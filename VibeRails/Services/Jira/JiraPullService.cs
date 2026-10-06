@@ -14,7 +14,8 @@ public sealed record JiraPullReport(
     int Updated,
     int Skipped,
     int Failed,
-    string? Message);
+    string? Message,
+    string? BoardId = null);
 
 /// <summary>What Connect learned about the Jira board (VIBE-102). Warnings say what fell back and why.</summary>
 public sealed record JiraBoardSummary(
@@ -92,6 +93,8 @@ public sealed class JiraPullService(
     public async Task<BoardJiraConnectionRecord> SaveAsync(
         string projectPath, string boardId, BoardJiraConnectionSave save, string? apiToken, CancellationToken cancellationToken)
     {
+        using var held = pullLock.TryAcquire();
+        if (held is null) throw new JiraConfigException("Another Jira operation is running. Try again when it finishes.");
         var existing = await store.GetJiraConnectionAsync(projectPath, boardId, cancellationToken);
         var source = ResolveSource(save, existing);
         var email = save.Email.Trim();
@@ -133,12 +136,13 @@ public sealed class JiraPullService(
             siteChanged
                 ? $"Site changed from {existing!.SiteUrl}. Cards pulled from that site stay on the board and are no longer updated."
                 : existing?.LastReport,
-            source.Link, source.JiraBoardId, source.JiraBoardName, columnMap, narrow, skipOldDone), cancellationToken)
+            source.Link, source.JiraBoardId, source.JiraBoardName, columnMap, narrow, skipOldDone, existing?.DedicatedBoard ?? false), cancellationToken)
             ?? throw new JiraConfigException("That board no longer exists. Open the board again and retry.");
         if (!string.IsNullOrEmpty(token))
             secrets.SaveToken(id, token);
         if (siteChanged)
             secrets.DeleteToken(existing!.Id);
+        saved = await store.EnsureDedicatedJiraBoardAsync(projectPath, saved.Id, cancellationToken);
         return WithTokenFlag(saved);
     }
 
@@ -271,7 +275,8 @@ public sealed class JiraPullService(
         using var held = pullLock.TryAcquire();
         if (held is null)
             return Report(dryRun, "busy", 0, 0, 0, 0, "Another Jira pull is running. Try again when it finishes.");
-        var report = await PullConnectionAsync(connection, token, dryRun, cancellationToken);
+        connection = await store.EnsureDedicatedJiraBoardAsync(projectPath, connection.Id, cancellationToken);
+        var report = (await PullConnectionAsync(connection, token, dryRun, cancellationToken)) with { BoardId = connection.BoardId };
         await Remember(connection, report, cancellationToken);
         return report;
     }
@@ -296,8 +301,9 @@ public sealed class JiraPullService(
                 continue;
             try
             {
-                var report = await PullConnectionAsync(connection, token, dryRun: false, cancellationToken);
-                await Remember(connection, report, cancellationToken);
+                var dedicated = await store.EnsureDedicatedJiraBoardAsync(connection.ProjectPath, connection.Id, cancellationToken);
+                var report = await PullConnectionAsync(dedicated, token, dryRun: false, cancellationToken);
+                await Remember(dedicated, report, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -495,7 +501,7 @@ public sealed class JiraPullService(
         // here stays put while neither the issue nor the mapping changes.
         var mapping = MappingKey(plan, laneTarget);
         var unchanged = link is not null && issue.Updated.ToUniversalTime() == link.IssueUpdated.ToUniversalTime();
-        if (unchanged && existing is not null && string.Equals(link!.Mapping, mapping, StringComparison.Ordinal))
+        if (unchanged && existing is not null && existing.BoardId == connection.BoardId && string.Equals(link!.Mapping, mapping, StringComparison.Ordinal))
             return ApplyAction.Skipped;
         if (mapped.Title.Length == 0)
             throw new JiraConfigException("Issue title is empty after trimming.");

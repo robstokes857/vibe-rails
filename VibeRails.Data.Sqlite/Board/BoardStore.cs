@@ -786,6 +786,15 @@ public sealed partial class BoardStore : IBoardStore
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
+        var moved = await MoveCardInTransactionAsync(connection, transaction, project, cardId, columnId, position, skipLaneAutomations, cancellationToken, author);
+        await transaction.CommitAsync(cancellationToken);
+        return moved;
+    }
+
+    private static async Task<BoardCardRecord?> MoveCardInTransactionAsync(SqliteConnection connection, SqliteTransaction transaction,
+        string project, string cardId, string columnId, int? position, bool skipLaneAutomations,
+        CancellationToken cancellationToken, BoardAuthor? author)
+    {
         var existing = await ReadCardAsync(connection, transaction, project, cardId, cancellationToken);
         if (existing is null)
             return null;
@@ -840,8 +849,7 @@ public sealed partial class BoardStore : IBoardStore
         await WriteCardPositionsAsync(connection, transaction, targetIds, cancellationToken);
         if (!sameColumn)
             await WriteCardPositionsAsync(connection, transaction, sourceIds, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-        return await ReadCardAsync(connection, null, project, existing.Id, cancellationToken);
+        return await ReadCardAsync(connection, transaction, project, existing.Id, cancellationToken);
     }
 
     // ------------------------------------------------------------------ comments
@@ -1271,7 +1279,8 @@ public sealed partial class BoardStore : IBoardStore
                (SELECT o.OptionsJson FROM BoardCardOptions o WHERE o.CardId = c.Id),
                c.Type,
                (SELECT k.BoardId FROM BoardColumns k WHERE k.Id = c.ColumnId), c.Flagged,
-               {CardPrefixSql}, c.CardKey, c.DisplayId, c.AgentMade, c.AgentMadeBy, c.AgentMadeSessionId
+               {CardPrefixSql}, c.CardKey, c.DisplayId, c.AgentMade, c.AgentMadeBy, c.AgentMadeSessionId,
+               (SELECT j.IssueKey FROM BoardJiraLinks j WHERE j.CardId = c.Id ORDER BY j.LastPulledUTC DESC LIMIT 1)
         FROM BoardCards c
         {CardPrefixJoinSql}
         """;
@@ -1462,7 +1471,8 @@ public sealed partial class BoardStore : IBoardStore
         StoredDisplayId: reader.IsDBNull(21) ? null : reader.GetString(21),
         AgentMade: !reader.IsDBNull(22) && reader.GetInt32(22) != 0,
         AgentMadeBy: reader.IsDBNull(23) ? null : reader.GetString(23),
-        AgentMadeSessionId: reader.IsDBNull(24) ? null : reader.GetString(24));
+        AgentMadeSessionId: reader.IsDBNull(24) ? null : reader.GetString(24),
+        JiraIssueKey: reader.IsDBNull(25) ? null : reader.GetString(25));
 
     private static async Task<IReadOnlyList<BoardCommentRecord>> ReadCommentsAsync(SqliteConnection connection, string cardId, CancellationToken cancellationToken)
     {
@@ -1551,7 +1561,7 @@ public sealed partial class BoardStore : IBoardStore
 
     // ------------------------------------------------------------------ writers / helpers
 
-    private static async Task<BoardRecord> InsertBoardWithDefaultLanesAsync(SqliteConnection connection, SqliteTransaction transaction, string project, string name, int position, CancellationToken cancellationToken, string? displayPrefix = null)
+    private static async Task<BoardRecord> InsertBoardWithDefaultLanesAsync(SqliteConnection connection, SqliteTransaction transaction, string project, string name, int position, CancellationToken cancellationToken, string? displayPrefix = null, bool createDefaultLanes = true)
     {
         var now = DateTime.UtcNow;
         var board = new BoardRecord(NewId("brd"), project, name, position, now, now, displayPrefix);
@@ -1571,6 +1581,7 @@ public sealed partial class BoardStore : IBoardStore
             insert.Parameters.AddWithValue("$updated", ToDb(now));
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
+        if (!createDefaultLanes) return board;
         var lanePosition = 0;
         foreach (var (laneName, color, recipeId) in DefaultLaneTemplate)
         {
@@ -1894,6 +1905,10 @@ public sealed partial class BoardStore : IBoardStore
         // unchanged issues. Additive and nullable; an older binary's link writes never name it.
         SqliteMigrationRunner.Apply(connection, "board", 29, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.AdoptStatement(db, transaction, JiraLinkMappingColumnSql));
+        // board/30: marks a connection whose BoardId is already its dedicated Jira board.
+        // Nullable and no startup backfill; ordinary Connect/pull performs the requested separation.
+        SqliteMigrationRunner.Apply(connection, "board", 30, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardJiraConnections ADD COLUMN DedicatedBoard INTEGER"));
         SqliteMigrationRunner.Apply(connection, "board-attention", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, AttentionSchemaSql));
         SqliteMigrationRunner.Apply(connection, "board-lane-dispatch", 1, MigrationKind.Additive, ApplyLaneDispatchSchema);

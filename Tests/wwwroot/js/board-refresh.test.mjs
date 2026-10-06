@@ -110,17 +110,6 @@ test('a response for an earlier mounted view cannot paint a replacement view', a
     assert.equal(h.controller.state.cards[0].id, 'replacement');
 });
 
-function jiraToolbar(h) {
-    const button = { hidden: true };
-    const status = { hidden: true, textContent: '' };
-    h.controller.root = {
-        isConnected: true,
-        querySelector: selector => selector === '[data-board-action="jira-pull"]' ? button
-            : selector === '[data-jira-pull-status]' ? status : null
-    };
-    return { button, status };
-}
-
 function pollHarness() {
     const h = harness();
     h.controller._cardPageGeneration = h.controller._refreshGeneration;
@@ -173,66 +162,4 @@ test('an ordering change during a background continuation keeps the last complet
     await pending;
     assert.equal(h.controller.state.cards[0].id, 'A-old-card');
     assert.equal(h.controller.cardPage.lanes[0].nextOffset, 60);
-});
-
-test('a Jira toolbar answer for the previous board cannot update the next board', async () => {
-    const h = harness();
-    const { button, status } = jiraToolbar(h);
-    const stale = h.controller.refreshJiraPullButton();
-    const request = h.requests.at(-1);
-    assert.match(request.url, /\/boards\/A\/jira$/);
-    h.controller.state.boardId = 'B';
-    h.controller._refreshGeneration++;
-    request.resolve({ hasToken: true, jql: 'project = A', lastReport: 'ok: board A' });
-    await stale;
-    assert.equal(button.hidden, true);
-    assert.equal(status.textContent, '');
-});
-
-test('the current board shows its Jira pull button and last report', async () => {
-    const h = harness();
-    const { button, status } = jiraToolbar(h);
-    const pending = h.controller.refreshJiraPullButton();
-    h.requests.at(-1).resolve({ hasToken: true, jql: 'project = A', lastReport: 'ok: 1 created' });
-    await pending;
-    assert.equal(button.hidden, false);
-    assert.equal(status.hidden, false);
-    assert.equal(status.textContent, 'ok: 1 created');
-});
-
-test('a connection made from a Jira board link shows the pull button before Connect has read its filter', async () => {
-    const h = harness();
-    const { button } = jiraToolbar(h);
-    const pending = h.controller.refreshJiraPullButton();
-    h.requests.at(-1).resolve({ hasToken: true, jql: '', jiraBoardId: '7', lastReport: null });
-    await pending;
-    assert.equal(button.hidden, false);
-});
-
-for (const staleFails of [false, true]) {
-    test(`an older Jira status ${staleFails ? 'failure' : 'response'} cannot overwrite the post-save toolbar`, async () => {
-        const h = harness();
-        const { button, status } = jiraToolbar(h);
-        const initial = h.controller.refreshJiraPullButton();
-        const initialRequest = h.requests.at(-1);
-        const afterSave = h.controller.refreshJiraPullButton();
-        h.requests.at(-1).resolve({ hasToken: true, jql: 'project = A', lastReport: 'fresh status' });
-        await afterSave;
-        if (staleFails) initialRequest.reject(new Error('old request failed'));
-        else initialRequest.resolve({ hasToken: false, jql: '', lastReport: 'old status' });
-        await initial;
-        assert.equal(button.hidden, false);
-        assert.equal(status.hidden, false);
-        assert.equal(status.textContent, 'fresh status');
-    });
-}
-
-test('the Jira toolbar refresh never rejects, even without a mounted toolbar', async () => {
-    const h = harness();
-    await h.controller.refreshJiraPullButton();
-    const { button } = jiraToolbar(h);
-    const pending = h.controller.refreshJiraPullButton();
-    h.requests.at(-1).reject(new Error('offline'));
-    await pending;
-    assert.equal(button.hidden, true);
 });

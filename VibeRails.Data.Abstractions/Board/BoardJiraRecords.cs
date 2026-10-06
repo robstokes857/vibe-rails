@@ -37,7 +37,8 @@ public sealed record BoardJiraConnectionRecord(
     string? JiraBoardName = null,
     string? ColumnMap = null,
     string? NarrowJql = null,
-    bool? SkipOldDone = null);
+    bool? SkipOldDone = null,
+    bool DedicatedBoard = false);
 
 public static class BoardJiraAuthStatus
 {

@@ -264,3 +264,14 @@ payloads. Existing stored snapshots and unlimited local attachment uploads are u
 `GetSyncSessionOutcomesAsync` accepts at most 200 IDs obtained from scoped linked-session metadata.
 It uses one state-database connection and a joined query after one batch of schema checks; summaries
 are bounded before materialization. The single-session reader still serves ordinary card context.
+
+
+## Dedicated Jira boards (VIBE-103)
+
+`board/30` adds nullable `BoardJiraConnections.DedicatedBoard` with no schema-time backfill.
+Connect and writing pulls call `IBoardStore.EnsureDedicatedJiraBoardAsync`: one transaction creates
+a separate local board, clones lanes without Automations, remaps lane choices, moves only that
+connection's live imports still on the source board using the ordinary log-transfer path, and
+moves the connection. IDs, comments, attachments, sessions and commits survive; local cards stay.
+Repeated calls use the existing dedicated board. Old writers preserve the new column. Card reads
+project the Jira issue key from retained `BoardJiraLinks`; no card-origin backfill is required.

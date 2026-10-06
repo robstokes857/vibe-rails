@@ -4819,12 +4819,6 @@
                     </div>
                     <div class="board-stats" data-board-stats></div>
                     <div class="board-head-actions">
-                        <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap" data-board-action="jira-pull"
-                            title="Pull the connected Jira board into this board" hidden>
-                            <i class="fa-brands fa-jira" aria-hidden="true"></i>
-                            <span>Pull from Jira</span>
-                        </button>
-                        <span class="text-muted small text-nowrap" data-jira-pull-status hidden></span>
                         <button type="button" class="btn btn-sm btn-outline-primary text-nowrap" data-board-action="new-card">
                             <i class="fa-solid fa-plus" aria-hidden="true"></i>
                             <span>New card</span>
@@ -4855,7 +4849,8 @@
                         <option value="low">Low</option>
                     </select>
                     <select class="board-control" data-board-filter-origin aria-label="Filter by who made the card">
-                        <option value="">Agent or human</option>
+                        <option value="">Any origin</option>
+                        <option value="jira">Jira</option>
                         <option value="agent">Agent-made</option>
                         <option value="human">Human-made</option>
                     </select>

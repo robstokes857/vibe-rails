@@ -18,6 +18,11 @@ public partial interface IBoardStore
     /// </summary>
     Task<BoardJiraConnectionRecord?> SaveJiraConnectionAsync(BoardJiraConnectionRecord connection, CancellationToken cancellationToken = default);
 
+    /// <summary>Atomically gives a connection its own board, cloning lanes and moving only its
+    /// imported cards from the source board. Preserves identities and skips lane Automations.
+    /// Repeated calls for the same connection return the same destination.</summary>
+    Task<BoardJiraConnectionRecord> EnsureDedicatedJiraBoardAsync(string projectPath, string connectionId, CancellationToken cancellationToken = default);
+
     Task<BoardJiraLinkRecord?> FindJiraLinkAsync(string siteId, string issueId, CancellationToken cancellationToken = default);
 
     /// <summary>

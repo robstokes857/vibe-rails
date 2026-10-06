@@ -208,7 +208,7 @@ namespace VibeRails.DTOs
         List<string> Warnings);
 
     public record JiraPullResponse(
-        bool DryRun, string Outcome, int Created, int Updated, int Skipped, int Failed, string? Message);
+        bool DryRun, string Outcome, int Created, int Updated, int Skipped, int Failed, string? Message, string? BoardId = null);
 
     // Board sync with viberails.ai (VB-51). Published = a link exists; Enabled = it syncs every
     // 60 s. Configured = an HTTPS endpoint and an API key are both present. The API key itself
@@ -290,7 +290,7 @@ namespace VibeRails.DTOs
         bool Flagged = false,
         bool HasActiveAutomation = false, string? DisplayId = null,
         bool AgentMade = false, bool HasWaitingAutomation = false,
-        string? AgentMadeBy = null, string? AgentMadeSessionId = null);
+        string? AgentMadeBy = null, string? AgentMadeSessionId = null, string? JiraIssueKey = null);
     public record BoardCardListResponse(List<BoardCardSummaryResponse> Cards)
     {
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -346,7 +346,7 @@ namespace VibeRails.DTOs
         bool Flagged = false,
         bool HasActiveAutomation = false, string? DisplayId = null,
         bool AgentMade = false, bool HasWaitingAutomation = false,
-        string? AgentMadeBy = null, string? AgentMadeSessionId = null)
+        string? AgentMadeBy = null, string? AgentMadeSessionId = null, string? JiraIssueKey = null)
     {
         public List<BoardLinkedCardDto> LinkedCards { get; init; } = [];
         public BoardHandoff? PreviousWork { get; init; }

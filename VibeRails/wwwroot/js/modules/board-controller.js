@@ -35,7 +35,7 @@ import { mountLlmPicker, setLlmPickerValue, getEnabledLlmItems } from './pickers
 import { BoardApi } from './board-api.js';
 import { BoardLaneAgents } from './board-lane-agents.js';
 import { BOARD_SELECTION_STORAGE_KEY } from './board-selection.js';
-import { boardContextSection, laneAutomationSection, mountBoardContext, mountLaneAutomation } from './board-settings.js';
+import { boardContextSection, laneAutomationSection, mountBoardContext, mountLaneAutomation, boardSettingsNavigation, mountBoardSettingsNavigation } from './board-settings.js';
 import { boardJiraSection, BoardJiraPanel } from './board-jira.js';
 import { cardOrganizeSection, bindCardOrganization } from './board-card-organize.js';
 import { openBoardSharing, openSharedBoards } from './board-sharing.js';
@@ -106,7 +106,6 @@ export class BoardController {
         this._openCardGeneration = 0;
         this._openCardAbort = null;
         this._refreshGeneration = 0;
-        this._jiraRefreshGeneration = 0;
         this._cardPageGeneration = -1;
         this._loadedBoardId = null;
         this._pageRequests = new Map();
@@ -571,7 +570,8 @@ export class BoardController {
         if (filters.type && cardType(card.type).value !== filters.type) return false;
         if (filters.priority && card.priority !== filters.priority) return false;
         if (filters.origin === 'agent' && !card.agentMade) return false;
-        if (filters.origin === 'human' && card.agentMade) return false;
+        if (filters.origin === 'human' && (card.agentMade || card.jiraIssueKey)) return false;
+        if (filters.origin === 'jira' && !card.jiraIssueKey) return false;
         return true;
     }
 
@@ -584,15 +584,14 @@ export class BoardController {
 
     // Distinct assignees present on the board, for the toolbar filter.
     allAssignees() {
-        if (this.cardPage?.assignees) return this.cardPage.assignees
-            .map(key => this.assigneeInfo(key)).filter(Boolean).sort((a, b) => a.label.localeCompare(b.label));
         const seen = new Map();
-        this.state.cards.forEach(card => {
-            const key = String(card.assignee || '');
-            if (!key || seen.has(key)) return;
+        const selections = this.cardPage?.assignees || this.state.cards.map(card => card.assignee);
+        for (const selection of selections) {
+            const key = canonicalLlmSelection(selection);
+            if (!key || seen.has(key)) continue;
             const info = this.assigneeInfo(key);
             if (info) seen.set(key, info);
-        });
+        }
         return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label));
     }
 
@@ -770,6 +769,10 @@ export class BoardController {
             >${face}</span>`;
     }
 
+    jiraBadge(card) {
+        return card?.jiraIssueKey ? `<span class="badge text-bg-primary" title="Imported from Jira: ${escapeHtml(card.jiraIssueKey)}"><i class="fa-brands fa-jira" aria-hidden="true"></i> Jira · ${escapeHtml(card.jiraIssueKey)}</span>` : '';
+    }
+
     renderCard(card) {
         const member = this.assigneeInfo(card.assignee);
         const type = cardType(card.type);
@@ -800,6 +803,7 @@ export class BoardController {
                     <div class="board-card-top">
                         <span class="board-key">${card.flagged ? '<i class="fa-solid fa-flag board-attention-flag" title="Needs your attention" aria-hidden="true"></i> ' : ''}${card.agentMade ? `<i class="fa-solid fa-robot board-agent-mark" title="${escapeHtml(agentMadeSummary(card))}" aria-label="${escapeHtml(agentMadeSummary(card))}"></i> ` : ''}${escapeHtml(cardDisplayId(card))}</span>
                         <span class="board-card-top-right">
+                            ${this.jiraBadge(card)}
                             <span class="board-type-chip" data-type="${escapeHtml(type.value)}"
                                 title="${escapeHtml(type.label)}">${escapeHtml(type.label)}</span>
                             <span class="board-priority-chip" data-priority="${escapeHtml(card.priority)}">${escapeHtml(card.priority)}</span>
@@ -1090,7 +1094,6 @@ export class BoardController {
             this._loadedBoardId = boardId;
             this.persistBoardSelection();
             this.renderAll();
-            void this.refreshJiraPullButton();
         } catch (error) {
             if (isCurrent()) this.app.showToast('Board', error?.message || 'Failed to refresh the board.', 'error');
         } finally {
@@ -1140,9 +1143,6 @@ export class BoardController {
             case 'new-card':
                 this.openCardEditor(null);
                 break;
-            case 'jira-pull':
-                void this.pullFromJira();
-                break;
             case 'add-lane':
                 this.openLaneEditor(null);
                 break;
@@ -1172,52 +1172,6 @@ export class BoardController {
                 break;
             default:
                 break;
-        }
-    }
-
-    // The toolbar pull is shown only when this board has a saved Jira connection.
-    // Jira wins on the mapped fields; the status line says when the last pull ran.
-    // Called fire-and-forget from refresh(), so it never rejects. The answer is dropped when a
-    // later status/board refresh, a board switch or a navigation owns the toolbar when it arrives.
-    async refreshJiraPullButton() {
-        const root = this.root;
-        const boardId = this.state.boardId;
-        const generation = this._refreshGeneration;
-        const jiraGeneration = ++this._jiraRefreshGeneration;
-        const isCurrent = () => root === this.root && root?.isConnected
-            && boardId === this.state.boardId && generation === this._refreshGeneration
-            && jiraGeneration === this._jiraRefreshGeneration;
-        let connection = null;
-        try {
-            if (!boardId || !this.query('[data-board-action="jira-pull"]')) return;
-            connection = await BoardApi.getJiraConnectionAsync(boardId);
-        } catch {
-            connection = null;
-        }
-        try {
-            if (!isCurrent()) return;
-            const button = this.query('[data-board-action="jira-pull"]');
-            const status = this.query('[data-jira-pull-status]');
-            if (!button) return;
-            button.hidden = !(connection?.hasToken && (connection?.jql || connection?.jiraBoardId));
-            if (status) {
-                status.hidden = !connection?.lastReport;
-                status.textContent = connection?.lastReport || '';
-            }
-        } catch {
-            // The toolbar was torn down between the checks above.
-        }
-    }
-
-    async pullFromJira() {
-        if (!this.state.boardId) return;
-        this.app.showToast('Jira', 'Pulling from Jira. Jira replaces the mapped fields.', 'info');
-        try {
-            const report = await BoardApi.pullJiraAsync(this.state.boardId, false);
-            this.app.showToast('Jira', report?.message || 'Pull finished.', report?.outcome === 'ok' ? 'success' : 'warning');
-            await this.refresh();
-        } catch (error) {
-            this.app.showToast('Jira', error?.message || 'Pull failed.', 'error');
         }
     }
 
@@ -1284,6 +1238,7 @@ export class BoardController {
             <div class="board-card-editor" data-board-card-editor data-card-id="${escapeHtml(card?.id || '')}">
                 <div class="board-editor-scroll">
                 <div class="board-editor-main">
+                    ${this.jiraBadge(card)}
                     ${card && card.boardId !== this.state.boardId ? `<div class="alert alert-info" role="note">This card is on another board: <strong>${escapeHtml(this.boardById(card.boardId)?.name || '')}</strong>. Changes are saved to that board.</div>` : ''}
                     <input type="text" class="form-control board-editor-title" id="board-card-title"
                         placeholder="What needs to happen" value="${escapeHtml(card?.title || '')}"
@@ -2537,6 +2492,8 @@ export class BoardController {
         const board = boardId ? this.boardById(boardId) : null;
         this.app.showModal(board ? `Board · ${board.name}` : 'New board', `
             <div class="board-lane-editor" data-board-board-editor>
+                ${board ? boardSettingsNavigation() : ''}
+                <section id="board-settings-general" data-board-settings-panel="general" ${board ? 'role="tabpanel" aria-labelledby="board-settings-tab-general"' : ''}>
                 <label class="board-editor-label" for="board-board-name">Name</label>
                 <input type="text" class="form-control form-control-sm mb-3" id="board-board-name" maxlength="60"
                     placeholder="Sprint 12, Website, Q4 bugs…" value="${escapeHtml(board?.name || '')}">
@@ -2552,7 +2509,12 @@ export class BoardController {
                     </button>` : '<span></span>'}
                     <button type="button" class="btn btn-sm btn-outline-primary" data-board-save-board>${board ? 'Save board' : 'Create'}</button>
                 </div>
-                ${board ? boardJiraSection() + boardContextSection() + historySection() : '<p class="board-editor-muted">Save the board to configure Jira and agent context.</p>'}
+                </section>
+                ${board ? `
+                    <section id="board-settings-jira" role="tabpanel" aria-labelledby="board-settings-tab-jira" data-board-settings-panel="jira" hidden>${boardJiraSection()}</section>
+                    <section id="board-settings-context" role="tabpanel" aria-labelledby="board-settings-tab-context" data-board-settings-panel="context" hidden>${boardContextSection()}</section>
+                    <section id="board-settings-history" role="tabpanel" aria-labelledby="board-settings-tab-history" data-board-settings-panel="history" hidden>${historySection()}</section>
+                ` : '<p class="board-editor-muted">Save the board to configure Jira and agent context.</p>'}
             </div>
         `, { onClose: () => { this.boardSettingsDispose?.(); this.boardSettingsDispose = null; } });
 
@@ -2562,13 +2524,26 @@ export class BoardController {
         if (board) {
             const disposeContext = mountBoardContext(this.app, editor.querySelector('[data-board-context]'), board.id);
             const disposeHistory = mountHistory(editor.querySelector('[data-board-history-view]'), board.id);
-            const jira = new BoardJiraPanel(this.app, editor.querySelector('[data-jira-panel]'), board, action => {
-                if (this.state.boardId !== board.id) return;
-                if (action === 'pull') void this.refresh();
-                else void this.refreshJiraPullButton();
+            const jira = new BoardJiraPanel(this.app, editor.querySelector('[data-jira-panel]'), board, (action, destination) => {
+                if (this.state.boardId !== board.id && this.state.boardId !== destination) return;
+                if (destination && destination !== this.state.boardId) {
+                    this.state.boardId = destination;
+                    this.persistBoardSelection();
+                }
+                // Keep the modal and its other sections' unsaved drafts. Only the Jira panel
+                // follows the connection; General and Agent context still edit the opened board.
+                if (action === 'pull' || destination !== board.id) void this.refresh().then(() => {
+                    if (editor.isConnected && destination) {
+                        const label = editor.querySelector('[data-jira-board]');
+                        if (label) label.textContent = this.boardById(destination)?.name || 'Jira board';
+                    }
+                });
             });
-            this.boardSettingsDispose = () => { jira.dispose(); disposeContext(); disposeHistory(); };
-            void jira.activate();
+            const disposeNavigation = mountBoardSettingsNavigation(editor, tab => {
+                if (tab === 'jira') void jira.activate();
+                if (tab === 'history') editor.querySelector('[data-board-history-view]').open = true;
+            });
+            this.boardSettingsDispose = () => { disposeNavigation(); jira.dispose(); disposeContext(); disposeHistory(); };
         }
         editor.querySelector('[data-board-save-board]')?.addEventListener('click', () => this.saveBoard(editor, board));
         editor.querySelector('[data-board-delete-board]')?.addEventListener('click', () => this.deleteBoard(board));

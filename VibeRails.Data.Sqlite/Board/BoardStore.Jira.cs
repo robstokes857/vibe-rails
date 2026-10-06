@@ -43,11 +43,11 @@ public sealed partial class BoardStore
             INSERT INTO BoardJiraConnections
                 (Id, ProjectPath, BoardId, SiteUrl, Email, HasToken, AuthStatus, StoryPointsFieldId,
                  Jql, Enabled, DisabledReason, OverflowColumnId, LastTestedUTC, LastPullUTC, LastReport,
-                 BoardLink, JiraBoardId, JiraBoardName, ColumnMap, NarrowJql, SkipOldDone)
+                 BoardLink, JiraBoardId, JiraBoardName, ColumnMap, NarrowJql, SkipOldDone, DedicatedBoard)
             SELECT
                 $id, $project, $board, $site, $email, $hasToken, $auth, $pointsField,
                 $jql, $enabled, $reason, $overflow, $tested, $pulled, $report,
-                $link, $jiraBoard, $jiraBoardName, $columnMap, $narrow, $skipOldDone
+                $link, $jiraBoard, $jiraBoardName, $columnMap, $narrow, $skipOldDone, $dedicated
             WHERE EXISTS (SELECT 1 FROM Boards WHERE Id = $board AND ProjectPath = $project{ProjectPathCollation})
             ON CONFLICT(ProjectPath, BoardId) DO UPDATE SET
                 Id = excluded.Id,
@@ -58,7 +58,8 @@ public sealed partial class BoardStore
                 LastPullUTC = excluded.LastPullUTC, LastReport = excluded.LastReport,
                 BoardLink = excluded.BoardLink, JiraBoardId = excluded.JiraBoardId,
                 JiraBoardName = excluded.JiraBoardName, ColumnMap = excluded.ColumnMap,
-                NarrowJql = excluded.NarrowJql, SkipOldDone = excluded.SkipOldDone;
+                NarrowJql = excluded.NarrowJql, SkipOldDone = excluded.SkipOldDone,
+                DedicatedBoard = excluded.DedicatedBoard;
             """;
         command.Parameters.AddWithValue("$id", connection.Id);
         command.Parameters.AddWithValue("$project", NormalizeProjectPath(connection.ProjectPath));
@@ -81,6 +82,7 @@ public sealed partial class BoardStore
         command.Parameters.AddWithValue("$columnMap", (object?)connection.ColumnMap ?? DBNull.Value);
         command.Parameters.AddWithValue("$narrow", (object?)connection.NarrowJql ?? DBNull.Value);
         command.Parameters.AddWithValue("$skipOldDone", connection.SkipOldDone is bool skip ? (skip ? 1 : 0) : DBNull.Value);
+        command.Parameters.AddWithValue("$dedicated", connection.DedicatedBoard ? 1 : DBNull.Value);
         if (await command.ExecuteNonQueryAsync(cancellationToken) == 0)
             return null;
         return await GetJiraConnectionAsync(connection.ProjectPath, connection.BoardId, cancellationToken);
@@ -159,7 +161,7 @@ public sealed partial class BoardStore
     private const string JiraConnectionSelect = """
         SELECT Id, ProjectPath, BoardId, SiteUrl, Email, HasToken, AuthStatus, StoryPointsFieldId,
                Jql, Enabled, DisabledReason, OverflowColumnId, LastTestedUTC, LastPullUTC, LastReport,
-               BoardLink, JiraBoardId, JiraBoardName, ColumnMap, NarrowJql, SkipOldDone
+               BoardLink, JiraBoardId, JiraBoardName, ColumnMap, NarrowJql, SkipOldDone, DedicatedBoard
         FROM BoardJiraConnections
         """;
 
@@ -190,7 +192,8 @@ public sealed partial class BoardStore
         reader.IsDBNull(17) ? null : reader.GetString(17),
         reader.IsDBNull(18) ? null : reader.GetString(18),
         reader.IsDBNull(19) ? null : reader.GetString(19),
-        reader.IsDBNull(20) ? null : reader.GetInt64(20) != 0);
+        reader.IsDBNull(20) ? null : reader.GetInt64(20) != 0,
+        !reader.IsDBNull(21) && reader.GetInt64(21) != 0);
 
     private static BoardJiraLinkRecord ReadJiraLink(SqliteDataReader reader) => new(
         reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),

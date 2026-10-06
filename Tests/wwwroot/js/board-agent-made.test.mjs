@@ -41,3 +41,27 @@ test('an agent-made tile carries the robot mark and a human tile does not', () =
     const human = board.renderCard(card({ title: 'Typed by hand' }));
     assert.doesNotMatch(human, /board-agent-mark/);
 });
+
+test('Jira origins have an escaped logo badge and are excluded from the human filter', () => {
+    const board = controller();
+    const imported = card({ id: 'jira', jiraIssueKey: 'PROJ-1<svg>' });
+    board.state.cards = [imported, card({ id: 'human' }), card({ id: 'agent', agentMade: true })];
+    board.state.filters.origin = 'jira';
+    assert.deepEqual(board.filteredCards().map(item => item.id), ['jira']);
+    board.state.filters.origin = 'human';
+    assert.deepEqual(board.filteredCards().map(item => item.id), ['human']);
+    const html = board.renderCard(imported);
+    assert.match(html, /fa-brands fa-jira/);
+    assert.match(html, /Jira · PROJ-1&lt;svg&gt;/);
+    assert.doesNotMatch(html, /<svg>/);
+});
+
+test('legacy and current Grok selections produce one filter option in paged and fallback boards', () => {
+    globalThis.window = {};
+    const board = controller();
+    board.state.cards = [card({ assignee: 'base:grok-4.6' }), card({ assignee: 'base:grok' })];
+    assert.equal(board.allAssignees().length, 1);
+    board.cardPage = { assignees: ['base:grok-4.6', 'base:grok'] };
+    assert.equal(board.allAssignees().length, 1);
+    assert.equal(board.allAssignees()[0].key, 'base:grok');
+});

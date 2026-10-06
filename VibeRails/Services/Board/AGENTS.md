@@ -508,3 +508,14 @@ The new-card link picker searches through `GET /api/v1/board/cards/link-candidat
 Canceling the draft writes nothing. Existing-card links still save immediately. Discussion has
 its own section with the shared agent picker followed by a text-style Chat button; its intent,
 independent assignment, save-before-launch and active-session guard remain unchanged.
+
+
+## Dedicated Jira boards (VIBE-103)
+
+`board/30` adds nullable `BoardJiraConnections.DedicatedBoard` with no schema-time backfill.
+Connect and writing pulls call `IBoardStore.EnsureDedicatedJiraBoardAsync`: one transaction creates
+a separate local board, clones lanes without Automations, remaps lane choices, moves only that
+connection's live imports still on the source board using the ordinary log-transfer path, and
+moves the connection. IDs, comments, attachments, sessions and commits survive; local cards stay.
+Repeated calls use the existing dedicated board. Old writers preserve the new column. Card reads
+project the Jira issue key from retained `BoardJiraLinks`; no card-origin backfill is required.

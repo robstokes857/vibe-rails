@@ -163,7 +163,7 @@ test('Connect saves the pasted link and token, reads the board, and reports what
     assert.match(summary, /Story point estimate/);
     assert.equal(fields.get('[data-jira-summary]').hidden, false);
     assert.equal(fields.get('[data-jira-report]').textContent, 'Connected as Rob Stokes.');
-    assert.deepEqual(changes, ['save', 'test']);
+    assert.deepEqual(changes, ['test']);
 });
 
 test('a lane picked under Advanced is sent by column name, and blank means automatic', async () => {
@@ -337,3 +337,64 @@ test('connect prevents overlapping actions and disposal suppresses late completi
     assert.equal(toasts.length, 0);
     assert.equal(fields.get('[data-jira-token]').value, '');
 });
+
+
+test('Connect follows the returned dedicated board for provider checks and future pulls', async () => {
+    const { panel, calls } = createHarness({ connection: savedConnection({ boardId: 'brd_jira' }) });
+    const changed = [];
+    panel._onChanged = (action, id) => changed.push([action, id]);
+    await panel.activate();
+    await panel._connect();
+    assert.ok(calls.some(([url, method]) => method === 'POST' && url === '/api/v1/board/boards/brd_jira/jira/test'));
+    await panel._pull(false);
+    assert.ok(calls.some(([url, method]) => method === 'POST' && url.startsWith('/api/v1/board/boards/brd_jira/jira/pull')));
+    assert.deepEqual(changed, [['test', 'brd_jira'], ['pull', 'brd_jira']]);
+});
+
+for (const failure of ['test', 'settings-before-test', 'settings-after-test']) {
+    test(`separation followed by a failed ${failure} never retries with source lane IDs`, async () => {
+        const source = savedConnection({ boardId: 'brd_sprint',
+            columns: [{ name: 'QA', laneId: 'source_done', laneName: 'Done', automatic: false }],
+            lanes: [{ id: 'source_done', name: 'Done' }] });
+        const destination = savedConnection({ boardId: 'brd_jira',
+            columns: [{ name: 'QA', laneId: 'destination_done', laneName: 'Done', automatic: false }],
+            lanes: [{ id: 'destination_done', name: 'Done' }] });
+        const { panel, fields, laneSelects } = createHarness({ connection: source });
+        // Reflect the selected option when the production panel replaces the lane-picker DOM.
+        Object.defineProperty(fields.get('[data-jira-lanes]'), 'innerHTML', { set(html) {
+            laneSelects.length = 0;
+            const selected = html.match(/<option value="([^"]+)" selected>/);
+            if (selected) laneSelects.push({ dataset: { jiraLane: '0' }, value: selected[1] });
+        } });
+        let moved = false;
+        let failOnce = true;
+        let destinationReads = 0;
+        const saves = [];
+        panel.app.apiCall = async (path, method, body) => {
+            if (method === 'PUT') {
+                saves.push(body);
+                moved = true;
+                return { ...destination, columns: null, lanes: null };
+            }
+            if (path.endsWith('/jira/test')) {
+                if (failure === 'test' && failOnce) { failOnce = false; throw new Error('Test unavailable'); }
+                return { ok: true, account: 'Ada' };
+            }
+            if (!moved) return source;
+            destinationReads++;
+            if (failOnce && ((failure === 'settings-before-test' && destinationReads === 1)
+                || (failure === 'settings-after-test' && destinationReads === 2))) {
+                failOnce = false;
+                throw new Error('Settings unavailable');
+            }
+            return destination;
+        };
+        await panel.activate();
+        await panel._connect();
+        assert.equal(panel._board, 'brd_jira');
+        await panel._connect();
+        assert.deepEqual(saves[0].columnMap, { QA: 'source_done' });
+        if (failure === 'settings-before-test') assert.equal('columnMap' in saves[1], false);
+        else assert.deepEqual(saves[1].columnMap, { QA: 'destination_done' });
+    });
+}

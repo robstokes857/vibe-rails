@@ -180,8 +180,7 @@ within that group. This ordering is persisted, including comments, notes, sessio
 attachments and commit links, rather than being a browser-only sort.
 
 The compact **Vibe Board** header groups the title, name-only **board picker**, `+` for a new
-board (default lanes; opens at once), and a settings cog for rename/delete. New card and the
-optional Jira pull sit on the right alongside board statistics (card count, flagged count, blocked
+board (default lanes; opens at once), and a settings cog for rename/delete. New card sits on the right alongside board statistics (card count, flagged count, blocked
 count). The flagged count is cards with `flagged=true` in the scope the remaining-points total
 used: the active filters, cards paging has not loaded, and open lanes only; completed lanes are
 excluded by the server page and the client fallback alike. The ten-second board poll
@@ -189,7 +188,8 @@ rewrites it when a card is flagged or unflagged. Stored story points stay on the
 not shown. Search and filters share a second
 row on the same surface. Lane headers retain their card counts. There are no lane-bottom entry
 fields: **New card** opens the editor, whose Lane selector chooses the destination.
-The settings modal includes a collapsible **Jira Cloud** section (`board-jira.js`) for the
+The settings modal has General, Jira Cloud, Agent context and History tabs (VIBE-103), preserving
+drafts when switching sections. Jira controls live only in the **Jira Cloud** section (`board-jira.js`) for the
 explicit board being edited. Since VIBE-102 it asks for a Jira board link, an API token (with a
 "Create a token" link to Atlassian) and the account email, filled in from the saved value, then
 the server's git `user.email` suggestion (`GET …/jira?settings=true`), then
@@ -199,7 +199,9 @@ field override and per-column lane picks sit under a collapsed Advanced section 
 Connect. There is no site, JQL-filter or Dry run input. A VB-40 JQL connection shows what it pulls
 and keeps pulling it until a board link is pasted. Both actions are independent of
 Save board. Closing/replacing the modal clears the token and ignores late responses; saving
-refreshes the toolbar status, and a pull refreshes cards. New boards must be saved first.
+follows the returned dedicated Jira board ID, and a pull refreshes cards. There are no Jira toolbar actions.
+Imported cards derive a Jira logo/key badge from `jiraIssueKey`; the origin filter includes Jira and
+Human-made excludes imports. Assignee filter choices deduplicate canonical CLI identities. New boards must be saved first.
 The settings modal also includes **Agent context**: a default message plus default-only,
 type-only, or combined messages for each card type. `board-settings.js` owns these asynchronous,
 abortable editors and revision-checked saves. Context is sent for both Start work and Chat with

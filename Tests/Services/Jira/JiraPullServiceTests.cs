@@ -32,11 +32,47 @@ public sealed class JiraPullServiceTests : IDisposable
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Fact]
+    public async Task ExistingConnectionSeparatesAtomically_PreservingCardsAndLaneChoices()
+    {
+        var source = await BoardWithLanes();
+        var lane = (await _store.GetColumnsAsync(_project, Ct, source.Id))[0];
+        var native = await _store.CreateCardAsync(_project, new NewBoardCard(lane.Id, "Local work", "", null,
+            "medium", null, [], false, null, BoardId: source.Id), Ct);
+        var imported = (await _store.CreateJiraCardAsync(_project, new NewBoardCard(lane.Id, "Jira work", "", null,
+            "medium", null, [], false, null, BoardId: source.Id),
+            new BoardJiraLinkRecord("", "jira_old", "100", "PROJ-1", null, DateTime.UtcNow, DateTime.UtcNow), Ct))!;
+        await _store.AddCommentAsync(_project, imported.Id, BoardAuthor.User(), "Keep this discussion", Ct);
+        await _store.SaveJiraConnectionAsync(new BoardJiraConnectionRecord("jira_old", _project, source.Id,
+            "https://acme.atlassian.net", "ada@example.com", true, "saved", null, "project = PROJ", true,
+            null, lane.Id, null, null, null,
+            ColumnMap: JiraColumnMap.Serialize([new JiraColumnChoice("To Do", lane.Id)])), Ct);
+
+        var destination = await _store.EnsureDedicatedJiraBoardAsync(_project, "jira_old", Ct);
+        Assert.NotEqual(source.Id, destination.BoardId);
+        Assert.True(destination.DedicatedBoard);
+        Assert.Null(await _store.GetJiraConnectionAsync(_project, source.Id, Ct));
+        Assert.Equal(native.Id, Assert.Single(await _store.GetCardsAsync(_project, Ct, source.Id)).Id);
+        var moved = Assert.Single(await _store.GetCardsAsync(_project, Ct, destination.BoardId));
+        Assert.Equal(imported.Id, moved.Id);
+        Assert.Equal(imported.Key, moved.Key);
+        Assert.Equal(imported.DisplayId, moved.DisplayId);
+        Assert.Equal("PROJ-1", moved.JiraIssueKey);
+        Assert.Equal(moved.ColumnId, destination.OverflowColumnId);
+        Assert.Equal(moved.ColumnId, Assert.Single(JiraColumnMap.Parse(destination.ColumnMap)).LaneId);
+        Assert.Contains((await _store.GetCardDetailAsync(_project, moved.Id, Ct))!.Comments,
+            comment => comment.Body == "Keep this discussion");
+        Assert.Equal(destination.BoardId, (await _store.EnsureDedicatedJiraBoardAsync(_project, "jira_old", Ct)).BoardId);
+        Assert.Equal(2, (await _store.GetBoardsAsync(_project, Ct)).Count);
+        Assert.Empty(await _store.GetPendingLaneAutomationsAsync(_project, moved.Id, Ct));
+    }
+
+    [Fact]
     public async Task SaveNeverReturnsTheToken_AndABlankTokenKeepsTheSavedOne()
     {
         var service = Service();
         var board = await _store.CreateBoardAsync(_project, "Main", Ct);
         var saved = await service.SaveAsync(_project, board.Id, Save("token-one"), "token-one", Ct);
+        board = board with { Id = saved.BoardId };
 
         Assert.True(saved.HasToken);
         Assert.Equal("token-one", _secrets.ReadToken(saved.Id));
@@ -52,7 +88,7 @@ public sealed class JiraPullServiceTests : IDisposable
     {
         var service = Service();
         var board = await BoardWithLanes();
-        await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct);
+        board = board with { Id = (await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct)).BoardId };
         _jira.Pages.Enqueue(Page(
             Issue("100", "PROJ-1", "2026-09-01T00:00:00.000Z", "Fix login", "Bug", "Highest", "Backlog"),
             Issue("101", "PROJ-2", "2026-09-01T00:00:00.000Z", "Tell the story", "Story", "Low", "Review")));
@@ -89,7 +125,7 @@ public sealed class JiraPullServiceTests : IDisposable
     {
         var service = Service();
         var board = await BoardWithLanes();
-        await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct);
+        board = board with { Id = (await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct)).BoardId };
         var review = (await _store.GetColumnsAsync(_project, Ct, board.Id)).Single(column => column.Name == "Review");
 
         _jira.Pages.Enqueue(Page(Issue("100", "PROJ-1", "2026-09-01T00:00:00.000Z", "Fix login", "Bug", "High", "Backlog")));
@@ -112,7 +148,7 @@ public sealed class JiraPullServiceTests : IDisposable
     {
         var service = Service();
         var board = await BoardWithLanes();
-        await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct);
+        board = board with { Id = (await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct)).BoardId };
         var issue = Issue("100", "PROJ-1", "2026-09-01T00:00:00.000Z", "Waiting", "Task", "Medium", "In QA");
         _jira.Pages.Enqueue(Page(issue));
         await service.PullAsync(_project, board.Id, dryRun: false, Ct);
@@ -136,7 +172,7 @@ public sealed class JiraPullServiceTests : IDisposable
     {
         var service = Service();
         var board = await BoardWithLanes();
-        await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct);
+        board = board with { Id = (await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct)).BoardId };
         _jira.Pages.Enqueue(Page(
             Issue("100", "PROJ-1", "2026-09-01T00:00:00.000Z", "   ", "Task", "Medium", "Backlog"),
             Issue("101", "PROJ-2", "2026-09-01T00:00:00.000Z", "Kept", "Task", "Medium", "Backlog")));
@@ -153,6 +189,7 @@ public sealed class JiraPullServiceTests : IDisposable
         var service = Service();
         var board = await BoardWithLanes();
         var saved = await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct);
+        board = board with { Id = saved.BoardId };
 
         _jira.Outcome = JiraCallOutcome.BadJql;
         _jira.Detail = "Bounded query required.";
@@ -162,7 +199,7 @@ public sealed class JiraPullServiceTests : IDisposable
         Assert.False(disabled.Enabled);
         Assert.Equal("Bounded query required.", disabled.DisabledReason);
 
-        await service.SaveAsync(_project, board.Id, Save("secret-token"), null, Ct);
+        board = board with { Id = (await service.SaveAsync(_project, board.Id, Save("secret-token"), null, Ct)).BoardId };
         _jira.Outcome = JiraCallOutcome.Unauthorized;
         var expired = await service.PullAsync(_project, board.Id, dryRun: false, Ct);
         Assert.Equal("expired", expired.Outcome);
@@ -175,7 +212,7 @@ public sealed class JiraPullServiceTests : IDisposable
     {
         var service = Service();
         var board = await BoardWithLanes();
-        await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct);
+        board = board with { Id = (await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct)).BoardId };
         _jira.Pages.Enqueue(Page(Issue("100", "OLD-1", "2026-09-01T00:00:00.000Z", "Moved", "Task", "Medium", "Backlog")));
         await service.PullAsync(_project, board.Id, dryRun: false, Ct);
         _jira.Pages.Enqueue(Page(Issue("100", "NEW-9", "2026-09-02T00:00:00.000Z", "Moved", "Task", "Medium", "Backlog")));
@@ -192,6 +229,7 @@ public sealed class JiraPullServiceTests : IDisposable
         var service = Service();
         var board = await BoardWithLanes();
         var first = await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct);
+        board = board with { Id = first.BoardId };
         _jira.Pages.Enqueue(Page(Issue("100", "OLD-1", "2026-09-01T00:00:00.000Z", "From the old site", "Task", "Medium", "Backlog")));
         await service.PullAsync(_project, board.Id, dryRun: false, Ct);
 
@@ -235,7 +273,7 @@ public sealed class JiraPullServiceTests : IDisposable
     {
         var service = Service();
         var board = await BoardWithLanes();
-        await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct);
+        board = board with { Id = (await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct)).BoardId };
         _jira.Pages.Enqueue(Page(
             Issue("100", "PROJ-1", "2026-09-01T00:00:00.000Z", "Parked", "Task", "Medium", "In QA"),
             Issue("101", "PROJ-2", "2026-09-01T00:00:00.000Z", "Known", "Task", "Medium", "Backlog")));
@@ -258,7 +296,7 @@ public sealed class JiraPullServiceTests : IDisposable
     {
         var service = Service();
         var board = await BoardWithLanes();
-        await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct);
+        board = board with { Id = (await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct)).BoardId };
         _jira.Pages.Enqueue(Page(Issue("100", "PROJ-1", "2026-09-01T00:00:00.000Z", "Gone", "Task", "Medium", "Backlog")));
         await service.PullAsync(_project, board.Id, dryRun: false, Ct);
         var card = Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id));
@@ -294,7 +332,7 @@ public sealed class JiraPullServiceTests : IDisposable
 
         var sprint = await _store.CreateBoardAsync(_project, "Sprint", Ct);
         var saved = await service.SaveAsync(_project, sprint.Id, Save(null), "secret-token", Ct);
-        Assert.NotNull(await _store.DeleteBoardAsync(_project, sprint.Id, Ct));
+        Assert.NotNull(await _store.DeleteBoardAsync(_project, saved.BoardId, Ct));
         Assert.Null(await _store.GetJiraConnectionAsync(_project, sprint.Id, Ct));
 
         await service.PullDueAsync(Ct);
@@ -307,7 +345,7 @@ public sealed class JiraPullServiceTests : IDisposable
     {
         var service = Service();
         var board = await BoardWithLanes();
-        await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct);
+        board = board with { Id = (await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct)).BoardId };
 
         using (var held = CrossProcessFileLock.TryAcquire(LockPath))
         {
@@ -364,6 +402,7 @@ public sealed class JiraPullServiceTests : IDisposable
         var service = Service();
         var board = await BoardWithLanes();
         var saved = await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct);
+        board = board with { Id = saved.BoardId };
 
         Assert.Equal("https://robstokes857.atlassian.net", saved.SiteUrl);
         Assert.Equal("https://robstokes857.atlassian.net/jira/software/projects/SCRUM/boards/1", saved.BoardLink);
@@ -382,7 +421,7 @@ public sealed class JiraPullServiceTests : IDisposable
     {
         var service = Service();
         var board = await BoardWithLanes();
-        await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct);
+        board = board with { Id = (await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct)).BoardId };
         _jira.Configuration = ScrumConfiguration();
         _jira.FilterJql = "project = SCRUM ORDER BY Rank ASC";
 
@@ -412,7 +451,7 @@ public sealed class JiraPullServiceTests : IDisposable
     {
         var service = Service();
         var board = await BoardWithLanes();
-        await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct);
+        board = board with { Id = (await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct)).BoardId };
         _jira.Configuration = ScrumConfiguration();
         await service.TestAsync(_project, board.Id, Ct);
         var lanes = await _store.GetColumnsAsync(_project, Ct, board.Id);
@@ -455,7 +494,7 @@ public sealed class JiraPullServiceTests : IDisposable
     {
         var service = Service();
         var board = await BoardWithLanes();
-        await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct);
+        board = board with { Id = (await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct)).BoardId };
         _jira.ConfigurationOutcome = JiraCallOutcome.Forbidden;
 
         var report = await service.TestAsync(_project, board.Id, Ct);
@@ -480,7 +519,7 @@ public sealed class JiraPullServiceTests : IDisposable
     {
         var service = Service();
         var board = await BoardWithLanes();
-        await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct);
+        board = board with { Id = (await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct)).BoardId };
         _jira.ConfigurationOutcome = JiraCallOutcome.Unauthorized;
 
         var report = await service.PullAsync(_project, board.Id, dryRun: false, Ct);
@@ -494,7 +533,7 @@ public sealed class JiraPullServiceTests : IDisposable
     {
         var service = Service();
         var board = await BoardWithLanes();
-        await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct);
+        board = board with { Id = (await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct)).BoardId };
         _jira.Configuration = ScrumConfiguration();
         await service.TestAsync(_project, board.Id, Ct);
         var lanes = await _store.GetColumnsAsync(_project, Ct, board.Id);
@@ -538,7 +577,7 @@ public sealed class JiraPullServiceTests : IDisposable
     {
         var service = Service();
         var board = await BoardWithLanes();
-        await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct);
+        board = board with { Id = (await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct)).BoardId };
         var issue = Issue("100", "PROJ-1", "2026-09-01T00:00:00.000Z", "Plan it", "Story", "Medium", "To Do");
         _jira.Pages.Enqueue(Page(issue));
         await service.PullAsync(_project, board.Id, dryRun: false, Ct);
@@ -546,7 +585,7 @@ public sealed class JiraPullServiceTests : IDisposable
         Assert.Equal(overflow.Id, Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id)).ColumnId);
 
         // Same site, so the saved token is kept; the issue itself is untouched in Jira.
-        await service.SaveAsync(_project, board.Id, LinkSave("https://acme.atlassian.net/jira/software/projects/PROJ/boards/1"), null, Ct);
+        board = board with { Id = (await service.SaveAsync(_project, board.Id, LinkSave("https://acme.atlassian.net/jira/software/projects/PROJ/boards/1"), null, Ct)).BoardId };
         _jira.Configuration = ScrumConfiguration();
         await service.TestAsync(_project, board.Id, Ct);
         _jira.Pages.Enqueue(Page(issue with { StatusId = "10000" }));
@@ -561,7 +600,7 @@ public sealed class JiraPullServiceTests : IDisposable
     {
         var service = Service();
         var board = await BoardWithLanes();
-        await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct);
+        board = board with { Id = (await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct)).BoardId };
         _jira.Configuration = ScrumConfiguration();
         await service.TestAsync(_project, board.Id, Ct);
         _jira.Pages.Enqueue(Page(Issue("100", "SCRUM-1", "2026-09-01T00:00:00.000Z", "Plan it", "Story", "Medium", "To Do") with { StatusId = "10000" }));
@@ -586,8 +625,8 @@ public sealed class JiraPullServiceTests : IDisposable
     {
         var service = Service();
         var board = await BoardWithLanes();
-        await service.SaveAsync(_project, board.Id, LinkSave() with { NarrowJql = "  assignee = currentUser()  ", SkipOldDone = false },
-            "secret-token", Ct);
+        board = board with { Id = (await service.SaveAsync(_project, board.Id, LinkSave() with { NarrowJql = "  assignee = currentUser()  ", SkipOldDone = false },
+            "secret-token", Ct)).BoardId };
         _jira.Configuration = ScrumConfiguration() with { SubQuery = "resolution = EMPTY" };
         _jira.Pages.Enqueue(Page());
         await service.PullAsync(_project, board.Id, dryRun: false, Ct);
@@ -603,7 +642,7 @@ public sealed class JiraPullServiceTests : IDisposable
     {
         var service = Service();
         var board = await BoardWithLanes();
-        await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct);
+        board = board with { Id = (await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct)).BoardId };
         _jira.Configuration = ScrumConfiguration();
         _jira.FilterJql = "project = SCRUM ORDER BY Rank ASC";
         await service.TestAsync(_project, board.Id, Ct);
@@ -640,7 +679,7 @@ public sealed class JiraPullServiceTests : IDisposable
         var board = await BoardWithLanes();
         Assert.Null((await service.GetDetailsAsync(_project, board.Id, Ct)).Connection);
 
-        await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct);
+        board = board with { Id = (await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct)).BoardId };
         _jira.Configuration = ScrumConfiguration();
         await service.TestAsync(_project, board.Id, Ct);
 
@@ -657,6 +696,7 @@ public sealed class JiraPullServiceTests : IDisposable
         var service = Service();
         var board = await BoardWithLanes();
         var saved = await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct);
+        board = board with { Id = saved.BoardId };
 
         // The board/12 statement an older binary runs: it names none of the board/28 columns.
         await using (var db = new SqliteConnection(_connectionString))
@@ -686,6 +726,7 @@ public sealed class JiraPullServiceTests : IDisposable
         Assert.Equal(saved.BoardLink, after.BoardLink);
         Assert.Equal("1", after.JiraBoardId);
         Assert.True(after.SkipOldDone);
+        Assert.True(after.DedicatedBoard);
     }
 
     private static BoardJiraConnectionSave LinkSave(string link = RobsLink) =>

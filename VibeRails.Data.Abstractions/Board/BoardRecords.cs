@@ -65,7 +65,8 @@ public sealed record BoardCardRecord(
     string? StoredDisplayId = null,
     bool AgentMade = false,
     string? AgentMadeBy = null,
-    string? AgentMadeSessionId = null)
+    string? AgentMadeSessionId = null,
+    string? JiraIssueKey = null)
 {
     /// <summary>The stored <c>PREFIX-RRRRR-n</c> key (cards created since board/14), else the
     /// computed legacy <c>PREFIX-n</c>.</summary>

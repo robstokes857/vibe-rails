@@ -1,6 +1,47 @@
 import { escapeHtml } from './utils.js';
 import { BoardApi } from './board-api.js';
 
+export const boardSettingsNavigation = () => `
+    <nav class="nav nav-pills gap-1 mb-3" aria-label="Board settings" role="tablist">
+        ${[['general', 'General'], ['jira', 'Jira Cloud'], ['context', 'Agent context'], ['history', 'History']].map(([id, label]) => `
+            <button type="button" class="nav-link${id === 'general' ? ' active' : ''}" role="tab"
+                id="board-settings-tab-${id}" aria-controls="board-settings-${id}" aria-selected="${id === 'general'}"
+                tabindex="${id === 'general' ? 0 : -1}" data-board-settings-tab="${id}">${label}</button>`).join('')}
+    </nav>`;
+
+/** Switch sections without replacing their DOM, so connection and context drafts survive. */
+export function mountBoardSettingsNavigation(editor, onSelect = () => {}) {
+    const abort = new AbortController();
+    const tabs = [...editor.querySelectorAll('[data-board-settings-tab]')];
+    const select = tab => {
+        for (const item of tabs) {
+            const active = item === tab;
+            item.classList.toggle('active', active);
+            item.setAttribute('aria-selected', String(active));
+            item.tabIndex = active ? 0 : -1;
+        }
+        const id = tab.dataset.boardSettingsTab;
+        for (const panel of editor.querySelectorAll('[data-board-settings-panel]')) {
+            panel.hidden = panel.dataset.boardSettingsPanel !== id;
+        }
+        onSelect(id);
+    };
+    for (const tab of tabs) {
+        tab.addEventListener('click', () => select(tab), { signal: abort.signal });
+        tab.addEventListener('keydown', event => {
+            const index = tabs.indexOf(tab);
+            const target = event.key === 'ArrowRight' ? tabs[(index + 1) % tabs.length]
+                : event.key === 'ArrowLeft' ? tabs[(index + tabs.length - 1) % tabs.length]
+                    : event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs.at(-1) : null;
+            if (!target) return;
+            event.preventDefault();
+            select(target);
+            target.focus();
+        }, { signal: abort.signal });
+    }
+    return () => abort.abort();
+}
+
 const TYPES = [
     ['task', 'Task'], ['bug', 'Bug'], ['feature', 'Feature'],
     ['research-spike', 'Research spike'], ['chore', 'Chore / tech debt']

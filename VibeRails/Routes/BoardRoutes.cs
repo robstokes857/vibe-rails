@@ -378,7 +378,7 @@ public static partial class BoardRoutes
             RunAsync(async () =>
             {
                 var report = await jira.PullAsync(Project(), boardId, dryRun == true, cancellationToken);
-                return Results.Ok(new JiraPullResponse(report.DryRun, report.Outcome, report.Created, report.Updated, report.Skipped, report.Failed, report.Message));
+                return Results.Ok(new JiraPullResponse(report.DryRun, report.Outcome, report.Created, report.Updated, report.Skipped, report.Failed, report.Message, report.BoardId));
             }))
             .WithName("PullJiraFilter");
 

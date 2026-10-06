@@ -5,6 +5,50 @@ const { test, expect } = process.env.VIBERAILS_BOARD_STATIC === '1'
 const IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=';
 const DESCRIPTION = 'Repro screenshot\n![Screenshot.png](attachment:att_image)\n<img src=x onerror="window.__injected=true">';
 
+test('Connect selects its dedicated Jira board and preserves other settings drafts', async ({ page }) => {
+    await openBoard(page);
+    let connected = false;
+    const calls = [];
+    await page.route('**/api/v1/board/**', route => {
+        const path = new URL(route.request().url()).pathname;
+        const method = route.request().method();
+        calls.push(`${method} ${path}`);
+        const connection = { boardId: connected ? 'brd_jira' : 'brd_main', email: 'ada@example.com',
+            hasToken: connected, authStatus: connected ? 'saved' : 'none',
+            boardLink: connected ? 'https://acme.atlassian.net/jira/software/projects/TEST/boards/1' : null,
+            columns: [], lanes: [] };
+        if (path.endsWith('/jira') && method === 'PUT') {
+            connected = true;
+            return route.fulfill({ json: { ...connection, boardId: 'brd_jira', hasToken: true, authStatus: 'saved' } });
+        }
+        if (path.endsWith('/jira')) return route.fulfill({ json: connection });
+        if (path.endsWith('/jira/test')) return route.fulfill({ json: { ok: true, account: 'Ada' } });
+        if (path.endsWith('/jira/pull')) return route.fulfill({ json: { outcome: 'ok', boardId: 'brd_jira', message: 'Pull complete' } });
+        if (path.endsWith('/context')) return route.fulfill({ json: { revision: 1, context: { defaultMessage: '', typeOverrides: [] } } });
+        if (path.endsWith('/boards')) return route.fulfill({ json: { boards: [
+            { id: 'brd_main', name: 'Main', position: 0 }, ...(connected ? [{ id: 'brd_jira', name: 'Jira · TEST', position: 1 }] : [])
+        ] } });
+        if (path.endsWith('/columns')) return route.fulfill({ json: { columns: [] } });
+        return route.fulfill({ json: { cards: [] } });
+    });
+    await page.getByRole('button', { name: 'Board settings', exact: true }).click();
+    await page.locator('#board-board-name').fill('Keep this name draft');
+    await page.getByRole('tab', { name: 'Jira Cloud', exact: true }).click();
+    const panel = page.locator('[data-jira-panel]');
+    await panel.getByLabel('Jira board link').fill('https://acme.atlassian.net/jira/software/projects/TEST/boards/1');
+    await panel.getByLabel('API token').fill('test-only');
+    await panel.getByRole('button', { name: 'Connect', exact: true }).click();
+    await expect(panel.locator('[data-jira-board]')).toHaveText('Jira · TEST');
+    await expect(page.locator('[data-board-select]')).toHaveValue('brd_jira');
+    await expect(panel.locator('[data-jira-report]')).toHaveText('Connected as Ada.');
+    await panel.getByRole('button', { name: 'Pull now' }).click();
+    await expect(panel.locator('[data-jira-report]')).toHaveText('Pull complete');
+    expect(calls).toContain('POST /api/v1/board/boards/brd_jira/jira/test');
+    expect(calls).toContain('POST /api/v1/board/boards/brd_jira/jira/pull');
+    await page.getByRole('tab', { name: 'General', exact: true }).click();
+    await expect(page.locator('#board-board-name')).toHaveValue('Keep this name draft');
+});
+
 for (const width of [1440, 390]) {
     test(`Jira connection lives in Board Settings and saves independently at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 950 });
@@ -45,7 +89,7 @@ for (const width of [1440, 390]) {
         });
         await page.locator('[data-board-action="edit-board"]').click();
         const panel = page.locator('[data-jira-panel]');
-        await panel.locator('summary').first().click();
+        await page.getByRole('tab', { name: 'Jira Cloud', exact: true }).click();
         await expect(panel.locator('[data-jira-board]')).toHaveText('Main');
         await expect(panel.getByLabel('Jira board link')).toHaveValue('');
         await expect(panel.getByLabel('Atlassian account email')).toHaveValue('robstokes857@gmail.com');
@@ -57,6 +101,12 @@ for (const width of [1440, 390]) {
 
         await panel.getByLabel('Jira board link').fill(boardLink);
         await panel.getByLabel('API token').fill('typed-secret');
+        await page.getByRole('tab', { name: 'General', exact: true }).click();
+        await page.locator('#board-board-name').fill('Unsaved board name');
+        await page.getByRole('tab', { name: 'General', exact: true }).press('ArrowRight');
+        await expect(page.getByRole('tab', { name: 'Jira Cloud', exact: true })).toBeFocused();
+        await expect(panel.getByLabel('API token')).toHaveValue('typed-secret');
+        await expect(panel.getByLabel('Jira board link')).toHaveValue(boardLink);
         await panel.getByRole('button', { name: 'Connect' }).click();
         await expect(panel.locator('[data-jira-report]')).toHaveText('Connected as Rob Stokes.');
         expect(writes).toHaveLength(1);
@@ -67,7 +117,7 @@ for (const width of [1440, 390]) {
         await expect(panel.locator('[data-jira-summary]')).toContainText('In Progress → Jira lane (unmatched)');
         await expect(panel.getByLabel('API token')).toHaveValue('');
         expect(requests.filter(request => request.method === 'PUT')).toEqual([]);
-        await expect(page.locator('[data-board-action="jira-pull"]')).toBeVisible();
+        await expect(page.locator('[data-board-action="jira-pull"]')).toHaveCount(0);
 
         // A lane picked for a column under Advanced is saved by the next Connect.
         await panel.locator('[data-jira-advanced] summary').click();
@@ -82,12 +132,12 @@ for (const width of [1440, 390]) {
         expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
         await panel.locator('[data-jira-lanes]').scrollIntoViewIfNeeded();
         await page.screenshot({ path: testInfo.outputPath(`board-jira-connected-${width}.png`) });
-        await panel.locator('summary').first().scrollIntoViewIfNeeded();
+        await page.getByRole('tab', { name: 'Jira Cloud', exact: true }).scrollIntoViewIfNeeded();
         await page.screenshot({ path: testInfo.outputPath(`board-jira-${width}.png`) });
         await panel.getByLabel('API token').fill('unsaved-secret');
         await page.evaluate(() => window.app.closeModal());
         await page.locator('[data-board-action="edit-board"]').click();
-        await panel.locator('summary').first().click();
+        await page.getByRole('tab', { name: 'Jira Cloud', exact: true }).click();
         await expect(panel.getByLabel('Jira board link')).toHaveValue(savedLink);
         await expect(panel.getByLabel('API token')).toHaveValue('');
         await page.evaluate(() => window.app.boardController.openBoardEditor(null));
@@ -1052,6 +1102,7 @@ test('board context settings persist default and per-type choices and preserve a
         return route.fulfill({ json: saved });
     });
     await page.getByRole('button', { name: 'Board settings', exact: true }).click();
+    await page.getByRole('tab', { name: 'Agent context', exact: true }).click();
     await page.getByLabel('Default message', { exact: true }).fill('Read project conventions. <img src=x onerror="window.__contextXss=1">');
     await page.locator('[data-board-context] summary').filter({ hasText: /^Bug$/ }).click();
     await page.getByLabel('Bug context', { exact: true }).selectOption('append');
@@ -1061,6 +1112,7 @@ test('board context settings persist default and per-type choices and preserve a
     expect(saved.context.typeOverrides.find(item => item.type === 'bug')).toEqual({ type: 'bug', mode: 'append', message: 'Reproduce before changing code.' });
     await page.locator('#modal-container [data-action="close-modal"]').first().click();
     await page.getByRole('button', { name: 'Board settings', exact: true }).click();
+    await page.getByRole('tab', { name: 'Agent context', exact: true }).click();
     await expect(page.getByLabel('Default message', { exact: true })).toHaveValue(saved.context.defaultMessage);
     await page.locator('[data-board-context] summary').filter({ hasText: /^Bug$/ }).click();
     await expect(page.getByLabel('Bug context', { exact: true })).toHaveValue('append');

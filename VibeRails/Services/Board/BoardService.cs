@@ -582,7 +582,7 @@ public sealed partial class BoardService(
             detail.Card.BaseLlmOptions,
             notes, summary.Type, summary.BoardId, summary.Flagged, hasActiveAutomation, summary.DisplayId, summary.AgentMade,
             (await store.GetWaitingAutomationCardIdsAsync(detail.Card.ProjectPath, [detail.Card.Id], cancellationToken)).Count > 0,
-            summary.AgentMadeBy, summary.AgentMadeSessionId)
+            summary.AgentMadeBy, summary.AgentMadeSessionId, summary.JiraIssueKey)
         {
             LinkedCards = detail.LinkedCards.Select(card => ToDto(card, detail.Card.ProjectPath)).ToList(),
             PreviousWork = BoardHandoffService.WithFileStatus(detail.PreviousWork, detail.Card.ProjectPath),
@@ -616,7 +616,7 @@ public sealed partial class BoardService(
         card.Id, card.Key, card.ColumnId, card.Position, card.Title, card.Description, PresentAssignee(card.Assignee), card.Priority,
         card.Points, card.Tags.ToList(), card.Blocked, card.CommentCount, activeSessionId, activeTabId, card.CreatedUtc, card.UpdatedUtc,
         card.BaseLlmOptions, card.Type, card.BoardId, card.Flagged, DisplayId: card.DisplayId, AgentMade: card.AgentMade,
-        AgentMadeBy: card.AgentMadeBy, AgentMadeSessionId: card.AgentMadeSessionId);
+        AgentMadeBy: card.AgentMadeBy, AgentMadeSessionId: card.AgentMadeSessionId, JiraIssueKey: card.JiraIssueKey);
 
     internal static BoardColumnResponse ToDto(BoardColumnRecord column) =>
         new(column.Id, column.Name, column.Position, column.Color, column.BoardId);
@@ -752,8 +752,8 @@ public sealed partial class BoardService(
     {
         var origin = value?.Trim().ToLowerInvariant();
         return string.IsNullOrEmpty(origin) ? null
-            : origin is "agent" or "human" ? origin
-            : throw new BoardValidationException("Origin must be agent or human.");
+            : origin is "agent" or "human" or "jira" ? origin
+            : throw new BoardValidationException("Origin must be agent, human or jira.");
     }
 
     internal static bool IsClearValue(System.Text.Json.JsonElement element) =>

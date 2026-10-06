@@ -1191,7 +1191,12 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         using var saved = await SendJsonAsync(HttpMethod.Put, $"/api/v1/board/boards/{boardId}/jira", valid);
         saved.EnsureSuccessStatusCode();
         using (var body = await ReadJsonAsync(saved))
+        {
             Assert.False(body.RootElement.TryGetProperty("apiToken", out _));
+            var destination = body.RootElement.GetProperty("boardId").GetString()!;
+            Assert.NotEqual(boardId, destination);
+            boardId = destination;
+        }
 
         // VIBE-102: a board link replaces site + JQL. The site alone is refused with a reason.
         var link = new

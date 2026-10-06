@@ -21,6 +21,26 @@ public sealed class BoardCardPagingTests : IDisposable
     }
 
     [Fact]
+    public async Task JiraFilterUsesIssueLinksAcrossPagedLanes_AndHumanFilterExcludesImports()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var lane = (await _store.GetColumnsAsync(_project, Ct)).First(c => c.Name == "Done");
+        var human = await _store.CreateCardAsync(_project, Card(lane.Id, "Human"), Ct);
+        for (var index = 0; index < 3; index++)
+            await _store.CreateJiraCardAsync(_project, Card(lane.Id, "Imported " + index),
+                new BoardJiraLinkRecord("", "jira_test", index.ToString(), "TEST-" + index,
+                    null, DateTime.UtcNow, DateTime.UtcNow), Ct);
+        var first = await _store.GetCardsPageAsync(_project, new(2, lane.Id, Origin: "jira"), Ct);
+        Assert.Equal(3, first.FilteredCount);
+        Assert.Equal(2, first.Cards.Count);
+        Assert.All(first.Cards, card => Assert.StartsWith("TEST-", card.JiraIssueKey));
+        var second = await _store.GetCardsPageAsync(_project, new(2, lane.Id, Offset: 2, Origin: "jira"), Ct);
+        Assert.Single(second.Cards);
+        var humans = await _store.GetCardsPageAsync(_project, new(2, lane.Id, Origin: "human"), Ct);
+        Assert.Equal(human.Id, Assert.Single(humans.Cards).Id);
+    }
+
+    [Fact]
     public async Task FlaggedCardsLeadEveryLaneAfterActivityMovesAndFlagChanges()
     {
         await _store.EnsureDefaultColumnsAsync(_project, Ct);

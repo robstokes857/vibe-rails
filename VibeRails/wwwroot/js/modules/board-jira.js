@@ -7,11 +7,11 @@ import { escapeHtml } from './utils.js';
 export const JIRA_TOKEN_URL = 'https://id.atlassian.com/manage-profile/security/api-tokens';
 
 export const boardJiraSection = () => `
-    <details class="mt-3 border-top pt-3" data-jira-panel>
-        <summary>Jira Cloud <span class="badge text-bg-secondary ms-2" data-jira-status>Not connected</span></summary>
+    <section data-jira-panel>
+        <h6>Jira Cloud <span class="badge text-bg-secondary ms-2" data-jira-status>Not connected</span></h6>
         <fieldset class="mt-3" data-jira-fields disabled>
             <p class="small mb-2">Board: <strong data-jira-board></strong></p>
-            <p class="text-muted small">Mirrors a Jira board's issues into this board. Jira wins on title, description, lane, type, priority, tags and story points. A local edit to those fields is replaced on the next pull. Assignee, flagged, blocked, comments, sessions and commits stay here.</p>
+            <p class="text-muted small">Connect creates a separate Jira board for imported issues. Existing Jira cards move there with their comments, files and sessions. Use the board picker to switch between Jira and your local work. Jira wins on title, description, lane, type, priority, tags and story points. A local edit to those fields is replaced on the next pull. Assignee, flagged, blocked, comments, sessions and commits stay here.</p>
             <div class="mb-3">
                 <label class="form-label" for="jira-link">Jira board link</label>
                 <input class="form-control" id="jira-link" data-jira-link type="url" autocomplete="off" spellcheck="false"
@@ -63,7 +63,7 @@ export const boardJiraSection = () => `
             </details>
         </fieldset>
         <p class="text-muted small mt-3 mb-0" data-jira-report role="status"></p>
-    </details>`;
+    </section>`;
 
 const OVERFLOW_LABEL = 'Jira lane (unmatched)';
 
@@ -242,20 +242,37 @@ export class BoardJiraPanel {
     // Connect = save, then check the token and read the board (its columns and an issue count).
     async _connect() {
         if (!this._ready) return;
+        let savedBoard = false;
         await this._run(async () => {
             this._report('Connecting…');
             const saved = await BoardApi.saveJiraConnectionAsync(this._board, this._body());
             if (!this._alive()) return;
+            const destination = saved.boardId || this._board;
+            const moved = destination !== this._board;
+            this._board = destination;
+            savedBoard = true;
+            if (moved) {
+                // The store remapped these choices while cloning the lanes. Source IDs must
+                // never be sent on a retry, including when the destination reload fails.
+                this._columns = [];
+                this._lanes = [];
+                const lanes = this.root.querySelector('[data-jira-lanes]');
+                if (lanes) lanes.innerHTML = jiraLaneRows([], []);
+            }
             this._fill(saved);
-            this._onChanged?.('save');
+            if (moved) {
+                await this._load();
+                if (!this._alive()) return;
+            }
             this._report('Connecting…');
             const result = await BoardApi.testJiraConnectionAsync(this._board);
             if (!this._alive()) return;
             await this._load();
             if (!this._alive()) return;
             this._showResult(result);
-            this._onChanged?.('test');
         });
+        // Saving may have moved the connection even if the provider test failed afterward.
+        if (savedBoard && this._alive()) this._onChanged?.('test', this._board);
     }
 
     _showResult(result) {
@@ -285,15 +302,18 @@ export class BoardJiraPanel {
 
     async _pull(dryRun) {
         if (!this._ready) return;
+        let pulled = false;
         await this._run(async () => {
             this._report(dryRun ? 'Dry run…' : 'Pulling…');
             const report = await BoardApi.pullJiraAsync(this._board, dryRun);
             if (!this._alive()) return;
+            if (report.boardId) this._board = report.boardId;
+            pulled = !dryRun;
             if (!dryRun) await this._load();
             if (!this._alive()) return;
             this._report(report.message || report.outcome);
-            if (!dryRun) this._onChanged?.('pull');
         });
+        if (pulled && this._alive()) this._onChanged?.('pull', this._board);
     }
 
     _set(selector, value) {

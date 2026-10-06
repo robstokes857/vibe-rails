@@ -490,7 +490,19 @@ for data limits, vendor provenance, themes/CSP, lifecycle and regression tests.
 
 Jira Cloud connection controls live in the board settings modal (`board-jira.js`), bound to
 the edited board ID. They save separately from board metadata; the app Settings page has no
-Integrations tab. Existing per-board storage and Jira routes are unchanged.
+Integrations tab. VIBE-103 separates General, Jira Cloud, Agent context and History with keyboard
+accessible settings tabs. Pull and its report stay in Jira settings. Card summaries/detail derive
+`jiraIssueKey` from the existing issue links for a Jira logo badge; the origin filter includes Jira
+and excludes imports from Human-made. Assignee choices deduplicate canonical CLI identities.
+
+Connect creates a dedicated `Jira · …` local board; existing connections do the same on the next
+writing pull. `IBoardStore.EnsureDedicatedJiraBoardAsync` atomically clones the source lanes,
+remaps explicit column choices and overflow, moves that connection's live imported cards still
+on the source board through the normal card-log transfer, then rehomes the connection. Native
+cards and existing card identities/discussion/files/session/commit links survive. Destination lanes
+have no copied Automations. `board/30` adds nullable `DedicatedBoard` on the connection with no
+startup backfill; older connection writers preserve it. Connect/pull returns the destination board
+ID, and the UI selects it. Save and writing pulls share the cross-process Jira lock.
 
 VIBE-102 connects a board from a pasted Jira board link plus an API token; there is no site, JQL
 or story points field to type. `JiraBoardLink.Parse` (`Services/Jira`) reads the site, board id
