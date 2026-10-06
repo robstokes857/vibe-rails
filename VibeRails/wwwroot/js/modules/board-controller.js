@@ -35,7 +35,7 @@ import { mountLlmPicker, setLlmPickerValue, getEnabledLlmItems } from './pickers
 import { BoardApi } from './board-api.js';
 import { BoardLaneAgents } from './board-lane-agents.js';
 import { BOARD_SELECTION_STORAGE_KEY } from './board-selection.js';
-import { boardContextSection, laneAutomationSection, mountBoardContext, mountLaneAutomation, boardSettingsNavigation, mountBoardSettingsNavigation } from './board-settings.js';
+import { boardContextSection, laneAutomationSection, mountBoardContext, mountLaneAutomation, boardSettingsNavigation, mountBoardSettingsNavigation, boardSyncSection, mountBoardSync } from './board-settings.js';
 import { boardJiraSection, BoardJiraPanel } from './board-jira.js';
 import { cardOrganizeSection, bindCardOrganization } from './board-card-organize.js';
 import { openBoardSharing, openSharedBoards } from './board-sharing.js';
@@ -2494,7 +2494,7 @@ export class BoardController {
             <div class="board-lane-editor" data-board-board-editor>
                 ${board ? boardSettingsNavigation() : ''}
                 <section id="board-settings-general" data-board-settings-panel="general" ${board ? 'role="tabpanel" aria-labelledby="board-settings-tab-general"' : ''}>
-                <label class="board-editor-label" for="board-board-name">Name</label>
+                <label class="board-editor-label" for="board-board-name">Board name</label>
                 <input type="text" class="form-control form-control-sm mb-3" id="board-board-name" maxlength="60"
                     placeholder="Sprint 12, Website, Q4 bugs…" value="${escapeHtml(board?.name || '')}">
                 <label class="board-editor-label" for="board-display-prefix">Card display ID prefix</label>
@@ -2503,6 +2503,7 @@ export class BoardController {
                 <p class="board-editor-muted mb-3">${board
                     ? 'Create a new card to work on another board. Cards can move between lanes on this board.'
                     : 'A new board starts with the default lanes. Card keys stay unique across the whole project.'}</p>
+                ${board ? boardSyncSection() : '<p class="board-editor-muted">New boards stay local until you enable viberails.ai sync in Board settings.</p>'}
                 <div class="board-editor-actions mt-4">
                     ${board ? `<button type="button" class="btn btn-sm btn-outline-danger" data-board-delete-board>
                         <i class="fa-solid fa-trash" aria-hidden="true"></i> Delete board
@@ -2523,6 +2524,7 @@ export class BoardController {
         if (!editor) return;
         if (board) {
             const disposeContext = mountBoardContext(this.app, editor.querySelector('[data-board-context]'), board.id);
+            const disposeSync = mountBoardSync(this.app, editor.querySelector('[data-board-sync]'), board.id);
             const disposeHistory = mountHistory(editor.querySelector('[data-board-history-view]'), board.id);
             const jira = new BoardJiraPanel(this.app, editor.querySelector('[data-jira-panel]'), board, (action, destination) => {
                 if (this.state.boardId !== board.id && this.state.boardId !== destination) return;
@@ -2543,7 +2545,7 @@ export class BoardController {
                 if (tab === 'jira') void jira.activate();
                 if (tab === 'history') editor.querySelector('[data-board-history-view]').open = true;
             });
-            this.boardSettingsDispose = () => { disposeNavigation(); jira.dispose(); disposeContext(); disposeHistory(); };
+            this.boardSettingsDispose = () => { disposeNavigation(); disposeSync(); jira.dispose(); disposeContext(); disposeHistory(); };
         }
         editor.querySelector('[data-board-save-board]')?.addEventListener('click', () => this.saveBoard(editor, board));
         editor.querySelector('[data-board-delete-board]')?.addEventListener('click', () => this.deleteBoard(board));

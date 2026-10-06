@@ -13,6 +13,7 @@ using VibeRails.Services.Diagnostics;
 using VibeRails_Front.Controllers;
 using VibeRails_Front.Data;
 using VibeRails_Front.Data.Entities;
+using VibeRails_Front.Data.Ownership;
 using VibeRails_Front.Services;
 using VibeRails_Front.Services.Boards;
 using Xunit;
@@ -47,7 +48,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
         sync = new DesktopSync(store, client, new BoardSyncLock(Path.Combine(root, "sync.lock")), NullFeatureLog.Instance, activityCache);
         using var db = Db();
         db.Users.Add(new User { Id = Owner, Auth0Id = "auth0|fixture-owner" });
-        db.SaveChanges();
+        using (db.BeginPrivilegedWrite(PrivilegedWrites.IdentityBootstrap)) db.SaveChanges();
     }
 
     [Fact]
@@ -61,6 +62,9 @@ public sealed class BoardSyncRoundTripTests : IDisposable
         await using (var db = Db())
         {
             var hosted = new HostedSync(db, TimeProvider.System);
+            var source = Assert.Single(await hosted.ListBoardsAsync(Owner, Ct));
+            Assert.Equal(Path.GetFileName(root), source.SourceRepository);
+            Assert.Equal(Environment.MachineName, source.SourceComputer);
             var remote = (await hosted.GetCardAsync(Owner, published, card.Id, Ct))!;
             Assert.Equal(card.Key, remote.Card.Key);
             Assert.Equal("base:codex", remote.Card.Assignee);
@@ -128,6 +132,44 @@ public sealed class BoardSyncRoundTripTests : IDisposable
         var history = await store.GetHistoryAsync(root, card.BoardId, card.Id, 0, Ct);
         Assert.Contains(history!, entry => entry.Changes?.Contains("Web title") == true);
         Assert.Contains(history!, entry => entry.Changes?.Contains("Offline desktop title") == true);
+    }
+
+    [Fact]
+    public async Task UpgradeRefreshesSourceIdentityWithoutOverwritingRemoteLayout()
+    {
+        var card = await LocalCard();
+        var remoteId = await Publish(card);
+        var board = (await store.GetBoardAsync(root, card.BoardId, Ct))!;
+        var localLanes = await store.GetColumnsAsync(root, Ct, board.Id);
+        var link = (await store.GetSyncLinkAsync(root, board.Id, Ct))!;
+        // An older desktop persisted only the portable layout fingerprint.
+        var prefix = link.RemoteKeyPrefix ?? await store.EnsureProjectKeyPrefixAsync(root, Ct);
+        var legacyHash = BoardLayoutHash.Compute(board.Name, prefix, board.EffectiveDisplayPrefix,
+            localLanes.Select(lane => new BoardRemoteLane(lane.Id, lane.Name, lane.Color, lane.Position)));
+        Assert.Equal(legacyHash, link.LayoutHash);
+        await store.SaveSyncLinkAsync(link with { LayoutHash = legacyHash }, Ct);
+
+        var remoteLaneId = "remote-" + Guid.NewGuid().ToString("N");
+        await using (var db = Db())
+        {
+            var remoteBoard = await db.SyncedBoards.SingleAsync(b => b.Id == remoteId, Ct);
+            var lanes = BoardSyncContract.ReadLanes(remoteBoard.LanesJson).ToList();
+            lanes.Add(new BoardLane(remoteLaneId, "Remote lane", null, lanes.Count));
+            remoteBoard.LanesJson = BoardSyncContract.WriteLanes(lanes);
+            remoteBoard.UpdatedUtc = DateTime.UtcNow;
+            await db.SaveChangesAsync(Ct);
+            await new HostedSync(db, TimeProvider.System).CreateCardAsync(Owner, remoteId, "Owner", "Remote lane card", remoteLaneId, Ct);
+        }
+        transport.PushBodies.Clear();
+
+        await Sync(card);
+
+        Assert.DoesNotContain(transport.PushBodies, body =>
+            Json(body).TryGetProperty("lanes", out var lanes) && lanes.ValueKind == JsonValueKind.Array);
+        Assert.Contains(transport.PushBodies, body => Json(body).TryGetProperty("sourceRepository", out _));
+        Assert.Contains(await store.GetColumnsAsync(root, Ct, board.Id), lane => lane.Id == remoteLaneId);
+        await using var verify = Db();
+        Assert.Equal(2, Assert.Single(await new HostedSync(verify, TimeProvider.System).ListBoardsAsync(Owner, Ct)).CardCount);
     }
 
     [Fact]
@@ -308,6 +350,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
             new([new("src/file.cs", "csharp", "original", "saved replacement")], 1), Ct);
         var attachment = (await store.AddAttachmentContentAsync(root, card.Id, "result.txt", "text/plain", "saved attachment"u8.ToArray(), Ct))!;
         await store.LinkCardAsync(root, card.Id, related.Id, Ct);
+        await store.SetBoardSyncEnabledAsync(root, card.BoardId, true, Ct);
         await sync.SyncDueAsync(Ct);
         var status = (await sync.GetStatusAsync(root, card.BoardId, Ct))!;
         Assert.Null(status.LastError);
@@ -425,6 +468,14 @@ public sealed class BoardSyncRoundTripTests : IDisposable
                     ControllerContext = new ControllerContext { HttpContext = http }
                 };
                 result = await activity.Replace(Guid.Parse(path[^4]), path[^2], ct);
+            }
+            else if (request.Method == HttpMethod.Get && Guid.TryParse(path[^1], out var describedBoard))
+            {
+                var sharing = new BoardSharingApiController(new VibeRails_Front.Services.Boards.BoardSharingService(db, TimeProvider.System))
+                {
+                    ControllerContext = new ControllerContext { HttpContext = http }
+                };
+                result = await sharing.Describe(describedBoard, ct);
             }
             else
             {

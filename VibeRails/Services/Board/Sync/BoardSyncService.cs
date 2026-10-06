@@ -32,15 +32,15 @@ public interface IBoardSyncService
     Task<BoardSyncStatus?> GetStatusAsync(string projectPath, string boardId, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Compatibility entry point: ensures publication and syncs with the configured account.
-    /// The retired enabled/includeActivity switches no longer disable publication or activity.
+    /// Saves this board's publication choice. Enabling syncs immediately when configured.
+    /// The retired includeActivity switch has no effect; activity follows board sync.
     /// </summary>
     Task<BoardSyncStatus?> SetPublishedAsync(string projectPath, string boardId, bool enabled, CancellationToken cancellationToken, bool includeActivity = false);
 
     /// <summary>One push-then-pull for this board now; errors land in the status, not the caller.</summary>
     Task<BoardSyncStatus?> SyncNowAsync(string projectPath, string boardId, CancellationToken cancellationToken);
 
-    /// <summary>Every local board when an account is configured. One failure never stops the next.</summary>
+    /// <summary>Every opted-in board when an account is configured. One failure never stops the next.</summary>
     Task SyncDueAsync(CancellationToken cancellationToken);
 }
 
@@ -74,7 +74,7 @@ public sealed class BoardSyncService(
         var board = await store.GetBoardAsync(projectPath, boardId, cancellationToken);
         if (board is null)
             return null;
-        return await StatusAsync(board.Id, await store.GetSyncLinkAsync(projectPath, boardId, cancellationToken), cancellationToken);
+        return await StatusAsync(board, await store.GetSyncLinkAsync(projectPath, boardId, cancellationToken), cancellationToken);
     }
 
     public async Task<BoardSyncStatus?> SetPublishedAsync(string projectPath, string boardId, bool enabled, CancellationToken cancellationToken, bool includeActivity = false)
@@ -84,11 +84,13 @@ public sealed class BoardSyncService(
         var board = await store.GetBoardAsync(projectPath, boardId, cancellationToken);
         if (board is null)
             return null;
-        // Legacy callers may still send the retired switches. A configured account now
-        // always includes its boards and linked activity; stored switches remain intact.
+        board = await store.SetBoardSyncEnabledAsync(projectPath, boardId, enabled, cancellationToken);
+        if (board is null) return null;
+        if (!enabled)
+            return await StatusAsync(board, await store.GetSyncLinkAsync(projectPath, boardId, cancellationToken), cancellationToken);
         var link = await EnsurePublishedAsync(board, cancellationToken);
         if (link is not null && client.IsConfigured) link = await SyncLinkAsync(link, cancellationToken, forceActivity: true);
-        return await StatusAsync(board.Id, link, cancellationToken);
+        return await StatusAsync(board, link, cancellationToken);
     }
 
     private async Task<BoardSyncLinkRecord?> EnsurePublishedAsync(BoardRecord board, CancellationToken cancellationToken, bool force = false)
@@ -118,7 +120,8 @@ public sealed class BoardSyncService(
         BoardSyncPublishResponse published;
         try
         {
-            published = await client.PublishAsync(new BoardSyncPublishRequest(board.Id, board.Name, layout.Prefix, layout.Lanes, board.EffectiveDisplayPrefix), cancellationToken, destination);
+            published = await client.PublishAsync(new BoardSyncPublishRequest(board.Id, board.Name, layout.Prefix, layout.Lanes,
+                board.EffectiveDisplayPrefix, SourceRepository(board.ProjectPath), SourceComputer()), cancellationToken, destination);
         }
         catch (BoardSyncClientException ex)
         {
@@ -160,10 +163,12 @@ public sealed class BoardSyncService(
         var board = await store.GetBoardAsync(projectPath, boardId, cancellationToken);
         if (board is null)
             return null;
+        if (!board.SyncEnabled)
+            throw new BoardValidationException("Enable viberails.ai sync for this board first.");
         var link = await EnsurePublishedAsync(board, cancellationToken);
         if (link is not null && client.IsConfigured)
             link = await SyncLinkAsync(link, cancellationToken, forceActivity: true);
-        return await StatusAsync(board.Id, link, cancellationToken);
+        return await StatusAsync(board, link, cancellationToken);
     }
 
     public async Task SyncDueAsync(CancellationToken cancellationToken)
@@ -267,7 +272,9 @@ public sealed class BoardSyncService(
         // A local change made during the network request belongs to the next push.
         if (hash != link.LayoutHash) return link;
         var applied = await store.ApplyRemoteLayoutAsync(link.ProjectPath, link.BoardId, remote, board, columns, ct);
-        return applied is null ? link : link with { LayoutHash = applied };
+        if (applied is null) return link;
+        return await store.SaveSyncLinkAsync(link with { LayoutHash = applied }, ct)
+            ?? link with { LayoutHash = applied };
     }
 
     private async Task<BoardSyncLinkRecord> PushAsync(BoardSyncLinkRecord link, CancellationToken cancellationToken)
@@ -286,14 +293,18 @@ public sealed class BoardSyncService(
         {
             var unsent = await store.GetUnsentLogEntriesAsync(link.BoardId, PushBatchSize, cancellationToken);
             var sendLayout = !string.Equals(layout.Hash, link.LayoutHash, StringComparison.Ordinal);
-            if (unsent.Count == 0 && !sendLayout)
+            // Refresh owner source labels independently of the layout hash. An older persisted
+            // layout hash must still match its unchanged layout so remote edits can be pulled.
+            var sendSourceIdentity = !link.Imported && batch == 0;
+            if (unsent.Count == 0 && !sendLayout && !sendSourceIdentity)
                 break;
 
             var request = new BoardSyncPushRequest(
                 sendLayout ? board.Name : null,
                 sendLayout ? layout.Prefix : null,
                 sendLayout ? layout.Lanes : null,
-                unsent.Select(ToWire).ToList(), sendLayout ? board.EffectiveDisplayPrefix : null);
+                unsent.Select(ToWire).ToList(), sendLayout ? board.EffectiveDisplayPrefix : null,
+                link.Imported ? null : SourceRepository(board.ProjectPath), link.Imported ? null : SourceComputer());
             BoardSyncPushResponse response;
             try
             {
@@ -746,8 +757,9 @@ public sealed class BoardSyncService(
         return value[value.LastIndexOf('-') + 1] != '0';
     }
 
-    private async Task<BoardSyncStatus> StatusAsync(string boardId, BoardSyncLinkRecord? link, CancellationToken cancellationToken)
+    private async Task<BoardSyncStatus> StatusAsync(BoardRecord board, BoardSyncLinkRecord? link, CancellationToken cancellationToken)
     {
+        var boardId = board.Id;
         var unsent = link is null ? 0 : await store.CountUnsentLogEntriesAsync(boardId, cancellationToken);
         var rejected = link is null ? 0 : await store.CountRejectedLogEntriesAsync(boardId, cancellationToken);
         var rejectedEntries = rejected == 0 ? [] : await store.GetRejectedLogEntriesAsync(boardId, 50, cancellationToken);
@@ -756,7 +768,7 @@ public sealed class BoardSyncService(
         return new BoardSyncStatus(
             boardId,
             Published: link is not null,
-            Enabled: client.IsConfigured,
+            Enabled: board.SyncEnabled,
             link?.RemoteBoardId,
             BoardSyncEndpoint.BoardPage(ParserConfigs.GetFrontendUrl(), link?.RemoteBoardId),
             link?.Cursor ?? 0,
@@ -768,8 +780,21 @@ public sealed class BoardSyncService(
             rejectedEntries,
             skipped,
             skippedEntries,
-            ActivityEnabled: client.IsConfigured);
+            ActivityEnabled: board.SyncEnabled && client.IsConfigured);
     }
 
     private static string Trim(string value) => value.Length <= MaxErrorLength ? value : value[..MaxErrorLength];
+
+    private static string SourceRepository(string projectPath)
+    {
+        var name = Path.GetFileName(projectPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        return name.Length <= 120 ? name : name[..120];
+    }
+
+    private static string SourceComputer()
+    {
+        var name = Environment.MachineName;
+        return name.Length <= 100 ? name : name[..100];
+    }
+
 }

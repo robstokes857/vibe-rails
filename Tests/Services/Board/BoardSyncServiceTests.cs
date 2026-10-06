@@ -32,13 +32,19 @@ public sealed partial class BoardSyncServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ApiKeyPublishesBoardsAutomatically_AndRetiredPauseCannotDisableSync()
+    public async Task BoardOptInControlsAutomaticPublicationAndActivity()
     {
         var card = await Card();
         client.IsConfigured = false;
         await service.SyncDueAsync(Ct);
         Assert.Equal(0, client.Calls);
         client.IsConfigured = true;
+        await service.SyncDueAsync(Ct);
+        Assert.Equal(0, client.Calls);
+        var local = (await service.GetStatusAsync(root, card.BoardId, Ct))!;
+        Assert.False(local.Enabled);
+        Assert.False(local.Published);
+        await store.SetBoardSyncEnabledAsync(root, card.BoardId, true, Ct);
         await service.SyncDueAsync(Ct);
         var status = (await service.GetStatusAsync(root, card.BoardId, Ct))!;
         Assert.True(status.Enabled);
@@ -49,8 +55,11 @@ public sealed partial class BoardSyncServiceTests : IDisposable
         Assert.Equal("base:codex", created.Changes!.Value.GetProperty("assignee").GetProperty("to").GetString());
         Assert.Equal("env:7:codex", (await store.FindCardAsync(root, card.Id, Ct))!.Assignee);
         await service.SetPublishedAsync(root, card.BoardId, false, Ct);
+        Assert.False((await service.GetStatusAsync(root, card.BoardId, Ct))!.Enabled);
         await store.UpdateCardAsync(root, card.Id, new(Title: "Still syncing"), Ct);
         await service.SyncDueAsync(Ct);
+        Assert.Single(client.Entries);
+        await service.SetPublishedAsync(root, card.BoardId, true, Ct);
         Assert.Equal(2, client.Entries.Count);
     }
 
@@ -61,6 +70,8 @@ public sealed partial class BoardSyncServiceTests : IDisposable
         var otherProject = Path.Combine(root, "other-project");
         await store.EnsureDefaultColumnsAsync(otherProject, Ct);
         var other = await store.CreateCardAsync(otherProject, new(null, "Another project", "", null, "medium", null, [], false), Ct);
+        await store.SetBoardSyncEnabledAsync(root, first.BoardId, true, Ct);
+        await store.SetBoardSyncEnabledAsync(otherProject, other.BoardId, true, Ct);
         Assert.Equal(2, (await store.GetBoardsForSyncAsync(Ct)).Count);
         client.BeforePublish = () =>
         {
@@ -636,6 +647,7 @@ public sealed partial class BoardSyncServiceTests : IDisposable
     public async Task MissingRemoteBoardRecoveryIsBounded_AndKeepsUnsentEdits()
     {
         var card = await Card();
+        await store.SetBoardSyncEnabledAsync(root, card.BoardId, true, Ct);
         await service.SyncDueAsync(Ct);
         await store.UpdateCardAsync(root, card.Id, new(Title: "Pending edit"), Ct);
         client.PushError = new BoardSyncClientException("Still missing", BoardSyncWire.CodeBoardNotFound, 404);
@@ -1038,7 +1050,9 @@ public sealed partial class BoardSyncServiceTests : IDisposable
                 accepted.Add(new(entry.Id, stored.Seq));
             }
             if (LoseNextAck) { LoseNextAck = false; throw new BoardSyncClientException("Connection lost", "network"); }
-            var response = new BoardSyncPushResponse(BadAck ? [new("unexpected", 5)] : accepted, Entries.Count);
+            // The host returns its sequence high-water mark, including entries no longer served.
+            var lastSeq = Math.Max(AdvertisedLastSeq ?? 0, Entries.Count == 0 ? 0 : Entries.Max(e => e.Seq));
+            var response = new BoardSyncPushResponse(BadAck ? [new("unexpected", 5)] : accepted, lastSeq);
             return Task.FromResult(TransformAck?.Invoke(response) ?? response);
         }
         public async Task<BoardSyncPullResponse> PullAsync(string boardId, long after, int limit, CancellationToken ct, string? expectedDestination = null)

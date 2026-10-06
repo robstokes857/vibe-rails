@@ -62,6 +62,76 @@ export const laneAutomationSection = () => `
         <p class="board-editor-muted mt-2">Runs while a VibeRails backend is open. Busy Automations wait for their turn. Saving settings cancels pending entries for this lane and applies to future entries; it does not launch an agent. Lane agents shows each workflow’s purpose, output and reviewer choices. Removing a selection keeps the shared Automation. You define what each lane, including Done, means.</p>
     </section>`;
 
+export const boardSyncSection = () => `
+    <section class="mt-3 border-top pt-3" data-board-sync>
+        <h6>viberails.ai</h6>
+        <p class="board-editor-muted">Save the board name above to use it as the hosted name. The hosted Boards list also shows this repository and computer.</p>
+        <div data-board-sync-content>Loading sync status…</div>
+    </section>`;
+
+export function mountBoardSync(app, element, boardId) {
+    if (!element) return () => {};
+    const abort = new AbortController();
+    const content = element.querySelector('[data-board-sync-content]');
+    let busy = false;
+    let disposed = false;
+    const alive = () => !disposed && element.isConnected !== false;
+    const render = status => {
+        content.innerHTML = `
+            <label class="form-check mb-2">
+                <input class="form-check-input" type="checkbox" data-board-sync-enabled ${status.enabled ? 'checked' : ''}>
+                <span class="form-check-label">Sync this board with viberails.ai</span>
+            </label>
+            <p class="board-editor-muted mb-2">${status.enabled
+                ? status.configured ? 'This board syncs while a VibeRails backend is open.' : 'Sign in to your account in Settings to start syncing.'
+                : 'This board stays local. A previously hosted copy remains on viberails.ai until you delete it there.'}</p>
+            ${status.lastError ? `<p class="text-warning" role="alert">${escapeHtml(status.lastError)}</p>` : ''}
+            ${status.remoteUrl ? `<a href="${escapeHtml(status.remoteUrl)}" target="_blank" rel="noopener noreferrer">Open hosted board</a>` : ''}
+            ${status.enabled && status.configured ? '<button type="button" class="btn btn-sm btn-outline-secondary ms-2" data-board-sync-now>Sync now</button>' : ''}`;
+    };
+    const reload = async () => {
+        try {
+            const status = await BoardApi.getBoardSyncAsync(boardId, { signal: abort.signal });
+            if (alive()) render(status);
+        } catch (error) {
+            if (alive() && error?.name !== 'AbortError') content.textContent = error?.message || 'Sync status could not be loaded.';
+        }
+    };
+    const change = async event => {
+        if (!event.target.matches('[data-board-sync-enabled]') || busy) return;
+        busy = true;
+        const enabled = event.target.checked;
+        event.target.disabled = true;
+        try {
+            const status = await BoardApi.setBoardSyncAsync(boardId, enabled);
+            if (alive()) { render(status); app.showToast('Board', enabled ? 'Board sync enabled.' : 'Board sync disabled.', 'success'); }
+        } catch (error) {
+            if (alive()) app.showToast('Board', error?.message || 'Sync setting could not be saved.', 'error');
+            // Publication can fail after the choice was saved. Read the stored setting again
+            // instead of assuming the request rolled it back.
+            await reload();
+        } finally {
+            busy = false;
+            if (alive()) event.target.disabled = false;
+        }
+    };
+    const click = async event => {
+        if (!event.target.closest('[data-board-sync-now]') || busy) return;
+        busy = true;
+        event.target.disabled = true;
+        try {
+            const status = await BoardApi.syncBoardNowAsync(boardId);
+            if (alive()) { render(status); app.showToast('Board', status.lastError || 'Board synced.', status.lastError ? 'warning' : 'success'); }
+        } catch (error) {
+            if (alive()) app.showToast('Board', error?.message || 'Sync failed.', 'error');
+        } finally { busy = false; if (alive()) event.target.disabled = false; }
+    };
+    element.addEventListener('change', change);
+    element.addEventListener('click', click);
+    void reload();
+    return () => { disposed = true; abort.abort(); element.removeEventListener('change', change); element.removeEventListener('click', click); };
+}
+
 // Each mount owns its request and DOM. Replacing/closing a modal cannot populate a newer one.
 function mountSettings(app, element, { load, render, read, save, savedMessage, onSaved }) {
     if (!element) return () => {};

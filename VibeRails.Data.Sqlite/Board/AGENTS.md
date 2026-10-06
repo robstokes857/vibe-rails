@@ -254,9 +254,12 @@ earliest entry an earlier version tried (NULL counts as earlier) and records the
 those rows in the same transaction; the stamped Card Log writers delete an entry's row in the
 transaction that applies it. No backfill; older binaries never name the column.
 
-`board/23` adds `BoardSyncLinks.ActivitySchema` (default 0) and `ActivityAfter`. Old publications
-keep these columns for compatibility; VIBE-13 upgrades publications automatically when an API
-key is configured. `GetBoardsForSyncAsync` enumerates board metadata for the root scheduler;
+`board/31` adds `Boards.SyncEnabled` (default 1 for existing boards); new boards explicitly start
+at 0. It is separate from the retained `BoardSyncLinks.Enabled` legacy column, and its scoped
+write does not delete a hosted copy or sync ledger. `board/23` adds `BoardSyncLinks.ActivitySchema`
+(default 0) and `ActivityAfter`. Old publications keep these columns for compatibility;
+opted-in boards upgrade publications automatically when an API key is configured.
+`GetBoardsForSyncAsync` enumerates enabled board metadata for the root scheduler;
 activity and card reads still use each board's project scope.
 The cursor makes bounded card refresh fair across root processes/restarts under the sync lock.
 Activity reads remain behind `IBoardStore`, with SQL row/actual-content bounds before loading

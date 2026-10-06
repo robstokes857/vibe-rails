@@ -1269,7 +1269,7 @@ public sealed partial class BoardStore : IBoardStore
         "SELECT c.Id, c.ProjectPath, c.Name, c.Position, c.Color, c.CreatedUTC, c.UpdatedUTC, c.BoardId FROM BoardColumns c";
 
     private const string BoardSelectSql =
-        "SELECT Id, ProjectPath, Name, Position, CreatedUTC, UpdatedUTC, DisplayPrefix FROM Boards";
+        "SELECT Id, ProjectPath, Name, Position, CreatedUTC, UpdatedUTC, DisplayPrefix, SyncEnabled FROM Boards";
 
     // A property because the prefix join interpolates ProjectPathCollation (see CardSequenceReseedSql).
     private static string CardSelectSql => $"""
@@ -1354,7 +1354,8 @@ public sealed partial class BoardStore : IBoardStore
         reader.GetInt32(3),
         ParseDb(reader.GetString(4)),
         ParseDb(reader.GetString(5)),
-        reader.IsDBNull(6) ? null : reader.GetString(6));
+        reader.IsDBNull(6) ? null : reader.GetString(6),
+        reader.GetInt32(7) != 0);
 
     /// <summary>
     /// The board a caller means: the named one (which must belong to the project), else the
@@ -1564,13 +1565,13 @@ public sealed partial class BoardStore : IBoardStore
     private static async Task<BoardRecord> InsertBoardWithDefaultLanesAsync(SqliteConnection connection, SqliteTransaction transaction, string project, string name, int position, CancellationToken cancellationToken, string? displayPrefix = null, bool createDefaultLanes = true)
     {
         var now = DateTime.UtcNow;
-        var board = new BoardRecord(NewId("brd"), project, name, position, now, now, displayPrefix);
+        var board = new BoardRecord(NewId("brd"), project, name, position, now, now, displayPrefix, SyncEnabled: false);
         await using (var insert = connection.CreateCommand())
         {
             insert.Transaction = transaction;
             insert.CommandText = """
-                INSERT INTO Boards (Id, ProjectPath, Name, Position, CreatedUTC, UpdatedUTC, DisplayPrefix)
-                VALUES ($id, $project, $name, $position, $created, $updated, $prefix);
+                INSERT INTO Boards (Id, ProjectPath, Name, Position, CreatedUTC, UpdatedUTC, DisplayPrefix, SyncEnabled)
+                VALUES ($id, $project, $name, $position, $created, $updated, $prefix, 0);
                 """;
             insert.Parameters.AddWithValue("$id", board.Id);
             insert.Parameters.AddWithValue("$project", project);
@@ -1909,6 +1910,9 @@ public sealed partial class BoardStore : IBoardStore
         // Nullable and no startup backfill; ordinary Connect/pull performs the requested separation.
         SqliteMigrationRunner.Apply(connection, "board", 30, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardJiraConnections ADD COLUMN DedicatedBoard INTEGER"));
+        // Existing boards keep their automatic publication; newly created boards require opt-in.
+        SqliteMigrationRunner.Apply(connection, "board", 31, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE Boards ADD COLUMN SyncEnabled INTEGER NOT NULL DEFAULT 1"));
         SqliteMigrationRunner.Apply(connection, "board-attention", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, AttentionSchemaSql));
         SqliteMigrationRunner.Apply(connection, "board-lane-dispatch", 1, MigrationKind.Additive, ApplyLaneDispatchSchema);

@@ -597,13 +597,15 @@ namespace VibeRails.DTOs
         string? ApprovedUtc,
         string? ModifiedUtc,
         long SizeBytes,
-        string Path
+        string Path,
+        bool RequirePinEachRun = false
     );
 
     public record PythonScriptListResponse(
         bool PinConfigured,
         string ScriptsDirectory,
-        List<PythonScriptInfo> Scripts
+        List<PythonScriptInfo> Scripts,
+        bool RequirePinEachRun = false
     );
 
     public record SetPythonScriptPinRequest(
@@ -616,6 +618,8 @@ namespace VibeRails.DTOs
         string? Pin
     );
 
+    public record PythonScriptRunPinRequirementRequest(string? Name, bool Enabled, string? Pin);
+
     // Arguments are the resolved argv tokens the run window previews on its command
     // line: what the user sees there is exactly what is sent. They never reach a shell
     // (CliWrap passes argv straight to the interpreter), and the script itself is still
@@ -623,7 +627,8 @@ namespace VibeRails.DTOs
     public record PythonScriptRunRequest(
         string? Name,
         List<string>? Arguments = null,
-        string? StandardInput = null
+        string? StandardInput = null,
+        string? Pin = null
     );
 
 
@@ -697,7 +702,9 @@ namespace VibeRails.DTOs
     public record PythonScriptSigningDocument(
         int Version,
         PythonScriptPinRecord? Pin,
-        List<PythonScriptApprovalRecord> Approvals
+        List<PythonScriptApprovalRecord> Approvals,
+        bool RequirePinEachRun = false,
+        List<string>? RequirePinEachRunNames = null
     );
 
     public record PythonScriptPinRecord(

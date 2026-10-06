@@ -198,7 +198,7 @@ CREATE TABLE BoardSyncRejectedFields ( EntryId TEXT NOT NULL REFERENCES BoardCom
 CREATE TABLE BoardSyncSkippedEntries ( BoardId TEXT NOT NULL REFERENCES Boards(Id) ON DELETE CASCADE, EntryId TEXT NOT NULL, Seq INTEGER NOT NULL, CardKey TEXT NOT NULL, Kind TEXT NOT NULL, Reason TEXT NOT NULL, SkippedUTC TEXT NOT NULL, Version TEXT, PRIMARY KEY (BoardId, EntryId) );
 
 -- table Boards
-CREATE TABLE Boards ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Name TEXT NOT NULL, Position INTEGER NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL , DisplayPrefix TEXT);
+CREATE TABLE Boards ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Name TEXT NOT NULL, Position INTEGER NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL , DisplayPrefix TEXT, SyncEnabled INTEGER NOT NULL DEFAULT 1);
 
 -- table SchemaMigrations
 CREATE TABLE SchemaMigrations ( Component TEXT NOT NULL, Version INTEGER NOT NULL CHECK (Version > 0), AppliedUTC TEXT NOT NULL, AppliedBy TEXT, PRIMARY KEY (Component, Version) );

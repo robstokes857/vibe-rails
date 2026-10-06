@@ -23,6 +23,12 @@ public static class PythonScriptRoutes
             ExecuteAsync(() => service.SetPinAsync(request, cancellationToken)))
             .WithName("SetPythonScriptPin");
 
+        app.MapPost("/api/v1/python-scripts/run-pin", (
+            IPythonScriptService service, PythonScriptRunPinRequirementRequest request,
+            CancellationToken cancellationToken) =>
+            ExecuteAsync(() => service.SetRunPinRequirementAsync(request, cancellationToken)))
+            .WithName("SetPythonScriptRunPinRequirement");
+
         app.MapPost("/api/v1/python-scripts/approve", (
             IPythonScriptService service,
             PythonScriptApprovalRequest request,
@@ -45,18 +51,20 @@ public static class PythonScriptRoutes
             PythonScriptRunRequest request,
             CancellationToken cancellationToken) =>
             ExecuteAsync(() => service.RunAsync(
-                request.Name, request.Arguments, request.StandardInput, cancellationToken)))
+                request.Name, request.Arguments, request.StandardInput, request.Pin, cancellationToken)))
             .WithName("RunPythonScript");
 
         if (isActiveRootBackend)
         {
             app.MapPost("/api/v1/python-scripts/run/interactive", async (
                 ITerminalTabHostService tabHost,
+                IPythonScriptService service,
                 PythonScriptRunRequest request,
                 CancellationToken cancellationToken) =>
             {
                 try
                 {
+                    await service.ValidateRunAuthorizationAsync(request.Name, request.Pin, cancellationToken);
                     var tab = await tabHost.CreatePythonScriptTabAsync(request.Name ?? string.Empty, cancellationToken);
                     return Results.Ok(new PythonScriptInteractiveRunResponse(
                         request.Name?.Trim() ?? string.Empty,

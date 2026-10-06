@@ -105,8 +105,16 @@ member prefix lock.
 
 ## VIBE-1: transfers and one discussion stream
 
-The Board settings sync section has been removed. Automatic publication and protected sync APIs
-remain. Comments includes retained legacy notes; new notes are written as comments.
+Board settings has a per-board viberails.ai sync choice. Boards created by this version start local;
+boards that existed before `board/31` remain enabled. Disabling stops push, pull, activity and
+remote Start work advertising without deleting the hosted copy or local cursor. Enabling resumes
+from that cursor. The board name is the hosted label; source repository (folder name only) and
+computer name travel as bounded metadata on owner publish/push and appear on the hosted list.
+Owner sync can send source metadata without a layout edit; the persisted layout hash remains the
+portable board/lane fingerprint so an older publication can pull pending remote layout changes.
+An older backend running against the same `board.db` predates this choice and may still publish
+the board while it is open; use updated backends wherever a disabled board must stay local.
+Comments includes retained legacy notes; new notes are written as comments.
 
 Cards can move between boards while keeping their immutable identity. In the move transaction,
 existing log rows receive their source `SyncBoardId`, a departure is queued there, and a new
@@ -130,9 +138,9 @@ change. The companion VibeRails-Front migration must ship for hosted hiding; old
 the unknown field but continue showing the comment. Merging uses ordinary destination changes,
 copied comments/activity and source soft deletion. No additional listener or credential is used.
 
-A configured viberails.ai API key automatically publishes all local boards and their linked
-activity (VIBE-13). The root backend pushes and pulls every 60 seconds while open. Without a key,
-local edits wait for a configured account. Protected APIs retain the manual sync action.
+A configured viberails.ai API key automatically publishes opted-in local boards and their linked
+activity. The root backend pushes and pulls every 60 seconds while open. Without a key,
+opted-in local edits wait for a configured account. Protected APIs retain the manual sync action.
 VB-52 adds invitations and shared editing through the hosted Board ACL described above.
 
 ## Conversation and history

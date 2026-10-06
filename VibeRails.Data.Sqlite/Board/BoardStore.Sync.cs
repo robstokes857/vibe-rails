@@ -86,8 +86,21 @@ public sealed partial class BoardStore
         return links;
     }
 
-    public Task<IReadOnlyList<BoardRecord>> GetBoardsForSyncAsync(CancellationToken cancellationToken = default) =>
-        GetLocalBoardsAsync(cancellationToken);
+    public async Task<IReadOnlyList<BoardRecord>> GetBoardsForSyncAsync(CancellationToken cancellationToken = default) =>
+        (await GetLocalBoardsAsync(cancellationToken)).Where(board => board.SyncEnabled).ToList();
+
+    public async Task<BoardRecord?> SetBoardSyncEnabledAsync(string projectPath, string boardId, bool enabled, CancellationToken cancellationToken = default)
+    {
+        var project = NormalizeProjectPath(projectPath);
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"UPDATE Boards SET SyncEnabled = $enabled WHERE Id = $board AND ProjectPath = $project{ProjectPathCollation};";
+        command.Parameters.AddWithValue("$enabled", enabled ? 1 : 0);
+        command.Parameters.AddWithValue("$board", boardId.Trim());
+        command.Parameters.AddWithValue("$project", project);
+        if (await command.ExecuteNonQueryAsync(cancellationToken) == 0) return null;
+        return await ReadBoardAsync(connection, null, project, boardId, cancellationToken);
+    }
 
     public async Task<BoardSyncLinkRecord?> SaveSyncLinkAsync(BoardSyncLinkRecord link, CancellationToken cancellationToken = default)
     {

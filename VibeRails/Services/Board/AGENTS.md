@@ -170,7 +170,8 @@ Only the human REST/UI path can delete discussion entries, including agent entri
 rejects agent authors. `board/25` adds comment tombstones plus `SyncBoardId`, `TransferRemoteSeq`
 and `DiscussionHidden` on log rows. No startup backfill or historical rewrite. Older binaries can
 still show deleted discussion. See SYNC.md for transfer delivery and hosted comment deletion.
-The Board settings sync section is removed; automatic background publication continues.
+Board settings has a per-board viberails.ai choice. New boards start local, existing boards stay
+enabled through additive `board/31`, and disabling preserves the hosted copy and sync ledger.
 
 Read [ARCHITECTURE.md](ARCHITECTURE.md) for the component map, wire contracts, data model,
 security boundaries and open VB-18 findings. This file is the contributor guide for Board work
@@ -415,7 +416,7 @@ Read [database migration instructions](../../../VibeRails.Data.Sqlite/DB/AGENTS.
 `board/24` (VIBE-11, additive) adds `BoardCards.AgentMade`
 (default 0, no backfill): set only when `create_board_card` runs as an agent, left alone by every
 later edit, and ignored by an older binary. `board/23` adds the activity schema version and durable rotation
-cursor on `BoardSyncLinks`. VIBE-13 automatically publishes all local boards and activity whenever
+cursor on `BoardSyncLinks`. The scheduler publishes opted-in boards and activity whenever
 an API key is configured; the old switch columns remain for compatibility. The scheduler-only
 `GetBoardsForSyncAsync` reads board identity metadata across projects through `IBoardStore`.
 See [SYNC.md](SYNC.md) for the bounded activity transfer and automatic recovery.

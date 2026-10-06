@@ -16,6 +16,8 @@ public interface IPythonScriptService
     Task<PythonScriptListResponse> GetStatusAsync(CancellationToken cancellationToken = default);
     Task<PythonScriptListResponse> SetPinAsync(
         SetPythonScriptPinRequest request, CancellationToken cancellationToken = default);
+    Task<PythonScriptListResponse> SetRunPinRequirementAsync(
+        PythonScriptRunPinRequirementRequest request, CancellationToken cancellationToken = default);
     Task<PythonScriptListResponse> ApproveAsync(
         PythonScriptApprovalRequest request, CancellationToken cancellationToken = default);
     Task<PythonScriptListResponse> RevokeAsync(
@@ -29,8 +31,10 @@ public interface IPythonScriptService
         string? name,
         IReadOnlyList<string>? arguments,
         string? standardInput,
+        string? pin,
         CancellationToken cancellationToken = default);
     Task<string> ValidateRunnableAsync(string? name, CancellationToken cancellationToken = default);
+    Task ValidateRunAuthorizationAsync(string? name, string? pin, CancellationToken cancellationToken = default);
     PythonScriptRunHistoryResponse GetRunHistory();
     string GetScriptsDirectory();
 
@@ -190,6 +194,31 @@ public sealed class PythonScriptService : IPythonScriptService
         }
     }
 
+    public async Task<PythonScriptListResponse> SetRunPinRequirementAsync(
+        PythonScriptRunPinRequirementRequest request, CancellationToken cancellationToken = default)
+    {
+        await _documentLock.WaitAsync(cancellationToken);
+        try
+        {
+            var document = ReadDocument();
+            if (document.Pin == null || !VerifyPin(document, request.Pin))
+                throw new PythonScriptValidationException("Incorrect PIN.");
+            var names = (document.RequirePinEachRunNames ?? []).Where(n => !string.IsNullOrWhiteSpace(n)).ToList();
+            if (string.IsNullOrWhiteSpace(request.Name))
+                document = document with { RequirePinEachRun = request.Enabled };
+            else
+            {
+                var name = ValidateScriptName(request.Name);
+                names.RemoveAll(n => NameEquals(n, name));
+                if (request.Enabled) names.Add(name);
+                document = document with { RequirePinEachRunNames = names };
+            }
+            WriteDocument(document);
+            return BuildStatus(document);
+        }
+        finally { _documentLock.Release(); }
+    }
+
     public async Task<PythonScriptListResponse> SetPinAsync(
         SetPythonScriptPinRequest request,
         CancellationToken cancellationToken = default)
@@ -335,7 +364,7 @@ public sealed class PythonScriptService : IPythonScriptService
         string? requestedName,
         CancellationToken cancellationToken = default)
     {
-        return await RunAsync(requestedName, arguments: null, cancellationToken);
+        return await RunAsync(requestedName, arguments: null, standardInput: null, pin: null, cancellationToken);
     }
 
     public async Task<PythonScriptRunResponse> RunAsync(
@@ -343,15 +372,24 @@ public sealed class PythonScriptService : IPythonScriptService
         IReadOnlyList<string>? arguments,
         CancellationToken cancellationToken = default)
     {
-        return await RunAsync(requestedName, arguments, standardInput: null, cancellationToken);
+        return await RunAsync(requestedName, arguments, standardInput: null, pin: null, cancellationToken);
     }
 
     public async Task<PythonScriptRunResponse> RunAsync(
         string? requestedName,
         IReadOnlyList<string>? arguments,
         string? standardInput,
+        CancellationToken cancellationToken = default) =>
+        await RunAsync(requestedName, arguments, standardInput, pin: null, cancellationToken);
+
+    public async Task<PythonScriptRunResponse> RunAsync(
+        string? requestedName,
+        IReadOnlyList<string>? arguments,
+        string? standardInput,
+        string? pin,
         CancellationToken cancellationToken = default)
     {
+        await VerifyRunPinAsync(requestedName, pin, cancellationToken);
         ValidateRunInputs(arguments, standardInput);
         var runtime = RuntimeFor(ValidateScriptName(requestedName));
         var interpreter = ResolveInterpreterOrThrow(runtime);
@@ -417,6 +455,24 @@ public sealed class PythonScriptService : IPythonScriptService
             catch (Exception ex) { Log.Debug(ex, "[PythonScripts] Temp cleanup failed for {Path}", verifiedCopy); }
         }
     }
+
+    private async Task VerifyRunPinAsync(string? requestedName, string? pin, CancellationToken cancellationToken)
+    {
+        await _documentLock.WaitAsync(cancellationToken);
+        try
+        {
+            var document = ReadDocument();
+            var name = ValidateScriptName(requestedName);
+            var required = document.RequirePinEachRun || (document.RequirePinEachRunNames ?? [])
+                .Any(n => NameEquals(n, name));
+            if (required && (document.Pin == null || !VerifyPin(document, pin)))
+                throw new PythonScriptValidationException("A correct signing PIN is required for this run.");
+        }
+        finally { _documentLock.Release(); }
+    }
+
+    public Task ValidateRunAuthorizationAsync(string? name, string? pin, CancellationToken cancellationToken = default) =>
+        VerifyRunPinAsync(name, pin, cancellationToken);
 
     /// <summary>
     /// Checks the same name/hash approval contract as a real run without launching anything. The
@@ -1063,7 +1119,8 @@ public sealed class PythonScriptService : IPythonScriptService
                         approval?.ApprovedUtc,
                         fileInfo.LastWriteTimeUtc.ToString("O"),
                         fileInfo.Length,
-                        path));
+                        path,
+                        (document.RequirePinEachRunNames ?? []).Any(n => NameEquals(n, name))));
                 }
                 catch (Exception ex) when (ex is
                     IOException or UnauthorizedAccessException or PythonScriptValidationException)
@@ -1076,7 +1133,7 @@ public sealed class PythonScriptService : IPythonScriptService
             }
         }
 
-        return new PythonScriptListResponse(document.Pin != null, scriptsDirectory, scripts);
+        return new PythonScriptListResponse(document.Pin != null, scriptsDirectory, scripts, document.RequirePinEachRun);
     }
 
     private static string ValidateScriptName(string? name)

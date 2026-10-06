@@ -28,6 +28,7 @@ public sealed class BoardRemoteLaunchService(IBoardStore store, IBoardSyncClient
         BoardSyncLinkRecord? link = null;
         foreach (var board in boards)
         {
+            if (!board.SyncEnabled) continue;
             var candidate = await store.GetSyncLinkAsync(project, board.Id, ct);
             if (candidate is { Imported: false, Enabled: true } && candidate.DestinationKey == destination
                 && Guid.TryParse(candidate.RemoteBoardId, out var remote) && remote == command.BoardId)
@@ -48,8 +49,9 @@ public sealed class BoardRemoteLaunchService(IBoardStore store, IBoardSyncClient
         if (!await store.IsCardSyncAppliedAsync(project, link.BoardId, command.CardId, status.Cursor, ct))
             return Result("sync_failed");
         var currentLink = await store.GetSyncLinkAsync(project, link.BoardId, ct);
+        var currentBoard = await store.GetBoardAsync(project, link.BoardId, ct);
         var card = await store.FindCardAsync(project, command.CardId, ct);
-        if (currentLink is not { Imported: false, Enabled: true } || currentLink.RemoteBoardId != link.RemoteBoardId
+        if (currentBoard is not { SyncEnabled: true } || currentLink is not { Imported: false, Enabled: true } || currentLink.RemoteBoardId != link.RemoteBoardId
             || currentLink.DestinationKey != destination || client.DestinationKey != destination
             || card is null || card.Id != command.CardId || card.BoardId != link.BoardId) return Result("unavailable");
         try
@@ -97,6 +99,7 @@ public sealed class BoardRemoteLaunchHostedService(IServiceScopeFactory scopes, 
         var ids = new List<Guid>();
         foreach (var board in (await store.GetBoardsAsync(project, ct)).Take(100))
         {
+            if (!board.SyncEnabled) continue;
             var link = await store.GetSyncLinkAsync(project, board.Id, ct);
             if (link is { Imported: false, Enabled: true } && link.DestinationKey == destination
                 && Guid.TryParse(link.RemoteBoardId, out var remote)) ids.Add(remote);

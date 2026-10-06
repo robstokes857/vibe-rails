@@ -21,7 +21,8 @@ remaining entries stay chronological. All / Hide agent comments / Agent comments
 attention entries visible, and background refresh preserves the selected filter and drafts.
 Each entry has a confirmed human Delete action; deletion refreshes only discussion and preserves
 drafts. Agent notes no longer has a separate rail. `append_board_note` is a compatibility alias.
-The complete viberails.ai settings section is removed; the backend still publishes automatically.
+Board settings General has a per-board viberails.ai switch and Sync now action. New boards start
+local; an enabled board syncs while a root backend and account are available.
 These rules supersede the older separate-notes and no-cross-board-transfer descriptions below.
 
 Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.

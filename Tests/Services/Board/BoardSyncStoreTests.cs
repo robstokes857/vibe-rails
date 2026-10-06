@@ -19,6 +19,25 @@ public sealed class BoardSyncStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task SyncChoiceUpgradesExistingBoardsAsEnabledButNewBoardsStartLocal()
+    {
+        await store.EnsureDefaultColumnsAsync(root, Ct);
+        var existing = Assert.Single(await store.GetBoardsAsync(root, Ct));
+        Assert.False(existing.SyncEnabled);
+        await ExecuteAsync("ALTER TABLE Boards DROP COLUMN SyncEnabled; DELETE FROM SchemaMigrations WHERE Component='board' AND Version=31;");
+
+        var upgraded = new BoardStore(cs, cs);
+        Assert.True((await upgraded.GetBoardAsync(root, existing.Id, Ct))!.SyncEnabled);
+        var fresh = await upgraded.CreateBoardAsync(root, "Fresh", Ct);
+        Assert.False(fresh.SyncEnabled);
+        Assert.Equal(existing.Id, Assert.Single(await upgraded.GetBoardsForSyncAsync(Ct)).Id);
+        Assert.Null(await upgraded.SetBoardSyncEnabledAsync(Path.Combine(root, "another-project"), existing.Id, false, Ct));
+        Assert.True((await upgraded.GetBoardAsync(root, existing.Id, Ct))!.SyncEnabled);
+        await upgraded.SetBoardSyncEnabledAsync(root, existing.Id, false, Ct);
+        Assert.Empty(await upgraded.GetBoardsForSyncAsync(Ct));
+    }
+
+    [Fact]
     public async Task OutboxReadsCreationBeforeComments_AndAcknowledgesOnlySentEntries()
     {
         await store.EnsureDefaultColumnsAsync(root, Ct);

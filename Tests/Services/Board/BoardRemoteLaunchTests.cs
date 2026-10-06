@@ -33,6 +33,7 @@ public sealed class BoardRemoteLaunchTests
 
     [Theory]
     [InlineData("imported")]
+    [InlineData("disabled")]
     [InlineData("destination")]
     [InlineData("wrong_board")]
     [InlineData("missing_card")]
@@ -65,7 +66,9 @@ public sealed class BoardRemoteLaunchTests
     {
         client.SetupGet(x => x.DestinationKey).Returns(Destination);
         store.Setup(x => x.IsCardSyncAppliedAsync(Project, "board", "card", 12, Ct)).ReturnsAsync(failure != "unapplied");
-        store.Setup(x => x.GetBoardsAsync(Project, Ct)).ReturnsAsync([new BoardRecord("board", Project, "Project", 0, default, default)]);
+        var board = new BoardRecord("board", Project, "Project", 0, default, default, SyncEnabled: failure != "disabled");
+        store.Setup(x => x.GetBoardsAsync(Project, Ct)).ReturnsAsync([board]);
+        store.Setup(x => x.GetBoardAsync(Project, "board", Ct)).ReturnsAsync(board);
         var link = new BoardSyncLinkRecord("board", remote.ToString(), 12, true, null, null, null, default, default,
             Project, "Project", failure == "destination" ? "other" : Destination, Imported: failure == "imported");
         var linkReads = 0;

@@ -123,7 +123,7 @@ public sealed class BoardSyncCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task RetiredPauseRetainsRejectedCountAndIdentities()
+    public async Task PausingBoardSyncRetainsRejectedCountAndIdentities()
     {
         var card = await Card();
         var creation = Assert.Single(await store.GetUnsentLogEntriesAsync(card.BoardId, 20, Ct));
@@ -134,7 +134,8 @@ public sealed class BoardSyncCoverageTests : IDisposable
         Assert.Equal(creation.Entry.Id, Assert.Single(published.RejectedEntries!).EntryId);
 
         var paused = (await service.SetPublishedAsync(root, card.BoardId, false, Ct))!;
-        Assert.True(paused.Enabled);
+        Assert.False(paused.Enabled);
+        Assert.False(paused.ActivityEnabled);
         Assert.True(paused.Published);
         Assert.Equal(1, paused.Rejected);
         var identity = Assert.Single(paused.RejectedEntries!);
@@ -168,7 +169,10 @@ public sealed class BoardSyncCoverageTests : IDisposable
 
         var calls = client.Calls;
         await service.SyncDueAsync(Ct);
-        Assert.True(client.Calls > calls); // The surviving board now publishes automatically.
+        Assert.Equal(calls, client.Calls); // A new surviving board stays local until opted in.
+        var survivor = Assert.Single(await store.GetBoardsAsync(root, Ct));
+        await service.SetPublishedAsync(root, survivor.Id, true, Ct);
+        Assert.True(client.Calls > calls);
         Assert.DoesNotContain(await store.GetSyncLinksAsync(Ct), link => link.BoardId == card.BoardId);
         Assert.Equal(remoteEntries, client.Entries.Count);
     }

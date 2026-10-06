@@ -20,7 +20,8 @@ public sealed record BoardRecord(
     int Position,
     DateTime CreatedUtc,
     DateTime UpdatedUtc,
-    string? DisplayPrefix = null)
+    string? DisplayPrefix = null,
+    bool SyncEnabled = true)
 {
     public string EffectiveDisplayPrefix => DisplayPrefix ?? BoardDisplayIds.DefaultPrefix(ProjectPath);
 }

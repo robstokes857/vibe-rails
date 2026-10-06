@@ -78,12 +78,14 @@ public sealed record BoardSyncEntryWire(
     DateTime CreatedUtc,
     JsonElement? Changes);
 
-public sealed record BoardSyncPublishRequest(string LocalBoardId, string Name, string KeyPrefix, List<BoardSyncLaneWire> Lanes, string? DisplayPrefix = null);
+public sealed record BoardSyncPublishRequest(string LocalBoardId, string Name, string KeyPrefix, List<BoardSyncLaneWire> Lanes,
+    string? DisplayPrefix = null, string? SourceRepository = null, string? SourceComputer = null);
 
 public sealed record BoardSyncPublishResponse(Guid RemoteBoardId, string Name, long LastSeq);
 
 /// <summary>Null <see cref="Name"/>, <see cref="KeyPrefix"/> and <see cref="Lanes"/> mean unchanged.</summary>
-public sealed record BoardSyncPushRequest(string? Name, string? KeyPrefix, List<BoardSyncLaneWire>? Lanes, List<BoardSyncEntryWire> Entries, string? DisplayPrefix = null);
+public sealed record BoardSyncPushRequest(string? Name, string? KeyPrefix, List<BoardSyncLaneWire>? Lanes, List<BoardSyncEntryWire> Entries,
+    string? DisplayPrefix = null, string? SourceRepository = null, string? SourceComputer = null);
 
 public sealed record BoardSyncAcceptedWire(string Id, long Seq);
 
