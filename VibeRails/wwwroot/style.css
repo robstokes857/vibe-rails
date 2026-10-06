@@ -19453,10 +19453,10 @@ body.performance-mode .brand-text-sm {
     .rules-editor-rule-row .rules-files-detail-actions { grid-column: 1 / -1; }
 }
 
-/* Keep the name/count compact; directory paths wrap at their slash boundaries. */
+/* Lead with the directory; rule files share the same filename. */
 .agent-file-tree-heading { display: flex; align-items: center; justify-content: space-between; gap: .65rem; min-width: 0; }
-.rules-files-rail .agent-file-tree-heading .agent-file-tree-name { order: 0; color: var(--color-text, #f1f5f9); font-size: .8rem; font-weight: 650; }
-.rules-files-rail .agent-file-tree-path { order: 1; font-size: .72rem; font-weight: 400; color: var(--color-text-muted, #94a3b8); line-height: 1.4; }
+.rules-files-rail .agent-file-tree-heading .agent-file-tree-path { color: var(--color-text, #f1f5f9); font-size: .8rem; font-weight: 650; line-height: 1.4; }
+.rules-files-rail .agent-file-tree-name { color: var(--color-text-muted, #94a3b8); font-size: .72rem; font-weight: 400; }
 .rules-files-rail .agent-file-tree-item { gap: .45rem; padding: .65rem; }
 .rules-files-rail .agent-file-tree-rename { margin-left: 40px; padding: .2rem .5rem; font-size: .7rem; }
 

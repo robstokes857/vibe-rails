@@ -747,9 +747,14 @@ test('Display-name controls and form describe a searchable label without renamin
     const appRenderer = Object.create(VibeControlApp.prototype);
     appRenderer.escapeHtml = escapeHtml;
     const item = { agent: { path: 'C:/repo/vc.rules.md' }, index: 0, shortName: 'vc.rules.md', scopePath: '.', relativePath: 'vc.rules.md', ruleCount: 0 };
-    assert.match(appRenderer.renderAgentFileItem(item), /Set display name/);
+    const rootHtml = appRenderer.renderAgentFileItem(item);
+    assert.match(rootHtml, /Set display name/);
+    assert.ok(rootHtml.indexOf('Repository root') < rootHtml.indexOf('vc.rules.md</span>'));
     item.agent.customName = 'DB Rules for NoSQL DB 1';
     item.shortName = item.agent.customName;
-    assert.match(appRenderer.renderAgentFileItem(item), /Edit display name/);
-    assert.match(appRenderer.renderAgentFileItem(item), /DB Rules for NoSQL DB 1/);
+    item.scopePath = 'VibeRails.Data.Sqlite/DB';
+    const nestedHtml = appRenderer.renderAgentFileItem(item);
+    assert.match(nestedHtml, /Edit display name/);
+    assert.match(nestedHtml, /VibeRails\.Data\.Sqlite\/<wbr>DB/);
+    assert.ok(nestedHtml.indexOf('VibeRails.Data.Sqlite/') < nestedHtml.indexOf('DB Rules for NoSQL DB 1'));
 });

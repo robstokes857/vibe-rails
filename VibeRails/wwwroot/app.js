@@ -952,10 +952,10 @@ export class VibeControlApp {
                     </span>
                     <span class="agent-file-tree-info">
                         <span class="agent-file-tree-heading">
-                            <span class="agent-file-tree-name">${this.escapeHtml(item.shortName)}</span>
+                            <span class="agent-file-tree-path">${directory}</span>
                             <span class="agent-file-tree-badge${item.hasRules ? ' agent-file-tree-badge--active' : ''}">${ruleLabel}</span>
                         </span>
-                        <span class="agent-file-tree-path">${directory}</span>
+                        <span class="agent-file-tree-name">${this.escapeHtml(item.shortName)}</span>
                         <span class="agent-file-tree-scope">${item.scopePath === '.' ? 'Entire repository' : 'This folder and its subfolders'}</span>
                     </span>
                 </button>
