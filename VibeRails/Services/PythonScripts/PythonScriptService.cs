@@ -197,6 +197,7 @@ public sealed class PythonScriptService : IPythonScriptService
     public async Task<PythonScriptListResponse> SetRunPinRequirementAsync(
         PythonScriptRunPinRequirementRequest request, CancellationToken cancellationToken = default)
     {
+        using var writeLock = await AcquireCrossProcessWriteLockAsync(cancellationToken);
         await _documentLock.WaitAsync(cancellationToken);
         try
         {

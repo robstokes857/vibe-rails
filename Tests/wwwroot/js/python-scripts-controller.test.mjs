@@ -449,6 +449,107 @@ test('The VS Code bridge is a one-way postMessage the dashboard feature-detects'
     assert.match(source, /typeof host\.__viberails_openFile__ === 'function'/);
 });
 
+for (const scope of ['global', 'script']) {
+    test(`Required ${scope} run PIN is collected and forwarded by both run paths`, async () => {
+        const app = createApp();
+        app.apiCall = async (url, method, body) => {
+            app.calls.push({ url, method, body });
+            if (url.endsWith('/run/interactive')) return { tabId: 'pin-tab' };
+            if (url.endsWith('/run')) return { name: SCRIPT.name, exitCode: 0 };
+            return controller.state;
+        };
+        const controller = controllerWith([{ ...SCRIPT, requirePinEachRun: scope === 'script' }], app);
+        controller.state.requirePinEachRun = scope === 'global';
+        let prompts = 0;
+        controller._promptPin = async options => {
+            assert.equal(options.preserveModal, true);
+            prompts++;
+            return '1234';
+        };
+        const view = controller.runWindow;
+        view.name = SCRIPT.name;
+        assert.equal((await view.execute()).exitCode, 0);
+        assert.equal((await controller.runInTerminal(SCRIPT.name)).tabId, 'pin-tab');
+        assert.equal(prompts, 2);
+        const launches = app.calls.filter(call => call.method === 'POST');
+        assert.equal(launches.length, 2);
+        assert.ok(launches.every(call => call.body.pin === '1234'));
+        assert.equal(controller.runningNames.size, 0);
+    });
+}
+
+test('Cancelling either required run PIN prompt starts nothing and clears busy state', async () => {
+    const app = createApp();
+    const controller = controllerWith([SCRIPT], app);
+    controller.state.requirePinEachRun = true;
+    controller._promptPin = async () => null;
+    controller.runWindow.name = SCRIPT.name;
+    assert.equal(await controller.runWindow.execute(), null);
+    const button = { disabled: false, innerHTML: 'Run' };
+    assert.equal(await controller.runInTerminal(SCRIPT.name, button), null);
+    assert.equal(app.calls.filter(call => call.method === 'POST').length, 0);
+    assert.equal(controller.runningNames.size, 0);
+    assert.deepEqual(button, { disabled: false, innerHTML: 'Run' });
+});
+
+for (const finishWith of ['submit', 'cancel', 'close-window']) {
+    test(`The nested run PIN prompt preserves its parent and clears fields on ${finishWith}`, async () => {
+        const controller = controllerWith([SCRIPT]);
+        let parentClosed = false;
+        const parent = {
+            layer: { isConnected: true, querySelector() { return null; }, remove() { this.isConnected = false; } },
+            close() { parentClosed = true; }
+        };
+        controller.modal = parent;
+        const field = { dataset: { pinField: 'pin' }, value: '1234' };
+        const events = new Map();
+        const form = { addEventListener(kind, fn) { events.set(kind, fn); } };
+        const cancel = { addEventListener(kind, fn) { events.set(`cancel-${kind}`, fn); } };
+        const layer = {
+            isConnected: true,
+            remove() { this.isConnected = false; },
+            querySelector(selector) { return selector === '[data-pin-form]' ? form : null; },
+            querySelectorAll(selector) { return selector === '[data-pin-field]' ? [field] : [cancel]; }
+        };
+        const originalDocument = globalThis.document;
+        const originalFrame = globalThis.requestAnimationFrame;
+        globalThis.document = {
+            getElementById() { return { appendChild() {} }; },
+            createElement() { return layer; },
+            addEventListener() {},
+            removeEventListener() {}
+        };
+        globalThis.requestAnimationFrame = () => {};
+        try {
+            let pending;
+            if (finishWith === 'close-window') {
+                controller.state.requirePinEachRun = true;
+                controller.runWindow.name = SCRIPT.name;
+                controller.runWindow.layer = parent.layer;
+                parent.close = () => { parentClosed = true; controller.runWindow.close(); };
+                pending = controller.runWindow.execute();
+            } else {
+                pending = controller._promptPin({ title: 'Run', body: 'PIN required', submitLabel: 'Run', preserveModal: true });
+            }
+            assert.equal(parentClosed, false);
+            assert.equal(controller.modal.layer, layer);
+            if (finishWith === 'submit') events.get('submit')({ preventDefault() {} });
+            else if (finishWith === 'cancel') events.get('cancel-click')();
+            else controller.runWindow.close();
+            assert.equal(await pending, finishWith === 'submit' ? '1234' : null);
+            assert.equal(controller.modal, finishWith === 'close-window' ? null : parent);
+            assert.equal(parentClosed, finishWith === 'close-window');
+            assert.equal(controller.app.calls.filter(call => call.method === 'POST').length, 0);
+            assert.equal(controller.runningNames.size, 0);
+            assert.equal(field.value, '');
+            assert.equal(layer.isConnected, false);
+        } finally {
+            globalThis.document = originalDocument;
+            globalThis.requestAnimationFrame = originalFrame;
+        }
+    });
+}
+
 test('Run in terminal stays busy until its tab is ready, and cannot start twice', async () => {
     const app = createApp();
     let releaseRun;

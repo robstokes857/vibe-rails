@@ -156,6 +156,10 @@ export class PythonRunWindow {
 
     close() {
         if (!this.layer) return;
+        if (this._runToken?.awaitingPin && this.scripts?.modal?.layer !== this.layer) {
+            this.scripts?._closeModal?.();
+            if (!this.layer) return;
+        }
         this._remember();
         if (this._onKeydown) document.removeEventListener('keydown', this._onKeydown, true);
         this._onKeydown = null;
@@ -185,7 +189,9 @@ export class PythonRunWindow {
         this._remember();
 
         const name = this.name;
-        const token = {};
+        const token = { awaitingPin: true };
+        const layer = this.layer;
+        const standardInput = this.stdin || null;
         this._runToken = token;
         this.running = true;
         // The previous result goes now, not when the new one lands: a stale "exit 0" sitting
@@ -196,8 +202,15 @@ export class PythonRunWindow {
 
         let result = null;
         try {
+            const isCurrent = () => this._runToken === token && this.name === name && this.layer === layer;
+            const requestedPin = this.scripts?.requestRunPin?.(name, { isCurrent });
+            const pin = requestedPin?.then ? await requestedPin : requestedPin;
+            token.awaitingPin = false;
+            if (pin === null || !isCurrent()) return null;
+            const body = { name, arguments: argv, standardInput };
+            if (pin !== undefined) body.pin = pin;
             result = await this.app.apiCall(`${API}/run`, 'POST',
-                { name, arguments: argv, standardInput: this.stdin || null },
+                body,
                 { showLoading: false, preferErrorResponseMessage: true });
             // Unconditional: the row's "Last run" drawer and the workbench's output panel are
             // where the result belongs even when nobody is looking at the window any more.
@@ -257,6 +270,7 @@ export class PythonRunWindow {
 
         this._onKeydown = (event) => {
             if (isConfirmDialogOpen() || !this.layer) return;
+            if (this.scripts?.modal?.layer && this.scripts.modal.layer !== this.layer) return;
             if (event.key === 'Escape') {
                 event.preventDefault();
                 event.stopImmediatePropagation();
@@ -388,8 +402,8 @@ export class PythonRunWindow {
     }
 
     /**
-     * The PTY escape hatch posts a script name and nothing else — /run/interactive deliberately
-     * accepts no command text from the browser — so it does NOT run the command line above.
+     * The PTY escape hatch posts a script name and optional run PIN. It accepts no command
+     * text from the browser, so it does NOT run the command line above.
      * Say so on the button rather than letting the two disagree in silence.
      */
     _paintTerminalLink(hasInput) {

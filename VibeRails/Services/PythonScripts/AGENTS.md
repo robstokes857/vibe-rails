@@ -10,7 +10,8 @@ classes, `/api/v1/python-scripts`, `--run-python-script`), but since VIBE-56 a s
    asks which runtime (pwsh, bash or python) and keeps that choice and the extension in step.
 2. Sign the exact script version with the user's Python signing PIN.
 3. Choose **Run** for the captured run window, with argument rows and optional standard input,
-   or **Run in terminal** for interactive scripts. The terminal path takes the script name only.
+   or **Run in terminal** for interactive scripts. The terminal path takes the script name and
+   an optional required run PIN.
 4. Edit scripts in the workbench, which pairs Monaco with an agent terminal. Changed bytes need
    signing again before either run path can execute them.
 
@@ -53,6 +54,13 @@ Signing pins the canonical SHA-256 of strict UTF-8 bytes (BOM removed, line endi
 file name included). Execution rechecks that hash and runs a verified copy (canonical text for bash). An edit, rename,
 or revoke must never silently approve different code. PINs are never stored as plaintext.
 Arguments use PyBridge arrays / `ProcessStartInfo.ArgumentList`, never shell concatenation.
+
+Run PIN requirements are optional globally and per script. Every signing-document mutation,
+including changing either requirement, takes the existing cross-process write lock before its
+instance semaphore and read/modify/write. Captured and interactive dashboard runs collect a
+required signing PIN for each launch; cancellation starts nothing. PINs are never remembered
+with arguments/stdin or retained in controller/window state. New request DTOs require an
+`AppJsonSerializerContext` registration and a real HTTP binding regression.
 
 Authoring does not take a PIN or create approvals. Saves require the raw-content version read by
 the editor; stale saves must not overwrite newer bytes. Import paths reject network/device paths

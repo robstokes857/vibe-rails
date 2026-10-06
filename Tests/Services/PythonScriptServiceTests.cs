@@ -331,6 +331,48 @@ public sealed class PythonScriptServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ConcurrentRunPinSettingsFromSeparateInstancesKeepBothScopesAndApprovals()
+    {
+        var (first, _) = await SignedService("good.py", "print('good')\n");
+        var second = NewService(out _);
+        await Task.WhenAll(
+            Task.Run(() => first.SetRunPinRequirementAsync(
+                new PythonScriptRunPinRequirementRequest(null, true, "1234"),
+                TestContext.Current.CancellationToken), TestContext.Current.CancellationToken),
+            Task.Run(() => second.SetRunPinRequirementAsync(
+                new PythonScriptRunPinRequirementRequest("good.py", true, "1234"),
+                TestContext.Current.CancellationToken), TestContext.Current.CancellationToken));
+
+        var reopened = NewService(out _);
+        var state = await reopened.GetStatusAsync(TestContext.Current.CancellationToken);
+        Assert.True(state.RequirePinEachRun);
+        var script = Assert.Single(state.Scripts);
+        Assert.True(script.RequirePinEachRun);
+        Assert.Equal(PythonScriptService.StatusApproved, script.Status);
+        await Assert.ThrowsAsync<PythonScriptValidationException>(() => reopened.ValidateRunAuthorizationAsync(
+            "good.py", null, TestContext.Current.CancellationToken));
+        await reopened.ValidateRunAuthorizationAsync("good.py", "1234", TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task RunPinSettingsWaitForTheSharedWriteLockAndCancellationDoesNotChangeTheDocument()
+    {
+        var (service, _) = await SignedService("good.py", "print('good')\n");
+        var signingPath = Path.Combine(_installDirectory, PythonScriptService.SigningFileName);
+        var original = File.ReadAllBytes(signingPath);
+        using var heldLock = new FileStream(signingPath + ".lock", FileMode.OpenOrCreate,
+            FileAccess.ReadWrite, FileShare.None);
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+
+        var pending = service.SetRunPinRequirementAsync(
+            new PythonScriptRunPinRequirementRequest(null, true, "1234"), cancellation.Token);
+        Assert.False(pending.IsCompleted);
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
+        Assert.Equal(original, File.ReadAllBytes(signingPath));
+    }
+
+    [Fact]
     public async Task ConcurrentApprovalsFromSeparateServiceInstancesAreAllKept()
     {
         // Two instances over one install directory model the dashboard and a

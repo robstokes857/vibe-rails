@@ -922,6 +922,22 @@ export class PythonScriptsController {
         return this.runWindow.open(name);
     }
 
+    /** Collects a required run PIN without retaining it in controller or browser state. */
+    requestRunPin(name, { isCurrent = () => true } = {}) {
+        const decide = () => {
+            if (!isCurrent()) return null;
+            if (!this.state) throw new Error('Could not load script run requirements.');
+            if (!this.state.requirePinEachRun && !this.scriptByName(name)?.requirePinEachRun) return undefined;
+            return this._promptPin({
+                title: `Run ${name}`,
+                body: 'This run requires your signing PIN.',
+                submitLabel: 'Run script',
+                preserveModal: true
+            });
+        };
+        return this.state ? decide() : this.ensureState().then(decide);
+    }
+
     /**
      * Starts a signed script in a backend-created interactive terminal tab — the escape hatch
      * for scripts that ask questions, need Ctrl+C, or stream for a long time. `button`
@@ -948,7 +964,12 @@ export class PythonScriptsController {
         this.markRunning(name);
         let result = null;
         try {
-            result = await this.app.apiCall(`${API}/run/interactive`, 'POST', { name },
+            const requestedPin = this.requestRunPin(name);
+            const pin = requestedPin?.then ? await requestedPin : requestedPin;
+            if (pin === null) return null;
+            const body = { name };
+            if (pin !== undefined) body.pin = pin;
+            result = await this.app.apiCall(`${API}/run/interactive`, 'POST', body,
                 { showLoading: false, preferErrorResponseMessage: true });
             const tabId = String(result?.tabId || '').trim();
             if (!tabId) throw new Error('The interactive terminal did not return a tab id.');
@@ -1032,12 +1053,13 @@ export class PythonScriptsController {
         }
     }
 
-    _promptPin({ title, body, submitLabel }) {
+    _promptPin({ title, body, submitLabel, preserveModal = false }) {
         return this._promptForm({
             title,
             body,
             fields: [{ key: 'pin', label: 'Signing PIN' }],
-            submitLabel
+            submitLabel,
+            preserveModal
         }).then((values) => (values === null ? null : values.pin || ''));
     }
 
@@ -1049,8 +1071,9 @@ export class PythonScriptsController {
      * land in the browser's saved passwords. Fields opt into plain "text" for names.
      * Resolves with the field values, or null on cancel/Escape.
      */
-    _promptForm({ title, body, fields, submitLabel, validate = null, onFieldChange = null }) {
-        this._closeModal();
+    _promptForm({ title, body, fields, submitLabel, validate = null, onFieldChange = null, preserveModal = false }) {
+        if (!preserveModal) this._closeModal();
+        const previousModal = preserveModal ? this.modal : null;
         const host = document.getElementById('modal-container');
         if (!host) return Promise.resolve(null);
 
@@ -1098,8 +1121,14 @@ export class PythonScriptsController {
                 <div class="modal-backdrop fade show"></div>`;
 
             host.appendChild(layer);
+            let finished = false;
             const finish = (value) => {
-                if (this.modal?.layer === layer) this.modal = null;
+                if (finished) return;
+                finished = true;
+                if (this.modal?.layer === layer) {
+                    this.modal = previousModal?.layer?.isConnected ? previousModal : null;
+                }
+                layer.querySelectorAll('[data-pin-field]').forEach((input) => { input.value = ''; });
                 document.removeEventListener('keydown', onKeydown, true);
                 layer.remove();
                 resolve(value);
@@ -1161,7 +1190,10 @@ export class PythonScriptsController {
     }
 
     _closeModal() {
-        this.modal?.close?.();
-        this.modal = null;
+        while (this.modal) {
+            const modal = this.modal;
+            modal.close?.();
+            if (this.modal === modal) this.modal = null;
+        }
     }
 }

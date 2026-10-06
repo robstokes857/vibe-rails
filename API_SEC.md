@@ -288,12 +288,16 @@ change. They reuse the existing export protocol and locks. See the
 ### Board sync, sharing and remote Start work
 
 [SYNC.md](VibeRails/Services/Board/SYNC.md) defines the full content and hosted authorization
-contract. A configured API key enables automatic Board publication and linked activity across
-local projects; older per-board consent switches no longer disable it. Read each board's content
-using its stored project scope. Portable text travels verbatim and can contain secrets. Activity
+contract. A configured API key enables automatic Board publication and linked activity for
+sync-enabled boards across local projects. New boards start local; existing boards retain sync
+for compatibility. Disabling sync stops publication and remote Start work advertising, while
+preserving the hosted copy and ledger. Older backends sharing the database may ignore the switch.
+Read each board's content using its stored project scope. Portable text travels verbatim and can contain secrets. Activity
 can include linked session metadata/outcomes, durable commit code, bounded attachment content
 and card links; local project paths, environment IDs, launch settings and Automation definitions
-are excluded. Snapshot code comes from the saved capture, not a fresh checkout read.
+are excluded. The repository folder name and source computer are published as owner-controlled
+display labels, independently of the portable layout hash. Snapshot code comes from the saved
+capture, not a fresh checkout read.
 
 Use header-only `X-Api-Key`, HTTPS (HTTP only for loopback fixtures), no redirects or endpoint
 credentials/query/fragment, a per-call endpoint/key fingerprint, 30-second deadlines and bounded

@@ -177,6 +177,41 @@ test('Run posts exactly the argv the command line shows, plus stdin when there i
     assert.deepEqual(resolveArgv(view).argv, posted[0].body.arguments);
 });
 
+test('A pending PIN prompt prevents duplicate runs and does not store the PIN with inputs', async () => {
+    const { view, scripts, posted } = windowFor({ run: { exitCode: 0 } });
+    let resolvePin;
+    scripts.requestRunPin = () => new Promise(resolve => { resolvePin = resolve; });
+    const saved = [];
+    const originalStorage = globalThis.localStorage;
+    globalThis.localStorage = { setItem(key, value) { saved.push({ key, value }); } };
+    try {
+        const pending = view.execute();
+        assert.equal(await view.execute(), null);
+        assert.equal(posted.length, 0);
+        resolvePin('1234');
+        await pending;
+        assert.equal(posted.length, 1);
+        assert.equal(posted[0].body.pin, '1234');
+        assert.equal(saved.length, 1);
+        assert.ok(saved.every(item => !item.value.includes('1234')));
+        assert.equal(scripts.runningNames.size, 0);
+    } finally {
+        globalThis.localStorage = originalStorage;
+    }
+});
+
+test('A PIN prompt finishing after the run window changed starts no script', async () => {
+    const { view, scripts, posted } = windowFor({});
+    let resolvePin;
+    scripts.requestRunPin = () => new Promise(resolve => { resolvePin = resolve; });
+    const pending = view.execute();
+    view.name = 'different.py';
+    resolvePin('1234');
+    assert.equal(await pending, null);
+    assert.equal(posted.length, 0);
+    assert.equal(scripts.runningNames.size, 0);
+});
+
 test('an empty stdin box is sent as null, not an empty pipe', async () => {
     const { view, posted } = windowFor({ run: { exitCode: 0, timedOut: false, durationMs: 1, standardOutput: '', standardError: '' } });
     await view.execute();

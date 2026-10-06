@@ -1043,7 +1043,11 @@ See also: [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for back
   automatic run so the user can review argument rows first.
 - **The command line** under the inputs is the payload: `resolveArgv()` builds one array,
   and the window prints and posts the same values.
-- **Output**. `POST /api/v1/python-scripts/run` with `{ name, arguments, standardInput }`
+- **Run PIN**. Global or per-script `requirePinEachRun` status uses the shared masked PIN prompt
+  before each captured or terminal launch. The prompt preserves the run window, clears fields
+  on completion/cancellation, and cancellation starts nothing. Never remember the PIN with
+  arguments/stdin or put it in controller/window state.
+- **Output**. `POST /api/v1/python-scripts/run` with `{ name, arguments, standardInput, pin? }`
   returns exit code, duration, stdout/stderr and `returnJson` — the JSON object or array
   the script printed as the whole of stdout or on its last line
   (`PythonScriptService.ExtractReturnJson`; a bare scalar is output, not a return value).
