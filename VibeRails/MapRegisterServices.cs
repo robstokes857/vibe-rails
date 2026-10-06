@@ -71,11 +71,15 @@ namespace VibeRails
                 serviceCollection.AddSingleton<IFeatureLog>(NullFeatureLog.Instance);
             }
 
+            // Summary, terminal registration and push send X-Api-Key, so like every credential
+            // client they follow no redirects: an automatic redirect would replay the key and the
+            // request body to wherever the response pointed (VIBE-109 review R1).
             serviceCollection.AddHttpClient<ISummaryService, SummaryService>(
                 x =>
                 {
                     x.BaseAddress = new Uri("https://viberails.ai");
-                });
+                })
+                .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
 
             serviceCollection.AddScoped<IFileService, FileService>();
 
@@ -403,8 +407,9 @@ namespace VibeRails
             serviceCollection.AddSingleton<IAppEventBus, AppEventBus>();
             serviceCollection.AddSingleton<AppEventWebSocketHandler>();
 
-            // Remote State Service (for terminal session remote registration)
-            serviceCollection.AddHttpClient<IRemoteStateService, RemoteStateService>();
+            // Remote State Service (for terminal session remote registration); sends X-Api-Key.
+            serviceCollection.AddHttpClient<IRemoteStateService, RemoteStateService>()
+                .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
 
             // Incremental session export. The service creates its own repository scopes and owns
             // both process/cross-process gates, so it is safe for the singleton drain job.
@@ -438,8 +443,9 @@ namespace VibeRails
                 })
                 .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
 
-            // Push Notification Service (forwards per-tab "ready/waiting" pushes to VibeRails-Front)
-            serviceCollection.AddHttpClient<IPushNotificationService, PushNotificationService>();
+            // Push Notification Service (forwards per-tab "ready/waiting" pushes to VibeRails-Front); sends X-Api-Key.
+            serviceCollection.AddHttpClient<IPushNotificationService, PushNotificationService>()
+                .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
 
             // Update Service (singleton with HttpClient)
             serviceCollection.AddHttpClient<UpdateService>();

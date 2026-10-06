@@ -76,6 +76,25 @@ public sealed class MapRegisterServicesHandlerTests
         Assert.Contains("VibeRails:FrontendUrl is not configured", exception.Message);
     }
 
+    // Summary, terminal registration and push also send X-Api-Key. First pinned for VB-BB4ED-171
+    // review R1; the Local Front removal (5a3614d4) dropped the guard with the mode, and the
+    // VIBE-109 review (R1) reproduced the redirect replay through these actual registrations.
+    [Theory]
+    [InlineData("ISummaryService")]
+    [InlineData("IRemoteStateService")]
+    [InlineData("IPushNotificationService")]
+    public void CredentialFrontTypedClients_UseTheNoRedirectPrimaryHandler(string clientName)
+    {
+        var services = new ServiceCollection();
+        MapRegisterServices.Register(services, [], "http://127.0.0.1:12345");
+        using var provider = services.BuildServiceProvider();
+        HttpMessageHandler handler = provider.GetRequiredService<IHttpMessageHandlerFactory>().CreateHandler(clientName);
+        while (handler is DelegatingHandler delegating && delegating.InnerHandler is not null)
+            handler = delegating.InnerHandler;
+
+        Assert.False(Assert.IsType<HttpClientHandler>(handler).AllowAutoRedirect);
+    }
+
     [Fact]
     public void AccountLinkNamedClient_DoesNotFollowRedirectsOrUseCookies()
     {
