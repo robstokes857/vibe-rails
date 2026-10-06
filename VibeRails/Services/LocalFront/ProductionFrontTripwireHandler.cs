@@ -7,7 +7,9 @@ namespace VibeRails.Services.LocalFront;
 /// process that sees <see cref="LocalFrontMode.OriginVariable"/>, it fails any request to
 /// viberails.ai or one of its subdomains before it leaves the machine. The feature-level pauses are
 /// the real behavior; this catches a client someone adds later with a pinned production URL.
-/// AI-provider and other hosts are untouched.
+/// AI-provider and other hosts are untouched. It sees only the first hop: automatic redirects
+/// happen inside the primary handler, so every client that carries a credential must also use
+/// <c>MapRegisterServices.CreateNoRedirectHttpMessageHandler</c>.
 /// </summary>
 public sealed class ProductionFrontTripwireHandler : DelegatingHandler
 {

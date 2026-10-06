@@ -216,10 +216,10 @@ namespace VibeRails
                 : settings.ApiKey;
             ParserConfigs.SetApiKey(apiKey);
             // A hand-edited legacy/inconsistent file must never make the relay effective without
-            // a credential, even if RouteThroughVibeRailsAi was set to true.
+            // a credential, even if RouteThroughVibeRailsAi was set to true. The relay presents
+            // this process's key: the production one, or the local one in local Front mode.
             ParserConfigs.SetRouteThroughVibeRailsAi(
-                settings.RouteThroughVibeRailsAi && !string.IsNullOrWhiteSpace(settings.ApiKey)
-                && !string.IsNullOrWhiteSpace(apiKey));
+                settings.RouteThroughVibeRailsAi && !string.IsNullOrWhiteSpace(apiKey));
             ParserConfigs.SetUseVsCodeTheme(settings.UseVsCodeTheme);
             if (!settings.McpEnabled || !settings.DataExportOptIn || !settings.DataRetentionEnabled)
             {

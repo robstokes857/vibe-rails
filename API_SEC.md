@@ -325,6 +325,8 @@ startup. It adds no listener or route.
   nothing to production: no Board sync/share/import or remote Start polling, no session upload,
   no backups or data export, no token savings and no signing-key sync. These pause before locks,
   metadata changes or network calls. Its `IHttpClientFactory` clients refuse viberails.ai hosts.
+- **Redirects.** Every client that carries the key (summary, terminal registration, push,
+  linking and the publishing clients) follows no redirects. The tripwire sees only the first hop.
 - **HTTPS.** Certificates validate normally; there is no bypass.
 - **Shells.** PTY shells and CLIs do not inherit the variable.
 

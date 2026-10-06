@@ -81,11 +81,15 @@ namespace VibeRails
                 serviceCollection.AddSingleton<IFeatureLog>(NullFeatureLog.Instance);
             }
 
+            // Summary, terminal registration and push send X-Api-Key, so like every credential
+            // client they follow no redirects: an automatic redirect happens below the local-mode
+            // tripwire and would replay the key to wherever it points (VB-BB4ED-171 review R1).
             serviceCollection.AddHttpClient<ISummaryService, SummaryService>(
                 x =>
                 {
                     x.BaseAddress = localFront.Active ? localFront.Origin : new Uri("https://viberails.ai");
-                });
+                })
+                .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
 
             serviceCollection.AddScoped<IFileService, FileService>();
 
@@ -440,7 +444,8 @@ namespace VibeRails
             serviceCollection.AddSingleton<AppEventWebSocketHandler>();
 
             // Remote State Service (for terminal session remote registration)
-            serviceCollection.AddHttpClient<IRemoteStateService, RemoteStateService>();
+            serviceCollection.AddHttpClient<IRemoteStateService, RemoteStateService>()
+                .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
 
             // Incremental session export. The service creates its own repository scopes and owns
             // both process/cross-process gates, so it is safe for the singleton drain job.
@@ -475,7 +480,8 @@ namespace VibeRails
                 .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
 
             // Push Notification Service (forwards per-tab "ready/waiting" pushes to VibeRails-Front)
-            serviceCollection.AddHttpClient<IPushNotificationService, PushNotificationService>();
+            serviceCollection.AddHttpClient<IPushNotificationService, PushNotificationService>()
+                .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
 
             // Update Service (singleton with HttpClient)
             serviceCollection.AddHttpClient<UpdateService>();

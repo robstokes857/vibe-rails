@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -388,6 +389,87 @@ public sealed class LocalFrontProcessTests : IDisposable
                 client.GetAsync("https://viberails.ai/api/v1/health", TestContext.Current.CancellationToken));
             Assert.Contains("Local Front mode blocked", blocked.Message);
         }
+    }
+
+    /// <summary>
+    /// Review R1: an automatic redirect happens below the tripwire, so the clients that carry the
+    /// key to the Front must not follow one at all. Exercised through the real registrations.
+    /// </summary>
+    [Theory]
+    [InlineData("ISummaryService")]
+    [InlineData("IRemoteStateService")]
+    [InlineData("IPushNotificationService")]
+    public async Task CredentialFrontClientsNeverFollowARedirect(string clientName)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var target = new TcpListener(IPAddress.Loopback, 0);
+        target.Start();
+        var targetPort = ((IPEndPoint)target.LocalEndpoint).Port;
+        var reachedTarget = target.AcceptTcpClientAsync(ct).AsTask();
+        using var front = new TcpListener(IPAddress.Loopback, 0);
+        front.Start();
+        var frontPort = ((IPEndPoint)front.LocalEndpoint).Port;
+        var serve = Task.Run(async () =>
+        {
+            using var connection = await front.AcceptTcpClientAsync(ct);
+            var stream = connection.GetStream();
+            var buffer = new byte[8192];
+            var received = new StringBuilder();
+            while (!received.ToString().Contains("\r\n\r\n"))
+            {
+                var read = await stream.ReadAsync(buffer, ct);
+                if (read == 0) break;
+                received.Append(Encoding.ASCII.GetString(buffer, 0, read));
+            }
+            var reply = $"HTTP/1.1 307 Temporary Redirect\r\nLocation: http://127.0.0.1:{targetPort}/receive\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            await stream.WriteAsync(Encoding.ASCII.GetBytes(reply), ct);
+        }, ct);
+
+        var services = new ServiceCollection();
+        MapRegisterServices.Register(services, ["--web"], "http://127.0.0.1:12345");
+        await using var provider = services.BuildServiceProvider();
+        using var client = provider.GetRequiredService<IHttpClientFactory>().CreateClient(clientName);
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"http://127.0.0.1:{frontPort}/api/v1/terminal")
+        {
+            Content = new StringContent("{}", Encoding.UTF8, "application/json")
+        };
+        request.Headers.Add("X-Api-Key", LocalKey);
+
+        using var response = await client.SendAsync(request, ct);
+        await serve;
+
+        Assert.Equal(HttpStatusCode.TemporaryRedirect, response.StatusCode);
+        Assert.False(await Task.WhenAny(reachedTarget, Task.Delay(300, ct)) == reachedTarget, "The redirect was followed.");
+    }
+
+    [Fact]
+    public void ALocalKeyAloneCanTurnTheRelayOnWithoutChangingTheProductionChoice()
+    {
+        // Review R3: a local-only setup (no production key) can use the relay in local mode.
+        var localOnly = Path.Combine(_directory, "local-only");
+        var settings = new SettingsFile(Path.Combine(localOnly, "settings.json"));
+        using var _ = settings;
+        settings.Save(new Settings { ApiKey = "", RouteThroughVibeRailsAi = false });
+        var keys = new LocalFrontKeyStore(Path.Combine(localOnly, "local-front-keys.json"));
+        keys.Set(LocalFrontMode.DefaultOrigin, LocalKey, null);
+
+        var saved = AppSettingsRoutes.UpdateSettings(
+            AppSettingsRoutes.BuildAppSettingsDto(settings.LoadFresh(), keys) with { RouteThroughVibeRailsAi = true },
+            settings, relay: null, keys);
+
+        Assert.True(saved.RouteThroughVibeRailsAi);
+        Assert.True(ParserConfigs.GetRouteThroughVibeRailsAi());
+
+        // With a production key but no local key, a saved choice stays as it was and stays off here.
+        var (production, emptyKeys) = Fixture();
+        using var __ = production;
+        var kept = AppSettingsRoutes.UpdateSettings(
+            AppSettingsRoutes.BuildAppSettingsDto(production.LoadFresh(), emptyKeys) with { RouteThroughVibeRailsAi = true },
+            production, relay: null, emptyKeys);
+
+        Assert.True(kept.RouteThroughVibeRailsAi);
+        Assert.True(production.LoadFresh().RouteThroughVibeRailsAi);
+        Assert.False(ParserConfigs.GetRouteThroughVibeRailsAi());
     }
 
     [Fact]

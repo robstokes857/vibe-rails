@@ -29,8 +29,14 @@ public interface ILocalFrontProcessRunner
 /// Front's containers keep running after the desktop stops; <c>run.ps1 down</c> stops them and
 /// keeps their data.
 /// </summary>
-public sealed class LocalFrontStartup(ILocalFrontProcessRunner runner, Func<Uri, CancellationToken, Task<string?>> probe)
+public sealed class LocalFrontStartup(
+    ILocalFrontProcessRunner runner,
+    Func<Uri, CancellationToken, Task<string?>> probe,
+    Func<Action<string>, CancellationToken, Task<string?>>? ensureDocker = null)
 {
+    private readonly Func<Action<string>, CancellationToken, Task<string?>> _ensureDocker =
+        ensureDocker ?? ((output, cancellationToken) => EnsureDockerAsync(runner, output, cancellationToken));
+
     /// <summary>"1" asks the root backend to start the local Front stack before it starts.</summary>
     public const string StartVariable = "VIBERAILS_LOCAL_FRONT_START";
 
@@ -57,6 +63,12 @@ public sealed class LocalFrontStartup(ILocalFrontProcessRunner runner, Func<Uri,
 
     /// <summary>Exit code for a timeout or cancellation of the whole preflight.</summary>
     public const int CancelledExitCode = 10;
+
+    /// <summary>run.ps1's own code for "Docker is not installed or did not become ready".</summary>
+    public const int DockerUnavailableExitCode = 3;
+
+    /// <summary>How long Docker Desktop may take to answer after this preflight starts it (as run.ps1).</summary>
+    public static readonly TimeSpan DockerStartTimeout = TimeSpan.FromMinutes(3);
 
     private static readonly string[] CheckoutMarkers =
     [
@@ -141,6 +153,17 @@ public sealed class LocalFrontStartup(ILocalFrontProcessRunner runner, Func<Uri,
     public static string? FindPwsh(string? pathVariable = null)
     {
         var name = OperatingSystem.IsWindows() ? "pwsh.exe" : "pwsh";
+        if (FindOnPath(name, pathVariable) is { } found)
+            return found;
+        if (!OperatingSystem.IsWindows())
+            return null;
+        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        var installed = Path.Combine(programFiles, "PowerShell", "7", name);
+        return File.Exists(installed) ? installed : null;
+    }
+
+    private static string? FindOnPath(string name, string? pathVariable = null)
+    {
         foreach (var directory in (pathVariable ?? Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
                      .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
@@ -155,11 +178,58 @@ public sealed class LocalFrontStartup(ILocalFrontProcessRunner runner, Func<Uri,
                 // A malformed PATH entry is skipped like the shell would.
             }
         }
-        if (!OperatingSystem.IsWindows())
+        return null;
+    }
+
+    /// <summary>
+    /// Makes sure Docker answers before run.ps1 runs, starting Docker Desktop from this process when
+    /// it does not. run.ps1 would otherwise start Docker Desktop as its own child, inside the
+    /// kill-on-close job, and stopping the script would stop Docker Desktop with it. Returns null to
+    /// continue; when docker or Docker Desktop is missing, run.ps1 reports that itself (exit 3).
+    /// </summary>
+    public static async Task<string?> EnsureDockerAsync(ILocalFrontProcessRunner runner, Action<string> output, CancellationToken cancellationToken)
+    {
+        var docker = FindOnPath(OperatingSystem.IsWindows() ? "docker.exe" : "docker");
+        if (docker is null || await DockerAnswersAsync(runner, docker, cancellationToken) || !OperatingSystem.IsWindows())
             return null;
-        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
-        var installed = Path.Combine(programFiles, "PowerShell", "7", name);
-        return File.Exists(installed) ? installed : null;
+        var desktop = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Docker", "Docker", "Docker Desktop.exe");
+        if (!File.Exists(desktop))
+            return null;
+        output("Starting Docker Desktop...");
+        // Shell-started from the desktop, never from run.ps1: it outlives this debug session.
+        Process.Start(new ProcessStartInfo(desktop) { UseShellExecute = true })?.Dispose();
+        var deadline = DateTime.UtcNow + DockerStartTimeout;
+        while (!await DockerAnswersAsync(runner, docker, cancellationToken))
+        {
+            if (DateTime.UtcNow > deadline)
+                return "Docker did not become ready within 3 minutes. Start Docker Desktop, then press Start again.";
+            await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
+        }
+        return null;
+    }
+
+    private static async Task<bool> DockerAnswersAsync(ILocalFrontProcessRunner runner, string docker, CancellationToken cancellationToken)
+    {
+        var info = new ProcessStartInfo
+        {
+            FileName = docker,
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        info.ArgumentList.Add("info");
+        using var bound = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        bound.CancelAfter(TimeSpan.FromSeconds(30));
+        try
+        {
+            return await runner.RunAsync(info, static _ => { }, bound.Token) == 0;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -238,6 +308,8 @@ public sealed class LocalFrontStartup(ILocalFrontProcessRunner runner, Func<Uri,
         try
         {
             using var startLock = await AcquireStartLockAsync(lockPath, output, deadline.Token);
+            if (await _ensureDocker(output, deadline.Token) is { } dockerError)
+                return new(DockerUnavailableExitCode, dockerError, checkout);
             output($"Starting the local Front stack: {pwsh} -File run.ps1 start -RepoRoot \"{checkout}\"");
             var started = Stopwatch.StartNew();
             var exitCode = await runner.RunAsync(BuildStartCommand(pwsh, checkout), line =>
@@ -325,12 +397,17 @@ public sealed class LocalFrontStartup(ILocalFrontProcessRunner runner, Func<Uri,
 }
 
 /// <summary>
-/// Runs run.ps1 as a child process. On Windows the child joins a kill-on-close job, so stopping the
-/// debugger also stops the script. The job allows silent breakaway: Docker Desktop and docker
-/// commands the script starts are not in it and keep running. Cancelling stops the script only.
+/// Runs one preflight command (run.ps1, docker info) with its whole process tree in a Windows
+/// kill-on-close job: everything it starts, docker compose included, stops with it, and Stop
+/// Debugging ends the tree too. Docker Desktop is never in the tree: <see
+/// cref="LocalFrontStartup.EnsureDockerAsync"/> starts it before run.ps1 would. The tree is gone
+/// before this returns, so the caller's start lock is never released while a stack-changing
+/// command still runs.
 /// </summary>
 internal sealed class LocalFrontProcessRunner : ILocalFrontProcessRunner
 {
+    private static readonly TimeSpan JoinTimeout = TimeSpan.FromSeconds(15);
+
     public async Task<int> RunAsync(ProcessStartInfo startInfo, Action<string> onLine, CancellationToken cancellationToken)
     {
         using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
@@ -339,28 +416,41 @@ internal sealed class LocalFrontProcessRunner : ILocalFrontProcessRunner
         using var job = KillOnCloseJob.TryCreate();
         process.Start();
         job?.TryAdd(process);
-        process.StandardInput.Close();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
         try
         {
+            process.StandardInput.Close();
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
             await process.WaitForExitAsync(cancellationToken);
+            // Drain the asynchronous readers before reporting.
+            process.WaitForExit();
+            return process.ExitCode;
         }
-        catch (OperationCanceledException)
+        finally
         {
-            try
-            {
-                // The script only. A tree kill would also stop a Docker Desktop it just started.
-                process.Kill(entireProcessTree: false);
-            }
-            catch (InvalidOperationException)
-            {
-                // Already exited.
-            }
-            throw;
+            // Normal exit leaves nothing to stop; cancellation stops the script and everything it
+            // started. Either way, wait until the tree is gone.
+            StopTree(process, job);
         }
-        // Drain the asynchronous readers before reporting.
-        process.WaitForExit();
-        return process.ExitCode;
+    }
+
+    private static void StopTree(Process process, KillOnCloseJob? job)
+    {
+        if (job is not null)
+        {
+            job.Terminate();
+            job.WaitUntilEmpty(JoinTimeout);
+            return;
+        }
+        try
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+        }
+        catch (InvalidOperationException)
+        {
+            // Already exited.
+        }
+        process.WaitForExit((int)JoinTimeout.TotalMilliseconds);
     }
 }

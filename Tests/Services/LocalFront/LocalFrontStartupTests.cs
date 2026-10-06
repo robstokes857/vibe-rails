@@ -33,6 +33,14 @@ public sealed class LocalFrontStartupTests : IDisposable
             Directory.Delete(_root, recursive: true);
     }
 
+    // Every orchestration test stubs the Docker step: the real one runs `docker info` and may start
+    // Docker Desktop.
+    private static LocalFrontStartup Startup(ILocalFrontProcessRunner runner,
+        Func<Uri, CancellationToken, Task<string?>>? probe = null,
+        Func<Action<string>, CancellationToken, Task<string?>>? ensureDocker = null) =>
+        new(runner, probe ?? ((_, _) => Task.FromResult<string?>(null)),
+            ensureDocker ?? ((_, _) => Task.FromResult<string?>(null)));
+
     private static void MakeCheckout(string path)
     {
         Directory.CreateDirectory(Path.Combine(path, "VibeRails-Front"));
@@ -123,7 +131,7 @@ public sealed class LocalFrontStartupTests : IDisposable
         MakeCheckout(Front);
         var runner = new FakeRunner(0, "Ready: https://localhost:5164 runs the local stack.");
         Uri? probed = null;
-        var startup = new LocalFrontStartup(runner, (origin, _) => { probed = origin; return Task.FromResult<string?>(null); });
+        var startup = Startup(runner, (origin, _) => { probed = origin; return Task.FromResult<string?>(null); });
         var output = new List<string>();
 
         var result = await startup.RunAsync(Local, null, BinDirectory, LockPath, output.Add, TestContext.Current.CancellationToken, pwshPath: "pwsh");
@@ -149,7 +157,7 @@ public sealed class LocalFrontStartupTests : IDisposable
     {
         MakeCheckout(Front);
         var probed = false;
-        var startup = new LocalFrontStartup(new FakeRunner(exitCode), (_, _) => { probed = true; return Task.FromResult<string?>(null); });
+        var startup = Startup(new FakeRunner(exitCode), (_, _) => { probed = true; return Task.FromResult<string?>(null); });
 
         var result = await startup.RunAsync(Local, null, BinDirectory, LockPath, _ => { }, TestContext.Current.CancellationToken, pwshPath: "pwsh");
 
@@ -163,7 +171,7 @@ public sealed class LocalFrontStartupTests : IDisposable
     public async Task ACertificateTheDesktopDoesNotTrustStopsIt()
     {
         MakeCheckout(Front);
-        var startup = new LocalFrontStartup(new FakeRunner(0), (_, _) => Task.FromResult<string?>("not trusted"));
+        var startup = Startup(new FakeRunner(0), (_, _) => Task.FromResult<string?>("not trusted"));
 
         var result = await startup.RunAsync(Local, null, BinDirectory, LockPath, _ => { }, TestContext.Current.CancellationToken, pwshPath: "pwsh");
 
@@ -175,7 +183,7 @@ public sealed class LocalFrontStartupTests : IDisposable
     public async Task NothingRunsForAnotherOriginAMissingCheckoutOrARefusedMode()
     {
         var runner = new FakeRunner(0);
-        var startup = new LocalFrontStartup(runner, (_, _) => Task.FromResult<string?>(null));
+        var startup = Startup(runner, (_, _) => Task.FromResult<string?>(null));
         var ct = TestContext.Current.CancellationToken;
 
         var otherOrigin = LocalFrontMode.Resolve("https://localhost:7000", debugBuild: true, "Development");
@@ -200,10 +208,10 @@ public sealed class LocalFrontStartupTests : IDisposable
         var ct = TestContext.Current.CancellationToken;
         var waitingLines = new List<string>();
 
-        var firstRun = new LocalFrontStartup(first, (_, _) => Task.FromResult<string?>(null))
+        var firstRun = Startup(first, (_, _) => Task.FromResult<string?>(null))
             .RunAsync(Local, null, BinDirectory, LockPath, _ => { }, ct, "pwsh");
         await first.Started.Task.WaitAsync(TimeSpan.FromSeconds(10), ct);
-        var secondRun = new LocalFrontStartup(second, (_, _) => Task.FromResult<string?>(null))
+        var secondRun = Startup(second, (_, _) => Task.FromResult<string?>(null))
             .RunAsync(Local, null, BinDirectory, LockPath, line => { lock (waitingLines) waitingLines.Add(line); }, ct, "pwsh");
         await Task.Delay(700, ct);
 
@@ -223,7 +231,7 @@ public sealed class LocalFrontStartupTests : IDisposable
         MakeCheckout(Front);
         using var cancel = new CancellationTokenSource();
         var runner = new FakeRunner(new TaskCompletionSource<int>().Task);
-        var run = new LocalFrontStartup(runner, (_, _) => Task.FromResult<string?>(null))
+        var run = Startup(runner, (_, _) => Task.FromResult<string?>(null))
             .RunAsync(Local, null, BinDirectory, LockPath, _ => { }, cancel.Token, "pwsh");
         await runner.Started.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
 
@@ -232,6 +240,123 @@ public sealed class LocalFrontStartupTests : IDisposable
 
         Assert.Equal(LocalFrontStartup.CancelledExitCode, result.ExitCode);
         Assert.True(runner.SawCancellation);
+    }
+
+    [Fact]
+    public async Task DockerThatNeverAnswersStopsBeforeRunPs1()
+    {
+        MakeCheckout(Front);
+        var runner = new FakeRunner(0);
+
+        var result = await Startup(runner, ensureDocker: (_, _) => Task.FromResult<string?>("Docker did not become ready within 3 minutes."))
+            .RunAsync(Local, null, BinDirectory, LockPath, _ => { }, TestContext.Current.CancellationToken, "pwsh");
+
+        Assert.Equal(LocalFrontStartup.DockerUnavailableExitCode, result.ExitCode);
+        Assert.Empty(runner.Commands);
+    }
+
+    // ------------------------------------------------------------ the real runner (review R2)
+
+    private static ProcessStartInfo PowerShell(string script)
+    {
+        var info = new ProcessStartInfo("powershell.exe")
+        {
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-Command", script })
+            info.ArgumentList.Add(argument);
+        return info;
+    }
+
+    // What run.ps1 does with docker compose: start a child process and leave it running.
+    private static string StartsAChild(string pidFile, int scriptSeconds) =>
+        $"$c = Start-Process -PassThru -WindowStyle Hidden powershell.exe -ArgumentList '-NoProfile','-Command','Start-Sleep -Seconds 120'; " +
+        $"Set-Content -LiteralPath '{pidFile}' $c.Id; Start-Sleep -Seconds {scriptSeconds}";
+
+    private static async Task<int> ChildPidAsync(string pidFile, Task running)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (DateTime.UtcNow < deadline && !running.IsCompleted)
+        {
+            if (File.Exists(pidFile) && int.TryParse((await File.ReadAllTextAsync(pidFile)).Trim(), out var pid))
+                return pid;
+            await Task.Delay(100);
+        }
+        throw new TimeoutException("The fixture script never reported its child.");
+    }
+
+    private static bool HasExited(int pid)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            return process.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            return true;
+        }
+    }
+
+    [Fact]
+    public async Task CancellingTheRealRunnerStopsEverythingTheScriptStarted()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "The preflight's process tree lives in a Windows job.");
+        var pidFile = Path.Combine(_root, "cancelled-child.pid");
+        using var cancel = new CancellationTokenSource();
+        var run = new LocalFrontProcessRunner().RunAsync(PowerShell(StartsAChild(pidFile, 120)), _ => { }, cancel.Token);
+        var child = await ChildPidAsync(pidFile, run);
+
+        cancel.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+
+        Assert.True(HasExited(child), "The script's child kept running after cancellation returned.");
+    }
+
+    [Fact]
+    public async Task AScriptThatExitsLeavesNothingRunning()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "The preflight's process tree lives in a Windows job.");
+        var pidFile = Path.Combine(_root, "finished-child.pid");
+
+        var exit = await new LocalFrontProcessRunner().RunAsync(
+            PowerShell(StartsAChild(pidFile, 0)), _ => { }, TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, exit);
+        Assert.True(HasExited(int.Parse((await File.ReadAllTextAsync(pidFile, TestContext.Current.CancellationToken)).Trim())));
+    }
+
+    [Fact]
+    public async Task ACancelledLaunchReleasesTheStartLockOnlyAfterItsTreeIsGone()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "The preflight's process tree lives in a Windows job.");
+        // The real contract runs `pwsh -File`; Windows PowerShell's default policy refuses local scripts.
+        var pwsh = LocalFrontStartup.FindPwsh();
+        Assert.SkipWhen(pwsh is null, "PowerShell 7 (pwsh) is not installed.");
+        MakeCheckout(Front);
+        var pidFile = Path.Combine(_root, "launch-child.pid");
+        // The fixture run.ps1 accepts the real contract's arguments and starts a long-lived child.
+        File.WriteAllText(Path.Combine(Front, "run.ps1"),
+            "param([string]$Command, [string]$RepoRoot, [int]$TimeoutSeconds)" + Environment.NewLine + StartsAChild(pidFile, 120));
+        using var cancel = new CancellationTokenSource();
+        var first = Startup(new LocalFrontProcessRunner())
+            .RunAsync(Local, null, BinDirectory, LockPath, _ => { }, cancel.Token, pwshPath: pwsh);
+        var child = await ChildPidAsync(pidFile, first);
+
+        cancel.Cancel();
+        var cancelled = await first;
+
+        Assert.Equal(LocalFrontStartup.CancelledExitCode, cancelled.ExitCode);
+        Assert.True(HasExited(child), "A cancelled launch released the start lock while its child still ran.");
+        var waited = new List<string>();
+        var next = Startup(new FakeRunner(0))
+            .RunAsync(Local, null, BinDirectory, LockPath, waited.Add, TestContext.Current.CancellationToken, "pwsh");
+        Assert.True((await next.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken)).Success);
+        Assert.DoesNotContain(waited, line => line.Contains("waiting"));
     }
 
     [Fact]

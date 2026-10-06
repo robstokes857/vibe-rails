@@ -5,13 +5,13 @@ namespace VibeRails.Services.LocalFront;
 
 /// <summary>
 /// A Windows job object that terminates its processes when its last handle closes, which happens
-/// when this process exits for any reason, including Visual Studio's Stop Debugging. Silent
-/// breakaway keeps the job to the processes added explicitly: their own children are not in it.
+/// when this process exits for any reason, including Visual Studio's Stop Debugging. Children of a
+/// member join the job, so the whole tree goes together.
 /// </summary>
 internal sealed class KillOnCloseJob : IDisposable
 {
+    private const int JobObjectBasicAccountingInformation = 1;
     private const int JobObjectExtendedLimitInformation = 9;
-    private const uint JobObjectLimitSilentBreakawayOk = 0x00001000;
     private const uint JobObjectLimitKillOnJobClose = 0x00002000;
 
     private IntPtr _handle;
@@ -30,7 +30,7 @@ internal sealed class KillOnCloseJob : IDisposable
         {
             BasicLimitInformation = new JOBOBJECT_BASIC_LIMIT_INFORMATION
             {
-                LimitFlags = JobObjectLimitKillOnJobClose | JobObjectLimitSilentBreakawayOk
+                LimitFlags = JobObjectLimitKillOnJobClose
             }
         };
         if (!SetInformationJobObject(handle, JobObjectExtendedLimitInformation, ref limits, (uint)Marshal.SizeOf<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>()))
@@ -54,6 +54,30 @@ internal sealed class KillOnCloseJob : IDisposable
         }
     }
 
+    /// <summary>Terminates every process in the job.</summary>
+    public void Terminate()
+    {
+        if (_handle != IntPtr.Zero)
+            TerminateJobObject(_handle, 1);
+    }
+
+    /// <summary>Waits until no process in the job is running. False on timeout.</summary>
+    public bool WaitUntilEmpty(TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (_handle != IntPtr.Zero)
+        {
+            if (!QueryInformationJobObject(_handle, JobObjectBasicAccountingInformation, out var accounting,
+                    (uint)Marshal.SizeOf<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>(), IntPtr.Zero)
+                || accounting.ActiveProcesses == 0)
+                return true;
+            if (DateTime.UtcNow > deadline)
+                return false;
+            Thread.Sleep(50);
+        }
+        return true;
+    }
+
     /// <summary>Closes the job, terminating any member process that is still running.</summary>
     public void Dispose()
     {
@@ -74,6 +98,19 @@ internal sealed class KillOnCloseJob : IDisposable
         public UIntPtr Affinity;
         public uint PriorityClass;
         public uint SchedulingClass;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct JOBOBJECT_BASIC_ACCOUNTING_INFORMATION
+    {
+        public long TotalUserTime;
+        public long TotalKernelTime;
+        public long ThisPeriodTotalUserTime;
+        public long ThisPeriodTotalKernelTime;
+        public uint TotalPageFaultCount;
+        public uint TotalProcesses;
+        public uint ActiveProcesses;
+        public uint TotalTerminatedProcesses;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -109,6 +146,15 @@ internal sealed class KillOnCloseJob : IDisposable
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool AssignProcessToJobObject(IntPtr hJob, IntPtr hProcess);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool TerminateJobObject(IntPtr hJob, uint uExitCode);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool QueryInformationJobObject(IntPtr hJob, int jobObjectInfoClass,
+        out JOBOBJECT_BASIC_ACCOUNTING_INFORMATION lpJobObjectInfo, uint cbJobObjectInfoLength, IntPtr lpReturnLength);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

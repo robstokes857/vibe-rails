@@ -141,14 +141,17 @@ public static class AppSettingsRoutes
 
             // Nullable is the stale-client guard. Enabling is effective only with the final raw
             // key after clear/replace semantics above have been applied.
+            // In local Front mode a local key also lets the saved choice be on, so a local-only
+            // setup can use the relay; with a saved production key the choice behaves as before.
+            var relayKey = localFront.Active && !string.IsNullOrWhiteSpace(localKey) ? localKey : settings.ApiKey;
             if (settingsDto.RouteThroughVibeRailsAi.HasValue)
             {
                 settings.RouteThroughVibeRailsAi = ResolveHttpRelaySetting(
                     settings.RouteThroughVibeRailsAi,
                     settingsDto.RouteThroughVibeRailsAi,
-                    settings.ApiKey);
+                    relayKey);
             }
-            if (string.IsNullOrWhiteSpace(settings.ApiKey))
+            if (string.IsNullOrWhiteSpace(relayKey))
                 settings.RouteThroughVibeRailsAi = false;
             // Vibe AI navigation is always shown. Ignore the legacy request field and preserve
             // its stored value for older versions that still expose the setting.

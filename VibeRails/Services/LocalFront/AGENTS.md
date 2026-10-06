@@ -58,14 +58,24 @@ acceptance run are in the vibe-books runbook
    folder that holds `VibeRails.slnx` above the build output. It checks for `run.ps1`, the
    compose file, `Dockerfile.local` and the project.
 2. Takes `~/.vibe_rails/local-front-start.lock`, so concurrent Starts run one after another.
-3. Runs `pwsh -NoProfile -NonInteractive -File <front>\run.ps1 start -RepoRoot <front>
+3. Makes sure `docker info` answers. If it doesn't, it starts Docker Desktop itself and waits up
+   to 3 minutes (exit 3). Docker Desktop is then never a child of run.ps1, so the job in step 4
+   never contains it.
+4. Runs `pwsh -NoProfile -NonInteractive -File <front>\run.ps1 start -RepoRoot <front>
    -TimeoutSeconds 300`. That is explicit argv, the checkout as working directory, and a
    30-minute overall bound. Its output goes to the console and the log.
-4. On Windows the script is in a kill-on-close job, so Stop Debugging also stops it. Silent
-   breakaway keeps a Docker Desktop the script launches out of that job. Cancelling stops the
-   script only.
-5. Maps exit codes 1–8 to an actionable message and exits with the same code. Exit 0 is followed
+5. On Windows the whole run.ps1 process tree, `docker compose` included, is in a kill-on-close
+   job (`KillOnCloseJob`).
+   - Stop Debugging ends the tree with the desktop.
+   - Cancellation, a timeout and normal completion all terminate the job and wait until it is
+     empty before the start lock is released (VB-BB4ED-171 review R2).
+   - Elsewhere the runner kills the process tree.
+6. Maps exit codes 1–8 to an actionable message and exits with the same code. Exit 0 is followed
    by a GET of `<origin>/dev/login` with default certificate validation from this process.
+
+Every client that carries the local key (`ISummaryService`, `IRemoteStateService`,
+`IPushNotificationService` and the named credential clients) follows no redirects. The tripwire
+sees only the first hop (review R1).
 
 Stop Debugging stops the desktop; the containers keep running for a fast next Start. Stop them
 with `pwsh -File <front>\run.ps1 down`, which keeps the local database. Never use `reset` for
