@@ -76,7 +76,7 @@ export function resolveArgv({ extras = [] } = {}) {
 /** Shell-style quoting, for display only: it shows where one argument ends. */
 export function quoteForDisplay(token) {
     const text = String(token ?? '');
-    return /[\s"']/.test(text) ? `"${text.replace(/"/g, '\\"')}"` : text;
+    return /[\s"'\\]/.test(text) ? JSON.stringify(text) : text;
 }
 
 export function readRemembered(storage, name) {

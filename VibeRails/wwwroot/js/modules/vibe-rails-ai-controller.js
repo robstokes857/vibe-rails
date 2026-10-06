@@ -1,6 +1,6 @@
 import { showTranscriptModal, showReplayModal } from './session-viewer.js';
 
-const esc = v => String(v ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+const esc = v => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 const shortId = v => !v ? 'n/a' : (v.length <= 14 ? v : v.slice(0, 8) + '…' + v.slice(-4));
 const fmtDate = v => {
     if (!v) return 'n/a';

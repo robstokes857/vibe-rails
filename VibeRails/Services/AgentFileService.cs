@@ -6,6 +6,8 @@ namespace VibeRails.Services
 {
     public interface IAgentFileService
     {
+        /// <summary>Validates and normalizes a rule-file path within the current repository.</summary>
+        Task<string> ResolvePathAsync(string path, CancellationToken cancellationToken);
         Task<List<string>> GetAgentFiles(CancellationToken cancellationToken);
         Task<string> GetAgentFileContentAsync(string path, CancellationToken cancellationToken);
         Task CreateAgentFileAsync(string path, CancellationToken cancellationToken, params string[] rules);
@@ -27,6 +29,10 @@ namespace VibeRails.Services
             this._gitService = gitService;
             this._rulesService = rulesService;
         }
+
+        /// <inheritdoc />
+        public async Task<string> ResolvePathAsync(string path, CancellationToken cancellationToken)
+            => RuleFilePath.Resolve(await _gitService.GetRootPathAsync(cancellationToken), path);
 
         /// <summary>
         /// Returns an insertion point in the first live rules section, creating a canonical
@@ -136,10 +142,29 @@ namespace VibeRails.Services
 
             // Fallback (git missing or timed out): the original full walk, so the Rules
             // page still works rather than reading an error or an empty list.
-            return Directory.EnumerateFiles(root, "*.md", SearchOption.AllDirectories)
-                .Where(f => IsAgentFileName(Path.GetFileName(f)))
-                .Select(Path.GetFullPath)
-                .ToList();
+            var files = new List<string>();
+            var pending = new Stack<string>();
+            pending.Push(root);
+            while (pending.TryPop(out var directory))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                foreach (var entry in new DirectoryInfo(directory).EnumerateFileSystemInfos())
+                {
+                    if (entry.Name.Equals(".git", StringComparison.OrdinalIgnoreCase)
+                        || entry.LinkTarget is not null || (entry.Attributes & FileAttributes.ReparsePoint) != 0)
+                        continue;
+                    if (entry is DirectoryInfo) pending.Push(entry.FullName);
+                    else if (IsAgentFileName(entry.Name) && TryResolveDiscoveredPath(root, entry.FullName, out var safePath))
+                        files.Add(safePath);
+                }
+            }
+            return files;
+        }
+
+        private static bool TryResolveDiscoveredPath(string root, string path, out string safePath)
+        {
+            try { safePath = RuleFilePath.Resolve(root, path); return true; }
+            catch (ArgumentException) { safePath = string.Empty; return false; }
         }
 
         private static bool IsAgentFileName(string name)
@@ -170,7 +195,8 @@ namespace VibeRails.Services
                     if (!IsAgentFileName(Path.GetFileName(relative)))
                         continue;
 
-                    var fullPath = Path.GetFullPath(Path.Combine(root, relative));
+                    if (!TryResolveDiscoveredPath(root, Path.Combine(root, relative), out var fullPath))
+                        continue;
                     // --cached also lists files deleted from disk but still in the index.
                     if (File.Exists(fullPath) && seen.Add(fullPath))
                         files.Add(fullPath);
@@ -190,6 +216,7 @@ namespace VibeRails.Services
 
         public async Task CreateAgentFileAsync(string path, CancellationToken cancellationToken, params string[] rules)
         {
+            path = await ResolvePathAsync(path, cancellationToken);
             foreach (var rule in rules)
             {
                 await ValidateRuleTextForWriteAsync(path, rule, cancellationToken);
@@ -205,15 +232,20 @@ namespace VibeRails.Services
             }
             sb.AppendLine();
             sb.AppendLine(STRINGS.FILE_HEADER);
-            await File.WriteAllTextAsync(path, sb.ToString(), cancellationToken);
+            // CreateNew makes a concurrent create fail instead of overwriting existing data.
+            await using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+            await using var writer = new StreamWriter(stream);
+            await writer.WriteAsync(sb.ToString().AsMemory(), cancellationToken);
         }
         public async Task<string> GetAgentFileContentAsync(string path, CancellationToken cancellationToken)
         {
+            path = await ResolvePathAsync(path, cancellationToken);
             // Validate this is actually a rule file
             var agentFiles = await GetAgentFiles(cancellationToken);
             var normalizedPath = Path.GetFullPath(path);
 
-            if (!agentFiles.Any(f => Path.GetFullPath(f).Equals(normalizedPath, StringComparison.OrdinalIgnoreCase)))
+            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            if (!agentFiles.Any(f => Path.GetFullPath(f).Equals(normalizedPath, comparison)))
             {
                 throw new UnauthorizedAccessException($"Path is not a valid rule file: {path}");
             }
@@ -238,6 +270,7 @@ namespace VibeRails.Services
         /// </summary>
         public async Task<List<RuleWithEnforcement>> GetRulesWithEnforcementAsync(string path, CancellationToken cancellationToken)
         {
+            path = await ResolvePathAsync(path, cancellationToken);
             string content = await File.ReadAllTextAsync(path, cancellationToken);
             return AgentRuleSectionReader.Read(content)
                 .Select(rule => new RuleWithEnforcement(
@@ -248,6 +281,7 @@ namespace VibeRails.Services
 
         public async Task AddRulesAsync(string path, CancellationToken cancellationToken, params string[] rules)
         {
+            path = await ResolvePathAsync(path, cancellationToken);
             var lines = (await File.ReadAllLinesAsync(path, cancellationToken)).ToList();
             int insertIndex = EnsureRulesSectionAndGetInsertIndex(lines);
 
@@ -270,6 +304,7 @@ namespace VibeRails.Services
 
         public async Task AddRuleWithEnforcementAsync(string path, string ruleText, Enforcement enforcement, CancellationToken cancellationToken)
         {
+            path = await ResolvePathAsync(path, cancellationToken);
             // Path-lock validation runs first so malformed lock syntax reports what is actually
             // wrong with it rather than the generic "not one of the allowed rules".
             await ValidateRuleTextForWriteAsync(path, ruleText, cancellationToken);
@@ -289,6 +324,7 @@ namespace VibeRails.Services
 
         public async Task DeleteRulesAsync(string path, CancellationToken cancellationToken, params string[] rules)
         {
+            path = await ResolvePathAsync(path, cancellationToken);
             var lines = (await File.ReadAllLinesAsync(path, cancellationToken)).ToList();
             var rulesToDelete = new HashSet<string>(rules, StringComparer.OrdinalIgnoreCase);
             var document = AgentRuleSectionReader.ParseDocument(string.Join("\n", lines));
@@ -322,6 +358,7 @@ namespace VibeRails.Services
         /// </summary>
         public async Task UpdateRuleEnforcementAsync(string path, string ruleText, Enforcement enforcement, CancellationToken cancellationToken)
         {
+            path = await ResolvePathAsync(path, cancellationToken);
             var lines = (await File.ReadAllLinesAsync(path, cancellationToken)).ToList();
             var document = AgentRuleSectionReader.ParseDocument(string.Join("\n", lines));
             var matches = document.Rules
@@ -346,6 +383,7 @@ namespace VibeRails.Services
 
         public async Task<List<string>> GetDocumentedFilesAsync(string path, CancellationToken cancellationToken)
         {
+            path = await ResolvePathAsync(path, cancellationToken);
             string[] lines = await File.ReadAllLinesAsync(path, cancellationToken);
             int index = lines.IndexOf(STRINGS.FILE_HEADER);
             if (index == -1)

@@ -1,5 +1,28 @@
 # Unresolved security review findings
 
+## VB-ELC4K-180 / VIBE-108: CodeQL findings — fixes awaiting owner review
+
+Recorded 2026-10-06. GitHub alerts #17–27 and #31–35 identify rule-file routes/services
+that used request paths before checking repository membership. Authenticated callers could
+read/write rule-shaped content outside the current repository or through a linked file.
+`RuleFilePath` now enforces repository containment, the `vc.rules.md` filename, and rejection
+of linked components/Git metadata before route metadata or service I/O. Creation uses
+CreateNew instead of an overwriting write. Tests use disposable files, never application data.
+Filesystem validation does not isolate the process from a concurrent local link-swap attacker.
+
+Alert #38 flags the Windows launch working directory. Although this value is not shell text,
+the bare `pwsh` executable with ShellExecute could be resolved in that chosen directory.
+The launcher now resolves `pwsh.exe` to an absolute path using only absolute PATH entries
+before handing the working directory to ShellExecute.
+
+Alerts #39–42: MCP log fields could introduce forged lines/control sequences. The owner
+explicitly requested retaining full tool names, error payloads and exception details, accepting
+their possible sensitive content. Those values are now losslessly control-escaped; they are
+not removed, redacted or truncated. See the specific diagnostic exception in API_SEC.md.
+
+The remaining alerts and validation/dispositions are recorded in the card's Comments.
+Review these fixes before removing this entry.
+
 ## VB-8WE2S-129 / F1: Automation saves discard Worker launch restrictions
 
 Recorded 2026-10-05 against the uncommitted working tree on

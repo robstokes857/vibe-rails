@@ -26,7 +26,7 @@ public static class AuthRoutes
             {
                 HttpOnly = true,              // Prevent JavaScript access (XSS protection)
                 SameSite = SameSiteMode.Lax,  // Allow cookie on redirects
-                Secure = false,               // localhost uses HTTP not HTTPS
+                Secure = UseSecureCookie(context.Request),
                 Path = "/",                   // Cookie applies to all routes
                 IsEssential = true            // Exempt from GDPR consent requirements
             });
@@ -46,6 +46,14 @@ public static class AuthRoutes
             return Results.Content(html, "text/html");
         }).WithName("AuthBootstrap");
     }
+
+    // Chromium accepts Secure cookies on HTTP localhost, but rejects them on numeric
+    // loopback HTTP origins. Retain the existing loopback-IP transport for those callers.
+    // Every HTTPS request and every non-loopback host still gets Secure.
+    internal static bool UseSecureCookie(HttpRequest request) => request.IsHttps
+        || !(request.Host.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase)
+             || request.Host.Host.Equals("[::1]", StringComparison.OrdinalIgnoreCase)
+             || request.Host.Host.Equals("::1", StringComparison.OrdinalIgnoreCase));
 
     internal static string NormalizeRedirect(string? redirect)
     {

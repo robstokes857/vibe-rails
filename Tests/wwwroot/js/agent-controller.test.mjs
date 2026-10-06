@@ -217,7 +217,7 @@ test('Inline add-rule modal escapes rule names and the target path', (t) => {
     controller.showInlineAddRule({ path: 'C:\\repo\\"><script>', rules: [] }, null);
 
     assert.doesNotMatch(modalHtml, /<svg onload=/);
-    assert.doesNotMatch(modalHtml, /<script>/);
+    assert.doesNotMatch(modalHtml, /<script>/i);
     assert.match(modalHtml, /&lt;svg onload=&quot;alert\(1\)&quot;&gt;/);
     assert.match(modalHtml, /&lt;b&gt;desc&lt;\/b&gt;/);
 });

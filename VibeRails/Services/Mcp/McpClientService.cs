@@ -4,6 +4,8 @@ using ModelContextProtocol;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 using VibeRails.Interfaces;
+using System.Globalization;
+using System.Text;
 
 namespace VibeRails.Services.Mcp;
 
@@ -50,14 +52,17 @@ public class McpClientService : IMcpService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to list MCP tools.");
+            _logger.LogError("Failed to list MCP tools: {Error}", EscapeLogText(ex.ToString()));
             throw;
         }
     }
 
     public async Task<McpToolCallOutcome> CallToolAsync(string toolName, Dictionary<string, object?> arguments, CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Calling MCP tool '{ToolName}'...", toolName);
+        // Preserve diagnostic content, but encode untrusted controls so a value cannot
+        // impersonate another log record. Do not pass the raw exception to the log sink.
+        var logToolName = EscapeLogText(toolName);
+        _logger.LogInformation("Calling MCP tool '{ToolName}'...", logToolName);
         try
         {
             var result = await _client.CallToolAsync(
@@ -75,20 +80,40 @@ public class McpClientService : IMcpService
 
             if (isError)
             {
-                _logger.LogWarning("Tool '{ToolName}' reported an error: {Error}", toolName, text);
+                _logger.LogWarning("Tool '{ToolName}' reported an error: {Error}", logToolName, EscapeLogText(text));
             }
             else if (string.IsNullOrEmpty(text))
             {
-                _logger.LogWarning("Tool '{ToolName}' returned no text content.", toolName);
+                _logger.LogWarning("Tool '{ToolName}' returned no text content.", logToolName);
             }
 
             return new McpToolCallOutcome(isError, text);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error calling MCP tool '{ToolName}'.", toolName);
+            _logger.LogError("Error calling MCP tool '{ToolName}': {Error}", logToolName, EscapeLogText(ex.ToString()));
             throw;
         }
+    }
+
+    /// <summary>Preserves complete log values while making control characters visible and inert.</summary>
+    internal static string EscapeLogText(string value)
+    {
+        // Explicit CR/LF replacement also makes the log-forging boundary visible to CodeQL.
+        var line = value.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\r", "\\r", StringComparison.Ordinal)
+            .Replace("\n", "\\n", StringComparison.Ordinal);
+        var safe = new StringBuilder(line.Length);
+        foreach (var character in line)
+        {
+            var category = char.GetUnicodeCategory(character);
+            if (char.IsControl(character) || category is UnicodeCategory.Format
+                or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator)
+                safe.Append("\\u").Append(((int)character).ToString("X4", CultureInfo.InvariantCulture));
+            else
+                safe.Append(character);
+        }
+        return safe.ToString();
     }
 
     public async Task<bool> PingAsync(CancellationToken cancellationToken = default)

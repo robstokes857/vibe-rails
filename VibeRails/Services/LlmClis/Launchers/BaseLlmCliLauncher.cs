@@ -147,6 +147,7 @@ namespace VibeRails.Services.LlmClis.Launchers
             bool keepTerminalOpen,
             bool launchMinimized)
         {
+            var shellPath = ShellDefaults.ResolveWindowsCommandShellPath();
             var exePath = Environment.ProcessPath ?? "vb";
             var argv = BuildVbArgv(launchLlm, workingDirectory, args, envName, vbArgs);
 
@@ -174,7 +175,7 @@ namespace VibeRails.Services.LlmClis.Launchers
 
             var startInfo = new ProcessStartInfo
             {
-                FileName = ShellDefaults.WindowsCommandShell,
+                FileName = shellPath,
                 WorkingDirectory = workingDirectory,
                 UseShellExecute = true,
                 WindowStyle = launchMinimized ? ProcessWindowStyle.Minimized : ProcessWindowStyle.Normal,

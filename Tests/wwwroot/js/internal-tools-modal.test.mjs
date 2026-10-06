@@ -251,7 +251,7 @@ test('existing log details safely retain multiline messages, source files, and b
     assert.match(detail, /Application logs/);
     assert.match(detail, /&lt;script&gt;\.log/);
     assert.match(detail, /Connection failed\n  at &lt;Service&gt;\.Connect\(\)/);
-    assert.doesNotMatch(detail, /<script>|<Service>/);
+    assert.doesNotMatch(detail, /<script>|<Service>/i);
     assert.equal(panel.querySelector('[data-warning]').hidden, false);
     assert.match(panel.querySelector('[data-warning]').textContent, /bounded window/);
     assert.match(panel.querySelector('[data-warning]').textContent, /1 log files or records/);

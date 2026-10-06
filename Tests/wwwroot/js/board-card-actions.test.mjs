@@ -16,7 +16,7 @@ test('attention comments render in red with an escaped body, ordinary comments s
     const html = controller.cardLogCommentHtml(entry);
     assert.match(html, /board-comment is-agent is-attention/);
     assert.match(html, /Needs your attention/);
-    assert.doesNotMatch(html, /<script>/);
+    assert.doesNotMatch(html, /<script>/i);
     assert.match(html, /&lt;script&gt;/);
     assert.doesNotMatch(controller.cardLogCommentHtml({ ...entry, isAttention: false }), /is-attention|Needs your attention/);
 });

@@ -165,7 +165,7 @@ test('a card choice opens its sessions with escaped agent/time metadata and link
     assert.match(html, /Linked .*2026/);
     assert.match(html, /Review · Open/);
     assert.match(html, /Reference card LOGIN-2/);
-    assert.doesNotMatch(html, /<script>/);
+    assert.doesNotMatch(html, /<script>/i);
     await popup.pick(1);
     assert.equal(popup.input.value, `See !${id} `);
     assert.equal(popup.calls.links[0].session.id, id);

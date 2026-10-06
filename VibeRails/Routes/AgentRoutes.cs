@@ -45,8 +45,21 @@ public static class AgentRoutes
 
     public static void Map(WebApplication app)
     {
+        var routes = app.MapGroup("/api/v1/agents").AddEndpointFilter(async (context, next) =>
+        {
+            try { return await next(context); }
+            catch (ArgumentException)
+            {
+                return Results.BadRequest(new ErrorResponse("Invalid rule file path or rule."));
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Results.BadRequest(new ErrorResponse("Rule file access denied."));
+            }
+        });
         // PUT /api/v1/agents/name - Update a rule file's custom display name
-        app.MapPut("/api/v1/agents/name", async (
+        routes.MapPut("/name", async (
+            IAgentFileService agentService,
             IRepository repository,
             UpdateAgentNameRequest request,
             CancellationToken cancellationToken) =>
@@ -61,18 +74,19 @@ public static class AgentRoutes
                 return Results.BadRequest(new ErrorResponse("CustomName is required"));
             }
 
-            if (!File.Exists(request.Path))
+            var path = await agentService.ResolvePathAsync(request.Path, cancellationToken);
+            if (!File.Exists(path))
             {
                 return Results.NotFound(new ErrorResponse($"Rule file not found: {request.Path}"));
             }
 
-            await repository.SetAgentCustomNameAsync(request.Path, request.CustomName, cancellationToken);
+            await repository.SetAgentCustomNameAsync(path, request.CustomName, cancellationToken);
 
-            return Results.Ok(new UpdateAgentNameResponse(request.Path, request.CustomName));
+            return Results.Ok(new UpdateAgentNameResponse(path, request.CustomName));
         }).WithName("UpdateAgentName");
 
         // GET /api/v1/agents - List all rule files with their rules
-        app.MapGet("/api/v1/agents", async (
+        routes.MapGet("", async (
             IAgentFileService agentService,
             IRepository repository,
             CancellationToken cancellationToken) =>
@@ -98,13 +112,14 @@ public static class AgentRoutes
         }).WithName("GetAgents");
 
         // GET /api/v1/agents/rules?path={path} - Get a specific rule file's rules
-        app.MapGet("/api/v1/agents/rules", async (
+        routes.MapGet("/rules", async (
             IAgentFileService agentService,
             IRepository repository,
             string path,
             CancellationToken cancellationToken) =>
         {
-            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+            path = await agentService.ResolvePathAsync(path, cancellationToken);
+            if (!File.Exists(path))
             {
                 return Results.NotFound(new ErrorResponse($"Rule file not found: {path}"));
             }
@@ -122,7 +137,7 @@ public static class AgentRoutes
         }).WithName("GetAgentRules");
 
         // POST /api/v1/agents - Create a new rule file
-        app.MapPost("/api/v1/agents", async (
+        routes.MapPost("", async (
             IAgentFileService agentService,
             CreateAgentRequest request,
             CancellationToken cancellationToken) =>
@@ -140,7 +155,8 @@ public static class AgentRoutes
                 return Results.BadRequest(new ErrorResponse("Path is required"));
             }
 
-            if (File.Exists(request.Path))
+            var path = await agentService.ResolvePathAsync(request.Path, cancellationToken);
+            if (File.Exists(path))
             {
                 return Results.BadRequest(new ErrorResponse("Rule file already exists at this path"));
             }
@@ -148,7 +164,7 @@ public static class AgentRoutes
             try
             {
                 await agentService.CreateAgentFileAsync(
-                    request.Path,
+                    path,
                     cancellationToken,
                     request.Rules ?? Array.Empty<string>());
             }
@@ -160,12 +176,12 @@ public static class AgentRoutes
             }
 
             // Fetch the created rules with their enforcement levels
-            var rules = await agentService.GetRulesWithEnforcementAsync(request.Path, cancellationToken);
+            var rules = await agentService.GetRulesWithEnforcementAsync(path, cancellationToken);
             var ruleResponses = rules.Select(r => new RuleWithEnforcementResponse(r.RuleText, r.Enforcement.ToString())).ToList();
 
             return Results.Ok(new AgentFileResponse(
-                Path: request.Path,
-                Name: Path.GetFileName(request.Path),
+                Path: path,
+                Name: Path.GetFileName(path),
                 CustomName: null,
                 RuleCount: ruleResponses.Count,
                 Rules: ruleResponses
@@ -173,14 +189,15 @@ public static class AgentRoutes
         }).WithName("CreateAgent");
 
         // POST /api/v1/agents/rules - Add a rule with enforcement to a rule file
-        app.MapPost("/api/v1/agents/rules", async (
+        routes.MapPost("/rules", async (
             IAgentFileService agentService,
             IGitService gitService,
             IRepository repository,
             AddRuleWithEnforcementRequest request,
             CancellationToken cancellationToken) =>
         {
-            if (string.IsNullOrEmpty(request.Path) || !File.Exists(request.Path))
+            var path = await agentService.ResolvePathAsync(request.Path, cancellationToken);
+            if (!File.Exists(path))
             {
                 return Results.NotFound(new ErrorResponse($"Rule file not found: {request.Path}"));
             }
@@ -190,16 +207,16 @@ public static class AgentRoutes
                 var enforcement = EnforcementParser.Parse(request.Enforcement);
 
                 // Decided before the edit: afterwards our own change is an unstaged difference.
-                var stagingIsSafe = await gitService.IsStagingSafeAsync(request.Path, cancellationToken);
-                await agentService.AddRuleWithEnforcementAsync(request.Path, request.RuleText, enforcement, cancellationToken);
-                await TryStageAgentFileAsync(gitService, request.Path, stagingIsSafe, cancellationToken);
+                var stagingIsSafe = await gitService.IsStagingSafeAsync(path, cancellationToken);
+                await agentService.AddRuleWithEnforcementAsync(path, request.RuleText, enforcement, cancellationToken);
+                await TryStageAgentFileAsync(gitService, path, stagingIsSafe, cancellationToken);
 
-                var updatedRules = await agentService.GetRulesWithEnforcementAsync(request.Path, cancellationToken);
+                var updatedRules = await agentService.GetRulesWithEnforcementAsync(path, cancellationToken);
                 var ruleResponses = updatedRules.Select(r => new RuleWithEnforcementResponse(r.RuleText, r.Enforcement.ToString())).ToList();
-                var customName = await repository.GetAgentCustomNameAsync(request.Path, cancellationToken);
+                var customName = await repository.GetAgentCustomNameAsync(path, cancellationToken);
                 return Results.Ok(new AgentFileResponse(
-                    Path: request.Path,
-                    Name: Path.GetFileName(request.Path),
+                    Path: path,
+                    Name: Path.GetFileName(path),
                     CustomName: customName,
                     RuleCount: updatedRules.Count,
                     Rules: ruleResponses
@@ -212,29 +229,30 @@ public static class AgentRoutes
         }).WithName("AddAgentRules");
 
         // DELETE /api/v1/agents/rules - Delete rules from a rule file
-        app.MapDelete("/api/v1/agents/rules", async (
+        routes.MapDelete("/rules", async (
             IAgentFileService agentService,
             IGitService gitService,
             IRepository repository,
             AgentRulesRequest request,
             CancellationToken cancellationToken) =>
         {
-            if (string.IsNullOrEmpty(request.Path) || !File.Exists(request.Path))
+            var path = await agentService.ResolvePathAsync(request.Path, cancellationToken);
+            if (!File.Exists(path))
             {
                 return Results.NotFound(new ErrorResponse($"Rule file not found: {request.Path}"));
             }
 
             // Decided before the edit: afterwards our own change is an unstaged difference.
-            var stagingIsSafe = await gitService.IsStagingSafeAsync(request.Path, cancellationToken);
-            await agentService.DeleteRulesAsync(request.Path, cancellationToken, request.Rules);
-            await TryStageAgentFileAsync(gitService, request.Path, stagingIsSafe, cancellationToken);
+            var stagingIsSafe = await gitService.IsStagingSafeAsync(path, cancellationToken);
+            await agentService.DeleteRulesAsync(path, cancellationToken, request.Rules);
+            await TryStageAgentFileAsync(gitService, path, stagingIsSafe, cancellationToken);
 
-            var updatedRules = await agentService.GetRulesWithEnforcementAsync(request.Path, cancellationToken);
+            var updatedRules = await agentService.GetRulesWithEnforcementAsync(path, cancellationToken);
             var ruleResponses = updatedRules.Select(r => new RuleWithEnforcementResponse(r.RuleText, r.Enforcement.ToString())).ToList();
-            var customName = await repository.GetAgentCustomNameAsync(request.Path, cancellationToken);
+            var customName = await repository.GetAgentCustomNameAsync(path, cancellationToken);
             return Results.Ok(new AgentFileResponse(
-                Path: request.Path,
-                Name: Path.GetFileName(request.Path),
+                Path: path,
+                Name: Path.GetFileName(path),
                 CustomName: customName,
                 RuleCount: updatedRules.Count,
                 Rules: ruleResponses
@@ -242,26 +260,27 @@ public static class AgentRoutes
         }).WithName("DeleteAgentRules");
 
         // PUT /api/v1/agents/rules/enforcement - Update enforcement level for a rule
-        app.MapPut("/api/v1/agents/rules/enforcement", async (
+        routes.MapPut("/rules/enforcement", async (
             IAgentFileService agentService,
             IRepository repository,
             UpdateEnforcementRequest request,
             CancellationToken cancellationToken) =>
         {
-            if (string.IsNullOrEmpty(request.Path) || !File.Exists(request.Path))
+            var path = await agentService.ResolvePathAsync(request.Path, cancellationToken);
+            if (!File.Exists(path))
             {
                 return Results.NotFound(new ErrorResponse($"Rule file not found: {request.Path}"));
             }
 
             var enforcement = EnforcementParser.Parse(request.Enforcement);
-            await agentService.UpdateRuleEnforcementAsync(request.Path, request.RuleText, enforcement, cancellationToken);
+            await agentService.UpdateRuleEnforcementAsync(path, request.RuleText, enforcement, cancellationToken);
 
-            var updatedRules = await agentService.GetRulesWithEnforcementAsync(request.Path, cancellationToken);
+            var updatedRules = await agentService.GetRulesWithEnforcementAsync(path, cancellationToken);
             var ruleResponses = updatedRules.Select(r => new RuleWithEnforcementResponse(r.RuleText, r.Enforcement.ToString())).ToList();
-            var customName = await repository.GetAgentCustomNameAsync(request.Path, cancellationToken);
+            var customName = await repository.GetAgentCustomNameAsync(path, cancellationToken);
             return Results.Ok(new AgentFileResponse(
-                Path: request.Path,
-                Name: Path.GetFileName(request.Path),
+                Path: path,
+                Name: Path.GetFileName(path),
                 CustomName: customName,
                 RuleCount: updatedRules.Count,
                 Rules: ruleResponses
@@ -269,7 +288,7 @@ public static class AgentRoutes
         }).WithName("UpdateRuleEnforcement");
 
         // GET /api/v1/agents/content?path={path} - Get raw rule file content
-        app.MapGet("/api/v1/agents/content", async (
+        routes.MapGet("/content", async (
             IAgentFileService agentService,
             string path,
             CancellationToken cancellationToken) =>
@@ -302,7 +321,7 @@ public static class AgentRoutes
         // GET /api/v1/agents/files?path={path} - Get files on disk that this rule file covers
         // Parent rules also apply beneath nested policies. Omit only this declaring file,
         // Git metadata, and linked paths from the on-disk listing.
-        app.MapGet("/api/v1/agents/files", async (
+        routes.MapGet("/files", async (
             IAgentFileService agentService,
             string path,
             CancellationToken cancellationToken) =>
@@ -312,6 +331,7 @@ public static class AgentRoutes
                 return Results.BadRequest(new ErrorResponse("Path parameter is required"));
             }
 
+            path = await agentService.ResolvePathAsync(path, cancellationToken);
             if (!File.Exists(path))
             {
                 return Results.NotFound(new ErrorResponse($"Rule file not found: {path}"));
@@ -347,14 +367,15 @@ public static class AgentRoutes
         }).WithName("GetAgentDocumentedFiles");
 
         // POST /api/v1/agents/validate?path={path} - Run VCA validation for a specific rule file
-        app.MapPost("/api/v1/agents/validate", async (
+        routes.MapPost("/validate", async (
             IRuleValidationService validationService,
             IAgentFileService agentService,
             IGitService gitService,
             string path,
             CancellationToken cancellationToken) =>
         {
-            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+            path = await agentService.ResolvePathAsync(path, cancellationToken);
+            if (!File.Exists(path))
             {
                 return Results.NotFound(new ErrorResponse($"Rule file not found: {path}"));
             }

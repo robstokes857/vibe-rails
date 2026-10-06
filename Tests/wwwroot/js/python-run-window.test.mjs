@@ -40,6 +40,9 @@ test('the command line quotes only what needs it, so one argument reads as one a
     assert.equal(quoteForDisplay('two words'), '"two words"');
     assert.equal(quoteForDisplay('say "hi"'), '"say \\"hi\\""');
     assert.equal(quoteForDisplay(undefined), '');
+    for (const token of ['C:\\path with spaces\\', 'slash\\"quote', 'line\nnext']) {
+        assert.equal(JSON.parse(quoteForDisplay(token)), token);
+    }
 });
 
 // --- the return value ---

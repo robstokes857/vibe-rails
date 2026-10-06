@@ -1486,12 +1486,9 @@ export class TerminalManager {
         if (!this._undoTomSelect) return;
         const dropdown = this._undoTomSelect.dropdown_content;
         if (!dropdown) return;
-        const escapeAttr = window.CSS && typeof window.CSS.escape === 'function'
-            ? (s) => window.CSS.escape(s)
-            : (s) => String(s).replace(/"/g, '\\"');
-        for (const [tabId, pending] of this._pendingCloses) {
-            const el = dropdown.querySelector(`[data-tab-time="${escapeAttr(tabId)}"]`);
-            if (el) el.textContent = `auto-close in ${this._formatTimeLeft(pending.expiresAt)}`;
+        for (const el of dropdown.querySelectorAll('[data-tab-time]')) {
+            const pending = this._pendingCloses.get(el.dataset.tabTime);
+            if (pending) el.textContent = `auto-close in ${this._formatTimeLeft(pending.expiresAt)}`;
         }
     }
 

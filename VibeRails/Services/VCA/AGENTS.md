@@ -236,6 +236,13 @@ author junk. Reads no longer filter, so hand-edited junk is shown rather than hi
 
 ## Testing
 
+Rules-page file operations use `RuleFilePath` through `AgentFileService.ResolvePathAsync`:
+only absolute `vc.rules.md` paths within the current repository are accepted. Check before
+existence probes or metadata writes as well as before content I/O. Reject linked components
+and Git metadata, and preserve CreateNew semantics when creating a file. Discovery omits
+linked files/directories. `RuleFilePathSecurityTests` and `AgentRoutesSecurityTests` pin this
+boundary, including rejection with valid API credentials.
+
 | Area | Tests |
 | --- | --- |
 | Discovery contract | `Tests/Services/VCA/AgentRuleSectionReaderTests.cs` |

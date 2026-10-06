@@ -20,6 +20,11 @@ secret, not two factors. The tab token lives in browser `sessionStorage` and tra
 header. WebSocket handshakes use the session cookie/subprotocol and tab subprotocol;
 query-string credentials are not accepted.
 
+The bootstrap cookie is HttpOnly, SameSite=Lax and Secure on HTTPS and the normal HTTP
+`localhost` origin. Numeric loopback HTTP (`127.0.0.1` / `[::1]`) retains a non-Secure cookie:
+Chromium rejects Secure cookies on those origins. This compatibility exception adds no
+listener, auth bypass or remote HTTP support.
+
 [CookieAuthMiddleware](VibeRails/Middleware/CookieAuthMiddleware.cs) runs before static
 files and handlers. Production ordering in [Program.cs](VibeRails/Program.cs) is request
 logging/redaction → security headers → CORS → WebSockets → authentication → static files →
@@ -239,6 +244,17 @@ incident below. Ordinary authenticated terminal-input routes remain their own ca
   to holders of both credentials. Only `IFeatureLog` is the redacted channel. Never log API keys,
   tokens or transcript text through Serilog, including exception text; a hidden Logs panel is no
   protection. See [InternalToolsRoutes](VibeRails/Routes/InternalToolsRoutes.cs).
+  **Owner-approved MCP diagnostic exception (2026-10-06, VIBE-108):** retain complete tool
+  names, error replies and exception details in `McpClientService` logs, without redaction or
+  truncation. Escape CR/LF, terminal controls and Unicode display controls so the values cannot
+  forge separate records. These diagnostics can contain sensitive text supplied by a tool;
+  the owner explicitly accepted that retention. Tool-call arguments are not newly logged.
+
+- Rules-page reads and writes accept only absolute `vc.rules.md` paths inside the current
+  repository. Reject Git metadata, symlinks/junctions and ambiguous Windows path components
+  before touching the file or custom-name metadata. Creation uses CreateNew to avoid replacing
+  existing data. This is a path boundary, not isolation from another local process racing a
+  filesystem change.
 
 ### Signing keys
 

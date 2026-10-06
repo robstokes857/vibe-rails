@@ -99,7 +99,7 @@ test('refresh uses server API-key status and safely escapes key metadata', async
     await panel.refresh();
     assert.equal(panel.apiKeyConfigured, true);
     const html = fields.get('[data-keys-list]').innerHTML;
-    assert.doesNotMatch(html, /<img|<script>/);
+    assert.doesNotMatch(html, /<img|<script>/i);
     assert.match(html, /&lt;img/);
     assert.match(html, /&lt;script&gt;/);
 });

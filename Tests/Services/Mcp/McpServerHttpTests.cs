@@ -83,7 +83,7 @@ public class McpServerHttpTests : IAsyncLifetime
         await _app.DisposeAsync();
     }
 
-    private async Task<McpClientService> ConnectAsync(CancellationToken ct = default)
+    private async Task<McpClientService> ConnectAsync(CancellationToken ct = default, ILogger<McpClientService>? logger = null)
     {
         var transport = new HttpClientTransport(
             new HttpClientTransportOptions
@@ -96,7 +96,51 @@ public class McpServerHttpTests : IAsyncLifetime
             NullLoggerFactory.Instance,
             ownsHttpClient: false);
 
-        return await McpClientService.ConnectAsync(transport, cancellationToken: ct);
+        return await McpClientService.ConnectAsync(transport, logger, cancellationToken: ct);
+    }
+
+    [Fact]
+    public async Task ClientLogsPreserveUntrustedDetailsWithoutAllowingForgedLines()
+    {
+        var logger = new CapturingClientLogger();
+        await using var client = await ConnectAsync(TestContext.Current.CancellationToken, logger);
+        const string untrusted = "missing-tool\r\nFORGED secret-token";
+        try { await client.CallToolAsync(untrusted, [], TestContext.Current.CancellationToken); }
+        catch (Exception) { /* Both an MCP error reply and an SDK exception are legitimate here. */ }
+        Assert.NotEmpty(logger.Messages);
+        Assert.Contains(logger.Messages, message => message.Contains("missing-tool\\r\\nFORGED secret-token", StringComparison.Ordinal));
+        Assert.All(logger.Messages, message => {
+            Assert.DoesNotContain('\n', message);
+            Assert.DoesNotContain('\r', message);
+        });
+        Assert.All(logger.Exceptions, exception => Assert.Null(exception));
+    }
+
+    [Fact]
+    public void LogEncodingPreservesPayloadsAndEscapesEveryRecordOrDisplayControl()
+    {
+        const string payload = "password=owner-keeps-details\\literal\r\nnext\t\u001b[31m\u0085\u2028\u2029\u202E";
+        Assert.Equal("password=owner-keeps-details\\\\literal\\r\\nnext\\u0009\\u001B[31m\\u0085\\u2028\\u2029\\u202E",
+            McpClientService.EscapeLogText(payload));
+        var longPayload = new string('x', 20000);
+        Assert.Equal(longPayload, McpClientService.EscapeLogText(longPayload));
+        var exception = new InvalidOperationException("meaningful failure", new IOException("underlying cause"));
+        var encoded = McpClientService.EscapeLogText(exception.ToString());
+        Assert.Contains("InvalidOperationException: meaningful failure", encoded);
+        Assert.Contains("IOException: underlying cause", encoded);
+    }
+
+    private sealed class CapturingClientLogger : ILogger<McpClientService>
+    {
+        public List<string> Messages { get; } = [];
+        public List<Exception?> Exceptions { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            Messages.Add(formatter(state, exception));
+            Exceptions.Add(exception);
+        }
     }
 
     [Fact]

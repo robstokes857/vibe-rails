@@ -6,13 +6,13 @@ import vm from 'node:vm';
 // Exercise the shipped sandbox's layout module: the whole-snapshot scope and the field's ambient link budget.
 const bundle = readFileSync(new URL('../../../VibeRails/wwwroot/js/modules/code-report/vendor/atlas/code-atlas.mjs', import.meta.url), 'utf8');
 const template = JSON.parse(bundle.match(/^const rendererTemplate = (.*);$/m)[1]);
-const layoutScript = [...template.matchAll(/<script>([\s\S]*?)<\/script>/g)]
+const layoutScript = [...template.matchAll(/<script>([\s\S]*?)<\/script>/gi)]
     .find(match => match[1].includes('root.CodeAtlasLayout ='))[1];
 const sandbox = {};
 vm.runInNewContext(layoutScript, sandbox);
 const { scopeNodes, ambientLinks, layout, detail, VISIBLE_LIMIT, DENSE_VIEW_NODES, AMBIENT_LINK_LIMIT, DETAIL_ZOOM, FILE_FLOOR } = sandbox.CodeAtlasLayout;
 // The camera module, the same way: the globe's perspective and depth fog live here.
-const spaceScript = [...template.matchAll(/<script>([\s\S]*?)<\/script>/g)]
+const spaceScript = [...template.matchAll(/<script>([\s\S]*?)<\/script>/gi)]
     .find(match => match[1].includes('root.CodeAtlasSpace ='))[1];
 const spaceSandbox = {};
 vm.runInNewContext(spaceScript, spaceSandbox);
@@ -90,7 +90,7 @@ test('semantic zoom settles files to dust, then brings files, classes and functi
 // The shipped placeLabels, run with a stub state: the field's app script is not a module, so the
 // function is cut out by its anchors the same way the renderer template is.
 function shippedPlaceLabels(zoom, items, field = {}) {
-    const app = [...template.matchAll(/<script>([\s\S]*?)<\/script>/g)].find(match => match[1].includes('function placeLabels('))[1];
+    const app = [...template.matchAll(/<script>([\s\S]*?)<\/script>/gi)].find(match => match[1].includes('function placeLabels('))[1];
     const source = app.slice(app.indexOf('    function placeLabels('), app.indexOf('    function fittedCamera('));
     // No canvas context here: label widths fall back to the estimate; points are 8px; type is 12px.
     const context = { state: { layout: items, zoom, panX: 0, panY: 0, query: '', filter: 'all' }, field: { candidates: null, ...field },

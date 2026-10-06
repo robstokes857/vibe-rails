@@ -69,7 +69,7 @@ test('search and linked-card context keep server order and escape foreign names,
     assert.match(html, /Another project/);
     assert.match(html, /C:\/&lt;remote&gt;/);
     assert.match(html, /&lt;svg onload=alert\(1\)&gt; comment/);
-    assert.doesNotMatch(html, /<img|<script|<svg/);
+    assert.doesNotMatch(html, /<img|<script|<svg/i);
     assert.match(cardLocationHtml({ ...current, boardId: 'second' }, 'own'), /Another board in this project/);
 });
 
@@ -101,7 +101,7 @@ test('foreign card markup labels the owning board and keeps card data inert', ()
     assert.match(html, /Changes are saved to that board/);
     assert.match(html, /&lt;\/textarea&gt;&lt;script&gt;/);
     assert.match(html, /C:\/&lt;repo&gt;/);
-    assert.doesNotMatch(html, /<script>|<img>/);
+    assert.doesNotMatch(html, /<script>|<img>/i);
 });
 
 test('local card navigation resolves target ownership, and a late foreign read cannot replace a new card', async () => {
@@ -160,7 +160,7 @@ test('foreign editor saves only changed fields and preserves drafts after commen
     assert.equal(commentForm.fields.body.value, '');
     assert.match(comments.innerHTML, /Comment draft/);
     assert.match(comments.innerHTML, /<strong>Comment draft<\/strong>/);
-    assert.doesNotMatch(comments.innerHTML, /<script>|data-board-ref-commit/);
+    assert.doesNotMatch(comments.innerHTML, /<script>|data-board-ref-commit/i);
     fail = true;
     await form.handlers.submit(submit);
     assert.equal(form.fields.description.value, 'Keep this draft');

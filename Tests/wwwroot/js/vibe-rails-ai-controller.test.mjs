@@ -6,6 +6,24 @@ import vm from 'node:vm';
 
 const modulePath = path.resolve('VibeRails/wwwroot/js/modules/vibe-rails-ai-controller.js');
 
+test('session IDs read from DOM attributes remain escaped in both session views', () => {
+    const source = readFileSync(modulePath, 'utf8')
+        .replace(/^import .*;\r?\n/m, '')
+        .replace('export class VibeRailsAiController', 'class VibeRailsAiController');
+    const Controller = vm.runInNewContext(source + '\nVibeRailsAiController;');
+    const controller = new Controller({});
+    controller.nodes = { queryStats: {}, cols: {} };
+    for (const id of ['<img src=x onerror=alert(1)>', '\"><svg/onload=alert(1)>', '&lt;script&gt;', "'<>\""]) {
+        controller.state = { mode: 'session-browse', sessionBrowseId: id, searchGroups: [] };
+        controller._renderQueryStats();
+        controller._renderSessionView(id, []);
+        for (const html of [controller.nodes.queryStats.innerHTML, controller.nodes.cols.innerHTML]) {
+            assert.doesNotMatch(html, /<img|<svg|<script/i);
+            assert.ok(!html.includes(`title="${id}"`));
+        }
+    }
+});
+
 test('Vibe AI learning card separates LLM retrieval savings from Token Saver', () => {
     const source = readFileSync(modulePath, 'utf8');
 

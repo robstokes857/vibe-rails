@@ -23,7 +23,7 @@ test('history is collapsed, fetches only on demand, escapes content and cancels 
     assert.equal(calls.length, 1);
     assert.match(calls[0][0], /history\?offset=0&card=card_a/);
     assert.match(host.html, /&lt;script&gt;/);
-    assert.doesNotMatch(host.html, /<script>/);
+    assert.doesNotMatch(host.html, /<script>/i);
     handlers.toggle();
     assert.equal(calls.length, 1);
     dispose();

@@ -219,7 +219,7 @@ test('Automation renderer escapes data and shows Worker, triggers, and next run'
     assert.equal(count.textContent, '1 automation');
     assert.match(list.innerHTML, /&lt;Security review&gt;/);
     assert.match(list.innerHTML, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
-    assert.doesNotMatch(list.innerHTML, /<script>/);
+    assert.doesNotMatch(list.innerHTML, /<script>/i);
     assert.match(list.innerHTML, /title="Worker"/);
     assert.match(list.innerHTML, /Every 15 min/);
     assert.match(list.innerHTML, /After successful commit/);
@@ -1031,7 +1031,7 @@ test('An automation card shows the initial message that carries its logic', () =
 
     assert.match(html, /class="job-card-prompt"/);
     assert.match(html, /Review the diff for &lt;script&gt;/);
-    assert.doesNotMatch(html, /<script>alert/);
+    assert.doesNotMatch(html, /<script>alert/i);
 
     // An Environment with no initial message must not leave an empty prompt row behind.
     controller.jobs[0].prompt = '   ';
@@ -1303,7 +1303,7 @@ test('Workflow run details escape script output and expose Worker replay separat
     assert.match(script, /&lt;unsafe&gt;/);
     assert.match(script, /&lt;script&gt;alert\(&quot;stdout&quot;\)&lt;\/script&gt;/);
     assert.match(script, /&lt;img src=x onerror=alert\(1\)&gt;/);
-    assert.doesNotMatch(script, /<script>|<img/);
+    assert.doesNotMatch(script, /<script>|<img/i);
     assert.match(worker, /Worker — Review &lt;Worker&gt;/);
     assert.match(worker, /data-run-action-session="session&lt;&amp;&gt;"/);
     assert.match(worker, /Replay Worker terminal/);
@@ -1589,7 +1589,7 @@ test('Recipe import confirmation discloses and escapes executable Environment co
     assert.match(modals[0].html, /reviewed the Worker settings and repository script actions/);
     assert.match(modals[0].html, /created disabled/);
     assert.match(modals[0].html, /&lt;script&gt;/);
-    assert.doesNotMatch(modals[0].html, /<script>/);
+    assert.doesNotMatch(modals[0].html, /<script>/i);
 });
 
 test('V2 recipes discard machine-local ids and approval hashes before import', () => {

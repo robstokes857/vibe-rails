@@ -6,6 +6,23 @@ import { pathToFileURL } from 'node:url';
 const modulePath = path.resolve('VibeRails/wwwroot/js/modules/terminal-multitab.js');
 const { TerminalController, TerminalManager, shouldCreateFreshTab, selectBlankPlaceholderTabIds } = await import(pathToFileURL(modulePath).href);
 
+test('undo countdown treats quotes and backslashes in tab IDs as literal data', () => {
+    const tabId = 'tab\\"], [data-other="x';
+    const matching = { dataset: { tabTime: tabId } };
+    const other = { dataset: { tabTime: 'another' }, textContent: 'unchanged' };
+    const manager = {
+        _undoTomSelect: { dropdown_content: { querySelectorAll(selector) {
+            assert.equal(selector, '[data-tab-time]');
+            return [matching, other];
+        } } },
+        _pendingCloses: new Map([[tabId, { expiresAt: 123 }]]),
+        _formatTimeLeft: value => String(value)
+    };
+    TerminalManager.prototype._tickUndoCountdown.call(manager);
+    assert.equal(matching.textContent, 'auto-close in 123');
+    assert.equal(other.textContent, 'unchanged');
+});
+
 function createManager({ selection = 'env:7:opencode', rememberedCli = 'opencode' } = {}) {
     const added = [];
     const focused = [];
