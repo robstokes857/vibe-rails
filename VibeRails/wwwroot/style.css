@@ -18746,7 +18746,13 @@ body.performance-mode .brand-text-sm {
 .project-health-page {
     width: min(1180px, 100%);
     margin: 0 auto;
-    padding: 0 0 clamp(24px, 4vw, 48px);
+    padding: 0;
+}
+
+/* No slack under the Code quality card (VIBE-71): the page ends 14px below it, mirroring the
+   14px above the header, and the viewer sizes the map to the viewport instead. */
+.main-container:has(.project-health-page) {
+    padding-bottom: 14px;
 }
 
 /* Git Guard is a pill in the header; its message only shows when something needs attention. */
@@ -19123,7 +19129,7 @@ body.performance-mode .brand-text-sm {
    queries take over below this box, so the host only supplies the gutter. */
 .project-health-quality-report {
     min-width: 0;
-    margin: 0 18px 16px;
+    margin: 0 18px 14px;
 }
 
 .project-health-scan-transcript {

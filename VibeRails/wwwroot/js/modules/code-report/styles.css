@@ -19,7 +19,8 @@
 .code-report .icon-button{display:inline-flex;align-items:center;justify-content:center;background:transparent;border:1px solid transparent;border-radius:5px;width:34px;height:34px}
 .code-report .icon-button:hover{background:var(--color-bg-surface-hover);border-color:var(--color-border)}
 .code-report main{padding:var(--code-report-padding,0);max-width:var(--code-report-max-width,none);margin:0 auto}
-.code-report .code-layout{display:grid;grid-template-columns:minmax(0,1fr) clamp(300px,22vw,360px);gap:20px;height:var(--code-report-height,clamp(600px,calc(100dvh - 180px),880px));align-items:stretch}
+/* The viewer sets --code-report-height to fill the viewport (viewer.js fitHeight); the clamp is the fallback before it measures. */
+.code-report .code-layout{display:grid;grid-template-columns:minmax(0,1fr) clamp(300px,22vw,360px);gap:20px;height:var(--code-report-height,clamp(600px,calc(100dvh - 180px),880px));max-height:1400px;align-items:stretch}
 .code-report .graph-panel{display:flex;flex-direction:column;min-width:0;min-height:0;border:1px solid var(--color-border);background:var(--surface-soft);border-radius:10px;overflow:hidden}
 .code-report [data-code-map]{flex:1;min-width:0;min-height:0}
 .code-report [data-code-map] iframe{display:block}
@@ -27,7 +28,7 @@
 .code-report .graph-note svg{width:13px;height:13px}
 .code-report .graph-options{flex:0 0 auto;padding:8px 14px;font-size:11px;color:var(--color-text-muted);background:var(--color-bg-surface);border-top:1px solid var(--color-border)}
 .code-report .graph-options label{display:flex;align-items:center;gap:7px;cursor:pointer}
-.code-report .graph-options details{margin-top:7px;max-height:160px;overflow:auto}
+.code-report .graph-options details{margin-top:7px;max-height:160px;overflow:auto;overscroll-behavior:contain}
 .code-report .graph-options summary{cursor:pointer;color:var(--color-text)}
 .code-report .graph-options p{margin:7px 0}
 .code-report .graph-options ul{padding-left:20px;margin:7px 0}
@@ -113,7 +114,7 @@
 .code-report [data-quality-report] .qr:not([data-state=loading]) .report-files-loading{display:none}
 @keyframes file-shimmer{from{background-position:100% 0}to{background-position:0 0}}
 /* Details replace the health summary inside the sidebar; the report never opens a modal. */
-.code-report .details-panel{display:flex;flex-direction:column;height:100%;min-height:0;overflow:auto;background:var(--color-bg-surface);border:1px solid var(--color-border);border-radius:10px;animation:details-in .18s ease-out}
+.code-report .details-panel{display:flex;flex-direction:column;height:100%;min-height:0;overflow:auto;overscroll-behavior:contain;background:var(--color-bg-surface);border:1px solid var(--color-border);border-radius:10px;animation:details-in .18s ease-out}
 .code-report .details-panel[hidden],.code-report .details-actions[hidden]{display:none}
 .code-report .details-header{position:sticky;top:0;z-index:1;display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:16px 18px;border-bottom:1px solid var(--color-border);background:var(--color-bg-surface)}
 .code-report .details-header>div{min-width:0}
@@ -131,7 +132,7 @@
 .code-report .metric-detail{padding:10px 12px;background:var(--surface-soft);border:1px solid var(--color-border);border-radius:5px;display:flex;justify-content:space-between;gap:12px;font-size:12px}
 .code-report .metric-detail strong{font-family:var(--report-font-mono);font-weight:500;color:var(--color-accent)}
 .code-report .snippet-heading{font-size:12px;color:var(--color-text-muted);margin:14px 0 8px}
-.code-report .code-excerpt{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--surface-soft);border:1px solid var(--color-border);padding:18px;border-radius:7px;font:13px/1.8 var(--report-font-mono);color:var(--color-primary);max-height:310px;overflow:auto}
+.code-report .code-excerpt{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--surface-soft);border:1px solid var(--color-border);padding:18px;border-radius:7px;font:13px/1.8 var(--report-font-mono);color:var(--color-primary);max-height:310px;overflow:auto;overscroll-behavior:contain}
 .code-report .detail-note{font-size:13px;color:var(--color-text-muted);line-height:1.6}
 @container code-report (max-width:1250px){.code-report .graph-note{font-size:10px}
 }

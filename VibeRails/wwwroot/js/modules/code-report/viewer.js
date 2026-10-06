@@ -14,6 +14,8 @@ let graphCache = null;
 const STATUS_LABELS = { modified: 'Modified', added: 'Added', deleted: 'Deleted', renamed: 'Renamed', copied: 'Copied',
     untracked: 'Untracked', conflicted: 'Conflicted', typechange: 'Type changed' };
 const STATUS_CODES = { modified: 'M', added: 'A', deleted: 'D', renamed: 'R', copied: 'C', untracked: '?', conflicted: 'U', typechange: 'T' };
+// Sidebar scrollers that keep the wheel inside the panel; innermost first when nested.
+const SIDEBAR_SCROLLERS = '.code-excerpt,.qr-files,.qr-changes,.details-panel';
 export const reportPath = path => String(path || '').replace(/\\/g, '/').replace(/:\d+(?::\d+)?$/, '').replace(/^\.\//, '');
 const basename = path => reportPath(path).split('/').pop();
 const metricName = name => String(name || '').replaceAll('_', ' ').replace(/^./, c => c.toUpperCase());
@@ -80,6 +82,52 @@ export class CodeReportViewer {
         this.qualityHost.querySelector('.qr-title').textContent = 'Code health';
         this.pagehide = () => this.destroy();
         this.window.addEventListener('pagehide', this.pagehide);
+        // The sidebar's lists keep the wheel (VIBE-71): a short list, or a list at its end, would
+        // otherwise hand the wheel to the page and scroll the map out from under the pointer. A
+        // nested scroller (a captured excerpt inside the details) still scrolls first.
+        this.sidebar = this.root.querySelector('.report-sidebar');
+        this.onWheel = event => {
+            if (event.defaultPrevented || !(event.target instanceof Element)) return;
+            const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? this.window.innerHeight : 1;
+            const delta = event.deltaY * unit;
+            let guarded = false;
+            for (let node = event.target.closest(SIDEBAR_SCROLLERS); node; node = node.parentElement?.closest(SIDEBAR_SCROLLERS)) {
+                guarded = true;
+                if (delta && node.scrollHeight > node.clientHeight + 1
+                    && (delta < 0 ? node.scrollTop > 0 : node.scrollTop + node.clientHeight < node.scrollHeight - 1)) return;
+            }
+            if (guarded) event.preventDefault();
+        };
+        this.sidebar.addEventListener('wheel', this.onWheel, { passive: false });
+        // The map fills the viewport under the page header (VIBE-71): the layout is as tall as what
+        // is left after the chrome above and below it, never under 600px nor over 1400px. The chrome
+        // below is the rest of the container plus whatever visible element follows it, measured
+        // from edges that do not depend on the layout's own height, so the observer settles after
+        // one pass. The stylesheet's clamp is the fallback until this measures (the Board card
+        // ignores the variable).
+        this.fitHeight = () => {
+            if (this.destroyed) return;
+            const layout = this.root.querySelector('.code-layout');
+            const container = this.host.closest('.main-container') || this.document.body;
+            const rect = layout.getBoundingClientRect();
+            if (!rect.height) return;
+            let below = Math.max(0, container.getBoundingClientRect().bottom - rect.bottom);
+            for (let next = container.nextElementSibling; next; next = next.nextElementSibling) {
+                const box = next.getBoundingClientRect();
+                if (!box.height) continue; // A hidden sibling (the app's footer) still reports its margins.
+                const style = this.window.getComputedStyle(next);
+                below += box.height + (parseFloat(style.marginTop) || 0) + (parseFloat(style.marginBottom) || 0);
+            }
+            const top = rect.top + (this.window.scrollY || 0);
+            const height = Math.round(Math.min(1400, Math.max(600, this.window.innerHeight - top - below)));
+            if (Math.abs(height - (this.layoutHeight || 0)) <= 1) return;
+            this.layoutHeight = height;
+            this.root.style.setProperty('--code-report-height', `${height}px`);
+        };
+        this.window.addEventListener('resize', this.fitHeight);
+        this.resizeObserver = typeof this.window.ResizeObserver === 'function' ? new this.window.ResizeObserver(this.fitHeight) : null;
+        this.resizeObserver?.observe(this.document.body);
+        this.fitHeight();
     }
 
     disposeGraph() {
@@ -464,6 +512,9 @@ export class CodeReportViewer {
         this.closeDetails();
         this.document.removeEventListener('keydown', this.onKeydown, true);
         this.window.removeEventListener('pagehide', this.pagehide);
+        this.window.removeEventListener('resize', this.fitHeight);
+        this.resizeObserver?.disconnect();
+        this.sidebar?.removeEventListener('wheel', this.onWheel);
         this.root.remove();
         this.response = null;
     }

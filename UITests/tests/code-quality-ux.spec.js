@@ -520,6 +520,105 @@ test('a fully connected field draws within its link budget and lights every link
     expect(selected.signals).toBe(99);
 });
 
+test('the wheel zooms the map from anywhere in its frame and the sidebar lists keep it; neither scrolls the page (VIBE-71)', async ({ page }) => {
+    // A short viewport so the page can scroll: the bug was the page moving instead of the map zooming.
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await installQualityApi(page);
+    const report = await openDetails(page);
+    const map = page.frameLocator('.code-report iframe');
+    await expect(map.locator('body')).toHaveAttribute('data-startup', 'ready');
+    await report.locator('iframe').evaluate(frame => frame.scrollIntoView({ block: 'start' }));
+    const scrollY = () => page.evaluate(() => window.scrollY);
+    const zoom = () => map.locator('body').evaluate(() => CodeAtlas.fieldStats().zoom);
+    const anchored = await scrollY();
+    expect(anchored).toBeGreaterThan(0);
+    const centre = box => ({ x: box.x + box.width / 2, y: box.y + box.height / 2 });
+    const rail = await map.locator('.canvas-controls').boundingBox();
+    const stage = await map.locator('#stage').boundingBox();
+    const legend = await map.locator('.graph-legend').boundingBox();
+    // The camera rail, the stage beneath it (the former gutter that scrolled the page) and the legend row all zoom.
+    // Wheel down (zoom out): the four-node fixture already fits at the 200% zoom cap.
+    for (const [label, point] of [['rail', centre(rail)], ['gutter', { x: centre(rail).x, y: rail.y + rail.height + 30 }],
+        ['stage edge', { x: stage.x + stage.width - 6, y: stage.y + stage.height - 6 }], ['legend', centre(legend)]]) {
+        const before = await zoom();
+        await page.mouse.move(point.x, point.y);
+        await page.mouse.wheel(0, 200);
+        await expect.poll(zoom, { message: `${label} zooms the map` }).toBeLessThan(before);
+        await page.waitForTimeout(100);
+        expect(await scrollY(), `${label} leaves the page where it was`).toBe(anchored);
+    }
+    expect(Math.round(stage.x + stage.width)).toBe(Math.round(rail.x + rail.width + 12)); // The stage runs under the rail to the frame's edge.
+    // A short Git changes list has nothing to scroll, and still keeps the wheel inside the panel.
+    await report.locator('.qr-list-switch [data-list="changes"]').click();
+    const list = report.locator('.qr-changes');
+    await expect(list.locator('.change-row')).toHaveCount(3);
+    const before = await zoom();
+    await page.mouse.move(...Object.values(centre(await list.boundingBox())));
+    await page.mouse.wheel(0, 200);
+    await page.waitForTimeout(150);
+    expect(await scrollY()).toBe(anchored);
+    expect(await zoom()).toBe(before);
+    // The grade and radar are the escape hatch: the wheel there still scrolls the page (up: it is at its end).
+    await page.mouse.move(...Object.values(centre(await report.locator('.qr-hero').boundingBox())));
+    await page.mouse.wheel(0, -200);
+    await expect.poll(scrollY).toBeLessThan(anchored);
+});
+
+test('the map fills the viewport, the page ends under the card without slack and the field is a globe (VIBE-71)', async ({ page }) => {
+    await page.setViewportSize({ width: 1512, height: 940 });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await installQualityApi(page);
+    await openDetails(page);
+    const map = page.frameLocator('.code-report iframe');
+    await expect(map.locator('body')).toHaveAttribute('data-startup', 'ready');
+    const measure = () => page.evaluate(() => {
+        const layout = document.querySelector('.code-report .code-layout').getBoundingClientRect();
+        const card = document.querySelector('.project-health-quality').getBoundingClientRect();
+        const container = document.querySelector('.main-container').getBoundingClientRect();
+        // What follows the container and is actually shown (the app's footer is hidden app-wide).
+        let after = 0;
+        for (let next = document.querySelector('.main-container').nextElementSibling; next; next = next.nextElementSibling) {
+            const box = next.getBoundingClientRect();
+            if (box.height) after += box.height + parseFloat(getComputedStyle(next).marginTop) + parseFloat(getComputedStyle(next).marginBottom);
+        }
+        return { layoutHeight: layout.height,
+            variable: parseFloat(getComputedStyle(document.querySelector('.code-report')).getPropertyValue('--code-report-height')),
+            slack: container.bottom - card.bottom, after,
+            // What the viewer should have produced: the viewport less the chrome above and below the layout, 600 to 1400.
+            expected: Math.min(1400, Math.max(600, window.innerHeight - (layout.top + window.scrollY) - (container.bottom - layout.bottom) - after)),
+            overflow: document.documentElement.scrollHeight - window.innerHeight };
+    });
+    await expect.poll(async () => (await measure()).variable).toBeGreaterThanOrEqual(600);
+    const check = async () => {
+        const metrics = await measure();
+        expect(Math.abs(metrics.layoutHeight - metrics.variable)).toBeLessThanOrEqual(1);
+        expect(Math.abs(metrics.layoutHeight - metrics.expected)).toBeLessThanOrEqual(2);
+        expect(metrics.after).toBe(0);
+        expect(metrics.slack).toBeLessThanOrEqual(40);
+        // A layout above its 600px floor was sized so the page ends with the viewport: no slack, no scroll.
+        if (metrics.layoutHeight > 602) expect(Math.abs(metrics.overflow)).toBeLessThanOrEqual(2);
+        return metrics;
+    };
+    const short = await check();
+    // A taller window gives the map the room; the fixture's header and Rules card keep the floor in play below that.
+    await page.setViewportSize({ width: 1512, height: 1400 });
+    await expect.poll(async () => (await measure()).layoutHeight).toBeGreaterThan(short.layoutHeight + 150);
+    const tall = await check();
+    expect(tall.layoutHeight).toBeGreaterThan(602);
+    // The field is a globe with a shell, a focal length, nine tones and a rail the camera keeps clear of; turning it deepens the view.
+    const stats = await map.locator('body').evaluate(() => CodeAtlas.fieldStats());
+    expect(stats.focal).toBeGreaterThan(0);
+    expect(stats.radius).toBeGreaterThanOrEqual(260);
+    expect(stats.turn).toBe(0);
+    expect(stats.tones).toBe(9);
+    expect(stats.controls.width).toBeGreaterThan(80);
+    await map.locator('#rotate-mode').click();
+    for (let step = 0; step < 4; step++) await map.locator('#stage').press('ArrowRight');
+    await expect.poll(() => map.locator('body').evaluate(() => CodeAtlas.fieldStats().turn)).toBe(1);
+    expect(await paintedPixels(map, '#field')).toBeGreaterThan(500);
+});
+
 test('a dense field hides its declarations zoomed out and reveals them on hover, zoom, search and filter', async ({ page }, testInfo) => {
     await installQualityApi(page);
     const graph = graphResponse();

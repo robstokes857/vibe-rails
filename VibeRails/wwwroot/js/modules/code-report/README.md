@@ -182,6 +182,29 @@ on two canvases inside `#stage`, with no DOM element per entity:
   `themeFromCss`, and the legend dots use the same tokens the canvas paints with. The bundle's
   own palettes (host-side and in the template; change both) are the fallback for a host that
   declares none and match the app defaults.
+- Globe, tones and the wheel (VIBE-71). The layout is still the flat map in the front view, but
+  `CodeAtlasLayout.layout` now returns its shell on `positions.space` (`radius`, `focal`,
+  `pivot`): every top-level cluster sits on one sphere, near and far by turns, and is itself a
+  ball of its files (a declaration stays within 15 units of its file). `CodeAtlasSpace.turn`
+  eases from 0 at the front to 1 at `TURN_FULL` (.6 rad) on either axis; the perspective divide
+  (`.6` to `1.6`) and the depth fog (`.62` floor at the front, `.45` turned) grow with it, so the
+  approved front view is untouched and depth appears as the field turns. Points are drawn back to
+  front every paint. Each top-level directory has a tone from a nine-hue wheel (`TONE_HUES`,
+  stepping four at a time so neighbours differ); its directory points, file points and links take
+  the tone, with lightness and saturation from the theme's `--node-module`/`--node-file` tokens;
+  classes, functions and data keep their family colours. Points larger than dust (`DUST_RADIUS`)
+  are shaded sphere sprites cached per colour and size; dust stays batched flat fills, and points
+  outside the viewport are skipped. Past 100% zoom labels grow as `zoom^.35` and points as
+  `zoom^.75`, ambient links cap at 1.2px and thin again, and a link with both ends off-screen is
+  not drawn. The canvas runs under the floating camera rail (no gutter): the fit and the labels
+  keep clear of `field.controls`, and one document-level wheel listener zooms the map from
+  anywhere in the frame (a scroller that can still move keeps its wheel; the inspector and search
+  results swallow theirs at their ends), so the frame never hands a wheel to the host page. On the
+  host, `viewer.js` keeps the wheel inside the sidebar lists (`SIDEBAR_SCROLLERS`) when they cannot
+  scroll further, and sizes the layout to the viewport (`--code-report-height`, 600 to 1400px,
+  measured from the chrome above and below it, counting only visible elements after the
+  container) so the page ends under the card. `fieldStats()` adds `focal`, `radius`, `turn`,
+  `tones` and `controls`.
 - `CodeAtlas.locate(id)` and `CodeAtlas.fieldStats()` exist on the frame's own global for
   browser tests and tracing; the host bridge does not expose them.
 

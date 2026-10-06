@@ -98,6 +98,45 @@ test('the QUALITY page is one header row, chips for the rule files and a menu fo
     assert.match(styleCss, /\.main-container:has\(\.vb-page-header\) \{\s*padding-top: 14px;/);
 });
 
+test('the map keeps the wheel, fills the viewport, draws tinted spheres on a globe and ends the page without slack (VIBE-71)', () => {
+    const template = JSON.parse(bundle.match(/^const rendererTemplate = (.*);$/m)[1]);
+    // The canvas fills the map body under the floating camera rail; the frame owns every wheel.
+    assert.doesNotMatch(template, /\.stage,\.stage\.constellation \{ right:104px; \}/, 'no gutter beside the camera rail');
+    assert.match(template, /html,body\{overscroll-behavior:none\}/);
+    assert.match(template, /document\.addEventListener\('wheel', event => \{/);
+    assert.doesNotMatch(template, /\$\('stage'\)\.addEventListener\('wheel'/);
+    assert.match(template, /function consumesWheel\(target, delta\)/);
+    assert.match(template, /field\.controls = rail && rail\.width/);
+    // Tones per top-level directory, shaded sprites, the globe and its camera.
+    assert.match(template, /const TONE_HUES = Object\.freeze\(\[262, 222, 196, 170, 142, 96, 28, 348, 312\]\);/);
+    assert.match(template, /function sphereSprite\(color, radius\)/);
+    assert.match(template, /const DUST_RADIUS = 3\.5;/);
+    assert.match(template, /positions\.space = shell\(items, centerById, index\);/);
+    assert.match(template, /const TURN_FULL = \.6;/);
+    assert.match(template, /root\.CodeAtlasSpace = Object\.freeze\(\{ position, projectPoint, unproject, center, project, turn, TURN_FULL \}\);/);
+    assert.match(template, /\.legend-row \.dot\.module-color,\.legend-row \.dot\.file-color\{background:conic-gradient/);
+    // High-zoom declutter: slow label growth, sub-linear points, culled off-screen links.
+    assert.match(template, /function labelSize\(\) \{ return state\.zoom > 1 \? 12 \* Math\.pow\(state\.zoom, \.35\)/);
+    assert.match(template, /const growth = state\.zoom > 1 \? Math\.pow\(state\.zoom, \.75\) : state\.zoom;/);
+    assert.match(template, /const cull = state\.zoom > 1\.2;/);
+    // Host: the sidebar lists keep the wheel and the layout is sized to the viewport.
+    assert.match(viewerSource, /const SIDEBAR_SCROLLERS = '\.code-excerpt,\.qr-files,\.qr-changes,\.details-panel';/);
+    assert.match(viewerSource, /this\.sidebar\.addEventListener\('wheel', this\.onWheel, \{ passive: false \}\);/);
+    assert.match(viewerSource, /this\.root\.style\.setProperty\('--code-report-height', `\$\{height\}px`\);/);
+    assert.match(viewerSource, /Math\.min\(1400, Math\.max\(600, this\.window\.innerHeight - top - below\)\)/);
+    assert.match(viewerSource, /for \(let next = container\.nextElementSibling; next; next = next\.nextElementSibling\)/, 'what follows the container counts as chrome');
+    assert.match(viewerSource, /if \(!box\.height\) continue;/, 'a hidden sibling (the app footer) contributes nothing, not its margins');
+    assert.match(viewerSource, /this\.resizeObserver\?\.disconnect\(\);/);
+    assert.match(viewerCss, /\.code-report \.details-panel\{[^}]*overscroll-behavior:contain/);
+    assert.match(viewerCss, /\.code-report \.code-excerpt\{[^}]*overscroll-behavior:contain/);
+    assert.match(viewerCss, /\.code-report \.graph-options details\{[^}]*overscroll-behavior:contain/);
+    assert.match(viewerCss, /\.code-report \.code-layout\{[^}]*height:var\(--code-report-height,clamp\(600px,calc\(100dvh - 180px\),880px\)\);max-height:1400px/);
+    // Page: the stacked bottom spacing is one 14px gutter.
+    assert.match(styleCss, /\.project-health-page \{[^}]*padding: 0;\s*\}/);
+    assert.match(styleCss, /\.main-container:has\(\.project-health-page\) \{\s*padding-bottom: 14px;\s*\}/);
+    assert.match(styleCss, /\.project-health-quality-report \{[^}]*margin: 0 18px 14px;\s*\}/);
+});
+
 test('the scan line says when, how many and how long', () => {
     const now = Date.parse('2026-10-05T12:00:00Z');
     const scan = (startedUtc, extra = {}) => describeCodeAnalyzerScan({ success: true, startedUtc, analyzedFileCount: 10, durationMs: 4180, ...extra }, now);
