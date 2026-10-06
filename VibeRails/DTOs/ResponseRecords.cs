@@ -1732,6 +1732,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(List<PythonScriptInfo>))]
     [JsonSerializable(typeof(PythonScriptListResponse))]
     [JsonSerializable(typeof(SetPythonScriptPinRequest))]
+    [JsonSerializable(typeof(PythonScriptRunPinRequirementRequest))]
     [JsonSerializable(typeof(PythonScriptApprovalRequest))]
     [JsonSerializable(typeof(PythonScriptRunRequest))]
     [JsonSerializable(typeof(PythonScriptContentResponse))]
