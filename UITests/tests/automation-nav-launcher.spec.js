@@ -95,9 +95,20 @@ test('customize modal lists every automation and cancels cleanly', async ({ page
     await expect(page.locator('.llm-picker-customization-modal')).toHaveCount(0);
 });
 
-test('a short viewport scrolls the catalog and keeps the footer on screen', async ({ page, context }) => {
-    const prefs = (await (await context.request.get(PREFERENCES)).json()).items;
-    test.skip(prefs.length < 4, 'needs a catalog long enough to overflow a short dialog');
+test('a short viewport scrolls the catalog and keeps the footer on screen', async ({ page }) => {
+    // A fixed catalog, so the layout assertions run on an empty project too. The route
+    // answers only this page's reads; nothing is written to the machine-wide preferences.
+    const items = ['API_SEC', 'open_pr', 'codex_code_review', 'commit-msg-hook.sh',
+        'download-bert-model.ps1', 'download-bert-model.sh', 'post-commit-hook.sh',
+        'pre-commit-hook.sh', 'run.ps1', 'test_script.py']
+        .map((label, order) => ({
+            key: `job:${order + 1}`, kind: 'automation', label, jobId: order + 1,
+            enabled: true, order, status: null
+        }));
+    await page.route(`**${PREFERENCES}`, (route) => {
+        if (route.request().method() !== 'GET') return route.continue();
+        return route.fulfill({ json: { items } });
+    });
 
     // Short enough that the automation list plus the Add section overflows the dialog.
     // The <form> wrapping .modal-body + .modal-footer used to break Bootstrap's
