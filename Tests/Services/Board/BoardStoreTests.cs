@@ -743,6 +743,34 @@ public sealed class BoardStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task BoardOrder_PersistsDefaultAndRejectsInvalidOrStaleListsAtomically()
+    {
+        var first = await _store.CreateBoardAsync(_project, "First", Ct);
+        var second = await _store.CreateBoardAsync(_project, "Second", Ct);
+        var third = await _store.CreateBoardAsync(_project, "Third", Ct);
+        var foreign = await _store.CreateBoardAsync(_otherProject, "Foreign", Ct);
+        var ids = new[] { third.Id, first.Id, second.Id };
+
+        var ordered = await _store.ReorderBoardsAsync(_project, ids, Ct);
+        Assert.Equal(ids, ordered.Select(board => board.Id));
+        Assert.Equal([0, 1, 2], ordered.Select(board => board.Position));
+        var reopened = new BoardStore(_connectionString, _connectionString);
+        Assert.Equal(ids, (await reopened.GetBoardsAsync(_project, Ct)).Select(board => board.Id));
+        Assert.All(await reopened.GetColumnsAsync(_project, Ct), lane => Assert.Equal(third.Id, lane.BoardId));
+
+        foreach (var invalid in new[] { new[] { first.Id, second.Id }, new[] { first.Id, first.Id, third.Id },
+            new[] { first.Id, second.Id, foreign.Id }, new[] { first.Id, second.Id, "missing" } })
+        {
+            await Assert.ThrowsAsync<BoardValidationException>(() => _store.ReorderBoardsAsync(_project, invalid, Ct));
+            Assert.Equal(ids, (await _store.GetBoardsAsync(_project, Ct)).Select(board => board.Id));
+        }
+        var added = await _store.CreateBoardAsync(_project, "Added elsewhere", Ct);
+        await Assert.ThrowsAsync<BoardValidationException>(() => _store.ReorderBoardsAsync(_project, ids, Ct));
+        Assert.Equal(ids.Append(added.Id), (await _store.GetBoardsAsync(_project, Ct)).Select(board => board.Id));
+        Assert.Equal(foreign, Assert.Single(await _store.GetBoardsAsync(_otherProject, Ct)));
+    }
+
+    [Fact]
     public async Task Boards_ScopeLanesAndCards_AndKeysStayPerProject()
     {
         Assert.True(await _store.EnsureDefaultColumnsAsync(_project, Ct));

@@ -1,7 +1,7 @@
 const { test, expect } = process.env.VIBERAILS_SCRIPTS_STATIC === '1'
     ? require('@playwright/test') : require('./fixtures');
 
-async function openScripts(page) {
+async function openScripts(page, { expandSigned = true } = {}) {
     await page.addInitScript(() => {
         sessionStorage.setItem('viberails_tab', 'scripts-fixture');
         sessionStorage.setItem('viberails_terminal_active_tab_id', 'agent');
@@ -15,6 +15,7 @@ async function openScripts(page) {
     });
     const script = { name: 'example.py', path: 'C:/fixture/scripts/example.py',
         status: 'approved', sizeBytes: 123, modifiedUtc: '2026-10-03T01:00:00Z' };
+    const scripts = Array.from({ length: 40 }, (_, i) => i ? { ...script, name: `script-${i}.py` } : script);
     const agent = { tabId: 'agent', sessionId: 'agent-session', cli: 'codex',
         hasActiveSession: true, workingDirectory: 'C:/fixture/scripts' };
     await page.route('**/api/v1/**', route => {
@@ -30,7 +31,7 @@ async function openScripts(page) {
             '/api/v1/jobs/runs/summary': { runs: [] },
             '/api/v1/llm-picker/preferences': { items: [] },
             '/api/v1/python-scripts': { scriptsDirectory: 'C:/fixture/scripts', pinConfigured: true,
-                scripts: Array.from({ length: 40 }, (_, i) => i ? { ...script, name: `script-${i}.py` } : script) },
+                scripts },
             '/api/v1/python-scripts/content': { ...script, name, version: 'one', content: `print("${name}")\n`.repeat(150) },
             '/api/v1/python-scripts/run': { exitCode: 0, durationMs: 25,
                 standardOutput: Array.from({ length: 100 }, (_, i) => `Output line ${i + 1}`).join('\n'), standardError: '' },
@@ -41,6 +42,8 @@ async function openScripts(page) {
     });
     await page.goto('/?view=jobs');
     await expect(page.locator('.python-script-row')).toHaveCount(40);
+    if (expandSigned) await page.locator('[data-signed-scripts] > summary').click();
+    return scripts;
 }
 
 async function expectTerminalFits(page, minimumHeight = 100) {
@@ -71,6 +74,7 @@ test('one selected script fills the editor and Back opens the list to choose ano
     await page.screenshot({ path: testInfo.outputPath('single-script-editor.png') });
     await page.locator('[data-action="go-back"]').click();
     await expect(page.locator('.python-script-row')).toHaveCount(40);
+    await page.locator('[data-signed-scripts] > summary').click();
     await page.locator('.python-script-name').filter({ hasText: /\bscript-1\.py\b/ }).click();
     await expect(page.locator('[data-workbench-name]')).toHaveText('script-1.py');
     await expect.poll(() => page.evaluate(() => window.app.pythonScriptWorkbench.editor.getValue()))
@@ -135,7 +139,20 @@ test('terminal prompt stays in the viewport under the top navigation', async ({ 
 
 test('script actions align and language guidance stays readable on narrow screens', async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await openScripts(page);
+    const scripts = await openScripts(page, { expandSigned: false });
+    const group = page.locator('[data-signed-scripts]');
+    await expect(page.locator('.python-script-row').first()).toBeHidden();
+    await expect(group.locator(':scope > summary')).toHaveText('Signed scripts40');
+    await group.locator(':scope > summary').focus();
+    await page.keyboard.press('Space');
+    await expect(page.locator('.python-script-row').first()).toBeVisible();
+    scripts[0].status = 'modified';
+    await page.locator('[data-python-scripts-action="refresh"]').click();
+    await expect(group.locator('.jobs-count')).toHaveText('39');
+    await expect(group).toHaveJSProperty('open', true);
+    await group.locator(':scope > summary').click();
+    await expect(page.locator('[data-python-script="example.py"]')).toBeVisible();
+    await expect(group.locator('.python-script-row').first()).toBeHidden();
     const actions = page.locator('.python-scripts-heading-actions');
     const buttons = actions.locator('button');
     const boxes = await buttons.evaluateAll(nodes => nodes.map(node => {

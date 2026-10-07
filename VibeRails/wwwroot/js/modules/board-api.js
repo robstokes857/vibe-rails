@@ -60,6 +60,11 @@ async function updateBoardAsync(boardId, patch) {
     return call(`/boards/${enc(boardId)}`, 'PUT', patch);
 }
 
+async function reorderBoardsAsync(orderedIds, extra = {}) {
+    const response = await call('/boards/order', 'PUT', { orderedIds }, extra);
+    return response?.boards || [];
+}
+
 // settings: true adds the board settings form's extras (column-to-lane map, lanes, email suggestion).
 async function getJiraConnectionAsync(boardId, { settings = false } = {}) {
     return call(`/boards/${enc(boardId)}/jira${settings ? '?settings=true' : ''}`);
@@ -394,6 +399,7 @@ export const BoardApi = {
     getBoardsAsync,
     createBoardAsync,
     updateBoardAsync,
+    reorderBoardsAsync,
     getJiraConnectionAsync,
     saveJiraConnectionAsync,
     testJiraConnectionAsync,

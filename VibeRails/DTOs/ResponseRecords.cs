@@ -228,10 +228,12 @@ namespace VibeRails.DTOs
         IReadOnlyList<BoardSyncRejectedEntry>? RejectedEntries = null,
         int Skipped = 0,
         IReadOnlyList<BoardSyncSkippedEntry>? SkippedEntries = null,
-        bool ActivityEnabled = false);
+        bool ActivityEnabled = false,
+        bool IsJiraBoard = false);
 
     public record SetBoardSyncRequest(bool Enabled = false, bool IncludeActivity = false);
     public record UpdateBoardRequest(string? Name = null, string? DisplayPrefix = null);
+    public record ReorderBoardsRequest(List<string>? OrderedIds = null);
     public record UpdateBoardContextRequest(BoardContextSettings? Context = null, int? ExpectedRevision = null);
     public record BoardAutomationOption(long Id, string Name, bool Enabled, string? Setup = null);
     public record BoardLaneRunningAgent(string RunId, string Name, string CardId, string CardLabel, string? SessionId, string? TerminalSessionId);
@@ -1868,6 +1870,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(BoardListResponse))]
     [JsonSerializable(typeof(CreateBoardRequest))]
     [JsonSerializable(typeof(UpdateBoardRequest))]
+    [JsonSerializable(typeof(ReorderBoardsRequest))]
     [JsonSerializable(typeof(UpdateBoardContextRequest))]
     [JsonSerializable(typeof(BoardContextSettingsRecord))]
     [JsonSerializable(typeof(BoardLaneAutomationResponse))]

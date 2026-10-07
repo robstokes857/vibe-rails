@@ -8,7 +8,7 @@ export const JIRA_TOKEN_URL = 'https://id.atlassian.com/manage-profile/security/
 
 export const boardJiraSection = () => `
     <section data-jira-panel>
-        <h6>Jira Cloud <span class="badge text-bg-secondary ms-2" data-jira-status>Not connected</span></h6>
+        <h6 class="mb-0" data-jira-heading>Jira Cloud <span class="badge text-bg-secondary ms-2" data-jira-status>Not connected</span></h6>
         <fieldset class="mt-3" data-jira-fields disabled>
             <p class="small mb-2">Board: <strong data-jira-board></strong></p>
             <p class="text-muted small">Connect creates a separate Jira board for imported issues. Existing Jira cards move there with their comments, files and sessions. Use the board picker to switch between Jira and your local work. Jira wins on title, description, lane, type, priority, tags and story points. A local edit to those fields is replaced on the next pull. Assignee, flagged, blocked, comments, sessions and commits stay here.</p>
@@ -20,8 +20,8 @@ export const boardJiraSection = () => `
             </div>
             <div class="mb-3">
                 <label class="form-label" for="jira-token">API token</label>
-                <input class="form-control" id="jira-token" data-jira-token type="password" autocomplete="new-password"
-                    placeholder="Paste an API token">
+                <input class="form-control" id="jira-token" data-jira-token type="text" autocomplete="off"
+                    spellcheck="false" autocapitalize="none" autocorrect="off" placeholder="Paste an API token">
                 <small class="form-text text-muted"><a href="${JIRA_TOKEN_URL}" target="_blank" rel="noopener noreferrer" data-jira-token-link>Create a token <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a>. Saved on this machine with your other API keys. It is never written to the board and never shown again.</small>
             </div>
             <div class="mb-3">
@@ -97,6 +97,8 @@ export class BoardJiraPanel {
     constructor(app, root, board, onChanged) {
         this.app = app;
         this.root = root;
+        // The settings dialog moves the heading into its header after mounting the panel.
+        this._status = root.querySelector('[data-jira-status]');
         this._board = board.id;
         this._boardName = board.name;
         this._onChanged = onChanged;
@@ -175,8 +177,9 @@ export class BoardJiraPanel {
         this._check('[data-jira-skip-done]', connection.skipOldDone ?? true);
         const token = this.root.querySelector('[data-jira-token]');
         if (token) {
+            // The dots only indicate a saved token; never submit a masking value as a replacement.
             token.value = '';
-            token.placeholder = connection.hasToken ? 'Token saved — leave blank to keep it' : 'Paste an API token';
+            token.placeholder = connection.hasToken ? '••••••••••••' : 'Paste an API token';
         }
         const help = this.root.querySelector('[data-jira-link-help]');
         if (help) {
@@ -184,7 +187,7 @@ export class BoardJiraPanel {
                 ? `This board pulls a saved JQL filter on ${connection.siteUrl || 'Jira'}: ${connection.jql}. Paste a board link to use the board's own issues and columns instead.`
                 : 'Open the board in Jira and copy the address bar.';
         }
-        const badge = this.root.querySelector('[data-jira-status]');
+        const badge = this._status;
         if (badge) {
             const status = connection.authStatus || 'none';
             badge.textContent = status === 'saved' ? (connection.jiraBoardName ? 'Connected' : 'Token saved')

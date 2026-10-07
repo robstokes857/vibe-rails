@@ -28,6 +28,8 @@ public partial interface IBoardStore
     Task<BoardRecord?> RenameBoardAsync(string projectPath, string boardId, string? name, string? displayPrefix, CancellationToken cancellationToken = default);
     /// <summary>Deletes the board with its lanes and cards. Refuses the project's last board.</summary>
     Task<BoardDeleteResult?> DeleteBoardAsync(string projectPath, string boardId, CancellationToken cancellationToken = default);
+    /// <summary>Atomically orders every board in the project. The first becomes the default board.</summary>
+    Task<IReadOnlyList<BoardRecord>> ReorderBoardsAsync(string projectPath, IReadOnlyList<string> orderedIds, CancellationToken cancellationToken = default);
 
     /// <summary>Seeds the default board and its lanes when the project has none. True when it did.</summary>
     Task<bool> EnsureDefaultColumnsAsync(string projectPath, CancellationToken cancellationToken = default);

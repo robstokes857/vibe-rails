@@ -84,6 +84,8 @@ test('Opening a script lands in the workbench: editor over an agent terminal in 
     const section = page.locator('[data-python-scripts-root]');
     await expect(section).toBeVisible({ timeout: 15_000 });
     const firstRow = section.locator('.python-script-row').first();
+    await expect(firstRow).toBeAttached({ timeout: 10_000 });
+    if (!await firstRow.isVisible()) await section.locator('[data-signed-scripts] > summary').click();
     await expect(firstRow).toBeVisible({ timeout: 10_000 });
     const scriptName = (await firstRow.getAttribute('data-python-script')) || '';
     await firstRow.locator('.python-script-name').click();

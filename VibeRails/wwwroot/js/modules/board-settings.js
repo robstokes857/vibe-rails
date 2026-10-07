@@ -2,7 +2,7 @@ import { escapeHtml } from './utils.js';
 import { BoardApi } from './board-api.js';
 
 export const boardSettingsNavigation = () => `
-    <nav class="nav nav-pills gap-1 mb-3" aria-label="Board settings" role="tablist">
+    <nav class="nav nav-pills board-settings-nav gap-2 mb-3" aria-label="Board settings" role="tablist">
         ${[['general', 'General'], ['jira', 'Jira Cloud'], ['context', 'Agent context'], ['history', 'History']].map(([id, label]) => `
             <button type="button" class="nav-link${id === 'general' ? ' active' : ''}" role="tab"
                 id="board-settings-tab-${id}" aria-controls="board-settings-${id}" aria-selected="${id === 'general'}"
@@ -12,7 +12,8 @@ export const boardSettingsNavigation = () => `
 /** Switch sections without replacing their DOM, so connection and context drafts survive. */
 export function mountBoardSettingsNavigation(editor, onSelect = () => {}) {
     const abort = new AbortController();
-    const tabs = [...editor.querySelectorAll('[data-board-settings-tab]')];
+    let tabs = [...editor.querySelectorAll('[data-board-settings-tab]')];
+    let combinedJira = false;
     const select = tab => {
         for (const item of tabs) {
             const active = item === tab;
@@ -24,7 +25,7 @@ export function mountBoardSettingsNavigation(editor, onSelect = () => {}) {
         for (const panel of editor.querySelectorAll('[data-board-settings-panel]')) {
             panel.hidden = panel.dataset.boardSettingsPanel !== id;
         }
-        onSelect(id);
+        onSelect(id, id === 'jira' || (combinedJira && id === 'general'));
     };
     for (const tab of tabs) {
         tab.addEventListener('click', () => select(tab), { signal: abort.signal });
@@ -39,7 +40,32 @@ export function mountBoardSettingsNavigation(editor, onSelect = () => {}) {
             target.focus();
         }, { signal: abort.signal });
     }
-    return () => abort.abort();
+    return {
+        dispose: () => abort.abort(),
+        combineJira() {
+            if (combinedJira || abort.signal.aborted || editor.isConnected === false) return;
+            combinedJira = true;
+            const generalTab = tabs.find(tab => tab.dataset.boardSettingsTab === 'general');
+            const jiraTab = tabs.find(tab => tab.dataset.boardSettingsTab === 'jira');
+            const activeTab = tabs.find(tab => tab.classList.contains('active')) || generalTab;
+            const focused = document.activeElement;
+            const generalPanel = editor.querySelector('[data-board-settings-panel="general"]');
+            const jiraPanel = editor.querySelector('[data-board-settings-panel="jira"]');
+            const restoreFocus = focused === jiraTab ? generalTab : jiraPanel.contains(focused) ? focused : null;
+            // Move the existing controls so a delayed status response cannot erase either draft.
+            jiraPanel.removeAttribute('data-board-settings-panel');
+            jiraPanel.removeAttribute('role');
+            jiraPanel.removeAttribute('aria-labelledby');
+            jiraPanel.setAttribute('aria-label', 'Jira Cloud');
+            jiraPanel.hidden = false;
+            jiraPanel.classList.add('board-settings-jira-combined');
+            generalPanel.append(jiraPanel);
+            jiraTab.remove();
+            tabs = tabs.filter(tab => tab !== jiraTab);
+            select(activeTab === jiraTab ? generalTab : activeTab);
+            restoreFocus?.focus({ preventScroll: true });
+        }
+    };
 }
 
 const TYPES = [
@@ -63,13 +89,13 @@ export const laneAutomationSection = () => `
     </section>`;
 
 export const boardSyncSection = () => `
-    <section class="mt-3 border-top pt-3" data-board-sync>
+    <section class="mt-3 border-top pt-3" data-board-sync hidden>
         <h6>viberails.ai</h6>
         <p class="board-editor-muted">Save the board name above to use it as the hosted name. The hosted Boards list also shows this repository and computer.</p>
         <div data-board-sync-content>Loading sync status…</div>
     </section>`;
 
-export function mountBoardSync(app, element, boardId) {
+export function mountBoardSync(app, element, boardId, onStatus = () => {}) {
     if (!element) return () => {};
     const abort = new AbortController();
     const content = element.querySelector('[data-board-sync-content]');
@@ -77,6 +103,12 @@ export function mountBoardSync(app, element, boardId) {
     let disposed = false;
     const alive = () => !disposed && element.isConnected !== false;
     const render = status => {
+        onStatus(status);
+        element.hidden = Boolean(status.isJiraBoard);
+        if (status.isJiraBoard) {
+            content.innerHTML = '';
+            return;
+        }
         content.innerHTML = `
             <label class="form-check mb-2">
                 <input class="form-check-input" type="checkbox" data-board-sync-enabled ${status.enabled ? 'checked' : ''}>
@@ -94,7 +126,10 @@ export function mountBoardSync(app, element, boardId) {
             const status = await BoardApi.getBoardSyncAsync(boardId, { signal: abort.signal });
             if (alive()) render(status);
         } catch (error) {
-            if (alive() && error?.name !== 'AbortError') content.textContent = error?.message || 'Sync status could not be loaded.';
+            if (alive() && error?.name !== 'AbortError') {
+                element.hidden = false;
+                content.textContent = error?.message || 'Sync status could not be loaded.';
+            }
         }
     };
     const change = async event => {

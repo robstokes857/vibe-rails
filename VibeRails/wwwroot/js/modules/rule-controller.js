@@ -498,6 +498,9 @@ export class RuleController {
         this.app.bindAction(root, '[data-action="manage-rules"]', () => {
             this.app.agentController?.openRuleManager?.();
         });
+        this.app.bindAction(root, '[data-action="add-rule-file"]', () => {
+            this.app.navigate('agent-create', {});
+        });
 
         root.querySelectorAll('[data-action="launch-health-fix"]').forEach(button => {
             button.addEventListener('click', () => this.launchProjectHealthFix(button.dataset.fixScope));
@@ -509,12 +512,6 @@ export class RuleController {
                 if (details) this.setHealthDetailsExpanded(button.dataset.healthTarget, details.hidden);
             });
         });
-        // Rule files are chips: one opens the manager at that file, the last starts a new rule file.
-        root.querySelector('[data-rule-files]')?.addEventListener('click', event => {
-            const chip = event.target.closest('[data-rule-file]');
-            if (chip) { this.openRuleFile(chip.dataset.ruleFile); return; }
-            if (event.target.closest('[data-action="add-rule-file"]')) this.app.navigate('agent-create', {});
-        });
         this.app.bindAction(root, '[data-action="toggle-code-analyzer-log"]', () => this.toggleCodeAnalyzerLog());
         this.app.bindAction(root, '[data-action="toggle-map-coverage"]', () => this.codeReportViewer?.toggleDiagnostics());
     }
@@ -525,18 +522,6 @@ export class RuleController {
         details.hidden = !expanded;
         this.query(`[data-action="toggle-health-details"][data-health-target="${target}"]`)?.setAttribute('aria-expanded', String(expanded));
         this.query(`[data-health-card="${target}"]`)?.classList?.toggle('is-expanded', expanded);
-    }
-
-    // The manager opens on the chosen rule file; the tree and the inline editor follow the selection.
-    openRuleFile(path) {
-        const agents = this.app.agentController;
-        if (!agents?.openRuleManager) return;
-        if (path) agents.selectedAgentPath = path;
-        agents.openRuleManager();
-        const root = document.getElementById('modal-container')?.querySelector('[data-rule-manager-modal]');
-        if (!root) return;
-        agents.updateAgentFileSelection?.(root.querySelector('[data-agent-file-tree]'));
-        agents.renderInlineRuleEditor?.(root);
     }
 
     toggleCodeAnalyzerLog() {
@@ -557,27 +542,6 @@ export class RuleController {
         this.setText('[data-rule-file-count]', agents.length);
         this.setText('[data-rule-count]', rules.length);
         this.setText('[data-stop-rule-count]', stopCount);
-        this.renderRuleFileChips(agents);
-    }
-
-    // One chip per rule file: its repository-relative path, its rule count and its strictest level.
-    renderRuleFileChips(agents) {
-        const host = this.query('[data-rule-files]');
-        if (!host || typeof host.innerHTML !== 'string') return;
-        const esc = value => this.app.escapeHtml ? this.app.escapeHtml(String(value ?? '')) : String(value ?? '');
-        const chips = agents.map((agent, index) => {
-            const fileRules = Array.isArray(agent?.rules) ? agent.rules : [];
-            const levels = new Set(fileRules.map(rule => String(rule?.enforcement || '').toUpperCase()));
-            const strictest = ['STOP', 'COMMIT', 'WARN'].find(level => levels.has(level)) || '';
-            const path = String(agent?.path || '');
-            const label = this.app.getAgentFileViewModel?.(agent, index)?.relativePath
-                || path.replace(/\\/g, '/').split('/').pop() || 'vc.rules.md';
-            return `<button type="button" class="project-health-rule-file" data-rule-file="${esc(path)}" title="${esc(path || label)}">`
-                + `<b>${esc(label)}</b><small>${fileRules.length} ${fileRules.length === 1 ? 'rule' : 'rules'}</small>`
-                + (strictest ? `<em data-level="${strictest}">${strictest}</em>` : '') + '</button>';
-        });
-        chips.push('<button type="button" class="project-health-rule-file project-health-rule-file-add" data-action="add-rule-file">+ New rule file</button>');
-        host.innerHTML = chips.join('');
     }
 
     setRulesCardStatus({ tone = 'neutral', icon = 'fa-circle-info', title = '', message = '' } = {}) {

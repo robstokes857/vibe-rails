@@ -27,7 +27,7 @@ function rule(css, selector) {
     return match[0];
 }
 
-test('the controller loads boards first, remembers the selection, and scopes lanes and cards to it', () => {
+test('the controller loads boards first, records the selection, and scopes lanes and cards to it', () => {
     const source = readFileSync(controllerPath, 'utf8');
     // Keep the remembered Board view selection in its shared helper.
     const selection = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/board-selection.js'), 'utf8');

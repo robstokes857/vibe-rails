@@ -248,12 +248,15 @@ async function openApp(page) {
     await expect(page.locator('.jobs-view[data-view="jobs"]')).toBeVisible({ timeout: 10_000 });
 }
 
-async function openJobs(page) {
+async function openJobs(page, { expandDisabled = true } = {}) {
     if (!await page.locator('.jobs-view[data-view="jobs"]').isVisible()) {
         await page.locator('.app-subnav-link[data-view="jobs"]:visible').click();
     }
     await expect(page.locator('.jobs-view[data-view="jobs"]')).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('[data-jobs-list]')).toContainText('Environment review');
+    if (expandDisabled && !await page.locator('[data-job-action="edit"][data-job-id="17"]').isVisible()) {
+        await page.locator('[data-disabled-jobs] > summary').click();
+    }
 }
 
 async function openWorkers(page) {
@@ -265,6 +268,10 @@ async function openWorkers(page) {
 }
 
 async function openAutomationEditorForExistingJob(page) {
+    await expect(page.locator('[data-job-action="edit"][data-job-id="17"]')).toBeAttached();
+    if (!await page.locator('[data-job-action="edit"][data-job-id="17"]').isVisible()) {
+        await page.locator('[data-disabled-jobs] > summary').click();
+    }
     await page.locator('[data-job-action="edit"][data-job-id="17"]').click();
     await expect(page.locator('[data-job-form]')).toBeVisible();
     await expect(page.locator('#env-initial-message')).toBeVisible();
@@ -704,12 +711,21 @@ test.describe('Jobs Worker / Environments integration', () => {
     });
 
     test('the enable toggle is a real switch that reflects the job state', async ({ page }) => {
-        await installStatefulApi(page);
+        const { state } = await installStatefulApi(page);
         await openApp(page);
-        await openJobs(page);
+        await openJobs(page, { expandDisabled: false });
 
         // Fixture job 17 is disabled → switch off.
         const toggle = page.locator('[data-job-action="toggle"][data-job-id="17"]');
+        const group = page.locator('[data-disabled-jobs]');
+        await expect(toggle).toBeHidden();
+        await expect(group.locator(':scope > summary')).toHaveText('Disabled automations1');
+        await group.locator(':scope > summary').focus();
+        await page.keyboard.press('Enter');
+        await expect(toggle).toBeVisible();
+        state.jobs[0].prompt = 'Updated while the disabled group is open.';
+        await page.evaluate(() => window.app.jobController.refreshJobs({ quiet: true }));
+        await expect(group).toHaveJSProperty('open', true);
         await expect(toggle).toHaveClass(/job-switch/);
         await expect(toggle).toHaveAttribute('role', 'switch');
         await expect(toggle).toHaveAttribute('aria-checked', 'false');
@@ -717,6 +733,8 @@ test.describe('Jobs Worker / Environments integration', () => {
 
         await toggle.click();
         const enabledToggle = page.locator('[data-job-action="toggle"][data-job-id="17"]');
+        await expect(enabledToggle).toBeVisible();
+        await expect(group).toHaveCount(0);
         await expect(enabledToggle).toHaveAttribute('aria-checked', 'true');
         await expect(enabledToggle.locator('.job-switch-text')).toHaveText('Enabled');
     });

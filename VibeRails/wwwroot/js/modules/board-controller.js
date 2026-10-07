@@ -33,6 +33,7 @@ import { previousWorkHtml } from './board-previous-work.js';
 import { escapeHtml, confirmDialog, parseLlmSelection, getCliBrand, canonicalLlmSelection } from './utils.js';
 import { mountLlmPicker, setLlmPickerValue, getEnabledLlmItems } from './pickers/llm-picker.js';
 import { BoardApi } from './board-api.js';
+import { BoardPicker, openBoardOrderManager } from './board-picker.js';
 import { BoardLaneAgents } from './board-lane-agents.js';
 import { BOARD_SELECTION_STORAGE_KEY } from './board-selection.js';
 import { boardContextSection, laneAutomationSection, mountBoardContext, mountLaneAutomation, boardSettingsNavigation, mountBoardSettingsNavigation, boardSyncSection, mountBoardSync } from './board-settings.js';
@@ -140,6 +141,9 @@ export class BoardController {
         if (!content) return;
 
         this.destroySortables();
+        this.boardPicker?.dispose();
+        this.boardPicker = null;
+        this.boardOrderDispose?.();
         content.innerHTML = '';
         const fragment = this.app.cloneTemplate('board-template');
         this.root = fragment.querySelector('[data-view="board"]');
@@ -157,7 +161,7 @@ export class BoardController {
     }
 
     // Opens the editor over the card's own board, so closing it leaves the user on the card's lane.
-    // An unreadable card (deleted since the link was drawn) still loads the remembered board.
+    // An unreadable card (deleted since the link was drawn) loads the default board.
     async openCardFromNavigation(cardId) {
         const root = this.root;
         let card = null;
@@ -180,6 +184,10 @@ export class BoardController {
     }
 
     unload() {
+        this.boardPicker?.dispose();
+        this.boardPicker = null;
+        this.boardOrderDispose?.();
+        this.boardOrderDispose = null;
         this.boardSearch?.dispose();
         this.boardSearch = null;
         this.localCardDispose?.();
@@ -475,14 +483,6 @@ export class BoardController {
     // Board selection
     // ============================================
 
-    readStoredBoardId() {
-        try {
-            return localStorage.getItem(BOARD_STORAGE_KEY) || null;
-        } catch {
-            return null;
-        }
-    }
-
     persistBoardSelection() {
         try {
             if (this.state.boardId) localStorage.setItem(BOARD_STORAGE_KEY, this.state.boardId);
@@ -491,11 +491,10 @@ export class BoardController {
         }
     }
 
-    // The remembered board when it still exists, else the project's first board.
+    // The top board in the saved order is the default on every Board view load.
     pickBoardId(boards) {
-        const stored = this.readStoredBoardId();
         const sorted = boards.slice().sort((a, b) => a.position - b.position);
-        return (stored && sorted.find(board => board.id === stored)?.id) || sorted[0]?.id || null;
+        return sorted[0]?.id || null;
     }
 
     boardById(id) {
@@ -695,15 +694,22 @@ export class BoardController {
     renderBoardPicker() {
         const select = this.query('[data-board-select]');
         if (!select) return;
-        select.innerHTML = this.state.boards
-            .slice()
-            .sort((a, b) => a.position - b.position)
-            .map(board => `<option value="${escapeHtml(board.id)}">${escapeHtml(board.name)}</option>`)
-            .join('');
-        select.value = this.state.boardId || '';
-        select.title = select.selectedOptions[0]?.textContent || 'Switch board';
+        if (this.boardPicker?.select !== select) {
+            this.boardPicker?.dispose();
+            this.boardPicker = new BoardPicker(select, () => this.manageBoards());
+        }
+        this.boardPicker.update(this.state.boards, this.state.boardId);
         const settings = this.query('[data-board-action="edit-board"]');
         if (settings) settings.title = `Settings for ${this.currentBoard()?.name || 'this board'}`;
+    }
+
+    manageBoards() {
+        this.boardOrderDispose?.();
+        this.boardOrderDispose = openBoardOrderManager(this.app, boards => {
+            this.state.boards = boards;
+            this.renderBoardPicker();
+            void this.refresh();
+        });
     }
 
     renderToolbar() {
@@ -803,12 +809,12 @@ export class BoardController {
                     <div class="board-card-top">
                         <span class="board-key">${card.flagged ? '<i class="fa-solid fa-flag board-attention-flag" title="Needs your attention" aria-hidden="true"></i> ' : ''}${card.agentMade ? `<i class="fa-solid fa-robot board-agent-mark" title="${escapeHtml(agentMadeSummary(card))}" aria-label="${escapeHtml(agentMadeSummary(card))}"></i> ` : ''}${escapeHtml(cardDisplayId(card))}</span>
                         <span class="board-card-top-right">
-                            ${this.jiraBadge(card)}
                             <span class="board-type-chip" data-type="${escapeHtml(type.value)}"
                                 title="${escapeHtml(type.label)}">${escapeHtml(type.label)}</span>
                             <span class="board-priority-chip" data-priority="${escapeHtml(card.priority)}">${escapeHtml(card.priority)}</span>
                         </span>
                     </div>
+                    ${card.jiraIssueKey ? `<div class="board-card-origin">${this.jiraBadge(card)}</div>` : ''}
                     <h3 class="board-card-title">${escapeHtml(card.title)}</h3>
                     ${card.hasWaitingAutomation ? this.waitingAutomationIndicator() : ''}
                     ${excerpt ? `<p class="board-card-excerpt">${escapeHtml(excerpt)}</p>` : ''}
@@ -2524,7 +2530,6 @@ export class BoardController {
         if (!editor) return;
         if (board) {
             const disposeContext = mountBoardContext(this.app, editor.querySelector('[data-board-context]'), board.id);
-            const disposeSync = mountBoardSync(this.app, editor.querySelector('[data-board-sync]'), board.id);
             const disposeHistory = mountHistory(editor.querySelector('[data-board-history-view]'), board.id);
             const jira = new BoardJiraPanel(this.app, editor.querySelector('[data-jira-panel]'), board, (action, destination) => {
                 if (this.state.boardId !== board.id && this.state.boardId !== destination) return;
@@ -2541,11 +2546,20 @@ export class BoardController {
                     }
                 });
             });
-            const disposeNavigation = mountBoardSettingsNavigation(editor, tab => {
-                if (tab === 'jira') void jira.activate();
+            const jiraHeading = editor.querySelector('[data-jira-heading]');
+            const header = container.querySelector('.modal-header');
+            header.classList.add('board-settings-header');
+            header.insertBefore(jiraHeading, header.querySelector('[data-action="close-modal"]'));
+            jiraHeading.hidden = true;
+            const navigation = mountBoardSettingsNavigation(editor, (tab, jiraVisible) => {
+                jiraHeading.hidden = !jiraVisible;
+                if (jiraVisible) void jira.activate();
                 if (tab === 'history') editor.querySelector('[data-board-history-view]').open = true;
             });
-            this.boardSettingsDispose = () => { disposeNavigation(); disposeSync(); jira.dispose(); disposeContext(); disposeHistory(); };
+            const disposeSync = mountBoardSync(this.app, editor.querySelector('[data-board-sync]'), board.id, status => {
+                if (status.isJiraBoard) navigation.combineJira();
+            });
+            this.boardSettingsDispose = () => { navigation.dispose(); disposeSync(); jira.dispose(); disposeContext(); disposeHistory(); };
         }
         editor.querySelector('[data-board-save-board]')?.addEventListener('click', () => this.saveBoard(editor, board));
         editor.querySelector('[data-board-delete-board]')?.addEventListener('click', () => this.deleteBoard(board));

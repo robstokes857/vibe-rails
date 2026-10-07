@@ -25,6 +25,8 @@ Candidate file names come from snapshot JSON metadata only. Keep recall reads pr
 behind `IBoardStore`; historical description logs are not search documents.
 
 `GetLocalBoardsAsync` lists existing local board identities without seeding projects.
+`ReorderBoardsAsync` validates the complete project board set and updates existing `Boards.Position`
+values atomically. The first position is the default board; reordering does not move cards or lanes.
 `FindLocalCardAsync` resolves a live card by row ID or full stored permanent key across projects,
 never by display ID or short-key alias. These support explicit MCP targeting (VIBE-28); writes
 still use the resolved owning project and existing transactional checks. No schema change.

@@ -1,5 +1,10 @@
 # Board sync (VB-51)
 
+Boards with a saved Jira connection use Jira for remote access. Board settings hide the
+viberails.ai sync section, and manual publication/sync and automatic sync exclude these boards,
+including paused or expired Jira connections. Existing sync settings, ledgers and hosted copies
+are retained; there is no schema change or cleanup. Jira pulls remain available.
+
 ## VIBE-26: remote Start work
 
 The hosted card's **Start work** button saves edits and asks an open desktop for that project

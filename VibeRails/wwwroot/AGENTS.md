@@ -180,7 +180,7 @@ card activity rise to the top of their flag group. Explicit drag positions remai
 within that group. This ordering is persisted, including comments, notes, session links/renames,
 attachments and commit links, rather than being a browser-only sort.
 
-The compact **Vibe Board** header groups the title, name-only **board picker**, `+` for a new
+The compact **Vibe Board** header groups the title, searchable Tom Select **board picker**, `+` for a new
 board (default lanes; opens at once), and a settings cog for rename/delete. New card sits on the right alongside board statistics (card count, flagged count, blocked
 count). The flagged count is cards with `flagged=true` in the scope the remaining-points total
 used: the active filters, cards paging has not loaded, and open lanes only; completed lanes are
@@ -189,9 +189,13 @@ rewrites it when a card is flagged or unflagged. Stored story points stay on the
 not shown. Search and filters share a second
 row on the same surface. Lane headers retain their card counts. There are no lane-bottom entry
 fields: **New card** opens the editor, whose Lane selector chooses the destination.
-The settings modal has General, Jira Cloud, Agent context and History tabs (VIBE-103), preserving
-drafts when switching sections. Jira controls live only in the **Jira Cloud** section (`board-jira.js`) for the
-explicit board being edited. Since VIBE-102 it asks for a Jira board link, an API token (with a
+The settings modal has General, Jira Cloud, Agent context and History tabs (VIBE-103) for local
+boards. Jira boards combine the board settings and Jira controls in **General**, followed by
+Agent context and History. The sync status's `isJiraBoard` determines this layout; move existing
+controls without replacing drafts or interrupting the selected section when status arrives.
+Each tab has a thin button border, with a filled active tab. Jira controls (`board-jira.js`) target
+the explicit board being edited. The Jira Cloud connection status sits at the right of the modal
+header while the Jira controls' tab is selected. Since VIBE-102 it asks for a Jira board link, an API token (with a
 "Create a token" link to Atlassian) and the account email, filled in from the saved value, then
 the server's git `user.email` suggestion (`GET …/jira?settings=true`), then
 `app.appSettings.remoteAccountEmail`. **Connect** saves and then reads the board (name, issue
@@ -203,12 +207,24 @@ Save board. Closing/replacing the modal clears the token and ignores late respon
 follows the returned dedicated Jira board ID, and a pull refreshes cards. There are no Jira toolbar actions.
 Imported cards derive a Jira logo/key badge from `jiraIssueKey`; the origin filter includes Jira and
 Human-made excludes imports. Assignee filter choices deduplicate canonical CLI identities. New boards must be saved first.
+On lane cards the Jira badge has its own row, with long issue keys wrapping inside the card.
+Board settings hide viberails.ai sync for boards whose sync status reports `isJiraBoard`;
+the section stays hidden until status loads. Jira connection and pull controls remain available.
+Saved Jira tokens show a fixed dot placeholder; the input value stays empty until a replacement is typed.
+Token entry uses a text input with autocomplete, spellcheck, autocapitalization and autocorrection off.
+The header wraps whole labels so the display ID, work type and priority stay readable in narrow lanes.
+Lane cards have a 10rem minimum height and keep activity and assignment at the bottom; longer content grows the card.
 The settings modal also includes **Agent context**: a default message plus default-only,
 type-only, or combined messages for each card type. `board-settings.js` owns these asynchronous,
 abortable editors and revision-checked saves. Context is sent for both Start work and Chat with
 agent. **Save context** is independent of **Save name**.
-The selection persists in `localStorage` (`viberails.board.selected.v1`), every
-list call carries the board id. Refresh generations discard stale catalog, lane, card, and error
+The picker footer's **Manage boards** opens an up/down order editor. **Save order** persists the
+complete project-scoped order through `PUT /api/v1/board/boards/order`; the first board opens
+on each Board view load, regardless of the last selection. Explicit card navigation still opens
+that card's board, and refreshes keep the current selection. `board-picker.js` owns the Tom Select
+lifecycle and order dialog; unchanged polling snapshots preserve open searches. The current
+selection is still recorded in `localStorage` (`viberails.board.selected.v1`) for compatibility,
+and every list call carries the board id. Refresh generations discard stale catalog, lane, card, and error
 responses; switching boards clears the previous lanes/cards until the new board loads. The card
 editor's Lane field offers lanes on the current board. Create a new card to work on another board;
 cross-board transfers are rejected. Card keys stay per project.
@@ -680,6 +696,11 @@ its editor. Tests: `Tests/wwwroot/js/terminal-board-card-link.test.mjs`, `Termin
 
 ## Automation workflow editor
 
+The Automation list shows enabled workflows first, with disabled workflows behind a collapsed
+**Disabled automations** caret and count. The Scripts list similarly keeps signed (`approved`)
+scripts behind **Signed scripts**, leaving unsigned or changed scripts visible. Both native
+`details` groups start closed and preserve their open state across list refreshes.
+
 `jobs-controller.js` owns an ordered workflow made of repository Script actions and at most one
 Worker action. Script actions select `.py`, `.ps1`, or `.sh`, an explicit matching runtime,
 optional repository-relative working directory, optional per-action timeout, and zero or more
@@ -804,6 +825,8 @@ started.
 ## Rule management forms
 
 `agent-controller.js` owns the Manage rules modal, full editor, and new-file wizard.
+Project health keeps **View/Edit Rules** and **New rule file** in the Rules card header.
+The card shows aggregate counts; browse individual rule files in the manager, not a badge strip.
 The manager shows searchable directory paths and scope. Add uses the same form in the
 manager and full editor; the editor has explicit per-rule Edit/Remove actions. Back from
 creation/details restores the selected manager through the parent route's

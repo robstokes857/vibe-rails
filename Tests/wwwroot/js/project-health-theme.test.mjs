@@ -77,7 +77,7 @@ test('the report viewer and the grade read the page tones, open with Git changes
     assert.match(viewerCss, /\.code-report\.code-report-compact \.qr-metrics-section/);
 });
 
-test('the QUALITY page is one header row, chips for the rule files and a menu for the log and coverage', () => {
+test('the QUALITY page keeps rule actions in the header and a menu for the log and coverage', () => {
     const template = indexHtml.match(/<template id="agents-template">([\s\S]*?)<\/template>/)[1];
     const header = template.match(/<header class="vb-page-header project-health-header">([\s\S]*?)<\/header>/)[1];
     assert.match(header, /<h1 class="vb-page-title">Rules and code quality<\/h1>/);
@@ -87,8 +87,10 @@ test('the QUALITY page is one header row, chips for the rule files and a menu fo
     const rules = template.match(/<section class="card project-health-card project-health-rules[\s\S]*?<\/section>\s*<section class="card project-health-card project-health-quality/)[0];
     const rulesHeader = rules.match(/<header class="project-health-card-header">([\s\S]*?)<\/header>/)[1];
     assert.match(rulesHeader, /data-action="run-hook-preview"[\s\S]*?data-action="manage-rules"/, 'Check again sits in the card header');
+    assert.match(rulesHeader, /data-action="manage-rules"[\s\S]*?View\/Edit Rules/);
+    assert.match(rulesHeader, /data-action="add-rule-file"[\s\S]*?New rule file/);
     assert.match(rules, /data-rules-card-status[\s\S]*?data-action="toggle-health-details"/, 'the Details toggle sits in the verdict row');
-    assert.match(rules, /<div class="project-health-rule-files" data-rule-files/);
+    assert.doesNotMatch(rules, /data-rule-files|project-health-rule-file/);
     assert.match(rules, /visually-hidden">\s*<span class="rules-check-running"[\s\S]*?data-vca-console-state/, 'the console state badge is kept for the console, never shown');
     const quality = template.slice(template.indexOf('project-health-quality vca-console-card'));
     assert.match(quality, /data-code-analyzer-meta/);
@@ -150,33 +152,18 @@ test('the scan line says when, how many and how long', () => {
     assert.equal(describeCodeAnalyzerScan(null), '');
 });
 
-test('rule files render as chips with their relative path, rule count and strictest level', () => {
-    const host = { innerHTML: '' };
+test('the rules summary counts files, rules and STOP enforcement without a file list', () => {
     const agents = [
         { path: 'C:/repo/AGENTS.md', rules: [{ enforcement: 'STOP' }, { enforcement: 'WARN' }] },
         { path: 'C:/repo/Services/Mcp/AGENTS.md', rules: [{ enforcement: 'commit' }] },
         { path: 'C:/repo/wwwroot/AGENTS.md', rules: [] }
     ];
-    const controller = new RuleController({
-        data: { agents },
-        escapeHtml: value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]),
-        getAgentFileViewModel: agent => ({ relativePath: agent.path.replace('C:/repo/', '') })
-    });
-    const nodes = new Map([['[data-rule-files]', host],
+    const controller = new RuleController({ data: { agents } });
+    const nodes = new Map([
         ['[data-rule-file-count]', {}], ['[data-rule-count]', {}], ['[data-stop-rule-count]', {}]]);
     controller.viewRoot = { querySelector: selector => nodes.get(selector) || null };
     controller.renderRuleInventorySummary();
     assert.equal(nodes.get('[data-rule-file-count]').textContent, 3);
     assert.equal(nodes.get('[data-stop-rule-count]').textContent, 1);
-    const chips = [...host.innerHTML.matchAll(/<button type="button" class="project-health-rule-file[^"]*"[^>]*>([\s\S]*?)<\/button>/g)].map(match => match[1]);
-    assert.equal(chips.length, 4, 'three files and the add chip');
-    assert.match(chips[0], /<b>AGENTS\.md<\/b><small>2 rules<\/small><em data-level="STOP">STOP<\/em>/);
-    assert.match(chips[1], /<b>Services\/Mcp\/AGENTS\.md<\/b><small>1 rule<\/small><em data-level="COMMIT">COMMIT<\/em>/);
-    assert.match(chips[2], /<b>wwwroot\/AGENTS\.md<\/b><small>0 rules<\/small>$/);
-    assert.equal(chips[3], '+ New rule file');
-    assert.match(host.innerHTML, /data-rule-file="C:\/repo\/Services\/Mcp\/AGENTS\.md"/);
-    // A root without the chip host (the Git Guard views) still renders the counts.
-    controller.viewRoot = { querySelector: selector => selector === '[data-rule-files]' ? null : nodes.get(selector) || null };
-    controller.renderRuleInventorySummary();
     assert.equal(nodes.get('[data-rule-count]').textContent, 3);
 });

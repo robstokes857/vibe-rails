@@ -226,9 +226,13 @@ test('Quality combines rule management, validation, Git Guard, and Code quality'
   await expect(page.getByRole('heading', { name: 'Rules', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Code quality', exact: true })).toBeVisible();
   await expect(page.locator('#vb-terminal-panel')).toHaveCount(0);
+  await expect(page.locator('[data-rule-files]')).toHaveCount(0);
+  const newRuleFile = page.locator('[data-health-card="rules"] .project-health-card-actions')
+    .getByRole('button', { name: 'New rule file', exact: true });
+  await expect(newRuleFile).toBeVisible();
 
   // Rule CRUD is one deliberate drill-in instead of another top-level page.
-  await page.getByRole('button', { name: 'Manage rules' }).click();
+  await page.getByRole('button', { name: 'View/Edit Rules' }).click();
   await expect(page.locator('[data-rule-manager-modal]')).toBeVisible();
 
   const container = page.locator('[data-agent-file-tree]');
@@ -278,14 +282,16 @@ test('Quality combines rule management, validation, Git Guard, and Code quality'
     await expect(controls.getByRole('button', { name: `Fix ${scope} with:`, exact: true })).toBeVisible();
     await expect(controls.locator('[role="combobox"]')).toBeVisible();
   }
+  await newRuleFile.click();
+  await expect(page.getByRole('heading', { name: 'Create New Rule File' })).toBeVisible();
 });
 
 test('rule-file workflows use policy terminology', async ({ page }) => {
   await page.goto('/');
 
   await page.locator('.app-subnav-link[data-action="navigate-home"]:visible').click();
-  await page.getByRole('button', { name: 'Manage rules' }).click();
-  await page.getByRole('button', { name: 'New rule file' }).click();
+  await page.getByRole('button', { name: 'View/Edit Rules' }).click();
+  await page.locator('[data-rule-manager-modal]').getByRole('button', { name: 'New rule file' }).click();
 
   await expect(page.getByRole('heading', { name: 'Create New Rule File' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Create New Agent' })).toHaveCount(0);
@@ -328,8 +334,8 @@ test('wizard Back preserves parameter drafts and creates one vc.rules.md path', 
   const expectedPath = `${directory}/vc.rules.md`;
   const csvDraft = 'WIP,fix later, temporary';
   await page.goto('/?view=agents');
-  await page.getByRole('button', { name: 'Manage rules' }).click();
-  await page.getByRole('button', { name: 'New rule file' }).click();
+  await page.getByRole('button', { name: 'View/Edit Rules' }).click();
+  await page.locator('[data-rule-manager-modal]').getByRole('button', { name: 'New rule file' }).click();
   const wizard = page.locator('#wizard-content');
   await wizard.getByLabel('Directory for vc.rules.md').fill(directory);
   await wizard.locator('#wizard-next-btn').click();
@@ -368,7 +374,7 @@ test('wizard Back preserves parameter drafts and creates one vc.rules.md path', 
 
 test('full editor edits and removes the rule directly from its row', async ({ page }) => {
   await page.goto('/?view=agents');
-  await page.getByRole('button', { name: 'Manage rules' }).click();
+  await page.getByRole('button', { name: 'View/Edit Rules' }).click();
   await openFirstRuleFileInManager(page);
   await page.locator('[data-agent-rule-editor]').getByRole('button', { name: 'Full editor' }).click();
 
@@ -395,7 +401,7 @@ test('full editor edits and removes the rule directly from its row', async ({ pa
 
 test('full editor keeps individual file cards visible above Rules with compact actions', async ({ page }) => {
   await page.goto('/?view=agents');
-  await page.getByRole('button', { name: 'Manage rules' }).click();
+  await page.getByRole('button', { name: 'View/Edit Rules' }).click();
   await openFirstRuleFileInManager(page);
   await page.locator('[data-agent-rule-editor]').getByRole('button', { name: 'Full editor' }).click();
   const editor = page.locator('[data-view="agent-edit"]');
@@ -414,7 +420,7 @@ test('full editor keeps individual file cards visible above Rules with compact a
 
 test('display-name actions sit beside the name and save only a friendly searchable label', async ({ page }) => {
   await page.goto('/?view=agents');
-  await page.getByRole('button', { name: 'Manage rules' }).click();
+  await page.getByRole('button', { name: 'View/Edit Rules' }).click();
   await openFirstRuleFileInManager(page);
   const detail = page.locator('[data-agent-rule-editor]');
   await expect(detail.locator('.rules-editor-name-row').getByRole('button', { name: 'Edit display name', exact: true })).toBeVisible();
@@ -446,7 +452,7 @@ test('display-name actions sit beside the name and save only a friendly searchab
 
 test('empty full editor explains how to add a first rule without dead edit actions', async ({ page }) => {
   await page.goto('/?view=agents');
-  await page.getByRole('button', { name: 'Manage rules' }).click();
+  await page.getByRole('button', { name: 'View/Edit Rules' }).click();
   await page.getByRole('button', { name: 'Open vc.rules.md', exact: true }).click();
   await page.locator('[data-agent-rule-editor]').getByRole('button', { name: 'Full editor' }).click();
   const editor = page.locator('[data-view="agent-edit"]');

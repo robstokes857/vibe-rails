@@ -5,6 +5,99 @@ const { test, expect } = process.env.VIBERAILS_BOARD_STATIC === '1'
 const IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=';
 const DESCRIPTION = 'Repro screenshot\n![Screenshot.png](attachment:att_image)\n<img src=x onerror="window.__injected=true">';
 
+for (const width of [1440, 390]) {
+    test(`Jira boards combine General and Jira settings at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        await openBoard(page);
+        let isJiraBoard = true;
+        await page.route('**/api/v1/board/boards/brd_main/sync', route => route.fulfill({ json: {
+            isJiraBoard, enabled: !isJiraBoard, configured: true
+        } }));
+        await page.route('**/api/v1/board/boards/brd_main/jira?settings=true', route => route.fulfill({ json: {
+            boardId: 'brd_main', siteUrl: 'https://example.atlassian.net', hasToken: true,
+            authStatus: 'saved', boardLink: 'https://example.atlassian.net/jira/software/projects/TEST/boards/1',
+            jiraBoardName: 'TEST', email: 'user@example.com', enabled: true, columns: [], lanes: []
+        } }));
+        await page.getByRole('button', { name: 'Board settings', exact: true }).click();
+        await expect(page.locator('[data-board-sync-content]')).toBeEmpty();
+        await expect(page.locator('[data-board-sync]')).toBeHidden();
+        await expect(page.getByLabel('Sync this board with viberails.ai')).toHaveCount(0);
+        await expect(page.getByRole('tab', { name: 'Jira Cloud', exact: true })).toHaveCount(0);
+        await expect(page.getByRole('tab')).toHaveText(['General', 'Agent context', 'History']);
+        await expect(page.getByRole('tab', { name: 'General', exact: true })).toHaveAttribute('aria-selected', 'true');
+        await expect(page.getByLabel('Board name', { exact: true })).toBeVisible();
+        await expect(page.getByLabel('Jira board link')).toHaveValue('https://example.atlassian.net/jira/software/projects/TEST/boards/1');
+        await expect(page.getByLabel('API token', { exact: true })).toHaveAttribute('placeholder', /^•+$/);
+        await expect(page.getByLabel('API token', { exact: true })).toHaveValue('');
+        await expect(page.getByRole('button', { name: 'Pull now', exact: true })).toBeEnabled();
+        await expect(page.locator('.modal-header [data-jira-status]')).toHaveText('Connected');
+        await page.getByLabel('Board name', { exact: true }).fill('Keep this draft');
+        await page.getByLabel('API token', { exact: true }).fill('unsaved-test-token');
+        await page.getByRole('tab', { name: 'General', exact: true }).focus();
+        await page.keyboard.press('ArrowRight');
+        await expect(page.getByRole('tab', { name: 'Agent context', exact: true })).toBeFocused();
+        await expect(page.getByLabel('Jira board link')).toBeHidden();
+        await expect(page.locator('.modal-header [data-jira-heading]')).toBeHidden();
+        await page.keyboard.press('Home');
+        await expect(page.getByRole('tab', { name: 'General', exact: true })).toBeFocused();
+        await expect(page.getByLabel('Board name', { exact: true })).toHaveValue('Keep this draft');
+        await expect(page.getByLabel('API token', { exact: true })).toHaveValue('unsaved-test-token');
+        await expect(page.locator('.modal-header [data-jira-heading]')).toBeVisible();
+        await page.getByLabel('API token', { exact: true }).fill('');
+        await page.getByRole('tab', { name: 'General', exact: true }).scrollIntoViewIfNeeded();
+        await page.screenshot({ path: testInfo.outputPath(`board-jira-combined-${width}.png`) });
+        await page.evaluate(() => window.app.closeModal());
+
+        // An ordinary board still offers both the sync choice and its manual action.
+        isJiraBoard = false;
+        await page.getByRole('button', { name: 'Board settings', exact: true }).click();
+        await expect(page.getByLabel('Sync this board with viberails.ai')).toBeChecked();
+        await expect(page.getByRole('button', { name: 'Sync now', exact: true })).toBeVisible();
+        await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Agent context', 'History']);
+    });
+}
+
+for (const selected of ['Jira Cloud', 'Agent context', 'Jira input']) {
+    test(`delayed Jira board status preserves drafts and the selected ${selected} section`, async ({ page }) => {
+        await openBoard(page);
+        let releaseStatus;
+        const statusReady = new Promise(resolve => { releaseStatus = resolve; });
+        await page.route('**/api/v1/board/boards/brd_main/sync', async route => {
+            await statusReady;
+            await route.fulfill({ json: { isJiraBoard: true } });
+        });
+        await page.route('**/api/v1/board/boards/brd_main/jira?settings=true', route => route.fulfill({ json: {
+            boardId: 'brd_main', authStatus: 'none', columns: [], lanes: []
+        } }));
+        await page.getByRole('button', { name: 'Board settings', exact: true }).click();
+        await page.getByLabel('Board name', { exact: true }).fill('Draft before status');
+        await page.getByRole('tab', { name: 'Jira Cloud', exact: true }).click();
+        await page.getByLabel('Jira board link').fill('https://example.atlassian.net/boards/42');
+        await page.getByLabel('API token', { exact: true }).fill('draft-token');
+        const token = page.getByLabel('API token', { exact: true });
+        if (selected === 'Jira input') {
+            await token.focus();
+            await token.evaluate(input => input.setSelectionRange(2, 5));
+        } else {
+            await page.getByRole('tab', { name: selected, exact: true }).click();
+        }
+        releaseStatus();
+        await expect(page.getByRole('tab', { name: 'Jira Cloud', exact: true })).toHaveCount(0);
+        const active = selected === 'Agent context' ? selected : 'General';
+        await expect(page.getByRole('tab', { name: active, exact: true })).toHaveAttribute('aria-selected', 'true');
+        if (selected === 'Jira input') {
+            await expect(token).toBeFocused();
+            expect(await token.evaluate(input => [input.selectionStart, input.selectionEnd])).toEqual([2, 5]);
+        } else {
+            await expect(page.getByRole('tab', { name: active, exact: true })).toBeFocused();
+        }
+        await page.getByRole('tab', { name: 'General', exact: true }).click();
+        await expect(page.getByLabel('Board name', { exact: true })).toHaveValue('Draft before status');
+        await expect(page.getByLabel('Jira board link')).toHaveValue('https://example.atlassian.net/boards/42');
+        await expect(page.getByLabel('API token', { exact: true })).toHaveValue('draft-token');
+    });
+}
+
 test('Connect selects its dedicated Jira board and preserves other settings drafts', async ({ page }) => {
     await openBoard(page);
     let connected = false;
@@ -998,6 +1091,7 @@ for (const width of [1440, 900, 390]) {
         const requests = await openBoard(page, { columns });
         await expect(page.getByRole('heading', { name: 'Vibe Board', exact: true })).toBeVisible();
         await expect(page.locator('[data-board-select] option:checked')).toHaveText('Main');
+        await expect(page.locator('.board-picker-control .ts-control')).toBeVisible();
         await expect(page.locator('[data-quick-add]')).toHaveCount(0);
         await expect(page.locator('.board-lane input')).toHaveCount(0);
         await expect(page.locator('[data-board-stats]')).toContainText('1 card');
@@ -1006,7 +1100,7 @@ for (const width of [1440, 900, 390]) {
         if (width >= 900) expect(bounds.height).toBeLessThan(120);
         expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
         expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
-        for (const control of await tools.locator('button:visible, input, select').all()) {
+        for (const control of await tools.locator('button:visible, input:visible, select:visible, .ts-control:visible').all()) {
             const box = await control.boundingBox();
             expect(box.x).toBeGreaterThanOrEqual(0);
             expect(box.x + box.width).toBeLessThanOrEqual(width);

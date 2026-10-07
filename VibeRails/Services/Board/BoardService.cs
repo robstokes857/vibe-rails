@@ -15,6 +15,8 @@ public partial interface IBoardService
     Task<BoardSummaryResponse> CreateBoardAsync(string projectPath, CreateBoardRequest request, CancellationToken cancellationToken = default);
     Task<BoardSummaryResponse?> UpdateBoardAsync(string projectPath, string boardId, UpdateBoardRequest request, CancellationToken cancellationToken = default);
     Task<DeleteBoardResponse?> DeleteBoardAsync(string projectPath, string boardId, CancellationToken cancellationToken = default);
+    /// <summary>Saves the project's complete board order, with the default first.</summary>
+    Task<BoardListResponse> ReorderBoardsAsync(string projectPath, IReadOnlyList<string> orderedIds, CancellationToken cancellationToken = default);
     /// <summary>
     /// Explicit History for the settings view, newest first: up to 101 rows from <paramref name="offset"/>
     /// so the caller can page by 100 and tell whether more exist. Null when the board, or the card on that
@@ -118,6 +120,14 @@ public sealed partial class BoardService(
         if (starterWorkflows is not null) await starterWorkflows.RecoverAsync(projectPath, cancellationToken);
         var columns = await store.GetColumnsAsync(projectPath, cancellationToken, board.Id);
         return ToDto(board, columns, new Dictionary<string, int>());
+    }
+
+    public async Task<BoardListResponse> ReorderBoardsAsync(string projectPath, IReadOnlyList<string> orderedIds, CancellationToken cancellationToken = default)
+    {
+        var boards = await store.ReorderBoardsAsync(projectPath, orderedIds, cancellationToken);
+        var columns = await store.GetAllColumnsAsync(projectPath, cancellationToken);
+        var counts = await store.CountCardsByBoardAsync(projectPath, cancellationToken);
+        return new BoardListResponse(boards.Select(board => ToDto(board, columns, counts)).ToList());
     }
 
     public async Task<BoardSummaryResponse?> UpdateBoardAsync(string projectPath, string boardId, UpdateBoardRequest request, CancellationToken cancellationToken = default)

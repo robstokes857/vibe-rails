@@ -105,6 +105,10 @@ public static partial class BoardRoutes
             RunAsync(async () => Results.Ok(await board.CreateBoardAsync(Project(), request, cancellationToken))))
             .WithName("CreateBoard");
 
+        app.MapPut("/api/v1/board/boards/order", (IBoardService board, ReorderBoardsRequest request, CancellationToken cancellationToken) =>
+            RunAsync(async () => Results.Ok(await board.ReorderBoardsAsync(Project(), request.OrderedIds ?? [], cancellationToken))))
+            .WithName("ReorderBoards");
+
         app.MapPut("/api/v1/board/boards/{boardId}", (IBoardService board, string boardId, UpdateBoardRequest request, CancellationToken cancellationToken) =>
             RunAsync(async () => OkOrNotFound(await board.UpdateBoardAsync(Project(), boardId, request, cancellationToken), "Board")))
             .WithName("UpdateBoard");
@@ -404,7 +408,7 @@ public static partial class BoardRoutes
             ? null
             : new BoardSyncStatusResponse(status.BoardId, status.Published, status.Enabled, status.RemoteBoardId, status.RemoteUrl,
                 status.Cursor, status.Unsent, status.LastSyncUtc, status.LastError, status.Configured, status.Rejected, status.RejectedEntries,
-                status.Skipped, status.SkippedEntries, status.ActivityEnabled);
+                status.Skipped, status.SkippedEntries, status.ActivityEnabled, status.IsJiraBoard);
 
     private static JiraConnectionResponse ToResponse(BoardJiraConnectionRecord? connection, string boardId) =>
         connection is null

@@ -657,6 +657,13 @@ its lane. Card numbers are unique **per project**, including across its boards. 
 display key, not a globally unique identifier; generated `card_*` IDs identify rows globally.
 Board, lane, attachment, comment and note IDs use type prefixes and 12 hexadecimal characters.
 
+The Board picker's **Manage boards** saves a complete project-scoped permutation through
+`PUT /api/v1/board/boards/order`. `IBoardStore.ReorderBoardsAsync` checks membership and writes
+the existing `Boards.Position` values in one transaction; missing, duplicate or foreign IDs fail
+without partial writes. No schema change is needed. The first board in this order is the default
+on Board view entry and for APIs with an omitted board. The Tom Select picker keeps the selected
+board during refreshes, and explicit card links still open the card's own board.
+
 The key's prefix belongs to the project (VB-32, 2026-09-22). `BoardProjectKeys` (`board/11`)
 stores one prefix per project, assigned inside the transaction that numbers the project's first
 card: the initials of the project folder's name (split on `-`, `_`, `.`, spaces and camelCase),

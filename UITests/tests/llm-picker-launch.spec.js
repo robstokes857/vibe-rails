@@ -34,7 +34,7 @@ async function openPicker(page, { nested = false, workingDirectory = null } = {}
         return route.fulfill({ json: payloads[path] || {} });
     });
     await page.goto('/?view=agents', { waitUntil: 'domcontentloaded' });
-    await expect(page.locator('[data-vca-quality-brief]')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('heading', { name: 'Rules and code quality', exact: true })).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('#loading-overlay')).toHaveClass(/\bd-none\b/);
     await page.waitForFunction(() => Boolean(window.app?.llmPickerController?.catalog));
     await page.evaluate(async ({ nested, workingDirectory }) => {

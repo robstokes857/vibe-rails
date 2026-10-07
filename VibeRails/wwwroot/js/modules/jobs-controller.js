@@ -346,7 +346,10 @@ export class JobController {
         // aren't wiped by an identical re-render.
         if (html === this._lastJobsListHtml) return;
         this._lastJobsListHtml = html;
+        const disabledOpen = this.root.querySelector('[data-disabled-jobs]')?.open === true;
         target.innerHTML = html;
+        const disabledGroup = this.root.querySelector('[data-disabled-jobs]');
+        if (disabledGroup) disabledGroup.open = disabledOpen;
     }
 
     renderJobsListHtml() {
@@ -360,7 +363,7 @@ export class JobController {
                 </div>`;
         }
 
-        return this.jobs.map(job => {
+        const renderJob = job => {
             const triggers = (job.triggers || []).map(trigger => `<span class="jobs-trigger-chip">${this.escape(this.formatTrigger(trigger))}</span>`).join('');
             const actions = this.normalizeJobActions(job);
             const workerAction = actions.find(action => action.kind === JOB_ACTION.WORKER);
@@ -421,7 +424,17 @@ export class JobController {
                         </details>
                     </div>
                 </article>`;
-        }).join('');
+        };
+        const enabled = this.jobs.filter(job => job.enabled === true);
+        const disabled = this.jobs.filter(job => job.enabled !== true);
+        return enabled.map(renderJob).join('') + (disabled.length ? `
+            <details class="jobs-collapsible-list" data-disabled-jobs>
+                <summary>
+                    <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+                    <span>Disabled automations</span><span class="jobs-count">${disabled.length}</span>
+                </summary>
+                <div>${disabled.map(renderJob).join('')}</div>
+            </details>` : '');
     }
 
     // One control carries both jobs: it reads the state (green ON / red OFF) and flips it.

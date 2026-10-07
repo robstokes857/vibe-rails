@@ -41,6 +41,26 @@ function finishLists(requests, board, suffix = '') {
     }
 }
 
+test('opening Board uses the saved top board instead of the previous selection', async () => {
+    const h = harness();
+    h.controller.state.boardId = 'A';
+    const loading = h.controller.refresh({ restoreSelection: true });
+    h.requests[0].resolve({ boards: [{ id: 'A', position: 1 }, { id: 'B', position: 0 }] });
+    await tick();
+    finishLists(h.requests.slice(-2), 'B');
+    await loading;
+    assert.equal(h.controller.state.boardId, 'B');
+
+    // Switching during the visit still takes priority over the default on refresh.
+    const switching = h.controller.switchBoard('A');
+    const catalog = h.requests.at(-1);
+    catalog.resolve({ boards: [{ id: 'A', position: 1 }, { id: 'B', position: 0 }] });
+    await tick();
+    finishLists(h.requests.slice(-2), 'A');
+    await switching;
+    assert.equal(h.controller.state.boardId, 'A');
+});
+
 test('a slower previous board cannot overwrite the selection or its actionable lanes', async () => {
     const h = harness();
     const first = h.controller.refresh();

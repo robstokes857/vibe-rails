@@ -484,15 +484,31 @@ function renderCliRowHtml(cliKey, data, escape) {
 }
 
 export function enhanceLlmSelectWithTomSelect(selectEl, options = {}) {
+    const { cliKey = 'cli' } = options;
+    return enhanceSelectWithTomSelect(selectEl, {
+        placeholder: 'Select LLM...',
+        searchPlaceholder: 'Search LLMs...',
+        emptyMessage: 'No matching LLMs.',
+        ...options,
+        render: {
+            option: (data, escape) => renderCliRowHtml(cliKey, data, escape),
+            item: (data, escape) => renderCliRowHtml(cliKey, data, escape)
+        }
+    });
+}
+
+/** Shared searchable select with a viewport-bounded menu and an optional management footer. */
+export function enhanceSelectWithTomSelect(selectEl, options = {}) {
     if (!selectEl || typeof window.TomSelect !== 'function') return null;
 
     const {
-        placeholder = 'Select LLM...',
-        cliKey = 'cli',
+        placeholder = 'Select...',
         searchable = true,
-        searchPlaceholder = 'Search LLMs...',
+        searchPlaceholder = 'Search...',
         onCustomize = null,
-        emptyMessage = 'No matching LLMs.'
+        customizeLabel = 'View/Edit all LLMs',
+        emptyMessage = 'No matching options.',
+        render = {}
     } = options;
 
     if (selectEl.tomselect) {
@@ -508,8 +524,7 @@ export function enhanceLlmSelectWithTomSelect(selectEl, options = {}) {
         // (#vb-terminal-panel, sandbox cards) can't clip it.
         dropdownParent: 'body',
         render: {
-            option: (data, escape) => renderCliRowHtml(cliKey, data, escape),
-            item: (data, escape) => renderCliRowHtml(cliKey, data, escape),
+            ...render,
             no_results: (_data, escape) =>
                 `<div class="no-results llm-picker-empty-state">${escape(emptyMessage)}</div>`
         }
@@ -522,7 +537,7 @@ export function enhanceLlmSelectWithTomSelect(selectEl, options = {}) {
     const ts = new window.TomSelect(selectEl, config);
 
     if (typeof onCustomize === 'function') {
-        mountLlmPickerFooter(ts, selectEl, onCustomize);
+        mountLlmPickerFooter(ts, selectEl, onCustomize, customizeLabel);
     }
 
     if (searchable) {
@@ -572,7 +587,7 @@ export function enhanceLlmSelectWithTomSelect(selectEl, options = {}) {
 // the vendored Tom Select v2.4.3 bundle (wwwroot/assets/tom-select/). When bumping that
 // bundle, re-run UITests/tests/llm-picker-preferences.spec.js — the footer Tab hand-off and
 // modal focus-restore tests fail fast if these internals moved.
-function mountLlmPickerFooter(ts, selectEl, onCustomize) {
+function mountLlmPickerFooter(ts, selectEl, onCustomize, label) {
     if (!ts?.dropdown) return;
 
     const footer = document.createElement('div');
@@ -580,8 +595,8 @@ function mountLlmPickerFooter(ts, selectEl, onCustomize) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'llm-picker-customize-button';
-    button.setAttribute('aria-label', 'View/Edit all LLMs');
-    button.innerHTML = '<i class="fa-solid fa-gear" aria-hidden="true"></i><span>View/Edit all LLMs</span>';
+    button.setAttribute('aria-label', label);
+    button.innerHTML = `<i class="fa-solid fa-gear" aria-hidden="true"></i><span>${escapeHtml(label)}</span>`;
     footer.appendChild(button);
     ts.dropdown.appendChild(footer);
 

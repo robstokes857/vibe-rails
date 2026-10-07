@@ -103,7 +103,8 @@ test('opening Board Settings loads the settings view, shows the board and never 
     assert.equal(fields.get('[data-jira-link]').value, SAVED_LINK);
     assert.equal(fields.get('[data-jira-email]').value, 'rob@example.com');
     assert.equal(fields.get('[data-jira-token]').value, '');
-    assert.match(fields.get('[data-jira-token]').placeholder, /Token saved/);
+    assert.match(fields.get('[data-jira-token]').placeholder, /^•+$/);
+    assert.equal(panel._body().apiToken, '');
     assert.equal(fields.get('[data-jira-status]').textContent, 'Connected');
     assert.equal(fields.get('[data-jira-skip-done]').checked, true);
     assert.match(fields.get('[data-jira-summary]').innerHTML, /SCRUM board/);

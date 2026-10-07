@@ -88,6 +88,54 @@ public sealed partial class BoardSyncServiceTests : IDisposable
         Assert.Equal(other.Id, Assert.Single(client.Entries).CardId);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task JiraBoardsCannotEnableOrRunHostedSync(bool dedicated)
+    {
+        var card = await Card();
+        await store.SaveJiraConnectionAsync(new("jira_test", root, card.BoardId,
+            "https://example.atlassian.net", "user@example.com", true, BoardJiraAuthStatus.Saved,
+            null, "project = TEST", true, null, null, null, null, null, DedicatedBoard: dedicated), Ct);
+
+        await Assert.ThrowsAsync<BoardValidationException>(() => service.SetPublishedAsync(root, card.BoardId, true, Ct));
+        await Assert.ThrowsAsync<BoardValidationException>(() => service.SyncNowAsync(root, card.BoardId, Ct));
+
+        var status = (await service.GetStatusAsync(root, card.BoardId, Ct))!;
+        Assert.True(status.IsJiraBoard);
+        Assert.False(status.Enabled);
+        Assert.False(status.ActivityEnabled);
+        Assert.False((await store.GetBoardAsync(root, card.BoardId, Ct))!.SyncEnabled);
+        Assert.Null(await store.GetSyncLinkAsync(root, card.BoardId, Ct));
+        Assert.Equal(0, client.Calls);
+    }
+
+    [Fact]
+    public async Task PreviouslyPublishedJiraBoardStopsSyncingWithoutDeletingSavedState()
+    {
+        var card = await Card();
+        await service.SetPublishedAsync(root, card.BoardId, true, Ct);
+        var link = await store.GetSyncLinkAsync(root, card.BoardId, Ct);
+        await store.SaveJiraConnectionAsync(new("jira_test", root, card.BoardId,
+            "https://example.atlassian.net", "user@example.com", false, BoardJiraAuthStatus.Expired,
+            null, "project = TEST", false, "Token expired", null, null, null, null, DedicatedBoard: true), Ct);
+        await store.UpdateCardAsync(root, card.Id, new(Title: "Retained local change"), Ct);
+        var calls = client.Calls;
+
+        await service.SyncDueAsync(Ct);
+        await Assert.ThrowsAsync<BoardValidationException>(() => service.SyncNowAsync(root, card.BoardId, Ct));
+
+        var status = (await service.GetStatusAsync(root, card.BoardId, Ct))!;
+        Assert.True(status.IsJiraBoard);
+        Assert.True(status.Published);
+        Assert.False(status.Enabled);
+        Assert.False(status.ActivityEnabled);
+        Assert.Equal(calls, client.Calls);
+        Assert.Equal(link, await store.GetSyncLinkAsync(root, card.BoardId, Ct));
+        Assert.True((await store.GetBoardAsync(root, card.BoardId, Ct))!.SyncEnabled);
+        Assert.Equal("Retained local change", (await store.FindCardAsync(root, card.Id, Ct))!.Title);
+    }
+
     [Fact]
     public async Task LostAcknowledgementRetriesSameEntryWithoutDuplicatingIt()
     {

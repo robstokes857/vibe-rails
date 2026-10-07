@@ -35,6 +35,27 @@ test('failed publication reloads the saved sync choice', async () => {
     dispose();
 });
 
+test('closing settings suppresses a late board-status callback', async () => {
+    let finish;
+    let signal;
+    const content = { innerHTML: 'loading' };
+    const element = {
+        isConnected: true,
+        querySelector: () => content,
+        addEventListener() {}, removeEventListener() {}
+    };
+    BoardApi.attach({ apiCall: (_path, _method, _body, options) => {
+        signal = options.signal;
+        return new Promise(resolve => { finish = resolve; });
+    } });
+    const dispose = mountBoardSync({}, element, 'closed-board', () => assert.fail('must not update a closed editor'));
+    dispose();
+    assert.equal(signal.aborted, true);
+    finish({ isJiraBoard: true });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(content.innerHTML, 'loading');
+});
+
 for (const mount of [mountBoardContext, mountLaneAutomation]) {
     test(`${mount.name} aborts on close and ignores a late response`, async () => {
         let finish;

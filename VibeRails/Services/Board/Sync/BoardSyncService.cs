@@ -24,7 +24,8 @@ public sealed record BoardSyncStatus(
     IReadOnlyList<BoardSyncRejectedEntry>? RejectedEntries = null,
     int Skipped = 0,
     IReadOnlyList<BoardSyncSkippedEntry>? SkippedEntries = null,
-    bool ActivityEnabled = false);
+    bool ActivityEnabled = false,
+    bool IsJiraBoard = false);
 
 public interface IBoardSyncService
 {
@@ -84,6 +85,8 @@ public sealed class BoardSyncService(
         var board = await store.GetBoardAsync(projectPath, boardId, cancellationToken);
         if (board is null)
             return null;
+        if (enabled && await IsJiraBoardAsync(projectPath, boardId, cancellationToken))
+            throw new BoardValidationException("Jira boards use Jira for remote access and cannot sync with viberails.ai.");
         board = await store.SetBoardSyncEnabledAsync(projectPath, boardId, enabled, cancellationToken);
         if (board is null) return null;
         if (!enabled)
@@ -163,6 +166,8 @@ public sealed class BoardSyncService(
         var board = await store.GetBoardAsync(projectPath, boardId, cancellationToken);
         if (board is null)
             return null;
+        if (await IsJiraBoardAsync(projectPath, boardId, cancellationToken))
+            throw new BoardValidationException("Jira boards use Jira for remote access and cannot sync with viberails.ai.");
         if (!board.SyncEnabled)
             throw new BoardValidationException("Enable viberails.ai sync for this board first.");
         var link = await EnsurePublishedAsync(board, cancellationToken);
@@ -186,6 +191,7 @@ public sealed class BoardSyncService(
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
+                if (await IsJiraBoardAsync(board.ProjectPath, board.Id, cancellationToken)) continue;
                 var link = await EnsurePublishedAsync(board, cancellationToken);
                 if (link is not null) await SyncLinkAsync(link, cancellationToken);
             }
@@ -760,6 +766,7 @@ public sealed class BoardSyncService(
     private async Task<BoardSyncStatus> StatusAsync(BoardRecord board, BoardSyncLinkRecord? link, CancellationToken cancellationToken)
     {
         var boardId = board.Id;
+        var isJiraBoard = await IsJiraBoardAsync(board.ProjectPath, boardId, cancellationToken);
         var unsent = link is null ? 0 : await store.CountUnsentLogEntriesAsync(boardId, cancellationToken);
         var rejected = link is null ? 0 : await store.CountRejectedLogEntriesAsync(boardId, cancellationToken);
         var rejectedEntries = rejected == 0 ? [] : await store.GetRejectedLogEntriesAsync(boardId, 50, cancellationToken);
@@ -768,7 +775,7 @@ public sealed class BoardSyncService(
         return new BoardSyncStatus(
             boardId,
             Published: link is not null,
-            Enabled: board.SyncEnabled,
+            Enabled: board.SyncEnabled && !isJiraBoard,
             link?.RemoteBoardId,
             BoardSyncEndpoint.BoardPage(ParserConfigs.GetFrontendUrl(), link?.RemoteBoardId),
             link?.Cursor ?? 0,
@@ -780,8 +787,12 @@ public sealed class BoardSyncService(
             rejectedEntries,
             skipped,
             skippedEntries,
-            ActivityEnabled: board.SyncEnabled && client.IsConfigured);
+            ActivityEnabled: board.SyncEnabled && !isJiraBoard && client.IsConfigured,
+            IsJiraBoard: isJiraBoard);
     }
+
+    private async Task<bool> IsJiraBoardAsync(string projectPath, string boardId, CancellationToken cancellationToken) =>
+        await store.GetJiraConnectionAsync(projectPath, boardId, cancellationToken) is not null;
 
     private static string Trim(string value) => value.Length <= MaxErrorLength ? value : value[..MaxErrorLength];
 

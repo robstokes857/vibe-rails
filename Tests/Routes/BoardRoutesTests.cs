@@ -471,6 +471,7 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
     [InlineData("GET", "/api/v1/board/boards/missing/sync")]
     [InlineData("PUT", "/api/v1/board/boards/missing/sync")]
     [InlineData("POST", "/api/v1/board/boards/missing/sync/now")]
+    [InlineData("PUT", "/api/v1/board/boards/order")]
     public async Task NewBoardSurfaces_RequireSessionAndTab(string method, string path)
     {
         using var none = await SendAsync(new HttpMethod(method), path);
@@ -479,6 +480,29 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Unauthorized, sessionOnly.StatusCode);
         using var tabOnly = await SendAsync(new HttpMethod(method), path, tab: "test-tab");
         Assert.Equal(HttpStatusCode.Unauthorized, tabOnly.StatusCode);
+    }
+
+    [Fact]
+    public async Task BoardOrder_UsesStoredPositionsAndRefusesForeignBoards()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var store = _app.Services.GetRequiredService<IBoardStore>();
+        using var initial = await GetJsonAsync("/api/v1/board/boards");
+        var first = initial.RootElement.GetProperty("boards")[0].GetProperty("id").GetString()!;
+        var second = await store.CreateBoardAsync(_project, "Second", ct);
+        var foreign = await store.CreateBoardAsync(_project + "-foreign", "Foreign", ct);
+        using var saved = await SendAsync(HttpMethod.Put, "/api/v1/board/boards/order", "test-session", "test-tab",
+            new ReorderBoardsRequest([second.Id, first]));
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        using var body = JsonDocument.Parse(await saved.Content.ReadAsStringAsync(ct));
+        Assert.Equal(second.Id, body.RootElement.GetProperty("boards")[0].GetProperty("id").GetString());
+        using var invalid = await SendAsync(HttpMethod.Put, "/api/v1/board/boards/order", "test-session", "test-tab",
+            new ReorderBoardsRequest([first, foreign.Id]));
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        Assert.Equal([second.Id, first], (await store.GetBoardsAsync(_project, ct)).Select(board => board.Id));
+        using var lanes = await GetJsonAsync("/api/v1/board/columns");
+        Assert.All(lanes.RootElement.GetProperty("columns").EnumerateArray(), lane =>
+            Assert.Equal(second.Id, lane.GetProperty("boardId").GetString()));
     }
 
     [Fact]
@@ -492,6 +516,7 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         Assert.Equal(boardId, body.GetProperty("boardId").GetString());
         Assert.False(body.GetProperty("published").GetBoolean());
         Assert.False(body.GetProperty("enabled").GetBoolean());
+        Assert.False(body.GetProperty("isJiraBoard").GetBoolean());
         Assert.False(body.GetProperty("configured").GetBoolean()); // the fixture's client has no key
         Assert.Equal(JsonValueKind.Null, body.GetProperty("remoteBoardId").ValueKind);
         Assert.Equal(0, body.GetProperty("unsent").GetInt32());
@@ -506,6 +531,26 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         var foreign = await _app.Services.GetRequiredService<IBoardStore>().CreateBoardAsync(_root + "-foreign", "Foreign", TestContext.Current.CancellationToken);
         using var foreignBoard = await SendAsync(HttpMethod.Get, $"/api/v1/board/boards/{foreign.Id}/sync", "test-session", "test-tab");
         Assert.Equal(HttpStatusCode.NotFound, foreignBoard.StatusCode);
+    }
+
+    [Fact]
+    public async Task JiraSyncStatusDisablesHostedControlsAndRejectsPublication()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var boards = _app.Services.GetRequiredService<IBoardStore>();
+        var board = await boards.CreateBoardAsync(_project, "Renamed imported board", ct);
+        await boards.SaveJiraConnectionAsync(new("jira_test", _project, board.Id,
+            "https://example.atlassian.net", "user@example.com", true, BoardJiraAuthStatus.Saved,
+            null, "project = TEST", true, null, null, null, null, null, DedicatedBoard: true), ct);
+
+        var path = $"/api/v1/board/boards/{board.Id}/sync";
+        using var status = await GetJsonAsync(path);
+        Assert.True(status.RootElement.GetProperty("isJiraBoard").GetBoolean());
+        Assert.False(status.RootElement.GetProperty("enabled").GetBoolean());
+        using var enable = await SendAsync(HttpMethod.Put, path, "test-session", "test-tab", new SetBoardSyncRequest(true));
+        Assert.Equal(HttpStatusCode.BadRequest, enable.StatusCode);
+        using var sync = await SendAsync(HttpMethod.Post, path + "/now", "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.BadRequest, sync.StatusCode);
     }
 
     [Fact]

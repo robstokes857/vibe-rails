@@ -259,6 +259,8 @@ export class PythonScriptsController {
         if (dir) dir.textContent = this.state.scriptsDirectory || '';
         if (pinLabel) pinLabel.textContent = this.state.pinConfigured ? 'Change PIN' : 'Set PIN';
 
+        const unsigned = scripts.filter(script => script.status !== 'approved');
+        const signed = scripts.filter(script => script.status === 'approved');
         const html = scripts.length === 0
             ? `<div class="jobs-empty python-scripts-empty">
                     <strong>No scripts yet</strong>
@@ -273,13 +275,24 @@ export class PythonScriptsController {
                         </button>` : ''}
                     </div>
                 </div>`
-            : scripts.map((script) => this._renderRow(script)).join('');
+            : (unsigned.length ? `<div class="python-scripts-list">${unsigned.map(script => this._renderRow(script)).join('')}</div>` : '')
+                + (signed.length ? `
+                    <details class="jobs-collapsible-list" data-signed-scripts>
+                        <summary>
+                            <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+                            <span>Signed scripts</span><span class="jobs-count">${signed.length}</span>
+                        </summary>
+                        <div class="python-scripts-list">${signed.map(script => this._renderRow(script)).join('')}</div>
+                    </details>` : '');
 
         // Re-assigning identical markup would close an open row menu (and restart the
         // spinner) on every background refresh.
         if (html === this._lastListHtml) return;
         this._lastListHtml = html;
+        const signedOpen = root.querySelector('[data-signed-scripts]')?.open === true;
         list.innerHTML = html;
+        const signedGroup = root.querySelector('[data-signed-scripts]');
+        if (signedGroup) signedGroup.open = signedOpen;
     }
 
     _renderRow(script) {

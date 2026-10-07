@@ -6135,6 +6135,49 @@ h6 {
     color: var(--color-text);
 }
 
+.board-settings-jira-combined {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--color-border);
+}
+
+.board-settings-nav .nav-link {
+    border: 1px solid var(--color-border);
+}
+
+.board-settings-nav .nav-link.active {
+    border-color: var(--bs-nav-pills-link-active-bg);
+}
+
+.board-settings-nav .nav-link:not(.active):hover {
+    border-color: var(--color-text-muted);
+    background-color: var(--color-bg-surface-hover);
+}
+
+.board-settings-nav .nav-link:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+}
+
+.modal-header.board-settings-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 1rem;
+}
+
+.board-settings-header .modal-title {
+    overflow-wrap: anywhere;
+}
+
+.board-settings-header [data-jira-heading] {
+    white-space: nowrap;
+}
+
+.board-settings-header .btn-close {
+    grid-column: 3;
+    margin-left: 0;
+}
+
 .modal-footer {
     background-color: transparent;
     border-top: 1px solid var(--color-border);
@@ -14630,6 +14673,34 @@ body.git-guard-focus-active #app-content {
     background-color: var(--color-bg-base, #121212);
 }
 
+.jobs-collapsible-list > summary {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.85rem 1rem;
+    list-style: none;
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+.jobs-collapsible-list > summary::-webkit-details-marker { display: none; }
+.jobs-collapsible-list > summary:hover { color: var(--color-text, #f8fafc); }
+.jobs-collapsible-list > summary:focus-visible {
+    outline: 2px solid var(--color-primary, #6366f1);
+    outline-offset: -2px;
+    border-radius: 8px;
+}
+.jobs-collapsible-list > summary > i { font-size: 0.7rem; }
+.jobs-collapsible-list[open] > summary > i { transform: rotate(90deg); }
+
+.python-scripts-list > .jobs-collapsible-list > summary {
+    border: 1px solid var(--color-border, #334155);
+    border-radius: 8px;
+}
+.python-scripts-list > .jobs-collapsible-list:not(:first-child) { margin-top: 0.75rem; }
+.python-scripts-list > .jobs-collapsible-list[open] > summary { margin-bottom: 0.5rem; }
+
 .job-inline-editor {
     margin: 0;
     scroll-margin-top: 5rem;
@@ -18899,84 +18970,6 @@ body.performance-mode .brand-text-sm {
     transform: rotate(180deg);
 }
 
-/* Rule files as chips: the file, how many rules it holds and its strictest enforcement. */
-.project-health-rule-files {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin: 0 18px 16px;
-}
-
-.project-health-rule-files:empty {
-    display: none;
-}
-
-.project-health-rule-file {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    max-width: 100%;
-    padding: 6px 10px;
-    border: 1px solid var(--color-border, #334155);
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--color-bg-surface, #1e1e1e) 70%, transparent);
-    color: var(--color-text, #f8fafc);
-    font: inherit;
-    font-size: .8rem;
-    cursor: pointer;
-    transition: border-color .15s ease, background-color .15s ease;
-}
-
-.project-health-rule-file:hover,
-.project-health-rule-file:focus-visible {
-    border-color: color-mix(in srgb, var(--color-text, #f8fafc) 30%, var(--color-border, #334155));
-    background: color-mix(in srgb, var(--color-text, #f8fafc) 6%, transparent);
-}
-
-.project-health-rule-file:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--color-primary, #3b82f6) 70%, transparent);
-    outline-offset: 2px;
-}
-
-.project-health-rule-file b {
-    overflow: hidden;
-    font-weight: 600;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.project-health-rule-file small {
-    color: var(--color-text-muted, #94a3b8);
-    font-size: .72rem;
-    white-space: nowrap;
-}
-
-.project-health-rule-file em {
-    --chip-tone: var(--color-text-muted, #94a3b8);
-    padding: 2px 6px;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--chip-tone, #94a3b8) 14%, transparent);
-    color: var(--chip-tone, #94a3b8);
-    font-family: var(--vb-font-mono, ui-monospace, monospace);
-    font-size: .6rem;
-    font-style: normal;
-    font-weight: 700;
-    letter-spacing: .06em;
-}
-
-.project-health-rule-file em[data-level="STOP"] {
-    --chip-tone: var(--quality-stop, #ff7a70);
-}
-
-.project-health-rule-file em[data-level="COMMIT"] {
-    --chip-tone: var(--quality-warn, #f5b74a);
-}
-
-.project-health-rule-file-add {
-    border-style: dashed;
-    color: var(--color-text-muted, #94a3b8);
-}
-
 .project-health-details {
     padding: 0 18px 18px;
     border-top: 1px solid var(--color-border, #334155);
@@ -19115,7 +19108,6 @@ body.performance-mode .brand-text-sm {
     }
 
     .project-health-rules-summary,
-    .project-health-rule-files,
     .project-health-quality-report,
     .project-health-scan-transcript {
         margin-inline: 14px;

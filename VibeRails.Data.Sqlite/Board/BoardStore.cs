@@ -157,6 +157,25 @@ public sealed partial class BoardStore : IBoardStore
         return new BoardDeleteResult(target.Id, columns, cards);
     }
 
+    public async Task<IReadOnlyList<BoardRecord>> ReorderBoardsAsync(string projectPath, IReadOnlyList<string> orderedIds, CancellationToken cancellationToken = default)
+    {
+        var project = NormalizeProjectPath(projectPath);
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
+        var boards = await ReadBoardsAsync(connection, transaction, project, cancellationToken);
+        var requested = orderedIds.Select(id => id?.Trim() ?? string.Empty).ToList();
+        var known = boards.Select(board => board.Id).ToHashSet(StringComparer.Ordinal);
+        if (requested.Count != known.Count
+            || requested.Distinct(StringComparer.Ordinal).Count() != requested.Count
+            || requested.Any(id => !known.Contains(id)))
+            throw new BoardValidationException("The board order must list every board in this project exactly once. Reload the boards and try again.");
+
+        await WriteBoardPositionsAsync(connection, transaction, requested, cancellationToken);
+        var result = await ReadBoardsAsync(connection, transaction, project, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
+    }
+
     // ------------------------------------------------------------------ columns
 
     public async Task<bool> EnsureDefaultColumnsAsync(string projectPath, CancellationToken cancellationToken = default)
