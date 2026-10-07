@@ -358,6 +358,40 @@ test.describe('Jobs Worker / Environments integration', () => {
         expect(writes.environmentCreates[0].body.steps).toBeUndefined();
     });
 
+
+    test('Codex Speed saves and reopens Ultrafast, Fast and Default, restricted to Astra', async ({ page }) => {
+        const { writes } = await installStatefulApi(page);
+        await openApp(page);
+        await openWorkers(page);
+        await page.locator('[data-action="create-environment"]').click();
+        await page.locator('#env-name').fill('Astra speed');
+        const speed = page.getByLabel('Speed', { exact: true });
+        const model = page.locator('#codex-model');
+        const ultrafast = speed.locator('option[value="ultrafast"]');
+        await expect(ultrafast).toBeDisabled();
+        await model.selectOption('gpt-6-astra');
+        await expect(ultrafast).toBeEnabled();
+        await speed.selectOption('ultrafast');
+        await model.selectOption('gpt-6.1-sol');
+        await expect(speed).toHaveValue('');
+        await expect(ultrafast).toBeDisabled();
+        await model.selectOption('gpt-6-astra');
+
+        for (const tier of ['ultrafast', 'fast', '']) {
+            await speed.selectOption(tier);
+            await page.locator('#env-form button[type="submit"]').click();
+            await expect(page.locator('#env-form')).toHaveCount(0);
+            const write = tier === 'ultrafast' ? writes.environmentCreates.at(-1) : writes.environments.at(-1);
+            expect(write.body.customArgs).toBe('--model gpt-6-astra'
+                + (tier ? ` -c service_tier=${tier} --enable fast_mode` : ''));
+            expect(writes.settings.at(-1).body).toMatchObject({
+                model: 'gpt-6-astra', fastMode: tier === 'fast', ultrafastMode: tier === 'ultrafast'
+            });
+            await page.locator('[data-action="edit-environment"][data-env-name="Astra speed"]').click();
+            await expect(speed).toHaveValue(tier);
+        }
+    });
+
     test('changing work type after a partial save keeps the created provider', async ({ page }) => {
         const { state, writes } = await installStatefulApi(page);
         state.failSettings = 1;

@@ -735,8 +735,9 @@ export class EnvironmentController {
             args.push('--no-alt-screen');
         }
 
-        if (s.fastMode) {
-            args.push('-c', 'service_tier=fast');
+        const serviceTier = this.codexServiceTier(s);
+        if (serviceTier) {
+            args.push('-c', `service_tier=${serviceTier}`);
             args.push('--enable', 'fast_mode');
         }
 
@@ -822,9 +823,11 @@ export class EnvironmentController {
         const modelSelect = environmentField(root, 'codex-model');
         const effortSelect = environmentField(root, 'codex-effort');
         const maxOption = effortSelect?.querySelector('option[value="max"]');
+        const speedSelect = environmentField(root, 'codex-speed');
+        const ultrafastOption = speedSelect?.querySelector('option[value="ultrafast"]');
         if (!modelSelect || !effortSelect || !maxOption) return;
 
-        const syncEffortForModel = () => {
+        const syncOptionsForModel = () => {
             const model = this.normalizeCodexModel(modelSelect.value);
             const supportsMax = this.codexModelSupportsMaxEffort(model);
             maxOption.disabled = !supportsMax;
@@ -832,10 +835,17 @@ export class EnvironmentController {
             if (!supportsMax && effortSelect.value === 'max') {
                 effortSelect.value = this.normalizeCodexEffort(model, effortSelect.value);
             }
+
+            if (ultrafastOption) {
+                ultrafastOption.disabled = !this.codexModelSupportsUltrafast(model);
+                if (ultrafastOption.disabled && speedSelect.value === 'ultrafast') {
+                    speedSelect.value = '';
+                }
+            }
         };
 
-        modelSelect.addEventListener('change', syncEffortForModel);
-        syncEffortForModel();
+        modelSelect.addEventListener('change', syncOptionsForModel);
+        syncOptionsForModel();
     }
 
     mergeCodexSettingsFromCustomArgs(settings, customArgs) {
@@ -843,7 +853,7 @@ export class EnvironmentController {
         if (args.length === 0) return settings;
 
         let sawFastFeature = false;
-        let sawFastTier = false;
+        let speedTier = null;
         // Flags without a control (--sandbox read-only, --search, other -c keys) must survive
         // an edit of the controls that do exist, so they come back as Additional Arguments.
         const additionalArgs = [];
@@ -858,19 +868,21 @@ export class EnvironmentController {
                 continue;
             }
 
-            if ((arg === '--config' || arg === '-c') && next) {
-                const [key, value = ''] = next.split('=');
+            const inlineConfig = arg.startsWith('--config=') ? arg.slice('--config='.length)
+                : arg.startsWith('-c=') ? arg.slice(3) : null;
+            if (((arg === '--config' || arg === '-c') && next) || inlineConfig !== null) {
+                const [key, value = ''] = (inlineConfig ?? next).split('=');
                 const cleanValue = value.replace(/^["']|["']$/g, '');
                 if (key === 'model_reasoning_effort') {
                     settings.effort = cleanValue;
-                } else if (key === 'service_tier' && cleanValue === 'fast') {
-                    sawFastTier = true;
+                } else if (key === 'service_tier' && ['fast', 'ultrafast', 'default'].includes(cleanValue)) {
+                    speedTier = cleanValue;
                 } else if (key === 'features.fast_mode') {
                     if (cleanValue.toLowerCase() !== 'false') sawFastFeature = true;
                 } else {
-                    additionalArgs.push(arg, next);
+                    additionalArgs.push(...(inlineConfig === null ? [arg, next] : [arg]));
                 }
-                i++;
+                if (inlineConfig === null) i++;
                 continue;
             }
 
@@ -897,7 +909,10 @@ export class EnvironmentController {
         // Older VibeRails builds wrote only `--enable fast_mode`; keep the user's
         // intent when they next edit/save the environment by migrating it to the
         // current `service_tier=fast` launch args.
-        if (sawFastFeature || sawFastTier) {
+        if (speedTier !== null) {
+            settings.fastMode = speedTier === 'fast';
+            settings.ultrafastMode = speedTier === 'ultrafast';
+        } else if (sawFastFeature && !settings.ultrafastMode) {
             settings.fastMode = true;
         }
 
@@ -914,6 +929,15 @@ export class EnvironmentController {
 
     normalizeCodexModel(model) {
         return (model || '').trim();
+    }
+
+    codexModelSupportsUltrafast(model) {
+        return this.normalizeCodexModel(model).toLowerCase() === 'gpt-6-astra';
+    }
+
+    codexServiceTier(settings) {
+        if (settings.ultrafastMode && this.codexModelSupportsUltrafast(settings.model)) return 'ultrafast';
+        return settings.fastMode ? 'fast' : '';
     }
 
     codexModelSupportsMaxEffort(model) {
@@ -1453,7 +1477,9 @@ export class EnvironmentController {
                 prompt: initialMessage,
                 model,
                 effort: this.normalizeCodexEffort(model, environmentField(root, 'codex-effort').value),
-                fastMode: environmentField(root, 'codex-fast-mode').checked,
+                fastMode: environmentField(root, 'codex-speed').value === 'fast',
+                ultrafastMode: this.codexModelSupportsUltrafast(model)
+                    && environmentField(root, 'codex-speed').value === 'ultrafast',
                 additionalArgs: environmentField(root, 'codex-additional-args')?.value ?? ''
             };
         }
@@ -1546,6 +1572,7 @@ export class EnvironmentController {
             const codexModel = this.normalizeCodexModel(s.model);
             const codexEffort = this.normalizeCodexEffort(codexModel, s.effort);
             const codexMaxEffortDisabled = !this.codexModelSupportsMaxEffort(codexModel);
+            const codexSpeed = this.codexServiceTier(s);
             return `
                 <hr class="my-4">
                 <h6 class="text-muted mb-3">Codex CLI Settings</h6>
@@ -1572,11 +1599,13 @@ export class EnvironmentController {
                     <small class="form-text text-muted">Passed as <code>-c model_reasoning_effort=&lt;level&gt;</code></small>
                 </div>
                 <div class="mb-3">
-                    <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" id="codex-fast-mode" ${s.fastMode ? 'checked' : ''}>
-                        <label class="form-check-label" for="codex-fast-mode">Fast Mode</label>
-                    </div>
-                    <small class="form-text text-muted">Launches with <code>service_tier=fast</code> for supported ChatGPT-backed models</small>
+                    <label class="form-label" for="codex-speed">Speed</label>
+                    <select class="form-select" id="codex-speed" aria-describedby="codex-speed-help">
+                        <option value="" ${codexSpeed === '' ? 'selected' : ''}>Default</option>
+                        <option value="fast" ${codexSpeed === 'fast' ? 'selected' : ''}>Fast (/fast)</option>
+                        <option value="ultrafast" ${codexSpeed === 'ultrafast' ? 'selected' : ''} ${this.codexModelSupportsUltrafast(codexModel) ? '' : 'disabled'}>Ultrafast (/ultrafast)</option>
+                    </select>
+                    <small id="codex-speed-help" class="form-text text-muted">Faster modes use more of your usage allowance. Ultrafast requires gpt-6-astra and an eligible account.</small>
                 </div>
                 <div class="mb-3">
                     <div class="form-check form-switch">

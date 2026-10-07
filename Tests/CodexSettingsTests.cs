@@ -431,6 +431,105 @@ model = ""gpt-5.6-terra""
         Assert.True(reread.FastMode);
     }
 
+
+    [Theory]
+    [InlineData("", true)]
+    [InlineData("features.fast_mode = true", true)]
+    [InlineData("features.fast_mode = false", false)]
+    [InlineData("[features]\nfast_mode = true", true)]
+    [InlineData("[features]\nfast_mode = false", false)]
+    public async Task GetSettings_ReadsUltrafastSeparatelyFromFast(string feature, bool expected)
+    {
+        _mockFileService.SetFileExists(true);
+        _mockFileService.SetFileContent($"model = \"gpt-6-astra\"\nservice_tier = \"ultrafast\"\n{feature}\n");
+
+        var settings = await _service.GetSettings("test-env", CancellationToken.None);
+
+        Assert.Equal(expected, settings.UltrafastMode);
+        Assert.False(settings.FastMode);
+    }
+
+    [Theory]
+    [InlineData("gpt-6-astra", false, "ultrafast")]
+    [InlineData("gpt-6-astra", true, "ultrafast")]
+    [InlineData("gpt-6.1-sol", false, "")]
+    [InlineData("", false, "")]
+    [InlineData("gpt-6.1-sol", true, "fast")]
+    public async Task SaveSettings_RestrictsUltrafastToAstra_AndRoundTrips(string model, bool fast, string expectedTier)
+    {
+        _mockFileService.SetFileExists(true);
+        _mockFileService.SetFileContent("features.fast_mode = false\n[features]\nunrelated = true\n");
+
+        await _service.SaveSettings("test-env", new CodexSettingsDto
+        {
+            Model = model, FastMode = fast, UltrafastMode = true
+        }, CancellationToken.None);
+
+        var written = _mockFileService.GetWrittenContent();
+        Assert.DoesNotContain("features.fast_mode", written);
+        Assert.Contains("unrelated = true", written);
+        if (expectedTier == "")
+        {
+            Assert.DoesNotContain("service_tier =", written);
+            Assert.DoesNotContain("fast_mode =", written);
+        }
+        else
+        {
+            Assert.Contains($"service_tier = \"{expectedTier}\"", written);
+            Assert.Contains("fast_mode = true", written);
+        }
+        _mockFileService.SetFileContent(written);
+        var reread = await _service.GetSettings("test-env", CancellationToken.None);
+        Assert.Equal(expectedTier == "ultrafast", reread.UltrafastMode);
+        Assert.Equal(expectedTier == "fast", reread.FastMode);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SaveSettings_CanSwitchUltrafastToDefaultOrFast_KeepingUserSettings(bool fast)
+    {
+        _mockFileService.SetFileExists(true);
+        _mockFileService.SetFileContent("""
+            # User comment
+            model = "gpt-6-astra"
+            service_tier = "ultrafast"
+            approval_policy = "on-request"
+            [features]
+            fast_mode = true
+            unrelated = true
+            [profiles.personal]
+            service_tier = "ultrafast"
+            """);
+
+        await _service.SaveSettings("test-env", new CodexSettingsDto
+        {
+            Model = "gpt-6-astra", FastMode = fast
+        }, CancellationToken.None);
+
+        var written = _mockFileService.GetWrittenContent();
+        var root = written.Split("[features]")[0];
+        if (fast) Assert.Contains("service_tier = \"fast\"", root);
+        else Assert.DoesNotContain("service_tier", root);
+        Assert.Contains("# User comment", written);
+        Assert.Contains("approval_policy = \"on-request\"", written);
+        Assert.Contains("unrelated = true", written);
+        Assert.Contains("[profiles.personal]\nservice_tier = \"ultrafast\"", written.Replace("\r\n", "\n"));
+        _mockFileService.SetFileContent(written);
+        var reread = await _service.GetSettings("test-env", CancellationToken.None);
+        Assert.False(reread.UltrafastMode);
+        Assert.Equal(fast, reread.FastMode);
+    }
+
+    [Fact]
+    public async Task SaveSettings_DefaultPreservesUnmanagedServiceTier()
+    {
+        _mockFileService.SetFileExists(true);
+        _mockFileService.SetFileContent("service_tier = \"flex\"\n");
+        await _service.SaveSettings("test-env", new CodexSettingsDto(), CancellationToken.None);
+        Assert.Contains("service_tier = \"flex\"", _mockFileService.GetWrittenContent());
+    }
+
     private class MockFileService : IFileService
     {
         private bool _fileExists;

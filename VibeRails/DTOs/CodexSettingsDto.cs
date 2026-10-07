@@ -6,6 +6,7 @@ namespace VibeRails.DTOs
         public string Model { get; set; } = "";                       // model; e.g. gpt-5.6-sol, gpt-5.5; empty = use Codex default
         public string Effort { get; set; } = "";                      // model_reasoning_effort; minimal | low | medium | high | xhigh | max | ultra
         public bool FastMode { get; set; } = false;                   // service_tier = "fast" plus [features].fast_mode
+        public bool UltrafastMode { get; set; } = false;              // service_tier = "ultrafast"; gpt-6-astra only
         public bool NoAltScreen { get; set; } = false;                // tui.alternate_screen = "never"
 
         // Permission posture is YOLO-or-nothing. YOLO is launch-only

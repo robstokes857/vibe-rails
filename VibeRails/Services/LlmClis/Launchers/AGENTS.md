@@ -133,7 +133,8 @@ The Codex CLI supports per-environment settings configuration. Settings are stor
 |---------|--------------|-------------|------|---------|-------------|
 | Model | `Model` | `model` | string | "" | Codex model override (e.g. gpt-5.6-sol) |
 | Effort | `Effort` | `model_reasoning_effort` | string | "" | minimal/low/medium/high/xhigh/max/ultra |
-| Fast Mode | `FastMode` | `service_tier` + `[features].fast_mode` | bool | false | Enables fast service tier for supported models |
+| Speed: Fast | `FastMode` | `service_tier = "fast"` + `[features].fast_mode` | bool | false | Fast (/fast) in the Speed selector |
+| Speed: Ultrafast | `UltrafastMode` | `service_tier = "ultrafast"` + `[features].fast_mode` | bool | false | Ultrafast (/ultrafast), selectable for `gpt-6-astra`; takes precedence over Fast |
 | No Alternate Screen | `NoAltScreen` | `[tui].alternate_screen` | bool | false | Sets `alternate_screen = "never"` |
 | YOLO | `Yolo` | (launch-only) | bool | false | Carried for the settings payload; persisted as `--dangerously-bypass-approvals-and-sandbox` in CustomArgs, never written to config.toml |
 
@@ -165,6 +166,7 @@ public class CodexSettingsDto
     public string Model { get; set; } = "";
     public string Effort { get; set; } = "";
     public bool FastMode { get; set; } = false;
+    public bool UltrafastMode { get; set; } = false;
     public bool NoAltScreen { get; set; } = false;
 
     // YOLO is launch-only (CustomArgs); never written to config.toml.

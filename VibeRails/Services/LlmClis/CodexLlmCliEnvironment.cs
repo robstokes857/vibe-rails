@@ -71,7 +71,8 @@ namespace VibeRails.Services.LlmClis
             // CustomArgs, so VibeRails neither reads nor edits them here.
             dto.Model = NormalizeModel(GetRootTomlValue(content, "model"));
             dto.Effort = NormalizeEffort(GetRootTomlValue(content, "model_reasoning_effort"));
-            dto.FastMode = IsFastModeEnabled(content);
+            dto.FastMode = IsSpeedModeEnabled(content, "fast");
+            dto.UltrafastMode = IsSpeedModeEnabled(content, "ultrafast");
             dto.NoAltScreen = IsAlternateScreenDisabled(content);
 
             return dto;
@@ -109,7 +110,10 @@ namespace VibeRails.Services.LlmClis
 
             existingContent = SetTomlValue(existingContent, "model", NormalizeModel(settings.Model));
             existingContent = SetTomlValue(existingContent, "model_reasoning_effort", NormalizeEffort(settings.Effort));
-            existingContent = SetFastMode(existingContent, settings.FastMode);
+            var serviceTier = settings.UltrafastMode
+                && string.Equals(NormalizeModel(settings.Model), "gpt-6-astra", StringComparison.OrdinalIgnoreCase)
+                    ? "ultrafast" : settings.FastMode ? "fast" : "";
+            existingContent = SetSpeedMode(existingContent, serviceTier);
             existingContent = SetAlternateScreen(existingContent, settings.NoAltScreen);
 
             await _fileService.WriteAllTextAsync(configPath, existingContent, FileMode.Create, FileShare.None, cancellationToken);
@@ -144,10 +148,10 @@ namespace VibeRails.Services.LlmClis
             return command;
         }
 
-        private static bool IsFastModeEnabled(string content)
+        private static bool IsSpeedModeEnabled(string content, string tier)
         {
             var serviceTier = GetRootTomlValue(content, "service_tier");
-            if (!string.Equals(serviceTier, "fast", StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(serviceTier, tier, StringComparison.OrdinalIgnoreCase))
                 return false;
 
             var featureEnabled =
@@ -347,11 +351,11 @@ namespace VibeRails.Services.LlmClis
             return sb.ToString();
         }
 
-        private static string SetFastMode(string content, bool enabled)
+        private static string SetSpeedMode(string content, string tier)
         {
-            if (enabled)
+            if (!string.IsNullOrEmpty(tier))
             {
-                content = SetTomlValue(content, "service_tier", "fast");
+                content = SetTomlValue(content, "service_tier", tier);
                 // Strip any root dotted form so we don't leave both `features.fast_mode` and a
                 // [features] fast_mode key (a duplicate-key TOML error).
                 content = RemoveTomlValue(content, "features.fast_mode");
@@ -359,7 +363,8 @@ namespace VibeRails.Services.LlmClis
             }
 
             var serviceTier = GetRootTomlValue(content, "service_tier");
-            if (string.Equals(serviceTier, "fast", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(serviceTier, "fast", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(serviceTier, "ultrafast", StringComparison.OrdinalIgnoreCase))
                 content = RemoveTomlValue(content, "service_tier");
 
             content = RemoveTomlValue(content, "features.fast_mode");

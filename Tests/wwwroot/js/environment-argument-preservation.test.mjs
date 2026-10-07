@@ -59,6 +59,44 @@ test('Codex flags that have controls are not duplicated into Additional Argument
         '--dangerously-bypass-approvals-and-sandbox --no-alt-screen -c service_tier=fast --enable fast_mode');
 });
 
+
+test('Codex Ultrafast round-trips every supported config argument spelling without duplicate tiers', () => {
+    const controller = createController();
+    for (const flag of ['-c service_tier=ultrafast', '--config service_tier=ultrafast',
+        '--config=service_tier=ultrafast', '-c=service_tier=ultrafast', '-c \'service_tier="ultrafast"\'']) {
+        const settings = controller.mergeCodexSettingsFromCustomArgs({ fastMode: true },
+            `--model gpt-6-astra ${flag} --enable fast_mode --sandbox read-only`);
+        assert.equal(settings.ultrafastMode, true);
+        assert.equal(settings.fastMode, false);
+        assert.equal(settings.additionalArgs, '--sandbox read-only');
+        assert.equal(controller.buildCodexCustomArgs(settings),
+            '--model gpt-6-astra -c service_tier=ultrafast --enable fast_mode --sandbox read-only');
+        assert.match(controller.buildCliSettingsHtml('codex', settings), /value="ultrafast" selected/);
+    }
+});
+
+test('Codex speed overrides replace copied settings and the last tier wins', () => {
+    const controller = createController();
+    for (const tier of ['fast', 'default']) {
+        const settings = controller.mergeCodexSettingsFromCustomArgs({ model: 'gpt-6-astra', ultrafastMode: true },
+            `--enable fast_mode -c service_tier=ultrafast -c service_tier=${tier}`);
+        assert.equal(settings.ultrafastMode, false);
+        assert.equal(settings.fastMode, tier === 'fast');
+        assert.doesNotMatch(controller.buildCodexCustomArgs(settings), /ultrafast/);
+    }
+});
+
+test('Codex refuses to emit Ultrafast for non-Astra models and preserves unmanaged tiers', () => {
+    const controller = createController();
+    for (const model of ['', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-5.6-sol']) {
+        assert.doesNotMatch(controller.buildCodexCustomArgs({ model, ultrafastMode: true }), /service_tier|fast_mode/);
+        assert.match(controller.buildCliSettingsHtml('codex', { model, ultrafastMode: true }), /value="ultrafast"\s+disabled/);
+    }
+    const settings = controller.mergeCodexSettingsFromCustomArgs({}, '--config=service_tier=flex --search');
+    assert.equal(settings.additionalArgs, '--config=service_tier=flex --search');
+    assert.equal(controller.buildCodexCustomArgs(settings), settings.additionalArgs);
+});
+
 test('Claude flags without a control round-trip unchanged and survive a model change', () => {
     const controller = createController();
     const stored = '--model claude-opus-5-5[1m] --permission-mode plan --add-dir "/work/my repo" --dangerously-skip-permissions --debug';
@@ -90,7 +128,7 @@ test('Codex and Claude forms show and read back Additional Arguments and unliste
         'codex-effort': { value: 'high' },
         'codex-yolo': { checked: false },
         'codex-no-alt-screen': { checked: false },
-        'codex-fast-mode': { checked: false },
+        'codex-speed': { value: '' },
         'codex-additional-args': { value: '--sandbox read-only --search' }
     };
     const root = { getElementById: id => fields[id] ?? null };
