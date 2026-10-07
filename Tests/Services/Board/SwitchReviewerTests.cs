@@ -61,11 +61,13 @@ public sealed class SwitchReviewerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SameProviderMapping_AdditionalProvider_AndPerReviewOverride()
+    public async Task SameCodingProviderIsRejected_ForMappingsFallbackAndOverride()
     {
         await Source("codex");
         var policy = ReviewerRouting.SwitchDefault() with { Mappings = [new("codex", new("base:codex")), new("opencode", new("base:claude"))] };
-        Assert.Equal("codex", (await Resolve(policy)).Resolution.Provider);
+        Assert.Contains("different LLM", (await Assert.ThrowsAsync<BoardValidationException>(() => Resolve(policy))).Message);
+        await Assert.ThrowsAsync<BoardValidationException>(() => Resolve(policy with { Mappings = [] }));
+        await Assert.ThrowsAsync<BoardValidationException>(() => routing.ResolveAsync(project, card.Key, ReviewerRouting.SwitchDefault(), new("base:codex"), Ct));
         var once = await routing.ResolveAsync(project, card.Key, policy, new("base:claude", new(Model: "sonnet[1m]")), Ct);
         Assert.Equal("claude", once.Resolution.Provider); Assert.True(once.Resolution.Overridden);
         Assert.Equal("sonnet[1m]", once.Resolution.Selected.Options!.Model); Assert.False(once.Resolution.Selected.Options.Yolo);
@@ -73,6 +75,45 @@ public sealed class SwitchReviewerTests : IAsyncLifetime
         Assert.Equal("claude", (await Resolve(policy)).Resolution.Provider);
         Assert.Equal("codex", (await Resolve()).Resolution.Provider);
         Assert.True((await Resolve()).Resolution.UsedFallback);
+    }
+
+    [Theory]
+    [InlineData("claude")]
+    [InlineData("grok")]
+    [InlineData("copilot")]
+    [InlineData("opencode")]
+    [InlineData("antigravity")]
+    [InlineData("glm-5.2")]
+    [InlineData("glm-5.3")]
+    [InlineData("deepseek-v4-pro")]
+    [InlineData("kimi-k3")]
+    public async Task SavedWorkerPolicyUsesDefaultOrChosenAlternate_ForEveryCard(string alternate)
+    {
+        var policy = new ReviewerRouting("switch", [new("codex", new("base:" + alternate))], new("base:codex"));
+        var worker = new LLM_Environment { CustomName = "Board reviewer", LLM = LLM.Codex, Purpose = "code_review",
+            ReviewerRouting = policy, AutomationWorker = true };
+        await repository.SaveEnvironmentAsync(worker, Ct);
+        await Source("codex");
+        var first = (await routing.PrepareAsync(project, worker.Id, card.Key, Ct))!.Resolution;
+        Assert.Equal(alternate, first.Provider);
+        var secondCard = await boards.CreateCardAsync(project, new(null, "Next card", "", null, "medium", null, [], false), Ct);
+        var source = await Session(alternate, "launch");
+        await boards.LinkSessionAsync(project, secondCard.Id, source, null, "base:" + alternate, alternate, "Coding", "launch", Ct);
+        await routing.SaveSettingsAsync(project, secondCard.Id, new("session", source, "Next card's implementation"), Ct);
+        var second = (await routing.PrepareAsync(project, worker.Id, secondCard.Key, Ct))!.Resolution;
+        Assert.Equal("codex", second.Provider);
+        Assert.Equivalent(policy, (await repository.GetEnvironmentByIdAsync(worker.Id, Ct))!.ReviewerRouting);
+        Assert.Equal(first.Provider, (await routing.PrepareAsync(project, worker.Id, card.Key, Ct))!.Resolution.Provider);
+    }
+
+    [Fact]
+    public async Task SameProviderEnvironmentCannotBypassSwitch()
+    {
+        await Source("codex");
+        var environment = new LLM_Environment { CustomName = "Another Codex", LLM = LLM.Codex, ProjectPath = project };
+        await repository.SaveEnvironmentAsync(environment, Ct);
+        var policy = ReviewerRouting.SwitchDefault() with { Mappings = [new("codex", new($"env:{environment.Id}:codex"))] };
+        await Assert.ThrowsAsync<BoardValidationException>(() => Resolve(policy));
     }
 
     [Theory]
@@ -140,8 +181,8 @@ public sealed class SwitchReviewerTests : IAsyncLifetime
         Assert.NotNull(await routing.RequireLaunchAsync(snapshot, Ct));
         environment.CustomArgs = "--model gpt-6.2"; await repository.UpdateEnvironmentAsync(environment, Ct);
         await Assert.ThrowsAsync<BoardValidationException>(() => routing.RequireLaunchAsync(snapshot, Ct));
-        var missing = await Resolve(ReviewerRouting.SwitchDefault() with { Fallback = new("env:999999:claude"), Mappings = [] });
-        Assert.Equal("claude", missing.Resolution.Provider); Assert.Contains("unavailable", missing.Resolution.Problem);
+        var missing = await Resolve(ReviewerRouting.SwitchDefault() with { Fallback = new("env:999999:codex"), Mappings = [] });
+        Assert.Equal("codex", missing.Resolution.Provider); Assert.Contains("unavailable", missing.Resolution.Problem);
         await Assert.ThrowsAsync<BoardValidationException>(() => routing.RequireLaunchAsync(missing, Ct));
     }
 
@@ -169,7 +210,7 @@ public sealed class SwitchReviewerTests : IAsyncLifetime
         Assert.Equal(LLM.Claude, queued.Llm); Assert.Null(queued.EnvironmentId); Assert.Equal("code_review", queued.Purpose);
         Assert.Equal(LLM.Claude, Assert.Single(queued.Actions!).Llm);
         Assert.NotNull(queued.ReviewLaunch!.Resolution.InputHash);
-        worker.ReviewerRouting = ReviewerRouting.SwitchDefault() with { Mappings = [new("codex", new("base:codex"))] };
+        worker.ReviewerRouting = ReviewerRouting.SwitchDefault() with { Mappings = [new("codex", new("base:grok"))] };
         await repository.UpdateEnvironmentAsync(worker, Ct);
         await Source("claude");
         Assert.Equivalent(queued.ReviewLaunch, (await jobs.GetRunAsync(id!, Ct))!.ReviewLaunch);

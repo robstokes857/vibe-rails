@@ -80,7 +80,8 @@ export function mountEnvironmentEditor(controller, host, {
                 <div data-reviewer-policy ${env?.purpose === 'code_review' ? '' : 'hidden'}>
                     <label class="form-label" for="env-reviewer-mode">Reviewer selection</label>
                     <select id="env-reviewer-mode" class="form-select mb-2"><option value="fixed">Fixed provider</option><option value="switch" ${env?.reviewerRouting?.mode === 'switch' ? 'selected' : ''}>Switch reviewer</option></select>
-                    <div data-reviewer-routing ${env?.reviewerRouting?.mode === 'switch' ? '' : 'hidden'}>${routingEditorMarkup()}</div>
+                    <div data-reviewer-routing ${env?.reviewerRouting?.mode === 'switch' ? '' : 'hidden'}>
+                        <p class="text-muted small">Saved for this review Automation and reused for every card it reviews in the repository.</p>${routingEditorMarkup()}</div>
                 </div>
                 ${app.data.isInGit ? `<div class="mb-3 env-workspace-group"><label class="form-label" for="env-workspace-mode">Workspace</label><select class="form-select" id="env-workspace-mode">
                     <option value="0" ${workspaceMode === 0 ? 'selected' : ''}>Project directory</option>
@@ -145,13 +146,22 @@ export function mountEnvironmentEditor(controller, host, {
         renderSettings(currentCli, drafts.get(currentCli) || {});
     });
     const reviewerMode = get('env-reviewer-mode');
-    reviewerMode.addEventListener('change', () => { routingHost.hidden = reviewerMode.value !== 'switch'; });
+    const updateReviewerControls = () => {
+        const switching = get('env-purpose').value === 'code_review' && reviewerMode.value === 'switch';
+        routingHost.hidden = !switching;
+        primary.hidden = switching;
+        slot.hidden = switching;
+        host.querySelector('[data-custom-args-group]').hidden = switching || controller.usesManagedCustomArgs(currentCli);
+    };
+    reviewerMode.addEventListener('change', updateReviewerControls);
     get('env-purpose').addEventListener('change', event => {
         host.querySelector('[data-reviewer-policy]').hidden = event.target.value !== 'code_review';
+        updateReviewerControls();
         if (!savedEnvironment && event.target.value === 'code_review') {
             if (!get('env-initial-message').value.trim()) get('env-initial-message').value = 'Review the intended changes for correctness, regressions and missing validation. Establish scope from the card handoff and actual checkout. Save the review on the originating card, then follow its workflow instructions.';
         }
     });
+    updateReviewerControls();
     for (const [selector, mode, name] of [['[data-code-review-preset]', 'fixed', 'Code review'], ['[data-switch-reviewer-preset]', 'switch', 'Switch reviewer']]) {
         host.querySelector(selector).addEventListener('click', event => {
             if (!savedEnvironment) {

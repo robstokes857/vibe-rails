@@ -243,9 +243,11 @@ export class LlmPickerController {
         const { context, includeGroups, includeDefaultSuffix, plainCliValues } = configuration;
         const allContextItems = this._contextCatalog(context);
         const visibleItems = allContextItems.filter((item) =>
-            context === 'environment-provider'
-            || item.enabled
-            || this._selectionValue(item, plainCliValues) === selectedValue
+            (!configuration.filterItem || configuration.filterItem(item)) && (
+                configuration.includeHidden
+                || context === 'environment-provider'
+                || item.enabled
+                || this._selectionValue(item, plainCliValues) === selectedValue)
         );
         const optionItems = visibleItems.map((item) => {
             const value = this._selectionValue(item, plainCliValues);
@@ -273,7 +275,8 @@ export class LlmPickerController {
         const fallback = typeof configuration.selectedFallback === 'function'
             ? configuration.selectedFallback(selectedValue)
             : configuration.selectedFallback;
-        if (selectedValue && !alreadyIncluded && fallback?.value === selectedValue) {
+        if (selectedValue && !alreadyIncluded && fallback?.value === selectedValue
+            && (!configuration.filterItem || configuration.filterItem(fallback))) {
             optionItems.push({
                 group: includeGroups ? (fallback.group || ENVIRONMENT_GROUP) : null,
                 value: fallback.value,

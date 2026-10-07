@@ -2108,6 +2108,8 @@ export class EnvironmentController {
             defaultPrompt: env.defaultPrompt,
             hidden: Boolean(env.hidden),
             automationWorker: Boolean(env.automationWorker),
+            purpose: env.purpose || 'work',
+            reviewerRouting: env.reviewerRouting || null,
             // Workspace mode is set the moment the environment is created, but the clone is
             // only made on first launch — so a mode of 1/2 with a null sandbox id is the
             // normal "configured, not provisioned yet" state, not an error.

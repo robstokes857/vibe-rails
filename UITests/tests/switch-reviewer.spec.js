@@ -47,7 +47,8 @@ for (const width of [1440, 390]) {
             const url = new URL(route.request().url());
             if (url.pathname.includes('llm-picker')) return route.fulfill({ json: { items: [
                 { key: 'base:codex', kind: 'base', cli: 'codex', label: 'Codex', enabled: true, order: 0 },
-                { key: 'base:claude', kind: 'base', cli: 'claude', label: 'Claude', enabled: true, order: 1 }
+                { key: 'base:claude', kind: 'base', cli: 'claude', label: 'Claude', enabled: true, order: 1 },
+                { key: 'base:grok', kind: 'base', cli: 'grok', label: 'Grok', enabled: true, order: 2 }
             ] } });
             return route.fulfill({ json: {} });
         });
@@ -64,11 +65,11 @@ for (const width of [1440, 390]) {
         await expect(panel.locator('[data-review-resolution]')).toContainText('claude coded this → codex will review');
         await panel.locator('[data-review-settings] > summary').click();
         await panel.locator('[data-review-override]').check();
-        await panel.locator('[data-review-picker]').evaluate(select => select.tomselect.setValue('base:claude'));
-        await expect(panel.locator('[data-review-resolution]')).toContainText('claude will review (override)');
+        await panel.locator('[data-review-picker]').evaluate(select => select.tomselect.setValue('base:grok'));
+        await expect(panel.locator('[data-review-resolution]')).toContainText('grok will review (override)');
         await panel.locator('[data-review-run]').click();
         await expect.poll(() => page.evaluate(() => window.reviewLaunches.length)).toBe(1);
-        expect(await page.evaluate(() => window.reviewLaunches[0])).toMatchObject({ intent: 'code_review', review: { override: { selection: 'base:claude' } } });
+        expect(await page.evaluate(() => window.reviewLaunches[0])).toMatchObject({ intent: 'code_review', review: { override: { selection: 'base:grok' } } });
         await page.screenshot({ path: testInfo.outputPath(`switch-reviewer-${width}.png`) });
         await page.evaluate(() => window.reviewPanel.dispose());
     });

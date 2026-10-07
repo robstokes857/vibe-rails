@@ -149,6 +149,8 @@ async function installStatefulApi(page) {
                 path: `C:\\test-envs\\${body.name}`,
                 customArgs: body.customArgs || '',
                 customPrompt: body.customPrompt || '',
+                purpose: body.purpose,
+                reviewerRouting: body.reviewerRouting,
                 hidden: Boolean(body.hidden),
                 automationWorker: Boolean(body.automationWorker),
                 lastUsedUTC: '2026-07-21T13:00:00Z'
@@ -684,6 +686,53 @@ test.describe('Jobs Worker / Environments integration', () => {
         await expect(enabledToggle).toHaveAttribute('aria-checked', 'true');
         await expect(enabledToggle.locator('.job-switch-text')).toHaveText('Enabled');
     });
+
+    for (const width of [1440, 390]) {
+        test(`saved Switch reviewer offers every other LLM and persists across cards at ${width}px`, async ({ page }, testInfo) => {
+            await page.setViewportSize({ width, height: 1100 });
+            const { state, writes } = await installStatefulApi(page);
+            state.environments[0].purpose = 'code_review';
+            state.environments[0].reviewerRouting = { mode: 'switch', fallback: { selection: 'base:codex' }, mappings: [
+                { sourceProvider: 'claude', reviewer: { selection: 'base:codex' } },
+                { sourceProvider: 'codex', reviewer: { selection: 'base:claude' } }
+            ] };
+            // Even a globally hidden provider remains configurable for this saved Board policy.
+            state.pickerItems.find(item => item.cli === 'grok').enabled = false;
+            state.pickerItems.push({ key: 'env:99:codex', kind: 'environment', cli: 'codex', label: 'Other Codex', enabled: true });
+            await openApp(page);
+            await openAutomationEditorForExistingJob(page);
+            const form = page.locator('[data-job-form]');
+            const defaultReviewer = form.locator('[data-reviewer-fallback] [data-reviewer-target]');
+            const alternate = form.locator('[data-reviewer-alternate] [data-reviewer-target]');
+            await expect(form.locator('[data-primary-options]')).toBeHidden();
+            await expect(alternate).toHaveValue('base:claude');
+            const options = await alternate.evaluate(select => Object.keys(select.tomselect.options));
+            for (const cli of ['claude', 'grok', 'copilot', 'opencode', 'antigravity', 'glm-5.2', 'glm-5.3', 'deepseek-v4-pro', 'kimi-k3']) {
+                expect(options).toContain(`base:${cli}`);
+            }
+            expect(options).not.toContain('base:codex');
+            expect(options).not.toContain('env:99:codex');
+            await alternate.evaluate(select => select.tomselect.setValue('base:grok'));
+            await page.screenshot({ path: testInfo.outputPath(`switch-reviewer-settings-${width}.png`) });
+            await form.locator('button[type="submit"]').click();
+            await expect(form).toHaveCount(0);
+            expect(writes.environments[0].body.reviewerRouting).toMatchObject({ fallback: { selection: 'base:codex' },
+                mappings: [{ sourceProvider: 'codex', reviewer: { selection: 'base:grok' } },
+                    { sourceProvider: 'claude', reviewer: { selection: 'base:codex' } }] });
+            await openAutomationEditorForExistingJob(page);
+            await expect(alternate).toHaveValue('base:grok');
+            // Changing the default removes it from the alternate's choices without selecting a substitute.
+            await defaultReviewer.evaluate(select => select.tomselect.setValue('base:grok'));
+            await expect(alternate).toHaveValue('');
+            expect(await alternate.evaluate(select => Object.keys(select.tomselect.options))).not.toContain('base:grok');
+            await alternate.evaluate(select => select.tomselect.setValue('base:copilot'));
+            await form.locator('button[type="submit"]').click();
+            await expect(form).toHaveCount(0);
+            await openAutomationEditorForExistingJob(page);
+            await expect(defaultReviewer).toHaveValue('base:grok');
+            await expect(alternate).toHaveValue('base:copilot');
+        });
+    }
 
     test('Automation opens a real modal with ordinary visible form settings', async ({ page }) => {
         await installStatefulApi(page);

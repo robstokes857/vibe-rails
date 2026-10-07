@@ -2345,34 +2345,34 @@ test('closing a card while its Automation catalog loads cannot repaint the next 
 });
 
 
-test('Switch reviewer Worker preset supports same-provider routing and editable fallback', async ({ page }, testInfo) => {
+test('Switch reviewer Worker preset saves a default reviewer and a different alternate', async ({ page }, testInfo) => {
     await openBoard(page);
     const writes = [];
     await page.route('**/api/v1/environments', async route => {
         if (route.request().method() === 'POST') {
             writes.push(route.request().postDataJSON());
-            return route.fulfill({ json: { success: true } });
+            return route.fulfill({ json: { id: 100, ...writes.at(-1) } });
         }
         return route.fulfill({ json: [] });
     });
     await page.evaluate(() => window.app.environmentController.showEnvironmentForm({ mode: 'create', automationWorker: true }));
     const form = page.locator('#env-form');
-    await form.getByRole('button', { name: 'Switch reviewer preset', exact: true }).click();
+    await form.getByRole('button', { name: 'Switch reviewer', exact: true }).click();
     await expect(form.locator('#env-purpose')).toHaveValue('code_review');
     await expect(form.locator('#env-reviewer-mode')).toHaveValue('switch');
-    const choices = form.locator('[data-reviewer-mappings] [data-reviewer-target]');
-    await expect(choices.nth(0)).toHaveValue('base:codex');
-    await expect(choices.nth(1)).toHaveValue('base:claude');
-    await choices.nth(1).evaluate(select => select.tomselect.setValue('base:codex'));
-    await form.locator('[data-reviewer-fallback] [data-reviewer-target]').evaluate(select => select.tomselect.setValue('base:claude'));
+    const defaultReviewer = form.locator('[data-reviewer-fallback] [data-reviewer-target]');
+    const alternate = form.locator('[data-reviewer-alternate] [data-reviewer-target]');
+    await expect(defaultReviewer).toHaveValue('base:codex');
+    await expect(alternate).toHaveValue('base:claude');
+    expect(await alternate.evaluate(select => Object.keys(select.tomselect.options))).not.toContain('base:codex');
     await page.screenshot({ path: testInfo.outputPath('switch-worker-preset.png') });
     await form.getByRole('button', { name: 'Create Worker', exact: true }).click();
     await expect.poll(() => writes.length).toBe(1);
     expect(writes[0]).toMatchObject({ name: 'Switch reviewer', purpose: 'code_review', automationWorker: true,
         reviewerRouting: { mode: 'switch', mappings: [
-            { sourceProvider: 'claude', reviewer: { selection: 'base:codex' } },
-            { sourceProvider: 'codex', reviewer: { selection: 'base:codex' } }
-        ], fallback: { selection: 'base:claude' } } });
+            { sourceProvider: 'codex', reviewer: { selection: 'base:claude' } },
+            { sourceProvider: 'claude', reviewer: { selection: 'base:codex' } }
+        ], fallback: { selection: 'base:codex' } } });
 });
 
 test('Code review Worker preset defaults to Codex and remains editable', async ({ page }) => {
@@ -2387,7 +2387,7 @@ test('Code review Worker preset defaults to Codex and remains editable', async (
     });
     await page.evaluate(() => window.app.environmentController.showEnvironmentForm({ mode: 'create', automationWorker: true }));
     const form = page.locator('#env-form');
-    await form.getByRole('button', { name: 'Code review preset', exact: true }).click();
+    await form.getByRole('button', { name: 'Code review', exact: true }).click();
     await expect(form.locator('#env-cli')).toHaveValue('codex');
     await expect(form.locator('#env-purpose')).toHaveValue('code_review');
     await expect(form.locator('#env-initial-message')).toHaveValue(/Save the review on the originating card/);

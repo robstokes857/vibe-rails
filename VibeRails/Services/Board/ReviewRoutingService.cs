@@ -113,6 +113,8 @@ public sealed class ReviewRoutingService(IBoardStore boards, IRepository reposit
         ValidateTarget(selected);
         BoardSelection.TryParse(selected.Selection, out var parsed);
         selected = selected with { Selection = parsed!.Key, Options = parsed.IsEnvironment ? null : BaseLlmOptionsBuilder.Normalize(parsed.Llm, selected.Options) };
+        if (routing.Mode == "switch" && string.Equals(source.Provider, parsed.Cli, StringComparison.OrdinalIgnoreCase))
+            throw new BoardValidationException($"{parsed.Cli} did the coding. Choose a different LLM for the Switch reviewer, then request a new review.");
         var reviewer = parsed!.Cli;
         var model = selected.Options?.Model;
         string? fingerprint = null;

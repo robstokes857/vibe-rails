@@ -1134,8 +1134,13 @@ Automations, and reporting the move. Done alone never grants merge/publish permi
 
 `ReviewRoutingService` resolves the reviewer for existing Code review Workers/Jobs and direct card
 reviews. `ReviewerRouting.SwitchDefault()` maps Claude to Codex and Codex to Claude, with Codex as
-the visible fallback. All mappings and the fallback are editable, including same-provider targets,
-other supported providers, custom environments and base model options. A direct review can override
+the visible default reviewer. The saved Automation editor exposes that default and a separate
+alternate for cards coded by the default provider; both use the full provider/environment catalog.
+The alternate excludes every environment using that same provider. Additional mappings remain
+editable. Switch routing rejects a resolved reviewer whose provider matches the declared coding
+provider, including custom environments and direct overrides. Fixed reviews retain their behavior.
+These settings persist on the Worker and apply to every card run by the Board Automation.
+Other supported providers, custom environments and base model options are available. A direct review can override
 the selection once. Fixed-provider Workers retain their existing pipeline. New-board template
 seeding consumes this default in VIBE-23; this change does not enable or replace existing Jobs.
 
