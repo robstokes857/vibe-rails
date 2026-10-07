@@ -2,7 +2,7 @@
   "name": "vscode-viberails",
   "displayName": "VibeRails",
   "description": "An opinionated framework that keeps vibe coding from going off the rails: deterministic rules, full session audit and replay, token savings, and Claude Code and Codex side by side.",
-  "version": "10.11.12",
+  "version": "10.11.13",
   "publisher": "viberails",
   "icon": "media/vs-logo.png",
   "license": "MIT",
