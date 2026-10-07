@@ -118,6 +118,7 @@ public sealed class JiraPullServiceTests : IDisposable
         var second = await service.PullAsync(_project, board.Id, dryRun: false, Ct);
         Assert.Equal(1, second.Skipped);
         Assert.Equal(0, second.Updated);
+        Assert.Equal("0 created, 0 updated, 1 skipped, 0 failed. Skipped: 1 unchanged.", second.Message);
     }
 
     [Fact]
@@ -309,16 +310,47 @@ public sealed class JiraPullServiceTests : IDisposable
         var dry = await service.PullAsync(_project, board.Id, dryRun: true, Ct);
         Assert.Equal(0, dry.Created);
         Assert.Equal(1, dry.Skipped);
+        Assert.Equal("Dry run. 0 created, 0 updated, 1 skipped, 0 failed. Skipped: 1 previously deleted in VibeRails.", dry.Message);
 
         _jira.Pages.Enqueue(newer);
         var report = await service.PullAsync(_project, board.Id, dryRun: false, Ct);
         Assert.Equal(0, report.Created);
         Assert.Equal(0, report.Updated);
         Assert.Equal(1, report.Skipped);
+        Assert.Equal("0 created, 0 updated, 1 skipped, 0 failed. Skipped: 1 previously deleted in VibeRails.", report.Message);
+        Assert.Equal("ok: " + report.Message, (await _store.GetJiraConnectionAsync(_project, board.Id, Ct))!.LastReport);
         Assert.Empty(await _store.GetCardsAsync(_project, Ct, board.Id));
         var lanes = await _store.GetColumnsAsync(_project, Ct, board.Id);
         Assert.Equal(lanesBefore, lanes.Count);
         Assert.DoesNotContain(lanes, lane => lane.Name == "Jira");
+    }
+
+    [Fact]
+    public async Task PullReportDistinguishesUnchangedDeletedAndFailedIssues()
+    {
+        var service = Service();
+        var source = await BoardWithLanes();
+        var connection = await service.SaveAsync(_project, source.Id, Save("secret-token"), "secret-token", Ct);
+        var unchanged = Issue("100", "PROJ-1", "2026-09-01T00:00:00.000Z", "Keep", "Task", "Medium", "Backlog");
+        var deleted = Issue("101", "PROJ-2", "2026-09-01T00:00:00.000Z", "Gone", "Task", "Medium", "Backlog");
+        _jira.Pages.Enqueue(Page(unchanged, deleted));
+        await service.PullAsync(_project, connection.BoardId, dryRun: false, Ct);
+        var card = Assert.Single(await _store.GetCardsAsync(_project, Ct, connection.BoardId), card => card.Title == "Gone");
+        Assert.True(await _store.DeleteCardAsync(_project, card.Id, Ct));
+
+        _jira.Pages.Enqueue(Page(unchanged, deleted,
+            Issue("102", "PROJ-3", "2026-09-01T00:00:00.000Z", "New", "Task", "Medium", "Backlog"),
+            Issue("103", "PROJ-4", "2026-09-01T00:00:00.000Z", "", "Task", "Medium", "Backlog")));
+        var report = await service.PullAsync(_project, connection.BoardId, dryRun: false, Ct);
+
+        Assert.Equal(1, report.Created);
+        Assert.Equal(0, report.Updated);
+        Assert.Equal(2, report.Skipped);
+        Assert.Equal(1, report.Failed);
+        Assert.Equal("1 created, 0 updated, 2 skipped, 1 failed. Skipped: 1 unchanged, 1 previously deleted in VibeRails.", report.Message);
+        Assert.Equal(2, (await _store.GetCardsAsync(_project, Ct, connection.BoardId)).Count);
+        Assert.Null(await _store.FindCardAsync(_project, card.Id, Ct));
+        Assert.Equal(card.Id, (await _store.FindJiraLinkAsync(connection.Id, deleted.Id, Ct))!.CardId);
     }
 
     [Fact]

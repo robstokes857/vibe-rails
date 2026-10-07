@@ -520,3 +520,8 @@ connection's live imports still on the source board using the ordinary log-trans
 moves the connection. IDs, comments, attachments, sessions and commits survive; local cards stay.
 Repeated calls use the existing dedicated board. Old writers preserve the new column. Card reads
 project the Jira issue key from retained `BoardJiraLinks`; no card-origin backfill is required.
+
+Jira pull reports keep `skipped` as the total of unchanged issues, previously deleted cards and
+already-linked issues. The message breaks down those reasons and reports failures as `failed`.
+Deleted imports stay deleted on dry runs and writing pulls; never label them as unchanged or
+recreate them to populate an empty board.

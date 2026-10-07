@@ -324,6 +324,8 @@ public sealed class JiraPullService(
         var created = 0;
         var updated = 0;
         var skipped = 0;
+        var unchanged = 0;
+        var deleted = 0;
         var failed = 0;
         string? pageToken = null;
         var pages = 0;
@@ -349,7 +351,12 @@ public sealed class JiraPullService(
                     var action = await ApplyIssueAsync(connection, plan, issue, lanes, overflowId, dryRun, cancellationToken);
                     if (action is ApplyAction.Created or ApplyAction.CreatedOverflow) created++;
                     else if (action == ApplyAction.Updated) updated++;
-                    else skipped++;
+                    else
+                    {
+                        skipped++;
+                        if (action == ApplyAction.Unchanged) unchanged++;
+                        else if (action == ApplyAction.SkippedDeleted) deleted++;
+                    }
                     if (action == ApplyAction.CreatedOverflow)
                     {
                         overflowId = await RefreshOverflowAsync(connection, cancellationToken) ?? overflowId;
@@ -372,7 +379,16 @@ public sealed class JiraPullService(
                 break;
         }
 
-        var message = $"{created} created, {updated} updated, {skipped} unchanged, {failed} skipped.";
+        var message = $"{created} created, {updated} updated, {skipped} skipped, {failed} failed.";
+        if (skipped > 0)
+        {
+            var reasons = new List<string>();
+            if (unchanged > 0) reasons.Add($"{unchanged} unchanged");
+            if (deleted > 0) reasons.Add($"{deleted} previously deleted in VibeRails");
+            var alreadyLinked = skipped - unchanged - deleted;
+            if (alreadyLinked > 0) reasons.Add($"{alreadyLinked} already linked");
+            message += $" Skipped: {string.Join(", ", reasons)}.";
+        }
         return Report(dryRun, "ok", created, updated, skipped, failed, dryRun ? "Dry run. " + message : message);
 
         async Task<JiraPullReport> StoppedAsync(JiraCallOutcome outcome, string? detail, TimeSpan? retryAfter)
@@ -459,7 +475,7 @@ public sealed class JiraPullService(
     private static IEnumerable<string> ColumnNames(JiraBoardConfiguration? configuration) =>
         configuration?.Columns.Where(column => column.StatusIds.Count > 0).Select(column => column.Name) ?? [];
 
-    private enum ApplyAction { Skipped, Created, Updated, CreatedOverflow }
+    private enum ApplyAction { Skipped, Unchanged, SkippedDeleted, Created, Updated, CreatedOverflow }
 
     private async Task<ApplyAction> ApplyIssueAsync(
         BoardJiraConnectionRecord connection, PullPlan plan, JiraIssue issue, IReadOnlyList<BoardColumnRecord> lanes,
@@ -472,7 +488,7 @@ public sealed class JiraPullService(
         // A soft-deleted card keeps its link (VB-51): the issue is neither recreated nor updated,
         // and no overflow lane is made on its behalf. Decided before the dry-run count.
         if (link is not null && existing is null)
-            return ApplyAction.Skipped;
+            return ApplyAction.SkippedDeleted;
 
         var mapped = JiraFieldMapping.Map(issue, plan.PointsField, existing?.Type);
         // A board connection places the issue by its Jira column; a status the board's columns
@@ -502,7 +518,7 @@ public sealed class JiraPullService(
         var mapping = MappingKey(plan, laneTarget);
         var unchanged = link is not null && issue.Updated.ToUniversalTime() == link.IssueUpdated.ToUniversalTime();
         if (unchanged && existing is not null && existing.BoardId == connection.BoardId && string.Equals(link!.Mapping, mapping, StringComparison.Ordinal))
-            return ApplyAction.Skipped;
+            return ApplyAction.Unchanged;
         if (mapped.Title.Length == 0)
             throw new JiraConfigException("Issue title is empty after trimming.");
 
