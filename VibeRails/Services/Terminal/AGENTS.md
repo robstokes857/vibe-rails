@@ -118,7 +118,7 @@ The run and lane-triggering Board card reference the same session ID. No history
 
 ### Board launch options and input sequences (2026-09-14)
 
-`StartTerminalRequest.BaseLlmOptions` carries typed model/effort/start-mode/YOLO choices only for
+`StartTerminalRequest.BaseLlmOptions` carries typed model/effort/start-mode/YOLO/speed choices only for
 base CLIs. `BaseLlmOptionsBuilder` validates these at both board save/launch and the terminal
 child, producing discrete argv without changing physical CLI config. Saved environments
 keep their own arguments. Every startup mode the UI offers is a native CLI flag
@@ -130,6 +130,13 @@ stored on an older Codex card is dropped by `BaseLlmOptionsBuilder`, not rejecte
 still launch. YOLO is a separate, explicit card toggle translated into the provider's native
 launch flag (`--dangerously-bypass-approvals-and-sandbox`, `--dangerously-skip-permissions`,
 `--yolo`, or `--auto`); it defaults off and never rewrites a provider configuration file.
+
+Codex Board speed is Default (inherit CLI settings), Fast or Ultrafast. An explicit supported
+model is required for a speed override; `CodexModelCapabilities` validates it and
+`BaseLlmOptionsBuilder` emits `-c service_tier=fast|ultrafast --enable fast_mode`. Keep its
+model support table aligned with `llm-model-catalog.js` and the model-update checklist in
+`vibe-books/custom_envs/CLI_OPTIONS.md`. Speed is optional JSON in existing Board options;
+older cards need no migration. Account eligibility remains enforced by Codex.
 
 General Settings' **Vibe Board Nudge** defaults on for default/base LLM launches; the independent
 **Vibe Board Nudge - Custom Envs** defaults off for saved/custom environments. The existing

@@ -697,9 +697,15 @@ The environment session ID is local process context, not a cryptographic identit
 
 An assignee is `base:<cli>` or `env:<id>:<cli>`, not a person. Saved environments are resolved by
 ID and checked against provider and project visibility at launch. Base provider options are
-typed model/effort/start-mode/YOLO records; YOLO defaults off and becomes a provider-native launch
+typed model/effort/start-mode/YOLO/speed records; YOLO defaults off and becomes a provider-native launch
 flag without changing configuration. Changing assignee clears incompatible options. Board-launched
 terminals are real PTY CLI sessions, not a separate chat service.
+
+Codex speed is an optional field in the existing options JSON: Default inherits CLI settings;
+Fast and Ultrafast become session-only `service_tier` overrides with `fast_mode` enabled.
+The shared frontend model catalog and `CodexModelCapabilities` restrict overrides to verified
+model/tier pairs; changing the model clears an unsupported selection. Saved environments keep
+their own settings, and existing cards without a speed field continue to launch unchanged.
 
 ## Main flows
 

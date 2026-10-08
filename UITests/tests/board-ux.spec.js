@@ -2021,6 +2021,7 @@ test('Start work preserves the board and stores base launch options including YO
     await page.getByText('Description images', { exact: true }).click();
     await expect(page.locator('.board-card-modal-dialog .modal-title')).toHaveText('VB-1 · Description images');
     await page.locator('[data-board-launch-model]').selectOption('gpt-6-astra');
+    await page.locator('[data-board-launch-speed]').selectOption('ultrafast');
     await page.locator('[data-board-launch-effort]').selectOption('high');
     await expect(page.locator('[data-board-launch-yolo]')).not.toBeChecked();
     await page.locator('[data-board-launch-yolo]').check();
@@ -2030,12 +2031,43 @@ test('Start work preserves the board and stores base launch options including YO
     await expect(page.locator('[data-board-card-editor]')).toHaveCount(0);
     await expect(page.locator('#app-content [data-view="board"]')).toBeVisible();
     expect(requests.find(request => request.method === 'PUT' && request.path.endsWith('/card_test')).body.baseLlmOptions)
-        .toEqual({ model: 'gpt-6-astra', effort: 'high', mode: '', yolo: true });
+        .toEqual({ model: 'gpt-6-astra', effort: 'high', mode: '', yolo: true, speed: 'ultrafast' });
     expect(requests.filter(request => request.path.endsWith('/launch'))).toHaveLength(1);
     await page.getByText('Description images', { exact: true }).click();
     await expect(page.locator('[data-board-launch-effort]')).toHaveValue('high');
+    await expect(page.locator('[data-board-launch-speed]')).toHaveValue('ultrafast');
     await expect(page.locator('[data-board-launch-yolo]')).toBeChecked();
 });
+
+for (const width of [1440, 390]) {
+    test(`Codex Board speed saves, reopens and follows the selected model at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        const requests = await openBoard(page, { assignee: 'base:codex' });
+        await page.getByText('Description images', { exact: true }).click();
+        const model = page.locator('[data-board-launch-model]');
+        const speed = page.getByRole('combobox', { name: 'Speed', exact: true });
+        await expect(speed.locator('option[value="fast"]')).toBeDisabled();
+        await model.selectOption('gpt-6-astra');
+        for (const tier of ['ultrafast', 'fast', '']) {
+            await speed.selectOption(tier);
+            await page.locator('[data-board-save-card]').click();
+            await expect(page.locator('[data-board-card-editor]')).toHaveCount(0);
+            expect(requests.filter(request => request.method === 'PUT' && request.path.endsWith('/card_test')).at(-1).body.baseLlmOptions.speed).toBe(tier);
+            await page.getByText('Description images', { exact: true }).click();
+            await expect(speed).toHaveValue(tier);
+        }
+        await speed.selectOption('ultrafast');
+        await speed.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: testInfo.outputPath(`board-codex-speed-${width}.png`) });
+        await model.selectOption('gpt-6.1-sol');
+        await expect(speed).toHaveValue('');
+        await expect(speed.locator('option[value="ultrafast"]')).toBeDisabled();
+        await speed.selectOption('fast');
+        await model.selectOption('');
+        await expect(speed).toHaveValue('');
+        await expect(speed.locator('option[value="fast"]')).toBeDisabled();
+    });
+}
 
 test('work and discussion actions remain reachable on a narrow screen', async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 390, height: 844 });

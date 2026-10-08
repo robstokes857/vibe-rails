@@ -40,9 +40,14 @@ not the display label. Display/scope changes do not grant approval.
 
 Scripts run with their own folder as working directory, from a verified cached copy inside
 that folder's `.vb-scripts` subdirectory: `.vibe-rails-{signed SHA-256 hash}.{extension}`.
+Before publishing a cached script, VibeRails creates `.vb-scripts/.gitignore` containing `*`
+if missing, including in existing cache folders. Git ignores the cache and its ignore file;
+the repository's own ignore rules and any existing cache ignore file are left unchanged.
 Both captured and interactive runs reuse the same signed version. The original must still pass
 the signing/PIN checks on every launch; cache filenames grant no trust. Cached bytes are checked
-against the verified executable bytes and repaired atomically if changed. Publication uses the
+against the verified executable bytes with bounded reads and repaired atomically if changed,
+including oversized regular cache files. The original script retains its 5 MB limit; links and
+reparse points are rejected before cache repair. Publication uses the
 existing cross-process signing lock, released before execution. Completed and cancelled runs
 retain cached versions; no automatic pruning or historical-file cleanup occurs.
 `$PSScriptRoot` and Python `__file__` point into `.vb-scripts`; ordinary working-directory-relative

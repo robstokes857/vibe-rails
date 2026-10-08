@@ -111,7 +111,7 @@ namespace VibeRails.Services.LlmClis
             existingContent = SetTomlValue(existingContent, "model", NormalizeModel(settings.Model));
             existingContent = SetTomlValue(existingContent, "model_reasoning_effort", NormalizeEffort(settings.Effort));
             var serviceTier = settings.UltrafastMode
-                && string.Equals(NormalizeModel(settings.Model), "gpt-6-astra", StringComparison.OrdinalIgnoreCase)
+                && CodexModelCapabilities.SupportsSpeed(settings.Model, "ultrafast")
                     ? "ultrafast" : settings.FastMode ? "fast" : "";
             existingContent = SetSpeedMode(existingContent, serviceTier);
             existingContent = SetAlternateScreen(existingContent, settings.NoAltScreen);

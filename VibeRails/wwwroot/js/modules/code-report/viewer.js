@@ -208,7 +208,7 @@ export class CodeReportViewer {
     scheduleAutoFocus(generation) {
         if (this.autoFocusCancelled || !this.atlas || this.activeList !== 'report') return;
         // Atlas readiness follows layout and the loader fade. Leave the overview visible
-        // for a second before using the same animated selection as a Report files click.
+        // for 1.5 seconds before using the same animated selection as a Report files click.
         this.autoFocusTimer = this.window.setTimeout(() => {
             this.autoFocusTimer = null;
             if (!this.isCurrent(generation) || this.autoFocusCancelled || this.document.hidden
@@ -218,7 +218,7 @@ export class CodeReportViewer {
             // Saved files may no longer exist in the map. Don't open a details panel or
             // show an unsolicited missing-file toast in place of the opening animation.
             if (path && !first.disabled && this.mappedFiles().has(path)) void this.focusFile(path);
-        }, 1000);
+        }, 1500);
     }
 
     async loadGraph(files, generation) {

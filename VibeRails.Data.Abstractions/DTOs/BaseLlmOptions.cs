@@ -5,4 +5,5 @@ public sealed record BaseLlmOptions(
     string? Model = null,
     string? Effort = null,
     string? Mode = null,
-    bool Yolo = false);
+    bool Yolo = false,
+    string? Speed = null);

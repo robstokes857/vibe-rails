@@ -262,7 +262,7 @@ public sealed class PythonScriptShellRuntimeTests : IDisposable
             "[System.IO.File]::WriteAllText((Join-Path $PWD 'interactive-location.txt'), $PSCommandPath)\nexit 7\n");
 
         await service.RunAsync("leave.ps1", TestContext.Current.CancellationToken);
-        var cachedPath = Assert.Single(Directory.GetFiles(ScriptPath(".vb-scripts")));
+        var cachedPath = Assert.Single(Directory.GetFiles(ScriptPath(".vb-scripts"), "*.ps1"));
         File.SetLastWriteTimeUtc(cachedPath, DateTime.UtcNow.AddDays(-1));
         var writtenUtc = File.GetLastWriteTimeUtc(cachedPath);
 
@@ -274,6 +274,35 @@ public sealed class PythonScriptShellRuntimeTests : IDisposable
         Assert.Equal(ScriptPath(".vb-scripts"), Path.GetDirectoryName(executedPath));
         Assert.Equal(cachedPath, executedPath);
         Assert.Equal(writtenUtc, File.GetLastWriteTimeUtc(cachedPath));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ARealPowerShellRunRepairsAnOversizedCache(bool interactive)
+    {
+        Assert.SkipWhen(new JobExecutableResolver().Resolve(JobScriptRuntime.PowerShell) is null,
+            "PowerShell 7 (pwsh) is not installed on this machine.");
+        var ct = TestContext.Current.CancellationToken;
+        var service = new PythonScriptService(installDirectory: _installDirectory);
+        const string content = "[System.IO.File]::WriteAllText((Join-Path $PWD 'executed-location.txt'), $PSCommandPath)\nexit 7\n";
+        await SignAsync(service, "repair.ps1", content);
+        await service.RunAsync("repair.ps1", ct);
+        var path = Assert.Single(Directory.GetFiles(ScriptPath(".vb-scripts"), "*.ps1"));
+        File.Delete(ScriptPath("executed-location.txt"));
+        using (var cache = File.OpenWrite(path)) cache.SetLength(5 * 1024 * 1024 + 1);
+        Assert.Equal(PythonScriptService.StatusApproved,
+            Assert.Single((await service.GetStatusAsync(ct)).Scripts).Status);
+
+        var exitCode = interactive
+            ? await service.RunInteractiveAsync("repair.ps1", ct)
+            : (await service.RunAsync("repair.ps1", ct)).ExitCode;
+
+        Assert.Equal(7, exitCode);
+        Assert.Equal(path, await File.ReadAllTextAsync(ScriptPath("executed-location.txt"), ct));
+        Assert.Equal(content, await File.ReadAllTextAsync(path, ct));
+        Assert.Equal(content, await File.ReadAllTextAsync(ScriptPath("repair.ps1"), ct));
+        Assert.Empty(Directory.GetFiles(ScriptPath(".vb-scripts"), "*.tmp"));
     }
 
     private static PythonResult Completed(string standardOutput) => new()

@@ -17,7 +17,7 @@ header. There is no second report store, scan engine or theme preference.
   **Show in code explorer** and Escape return to the map. Copy context is absent.
 - The chrome is compact: the sidebar is the grade, the radar and the file list, with **Git
   changes** available beside the default **Report files** list and the changed files lit on the map on load.
-  One second after Atlas is ready, the first report file is selected using the normal map focus
+  1.5 seconds after Atlas is ready, the first report file is selected using the normal 800 ms map focus
   animation. User input cancels this opening selection, as do reload and teardown; empty reports,
   failed maps and a first file outside the map skip it. Reduced motion follows Atlas's preference.
   The scan's count,

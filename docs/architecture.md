@@ -585,6 +585,11 @@ For Board UI, API, SQLite, launch and MCP work, start with the
 [architecture and VB-18 review](../VibeRails/Services/Board/ARCHITECTURE.md).
 The Board uses `~/.vibe_rails/board.db`; its contracts live in `VibeRails.Data.Abstractions/Board`
 and its store/migrations in `VibeRails.Data.Sqlite/Board`. REST and MCP share `BoardService`.
+Base Codex cards persist an optional Speed choice (Default/Fast/Ultrafast) in their existing
+`BaseLlmOptions` JSON. `llm-model-catalog.js` and `CodexModelCapabilities` define supported
+model/tier pairs; `BaseLlmOptionsBuilder` validates them and emits session-only service-tier
+arguments. Default inherits CLI settings. See the model maintenance checklist in
+`vibe-books/custom_envs/CLI_OPTIONS.md` when adding models or speed tiers.
 VIBE-6 adds `BoardSearchService` for dashboard search, link candidates, `search_board_cards` and
 card recall: all local boards share current-text BGE/keyword retrieval with a bounded repository
 preference. VIBE-55 feeds full titles, descriptions, Comments, retained notes and handoffs through
@@ -883,9 +888,12 @@ and can use a selected folder; Add from disk references the original. No folder 
 legacy import occurs, and removing a registration leaves its file. Signing keeps the existing
 PIN document, binding each new approval to ID/path/content. Both documents share the existing
 cross-process lock. Runs reuse `.vb-scripts/.vibe-rails-{signed SHA-256 hash}.{extension}` beneath
-the original script's directory, retaining that original directory as cwd. Each launch verifies
-the original approval and cached bytes; missing/changed cache files are published atomically
-under the signing lock. The cache rejects links and junctions and survives completion or
+the original script's directory, retaining that original directory as cwd. Before caching,
+VibeRails creates a missing `.vb-scripts/.gitignore` containing `*`, so Git ignores the cache
+and its ignore file in new and existing cache folders without editing repository ignore rules.
+Each launch verifies the original approval and compares cached bytes with bounded reads;
+missing/changed cache files, including oversized regular files, are published atomically under
+the signing lock. Original scripts retain the 5 MB limit. The cache rejects links and junctions and survives completion or
 cancellation. `$PSScriptRoot` and `__file__` refer to its directory. The captured run window and active Scripts rows offer
 Stop, which aborts the exact HTTP request and propagates cancellation through PyBridge to the
 process tree. Closing the window keeps its run alive; handles remain scoped to each script.

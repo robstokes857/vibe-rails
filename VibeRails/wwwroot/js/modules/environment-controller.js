@@ -1,6 +1,6 @@
 import { mountEnvironmentEditor, environmentField } from './environment-editor.js';
 import { parseCliArguments } from './cli-arguments.js';
-import { normalizeLlmModel, renderLlmModelOptions } from './llm-model-catalog.js';
+import { codexModelSupportsSpeed, normalizeLlmModel, renderLlmModelOptions } from './llm-model-catalog.js';
 import { isConfirmDialogOpen } from './utils.js';
 import {
     normalizeSteps,
@@ -932,7 +932,7 @@ export class EnvironmentController {
     }
 
     codexModelSupportsUltrafast(model) {
-        return this.normalizeCodexModel(model).toLowerCase() === 'gpt-6-astra';
+        return codexModelSupportsSpeed(model, 'ultrafast');
     }
 
     codexServiceTier(settings) {

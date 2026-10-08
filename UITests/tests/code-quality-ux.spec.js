@@ -384,7 +384,7 @@ test('Quality report opens inline beside compact scan controls', async ({ page }
     await expect(quality.getByRole('button', { name: 'View metrics' })).toHaveCount(0);
 });
 
-test('the first Report file animates into focus one second after a delayed map is ready', async ({ page }) => {
+test('the first Report file animates into focus 1.5 seconds after a delayed map is ready', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await installQualityApi(page);
     let release;
@@ -421,7 +421,7 @@ test('the first Report file animates into focus one second after a delayed map i
     await expect(map.locator('#inspector h2')).toHaveText('PaymentProcessor.cs');
     expect(await map.locator('body').evaluate(() => window.mapMotions)).toContain('focus');
     const delay = await page.evaluate(() => window.fileFocusedAt - window.mapReadyAt);
-    expect(delay).toBeGreaterThanOrEqual(950);
+    expect(delay).toBeGreaterThanOrEqual(1450);
     expect(delay).toBeLessThan(3000);
     await expect(report.locator('.details-panel')).toBeHidden();
 });
@@ -441,7 +441,7 @@ for (const interaction of ['another file', 'Git changes', 'map search']) {
         } else {
             await map.locator('#search').fill('Healthy');
         }
-        await page.waitForTimeout(1200);
+        await page.waitForTimeout(1700);
         await expect(report.locator('.qr-file').first()).toHaveAttribute('aria-pressed', 'false');
         if (interaction === 'another file') await expect(map.locator('#inspector h2')).toHaveText('HealthyHelper.cs');
         else await expect(map.locator('#inspector')).toBeHidden();
@@ -459,7 +459,7 @@ test('leaving a ready map cancels its opening selection and returning replays it
         window.app.navigate('environments');
     });
     await expect(page.locator('.code-report iframe')).toHaveCount(0);
-    await page.waitForTimeout(1200);
+    await page.waitForTimeout(1700);
     expect(await page.evaluate(() => window.oldMapSelections)).toBe(0);
     await page.locator('.app-subnav [data-view="code-quality"]').click();
     await expect(page.locator('.code-report .qr-file').first()).toHaveAttribute('aria-pressed', 'true', { timeout: 10000 });

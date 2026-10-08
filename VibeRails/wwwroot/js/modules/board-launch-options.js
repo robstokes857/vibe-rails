@@ -1,5 +1,5 @@
 import { escapeHtml } from './utils.js';
-import { normalizeLlmModel, renderLlmModelOptions } from './llm-model-catalog.js';
+import { codexModelSupportsSpeed, normalizeLlmModel, renderLlmModelOptions } from './llm-model-catalog.js';
 
 const pinnedModels = Object.freeze({
     'glm-5.2': 'zai/glm-5.2', 'glm-5.3': 'zai-coding-plan/glm-5.3',
@@ -30,7 +30,8 @@ export function normalizeBoardLaunchOptions(selection, options = {}) {
         model,
         effort,
         mode: startModes(cli).length ? String(options?.mode || '') : '',
-        yolo: options?.yolo === true
+        yolo: options?.yolo === true,
+        speed: cli === 'codex' && codexModelSupportsSpeed(model, options?.speed) ? options.speed : ''
     };
 }
 
@@ -56,6 +57,10 @@ export function renderBoardLaunchOptions(selection, options = {}) {
         : `<select class="form-select form-select-sm" data-board-launch-model aria-label="Model">${renderLlmModelOptions(cli, values.model)}</select>`;
     return `<div class="board-launch-options mt-2" data-board-launch-options>
         <label class="form-label">Model</label>${modelHtml}
+        ${cli === 'codex' ? `<label class="form-label mt-2">Speed</label><select class="form-select form-select-sm" data-board-launch-speed aria-label="Speed" aria-describedby="board-launch-speed-help">
+            <option value="" ${!values.speed ? 'selected' : ''}>Default</option>
+            ${['fast', 'ultrafast'].map(speed => `<option value="${speed}" ${values.speed === speed ? 'selected' : ''} ${codexModelSupportsSpeed(values.model, speed) ? '' : 'disabled'}>${speed === 'fast' ? 'Fast' : 'Ultrafast'}</option>`).join('')}
+        </select><small id="board-launch-speed-help" class="form-text text-muted d-block">Select a supported model to choose a speed. Faster modes use more of your allowance; Ultrafast requires an eligible account. Default uses your Codex settings.</small>` : ''}
         ${efforts[cli] ? `<label class="form-label mt-2">Effort</label><select class="form-select form-select-sm" data-board-launch-effort aria-label="Effort">${optionTags(efforts[cli], values.effort)}</select>` : ''}
         ${modes.length ? `<label class="form-label mt-2">Start mode</label><select class="form-select form-select-sm" data-board-launch-mode aria-label="Start mode">${optionTags(modes, values.mode)}</select>` : ''}
         <div class="form-check mt-2">
@@ -70,19 +75,28 @@ export function readBoardLaunchOptions(container, selection) {
         model: container.querySelector('[data-board-launch-model]')?.value || '',
         effort: container.querySelector('[data-board-launch-effort]')?.value || '',
         mode: container.querySelector('[data-board-launch-mode]')?.value || '',
-        yolo: Boolean(container.querySelector('[data-board-launch-yolo]')?.checked)
+        yolo: Boolean(container.querySelector('[data-board-launch-yolo]')?.checked),
+        speed: container.querySelector('[data-board-launch-speed]')?.value || ''
     });
 }
 
 export function bindBoardLaunchOptions(container, selection) {
     const model = container.querySelector('[data-board-launch-model]');
     const effort = container.querySelector('[data-board-launch-effort]');
+    const speed = container.querySelector('[data-board-launch-speed]');
     const synchronize = () => {
-        if (baseCli(selection) !== 'codex' || !effort) return;
-        const max = effort.querySelector('option[value="max"]');
+        if (baseCli(selection) !== 'codex') return;
+        const max = effort?.querySelector('option[value="max"]');
         const unsupported = model?.value.toLowerCase() === 'gpt-5.5';
         if (max) max.disabled = unsupported;
-        if (unsupported && effort.value === 'max') effort.value = 'xhigh';
+        if (unsupported && effort?.value === 'max') effort.value = 'xhigh';
+        if (speed) {
+            for (const tier of ['fast', 'ultrafast']) {
+                const option = speed.querySelector(`option[value="${tier}"]`);
+                if (option) option.disabled = !codexModelSupportsSpeed(model?.value, tier);
+            }
+            if (!codexModelSupportsSpeed(model?.value, speed.value)) speed.value = '';
+        }
     };
     model?.addEventListener('change', synchronize);
     synchronize();

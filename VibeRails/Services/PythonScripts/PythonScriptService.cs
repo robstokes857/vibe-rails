@@ -776,21 +776,47 @@ public sealed partial class PythonScriptService : IPythonScriptService
         ValidatePathComponents(directory);
         Directory.CreateDirectory(directory);
         ValidatePathComponents(directory);
+        // Keep the entire cache (including this file) out of Git in every repository.
+        // Also covers caches created by older versions without changing the repo's rules.
+        var ignorePath = Path.Combine(directory, ".gitignore");
+        ValidatePathComponents(ignorePath);
+        if (!PathEntryExists(ignorePath))
+            await WriteNewFileAtomicallyAsync(ignorePath, "*\n"u8.ToArray(), ".gitignore", cancellationToken);
+
         var path = Path.Combine(directory,
             $".vibe-rails-{signedHash.ToLowerInvariant()}{Path.GetExtension(originalPath).ToLowerInvariant()}");
         ValidatePathComponents(path);
         if (PathEntryExists(path))
         {
-            var existing = ReadScriptBytes(path);
-            if (existing.AsSpan().SequenceEqual(content)) return path;
+            if (CachedBytesMatch(path, content)) return path;
             await ReplaceFileAtomicallyAsync(path, content, Path.GetFileName(path),
-                ComputeContentVersion(existing), cancellationToken);
+                expectedVersion: null, cancellationToken);
         }
         else
         {
             await WriteNewFileAtomicallyAsync(path, content, Path.GetFileName(path), cancellationToken);
         }
         return path;
+    }
+
+    private static bool CachedBytesMatch(string path, byte[] content)
+    {
+        // Reject links before treating a length mismatch (including an oversized cache) as
+        // repairable. Never allocate or read in proportion to untrusted cache contents.
+        if (GetRegularScriptFileInfo(path).Length != content.Length) return false;
+        using var stream = File.OpenRead(path);
+        if (stream.Length != content.Length) return false;
+
+        Span<byte> buffer = stackalloc byte[8192];
+        var offset = 0;
+        while (offset < content.Length)
+        {
+            var read = stream.Read(buffer[..Math.Min(buffer.Length, content.Length - offset)]);
+            if (read == 0 || !buffer[..read].SequenceEqual(content.AsSpan(offset, read))) return false;
+            offset += read;
+        }
+        // Even if the file grows after the length check, comparison remains bounded.
+        return stream.ReadByte() == -1;
     }
 
     /// <summary>
@@ -1054,7 +1080,7 @@ public sealed partial class PythonScriptService : IPythonScriptService
         string path,
         byte[] bytes,
         string name,
-        string expectedVersion,
+        string? expectedVersion,
         CancellationToken cancellationToken)
     {
         var tempPath = TemporarySiblingPath(path);
@@ -1062,14 +1088,22 @@ public sealed partial class PythonScriptService : IPythonScriptService
         {
             await WriteTemporaryFileAsync(tempPath, bytes, cancellationToken);
 
-            // Recheck immediately before the atomic rename. This catches an external editor
-            // changing or deleting the file while the replacement bytes were being written.
-            var current = ReadScriptBytes(path);
-            if (!string.Equals(
-                    ComputeContentVersion(current), expectedVersion, StringComparison.OrdinalIgnoreCase))
+            // Recheck immediately before the atomic rename. Authoring must preserve external
+            // edits; a generated cache can replace any contents, but must still be a regular
+            // file. Do not read/hash an oversized cache just to overwrite it with verified bytes.
+            if (expectedVersion is null)
             {
-                throw new PythonScriptValidationException(
-                    $"'{name}' changed while it was being saved. Reopen it and try again.");
+                GetRegularScriptFileInfo(path);
+            }
+            else
+            {
+                var current = ReadScriptBytes(path);
+                if (!string.Equals(
+                        ComputeContentVersion(current), expectedVersion, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new PythonScriptValidationException(
+                        $"'{name}' changed while it was being saved. Reopen it and try again.");
+                }
             }
 
             cancellationToken.ThrowIfCancellationRequested();

@@ -8,6 +8,42 @@ namespace Tests.Services.Terminal;
 public sealed class BaseLlmOptionsTests
 {
     [Theory]
+    [InlineData("gpt-6-astra", "fast")]
+    [InlineData("gpt-6-astra", "ultrafast")]
+    [InlineData("gpt-6.1-sol", "fast")]
+    [InlineData("gpt-6-sol", "fast")]
+    [InlineData("gpt-6-luna", "fast")]
+    [InlineData("gpt-5.6-sol", "fast")]
+    [InlineData("gpt-5.6-terra", "fast")]
+    [InlineData("gpt-5.6-luna", "fast")]
+    [InlineData("gpt-5.5", "fast")]
+    public void CodexSpeedBecomesSessionArguments(string model, string speed) =>
+        Assert.Equal(["--model", model, "-c", "model_reasoning_effort=high", "-c", $"service_tier={speed}", "--enable", "fast_mode"],
+            BaseLlmOptionsBuilder.BuildArguments(LLM.Codex, new(model, "high", Speed: speed)));
+
+    [Theory]
+    [InlineData(LLM.Codex, "", "fast")]
+    [InlineData(LLM.Codex, "custom-model", "fast")]
+    [InlineData(LLM.Codex, "gpt-6.1-sol", "ultrafast")]
+    [InlineData(LLM.Codex, "gpt-5.6-sol", "ultrafast")]
+    [InlineData(LLM.Codex, "gpt-6-astra", "turbo")]
+    [InlineData(LLM.Codex, "gpt-6-astra", "fast --yolo")]
+    [InlineData(LLM.Claude, "gpt-6-astra", "fast")]
+    public void UnsupportedSpeedsAreRejected(LLM cli, string model, string speed) =>
+        Assert.Throws<ArgumentException>(() => BaseLlmOptionsBuilder.BuildArguments(cli, new(model, Speed: speed)));
+
+    [Fact]
+    public void DefaultSpeedKeepsExistingConfigAndLegacyOptions()
+    {
+        Assert.Null(BaseLlmOptionsBuilder.Normalize(LLM.Codex, new(Speed: "default")));
+        Assert.Equal(["--model", "custom-model"], BaseLlmOptionsBuilder.BuildArguments(LLM.Codex, new("custom-model")));
+        Assert.Equal("fast", BaseLlmOptionsBuilder.Normalize(LLM.Codex, new(" GPT-6-ASTRA ", Speed: " FAST "))!.Speed);
+        var legacy = System.Text.Json.JsonSerializer.Deserialize("{\"model\":\"gpt-6-astra\",\"effort\":\"high\",\"yolo\":true}", AppJsonSerializerContext.Default.BaseLlmOptions)!;
+        Assert.Null(legacy.Speed);
+        Assert.DoesNotContain("fast_mode", BaseLlmOptionsBuilder.BuildArguments(LLM.Codex, legacy));
+    }
+
+    [Theory]
     [InlineData(LLM.Claude, "--permission-mode")]
     [InlineData(LLM.Grok46, "--permission-mode")]
     [InlineData(LLM.Antigravity, "--mode")]

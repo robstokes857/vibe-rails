@@ -32,7 +32,7 @@ test('base selections expose provider options; saved environments keep their set
         ['[data-board-launch-yolo]', { checked: true }]
     ]);
     assert.deepEqual(readBoardLaunchOptions({ querySelector: selector => values.get(selector) || null }, 'base:codex'), {
-        model: 'gpt-6-astra', effort: 'high', mode: '', yolo: true
+        model: 'gpt-6-astra', effort: 'high', mode: '', yolo: true, speed: ''
     });
 });
 
@@ -78,7 +78,7 @@ test('Codex max effort normalizes when selecting gpt-5.5', () => {
     const max = { disabled: false };
     const effort = { value: 'max', querySelector: () => max };
     const model = { value: 'gpt-5.5', addEventListener() {}, removeEventListener() {} };
-    bindBoardLaunchOptions({ querySelector: selector => selector.includes('model') ? model : effort }, 'base:codex')();
+    bindBoardLaunchOptions({ querySelector: selector => selector.includes('model') ? model : selector.includes('effort') ? effort : null }, 'base:codex')();
     assert.equal(effort.value, 'xhigh');
     assert.equal(max.disabled, true);
 });
@@ -87,4 +87,47 @@ test('saved/custom model text is escaped before becoming dropdown markup', () =>
     const html = renderBoardLaunchOptions('base:claude', { model: '"><img src=x onerror=alert(1)>' });
     assert.doesNotMatch(html, /<img|<script/);
     assert.match(html, /&lt;img/);
+});
+
+test('Codex speeds follow model capabilities and round-trip through the form', () => {
+    for (const model of ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5']) {
+        assert.equal(normalizeBoardLaunchOptions('base:codex', { model, speed: 'fast' }).speed, 'fast');
+        assert.equal(normalizeBoardLaunchOptions('base:codex', { model, speed: 'ultrafast' }).speed,
+            model === 'gpt-6-astra' ? 'ultrafast' : '');
+    }
+    for (const model of ['', 'unknown-model', 'constructor', '__proto__']) {
+        for (const speed of ['fast', 'ultrafast', 'turbo']) {
+            assert.equal(normalizeBoardLaunchOptions('base:codex', { model, speed }).speed, '');
+        }
+    }
+    assert.equal(normalizeBoardLaunchOptions('base:claude', { model: 'gpt-6-astra', speed: 'fast' }).speed, '');
+    assert.doesNotMatch(renderBoardLaunchOptions('base:claude'), /data-board-launch-speed/);
+    assert.match(renderBoardLaunchOptions('base:codex', { model: 'gpt-6-astra', speed: 'ultrafast' }), /value="ultrafast" selected/);
+    const values = new Map([
+        ['[data-board-launch-model]', { value: 'gpt-6-astra' }],
+        ['[data-board-launch-speed]', { value: 'ultrafast' }]
+    ]);
+    assert.equal(readBoardLaunchOptions({ querySelector: key => values.get(key) }, 'base:codex').speed, 'ultrafast');
+});
+
+test('changing the Codex model clears unsupported speeds and disposes the listener', () => {
+    let listener;
+    const model = { value: 'gpt-6-astra', addEventListener: (_, fn) => { listener = fn; },
+        removeEventListener: (_, fn) => { assert.equal(fn, listener); listener = null; } };
+    const fast = { disabled: false }, ultrafast = { disabled: false };
+    const speed = { value: 'ultrafast', querySelector: selector => selector.includes('"fast"') ? fast : ultrafast };
+    const dispose = bindBoardLaunchOptions({ querySelector: selector => selector.includes('model') ? model : selector.includes('speed') ? speed : null }, 'base:codex');
+    assert.equal(speed.value, 'ultrafast');
+    model.value = 'gpt-6.1-sol';
+    listener();
+    assert.equal(speed.value, '');
+    assert.equal(ultrafast.disabled, true);
+    assert.equal(fast.disabled, false);
+    speed.value = 'fast';
+    model.value = '';
+    listener();
+    assert.equal(speed.value, '');
+    assert.equal(fast.disabled, true);
+    dispose();
+    assert.equal(listener, null);
 });
