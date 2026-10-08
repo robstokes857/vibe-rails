@@ -16,7 +16,8 @@ boards/lanes and a card search, confirms the destination and lane Automation cou
 to replace an editor with unsaved drafts. Dispose it on close/replacement/unload. The existing
 navbar **Sign in** opens the device approval flow when signed out. The top navigation is the
 only application navigation. Quality is third and Rules fourth; they are separate destinations.
-Settings is an accessible icon-only cog immediately after the Automation play button.
+Automation and its play button follow Rules, then ENVs, Vibe AI and MCP.
+Settings is an accessible icon-only cog after MCP.
 Rules runs validation only; Quality restores or starts its own cached scan when opened.
 
 Comments includes agent checkpoints and legacy note rows. Attention entries appear first; the

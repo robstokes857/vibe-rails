@@ -57,10 +57,10 @@ export function renderBoardLaunchOptions(selection, options = {}) {
         : `<select class="form-select form-select-sm" data-board-launch-model aria-label="Model">${renderLlmModelOptions(cli, values.model)}</select>`;
     return `<div class="board-launch-options mt-2" data-board-launch-options>
         <label class="form-label">Model</label>${modelHtml}
-        ${cli === 'codex' ? `<label class="form-label mt-2">Speed</label><select class="form-select form-select-sm" data-board-launch-speed aria-label="Speed" aria-describedby="board-launch-speed-help">
+        ${cli === 'codex' ? `<label class="form-label mt-2">Speed</label><select class="form-select form-select-sm" data-board-launch-speed aria-label="Speed">
             <option value="" ${!values.speed ? 'selected' : ''}>Default</option>
             ${['fast', 'ultrafast'].map(speed => `<option value="${speed}" ${values.speed === speed ? 'selected' : ''} ${codexModelSupportsSpeed(values.model, speed) ? '' : 'disabled'}>${speed === 'fast' ? 'Fast' : 'Ultrafast'}</option>`).join('')}
-        </select><small id="board-launch-speed-help" class="form-text text-muted d-block">Select a supported model to choose a speed. Faster modes use more of your allowance; Ultrafast requires an eligible account. Default uses your Codex settings.</small>` : ''}
+        </select>` : ''}
         ${efforts[cli] ? `<label class="form-label mt-2">Effort</label><select class="form-select form-select-sm" data-board-launch-effort aria-label="Effort">${optionTags(efforts[cli], values.effort)}</select>` : ''}
         ${modes.length ? `<label class="form-label mt-2">Start mode</label><select class="form-select form-select-sm" data-board-launch-mode aria-label="Start mode">${optionTags(modes, values.mode)}</select>` : ''}
         <div class="form-check mt-2">
