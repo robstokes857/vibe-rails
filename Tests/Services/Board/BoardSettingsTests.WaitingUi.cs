@@ -66,7 +66,7 @@ public sealed partial class BoardSettingsTests
     }
 
     [Fact]
-    public async Task SkipTargetsOneExactEntry_PreservesOtherCardsAndReentries_AndRejectsCommittedRuns()
+    public async Task SkipTargetsOneExactEntry_PreservesOtherCardsAndReentries_AndStopsCommittedRuns()
     {
         var (_, from, lane, _) = await Lanes();
         var firstJob = await Job();
@@ -82,15 +82,17 @@ public sealed partial class BoardSettingsTests
         Assert.Single(await _boards.GetPendingLaneAutomationsAsync(_root, card.Id, Ct));
         Assert.Equal(2, (await _boards.GetPendingLaneAutomationsAsync(_root, other.Id, Ct)).Count);
         Assert.Contains((await _boards.GetCardDetailAsync(_root, card.Id, Ct))!.Comments,
-            comment => comment.Body.Contains("Requested to continue without"));
+            comment => comment.Body.Contains("Skipped lane Automation"));
         await _boards.MoveCardAsync(_root, card.Id, from, null, Ct);
         await _boards.MoveCardAsync(_root, card.Id, lane, null, Ct);
         await Assert.ThrowsAsync<BoardConflictException>(() => service.SkipAsync(_root, card.Id, secondJob.Id, entry.EventKey, Ct));
         Assert.Equal(2, (await _boards.GetPendingLaneAutomationsAsync(_root, card.Id, Ct)).Count);
-        // Skip the older card so this card can dispatch both Jobs.
+        // Remove the older card so this card can start its first step.
         await _boards.MoveCardAsync(_root, other.Id, from, null, Ct);
-        Assert.Equal(2, (await Tick(await Due(card.Id))).Count);
+        Assert.Single(await Tick(await Due(card.Id)));
         var queued = (await _boards.GetLaneAutomationStatusesAsync(_root, card.Id, Ct)).First(e => e.RunId is not null);
-        await Assert.ThrowsAsync<BoardConflictException>(() => service.SkipAsync(_root, card.Id, queued.JobId, queued.EventKey, Ct));
+        var result = await service.SkipAsync(_root, card.Id, queued.JobId, queued.EventKey, Ct);
+        Assert.Equal("Skipped", result!.LaneEntries!.Single(e => e.EventKey == queued.EventKey).StepStatus);
+        Assert.Equal(JobRunStatus.Cancelled, (await _jobs.GetRunAsync(queued.RunId!, Ct))!.Status);
     }
 }

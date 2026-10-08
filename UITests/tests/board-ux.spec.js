@@ -1418,7 +1418,7 @@ test('waiting badge follows server activity and skip preserves editor drafts', a
     await page.screenshot({ path: testInfo.outputPath('waiting-card.png') });
     await page.locator('.board-automation-waiting').click();
     await page.locator('#board-card-title').fill('Keep my draft');
-    const skip = page.getByRole('button', { name: 'Continue without this Automation', exact: true });
+    const skip = page.getByRole('button', { name: 'Skip this step', exact: true });
     await expect(skip).toBeVisible();
     await skip.click();
     await expect(page.locator('[data-board-automation-runs]')).toContainText('Skipped');
@@ -1460,7 +1460,7 @@ for (const width of [1440, 390]) {
         const panel = page.getByRole('dialog', { name: 'Lane agents', exact: true });
         await expect(panel).toContainText('Claude → Codex; Codex → Claude');
         await expect(panel).toContainText('Code review report');
-        await expect(panel).toContainText('does not launch a run');
+        await expect(panel).toContainText('Each step waits for the previous step to pass or be skipped.');
         await expect(panel).toContainText('Setup needed: Install/sign in to claude');
         expect(await page.evaluate(() => window.__setupXss)).toBeUndefined();
         await expect(panel.getByRole('button', { name: 'Choose reviewer / edit mappings' })).toHaveCount(0);
@@ -2688,5 +2688,73 @@ for (const width of [1440, 390]) {
         await search.fill('');
         await expect(page.locator('[data-board-canvas]')).toBeVisible();
         await expect(page.locator('[data-board-filter-type]')).toBeEnabled();
+    });
+}
+
+for (const width of [1440, 390]) {
+    test(`ordered lane workflow status and per-card skip at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        await page.clock.install();
+        const { jobs, settings, writes } = await openLaneAgentsBoard(page);
+        jobs.find(job => job.id === 14).name = 'VCA';
+        jobs.find(job => job.id === 14).actions = [{ kind: 3, arguments: ['working-tree'] }];
+        Object.assign(jobs.find(job => job.id === 15), { name: 'Code quality', actions: [{ kind: 2, arguments: ['working-tree'] }] });
+        settings.lane_2.jobIds = [12, 14, 15];
+        const steps = [
+            { jobId: 12, eventKey: 'review-entry', status: 'Running', stepStatus: 'Reviewing', canSkip: true, reason: 'Review in progress.' },
+            { jobId: 14, eventKey: 'vca-entry', status: 'Waiting', stepStatus: 'Waiting', canSkip: true, reason: 'Waiting for Code Review.' },
+            { jobId: 15, eventKey: 'quality-entry', status: 'Waiting', stepStatus: 'Waiting', canSkip: true, reason: 'Waiting for VCA.' }
+        ];
+        settings.lane_2.workflows = [{ cardId: 'card_test', cardLabel: 'VIBE-123 · Example change', steps }];
+        const response = () => ({ runningAgents: [], workflows: settings.lane_2.workflows });
+        let holdPoll = false, heldPoll, releasePoll;
+        // Keep one old poll in flight across Skip to verify the mutation cannot be repainted.
+        await page.route('**/api/v1/board/columns/lane_2/automation/running', async route => {
+            if (holdPoll) {
+                holdPoll = false;
+                const snapshot = structuredClone(response());
+                await new Promise(resolve => { heldPoll = true; releasePoll = resolve; });
+                return route.fulfill({ json: snapshot });
+            }
+            return route.fulfill({ json: response() });
+        });
+        const skips = [];
+        await page.route('**/api/v1/board/cards/card_test/automations/skip', route => {
+            const body = route.request().postDataJSON();
+            skips.push(body);
+            const step = steps.find(step => step.eventKey === body.eventKey);
+            step.stepStatus = 'Skipped'; step.status = 'Skipped'; step.canSkip = false; step.reason = 'User skipped this step.';
+            return route.fulfill({ json: { laneEntries: steps } });
+        });
+        await page.getByRole('button', { name: 'Agents on entry to Review', exact: true }).click();
+        const panel = page.getByRole('dialog', { name: 'Lane agents', exact: true });
+        await expect(panel).toContainText('run top to bottom');
+        await expect(panel.locator('[data-lane-step-id="12"]')).toContainText('Reviewing');
+        await expect(panel.locator('[data-lane-step-id="12"]')).toContainText('VIBE-123');
+        await expect(panel.locator('.board-workflow-arrow')).toHaveCount(2);
+        for (const state of ['Failed', 'Fixing', 'Reviewing', 'Passed']) {
+            steps[0].stepStatus = state;
+            steps[0].reason = state === 'Passed' ? 'No blocking findings.' : state + ' in progress.';
+            steps[0].canSkip = state !== 'Passed';
+            steps[0].status = state === 'Passed' ? 'Succeeded' : 'Running';
+            await page.clock.fastForward(10100);
+            await expect(panel.locator('[data-lane-step-id="12"] .board-workflow-state')).toHaveText(state);
+        }
+        await expect(panel.locator('[data-lane-arrow-id="12"] .is-complete')).toBeVisible();
+        holdPoll = true;
+        await page.clock.fastForward(10100);
+        await expect.poll(() => heldPoll).toBe(true);
+        await panel.locator('[data-lane-step-id="14"]').getByRole('button', { name: 'Skip', exact: true }).click();
+        await expect(panel.locator('[data-lane-step-id="14"]')).toContainText('Skipped');
+        releasePoll();
+        await page.clock.fastForward(100);
+        await expect(panel.locator('[data-lane-step-id="14"]')).toContainText('Skipped');
+        expect(skips).toEqual([{ jobId: 14, eventKey: 'vca-entry' }]);
+        expect(writes).toEqual([]);
+        expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+        await page.screenshot({ path: testInfo.outputPath(`ordered-workflow-${width}.png`) });
+        await panel.getByRole('button', { name: 'Close lane agents' }).click();
+        await page.clock.fastForward(20000);
+        await expect(panel).toHaveCount(0);
     });
 }

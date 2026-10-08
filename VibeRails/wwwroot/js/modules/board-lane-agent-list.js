@@ -1,3 +1,4 @@
+import { laneStepMarkup, laneArrowMarkup } from './board-lane-workflow.js';
 import { escapeHtml } from './utils.js';
 import { workerIdentity, laneReviewerSummary } from './board-lane-agent-display.js';
 import { agentPurposeLabel } from './agent-purpose.js';
@@ -6,7 +7,7 @@ export const selectedLaneJobIds = settings => settings.jobIds ?? (settings.jobId
 
 /** Read-only lane summary. The heading pencil opens the full Automation editor. */
 export function laneAgentListMarkup(settings, jobs, environments) {
-    const rows = selectedLaneJobIds(settings).map(id => {
+    const rows = selectedLaneJobIds(settings).map((id, index, ids) => {
         const option = settings.jobs?.find(job => job.id === id);
         const job = jobs.find(job => job.id === id);
         const name = option?.name || `Unavailable Automation (${id})`;
@@ -26,11 +27,12 @@ export function laneAgentListMarkup(settings, jobs, environments) {
                 <button type="button" class="board-lane-agents-action" data-agent-action="edit" aria-label="Edit ${escapeHtml(name)}" title="Edit Automation" ${option ? '' : 'disabled'}><i class="fa-solid fa-pen" aria-hidden="true"></i></button>
                 <button type="button" class="board-lane-agents-action" data-agent-action="remove" aria-label="Remove ${escapeHtml(name)} from this lane" title="Remove from this lane"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>
             </div>
+            <div data-lane-step-id="${Number(id)}" aria-live="polite">${laneStepMarkup(Number(id), settings.workflows || [])}</div>
             ${environment?.purpose === 'code_review' ? `<p class="board-lane-agent-reviewer">${escapeHtml(laneReviewerSummary(environment, environments))}</p>
                 <p class="small">Output: configured Checks, a Code review report and a card handoff.</p>
                 ${option?.setup ? `<p class="small" role="status">${escapeHtml(option.setup)}</p>` : ''}` : ''}
             <p class="board-lane-agent-description-preview">${escapeHtml(job?.description || 'No description yet.')}</p>
-        </article>`;
+        </article>${index < ids.length - 1 ? `<div data-lane-arrow-id="${Number(id)}">${laneArrowMarkup(Number(id), settings.workflows || [])}</div>` : ''}`;
     }).join('');
     return `${settings.starterSetupPending ? '<p role="status">Starter review setup is pending. Reopen to retry, or save your own lane selection.</p>' : ''}
         <div class="board-lane-agents-list">${rows || '<p class="board-lane-agents-empty">No agents on entry to this lane.</p>'}</div>

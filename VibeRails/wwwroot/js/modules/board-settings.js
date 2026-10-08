@@ -98,7 +98,7 @@ export const boardContextSection = () => `
 export const laneAutomationSection = () => `
     <section class="mt-3 border-top pt-3" data-lane-automation>
         <h6>Automations</h6>
-        <p class="board-editor-muted">Run selected Automations after a card enters this lane and stays for 60 seconds. Each runs independently. Moving again restarts the wait. Reordering or editing a card in the same lane does not trigger them.</p>
+        <p class="board-editor-muted">Run selected Automations after a card enters this lane and stays for 60 seconds. They run in the order shown, each waiting for the preceding step to pass or be skipped. Moving again restarts the wait. Reordering or editing a card in the same lane does not trigger them.</p>
         <div data-board-settings-content>Loading Automations…</div>
         <p class="board-editor-muted mt-2">Runs while a VibeRails backend is open. Busy Automations wait for their turn. Saving settings cancels pending entries for this lane and applies to future entries; it does not launch an agent. Lane agents shows each workflow’s purpose, output and reviewer choices. Removing a selection keeps the shared Automation. You define what each lane, including Done, means.</p>
     </section>`;
@@ -269,8 +269,8 @@ export function mountLaneAutomation(app, element, columnId, onSaved) {
         load: extra => BoardApi.getLaneAutomationAsync(columnId, extra),
         render: ({ jobs, jobIds, jobId, starterSetupPending }) => {
             const selected = new Set(jobIds ?? (jobId ? [jobId] : []));
-            const choices = [...jobs, ...[...selected].filter(id => !jobs.some(job => job.id === id))
-                .map(id => ({ id, name: `Unavailable Automation (${id})`, enabled: false }))];
+            const choices = [...[...selected].map(id => jobs.find(job => job.id === id)
+                || { id, name: `Unavailable Automation (${id})`, enabled: false }), ...jobs.filter(job => !selected.has(job.id))];
             return `${starterSetupPending ? '<p role="status">Starter review setup is pending. Reopen to retry, or save your lane selection to cancel the default.</p>' : ''}<fieldset class="mb-2">
                 <legend class="board-editor-label">Automations on entry</legend>
                 <p class="board-editor-muted">Select any number, or clear all to turn off Automations for this lane. Remove unavailable or disabled selections before saving.</p>

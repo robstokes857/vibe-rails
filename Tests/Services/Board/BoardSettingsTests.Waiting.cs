@@ -135,7 +135,7 @@ public sealed partial class BoardSettingsTests
     }
 
     [Fact]
-    public async Task MoreThanOneBatchOfBusyJobs_RotatesToLaterJobsDurably()
+    public async Task MoreThanOneBatchOfBusyJobs_PreservesSequentialOrderAcrossRestart()
     {
         var (_, lane, _, _) = await Lanes();
         var jobs = new List<long>();
@@ -148,12 +148,13 @@ public sealed partial class BoardSettingsTests
         await _boards.SaveLaneAutomationAsync(_root, lane, jobs, 0, Ct);
         var card = await Card(lane);
         var now = await Due(card.Id);
-        var first = await _boards.GetDueLaneAutomationsAsync(DateTimeOffset.FromUnixTimeMilliseconds(now).UtcDateTime, Ct);
-        Assert.Equal(100, first.Count);
+        var first = Assert.Single(await _boards.GetDueLaneAutomationsAsync(DateTimeOffset.FromUnixTimeMilliseconds(now).UtcDateTime, Ct));
+        Assert.Equal(jobs[0], first.JobId);
         Assert.Empty(await Tick(now));
-        var next = await new BoardStore(_connectionString, _stateConnectionString)
-            .GetDueLaneAutomationsAsync(DateTimeOffset.FromUnixTimeMilliseconds(now + 1).UtcDateTime, Ct);
-        Assert.All(next.Take(3), entry => Assert.DoesNotContain(first, old => old.JobId == entry.JobId));
+        var next = Assert.Single(await new BoardStore(_connectionString, _stateConnectionString)
+            .GetDueLaneAutomationsAsync(DateTimeOffset.FromUnixTimeMilliseconds(now + 1).UtcDateTime, Ct));
+        Assert.Equal(first.EventKey, next.EventKey);
+        Assert.Equal(103, (await _boards.GetPendingLaneAutomationsAsync(_root, card.Id, Ct)).Count);
     }
 
     [Fact]
@@ -168,6 +169,10 @@ public sealed partial class BoardSettingsTests
         var delivery = new Mock<IBoardStore>(MockBehavior.Strict);
         delivery.Setup(s => s.GetDueLaneAutomationsAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[] { entry, entry });
+        delivery.Setup(s => s.GetLaneAutomationBlockReasonAsync(It.IsAny<BoardLaneAutomationEvent>(), It.IsAny<CancellationToken>()))
+            .Returns<BoardLaneAutomationEvent, CancellationToken>(_boards.GetLaneAutomationBlockReasonAsync);
+        delivery.Setup(s => s.GetLaneAutomationStatusesAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns<string, string, CancellationToken>(_boards.GetLaneAutomationStatusesAsync);
         delivery.Setup(s => s.IsLaneAutomationCurrentAsync(entry, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         delivery.Setup(s => s.RecordLaneAutomationDispatchAsync(entry, It.IsAny<BoardLaneAutomationDispatch>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .Returns<BoardLaneAutomationEvent, BoardLaneAutomationDispatch, DateTime, CancellationToken>(_boards.RecordLaneAutomationDispatchAsync);
@@ -234,7 +239,7 @@ public sealed partial class BoardSettingsTests
         Assert.Empty(await Tick(await Due(card.Id)));
         Assert.Equal(0, await Due(card.Id));
         var status = Assert.Single(await _boards.GetLaneAutomationStatusesAsync(_root, card.Id, Ct));
-        Assert.Equal("Skipped", status.Status);
+        Assert.Equal("Failed", status.Status);
         Assert.Contains(reason, status.Reason);
         Assert.Empty(await _boards.GetLaneAutomationStatusesAsync(_root + "-foreign", card.Id, Ct));
     }

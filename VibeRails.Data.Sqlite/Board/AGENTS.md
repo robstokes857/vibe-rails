@@ -1,5 +1,11 @@
 # Board persistence
 
+`board-lane-workflow/1` adds per-entry ordered workflow snapshots and append-only step reports.
+All current lane dispatch is sequential per card; the existing per-Job overlap guard remains.
+Use current workflow/event identity for decisions and user skips, and wait for actual run
+completion before advancing. Setup is additive with no history conversion or backfill. See
+[ordered lane workflows](../../VibeRails/Services/Board/ARCHITECTURE.md#ordered-lane-workflows).
+
 VIBE-55 retires active use of `board-search/1`'s JSON-vector cache without deleting it.
 `GetSearchDocumentsAsync` pages full live titles/descriptions, visible Comments/retained notes
 and handoffs behind `IBoardStore`, preserving source boundaries and compact recall metadata.
@@ -33,8 +39,10 @@ still use the resolved owning project and existing transactional checks. No sche
 
 `board-starter-workflows/1` adds new-board recipe intents, bound to lane IDs at creation only.
 Settings insert/update triggers retire an intent without changing existing settings or history.
-Completion and assignment commit together behind `IBoardStore`; state recipe installation commits
-independently through `IJobStore`. Never backfill old boards or reset completion after removal.
+Current recovery completes the intent through `IBoardStore` without assigning the Automation;
+it stays available for explicit lane selection. The older completion/assignment contract and
+existing selections remain supported. State recipe installation commits independently through
+`IJobStore`. Never backfill old boards or reset completion after removal.
 
 `board-lane-dispatch/1` adds a dispatch ledger and cancellation triggers that write only to that
 new table. Existing queue/schema writers remain compatible. Busy events stay pending; the drain

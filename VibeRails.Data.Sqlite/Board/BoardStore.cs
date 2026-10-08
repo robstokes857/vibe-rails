@@ -1935,6 +1935,7 @@ public sealed partial class BoardStore : IBoardStore
         SqliteMigrationRunner.Apply(connection, "board-attention", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, AttentionSchemaSql));
         SqliteMigrationRunner.Apply(connection, "board-lane-dispatch", 1, MigrationKind.Additive, ApplyLaneDispatchSchema);
+        SqliteMigrationRunner.Apply(connection, "board-lane-workflow", 1, MigrationKind.Additive, ApplyWorkflowSchema);
         SqliteMigrationRunner.Apply(connection, "board-checks", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, ChecksSchemaSql));
         SqliteMigrationRunner.Apply(connection, "board-starter-workflows", 1, MigrationKind.Additive, (db, transaction) =>

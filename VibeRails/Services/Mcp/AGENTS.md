@@ -1,5 +1,13 @@
 # MCP Server (in-process)
 
+## Ordered lane progress
+
+`report_automation_step` records reviewing/fixing/passed/failed for the current lane entry.
+Only the owning current Automation run can decide; a linked coding agent may report fixing.
+A code review pass must reference the caller’s complete saved review with current captured inputs.
+User skips stay on the authenticated card route. Keep the exact Board grant and both transports
+in sync, and retain independent MCP tests. See [the workflow contract](../Board/ARCHITECTURE.md#ordered-lane-workflows).
+
 ## Attention flags (VIBE-40)
 
 `update_board_card(flagged: true, flagReason: "issue and requested action")` requires a reason
@@ -106,6 +114,7 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 | Wire name (snake_case) | Method | Description |
 |------------------------|--------|-------------|
 | `validate_vca` | `RulesTool.ValidateVca` | Validates the staged Git index snapshot against `- [ENFORCEMENT] …` rules from the indexed vc.rules.md files. |
+| `create_session_share_link` | `SessionSharingTool.CreateSessionShareLink` | Creates a public replay link for the calling terminal's inherited session, with a required `displayName` (1–160 characters). Returns upload status, expiry and a ready-to-copy `vibe-share:<url>` commit line. Anyone with the link can view terminal output, prompts and saved code changes. |
 | `search_history` | `SessionSearchTool.SearchHistory` | Semantic + keyword search over the developer's captured agent history. |
 | `pause_token_saver` | `TokenSaverTool.PauseTokenSaver` | Turns VibeRails' token compression off for 5 minutes for this terminal tab, so an agent can read elided output verbatim. |
 | `resume_token_saver` | `TokenSaverTool.ResumeTokenSaver` | Restores token compression immediately, ending an active pause early. |
@@ -244,6 +253,25 @@ signed Python scripts remain available from the dashboard; legacy MCP configurat
 > `cancel_shell_command` (`HostShellTools`) and `web_search` / `web_fetch` (`WebResearchTools`) are kept in the
 > tree but no longer registered or listed via `WithTools<...>()` in either transport. The sections below
 > describe the retained implementations.
+
+### `create_session_share_link` — public session replay
+
+`SessionSharingTool` uses the inherited `VIBERAILS_TOOL_API_BASE`, `VIBERAILS_TOOL_SESSION_TOKEN`,
+`VIBERAILS_TOOL_TAB_TOKEN` and `VIBERAILS_TOOL_CURRENT_SESSION_ID` to call the existing root-only
+session-sharing route. These are the root tool API credentials, not the terminal child's agent
+control credentials. Codex forwards their names in its per-launch MCP environment override;
+values never enter argv or shared configuration. Both transports register the tool, but callers
+without an inherited terminal/root context receive an actionable failure (including MCP Explorer).
+There is no arbitrary session target, database access in the stdio child, extra listener or Board
+auto-grant. The local hop rejects non-loopback destinations, disables redirects/proxies/cookies,
+and bounds requests to 30 seconds and responses to 16 KiB. Returned links are validated and never
+logged by the tool. The existing sharing service owns account checks and durable upload requests.
+
+Call only when sharing is requested or required by the repository's VCA rule. Reuse the returned
+link for later commits from the same session. Active sessions can create links immediately, but
+the replay is available only after completion and upload; keep the root open for upload. The tool
+description and response disclose the public-read capability and expiration. See
+[SessionSharing.md](../Integrations/VibeCodeRemote/SessionSharing.md).
 
 ### `search_history` — the real search
 

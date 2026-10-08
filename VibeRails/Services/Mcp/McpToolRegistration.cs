@@ -26,6 +26,7 @@ public static class McpToolRegistration
         .WithTools<SessionSearchTool>(SerializerOptions)
         .WithTools<TokenSaverTool>(SerializerOptions)
         .WithTools<AgentSessionTool>(SerializerOptions)
+        .WithTools<SessionSharingTool>(SerializerOptions)
         .WithTools<BoardTool>(SerializerOptions);
 
     /// <summary>
@@ -44,6 +45,18 @@ public static class McpToolRegistration
         services.AddHttpClient(AgentSessionTool.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(10))
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false });
         services.AddScoped<AgentSessionTool>();
+        return services;
+    }
+
+    /// <summary>Calls only the inherited root API, without redirects, cookies or system proxies.</summary>
+    public static IServiceCollection AddSessionSharingMcp(this IServiceCollection services)
+    {
+        services.AddHttpClient(SessionSharingTool.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(30))
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+            {
+                AllowAutoRedirect = false, UseProxy = false, UseCookies = false
+            });
+        services.AddScoped<SessionSharingTool>();
         return services;
     }
 

@@ -81,3 +81,24 @@ test('purpose filters preserve attention and distinguish human and unclassified 
     assert.equal(matchesCommentFilter({ author: { kind: 'user' } }, 'work'), false);
     assert.equal(matchesCommentFilter({ ...testComment, isAttention: true }, 'code_review'), true);
 });
+
+import { laneStepMarkup, laneArrowMarkup } from '../../../VibeRails/wwwroot/js/modules/board-lane-workflow.js';
+
+test('workflow progress identifies each card and only offers server-authorized skips', () => {
+    const flow = [{ cardId: 'card-1', cardLabel: 'VIBE-123 <img src=x>',
+        steps: [{ jobId: 7, eventKey: 'entry"1', status: 'Running', stepStatus: 'Reviewing',
+            reason: '<script>bad()</script>', canSkip: true }] }];
+    const html = laneStepMarkup(7, flow);
+    assert.match(html, /Reviewing/);
+    assert.match(html, /Stop and skip/);
+    assert.match(html, /data-card-id="card-1"/);
+    assert.match(html, /entry&quot;1/);
+    assert.doesNotMatch(html, /<img|<script>/);
+    flow[0].steps[0].canSkip = false;
+    flow[0].steps[0].stepStatus = 'Passed';
+    assert.doesNotMatch(laneStepMarkup(7, flow), /data-agent-action="skip"/);
+    assert.match(laneArrowMarkup(7, flow), /is-complete/);
+    flow[0].steps[0].stepStatus = 'Skipped';
+    assert.match(laneStepMarkup(7, flow), /Skipped/);
+    assert.doesNotMatch(laneStepMarkup(7, flow), /circle-check/);
+});

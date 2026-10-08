@@ -63,6 +63,10 @@ namespace VibeRails.Services.VCA
 
                 // Commit message word check
                 [Rule.CheckCommitMessageForWords] = new CommitMessageWordValidator(),
+                [Rule.RequireVibeRailsSessionLink] = new SessionShareCommitValidator(),
+                [Rule.CodeQualityMinimumA] = new CodeQualityValidator(Rule.CodeQualityMinimumA),
+                [Rule.CodeQualityMinimumB] = new CodeQualityValidator(Rule.CodeQualityMinimumB),
+                [Rule.CodeQualityMinimumC] = new CodeQualityValidator(Rule.CodeQualityMinimumC),
 
                 // Exact-file and recursive-directory locks
                 [Rule.FileLock] = new PathLockValidator(PathLockKind.File),

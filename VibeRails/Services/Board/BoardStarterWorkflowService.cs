@@ -1,23 +1,20 @@
 using VibeRails.DB;
-using VibeRails.Utils;
 
 namespace VibeRails.Services.Board;
 
 /// <summary>Recoverable local recipe installation across independent Board and state commits.</summary>
 public sealed class BoardStarterWorkflowService(IBoardStore boards, IJobStore jobs, ILogger<BoardStarterWorkflowService> logger)
 {
-    /// <summary>Finishes only durable new-board requests; failed installs remain visible and retryable.</summary>
+    /// <summary>Makes new-board recipes available without selecting them; failed installs remain retryable.</summary>
     public async Task RecoverAsync(string project, CancellationToken ct)
     {
         foreach (var seed in await boards.GetPendingStarterWorkflowsAsync(project, ct))
         {
             try
             {
-                var job = await jobs.EnsureBoardReviewRecipeAsync(project, seed.ColumnId, seed.RecipeId, ct);
-                var definition = await jobs.GetJobAsync(job, ct);
-                await boards.CompleteStarterWorkflowAsync(project, seed.ColumnId,
-                    definition is { DeletedUtc: null, Enabled: true } && ProjectPathComparer.Matches(definition.ProjectPath, project)
-                        ? job : null, ct);
+                await jobs.EnsureBoardReviewRecipeAsync(project, seed.ColumnId, seed.RecipeId, ct);
+                // Keep Switch reviewer available in the picker. Only an explicit lane settings save selects it.
+                await boards.CompleteStarterWorkflowAsync(project, seed.ColumnId, null, ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

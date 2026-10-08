@@ -218,7 +218,7 @@ public partial class CommandServiceTests : IDisposable
         var service = CreateService(codexLlmProxyEnabled: proxyEnabled);
         const string sessionId = "session-private-to-this-launch";
         var prepared = await service.PrepareSessionAsync(LLM.Codex, null, null, sessionId: sessionId);
-        const string forwarding = "mcp_servers.viberails-mcp.env_vars=[\"VIBERAILS_TOOL_CURRENT_SESSION_ID\",\"VIBERAILS_TOOL_CURRENT_TAB_ID\",\"VIBERAILS_AGENT_CONTROL_BASE\",\"VIBERAILS_AGENT_CONTROL_SESSION_TOKEN\",\"VIBERAILS_AGENT_CONTROL_TAB_TOKEN\"]";
+        const string forwarding = "mcp_servers.viberails-mcp.env_vars=[\"VIBERAILS_TOOL_CURRENT_SESSION_ID\",\"VIBERAILS_TOOL_CURRENT_TAB_ID\",\"VIBERAILS_TOOL_API_BASE\",\"VIBERAILS_TOOL_SESSION_TOKEN\",\"VIBERAILS_TOOL_TAB_TOKEN\",\"VIBERAILS_AGENT_CONTROL_BASE\",\"VIBERAILS_AGENT_CONTROL_SESSION_TOKEN\",\"VIBERAILS_AGENT_CONTROL_TAB_TOKEN\"]";
 
         Assert.Contains(forwarding, prepared.Argv!);
         Assert.Contains("mcp_servers.viberails-mcp.env_vars", prepared.LaunchCommand);

@@ -902,9 +902,10 @@ public sealed partial class BoardToolTests : IDisposable
         var lanes = await _tool.ListBoardColumns(cancellationToken: Ct);
         Assert.Contains("- Review (id col_", lanes);
         Assert.Contains("\n  on entry: " + ReviewDetail + "\n  on entry: " + OpenPrDetail + "\n", lanes);
-        Assert.Contains("Link commits and post your summary comment before moving a card into such a lane, and move it once.", lanes);
+        Assert.Contains("Link commits and post a summary before moving into the lane once.", lanes);
+        Assert.Contains("Each step needs the preceding pass or a user skip.", lanes);
         Assert.DoesNotContain("second prompt line", lanes);
-        Assert.Single(lanes.Split('\n'), line => line.StartsWith("Lanes with on-entry Automations", StringComparison.Ordinal));
+        Assert.Single(lanes.Split('\n'), line => line.StartsWith("Lane Automations run in listed order", StringComparison.Ordinal));
 
         var card = await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct);
         Assert.Contains("\nLanes: Backlog → Ready → Build → Review (on entry: \"Automated code review\", \"Open PR\") → Done\n", card);
@@ -914,7 +915,7 @@ public sealed partial class BoardToolTests : IDisposable
         // A board without lane Automations reads exactly as before, guidance included.
         await _store.SaveLaneAutomationAsync(_project, (await _service.FindColumnAsync(_project, "Review", Ct))!.Id, [], 1, Ct);
         Assert.DoesNotContain("on entry", await _tool.ListBoardColumns(cancellationToken: Ct));
-        Assert.DoesNotContain("Lanes with on-entry Automations", await _tool.ListBoardColumns(cancellationToken: Ct));
+        Assert.DoesNotContain("Lane Automations run in listed order", await _tool.ListBoardColumns(cancellationToken: Ct));
     }
 
     [Fact]
@@ -942,17 +943,19 @@ public sealed partial class BoardToolTests : IDisposable
         Assert.Empty(await TickAsync());
         Assert.Contains("Automated code review · Cancelled", await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct));
 
-        // Entering again records fresh entries, which settle into one run of each Automation.
+        // Entering again records fresh entries; only the first step may run initially.
         await _tool.MoveBoardCard("PROJ-1", "review", cancellationToken: Ct);
         var runs = await TickAsync();
         var jobIds = new List<long>();
         foreach (var runId in runs) jobIds.Add((await _jobs.GetRunAsync(runId, Ct))!.JobId);
-        Assert.Equal(new[] { review, openPr }.Order(), jobIds.Order());
+        Assert.Equal(new[] { review }, jobIds);
         Assert.Contains("Automated code review · Queued", await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct));
+        Assert.Empty(await TickAsync());
+        Assert.Contains("Open PR · Waiting", await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct));
     }
 
     [Fact]
-    public async Task Move_ReportsSkippedEntries_ForActiveRunsAndUnavailableAutomations()
+    public async Task Move_ReportsWaitingAndBlockedEntries_ForActiveRunsAndUnavailableAutomations()
     {
         var (review, openPr) = await ReviewLaneAutomationsAsync();
         await _tool.CreateBoardCard("Fix the race", cancellationToken: Ct);
@@ -966,7 +969,7 @@ public sealed partial class BoardToolTests : IDisposable
 
         Assert.Equal("Moved PROJ-1 to Review (position 0).\n"
             + $"Waiting: \"Automated code review\" — a run of this Automation is already active (run {active}, queued); this entry waits for its turn after the 60-second settling period.\n"
-            + "Skipped: \"Open PR\" — the Automation is disabled.",
+            + "Blocked: \"Open PR\" — the Automation is disabled. Later steps wait for a pass or user skip.",
             BoardKeyText.Short(await _tool.MoveBoardCard("PROJ-1", "review", cancellationToken: Ct)));
         // The scheduler applies the same gates when the entries settle: nothing new is queued.
         Assert.Empty(await TickAsync());

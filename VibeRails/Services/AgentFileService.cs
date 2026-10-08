@@ -94,6 +94,11 @@ namespace VibeRails.Services
         {
             EnsureSingleLineRule(ruleText);
 
+            if (CodeQualityRule.LooksLike(ruleText) && !CodeQualityRule.TryParse(ruleText, out _))
+            {
+                throw new ArgumentException("Code quality minimum must be A, B or C. C is the lowest supported minimum.");
+            }
+
             if (CommitMessageWordRule.LooksLike(ruleText) && !CommitMessageWordRule.TryParse(ruleText, out _))
             {
                 throw new ArgumentException($"Invalid commit-message word list. {CommitMessageWordRule.SyntaxHelp}");

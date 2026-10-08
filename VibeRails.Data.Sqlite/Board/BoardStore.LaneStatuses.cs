@@ -25,7 +25,11 @@ public sealed partial class BoardStore
                         AND NOT EXISTS (SELECT 1 FROM pending p WHERE p.EventKey = d.EventKey AND p.JobId = d.JobId)
                 )
                 SELECT EventKey, JobId, ColumnId, DueUnixMs, Status, Reason, RunId FROM entries
-                ORDER BY priority, DueUnixMs DESC, EventKey LIMIT 100;
+                WHERE priority = 0 OR EventKey IN (
+                    SELECT s.EventKey FROM BoardLaneWorkflowSteps s JOIN BoardLaneWorkflows w ON w.Id = s.WorkflowId
+                    WHERE w.CardId = $card AND w.Current = 1)
+                    OR EventKey IN (SELECT EventKey FROM BoardLaneAutomationDispatch WHERE CardId = $card ORDER BY DueUnixMs DESC LIMIT 100)
+                ORDER BY priority, DueUnixMs DESC, EventKey;
                 """;
             command.Parameters.AddWithValue("$card", card.Id);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -46,18 +50,24 @@ public sealed partial class BoardStore
                 : definition.InProject && definition.ActiveRunId is not null ? $"Automation is busy with run {definition.ActiveRunId}; waiting for its turn."
                 : "Waiting for the scheduler; a VibeRails root backend must be open.";
             rows[index] = row with { Name = definition.InProject ? definition.Name ?? $"Automation #{row.JobId}" : $"Automation #{row.JobId}",
-                Purpose = definition.InProject ? definition.Purpose : "work", Reason = reason };
+                Purpose = definition.InProject ? definition.Purpose : "work", RequiresVerdict = definition.WorkerName is not null, Reason = reason };
         }
 
         // Reconcile by immutable trigger, even before Board acknowledgement, after a crash, or
         // when a move cancelled the pending entry concurrently with the independent run commit.
         await using var state = await OpenStateAsync(cancellationToken);
-        if (!await _stateFeatures.HasTableAsync(state, "JobRuns", cancellationToken)) return rows;
+        if (!await _stateFeatures.HasTableAsync(state, "JobRuns", cancellationToken))
+        {
+            await ApplyWorkflowStatusesAsync(projectPath, card, rows, cancellationToken);
+            return rows;
+        }
         var keys = rows.Select(row => $"board-lane:{card.Key}:{row.ColumnId}:{row.EventKey}").ToList();
+        var hasActions = await _stateFeatures.HasTableAsync(state, "JobRunActions", cancellationToken);
+        var worker = hasActions ? "EXISTS (SELECT 1 FROM JobRunActions a WHERE a.RunId = JobRuns.Id AND a.Kind = 0)" : "1";
         var purpose = _stateFeatures.HasColumn(state, "JobRuns", "Purpose") ? "Purpose" : "'work'";
         await using var runs = state.CreateCommand();
         runs.CommandText = $"""
-            SELECT TriggerKey, Id, JobName, Status, ErrorMessage, {purpose} FROM JobRuns
+            SELECT TriggerKey, Id, JobName, Status, ErrorMessage, {purpose}, {worker} FROM JobRuns
             WHERE ProjectPath = $project{ProjectPathCollation} AND TriggerKind = $kind
                 AND TriggerKey IN (SELECT value FROM json_each($keys));
             """;
@@ -70,8 +80,11 @@ public sealed partial class BoardStore
             var index = keys.IndexOf(runReader.GetString(0));
             var status = (JobRunStatus)runReader.GetInt32(3);
             rows[index] = rows[index] with { RunId = runReader.GetString(1), Name = runReader.GetString(2), Status = status.ToString(),
-                Reason = runReader.IsDBNull(4) ? $"Automation run {status.ToString().ToLowerInvariant()}." : runReader.GetString(4), Purpose = runReader.GetString(5) };
+                Reason = runReader.IsDBNull(4) ? $"Automation run {status.ToString().ToLowerInvariant()}." : runReader.GetString(4), Purpose = runReader.GetString(5), RequiresVerdict = runReader.GetBoolean(6) };
         }
+        await runReader.DisposeAsync();
+        if (hasActions) await ApplyDeterministicRetriesAsync(state, card, rows, cancellationToken);
+        await ApplyWorkflowStatusesAsync(projectPath, card, rows, cancellationToken);
         return rows;
     }
 }

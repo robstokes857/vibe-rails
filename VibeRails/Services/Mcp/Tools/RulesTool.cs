@@ -156,10 +156,23 @@ public class RulesTool
                     stagedFiles.Count);
             }
 
+            // Quality must score the same immutable added-code snapshot as Git Guard,
+            // including on the direct MCP path. Re-read policy from that snapshot too.
+            if (stagedSnapshot is null && allRules.Any(rule =>
+                rule.Enforcement is not ("SKIP" or "DISABLED")
+                && CodeQualityRule.TryParse(rule.RuleText, out _)
+                && GetScopedFiles(stagedFiles, rule.Source.FullPath, gitRoot).Count > 0))
+            {
+                var qualitySnapshot = await new GitStagedSnapshotProvider().CaptureAsync(gitRoot, cancellationToken);
+                return await ValidateVcaReportAsync(gitRoot, commitMessage, validateCommitMessage,
+                    cancellationToken, qualitySnapshot, workingTreeScope);
+            }
+
             // Validate against rules
             var violations = new List<string>();
             var warnings = new List<string>();
             var deferredChecks = new List<string>();
+            var qualityChecks = new List<string>();
             var commitViolations = new List<(string RuleText, string SourceFile, string Slug)>();
             var requiredAcknowledgments = new List<string>();
             var findings = new List<VcaRuleFinding>();
@@ -194,7 +207,11 @@ public class RulesTool
                     rule.Source,
                     commitMessage,
                     validateCommitMessage,
-                    cancellationToken);
+                    cancellationToken,
+                    stagedSnapshot);
+
+                if (validation.State == RuleValidationState.Passed && CodeQualityRule.LooksLike(ruleText))
+                    qualityChecks.Add($"{ruleText}: {validation.Message}");
 
                 if (validation.State == RuleValidationState.Deferred)
                 {
@@ -293,6 +310,8 @@ public class RulesTool
             var result = new System.Text.StringBuilder();
             result.AppendLine($"Validated {stagedFiles.Count} {scopeNoun} file(s) against {evaluatedRuleCount} applicable rule(s).");
             result.AppendLine();
+            foreach (var qualityCheck in qualityChecks)
+                result.AppendLine(qualityCheck);
 
             if (violations.Count == 0 && warnings.Count == 0 && deferredChecks.Count == 0)
             {
@@ -569,9 +588,26 @@ public class RulesTool
         AgentFileSnapshot sourceAgent,
         string? commitMessage,
         bool validateCommitMessage,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        GitStagedSnapshot? snapshot)
     {
         var ruleLower = ruleText.ToLowerInvariant();
+
+        if (CodeQualityRule.LooksLike(ruleText))
+        {
+            if (!CodeQualityRule.TryParse(ruleText, out var minimumGrade))
+                return RuleValidationResult.Unrecognized(
+                    "UNSUPPORTED: use Code quality minimum A, B or C. C is the lowest supported minimum.");
+
+            if (snapshot is null)
+                return RuleValidationResult.Violation("UNSUPPORTED: Code quality needs a source snapshot.");
+
+            var quality = CodeQualityRule.Evaluate(minimumGrade,
+                CodeQualityRule.InScope(snapshot, sourceAgent.FullPath), cancellationToken);
+            return quality.IsValid
+                ? RuleValidationResult.Pass(quality.Message!)
+                : RuleValidationResult.Violation(quality.Message!);
+        }
 
         if (PathLockRule.LooksLikePathLock(ruleText))
         {
@@ -747,6 +783,15 @@ public class RulesTool
                     $"{packageFiles.Count} package file(s) changed: {string.Join(", ", packageFiles.Take(3))}");
         }
 
+        if (SessionShareCommitRule.IsRule(ruleText))
+        {
+            if (!validateCommitMessage)
+                return RuleValidationResult.Deferred(SessionShareCommitRule.DeferredMessage);
+            return SessionShareCommitRule.HasShareLink(commitMessage)
+                ? RuleValidationResult.Pass("Commit message contains a VibeRails session sharing link")
+                : RuleValidationResult.Violation(SessionShareCommitRule.MissingMessage);
+        }
+
         if (CommitMessageWordRule.LooksLike(ruleText))
         {
             if (!CommitMessageWordRule.TryParse(ruleText, out var wordRule))
@@ -773,7 +818,7 @@ public class RulesTool
     }
 
     private static bool IsCommitMessageRule(string ruleText) =>
-        CommitMessageWordRule.LooksLike(ruleText);
+        CommitMessageWordRule.LooksLike(ruleText) || SessionShareCommitRule.IsRule(ruleText);
 
     private static string DescribePathLockChange(StagedFileSnapshot file)
     {

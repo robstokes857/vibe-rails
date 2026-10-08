@@ -168,7 +168,7 @@ public class CommandService : ICommandService
             var identityArgs = new List<string>(launchArgs);
             var delimiter = identityArgs.IndexOf("--");
             identityArgs.InsertRange(delimiter < 0 ? identityArgs.Count : delimiter,
-                ["--config", $"mcp_servers.{VibeRailsMcpServerName}.env_vars=[\"{LocalToolApiContext.CurrentSessionIdVariable}\",\"{LocalToolApiContext.CurrentTabIdVariable}\",\"{AgentSessionTool.BaseUrlVariable}\",\"{AgentSessionTool.SessionTokenVariable}\",\"{AgentSessionTool.TabTokenVariable}\"]"]);
+                ["--config", $"mcp_servers.{VibeRailsMcpServerName}.env_vars=[\"{LocalToolApiContext.CurrentSessionIdVariable}\",\"{LocalToolApiContext.CurrentTabIdVariable}\",\"{LocalToolApiContext.ApiBaseUrlVariable}\",\"{LocalToolApiContext.SessionTokenVariable}\",\"{LocalToolApiContext.TabTokenVariable}\",\"{AgentSessionTool.BaseUrlVariable}\",\"{AgentSessionTool.SessionTokenVariable}\",\"{AgentSessionTool.TabTokenVariable}\"]"]);
             launchArgs = identityArgs.ToArray();
         }
         // The Board sets this explicitly on Start work. Never infer permission from

@@ -110,8 +110,11 @@ scheduler cycle. Lean stdio creation records the intent for that root recovery w
 full state-schema setup. `IJobStore.EnsureBoardReviewRecipeAsync` creates a dedicated editable
 Worker, enabled Job and `BoardAutomationRecipes` receipt in one state.db transaction. The receipt
 is keyed by project, lane ID and stable recipe ID, independent of display names. Separate Board
-completion assigns once. A failed state write rolls back the Worker too; an interruption between
-commits reuses the receipt. The UI reports pending setup while the normal recovery retries.
+completion retires the intent without assigning the Job. New boards have no lane Automations
+selected; the recipe stays available in the picker until a user explicitly selects it. Existing
+lane selections are preserved, including those installed by older versions. A failed state write
+rolls back the Worker too; an interruption between commits reuses the receipt. The UI reports
+pending setup while the normal recovery retries.
 
 Both schemas are additive (`board-starter-workflows/1`, `jobs-board-recipes/1`), with no historical
 backfill. Lane-settings insert/update triggers only touch the new intent table, cancelling an
@@ -137,9 +140,10 @@ explicit Codex target for every source). It saves the Worker's routing through t
 Environment update; other Worker fields and Automation actions stay intact. The ordinary
 Automation editor owns checks, descriptions, prompts and other workflow edits.
 
-Creation and settings saves never queue runs. Future card entries from any direction, including
-creation in that lane, retain the existing 60-second delay. Renaming/reordering never changes the
-binding. Saved settings cancel pending entries. Humans and agents choose card movement; output
+Creation and settings saves never queue runs. Once an Automation is explicitly selected, future
+card entries from any direction, including creation in that lane, retain the existing 60-second
+delay. Renaming/reordering never changes the binding. Saved settings cancel pending entries.
+Humans and agents choose card movement; output
 does not trigger deterministic application moves and Done remains user-defined. Local defaults
 do not publish hosted recipes (VIBE-25). Tests: `BoardStarterWorkflowTests`, schema/compatibility
 tests, and desktop/mobile Lane agents cases in `board-ux.spec.js`.
@@ -375,7 +379,7 @@ footer carry the sequencing rule: link commits and post the summary before movin
 lane, and move once.
 
 Confirmation surface: `move_board_card` keeps its historical first line and appends `Queued:` /
-`Waiting:` / `Skipped:` lines per Automation, `Cancelled pending:` for earlier pending entries the move
+`Waiting:` / `Blocked:` lines per Automation, `Cancelled pending:` for earlier pending entries the move
 replaced, otherwise `No lane automations.` or `Same lane; no lane automations triggered.`, plus a
 `get_board_card since=<move time>` hint for the run's session. There is no run id at move time,
 so settle-time conditions are stated rather than predicted as fact.
@@ -539,8 +543,8 @@ transaction. Header updates clear additional selections and cascade their pendin
 legacy settings save also replaces the full list. New saves validate the full list before writing,
 advance the shared revision, and rebuild additional selections atomically. No backfill is needed.
 
-Each Automation queues independently after the same 60-second settling period, with its own
-enabled/deleted/project/overlap checks. There is no execution-order dependency. The scheduler
+Each Automation retains its own enabled/deleted/project/overlap checks. Current schedulers
+run the selected order per card after the 60-second settling period; see Ordered lane workflows. The scheduler
 consumes each queue in a transaction with the resulting run/action snapshots; an old scheduler
 can consume the original queue without discarding additional events. Extra jobs wait until a
 backend supporting board/7 runs. Moving away, settings saves and card/board deletion cancel all
@@ -1189,10 +1193,10 @@ VIBE-42 surfaces pending entries on card tiles as **Waiting for Automation**. Li
 the bounded activity poll read the same bulk pending-card lookup behind `IBoardStore`; immutable
 Job trigger keys suppress the waiting badge as soon as a run commits, even before acknowledgment.
 The card stays visible in its chosen lane while its Automation entry waits. Completion does not
-move it. In the card's Automations rail, **Continue without this Automation** skips one exact
+move it. In the card's Automations rail, **Skip** skips one exact
 Job/event pair and records the request in Comments in the same Board transaction. A failed receipt
 write rolls back the skip so it can be retried. Stale requests cannot remove a reentry, and
-committed runs keep their lifecycle, including the existing independent-commit race.
+**Stop and skip** requests cancellation of a committed run before releasing its successor.
 
 The lane Agents picker also creates repository Python, PowerShell and Bash script Automations.
 Each is a normal single-script Job with explicit argument lines, repository-root working directory
@@ -1231,7 +1235,7 @@ over the cancellation observation in all status readers. Trigger keys deduplicat
 after crash, duplicate delivery or acknowledgment failure. A late acknowledgment never deletes
 a newer entry. No Board writer transaction spans a state.db writer transaction.
 
-The card Automations endpoint exposes up to 100 lane entries, pending first, with Waiting,
+The card Automations endpoint exposes all current steps plus up to 100 recent lane entries, with Waiting,
 Queued, Running, Succeeded, Failed, Cancelled, Skipped and other native Job terminal states.
 Reasons and event/run IDs exist before a recording. get_board_card and get_board_agent_status
 show the same states; review/check discovery uses the same pending/terminal reasons while
@@ -1264,3 +1268,50 @@ scoped to its project and board even after a card moves. The open panel polls on
 key cannot fail alias resolution) and the lane's running cards by row ID, without the catalog,
 starter recovery or reviewer setup probes. Each root scheduler closes confirmed
 completed Automation hosts after their recording flush; saved recordings remain replayable.
+
+## Ordered lane workflows
+
+Lane Automations always run in their selected top-to-bottom order for each card; there is no
+execution-mode setting. The 60-second settling period applies to entry, and each Job still allows
+one active run. Different cards may occupy different steps. A step releases its successor only
+after a successful run plus an explicit LLM pass, or a user skip. Script/check-only Automations
+use their existing run outcome; their advisory findings keep their existing meaning. Missing
+reports, process failures and unavailable Jobs hold the chain.
+
+Deterministic retries retain the original lane event in their immutable trigger key. A manual
+card run started against a failed script/check step records the same exact entry. Status reads
+use those run outcomes, including retry-of-retry, without requiring an LLM verdict. A successful
+step stays passed; retries of an older entry cannot satisfy a later reentry. Worker retries
+continue to require their explicit reports. No historical runs are rewritten or guessed into
+a workflow from timestamps alone.
+
+The additive `board-lane-workflow/1` component snapshots each entry's identity and ordered Job IDs
+in `BoardLaneWorkflows`/`BoardLaneWorkflowSteps`. Existing queue triggers fill exact event keys;
+new BEFORE card triggers establish the workflow before those AFTER triggers execute. No stored
+history is converted. Pre-upgrade pending entries use their shared entry timestamp and selected
+order until consumed. Older schedulers retain their old dispatch behavior; sequencing is enforced
+by the current scheduler. Run commits and Board receipts remain separate.
+
+`report_automation_step` accepts reviewing, fixing, passed and failed. A decision belongs to the
+current linked Automation run and exact entry; a linked coding session can report fixing.
+Code-review passes reference the caller's saved, complete review and verify captured inputs at
+reporting time. A fresh run of the same Automation can re-review a failed step using its eventKey.
+Receipts append in `BoardLaneStepReports` with an attributed card comment. Skipped steps and
+passes backed by successful runs cannot be reversed by later agent progress. Normal run completion
+is still required before a reported pass releases a successor; a run that fails after reporting
+pass can be retried. Reviewing without a verdict becomes Awaiting result when the run succeeds.
+
+The existing authenticated per-card skip route supports waiting, failed and running steps.
+Waiting skips and comments commit together; running skips request cancellation and display
+Stopping until the recorded run is terminal. A skip racing dispatch is retained and the scheduler
+requests cancellation of that exact run. Skip applies only to this card entry and is not exposed
+as an agent status. Card movement and settings edits retain their existing pending-entry
+cancellation behavior; the application does not move cards automatically.
+The scheduler rechecks current entry and predecessor state under the state.db run writer lock,
+so concurrent roots cannot insert a skipped step after its successor has started. These checks
+only read Board state; Board receipts are still committed separately after the run transaction.
+
+The lane popup shows each card's status beneath its Automation, green completion arrows and
+Skip/Stop and skip. The existing running-agent poll also returns up to 100 current card workflows.
+The card rail and MCP status reads share the same step projection. Polls preserve add-form drafts,
+ignore stale results during mutations and stop when the popup closes.

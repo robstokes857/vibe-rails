@@ -30,6 +30,48 @@ public class AgentFileServiceTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData("A")]
+    [InlineData("B")]
+    [InlineData("C")]
+    public async Task CodeQuality_RoundTripsThroughRuleWriters(string grade)
+    {
+        var service = new AgentFileService(_mockGitService, new RulesService());
+        var ct = TestContext.Current.CancellationToken;
+        var text = $"Code quality minimum {grade}";
+        var path = Path.Combine(_testDirectory, "vc.rules.md");
+        await service.CreateAgentFileAsync(path, ct, text);
+        Assert.Equal(text, Assert.Single(await service.GetRulesWithEnforcementAsync(path, ct)).RuleText);
+        await service.UpdateRuleEnforcementAsync(path, text, Enforcement.STOP, ct);
+        Assert.Equal(Enforcement.STOP, Assert.Single(await service.GetRulesWithEnforcementAsync(path, ct)).Enforcement);
+        await File.WriteAllTextAsync(path, "## Vibe Rails Rules\n", ct);
+        await service.AddRulesAsync(path, ct, text);
+        Assert.Equal(text, Assert.Single(await service.GetRulesWithEnforcementAsync(path, ct)).RuleText);
+        await File.WriteAllTextAsync(path, "## Vibe Rails Rules\n", ct);
+        await service.AddRuleWithEnforcementAsync(path, text, Enforcement.COMMIT, ct);
+        var added = Assert.Single(await service.GetRulesWithEnforcementAsync(path, ct));
+        Assert.Equal(text, added.RuleText);
+        Assert.Equal(Enforcement.COMMIT, added.Enforcement);
+    }
+
+    [Theory]
+    [InlineData("D")]
+    [InlineData("F")]
+    [InlineData("C+")]
+    [InlineData("")]
+    public async Task CodeQuality_AllWritersRejectUnsupportedMinimum(string grade)
+    {
+        var service = new AgentFileService(_mockGitService, new RulesService());
+        var ct = TestContext.Current.CancellationToken;
+        var text = $"Code quality minimum {grade}";
+        const string original = "## Vibe Rails Rules\n\n## Files\n";
+        var path = await CreateTestAgentFile(original);
+        await Assert.ThrowsAsync<ArgumentException>(() => service.CreateAgentFileAsync(path, ct, text));
+        await Assert.ThrowsAsync<ArgumentException>(() => service.AddRulesAsync(path, ct, text));
+        await Assert.ThrowsAsync<ArgumentException>(() => service.AddRuleWithEnforcementAsync(path, text, Enforcement.STOP, ct));
+        Assert.Equal(original, await File.ReadAllTextAsync(path, ct));
+    }
+
     private async Task<string> CreateTestAgentFile(string content)
     {
         var filePath = Path.Combine(_testDirectory, "vc.rules.md");

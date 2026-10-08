@@ -56,11 +56,11 @@ export function bindCardAutomations(editor, card, { app, onQueued }) {
             const entries = result?.laneEntries || [];
             runs.innerHTML = entries.map(entry => `<div class="board-automation-run">
                 <span class="board-side-title">${escapeHtml(entry.name)}</span>
-                <span class="board-side-sub">${escapeHtml(entry.status)}</span>
+                <span class="board-side-sub">${escapeHtml(entry.stepStatus || entry.status)}</span>
                 <span class="board-side-sub">${escapeHtml(entry.reason)}</span>
-                ${entry.status === 'Waiting' && !entry.runId ? `<p class="board-side-empty">This lane entry is waiting. It will run automatically when ready; each Automation handles one card at a time.</p>
+                ${(entry.canSkip || entry.status === 'Waiting' && !entry.runId) ? `<p class="board-side-empty">Steps run in order. The next step waits for this one to pass or be skipped.</p>
                     <button type="button" class="btn btn-sm btn-outline-secondary" data-board-skip-automation
-                        data-job-id="${Number(entry.jobId)}" data-event-key="${escapeHtml(entry.eventKey)}">Continue without this Automation</button>` : ''}
+                        data-job-id="${Number(entry.jobId)}" data-event-key="${escapeHtml(entry.eventKey)}">${['Queued', 'Running'].includes(entry.status) ? 'Stop and skip' : 'Skip this step'}</button>` : ''}
             </div>`).join('') + (result?.runs || []).map(run => `<div class="board-automation-run" data-board-run-id="${escapeHtml(run.id)}">
                 <span class="board-side-title">${escapeHtml(run.name)}</span>
                 <span class="board-side-sub">${escapeHtml(STATUSES[run.status] || 'Unknown')}</span>
@@ -131,7 +131,9 @@ export function bindCardAutomations(editor, card, { app, onQueued }) {
             const result = await BoardApi.skipCardAutomationAsync(card.id, Number(target.dataset.jobId), target.dataset.eventKey);
             if (!current()) return;
             const entry = result?.laneEntries?.find(item => item.eventKey === target.dataset.eventKey && item.jobId === Number(target.dataset.jobId));
-            app.showToast('Board', entry?.status === 'Skipped' ? 'Continuing without this Automation.'
+            const state = entry?.stepStatus || entry?.status;
+            app.showToast('Board', state === 'Skipped' ? 'Continuing without this Automation.'
+                : state === 'Stopping' ? 'Stopping this Automation before continuing.'
                 : 'The entry changed while you were skipping it. Its current status is shown below.', 'info');
             running = false;
             await refresh();

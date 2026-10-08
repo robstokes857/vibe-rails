@@ -826,10 +826,9 @@ public sealed partial class BoardTool(
     /// shows an on-entry Automation, and in the card-session preamble (BoardPromptComposer).
     /// </summary>
     internal const string LaneAutomationGuidance =
-        "Lanes with on-entry Automations become eligible about " + SettleSecondsText + " seconds after a card enters, while a VibeRails dashboard is open; busy Automations keep entries waiting for their turn. "
-        + "Link commits and post your summary comment before moving a card into such a lane, and move it once. "
-        + "Use get_board_agent_status to discover the run and poll for its result. "
-        + "move_board_card reports what an entry queued or skipped; pass skipAutomations=true to move without running them, or preview=true to see what a move would trigger.";
+        "Lane Automations run in listed order after " + SettleSecondsText + " seconds with a dashboard open; busy Automations wait. Each step needs the preceding pass or a user skip. "
+        + "Link commits and post a summary before moving into the lane once. Poll get_board_agent_status for step results. "
+        + "move_board_card reports queued/skipped entries; skipAutomations=true moves without running them, and preview=true previews the move.";
 
     private const string SettleSecondsText = "60";
 
@@ -858,7 +857,7 @@ public sealed partial class BoardTool(
     {
         var builder = new StringBuilder();
         var queued = preview ? "Would queue" : "Queued";
-        var skipped = preview ? "Would skip" : "Skipped";
+        var blocked = preview ? "Would block" : "Blocked";
         if (!report.EnteredLane)
             builder.Append("Same lane; no lane automations triggered.\n");
         else if (report.Automations.Count == 0)
@@ -878,7 +877,8 @@ public sealed partial class BoardTool(
             foreach (var automation in report.Automations)
             {
                 if (automation.Unavailable is not null)
-                    builder.Append(skipped).Append(": \"").Append(automation.Name).Append("\" — the Automation ").Append(automation.Unavailable).Append(".\n");
+                    builder.Append(blocked).Append(": \"").Append(automation.Name).Append("\" — the Automation ").Append(automation.Unavailable)
+                        .Append(". Later steps wait for a pass or user skip.\n");
                 else if (automation.ActiveRunId is not null)
                     builder.Append(preview ? "Would wait" : "Waiting").Append(": \"").Append(automation.Name).Append("\" — a run of this Automation is already active (")
                         .Append(RunLabel(automation)).Append("); this entry waits for its turn after the 60-second settling period.\n");

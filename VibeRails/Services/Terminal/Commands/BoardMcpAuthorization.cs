@@ -23,6 +23,7 @@ public static class BoardMcpAuthorization
         "begin_board_review",
         "save_board_review",
         "get_board_reviews",
+        "report_automation_step",
         "get_board_notes",
         "get_board_agent_status",
         "complete_board_agent",

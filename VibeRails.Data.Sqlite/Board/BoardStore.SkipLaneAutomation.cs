@@ -20,6 +20,18 @@ public sealed partial class BoardStore
             pending.Parameters.AddWithValue("$lane", card.ColumnId);
             if (Convert.ToInt64(await pending.ExecuteScalarAsync(cancellationToken)) == 0) return false;
         }
+        await using (var skipped = connection.CreateCommand())
+        {
+            skipped.Transaction = transaction;
+            skipped.CommandText = """
+                INSERT INTO BoardLaneStepReports (EventKey, JobId, Status, Summary, CreatedUTC)
+                VALUES ($event, $job, 'Skipped', 'User skipped this step.', $now);
+                """;
+            skipped.Parameters.AddWithValue("$event", entry.EventKey);
+            skipped.Parameters.AddWithValue("$job", entry.JobId);
+            skipped.Parameters.AddWithValue("$now", ToDb(DateTime.UtcNow));
+            await skipped.ExecuteNonQueryAsync(cancellationToken);
+        }
         await WriteLaneAutomationDispatchAsync(connection, transaction, entry,
             new("Skipped", "User chose to continue without this Automation."), DateTime.UtcNow, cancellationToken);
         await using (var receipt = connection.CreateCommand())

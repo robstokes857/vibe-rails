@@ -5,6 +5,9 @@ import { readReportTheme, observeReportTheme } from './theme-sync.js';
 import { enhanceRadar } from './radar-interactions.js';
 import { isConfirmDialogOpen } from '../utils.js';
 import { openDiffModal } from '../diff-modal.js';
+import { reportPath, withReportMetrics } from './graph-metrics.js';
+
+export { reportPath } from './graph-metrics.js';
 
 let instanceId = 0;
 // The last graph a viewer fetched, keyed by its request and the report it belongs to. Re-entering the
@@ -16,7 +19,6 @@ const STATUS_LABELS = { modified: 'Modified', added: 'Added', deleted: 'Deleted'
 const STATUS_CODES = { modified: 'M', added: 'A', deleted: 'D', renamed: 'R', copied: 'C', untracked: '?', conflicted: 'U', typechange: 'T' };
 // Sidebar scrollers that keep the wheel inside the panel; innermost first when nested.
 const SIDEBAR_SCROLLERS = '.code-excerpt,.qr-files,.qr-changes,.details-panel';
-export const reportPath = path => String(path || '').replace(/\\/g, '/').replace(/:\d+(?::\d+)?$/, '').replace(/^\.\//, '');
 const basename = path => reportPath(path).split('/').pop();
 const metricName = name => String(name || '').replaceAll('_', ' ').replace(/^./, c => c.toUpperCase());
 const cappedNPath = metric => metric?.name === 'npath_complexity' && metric.value >= 1_000_000_000;
@@ -183,11 +185,11 @@ export class CodeReportViewer {
             this.response.report = { files: [], overview: [], scorecard: [] };
         const reportFiles = this.response?.report?.files;
         const files = Array.isArray(reportFiles) ? reportFiles.map(file => reportPath(file?.file)).filter(Boolean) : [];
-        // Start the map, then paint the report we already hold in memory: the quality panel needs no
-        // network data, and focusFile awaits this.ready before it touches the map.
-        this.ready = this.loadGraph(files, generation);
+        // Only a report accepted by the quality viewer can supply map measurements.
+        const validReport = this.quality.setResponse(this.response);
+        this.ready = this.loadGraph(files, generation, validReport);
         void this.loadChanges(generation);
-        if (this.quality.setResponse(this.response)) {
+        if (validReport) {
             this.composeFiles();
             this.radar = enhanceRadar(this.qualityHost.querySelector('.qr'), this.response, {
                 onSelect: category => this.showCategory(category)
@@ -221,7 +223,7 @@ export class CodeReportViewer {
         }, 1500);
     }
 
-    async loadGraph(files, generation) {
+    async loadGraph(files, generation, validReport = false) {
         this.root.querySelector('[data-map-diagnostics]').hidden = true;
         const request = this.request = new AbortController();
         const cacheKey = JSON.stringify([this.response?.startedUtc ?? null, files.slice(0, 1000)]);
@@ -235,7 +237,8 @@ export class CodeReportViewer {
             this.graph = graph;
             this.mapHost.replaceChildren();
             const atlas = this.atlas = mountCodeAtlas(this.mapHost, {
-                graph, theme: readReportTheme(this.root), cspNonce: this.window.__viberails_NONCE__,
+                graph: withReportMetrics(graph, validReport ? this.response.report.files : [], this.response?.startedUtc),
+                theme: readReportTheme(this.root), cspNonce: this.window.__viberails_NONCE__,
                 changedFiles: this.changedPaths() ?? files, highlightChanges: true,
                 onOpenDetails: details => { if (this.isCurrent(generation)) this.showEntity(details); },
                 onError: error => { if (this.isCurrent(generation)) this.notify(error.message); }

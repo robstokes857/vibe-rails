@@ -61,7 +61,15 @@ TypeScript interfaces and type aliases have `interface` and `type` kinds, with s
 type signatures are not mapped as runtime functions. This does not change saved analyzer metrics.
 Cross-directory references also have
 domain edges. These are lexical source evidence, not resolved call graphs or runtime dependencies.
-No coverage or quality metric is inferred from the graph.
+No coverage or quality metric is inferred from the graph. Before mounting Atlas,
+`graph-metrics.js` overlays the accepted saved report's `lines_of_code` and
+`cyclomatic_complexity` values onto matching file nodes. Paths use the same slash normalization
+as file selection and remain case sensitive. Complexity is the maximum function cyclomatic
+complexity, not the category score; the inspector identifies the saved scan and its timestamp
+when available. Directory and declaration nodes never inherit file measurements. The cached
+working-tree graph stays unchanged, so a new, empty or failed report cannot retain old metrics.
+Atlas only renders finite supplied metrics (including zero); unavailable lines of code,
+complexity and coverage are hidden, without placeholder cells or missing-value footnotes.
 
 Limits: 2,000 files, 2,800 nodes, 10,000 edges, 512 characters per reference evidence,
 8 MiB serialized graph, 12 declarations per file, 128 KiB per source file,

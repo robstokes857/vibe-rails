@@ -90,7 +90,7 @@ export class BoardLaneAgents {
             <div class="board-lane-agents-heading-copy"><h2 id="board-lane-agents-title">Lane agents</h2><p>On entry to <strong>${escapeHtml(column.name)}</strong></p></div>
             <button type="button" class="board-lane-agents-action" data-agent-action="close" aria-label="Close lane agents">${icon('xmark')}</button>
         </header>
-        <p class="board-lane-agents-help">Enabled Automations run after a card stays here for 60 seconds. Each Automation handles one card at a time; later entries show Waiting for Automation until their turn. Open a waiting card to continue without its Automation. Creating a board or saving settings does not launch a run.</p>
+        <p class="board-lane-agents-help">Automations run top to bottom after a card stays here for 60 seconds. Each step waits for the previous step to pass or be skipped. Each Automation handles one card at a time.</p>
         <section data-lane-running aria-label="Running agents" aria-live="polite"></section>
         <div data-lane-agents-content role="status">Loading agents…</div>`;
         this.anchor = button;

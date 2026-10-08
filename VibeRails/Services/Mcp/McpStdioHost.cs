@@ -131,6 +131,7 @@ public static class McpStdioHost
         });
         services.AddScoped<TokenSaverTool>();
         services.AddAgentSessionMcp();
+        services.AddSessionSharingMcp();
         // Kanban board tools. Backed by the board's own SQLite store (it owns its schema, so no
         // Repository migration pass runs in this short-lived child) and scoped to the project by
         // the CLI's inherited cwd / the launching session — see BoardProjectResolver. This is what

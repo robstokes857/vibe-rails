@@ -301,7 +301,7 @@ selects any number of existing project Automations using checkboxes, with a sepa
 waits 60 seconds after a card enters the lane; another move replaces the pending trigger. The
 browser owns no debounce timer. New cards count as lane entries; same-lane edits/reorders do
 not. Saved settings affect future entries and cancel pending entries for the lane. Disabled
-Automations and active-job overlap are skipped independently for each selection. Clear all
+Automations run in selected order per card. Unavailable Jobs hold the chain; active-job overlap waits. Clear all
 checkboxes to disable lane Automations; selected disabled/deleted jobs remain removable. The ordinary root Automation scheduler and
 trigger-based run lifecycle apply: Board lane runs and runs started from a card open terminal tabs; ordinary manual runs, retries and other triggers open native terminals. Automation recordings appear in the Automations rail immediately below Sessions.
 
@@ -315,6 +315,10 @@ is separate from the existing-Automation picker. VCA and Code quality additions 
 working-tree scope. Existing rows are read-only; their heading pencil opens the full Automation
 editor for description, workflow and reviewer changes. Removing a lane selection keeps the
 Automation and recordings. New Automation opens that same editor.
+
+`board-lane-workflow.js` renders per-card step badges, completion arrows and user Skip/Stop and skip.
+The running-agent poll carries workflows too; update only status containers so add-form drafts
+survive. Selected checkbox order must survive a settings save. There is no sequencing toggle.
 
 `board-lane-agents.js` owns positioning/disposal, `board-lane-agent-body.js` owns asynchronous
 CRUD and drafts, `board-lane-agent-list.js` and `board-lane-agent-add.js` render each body, and

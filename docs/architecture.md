@@ -5,6 +5,11 @@
 Terminal Share creates a public replay link through the protected root API. The existing drain
 job prioritizes completed recordings with durable requests pinned to the creating API key;
 already-exported sessions can be sent to the link's account without discarding prior evidence.
+The `create_session_share_link` MCP tool reaches the same root route using inherited terminal
+identity and root credentials. It returns a `vibe-share:<url>` commit line. The optional VCA rule
+`Require VibeRails session link` defers until commit-msg, checks those lines before scanning other
+message URLs, and applies the existing enforcement levels without a network lookup. The rule
+checks presence/URL shape only; upload readiness, session ownership and link expiry are not verified.
 See the [sharing contract](../VibeRails/Services/Integrations/VibeCodeRemote/SessionSharing.md)
 for boundaries, account changes, queue/retry behavior and server-first rollout.
 
@@ -475,6 +480,13 @@ before clients can use sign-in; older sites leave the manual API key input usabl
 
 ### Code report inspection
 
+VCA offers `Code quality minimum A`, `B`, and `C` rules. `CodeQualityRule` uses MintLint's
+existing overall score for added code under the declaring rule file; individual file grades do
+not decide the result. The cutoffs are health 90/80/70, with C the lowest selectable minimum.
+Git Guard and MCP validate the staged snapshot, while Rules-page validation captures working-tree
+additions once per request. Failures use standard WARN/COMMIT/STOP enforcement. Report-only ignore
+preferences do not exempt code from the rule, and changes with no supported added code are skipped.
+
 The full-width Quality workspace (`code-quality`) renders the host-owned Code Atlas / Quality
 Lab viewer, third in the top navigation. Rules and Git Guard have the fourth destination
 (`dashboard` / `agents`). Each
@@ -560,8 +572,9 @@ Its Add form can create a repository script Automation using the existing Jobs a
 Waiting cards show a badge backed by the durable lane queue; the card's Automations rail can skip
 one exact pending entry with **Continue without this Automation**. Cards stay in their chosen lane
 while entries wait for an available Automation.
-New local boards prefill Review with Code quality → VCA → Switch reviewer. Durable recipe receipts
-recover across the separate Board/state commits without restoring removed defaults or changing old
+New local boards offer Code quality → VCA → Switch reviewer in the picker, with no lane Automation
+selected by default. Durable recipe receipts recover across the separate Board/state commits
+without assigning the recipe, restoring removed selections or changing old
 boards. See the [starter workflow contract](../VibeRails/Services/Board/ARCHITECTURE.md#new-board-review-defaults-vibe-23).
 
 VB-52 adds owner invitation controls, website recipient inbox/block screens and desktop shared-board
@@ -1519,3 +1532,8 @@ pipeline. `IBoardStore` retains attempts, provenance and reports in additive `Bo
 `BoardChecksReader` combines saved evidence with per-card run state; `read_board_check` supplies
 reviewer evidence, and the Checks panel reuses the existing CodeReportViewer. No scan result
 moves a card. See [scope, persistence, status and starter contracts](../VibeRails/Services/Board/CHECKS.md).
+
+Lane Automations always run in selected order per card. The lane popup and card rail share
+per-step progress, explicit LLM verdicts and user skips; no execution-mode setting is required.
+See [ordered lane workflows](../VibeRails/Services/Board/ARCHITECTURE.md#ordered-lane-workflows)
+for entry snapshots, review decisions, cancellation and compatibility.

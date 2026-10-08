@@ -114,6 +114,22 @@ ordinary protected content.
 
 ## Thresholds
 
+`Code quality minimum A`, `Code quality minimum B`, and `Code quality minimum C` gate the
+**overall** MintLint grade of added code in supported source files under the declaring rule file.
+They never require each file to pass separately. A requires health ≥90, B ≥80, and C ≥70;
+C is the lowest configurable minimum. D/F are still possible results, but are not thresholds.
+Health is 100 minus the existing scan's overall concern score. Hooks and MCP use the staged
+snapshot; Rules-page validation uses working-tree additions. Deletions, unchanged renames,
+binary files and unsupported file types contribute no added code. An empty scan is explicitly
+skipped. Missing content or an invalid score must not silently pass. Report ignore preferences
+are presentation settings and do not exempt code from this repository rule.
+
+Quality failures follow the standard WARN/COMMIT/STOP policy, including re-evaluation at
+commit-msg. Invalid handwritten thresholds warn as unsupported; rule writers accept only A/B/C.
+`CodeQualityRule` owns grading and scope, shared by the active validators and legacy adapter.
+Regression fixtures and real-hook coverage live under `Tests/VcaRegression/Fixtures/code-quality`
+and `CodeQualityTests.cs`; score boundaries and aggregate behavior are in `CodeQualityRuleTests.cs`.
+
 Pinned by `Tests/VcaRegression` on 2026-09-26, after the regression sweep found the first one
 wrong in all three validators:
 
@@ -132,6 +148,21 @@ wrong in all three validators:
   pass silently.
 
 ## Enforcement levels
+
+`Require VibeRails session link` requires at least one public session replay URL in the final
+commit message. It defers at pre-commit and in Rules-page validation, then follows the normal
+WARN/COMMIT/STOP policy at commit-msg (including message-only commits). `SessionShareCommitRule`
+checks dedicated `vibe-share:<url>` lines first, then scans URLs in prose or Markdown. It accepts
+the sharing service's HTTPS `viberails.ai/shared/session?key=<64 lowercase hex characters>` shape;
+API endpoints, unrelated hosts and malformed keys do not count. Git comment lines are stripped
+before validation. Multiple links are allowed; one valid link satisfies the rule.
+
+Agents can call `create_session_share_link(displayName: "Description of the work")`, then copy its
+returned `vibe-share:` line into the commit message, one line per session. The rule only checks
+text: it makes no network request and cannot prove the session belongs to the commit, has uploaded,
+or remains accessible. Active-session links are accepted; sharing links expire and can be revoked.
+The Rules catalog and deferred/violation messages carry this guidance. The rule is selectable,
+not automatically enabled in every repository.
 
 As of 2026-09-07, `Check commit message for: wip, temporary, do not merge` uses
 `CommitMessageWordRule` for syntax and matching across Git Guard and the legacy validator.

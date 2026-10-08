@@ -10,7 +10,7 @@ using Xunit;
 
 namespace Tests.Services.Board;
 
-public sealed class BoardReviewsTests : IAsyncLifetime
+public sealed partial class BoardReviewsTests : IAsyncLifetime
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "board-reviews-" + Guid.NewGuid().ToString("N"));
     private string repo = null!, state = null!, boardPath = null!, baseline = null!;

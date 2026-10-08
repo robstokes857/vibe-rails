@@ -16,7 +16,9 @@ public sealed record BoardLaneAutomationDispatch(string Status, string Reason, s
 
 /// <summary>A lane entry's visible state, including entries without a terminal session.</summary>
 public sealed record BoardLaneAutomationStatus(string EventKey, long JobId, string ColumnId,
-    DateTime DueUtc, string Name, string Status, string Reason, string? RunId = null, string Purpose = "work");
+    DateTime DueUtc, string Name, string Status, string Reason, string? RunId = null, string Purpose = "work",
+    string? WorkflowId = null, int Position = 0, bool IsCurrent = false, string? StepStatus = null,
+    bool CanSkip = false, bool RequiresVerdict = false);
 
 /// <summary>
 /// A lane Automation read from its local definition so agents can be told what a lane entry
@@ -43,8 +45,23 @@ public sealed record BoardLaneAutomationDefinition(
 /// <summary>A lane entry recorded for a card that the scheduler has not consumed yet.</summary>
 public sealed record BoardPendingLaneAutomation(long JobId, string ColumnId, DateTime DueUtc);
 
+/// <summary>A card's current lane workflow, for the lane progress display.</summary>
+public sealed record BoardLaneWorkflow(string CardId, string CardLabel, IReadOnlyList<BoardLaneAutomationStatus> Steps);
+
+/// <summary>An attributed, append-only progress or verdict receipt for one exact lane entry.</summary>
+public sealed record BoardLaneStepReport(string EventKey, long JobId, string Status, string Summary,
+    string? RunId = null, string? ReviewId = null);
+
 public partial interface IBoardStore
 {
+    /// <summary>Current per-card workflows in one project lane, including completed steps.</summary>
+    Task<IReadOnlyList<BoardLaneWorkflow>> GetLaneWorkflowsAsync(string projectPath, string columnId, CancellationToken cancellationToken = default);
+    /// <summary>Why this entry must wait for an earlier step; null means eligible.</summary>
+    Task<string?> GetLaneAutomationBlockReasonAsync(BoardLaneAutomationEvent entry, CancellationToken cancellationToken = default);
+    /// <summary>Append a step receipt after rechecking the current entry and session membership.</summary>
+    Task<bool> ReportLaneStepAsync(string projectPath, string cardId, BoardLaneStepReport report, BoardAuthor author, CancellationToken cancellationToken = default);
+    /// <summary>Resolve a linked Automation Worker's immutable run context.</summary>
+    Task<BoardLaneStepRun?> FindLaneStepRunAsync(string projectPath, string cardId, string sessionId, CancellationToken cancellationToken = default);
     /// <summary>Requested live cards with pending entries that have no committed run yet.</summary>
     Task<IReadOnlyList<string>> GetWaitingAutomationCardIdsAsync(string projectPath, IReadOnlyList<string> cardIds,
         CancellationToken cancellationToken = default);
@@ -80,3 +97,6 @@ public partial interface IBoardStore
     /// </summary>
     Task<BoardCardRecord?> MoveCardAsync(string projectPath, string cardId, string columnId, int? position, bool skipLaneAutomations, CancellationToken cancellationToken = default, BoardAuthor? author = null);
 }
+
+/// <summary>Immutable run identity used to authorize a workflow result.</summary>
+public sealed record BoardLaneStepRun(string Id, long JobId, string TriggerKey, DateTime QueuedUtc, string Purpose, bool Active);

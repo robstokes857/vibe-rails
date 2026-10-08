@@ -234,8 +234,13 @@ incident below. Ordinary authenticated terminal-input routes remain their own ca
   substring filter applied before budgets, never a path/command. Script execution uses an explicit
   interpreter and argv. Ordinary signed-Python authoring/execution retains its approval checks.
 - Card Automation requests resolve card/job in the server's project and recheck enabled state,
-  project and overlap in the run transaction. Lane skip matches an exact pending job/event pair;
-  stale requests conflict, committed runs keep their lifecycle, and the receipt commits atomically.
+  project and overlap in the run transaction. Lane skip matches the current card/job/event pair;
+  stale requests conflict. Waiting skips and their receipts commit atomically; running skips
+  request cancellation and successors wait for terminal run state. Skips are user-only status
+  decisions. `report_automation_step` uses the inherited linked session and current Automation
+  run; fixing may come from a linked coding session. Code-review pass requires that session’s
+  complete saved review with matching captured inputs. Progress cannot reverse a passed/skipped
+  receipt. The tool is in the exact Board launch grant list on both transports.
 - Root-only session replay is read-only/no-store, scopes details to the exact session ID and uses
   SQLite ReadOnly/query_only. Terminal snapshots remain behind both credentials, including retained
   screens after PTY exit (up to 20,000 scrollback lines); input rejects completed sessions.
@@ -274,6 +279,14 @@ an owner-approved behavior explained by the KEYS UI. See [SigningKeyRoutes](Vibe
 ## Outbound services and credentials
 
 ### Public session sharing links
+
+`create_session_share_link` exposes the same operation to a managed terminal through MCP. It
+takes a display name and only the inherited current session, never a caller-supplied target.
+The stdio child calls the existing root route with both inherited root credentials; it accepts
+only loopback HTTP(S), disables redirects/proxies/cookies, and bounds the local hop to 30 seconds
+and 16 KiB. Codex forwards environment variable names per launch, never credential values in argv
+or shared config. No Board auto-grant is added. Callers without a terminal/root context fail;
+tool descriptions disclose that creating the link grants public read access.
 
 Root-only `POST /api/v1/sessions/{id}/sharing-links` requires both local credentials and validates
 the exact local recording. It creates the capability at fixed `https://viberails.ai` using only

@@ -28,6 +28,12 @@ public static class BoardPromptComposer
     public const int MaxDescriptionChars = 4_000;
     internal const string AttentionGuidance =
         "Set flagged=true with update_board_card only for an unresolved major bug, security/data-loss issue, or missing information blocking work that requires the user's intervention. Include flagReason explaining the issue and needed action; it saves a red comment and alerts this terminal. Routine progress, completion and review do not warrant a flag. Clear flagged once all reasons are resolved. ";
+    internal const string WorkflowGuidance =
+        "Lane Automations run in their listed order for each card. Read get_board_agent_status for the current step and following steps. "
+        + "When reviewing, first call report_automation_step reviewing (include the original eventKey for a fresh run fixing a failed step). For your lane Automation, call report_automation_step with passed or failed and a summary before completing your session; a successful exit alone does not release later steps. "
+        + "For a code review pass, first save_board_review and supply its reviewId; only pass when agreed blocking findings are resolved and the reviewed inputs are current. "
+        + "When a linked coding agent starts fixing a failed step, report fixing with that step's eventKey. Request a fresh review after code changes; a new run of the same Automation can report against that eventKey. "
+        + "Only the user can skip a step. An Automation agent reports its result and finishes its own session so later steps can run; leave the card in this lane while later steps remain. The original coding agent waits for required workflow steps before its final card move, because leaving the lane cancels pending steps. ";
     internal const string ReviewFindingGuidance =
         "Critical, high and medium-high findings block completion; fix them. "
         + "Medium-low and low findings are non-blocking notes: the worker may fix now or defer to a backlog card. Reference the original card/finding there; link the backlog key in the original card's comment and handoff. These notes alone need no re-review. ";
@@ -56,7 +62,7 @@ public static class BoardPromptComposer
         + "The user has authorized the viberails-mcp Board tools for this card session. "
         + "Read get_board_card for its task, linked commits and latest activity. Read its Checks summary and use read_board_check for full evidence. Findings and failed analysis are different; judge coverage and scope before deciding the next lane. Post your findings with add_board_comment. "
         + "This is an Automation-launched agent. Keep your progress logs, decisions, validation results and final handoff in Comments using add_board_comment on every card this Automation is working against. Attach any additional cards with attach_board_session and name each target explicitly when commenting. Do not leave the only copy in terminal output: the Automation terminal closes after completion; its recording remains available. "
-        + "Before moving, save your handoff, check destination Automations with list_board_columns, then report the move. Read the user's Board context from get_board_card. " + AttentionGuidance + AgentCompletionGuidance + "\n\n" + (workerPrompt ?? "");
+        + "Before moving, save your handoff, check destination Automations with list_board_columns, then report the move. Read the user's Board context from get_board_card. " + WorkflowGuidance + AttentionGuidance + AgentCompletionGuidance + "\n\n" + (workerPrompt ?? "");
     public const int MinDescriptionChars = 1_500;
     public const int MaxTitleChars = 200;
     public const int MaxLinkedCommits = 10;

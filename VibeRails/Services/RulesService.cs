@@ -87,7 +87,11 @@ namespace VibeRails.Services
         PackageChangeDetected,
         CheckCommitMessageForWords,
         FileLock,
-        DirectoryLock
+        DirectoryLock,
+        RequireVibeRailsSessionLink,
+        CodeQualityMinimumA,
+        CodeQualityMinimumB,
+        CodeQualityMinimumC
     }
     public static class RuleParser
     {
@@ -107,6 +111,10 @@ namespace VibeRails.Services
             { Rule.SkipTestCoverage, "Skip test coverage" },
             { Rule.PackageChangeDetected, "Package file changes" },
             { Rule.CheckCommitMessageForWords, CommitMessageWordRule.Template },
+            { Rule.RequireVibeRailsSessionLink, SessionShareCommitRule.Name },
+            { Rule.CodeQualityMinimumA, "Code quality minimum A" },
+            { Rule.CodeQualityMinimumB, "Code quality minimum B" },
+            { Rule.CodeQualityMinimumC, "Code quality minimum C" },
             { Rule.FileLock, PathLockRule.FileTemplate },
             { Rule.DirectoryLock, PathLockRule.DirectoryTemplate }
         };
@@ -128,6 +136,10 @@ namespace VibeRails.Services
             { Rule.PackageChangeDetected, "Detects changes to package/dependency files (package.json, .csproj, requirements.txt, etc.) and alerts or blocks based on enforcement level." },
             { Rule.CheckCommitMessageForWords, "Checks the final commit message for forbidden whole words or phrases, ignoring case. Enter a plain comma-separated list, for example: Check commit message for: wip, temporary, do not merge. Do not wrap entries in quotes." },
             { Rule.FileLock, "Warns or blocks when the exact file path is added, modified, deleted, or renamed. The path is relative to the declaring vc.rules.md. Format: File Lock('path/to/file')" },
+            { Rule.RequireVibeRailsSessionLink, "Requires a public VibeRails session sharing URL in the final commit message. Checks vibe-share: lines first, then links elsewhere in the message. " + SessionShareCommitRule.Guidance },
+            { Rule.CodeQualityMinimumA, CodeQualityRule.Description + " Requires overall grade A (health at least 90/100)." },
+            { Rule.CodeQualityMinimumB, CodeQualityRule.Description + " Requires overall grade A or B (health at least 80/100)." },
+            { Rule.CodeQualityMinimumC, CodeQualityRule.Description + " Requires overall grade A, B or C (health at least 70/100). C is the lowest available minimum." },
             { Rule.DirectoryLock, "Warns or blocks when any file at or below the directory is added, modified, deleted, or renamed. The path is relative to the declaring vc.rules.md. Format: Directory Lock('path/to/directory')" }
         };
 

@@ -55,6 +55,7 @@ public class McpStdioHostTests
         McpStdioHost.ConfigureServices(services);
 
         Assert.Contains(services, d => d.ServiceType == typeof(TokenSaverTool));
+        Assert.Contains(services, d => d.ServiceType == typeof(SessionSharingTool));
         Assert.Contains(services, d => d.ServiceType == typeof(IHttpClientFactory));
     }
 

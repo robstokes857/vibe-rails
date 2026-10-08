@@ -347,6 +347,7 @@ public sealed partial class JobStore : IJobStore
         await using var transaction = connection.BeginTransaction(deferred: false);
 
         var triggerKey = $"retry:{runId}:{Guid.NewGuid():N}";
+        string? laneRetry = null;
         await using (var readSource = connection.CreateCommand())
         {
             readSource.Transaction = transaction;
@@ -359,6 +360,20 @@ public sealed partial class JobStore : IJobStore
                 var cardKey = source.ReviewLaunch?.Resolution.CardKey ?? JobBoardContext.GetCardKey(source.TriggerKind, source.TriggerKey);
                 if (source.Purpose == "code_review" && cardKey is not null)
                     triggerKey = $"{JobBoardContext.ReviewRetryPrefix}{cardKey}:{triggerKey}";
+                else if (JobBoardContext.GetLaneTriggerKey(source.TriggerKind, source.TriggerKey) is { } laneTrigger)
+                    laneRetry = laneTrigger;
+            }
+        }
+        if (laneRetry is not null)
+        {
+            await using var worker = connection.CreateCommand();
+            worker.Transaction = transaction;
+            worker.CommandText = "SELECT EXISTS (SELECT 1 FROM JobRunActions WHERE RunId = $source AND Kind = 0);";
+            worker.Parameters.AddWithValue("$source", runId);
+            if (Convert.ToInt64(await worker.ExecuteScalarAsync(cancellationToken)) == 0)
+            {
+                var lane = laneRetry.Split(':');
+                triggerKey = $"{JobBoardContext.LaneRetryPrefix}{lane[1]}:lane:{lane[2]}:{lane[3]}:{triggerKey}";
             }
         }
 

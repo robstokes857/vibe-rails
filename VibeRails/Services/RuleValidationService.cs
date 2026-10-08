@@ -1,4 +1,5 @@
 using VibeRails.Services.VCA;
+using VibeRails.Services.GitPreflight;
 
 namespace VibeRails.Services
 {
@@ -32,11 +33,14 @@ namespace VibeRails.Services
     {
         private readonly IRulesService _rulesService;
         private readonly IAgentFileService _agentFileService;
+        private readonly IGitWorkingTreeSnapshotProvider _snapshotProvider;
 
-        public RuleValidationService(IRulesService rulesService, IAgentFileService agentFileService)
+        public RuleValidationService(IRulesService rulesService, IAgentFileService agentFileService,
+            IGitWorkingTreeSnapshotProvider? snapshotProvider = null)
         {
             _rulesService = rulesService;
             _agentFileService = agentFileService;
+            _snapshotProvider = snapshotProvider ?? new GitStagedSnapshotProvider();
         }
 
         public async Task<ValidationResultSet> ValidateAsync(
@@ -46,9 +50,17 @@ namespace VibeRails.Services
             CancellationToken cancellationToken)
         {
             var results = new List<ValidationResult>();
+            Task<GitStagedSnapshot>? qualitySnapshot = null;
 
             foreach (var rule in rules)
             {
+                if (CodeQualityRule.LooksLike(rule.RuleText))
+                {
+                    results.Add(await ValidateCodeQualityAsync(rule, files, rootPath,
+                        () => qualitySnapshot ??= _snapshotProvider.CaptureWorkingTreeAsync(rootPath, cancellationToken),
+                        cancellationToken));
+                    continue;
+                }
                 if (CommitMessageWordRule.LooksLike(rule.RuleText))
                 {
                     results.Add(ValidateCommitMessageConfiguration(rule));
@@ -77,6 +89,7 @@ namespace VibeRails.Services
                     Rule.RequireTestCoverageMinimum100 => ValidateTestCoverage(files, 100, rule),
                     Rule.SkipTestCoverage => new ValidationResult(rule.RuleText, rule.Enforcement, true, "Coverage check skipped"),
                     Rule.PackageChangeDetected => ValidatePackageChanges(files, rule),
+                    Rule.RequireVibeRailsSessionLink => new ValidationResult(rule.RuleText, rule.Enforcement, true, SessionShareCommitRule.DeferredMessage),
                     Rule.FileLock or Rule.DirectoryLock => ValidatePathLock(
                         files,
                         rule,
@@ -98,11 +111,20 @@ namespace VibeRails.Services
             CancellationToken cancellationToken)
         {
             var results = new List<ValidationResult>();
+            Task<GitStagedSnapshot>? qualitySnapshot = null;
 
             foreach (var ruleWithSource in rulesWithSource)
             {
                 var rule = ruleWithSource.Rule;
                 var sourceFile = ruleWithSource.SourceFile;
+
+                if (CodeQualityRule.LooksLike(rule.RuleText))
+                {
+                    results.Add(await ValidateCodeQualityAsync(rule, GetScopedFiles(files, sourceFile, rootPath), rootPath,
+                        () => qualitySnapshot ??= _snapshotProvider.CaptureWorkingTreeAsync(rootPath, cancellationToken),
+                        cancellationToken));
+                    continue;
+                }
 
                 if (CommitMessageWordRule.LooksLike(rule.RuleText))
                 {
@@ -137,6 +159,7 @@ namespace VibeRails.Services
                     Rule.RequireTestCoverageMinimum100 => ValidateTestCoverage(scopedFiles, 100, rule),
                     Rule.SkipTestCoverage => new ValidationResult(rule.RuleText, rule.Enforcement, true, "Coverage check skipped"),
                     Rule.PackageChangeDetected => ValidatePackageChanges(scopedFiles, rule),
+                    Rule.RequireVibeRailsSessionLink => new ValidationResult(rule.RuleText, rule.Enforcement, true, SessionShareCommitRule.DeferredMessage),
                     Rule.FileLock or Rule.DirectoryLock => ValidatePathLock(
                         scopedFiles,
                         rule,
@@ -149,6 +172,34 @@ namespace VibeRails.Services
             }
 
             return new ValidationResultSet(results);
+        }
+
+        private static async Task<ValidationResult> ValidateCodeQualityAsync(
+            RuleWithEnforcement rule, List<string> files, string rootPath,
+            Func<Task<GitStagedSnapshot>> capture, CancellationToken cancellationToken)
+        {
+            if (!CodeQualityRule.TryParse(rule.RuleText, out var grade))
+                return new(rule.RuleText, Enforcement.WARN, false,
+                    "UNSUPPORTED: use Code quality minimum A, B or C. C is the lowest supported minimum.");
+
+            if (files.Count == 0)
+                return new(rule.RuleText, rule.Enforcement, true,
+                    "Code quality skipped: no changed files in this rule's scope.");
+
+            try
+            {
+                var snapshot = await capture();
+                var comparison = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+                var paths = files.Select(file => Path.GetFullPath(file, rootPath)).ToHashSet(comparison);
+                var quality = CodeQualityRule.Evaluate(grade,
+                    snapshot.Files.Where(file => paths.Contains(file.FullPath)), cancellationToken);
+                return new(rule.RuleText, rule.Enforcement, quality.IsValid, quality.Message);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                return new(rule.RuleText, rule.Enforcement, false,
+                    $"UNSUPPORTED: Code quality could not be evaluated: {exception.Message}");
+            }
         }
 
         private static ValidationResult ValidateCommitMessageConfiguration(RuleWithEnforcement rule) =>

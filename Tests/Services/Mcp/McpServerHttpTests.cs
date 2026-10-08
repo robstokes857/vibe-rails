@@ -43,6 +43,7 @@ public class McpServerHttpTests : IAsyncLifetime
         "pause_token_saver",
         "resume_token_saver",
         "get_token_saver_status",
+        "create_session_share_link",
     };
 
     public async ValueTask InitializeAsync()
@@ -58,6 +59,7 @@ public class McpServerHttpTests : IAsyncLifetime
         builder.Services.AddHttpClient(TokenSaverTool.HttpClientName);
         builder.Services.AddScoped<TokenSaverTool>();
         builder.Services.AddAgentSessionMcp();
+        builder.Services.AddSessionSharingMcp();
         builder.Services.AddSingleton(Mock.Of<IBoardService>());
         builder.Services.AddSingleton(Mock.Of<IBoardProjectResolver>());
         builder.Services.AddSingleton(Mock.Of<IBoardStore>());
@@ -215,6 +217,21 @@ public class McpServerHttpTests : IAsyncLifetime
             Assert.Contains(expected, names);
         }
         Assert.Equal(ExpectedTools.Length + BoardMcpAuthorization.ToolNames.Count, names.Count);
+    }
+
+    [Fact]
+    public async Task SessionSharingToolResolvesAndExposesOnlyTheLinkName()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var client = await ConnectAsync(ct);
+        var tool = Assert.Single(await client.GetAvailableToolsAsync(ct), t => t.Name == "create_session_share_link");
+        var properties = tool.JsonSchema.GetProperty("properties");
+        Assert.Equal("displayName", Assert.Single(properties.EnumerateObject()).Name);
+        var result = await client.CallToolAsync("create_session_share_link", new Dictionary<string, object?>
+        {
+            ["displayName"] = " " // Exercises binding/DI without sharing a real session.
+        }, ct);
+        Assert.Contains("FAIL: Enter a link name", result.Text);
     }
 
     [Fact]

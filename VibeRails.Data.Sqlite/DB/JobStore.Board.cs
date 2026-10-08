@@ -36,20 +36,40 @@ public sealed partial class JobStore
             try
             {
                 var current = entry.IsCurrent && await _boards.IsLaneAutomationCurrentAsync(entry, cancellationToken);
+                var blocker = current ? await _boards.GetLaneAutomationBlockReasonAsync(entry, cancellationToken) : null;
+                if (blocker is not null)
+                {
+                    await _boards.RecordLaneAutomationDispatchAsync(entry, new("Waiting", blocker), nowUtc, cancellationToken);
+                    continue;
+                }
                 var reviewLaunch = current ? await PrepareReviewAsync(entry.JobId, JobBoardContext.GetCardKey(JobTriggerKind.BoardLane, entry.TriggerKey), cancellationToken) : null;
                 BoardLaneAutomationDispatch dispatch;
                 await using (var transaction = connection.BeginTransaction(deferred: false))
                 {
-                    var runId = current ? await InsertRunAsync(connection, transaction, entry.JobId,
+                    // Serialize this final read with other roots' run commits. A pending skip
+                    // may have released the next step while we prepared this one. Only reads
+                    // cross the store boundary here; Board receipts are written after commit.
+                    current = current && await _boards.IsLaneAutomationCurrentAsync(entry, cancellationToken);
+                    blocker = current ? await _boards.GetLaneAutomationBlockReasonAsync(entry, cancellationToken) : null;
+                    var runId = current && blocker is null ? await InsertRunAsync(connection, transaction, entry.JobId,
                         JobTriggerKind.BoardLane, entry.TriggerKey, requireEnabled: true, cancellationToken,
                         expectedProjectPath: entry.ProjectPath, reviewLaunch: reviewLaunch) : null;
                     if (runId is not null) runIds.Add(runId);
                     dispatch = runId is not null ? new("Queued", "Lane Automation queued.", runId)
+                        : blocker is not null ? new("Waiting", blocker)
                         : await DescribeBoardRunRejectionAsync(connection, transaction, entry, current, cancellationToken);
                     await transaction.CommitAsync(cancellationToken);
                 }
 
                 await _boards.RecordLaneAutomationDispatchAsync(entry, dispatch, nowUtc, cancellationToken);
+                // A user skip can race the independent state.db commit. The durable skip
+                // receipt wins, and successors still wait until cancellation has completed.
+                if (dispatch.RunId is not null)
+                {
+                    var observed = (await _boards.GetLaneAutomationStatusesAsync(entry.ProjectPath, entry.CardId, cancellationToken))
+                        .FirstOrDefault(s => s.EventKey == entry.EventKey && s.JobId == entry.JobId);
+                    if (observed?.StepStatus == "Stopping") await RequestCancelAsync(dispatch.RunId, cancellationToken);
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
@@ -88,8 +108,8 @@ public sealed partial class JobStore
                 ELSE NULL END FROM Jobs WHERE Id = $job;
             """;
         var reason = await command.ExecuteScalarAsync(cancellationToken);
-        if (reason is null) return new("Skipped", "Automation no longer exists.");
-        if (reason is string message) return new("Skipped", message);
+        if (reason is null) return new("Failed", "Automation no longer exists.");
+        if (reason is string message) return new("Failed", message);
         command.CommandText = "SELECT Id FROM JobRuns WHERE JobId = $job AND Status IN ($queued, $running) LIMIT 1;";
         command.Parameters.AddWithValue("$queued", (int)JobRunStatus.Queued);
         command.Parameters.AddWithValue("$running", (int)JobRunStatus.Running);

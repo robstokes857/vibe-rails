@@ -7,7 +7,7 @@ namespace VibeRails.Services.Board;
 /// <summary>Run an existing project Automation and retain the card in its immutable run context.</summary>
 public sealed class BoardCardAutomationService(IBoardStore boards, IJobStore jobs, IJobService runner)
 {
-    /// <summary>Skip one exact pending lane entry; a newer entry or committed run is preserved.</summary>
+    /// <summary>Skip one current step, requesting cancellation before a running step releases its successor.</summary>
     public async Task<BoardCardAutomationsResponse?> SkipAsync(string projectPath, string cardKeyOrId,
         long jobId, string eventKey, CancellationToken cancellationToken)
     {
@@ -17,14 +17,25 @@ public sealed class BoardCardAutomationService(IBoardStore boards, IJobStore job
         if (card is null) return null;
         var status = (await boards.GetLaneAutomationStatusesAsync(projectPath, card.Id, cancellationToken))
             .FirstOrDefault(entry => entry.JobId == jobId && entry.EventKey == eventKey);
-        if (status is null || status.Status != "Waiting" || status.RunId is not null)
-            throw new BoardConflictException("This entry is no longer waiting. Refresh to see its current status.");
-        var entry = new BoardLaneAutomationEvent(card.Id, jobId, eventKey, card.ProjectPath,
-            $"board-lane:{card.Key}:{status.ColumnId}:{eventKey}", true);
-        if (!await boards.SkipLaneAutomationAsync(entry, BoardAuthor.User(),
-            $"Requested to continue without lane Automation “{status.Name}” for entry {eventKey}. Any already committed run keeps its lifecycle.",
-            cancellationToken))
-            throw new BoardConflictException("This entry is no longer waiting. Refresh to see its current status.");
+        if (status is null || !(status.CanSkip || status.Status == "Waiting" && status.RunId is null))
+            throw new BoardConflictException("This step cannot be skipped. Refresh to see its current status.");
+        if (status.RunId is null && status.Status == "Waiting")
+        {
+            var entry = new BoardLaneAutomationEvent(card.Id, jobId, eventKey, card.ProjectPath,
+                $"board-lane:{card.Key}:{status.ColumnId}:{eventKey}", true);
+            if (!await boards.SkipLaneAutomationAsync(entry, BoardAuthor.User(),
+                $"Skipped lane Automation “{status.Name}” for this card's current workflow.", cancellationToken))
+                throw new BoardConflictException("This entry changed. Refresh to see its current status.");
+        }
+        else
+        {
+            if (status.RunId is not null && status.Status is "Queued" or "Running")
+                await jobs.RequestCancelAsync(status.RunId, cancellationToken);
+            if (!await boards.ReportLaneStepAsync(projectPath, card.Id,
+                new(eventKey, jobId, "Skipped", $"User skipped {status.Name} for this card's current workflow.", status.RunId),
+                BoardAuthor.User(), cancellationToken))
+                throw new BoardConflictException("This entry changed. Refresh to see its current status.");
+        }
         return await GetAsync(projectPath, card.Id, cancellationToken);
     }
 

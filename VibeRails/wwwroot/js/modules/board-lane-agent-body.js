@@ -1,3 +1,4 @@
+import { refreshLaneSteps } from './board-lane-workflow.js';
 import { BoardApi } from './board-api.js';
 import { escapeHtml, confirmDialog } from './utils.js';
 import { laneAgentListMarkup, selectedLaneJobIds } from './board-lane-agent-list.js';
@@ -11,7 +12,7 @@ export function mountLaneAgentBody({ app, panel, column, signal, position, updat
     const options = { showLoading: false, preferErrorResponseMessage: true, signal };
     const api = (path, method = 'GET', body = null) => app.apiCall(path, method, body, options);
     let settings, jobs = [], environments = [], scripts;
-    let adding = false, busy = false, polling = false, scriptRequest = 0;
+    let adding = false, busy = false, polling = false, scriptRequest = 0, activityGeneration = 0;
     let draft = { kind: '', jobId: '', name: '', path: '', arguments: '' };
     const renderRunning = () => {
         const host = panel.querySelector('[data-lane-running]');
@@ -53,6 +54,7 @@ export function mountLaneAgentBody({ app, panel, column, signal, position, updat
     const run = async (operation, focus) => {
         if (busy) return;
         busy = true;
+        ++activityGeneration;
         content.querySelectorAll('button, select, textarea, input').forEach(control => { control.disabled = true; });
         let failure;
         try { await operation(); } catch (error) { failure = error; }
@@ -135,6 +137,15 @@ export function mountLaneAgentBody({ app, panel, column, signal, position, updat
             app.navigate('jobs', action === 'edit' ? { editJobId: id } : { newJob: true, triggerKind: 3 });
             return;
         }
+        if (action === 'skip') {
+            const button = event.target.closest('[data-agent-action="skip"]');
+            void run(async () => {
+                await BoardApi.skipCardAutomationAsync(button.dataset.cardId, id, button.dataset.eventKey);
+                const fresh = await BoardApi.getLaneRunningAgentsAsync(column.id, { signal });
+                if (alive()) { settings.runningAgents = fresh.runningAgents; settings.workflows = fresh.workflows; }
+            }, '[data-agent-action="add"]');
+            return;
+        }
         if (action === 'remove') {
             const name = settings.jobs?.find(job => job.id === id)?.name || `Automation ${id}`;
             const retained = selectedLaneJobIds(settings).filter(value => value !== id && settings.jobs?.some(job => job.id === value && job.enabled));
@@ -182,9 +193,10 @@ export function mountLaneAgentBody({ app, panel, column, signal, position, updat
     const timer = setInterval(async () => {
         if (!alive() || document.hidden || polling || busy || adding) return;
         polling = true;
+        const generation = activityGeneration;
         try {
             const fresh = await BoardApi.getLaneRunningAgentsAsync(column.id, { signal });
-            if (alive() && settings) { settings.runningAgents = fresh.runningAgents; renderRunning(); position(); }
+            if (alive() && settings && !busy && !adding && generation === activityGeneration) { settings.runningAgents = fresh.runningAgents; settings.workflows = fresh.workflows; renderRunning(); refreshLaneSteps(content, fresh.workflows); position(); }
         } catch { /* Preserve the last known running list. */ }
         finally { polling = false; }
     }, 10000);

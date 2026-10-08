@@ -59,6 +59,18 @@ CREATE INDEX IX_BoardJiraLinks_Card ON BoardJiraLinks(CardId);
 -- index IX_BoardLaneAutomationDispatch_Card
 CREATE INDEX IX_BoardLaneAutomationDispatch_Card ON BoardLaneAutomationDispatch(CardId, DueUnixMs DESC);
 
+-- index IX_BoardLaneStepReports_Event
+CREATE INDEX IX_BoardLaneStepReports_Event ON BoardLaneStepReports(EventKey, JobId, Id DESC);
+
+-- index IX_BoardLaneWorkflowSteps_Event
+CREATE UNIQUE INDEX IX_BoardLaneWorkflowSteps_Event ON BoardLaneWorkflowSteps(EventKey, JobId);
+
+-- index IX_BoardLaneWorkflows_Column
+CREATE INDEX IX_BoardLaneWorkflows_Column ON BoardLaneWorkflows(ColumnId, Current);
+
+-- index IX_BoardLaneWorkflows_Current
+CREATE UNIQUE INDEX IX_BoardLaneWorkflows_Current ON BoardLaneWorkflows(CardId) WHERE Current = 1;
+
 -- index IX_BoardPendingAdditionalAutomations_Due
 CREATE INDEX IX_BoardPendingAdditionalAutomations_Due ON BoardPendingAdditionalAutomations(DueUnixMs);
 
@@ -161,6 +173,15 @@ CREATE TABLE BoardLaneAutomationDispatch ( EventKey TEXT NOT NULL, JobId INTEGER
 -- table BoardLaneAutomations
 CREATE TABLE BoardLaneAutomations ( ColumnId TEXT PRIMARY KEY REFERENCES BoardColumns(Id) ON DELETE CASCADE, JobId INTEGER NULL, Revision INTEGER NOT NULL );
 
+-- table BoardLaneStepReports
+CREATE TABLE BoardLaneStepReports ( Id INTEGER PRIMARY KEY AUTOINCREMENT, EventKey TEXT NOT NULL, JobId INTEGER NOT NULL, Status TEXT NOT NULL, Summary TEXT NOT NULL, RunId TEXT NULL, ReviewId TEXT NULL, SessionId TEXT NULL, CreatedUTC TEXT NOT NULL );
+
+-- table BoardLaneWorkflowSteps
+CREATE TABLE BoardLaneWorkflowSteps ( WorkflowId TEXT NOT NULL REFERENCES BoardLaneWorkflows(Id), JobId INTEGER NOT NULL, Position INTEGER NOT NULL, EventKey TEXT NULL, PRIMARY KEY (WorkflowId, JobId) );
+
+-- table BoardLaneWorkflows
+CREATE TABLE BoardLaneWorkflows ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL, ColumnId TEXT NOT NULL, CreatedUnixMs INTEGER NOT NULL, Current INTEGER NOT NULL DEFAULT 1 );
+
 -- table BoardPendingAdditionalAutomations
 CREATE TABLE BoardPendingAdditionalAutomations ( CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, ColumnId TEXT NOT NULL, JobId INTEGER NOT NULL, EventKey TEXT NOT NULL, DueUnixMs INTEGER NOT NULL, PRIMARY KEY (CardId, JobId), FOREIGN KEY (ColumnId, JobId) REFERENCES BoardLaneAdditionalAutomations(ColumnId, JobId) ON DELETE CASCADE );
 
@@ -203,6 +224,9 @@ CREATE TABLE Boards ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Name TEXT 
 -- table SchemaMigrations
 CREATE TABLE SchemaMigrations ( Component TEXT NOT NULL, Version INTEGER NOT NULL CHECK (Version > 0), AppliedUTC TEXT NOT NULL, AppliedBy TEXT, PRIMARY KEY (Component, Version) );
 
+-- table sqlite_sequence
+CREATE TABLE sqlite_sequence(name,seq);
+
 -- trigger BoardCards_AdditionalLaneAutomation_Insert
 CREATE TRIGGER BoardCards_AdditionalLaneAutomation_Insert AFTER INSERT ON BoardCards BEGIN INSERT INTO BoardPendingAdditionalAutomations (CardId, ColumnId, JobId, EventKey, DueUnixMs) SELECT NEW.Id, NEW.ColumnId, a.JobId, lower(hex(randomblob(16))), CAST(unixepoch('subsec') * 1000 AS INTEGER) + 60000 FROM BoardLaneAdditionalAutomations a WHERE a.ColumnId = NEW.ColumnId; END;
 
@@ -218,6 +242,12 @@ CREATE TRIGGER BoardCards_LaneAutomation_Move AFTER UPDATE OF ColumnId ON BoardC
 -- trigger BoardCards_ResolveAttention
 CREATE TRIGGER BoardCards_ResolveAttention AFTER UPDATE OF Flagged ON BoardCards WHEN NEW.Flagged = 0 BEGIN UPDATE BoardAttentionRequests SET ResolvedUTC = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE CardId = NEW.Id AND ResolvedUTC IS NULL; END;
 
+-- trigger BoardCards_Workflow_Insert
+CREATE TRIGGER BoardCards_Workflow_Insert BEFORE INSERT ON BoardCards BEGIN UPDATE BoardLaneWorkflows SET Current = 0 WHERE CardId = NEW.Id AND Current = 1; INSERT INTO BoardLaneWorkflows (Id, CardId, ColumnId, CreatedUnixMs) SELECT lower(hex(randomblob(16))), NEW.Id, NEW.ColumnId, CAST(unixepoch('subsec') * 1000 AS INTEGER) WHERE EXISTS (SELECT 1 FROM BoardLaneAutomations WHERE ColumnId = NEW.ColumnId AND JobId IS NOT NULL); INSERT INTO BoardLaneWorkflowSteps (WorkflowId, JobId, Position) SELECT w.Id, a.JobId, 0 FROM BoardLaneWorkflows w JOIN BoardLaneAutomations a ON a.ColumnId = w.ColumnId WHERE w.CardId = NEW.Id AND w.Current = 1 AND a.JobId IS NOT NULL UNION ALL SELECT w.Id, a.JobId, a.Position FROM BoardLaneWorkflows w JOIN BoardLaneAdditionalAutomations a ON a.ColumnId = w.ColumnId WHERE w.CardId = NEW.Id AND w.Current = 1; END;
+
+-- trigger BoardCards_Workflow_Move
+CREATE TRIGGER BoardCards_Workflow_Move BEFORE UPDATE OF ColumnId ON BoardCards WHEN OLD.ColumnId <> NEW.ColumnId BEGIN UPDATE BoardLaneWorkflows SET Current = 0 WHERE CardId = NEW.Id AND Current = 1; INSERT INTO BoardLaneWorkflows (Id, CardId, ColumnId, CreatedUnixMs) SELECT lower(hex(randomblob(16))), NEW.Id, NEW.ColumnId, CAST(unixepoch('subsec') * 1000 AS INTEGER) WHERE EXISTS (SELECT 1 FROM BoardLaneAutomations WHERE ColumnId = NEW.ColumnId AND JobId IS NOT NULL); INSERT INTO BoardLaneWorkflowSteps (WorkflowId, JobId, Position) SELECT w.Id, a.JobId, 0 FROM BoardLaneWorkflows w JOIN BoardLaneAutomations a ON a.ColumnId = w.ColumnId WHERE w.CardId = NEW.Id AND w.Current = 1 AND a.JobId IS NOT NULL UNION ALL SELECT w.Id, a.JobId, a.Position FROM BoardLaneWorkflows w JOIN BoardLaneAdditionalAutomations a ON a.ColumnId = w.ColumnId WHERE w.CardId = NEW.Id AND w.Current = 1; END;
+
 -- trigger BoardColumns_HistoryChanged
 CREATE TRIGGER BoardColumns_HistoryChanged AFTER UPDATE OF Name, Color, Position ON BoardColumns WHEN OLD.Name IS NOT NEW.Name OR OLD.Color IS NOT NEW.Color OR OLD.Position IS NOT NEW.Position BEGIN INSERT INTO BoardHistory VALUES ('bh_' || lower(hex(randomblob(16))), COALESCE(NEW.BoardId, ''), NEW.ProjectPath, 'change', 'Lane ' || OLD.Name || ': ' || CASE WHEN OLD.Name IS NOT NEW.Name THEN 'name → ' || NEW.Name || '; ' ELSE '' END || CASE WHEN OLD.Color IS NOT NEW.Color THEN 'colour → ' || NEW.Color || '; ' ELSE '' END || CASE WHEN OLD.Position IS NOT NEW.Position THEN 'position → ' || NEW.Position ELSE '' END, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')); END;
 
@@ -230,11 +260,23 @@ CREATE TRIGGER BoardColumns_HistoryDeleted AFTER DELETE ON BoardColumns BEGIN IN
 -- trigger BoardLaneAutomations_ClearAdditional
 CREATE TRIGGER BoardLaneAutomations_ClearAdditional AFTER UPDATE ON BoardLaneAutomations BEGIN DELETE FROM BoardLaneAdditionalAutomations WHERE ColumnId = NEW.ColumnId; END;
 
+-- trigger BoardLaneAutomations_Workflow_DELETE
+CREATE TRIGGER BoardLaneAutomations_Workflow_DELETE AFTER DELETE ON BoardLaneAutomations BEGIN UPDATE BoardLaneWorkflows SET Current = 0 WHERE ColumnId = OLD.ColumnId AND Current = 1; END;
+
+-- trigger BoardLaneAutomations_Workflow_UPDATE
+CREATE TRIGGER BoardLaneAutomations_Workflow_UPDATE AFTER UPDATE ON BoardLaneAutomations BEGIN UPDATE BoardLaneWorkflows SET Current = 0 WHERE ColumnId = OLD.ColumnId AND Current = 1; END;
+
 -- trigger BoardPendingAdditionalAutomations_RecordCancellation
 CREATE TRIGGER BoardPendingAdditionalAutomations_RecordCancellation BEFORE DELETE ON BoardPendingAdditionalAutomations BEGIN INSERT INTO BoardLaneAutomationDispatch (EventKey, JobId, CardId, ColumnId, DueUnixMs, Status, Reason) VALUES (OLD.EventKey, OLD.JobId, OLD.CardId, OLD.ColumnId, OLD.DueUnixMs, 'Cancelled', CASE WHEN NOT EXISTS (SELECT 1 FROM BoardCards WHERE Id = OLD.CardId AND DeletedUTC IS NULL) THEN 'Card was deleted.' WHEN NOT EXISTS (SELECT 1 FROM BoardCards WHERE Id = OLD.CardId AND ColumnId = OLD.ColumnId) THEN 'Card left the destination lane; a later entry starts a new settling period.' ELSE 'Lane Automation assignment changed or the pending entry was removed.' END) ON CONFLICT(EventKey, JobId) DO UPDATE SET Status = excluded.Status, Reason = excluded.Reason WHERE BoardLaneAutomationDispatch.Status = 'Waiting'; END;
 
+-- trigger BoardPendingAdditionalAutomations_Workflow
+CREATE TRIGGER BoardPendingAdditionalAutomations_Workflow AFTER INSERT ON BoardPendingAdditionalAutomations BEGIN UPDATE BoardLaneWorkflowSteps SET EventKey = NEW.EventKey WHERE JobId = NEW.JobId AND WorkflowId IN ( SELECT Id FROM BoardLaneWorkflows WHERE CardId = NEW.CardId AND ColumnId = NEW.ColumnId AND Current = 1); END;
+
 -- trigger BoardPendingAutomations_RecordCancellation
 CREATE TRIGGER BoardPendingAutomations_RecordCancellation BEFORE DELETE ON BoardPendingAutomations BEGIN INSERT INTO BoardLaneAutomationDispatch (EventKey, JobId, CardId, ColumnId, DueUnixMs, Status, Reason) VALUES (OLD.EventKey, OLD.JobId, OLD.CardId, OLD.ColumnId, OLD.DueUnixMs, 'Cancelled', CASE WHEN NOT EXISTS (SELECT 1 FROM BoardCards WHERE Id = OLD.CardId AND DeletedUTC IS NULL) THEN 'Card was deleted.' WHEN NOT EXISTS (SELECT 1 FROM BoardCards WHERE Id = OLD.CardId AND ColumnId = OLD.ColumnId) THEN 'Card left the destination lane; a later entry starts a new settling period.' ELSE 'Lane Automation assignment changed or the pending entry was removed.' END) ON CONFLICT(EventKey, JobId) DO UPDATE SET Status = excluded.Status, Reason = excluded.Reason WHERE BoardLaneAutomationDispatch.Status = 'Waiting'; END;
+
+-- trigger BoardPendingAutomations_Workflow
+CREATE TRIGGER BoardPendingAutomations_Workflow AFTER INSERT ON BoardPendingAutomations BEGIN UPDATE BoardLaneWorkflowSteps SET EventKey = NEW.EventKey WHERE JobId = NEW.JobId AND WorkflowId IN ( SELECT Id FROM BoardLaneWorkflows WHERE CardId = NEW.CardId AND ColumnId = NEW.ColumnId AND Current = 1); END;
 
 -- trigger BoardStarterWorkflows_SettingsInsert
 CREATE TRIGGER BoardStarterWorkflows_SettingsInsert AFTER INSERT ON BoardLaneAutomations BEGIN UPDATE BoardStarterWorkflows SET Completed = 1 WHERE ColumnId = NEW.ColumnId; END;

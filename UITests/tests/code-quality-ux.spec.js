@@ -44,7 +44,7 @@ function scanResponse() {
         ] }
     ].map(category => ({ ...category, weight: 1, weightedScore: category.score }));
     return {
-        success: true, healthScore: 64, rating: 'NeedsWork',
+        success: true, healthScore: 64, rating: 'NeedsWork', startedUtc: '2026-10-08T12:00:00Z',
         analyzedFileCount: 2, skippedFileCount: 0, durationMs: 82,
         output: 'Fixture scan complete.',
         report: {
@@ -486,6 +486,40 @@ test('report selection focuses the isolated map and opens saved details', async 
     await expect(map.locator('#inspector h2')).toHaveText('PaymentProcessor.cs');
     expect(scanRequests).toHaveLength(1);
     expect(sourceRequests).toHaveLength(0);
+});
+
+test('inspector shows saved file measurements and hides unavailable metrics through refresh and failure', async ({ page }) => {
+    await installQualityApi(page);
+    const report = await openDetails(page);
+    const map = page.frameLocator('.code-report iframe');
+    const inspect = async id => {
+        await page.evaluate(() => window.app.ruleController.codeReportViewer.ready);
+        await map.locator('body').evaluate((_, nodeId) => CodeAtlas.focusNode(nodeId), id);
+    };
+    const cells = map.locator('#inspector .metric');
+    await inspect('payment-file');
+    await expect(cells.locator('span')).toHaveText(['Lines of code', 'Complexity', 'Direct links']);
+    await expect(cells.locator('strong')).toHaveText(['2', '31', '1']);
+    await expect(map.locator('#inspector .entity-summary')).toContainText('Measurements from the scan captured');
+    await expect(map.locator('#inspector')).not.toContainText('metric was not supplied');
+    await inspect('helper-file');
+    await expect(cells.locator('span')).toHaveText(['Direct links']);
+    await inspect('payments');
+    await expect(cells.locator('span')).toHaveText(['Direct links']);
+
+    const response = scanResponse();
+    response.report.files[0].categories[0].metrics.find(item => item.name === 'cyclomatic_complexity').value = 0;
+    response.report.files[0].categories[1].metrics.find(item => item.name === 'lines_of_code').value = 0;
+    await page.evaluate(value => window.app.ruleController.codeReportViewer.setResponse(value), response);
+    await inspect('payment-file');
+    await expect(cells.locator('strong')).toHaveText(['0', '0', '1']);
+
+    response.success = false;
+    await page.evaluate(value => window.app.ruleController.codeReportViewer.setResponse(value), response);
+    await inspect('payment-file');
+    await expect(cells.locator('span')).toHaveText(['Direct links']);
+    await expect(map.locator('#inspector .entity-summary')).not.toContainText('Measurements from');
+    await expect(report.locator('.qr')).toHaveAttribute('data-state', 'error');
 });
 
 test('radar supports keyboard categories, saved detail activation and Escape', async ({ page }) => {

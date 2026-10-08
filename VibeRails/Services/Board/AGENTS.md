@@ -61,7 +61,9 @@ auto-attach a session, and explicit session attachments remain within the curren
 
 The single local lane template records a `BoardStarterWorkflows` intent with the new Review
 lane's ID in the board-creation transaction. `BoardStarterWorkflowService` recovers it through
-`IJobStore.EnsureBoardReviewRecipeAsync`, then assigns it through `IBoardStore`. Workers, Jobs
+`IJobStore.EnsureBoardReviewRecipeAsync`, then completes the intent through `IBoardStore` without
+assigning it. New boards have no lane Automations selected; Switch reviewer stays available in
+the picker for explicit selection. Preserve existing selections. Workers, Jobs
 and the stable recipe receipt commit together in state.db. Root Board access and the existing
 scheduler recover incomplete installs; a lean stdio first-board creation only records intent.
 Never seed by runtime lane name, retrofit existing boards, refresh installed recipes, or restore
@@ -69,12 +71,19 @@ a removed assignment. A settings write, even an empty selection from an older wr
 pending installation. Removing a lane or assignment keeps the shared Automation and Worker.
 See [the starter contract](ARCHITECTURE.md#new-board-review-defaults-vibe-23).
 
-## Waiting lane Automations (VIBE-21)
+## Ordered and waiting lane Automations
+
+All lane Automations run in selected order, with no mode setting. Preserve explicit LLM pass/fail
+via `report_automation_step`, per-entry user skips and stop-before-continue behavior. Keep workflow
+snapshots and append-only receipts behind `IBoardStore`; do not infer approval from process exit.
+See [the ordered workflow contract](ARCHITECTURE.md#ordered-lane-workflows).
+
+### Waiting lane Automations (VIBE-21)
 
 VIBE-42 adds a waiting tile badge and an exact-entry skip action in the card's Automations rail.
 Keep the card visible in its selected lane; only its Automation entry waits. Bulk activity must
-exclude committed runs even before acknowledgment. A skip must not affect a newer entry or stop
-a committed run. Scripts added in the lane picker use ordinary Jobs and existing script approvals.
+exclude committed runs even before acknowledgment. A skip must not affect a newer entry. Running-step skips request cancellation and hold successors
+until the run stops. Scripts added in the lane picker use ordinary Jobs and existing script approvals.
 
 Busy lane demand stays in the existing Board queues. Keep the oldest pending entry per Job
 first, with one pending entry per card/Job and a fresh 60-second delay after reentry. Moves and
@@ -140,7 +149,7 @@ decide card movement through the UI or Board MCP tools. Give agents the lane con
 expected output and workflow instructions so they can choose the appropriate next action.
 Do not add deterministic application rules that move cards based on review or Automation outcomes,
 or impose a stay-in-lane default. Lane names, order and the meaning of Done remain user-defined.
-New template review defaults use Switch reviewer (Claude to Codex, Codex to Claude), with editable
+The optional new-board review recipe uses Switch reviewer (Claude to Codex, Codex to Claude), with editable
 mappings and a fixed Codex review alternative; the implementation scope is tracked on VIBE-20–25.
 
 ## Board sharing (VB-52)
@@ -310,7 +319,7 @@ serialization or tool discovery into the Native AOT path.
   terminal is a Sessions action or **Chat with agent**, whose independent shared LLM/environment
   picker defaults to the assignee. Chat saves first, sends the selected launch override without
   reassigning the card, and launches with discussion intent, then focuses the returned terminal.
-  Lane Automations are independent existing Jobs, queued after a 60-second settling period;
+  Lane Automations are existing Jobs, dispatched in selected order per card after a 60-second settling period;
   automatic assignee launch is still a TODO. Agents are told about them (VB-34): every lane list
   annotates on-entry Automations from the Job definition, `move_board_card` appends what the
   entry queued or skipped and why (never silent), and `skipAutomations` deletes the entries a

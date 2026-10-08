@@ -19,6 +19,16 @@ public sealed partial class BoardSettingsTests
     }
 
     private Task RemoveBoard7() => ExecuteSql("""
+        DROP TRIGGER BoardCards_Workflow_Insert;
+        DROP TRIGGER BoardCards_Workflow_Move;
+        DROP TRIGGER BoardPendingAutomations_Workflow;
+        DROP TRIGGER BoardPendingAdditionalAutomations_Workflow;
+        DROP TRIGGER BoardLaneAutomations_Workflow_UPDATE;
+        DROP TRIGGER BoardLaneAutomations_Workflow_DELETE;
+        DROP TABLE BoardLaneStepReports;
+        DROP TABLE BoardLaneWorkflowSteps;
+        DROP TABLE BoardLaneWorkflows;
+        DELETE FROM SchemaMigrations WHERE Component = 'board-lane-workflow';
         DROP TRIGGER BoardPendingAutomations_RecordCancellation;
         DROP TRIGGER BoardPendingAdditionalAutomations_RecordCancellation;
         DROP TABLE BoardLaneAutomationDispatch;
@@ -48,7 +58,9 @@ public sealed partial class BoardSettingsTests
         await Assert.ThrowsAsync<BoardConflictException>(() => _boards.SaveLaneAutomationAsync(_root, a, [first.Id], 0, Ct));
         Assert.Equal(saved.JobIds, (await _boards.GetLaneAutomationAsync(_root, a, Ct))!.JobIds);
         Assert.Equal(due, await Due(card.Id));
-        Assert.Equal(2, (await Tick(due)).Count);
+        var run = Assert.Single(await Tick(due));
+        Assert.Equal(second.Id, (await _jobs.GetRunAsync(run, Ct))!.JobId);
+        Assert.Single(await _boards.GetPendingLaneAutomationsAsync(_root, card.Id, Ct));
     }
 
     [Fact]
@@ -71,9 +83,12 @@ public sealed partial class BoardSettingsTests
         Assert.Empty(await Tick(due - 1));
         var roots = await Task.WhenAll(Tick(due, ReopenJobs()), Tick(due, ReopenJobs()));
         var runs = await Task.WhenAll(roots.SelectMany(ids => ids).Select(id => _jobs.GetRunAsync(id, Ct)));
-        Assert.Equal(new[] { first.Id, third.Id }, runs.Select(run => run!.JobId).Order());
+        Assert.Equal(third.Id, Assert.Single(runs)!.JobId);
         Assert.All(runs, run => { Assert.Equal(JobTriggerKind.BoardLane, run!.TriggerKind); Assert.Single(run.Actions!); });
         Assert.Empty(await Tick(due + 100_000));
+        await _jobs.CompleteRunAsync(runs[0]!.Id, JobRunStatus.Succeeded, 0, null, Ct);
+        var next = Assert.Single(await Tick(due + 100_001));
+        Assert.Equal(first.Id, (await _jobs.GetRunAsync(next, Ct))!.JobId);
         Assert.Equal(0, await Due(card.Id));
     }
 
@@ -84,7 +99,7 @@ public sealed partial class BoardSettingsTests
     [InlineData("deleted", true)]
     [InlineData("overlap", false)]
     [InlineData("overlap", true)]
-    public async Task OneSkippedAutomation_DoesNotPreventTheOtherFromQueuing(string reason, bool skipFirst)
+    public async Task UnavailableOrBusyAutomation_HoldsFollowingStepsUntilUserSkip(string reason, bool skipFirst)
     {
         var (_, a, _, _) = await Lanes();
         var skipped = await Job("Skipped");
@@ -96,10 +111,21 @@ public sealed partial class BoardSettingsTests
             await _jobs.UpdateJobAsync(skipped.Id, new(skipped.Name, _root, LLM.NotSet, null, "", null, false, []), Ct);
         if (reason == "deleted") await _jobs.SoftDeleteJobAsync(skipped.Id, Ct);
         if (reason == "overlap") Assert.NotNull(await _jobs.EnqueueManualRunAsync(skipped.Id, Ct));
-        var run = (await _jobs.GetRunAsync(Assert.Single(await Tick(due)), Ct))!;
-        Assert.Equal(valid.Id, run.JobId);
-        Assert.Equal(reason == "overlap" ? due : 0, await Due(card.Id));
-        Assert.Empty(await Tick(due + 100_000));
+        var initial = await Tick(due);
+        if (skipFirst) Assert.Empty(initial);
+        else
+        {
+            var validRun = Assert.Single(initial);
+            Assert.Equal(valid.Id, (await _jobs.GetRunAsync(validRun, Ct))!.JobId);
+            await _jobs.CompleteRunAsync(validRun, JobRunStatus.Succeeded, 0, null, Ct);
+            Assert.Empty(await Tick(due + 1));
+        }
+        var entry = (await _boards.GetLaneAutomationStatusesAsync(_root, card.Id, Ct)).Single(e => e.JobId == skipped.Id);
+        var service = new BoardCardAutomationService(_boards, _jobs, Moq.Mock.Of<VibeRails.Services.Jobs.IJobService>());
+        await service.SkipAsync(_root, card.Id, skipped.Id, entry.EventKey, Ct);
+        if (skipFirst) Assert.Equal(valid.Id, (await _jobs.GetRunAsync(Assert.Single(await Tick(due + 2)), Ct))!.JobId);
+        else Assert.Empty(await Tick(due + 2));
+
     }
 
     [Theory]
@@ -128,7 +154,7 @@ public sealed partial class BoardSettingsTests
         if (operation == "save")
         {
             var next = await Card(a);
-            Assert.Equal(2, (await Tick(await Due(next.Id))).Count);
+            Assert.Single(await Tick(await Due(next.Id)));
         }
     }
 
@@ -141,13 +167,18 @@ public sealed partial class BoardSettingsTests
         await _boards.SaveLaneAutomationAsync(_root, a, jobs, 0, Ct);
         var card = await Card(a);
         var due = await Due(card.Id);
-        var firstBatch = await Tick(due);
-        Assert.Equal(100, firstBatch.Count); // One shared bounded batch across both queues.
-        var remaining = await Tick(due);
-        Assert.Equal(3, remaining.Count);
-        Assert.Equal(103, firstBatch.Concat(remaining).Distinct().Count());
+        var runs = new List<string>();
+        foreach (var job in jobs)
+        {
+            var run = Assert.Single(await Tick(due + 1));
+            Assert.Equal(job, (await _jobs.GetRunAsync(run, Ct))!.JobId);
+            runs.Add(run);
+            await _jobs.CompleteRunAsync(run, JobRunStatus.Succeeded, 0, null, Ct);
+        }
+        Assert.Equal(103, runs.Distinct().Count());
         Assert.Equal(0, await Due(card.Id));
-        Assert.Empty(await Tick(due));
+        Assert.Empty(await Tick(due + 2));
+
     }
 
     [Fact]
@@ -171,6 +202,10 @@ public sealed partial class BoardSettingsTests
         due = await Due(card.Id);
         // Model the previous scheduler consuming only its queue; extra jobs must survive it.
         await ExecuteSql($"DELETE FROM BoardPendingAutomations WHERE CardId = '{card.Id}';");
+        Assert.Empty(await Tick(due)); // A missing old-scheduler result cannot imply a pass.
+        var oldStep = (await upgraded.GetLaneAutomationStatusesAsync(_root, card.Id, Ct)).Single(e => e.JobId == first.Id && e.IsCurrent);
+        await new BoardCardAutomationService(upgraded, _jobs, Moq.Mock.Of<VibeRails.Services.Jobs.IJobService>())
+            .SkipAsync(_root, card.Id, first.Id, oldStep.EventKey, Ct);
         var run = (await _jobs.GetRunAsync(Assert.Single(await Tick(due)), Ct))!;
         Assert.Equal(second.Id, run.JobId);
         var next = await Card(b);

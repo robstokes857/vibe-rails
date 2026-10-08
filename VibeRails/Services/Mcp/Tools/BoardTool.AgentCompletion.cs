@@ -92,15 +92,17 @@ public sealed partial class BoardTool
     private static string FormatLaneStatuses(IReadOnlyList<BoardLaneAutomationStatus> entries)
     {
         if (entries.Count == 0) return "No recent lane Automation entries.";
-        var text = new StringBuilder("Lane Automation entries (up to 100, pending first):\n");
+        var text = new StringBuilder("Lane Automation entries (current workflow first, in execution order):\n");
         foreach (var entry in entries)
         {
-            text.Append("- ").Append(BoardPromptComposer.SanitizeLine(entry.Name, 120)).Append(" · ").Append(entry.Status)
-                .Append(" · entry ").Append(entry.EventKey).Append(" · lane ").Append(entry.ColumnId)
+            text.Append("- ").Append(BoardPromptComposer.SanitizeLine(entry.Name, 120)).Append(" · ").Append(entry.StepStatus ?? entry.Status)
+                .Append(" · job ").Append(entry.JobId).Append(" · entry ").Append(entry.EventKey).Append(" · lane ").Append(entry.ColumnId)
                 .Append(" · settles ").Append(entry.DueUtc.ToString("O"));
             if (entry.RunId is not null) text.Append(" · run ").Append(entry.RunId);
             text.Append(" · ").AppendLine(BoardPromptComposer.SanitizeLine(entry.Reason, 600));
         }
+        if (entries.Any(e => e.IsCurrent && e.StepStatus is "Failed" or "Awaiting result"))
+            text.AppendLine("When you begin fixing a failed step, call report_automation_step status=fixing with its eventKey and a summary. Request a fresh review when ready; only a passing reviewer or user skip releases later steps.");
         return text.ToString();
     }
 }

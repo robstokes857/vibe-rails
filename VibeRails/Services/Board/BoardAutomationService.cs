@@ -20,7 +20,8 @@ public sealed class BoardAutomationService(IBoardStore boards, IJobStore jobs,
             choices.Add(new(job.Id, job.Name, job.Enabled, setting.JobIds.Contains(job.Id)
                 ? await ReviewSetupAsync(projectPath, job, cancellationToken) : null));
         var pending = (await boards.GetPendingStarterWorkflowsAsync(projectPath, cancellationToken)).Any(seed => seed.ColumnId == columnId);
-        return new(setting.JobId, setting.Revision, choices, setting.JobIds, pending, await ReadRunningAgentsAsync(projectPath, columnId, cancellationToken));
+        return new(setting.JobId, setting.Revision, choices, setting.JobIds, pending, await ReadRunningAgentsAsync(projectPath, columnId, cancellationToken),
+            await boards.GetLaneWorkflowsAsync(projectPath, columnId, cancellationToken));
     }
 
     /// <summary>
@@ -29,7 +30,8 @@ public sealed class BoardAutomationService(IBoardStore boards, IJobStore jobs,
     /// </summary>
     public async Task<BoardLaneRunningAgentsResponse?> GetRunningAgentsAsync(string projectPath, string columnId, CancellationToken cancellationToken) =>
         await boards.GetColumnAsync(projectPath, columnId, cancellationToken) is null ? null
-            : new(await ReadRunningAgentsAsync(projectPath, columnId, cancellationToken));
+            : new(await ReadRunningAgentsAsync(projectPath, columnId, cancellationToken),
+                await boards.GetLaneWorkflowsAsync(projectPath, columnId, cancellationToken));
 
     private async Task<IReadOnlyList<BoardLaneRunningAgent>> ReadRunningAgentsAsync(string projectPath, string columnId, CancellationToken cancellationToken)
     {

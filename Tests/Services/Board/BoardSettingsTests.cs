@@ -244,7 +244,10 @@ public sealed partial class BoardSettingsTests : IDisposable
         var card = await Card(lanes[1].Id);
         await _boards.DeleteColumnAsync(_root, lanes[1].Id, Ct);
         Assert.Equal(lanes[0].Id, (await _boards.FindCardAsync(_root, card.Id, Ct))!.ColumnId);
-        Assert.Equal(2, (await Tick(await Due(card.Id))).Count);
+        var firstRun = Assert.Single(await Tick(await Due(card.Id)));
+        Assert.Equal(job.Id, (await _jobs.GetRunAsync(firstRun, Ct))!.JobId);
+        await _jobs.CompleteRunAsync(firstRun, JobRunStatus.Succeeded, 0, null, Ct);
+        Assert.Equal(additional.Id, (await _jobs.GetRunAsync(Assert.Single(await Tick(await Due(card.Id))), Ct))!.JobId);
     }
 
     [Fact]
@@ -258,6 +261,10 @@ public sealed partial class BoardSettingsTests : IDisposable
         var unavailable = new Mock<IBoardStore>(MockBehavior.Strict);
         unavailable.Setup(store => store.GetDueLaneAutomationsAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .Returns<DateTime, CancellationToken>(_boards.GetDueLaneAutomationsAsync);
+        unavailable.Setup(store => store.GetLaneAutomationBlockReasonAsync(It.IsAny<BoardLaneAutomationEvent>(), It.IsAny<CancellationToken>()))
+            .Returns<BoardLaneAutomationEvent, CancellationToken>(_boards.GetLaneAutomationBlockReasonAsync);
+        unavailable.Setup(store => store.GetLaneAutomationStatusesAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns<string, string, CancellationToken>(_boards.GetLaneAutomationStatusesAsync);
         unavailable.Setup(store => store.IsLaneAutomationCurrentAsync(It.IsAny<BoardLaneAutomationEvent>(), It.IsAny<CancellationToken>()))
             .Returns<BoardLaneAutomationEvent, CancellationToken>(_boards.IsLaneAutomationCurrentAsync);
         unavailable.Setup(store => store.RecordLaneAutomationDispatchAsync(It.IsAny<BoardLaneAutomationEvent>(), It.IsAny<BoardLaneAutomationDispatch>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
@@ -326,6 +333,10 @@ public sealed partial class BoardSettingsTests : IDisposable
         var flaky = new Mock<IBoardStore>(MockBehavior.Strict);
         flaky.Setup(store => store.GetDueLaneAutomationsAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .Returns<DateTime, CancellationToken>(_boards.GetDueLaneAutomationsAsync);
+        flaky.Setup(store => store.GetLaneAutomationBlockReasonAsync(It.IsAny<BoardLaneAutomationEvent>(), It.IsAny<CancellationToken>()))
+            .Returns<BoardLaneAutomationEvent, CancellationToken>(_boards.GetLaneAutomationBlockReasonAsync);
+        flaky.Setup(store => store.GetLaneAutomationStatusesAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns<string, string, CancellationToken>(_boards.GetLaneAutomationStatusesAsync);
         flaky.Setup(store => store.IsLaneAutomationCurrentAsync(It.IsAny<BoardLaneAutomationEvent>(), It.IsAny<CancellationToken>()))
             .Returns<BoardLaneAutomationEvent, CancellationToken>(_boards.IsLaneAutomationCurrentAsync);
         flaky.Setup(store => store.RecordLaneAutomationDispatchAsync(It.Is<BoardLaneAutomationEvent>(e => e.JobId == first.Id), It.IsAny<BoardLaneAutomationDispatch>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))

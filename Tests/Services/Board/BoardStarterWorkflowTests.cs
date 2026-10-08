@@ -36,7 +36,7 @@ public sealed class BoardStarterWorkflowTests : IDisposable
         new(boards, Mock.Of<IBoardCommitService>(), new NullBoardLiveSessionProbe(), recovery ?? Recovery());
 
     [Fact]
-    public async Task RootSchedulerFinishesAFirstBoardCreatedByTheLeanMcpHostWithoutLaunching()
+    public async Task RootSchedulerFinishesAFirstBoardCreatedByTheLeanMcpHostWithoutSelectingOrLaunching()
     {
         // The stdio host never runs the full state migration or root scheduler.
         var lean = new BoardService(boards, Mock.Of<IBoardCommitService>(), new NullBoardLiveSessionProbe());
@@ -51,11 +51,13 @@ public sealed class BoardStarterWorkflowTests : IDisposable
         await scheduler.RunCycleAsync(DateTime.UtcNow, Ct);
         Assert.Empty(await boards.GetPendingStarterWorkflowsAsync(root, Ct));
         Assert.Single(await jobs.GetJobsAsync(root, cancellationToken: Ct));
+        foreach (var column in await boards.GetColumnsAsync(root, Ct))
+            Assert.Empty((await boards.GetLaneAutomationAsync(root, column.Id, Ct))!.JobIds);
         Assert.Empty(await jobs.GetRunsAsync(cancellationToken: Ct));
     }
 
     [Fact]
-    public async Task FirstAndAdditionalBoardsUseOneRecipeAndNeverLaunchOnCreationOrSave()
+    public async Task FirstAndAdditionalBoardsOfferTheRecipeWithoutSelectingOrLaunchingIt()
     {
         var service = Service();
         await service.GetBoardsAsync(root, Ct);
@@ -66,6 +68,7 @@ public sealed class BoardStarterWorkflowTests : IDisposable
         Assert.Equal(2, catalog.Count);
         foreach (var job in catalog)
         {
+            Assert.True(job.Enabled);
             Assert.Equal(new[] { JobActionKind.CodeQuality, JobActionKind.Vca, JobActionKind.Worker }, job.Actions!.Select(a => a.Kind));
             Assert.All(job.Actions!.Take(2), action => Assert.Equal(new[] { "unpushed" }, action.Arguments));
             var worker = (await repository.GetEnvironmentByIdAsync(job.EnvironmentId!.Value, Ct))!;
@@ -80,8 +83,14 @@ public sealed class BoardStarterWorkflowTests : IDisposable
         {
             var columns = await boards.GetColumnsAsync(root, Ct, b.Id);
             Assert.Equal(BoardStore.DefaultLanes.Select(l => l.Name), columns.Select(c => c.Name));
-            var setting = (await boards.GetLaneAutomationAsync(root, columns[3].Id, Ct))!;
-            Assert.Single(setting.JobIds);
+            foreach (var column in columns)
+                Assert.Empty((await boards.GetLaneAutomationAsync(root, column.Id, Ct))!.JobIds);
+            var setting = (await new BoardAutomationService(boards, jobs, Recovery()).GetAsync(root, columns[3].Id, Ct))!;
+            Assert.Equal(2, setting.Jobs.Count);
+            Assert.False(setting.StarterSetupPending);
+            Assert.Equal(0, setting.Revision);
+            var card = await boards.CreateCardAsync(root, new(columns[3].Id, "No automatic review", "", null, "medium", null, [], false), Ct);
+            Assert.Empty(await boards.GetPendingLaneAutomationsAsync(root, card.Id, Ct));
             await boards.SaveLaneAutomationAsync(root, columns[3].Id, setting.JobIds, setting.Revision, Ct);
         }
         Assert.Empty(await jobs.GetRunsAsync(cancellationToken: Ct));
@@ -89,7 +98,7 @@ public sealed class BoardStarterWorkflowTests : IDisposable
     }
 
     [Fact]
-    public async Task CrashBetweenCommitsAndConcurrentRecoveryReuseTheWorkerJobAndAssignment()
+    public async Task CrashBetweenCommitsAndConcurrentRecoveryReuseTheRecipeWithoutSelectingIt()
     {
         await boards.EnsureDefaultColumnsAsync(root, Ct);
         var pending = Assert.Single(await boards.GetPendingStarterWorkflowsAsync(root, Ct));
@@ -99,10 +108,11 @@ public sealed class BoardStarterWorkflowTests : IDisposable
         await Task.WhenAll(Task.Run(() => Recovery(reopened, new JobStore(state)).RecoverAsync(root, Ct), Ct),
             Task.Run(() => Recovery().RecoverAsync(root, Ct), Ct));
         await Recovery().RecoverAsync(root, Ct);
-        Assert.Equal(id, Assert.Single((await boards.GetLaneAutomationAsync(root, pending.ColumnId, Ct))!.JobIds));
-        Assert.Single(await jobs.GetJobsAsync(root, cancellationToken: Ct));
+        Assert.Empty((await boards.GetLaneAutomationAsync(root, pending.ColumnId, Ct))!.JobIds);
+        Assert.Equal(id, Assert.Single(await jobs.GetJobsAsync(root, cancellationToken: Ct)).Id);
         Assert.Single(await repository.GetAllEnvironmentsAsync(Ct), e => e.AutomationWorker);
-        Assert.Equal(1, (await boards.GetLaneAutomationAsync(root, pending.ColumnId, Ct))!.Revision);
+        Assert.Equal(0, (await boards.GetLaneAutomationAsync(root, pending.ColumnId, Ct))!.Revision);
+        Assert.Empty(await boards.GetPendingStarterWorkflowsAsync(root, Ct));
     }
 
     [Fact]
@@ -142,7 +152,24 @@ public sealed class BoardStarterWorkflowTests : IDisposable
     }
 
     [Fact]
-    public async Task RenamesDuplicateNamesAndFirstPositionKeepTheCapturedLaneIdentity()
+    public async Task PreviouslyAssignedReviewSurvivesRecoveryAndReopen()
+    {
+        await boards.EnsureDefaultColumnsAsync(root, Ct);
+        var seed = Assert.Single(await boards.GetPendingStarterWorkflowsAsync(root, Ct));
+        var jobId = await jobs.EnsureBoardReviewRecipeAsync(root, seed.ColumnId, seed.RecipeId, Ct);
+        // Model a selection installed by a previous release.
+        await boards.CompleteStarterWorkflowAsync(root, seed.ColumnId, jobId, Ct);
+        var before = (await boards.GetLaneAutomationAsync(root, seed.ColumnId, Ct))!;
+        var reopened = new BoardStore(board, state);
+        await Recovery(reopened).RecoverAsync(root, Ct);
+        var after = (await reopened.GetLaneAutomationAsync(root, seed.ColumnId, Ct))!;
+        Assert.Equal(jobId, Assert.Single(after.JobIds));
+        Assert.Equal(before.Revision, after.Revision);
+        Assert.True((await jobs.GetJobAsync(jobId, Ct))!.Enabled);
+    }
+
+    [Fact]
+    public async Task RenamesDuplicateNamesAndFirstPositionDoNotSelectTheRecipe()
     {
         await boards.EnsureDefaultColumnsAsync(root, Ct);
         var seed = Assert.Single(await boards.GetPendingStarterWorkflowsAsync(root, Ct));
@@ -152,16 +179,27 @@ public sealed class BoardStarterWorkflowTests : IDisposable
         await boards.ReorderColumnsAsync(root, new[] { seed.ColumnId }.Concat(columns.Where(c => c.Id != seed.ColumnId).Select(c => c.Id)).ToList(), Ct);
         await Recovery().RecoverAsync(root, Ct);
         Assert.Equal(seed.ColumnId, (await boards.GetColumnsAsync(root, Ct))[0].Id);
-        Assert.Single((await boards.GetLaneAutomationAsync(root, seed.ColumnId, Ct))!.JobIds);
+        Assert.Empty((await boards.GetLaneAutomationAsync(root, seed.ColumnId, Ct))!.JobIds);
         Assert.Empty((await boards.GetLaneAutomationAsync(root, columns[0].Id, Ct))!.JobIds);
+        Assert.Single(await jobs.GetJobsAsync(root, cancellationToken: Ct));
+        Assert.Empty(await boards.GetPendingStarterWorkflowsAsync(root, Ct));
     }
 
     [Fact]
-    public async Task CreationSkippedAndBackwardEntriesKeepTheSixtySecondDelay()
+    public async Task ExplicitSelectionEnablesFutureEntriesWithTheSixtySecondDelay()
     {
         await Service().GetBoardsAsync(root, Ct);
         var columns = await boards.GetColumnsAsync(root, Ct);
         var review = columns[3].Id;
+        var automationService = new BoardAutomationService(boards, jobs, Recovery());
+        var available = (await automationService.GetAsync(root, review, Ct))!;
+        var jobId = Assert.Single(available.Jobs).Id;
+        Assert.Empty(available.JobIds);
+        var existing = await boards.CreateCardAsync(root, new(review, "Already here", "", null, "medium", null, [], false), Ct);
+        await automationService.SaveAsync(root, review, new(null, available.Revision, [jobId]), Ct);
+        Assert.Empty(await boards.GetPendingLaneAutomationsAsync(root, existing.Id, Ct));
+        await Service().GetBoardsAsync(root, Ct);
+        Assert.Equal(jobId, Assert.Single((await automationService.GetAsync(root, review, Ct))!.JobIds));
         var created = await boards.CreateCardAsync(root, new(review, "Created here", "", null, "medium", null, [], false), Ct);
         var due = Assert.Single(await boards.GetPendingLaneAutomationsAsync(root, created.Id, Ct)).DueUtc;
         Assert.InRange((due - DateTime.UtcNow).TotalSeconds, 55, 61);
@@ -197,13 +235,16 @@ public sealed class BoardStarterWorkflowTests : IDisposable
     }
 
     [Fact]
-    public async Task MissingProviderIsVisibleWithoutChangingTheRoutingOrDisablingTheDefault()
+    public async Task MissingProviderIsVisibleAfterExplicitSelectionWithoutChangingTheRouting()
     {
         await Service().GetBoardsAsync(root, Ct);
         var lane = (await boards.GetColumnsAsync(root, Ct))[3];
         var executable = new Mock<IJobExecutableResolver>();
         executable.Setup(e => e.Resolve(LLM.Codex)).Returns("codex");
         var service = new BoardAutomationService(boards, jobs, Recovery(), repository, executable.Object);
+        var available = (await service.GetAsync(root, lane.Id, Ct))!;
+        Assert.Empty(available.JobIds);
+        await service.SaveAsync(root, lane.Id, new(null, available.Revision, [Assert.Single(available.Jobs).Id]), Ct);
         var setting = (await service.GetAsync(root, lane.Id, Ct))!;
         var choice = Assert.Single(setting.Jobs);
         Assert.True(choice.Enabled);

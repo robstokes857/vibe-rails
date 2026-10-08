@@ -30,7 +30,11 @@ public sealed partial class BoardStore
             FROM ranked p JOIN BoardCards c ON c.Id = p.CardId
             {CardPrefixJoinSql}
             LEFT JOIN BoardLaneAutomationDispatch d ON d.EventKey = p.EventKey AND d.JobId = p.JobId
-            WHERE p.rank = 1
+            WHERE p.rank = 1 AND NOT EXISTS (
+                SELECT 1 FROM BoardLaneWorkflowSteps target
+                JOIN BoardLaneWorkflowSteps prior ON prior.WorkflowId = target.WorkflowId AND prior.Position < target.Position
+                JOIN pending earlier ON earlier.EventKey = prior.EventKey AND earlier.JobId = prior.JobId
+                WHERE target.EventKey = p.EventKey AND target.JobId = p.JobId)
             ORDER BY COALESCE(d.LastAttemptUnixMs, 0), p.DueUnixMs, p.CardId, p.JobId LIMIT 100;
             """;
         query.Parameters.AddWithValue("$now", new DateTimeOffset(nowUtc).ToUnixTimeMilliseconds());
@@ -74,7 +78,7 @@ public sealed partial class BoardStore
     private static async Task WriteLaneAutomationDispatchAsync(SqliteConnection connection, SqliteTransaction transaction,
         BoardLaneAutomationEvent entry, BoardLaneAutomationDispatch dispatch, DateTime nowUtc, CancellationToken cancellationToken)
     {
-        if (dispatch.Status is not ("Waiting" or "Queued" or "Skipped" or "Cancelled"))
+        if (dispatch.Status is not ("Waiting" or "Queued" or "Skipped" or "Cancelled" or "Failed"))
             throw new ArgumentException("Invalid lane dispatch status.", nameof(dispatch));
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;

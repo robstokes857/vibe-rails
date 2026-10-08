@@ -1,4 +1,6 @@
 using VibeRails.Services;
+using VibeRails.Services.GitPreflight;
+using VibeRails.Services.VCA.Validators;
 
 namespace VibeRails.Services.VCA
 {
@@ -47,6 +49,20 @@ namespace VibeRails.Services.VCA
             var results = new List<FileValidationResult>();
             var filesAndRules = await _fileAndRuleParser.GetFilesAndRulesAsync(rootPath, stagedOnly, cancellationToken);
 
+            if (filesAndRules.Values.SelectMany(rules => rules)
+                .Any(rule => CodeQualityRule.TryParse(rule.Rule.RuleText, out _)))
+            {
+                var provider = new GitStagedSnapshotProvider();
+                var snapshot = stagedOnly
+                    ? await provider.CaptureAsync(rootPath, cancellationToken)
+                    : await provider.CaptureWorkingTreeAsync(rootPath, cancellationToken);
+                var data = context?.AdditionalData is { } existing
+                    ? new Dictionary<string, object>(existing)
+                    : new Dictionary<string, object>();
+                data[CodeQualityValidator.SnapshotKey] = snapshot;
+                context = new ValidationContext(context?.CommitMessage, data);
+            }
+
             int totalRules = 0;
 
             foreach (var (filePath, rulesWithSource) in filesAndRules)
@@ -54,6 +70,15 @@ namespace VibeRails.Services.VCA
                 foreach (var ruleWithSource in rulesWithSource)
                 {
                     totalRules++;
+
+                    if (CodeQualityRule.LooksLike(ruleWithSource.Rule.RuleText)
+                        && !CodeQualityRule.TryParse(ruleWithSource.Rule.RuleText, out _))
+                    {
+                        results.Add(new FileValidationResult(filePath, ruleWithSource.Rule.RuleText,
+                            Enforcement.WARN, false, ruleWithSource.SourceFile,
+                            "UNSUPPORTED: Code quality minimum must be A, B or C."));
+                        continue;
+                    }
 
                     if (CommitMessageWordRule.LooksLike(ruleWithSource.Rule.RuleText)
                         && !CommitMessageWordRule.TryParse(ruleWithSource.Rule.RuleText, out _))

@@ -7,6 +7,15 @@ The modal explains that terminal output, prompts and saved code changes become v
 anyone holding the link. The public server omits proxy captures. Closing the modal hides its
 result while the creation request finishes; it does not deliberately cancel upload scheduling.
 
+The `create_session_share_link` MCP tool uses this same root route for the calling terminal's
+inherited recording id. It accepts a `displayName` and returns status, expiry and a commit line:
+`vibe-share:<public URL>`. Multiple sessions can be listed on separate lines. The optional VCA rule
+`Require VibeRails session link` checks these lines first, then public URLs elsewhere in the commit
+message. It validates URL shape locally, not ownership, upload completion, expiry or revocation.
+Creating another link is unnecessary for subsequent commits from the same session. MCP uses the
+inherited root credentials over loopback, not the terminal child's control endpoint; it does not
+open the database or upload live sessions itself.
+
 `POST /api/v1/sessions/{sessionId:guid}/sharing-links` is active-root-only and requires both
 normal process/session and tab credentials through CookieAuthMiddleware. It accepts only
 `{ displayName }`, checks the local recording, caps JSON at 4 KiB and names at 160 characters,
