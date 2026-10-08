@@ -132,11 +132,12 @@ public sealed class PythonScriptShellRuntimeTests : IDisposable
         // pwsh only accepts -File for a .ps1, and the copy is never the writable original.
         Assert.EndsWith(".ps1", arguments[6], StringComparison.Ordinal);
         Assert.NotEqual(ScriptPath("deploy.ps1"), arguments[6]);
+        Assert.Equal(ScriptPath(".vb-scripts"), Path.GetDirectoryName(arguments[6]));
         Assert.Equal(["-Target", "prod"], arguments.Skip(7));
         Assert.Equal("piped", standardInput);
         // PowerShell runs the exact signed bytes, CRLF and all.
         Assert.Equal(File.ReadAllBytes(ScriptPath("deploy.ps1")), executedBytes);
-        Assert.False(File.Exists(arguments[6]), "the verified copy is removed after the run");
+        Assert.True(File.Exists(arguments[6]), "the verified copy is retained for reuse");
         Assert.Equal("{\"ok\":true}", result.ReturnJson);
         Assert.Equal(Assert.Single((await service.GetStatusAsync(TestContext.Current.CancellationToken)).Scripts).Id, Assert.Single(service.GetRunHistory().Runs).Name);
     }
@@ -171,6 +172,7 @@ public sealed class PythonScriptShellRuntimeTests : IDisposable
         // Git Bash and POSIX bash both read a relative slash path; a drive path is not portable.
         Assert.DoesNotContain('\\', arguments[0]);
         Assert.False(Path.IsPathRooted(arguments[0]));
+        Assert.StartsWith(".vb-scripts/", arguments[0]);
         Assert.EndsWith(".sh", arguments[0], StringComparison.Ordinal);
         Assert.Equal("--dry-run", arguments[1]);
         // The signed text with the BOM and every '\r' removed: bash would read them as commands.
@@ -256,12 +258,22 @@ public sealed class PythonScriptShellRuntimeTests : IDisposable
         Assert.SkipWhen(new JobExecutableResolver().Resolve(JobScriptRuntime.PowerShell) is null,
             "PowerShell 7 (pwsh) is not installed on this machine.");
         var service = new PythonScriptService(installDirectory: _installDirectory);
-        await SignAsync(service, "leave.ps1", "exit 7\n");
+        await SignAsync(service, "leave.ps1",
+            "[System.IO.File]::WriteAllText((Join-Path $PWD 'interactive-location.txt'), $PSCommandPath)\nexit 7\n");
+
+        await service.RunAsync("leave.ps1", TestContext.Current.CancellationToken);
+        var cachedPath = Assert.Single(Directory.GetFiles(ScriptPath(".vb-scripts")));
+        File.SetLastWriteTimeUtc(cachedPath, DateTime.UtcNow.AddDays(-1));
+        var writtenUtc = File.GetLastWriteTimeUtc(cachedPath);
 
         var exitCode = await service.RunInteractiveAsync("leave.ps1", TestContext.Current.CancellationToken);
 
         Assert.Equal(7, exitCode);
-        Assert.Equal(7, Assert.Single(service.GetRunHistory().Runs).ExitCode);
+        Assert.All(service.GetRunHistory().Runs, run => Assert.Equal(7, run.ExitCode));
+        var executedPath = await File.ReadAllTextAsync(ScriptPath("interactive-location.txt"), TestContext.Current.CancellationToken);
+        Assert.Equal(ScriptPath(".vb-scripts"), Path.GetDirectoryName(executedPath));
+        Assert.Equal(cachedPath, executedPath);
+        Assert.Equal(writtenUtc, File.GetLastWriteTimeUtc(cachedPath));
     }
 
     private static PythonResult Completed(string standardOutput) => new()

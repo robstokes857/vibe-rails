@@ -25,8 +25,7 @@ const {
     COMPACT_VIEWPORT_MAX_HEIGHT,
     EDITOR_MIN_HEIGHT,
     SPLITTER_KEY_STEP,
-    buildAskAgentBrief,
-    buildAskAgentInitialPrompt,
+    buildScriptAgentInitialPrompt,
     clampTerminalHeight,
     terminalMinHeight,
     readStoredTerminalHeight,
@@ -386,251 +385,10 @@ test('Escape: widgets first, then an open modal, then plain fields, then Back', 
     assert.deepEqual(drive({ target: body, modalOpen: true }), ['closeModal']);
 });
 
-// --- Ask agent ---
+// --- Agent launch context ---
 
-test('Ask agent pastes the brief without submitting when a session socket is open', async () => {
-    const { workbench, app } = mountedWorkbench();
-    const injected = [];
-    const started = [];
-    const tab = {
-        // Belongs to this script: askAgent only pastes into the script's own agent tab.
-        state: { hasActiveSession: true, taskKey: 'python-script:nightly.py' },
-        instance: {
-            hasOpenSocket: () => true,
-            injectText: (text) => { injected.push(text); return true; },
-            focusInput() { this.focused = true; },
-            focus() {}
-        }
-    };
-    app.terminalController = {
-        manager: { getActiveTab: () => tab, getLaunchSelection: () => 'base:codex', getSelectionMeta: () => ({ cli: 'codex' }) },
-        async startTerminalWithOptions(options) { started.push(options); return { started: true }; }
-    };
-
-    const result = await workbench.askAgent();
-
-    assert.deepEqual(result, { mode: 'inject' });
-    assert.equal(started.length, 0, 'an open session must be reused, not replaced');
-    assert.equal(injected.length, 1);
-    assert.match(injected[0], /\/scripts\/nightly\.py/);
-    assert.match(injected[0], /single self-contained file at that path/);
-    assert.match(injected[0], /it only runs after I sign it in VibeRails/);
-    assert.doesNotMatch(injected[0], /re-sign/, 'the constraint says sign, not re-sign (the script may be unsigned)');
-    assert.ok(injected[0].endsWith('\n\nChange: '), 'the paste ends mid-sentence so the user finishes and submits it');
-    assert.equal(tab.instance.focused, true);
-    assert.equal(app.toasts.at(-1).options?.compact, true);
-});
-
-test('Ask agent reconnects a dropped agent socket before pasting, and pastes into a re-activated task tab', async () => {
-    // Session alive but the socket is closed (webview slept): connect(), then inject.
-    {
-        const { workbench, app } = mountedWorkbench();
-        const order = [];
-        const tab = {
-            // No task key, but parked in the scripts folder: the panel's own agent.
-            state: { hasActiveSession: true, cli: 'claude', workingDirectory: '/scripts' },
-            instance: {
-                _open: false,
-                hasOpenSocket() { return this._open; },
-                async connect() { order.push('connect'); this._open = true; },
-                injectText: (text) => { order.push(`inject:${text.slice(0, 6)}`); return true; },
-                focusInput() {},
-                focus() {}
-            }
-        };
-        app.terminalController = {
-            manager: { getActiveTab: () => tab, getLaunchSelection: () => null, getSelectionMeta: () => null },
-            async startTerminalWithOptions() { order.push('start'); return { started: true }; }
-        };
-        assert.deepEqual(await workbench.askAgent(), { mode: 'inject' });
-        assert.deepEqual(order, ['connect', 'inject:Please']);
-    }
-    // No active tab, but the task tab for this script already had a session: the manager
-    // re-activates it (reusedExisting, not started) and the brief goes straight in.
-    {
-        const { workbench, app } = mountedWorkbench();
-        const injected = [];
-        const taskTab = {
-            state: { hasActiveSession: true, cli: 'claude' },
-            instance: { hasOpenSocket: () => true, injectText: (text) => { injected.push(text); return true; }, focusInput() {}, focus() {} }
-        };
-        let active = null;
-        app.terminalController = {
-            manager: { getActiveTab: () => active, getLaunchSelection: () => null, getSelectionMeta: () => null },
-            async startTerminalWithOptions() { active = taskTab; return { reusedExisting: true, started: false }; }
-        };
-        const result = await workbench.askAgent();
-        assert.deepEqual(result, { mode: 'inject', cli: 'claude' });
-        assert.equal(injected.length, 1);
-        assert.match(injected[0], /Change: $/);
-        assert.doesNotMatch(app.toasts.map((toast) => toast.title).join(), /Agent started/);
-    }
-});
-test('Ask agent never pastes into an unrelated active agent tab', async () => {
-    // The pre-2026-08-24 behavior — brief goes to whatever tab is active — pasted
-    // into completely unrelated sessions. An active agent that neither carries this
-    // script's task key nor lives in the scripts folder must be left alone.
-    const { workbench, app } = mountedWorkbench();
-    const injected = [];
-    const started = [];
-    const unrelated = {
-        state: { hasActiveSession: true, cli: 'claude', taskKey: 'automation:deploy', workingDirectory: 'C:/source/project' },
-        instance: { hasOpenSocket: () => true, injectText: (text) => { injected.push(text); return true; }, focusInput() {}, focus() {} }
-    };
-    app.terminalController = {
-        manager: { getActiveTab: () => unrelated, getLaunchSelection: () => null, getSelectionMeta: () => null },
-        async startTerminalWithOptions(options) { started.push(options); return { started: true }; }
-    };
-
-    const result = await workbench.askAgent();
-
-    assert.equal(result.mode, 'start');
-    assert.equal(injected.length, 0, 'the unrelated session must not receive the brief');
-    assert.equal(started.length, 1);
-    assert.equal(started[0].taskKey, 'python-script:nightly.py');
-});
-test('Ask agent activates the script task tab and pastes into it, even when another tab is active', async () => {
-    const { workbench, app } = mountedWorkbench();
-    const injected = [];
-    const activations = [];
-    const taskTab = {
-        state: { id: 'task-1', hasActiveSession: true, cli: 'claude' },
-        instance: { hasOpenSocket: () => true, injectText: (text) => { injected.push(text); return true; }, focusInput() {}, focus() {} }
-    };
-    app.terminalController = {
-        manager: {
-            activeTabId: 'other-tab',
-            findTabByTaskKey: (key) => (key === 'python-script:nightly.py' ? taskTab : null),
-            async activateTab(tabId, options) { activations.push({ tabId, options }); this.activeTabId = tabId; },
-            getActiveTab: () => null,
-            getLaunchSelection: () => null,
-            getSelectionMeta: () => null
-        },
-        async startTerminalWithOptions() { throw new Error('the live task tab must be reused, not restarted'); }
-    };
-
-    assert.deepEqual(await workbench.askAgent(), { mode: 'inject' });
-    assert.deepEqual(activations, [{ tabId: 'task-1', options: { connectIfNeeded: true } }]);
-    assert.equal(injected.length, 1);
-});
-test('Ask agent re-keys a stale shell task tab instead of pasting into it', async () => {
-    // A pre-rename build tagged RUN shell tabs with the agent key; the brief must
-    // never feed a running python process, and the key moves to python-script-run:.
-    const { workbench, app } = mountedWorkbench();
-    const rekeys = [];
-    const started = [];
-    const shellTab = {
-        state: { id: 'run-1', hasActiveSession: true, cli: 'Shell', taskKey: 'python-script:nightly.py' },
-        instance: { hasOpenSocket: () => true, injectText: () => { throw new Error('must not inject into the shell'); } }
-    };
-    app.terminalController = {
-        manager: {
-            findTabByTaskKey: (key) => (key === 'python-script:nightly.py' ? shellTab : null),
-            updateTabMetadata: (tab, metadata) => { rekeys.push({ ...metadata }); Object.assign(tab.state, metadata); },
-            getActiveTab: () => shellTab,
-            getLaunchSelection: () => null,
-            getSelectionMeta: () => null
-        },
-        async startTerminalWithOptions(options) { started.push(options); return { started: true }; }
-    };
-
-    const result = await workbench.askAgent();
-
-    assert.deepEqual(rekeys, [{ taskKey: 'python-script-run:nightly.py' }]);
-    assert.equal(result.mode, 'start');
-    assert.equal(started.length, 1, 'a fresh agent starts once the stale key is out of the way');
-});
-
-test('Ask agent never pastes into a plain shell tab: it starts Claude instead', async () => {
-    const { workbench, app } = mountedWorkbench();
-    const injected = [];
-    const started = [];
-    // The server reports the wire name "Shell" (capital S).
-    const shellTab = {
-        state: { hasActiveSession: true, cli: 'Shell', selection: 'base:shell' },
-        instance: { hasOpenSocket: () => true, injectText: (text) => { injected.push(text); return true; }, focusInput() {}, focus() {} }
-    };
-    app.terminalController = {
-        manager: {
-            getActiveTab: () => shellTab,
-            getLaunchSelection: () => 'base:shell',
-            getSelectionMeta: () => ({ cli: 'shell', environmentName: null, displayName: 'Shell' })
-        },
-        async startTerminalWithOptions(options) { started.push(options); return { started: true }; }
-    };
-
-    const result = await workbench.askAgent();
-
-    assert.equal(injected.length, 0, 'a shell would only echo the brief');
-    assert.equal(started.length, 1);
-    assert.equal(started[0].cli, 'claude');
-    assert.equal(result.mode, 'start');
-    assert.equal(result.cli, 'claude');
-
-    // Without state.cli the picker selection decides, still case-insensitively.
-    shellTab.state.cli = null;
-    await workbench.askAgent();
-    assert.equal(injected.length, 0);
-    assert.equal(started.length, 2);
-});
-
-test('Ask agent starts the picked CLI in the scripts directory when nothing is running (default claude)', async () => {
-    const { workbench, app } = mountedWorkbench();
-    const started = [];
-    let selection = null;
-    let meta = null;
-    app.terminalController = {
-        manager: {
-            getActiveTab: () => null,
-            getLaunchSelection: () => selection,
-            getSelectionMeta: () => meta
-        },
-        async startTerminalWithOptions(options, host) { started.push({ options, host }); return { started: true }; }
-    };
-    const host = workbench.root.el('[data-terminal-content]');
-
-    // Nothing picked → claude.
-    let result = await workbench.askAgent();
-    assert.equal(result.mode, 'start');
-    assert.equal(started[0].host, host);
-    assert.equal(started[0].options.cli, 'claude');
-    assert.equal(started[0].options.environmentName, null);
-    assert.equal(started[0].options.workingDirectory, '/scripts');
-    assert.equal(started[0].options.tabLabel, 'nightly.py');
-    assert.equal(started[0].options.taskKey, 'python-script:nightly.py');
-    assert.match(started[0].options.initialPrompt, /Read \/scripts\/nightly\.py/);
-    assert.match(started[0].options.initialPrompt, /wait for my change request/);
-    assert.doesNotMatch(started[0].options.initialPrompt, /Change: /,
-        'initialPrompt is auto-submitted, so it must not carry the half-finished sentence');
-    assert.doesNotMatch(started[0].options.initialPrompt, /\{\{/, 'no template placeholders — they would pop the fill-in modal');
-    assert.match(app.toasts.at(-1).message, /^Claude opened in the scripts folder/);
-
-    // The panel's picker wins when it names an agent, and the toast uses its display
-    // name rather than the wire id ('agy')…
-    selection = 'env:7:agy';
-    meta = { cli: 'agy', environmentName: 'Reviewer', displayName: 'Antigravity · Reviewer' };
-    result = await workbench.askAgent();
-    assert.equal(started[1].options.cli, 'agy');
-    assert.equal(started[1].options.environmentName, 'Reviewer');
-    assert.equal(result.cli, 'agy', 'the returned id stays the wire name');
-    assert.match(app.toasts.at(-1).message, /^Antigravity · Reviewer opened in the scripts folder/);
-    assert.doesNotMatch(app.toasts.at(-1).message, /\bagy\b/);
-
-    // …but the plain shell is not an agent, so it falls back to claude.
-    selection = 'base:shell';
-    meta = { cli: 'shell', environmentName: null, displayName: 'Shell' };
-    await workbench.askAgent();
-    assert.equal(started[2].options.cli, 'claude');
-    assert.match(app.toasts.at(-1).message, /^Claude opened/);
-});
-
-test('Ask agent briefs name the absolute path and the signing constraint, once each', () => {
-    const brief = buildAskAgentBrief({ name: 'nightly.py', path: 'C:\\Users\\rob\\.vibe_rails\\scripts\\nightly.py' });
-    assert.match(brief, /C:\\Users\\rob\\\.vibe_rails\\scripts\\nightly\.py/);
-    assert.match(brief, /tell me when you're done and what changed/);
-    assert.match(brief, /it only runs after I sign it in VibeRails/);
-    assert.doesNotMatch(brief, /re-sign/);
-    const initial = buildAskAgentInitialPrompt({ name: 'nightly.py', path: '/scripts/nightly.py' });
+test('The initial script brief names the file, read-and-wait instruction and signing constraint', () => {
+    const initial = buildScriptAgentInitialPrompt({ name: 'nightly.py', path: '/scripts/nightly.py' });
     assert.equal(initial,
         "Read /scripts/nightly.py and summarize what it does in 2-3 lines, then wait for my change request. "
         + "It's a VibeRails Automation script: keep it a single self-contained file at that path; "
@@ -1149,19 +907,6 @@ test('Rename hands off to the shared flow, holds the poll, and moves the identit
     const { workbench, app, editor, root } = mountedWorkbench();
     const scripts = app.jobController.pythonScripts;
     const renamed = [];
-    const taskKeyUpdates = [];
-    const agentTab = { state: { taskKey: 'python-script:nightly.py' } };
-    app.terminalController = {
-        manager: {
-            findTabByTaskKey(key) {
-                return key === agentTab.state.taskKey ? agentTab : null;
-            },
-            updateTabMetadata(tab, metadata) {
-                taskKeyUpdates.push({ tab, metadata });
-                Object.assign(tab.state, metadata);
-            }
-        }
-    };
     editor.value = 'print(1)\nprint("unsaved")\n';
     scripts.rename = async (name) => {
         renamed.push({ name, mutating: workbench._mutating });
@@ -1180,10 +925,6 @@ test('Rename hands off to the shared flow, holds the poll, and moves the identit
     assert.deepEqual(app.viewData, [{ name: 'weekly.py' }]);
     assert.equal(root.el('[data-workbench-name]').textContent, 'weekly.py');
     assert.equal(root.el('[data-workbench-approve-label]').textContent, 'Sign');
-    assert.deepEqual(taskKeyUpdates, [{
-        tab: agentTab,
-        metadata: { taskKey: 'python-script:weekly.py' }
-    }], 'the dedicated agent tab follows the renamed script');
 
     // Cancelled: nothing moves.
     scripts.rename = async () => null;
@@ -1576,7 +1317,8 @@ test('The shell renders one script editor, Back, signing actions, a splitter and
     assert.match(html, /fa-brands fa-python/);
     assert.match(html, /night &lt;b&gt;ly&lt;\/b&gt;\.py/, 'names are escaped');
     assert.match(html, /class="python-script-status" data-tone="neutral" data-workbench-status/);
-    for (const action of ['run', 'approve', 'menu', 'ask-agent', 'save', 'save-sign']) {
+    assert.doesNotMatch(html, /data-workbench-action="ask-agent"/);
+    for (const action of ['run', 'approve', 'menu', 'save', 'save-sign']) {
         assert.match(html, new RegExp(`data-workbench-action="${action}"`), `missing ${action}`);
     }
     assert.match(html, /<section class="rules-section card python-workbench-editor-card"/);
@@ -1680,7 +1422,7 @@ test('The hint line, dirty mark and Save button follow the editor state', () => 
     assert.equal(run.disabled, false);
 });
 
-test('The terminal mounts with the scripts directory as its working folder', async () => {
+test('The terminal supplies the current script context for Start, including after a switch or rename', async () => {
     const { workbench, app, root } = mountedWorkbench();
     const rendered = [];
     const bound = [];
@@ -1694,7 +1436,34 @@ test('The terminal mounts with the scripts directory as its working folder', asy
     const host = root.el('[data-terminal-content]');
     assert.deepEqual(rendered, [{ workingDirectory: '/scripts' }]);
     assert.equal(host.innerHTML, '<div id="vb-terminal-panel"></div>');
-    assert.deepEqual(bound, [{ host, preselected: null, options: { defaultWorkingDirectory: '/scripts' } }]);
+    assert.equal(bound.length, 1);
+    assert.equal(bound[0].host, host);
+    assert.equal(bound[0].preselected, null);
+    assert.equal(bound[0].options.defaultWorkingDirectory, '/scripts');
+    const { getLaunchContext } = bound[0].options;
+    assert.deepEqual(getLaunchContext(), {
+        workingDirectory: '/scripts',
+        initialPrompt: buildScriptAgentInitialPrompt({ name: 'nightly.py', path: '/scripts/nightly.py' })
+    });
+
+    // Registered IDs stay stable when a script's filename changes. The callback
+    // must follow the live record, including its directory, without remounting.
+    const next = { name: 'registration-2', fileName: 'deploy.ps1', path: 'C:\\My Scripts\\deploy.ps1' };
+    app.jobController.pythonScripts.state.scripts.push(next);
+    workbench._loadContent = async () => true;
+    await workbench.switchTo(next.name);
+    assert.equal(getLaunchContext().workingDirectory, 'C:\\My Scripts');
+    assert.match(getLaunchContext().initialPrompt, /C:\\My Scripts\\deploy\.ps1/);
+    assert.doesNotMatch(getLaunchContext().initialPrompt, /nightly/);
+
+    next.fileName = 'release.sh';
+    next.path = 'C:\\My Scripts\\release.sh';
+    app.jobController.pythonScripts.rename = async () => next.name;
+    await workbench.rename();
+    assert.match(getLaunchContext().initialPrompt, /C:\\My Scripts\\release\.sh/);
+    assert.doesNotMatch(getLaunchContext().initialPrompt, /deploy/);
+    workbench.unload();
+    assert.equal(getLaunchContext(), null, 'a detached workbench no longer supplies context');
 
     // And the manager honours it (source pins for the two tiny terminal-multitab changes).
     const terminal = readFileSync(terminalPath, 'utf8');
@@ -1819,7 +1588,7 @@ test('The wwwroot AGENTS.md documents the workbench view', () => {
     assert.match(doc, /## Python script workbench/);
     assert.match(doc, /python-script-workbench\.js/);
     assert.match(doc, /viberails\.pythonWorkbench\.terminalHeight/);
-    assert.match(doc, /scripts directory/);
+    assert.match(doc, /selected script's directory/);
 });
 
 // --- side-by-side layout (wide windows) ---
@@ -1976,7 +1745,7 @@ test('A result that lands after the run window closes still reaches the workbenc
     assert.equal(workbench.lastRun, landed, 'and it stops listening once the view unloads');
 });
 
-test('A PowerShell script opens with PowerShell highlighting, its runtime icon and a matching brief', async (t) => {
+test('A PowerShell script opens with PowerShell highlighting and its runtime icon', async (t) => {
     const app = createApp();
     app.apiCall = async (url, method) => {
         app.calls.push({ url, method });
@@ -1991,9 +1760,7 @@ test('A PowerShell script opens with PowerShell highlighting, its runtime icon a
     assert.equal(monaco.created[0].options.language, 'powershell');
     assert.deepEqual(languages, ['powershell'], 'each load re-applies the language to the shared model');
     assert.match(root.el('[data-workbench-meta]').textContent, /^runs with pwsh · \/scripts\/deploy\.ps1 · /);
-    assert.match(buildAskAgentBrief({ name: 'deploy.ps1', path: '/scripts/deploy.ps1' }),
-        /^Please help me change the PowerShell script deploy\.ps1 at \/scripts\/deploy\.ps1\./);
-    assert.match(buildAskAgentBrief({ name: 'backup.sh', path: '/scripts/backup.sh' }), /the Bash script backup\.sh/);
+
 });
 
 test('Renaming a script to another extension switches the editor to that runtime', async () => {

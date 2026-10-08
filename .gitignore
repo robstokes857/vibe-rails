@@ -14,6 +14,7 @@ artifacts/
 # These reached 13.5 GB before being cleared on 2026-09-14.
 .codex-*-artifacts*/
 .test-artifacts/
+.vb-scripts/
 .review-test-out/
 # Local-only BERT embedder benchmark corpus dumped from real CleanedUserInput.
 # Contains personal session content; benchmark Skip()s when these are absent.

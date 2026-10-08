@@ -62,8 +62,8 @@ public sealed class PythonScriptValidationException(string message) : Exception(
 /// hash pinning:
 /// the user approves ("signs") a script by entering their PIN, which records the
 /// script's canonical SHA-256; a script only runs while its current content still
-/// hashes to an approved value, and the run executes the exact verified bytes (via a
-/// temp copy) so the file cannot be swapped between check and launch.
+/// hashes to an approved value. Runs execute a separately verified, reusable cache of
+/// those bytes so later edits to the original do not change the launched version.
 ///
 /// The PIN is a PBKDF2-SHA256 verifier stored next to the approvals in
 /// <c>~/.vibe_rails/script_signing.json</c>. It is required for every approval — there
@@ -405,62 +405,53 @@ public sealed partial class PythonScriptService : IPythonScriptService
         var name = verified.Name;
 
         var startedUtc = DateTime.UtcNow;
-        var verifiedCopy = VerifiedCopyPath(name);
+        var verifiedCopy = await EnsureVerifiedCopyAsync(
+            verified.Path, verified.Hash, ExecutableBytes(runtime, verified.Content), cancellationToken);
+
+        // The PyBridge runner is a plain CliWrap process runner: pointed at pwsh or bash it
+        // gives those scripts the same argv, stdin, timeout and output capture as Python.
+        var options = interpreter.Options;
+        options.WorkingDirectory = Path.GetDirectoryName(verified.Path)!;
+        options.Timeout = RunTimeout;
+        var runner = _runnerFactory(options);
+
+        PythonResult result;
         try
         {
-            await File.WriteAllBytesAsync(
-                verifiedCopy, ExecutableBytes(runtime, verified.Content), cancellationToken);
-
-            // The PyBridge runner is a plain CliWrap process runner: pointed at pwsh or bash it
-            // gives those scripts the same argv, stdin, timeout and output capture as Python.
-            var options = interpreter.Options;
-            options.WorkingDirectory = Path.GetDirectoryName(ResolveScriptPath(name))!;
-            options.Timeout = RunTimeout;
-            var runner = _runnerFactory(options);
-
-            PythonResult result;
-            try
+            var interpreterArguments = new List<string>(interpreter.PrefixArguments);
+            interpreterArguments.AddRange(
+                ScriptLaunchArguments(runtime, verifiedCopy, options.WorkingDirectory, interactive: false));
+            if (arguments is { Count: > 0 })
             {
-                var interpreterArguments = new List<string>(interpreter.PrefixArguments);
-                interpreterArguments.AddRange(
-                    ScriptLaunchArguments(runtime, verifiedCopy, options.WorkingDirectory, interactive: false));
-                if (arguments is { Count: > 0 })
-                {
-                    interpreterArguments.AddRange(arguments);
-                }
-                result = await runner.RunAsync(
-                    interpreterArguments,
-                    standardInput: string.IsNullOrEmpty(standardInput) ? null : standardInput,
-                    cancellationToken: cancellationToken);
+                interpreterArguments.AddRange(arguments);
             }
-            catch (PythonExecutionException ex)
-            {
-                // The interpreter itself could not be launched (missing or broken install).
-                // Surface an actionable message so the route returns 400, not a raw 500.
-                Log.Warning(ex, "[PythonScripts] {Runtime} interpreter failed to launch for {Name}", runtime, name);
-                throw new PythonScriptValidationException(CouldNotStartMessage(runtime));
-            }
-
-            RecordRun(name, startedUtc, result.ExitCode, result.TimedOut, result.RunTime.TotalMilliseconds);
-            Log.Information(
-                "[PythonScripts] Ran script {Name}: exit={ExitCode} timedOut={TimedOut} durationMs={Duration}",
-                name, result.ExitCode, result.TimedOut, Math.Round(result.RunTime.TotalMilliseconds));
-
-            return new PythonScriptRunResponse(
-                name,
-                result.ExitCode,
-                result.TimedOut,
-                Truncate(result.StandardOutput),
-                Truncate(result.StandardError),
-                result.RunTime.TotalMilliseconds,
-                startedUtc.ToString("O"),
-                ExtractReturnJson(result.StandardOutput));
+            result = await runner.RunAsync(
+                interpreterArguments,
+                standardInput: string.IsNullOrEmpty(standardInput) ? null : standardInput,
+                cancellationToken: cancellationToken);
         }
-        finally
+        catch (PythonExecutionException ex)
         {
-            try { File.Delete(verifiedCopy); }
-            catch (Exception ex) { Log.Debug(ex, "[PythonScripts] Temp cleanup failed for {Path}", verifiedCopy); }
+            // The interpreter itself could not be launched (missing or broken install).
+            // Surface an actionable message so the route returns 400, not a raw 500.
+            Log.Warning(ex, "[PythonScripts] {Runtime} interpreter failed to launch for {Name}", runtime, name);
+            throw new PythonScriptValidationException(CouldNotStartMessage(runtime));
         }
+
+        RecordRun(name, startedUtc, result.ExitCode, result.TimedOut, result.RunTime.TotalMilliseconds);
+        Log.Information(
+            "[PythonScripts] Ran script {Name}: exit={ExitCode} timedOut={TimedOut} durationMs={Duration}",
+            name, result.ExitCode, result.TimedOut, Math.Round(result.RunTime.TotalMilliseconds));
+
+        return new PythonScriptRunResponse(
+            name,
+            result.ExitCode,
+            result.TimedOut,
+            Truncate(result.StandardOutput),
+            Truncate(result.StandardError),
+            result.RunTime.TotalMilliseconds,
+            startedUtc.ToString("O"),
+            ExtractReturnJson(result.StandardOutput));
     }
 
     private async Task VerifyRunPinAsync(string? requestedName, string? pin, CancellationToken cancellationToken)
@@ -508,20 +499,18 @@ public sealed partial class PythonScriptService : IPythonScriptService
         var interpreter = ResolveInterpreterOrThrow(runtime);
 
         var verified = await ReadVerifiedScriptAsync(requestedName, cancellationToken);
-        var verifiedCopy = VerifiedCopyPath(verified.Name);
+        var verifiedCopy = await EnsureVerifiedCopyAsync(
+            verified.Path, verified.Hash, ExecutableBytes(runtime, verified.Content), cancellationToken);
         var startedUtc = DateTime.UtcNow;
         var stopwatch = Stopwatch.StartNew();
 
         try
         {
-            await File.WriteAllBytesAsync(
-                verifiedCopy, ExecutableBytes(runtime, verified.Content), cancellationToken);
-
             var options = interpreter.Options;
             var startInfo = new ProcessStartInfo
             {
                 FileName = options.PythonExecutable,
-                WorkingDirectory = Path.GetDirectoryName(ResolveScriptPath(verified.Name))!,
+                WorkingDirectory = Path.GetDirectoryName(verified.Path)!,
                 UseShellExecute = false,
                 RedirectStandardInput = false,
                 RedirectStandardOutput = false,
@@ -579,8 +568,6 @@ public sealed partial class PythonScriptService : IPythonScriptService
         finally
         {
             stopwatch.Stop();
-            try { File.Delete(verifiedCopy); }
-            catch (Exception ex) { Log.Debug(ex, "[PythonScripts] Temp cleanup failed for {Path}", verifiedCopy); }
         }
     }
 
@@ -674,7 +661,7 @@ public sealed partial class PythonScriptService : IPythonScriptService
         }
     }
 
-    private async Task<(string Name, byte[] Content)> ReadVerifiedScriptAsync(
+    private async Task<(string Name, string Path, string Hash, byte[] Content)> ReadVerifiedScriptAsync(
         string? requestedName,
         CancellationToken cancellationToken)
     {
@@ -712,7 +699,7 @@ public sealed partial class PythonScriptService : IPythonScriptService
             _documentLock.Release();
         }
 
-        return (name, content);
+        return (name, scriptPath, hash, content);
     }
 
     // --- internals ---
@@ -776,13 +763,35 @@ public sealed partial class PythonScriptService : IPythonScriptService
     }
 
     /// <summary>
-    /// The verified copy keeps the script's extension: pwsh refuses -File on anything that is
-    /// not a .ps1, and a traceback naming a .py file reads as expected.
+    /// Reuses a signed version in .vb-scripts. Cached bytes are checked on every launch;
+    /// the filename alone never grants approval. Completed and cancelled runs retain it.
     /// </summary>
-    private string VerifiedCopyPath(string scriptName) =>
-        Path.Combine(
-            Path.GetDirectoryName(ResolveScriptPath(scriptName))!,
-            $".viberails-script-{Guid.NewGuid():N}{Path.GetExtension(ResolveScriptPath(scriptName)).ToLowerInvariant()}");
+    private async Task<string> EnsureVerifiedCopyAsync(
+        string originalPath, string signedHash, byte[] content, CancellationToken cancellationToken)
+    {
+        // Reuse the library's cross-process lock only for publication, never for execution.
+        // Concurrent roots can then launch the same complete cache file without rewriting it.
+        using var writeLock = await AcquireCrossProcessWriteLockAsync(cancellationToken);
+        var directory = Path.Combine(Path.GetDirectoryName(originalPath)!, ".vb-scripts");
+        ValidatePathComponents(directory);
+        Directory.CreateDirectory(directory);
+        ValidatePathComponents(directory);
+        var path = Path.Combine(directory,
+            $".vibe-rails-{signedHash.ToLowerInvariant()}{Path.GetExtension(originalPath).ToLowerInvariant()}");
+        ValidatePathComponents(path);
+        if (PathEntryExists(path))
+        {
+            var existing = ReadScriptBytes(path);
+            if (existing.AsSpan().SequenceEqual(content)) return path;
+            await ReplaceFileAtomicallyAsync(path, content, Path.GetFileName(path),
+                ComputeContentVersion(existing), cancellationToken);
+        }
+        else
+        {
+            await WriteNewFileAtomicallyAsync(path, content, Path.GetFileName(path), cancellationToken);
+        }
+        return path;
+    }
 
     /// <summary>
     /// The bytes written to the verified copy. Bash gets the canonical text the approval was

@@ -123,7 +123,7 @@ public sealed class PythonScriptServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task RunExecutesAVerifiedTempCopyAndRecordsHistory()
+    public async Task RunExecutesAVerifiedCachedCopyAndRecordsHistory()
     {
         var service = NewService(out var runner);
         await WriteScriptAsync("good.py", "print('ok')\n");
@@ -158,10 +158,77 @@ public sealed class PythonScriptServiceTests : IDisposable
         Assert.Equal("ok", result.StandardOutput);
         Assert.NotNull(executedArguments);
         var executedPath = Assert.Single(executedArguments);
-        // The exact verified bytes run from a temp copy, never the still-writable original.
+        // The exact verified bytes run from the cache, never the still-writable original.
         Assert.NotEqual(ScriptPath("good.py"), executedPath);
+        Assert.Equal(ScriptPath(".vb-scripts"), Path.GetDirectoryName(executedPath));
+        Assert.True(File.Exists(executedPath), "The verified copy remains available for reuse.");
+        Assert.Matches(@"^\.vibe-rails-[0-9a-f]{64}\.py$", Path.GetFileName(executedPath));
         Assert.Equal(Assert.Single((await service.GetStatusAsync(TestContext.Current.CancellationToken)).Scripts).Id, Assert.Single(service.GetRunHistory().Runs).Name);
     }
+
+    [Fact]
+    public async Task ConcurrentInstancesReuseTheSignedCacheWithoutRewritingIt()
+    {
+        var (service, runner) = await SignedService("good.py", "print('approved')\n");
+        ReturnExecutedContent(runner);
+        var reopened = new PythonScriptService(runner.Object, _installDirectory, runnerFactory: _ => runner.Object);
+        await Task.WhenAll(service.RunAsync("good.py", TestContext.Current.CancellationToken),
+            reopened.RunAsync("good.py", TestContext.Current.CancellationToken));
+        var path = Assert.Single(Directory.GetFiles(ScriptPath(".vb-scripts")));
+        File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddDays(-1));
+        var writtenUtc = File.GetLastWriteTimeUtc(path);
+        var runs = await Task.WhenAll(
+            service.RunAsync("good.py", TestContext.Current.CancellationToken),
+            reopened.RunAsync("good.py", TestContext.Current.CancellationToken));
+
+        Assert.All(runs, run => Assert.Equal("print('approved')\n", run.StandardOutput));
+        Assert.Equal(path, Assert.Single(Directory.GetFiles(ScriptPath(".vb-scripts"))));
+        Assert.Equal(writtenUtc, File.GetLastWriteTimeUtc(path));
+    }
+
+    [Fact]
+    public async Task AChangedCacheIsRepairedFromVerifiedBytesBeforeExecution()
+    {
+        var (service, runner) = await SignedService("good.py", "print('approved')\n");
+        ReturnExecutedContent(runner);
+        await service.RunAsync("good.py", TestContext.Current.CancellationToken);
+        var path = Assert.Single(Directory.GetFiles(ScriptPath(".vb-scripts")));
+        await File.WriteAllTextAsync(path, "print('injected')\n", TestContext.Current.CancellationToken);
+
+        var run = await service.RunAsync("good.py", TestContext.Current.CancellationToken);
+
+        Assert.Equal("print('approved')\n", run.StandardOutput);
+        Assert.Equal(path, Assert.Single(Directory.GetFiles(ScriptPath(".vb-scripts"))));
+    }
+
+    [Fact]
+    public async Task ANewSignedVersionGetsANewCacheAndCachedFilesNeverBypassApproval()
+    {
+        var (service, runner) = await SignedService("good.py", "print('first')\n");
+        ReturnExecutedContent(runner);
+        await service.RunAsync("good.py", TestContext.Current.CancellationToken);
+        var firstPath = Assert.Single(Directory.GetFiles(ScriptPath(".vb-scripts")));
+        await WriteScriptAsync("good.py", "print('second')\n");
+        await Assert.ThrowsAsync<PythonScriptValidationException>(() => service.RunAsync("good.py", TestContext.Current.CancellationToken));
+        await service.ApproveAsync(new PythonScriptApprovalRequest("good.py", "1234"), TestContext.Current.CancellationToken);
+        var second = await service.RunAsync("good.py", TestContext.Current.CancellationToken);
+
+        Assert.Equal("print('second')\n", second.StandardOutput);
+        Assert.Equal(2, Directory.GetFiles(ScriptPath(".vb-scripts")).Length);
+        Assert.Equal("print('first')\n", await File.ReadAllTextAsync(firstPath, TestContext.Current.CancellationToken));
+        await service.RevokeAsync(new PythonScriptApprovalRequest("good.py", "1234"), TestContext.Current.CancellationToken);
+        await Assert.ThrowsAsync<PythonScriptValidationException>(() => service.RunAsync("good.py", TestContext.Current.CancellationToken));
+    }
+
+    private static void ReturnExecutedContent(Mock<IPythonRunner> runner) =>
+        runner.Setup(item => item.RunAsync(It.IsAny<IReadOnlyList<string>>(), It.IsAny<string?>(),
+                It.IsAny<Action<string>?>(), It.IsAny<Action<string>?>(), It.IsAny<CancellationToken>()))
+            .Returns((IReadOnlyList<string> arguments, string? input, Action<string>? output,
+                Action<string>? error, CancellationToken token) => Task.FromResult(new PythonResult
+            {
+                ExitCode = 0, StandardOutput = File.ReadAllText(arguments[0]), StandardError = "",
+                RunTime = TimeSpan.Zero, Executable = "python", CommandLine = "python"
+            }));
 
     [Theory]
     [InlineData("../evil.py")]
@@ -701,6 +768,38 @@ public sealed class PythonScriptServiceTests : IDisposable
         await Assert.ThrowsAsync<PythonScriptValidationException>(
             () => service.RunAsync("linked.py", TestContext.Current.CancellationToken));
         Assert.Equal("do not overwrite\n", File.ReadAllText(outside));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LinkedStagingDirectoryCannotRedirectVerifiedCopies(bool interactive)
+    {
+        var service = NewService(out _);
+        await WriteScriptAsync("good.py", "print('ok')\n");
+        await service.SetPinAsync(new SetPythonScriptPinRequest(null, "1234"), TestContext.Current.CancellationToken);
+        await service.ApproveAsync(new PythonScriptApprovalRequest("good.py", "1234"), TestContext.Current.CancellationToken);
+        var outside = Path.Combine(_installDirectory, "outside");
+        Directory.CreateDirectory(outside);
+        var link = ScriptPath(".vb-scripts");
+        try
+        {
+            Directory.CreateSymbolicLink(link, outside);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            Assert.Skip("This platform does not permit creating directory symbolic links.");
+        }
+
+        try
+        {
+            if (interactive)
+                await Assert.ThrowsAsync<PythonScriptValidationException>(() => service.RunInteractiveAsync("good.py", TestContext.Current.CancellationToken));
+            else
+                await Assert.ThrowsAsync<PythonScriptValidationException>(() => service.RunAsync("good.py", TestContext.Current.CancellationToken));
+            Assert.Empty(Directory.GetFileSystemEntries(outside));
+        }
+        finally { Directory.Delete(link); }
     }
 
     [Fact]

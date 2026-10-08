@@ -20,7 +20,12 @@ const MAX_EXTRAS = 24;
 
 /** A run "worked" only when it exited 0 without hitting the timeout. */
 export function isPythonRunOk(run) {
-    return Boolean(run) && run.exitCode === 0 && !run.timedOut;
+    return Boolean(run) && run.exitCode === 0 && !run.timedOut && !run.cancelled;
+}
+
+/** A cancelled request has no exit code: never present one as a successful run. */
+export function pythonRunStatus(run) {
+    return run?.cancelled ? 'Stop requested' : `exit ${run?.exitCode}${run?.timedOut ? ' (timed out)' : ''}`;
 }
 
 /** stdout then stderr of one run, as the row drawer and this window both show it. */
@@ -109,6 +114,7 @@ export class PythonRunWindow {
         // (closed mid-run) still records its result, but must not paint over or re-enable a
         // window that has since been reopened for something else.
         this._runToken = null;
+        this._runs = new Map();
         this._resolve = null;
         this._onKeydown = null;
     }
@@ -133,6 +139,7 @@ export class PythonRunWindow {
         this.extras = remembered?.extras || [];
         this.stdin = remembered?.stdin || '';
         this.lastRun = null;
+        this._runToken = this._runs.get(name) || null;
         // NOT `false`. A run started from an earlier window can still be in flight, and
         // clearing the flag here is what used to let a second interpreter start for the same
         // script. The in-flight run still owns this window and will clear it when it lands.
@@ -189,10 +196,11 @@ export class PythonRunWindow {
         this._remember();
 
         const name = this.name;
-        const token = { awaitingPin: true };
+        const token = { awaitingPin: true, controller: new AbortController(), startedUtc: new Date() };
         const layer = this.layer;
         const standardInput = this.stdin || null;
         this._runToken = token;
+        this._runs.set(name, token);
         this.running = true;
         // The previous result goes now, not when the new one lands: a stale "exit 0" sitting
         // under a failed re-run reads as if the failure were the old run's.
@@ -206,18 +214,32 @@ export class PythonRunWindow {
             const requestedPin = this.scripts?.requestRunPin?.(name, { isCurrent });
             const pin = requestedPin?.then ? await requestedPin : requestedPin;
             token.awaitingPin = false;
-            if (pin === null || !isCurrent()) return null;
+            if (pin === null || !isCurrent() || token.controller.signal.aborted) return null;
+            this._paintRunState();
             const body = { name, arguments: argv, standardInput };
             if (pin !== undefined) body.pin = pin;
             result = await this.app.apiCall(`${API}/run`, 'POST',
                 body,
-                { showLoading: false, preferErrorResponseMessage: true });
+                { showLoading: false, preferErrorResponseMessage: true, signal: token.controller.signal });
             // Unconditional: the row's "Last run" drawer and the workbench's output panel are
             // where the result belongs even when nobody is looking at the window any more.
             this.scripts?.recordRun?.(name, result);
         } catch (problem) {
-            if (this._runToken === token) this._showProblem(problem?.message || `Could not run ${name}.`);
+            if (problem?.name === 'AbortError' && token.controller.signal.aborted) {
+                // Aborting the request cancels the server's run token and kills its process
+                // tree. The disconnected request cannot report an exit code or final output.
+                result = {
+                    name, cancelled: true, exitCode: null, timedOut: false,
+                    standardOutput: '', standardError: '',
+                    startedUtc: token.startedUtc.toISOString(),
+                    durationMs: Date.now() - token.startedUtc.getTime()
+                };
+                this.scripts?.recordRun?.(name, result);
+            } else if (this._runToken === token && this.name === name) {
+                this._showProblem(problem?.message || `Could not run ${name}.`);
+            }
         } finally {
+            this._runs.delete(name);
             this.scripts?.clearRunning?.(name);
             // Window state is only ours to touch while we are still the current run. Reopening
             // the window for the same script leaves the token alone, so a run that survived its
@@ -232,6 +254,23 @@ export class PythonRunWindow {
             }
         }
         return result;
+    }
+
+    /** Stops only this window's captured request for the named script, including after Close. */
+    stop(name = this.name) {
+        const token = this._runs.get(name);
+        if (!token || token.controller.signal.aborted) return;
+        token.controller.abort();
+        if (token.awaitingPin && this._runToken === token && this.scripts?.modal?.layer !== this.layer) {
+            this.scripts?._closeModal?.();
+        }
+        if (this.name === name) this._paintRunState();
+        this.scripts?._render?.();
+    }
+
+    canStop(name = this.name) {
+        const token = this._runs.get(name);
+        return Boolean(token && !token.controller.signal.aborted);
     }
 
     /**
@@ -342,6 +381,9 @@ export class PythonRunWindow {
                                 <i class="fa-solid fa-terminal me-1" aria-hidden="true"></i>Run in terminal
                             </button>
                             <button type="button" class="btn btn-secondary" data-run-action="close">Close</button>
+                            <button type="button" class="btn btn-outline-danger" data-run-action="stop" hidden>
+                                <i class="fa-solid fa-stop me-1" aria-hidden="true"></i>Stop
+                            </button>
                             <button type="submit" class="btn btn-primary" data-run-submit>
                                 <i class="fa-solid fa-play me-1" aria-hidden="true"></i>Run
                             </button>
@@ -426,12 +468,19 @@ export class PythonRunWindow {
         const submit = this.layer?.querySelector('[data-run-submit]');
         if (!submit) return;
         submit.disabled = this.running;
+        const stopping = this._runs.get(this.name)?.controller.signal.aborted === true;
+        const stop = this.layer?.querySelector('[data-run-action="stop"]');
+        if (stop) {
+            stop.hidden = !this.running || !this._runs.has(this.name);
+            stop.disabled = stopping;
+            stop.innerHTML = stopping ? 'Stopping…' : '<i class="fa-solid fa-stop me-1" aria-hidden="true"></i>Stop';
+        }
         submit.innerHTML = this.running
             ? '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Running…'
             : '<i class="fa-solid fa-play me-1" aria-hidden="true"></i>Run';
         const result = this.layer?.querySelector('[data-run-result]');
         if (this.running && result) {
-            result.innerHTML = '<div class="vb-run-status is-waiting"><span class="vb-run-dot"></span>Running…</div>';
+            result.innerHTML = `<div class="vb-run-status is-waiting"><span class="vb-run-dot"></span>${stopping ? 'Stopping…' : 'Running…'}</div>`;
         }
     }
 
@@ -449,7 +498,7 @@ export class PythonRunWindow {
         const output = formatPythonRunOutput(run);
         const started = run.startedUtc ? new Date(run.startedUtc) : null;
         const facts = [
-            run.timedOut ? 'timed out' : `exit ${run.exitCode}`,
+            pythonRunStatus(run),
             `${Math.round(run.durationMs)} ms`,
             started && !Number.isNaN(started.valueOf()) ? started.toLocaleTimeString() : ''
         ].filter(Boolean).join(' · ');
@@ -471,7 +520,8 @@ export class PythonRunWindow {
             <div class="vb-run-panel">
                 <div class="vb-run-panel-head"><h6>Output</h6></div>
                 <pre class="vb-run-output">${escapeHtml(output)}</pre>
-                ${!returned && output === '(no output)' ? `
+                ${run.cancelled ? '<p class="vb-run-field-hint">The run request was cancelled. Final output and exit status are unavailable.</p>' : ''}
+                ${!run.cancelled && !returned && output === '(no output)' ? `
                 <p class="vb-run-field-hint">Print a JSON object on the last line to return a value.</p>` : ''}
             </div>`;
 
@@ -511,6 +561,7 @@ export class PythonRunWindow {
         if (!button) return;
         const action = button.dataset.runAction;
         if (action === 'close') return this.close();
+        if (action === 'stop') return this.stop();
         if (action === 'terminal') return void this.runInTerminal();
         if (action === 'copy-return') return void this._copyReturn(button);
         if (action === 'add-extra') {

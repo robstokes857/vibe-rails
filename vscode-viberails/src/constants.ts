@@ -9,6 +9,7 @@
 
 export const COMMAND_OPEN = 'viberails.open';
 export const COMMAND_STOP = 'viberails.stop';
+export const COMMAND_ADD_SCRIPT = 'viberails.addScript';
 export const COMMAND_TEST_CONNECTION_INFO = 'viberails._test.getConnectionInfo';
 
 // --- Webview / output -----------------------------------------------------

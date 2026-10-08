@@ -24,6 +24,7 @@ import { AutomationNavLauncher } from './js/modules/automation-launcher.js';
 import { AppEventClient } from './js/modules/app-event-client.js';
 import { TerminalTokenCompressionMeter, getTokenSaverEnabledSources } from './js/modules/terminal-token-compression.js';
 import { openFileExplorer } from './js/modules/file-explorer.js';
+import { setupVSCodeScriptImport } from './js/modules/vscode-script-import.js';
 import { showAppToast } from './js/modules/toast-service.js';
 import { getLlmName, getProjectNameFromPath, formatRelativeTime, getCliBrand, escapeHtml } from './js/modules/utils.js';
 
@@ -120,6 +121,7 @@ export class VibeControlApp {
         this.bindGlobalActions();
         this.setupKeyboardShortcuts();
         this.setupVSCodeIntegration();
+        setupVSCodeScriptImport(this);
         this.startLifecycleHeartbeat();
     }
 

@@ -1,6 +1,6 @@
 import { confirmDialog, escapeHtml, formatRelativeTime, isConfirmDialogOpen } from './utils.js';
 import { formatFileExplorerSize } from './file-explorer.js';
-import { PythonRunWindow, formatPythonRunOutput, isPythonRunOk } from './python-run-window.js';
+import { PythonRunWindow, formatPythonRunOutput, isPythonRunOk, pythonRunStatus } from './python-run-window.js';
 import {
     SCRIPT_NAME_PATTERN,
     SCRIPT_NAME_RULE,
@@ -18,6 +18,17 @@ const API = '/api/v1/python-scripts';
 const REFRESH_THROTTLE_MS = 2000;
 const MAX_SCRIPT_BYTES = 5 * 1024 * 1024;
 
+// Windows paths are case-insensitive; POSIX paths are not. This is presentation only:
+// the existing import endpoint validates/canonicalizes paths and enforces repo scope.
+function scriptPathKey(value) {
+    const path = String(value || '');
+    return /^[a-z]:[\\/]/i.test(path) ? path.replace(/\\/g, '/').toLowerCase() : path;
+}
+
+function scriptIsWithin(filePath, directory) {
+    return Boolean(directory) && scriptPathKey(filePath).startsWith(`${scriptPathKey(directory).replace(/\/+$/, '')}/`);
+}
+
 
 // One Run button while its script is in flight, wherever it is rendered.
 const RUNNING_BUTTON_HTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Running…';
@@ -32,7 +43,7 @@ const STATUS_META = PYTHON_SCRIPT_STATUS_META;
 
 // Both live with the run window, which is what renders a finished run; re-exported here
 // so the row drawer, the workbench and the tests keep one import site.
-export { isPythonRunOk, formatPythonRunOutput };
+export { isPythonRunOk, formatPythonRunOutput, pythonRunStatus };
 
 /**
  * "Scripts" section of the Automation page: single-file pwsh (.ps1), bash (.sh) or
@@ -342,6 +353,11 @@ export class PythonScriptsController {
                             title="${running ? `${label} is running` : canRun ? `Run ${label} and read its output here` : 'Sign the script before running it'}">
                         ${running ? RUNNING_BUTTON_HTML : '<i class="fa-solid fa-play me-1" aria-hidden="true"></i>Run'}
                     </button>
+                    ${running && this.runWindow.canStop(script.name) ? `
+                    <button class="btn btn-sm btn-outline-danger" type="button" data-python-scripts-action="stop"
+                            data-name="${name}" title="Stop ${label}">
+                        <i class="fa-solid fa-stop me-1" aria-hidden="true"></i>Stop
+                    </button>` : ''}
                     <button class="btn btn-sm btn-outline-secondary" type="button" data-python-scripts-action="approve"
                             data-name="${name}" title="Approve this exact version with your PIN">
                         <i class="fa-solid fa-signature me-1" aria-hidden="true"></i>${approveLabel}
@@ -359,7 +375,7 @@ export class PythonScriptsController {
                 </div>
                 ${lastRun ? `
                 <details class="python-script-output" ${lastRun.open ? 'open' : ''}>
-                    <summary>Last run: exit ${lastRun.exitCode}${lastRun.timedOut ? ' (timed out)' : ''} · ${Math.round(lastRun.durationMs)} ms</summary>
+                    <summary>Last run: ${escapeHtml(pythonRunStatus(lastRun))} · ${Math.round(lastRun.durationMs)} ms</summary>
                     <pre>${escapeHtml(this._combinedOutput(lastRun))}</pre>
                 </details>` : ''}
             </div>`;
@@ -429,6 +445,7 @@ export class PythonScriptsController {
         if (action === 'revoke') return void this.revoke(name);
         if (action === 'delete') return void this.deleteScript(name);
         if (action === 'run') return void this.run(name);
+        if (action === 'stop') return this.runWindow.stop(name);
         if (action === 'run-terminal') return void this.runInTerminal(name, button);
     }
 
@@ -634,20 +651,59 @@ export class PythonScriptsController {
         });
         if (!picked || picked.canceled || !picked.path) return;
 
-        const suggestion = picked.name || picked.path.split(/[\\/]/).pop();
-        const values = await this._promptForm({
-            title: 'Add script from disk',
-            body: `Runs from its own folder: ${picked.path}. The file stays where it is.`,
-            fields: this._libraryFields(suggestion),
-            submitLabel: 'Add script'
-        });
-        if (values === null) return;
+        return this.importScript(picked.path);
+    }
+
+    /** Shared by Add from disk and the VS Code Explorer command; never signs or runs. */
+    async importScript(sourcePath) {
+        if (!this._canImportFromHost()) {
+            return this.app.showError('Adding a host file is available from the main VibeRails dashboard.');
+        }
+        if (!isScriptFileName(sourcePath)) {
+            return this.app.showError('Select a .ps1, .sh or .py file.');
+        }
+        if (this.modal || this.app.modalState || isConfirmDialogOpen()) {
+            return this.app.showError('Finish the open dialog before adding a script.');
+        }
         try {
+            // Refresh explicitly so a file registered in another window is recognized.
+            this._applyState(await this.app.apiCall(API, 'GET', null, { showLoading: false }));
+            if (this.modal || this.app.modalState || isConfirmDialogOpen()) {
+                return this.app.showError('Finish the open dialog before adding a script.');
+            }
+            const existing = this.state.scripts.find(script => scriptPathKey(script.path) === scriptPathKey(sourcePath));
+            if (existing) {
+                this.app.showToast('Script already added', 'Opening its existing registration.', 'info');
+                this.openScript(existing.name);
+                return;
+            }
+            const suggestion = sourcePath.split(/[\\/]/).pop();
+            const project = this.app.data?.configs?.rootPath || this.app.data?.configs?.launchDirectory;
+            const repoAllowed = Boolean(project) && (scriptIsWithin(sourcePath, project)
+                || scriptIsWithin(sourcePath, this.state.scriptsDirectory));
+            const fields = this._libraryFields(suggestion);
+            if (!repoAllowed) {
+                const scope = fields.find(field => field.key === 'scope');
+                scope.value = 'global';
+                scope.options = scope.options.filter(option => option.value === 'global');
+            }
+            const scopeHelp = repoAllowed ? ` Repo scope applies to ${project}.`
+                : ' To use Repo scope, open VibeRails in this file’s repository.';
+            const values = await this._promptForm({
+                title: 'Add script from disk',
+                body: `Runs from its own folder: ${sourcePath}. The file stays where it is.${scopeHelp}`,
+                fields,
+                submitLabel: 'Add script'
+            });
+            if (values === null) return;
+            const previousIds = new Set(this.state?.scripts.map(script => script.name));
             this._applyState(await this.app.apiCall(`${API}/import`, 'POST', {
-                sourcePath: picked.path, displayName: values.displayName || suggestion,
-                scope: values.scope || 'global', requirePinEachRun: values.requirePinEachRun === 'true'
+                sourcePath, displayName: values.displayName || suggestion,
+                scope: values.scope || (repoAllowed ? 'repo' : 'global'), requirePinEachRun: values.requirePinEachRun === 'true'
             }, { showLoading: false, preferErrorResponseMessage: true }));
-            const added = this.state.scripts.find(script => script.path === picked.path);
+            const newScripts = this.state.scripts.filter(script => !previousIds.has(script.name));
+            const added = this.state.scripts.find(script => scriptPathKey(script.path) === scriptPathKey(sourcePath))
+                || (newScripts.length === 1 ? newScripts[0] : null);
             this.app.showToast('Script added', 'Sign it before it can run.', 'success');
             if (added) this.openScript(added.name);
         } catch (error) {
@@ -1062,9 +1118,8 @@ export class PythonScriptsController {
                 label: this.displayName(name),
                 title: `${this.displayName(name)} · ${runtime.label}`,
                 icon: runtime.tabIcon,
-                // NOT `python-script:${name}` — that key belongs to the script's AGENT
-                // tab (the workbench's "Ask agent"). Sharing it would make the agent
-                // flows adopt this script's shell tab and paste briefs into a running script.
+                // Keep run tabs separate from the legacy `python-script:` agent tabs
+                // retained from the former Ask agent flow.
                 taskKey: `python-script-run:${name}`,
                 workingDirectory: this.scriptDirectory(name)
             });

@@ -93,7 +93,7 @@ public sealed class UserScriptLibraryTests : IDisposable
     }
 
     [Fact]
-    public async Task RunUsesVerifiedBytesAndBothWorkingDirectoryAndScriptDirectoryAreTheOriginalFolder()
+    public async Task RunUsesVerifiedCacheAndKeepsTheOriginalWorkingDirectory()
     {
         var path = FileIn(RepoA);
         var runner = new Mock<IPythonRunner>();
@@ -115,9 +115,9 @@ public sealed class UserScriptLibraryTests : IDisposable
         await service.ApproveAsync(new(entry.Id, "1234"), Ct);
         await service.RunAsync(entry.Id, Ct);
         Assert.Equal(RepoA, options!.WorkingDirectory);
-        Assert.Equal(RepoA, Path.GetDirectoryName(executedPath));
+        Assert.Equal(Path.Combine(RepoA, ".vb-scripts"), Path.GetDirectoryName(executedPath));
         Assert.NotEqual(path, executedPath);
-        Assert.False(File.Exists(executedPath));
+        Assert.True(File.Exists(executedPath));
         await Assert.ThrowsAsync<PythonScriptValidationException>(() => service.RunAsync(entry.Id, Ct));
     }
 

@@ -369,25 +369,51 @@ test('selected and canceled outcomes have a stable caller-facing shape', () => {
     });
 });
 
-test('the last accepted folder is remembered per picker mode and read back defensively', () => {
-    assert.equal(getFileExplorerLastPathKey('file'), 'viberails.fileExplorer.lastPath:file');
-    assert.equal(getFileExplorerLastPathKey('DIRECTORY'), 'viberails.fileExplorer.lastPath:directory');
-    assert.equal(getFileExplorerLastPathKey('nonsense'), 'viberails.fileExplorer.lastPath:any');
+test('the last accepted folder is remembered per project and picker mode', () => {
+    const project = 'C:\\repo';
+    const otherProject = 'C:\\other';
+    const storage = fakeStorage();
+    assert.equal(writeFileExplorerLastPath('file', '  C:\\repo\\src  ', project, storage), true);
+    assert.equal(readFileExplorerLastPath('file', project, storage), 'C:\\repo\\src');
+    assert.equal(readFileExplorerLastPath('directory', project, storage), '', 'modes do not share a memory');
+    assert.equal(readFileExplorerLastPath('file', otherProject, storage), '', 'new projects start without a saved folder');
 
-    const storage = fakeStorage({ 'viberails.fileExplorer.lastPath:file': '  C:\\repo\\src  ' });
-    assert.equal(readFileExplorerLastPath('file', storage), 'C:\\repo\\src');
-    assert.equal(readFileExplorerLastPath('directory', storage), '', 'modes do not share a memory');
-    assert.equal(writeFileExplorerLastPath('directory', 'D:\\data', storage), true);
-    assert.equal(storage.store.get('viberails.fileExplorer.lastPath:directory'), 'D:\\data');
-    assert.equal(writeFileExplorerLastPath('directory', '   ', storage), true, 'a blank path clears the memory');
-    assert.equal(storage.store.has('viberails.fileExplorer.lastPath:directory'), false);
+    assert.equal(writeFileExplorerLastPath('file', 'D:\\data', otherProject, storage), true);
+    assert.equal(readFileExplorerLastPath('file', otherProject, storage), 'D:\\data');
+    assert.equal(readFileExplorerLastPath('file', project, storage), 'C:\\repo\\src', 'returning to a project keeps its folder');
+    assert.equal(writeFileExplorerLastPath('file', '   ', otherProject, storage), true);
+    assert.equal(readFileExplorerLastPath('file', otherProject, storage), '', 'a blank path clears this project only');
+    assert.equal(readFileExplorerLastPath('file', project, storage), 'C:\\repo\\src');
+});
 
+test('project folder memory normalizes Windows paths and preserves Unix path case', () => {
+    const storage = fakeStorage();
+    writeFileExplorerLastPath('DIRECTORY', 'D:\\data', ' C:\\Repo\\ ', storage);
+    assert.equal(readFileExplorerLastPath('directory', 'c:/repo', storage), 'D:\\data');
+    writeFileExplorerLastPath('nonsense', '/Repo/src', '/Repo/', storage);
+    assert.equal(readFileExplorerLastPath('any', '/Repo', storage), '/Repo/src');
+    assert.equal(readFileExplorerLastPath('any', '/repo', storage), '');
+    assert.notEqual(getFileExplorerLastPathKey('file', '/'), getFileExplorerLastPathKey('file', ''));
+});
+
+test('legacy global folder memory is ignored and an unknown project does not share memory', () => {
+    const legacyKey = 'viberails.fileExplorer.lastPath:file';
+    const storage = fakeStorage({ [legacyKey]: 'C:\\old-project\\src' });
+    assert.equal(readFileExplorerLastPath('file', 'C:\\new-project', storage), '');
+    assert.equal(readFileExplorerLastPath('file', '', storage), '');
+    assert.equal(writeFileExplorerLastPath('file', 'C:\\temp', '', storage), false);
+    assert.equal(storage.store.size, 1);
+    assert.equal(storage.store.get(legacyKey), 'C:\\old-project\\src', 'legacy preferences remain available to older versions');
+});
+
+test('project folder memory tolerates blocked or absent storage', () => {
+    const project = 'C:\\repo';
     // Blocked or absent storage must never throw into the dialog.
     const blocked = fakeStorage({}, { failing: true });
-    assert.equal(readFileExplorerLastPath('file', blocked), '');
-    assert.equal(writeFileExplorerLastPath('file', 'C:\\x', blocked), false);
-    assert.equal(readFileExplorerLastPath('file', null), '');
-    assert.equal(writeFileExplorerLastPath('file', 'C:\\x', null), false);
+    assert.equal(readFileExplorerLastPath('file', project, blocked), '');
+    assert.equal(writeFileExplorerLastPath('file', 'C:\\x', project, blocked), false);
+    assert.equal(readFileExplorerLastPath('file', project, null), '');
+    assert.equal(writeFileExplorerLastPath('file', 'C:\\x', project, null), false);
 });
 
 test('a failed first load of a remembered folder falls back to the project root, later failures do not', () => {

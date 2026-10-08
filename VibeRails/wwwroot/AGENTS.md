@@ -643,8 +643,11 @@ declared missing); and a footer with the status, "Show hidden items", and Open /
 Cancel. In directory mode the primary button picks the highlighted folder, else the folder being
 viewed (a highlighted muted file counts as nothing). Only Escape, Cancel, and the X dismiss;
 clicking the backdrop does nothing. Without `initialPath` the dialog reopens at the folder the
-last picker of that mode was accepted from (localStorage `viberails.fileExplorer.lastPath:<mode>`)
-and falls back silently to the project root if that folder no longer loads. Nested-layer rules
+last picker of that mode in the current project was accepted from (localStorage
+`viberails.fileExplorer.lastPath:<mode>:project:<normalized-project-path>`). Each open resolves
+the current project root, or launch directory when there is no root. A project without a saved
+folder starts there; a saved folder that no longer loads falls back there silently. Legacy global
+last-folder keys are ignored, and no folder is remembered when the project is unknown. Nested-layer rules
 apply: it appends its own layer to `#modal-container`, marks everything else inert, traps Tab, and
 stands down for `confirmDialog()`.
 
@@ -1014,6 +1017,13 @@ edits metadata; removing an entry retains its file. API IDs, not display names, 
 run inputs and nav launcher. The controller retains `fileName` for runtime selection. Both the
 workbench agent and script execution use the registered file's own directory. The old scripts
 folder is never scanned and no legacy entries are backfilled.
+The workbench supplies a live `getLaunchContext` callback to the terminal manager. **Start**
+appends the selected script's absolute-path/read-and-wait brief and signing constraint to any
+resolved environment prompt, and uses the file's current directory. Read the current record at
+launch so switches and stable-ID renames cannot reuse an old path. Shell starts omit the brief;
+reconnects and explicit launches do not consume this callback. **Start** is the sole agent launch
+action; the redundant **Ask agent** button and brief-paste flow were removed. Covered by
+`terminal-launch-context.test.mjs` and the workbench suite.
 Creation resolves the returned registration ID even when the server canonicalizes the destination.
 A rename keeps that ID but must refresh the editor language and clear prior run output. Missing-file
 recovery rechecks content after a library refresh: retained registrations do not prove a file exists.
@@ -1093,14 +1103,14 @@ recovery rechecks content after a library refresh: retained registrations do not
   The window shows **Returned** (pretty-printed, copyable) only when there is one, then
   **Output**. Argv and stdin are bounded server-side (64 args, 8k chars each, 256k stdin).
   The result also lands in the row's last-run drawer through `recordRun`.
+- **Stop**. The run window and active Scripts row cancel the exact captured request through its
+  `AbortController`; the backend request token terminates the process tree. The signed cache
+  in `.vb-scripts` is retained for reuse. Closing the window does not cancel. Run handles survive close/reopen and stay
+  separate per script. Cancelled requests show **Stop requested**, with no invented exit code
+  or final output, because the disconnected response cannot acknowledge process completion.
 - **Keys**: Escape closes, Ctrl/⌘+Enter runs from anywhere including the stdin box.
 - **Python MCP removed (2026-09-18)**: the exposure switch, configurator, and special Explorer
   group are gone. Signed scripts remain available for human-initiated runs.
-- **Ask agent**: with a live session (open socket) the brief naming the absolute script
-  path is pasted with `injectText` **without submitting** (`…\n\nChange: `); otherwise
-  `startTerminalWithOptions` starts the panel's picked CLI (default `claude`) in the
-  scripts directory with a read-and-wait `initialPrompt` (auto-submitted, so it never
-  carries the half-finished sentence), `taskKey: 'python-script:<name>'` reuses the tab.
 - **Live reload**: while mounted and visible, `GET /api/v1/python-scripts/content` is
   polled every ~4s (and on focus / visibilitychange); a new `version` swaps the text
   preserving cursor + scroll when the editor is clean, or raises an inline banner

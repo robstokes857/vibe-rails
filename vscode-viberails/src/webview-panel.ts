@@ -8,6 +8,14 @@ import { openExternalSignIn } from './external-sign-in';
 export class WebviewPanelManager {
     private panel: vscode.WebviewPanel | null = null;
     private readonly wwwrootPath: string;
+    private dashboardReady = false;
+    private pendingImport: {
+        id: string;
+        path: string;
+        resolve: () => void;
+        reject: (error: Error) => void;
+        timer: ReturnType<typeof setTimeout>;
+    } | null = null;
 
     private _onCloseRequested: vscode.EventEmitter<void> = new vscode.EventEmitter<void>();
     public readonly onCloseRequested: vscode.Event<void> = this._onCloseRequested.event;
@@ -18,6 +26,43 @@ export class WebviewPanelManager {
 
     public isVisible(): boolean {
         return this.panel !== null && this.panel.visible;
+    }
+
+    public hasPanel(): boolean {
+        return this.panel !== null;
+    }
+
+    /** Wait for the dashboard's handler before delivering a file selected in Explorer. */
+    public importScript(filePath: string, timeoutMs = 30000): Promise<void> {
+        if (!this.panel) return Promise.reject(new Error('The VibeRails dashboard is closed.'));
+        if (this.pendingImport) return Promise.reject(new Error('A script is already being opened. Please wait.'));
+        return new Promise((resolve, reject) => {
+            this.pendingImport = {
+                id: crypto.randomUUID(), path: filePath, resolve, reject,
+                timer: setTimeout(() => this.finishImport('The dashboard did not respond. Try adding the script again.'), timeoutMs)
+            };
+            if (this.dashboardReady) this.sendPendingImport();
+        });
+    }
+
+    private sendPendingImport(): void {
+        const pending = this.pendingImport;
+        if (!pending || !this.panel) return;
+        void this.panel.webview.postMessage({ command: 'importScript', requestId: pending.id, path: pending.path })
+            .then(delivered => {
+                if (!delivered && this.pendingImport === pending) this.finishImport('The dashboard is unavailable. Try again.');
+            }, () => {
+                if (this.pendingImport === pending) this.finishImport('The dashboard is unavailable. Try again.');
+            });
+    }
+
+    private finishImport(error?: string): void {
+        const pending = this.pendingImport;
+        if (!pending) return;
+        clearTimeout(pending.timer);
+        this.pendingImport = null;
+        if (error) pending.reject(new Error(error));
+        else pending.resolve();
     }
 
     public reveal(): void {
@@ -44,11 +89,16 @@ export class WebviewPanelManager {
             }
         );
 
-        this.panel.webview.html = this.buildHtml(this.panel.webview, port, sessionToken, tabToken);
-
         this.panel.webview.onDidReceiveMessage(message => {
             if (!message || typeof message !== 'object') return;
-            if (message.command === 'close') {
+            if (message.command === 'scriptImportReady') {
+                if (!this.dashboardReady) {
+                    this.dashboardReady = true;
+                    this.sendPendingImport();
+                }
+            } else if (message.command === 'scriptImportReceived' && message.requestId === this.pendingImport?.id) {
+                this.finishImport(typeof message.error === 'string' ? message.error : undefined);
+            } else if (message.command === 'close') {
                 this._onCloseRequested.fire();
             } else if (message.command === 'openFile' && typeof message.path === 'string') {
                 void this.openFileInEditor(message.path);
@@ -72,9 +122,13 @@ export class WebviewPanelManager {
         });
 
         this.panel.onDidDispose(() => {
+            this.dashboardReady = false;
+            this.finishImport('The VibeRails dashboard was closed.');
             this.panel = null;
             this._onCloseRequested.fire();
         });
+
+        this.panel.webview.html = this.buildHtml(this.panel.webview, port, sessionToken, tabToken);
 
         return this.panel;
     }
@@ -226,6 +280,10 @@ export class WebviewPanelManager {
         window.__viberails_setTitle__ = function(title) { vscode.postMessage({ command: 'setTitle', title: title }); };
         window.__viberails_openFile__ = function(path) { vscode.postMessage({ command: 'openFile', path: path }); };
         window.__viberails_openExternal__ = function(url) { vscode.postMessage({ command: 'openExternal', url: url }); };
+        window.__viberails_scriptImportReady__ = function() { vscode.postMessage({ command: 'scriptImportReady' }); };
+        window.__viberails_scriptImportReceived__ = function(requestId, error) {
+            vscode.postMessage({ command: 'scriptImportReceived', requestId: requestId, error: error });
+        };
         ${fetchPatch}
     </script>`;
 

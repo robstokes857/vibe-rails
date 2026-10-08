@@ -38,6 +38,112 @@ function controllerWith(scripts, app = createApp()) {
     return controller;
 }
 
+test('an active captured script has a Stop action on its row even after the run window closes', async () => {
+    const script = { name: 'report.py', status: 'approved' };
+    const app = createApp();
+    const controller = controllerWith([script], app);
+    app.apiCall = (url, method, body, options) => new Promise((resolve, reject) => {
+        options.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+    });
+    controller.runWindow.name = script.name;
+    const pending = controller.runWindow.execute();
+    assert.match(controller._renderRow(script), /data-python-scripts-action="stop"/);
+    const button = { dataset: { pythonScriptsAction: 'stop', name: script.name } };
+    controller.root = { contains: value => value === button };
+    controller._closeMenus = () => {};
+    controller._render = () => {};
+    controller._onClick({ target: { closest: () => button } });
+    await pending;
+    const html = controller._renderRow(script);
+    assert.doesNotMatch(html, /data-python-scripts-action="stop"/);
+    assert.match(html, /Last run: Stop requested/);
+    assert.doesNotMatch(html, /exit null/);
+});
+
+for (const extension of ['ps1', 'sh', 'py', 'PS1']) {
+    test(`Importing a selected .${extension} registers its path and opens its unsigned library ID`, async () => {
+        const app = createApp();
+        app.data = { configs: { rootPath: 'C:\\repo' } };
+        const sourcePath = `C:/repo/scripts/My script.${extension}`;
+        const controller = controllerWith([], app);
+        let form;
+        controller._promptForm = async options => {
+            form = options;
+            return { displayName: 'Deploy', scope: 'repo', requirePinEachRun: 'true' };
+        };
+        app.apiCall = async (url, method, body) => {
+            app.calls.push({ url, method, body });
+            return { scriptsDirectory: 'C:/managed', scripts: method === 'POST'
+                ? [{ id: 'new-id.py', name: `My script.${extension}`, path: sourcePath.replaceAll('/', '\\'), status: 'unapproved' }] : [] };
+        };
+        await controller.importScript(sourcePath);
+        assert.equal(form.fields.find(field => field.key === 'scope').value, 'repo');
+        assert.match(form.body, /C:\\repo/);
+        assert.deepEqual(app.calls, [
+            { url: '/api/v1/python-scripts', method: 'GET', body: null },
+            { url: '/api/v1/python-scripts/import', method: 'POST', body: {
+                sourcePath, displayName: 'Deploy', scope: 'repo', requirePinEachRun: true
+            } }
+        ]);
+        assert.equal(controller.state.scripts[0].status, 'unapproved');
+        assert.equal(app.navigations[0].data.name, 'new-id.py');
+        assert.match(app.toasts[0].message, /Sign it/);
+    });
+}
+
+test('Import opens an existing registration with Windows path casing without posting again', async () => {
+    const app = createApp();
+    app.apiCall = async () => ({ scripts: [{ id: 'existing.py', name: 'job.py', path: 'C:\\Repo\\Job.py' }] });
+    const controller = controllerWith([], app);
+    controller._promptForm = async () => assert.fail('Already registered files need no form');
+    await controller.importScript('c:/repo/job.py');
+    assert.equal(app.navigations[0].data.name, 'existing.py');
+    assert.match(app.toasts[0].title, /already added/);
+});
+
+test('Import scope follows the dashboard repository, not a matching path prefix or POSIX casing', async () => {
+    for (const [rootPath, sourcePath, expected] of [
+        ['/repo', '/repo/job.sh', ['repo', 'global']],
+        ['/repo', '/repo-other/job.sh', ['global']],
+        ['/repo', '/Repo/job.sh', ['global']],
+        [null, '/repo/job.sh', ['global']],
+        ['C:\\repo', 'c:/REPO/job.sh', ['repo', 'global']]
+    ]) {
+        const app = createApp();
+        app.data = { configs: { rootPath } };
+        const controller = controllerWith([], app);
+        controller._promptForm = async ({ fields }) => {
+            const scope = fields.find(field => field.key === 'scope');
+            assert.deepEqual(scope.options.map(option => option.value), expected);
+            assert.equal(scope.value, expected[0]);
+            return null;
+        };
+        await controller.importScript(sourcePath);
+        assert.equal(app.calls.length, 1, 'Cancel does not register or sign');
+        assert.equal(app.navigations.length, 0);
+    }
+});
+
+test('Import preserves existing dialogs and surfaces list/import errors', async () => {
+    const app = createApp();
+    const controller = controllerWith([], app);
+    controller.modal = {};
+    await controller.importScript('/repo/job.py');
+    assert.equal(app.calls.length, 0);
+    assert.match(app.errors.pop(), /Finish the open dialog/);
+    controller.modal = null;
+    for (const failMethod of ['GET', 'POST']) {
+        app.apiCall = async (url, method) => {
+            if (method === failMethod) throw new Error(`${method} failed`);
+            return { scripts: [] };
+        };
+        controller._promptForm = async () => ({ scope: 'global' });
+        await controller.importScript('/repo/job.py');
+        assert.equal(app.errors.pop(), `${failMethod} failed`);
+        assert.equal(app.navigations.length, 0);
+    }
+});
+
 const SCRIPT = Object.freeze({
     name: 'nightly.py',
     status: 'approved',

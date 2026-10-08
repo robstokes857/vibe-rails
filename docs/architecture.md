@@ -237,6 +237,12 @@ vb --vs-code-v1 [--parent-pid <pid>]
 - Internal mode used by the VS Code extension and terminal-tab child processes
 - Prints a one-time bootstrap URL for the extension host
 - Uses the same authenticated web/API backend as browser mode
+- The Explorer/editor-tab **Add to VibeRails Scripts…** command hands a selected `.ps1`,
+  `.sh` or `.py` path to the dashboard after a readiness/receipt handshake. The shared
+  `PythonScriptsController.importScript` shows the existing registration form and calls the
+  authenticated root-only import route. It opens existing visible entries by ID and leaves new
+  entries unsigned. A cold start uses the selected file's workspace folder; an open dashboard
+  keeps its project and offers Global scope for files outside it.
 
 #### 3. Environment Bootstrap Mode
 ```bash
@@ -876,7 +882,13 @@ scripts are filtered by the server's current root. Creation defaults to `scripts
 and can use a selected folder; Add from disk references the original. No folder scanning or
 legacy import occurs, and removing a registration leaves its file. Signing keeps the existing
 PIN document, binding each new approval to ID/path/content. Both documents share the existing
-cross-process lock. Runs use verified sibling copies and the original directory as cwd.
+cross-process lock. Runs reuse `.vb-scripts/.vibe-rails-{signed SHA-256 hash}.{extension}` beneath
+the original script's directory, retaining that original directory as cwd. Each launch verifies
+the original approval and cached bytes; missing/changed cache files are published atomically
+under the signing lock. The cache rejects links and junctions and survives completion or
+cancellation. `$PSScriptRoot` and `__file__` refer to its directory. The captured run window and active Scripts rows offer
+Stop, which aborts the exact HTTP request and propagates cancellation through PyBridge to the
+process tree. Closing the window keeps its run alive; handles remain scoped to each script.
 
 - `GET /api/v1/python-scripts` - List scripts with signing status
 - `POST /api/v1/python-scripts/settings` - Update display name, Global/Repo scope and PIN-on-each-run requirement
@@ -892,6 +904,12 @@ cross-process lock. Runs use verified sibling copies and the original directory 
 
 The script workbench edits one selected file beside the agent terminal. Its editor has no file
 rail; **Back → Automation → Scripts** is where users select another file or create one.
+Starting an agent from this workbench adds the current script's absolute path, an instruction to
+read it and wait for a change request, and the signing constraint to the environment's startup
+prompt. The terminal manager reads the workbench's `getLaunchContext` callback on each fresh
+Start so file switches and renames update both the brief and working directory. Shell launches
+omit the brief, and reconnecting an existing session does not resend it. The former **Ask agent**
+button and paste flow are removed; users launch agents through the terminal's **Start** action.
 Installed git-hook helpers and BERT download scripts remain internal. They never appear in the user library. Signed entries are visible; unsigned and modified entries are behind a collapsed **Unsigned scripts** section.
 
 **Nav Automation launcher** (the nav "Launch" flyout; preferences persist per install in GlobalCache):

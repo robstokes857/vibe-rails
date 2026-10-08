@@ -71,28 +71,31 @@ export function getFileExplorerInitialPath(app, initialPath) {
     );
 }
 
-/** localStorage key under which the folder last accepted from a picker of this mode is kept. */
-export function getFileExplorerLastPathKey(mode) {
-    return `${LAST_PATH_STORAGE_PREFIX}${normalizeFileExplorerMode(mode)}`;
+/** localStorage key for the last accepted folder in this project and picker mode. */
+export function getFileExplorerLastPathKey(mode, projectPath) {
+    const projectKey = fileExplorerPathKey(cleanString(projectPath));
+    return projectKey ? `${LAST_PATH_STORAGE_PREFIX}${normalizeFileExplorerMode(mode)}:project:${projectKey}` : '';
 }
 
 /**
- * The folder the previous dialog of this mode was accepted from, or '' when nothing was stored
- * or storage is unavailable (private mode, quota, disabled). Never throws.
+ * The folder the previous dialog in this project and mode was accepted from, or '' when no
+ * project is known, nothing was stored, or storage is unavailable. Legacy global keys are ignored.
  */
-export function readFileExplorerLastPath(mode, storage = defaultStorage()) {
+export function readFileExplorerLastPath(mode, projectPath, storage = defaultStorage()) {
+    const key = getFileExplorerLastPathKey(mode, projectPath);
+    if (!key) return '';
     try {
-        return cleanString(storage?.getItem?.(getFileExplorerLastPathKey(mode)));
+        return cleanString(storage?.getItem?.(key));
     } catch {
         return '';
     }
 }
 
-/** Remembers `path` for the next dialog of this mode; a blank path clears the memory. */
-export function writeFileExplorerLastPath(mode, path, storage = defaultStorage()) {
-    const key = getFileExplorerLastPathKey(mode);
+/** Remembers `path` for this project and mode; a blank path clears only that project's memory. */
+export function writeFileExplorerLastPath(mode, path, projectPath, storage = defaultStorage()) {
+    const key = getFileExplorerLastPathKey(mode, projectPath);
     const value = cleanString(path);
-    if (!storage) return false;
+    if (!key || !storage) return false;
     try {
         if (value) storage.setItem(key, value);
         else storage.removeItem(key);
@@ -498,7 +501,8 @@ export function createCanceledFileExplorerResult() {
  * @param {object} app VibeRails application instance.
  * @param {object} options
  * @param {'file'|'directory'|'any'} [options.mode='any'] Selectable entry type.
- * @param {string} [options.initialPath] Initial directory; defaults to project root/launch directory.
+ * @param {string} [options.initialPath] Initial directory; defaults to this project's last accepted
+ *   folder for the picker mode, then the project root/launch directory.
  * @param {string} [options.title] Dialog title.
  * @param {boolean} [options.includeHidden=false] Initial hidden-file visibility.
  * @param {Array<{label: string, extensions: string[]}>} [options.filters] "Files of type" choices
@@ -519,9 +523,9 @@ export function openFileExplorer(app, options = {}) {
 
     const mode = normalizeFileExplorerMode(options.mode);
     const projectPath = getFileExplorerInitialPath(app);
-    // Without an explicit start, reopen where the last picker of this mode was accepted, like a
-    // desktop dialog does; the project root is the quiet fallback should that folder be gone.
-    const rememberedPath = cleanString(options.initialPath) ? '' : readFileExplorerLastPath(mode);
+    // Resolve the current project on every open; another project's picker must not supply its
+    // starting folder. The project root is the quiet fallback should its saved folder be gone.
+    const rememberedPath = cleanString(options.initialPath) ? '' : readFileExplorerLastPath(mode, projectPath);
     const initialPath = getFileExplorerInitialPath(app, cleanString(options.initialPath) || rememberedPath);
     const fallbackPath = rememberedPath && !samePath(rememberedPath, projectPath) ? projectPath : '';
     const filters = mode === FILE_EXPLORER_MODES.DIRECTORY
@@ -619,7 +623,7 @@ export function openFileExplorer(app, options = {}) {
             if (state.settled) return;
             state.settled = true;
             if (!result?.canceled && state.locationReady) {
-                writeFileExplorerLastPath(mode, state.data.currentPath);
+                writeFileExplorerLastPath(mode, state.data.currentPath, projectPath);
             }
             if (layer.isConnected) layer.remove();
             dispose({ restoreFocus });

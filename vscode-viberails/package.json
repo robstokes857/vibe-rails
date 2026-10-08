@@ -60,9 +60,28 @@
       {
         "command": "viberails.stop",
         "title": "VibeRails: Stop Dashboard"
+      },
+      {
+        "command": "viberails.addScript",
+        "title": "Add to VibeRails Scripts…",
+        "enablement": "isWorkspaceTrusted"
       }
     ],
     "menus": {
+      "explorer/context": [
+        {
+          "command": "viberails.addScript",
+          "group": "navigation@100",
+          "when": "!explorerResourceIsFolder && resourceScheme == file && resourceExtname =~ /\\.(ps1|sh|py)$/i"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "viberails.addScript",
+          "group": "navigation@100",
+          "when": "resourceScheme == file && resourceExtname =~ /\\.(ps1|sh|py)$/i"
+        }
+      ],
       "editor/title": [
         {
           "command": "viberails.open",

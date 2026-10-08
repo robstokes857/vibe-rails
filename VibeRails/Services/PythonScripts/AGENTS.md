@@ -10,10 +10,16 @@ classes, `/api/v1/python-scripts`, `--run-python-script`), but since VIBE-56 a s
    New script selects a runtime and a destination (default `~/.vibe_rails/scripts/UserScripts`,
    or a local folder selected with the shared file picker). Add from disk registers the original
    path without copying. Both forms offer a display name, Global/Repo scope and PIN on every run.
+   In VS Code, right-click a local script and choose **Add to VibeRails Scripts…** to open this
+   same form with its path already selected. Existing visible registrations open instead of
+   being added twice. Repo scope is offered for files in the dashboard's project or managed
+   UserScripts folder; other files offer Global scope.
 2. Sign the exact script version with the user's Python signing PIN.
 3. Choose **Run** for the captured run window, with argument rows and optional standard input,
    or **Run in terminal** for interactive scripts. The terminal path takes the script name and
-   an optional required run PIN.
+   an optional required run PIN. **Stop** in the captured run window or its active Scripts row
+   aborts that run's request; the request cancellation token terminates the interpreter and its
+   children. Closing the window alone keeps the run alive.
 4. Edit scripts in the workbench, which pairs Monaco with an agent terminal. Changed bytes need
    signing again before either run path can execute them.
 
@@ -32,12 +38,18 @@ filename is accepted by local callers for convenience. The frontend normalizes t
 internal `name` key and retains `fileName` for runtime and display. The nav launcher uses the ID,
 not the display label. Display/scope changes do not grant approval.
 
-Scripts run with their own folder as working directory, from a verified temporary copy alongside
-the original, so `$PSScriptRoot`, Python script-relative paths and relative subprocess paths use
-the original directory. The temporary filename differs from the original. Python sibling imports
-are possible but their contents, like installed packages or programs a script invokes, are not
-covered by the single-file signature. Every path component is checked for links/reparse points
-on authoring, signing and execution.
+Scripts run with their own folder as working directory, from a verified cached copy inside
+that folder's `.vb-scripts` subdirectory: `.vibe-rails-{signed SHA-256 hash}.{extension}`.
+Both captured and interactive runs reuse the same signed version. The original must still pass
+the signing/PIN checks on every launch; cache filenames grant no trust. Cached bytes are checked
+against the verified executable bytes and repaired atomically if changed. Publication uses the
+existing cross-process signing lock, released before execution. Completed and cancelled runs
+retain cached versions; no automatic pruning or historical-file cleanup occurs.
+`$PSScriptRoot` and Python `__file__` point into `.vb-scripts`; ordinary working-directory-relative
+paths still use the original folder. Python sibling imports may require an explicit import path.
+Imported code, installed packages and invoked programs are not covered by the single-file
+signature. Every path component, including the staging directory, is checked for links/reparse
+points on authoring, signing and execution.
 
 ## Runtimes
 

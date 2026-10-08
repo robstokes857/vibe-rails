@@ -12,6 +12,7 @@ const {
     PythonRunWindow,
     formatPythonRunOutput,
     isPythonRunOk,
+    pythonRunStatus,
     prettyJson,
     quoteForDisplay,
     readRemembered,
@@ -242,6 +243,123 @@ test('a second Run while one is in flight is ignored, not queued', async () => {
     assert.equal(await view.execute(), null);
     await first;
     assert.equal(posted.length, 1);
+});
+
+function pendingRuns(app) {
+    const calls = [];
+    app.apiCall = (url, method, body, options) => new Promise((resolve, reject) => {
+        calls.push({ body, signal: options.signal, resolve });
+        options.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+    });
+    return calls;
+}
+
+test('Stop aborts the run request, records cancellation without a fake exit code and allows another run', async () => {
+    const { view, app, scripts } = windowFor();
+    const calls = pendingRuns(app);
+    const problems = [];
+    view._showProblem = text => { if (text) problems.push(text); };
+    const first = view.execute();
+    assert.equal(view.canStop(), true);
+    view._onClick({ target: { closest: () => ({ dataset: { runAction: 'stop' } }) } });
+    assert.equal(calls[0].signal.aborted, true);
+    assert.equal(view.canStop(), false);
+    assert.equal(view.running, true, 'the pending request still owns the busy state');
+    assert.equal(await view.execute(), null);
+    view.stop(); // Repeated clicks are harmless.
+    const cancelled = await first;
+    assert.equal(cancelled.cancelled, true);
+    assert.equal(cancelled.exitCode, null);
+    assert.equal(pythonRunStatus(cancelled), 'Stop requested');
+    assert.equal(isPythonRunOk(cancelled), false);
+    assert.equal(isPythonRunOk({ exitCode: 0, cancelled: true }), false);
+    assert.deepEqual(problems, []);
+    assert.deepEqual(scripts.recorded, [{ name: 'report.py', result: cancelled }]);
+    assert.equal(scripts.runningNames.size, 0);
+    assert.equal(view._runs.size, 0);
+
+    const second = view.execute();
+    assert.notEqual(calls[1].signal, calls[0].signal);
+    assert.equal(calls[1].signal.aborted, false);
+    calls[1].resolve({ exitCode: 0 });
+    assert.equal((await second).exitCode, 0);
+});
+
+test('Stop targets the named background script and reopening restores the correct run handle', async () => {
+    const { view, app, scripts } = windowFor();
+    const calls = pendingRuns(app);
+    const first = view.execute();
+    view._mount = () => {};
+    globalThis.requestAnimationFrame ??= fn => fn();
+    view.open('other.py'); // Opening an input-free script automatically starts it.
+    assert.equal(calls.length, 2);
+    view.open('report.py');
+    assert.equal(calls.length, 2, 'reopening an active script does not run it twice');
+    assert.equal(view.canStop(), true);
+    view.stop('other.py');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(calls[1].signal.aborted, true);
+    assert.equal(calls[0].signal.aborted, false);
+    assert.equal(view.running, true);
+    assert.equal(view.lastRun, null, 'the background result does not overwrite this window');
+    assert.equal(scripts.runningNames.has('report.py'), true);
+    view.stop();
+    await first;
+    assert.equal(view.lastRun.cancelled, true);
+    assert.equal(scripts.runningNames.size, 0);
+});
+
+test('Stop while awaiting a PIN prevents a late answer from launching a script', async () => {
+    const { view, scripts, posted } = windowFor();
+    let resolvePin;
+    scripts.requestRunPin = () => new Promise(resolve => { resolvePin = resolve; });
+    const pending = view.execute();
+    view.stop();
+    resolvePin('1234');
+    assert.equal(await pending, null);
+    assert.equal(posted.length, 0);
+    assert.equal(view.running, false);
+    assert.equal(view.canStop(), false);
+});
+
+test('Stop is hidden when idle, available while running and disabled while cancellation settles', async () => {
+    const { view, app } = windowFor();
+    pendingRuns(app);
+    const submit = {};
+    const stop = {};
+    const result = {};
+    view.layer = { querySelector: selector => ({
+        '[data-run-submit]': submit,
+        '[data-run-action="stop"]': stop,
+        '[data-run-result]': result
+    })[selector] };
+    view._paintRunState();
+    assert.equal(stop.hidden, true);
+    const pending = view.execute();
+    assert.equal(stop.hidden, false);
+    assert.equal(stop.disabled, false);
+    assert.equal(submit.disabled, true);
+    view.stop();
+    assert.equal(stop.disabled, true);
+    assert.match(result.innerHTML, /Stopping/);
+    await pending;
+    assert.equal(stop.hidden, true);
+    assert.equal(submit.disabled, false);
+    assert.match(result.innerHTML, /Stop requested/);
+    assert.doesNotMatch(result.innerHTML, /exit null|is-ok|Print a JSON/);
+});
+
+test('a request failure is not reported as cancellation just because Stop was clicked', async () => {
+    const { view, app } = windowFor();
+    let fail;
+    app.apiCall = () => new Promise((resolve, reject) => { fail = reject; });
+    const problems = [];
+    view._showProblem = text => { if (text) problems.push(text); };
+    const pending = view.execute();
+    view.stop();
+    fail(new Error('Connection lost'));
+    assert.equal(await pending, null);
+    assert.deepEqual(problems, ['Connection lost']);
 });
 
 // A run outlives its window: close it mid-run and the interpreter keeps going. The window is

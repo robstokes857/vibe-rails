@@ -23,7 +23,7 @@ import { TerminalMultiRun } from './terminal-multirun.js';
 import { TerminalEditorModal } from './terminal-editor-modal.js';
 import { TerminalToast } from './terminal-toast.js';
 import { TerminalNotifications } from './terminal-notifications.js';
-import { resolvePromptTemplateForLaunch } from './prompt-template-modal.js';
+import { findEnvironmentForPrompt, resolvePromptTemplateForLaunch } from './prompt-template-modal.js';
 import { cardDisplayId, cardLabel } from './board-card-label.js';
 
 // Pending-close grace window: how long a closed tab is held in the undo
@@ -1527,8 +1527,20 @@ export class TerminalManager {
             environmentName: meta.environmentName,
             title: meta.displayName
         });
-        if (promptResolution.canceled) {
+        if (promptResolution.canceled || this._destroyed) {
             return;
+        }
+
+        // Only fresh starts use the host view's context. Read it after any prompt
+        // dialog so an in-place file switch/rename cannot leave stale context.
+        const launchContext = this.options?.getLaunchContext?.() || {};
+        let initialPrompt = promptResolution.initialPrompt;
+        if (lower(meta.cli) !== 'shell' && cleanString(launchContext.initialPrompt)) {
+            const environment = findEnvironmentForPrompt(
+                this.app.data?.environments || [], meta.cli, meta.environmentName);
+            initialPrompt = [initialPrompt ?? environment?.customPrompt, launchContext.initialPrompt]
+                .filter((text) => typeof text === 'string' && text.trim())
+                .join('\n\n');
         }
 
         if (!tab) {
@@ -1543,7 +1555,7 @@ export class TerminalManager {
             return;
         }
 
-        const workingDirectory = this.getDefaultWorkingDirectory();
+        const workingDirectory = cleanString(launchContext.workingDirectory) || this.getDefaultWorkingDirectory();
         const sessionTitle = meta.cli === 'shell' ? meta.displayName : `${meta.displayName} Terminal`;
         const body = {
             cli: meta.cli,
@@ -1553,8 +1565,8 @@ export class TerminalManager {
         if (meta.environmentName) {
             body.environmentName = meta.environmentName;
         }
-        if (promptResolution.initialPrompt != null) {
-            body.initialPrompt = promptResolution.initialPrompt;
+        if (initialPrompt != null) {
+            body.initialPrompt = initialPrompt;
         }
 
         const started = await tab.instance.startSession(body);

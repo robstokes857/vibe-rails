@@ -20,6 +20,12 @@ This VS Code extension provides seamless integration with VibeRails, a dashboard
 
 - `VibeRails: Open Dashboard` (`viberails.open`) — starts the backend if needed and opens the dashboard panel
 - `VibeRails: Stop Dashboard` (`viberails.stop`) — closes the panel and stops the backend
+- `Add to VibeRails Scripts…` (`viberails.addScript`) — Explorer and editor-tab context menu
+  for local `.ps1`, `.sh` and `.py` files; the command palette uses the active editor.
+  Opens the existing registration form with that path. A cold launch uses the selected file's
+  workspace folder (or its containing folder outside a workspace). An already open dashboard
+  stays in its current project; external files offer Global scope and explain how to use Repo.
+  Existing visible registrations open by ID. Adding never signs or runs a script.
 
 ## Settings
 
@@ -42,6 +48,13 @@ The dashboard and the extension talk through injected globals, not DOM structure
 scripts section uses it instead of its in-app Monaco editor), and `__viberails_openExternal__`
 (opens the account sign-in page in the user's browser). The dashboard
 feature-detects each one, so an older extension host degrades instead of breaking.
+
+Script import uses `__viberails_scriptImportReady__` and
+`__viberails_scriptImportReceived__` for the dashboard-to-extension handshake. The extension
+sends `{ command: 'importScript', requestId, path }` only after the dashboard installs its
+handler. Receipt is acknowledged before user input, so the startup timeout never times out
+an open form. Concurrent requests preserve the first dialog; closing rejects pending delivery.
+The dashboard calls the existing root-only authenticated import API through its shared controller.
 
 `external-sign-in.ts` accepts only `https://viberails.ai/link`, optionally followed by the strict
 public user-code fragment `#code=ABCD-EFGH`, before calling

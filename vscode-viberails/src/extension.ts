@@ -4,11 +4,13 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { BackendManager } from './backend-manager';
 import { WebviewPanelManager } from './webview-panel';
+import { resolveScriptImportTarget } from './script-import';
 import {
     BOOTSTRAP_REQUEST_TIMEOUT_MS,
     BOOTSTRAP_RETRY_ATTEMPTS,
     BOOTSTRAP_RETRY_DELAY_MS,
     COMMAND_OPEN,
+    COMMAND_ADD_SCRIPT,
     COMMAND_STOP,
     COMMAND_TEST_CONNECTION_INFO,
     CONFIG_SECTION,
@@ -51,6 +53,7 @@ let webviewManager: WebviewPanelManager | null = null;
 let statusBarItem: vscode.StatusBarItem | null = null;
 let stopBarItem: vscode.StatusBarItem | null = null;
 let closingPromise: Promise<void> | null = null;
+let openingPromise: Promise<void> | null = null;
 
 export function activate(context: vscode.ExtensionContext) {
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 1000);
@@ -83,6 +86,17 @@ export function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(openCommand);
     context.subscriptions.push(stopCommand);
+    context.subscriptions.push(vscode.commands.registerCommand(COMMAND_ADD_SCRIPT, async (uri?: vscode.Uri) => {
+        try {
+            const target = await resolveScriptImportTarget(uri);
+            await openDashboard(context, target.projectFolder);
+            if (!webviewManager) throw new Error('The VibeRails dashboard was closed. Try again.');
+            await webviewManager.importScript(target.filePath, getStartupTimeoutMs());
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            void vscode.window.showErrorMessage(`Could not add VibeRails script: ${message}`);
+        }
+    }));
     registerTestCommands(context);
     context.subscriptions.push({
         dispose: () => {
@@ -124,14 +138,25 @@ async function closeDashboard(showMessage: boolean, shutdownBackend: boolean): P
     }
 }
 
-async function openDashboard(context: vscode.ExtensionContext): Promise<void> {
-    if (webviewManager?.isVisible()) {
+async function openDashboard(context: vscode.ExtensionContext, projectFolder?: string): Promise<void> {
+    if (closingPromise) await closingPromise;
+    if (openingPromise) return openingPromise;
+    openingPromise = createDashboard(context, projectFolder);
+    try {
+        await openingPromise;
+    } finally {
+        openingPromise = null;
+    }
+}
+
+async function createDashboard(context: vscode.ExtensionContext, projectFolder?: string): Promise<void> {
+    if (webviewManager?.hasPanel()) {
         webviewManager.reveal();
         return;
     }
 
     const bundledAssets = resolveBundledAssets(context);
-    const targetProjectFolder = getCurrentWorkspaceFolder(context);
+    const targetProjectFolder = projectFolder ?? getCurrentWorkspaceFolder(context);
     const manager = await ensureBackendManager(bundledAssets.exePath);
 
     await vscode.window.withProgress({

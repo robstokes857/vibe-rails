@@ -1,10 +1,12 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Diagnostics;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
+using PyBridge;
 using VibeRails.DTOs;
 using VibeRails.Routes;
 using VibeRails.Services.PythonScripts;
@@ -361,6 +363,82 @@ public sealed class PythonScriptRoutesTests : IDisposable
             using var response = await SharedClient.SendAsync(request, TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         });
+    }
+
+    [Fact]
+    public async Task CancellingCapturedRunRequestStopsTheProcessTreeAndRetainsTheVerifiedCache()
+    {
+        var interpreter = PythonLocator.FindBest();
+        Assert.SkipWhen(interpreter is null, "Python is not installed on this machine.");
+        var service = new PythonScriptService(new PythonRunner(interpreter!.ToOptions()), _installDirectory);
+        await service.CreateAsync(new PythonScriptSaveRequest("wait.py", """
+            import os, pathlib, subprocess, sys, time
+            child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])
+            marker = pathlib.Path('running.tmp')
+            marker.write_text(f'{os.getpid()}\n{child.pid}\n{__file__}', encoding='utf-8')
+            os.replace(marker, 'running.txt')
+            time.sleep(120)
+            """), TestContext.Current.CancellationToken);
+        await service.SetPinAsync(new SetPythonScriptPinRequest(null, "1234"), TestContext.Current.CancellationToken);
+        await service.ApproveAsync(new PythonScriptApprovalRequest("wait.py", "1234"), TestContext.Current.CancellationToken);
+
+        await WithHostAsync(async baseUri =>
+        {
+            using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            var request = SharedClient.PostAsync(new Uri(baseUri, "/api/v1/python-scripts/run"),
+                JsonContent.Create(new PythonScriptRunRequest("wait.py"), AppJsonSerializerContext.Default.PythonScriptRunRequest),
+                cancellation.Token);
+            Process? parent = null;
+            Process? child = null;
+            try
+            {
+                var marker = ScriptPath("running.txt");
+                await WaitUntilAsync(() => File.Exists(marker) || request.IsCompleted);
+                Assert.False(request.IsCompleted, "The script should still be running when Stop is pressed.");
+                var lines = await File.ReadAllLinesAsync(marker, TestContext.Current.CancellationToken);
+                parent = Process.GetProcessById(int.Parse(lines[0]));
+                child = Process.GetProcessById(int.Parse(lines[1]));
+                var verifiedCopy = lines[2];
+                Assert.Equal(ScriptPath(".vb-scripts"), Path.GetDirectoryName(verifiedCopy));
+                Assert.True(File.Exists(verifiedCopy));
+                Assert.False(parent.HasExited);
+                Assert.False(child.HasExited);
+
+                cancellation.Cancel(); // The browser's AbortController disconnects this same request.
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+                {
+                    using var response = await request;
+                });
+                await Task.WhenAll(parent.WaitForExitAsync(TestContext.Current.CancellationToken),
+                        child.WaitForExitAsync(TestContext.Current.CancellationToken))
+                    .WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+                Assert.True(File.Exists(verifiedCopy), "Stopped runs retain the signed cache for reuse.");
+                Assert.True(File.Exists(ScriptPath("wait.py")), "The original script must be retained.");
+            }
+            finally
+            {
+                cancellation.Cancel();
+                foreach (var process in new[] { parent, child })
+                {
+                    if (process is null) continue;
+                    try
+                    {
+                        if (!process.HasExited) process.Kill(entireProcessTree: true);
+                    }
+                    catch (InvalidOperationException) { }
+                    finally { process.Dispose(); }
+                }
+                try { using var response = await request; }
+                catch (OperationCanceledException) { }
+            }
+        }, pythonScripts: service);
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(10));
+        while (!condition()) await Task.Delay(25, timeout.Token);
     }
 
     private static Task<HttpResponseMessage> PostAsync<TRequest>(

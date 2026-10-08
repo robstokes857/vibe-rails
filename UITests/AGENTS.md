@@ -113,6 +113,13 @@ This mounts the production sidebar and styles with paged API fixtures. It checks
 against older sessions, Board titles, escaped metadata, narrow scrolling and remount behavior.
 It opens no application database and launches no CLI.
 
+### Focused file picker tests (No Backend Required)
+
+From `UITests`, run `npx playwright test --config playwright.file-explorer.config.js`.
+This mounts the production picker with filesystem API fixtures to check per-project folder
+memory, project switching, legacy preferences, explicit starting paths and cancellation.
+It opens no application database and selects only fixture files.
+
 ### Focused scripts layout tests (No Backend Required)
 
 From `UITests`, run `npx playwright test --config playwright.scripts.config.js`.
