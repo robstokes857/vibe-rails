@@ -31,14 +31,13 @@ test('the dashboard view checks it is still current after its async refresh, bef
     assert.ok(start >= 0 && paintAt > start, 'loadDashboard should paint into #app-content');
     const body = dashboardSource.slice(start, paintAt);
     const refreshAt = body.search(/await Promise\.all\(\[this\.app\.refreshDashboardData\(\), nameTask\]\);/);
-    const guardAt = body.search(/if \(!\['dashboard', 'agents', 'code-quality'\]\.includes\(this\.app\.currentView\)\) return;/);
+    const guardAt = body.search(/if \(this\.loadId !== loadId \|\| this\.app\.currentView !== view\) return;/);
     assert.ok(refreshAt >= 0, 'the refresh must be awaited before painting');
     assert.ok(guardAt > refreshAt, 'the stand-down guard must run after the refresh, before painting');
 });
 
-// app.js routes the legacy `code-quality` view (saved tabs, deep links) to loadDashboard, so the
-// stand-down guard must count it as the dashboard or the page loads its data and paints nothing.
-test('the legacy code-quality route paints Project health', async () => {
+// Saved Quality links must paint the independent report workspace.
+test('the code-quality route paints its report workspace', async () => {
     const { DashboardController } = await import('../../../VibeRails/wwwroot/js/modules/dashboard-controller.js');
     const previousDocument = globalThis.document;
     const previousWindow = globalThis.window;
@@ -48,19 +47,18 @@ test('the legacy code-quality route paints Project health', async () => {
     globalThis.window = { scrollTo() {} };
     try {
         const mounted = [];
-        const rulesHost = {};
-        const dashboard = { querySelector: selector => (selector === '[data-rules-overview-host]' ? rulesHost : null) };
+        const qualityRoot = {};
         const app = {
             currentView: 'code-quality',
             data: { isInGit: false },
             refreshDashboardData: async () => {},
-            cloneTemplate: () => ({ querySelector: selector => (selector === '[data-dashboard]' ? dashboard : null) }),
-            agentController: { mountAgentsOverview: host => mounted.push(host) }
+            cloneTemplate: () => ({ querySelector: selector => (selector === '[data-view="code-quality"]' ? qualityRoot : null) }),
+            ruleController: { attachCodeQualityOverview: host => mounted.push(host) }
         };
         await new DashboardController(app).loadDashboard();
         assert.equal(content.innerHTML, '');
         assert.equal(painted.length, 1);
-        assert.deepEqual(mounted, [rulesHost]);
+        assert.deepEqual(mounted, [qualityRoot]);
     } finally {
         globalThis.document = previousDocument;
         globalThis.window = previousWindow;

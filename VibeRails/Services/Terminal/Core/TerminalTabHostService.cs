@@ -117,7 +117,9 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         await using var scope = _scopeFactory.CreateAsyncScope();
         var scripts = scope.ServiceProvider.GetRequiredService<IPythonScriptService>();
         var canonicalName = await scripts.ValidateRunnableAsync(name, cancellationToken);
-        var scriptsDirectory = scripts.GetScriptsDirectory();
+        var script = (await scripts.GetStatusAsync(cancellationToken)).Scripts
+            .FirstOrDefault(item => item.Id == canonicalName || item.Name == canonicalName);
+        var scriptsDirectory = script != null ? Path.GetDirectoryName(script.Path)! : scripts.GetScriptsDirectory();
         var executable = Environment.ProcessPath;
         if (string.IsNullOrWhiteSpace(executable))
             throw new InvalidOperationException("Unable to determine the VibeRails executable path.");
@@ -132,7 +134,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                 new StartTerminalRequest(
                     WorkingDirectory: scriptsDirectory,
                     Cli: "shell",
-                    Title: $"{canonicalName} · {PythonScriptService.RuntimeDisplayName(canonicalName)}"),
+                    Title: $"{script?.DisplayName ?? script?.Name ?? canonicalName} · {PythonScriptService.RuntimeDisplayName(script?.Name ?? canonicalName)}"),
                 cancellationToken);
 
             await SendInputAsync(

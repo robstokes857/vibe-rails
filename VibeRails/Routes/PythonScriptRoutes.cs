@@ -107,8 +107,17 @@ public static class PythonScriptRoutes
             IPythonScriptService service,
             PythonScriptSaveRequest request,
             CancellationToken cancellationToken) =>
-            ExecuteAsync(() => service.CreateAsync(request, cancellationToken)))
+            ExecuteAsync(() => !isActiveRootBackend && !string.IsNullOrWhiteSpace(request.Directory)
+                ? throw new PythonScriptValidationException("Choosing a host folder is available from the main dashboard.")
+                : service.CreateAsync(request, cancellationToken)))
             .WithName("CreatePythonScript");
+
+        app.MapPost("/api/v1/python-scripts/settings", (
+            IPythonScriptService service,
+            PythonScriptSettingsRequest request,
+            CancellationToken cancellationToken) =>
+            ExecuteAsync(() => service.UpdateSettingsAsync(request, cancellationToken)))
+            .WithName("UpdatePythonScriptSettings");
 
         app.MapPost("/api/v1/python-scripts/rename", (
             IPythonScriptService service,
@@ -147,6 +156,10 @@ public static class PythonScriptRoutes
         catch (PythonScriptValidationException exception)
         {
             return Results.BadRequest(new ErrorResponse(exception.Message));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return Results.BadRequest(new ErrorResponse("The script file or library could not be accessed. Check that the folder exists and is writable, then try again."));
         }
     }
 }

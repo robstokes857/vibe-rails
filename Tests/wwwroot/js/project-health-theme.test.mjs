@@ -66,9 +66,9 @@ test('the Atlas bundle falls back to the same palette the app declares', () => {
     assert.doesNotMatch(template, /Drawing \$\{count\(view\.edges\)\}/, 'the link budget is no longer a notice');
 });
 
-test('the report viewer and the grade read the page tones, open with Git changes and light them', () => {
+test('the report viewer and the grade read the page tones, open with Report files and light Git changes', () => {
     assert.match(viewerSource, /class="code-report code-report-compact"/);
-    assert.match(viewerSource, /this\.activeList = 'changes'/);
+    assert.match(viewerSource, /this\.activeList = 'report'/);
     assert.match(viewerSource, /highlightChanges: true/);
     assert.match(viewerSource, /toggleDiagnostics\(\)/);
     assert.doesNotMatch(viewerSource, /data-graph-note|updateGraphNote/);
@@ -77,14 +77,14 @@ test('the report viewer and the grade read the page tones, open with Git changes
     assert.match(viewerCss, /\.code-report\.code-report-compact \.qr-metrics-section/);
 });
 
-test('the QUALITY page keeps rule actions in the header and a menu for the log and coverage', () => {
+test('Rules retains its actions and Quality retains the log and coverage menu', () => {
     const template = indexHtml.match(/<template id="agents-template">([\s\S]*?)<\/template>/)[1];
     const header = template.match(/<header class="vb-page-header project-health-header">([\s\S]*?)<\/header>/)[1];
-    assert.match(header, /<h1 class="vb-page-title">Rules and code quality<\/h1>/);
+    assert.match(header, /<h1 class="vb-page-title">Rules<\/h1>/);
     assert.match(header, /<section class="project-health-guard"/, 'Git Guard is a pill in the header');
     assert.doesNotMatch(template, /project-health-eyebrow|project-health-card-kicker|project-health-card-toolbar/);
     assert.doesNotMatch(template, /See what needs attention/);
-    const rules = template.match(/<section class="card project-health-card project-health-rules[\s\S]*?<\/section>\s*<section class="card project-health-card project-health-quality/)[0];
+    const rules = template;
     const rulesHeader = rules.match(/<header class="project-health-card-header">([\s\S]*?)<\/header>/)[1];
     assert.match(rulesHeader, /data-action="run-hook-preview"[\s\S]*?data-action="manage-rules"/, 'Check again sits in the card header');
     assert.match(rulesHeader, /data-action="manage-rules"[\s\S]*?View\/Edit Rules/);
@@ -92,7 +92,7 @@ test('the QUALITY page keeps rule actions in the header and a menu for the log a
     assert.match(rules, /data-rules-card-status[\s\S]*?data-action="toggle-health-details"/, 'the Details toggle sits in the verdict row');
     assert.doesNotMatch(rules, /data-rule-files|project-health-rule-file/);
     assert.match(rules, /visually-hidden">\s*<span class="rules-check-running"[\s\S]*?data-vca-console-state/, 'the console state badge is kept for the console, never shown');
-    const quality = template.slice(template.indexOf('project-health-quality vca-console-card'));
+    const quality = indexHtml.match(/<template id="code-quality-template">([\s\S]*?)<\/template>/)[1];
     assert.match(quality, /data-code-analyzer-meta/);
     assert.match(quality, /data-action="toggle-map-coverage"/);
     assert.match(quality, /data-action="toggle-code-analyzer-log"/);

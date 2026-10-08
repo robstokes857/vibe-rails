@@ -60,12 +60,13 @@ frontend, combined code report viewer and shared agent picker, with mocked API r
 It needs no database or installed LLM CLI and does not change the standard suite's configuration.
 The tests cover compact actions, file-to-map selection, visible domain links and large overviews,
 saved metrics, radar keyboard access, themes/reduced motion, independent scrolling, narrow layouts,
-failure/empty states, request cancellation and cleanup, exclusion/restore flow, and agent choice.
+failure/empty states, request cancellation and cleanup, exclusion/restore flow, agent choice,
+independent Rules/Quality checks, and responsive navigation with the Settings cog.
 
 ### Focused Page Header Tests (No Backend Required)
 
 From `UITests`, run `npx playwright test --config playwright.page-headers.config.js`.
-Uses all five production views with intercepted APIs to compare title typography and header
+Uses all six production views with intercepted APIs to compare title typography and header
 treatment at desktop, tablet and phone widths, exercise retained controls, and verify theme colors.
 The static fixture never opens application databases or launches a CLI.
 

@@ -2539,7 +2539,8 @@ export class BoardController {
                 }
                 // Keep the modal and its other sections' unsaved drafts. Only the Jira panel
                 // follows the connection; General and Agent context still edit the opened board.
-                if (action === 'pull' || destination !== board.id) void this.refresh().then(() => {
+                if (action === 'unlink' && destination === board.id) reloadSync();
+                if (action === 'pull' || action === 'unlink' || destination !== board.id) void this.refresh().then(() => {
                     if (editor.isConnected && destination) {
                         const label = editor.querySelector('[data-jira-board]');
                         if (label) label.textContent = this.boardById(destination)?.name || 'Jira board';
@@ -2556,9 +2557,21 @@ export class BoardController {
                 if (jiraVisible) void jira.activate();
                 if (tab === 'history') editor.querySelector('[data-board-history-view]').open = true;
             });
-            const disposeSync = mountBoardSync(this.app, editor.querySelector('[data-board-sync]'), board.id, status => {
-                if (status.isJiraBoard) navigation.combineJira();
-            });
+            let disposeSync = () => {};
+            const reloadSync = () => {
+                disposeSync();
+                disposeSync = mountBoardSync(this.app, editor.querySelector('[data-board-sync]'), board.id, status => {
+                    const title = header.querySelector('.modal-title');
+                    if (status.isJiraBoard) {
+                        title.innerHTML = `Board · <span class="d-inline-block"><i class="fa-brands fa-jira text-primary" role="img" aria-label="Jira board"></i> ${escapeHtml(board.name)}</span>`;
+                        navigation.combineJira();
+                    } else {
+                        title.textContent = `Board · ${board.name}`;
+                        navigation.separateJira();
+                    }
+                });
+            };
+            reloadSync();
             this.boardSettingsDispose = () => { navigation.dispose(); disposeSync(); jira.dispose(); disposeContext(); disposeHistory(); };
         }
         editor.querySelector('[data-board-save-board]')?.addEventListener('click', () => this.saveBoard(editor, board));

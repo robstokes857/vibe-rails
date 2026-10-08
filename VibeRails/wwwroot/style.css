@@ -421,6 +421,19 @@ code {
     min-width: 0;
 }
 
+.app-subnav .app-subnav-settings {
+    flex: 0 0 34px;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    justify-content: center;
+}
+
+.app-subnav-link:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: -2px;
+}
+
 .app-subnav-brand .brand-text-sm {
     white-space: nowrap;
 }
@@ -9256,6 +9269,16 @@ input.form-control:disabled {
 
     .navbar-brand-sm {
         gap: 0 !important;
+    }
+
+    .app-subnav-links {
+        justify-content: flex-start !important;
+        overflow-x: auto;
+        scrollbar-width: thin;
+    }
+
+    .app-subnav-links > * {
+        flex-shrink: 0;
     }
 }
 
@@ -18672,11 +18695,9 @@ body.performance-mode .brand-text-sm {
     filter: none;
 }
 
-/* ── Unified Project health ────────────────────────────────────────────────
-   Rules, VCA status, Git Guard, and Code quality share one intentionally
-   shallow page. Detail-heavy work stays behind one disclosure or modal. */
+/* Rules and Quality share status and action styling, with independent pages. */
 /* ============================================================================
-   QUALITY (view 'agents'): one header row, the Rules card and the Code quality card.
+   Rules (dashboard/agents) and the full-width Quality workspace (code-quality).
    Every status color reads a --quality-* token (declared on :root and mapped from the
    editor theme by the VS Code bridge), so a theme is one block of variables.
    ============================================================================ */
@@ -18684,6 +18705,23 @@ body.performance-mode .brand-text-sm {
     width: min(1180px, 100%);
     margin: 0 auto;
     padding: 0;
+}
+
+.code-quality-page {
+    width: 100%;
+}
+
+.main-container:has(.code-quality-page) {
+    max-width: none;
+}
+
+.code-quality-page .project-health-quality {
+    border: 0;
+    background: transparent;
+}
+
+.code-quality-page .project-health-quality-report {
+    margin: 0;
 }
 
 /* No slack under the Code quality card (VIBE-71): the page ends 14px below it, mirroring the

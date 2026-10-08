@@ -569,7 +569,7 @@ export class VibeControlApp {
     getDuplicateTabViewName(view) {
         // Detail views land on their parent page: a duplicated Python workbench tab
         // opens the Automation page (the script list), not the single-script editor.
-        const normalizedView = ['agents', 'code-quality', 'rule-files', 'agent-edit', 'agent-create'].includes(view)
+        const normalizedView = ['agents', 'rule-files', 'agent-edit', 'agent-create'].includes(view)
             ? 'dashboard'
                 : view === 'python-script'
                     ? 'jobs'
@@ -750,9 +750,8 @@ export class VibeControlApp {
     }
 
     updateActiveSubNav(view) {
-        // Rules and Code quality now share the Project health destination. Legacy
-        // detail routes keep that single nav item highlighted.
-        const highlightView = ['agents', 'code-quality', 'rule-files', 'agent-edit', 'agent-create'].includes(view)
+        // Rule editors retain the Rules highlight; Quality has its own destination.
+        const highlightView = ['agents', 'rule-files', 'agent-edit', 'agent-create'].includes(view)
             ? 'dashboard'
             : view === 'python-script'
                     ? 'jobs'
@@ -762,8 +761,10 @@ export class VibeControlApp {
 
             if (linkView === highlightView) {
                 link.classList.add('active');
+                link.setAttribute('aria-current', 'page');
             } else {
                 link.classList.remove('active');
+                link.removeAttribute('aria-current');
             }
         });
     }
@@ -833,7 +834,7 @@ export class VibeControlApp {
             'agents': () => this.dashboardController.loadDashboard(data),
             'agent-edit': () => this.agentController.loadAgentEdit(data),
             'agent-create': () => this.agentController.loadAgentCreate(),
-            // Legacy route: the code report now lives inline on Project health.
+            // Dedicated report workspace, separate from Rules and Git Guard.
             'code-quality': () => this.dashboardController.loadDashboard(data),
             'rule-files': () => this.agentController.loadRuleFiles(),
             'check-violations': () => this.ruleController.loadCheckViolations(),

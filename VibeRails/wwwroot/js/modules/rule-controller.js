@@ -453,12 +453,12 @@ export class RuleController {
         this.focusedMode = false;
         // The mounted report owns its graph, details panel, observers and request lifetime.
         this.codeReportViewer = null;
-        // A Rules overview is remounted each time the user navigates away and back. Keep the
+        // The Quality workspace is remounted each time the user navigates away and back. Keep the
         // most recent MintLint response so remounting can restore it without starting another
         // scan. A manual scan (or an ignore/restore that deliberately rescans) replaces this.
         this.codeAnalyzerCache = null;
         this.codeAnalyzerScanInProgress = null;
-        // Scan scope survives leaving and remounting Project health, so a rescan started before
+        // Scan scope survives leaving and remounting Quality, so a rescan started before
         // the scope controls are restored replays the last choice.
         this.lastAnalyzerUnpushed = false;
         this.lastAnalyzerFullScan = false;
@@ -479,17 +479,24 @@ export class RuleController {
         this.unload();
         this.focusedMode = false;
         this.viewRoot = root;
-        // Both cards own a console and scan controls. The Code quality card hosts the
-        // Code Atlas / Quality Lab report inline; there is no second report screen.
-        const reportHost = root.querySelector('[data-code-analyzer-report]');
-        this.codeReportViewer = reportHost ? new CodeReportViewer(reportHost, this.app) : null;
         this.bindGuardControls(root);
         this.bindValidationControls(root);
-        this.bindCodeQualityControls(root);
         this.bindProjectHealthControls(root);
         this.bindActionMenuAutoClose(root);
         this.renderRuleInventorySummary();
         void this.runRulesOverviewChecks(root);
+    }
+
+    attachCodeQualityOverview(root) {
+        this.unload();
+        this.focusedMode = false;
+        this.viewRoot = root;
+        const reportHost = root.querySelector('[data-code-analyzer-report]');
+        this.codeReportViewer = reportHost ? new CodeReportViewer(reportHost, this.app) : null;
+        this.bindCodeQualityControls(root);
+        this.bindProjectHealthControls(root);
+        this.bindActionMenuAutoClose(root);
+        void this.runCodeQualityOverviewChecks(root);
     }
 
     bindProjectHealthControls(root) {
@@ -555,10 +562,17 @@ export class RuleController {
         this.setText('[data-rules-card-message]', message);
     }
 
-    // Restores the last scan from cache so leaving and returning to Project health never
+    async runRulesOverviewChecks(root) {
+        await this.refreshHookStatus();
+        if (this.viewRoot !== root || !this.hookStatus?.inGitRepo) return false;
+        await this.runHookPreview();
+        return true;
+    }
+
+    // Restores the last scan from cache so leaving and returning to Quality never
     // re-runs MintLint; a genuinely fresh visit starts one scan. A scan already in flight
     // renders into whichever overview is mounted when it completes.
-    async runRulesOverviewChecks(root) {
+    async runCodeQualityOverviewChecks(root) {
         await this.refreshHookStatus();
         if (this.viewRoot !== root) return false;
         if (!this.hookStatus?.inGitRepo) {
@@ -572,10 +586,7 @@ export class RuleController {
         const restoreCachedAnalyzer = this.restoreCodeAnalyzerCache() || scanInFlight;
         // A first scan still running from the previous mount renders here when it completes.
         if (scanInFlight && !this.codeAnalyzerCache) this.renderCodeAnalyzerLoading();
-        await Promise.all([
-            this.runHookPreview(),
-            restoreCachedAnalyzer ? Promise.resolve() : this.runCodeAnalyzer()
-        ]);
+        if (!restoreCachedAnalyzer) await this.runCodeAnalyzer();
         return true;
     }
 
@@ -585,7 +596,7 @@ export class RuleController {
 
         this.lastAnalyzerUnpushed = cache.unpushed;
         this.lastAnalyzerFullScan = cache.fullScan === true;
-        // Project health owns the toggle; show it the scope the cached scan actually used.
+        // Quality owns the toggle; show it the scope the cached scan actually used.
         const fullScanToggle = this.query('[data-code-analyzer-full-scan]');
         if (fullScanToggle) fullScanToggle.checked = this.lastAnalyzerFullScan;
         this.analyzerIgnores = cache.ignoredFiles;
@@ -596,7 +607,7 @@ export class RuleController {
     }
 
     // Composition kept for the Git Guard views, which host all three concerns on one
-    // root. Project health binds each concern separately. Every binder tolerates
+    // root. Rules and Quality bind their own concerns separately. Every binder tolerates
     // absent hosts.
     bindHookControls(root) {
         this.bindGuardControls(root);
@@ -997,6 +1008,7 @@ export class RuleController {
     }
 
     async runHookPreview() {
+        const root = this.viewRoot;
         const button = this.query('[data-action="run-hook-preview"]');
         this.setButtonBusy(button, true, 'Refreshing…');
         this.setHookMutationButtonsDisabled(true);
@@ -1005,15 +1017,19 @@ export class RuleController {
         this.renderVcaExplanationLoading();
         try {
             const response = await this.app.apiCall('/api/v1/hooks/preview', 'POST', null, { showLoading: false });
+            if (this.viewRoot !== root) return;
             this.vcaConsole?.complete(response);
             this.renderVcaExplanation(response);
         } catch (error) {
+            if (this.viewRoot !== root) return;
             this.vcaConsole?.fail(error);
             this.renderVcaExplanation({ success: false, status: 'error' });
         } finally {
             this.setButtonBusy(button, false);
-            this.setHookMutationButtonsDisabled(false);
-            this.setConsoleUtilityButtonsDisabled(false);
+            if (this.viewRoot === root) {
+                this.setHookMutationButtonsDisabled(false);
+                this.setConsoleUtilityButtonsDisabled(false);
+            }
         }
     }
 
@@ -1032,7 +1048,7 @@ export class RuleController {
         // Remember the scope so ignore/restore rescans replay it instead of silently reverting to
         // the working-tree scope, and so the source pane can request the matching revision.
         this.lastAnalyzerUnpushed = unpushed === true;
-        // The full-scan toggle only exists while Project health is mounted. A scan started without
+        // The full-scan toggle only exists while Quality is mounted. A scan started without
         // it must replay the remembered choice instead of quietly falling back off.
         const fullScanToggle = this.query('[data-code-analyzer-full-scan]');
         const fullScan = fullScanToggle ? fullScanToggle.checked === true : this.lastAnalyzerFullScan === true;
@@ -1128,7 +1144,7 @@ export class RuleController {
         void this.codeReportViewer?.setResponse(response);
     }
 
-    // Scan policy stays on Project health, outside the report inspector.
+    // Scan policy stays on Quality, outside the report inspector.
     async openAnalyzerExclusions() {
         const root = this.viewRoot;
         const ignored = await this.fetchAnalyzerIgnores();

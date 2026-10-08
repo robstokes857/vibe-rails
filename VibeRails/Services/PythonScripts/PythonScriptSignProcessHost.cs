@@ -59,14 +59,16 @@ public static class PythonScriptSignProcessHost
             return 1;
         }
 
-        // Accept a full path to a script that already lives in the scripts folder; the
-        // service validates the bare name either way.
-        name = Path.GetFileName(name.Trim());
-
-        var service = new PythonScriptService(installDirectory: installDirectory);
+        var service = new PythonScriptService(installDirectory: installDirectory, allProjects: true);
         try
         {
             var status = await service.GetStatusAsync();
+            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            if (Path.IsPathFullyQualified(name))
+            {
+                var selected = status.Scripts.FirstOrDefault(entry => string.Equals(entry.Path, Path.GetFullPath(name), comparison));
+                name = selected?.Id ?? throw new PythonScriptValidationException("Register this file from the Scripts page before signing it.");
+            }
             if (!status.PinConfigured)
             {
                 Console.WriteLine("No signing PIN is configured yet. Create one now.");
@@ -87,7 +89,7 @@ public static class PythonScriptSignProcessHost
             // Approvals key off the file's on-disk casing; prefer the exact entry and only
             // fall back to a case-insensitive match for the typed name.
             var script = result.Scripts.FirstOrDefault(entry =>
-                    string.Equals(entry.Name, name, StringComparison.Ordinal))
+                    entry.Id == name || string.Equals(entry.Name, name, StringComparison.Ordinal))
                 ?? result.Scripts.FirstOrDefault(entry =>
                     string.Equals(entry.Name, name, StringComparison.OrdinalIgnoreCase));
             Console.WriteLine(script is { Status: PythonScriptService.StatusApproved }

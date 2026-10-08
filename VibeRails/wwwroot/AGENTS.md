@@ -14,7 +14,10 @@ starting a different session clears local state. Clearing the card flag clears i
 `board-card-organize.js` renders the saved card's **Move or merge** section. It offers project
 boards/lanes and a card search, confirms the destination and lane Automation count, and refuses
 to replace an editor with unsaved drafts. Dispose it on close/replacement/unload. The existing
-navbar **Sign in** opens the device approval flow when signed out. The top navigation is the only application navigation.
+navbar **Sign in** opens the device approval flow when signed out. The top navigation is the
+only application navigation. Quality is third and Rules fourth; they are separate destinations.
+Settings is an accessible icon-only cog immediately after the Automation play button.
+Rules runs validation only; Quality restores or starts its own cached scan when opened.
 
 Comments includes agent checkpoints and legacy note rows. Attention entries appear first; the
 remaining entries stay chronological. All / Hide agent comments / Agent comments filters keep
@@ -29,7 +32,7 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 
 ## Page headings (VIBE-70)
 
-Quality, ENVs, Vibe AI, MCP and Settings use `vb-page-header`, `vb-page-heading` and
+Rules, Quality, ENVs, Vibe AI, MCP and Settings use `vb-page-header`, `vb-page-heading` and
 one `h1.vb-page-title` in their view templates. `style.css` owns the shared title typography,
 left alignment, divider, shared top inset, spacing and narrow-screen stacking. Optional supporting text uses
 `vb-page-description`; grouped controls use `vb-page-actions`. Grid workspaces supply their
@@ -53,10 +56,10 @@ title rules, uppercase utilities, inline letter spacing or gradient page titles.
 | [js/modules/terminal-snapshot-renderer.js](js/modules/terminal-snapshot-renderer.js) | Renders reserved `xterm_ui_bytes` payloads into xterm.js and captures PNG data URLs for MCP Explorer previews |
 | [js/modules/environment-controller.js](js/modules/environment-controller.js) | Environment CRUD + "Web UI" launch button |
 | [js/modules/sandbox-controller.js](js/modules/sandbox-controller.js) | Sandbox CRUD + launch terminals/VS Code into sandbox dirs |
-| [js/modules/dashboard-controller.js](js/modules/dashboard-controller.js) | Unified Project health page (Rules, VCA, Git Guard, and Code quality; no embedded terminal) |
+| [js/modules/dashboard-controller.js](js/modules/dashboard-controller.js) | Independent Rules (dashboard/agents) and full-width Quality (code-quality) pages; no embedded terminal |
 | [js/modules/code-analyzer-dashboard.js](js/modules/code-analyzer-dashboard.js) | MintLint report model helpers (plus the unmounted legacy workspace renderer) |
-| [js/modules/code-report/viewer.js](js/modules/code-report/viewer.js) | Code Atlas / Quality Lab report inline in Project health's Code quality card: real repository graph, inline saved-details panel and explicit teardown; see [integration contract](js/modules/code-report/README.md) |
-| [js/modules/project-health-fix-launcher.js](js/modules/project-health-fix-launcher.js) | Inline shared agent/environment pickers beside Project health Fix actions; synchronizes and remembers the target for direct launch |
+| [js/modules/code-report/viewer.js](js/modules/code-report/viewer.js) | Code Atlas / Quality Lab report in the dedicated Quality workspace: real repository graph, inline saved-details panel and explicit teardown; see [integration contract](js/modules/code-report/README.md) |
+| [js/modules/project-health-fix-launcher.js](js/modules/project-health-fix-launcher.js) | Inline shared agent/environment pickers beside Rules and Quality Fix actions; synchronizes and remembers the target for direct launch |
 | [js/modules/jobs-controller.js](js/modules/jobs-controller.js) | Automation page: ordered repository-script/Worker workflow editor, automation CRUD, per-action run details, recipes, and "Run now" (queues a native-terminal run; `launchFromNav` for the nav launcher); owns the shared `PythonScriptsController` |
 | [js/modules/python-scripts-controller.js](js/modules/python-scripts-controller.js) | "Scripts" section of the Automation page (pwsh, bash and python) + shared lifecycle and signing flows |
 | [js/modules/script-runtimes.js](js/modules/script-runtimes.js) | The `.ps1`/`.sh`/`.py` → pwsh/bash/python table (labels, icons, Monaco language, starter templates, name rule) every script surface reads |
@@ -191,7 +194,8 @@ row on the same surface. Lane headers retain their card counts. There are no lan
 fields: **New card** opens the editor, whose Lane selector chooses the destination.
 The settings modal has General, Jira Cloud, Agent context and History tabs (VIBE-103) for local
 boards. Jira boards combine the board settings and Jira controls in **General**, followed by
-Agent context and History. The sync status's `isJiraBoard` determines this layout; move existing
+Agent context and History, with a Jira logo beside the board name in the modal header.
+The sync status's `isJiraBoard` determines this layout and logo; move existing
 controls without replacing drafts or interrupting the selected section when status arrives.
 Each tab has a thin button border, with a filled active tab. Jira controls (`board-jira.js`) target
 the explicit board being edited. The Jira Cloud connection status sits at the right of the modal
@@ -210,7 +214,11 @@ Human-made excludes imports. Assignee filter choices deduplicate canonical CLI i
 On lane cards the Jira badge has its own row, with long issue keys wrapping inside the card.
 Board settings hide viberails.ai sync for boards whose sync status reports `isJiraBoard`;
 the section stays hidden until status loads. Jira connection and pull controls remain available.
-Saved Jira tokens show a fixed dot placeholder; the input value stays empty until a replacement is typed.
+Saved Jira tokens show a fixed 32-dot placeholder; the input value stays empty until a replacement is typed.
+**Unlink Jira** confirms before removing the connection and its saved token; the board, imported
+cards and discussion stay. A successful unlink clears the Jira form and logo, restores the separate
+Jira tab and local sync controls, and preserves drafts in other settings sections. Failed unlink
+requests leave the connected form available for retry.
 Token entry uses a text input with autocomplete, spellcheck, autocapitalization and autocorrection off.
 The header wraps whole labels so the display ID, work type and priority stay readable in narrow lanes.
 Lane cards have a 10rem minimum height and keep activity and assignment at the bottom; longer content grows the card.
@@ -697,8 +705,7 @@ its editor. Tests: `Tests/wwwroot/js/terminal-board-card-link.test.mjs`, `Termin
 ## Automation workflow editor
 
 The Automation list shows enabled workflows first, with disabled workflows behind a collapsed
-**Disabled automations** caret and count. The Scripts list similarly keeps signed (`approved`)
-scripts behind **Signed scripts**, leaving unsigned or changed scripts visible. Both native
+**Disabled automations** caret and count. The Scripts list keeps unsigned or changed scripts behind **Unsigned scripts**, leaving signed (`approved`) scripts visible. Both native
 `details` groups start closed and preserve their open state across list refreshes.
 
 `jobs-controller.js` owns an ordered workflow made of repository Script actions and at most one
@@ -825,7 +832,7 @@ started.
 ## Rule management forms
 
 `agent-controller.js` owns the Manage rules modal, full editor, and new-file wizard.
-Project health keeps **View/Edit Rules** and **New rule file** in the Rules card header.
+The Rules page keeps **View/Edit Rules** and **New rule file** in the Rules card header.
 The card shows aggregate counts; browse individual rule files in the manager, not a badge strip.
 The manager shows searchable directory paths and scope. Add uses the same form in the
 manager and full editor; the editor has explicit per-rule Edit/Remove actions. Back from
@@ -849,9 +856,8 @@ and CSV quote wrappers are rejected. Backend write validation remains authoritat
 
 ## Customizable LLM Pickers
 
-Project health's Fix actions use inline selectors with the shared `sandbox` picker context,
-including custom environments. Selecting an agent synchronizes all three Fix selectors and
-remembers the choice; each Fix button launches directly without an intermediate dialog.
+Rules and Quality Fix actions use inline selectors with the shared `sandbox` picker context,
+including custom environments. Selecting an agent remembers the choice across both pages; each Fix button launches directly without an intermediate dialog.
 The page disposes its pickers on unload, and the inline quality report is destroyed with it.
 
 `LlmPickerController` loads the resolved machine-wide catalog from
@@ -1001,6 +1007,17 @@ See also: [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for back
 
 ## Python script workbench
 
+The Scripts section is an explicit user library. New script includes display name, Global/Repo
+scope, PIN on each run, and a destination folder (default `scripts/UserScripts`, with the shared
+folder picker). Add from disk registers the original file in place. The kebab's Script settings
+edits metadata; removing an entry retains its file. API IDs, not display names, key the workbench,
+run inputs and nav launcher. The controller retains `fileName` for runtime selection. Both the
+workbench agent and script execution use the registered file's own directory. The old scripts
+folder is never scanned and no legacy entries are backfilled.
+Creation resolves the returned registration ID even when the server canonicalizes the destination.
+A rename keeps that ID but must refresh the editor language and clear prior run output. Missing-file
+recovery rechecks content after a library refresh: retained registrations do not prove a file exists.
+
 - **View** `python-script` (data `{ name }`), module `js/modules/python-script-workbench.js`
   (`PythonScriptWorkbench`, constructed in `app.js`; Automation stays the highlighted nav
   entry and a duplicated tab lands on `jobs`). Opened from the Automation page's Python
@@ -1022,8 +1039,7 @@ See also: [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for back
   loaded file: python, powershell or shell); an optional last-run drawer; a draggable
   splitter (`role="separator"`, Arrow keys ±24px); and the agent terminal
   (`renderTerminalPanel({ workingDirectory })` + `bindTerminalActions(host, null,
-  { defaultWorkingDirectory: scriptsDirectory })`, so sessions start in the **scripts
-  directory**, not the project root). **Side by side is the layout**: from 880px up
+  { defaultWorkingDirectory: scriptsDirectory })`, so sessions start in the **selected script's directory**). **Side by side is the layout**: from 880px up
   (`isSideBySideLayout()` = the CSS `@media (min-width: 880px)`) the terminal is a grid
   column BESIDE the editor, full working height, and the (vertical) splitter sets its
   width — `--python-workbench-terminal-width`, persisted in localStorage

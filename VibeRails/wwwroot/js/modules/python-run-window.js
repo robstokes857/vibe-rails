@@ -291,7 +291,7 @@ export class PythonRunWindow {
     }
 
     _shell() {
-        const name = escapeHtml(this.name || '');
+        const name = escapeHtml(this.scripts?.displayName?.(this.name) || this.name || '');
         return `
             <div class="modal fade show d-block vb-run-window" tabindex="-1" role="dialog"
                  aria-modal="true" aria-labelledby="vb-run-window-title">
@@ -299,7 +299,7 @@ export class PythonRunWindow {
                     <form class="modal-content" data-run-form autocomplete="off">
                         <div class="modal-header vb-run-header">
                             <div class="vb-run-identity">
-                                <i class="${scriptRuntimeFor(this.name).icon}" aria-hidden="true"></i>
+                                <i class="${scriptRuntimeFor(this.scripts?.scriptByName?.(this.name)?.fileName || this.name).icon}" aria-hidden="true"></i>
                                 <h5 class="modal-title" id="vb-run-window-title">Run <span>${name}</span></h5>
                             </div>
                             <button type="button" class="btn-close" data-run-action="close" aria-label="Close"></button>
@@ -355,7 +355,7 @@ export class PythonRunWindow {
     _renderFields() {
         const extras = this.extras.map((extra, index) => this._renderExtraRow(extra, index)).join('');
         if (!extras) {
-            return `<p class="vb-run-empty">No arguments configured for ${escapeHtml(this.name || 'this script')}. Add one to pass a value through <code>${escapeHtml(scriptRuntimeFor(this.name).argumentsHint)}</code>.</p>`;
+            return `<p class="vb-run-empty">No arguments configured for ${escapeHtml(this.name || 'this script')}. Add one to pass a value through <code>${escapeHtml(scriptRuntimeFor(this.scripts?.scriptByName?.(this.name)?.fileName || this.name).argumentsHint)}</code>.</p>`;
         }
         return extras;
     }
@@ -396,7 +396,7 @@ export class PythonRunWindow {
             const looksLikeFlag = /^-{1,2}[^\d\s]/.test(token);
             return `<span class="${looksLikeFlag ? 'vb-run-flag' : 'vb-run-value'}">${escapeHtml(quoteForDisplay(token))}</span>`;
         }).join(' ');
-        box.innerHTML = `<span class="vb-run-exec">${scriptRuntimeFor(this.name).command}</span> <span class="vb-run-script">${escapeHtml(this.name || '')}</span>${tokens ? ' ' + tokens : ''}`;
+        box.innerHTML = `<span class="vb-run-exec">${scriptRuntimeFor(this.scripts?.scriptByName?.(this.name)?.fileName || this.name).command}</span> <span class="vb-run-script">${escapeHtml(this.scripts?.scriptByName?.(this.name)?.path || this.name || '')}</span>${tokens ? ' ' + tokens : ''}`;
         box.classList.toggle('is-incomplete', Boolean(error));
         this._paintTerminalLink(argv.length > 0 || Boolean(this.stdin));
     }

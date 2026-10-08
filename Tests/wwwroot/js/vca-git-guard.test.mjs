@@ -155,7 +155,7 @@ test('Project health includes a direct remove action for a broken Git Guard', as
     assert.match(setting, />Remove</);
 });
 
-test('Rules overview automatically starts validation and analysis together', async () => {
+test('Rules overview runs validation without starting code analysis', async () => {
     const controller = new RuleController({});
     const root = {};
     const calls = [];
@@ -167,10 +167,10 @@ test('Rules overview automatically starts validation and analysis together', asy
     controller.runCodeAnalyzer = async () => calls.push('analysis');
 
     assert.equal(await controller.runRulesOverviewChecks(root), true);
-    assert.deepEqual(calls.sort(), ['analysis', 'validation']);
+    assert.deepEqual(calls, ['validation']);
 });
 
-test('Rules overview restores its MintLint result instead of rescanning on return', async () => {
+test('Quality restores its MintLint result without rescanning or running rules', async () => {
     const controller = new RuleController({});
     // Restoring a cached scan reads the view's own controls, so the stub root answers queries.
     const root = { querySelector: () => null };
@@ -190,8 +190,8 @@ test('Rules overview restores its MintLint result instead of rescanning on retur
     controller.runCodeAnalyzer = async () => calls.push('analysis');
     controller.renderCodeAnalyzerSummary = response => calls.push(response === cachedResponse ? 'restored' : 'wrong-response');
 
-    assert.equal(await controller.runRulesOverviewChecks(root), true);
-    assert.deepEqual(calls.sort(), ['restored', 'validation']);
+    assert.equal(await controller.runCodeQualityOverviewChecks(root), true);
+    assert.deepEqual(calls, ['restored']);
 });
 
 test('focused Git Guard autoruns again when the view is reopened', async () => {
@@ -474,8 +474,8 @@ test('QUALITY binds its scan actions and console when its overview is mounted', 
     const controller = new RuleController({
         data: {}, bindAction: (_root, selector, action) => actions.set(selector, action)
     });
-    controller.runRulesOverviewChecks = async () => true;
-    controller.attachRulesOverview(root);
+    controller.runCodeQualityOverviewChecks = async () => true;
+    controller.attachCodeQualityOverview(root);
     assert.ok(controller.codeAnalyzerConsole instanceof VcaConsole);
     let scans = 0;
     controller.runCodeAnalyzer = () => { scans += 1; };

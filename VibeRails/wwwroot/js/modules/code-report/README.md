@@ -1,13 +1,13 @@
 # Code report viewer
 
-`RuleController.attachRulesOverview()` mounts `CodeReportViewer` inline in Project health's
-Code quality card (`[data-code-analyzer-report]`), so the map, health summary and file list are
-the first thing QUALITY shows. There is no second screen: the old `code-quality` route is an
-alias that loads Project health. The controller supplies the latest real MintLint response from
-its scan cache; the viewer requests a current repository graph through `app.apiCall`. Scan
-scope, exclusions, Scan again, Fix and Copy scan summary stay in the card header; rule
-enforcement and Git Guard stay in the Rules card. There is no second report store, scan engine
-or theme preference.
+`RuleController.attachCodeQualityOverview()` mounts `CodeReportViewer` in the dedicated,
+full-width Quality workspace (`code-quality`, `[data-code-analyzer-report]`). Rules and Git
+Guard stay on their own page (`dashboard` / `agents`); opening Rules does not start analysis,
+and opening Quality does not run rule validation. Settings is the cog beside Automation's play
+button, leaving room for both navigation destinations. The controller supplies the latest real
+MintLint response from its scan cache; the viewer requests a current repository graph through
+`app.apiCall`. Scan scope, exclusions, Scan again, Fix and Copy scan summary stay in the Quality
+header. There is no second report store, scan engine or theme preference.
 
 ## Composition and lifetime
 
@@ -16,7 +16,11 @@ or theme preference.
   inline panel of saved measurements and captured excerpts (never a modal or window).
   **Show in code explorer** and Escape return to the map. Copy context is absent.
 - The chrome is compact: the sidebar is the grade, the radar and the file list, with **Git
-  changes** as the default list and the changed files lit on the map on load. The scan's count,
+  changes** available beside the default **Report files** list and the changed files lit on the map on load.
+  One second after Atlas is ready, the first report file is selected using the normal map focus
+  animation. User input cancels this opening selection, as do reload and teardown; empty reports,
+  failed maps and a first file outside the map skip it. Reduced motion follows Atlas's preference.
+  The scan's count,
   duration and age sit in the card header; the metric averages live in a file's details; map
   coverage (`toggleDiagnostics()`) and the scan log open from the card's menu. The verdict, the
   grade, the radar and the map read the host's `--quality-*`, `--node-*` and `--graph-*` tokens.

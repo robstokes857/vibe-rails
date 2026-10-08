@@ -15,6 +15,7 @@ export function normalizeLauncherItems(items) {
             key: String(item?.key || ''),
             kind: item?.kind === 'script' ? 'script' : 'automation',
             label: String(item?.label || ''),
+            ...(item?.scriptFileName ? { scriptFileName: String(item.scriptFileName) } : {}),
             jobId: Number(item?.jobId),
             enabled: Boolean(item?.enabled),
             order: Number(item?.order) || 0,
@@ -31,7 +32,7 @@ export function isLauncherItemRunnable(item) {
 
 function launcherItemIcon(item) {
     // A script's label is its file name, whose extension says python, pwsh or bash.
-    return item.kind === 'script' ? scriptRuntimeFor(item.label).icon : 'fa-solid fa-play';
+    return item.kind === 'script' ? scriptRuntimeFor(item.scriptFileName || item.label).icon : 'fa-solid fa-play';
 }
 
 /**
@@ -314,14 +315,14 @@ export class AutomationNavLauncher {
         } else {
             const runningNames = this.app.jobController?.pythonScripts?.runningNames;
             target.innerHTML = visible.map((item, index) => this._renderFlyoutItem(
-                item, index, item.kind === 'script' && Boolean(runningNames?.has?.(item.label)))).join('');
+                item, index, item.kind === 'script' && Boolean(runningNames?.has?.(item.key.startsWith('script:') ? item.key.slice(7) : item.label)))).join('');
             target.querySelectorAll('[data-automation-launch-index]').forEach((button) => {
                 button.addEventListener('click', () => {
                     const index = Number(button.dataset.automationLaunchIndex);
                     const item = visible[index];
                     if (!item || !isLauncherItemRunnable(item)) return;
                     if (item.kind === 'script') {
-                        void this._runScript(item.label);
+                        void this._runScript(item.key.startsWith('script:') ? item.key.slice(7) : item.label);
                     } else {
                         this.closeFlyout();
                         void this.app.jobController?.launchFromNav?.(item.jobId);

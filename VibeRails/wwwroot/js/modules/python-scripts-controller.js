@@ -90,7 +90,7 @@ export class PythonScriptsController {
                         <span class="jobs-count" data-python-scripts-count>0 scripts</span>
                     </div>
                     <p>Edit single-file pwsh, bash, or python scripts with an agent terminal beside the editor. Sign with your PIN to run.</p>
-                    <p class="python-scripts-directory">Folder: <code data-python-scripts-dir></code></p>
+                    <p class="python-scripts-directory">Default folder: <code data-python-scripts-dir></code></p>
                 </div>
                 <div class="python-scripts-heading-actions">
                     <button class="btn btn-sm btn-primary" type="button" data-python-scripts-action="new">
@@ -112,8 +112,7 @@ export class PythonScriptsController {
             </div>
             <p class="python-scripts-runtime-help">The extension picks the interpreter: <strong>pwsh</strong> (PowerShell 7)
                 runs <code>.ps1</code>, <strong>bash</strong> runs <code>.sh</code> (Git Bash on Windows), and
-                <strong>python</strong> runs <code>.py</code>. For scripts that live in this repository, choose
-                <strong>New automation → Add script</strong> above.</p>
+                <strong>python</strong> runs <code>.py</code>. Add a file from disk to run it where it lives. Choose Repo to show it only here, or Global for every repository.</p>
             <div class="python-scripts-list" data-python-scripts-list>
                 <div class="jobs-empty" role="status"><span class="spinner-border spinner-border-sm"></span> Loading scripts…</div>
             </div>`;
@@ -222,6 +221,9 @@ export class PythonScriptsController {
     }
 
     _applyState(state) {
+        state = state ? { ...state, scripts: (state.scripts || []).map(script => ({
+            ...script, fileName: script.fileName || script.name, name: script.id || script.name
+        })) } : state;
         this.state = state;
         this._lastRefreshAt = Date.now();
         this._render();
@@ -264,7 +266,7 @@ export class PythonScriptsController {
         const html = scripts.length === 0
             ? `<div class="jobs-empty python-scripts-empty">
                     <strong>No scripts yet</strong>
-                    <span>Write a pwsh, bash, or python script here, copy one in from disk, or drop a
+                    <span>Write a pwsh, bash, or python script here, add one from disk, or drop a
                         <code>.ps1</code>, <code>.sh</code> or <code>.py</code> file onto this panel.</span>
                     <div class="python-scripts-empty-actions">
                         <button class="btn btn-sm btn-primary" type="button" data-python-scripts-action="new">
@@ -275,35 +277,38 @@ export class PythonScriptsController {
                         </button>` : ''}
                     </div>
                 </div>`
-            : (unsigned.length ? `<div class="python-scripts-list">${unsigned.map(script => this._renderRow(script)).join('')}</div>` : '')
-                + (signed.length ? `
-                    <details class="jobs-collapsible-list" data-signed-scripts>
-                        <summary>
-                            <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
-                            <span>Signed scripts</span><span class="jobs-count">${signed.length}</span>
+            : (signed.length ? `<div class="python-scripts-list">${signed.map(script => this._renderRow(script)).join('')}</div>` : '')
+                + (unsigned.length ? `
+                    <details class="jobs-collapsible-list" data-unsigned-scripts>
+                        <summary><i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+                            <span>Unsigned scripts</span><span class="jobs-count">${unsigned.length}</span>
                         </summary>
-                        <div class="python-scripts-list">${signed.map(script => this._renderRow(script)).join('')}</div>
+                        <div class="python-scripts-list">${unsigned.map(script => this._renderRow(script)).join('')}</div>
                     </details>` : '');
 
         // Re-assigning identical markup would close an open row menu (and restart the
         // spinner) on every background refresh.
         if (html === this._lastListHtml) return;
         this._lastListHtml = html;
-        const signedOpen = root.querySelector('[data-signed-scripts]')?.open === true;
+        const unsignedOpen = root.querySelector('[data-unsigned-scripts]')?.open === true;
         list.innerHTML = html;
-        const signedGroup = root.querySelector('[data-signed-scripts]');
-        if (signedGroup) signedGroup.open = signedOpen;
+        const unsignedGroup = root.querySelector('[data-unsigned-scripts]');
+        if (unsignedGroup) unsignedGroup.open = unsignedOpen;
     }
 
     _renderRow(script) {
         const meta = STATUS_META[script.status] || STATUS_META.unapproved;
-        const runtime = scriptRuntimeFor(script.name);
+        const runtime = scriptRuntimeFor(script.fileName || script.name);
         const name = escapeHtml(script.name);
+        const label = escapeHtml(script.displayName || script.fileName || script.name);
         const running = this.runningNames.has(script.name);
         const canRun = script.status === 'approved' && !running;
         const lastRun = this.lastRunByName.get(script.name);
         const approveLabel = script.status === 'approved' ? 'Re-sign' : 'Sign';
         const details = [
+            script.scope === 'repo' ? 'Repo' : 'Global',
+            script.fileName || script.name,
+            script.requirePinEachRun ? 'PIN each run' : '',
             formatFileExplorerSize(script.sizeBytes),
             script.modifiedUtc ? `edited ${formatRelativeTime(script.modifiedUtc).toLowerCase()}` : '',
             script.status === 'approved' && script.approvedUtc
@@ -316,8 +321,8 @@ export class PythonScriptsController {
                 <div class="python-script-main">
                     <div class="python-script-identity">
                         <button class="python-script-name" type="button" data-python-scripts-action="open"
-                                data-name="${name}" title="Edit ${name}">
-                            <span>${name}</span>
+                                data-name="${name}" title="Edit ${label}">
+                            <span>${label}</span>
                             <i class="fa-solid fa-pen-to-square" aria-hidden="true"></i>
                         </button>
                         <span class="python-script-meta"><span class="python-script-runtime" data-runtime="${runtime.id}"
@@ -329,12 +334,12 @@ export class PythonScriptsController {
                 </div>
                 <div class="python-script-actions">
                     <button class="btn btn-sm btn-outline-primary python-script-edit" type="button" data-python-scripts-action="edit"
-                            data-name="${name}" title="Open ${name} in the editor with an agent terminal beside it">
+                            data-name="${name}" title="Open ${label} in the editor with an agent terminal beside it">
                         <i class="fa-solid fa-pen-to-square me-1" aria-hidden="true"></i>Edit
                     </button>
                     <button class="btn btn-sm btn-primary" type="button" data-python-scripts-action="run"
                             data-name="${name}" ${canRun ? '' : 'disabled'}
-                            title="${running ? `${name} is running` : canRun ? `Run ${name} and read its output here` : 'Sign the script before running it'}">
+                            title="${running ? `${label} is running` : canRun ? `Run ${label} and read its output here` : 'Sign the script before running it'}">
                         ${running ? RUNNING_BUTTON_HTML : '<i class="fa-solid fa-play me-1" aria-hidden="true"></i>Run'}
                     </button>
                     <button class="btn btn-sm btn-outline-secondary" type="button" data-python-scripts-action="approve"
@@ -344,7 +349,7 @@ export class PythonScriptsController {
                     <div class="python-script-menu-wrap">
                         <button class="btn btn-sm btn-outline-secondary python-script-menu-toggle" type="button"
                                 data-python-scripts-action="menu" data-name="${name}" aria-haspopup="menu"
-                                aria-expanded="false" aria-label="More actions for ${name}" title="More actions">
+                                aria-expanded="false" aria-label="More actions for ${label}" title="More actions">
                             <i class="fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>
                         </button>
                         <div class="python-script-menu" role="menu" data-python-script-menu="${name}" hidden>
@@ -374,11 +379,12 @@ export class PythonScriptsController {
                 ? item('run-terminal', 'fa-terminal', 'Run in terminal…')
                 : '',
             this.canOpenInVsCode() ? item('open-vscode', 'fa-arrow-up-right-from-square', 'Open in VS Code') : '',
+            item('settings', 'fa-sliders', 'Script settings…'),
             item('duplicate', 'fa-copy', 'Duplicate…'),
             item('rename', 'fa-i-cursor', 'Rename…'),
             item('copy-path', 'fa-clipboard', 'Copy full path'),
             script.status === 'unapproved' ? '' : item('revoke', 'fa-ban', 'Remove signature'),
-            item('delete', 'fa-trash', 'Delete…', 'python-script-menu-item-danger')
+            item('delete', 'fa-trash', 'Remove from library…', 'python-script-menu-item-danger')
         ].filter(Boolean).join('');
     }
 
@@ -416,6 +422,7 @@ export class PythonScriptsController {
         if (action === 'open' || action === 'edit') return this.openScript(name);
         if (action === 'open-vscode') return this.openInVsCode(name);
         if (action === 'duplicate') return void this._duplicateAndOpen(name);
+        if (action === 'settings') return void this.editSettings(name);
         if (action === 'rename') return void this.rename(name);
         if (action === 'copy-path') return void this.copyPath(name);
         if (action === 'approve') return void this.approve(name);
@@ -490,6 +497,9 @@ export class PythonScriptsController {
         if (lastRun) lastRun.open = Boolean(details.open);
     }
 
+    displayName(name) { const script = this.scriptByName(name); return script?.displayName || script?.fileName || name; }
+    scriptDirectory(name) { return this.scriptByName(name)?.path?.replace(/[\\/][^\\/]+$/, '') || this.state?.scriptsDirectory || null; }
+
     // --- authoring ---
 
     /** Opens the workbench view for a script — the same destination in every host. */
@@ -504,7 +514,7 @@ export class PythonScriptsController {
         if (!script || !this.canOpenInVsCode()) return;
         globalThis.window.__viberails_openFile__(script.path);
         const signHint = script.status === 'unapproved' ? 'sign it here when it is ready' : 're-sign it here';
-        this.app.showToast('Opened in VS Code', `${name} is open in an editor tab. Save there, then ${signHint}.`, 'info');
+        this.app.showToast('Opened in VS Code', `${this.displayName(name)} is open in an editor tab. Save there, then ${signHint}.`, 'info');
     }
 
     async _newScriptAndOpen() {
@@ -519,13 +529,14 @@ export class PythonScriptsController {
 
     /**
      * Prompts for a name and creates the file from the template. Resolves with the new
-     * script's name, or null when cancelled/failed. Callers decide where to go next.
+     * script's registration ID, or null when cancelled/failed. Callers decide where to go next.
      */
     async newScript() {
         await this.ensureState();
+        let displayEdited = false;
         const values = await this._promptForm({
             title: 'New script',
-            body: `Choose pwsh, bash, or python. The file is created in ${this.state?.scriptsDirectory || 'the scripts folder'}. It starts unsigned — sign it when you are ready to run it.`,
+            body: 'Choose pwsh, bash, or python, where to create your script and where it appears. Sign it when you are ready to run it.',
             fields: [{
                 key: 'runtime',
                 label: 'Runs with',
@@ -542,24 +553,50 @@ export class PythonScriptsController {
                 value: this._uniqueName('script.py'),
                 placeholder: 'script.py',
                 autofocus: true
+            }, ...this._libraryFields(this._uniqueName('script.py')), {
+                key: 'directory', label: 'Save in folder', type: 'directory',
+                value: this.state?.scriptsDirectory || ''
             }],
             submitLabel: 'Create and edit',
             // The two fields describe one choice: picking bash renames script.py to
             // script.sh, and typing deploy.ps1 flips the picker to pwsh.
-            onFieldChange: (key, data) => this._syncRuntimeAndName(key, data),
-            validate: (data) => this._validateNewName(this._nameForRuntime(data.name, data.runtime))
+            onFieldChange: (key, data) => {
+                const updates = this._syncRuntimeAndName(key, data) || {};
+                if (key === 'name' || key === 'runtime') {
+                    if (!displayEdited) updates.displayName = this._nameForRuntime(updates.name || data.name, updates.runtime || data.runtime);
+                }
+                if (key === 'displayName') displayEdited = true;
+                return updates;
+            },
+            validate: (data) => this._validateNewName(this._nameForRuntime(data.name, data.runtime), { directory: data.directory })
         });
         if (values === null) return null;
 
         const name = this._nameForRuntime(values.name, values.runtime);
+        const knownIds = new Set((this.state?.scripts || []).map(script => script.name));
         try {
-            await this.createScript(name, newScriptTemplate(name));
+            const created = await this.createScript(name, newScriptTemplate(name), {
+                ...(this._canImportFromHost() ? { directory: values.directory } : {}), displayName: values.displayName || name,
+                scope: values.scope || 'global', requirePinEachRun: values.requirePinEachRun === 'true'
+            });
+            const directory = (this._canImportFromHost() && values.directory) || created.scriptsDirectory || '';
+            const target = `${directory.replaceAll('\\', '/').replace(/\/+$/, '')}/${name}`;
+            const candidates = (created.scripts || []).filter(script =>
+                !knownIds.has(script.name) && (script.fileName || script.name) === name);
+            // The backend canonicalizes paths (including dot segments and Windows casing).
+            // A uniquely added filename identifies its ID even if the entered path differs.
+            const entry = candidates.find(script => script.path?.replaceAll('\\', '/') === target)
+                || (candidates.length === 1 ? candidates[0] : null);
+            if (!entry) {
+                this.app.showToast('Script created', 'Open it from the Scripts list to edit it.', 'success');
+                return null;
+            }
+            this.app.showToast('Script created', `${entry.displayName || entry.fileName || name} is ready to edit.`, 'success', { compact: true });
+            return entry.name;
         } catch (error) {
             this.app.showError(error?.message || 'Could not create the script.');
             return null;
         }
-        this.app.showToast('Script created', `${name} is ready to edit.`, 'success', { compact: true });
-        return name;
     }
 
     /**
@@ -567,12 +604,12 @@ export class PythonScriptsController {
      * travel through here, so no process role needs host-path import). Resolves with the
      * refreshed list state; throws with the server's message on refusal.
      */
-    async createScript(name, content) {
+    async createScript(name, content, options = {}) {
         const state = await this.app.apiCall(`${API}/create`, 'POST',
-            { name, content },
+            { name, content, ...options },
             { showLoading: false, preferErrorResponseMessage: true });
         this._applyState(state);
-        return state;
+        return this.state;
     }
 
     async _importScript(trigger) {
@@ -597,24 +634,57 @@ export class PythonScriptsController {
         });
         if (!picked || picked.canceled || !picked.path) return;
 
-        const suggestion = this._uniqueName(this._sanitizeName(picked.name || picked.path));
+        const suggestion = picked.name || picked.path.split(/[\\/]/).pop();
         const values = await this._promptForm({
             title: 'Add script from disk',
-            body: `A copy of ${picked.path} is saved into the scripts folder. The original file is left alone.`,
-            fields: [{ key: 'name', label: 'Save as', type: 'text', value: suggestion }],
-            submitLabel: 'Copy in',
-            validate: (data) => this._validateNewName(data.name)
+            body: `Runs from its own folder: ${picked.path}. The file stays where it is.`,
+            fields: this._libraryFields(suggestion),
+            submitLabel: 'Add script'
         });
         if (values === null) return;
-
         try {
-            this._applyState(await this.app.apiCall(`${API}/import`, 'POST',
-                { sourcePath: picked.path, name: values.name.trim() },
-                { showLoading: false, preferErrorResponseMessage: true }));
-            this.app.showToast('Script added', `${values.name.trim()} is here — sign it before it can run.`, 'success');
+            this._applyState(await this.app.apiCall(`${API}/import`, 'POST', {
+                sourcePath: picked.path, displayName: values.displayName || suggestion,
+                scope: values.scope || 'global', requirePinEachRun: values.requirePinEachRun === 'true'
+            }, { showLoading: false, preferErrorResponseMessage: true }));
+            const added = this.state.scripts.find(script => script.path === picked.path);
+            this.app.showToast('Script added', 'Sign it before it can run.', 'success');
+            if (added) this.openScript(added.name);
         } catch (error) {
             this.app.showError(error?.message || 'Could not add that file.');
         }
+    }
+
+    _libraryFields(displayName, script = null) {
+        return [{ key: 'displayName', label: 'Display name', type: 'text', value: displayName }, {
+            key: 'scope', label: 'Show in', type: 'select', value: script?.scope || 'repo',
+            options: [{ value: 'repo', label: 'Repo — this repository only' }, { value: 'global', label: 'Global — all VibeRails instances' }]
+        }, {
+            key: 'requirePinEachRun', label: 'Ask for PIN every time', type: 'select',
+            value: script?.requirePinEachRun ? 'true' : 'false',
+            options: [{ value: 'false', label: 'No — run signed scripts with Play' }, { value: 'true', label: 'Yes — require my PIN for every run' }]
+        }];
+    }
+
+    async editSettings(name) {
+        await this.ensureState();
+        const script = this.scriptByName(name);
+        if (!script) return;
+        const values = await this._promptForm({ title: 'Script settings', body: script.path,
+            fields: this._libraryFields(script.displayName || script.fileName || name, script), submitLabel: 'Save' });
+        if (!values) return;
+        let pin;
+        const requirePinEachRun = values.requirePinEachRun === 'true';
+        if (requirePinEachRun !== Boolean(script.requirePinEachRun)) {
+            pin = await this._promptPin({ title: 'Change run PIN requirement',
+                body: 'Enter your signing PIN to change when this script asks for it.', submitLabel: 'Save' });
+            if (pin === null) return;
+        }
+        try {
+            this._applyState(await this.app.apiCall(`${API}/settings`, 'POST', {
+                name, displayName: values.displayName, scope: values.scope, requirePinEachRun, ...(pin !== undefined ? { pin } : {})
+            }, { showLoading: false, preferErrorResponseMessage: true }));
+        } catch (error) { this.app.showError(error?.message || 'Could not save script settings.'); }
     }
 
     /** Copies a script under a new name. Resolves with the copy's name, or null. */
@@ -623,13 +693,13 @@ export class PythonScriptsController {
         const script = this.scriptByName(name);
         if (!script) return null;
         const values = await this._promptForm({
-            title: `Duplicate ${name}`,
+            title: `Duplicate ${this.displayName(name)}`,
             body: 'The copy starts unsigned, even when the original is signed.',
             fields: [{
                 key: 'name',
                 label: 'Name for the copy',
                 type: 'text',
-                value: this._uniqueName(`${scriptStem(name)}-copy${scriptRuntimeFor(name).extension}`)
+                value: this._uniqueName(`${scriptStem(script.fileName || name)}-copy${scriptRuntimeFor(script.fileName || name).extension}`)
             }],
             submitLabel: 'Duplicate',
             validate: (data) => this._validateNewName(data.name)
@@ -643,9 +713,9 @@ export class PythonScriptsController {
             const source = await this.app.apiCall(
                 `${API}/content?name=${encodeURIComponent(name)}`, 'GET', null,
                 { showLoading: false, preferErrorResponseMessage: true });
-            await this.createScript(copyName, source.content);
+            const created = await this.createScript(copyName, source.content, { scope: script.scope || 'global' });
             this.app.showToast('Script duplicated', `${copyName} is ready to edit.`, 'success', { compact: true });
-            return copyName;
+            return created.scripts?.find(entry => (entry.fileName || entry.name) === copyName)?.name || copyName;
         } catch (error) {
             this.app.showError(error?.message || 'Could not duplicate the script.');
             return null;
@@ -658,13 +728,13 @@ export class PythonScriptsController {
         const script = this.scriptByName(name);
         if (!script) return null;
         const values = await this._promptForm({
-            title: `Rename ${name}`,
+            title: `Rename ${this.displayName(name)}`,
             body: script.status === 'unapproved'
                 ? 'Pick a new file name.'
                 : 'The file name is part of what gets signed, so renaming clears the signature — re-sign it afterwards.',
-            fields: [{ key: 'name', label: 'New name', type: 'text', value: name }],
+            fields: [{ key: 'name', label: 'New name', type: 'text', value: script.fileName || name }],
             submitLabel: 'Rename',
-            validate: (data) => this._validateNewName(data.name, { allow: name })
+            validate: (data) => this._validateNewName(data.name, { allow: script.fileName || name, directory: this.scriptDirectory(name) })
         });
         if (values === null) return null;
 
@@ -675,8 +745,8 @@ export class PythonScriptsController {
                 { showLoading: false, preferErrorResponseMessage: true });
             this._applyState(nextState);
             this.lastRunByName.delete(name);
-            this.app.showToast('Script renamed', `${name} is now ${newName}.`, 'success', { compact: true });
-            return newName;
+            this.app.showToast('Script renamed', `${this.displayName(name)} is now ${newName}.`, 'success', { compact: true });
+            return script.id || newName;
         } catch (error) {
             this.app.showError(error?.message || 'Could not rename the script.');
             return null;
@@ -688,11 +758,9 @@ export class PythonScriptsController {
         await this.ensureState();
         const script = this.scriptByName(name);
         const confirmed = await this.confirm({
-            title: `Delete ${name}?`,
-            message: script?.status === 'approved'
-                ? 'The file is removed from the scripts folder and its signature is forgotten. This cannot be undone.'
-                : 'The file is removed from the scripts folder. This cannot be undone.',
-            confirmLabel: 'Delete script',
+            title: `Remove ${script?.displayName || script?.fileName || name}?`,
+            message: 'Remove this entry from the library? The script file stays on disk.',
+            confirmLabel: 'Remove script',
             danger: true
         });
         if (!confirmed) return false;
@@ -703,7 +771,7 @@ export class PythonScriptsController {
                 { showLoading: false, preferErrorResponseMessage: true });
             this._applyState(nextState);
             this.lastRunByName.delete(name);
-            this.app.showToast('Script deleted', `${name} is gone.`, 'info', { compact: true });
+            this.app.showToast('Script removed', 'The file is still on disk.', 'info', { compact: true });
             return true;
         } catch (error) {
             this.app.showError(error?.message || 'Could not delete the script.');
@@ -753,7 +821,7 @@ export class PythonScriptsController {
 
     /** The candidate name, or the first "-2", "-3", … variant nothing else is using. */
     _uniqueName(candidate) {
-        const taken = new Set((this.state?.scripts || []).map((script) => script.name.toLowerCase()));
+        const taken = new Set((this.state?.scripts || []).map((script) => (script.fileName || script.name).toLowerCase()));
         if (!taken.has(candidate.toLowerCase())) return candidate;
         const stem = scriptStem(candidate);
         const extension = isScriptFileName(candidate) ? scriptRuntimeFor(candidate).extension : '';
@@ -787,7 +855,7 @@ export class PythonScriptsController {
         return `${name}${scriptRuntimeById(runtimeId).extension}`;
     }
 
-    _validateNewName(rawName, { allow = null } = {}) {
+    _validateNewName(rawName, { allow = null, directory = null } = {}) {
         const name = (rawName || '').trim();
         if (!SCRIPT_NAME_PATTERN.test(name)) {
             return SCRIPT_NAME_RULE;
@@ -795,7 +863,8 @@ export class PythonScriptsController {
         if (name.includes('..')) return 'File names cannot contain "..".';
         if (allow && name.toLowerCase() === allow.toLowerCase()) return null;
         const clash = (this.state?.scripts || [])
-            .some((script) => script.name.toLowerCase() === name.toLowerCase());
+            .some((script) => (script.fileName || script.name).toLowerCase() === name.toLowerCase()
+                && (!directory || this.scriptDirectory(script.name)?.replaceAll('\\', '/') === directory.replaceAll('\\', '/')));
         return clash ? `A script named ${name} already exists.` : null;
     }
 
@@ -876,7 +945,7 @@ export class PythonScriptsController {
         }
 
         const pin = await this._promptPin({
-            title: `Sign ${name}`,
+            title: `Sign ${this.displayName(name)}`,
             body: 'Signing approves this exact version of the script to run. Enter your signing PIN.',
             submitLabel: 'Sign script'
         });
@@ -886,7 +955,7 @@ export class PythonScriptsController {
                 { showLoading: false, preferErrorResponseMessage: true }));
             // Compact (bottom-right): a full top-right toast sits exactly on the
             // workbench's Run/Sign buttons — the ones wanted right after signing.
-            this.app.showToast('Script signed', `${name} is approved to run.`, 'success', { compact: true });
+            this.app.showToast('Script signed', `${this.displayName(name)} is approved to run.`, 'success', { compact: true });
             return true;
         } catch (error) {
             this.app.showError(error?.message || 'Could not sign the script.');
@@ -897,7 +966,7 @@ export class PythonScriptsController {
     /** PIN-gated removal of the approval. Resolves true once revoked. */
     async revoke(name) {
         const pin = await this._promptPin({
-            title: `Remove signature from ${name}`,
+            title: `Remove signature from ${this.displayName(name)}`,
             body: 'The script will not run again until it is re-signed. Enter your signing PIN.',
             submitLabel: 'Remove signature'
         });
@@ -929,7 +998,7 @@ export class PythonScriptsController {
         // "is it running" lives here, not in the window's own flag. Without this, reopening
         // the window for a script still in flight starts a second interpreter.
         if (this.runningNames.has(name)) {
-            this.app.showToast('Already running', `${name} is still running.`, 'info', { compact: true });
+            this.app.showToast('Already running', `${this.displayName(name)} is still running.`, 'info', { compact: true });
             return null;
         }
         return this.runWindow.open(name);
@@ -942,7 +1011,7 @@ export class PythonScriptsController {
             if (!this.state) throw new Error('Could not load script run requirements.');
             if (!this.state.requirePinEachRun && !this.scriptByName(name)?.requirePinEachRun) return undefined;
             return this._promptPin({
-                title: `Run ${name}`,
+                title: `Run ${this.displayName(name)}`,
                 body: 'This run requires your signing PIN.',
                 submitLabel: 'Run script',
                 preserveModal: true
@@ -965,7 +1034,7 @@ export class PythonScriptsController {
         if (this.runningNames.has(name)) {
             this.app.showToast(
                 'Already running',
-                `${name} is still running. Wait for it to finish before starting a terminal run.`,
+                `${this.displayName(name)} is still running. Wait for it to finish before starting a terminal run.`,
                 'info', { compact: true });
             return null;
         }
@@ -987,21 +1056,21 @@ export class PythonScriptsController {
             const tabId = String(result?.tabId || '').trim();
             if (!tabId) throw new Error('The interactive terminal did not return a tab id.');
 
-            const runtime = scriptRuntimeFor(name);
+            const runtime = scriptRuntimeFor(this.scriptByName(name)?.fileName || name);
             this.app.terminalController?.rememberTabLaunch?.(tabId, {
                 selection: 'base:shell',
-                label: name,
-                title: `${name} · ${runtime.label}`,
+                label: this.displayName(name),
+                title: `${this.displayName(name)} · ${runtime.label}`,
                 icon: runtime.tabIcon,
                 // NOT `python-script:${name}` — that key belongs to the script's AGENT
                 // tab (the workbench's "Ask agent"). Sharing it would make the agent
                 // flows adopt this script's shell tab and paste briefs into a running script.
                 taskKey: `python-script-run:${name}`,
-                workingDirectory: this.state?.scriptsDirectory || null
+                workingDirectory: this.scriptDirectory(name)
             });
             this.app.showToast(
                 'Script started',
-                `${name} is running in an interactive terminal.`,
+                `${this.displayName(name)} is running in an interactive terminal.`,
                 'success', { compact: true });
             // A view that already shows a terminal panel (the workbench, the Terminals
             // page, the Code quality page) hosts the run in place — being yanked to the
@@ -1113,13 +1182,14 @@ export class PythonScriptsController {
                                             ${(field.options || []).map((option) => `
                                             <option value="${escapeHtml(option.value)}" ${option.value === field.value ? 'selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}
                                         </select>` : `
-                                        <input class="form-control${field.type === 'text' ? '' : ' python-pin-input'}" type="text"
+                                        <input class="form-control${['text', 'directory'].includes(field.type) ? '' : ' python-pin-input'}" type="text"
                                                id="python-scripts-pin-${index}" data-pin-field="${escapeHtml(field.key)}"
                                                value="${escapeHtml(field.value || '')}"
                                                placeholder="${escapeHtml(field.placeholder || '')}"
                                                ${field.autofocus ? 'data-pin-autofocus' : ''}
-                                               autocomplete="${field.type === 'text' ? 'off' : 'one-time-code'}" autocapitalize="off" spellcheck="false"
-                                               data-1p-ignore data-lpignore="true" data-bwignore required>`}
+                                               autocomplete="${['text', 'directory'].includes(field.type) ? 'off' : 'one-time-code'}" autocapitalize="off" spellcheck="false"
+                                               data-1p-ignore data-lpignore="true" data-bwignore required>
+                                        ${field.type === 'directory' && this._canImportFromHost() ? `<button type="button" class="btn btn-sm btn-outline-secondary mt-1" data-pick-directory="${escapeHtml(field.key)}">Browse…</button>` : ''}`}
                                     </div>`).join('')}
                                     <div class="alert alert-danger mt-2 mb-0 d-none" role="alert" data-pin-error></div>
                                 </div>
@@ -1157,6 +1227,11 @@ export class PythonScriptsController {
             document.addEventListener('keydown', onKeydown, true);
             layer.querySelectorAll('[data-pin-action="cancel"]')
                 .forEach((el) => el.addEventListener('click', () => finish(null)));
+            layer.querySelectorAll('[data-pick-directory]').forEach(button => button.dataset?.pickDirectory && button.addEventListener('click', async () => {
+                const input = layer.querySelector(`[data-pin-field="${button.dataset.pickDirectory}"]`);
+                const picked = await this.app.pickFileSystemEntry({ mode: 'directory', title: 'Choose script folder', initialPath: input.value, triggerElement: button });
+                if (picked?.path && !picked.canceled && !finished) input.value = picked.path;
+            }));
             const readValues = () => {
                 const values = {};
                 layer.querySelectorAll('[data-pin-field]').forEach((input) => {

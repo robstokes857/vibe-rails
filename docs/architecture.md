@@ -469,9 +469,12 @@ before clients can use sign-in; older sites leave the manual API key input usabl
 
 ### Code report inspection
 
-Project health's Code quality card renders the host-owned Code Atlas / Quality Lab viewer
-inline (the `code-quality` route is an alias for Project health). `RuleController` supplies the
-cached MintLint report; the authenticated,
+The full-width Quality workspace (`code-quality`) renders the host-owned Code Atlas / Quality
+Lab viewer, third in the top navigation. Rules and Git Guard have the fourth destination
+(`dashboard` / `agents`). Each
+page runs only its own checks; `RuleController` preserves the cached MintLint report across
+navigation and disposes the viewer on departure. Settings is an icon-only cog beside the
+Automation play button in the top navigation. The authenticated,
 root-only `POST /api/v1/code-analyzer/graph` supplies bounded working-tree structure and
 lexical source references through `RepositoryCodeGraph`. Python package imports, Rust module
 trees, JS/TS imports/re-exports and namespace-scoped C#/PHP mentions provide link evidence;
@@ -488,7 +491,9 @@ fade in as the camera closes while the structure, hover, selection, search and f
 unaffected and the layout never moves. Root-only `GET /api/v1/code-analyzer/changes`
 and `GET /api/v1/code-analyzer/changes/diff` list the working tree's changes against HEAD and
 serve one file's before/after text for the shared diff viewer; the sidebar switches between
-report files and Git changes, and the same list feeds the map's change highlight.
+report files and Git changes, and the same list feeds the map's change highlight. Report files
+is the default list. One second after the map is ready, the viewer focuses the first report
+file with Atlas's normal animation; user input or leaving the view cancels that selection.
 The request retains the existing repository containment and read limits. No preview fixtures are shipped.
 Scan/exclusion controls and all rule/commit enforcement remain outside the viewer.
 See the [viewer integration contract](../VibeRails/wwwroot/js/modules/code-report/README.md)
@@ -510,7 +515,13 @@ on the source board through the normal card-log transfer, then rehomes the conne
 cards and existing card identities/discussion/files/session/commit links survive. Destination lanes
 have no copied Automations. `board/30` adds nullable `DedicatedBoard` on the connection with no
 startup backfill; older connection writers preserve it. Connect/pull returns the destination board
-ID, and the UI selects it. Save and writing pulls share the cross-process Jira lock.
+ID, and the UI selects it. Save, connection tests, unlink and writing pulls share the cross-process
+Jira lock. Board settings show a Jira logo beside the board name and a fixed 32-dot saved-token
+placeholder. **Unlink Jira** calls the root/project-scoped `DELETE …/boards/{boardId}/jira`,
+forgets the local token and deletes only the connection through `IBoardStore`. The board,
+imported cards, notes and historical issue links remain. The dialog restores local-board settings
+without replacing unrelated drafts. Jira is still the source of imported story fields; notes
+remain local and publishing them as Jira comments is not implemented.
 
 VIBE-102 connects a board from a pasted Jira board link plus an API token; there is no site, JQL
 or story points field to type. `JiraBoardLink.Parse` (`Services/Jira`) reads the site, board id
@@ -857,32 +868,38 @@ coordination; see the [database reference](../VibeRails.Data.Sqlite/DB/AGENTS.md
 - `DELETE /api/v1/sandboxes/{id}` - Delete sandbox (removes directory + DB record)
 - `POST /api/v1/sandboxes/{id}/launch/vscode` - Launch VS Code in sandbox directory
 
-**Python scripts** (single-file pwsh `.ps1`, bash `.sh` or python `.py` scripts in `~/.vibe_rails/scripts`,
-gated by PIN-backed hash pinning; the extension picks the interpreter):
+**User scripts** (registered pwsh `.ps1`, bash `.sh` or python `.py` files, gated by PIN-backed
+hash pinning; the extension picks the interpreter):
+Registrations in `~/.vibe_rails/user_script_library.json` hold stable IDs, local paths, display
+names, optional project roots and run-PIN requirements. Global scripts appear everywhere; Repo
+scripts are filtered by the server's current root. Creation defaults to `scripts/UserScripts`
+and can use a selected folder; Add from disk references the original. No folder scanning or
+legacy import occurs, and removing a registration leaves its file. Signing keeps the existing
+PIN document, binding each new approval to ID/path/content. Both documents share the existing
+cross-process lock. Runs use verified sibling copies and the original directory as cwd.
+
 - `GET /api/v1/python-scripts` - List scripts with signing status
+- `POST /api/v1/python-scripts/settings` - Update display name, Global/Repo scope and PIN-on-each-run requirement
 - `POST /api/v1/python-scripts/pin` - Create or change the signing PIN
 - `POST /api/v1/python-scripts/approve` | `/revoke` - Sign / unsign a script (PIN required)
 - `POST /api/v1/python-scripts/run` - Run a signed script; `GET .../runs` for history
 - `GET|POST /api/v1/python-scripts/content` - Read / write a script's text. GET returns a
   raw-content version; POST requires it as `expectedVersion` so a stale editor cannot overwrite
   a newer file. No PIN is accepted and a write can never create an approval.
-- `POST /api/v1/python-scripts/create` | `/rename`, `DELETE /api/v1/python-scripts?name=` - File management
-- `POST /api/v1/python-scripts/import` - Copy a regular UTF-8 file from a local disk into the
-  scripts folder (root-dashboard backend only, like the filesystem picker; network/device
+- `POST /api/v1/python-scripts/create` | `/rename` - File management; `DELETE /api/v1/python-scripts?name=` removes only the registration
+- `POST /api/v1/python-scripts/import` - Register a regular UTF-8 file at its existing local path (root-dashboard backend only, like the filesystem picker; network/device
   paths and links are rejected)
 
 The script workbench edits one selected file beside the agent terminal. Its editor has no file
 rail; **Back → Automation → Scripts** is where users select another file or create one.
-The library enumerates supported files in `~/.vibe_rails/scripts`. Installed builds also ship
-git-hook helpers and BERT download scripts there, so those bundled helpers can appear in the
-library. They are not created by opening the workbench and remain unsigned until explicitly signed.
+Installed git-hook helpers and BERT download scripts remain internal. They never appear in the user library. Signed entries are visible; unsigned and modified entries are behind a collapsed **Unsigned scripts** section.
 
 **Nav Automation launcher** (the nav "Launch" flyout; preferences persist per install in GlobalCache):
 
 The flyout shows visible automations and currently approved scripts; unsigned or modified scripts are omitted.
 
 - `GET /api/v1/automation-nav/preferences` - Catalog of the current project's automations
-  (`job:{id}`) plus every signed-library script (`script:{name}`, with its signing `status`), each
+  (`job:{id}`) plus each visible user script (`script:{id}`, with its signing `status`), each
   with its saved order and show/hide state
 - `PUT /api/v1/automation-nav/preferences` - Save order/visibility; the body must be the full
   current catalog (400 when it no longer matches, e.g. an automation was renamed meanwhile)

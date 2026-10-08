@@ -570,7 +570,8 @@ namespace VibeRails.DTOs
         long JobId,
         bool Enabled,
         int Order,
-        string? Status = null
+        string? Status = null,
+        string? ScriptFileName = null
     );
 
     public record AutomationNavPreferencesResponse(
@@ -600,7 +601,11 @@ namespace VibeRails.DTOs
         string? ModifiedUtc,
         long SizeBytes,
         string Path,
-        bool RequirePinEachRun = false
+        bool RequirePinEachRun = false,
+        string? Id = null,
+        string? DisplayName = null,
+        string Scope = "global",
+        string? ProjectPath = null
     );
 
     public record PythonScriptListResponse(
@@ -649,7 +654,11 @@ namespace VibeRails.DTOs
     public record PythonScriptSaveRequest(
         string? Name,
         string? Content,
-        string? ExpectedVersion = null
+        string? ExpectedVersion = null,
+        string? Directory = null,
+        string? DisplayName = null,
+        string Scope = "global",
+        bool RequirePinEachRun = false
     );
 
     public record PythonScriptSaveResponse(
@@ -659,8 +668,17 @@ namespace VibeRails.DTOs
 
     public record PythonScriptImportRequest(
         string? SourcePath,
-        string? Name
+        string? Name = null,
+        string? DisplayName = null,
+        string Scope = "global",
+        bool RequirePinEachRun = false
     );
+
+    public record UserScriptRegistration(string Id, string Path, string DisplayName,
+        string? ProjectPath, bool RequirePinEachRun = false);
+    public record UserScriptLibrary(List<UserScriptRegistration> Scripts);
+    public record PythonScriptSettingsRequest(string Name, string DisplayName, string Scope,
+        bool RequirePinEachRun, string? Pin = null);
 
     public record PythonScriptRenameRequest(
         string? Name,
@@ -1981,6 +1999,8 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(DeviceLinkSecret))]
     [JsonSerializable(typeof(DeviceLinkCreated))]
     [JsonSerializable(typeof(DeviceLinkToken))]
+    [JsonSerializable(typeof(UserScriptLibrary))]
+    [JsonSerializable(typeof(PythonScriptSettingsRequest))]
     internal partial class AppJsonSerializerContext : JsonSerializerContext
     {
     }

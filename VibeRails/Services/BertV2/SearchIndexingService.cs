@@ -7,45 +7,75 @@ namespace VibeRails.Services.BertV2;
 public sealed class SearchIndexingService(ISearchIndexStore store, IBoardStore board,
     Func<SearchTextChunker> chunker, Func<IBertV2BgeEmbedder> embedder)
 {
+    private static readonly string[] Kinds = ["board", "input", "session"];
+    /// <summary>A sweep of a very large corpus yields after this long; its durable cursor resumes on the next batch.</summary>
+    private static readonly TimeSpan SweepBudget = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan InferenceBudget = TimeSpan.FromSeconds(3);
+
     public static SearchIndexingService Create(IServiceProvider services) => new(
         services.GetRequiredService<ISearchIndexStore>(), services.GetRequiredService<IBoardStore>(),
         () => services.GetRequiredService<SearchTextChunker>(), () => services.GetRequiredService<IBertV2BgeEmbedder>());
 
-    public async Task RunBatchAsync(CancellationToken ct, int perKind = 10)
+    /// <summary>
+    /// Sweeps every source corpus once, then runs bounded inference rounds. True means work is still
+    /// waiting (an unfinished sweep, or rounds cut short while they were completing items), so the
+    /// caller should follow up soon instead of waiting for its idle interval.
+    /// </summary>
+    public async Task<bool> RunBatchAsync(CancellationToken ct, int perKind = 10)
     {
         var stopwatch = Stopwatch.StartNew();
-        await store.ReconcileAsync(board, 25, ct);
+        var sweep = await store.ReconcileAsync(board, 25, ct, SweepBudget);
+        var inference = Stopwatch.StartNew();
+        var completed = 0;
+        var more = sweep.Incomplete;
         for (var round = 0; round < perKind; round++)
         {
-            foreach (var kind in new[] { "board", "input", "session" })
+            var claimed = 0;
+            foreach (var kind in Kinds)
             {
                 ct.ThrowIfCancellationRequested();
                 var source = store.ClaimSources(kind, 1, SearchIndexVersions.Chunks).FirstOrDefault();
                 if (source is not null)
-                    await Process(source, true, () => store.CompleteSource(source, chunker().Split(source.Text, source.Title, ct), SearchIndexVersions.Chunks), ct);
+                {
+                    claimed++;
+                    if (await Process(source, true, () => store.CompleteSource(source, chunker().Split(source.Text, source.Title, ct), SearchIndexVersions.Chunks), ct))
+                        completed++;
+                }
                 var work = store.ClaimChunks(kind, 1, SearchIndexVersions.Model).FirstOrDefault();
                 if (work is not null)
-                    await Process(work, false, () => store.CompleteChunk(work, embedder().GenerateEmbedding(work.Text), SearchIndexVersions.Model), ct);
+                {
+                    claimed++;
+                    if (await Process(work, false, () => store.CompleteChunk(work, embedder().GenerateEmbedding(work.Text), SearchIndexVersions.Model), ct))
+                        completed++;
+                }
             }
-            if (stopwatch.Elapsed > TimeSpan.FromSeconds(3)) break;
+            if (claimed == 0) break;
+            // Cut short while items were still completing: the rest of the backlog is waiting. Rounds
+            // that only failed wait for their retry delay instead of asking for a follow-up.
+            if (round == perKind - 1 || inference.Elapsed > InferenceBudget) { more |= completed > 0; break; }
         }
-        Serilog.Log.Information("[SearchIndex] Batch completed in {Milliseconds} ms", stopwatch.ElapsedMilliseconds);
+        Serilog.Log.Information("[SearchIndex] Batch completed in {Milliseconds} ms: swept={Documents} changed={Changed} finished={Completed} more={More}",
+            stopwatch.ElapsedMilliseconds, sweep.Documents, sweep.Changed, completed, more);
+        return more;
     }
 
-    private async Task Process(SearchWork work, bool source, Action action, CancellationToken ct)
+    private async Task<bool> Process(SearchWork work, bool source, Action action, CancellationToken ct)
     {
         using var renewals = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var heartbeat = RenewAsync(work, source, renewals.Token);
         try
         {
             ct.ThrowIfCancellationRequested();
-            if (store.Renew(work, source)) await Task.Run(action, ct);
+            if (!store.Renew(work, source)) return false;
+            await Task.Run(action, ct);
+            return true;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { store.Release(work, source); throw; }
         catch (Exception ex)
         {
             store.Fail(work, source, ex.Message);
             Serilog.Log.Warning(ex, "[SearchIndex] {Kind} work deferred for retry", work.Kind);
+            return false;
         }
         finally
         {

@@ -212,19 +212,19 @@ test('opens the terminal workspace by default', async ({ page }) => {
   await expect(page.locator('[data-rules-overview-host]')).toHaveCount(0);
 });
 
-test('Quality combines rule management, validation, Git Guard, and Code quality', async ({ page }) => {
+test('Rules combines rule management, validation and Git Guard', async ({ page }) => {
   await page.goto('/');
 
-  const qualityNav = page.locator('.app-subnav-link[data-action="navigate-home"]:visible');
-  await expect(qualityNav).toHaveText(/quality/i);
+  const rulesNav = page.locator('.app-subnav-link[data-action="navigate-home"]:visible');
+  await expect(rulesNav).toHaveText(/rules/i);
   await expect(page.locator('.app-subnav-link[data-view="rule-files"]:visible')).toHaveCount(0);
-  await qualityNav.click();
+  await rulesNav.click();
 
   await expect(page.locator('.view[data-view="agents"]')).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Rules and code quality' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Rules', level: 1 })).toBeVisible();
   await expect(page.locator('.project-health-guard')).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Rules', exact: true })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Code quality', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Rules', level: 2, exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Code quality', exact: true })).toHaveCount(0);
   await expect(page.locator('#vb-terminal-panel')).toHaveCount(0);
   await expect(page.locator('[data-rule-files]')).toHaveCount(0);
   const newRuleFile = page.locator('[data-health-card="rules"] .project-health-card-actions')
@@ -277,7 +277,7 @@ test('Quality combines rule management, validation, Git Guard, and Code quality'
   await page.locator('#modal-container [data-action="close-modal"]').click();
   await expect(page.locator('[data-rule-manager-modal]')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Fix rules & code quality' })).toHaveCount(0);
-  for (const scope of ['rules', 'code quality']) {
+  for (const scope of ['rules']) {
     const controls = page.getByRole('group', { name: `Fix ${scope} with an agent` });
     await expect(controls.getByRole('button', { name: `Fix ${scope} with:`, exact: true })).toBeVisible();
     await expect(controls.locator('[role="combobox"]')).toBeVisible();
@@ -312,21 +312,12 @@ test('rule-file workflows use policy terminology', async ({ page }) => {
   await expect(page.locator('.agent-file-tree-open[aria-current="true"]')).toHaveAttribute('title', selectedPath);
 });
 
-test('Project health is a simple scrollable card stack with no embedded terminal', async ({ page }) => {
-  await page.goto('/');
-  await page.locator('.app-subnav-link[data-action="navigate-home"]:visible').click();
-
-  const layout = await page.locator('.project-health-stack').evaluate((stack) => {
-    const [rules, quality] = stack.querySelectorAll(':scope > .project-health-card');
-    return {
-      rulesTop: rules.getBoundingClientRect().top,
-      qualityTop: quality.getBoundingClientRect().top,
-      bodyOverflowY: getComputedStyle(document.body).overflowY
-    };
-  });
-  expect(layout.qualityTop).toBeGreaterThan(layout.rulesTop);
-  expect(layout.bodyOverflowY).not.toBe('hidden');
-  await expect(page.locator('[data-terminal-section], [data-terminal-content]')).toHaveCount(0);
+test('Rules stays scrollable without embedding the Quality report or terminal', async ({ page }) => {
+  await page.goto('/?view=agents');
+  await expect(page.locator('.project-health-stack > .project-health-card')).toHaveCount(1);
+  await expect(page.locator('[data-health-card="rules"]')).toBeVisible();
+  expect(await page.locator('body').evaluate(body => getComputedStyle(body).overflowY)).not.toBe('hidden');
+  await expect(page.locator('[data-code-analyzer-report], [data-terminal-section], [data-terminal-content]')).toHaveCount(0);
 });
 
 test('wizard Back preserves parameter drafts and creates one vc.rules.md path', async ({ page }) => {
@@ -470,64 +461,16 @@ test('empty full editor explains how to add a first rule without dead edit actio
   await expect(page.locator('.agent-file-tree-open[aria-current="true"]')).toHaveAttribute('title', EMPTY_RULE_PATH);
 });
 
-test('the quality brief opens metric details in a modal and returns to the same summary', async ({ page }) => {
-  await page.route('**/api/v1/code-analyzer**', async (route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(CODE_QUALITY_RESPONSE) });
-  });
-  // Registered after the generic mock so it wins for the source-pane fetch.
-  await page.route('**/api/v1/code-analyzer/source**', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        path: 'VibeRails/Services/ExampleService.cs',
-        content: 'namespace VibeRails.Services;\n\npublic sealed class ExampleService\n{\n    public async Task ProcessAsync()\n    {\n        if (ready) Run();\n    }\n}\n',
-        exists: true,
-        isBinary: false,
-        truncated: false
-      })
-    });
-  });
-  await page.goto('/');
-  await page.locator('.app-subnav-link[data-action="navigate-home"]:visible').click();
-
-  // The scan summary lands on the Code quality page as a compact brief.
-  const brief = page.locator('[data-vca-quality-brief]');
-  await expect(brief).toBeVisible();
-  await expect(brief.getByRole('heading', { name: 'Change required' })).toBeVisible();
-  await expect(brief.locator('.code-analyzer-brief-ring')).toBeVisible();
-  // The full report is not on the summary page.
-  await expect(page.locator('[data-code-analyzer-report]')).toHaveCount(0);
-
-  // Its button opens the report without leaving the unified page.
-  await brief.getByRole('button', { name: /View metrics/ }).click();
-  await expect(page.locator('.view[data-view="agents"]')).toBeVisible();
-  await expect(page.locator('[data-project-health-quality-report]')).toBeVisible();
-
-  const card = page.locator('[data-project-health-quality-report]');
-  // No internal tabs — the files workspace is the only surface.
-  await expect(card.getByRole('tablist', { name: 'Code quality report sections' })).toHaveCount(0);
-  await expect(card.getByRole('heading', { name: 'Changed files' })).toBeVisible();
-  await expect(card.getByRole('heading', { name: 'Health metrics' })).toBeVisible();
-  // Changed files are grouped under full directory headers in the rail.
-  await expect(card.locator('.code-analyzer-dir-head').first()).toContainText('VibeRails/Services');
-  // The code rides in the third pane, headed by the selected metric.
-  await expect(card.getByRole('heading', { name: 'Cyclomatic complexity', exact: true })).toBeVisible();
-  await expect(card.locator('.code-analyzer-source-column .code-analyzer-editor-readonly')).toBeVisible();
-
-  // Directory groups collapse and reopen on header click.
-  const serviceRow = card.locator('.code-analyzer-file-item', { hasText: 'ExampleService.cs' });
-  await expect(serviceRow).toHaveCount(1);
-  await card.locator('.code-analyzer-dir-head').first().click();
-  await expect(serviceRow).toHaveCount(0);
-  await card.locator('.code-analyzer-dir-head').first().click();
-  await expect(serviceRow).toHaveCount(1);
-
-  // Closing the modal leaves both health cards and the brief in place.
-  await page.locator('#modal-container [data-action="close-modal"]').click();
-  await expect(page.locator('[data-project-health-quality-report]')).toHaveCount(0);
-  await expect(page.getByRole('heading', { name: 'Rules and code quality' })).toBeVisible();
-  await expect(brief).toBeVisible();
+test('Quality opens its report separately and preserves it across Rules visits', async ({ page }) => {
+  await page.goto('/?view=code-quality');
+  await expect(page.getByRole('heading', { name: 'Code quality', level: 1 })).toBeVisible();
+  await expect(page.locator('.code-report .qr')).toHaveAttribute('data-state', 'complete');
+  await expect(page.locator('[data-health-card="rules"]')).toHaveCount(0);
+  await page.locator('.app-subnav-link[data-action="navigate-home"]').click();
+  await expect(page.getByRole('heading', { name: 'Rules', level: 1 })).toBeVisible();
+  await expect(page.locator('.code-report')).toHaveCount(0);
+  await page.locator('.app-subnav-link[data-view="code-quality"]').click();
+  await expect(page.locator('.code-report .qr')).toHaveAttribute('data-state', 'complete');
 });
 
 test('project naming is available from Settings', async ({ page }) => {

@@ -191,7 +191,7 @@ export class PythonScriptWorkbench {
     }
 
     get scriptsDirectory() {
-        return this.state?.scriptsDirectory || '';
+        return this.script?.path?.replace(/[\\/][^\\/]+$/, '') || this.state?.scriptsDirectory || '';
     }
 
     async loadView(data = {}) {
@@ -426,6 +426,7 @@ export class PythonScriptWorkbench {
             case 'ask-agent': return void this.askAgent();
             case 'open-vscode': return this.scripts?.openInVsCode?.(this.name);
             case 'duplicate': return void this.duplicate();
+            case 'settings': return void this.scripts?.editSettings?.(this.name);
             case 'rename': return void this.rename();
             case 'copy-path': return void this.scripts?.copyPath?.(this.name);
             case 'delete': return void this.deleteScript();
@@ -492,9 +493,9 @@ export class PythonScriptWorkbench {
         const status = this.status || 'unapproved';
         const meta = PYTHON_SCRIPT_STATUS_META[status] || PYTHON_SCRIPT_STATUS_META.unapproved;
 
-        const runtime = scriptRuntimeFor(this.name);
+        const runtime = scriptRuntimeFor(this.script?.fileName || this.name);
         const nameEl = root.querySelector('[data-workbench-name]');
-        if (nameEl) nameEl.textContent = this.name || '';
+        if (nameEl) nameEl.textContent = script?.displayName || script?.fileName || this.name || '';
         // Rail clicks and renames can change the runtime without rebuilding the shell.
         const runtimeIcon = root.querySelector('[data-workbench-runtime-icon]');
         if (runtimeIcon) runtimeIcon.className = runtime.icon;
@@ -744,7 +745,7 @@ export class PythonScriptWorkbench {
             this.monaco = monaco;
             const editor = monaco.editor.create(mount, {
                 value: '',
-                language: scriptRuntimeFor(this.name).monacoLanguage,
+                language: scriptRuntimeFor(this.script?.fileName || this.name).monacoLanguage,
                 theme: 'viberails-dark',
                 automaticLayout: true,
                 minimap: { enabled: false },
@@ -780,7 +781,7 @@ export class PythonScriptWorkbench {
     _applyEditorLanguage(name) {
         const model = this.editor?.getModel?.();
         if (!model || typeof this.monaco?.editor?.setModelLanguage !== 'function') return;
-        this.monaco.editor.setModelLanguage(model, scriptRuntimeFor(name).monacoLanguage);
+        this.monaco.editor.setModelLanguage(model, scriptRuntimeFor(this.scripts?.scriptByName(name)?.fileName || name).monacoLanguage);
     }
 
     /**
@@ -882,10 +883,21 @@ export class PythonScriptWorkbench {
             if (stale()) return;
             // Transient failures (host briefly unreachable) are simply retried on the next tick.
             if (!/was not found/i.test(error?.message || '')) return;
-            // A 404 can be a rename/delete that was mid-flight when the request went out;
-            // the list endpoint has the final word before the file counts as gone.
+            // A rename may have completed during the failed read. Registrations survive
+            // missing files, so their presence alone cannot decide whether to offer recovery.
             await this.scripts?.refresh?.({ quiet: true });
-            if (stale() || this._mutating || this.scripts?.scriptByName?.(name)) return;
+            if (stale() || this.saving || this._mutating || !this.scripts?.state) return;
+            if (this.scripts.scriptByName(name)) {
+                try {
+                    const response = await this.app.apiCall(
+                        `${API}/content?name=${encodeURIComponent(name)}`, 'GET', null,
+                        { showLoading: false, preferErrorResponseMessage: true });
+                    if (!stale() && !this.saving && !this._mutating) this.applyDiskCheck(response);
+                    return;
+                } catch (retryError) {
+                    if (stale() || this.saving || this._mutating || !/was not found/i.test(retryError?.message || '')) return;
+                }
+            }
             this._onDeletedOnDisk(name);
         } finally {
             this._pollInFlight = false;
@@ -1166,14 +1178,14 @@ export class PythonScriptWorkbench {
         const previous = this.name;
         if (!previous || !scripts) return null;
         const newName = await this._whileMutating(() => scripts.rename(previous));
-        if (!newName || newName === previous) return newName;
+        if (!newName) return newName;
         // The agent tab follows the script identity. Otherwise the exact task-key
         // lookup in askAgent can no longer find the live session after a rename and
         // starts a duplicate agent for the same workbench.
-        this._migrateAgentTaskKey(previous, newName);
+        if (newName !== previous) this._migrateAgentTaskKey(previous, newName);
         if (previous !== this.name || !this.root) return newName;
-        // Same bytes under a new name: the editor (and any unsaved edits) stays; only the
-        // identity, the status (renaming clears a signature) and the stack entry move.
+        // The registration ID can stay the same while the filename/runtime changes.
+        // Keep editor text and refresh status, highlighting and previous run output.
         this.name = newName;
         this.state = scripts.state || this.state;
         this.script = scripts.scriptByName(newName) || this.script;

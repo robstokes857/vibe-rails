@@ -43,7 +43,7 @@ public sealed class PythonScriptShellRuntimeTests : IDisposable
     {
         var (service, _, _) = NewService();
         foreach (var name in new[] { "a.py", "b.ps1", "c.sh", "d.txt", "e.bat", ".f.sh.0123.tmp" })
-            WriteScript(name, "x\n");
+            await WriteScriptAsync(name, "x\n");
 
         var status = await service.GetStatusAsync(TestContext.Current.CancellationToken);
 
@@ -81,7 +81,7 @@ public sealed class PythonScriptShellRuntimeTests : IDisposable
     }
 
     [Fact]
-    public async Task ImportKeepsAShellScriptsExtensionLowerCased()
+    public async Task ImportKeepsTheOriginalFileNameAndPath()
     {
         var (service, _, _) = NewService();
         Directory.CreateDirectory(_installDirectory);
@@ -91,7 +91,7 @@ public sealed class PythonScriptShellRuntimeTests : IDisposable
         var imported = await service.ImportAsync(
             new PythonScriptImportRequest(source, null), TestContext.Current.CancellationToken);
 
-        Assert.Contains(imported.Scripts, script => script.Name == "Deploy.ps1");
+        Assert.Contains(imported.Scripts, script => script.Name == "Deploy.PS1");
     }
 
     [Fact]
@@ -138,7 +138,7 @@ public sealed class PythonScriptShellRuntimeTests : IDisposable
         Assert.Equal(File.ReadAllBytes(ScriptPath("deploy.ps1")), executedBytes);
         Assert.False(File.Exists(arguments[6]), "the verified copy is removed after the run");
         Assert.Equal("{\"ok\":true}", result.ReturnJson);
-        Assert.Equal("deploy.ps1", Assert.Single(service.GetRunHistory().Runs).Name);
+        Assert.Equal(Assert.Single((await service.GetStatusAsync(TestContext.Current.CancellationToken)).Scripts).Id, Assert.Single(service.GetRunHistory().Runs).Name);
     }
 
     [Fact]
@@ -197,7 +197,7 @@ public sealed class PythonScriptShellRuntimeTests : IDisposable
     public async Task AnUnsignedShellScriptNeverReachesItsInterpreter()
     {
         var (service, runner, _) = NewService();
-        WriteScript("backup.sh", "echo hi\n");
+        await WriteScriptAsync("backup.sh", "echo hi\n");
         await service.SetPinAsync(
             new SetPythonScriptPinRequest(null, "1234"), TestContext.Current.CancellationToken);
 
@@ -303,7 +303,7 @@ public sealed class PythonScriptShellRuntimeTests : IDisposable
 
     private async Task SignAsync(PythonScriptService service, string name, string content)
     {
-        WriteScript(name, content);
+        await WriteScriptAsync(name, content);
         await service.SetPinAsync(
             new SetPythonScriptPinRequest(null, "1234"), TestContext.Current.CancellationToken);
         await service.ApproveAsync(
@@ -313,9 +313,15 @@ public sealed class PythonScriptShellRuntimeTests : IDisposable
     private string ScriptPath(string name) =>
         Path.Combine(_installDirectory, PythonScriptService.ScriptsSubdirectory, name);
 
-    private void WriteScript(string name, string content)
+    private async Task WriteScriptAsync(string name, string content)
     {
         Directory.CreateDirectory(Path.Combine(_installDirectory, PythonScriptService.ScriptsSubdirectory));
         File.WriteAllText(ScriptPath(name), content);
+        if (new[] { ".py", ".ps1", ".sh" }.Contains(Path.GetExtension(name)))
+        {
+            var library = new PythonScriptService(installDirectory: _installDirectory);
+            if (!(await library.GetStatusAsync(TestContext.Current.CancellationToken)).Scripts.Any(item => item.Path == ScriptPath(name)))
+                await library.ImportAsync(new PythonScriptImportRequest(ScriptPath(name)), TestContext.Current.CancellationToken);
+        }
     }
 }

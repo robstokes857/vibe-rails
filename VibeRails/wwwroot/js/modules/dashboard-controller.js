@@ -4,6 +4,8 @@ export class DashboardController {
     }
 
     async loadDashboard(data = {}) {
+        const view = this.app.currentView;
+        const loadId = this.loadId = (this.loadId || 0) + 1;
         // Fetch custom project name concurrently with the dashboard data refresh —
         // it only depends on configs.rootPath, which is already loaded. app.js reads
         // _customProjectName for the window/tab title, so keep this fresh.
@@ -26,21 +28,27 @@ export class DashboardController {
 
         // A navigation that happened while the fetches above were in flight owns the
         // page now; painting the dashboard over it would clobber that view.
-        // 'code-quality' is the legacy route that now renders Project health.
-        if (!['dashboard', 'agents', 'code-quality'].includes(this.app.currentView)) return;
+        if (this.loadId !== loadId || this.app.currentView !== view) return;
 
         const content = document.getElementById('app-content');
         if (!content) return;
 
         content.innerHTML = '';
-        this.renderUnifiedDashboard(content, data);
+        if (view === 'code-quality') {
+            const fragment = this.app.cloneTemplate('code-quality-template');
+            const root = fragment.querySelector('[data-view="code-quality"]');
+            content.appendChild(fragment);
+            if (root) this.app.ruleController.attachCodeQualityOverview(root);
+        } else {
+            this.renderUnifiedDashboard(content, data);
+        }
 
         // Ensure we are at the top on load
         window.scrollTo(0, 0);
     }
 
-    // Rules, validation, Git Guard, and Code quality share one dashboard. Agent work
-    // opens in the dedicated terminal view, so this surface never mounts xterm.
+    // Rules, validation and Git Guard share the Rules page. Agent work opens in
+    // the dedicated terminal view, so this surface never mounts xterm.
     renderUnifiedDashboard(container, data = {}) {
         const fragment = this.app.cloneTemplate('dashboard-template');
         const root = fragment.querySelector('[data-dashboard]');

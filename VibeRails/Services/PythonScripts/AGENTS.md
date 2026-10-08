@@ -6,8 +6,10 @@ classes, `/api/v1/python-scripts`, `--run-python-script`), but since VIBE-56 a s
 
 ## User workflow
 
-1. Open **Automation → Scripts** and create or import a `.ps1`, `.sh` or `.py` file. New script
-   asks which runtime (pwsh, bash or python) and keeps that choice and the extension in step.
+1. Open **Automation → Scripts** and create or register a `.ps1`, `.sh` or `.py` file.
+   New script selects a runtime and a destination (default `~/.vibe_rails/scripts/UserScripts`,
+   or a local folder selected with the shared file picker). Add from disk registers the original
+   path without copying. Both forms offer a display name, Global/Repo scope and PIN on every run.
 2. Sign the exact script version with the user's Python signing PIN.
 3. Choose **Run** for the captured run window, with argument rows and optional standard input,
    or **Run in terminal** for interactive scripts. The terminal path takes the script name and
@@ -15,9 +17,27 @@ classes, `/api/v1/python-scripts`, `--run-python-script`), but since VIBE-56 a s
 4. Edit scripts in the workbench, which pairs Monaco with an agent terminal. Changed bytes need
    signing again before either run path can execute them.
 
-Scripts live in `~/.vibe_rails/scripts`. They run with that directory as their working directory.
-A script is one self-contained UTF-8 file; Python imports must be from the standard library or
-installed packages, not sibling scripts.
+Only explicit registrations in `~/.vibe_rails/user_script_library.json` appear. No folder is scanned;
+legacy scripts and approvals are not imported, moved or deleted. `scripts` outside `UserScripts`
+is reserved for internal app scripts and cannot be registered. Removing a library entry preserves
+its file. Repo scope uses the same server-derived canonical project root as the Automation page;
+external Repo files must live in that root, while managed UserScripts files can belong to it.
+Global entries appear in all instances. Metadata uses a separate atomic file so older versions
+writing the signing document cannot erase it; the existing cross-process signing lock serializes
+both documents. No state DB schema changes or backfill are required.
+
+Each registration has a stable ID. APIs accept it in the legacy `name` field; list responses retain
+`name` as the actual filename and add `id`, `displayName`, `scope`, `projectPath`. A unique visible
+filename is accepted by local callers for convenience. The frontend normalizes the ID into its
+internal `name` key and retains `fileName` for runtime and display. The nav launcher uses the ID,
+not the display label. Display/scope changes do not grant approval.
+
+Scripts run with their own folder as working directory, from a verified temporary copy alongside
+the original, so `$PSScriptRoot`, Python script-relative paths and relative subprocess paths use
+the original directory. The temporary filename differs from the original. Python sibling imports
+are possible but their contents, like installed packages or programs a script invokes, are not
+covered by the single-file signature. Every path component is checked for links/reparse points
+on authoring, signing and execution.
 
 ## Runtimes
 
@@ -36,8 +56,8 @@ from `AutomationScriptService.MissingRuntimeMessage`.
   gets the canonical text the approval was computed over (BOM removed, LF line endings), because
   bash reads every `\r` as part of a command; it is passed as a relative slash path
   (`AutomationScriptService.ToBashPath`). pwsh and python run the signed bytes unchanged.
-- Signatures, hashes and stored approvals are unchanged: the canonical hash already mixes in the
-  file name, so existing `.py` approvals stay valid and a `.ps1`/`.sh` rename always re-signs.
+- New approvals mix in the registration ID and absolute path; a rename needs signing again.
+  Legacy approvals are retained but never matched to new registrations.
 
 ## Architecture and invariants
 
@@ -51,11 +71,11 @@ from `AutomationScriptService.MissingRuntimeMessage`.
 - `python-script-workbench.js` owns the editor and docked agent terminal.
 
 Signing pins the canonical SHA-256 of strict UTF-8 bytes (BOM removed, line endings normalized,
-file name included). Execution rechecks that hash and runs a verified copy (canonical text for bash). An edit, rename,
+registration ID and absolute file path included). Execution rechecks that hash and runs a verified copy (canonical text for bash). An edit, rename,
 or revoke must never silently approve different code. PINs are never stored as plaintext.
 Arguments use PyBridge arrays / `ProcessStartInfo.ArgumentList`, never shell concatenation.
 
-Run PIN requirements are optional globally and per script. Every signing-document mutation,
+Run PIN requirements are optional globally and per script. New entries can require a PIN before any approval exists; changing an existing requirement requires the signing PIN through settings or the existing run-pin API. Every signing-document mutation,
 including changing either requirement, takes the existing cross-process write lock before its
 instance semaphore and read/modify/write. Captured and interactive dashboard runs collect a
 required signing PIN for each launch; cancellation starts nothing. PINs are never remembered

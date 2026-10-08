@@ -14,6 +14,7 @@ namespace VibeRails.Services.PythonScripts;
 public interface IPythonScriptService
 {
     Task<PythonScriptListResponse> GetStatusAsync(CancellationToken cancellationToken = default);
+    Task<PythonScriptListResponse> UpdateSettingsAsync(PythonScriptSettingsRequest request, CancellationToken cancellationToken = default);
     Task<PythonScriptListResponse> SetPinAsync(
         SetPythonScriptPinRequest request, CancellationToken cancellationToken = default);
     Task<PythonScriptListResponse> SetRunPinRequirementAsync(
@@ -56,7 +57,7 @@ public interface IPythonScriptService
 public sealed class PythonScriptValidationException(string message) : Exception(message);
 
 /// <summary>
-/// Single-file scripts in <c>~/.vibe_rails/scripts</c> — Python (<c>.py</c>), PowerShell
+/// Explicitly registered user scripts (default <c>~/.vibe_rails/scripts/UserScripts</c>) — Python (<c>.py</c>), PowerShell
 /// (<c>.ps1</c>, run by pwsh) or Bash (<c>.sh</c>), chosen by the file extension — gated by
 /// hash pinning:
 /// the user approves ("signs") a script by entering their PIN, which records the
@@ -81,20 +82,20 @@ public sealed class PythonScriptValidationException(string message) : Exception(
 /// hostile same-user agent.
 ///
 /// Hashes are computed over LF-normalized, BOM-stripped, strictly-decoded UTF-8 bytes
-/// with the script name mixed in, so CRLF churn (git autocrlf, editors) cannot
+/// with the registration ID and absolute path mixed in, so CRLF churn (git autocrlf, editors) cannot
 /// invalidate an approval, while renaming a file or changing its canonical content does.
 ///
-/// Authoring (create / save / import / rename / delete) deliberately takes no PIN and can
+/// Authoring (create / save / register / rename / remove) deliberately takes no PIN and can
 /// never create an approval. Create/import/rename always land unsigned; a changed save
 /// becomes modified, while a byte-for-byte or canonical line-ending-only save may retain
-/// the approval for that same version. Create, import, delete, and rename remove stale
-/// approvals before publishing their filesystem mutation, so restoring a removed name
-/// cannot silently recover trust. Approve/revoke keep requiring the PIN; only Approve can
+/// the approval for that same version. New registrations use fresh IDs; remove and rename
+/// revoke existing approvals. Removal retains the file on disk, and restoring a removed
+/// registration cannot silently recover trust. Approve/revoke keep requiring the PIN; only Approve can
 /// make a previously unapproved or modified script runnable.
 /// </summary>
-public sealed class PythonScriptService : IPythonScriptService
+public sealed partial class PythonScriptService : IPythonScriptService
 {
-    public const string ScriptsSubdirectory = "scripts";
+    public static readonly string ScriptsSubdirectory = Path.Combine("scripts", "UserScripts");
     public const string SigningFileName = "script_signing.json";
 
     public const string StatusApproved = "approved";
@@ -145,7 +146,9 @@ public sealed class PythonScriptService : IPythonScriptService
         string? installDirectory = null,
         Func<PythonRunnerOptions, IPythonRunner>? runnerFactory = null,
         Func<IPythonRunner?>? pythonRunnerProvider = null,
-        IJobExecutableResolver? executableResolver = null)
+        IJobExecutableResolver? executableResolver = null,
+        Func<string?>? projectRootProvider = null,
+        bool allProjects = false)
     {
         _pythonRunner = new Lazy<IPythonRunner?>(
             () => pythonRunner ?? pythonRunnerProvider?.Invoke(),
@@ -155,6 +158,8 @@ public sealed class PythonScriptService : IPythonScriptService
         // pwsh and Bash resolve exactly like repository Automation scripts (Git Bash on Windows,
         // never the System32 WSL bridge). Resolution is per run, so listing never probes PATH.
         _executableResolver = executableResolver ?? new JobExecutableResolver();
+        _projectRoot = projectRootProvider ?? (() => ParserConfigs.GetRootPath());
+        _allProjects = allProjects;
     }
 
     /// <summary>The interpreter a script runs under, from its (validated) file extension.</summary>
@@ -209,9 +214,12 @@ public sealed class PythonScriptService : IPythonScriptService
                 document = document with { RequirePinEachRun = request.Enabled };
             else
             {
-                var name = ValidateScriptName(request.Name);
+                var entry = Registration(request.Name);
+                var name = entry.Id;
+                var library = ReadLibrary();
+                library.Scripts[library.Scripts.FindIndex(item => item.Id == name)] = entry with { RequirePinEachRun = request.Enabled };
+                WriteLibrary(library);
                 names.RemoveAll(n => NameEquals(n, name));
-                if (request.Enabled) names.Add(name);
                 document = document with { RequirePinEachRunNames = names };
             }
             WriteDocument(document);
@@ -268,7 +276,7 @@ public sealed class PythonScriptService : IPythonScriptService
         PythonScriptApprovalRequest request,
         CancellationToken cancellationToken = default)
     {
-        var name = ValidateScriptName(request.Name);
+        var name = RegisteredName(request.Name);
         using (await AcquireCrossProcessWriteLockAsync(cancellationToken))
         {
             await _documentLock.WaitAsync(cancellationToken);
@@ -289,12 +297,11 @@ public sealed class PythonScriptService : IPythonScriptService
                         throw new PythonScriptValidationException($"Script '{name}' was not found.");
                     }
 
-                    // Key the approval to the file's real on-disk name so it survives a
-                    // case-only difference in the request and stays distinct from a
-                    // same-named sibling on a case-sensitive volume.
-                    var canonicalName = CanonicalOnDiskName(scriptPath) ?? name;
+                    // Key approval to the registration ID; the hash also binds its absolute path.
+                    // Equal filenames in different repositories never share approval.
+                    var canonicalName = name;
                     var content = ReadScriptBytes(scriptPath);
-                    var hash = ComputeCanonicalHash(canonicalName, content);
+                    var hash = RegisteredHash(canonicalName, content);
                     var approvals = document.Approvals
                         .Where(approval => !NameEquals(approval.Name, canonicalName))
                         .Append(new PythonScriptApprovalRecord(
@@ -322,7 +329,7 @@ public sealed class PythonScriptService : IPythonScriptService
         PythonScriptApprovalRequest request,
         CancellationToken cancellationToken = default)
     {
-        var name = ValidateScriptName(request.Name);
+        var name = RegisteredName(request.Name);
         using (await AcquireCrossProcessWriteLockAsync(cancellationToken))
         {
             await _documentLock.WaitAsync(cancellationToken);
@@ -336,9 +343,8 @@ public sealed class PythonScriptService : IPythonScriptService
 
                 if (VerifyPin(document, request.Pin))
                 {
-                    // Drop the approval under either the request's name or the file's real
-                    // on-disk name, so a stale entry for a since-deleted script still clears.
-                    var canonicalName = CanonicalOnDiskName(ResolveScriptPath(name)) ?? name;
+                    // Resolve the registration before clearing its approval, even if its file is gone.
+                    var canonicalName = name;
                     var updated = document with
                     {
                         Approvals = document.Approvals
@@ -392,7 +398,7 @@ public sealed class PythonScriptService : IPythonScriptService
     {
         await VerifyRunPinAsync(requestedName, pin, cancellationToken);
         ValidateRunInputs(arguments, standardInput);
-        var runtime = RuntimeFor(ValidateScriptName(requestedName));
+        var runtime = RuntimeFor(ResolveScriptPath(RegisteredName(requestedName)));
         var interpreter = ResolveInterpreterOrThrow(runtime);
 
         var verified = await ReadVerifiedScriptAsync(requestedName, cancellationToken);
@@ -408,7 +414,7 @@ public sealed class PythonScriptService : IPythonScriptService
             // The PyBridge runner is a plain CliWrap process runner: pointed at pwsh or bash it
             // gives those scripts the same argv, stdin, timeout and output capture as Python.
             var options = interpreter.Options;
-            options.WorkingDirectory = GetScriptsDirectory();
+            options.WorkingDirectory = Path.GetDirectoryName(ResolveScriptPath(name))!;
             options.Timeout = RunTimeout;
             var runner = _runnerFactory(options);
 
@@ -463,8 +469,8 @@ public sealed class PythonScriptService : IPythonScriptService
         try
         {
             var document = ReadDocument();
-            var name = ValidateScriptName(requestedName);
-            var required = document.RequirePinEachRun || (document.RequirePinEachRunNames ?? [])
+            var name = RegisteredName(requestedName);
+            var required = Registration(name).RequirePinEachRun || document.RequirePinEachRun || (document.RequirePinEachRunNames ?? [])
                 .Any(n => NameEquals(n, name));
             if (required && (document.Pin == null || !VerifyPin(document, pin)))
                 throw new PythonScriptValidationException("A correct signing PIN is required for this run.");
@@ -498,7 +504,7 @@ public sealed class PythonScriptService : IPythonScriptService
         string? requestedName,
         CancellationToken cancellationToken = default)
     {
-        var runtime = RuntimeFor(ValidateScriptName(requestedName));
+        var runtime = RuntimeFor(ResolveScriptPath(RegisteredName(requestedName)));
         var interpreter = ResolveInterpreterOrThrow(runtime);
 
         var verified = await ReadVerifiedScriptAsync(requestedName, cancellationToken);
@@ -515,7 +521,7 @@ public sealed class PythonScriptService : IPythonScriptService
             var startInfo = new ProcessStartInfo
             {
                 FileName = options.PythonExecutable,
-                WorkingDirectory = GetScriptsDirectory(),
+                WorkingDirectory = Path.GetDirectoryName(ResolveScriptPath(verified.Name))!,
                 UseShellExecute = false,
                 RedirectStandardInput = false,
                 RedirectStandardOutput = false,
@@ -582,14 +588,13 @@ public sealed class PythonScriptService : IPythonScriptService
         string? requestedName,
         CancellationToken cancellationToken = default)
     {
-        var name = ValidateScriptName(requestedName);
+        var name = RegisteredName(requestedName);
         var scriptPath = ResolveScriptPath(name);
         if (!File.Exists(scriptPath))
         {
             throw new PythonScriptValidationException($"Script '{name}' was not found.");
         }
 
-        name = CanonicalOnDiskName(scriptPath) ?? name;
         byte[] content;
         try
         {
@@ -630,7 +635,7 @@ public sealed class PythonScriptService : IPythonScriptService
         PythonScriptSaveRequest request,
         CancellationToken cancellationToken = default)
     {
-        var name = ValidateScriptName(request.Name);
+        var name = RegisteredName(request.Name);
         var scriptPath = ResolveScriptPath(name);
         var bytes = EncodeScriptContent(request.Content);
         var expectedVersion = ValidateExpectedVersion(request.ExpectedVersion);
@@ -661,213 +666,6 @@ public sealed class PythonScriptService : IPythonScriptService
             ComputeContentVersion(bytes));
     }
 
-    public async Task<PythonScriptListResponse> CreateAsync(
-        PythonScriptSaveRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        var name = ValidateScriptName(request.Name);
-        var scriptPath = ResolveScriptPath(name);
-        var bytes = EncodeScriptContent(request.Content);
-        Directory.CreateDirectory(GetScriptsDirectory());
-        await WriteUnsignedNewFileAsync(scriptPath, bytes, name, cancellationToken);
-        Log.Information("[PythonScripts] Created script {Name}", name);
-        return await GetStatusAsync(cancellationToken);
-    }
-
-    /// <summary>
-    /// Copies a file from anywhere the user can browse into the scripts folder. The copy
-    /// lands unsigned like any other new script, so this grants no execution the user did
-    /// not already have; it is gated to the root dashboard (see <see cref="Routes"/>)
-    /// because the source path is arbitrary, matching the file picker that drives it.
-    /// </summary>
-    public async Task<PythonScriptListResponse> ImportAsync(
-        PythonScriptImportRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        var requestedSource = (request.SourcePath ?? string.Empty).Trim();
-        if (requestedSource.Length == 0)
-        {
-            throw new PythonScriptValidationException("Choose a file to import.");
-        }
-
-        if (!Path.IsPathFullyQualified(requestedSource) || IsNetworkOrDevicePath(requestedSource))
-        {
-            throw new PythonScriptValidationException(
-                "Choose a fully qualified path on a local drive. Network and device paths are not supported.");
-        }
-
-        string sourcePath;
-        try
-        {
-            sourcePath = Path.GetFullPath(requestedSource);
-        }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            throw new PythonScriptValidationException("That is not a valid file path.");
-        }
-
-        if (IsNetworkOrDevicePath(sourcePath)
-            || (OperatingSystem.IsWindows() && IsUnsupportedWindowsDrive(sourcePath)))
-        {
-            throw new PythonScriptValidationException(
-                "Network and device paths are not supported.");
-        }
-
-        var sourceInfo = new FileInfo(sourcePath);
-        if (!sourceInfo.Exists)
-        {
-            throw new PythonScriptValidationException("The file to import was not found.");
-        }
-
-        // A link would copy whatever it currently points at rather than the file the user
-        // picked, and could be re-aimed between the pick and the copy.
-        if (IsLinkOrReparsePoint(sourceInfo))
-        {
-            throw new PythonScriptValidationException(
-                "That path is a shortcut or symbolic link. Pick the file it points to.");
-        }
-
-        if (sourceInfo.Length > MaxScriptBytes)
-        {
-            throw new PythonScriptValidationException(
-                $"That file is larger than the {MaxScriptBytes / (1024 * 1024)} MB limit.");
-        }
-
-        byte[] content;
-        try
-        {
-            content = File.ReadAllBytes(sourcePath);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            throw new PythonScriptValidationException($"Could not read that file: {ex.Message}");
-        }
-
-        // Refuse what could never be signed (binaries, latin-1 text) instead of dropping a
-        // permanently unrunnable file into the folder.
-        DecodeUtf8OrThrow(content);
-
-        var name = ValidateScriptName(string.IsNullOrWhiteSpace(request.Name)
-            ? SuggestScriptName(sourceInfo.Name)
-            : request.Name);
-        var scriptPath = ResolveScriptPath(name);
-        Directory.CreateDirectory(GetScriptsDirectory());
-        await WriteUnsignedNewFileAsync(scriptPath, content, name, cancellationToken);
-        Log.Information("[PythonScripts] Imported {Source} as {Name}", sourceInfo.Name, name);
-        return await GetStatusAsync(cancellationToken);
-    }
-
-    public async Task<PythonScriptListResponse> RenameAsync(
-        PythonScriptRenameRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        var requestedName = ValidateScriptName(request.Name);
-        var newName = ValidateScriptName(request.NewName);
-        var scriptPath = ResolveScriptPath(requestedName);
-        var targetPath = ResolveScriptPath(newName);
-        string canonicalName;
-
-        using (await AcquireCrossProcessWriteLockAsync(cancellationToken))
-        {
-            await _documentLock.WaitAsync(cancellationToken);
-            try
-            {
-                // Read validates that the source is a regular file rather than a link that
-                // escapes the scripts directory.
-                ReadScriptBytes(scriptPath);
-                canonicalName = CanonicalOnDiskName(scriptPath) ?? requestedName;
-                if (NameEquals(canonicalName, newName))
-                {
-                    return BuildStatus(ReadDocument());
-                }
-
-                // On a case-insensitive volume "job.py" -> "Job.py" is the same file, so an
-                // existence check would refuse a legitimate case-only rename.
-                var caseOnlyRename = string.Equals(
-                    scriptPath, targetPath, StringComparison.OrdinalIgnoreCase);
-                if (!caseOnlyRename && PathEntryExists(targetPath))
-                {
-                    throw new PythonScriptValidationException(
-                        $"A script named '{newName}' already exists. Pick another name.");
-                }
-
-                // Revoke both names before moving. If the move subsequently fails, the old
-                // file is left unsigned (fail closed); a stale target-name approval can never
-                // make the renamed file runnable.
-                var document = ReadDocument();
-                var updated = WithoutApprovals(
-                    document, canonicalName, requestedName, newName);
-                if (updated.Approvals.Count != document.Approvals.Count)
-                {
-                    WriteDocument(updated);
-                }
-
-                try
-                {
-                    File.Move(scriptPath, targetPath);
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    throw new PythonScriptValidationException(
-                        $"Could not rename '{canonicalName}': {ex.Message}");
-                }
-            }
-            finally
-            {
-                _documentLock.Release();
-            }
-        }
-
-        Log.Information("[PythonScripts] Renamed script {Name} to {NewName}", canonicalName, newName);
-        return await GetStatusAsync(CancellationToken.None);
-    }
-
-    public async Task<PythonScriptListResponse> DeleteAsync(
-        string? requestedName,
-        CancellationToken cancellationToken = default)
-    {
-        var name = ValidateScriptName(requestedName);
-        var scriptPath = ResolveScriptPath(name);
-        string canonicalName;
-
-        using (await AcquireCrossProcessWriteLockAsync(cancellationToken))
-        {
-            await _documentLock.WaitAsync(cancellationToken);
-            try
-            {
-                canonicalName = CanonicalOnDiskName(scriptPath) ?? name;
-                var document = ReadDocument();
-                var updated = WithoutApprovals(document, canonicalName, name);
-                if (updated.Approvals.Count != document.Approvals.Count)
-                {
-                    // Trust is removed before the filesystem mutation. A later delete error
-                    // may leave the file present, but it can never leave it runnable.
-                    WriteDocument(updated);
-                }
-
-                try
-                {
-                    // Already gone is success: two tabs deleting the same row should both end
-                    // up with the row gone rather than one of them showing an error. File.Delete
-                    // removes a link itself, which is the safe cleanup for a linked script.
-                    File.Delete(scriptPath);
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    throw new PythonScriptValidationException(
-                        $"Could not delete '{canonicalName}': {ex.Message}");
-                }
-            }
-            finally
-            {
-                _documentLock.Release();
-            }
-        }
-
-        Log.Information("[PythonScripts] Deleted script {Name}", canonicalName);
-        return await GetStatusAsync(CancellationToken.None);
-    }
-
     public PythonScriptRunHistoryResponse GetRunHistory()
     {
         lock (_historyLock)
@@ -880,18 +678,17 @@ public sealed class PythonScriptService : IPythonScriptService
         string? requestedName,
         CancellationToken cancellationToken)
     {
-        var name = ValidateScriptName(requestedName);
+        var name = RegisteredName(requestedName);
         var scriptPath = ResolveScriptPath(name);
         if (!File.Exists(scriptPath))
         {
             throw new PythonScriptValidationException($"Script '{name}' was not found.");
         }
 
-        // Match the approval keyed to the file's real on-disk name, then read once. Every caller
+        // Match the approval keyed to the registration ID, then read once. Every caller
         // executes or copies this byte array; none re-read the writable original after approval.
-        name = CanonicalOnDiskName(scriptPath) ?? name;
         var content = ReadScriptBytes(scriptPath);
-        var hash = ComputeCanonicalHash(name, content);
+        var hash = RegisteredHash(name, content);
 
         await _documentLock.WaitAsync(cancellationToken);
         try
@@ -982,10 +779,10 @@ public sealed class PythonScriptService : IPythonScriptService
     /// The verified copy keeps the script's extension: pwsh refuses -File on anything that is
     /// not a .ps1, and a traceback naming a .py file reads as expected.
     /// </summary>
-    private static string VerifiedCopyPath(string scriptName) =>
+    private string VerifiedCopyPath(string scriptName) =>
         Path.Combine(
-            Path.GetTempPath(),
-            $"viberails-script-{Guid.NewGuid():N}{Path.GetExtension(scriptName).ToLowerInvariant()}");
+            Path.GetDirectoryName(ResolveScriptPath(scriptName))!,
+            $".viberails-script-{Guid.NewGuid():N}{Path.GetExtension(ResolveScriptPath(scriptName)).ToLowerInvariant()}");
 
     /// <summary>
     /// The bytes written to the verified copy. Bash gets the canonical text the approval was
@@ -1097,44 +894,29 @@ public sealed class PythonScriptService : IPythonScriptService
 
     private PythonScriptListResponse BuildStatus(PythonScriptSigningDocument document)
     {
-        var scriptsDirectory = GetScriptsDirectory();
         var scripts = new List<PythonScriptInfo>();
-        if (Directory.Exists(scriptsDirectory))
+        foreach (var entry in ReadLibrary().Scripts.Where(IsVisible).OrderBy(item => item.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
-            // Every entry is matched against the name rule below, which is what limits the list
-            // to .py, .ps1 and .sh (and skips the dot-prefixed temp files of an in-flight save).
-            foreach (var path in Directory.EnumerateFiles(scriptsDirectory, "*", SearchOption.TopDirectoryOnly)
-                         .OrderBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase))
+            var approval = document.Approvals.FirstOrDefault(item => item.Name == entry.Id);
+            string status = StatusUnapproved;
+            FileInfo? info = null;
+            try
             {
-                var name = Path.GetFileName(path);
-                if (!ScriptNamePattern.IsMatch(name)) continue;
-
-                try
-                {
-                    var approval = document.Approvals.FirstOrDefault(entry => NameEquals(entry.Name, name));
-                    var fileInfo = GetRegularScriptFileInfo(path);
-                    var status = ResolveStatus(approval, name, () => ReadScriptBytes(path));
-                    scripts.Add(new PythonScriptInfo(
-                        name,
-                        status,
-                        approval?.ApprovedUtc,
-                        fileInfo.LastWriteTimeUtc.ToString("O"),
-                        fileInfo.Length,
-                        path,
-                        (document.RequirePinEachRunNames ?? []).Any(n => NameEquals(n, name))));
-                }
-                catch (Exception ex) when (ex is
-                    IOException or UnauthorizedAccessException or PythonScriptValidationException)
-                {
-                    // A linked, deleted, or locked entry is not a runnable script. Skip it
-                    // rather than exposing a path that escapes the scripts directory or
-                    // failing the whole listing.
-                    Log.Debug(ex, "[PythonScripts] Skipping {Path} while building status.", path);
-                }
+                ValidateLibraryPath(entry.Path);
+                info = GetRegularScriptFileInfo(entry.Path);
+                status = ResolveStatus(approval, entry.Id, () => ReadScriptBytes(entry.Path));
             }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PythonScriptValidationException)
+            {
+                // Retain missing/unsafe registrations so the owner can remove them, but
+                // never show them as runnable or silently substitute another file.
+            }
+            scripts.Add(new PythonScriptInfo(Path.GetFileName(entry.Path), status, approval?.ApprovedUtc,
+                info?.LastWriteTimeUtc.ToString("O"), info?.Length ?? 0, entry.Path,
+                entry.RequirePinEachRun || (document.RequirePinEachRunNames ?? []).Contains(entry.Id),
+                entry.Id, entry.DisplayName, entry.ProjectPath == null ? "global" : "repo", entry.ProjectPath));
         }
-
-        return new PythonScriptListResponse(document.Pin != null, scriptsDirectory, scripts, document.RequirePinEachRun);
+        return new PythonScriptListResponse(document.Pin != null, GetScriptsDirectory(), scripts, document.RequirePinEachRun);
     }
 
     private static string ValidateScriptName(string? name)
@@ -1149,19 +931,7 @@ public sealed class PythonScriptService : IPythonScriptService
         return trimmed;
     }
 
-    private string ResolveScriptPath(string validatedName)
-    {
-        var scriptsDirectory = Path.GetFullPath(GetScriptsDirectory());
-        var fullPath = Path.GetFullPath(Path.Combine(scriptsDirectory, validatedName));
-        // Defense in depth behind ValidateScriptName: never allow an escape from the
-        // scripts directory, whatever the name contained.
-        if (!string.Equals(Path.GetDirectoryName(fullPath), scriptsDirectory, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new PythonScriptValidationException("Script names cannot contain path segments.");
-        }
-
-        return fullPath;
-    }
+    private string ResolveScriptPath(string identifier) => ValidateLibraryPath(Registration(identifier).Path);
 
     private static byte[] ReadScriptBytes(string path)
     {
@@ -1179,6 +949,7 @@ public sealed class PythonScriptService : IPythonScriptService
     {
         try
         {
+            ValidatePathComponents(path);
             var info = new FileInfo(path);
             if (!info.Exists)
             {
@@ -1190,7 +961,7 @@ public sealed class PythonScriptService : IPythonScriptService
             {
                 throw new PythonScriptValidationException(
                     $"Script '{Path.GetFileName(path)}' is a symbolic link or reparse point. "
-                    + "Only regular files in the scripts folder can be opened, signed, or run.");
+                    + "Only registered regular files can be opened, signed, or run.");
             }
 
             return info;
@@ -1243,39 +1014,6 @@ public sealed class PythonScriptService : IPythonScriptService
         {
             throw new PythonScriptValidationException(
                 "Script is not valid UTF-8. Save it as UTF-8 before signing or running it.");
-        }
-    }
-
-    private async Task WriteUnsignedNewFileAsync(
-        string path, byte[] bytes, string name, CancellationToken cancellationToken)
-    {
-        using (await AcquireCrossProcessWriteLockAsync(cancellationToken))
-        {
-            await _documentLock.WaitAsync(cancellationToken);
-            try
-            {
-                if (PathEntryExists(path))
-                {
-                    throw new PythonScriptValidationException(
-                        $"A script named '{name}' already exists. Pick another name.");
-                }
-
-                // A file deleted outside the dashboard can leave an approval record behind.
-                // Remove it before publishing the new file so Create and Import always land
-                // unsigned, even when the bytes happen to match the old approved version.
-                var document = ReadDocument();
-                var updated = WithoutApprovals(document, name);
-                if (updated.Approvals.Count != document.Approvals.Count)
-                {
-                    WriteDocument(updated);
-                }
-
-                await WriteNewFileAtomicallyAsync(path, bytes, name, cancellationToken);
-            }
-            finally
-            {
-                _documentLock.Release();
-            }
         }
     }
 
@@ -1386,7 +1124,7 @@ public sealed class PythonScriptService : IPythonScriptService
             : trimmed + ".py";
     }
 
-    private static string ResolveStatus(
+    private string ResolveStatus(
         PythonScriptApprovalRecord? approval, string name, Func<byte[]> contentFactory)
     {
         if (approval == null)
@@ -1397,7 +1135,7 @@ public sealed class PythonScriptService : IPythonScriptService
         string currentHash;
         try
         {
-            currentHash = ComputeCanonicalHash(name, contentFactory());
+            currentHash = RegisteredHash(name, contentFactory());
         }
         catch (PythonScriptValidationException)
         {

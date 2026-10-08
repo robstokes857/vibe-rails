@@ -50,6 +50,7 @@ public static class PythonScriptRunProcessHost
         // Lazy: only a .py script needs the interpreter search; pwsh and bash resolve their own.
         var service = new PythonScriptService(
             installDirectory: installDirectory,
+            allProjects: true,
             pythonRunnerProvider: () => new PythonRunner(PythonRunnerOptions.Discover(scriptsDirectory)));
 
         try

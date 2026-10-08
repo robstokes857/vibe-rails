@@ -316,6 +316,56 @@ public sealed class SharedSearchIndexTests : IDisposable
         Assert.Equal(3L, await cmd.ExecuteScalarAsync(Ct));
     }
 
+    [Fact]
+    public async Task OneReconciliationSweepsEveryPageAndAnUnchangedCorpusReportsNoChanges()
+    {
+        for (var i = 0; i < 60; i++) await Card("Card " + i, "Text " + i);
+        SeedInput("s1", 1, "first capture", ended: true);
+        // 60 cards over three pages, one input and its ended session: one call, no paging loop (VB-2GUR8-187).
+        var first = await index.ReconcileAsync(board, 25, Ct);
+        Assert.Equal((62, 62, false), (first.Documents, first.Changed, first.Incomplete));
+        Assert.Equal(60, index.Count("board"));
+        var again = await index.ReconcileAsync(board, 25, Ct);
+        Assert.Equal((62, 0, false), (again.Documents, again.Changed, again.Incomplete));
+        Execute(Path.Combine(root, "board.db"), "UPDATE BoardCards SET Description='edited text' WHERE Title='Card 59'");
+        var edited = await index.ReconcileAsync(board, 25, Ct);
+        Assert.Equal((62, 1, false), (edited.Documents, edited.Changed, edited.Incomplete));
+        Assert.Single(index.Search("board", "edited", null, 10));
+    }
+
+    [Fact]
+    public async Task ABudgetYieldsAfterOnePageAndTheDurableCursorResumesTheSameEpoch()
+    {
+        for (var i = 0; i < 30; i++) await Card("Card " + i, "Text " + i);
+        var partial = await index.ReconcileAsync(board, 25, Ct, TimeSpan.Zero);
+        Assert.Equal((25, true), (partial.Documents, partial.Incomplete));
+        Assert.Equal(25, index.Count("board"));
+        var resumed = await index.ReconcileAsync(board, 25, Ct, TimeSpan.Zero);
+        Assert.Equal((5, false), (resumed.Documents, resumed.Incomplete));
+        // Finishing the epoch removed nothing: every card was marked by the same epoch across both calls.
+        Assert.Equal(30, index.Count("board"));
+    }
+
+    [Fact]
+    public async Task BatchAsksForAFollowUpOnlyWhileItWasCutShortWithWorkCompleting()
+    {
+        await Card("Repair", "vehicle wheel replacement");
+        // A single round per kind cannot drain the sources and their chunks: a follow-up is due.
+        Assert.True(await Worker().RunBatchAsync(Ct, 1));
+        var batches = 1;
+        while (await Worker().RunBatchAsync(Ct, 1)) Assert.True(++batches < 20, "the backlog never drained");
+        var progress = index.GetProgress();
+        Assert.Equal(0, progress.PendingSources);
+        Assert.Equal(progress.Chunks, progress.Embedded);
+        Assert.False(await Worker().RunBatchAsync(Ct));
+        // Rounds that only fail wait for their retry delay; they must not spin the follow-up cadence.
+        Execute(SearchPath, "UPDATE SearchChunks SET ModelVersion='obsolete-model'");
+        var broken = new Mock<IBertV2BgeEmbedder>();
+        broken.Setup(m => m.GenerateEmbedding(It.IsAny<string>())).Throws(new IOException("model unavailable"));
+        Assert.False(await Worker(embedding: broken.Object).RunBatchAsync(Ct, 1));
+        Assert.True(index.GetProgress().Failed > 0);
+    }
+
     internal static void Execute(string path, string sql, params (string Name, object? Value)[] parameters)
     {
         using var db = BertVectorDatabase.Open(path);

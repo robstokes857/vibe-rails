@@ -166,7 +166,8 @@ test('New script and Duplicate land in the workbench for the new file', async ()
         if (url.includes('/content?')) {
             return { name: 'nightly.py', content: 'print("copy me")\n', version: 'v1' };
         }
-        return { pinConfigured: true, scriptsDirectory: '/scripts', scripts: [SCRIPT] };
+        return { pinConfigured: true, scriptsDirectory: '/scripts', scripts: [SCRIPT,
+            { id: `id-${body.name}`, name: body.name, path: `/scripts/${body.name}`, status: 'unapproved' }] };
     };
     const controller = controllerWith([SCRIPT], app);
     controller._promptForm = async ({ title }) => ({ name: title.startsWith('New') ? 'fresh.py' : 'nightly-copy.py' });
@@ -178,10 +179,32 @@ test('New script and Duplicate land in the workbench for the new file', async ()
     // JSON object on the last line of stdout as the return value it shows.
     assert.match(app.calls[0].body.content, /def main\(argv: list\[str\]\) -> dict:/);
     assert.match(app.calls[0].body.content, /print\(json\.dumps\(main\(sys\.argv\[1:\]\)\)\)/);
-    assert.deepEqual(app.navigations.at(-1), { view: 'python-script', data: { name: 'fresh.py' }, options: {} });
+    assert.deepEqual(app.navigations.at(-1), { view: 'python-script', data: { name: 'id-fresh.py' }, options: {} });
 
     await controller._duplicateAndOpen('nightly.py');
-    assert.deepEqual(app.navigations.at(-1), { view: 'python-script', data: { name: 'nightly-copy.py' }, options: {} });
+    assert.deepEqual(app.navigations.at(-1), { view: 'python-script', data: { name: 'id-nightly-copy.py' }, options: {} });
+});
+
+test('Create and edit opens the new registration for canonicalized destination paths', async () => {
+    for (const directory of ['C:/repo/', 'C:\\repo\\', 'C:/repo/./', '/repo/']) {
+        const app = createApp();
+        const canonicalDirectory = directory.startsWith('C:') ? 'C:/repo' : '/repo';
+        const controller = controllerWith([{ ...SCRIPT, id: 'old.py', name: 'old.py', fileName: 'job.py' }], app);
+        controller._promptForm = async () => ({ name: 'job.py', runtime: 'python', directory });
+        app.apiCall = async () => ({
+            scriptsDirectory: '/managed',
+            scripts: [
+                { ...SCRIPT, id: 'old.py', name: 'job.py' },
+                { id: 'new.py', name: 'job.py', path: `${canonicalDirectory}/job.py`, status: 'unapproved' }
+            ]
+        });
+
+        await controller._newScriptAndOpen();
+
+        assert.equal(app.navigations.at(-1)?.data.name, 'new.py', directory);
+        assert.equal(controller.scriptByName('new.py').path, `${canonicalDirectory}/job.py`);
+        assert.deepEqual(app.errors, []);
+    }
 });
 
 test('Saving posts the content with its optimistic version and never a PIN', async () => {
@@ -248,7 +271,8 @@ test('Duplicate uses content + create so it works without host-path import', asy
     assert.equal(app.calls[1].url, '/api/v1/python-scripts/create');
     assert.deepEqual(app.calls[1].body, {
         name: 'nightly-copy.py',
-        content: 'print("copy me")\n'
+        content: 'print("copy me")\n',
+        scope: 'global'
     });
 });
 
@@ -406,8 +430,8 @@ test('Authoring endpoints never carry a PIN, and only approve/revoke ask for one
         const call = source.slice(source.indexOf(`${endpoint}\``));
         assert.doesNotMatch(call.slice(0, 400), /\bpin\b/i, `${endpoint} must not send a PIN`);
     }
-    assert.match(source, /_promptPin\([\s\S]*?Sign \$\{name\}/);
-    assert.match(source, /_promptPin\([\s\S]*?Remove signature from \$\{name\}/);
+    assert.match(source, /_promptPin\([\s\S]*?Sign \$\{this\.displayName\(name\)\}/);
+    assert.match(source, /_promptPin\([\s\S]*?Remove signature from \$\{this\.displayName\(name\)\}/);
 });
 
 test('The Monaco modal is gone: the workbench view replaced it everywhere', () => {
@@ -759,6 +783,12 @@ test('Opening in VS Code tells a never-signed script to sign, and a signed one t
 
 test('New script says pwsh, bash, or python and keeps the picker and the file name in step', async () => {
     const app = createApp();
+    app.apiCall = async (url, method, body) => {
+        app.calls.push({ url, method, body });
+        return { scriptsDirectory: '/scripts', scripts: [
+            { id: 'deploy-id.sh', name: body.name, path: `/scripts/${body.name}`, status: 'unapproved' }
+        ] };
+    };
     const controller = controllerWith([{ ...SCRIPT, name: 'script.sh' }], app);
     let form = null;
     controller._promptForm = async (options) => {
@@ -782,13 +812,13 @@ test('New script says pwsh, bash, or python and keeps the picker and the file na
     controller.state = { ...controller.state, scripts: [{ ...SCRIPT, name: 'script.sh' }] };
     // Picking a runtime re-extends the typed name (and stays clear of existing files);
     // typing a known extension moves the picker; anything else leaves it alone.
-    assert.deepEqual(form.onFieldChange('runtime', { runtime: 'bash', name: 'script.py' }), { name: 'script-2.sh' });
-    assert.deepEqual(form.onFieldChange('runtime', { runtime: 'pwsh', name: 'deploy' }), { name: 'deploy.ps1' });
-    assert.deepEqual(form.onFieldChange('name', { runtime: 'python', name: 'test.sh' }), { runtime: 'bash' });
-    assert.equal(form.onFieldChange('name', { runtime: 'python', name: 'test' }), null);
+    assert.deepEqual(form.onFieldChange('runtime', { runtime: 'bash', name: 'script.py' }), { name: 'script-2.sh', displayName: 'script-2.sh' });
+    assert.deepEqual(form.onFieldChange('runtime', { runtime: 'pwsh', name: 'deploy' }), { name: 'deploy.ps1', displayName: 'deploy.ps1' });
+    assert.deepEqual(form.onFieldChange('name', { runtime: 'python', name: 'test.sh' }), { runtime: 'bash', displayName: 'test.sh' });
+    assert.deepEqual(form.onFieldChange('name', { runtime: 'python', name: 'test' }), { displayName: 'test.py' });
     // A bare name takes the picked runtime's extension before validation and creation.
     assert.equal(form.validate({ runtime: 'bash', name: 'deploy' }), null);
-    assert.equal(name, 'deploy.sh');
+    assert.equal(name, 'deploy-id.sh');
     assert.equal(app.calls[0].body.name, 'deploy.sh');
     assert.match(app.calls[0].body.content, /^#!\/usr\/bin\/env bash\n/);
     assert.match(app.calls[0].body.content, /"\$@"/);

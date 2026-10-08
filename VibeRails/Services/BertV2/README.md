@@ -6,20 +6,24 @@ changes; `board.db` remains authoritative for cards. Search queries, ranking, sn
 result metadata use only the derived search database. `BoardSearchService` is shared by the
 dashboard, link candidates, `search_board_cards` and card discovery in `search_history`.
 
-The existing root-only `BertEmbeddingBackfillJob` runs bounded rounds every five seconds,
-subject to the existing resource-pressure policy. `SearchIndexMaintenanceJob` reconciles and
-repairs derived indexes every three minutes. There is no new scheduler, daemon or OS role.
-Each round gives Board, input and ended-session work a turn. Ingestion does not require the
-model; query embedding and background model construction are lazy so keyword search survives
-missing model files or native ONNX dependencies.
+The existing root-only `BertEmbeddingBackfillJob` sweeps every source corpus and then runs bounded
+inference rounds, subject to the existing resource-pressure policy. An idle root ticks every five
+minutes; while a sweep or an inference backlog is unfinished the job follows up after five seconds
+(VB-2GUR8-187: the earlier five-second cadence re-upserted the whole corpus around the clock in
+every root). `SearchIndexMaintenanceJob` repairs derived indexes every fifteen minutes. There is no
+new scheduler, daemon or OS role. Each round gives Board, input and ended-session work a turn.
+Ingestion does not require the model; query embedding and background model construction are lazy
+so keyword search survives missing model files or native ONNX dependencies.
 
 `ISearchIndexStore` owns full source text, FTS5, typed result metadata, sqlite-vec chunks,
 reconciliation cursors, expiring claims, progress, failures and retry deadlines. Board source
 access remains behind `IBoardStore`. Bounded ID pages sweep each source corpus independently;
 an epoch marks seen documents and removes deleted source documents when that sweep finishes.
-The durable cursor resumes after restart. Repeated sweeps detect older/concurrent writers
-without relying on timestamps or in-process notifications. Queries never advance these cursors,
-claim work, write vectors or consult canonical history metadata.
+One reconciliation call sweeps each corpus from its cursor to its end with one write transaction
+per page, yielding after ten seconds on a very large corpus; the durable cursor resumes after a
+restart or an interrupted call. Repeated sweeps detect older/concurrent writers without relying
+on timestamps or in-process notifications. Queries never advance these cursors, claim work, write
+vectors or consult canonical history metadata.
 
 Full titles, descriptions, visible Comments/retained notes and all retained handoffs are separate
 sources. History rows and deleted/hidden discussion are excluded. WordPiece chunks use the

@@ -1045,14 +1045,59 @@ test('A script deleted on disk sends a clean editor back to Automation, and offe
     assert.equal(banner.innerHTML, 'untouched');
 });
 
-test('A 404 from the poll is not "deleted" while the list still knows the script (rename/delete in flight)', async () => {
+test('A retained registration still offers recovery when its file is missing', async () => {
+    const registration = { ...SCRIPT, id: 'stable.py', name: 'stable.py', fileName: 'nightly.py' };
+    const { workbench, app, editor, root } = mountedWorkbench({ scripts: [registration] });
+    workbench.name = registration.id;
+    editor.value = 'print("keep my edits")\n';
+    const scripts = app.jobController.pythonScripts;
+    let missing = true;
+    app.apiCall = async () => {
+        if (missing) throw new Error("Script 'nightly.py' was not found.");
+        return { content: editor.value, version: 'recreated', status: 'unapproved' };
+    };
+    scripts.createScript = async (name, content) => {
+        assert.equal(name, registration.id);
+        assert.equal(content, 'print("keep my edits")\n');
+        missing = false;
+    };
+
+    await workbench.checkDisk();
+
+    assert.equal(scripts.scriptByName(registration.id), registration, 'the registration remains');
+    assert.equal(root.el('[data-workbench-banner]').dataset.kind, 'deleted');
+    assert.equal(app.navigations.length, 0);
+    assert.equal(editor.value, 'print("keep my edits")\n');
+    await workbench.recreateFromEditor();
+    assert.equal(workbench._deletedOnDisk, false);
+    assert.equal(workbench.isDirty, false);
+    assert.equal(workbench.status, 'unapproved');
+});
+
+test('A missing-file recheck ignores navigation and transient failures', async () => {
+    for (const failure of ['unreachable', 'navigated', 'refresh']) {
+        const { workbench, app } = mountedWorkbench();
+        let calls = 0;
+        app.apiCall = async () => {
+            if (++calls === 1) throw new Error("Script 'nightly.py' was not found.");
+            if (failure === 'navigated') workbench._generation += 1;
+            throw new Error(failure === 'unreachable' ? 'Host unavailable' : "Script 'nightly.py' was not found.");
+        };
+        if (failure === 'refresh') app.jobController.pythonScripts.refresh = async function () { this.state = null; };
+        await workbench.checkDisk();
+        assert.equal(app.navigations.length, 0, failure);
+        assert.equal(workbench._deletedOnDisk, false, failure);
+    }
+});
+
+test('A 404 from the poll is rechecked after a concurrent rename', async () => {
     const { workbench, app, root } = mountedWorkbench();
     app.apiCall = async (url) => {
         app.calls.push({ url });
-        if (url.includes('/content?')) throw new Error("Script 'nightly.py' was not found.");
-        return {};
+        if (app.calls.length === 1) throw new Error("Script 'nightly.py' was not found.");
+        return { content: 'print(1)\n', version: 'v1', status: 'approved' };
     };
-    // The list refresh still returns nightly.py (the shared flow has not applied yet).
+    // The registration remains and the second content read succeeds at its current path.
     await workbench.checkDisk();
     assert.equal(app.jobController.pythonScripts.refreshes, 1);
     assert.equal(app.navigations.length, 0);
@@ -1061,6 +1106,7 @@ test('A 404 from the poll is not "deleted" while the list still knows the script
     assert.equal(workbench._deletedOnDisk, false);
     // The same holds when a shared flow started while the request was out.
     app.jobController.pythonScripts.refresh = async function () { this.refreshes += 1; workbench._mutating = true; };
+    app.calls.length = 0;
     await workbench.checkDisk();
     assert.equal(app.navigations.length, 0);
     workbench._mutating = false;
@@ -1143,6 +1189,30 @@ test('Rename hands off to the shared flow, holds the poll, and moves the identit
     scripts.rename = async () => null;
     assert.equal(await workbench.rename(), null);
     assert.equal(workbench.name, 'weekly.py');
+});
+
+test('Stable-ID rename refreshes the editor runtime and clears old output while retaining edits', async () => {
+    const registration = { ...SCRIPT, id: 'stable.py', name: 'stable.py', fileName: 'nightly.py' };
+    const { workbench, app, editor, root } = mountedWorkbench({ scripts: [registration] });
+    workbench.name = registration.id;
+    editor.value = 'unsaved edits';
+    workbench.lastRun = { standardOutput: 'old output' };
+    const languages = [];
+    workbench.monaco = { editor: { setModelLanguage: (_model, language) => languages.push(language) } };
+    const scripts = app.jobController.pythonScripts;
+    scripts.rename = async () => {
+        scripts.state.scripts = [{ ...registration, fileName: 'nightly.sh', path: '/scripts/nightly.sh', status: 'unapproved' }];
+        return registration.id;
+    };
+
+    assert.equal(await workbench.rename(), registration.id);
+    assert.equal(workbench.name, registration.id);
+    assert.deepEqual(languages, ['shell']);
+    assert.equal(workbench.lastRun, null);
+    assert.equal(workbench.status, 'unapproved');
+    assert.equal(editor.value, 'unsaved edits');
+    assert.equal(workbench.isDirty, true);
+    assert.equal(root.el('[data-workbench-name]').textContent, 'nightly.sh');
 });
 
 test('Delete hands off to the shared flow and leaves without the unsaved-changes guard', async () => {

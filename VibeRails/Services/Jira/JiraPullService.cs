@@ -49,6 +49,8 @@ public interface IJiraPullService
     /// </summary>
     Task<JiraConnectionDetails> GetDetailsAsync(string projectPath, string boardId, CancellationToken cancellationToken);
     Task<BoardJiraConnectionRecord> SaveAsync(string projectPath, string boardId, BoardJiraConnectionSave save, string? apiToken, CancellationToken cancellationToken);
+    /// <summary>Unlinks Jira and forgets its token, preserving the board and all imported work. False means the board is outside this project or missing.</summary>
+    Task<bool> UnlinkAsync(string projectPath, string boardId, CancellationToken cancellationToken);
     /// <summary>Checks the token and, for a board link, reads the board, its columns and an issue count.</summary>
     Task<JiraTestReport> TestAsync(string projectPath, string boardId, CancellationToken cancellationToken);
     Task<JiraPullReport> PullAsync(string projectPath, string boardId, bool dryRun, CancellationToken cancellationToken);
@@ -146,6 +148,24 @@ public sealed class JiraPullService(
         return WithTokenFlag(saved);
     }
 
+    /// <inheritdoc />
+    public async Task<bool> UnlinkAsync(string projectPath, string boardId, CancellationToken cancellationToken)
+    {
+        using var held = pullLock.TryAcquire();
+        if (held is null) throw new JiraConfigException("Another Jira operation is running. Try again when it finishes.");
+        if (await store.GetBoardAsync(projectPath, boardId, cancellationToken) is null)
+            return false;
+        var connection = await store.GetJiraConnectionAsync(projectPath, boardId, cancellationToken);
+        if (connection is null) return true;
+
+        // Forget the credential first: even a failed database write cannot leave syncing active.
+        // A retry can safely finish removing the connection without touching imported work.
+        secrets.DeleteToken(connection.Id);
+        if (!await store.DeleteJiraConnectionAsync(projectPath, boardId, connection.Id, cancellationToken))
+            throw new JiraConfigException("The Jira connection changed. Reopen Board Settings and try again.");
+        return true;
+    }
+
     private sealed record ConnectionSource(
         string Origin, string? Link, string? JiraBoardId, string? JiraBoardName, string Jql, bool SameBoard);
 
@@ -182,6 +202,9 @@ public sealed class JiraPullService(
 
     public async Task<JiraTestReport> TestAsync(string projectPath, string boardId, CancellationToken cancellationToken)
     {
+        // A late test result must never recreate a connection after Unlink completes.
+        using var held = pullLock.TryAcquire();
+        if (held is null) throw new JiraConfigException("Another Jira operation is running. Try again when it finishes.");
         var connection = await RequireReady(projectPath, boardId, requireSource: false, cancellationToken);
         var token = secrets.ReadToken(connection.Id)
             ?? throw new JiraConfigException("Save an API token before testing the connection.");

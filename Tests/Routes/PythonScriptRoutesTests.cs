@@ -35,6 +35,35 @@ public sealed class PythonScriptRoutesTests : IDisposable
     }
 
     [Fact]
+    public async Task RegistrationSettingsBindThroughTheAotContextAndKeepTheOriginalFile()
+    {
+        Directory.CreateDirectory(_installDirectory);
+        var path = Path.Combine(_installDirectory, "launch.ps1");
+        File.WriteAllText(path, "Write-Output 1");
+        await WithHostAsync(async baseUri =>
+        {
+            using var added = await PostAsync(baseUri, "/api/v1/python-scripts/import",
+                new PythonScriptImportRequest(path, DisplayName: "Launch app", RequirePinEachRun: true),
+                AppJsonSerializerContext.Default.PythonScriptImportRequest);
+            Assert.Equal(HttpStatusCode.OK, added.StatusCode);
+            var list = await added.Content.ReadFromJsonAsync(AppJsonSerializerContext.Default.PythonScriptListResponse,
+                TestContext.Current.CancellationToken);
+            var script = Assert.Single(list!.Scripts);
+            Assert.Equal(path, script.Path);
+            Assert.Equal("Launch app", script.DisplayName);
+            Assert.True(script.RequirePinEachRun);
+            using var updated = await PostAsync(baseUri, "/api/v1/python-scripts/settings",
+                new PythonScriptSettingsRequest(script.Id!, "Start app", "global", true),
+                AppJsonSerializerContext.Default.PythonScriptSettingsRequest);
+            Assert.Equal(HttpStatusCode.OK, updated.StatusCode);
+            var saved = await updated.Content.ReadFromJsonAsync(AppJsonSerializerContext.Default.PythonScriptListResponse,
+                TestContext.Current.CancellationToken);
+            Assert.Equal("Start app", Assert.Single(saved!.Scripts).DisplayName);
+            Assert.Equal("Write-Output 1", File.ReadAllText(path));
+        });
+    }
+
+    [Fact]
     public async Task CreateThenReadRoundTripsTheScriptThroughTheAotJsonContext()
     {
         await WithHostAsync(async baseUri =>
@@ -170,7 +199,7 @@ public sealed class PythonScriptRoutesTests : IDisposable
                 TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.OK, deleted.StatusCode);
             Assert.Empty(remaining!.Scripts);
-            Assert.False(File.Exists(ScriptPath("nightly.py")));
+            Assert.True(File.Exists(ScriptPath("nightly.py")));
         });
     }
 
@@ -219,7 +248,8 @@ public sealed class PythonScriptRoutesTests : IDisposable
                 AppJsonSerializerContext.Default.PythonScriptListResponse,
                 TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            Assert.Equal("copied.py", Assert.Single(list!.Scripts).Name);
+            Assert.Equal("outside.py", Assert.Single(list!.Scripts).Name);
+            Assert.Equal(source, Assert.Single(list.Scripts).Path);
         });
     }
 
@@ -241,6 +271,9 @@ public sealed class PythonScriptRoutesTests : IDisposable
 
         await WithHostAsync(async baseUri =>
         {
+            using (await PostAsync(baseUri, "/api/v1/python-scripts/create",
+                new PythonScriptSaveRequest("prompt.py", "print(1)"), AppJsonSerializerContext.Default.PythonScriptSaveRequest)) { }
+
             using var response = await PostAsync(
                 baseUri,
                 "/api/v1/python-scripts/run/interactive",

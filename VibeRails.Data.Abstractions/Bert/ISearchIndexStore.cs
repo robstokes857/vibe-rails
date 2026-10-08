@@ -22,13 +22,25 @@ public sealed record SearchMatch(SearchDocument Document, string Text, double Le
 public sealed record SearchIndexProgress(int Documents, int Sources, int Chunks, int Embedded,
     int PendingSources, int Failed, string? LastError, string? LastReconciledUtc);
 
+/// <summary>
+/// Outcome of one reconciliation call: the documents it visited, how many had changed sources, and
+/// whether a claimed sweep stopped before the end of its corpus (time budget, lost lease). An
+/// incomplete sweep resumes from its durable cursor on the next call.
+/// </summary>
+public sealed record SearchReconcileResult(int Documents, int Changed, bool Incomplete);
+
 /// <summary>The shared derived search component. Source databases are only read by reconciliation.</summary>
 public interface ISearchIndexStore
 {
     string DatabasePath { get; }
     /// <summary>Canonical source path for background ingestion and the existing UI diagnostics only.</summary>
     string StateDatabasePath { get; }
-    Task<int> ReconcileAsync(IBoardStore board, int batchSize, CancellationToken ct);
+    /// <summary>
+    /// Sweeps every source corpus from its durable cursor to its end, one write transaction per page of
+    /// <paramref name="batchSize"/> documents. With a <paramref name="budget"/>, a sweep yields once the
+    /// call has run that long; each corpus still advances at least one page per call.
+    /// </summary>
+    Task<SearchReconcileResult> ReconcileAsync(IBoardStore board, int batchSize, CancellationToken ct, TimeSpan? budget = null);
     IReadOnlyList<SearchWork> ClaimSources(string kind, int count, string version);
     void CompleteSource(SearchWork work, IReadOnlyList<string> chunks, string version);
     IReadOnlyList<SearchWork> ClaimChunks(string kind, int count, string modelVersion);

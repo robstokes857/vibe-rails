@@ -67,7 +67,7 @@ test('Automation page shows the Scripts section (pwsh, bash and python)', async 
     const prefs = await (await context.request.get('/api/v1/automation-nav/preferences')).json();
     const scriptItems = prefs.items.filter((item) => item.kind === 'script');
     expect(scriptItems.map((item) => item.label).sort()).toEqual(
-        status.scripts.map((script) => script.name).sort());
+        status.scripts.map((script) => script.displayName || script.name).sort());
     expect(scriptItems.map((item) => [item.label, item.status]).sort()).toEqual(
         status.scripts.map((script) => [script.name, script.status]).sort());
 });
@@ -85,7 +85,7 @@ test('Opening a script lands in the workbench: editor over an agent terminal in 
     await expect(section).toBeVisible({ timeout: 15_000 });
     const firstRow = section.locator('.python-script-row').first();
     await expect(firstRow).toBeAttached({ timeout: 10_000 });
-    if (!await firstRow.isVisible()) await section.locator('[data-signed-scripts] > summary').click();
+    if (!await firstRow.isVisible()) await section.locator('[data-unsigned-scripts] > summary').click();
     await expect(firstRow).toBeVisible({ timeout: 10_000 });
     const scriptName = (await firstRow.getAttribute('data-python-script')) || '';
     await firstRow.locator('.python-script-name').click();

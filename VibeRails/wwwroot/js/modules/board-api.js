@@ -78,6 +78,10 @@ async function testJiraConnectionAsync(boardId) {
     return call(`/boards/${enc(boardId)}/jira/test`, 'POST');
 }
 
+async function unlinkJiraConnectionAsync(boardId) {
+    return call(`/boards/${enc(boardId)}/jira`, 'DELETE');
+}
+
 async function pullJiraAsync(boardId, dryRun = false) {
     return call(`/boards/${enc(boardId)}/jira/pull${dryRun ? '?dryRun=true' : ''}`, 'POST');
 }
@@ -403,6 +407,7 @@ export const BoardApi = {
     getJiraConnectionAsync,
     saveJiraConnectionAsync,
     testJiraConnectionAsync,
+    unlinkJiraConnectionAsync,
     pullJiraAsync,
     getBoardSyncAsync,
     setBoardSyncAsync,

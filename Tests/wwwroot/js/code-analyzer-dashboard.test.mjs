@@ -514,32 +514,34 @@ test('NPath saturation is described as a capped estimate rather than an exact me
     disposeCodeAnalyzerDashboard(container);
 });
 
-test('Rules and Code quality share one Project health destination without a docked terminal', () => {
+test('Rules and Code quality have independent pages without a docked terminal', () => {
     const index = readFileSync(path.resolve('VibeRails/wwwroot/index.html'), 'utf8');
 
-    // One QUALITY entry lives in the top navigation. The old top-level RULES link is gone.
+    // Rules and Quality have separate navigation entries; rule-files remains an editor route.
     const rulesNavLinks = index.match(/data-action="navigate" data-view="rule-files"/g) || [];
     assert.equal(rulesNavLinks.length, 0);
     assert.equal((index.match(/<span>QUALITY<\/span>/g) || []).length, 1);
     assert.equal((index.match(/data-action="navigate-home"/g) || []).length, 1);
     assert.equal((index.match(/class="app-sidebar"|switch-nav-layout|nav-layout\.js/g) || []).length, 0);
 
-    // The unified page carries both summaries and the card-level agent actions, but never xterm.
+    // Rules owns validation and Quality owns analysis; neither mounts xterm.
     const agentsTemplate = index.match(/<template id="agents-template">([\s\S]*?)<\/template>/)[1];
     assert.doesNotMatch(agentsTemplate, /rules-localnav|role="tablist"|data-rules-tab/);
-    assert.match(agentsTemplate, /Rules and code quality<\/h1>/);
+    assert.match(agentsTemplate, /Rules<\/h1>/);
     assert.match(agentsTemplate, /data-vca-console\b/);
-    assert.match(agentsTemplate, /data-code-analyzer-console[\s\S]*?data-code-analyzer-report[\s\S]*?Technical details/);
+    assert.doesNotMatch(agentsTemplate, /data-code-analyzer/);
     assert.match(agentsTemplate, /project-health-status-copy" role="status"[\s\S]*?aria-live="polite" aria-atomic="true"/);
     assert.match(agentsTemplate, /data-action="manage-rules"/);
-    assert.equal((agentsTemplate.match(/data-action="launch-health-fix"/g) || []).length, 2);
+    assert.equal((agentsTemplate.match(/data-action="launch-health-fix"/g) || []).length, 1);
     assert.doesNotMatch(agentsTemplate, /data-terminal-section|data-terminal-content|renderTerminalPanel/);
     assert.doesNotMatch(agentsTemplate, /data-agent-file-tree|data-rules-files-door/);
 
-    // The report renders inline in the Code quality card: no second screen, modal or window.
-    assert.doesNotMatch(index, /id="code-quality-template"/);
+    // The report renders in its own full-width workspace.
+    const qualityTemplate = index.match(/<template id="code-quality-template">([\s\S]*?)<\/template>/)[1];
+    assert.match(qualityTemplate, /data-code-analyzer-report/);
+    assert.doesNotMatch(qualityTemplate, /\sdata-vca-console(?:\s|>)|data-hook-health/);
     assert.equal((index.match(/data-code-analyzer-report/g) || []).length, 1);
-    assert.match(agentsTemplate, /data-code-analyzer-full-scan/);
+    assert.match(qualityTemplate, /data-code-analyzer-full-scan/);
 
     // Legacy detail routes remain for old links and the full editor, but are no longer nav destinations.
     const files = index.match(/<template id="rule-files-template">([\s\S]*?)<\/template>/)[1];
@@ -548,13 +550,13 @@ test('Rules and Code quality share one Project health destination without a dock
     assert.match(files, /data-agent-file-tree/);
     assert.match(files, /data-agent-rule-editor/);
 
-    // The old detail route stays valid for saved links, but lands on Project health.
+    // Saved Quality links open the dedicated workspace.
     const app = readFileSync(path.resolve('VibeRails/wwwroot/app.js'), 'utf8');
     assert.match(app, /'code-quality': \(\) => this\.dashboardController\.loadDashboard\(data\)/);
     assert.match(app, /'rule-files': \(\) => this\.agentController\.loadRuleFiles\(\)/);
 
     const ruleController = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/rule-controller.js'), 'utf8');
-    assert.match(ruleController, /new CodeReportViewer\(reportHost, this\.app\)/);
+    assert.match(ruleController, /new CodeReportViewer\(/);
     assert.match(ruleController, /this\.codeReportViewer\?\.destroy\(\)/);
     assert.doesNotMatch(ruleController, /loadCodeQuality|openCodeQualityDetails|navigate\('code-quality'\)/);
     assert.doesNotMatch(ruleController, /data-rules-tab/);

@@ -13,6 +13,10 @@ export const boardSettingsNavigation = () => `
 export function mountBoardSettingsNavigation(editor, onSelect = () => {}) {
     const abort = new AbortController();
     let tabs = [...editor.querySelectorAll('[data-board-settings-tab]')];
+    const jiraTab = tabs.find(tab => tab.dataset.boardSettingsTab === 'jira');
+    const generalTab = tabs.find(tab => tab.dataset.boardSettingsTab === 'general');
+    const jiraPanel = editor.querySelector('[data-board-settings-panel="jira"]');
+    const generalPanel = editor.querySelector('[data-board-settings-panel="general"]');
     let combinedJira = false;
     const select = tab => {
         for (const item of tabs) {
@@ -45,12 +49,8 @@ export function mountBoardSettingsNavigation(editor, onSelect = () => {}) {
         combineJira() {
             if (combinedJira || abort.signal.aborted || editor.isConnected === false) return;
             combinedJira = true;
-            const generalTab = tabs.find(tab => tab.dataset.boardSettingsTab === 'general');
-            const jiraTab = tabs.find(tab => tab.dataset.boardSettingsTab === 'jira');
             const activeTab = tabs.find(tab => tab.classList.contains('active')) || generalTab;
             const focused = document.activeElement;
-            const generalPanel = editor.querySelector('[data-board-settings-panel="general"]');
-            const jiraPanel = editor.querySelector('[data-board-settings-panel="jira"]');
             const restoreFocus = focused === jiraTab ? generalTab : jiraPanel.contains(focused) ? focused : null;
             // Move the existing controls so a delayed status response cannot erase either draft.
             jiraPanel.removeAttribute('data-board-settings-panel');
@@ -64,6 +64,21 @@ export function mountBoardSettingsNavigation(editor, onSelect = () => {}) {
             tabs = tabs.filter(tab => tab !== jiraTab);
             select(activeTab === jiraTab ? generalTab : activeTab);
             restoreFocus?.focus({ preventScroll: true });
+        },
+        separateJira() {
+            if (!combinedJira || abort.signal.aborted || editor.isConnected === false) return;
+            combinedJira = false;
+            const activeTab = tabs.find(tab => tab.classList.contains('active')) || generalTab;
+            jiraPanel.dataset.boardSettingsPanel = 'jira';
+            jiraPanel.setAttribute('role', 'tabpanel');
+            jiraPanel.setAttribute('aria-labelledby', jiraTab.id);
+            jiraPanel.removeAttribute('aria-label');
+            jiraPanel.classList.remove('board-settings-jira-combined');
+            generalPanel.after(jiraPanel);
+            generalTab.after(jiraTab);
+            tabs = [...editor.querySelectorAll('[data-board-settings-tab]')];
+            // Keep the unlink result visible while retaining every other settings draft.
+            select(activeTab === generalTab ? jiraTab : activeTab);
         }
     };
 }

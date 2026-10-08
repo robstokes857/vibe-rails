@@ -1,17 +1,16 @@
 using VibeRails.Services;
 using VibeRails.Services.BertV2;
-using VibeRails.Services.Board;
 
 namespace VibeRails.Jobs;
 
-/// <summary>Reconciles source changes and repairs derived indexes.</summary>
+/// <summary>Repairs derived search indexes. Source reconciliation belongs to <see cref="BertEmbeddingBackfillJob"/> (VB-2GUR8-187).</summary>
 public sealed class SearchIndexMaintenanceJob(ILogger<SearchIndexMaintenanceJob> logger,
-    ISystemResourceService resources, ISearchIndexStore store, IBoardStore board) : JobBase(logger, resources)
+    ISystemResourceService resources, ISearchIndexStore store) : JobBase(logger, resources)
 {
-    protected override TimeSpan Interval => TimeSpan.FromMinutes(3);
-    protected override async Task ExecuteJob(CancellationToken cancellationToken)
+    protected override TimeSpan Interval => TimeSpan.FromMinutes(15);
+    protected override Task ExecuteJob(CancellationToken cancellationToken)
     {
-        await store.ReconcileAsync(board, 25, cancellationToken);
         if (store.Repair()) Serilog.Log.Warning("[SearchIndex] Repaired the derived search index");
+        return Task.CompletedTask;
     }
 }

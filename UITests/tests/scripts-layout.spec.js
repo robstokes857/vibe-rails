@@ -42,7 +42,6 @@ async function openScripts(page, { expandSigned = true } = {}) {
     });
     await page.goto('/?view=jobs');
     await expect(page.locator('.python-script-row')).toHaveCount(40);
-    if (expandSigned) await page.locator('[data-signed-scripts] > summary').click();
     return scripts;
 }
 
@@ -74,7 +73,6 @@ test('one selected script fills the editor and Back opens the list to choose ano
     await page.screenshot({ path: testInfo.outputPath('single-script-editor.png') });
     await page.locator('[data-action="go-back"]').click();
     await expect(page.locator('.python-script-row')).toHaveCount(40);
-    await page.locator('[data-signed-scripts] > summary').click();
     await page.locator('.python-script-name').filter({ hasText: /\bscript-1\.py\b/ }).click();
     await expect(page.locator('[data-workbench-name]')).toHaveText('script-1.py');
     await expect.poll(() => page.evaluate(() => window.app.pythonScriptWorkbench.editor.getValue()))
@@ -140,19 +138,20 @@ test('terminal prompt stays in the viewport under the top navigation', async ({ 
 test('script actions align and language guidance stays readable on narrow screens', async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     const scripts = await openScripts(page, { expandSigned: false });
-    const group = page.locator('[data-signed-scripts]');
-    await expect(page.locator('.python-script-row').first()).toBeHidden();
-    await expect(group.locator(':scope > summary')).toHaveText('Signed scripts40');
-    await group.locator(':scope > summary').focus();
-    await page.keyboard.press('Space');
     await expect(page.locator('.python-script-row').first()).toBeVisible();
     scripts[0].status = 'modified';
     await page.locator('[data-python-scripts-action="refresh"]').click();
-    await expect(group.locator('.jobs-count')).toHaveText('39');
+    const group = page.locator('[data-unsigned-scripts]');
+    await expect(group.locator(':scope > summary')).toHaveText('Unsigned scripts1');
+    await expect(page.locator('[data-python-script="example.py"]')).toBeHidden();
+    await group.locator(':scope > summary').focus();
+    await page.keyboard.press('Space');
+    await expect(page.locator('[data-python-script="example.py"]')).toBeVisible();
+    await page.locator('[data-python-scripts-action="refresh"]').click();
     await expect(group).toHaveJSProperty('open', true);
     await group.locator(':scope > summary').click();
-    await expect(page.locator('[data-python-script="example.py"]')).toBeVisible();
-    await expect(group.locator('.python-script-row').first()).toBeHidden();
+    await expect(page.locator('[data-python-script="example.py"]')).toBeHidden();
+    await expect(page.locator('[data-python-script="script-1.py"]')).toBeVisible();
     const actions = page.locator('.python-scripts-heading-actions');
     const buttons = actions.locator('button');
     const boxes = await buttons.evaluateAll(nodes => nodes.map(node => {
@@ -175,7 +174,8 @@ test('New script says pwsh, bash or python, keeps the extension in step and open
     await page.setViewportSize({ width: 1280, height: 860 });
     await openScripts(page);
     const created = [];
-    const deploy = { name: 'deploy.sh', path: 'C:/fixture/scripts/deploy.sh', status: 'unapproved',
+    const deploy = { id: 'unique-deploy.sh', name: 'deploy.sh', displayName: 'Start my app', scope: 'repo',
+        path: 'C:/fixture/repo/deploy.sh', status: 'unapproved',
         sizeBytes: 64, modifiedUtc: '2026-10-03T01:00:00Z' };
     const list = () => ({ scriptsDirectory: 'C:/fixture/scripts', pinConfigured: true, scripts: created.length ? [deploy] : [] });
     // Registered after openScripts, so these win over its catch-all fixture.
@@ -190,30 +190,99 @@ test('New script says pwsh, bash or python, keeps the extension in step and open
     await page.locator('[data-python-scripts-action="new"]').first().click();
     const modal = page.locator('.python-scripts-pin-modal');
     await expect(modal.locator('.modal-title')).toHaveText('New script');
-    await expect(modal).toContainText('Choose pwsh, bash, or python.');
+    await expect(modal).toContainText('Choose pwsh, bash, or python');
     const runtime = modal.locator('select[data-pin-field="runtime"]');
     const name = modal.locator('input[data-pin-field="name"]');
     await expect(runtime.locator('option')).toHaveText(['python — Python (.py)', 'pwsh — PowerShell (.ps1)', 'bash — Bash (.sh)']);
     await expect(name).toBeFocused();
     await expect(name).toHaveValue('script.py');
+    const displayName = modal.locator('[data-pin-field="displayName"]');
+    await expect(displayName).toHaveValue('script.py');
 
     await runtime.selectOption('bash');
     await expect(name).toHaveValue('script.sh');
+    await expect(displayName).toHaveValue('script.sh');
+    await displayName.fill('Start my app');
     await name.fill('deploy.ps1');
     await expect(runtime).toHaveValue('pwsh');
     await page.screenshot({ path: testInfo.outputPath('new-script-dialog.png') });
     await name.fill('deploy');
     await runtime.selectOption('bash');
     await expect(name).toHaveValue('deploy.sh');
+    await expect(displayName).toHaveValue('Start my app');
+    await page.evaluate(() => {
+        window.app.pickFileSystemEntry = async options => {
+            window.scriptPickerOptions = options;
+            return { path: 'C:/fixture/repo' };
+        };
+    });
+    await modal.getByRole('button', { name: 'Browse…' }).click();
+    await expect(modal.locator('[data-pin-field="directory"]')).toHaveValue('C:/fixture/repo');
+    await modal.locator('[data-pin-field="directory"]').fill('C:/fixture/repo/');
+    await modal.locator('[data-pin-field="requirePinEachRun"]').selectOption('true');
     await modal.getByRole('button', { name: 'Create and edit' }).click();
 
     await expect.poll(() => created.length).toBe(1);
     expect(created[0].name).toBe('deploy.sh');
+    expect(created[0]).toMatchObject({ displayName: 'Start my app', directory: 'C:/fixture/repo/', scope: 'repo', requirePinEachRun: true });
+    expect(await page.evaluate(() => window.scriptPickerOptions.mode)).toBe('directory');
     expect(created[0].content.startsWith('#!/usr/bin/env bash\n')).toBe(true);
     await expect(page.locator('.monaco-editor')).toBeVisible();
+    await expect(page.locator('[data-workbench-name]')).toHaveText('Start my app');
     await expect.poll(() => page.evaluate(() => window.monaco?.editor.getModels().map(model => model.getLanguageId())))
         .toContain('shell');
     await expect(page.locator('.python-workbench-identity > i')).toHaveClass(/fa-terminal/);
     await expect(page.locator('[data-workbench-meta]')).toContainText('runs with bash');
     await page.screenshot({ path: testInfo.outputPath('new-script-workbench.png') });
+});
+
+test('Add from disk keeps the selected path and exposes display, scope and run PIN settings', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1100, height: 800 });
+    await openScripts(page);
+    let registered = null;
+    let importBody = null;
+    let settingsBody = null;
+    const list = () => ({ scriptsDirectory: 'C:/fixture/scripts/UserScripts', pinConfigured: true,
+        scripts: registered ? [registered] : [] });
+    await page.route('**/api/v1/python-scripts', route => route.fulfill({ json: list() }));
+    await page.route('**/api/v1/python-scripts/import', route => {
+        importBody = route.request().postDataJSON();
+        registered = { id: 'external-launch.ps1', name: 'launch.ps1', path: importBody.sourcePath,
+            displayName: importBody.displayName, scope: importBody.scope, requirePinEachRun: importBody.requirePinEachRun,
+            status: 'unapproved', sizeBytes: 20 };
+        return route.fulfill({ json: list() });
+    });
+    await page.route('**/api/v1/python-scripts/settings', route => {
+        settingsBody = route.request().postDataJSON();
+        registered = { ...registered, displayName: settingsBody.displayName };
+        return route.fulfill({ json: list() });
+    });
+    await page.route('**/api/v1/python-scripts/content*', route => route.fulfill({
+        json: { name: 'external-launch.ps1', content: 'Write-Output 1', version: 'one', status: 'unapproved' }
+    }));
+    await page.evaluate(() => {
+        window.app.pickFileSystemEntry = async () => ({ path: 'C:/fixture/repo/launch.ps1', name: 'launch.ps1' });
+    });
+    await page.getByRole('button', { name: 'Add from disk' }).first().click();
+    const modal = page.locator('.python-scripts-pin-modal');
+    await expect(modal.locator('[data-pin-field="displayName"]')).toHaveValue('launch.ps1');
+    await modal.locator('[data-pin-field="displayName"]').fill('Launch Front');
+    await modal.locator('[data-pin-field="scope"]').selectOption('global');
+    await modal.locator('[data-pin-field="requirePinEachRun"]').selectOption('true');
+    await modal.getByRole('button', { name: 'Add script', exact: true }).click();
+    await expect(page.locator('[data-workbench-name]')).toHaveText('Launch Front');
+    expect(importBody).toEqual({ sourcePath: 'C:/fixture/repo/launch.ps1', displayName: 'Launch Front',
+        scope: 'global', requirePinEachRun: true });
+    await expect(page.locator('[data-workbench-meta]')).toContainText('C:/fixture/repo/launch.ps1');
+    await page.locator('[data-action="go-back"]').click();
+    await expect(page.locator('.python-script-row')).toBeHidden();
+    await page.locator('[data-unsigned-scripts] > summary').click();
+    await page.locator('[data-python-scripts-action="menu"]').click();
+    await page.getByRole('menuitem', { name: 'Script settings…' }).click();
+    await expect(modal.locator('[data-pin-field="requirePinEachRun"]')).toHaveValue('true');
+    await modal.locator('[data-pin-field="displayName"]').fill('Start Front');
+    await modal.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(page.locator('.python-script-name')).toHaveText('Start Front');
+    expect(settingsBody).toEqual({ name: 'external-launch.ps1', displayName: 'Start Front', scope: 'global', requirePinEachRun: true });
+    await page.screenshot({ path: testInfo.outputPath('registered-external-script.png') });
 });

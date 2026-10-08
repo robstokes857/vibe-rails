@@ -84,6 +84,58 @@ public sealed class JiraPullServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task UnlinkKeepsImportedWorkAndIssueLinks_ButRemovesOnlyItsConnectionAndToken()
+    {
+        var service = Service();
+        var source = await BoardWithLanes();
+        var saved = await service.SaveAsync(_project, source.Id, Save("secret-token"), "secret-token", Ct);
+        _jira.Pages.Enqueue(Page(Issue("100", "PROJ-1", "2026-09-01T00:00:00.000Z", "Keep this story", "Story", "Medium", "Backlog")));
+        await service.PullAsync(_project, saved.BoardId, false, Ct);
+        var card = Assert.Single(await _store.GetCardsAsync(_project, Ct, saved.BoardId));
+        await _store.AddCommentAsync(_project, card.Id, BoardAuthor.User(), "Keep this note", Ct);
+        var other = await service.SaveAsync(_project, source.Id, Save("other-token"), "other-token", Ct);
+
+        Assert.False(await service.UnlinkAsync(_project + "-foreign", saved.BoardId, Ct));
+        Assert.False(await _store.DeleteJiraConnectionAsync(_project + "-foreign", saved.BoardId, saved.Id, Ct));
+        Assert.False(await _store.DeleteJiraConnectionAsync(_project, saved.BoardId, other.Id, Ct));
+        Assert.Equal("secret-token", _secrets.ReadToken(saved.Id));
+
+        Assert.True(await service.UnlinkAsync(_project, saved.BoardId, Ct));
+        Assert.True(await service.UnlinkAsync(_project, saved.BoardId, Ct));
+        Assert.Null(await service.GetAsync(_project, saved.BoardId, Ct));
+        Assert.Null(_secrets.ReadToken(saved.Id));
+        Assert.NotNull(await _store.GetBoardAsync(_project, saved.BoardId, Ct));
+        var kept = Assert.Single(await _store.GetCardsAsync(_project, Ct, saved.BoardId));
+        Assert.Equal(card.Id, kept.Id);
+        Assert.Equal(card.Title, kept.Title);
+        Assert.Equal(card.Description, kept.Description);
+        Assert.Equal(card.ColumnId, kept.ColumnId);
+        Assert.Contains((await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Comments, comment => comment.Body == "Keep this note");
+        Assert.Equal(card.Id, (await _store.FindJiraLinkAsync(saved.Id, "100", Ct))!.CardId);
+        Assert.Equal(other.Id, (await service.GetAsync(_project, other.BoardId, Ct))!.Id);
+        Assert.Equal("other-token", _secrets.ReadToken(other.Id));
+        await Assert.ThrowsAsync<JiraConfigException>(() => service.PullAsync(_project, saved.BoardId, false, Ct));
+        Assert.Equal(1, _jira.Searches);
+    }
+
+    [Fact]
+    public async Task UnlinkAndConnectionTestsRespectTheCrossProcessOperationLock()
+    {
+        var service = Service();
+        var source = await BoardWithLanes();
+        var saved = await service.SaveAsync(_project, source.Id, Save("secret-token"), "secret-token", Ct);
+        using (var held = CrossProcessFileLock.TryAcquire(LockPath))
+        {
+            Assert.NotNull(held);
+            await Assert.ThrowsAsync<JiraConfigException>(() => service.UnlinkAsync(_project, saved.BoardId, Ct));
+            await Assert.ThrowsAsync<JiraConfigException>(() => service.TestAsync(_project, saved.BoardId, Ct));
+            Assert.Equal("secret-token", _secrets.ReadToken(saved.Id));
+            Assert.NotNull(await service.GetAsync(_project, saved.BoardId, Ct));
+        }
+        Assert.True(await service.UnlinkAsync(_project, saved.BoardId, Ct));
+    }
+
+    [Fact]
     public async Task DryRunCountsWithoutWriting_AndARealPullCreatesThenSkips()
     {
         var service = Service();

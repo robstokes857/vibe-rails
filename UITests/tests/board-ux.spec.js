@@ -57,6 +57,67 @@ for (const width of [1440, 390]) {
     });
 }
 
+for (const width of [1440, 390]) {
+    test(`Jira unlink confirms, handles failure and preserves settings drafts at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        await openBoard(page);
+        let linked = true;
+        let attempts = 0;
+        await page.route('**/api/v1/board/boards/brd_main/sync', route => route.fulfill({ json: {
+            isJiraBoard: linked, enabled: false, configured: true
+        } }));
+        await page.route(url => url.pathname === '/api/v1/board/boards/brd_main/jira', route => {
+            if (route.request().method() === 'DELETE') {
+                attempts++;
+                if (attempts === 1) return route.fulfill({ status: 400, json: { error: 'Another Jira operation is running. Try again when it finishes.' } });
+                linked = false;
+                return route.fulfill({ json: { message: 'Jira unlinked' } });
+            }
+            return route.fulfill({ json: linked ? {
+                boardId: 'brd_main', siteUrl: 'https://example.atlassian.net', hasToken: true,
+                authStatus: 'saved', boardLink: 'https://example.atlassian.net/boards/1',
+                jiraBoardName: 'TEST', email: 'user@example.com', enabled: true, columns: [], lanes: []
+            } : { boardId: 'brd_main', authStatus: 'none', columns: [], lanes: [] } });
+        });
+        await page.getByRole('button', { name: 'Board settings', exact: true }).click();
+        const icon = page.locator('.modal-title').getByRole('img', { name: 'Jira board', exact: true });
+        await expect(icon).toBeVisible();
+        await expect(page.getByLabel('API token', { exact: true })).toHaveAttribute('placeholder', '•'.repeat(32));
+        await page.getByLabel('Board name', { exact: true }).fill('Keep my name draft');
+        const panel = page.locator('[data-jira-panel]');
+        const unlink = panel.getByRole('button', { name: 'Unlink Jira', exact: true });
+        await unlink.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: testInfo.outputPath(`board-jira-unlink-button-${width}.png`) });
+        await unlink.click();
+        await expect(page.getByRole('alertdialog')).toContainText('imported cards, comments, files and sessions stay');
+        await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel', exact: true }).click();
+        expect(attempts).toBe(0);
+        await expect(unlink).toBeEnabled();
+
+        await unlink.click();
+        await page.getByRole('alertdialog').getByRole('button', { name: 'Unlink Jira', exact: true }).click();
+        await expect(panel.locator('[data-jira-report]')).toContainText('Another Jira operation is running');
+        await expect(icon).toBeVisible();
+        await expect(unlink).toBeEnabled();
+
+        await unlink.click();
+        await page.getByRole('alertdialog').getByRole('button', { name: 'Unlink Jira', exact: true }).click();
+        await expect(panel.locator('[data-jira-report]')).toContainText('Jira unlinked');
+        await expect(icon).toHaveCount(0);
+        await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Agent context', 'History']);
+        await expect(unlink).toBeHidden();
+        await expect(panel.getByRole('button', { name: 'Pull now', exact: true })).toBeDisabled();
+        await expect(panel.getByLabel('API token', { exact: true })).toHaveValue('');
+        await expect(panel.getByLabel('API token', { exact: true })).toHaveAttribute('placeholder', 'Paste an API token');
+        await expect(panel.getByLabel('Jira board link')).toHaveValue('');
+        await page.screenshot({ path: testInfo.outputPath(`board-jira-unlinked-${width}.png`) });
+        await page.getByRole('tab', { name: 'General', exact: true }).click();
+        await expect(page.getByLabel('Board name', { exact: true })).toHaveValue('Keep my name draft');
+        await expect(page.getByLabel('Sync this board with viberails.ai')).toBeVisible();
+        expect(attempts).toBe(2);
+    });
+}
+
 for (const selected of ['Jira Cloud', 'Agent context', 'Jira input']) {
     test(`delayed Jira board status preserves drafts and the selected ${selected} section`, async ({ page }) => {
         await openBoard(page);

@@ -22,8 +22,8 @@ public sealed class AutomationNavPreferenceValidationException(string message) :
 /// <summary>
 /// Order and visibility for the nav-bar Automation launcher, mirroring how the LLM
 /// picker preferences treat Custom Environments. The catalog is the current project's
-/// automations (keyed job:{id}) followed by every script in the global scripts
-/// folder (keyed script:{name}, each carrying its signing status); preferences live
+/// automations (keyed job:{id}) followed by visible user scripts
+/// (keyed script:{id}, each carrying its signing status and display name); preferences live
 /// entirely in one GlobalCache document. Saves and resets only ever touch keys that are
 /// in the current catalog, so another project's stored choices survive untouched.
 /// </summary>
@@ -101,8 +101,7 @@ public sealed class AutomationNavPreferenceService(
     /// <summary>
     /// The launcher catalog: the current project's automations (jobs) followed by every
     /// script (Python, PowerShell or Bash), signed or not, each with its signing status so the launcher can
-    /// disable the unsigned ones. Scripts are global (they live in the home dir), so
-    /// they appear whatever project is open.
+    /// omit the unsigned ones. The script service filters Global and current-Repo registrations.
     /// </summary>
     private async Task<List<AutomationNavPreferenceItem>> BuildCatalogAsync(
         CancellationToken cancellationToken)
@@ -131,13 +130,14 @@ public sealed class AutomationNavPreferenceService(
         }
 
         catalog.AddRange(scripts.Scripts.Select(script => new AutomationNavPreferenceItem(
-            ScriptKey(script.Name),
+            ScriptKey(script.Id ?? script.Name),
             ScriptKind,
-            script.Name,
+            script.DisplayName ?? script.Name,
             JobId: 0,
             Enabled: true,
             Order: 0,
-            Status: script.Status)));
+            Status: script.Status,
+            ScriptFileName: script.Name)));
         return catalog;
     }
 
@@ -233,7 +233,8 @@ public sealed class AutomationNavPreferenceService(
             .Select((item, index) => item with
             {
                 Order = index,
-                Status = expectedByKey[item.Key].Status
+                Status = expectedByKey[item.Key].Status,
+                ScriptFileName = expectedByKey[item.Key].ScriptFileName
             })
             .ToList();
     }

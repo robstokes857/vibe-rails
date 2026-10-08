@@ -15,20 +15,9 @@ internal static class SearchTestIndex
         return index;
     }
 
-    internal static void Reconcile(SqliteSearchIndexStore index, IBoardStore board)
-    {
-        var ct = Xunit.TestContext.Current.CancellationToken;
-        var cards = 0;
-        string? after = null;
-        while (true)
-        {
-            var page = board.GetSearchDocumentsAsync(0, ct, false, after).GetAwaiter().GetResult();
-            cards += page.Count;
-            if (page.Count < 100) break;
-            after = page[^1].Id;
-        }
-        for (var i = 0; i <= cards / 25; i++) index.ReconcileAsync(board, 25, ct).GetAwaiter().GetResult();
-    }
+    /// <summary>One call sweeps every corpus to its end (VB-2GUR8-187), so no paging loop is needed here.</summary>
+    internal static void Reconcile(SqliteSearchIndexStore index, IBoardStore board) =>
+        index.ReconcileAsync(board, 25, Xunit.TestContext.Current.CancellationToken).GetAwaiter().GetResult();
 
     internal static void Embed(SqliteSearchIndexStore index, IBertV2BgeEmbedder model)
     {

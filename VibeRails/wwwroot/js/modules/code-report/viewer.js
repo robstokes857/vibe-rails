@@ -33,7 +33,7 @@ export class CodeReportViewer {
         this.window = this.document.defaultView;
         this.generation = 0;
         this.destroyed = false;
-        this.activeList = 'changes'; // What changed comes first; the report list is one click away.
+        this.activeList = 'report';
         const titleId = `code-report-details-${++instanceId}`;
         host.innerHTML = `<div class="code-report code-report-compact">
             <main aria-label="Interactive code report">
@@ -69,6 +69,12 @@ export class CodeReportViewer {
             this.closeDetails(true);
         };
         this.document.addEventListener('keydown', this.onKeydown, true);
+        // Let the opening map tour yield immediately to the user's own navigation.
+        // Focusing the sandboxed Atlas frame blurs the host window.
+        this.onInteraction = () => this.cancelAutoFocus();
+        for (const type of ['pointerdown', 'keydown', 'wheel'])
+            this.document.addEventListener(type, this.onInteraction, { capture: true, passive: true });
+        this.window.addEventListener('blur', this.onInteraction);
         this.quality = mountQualityReport(this.qualityHost, {
             onFileClick: file => this.focusFile(file.file),
             onMetricClick: metric => this.showFile(this.findFile(metric.file), metric.metricName),
@@ -131,6 +137,7 @@ export class CodeReportViewer {
     }
 
     disposeGraph() {
+        this.cancelAutoFocus();
         this.request?.abort();
         this.request = null;
         this.changesRequest?.abort();
@@ -149,6 +156,7 @@ export class CodeReportViewer {
         this.radar = null;
         this.closeDetails();
         this.disposeGraph();
+        this.autoFocusCancelled = false;
         this.changes = undefined;
         this.root.querySelector('[data-map-diagnostics]').hidden = true;
         this.root.querySelector('[data-graph-options]').hidden = true;
@@ -186,9 +194,32 @@ export class CodeReportViewer {
             });
         }
         await this.ready;
+        if (this.isCurrent(generation)) this.scheduleAutoFocus(generation);
     }
 
     isCurrent(generation) { return !this.destroyed && generation === this.generation; }
+
+    cancelAutoFocus() {
+        this.window.clearTimeout(this.autoFocusTimer);
+        this.autoFocusTimer = null;
+        this.autoFocusCancelled = true;
+    }
+
+    scheduleAutoFocus(generation) {
+        if (this.autoFocusCancelled || !this.atlas || this.activeList !== 'report') return;
+        // Atlas readiness follows layout and the loader fade. Leave the overview visible
+        // for a second before using the same animated selection as a Report files click.
+        this.autoFocusTimer = this.window.setTimeout(() => {
+            this.autoFocusTimer = null;
+            if (!this.isCurrent(generation) || this.autoFocusCancelled || this.document.hidden
+                || !this.root.isConnected || !this.details.hidden || this.activeList !== 'report') return;
+            const first = this.qualityHost.querySelector('.qr-file');
+            const path = first?.dataset.path;
+            // Saved files may no longer exist in the map. Don't open a details panel or
+            // show an unsolicited missing-file toast in place of the opening animation.
+            if (path && !first.disabled && this.mappedFiles().has(path)) void this.focusFile(path);
+        }, 1000);
+    }
 
     async loadGraph(files, generation) {
         this.root.querySelector('[data-map-diagnostics]').hidden = true;
@@ -404,6 +435,7 @@ export class CodeReportViewer {
     }
 
     async focusFile(path, nodeId) {
+        this.cancelAutoFocus();
         const generation = this.generation;
         this.closeDetails();
         await this.ready;
@@ -511,6 +543,9 @@ export class CodeReportViewer {
         this.quality.destroy();
         this.closeDetails();
         this.document.removeEventListener('keydown', this.onKeydown, true);
+        for (const type of ['pointerdown', 'keydown', 'wheel'])
+            this.document.removeEventListener(type, this.onInteraction, true);
+        this.window.removeEventListener('blur', this.onInteraction);
         this.window.removeEventListener('pagehide', this.pagehide);
         this.window.removeEventListener('resize', this.fitHeight);
         this.resizeObserver?.disconnect();

@@ -89,6 +89,18 @@ const CATALOG = [
     { key: 'job:9', kind: 'automation', label: 'Hidden one', jobId: 9, enabled: false, order: 3 }
 ];
 
+test('display names do not replace a script identity or its runtime', async () => {
+    const launcher = launcherWith([{ key: 'script:unique.ps1', kind: 'script', label: 'Launch app',
+        scriptFileName: 'launch.ps1', jobId: 0, enabled: true, status: 'approved', order: 0 }]);
+    const invoked = [];
+    launcher._runScript = async name => invoked.push(name);
+    launcher._renderFlyoutItems();
+    assert.match(launcher.flyout.target.html, /Launch app/);
+    assert.doesNotMatch(launcher.flyout.target.html, /fa-python/);
+    await launcher.flyout.target.buttons[0].click();
+    assert.deepEqual(invoked, ['unique.ps1']);
+});
+
 test('normalizeLauncherItems sorts by saved order, keeps hidden rows, and drops malformed entries', () => {
     const items = normalizeLauncherItems([
         ...CATALOG,

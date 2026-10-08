@@ -2,7 +2,8 @@
 const { test, expect } = require('@playwright/test');
 
 const VIEWS = [
-    ['agents', 'Rules and code quality'],
+    ['agents', 'Rules'],
+    ['code-quality', 'Code quality'],
     ['environments', 'Environment / Workers'],
     ['vibe-rails-ai', 'Vibe AI Search'],
     ['mcp', 'MCP Explorer'],

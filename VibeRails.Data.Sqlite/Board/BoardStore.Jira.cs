@@ -5,6 +5,19 @@ namespace VibeRails.Services.Board;
 
 public sealed partial class BoardStore
 {
+    /// <inheritdoc />
+    public async Task<bool> DeleteJiraConnectionAsync(
+        string projectPath, string boardId, string connectionId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"DELETE FROM BoardJiraConnections WHERE ProjectPath = $project{ProjectPathCollation} AND BoardId = $board AND Id = $id;";
+        command.Parameters.AddWithValue("$project", NormalizeProjectPath(projectPath));
+        command.Parameters.AddWithValue("$board", boardId);
+        command.Parameters.AddWithValue("$id", connectionId);
+        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+    }
+
     public async Task<BoardJiraConnectionRecord?> GetJiraConnectionAsync(string projectPath, string boardId, CancellationToken cancellationToken = default)
     {
         var project = NormalizeProjectPath(projectPath);

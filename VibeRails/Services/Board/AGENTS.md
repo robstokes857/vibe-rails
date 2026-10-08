@@ -513,6 +513,11 @@ independent assignment, save-before-launch and active-session guard remain uncha
 
 ## Dedicated Jira boards (VIBE-103)
 
+Board settings can unlink Jira through the root/project-scoped DELETE connection route. This
+removes only that connection and its local token; preserve the board, cards, discussion and
+historical issue links. Unlink and connection tests share the cross-process save/pull lock so a
+late write cannot recreate the connection. No schema change or data backfill is involved.
+
 `board/30` adds nullable `BoardJiraConnections.DedicatedBoard` with no schema-time backfill.
 Connect and writing pulls call `IBoardStore.EnsureDedicatedJiraBoardAsync`: one transaction creates
 a separate local board, clones lanes without Automations, remaps lane choices, moves only that

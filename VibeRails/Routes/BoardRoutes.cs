@@ -368,6 +368,12 @@ public static partial class BoardRoutes
                 request.ApiToken, cancellationToken), boardId))))
             .WithName("SaveJiraConnection");
 
+        app.MapDelete("/api/v1/board/boards/{boardId}/jira", (IJiraPullService jira, string boardId, CancellationToken cancellationToken) =>
+            RunAsync(async () => await jira.UnlinkAsync(Project(), boardId, cancellationToken)
+                ? Results.Ok(new OK("Jira unlinked. Board and cards kept."))
+                : NotFound("Board", boardId)))
+            .WithName("UnlinkJiraConnection");
+
         // Connect: checks the token and, for a board link, reads the board, its columns and its issue count.
         app.MapPost("/api/v1/board/boards/{boardId}/jira/test", (IJiraPullService jira, string boardId, CancellationToken cancellationToken) =>
             RunAsync(async () =>

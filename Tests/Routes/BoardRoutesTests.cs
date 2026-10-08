@@ -1212,6 +1212,44 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task JiraUnlinkRequiresBothCredentialsAndProjectOwnership_AndKeepsTheBoard()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var store = _app.Services.GetRequiredService<IBoardStore>();
+        var board = await store.CreateBoardAsync(_project, "Jira board", ct);
+        var connection = new BoardJiraConnectionRecord("jira_unlink", _project, board.Id,
+            "https://acme.atlassian.net", "ada@example.com", true, BoardJiraAuthStatus.Saved,
+            null, "project = PROJ", true, null, null, null, null, null);
+        await store.SaveJiraConnectionAsync(connection, ct);
+        var secrets = _app.Services.GetRequiredService<IJiraSecretStore>();
+        secrets.SaveToken(connection.Id, "test-only-token");
+        var path = $"/api/v1/board/boards/{board.Id}/jira";
+        foreach (var (session, tab) in new (string?, string?)[] { (null, null), ("test-session", null), (null, "test-tab") })
+        {
+            using var denied = await SendAsync(HttpMethod.Delete, path, session, tab);
+            Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+        }
+        Assert.True(secrets.HasToken(connection.Id));
+        var foreign = await store.CreateBoardAsync(_project + "-foreign", "Foreign", ct);
+        await store.SaveJiraConnectionAsync(connection with { Id = "jira_foreign", ProjectPath = _project + "-foreign", BoardId = foreign.Id }, ct);
+        using var outside = await SendAsync(HttpMethod.Delete, $"/api/v1/board/boards/{foreign.Id}/jira", "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.NotFound, outside.StatusCode);
+        Assert.NotNull(await store.GetJiraConnectionAsync(_project + "-foreign", foreign.Id, ct));
+        using var missing = await SendAsync(HttpMethod.Delete, "/api/v1/board/boards/missing/jira", "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+
+        using var unlinked = await SendAsync(HttpMethod.Delete, path, "test-session", "test-tab");
+        unlinked.EnsureSuccessStatusCode();
+        using var repeated = await SendAsync(HttpMethod.Delete, path, "test-session", "test-tab");
+        repeated.EnsureSuccessStatusCode();
+        Assert.False(secrets.HasToken(connection.Id));
+        Assert.Null(await store.GetJiraConnectionAsync(_project, board.Id, ct));
+        Assert.NotNull(await store.GetBoardAsync(_project, board.Id, ct));
+        using var status = await GetJsonAsync($"/api/v1/board/boards/{board.Id}/sync");
+        Assert.False(status.RootElement.GetProperty("isJiraBoard").GetBoolean());
+    }
+
+    [Fact]
     public async Task JiraConfigurationErrors_AreReadable400s_NotServerErrors()
     {
         using var list = await GetJsonAsync("/api/v1/board/boards");

@@ -72,10 +72,15 @@
                 <i class="fa-solid fa-clipboard-list me-1"></i>
                 <span>Board</span>
             </button>
-            <button class="app-subnav-link" data-action="navigate-home"
-                title="Rules, Git Guard, and code quality">
-                <i class="fa-solid fa-shield-halved me-1"></i>
+            <button class="app-subnav-link" data-action="navigate" data-view="code-quality"
+                title="Code quality and repository map">
+                <i class="fa-solid fa-chart-line me-1"></i>
                 <span>QUALITY</span>
+            </button>
+            <button class="app-subnav-link" data-action="navigate-home"
+                title="Rules and Git Guard">
+                <i class="fa-solid fa-shield-halved me-1"></i>
+                <span>Rules</span>
             </button>
             <button class="app-subnav-link" data-action="navigate" data-view="environments"
                 title="Manage Environment / Workers & Sandboxes">
@@ -104,9 +109,9 @@
                     <i class="fa-solid fa-play" aria-hidden="true"></i>
                 </button>
             </div>
-            <button class="app-subnav-link" data-action="navigate-settings" title="Application Settings">
-                <img src="assets/img/icons/sliders-solid-full.svg" alt="" class="me-1 icon-light settings-card-cog">
-                <span>Settings</span>
+            <button type="button" class="app-subnav-link app-subnav-settings" data-action="navigate-settings"
+                title="Application Settings" aria-label="Settings">
+                <i class="fa-solid fa-gear" aria-hidden="true"></i>
             </button>
         </div>
 
@@ -263,14 +268,12 @@
         </div>
     </template>
 
-    <!-- Unified project-health page. The historical route name remains "agents", but
-         Rules, VCA findings, Git Guard, and MintLint now live on one calm surface.
-         Agent terminals open in the dedicated terminal view; this page never mounts xterm. -->
+    <!-- Rules and Git Guard. The historical route names remain dashboard/agents. -->
     <template id="agents-template">
         <div class="view project-health-page" data-view="agents" data-rules-workspace>
             <header class="vb-page-header project-health-header">
                 <div class="vb-page-heading">
-                    <h1 class="vb-page-title">Rules and code quality</h1>
+                    <h1 class="vb-page-title">Rules</h1>
                 </div>
                 <section class="project-health-guard" data-hook-health data-tone="neutral" aria-busy="true"
                     aria-label="Git Guard setting">
@@ -421,82 +424,89 @@
                         </div>
                     </div>
                 </section>
-
-                <section class="card project-health-card project-health-quality vca-console-card"
-                    data-code-analyzer-console data-tone="neutral" aria-busy="false">
-                    <header class="project-health-card-header">
-                        <h2>Code quality</h2>
-                        <div class="project-health-card-actions">
-                            <span class="project-health-scan-meta" data-code-analyzer-meta aria-live="polite"></span>
-                            <details class="rules-action-menu">
-                                <summary class="btn btn-sm btn-outline-secondary" aria-label="More scan options" title="More scan options">
-                                    <i class="fa-solid fa-ellipsis" aria-hidden="true"></i>
-                                </summary>
-                                <div class="rules-action-menu-popover" role="group" aria-label="Scan options">
-                                    <label class="rules-action-menu-toggle" title="Include every source file">
-                                        <span><i class="fa-solid fa-folder-tree" aria-hidden="true"></i>Full repository</span>
-                                        <input type="checkbox" data-code-analyzer-full-scan>
-                                    </label>
-                                    <button type="button" data-action="run-code-analyzer-unpushed"
-                                        data-idle-label="Scan unpushed commits">
-                                        <span class="spinner-border spinner-border-sm" data-button-spinner hidden
-                                            aria-hidden="true"></span>
-                                        <i class="fa-solid fa-cloud-arrow-up" data-button-icon aria-hidden="true"></i>
-                                        <span data-button-label>Scan unpushed commits</span>
-                                    </button>
-                                    <button type="button" data-action="manage-analyzer-ignores">
-                                        <i class="fa-solid fa-eye-slash" aria-hidden="true"></i>Manage scan exclusions
-                                    </button>
-                                    <button type="button" data-action="toggle-map-coverage">
-                                        <i class="fa-solid fa-map" aria-hidden="true"></i>Map coverage
-                                    </button>
-                                    <button type="button" data-action="toggle-code-analyzer-log">
-                                        <i class="fa-solid fa-terminal" aria-hidden="true"></i>Scan log
-                                    </button>
-                                    <button type="button" data-action="copy-code-analyzer-output">
-                                        <i class="fa-regular fa-copy" aria-hidden="true"></i>Copy scan summary
-                                    </button>
-                                </div>
-                            </details>
-                            <button class="btn btn-sm btn-outline-secondary" type="button"
-                                data-action="run-code-analyzer" data-idle-label="Scan again">
-                                <span class="spinner-border spinner-border-sm" data-button-spinner hidden
-                                    aria-hidden="true"></span>
-                                <i class="fa-solid fa-rotate-right" data-button-icon aria-hidden="true"></i>
-                                <span data-button-label>Scan again</span>
-                            </button>
-                            <div class="project-health-fix-controls" role="group" aria-label="Fix code quality with an agent">
-                                <button class="btn btn-sm btn-outline-secondary" type="button"
-                                    data-action="launch-health-fix" data-fix-scope="quality" disabled>
-                                    <i class="fa-solid fa-screwdriver-wrench" aria-hidden="true"></i>
-                                    Fix code quality with:
-                                </button>
-                                <label class="project-health-fix-picker">
-                                    <span class="visually-hidden">Agent for code quality</span>
-                                    <select class="form-select" data-project-health-fix-agent data-fix-scope="quality"
-                                        aria-label="Agent for code quality"></select>
-                                </label>
-                            </div>
-                        </div>
-                    </header>
-
-                    <!-- Code Atlas + Quality Lab, mounted inline by RuleController.attachRulesOverview. -->
-                    <div class="project-health-quality-report" data-code-analyzer-report></div>
-                    <!-- The scan log opens from the menu; the header line carries the scan's size and age. -->
-                    <details class="rules-console-transcript project-health-scan-transcript" data-code-analyzer-log hidden>
-                        <summary>
-                            <span class="vca-console-pulse" aria-hidden="true"></span>
-                            <span class="rules-console-transcript-label">Technical details</span>
-                            <small data-vca-console-meta>Waiting for analysis</small>
-                        </summary>
-                        <div class="vca-console-shell">
-                            <pre class="vca-console-output" data-vca-console-output role="log"
-                                aria-live="polite" aria-atomic="false" tabindex="0"></pre>
-                        </div>
-                    </details>
-                    <button type="button" data-action="clear-code-analyzer-output" hidden>Clear results</button>
-                </section>
             </main>
+        </div>
+    </template>
+
+    <!-- Quality owns the full-width report workspace and its scan controls. -->
+    <template id="code-quality-template">
+        <div class="view project-health-page code-quality-page" data-view="code-quality">
+            <section class="card project-health-card project-health-quality vca-console-card"
+                data-code-analyzer-console data-tone="neutral" aria-busy="false">
+                <header class="vb-page-header project-health-header">
+                    <div class="vb-page-heading">
+                        <h1 class="vb-page-title">Code quality</h1>
+                    </div>
+                    <div class="vb-page-actions project-health-card-actions">
+                        <span class="project-health-scan-meta" data-code-analyzer-meta aria-live="polite"></span>
+                        <details class="rules-action-menu">
+                            <summary class="btn btn-sm btn-outline-secondary" aria-label="More scan options" title="More scan options">
+                                <i class="fa-solid fa-ellipsis" aria-hidden="true"></i>
+                            </summary>
+                            <div class="rules-action-menu-popover" role="group" aria-label="Scan options">
+                                <label class="rules-action-menu-toggle" title="Include every source file">
+                                    <span><i class="fa-solid fa-folder-tree" aria-hidden="true"></i>Full repository</span>
+                                    <input type="checkbox" data-code-analyzer-full-scan>
+                                </label>
+                                <button type="button" data-action="run-code-analyzer-unpushed"
+                                    data-idle-label="Scan unpushed commits">
+                                    <span class="spinner-border spinner-border-sm" data-button-spinner hidden
+                                        aria-hidden="true"></span>
+                                    <i class="fa-solid fa-cloud-arrow-up" data-button-icon aria-hidden="true"></i>
+                                    <span data-button-label>Scan unpushed commits</span>
+                                </button>
+                                <button type="button" data-action="manage-analyzer-ignores">
+                                    <i class="fa-solid fa-eye-slash" aria-hidden="true"></i>Manage scan exclusions
+                                </button>
+                                <button type="button" data-action="toggle-map-coverage">
+                                    <i class="fa-solid fa-map" aria-hidden="true"></i>Map coverage
+                                </button>
+                                <button type="button" data-action="toggle-code-analyzer-log">
+                                    <i class="fa-solid fa-terminal" aria-hidden="true"></i>Scan log
+                                </button>
+                                <button type="button" data-action="copy-code-analyzer-output">
+                                    <i class="fa-regular fa-copy" aria-hidden="true"></i>Copy scan summary
+                                </button>
+                            </div>
+                        </details>
+                        <button class="btn btn-sm btn-outline-secondary" type="button"
+                            data-action="run-code-analyzer" data-idle-label="Scan again">
+                            <span class="spinner-border spinner-border-sm" data-button-spinner hidden
+                                aria-hidden="true"></span>
+                            <i class="fa-solid fa-rotate-right" data-button-icon aria-hidden="true"></i>
+                            <span data-button-label>Scan again</span>
+                        </button>
+                        <div class="project-health-fix-controls" role="group" aria-label="Fix code quality with an agent">
+                            <button class="btn btn-sm btn-outline-secondary" type="button"
+                                data-action="launch-health-fix" data-fix-scope="quality" disabled>
+                                <i class="fa-solid fa-screwdriver-wrench" aria-hidden="true"></i>
+                                Fix code quality with:
+                            </button>
+                            <label class="project-health-fix-picker">
+                                <span class="visually-hidden">Agent for code quality</span>
+                                <select class="form-select" data-project-health-fix-agent data-fix-scope="quality"
+                                    aria-label="Agent for code quality"></select>
+                            </label>
+                        </div>
+                    </div>
+                </header>
+
+                <!-- Code Atlas + Quality Lab, mounted inline by RuleController.attachCodeQualityOverview. -->
+                <div class="project-health-quality-report" data-code-analyzer-report></div>
+                <!-- The scan log opens from the menu; the header line carries the scan's size and age. -->
+                <details class="rules-console-transcript project-health-scan-transcript" data-code-analyzer-log hidden>
+                    <summary>
+                        <span class="vca-console-pulse" aria-hidden="true"></span>
+                        <span class="rules-console-transcript-label">Technical details</span>
+                        <small data-vca-console-meta>Waiting for analysis</small>
+                    </summary>
+                    <div class="vca-console-shell">
+                        <pre class="vca-console-output" data-vca-console-output role="log"
+                            aria-live="polite" aria-atomic="false" tabindex="0"></pre>
+                    </div>
+                </details>
+                <button type="button" data-action="clear-code-analyzer-output" hidden>Clear results</button>
+            </section>
         </div>
     </template>
 

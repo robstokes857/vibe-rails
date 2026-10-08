@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using Microsoft.Data.Sqlite;
 using VibeRails.DTOs;
@@ -9,12 +10,17 @@ namespace VibeRails.Data.Sqlite;
 
 public sealed partial class SqliteSearchIndexStore
 {
-    public async Task<int> ReconcileAsync(IBoardStore board, int batchSize, CancellationToken ct)
+    private static readonly string[] Kinds = ["board", "input", "session"];
+
+    public async Task<SearchReconcileResult> ReconcileAsync(IBoardStore board, int batchSize, CancellationToken ct, TimeSpan? budget = null)
     {
         Initialize();
-        var total = 0;
-        // Independent durable cursors give every corpus progress on every tick, including an empty history queue.
-        foreach (var kind in new[] { "board", "input", "session" })
+        var stopwatch = Stopwatch.StartNew();
+        var documents = 0;
+        var changed = 0;
+        var incomplete = false;
+        // Independent durable cursors give every corpus progress on every call, including an empty history queue.
+        foreach (var kind in Kinds)
         {
             ct.ThrowIfCancellationRequested();
             var claim = ClaimReconciliation(kind);
@@ -22,26 +28,24 @@ public sealed partial class SqliteSearchIndexStore
             try
             {
                 var size = Math.Clamp(batchSize, 1, kind == "session" ? 5 : 25);
-                IReadOnlyList<SearchDocument> documents;
-                string cursor;
-                if (kind == "board")
-                {
-                    var cards = await board.GetSearchDocumentsAsync(0, ct, afterCardId: claim.Cursor.Length == 0 ? null : claim.Cursor, pageSize: size);
-                    documents = cards.Select(card => new SearchDocument(card.Id, "board", card.ProjectPath, card.Sources,
-                        Board: card with { Sources = [], Passages = [], KeywordSources = [] })).ToArray();
-                    cursor = cards.LastOrDefault()?.Id ?? claim.Cursor;
-                }
-                else
-                {
-                    (documents, cursor) = ReadHistoryPage(kind, claim.Cursor, size, ct);
-                }
-                foreach (var document in documents)
+                var cursor = claim.Cursor;
+                // One claim sweeps the corpus to its end. A page per call looked bounded but never idled:
+                // every five-second tick re-upserted another page around the clock (VB-2GUR8-187).
+                while (true)
                 {
                     ct.ThrowIfCancellationRequested();
-                    if (!Ingest(document, claim)) break;
-                    total++;
+                    var (page, next) = kind == "board"
+                        ? await ReadBoardPage(board, cursor, size, ct)
+                        : ReadHistoryPage(kind, cursor, size, ct);
+                    var finished = page.Count < size;
+                    var ingested = IngestPage(page, claim, next, finished, ct);
+                    if (ingested is null) { incomplete = true; break; }
+                    documents += page.Count;
+                    changed += ingested.Value;
+                    if (finished) break;
+                    cursor = next;
+                    if (budget is { } limit && stopwatch.Elapsed >= limit) { incomplete = true; break; }
                 }
-                FinishPage(claim, cursor, documents.Count < size);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex)
@@ -60,7 +64,7 @@ public sealed partial class SqliteSearchIndexStore
                     ("$kind", kind), ("$lease", claim.Lease));
             }
         }
-        return total;
+        return new(documents, changed, incomplete);
     }
 
     private sealed record Reconciliation(string Kind, string Cursor, long Epoch, string Lease);
@@ -84,18 +88,50 @@ public sealed partial class SqliteSearchIndexStore
         return claim;
     }
 
-    private bool Ingest(SearchDocument document, Reconciliation claim)
+    private static async Task<(IReadOnlyList<SearchDocument> Documents, string Cursor)> ReadBoardPage(IBoardStore board, string cursor, int size, CancellationToken ct)
+    {
+        var cards = await board.GetSearchDocumentsAsync(0, ct, afterCardId: cursor.Length == 0 ? null : cursor, pageSize: size);
+        var documents = cards.Select(card => new SearchDocument(card.Id, "board", card.ProjectPath, card.Sources,
+            Board: card with { Sources = [], Passages = [], KeywordSources = [] })).ToArray();
+        return (documents, cards.LastOrDefault()?.Id ?? cursor);
+    }
+
+    /// <summary>
+    /// Writes one page in a single short transaction: the lease renewal, every document, the cursor
+    /// advance and, when the sweep finished, the removal of documents this epoch never saw. Returns
+    /// the number of documents whose sources changed, or null once another sweep owns the lease.
+    /// </summary>
+    private int? IngestPage(IReadOnlyList<SearchDocument> page, Reconciliation claim, string cursor, bool finished, CancellationToken ct)
     {
         using var db = Open();
         using var tx = db.BeginTransaction();
         if (Execute(db, "UPDATE SearchCheckpoints SET LeaseUntil=$until WHERE Kind=$kind AND Lease=$lease AND LeaseUntil>$now",
-            ("$until", Now + LeaseMilliseconds), ("$kind", claim.Kind), ("$lease", claim.Lease), ("$now", Now)) != 1) return false;
-        if (document.Sources.Count == 0)
+            ("$until", Now + LeaseMilliseconds), ("$kind", claim.Kind), ("$lease", claim.Lease), ("$now", Now)) != 1) return null;
+        var changed = 0;
+        foreach (var document in page)
         {
-            Execute(db, "DELETE FROM SearchDocuments WHERE Id=$id", ("$id", document.Id));
-            tx.Commit();
-            return true;
+            ct.ThrowIfCancellationRequested();
+            if (Ingest(db, document, claim)) changed++;
         }
+        Execute(db, """
+            UPDATE SearchCheckpoints SET Cursor=$cursor,Epoch=$epoch,CompletedUtc=CASE WHEN $finished THEN $utc ELSE CompletedUtc END,
+                Error=NULL,Attempts=0,RetryAt=0
+            WHERE Kind=$kind AND Lease=$lease
+            """, ("$cursor", finished ? "" : cursor), ("$epoch", claim.Epoch + (finished ? 1 : 0)),
+            ("$finished", finished), ("$utc", DateTime.UtcNow.ToString("O")), ("$kind", claim.Kind), ("$lease", claim.Lease));
+        if (finished)
+            Execute(db, "DELETE FROM SearchDocuments WHERE Kind=$kind AND SeenEpoch<>$epoch", ("$kind", claim.Kind), ("$epoch", claim.Epoch));
+        tx.Commit();
+        return changed;
+    }
+
+    /// <summary>Upserts one document inside the page transaction; true when a source was added, replaced or removed.</summary>
+    private static bool Ingest(SqliteConnection db, SearchDocument document, Reconciliation claim)
+    {
+        if (document.Sources.Count == 0)
+            return Execute(db, "DELETE FROM SearchDocuments WHERE Id=$id", ("$id", document.Id)) > 0;
+        // SeenEpoch is the durable "still at the source" mark. Writing an unchanged row rewrites only the
+        // bytes that differ, so this costs far less than it reads.
         Execute(db, """
             INSERT INTO SearchDocuments(Id,Kind,ProjectPath,SessionId,Metadata,SeenEpoch)
             VALUES($id,$kind,$project,$session,$metadata,$epoch)
@@ -104,6 +140,7 @@ public sealed partial class SqliteSearchIndexStore
             """, ("$id", document.Id), ("$kind", document.Kind), ("$project", document.ProjectPath),
             ("$session", document.Input?.SessionId ?? document.Session?.SessionId),
             ("$metadata", Json(document with { Sources = [] })), ("$epoch", claim.Epoch));
+        var changed = false;
         var sourceIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var source in document.Sources)
         {
@@ -117,6 +154,7 @@ public sealed partial class SqliteSearchIndexStore
             Execute(db, "DELETE FROM SearchSources WHERE Id=$id", ("$id", id));
             Execute(db, "INSERT INTO SearchSources(Id,DocumentId,SourceKey,Text,Title,Hash) VALUES($id,$doc,$key,$text,$title,$hash)",
                 ("$id", id), ("$doc", document.Id), ("$key", source.Id), ("$text", source.Text), ("$title", source.Title), ("$hash", hash));
+            changed = true;
         }
         using (var stale = Command(db, "SELECT Id FROM SearchSources WHERE DocumentId=$id", ("$id", document.Id)))
         {
@@ -124,6 +162,7 @@ public sealed partial class SqliteSearchIndexStore
             using (var reader = stale.ExecuteReader())
                 while (reader.Read()) if (!sourceIds.Contains(reader.GetString(0))) removed.Add(reader.GetString(0));
             foreach (var id in removed) Execute(db, "DELETE FROM SearchSources WHERE Id=$id", ("$id", id));
+            changed |= removed.Count > 0;
         }
         if (document.Kind == "session")
             Execute(db, """
@@ -131,23 +170,7 @@ public sealed partial class SqliteSearchIndexStore
                     (SELECT count(*) FROM SearchChunks c JOIN SearchSources s ON s.Id=c.SourceId WHERE s.DocumentId=$id))
                 WHERE Id=$id
                 """, ("$id", document.Id));
-        tx.Commit();
-        return true;
-    }
-
-    private void FinishPage(Reconciliation claim, string cursor, bool finished)
-    {
-        using var db = Open();
-        using var tx = db.BeginTransaction();
-        if (Execute(db, """
-            UPDATE SearchCheckpoints SET Cursor=$cursor,Epoch=$epoch,CompletedUtc=CASE WHEN $finished THEN $utc ELSE CompletedUtc END,
-                Error=NULL,Attempts=0,RetryAt=0
-            WHERE Kind=$kind AND Lease=$lease AND LeaseUntil>$now
-            """, ("$cursor", finished ? "" : cursor), ("$epoch", claim.Epoch + (finished ? 1 : 0)),
-            ("$finished", finished), ("$utc", DateTime.UtcNow.ToString("O")), ("$kind", claim.Kind), ("$lease", claim.Lease), ("$now", Now)) != 1) return;
-        if (finished)
-            Execute(db, "DELETE FROM SearchDocuments WHERE Kind=$kind AND SeenEpoch<>$epoch", ("$kind", claim.Kind), ("$epoch", claim.Epoch));
-        tx.Commit();
+        return changed;
     }
 
     private (IReadOnlyList<SearchDocument> Documents, string Cursor) ReadHistoryPage(string kind, string cursor, int size, CancellationToken ct)

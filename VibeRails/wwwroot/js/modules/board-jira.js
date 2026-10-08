@@ -2,7 +2,7 @@
 // token connects it (VIBE-102): the board supplies its issues, its columns and its story points
 // field, so there is no site, JQL or field id to type. Tokens are write-only and saved separately.
 import { BoardApi } from './board-api.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, confirmDialog } from './utils.js';
 
 export const JIRA_TOKEN_URL = 'https://id.atlassian.com/manage-profile/security/api-tokens';
 
@@ -41,6 +41,7 @@ export const boardJiraSection = () => `
             <div class="d-flex flex-wrap gap-2">
                 <button type="button" class="btn btn-outline-primary btn-sm" data-jira-action="connect">Connect</button>
                 <button type="button" class="btn btn-outline-secondary btn-sm" data-jira-action="pull">Pull now</button>
+                <button type="button" class="btn btn-outline-danger btn-sm ms-auto" data-jira-action="unlink" hidden>Unlink Jira</button>
             </div>
             <div class="small mt-3" data-jira-summary hidden></div>
             <details class="mt-3" data-jira-advanced>
@@ -110,6 +111,7 @@ export class BoardJiraPanel {
         this._columns = [];
         this._lanes = [];
         this._savedLink = '';
+        this._hasConnection = false;
     }
 
     _alive() {
@@ -122,7 +124,7 @@ export class BoardJiraPanel {
         BoardApi.attach(this.app);
         const label = this.root.querySelector('[data-jira-board]');
         if (label) label.textContent = this._boardName;
-        const actions = { connect: () => this._connect(), pull: () => this._pull(false) };
+        const actions = { connect: () => this._connect(), pull: () => this._pull(false), unlink: () => this._unlink() };
         for (const [action, handler] of Object.entries(actions)) {
             this.root.querySelector(`[data-jira-action="${action}"]`)?.addEventListener('click', handler,
                 { signal: this._events.signal });
@@ -165,7 +167,12 @@ export class BoardJiraPanel {
     }
 
     _fill(connection) {
-        const saved = !!(connection.boardLink || connection.jql);
+        const saved = !!(connection.boardLink || connection.jql || connection.siteUrl);
+        this._hasConnection = saved;
+        const unlink = this.root.querySelector('[data-jira-action="unlink"]');
+        if (unlink) unlink.hidden = !saved;
+        const pull = this.root.querySelector('[data-jira-action="pull"]');
+        if (pull) pull.disabled = !saved;
         this._savedLink = connection.boardLink || '';
         this._set('[data-jira-link]', this._savedLink);
         this._fillEmail(connection);
@@ -179,7 +186,7 @@ export class BoardJiraPanel {
         if (token) {
             // The dots only indicate a saved token; never submit a masking value as a replacement.
             token.value = '';
-            token.placeholder = connection.hasToken ? '••••••••••••' : 'Paste an API token';
+            token.placeholder = connection.hasToken ? '•'.repeat(32) : 'Paste an API token';
         }
         const help = this.root.querySelector('[data-jira-link-help]');
         if (help) {
@@ -203,7 +210,7 @@ export class BoardJiraPanel {
         if (connection.jiraBoardName) {
             this._summary(`Jira board <strong>${escapeHtml(connection.jiraBoardName)}</strong>`
                 + (this._columns.length ? `<br>${jiraColumnSummary(this._columns)}` : ''));
-        }
+        } else this._summary('');
         this._report(connection.disabledReason || connection.lastReport || '');
     }
 
@@ -276,6 +283,27 @@ export class BoardJiraPanel {
         });
         // Saving may have moved the connection even if the provider test failed afterward.
         if (savedBoard && this._alive()) this._onChanged?.('test', this._board);
+    }
+
+    async _unlink() {
+        if (!this._ready || !this._hasConnection) return;
+        let unlinked = false;
+        await this._run(async () => {
+            const confirmed = await confirmDialog({
+                title: 'Unlink Jira board',
+                message: 'Stop syncing this board with Jira and forget its saved API token? The board, imported cards, comments, files and sessions stay in VibeRails. Nothing is changed in Jira.',
+                confirmLabel: 'Unlink Jira',
+                danger: true
+            });
+            if (!confirmed || !this._alive()) return;
+            this._report('Unlinking Jira…');
+            await BoardApi.unlinkJiraConnectionAsync(this._board);
+            if (!this._alive()) return;
+            unlinked = true;
+            this._fill({ columns: [], lanes: this._lanes });
+            this._report('Jira unlinked. The board and its cards have been kept.');
+        });
+        if (unlinked && this._alive()) this._onChanged?.('unlink', this._board);
     }
 
     _showResult(result) {

@@ -14,6 +14,11 @@ public abstract class JobBase : BackgroundService
     }
 
     protected abstract TimeSpan Interval { get; }
+    /// <summary>
+    /// Delay before the next tick, read after every tick and for the first one. A job with a backlog
+    /// overrides it to follow up sooner and returns to <see cref="Interval"/> once it is idle.
+    /// </summary>
+    protected virtual TimeSpan NextDelay => Interval;
     protected virtual JobPriority Priority => JobPriority.Low;
     protected abstract Task ExecuteJob(CancellationToken cancellationToken);
 
@@ -27,7 +32,7 @@ public abstract class JobBase : BackgroundService
         Serilog.Log.Information("[Job:{Job}] Starting interval={Interval} priority={Priority} pid={Pid}",
             jobName, Interval, Priority, Environment.ProcessId);
 
-        using var timer = new PeriodicTimer(Interval);
+        using var timer = new PeriodicTimer(NextDelay);
         var tickCount = 0L;
 
         try
@@ -46,6 +51,8 @@ public abstract class JobBase : BackgroundService
                     Serilog.Log.Information(
                         "[Job:{Job}] Deferred tick={Tick} reason=pressure cpu={Cpu:F0} mem={Mem:F0}",
                         jobName, tickCount, s.ProcessCpuPercent, s.MemoryUsedPercent);
+                    // A deferred backlog waits for the normal interval, not the follow-up delay.
+                    Reschedule(timer, Interval);
                     continue;
                 }
 
@@ -70,6 +77,7 @@ public abstract class JobBase : BackgroundService
                         "[Job:{Job}] Unhandled exception in tick={Tick} duration={Duration} pid={Pid}",
                         jobName, tickCount, DateTime.UtcNow - started, Environment.ProcessId);
                 }
+                Reschedule(timer, NextDelay);
             }
         }
         catch (OperationCanceledException)
@@ -79,6 +87,12 @@ public abstract class JobBase : BackgroundService
 
         _logger.LogInformation("[{Job}] Stopped", jobName);
         Serilog.Log.Information("[Job:{Job}] Stopped. totalTicks={Tick} pid={Pid}", jobName, tickCount, Environment.ProcessId);
+    }
+
+    /// <summary>Setting <see cref="PeriodicTimer.Period"/> restarts the wait, so the timer is only touched when the delay changes.</summary>
+    private static void Reschedule(PeriodicTimer timer, TimeSpan delay)
+    {
+        if (timer.Period != delay) timer.Period = delay;
     }
 }
 
