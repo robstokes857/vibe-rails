@@ -30,11 +30,17 @@ namespace VibeRails.Services.VCA
     {
         private readonly IValidatorList _validatorList;
         private readonly IFileAndRuleParser _fileAndRuleParser;
+        private readonly IGitStagedSnapshotProvider _stagedSnapshotProvider;
+        private readonly IGitWorkingTreeSnapshotProvider _workingTreeSnapshotProvider;
 
-        public ValidationService(IValidatorList validatorList, IFileAndRuleParser fileAndRuleParser)
+        public ValidationService(IValidatorList validatorList, IFileAndRuleParser fileAndRuleParser,
+            IGitStagedSnapshotProvider stagedSnapshotProvider,
+            IGitWorkingTreeSnapshotProvider workingTreeSnapshotProvider)
         {
             _validatorList = validatorList;
             _fileAndRuleParser = fileAndRuleParser;
+            _stagedSnapshotProvider = stagedSnapshotProvider;
+            _workingTreeSnapshotProvider = workingTreeSnapshotProvider;
         }
 
         /// <summary>
@@ -48,19 +54,26 @@ namespace VibeRails.Services.VCA
         {
             var results = new List<FileValidationResult>();
             var filesAndRules = await _fileAndRuleParser.GetFilesAndRulesAsync(rootPath, stagedOnly, cancellationToken);
+            string? qualitySnapshotFailure = null;
 
             if (filesAndRules.Values.SelectMany(rules => rules)
                 .Any(rule => CodeQualityRule.TryParse(rule.Rule.RuleText, out _)))
             {
-                var provider = new GitStagedSnapshotProvider();
-                var snapshot = stagedOnly
-                    ? await provider.CaptureAsync(rootPath, cancellationToken)
-                    : await provider.CaptureWorkingTreeAsync(rootPath, cancellationToken);
-                var data = context?.AdditionalData is { } existing
-                    ? new Dictionary<string, object>(existing)
-                    : new Dictionary<string, object>();
-                data[CodeQualityValidator.SnapshotKey] = snapshot;
-                context = new ValidationContext(context?.CommitMessage, data);
+                try
+                {
+                    var snapshot = stagedOnly
+                        ? await _stagedSnapshotProvider.CaptureAsync(rootPath, cancellationToken)
+                        : await _workingTreeSnapshotProvider.CaptureWorkingTreeAsync(rootPath, cancellationToken);
+                    var data = context?.AdditionalData is { } existing
+                        ? new Dictionary<string, object>(existing)
+                        : new Dictionary<string, object>();
+                    data[CodeQualityValidator.SnapshotKey] = snapshot;
+                    context = new ValidationContext(context?.CommitMessage, data);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or TimeoutException)
+                {
+                    qualitySnapshotFailure = $"UNSUPPORTED: Code quality could not be evaluated: {exception.Message}";
+                }
             }
 
             int totalRules = 0;
@@ -77,6 +90,13 @@ namespace VibeRails.Services.VCA
                         results.Add(new FileValidationResult(filePath, ruleWithSource.Rule.RuleText,
                             Enforcement.WARN, false, ruleWithSource.SourceFile,
                             "UNSUPPORTED: Code quality minimum must be A, B or C."));
+                        continue;
+                    }
+
+                    if (qualitySnapshotFailure is not null && CodeQualityRule.TryParse(ruleWithSource.Rule.RuleText, out _))
+                    {
+                        results.Add(new FileValidationResult(filePath, ruleWithSource.Rule.RuleText,
+                            ruleWithSource.Rule.Enforcement, false, ruleWithSource.SourceFile, qualitySnapshotFailure));
                         continue;
                     }
 

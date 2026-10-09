@@ -665,7 +665,7 @@ public sealed partial class BoardSyncServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task MissingRemoteBoardIsRepublishedWithItsHistoryAndActivity()
+    public async Task MissingRemoteBoardPausesUntilExplicitlyRepublishedWithHistoryAndActivity()
     {
         var card = await Card();
         await service.SetPublishedAsync(root, card.BoardId, true, Ct);
@@ -682,6 +682,17 @@ public sealed partial class BoardSyncServiceTests : IDisposable
             client.PushError = null;
         };
         await service.SyncDueAsync(Ct);
+        var paused = (await service.GetStatusAsync(root, card.BoardId, Ct))!;
+        Assert.False(paused.Enabled);
+        Assert.Contains("Sync is paused", paused.LastError);
+        Assert.Equal(oldRemoteId, paused.RemoteBoardId);
+        Assert.Equal(1, client.Publications);
+        Assert.Equal(1, paused.Unsent);
+        await service.SyncDueAsync(Ct);
+        Assert.Equal(1, client.Publications);
+        Assert.NotNull(await store.FindCardAsync(root, card.Id, Ct));
+
+        await service.SetPublishedAsync(root, card.BoardId, true, Ct);
         var republished = await service.GetStatusAsync(root, card.BoardId, Ct);
         Assert.Null(republished!.LastError);
         Assert.NotEqual(oldRemoteId, republished.RemoteBoardId);
@@ -692,7 +703,7 @@ public sealed partial class BoardSyncServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task MissingRemoteBoardRecoveryIsBounded_AndKeepsUnsentEdits()
+    public async Task MissingRemoteBoardOnManualSyncReturnsPausedStatusAndKeepsUnsentEdits()
     {
         var card = await Card();
         await store.SetBoardSyncEnabledAsync(root, card.BoardId, true, Ct);
@@ -700,8 +711,9 @@ public sealed partial class BoardSyncServiceTests : IDisposable
         await store.UpdateCardAsync(root, card.Id, new(Title: "Pending edit"), Ct);
         client.PushError = new BoardSyncClientException("Still missing", BoardSyncWire.CodeBoardNotFound, 404);
         var status = await service.SyncNowAsync(root, card.BoardId, Ct);
-        Assert.Equal("Still missing", status!.LastError);
-        Assert.Equal(2, client.Publications);
+        Assert.Contains("Sync is paused", status!.LastError);
+        Assert.False(status.Enabled);
+        Assert.Equal(1, client.Publications);
         Assert.Equal(1, status.Unsent);
     }
 

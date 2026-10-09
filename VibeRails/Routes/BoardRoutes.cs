@@ -19,6 +19,7 @@ public static partial class BoardRoutes
     public static void Map(WebApplication app)
     {
         MapLocalSearch(app);
+        MapRemoteBoards(app);
         // Attachment uploads are not size-limited. This has to run as middleware, before model
         // binding reads the body: a RequestSizeLimitAttribute on the endpoint does nothing here,
         // because only the MVC filter pipeline honours it and a MapPost lambda never runs those —

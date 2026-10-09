@@ -56,7 +56,7 @@ test('Codex flags that have controls are not duplicated into Additional Argument
     assert.equal(settings.noAltScreen, true);
     assert.equal(settings.fastMode, true);
     assert.equal(controller.buildCodexCustomArgs(settings),
-        '--dangerously-bypass-approvals-and-sandbox --no-alt-screen -c service_tier=fast --enable fast_mode');
+        '--dangerously-bypass-approvals-and-sandbox --no-alt-screen -c service_tier=fast -c features.fast_mode=true');
 });
 
 
@@ -70,7 +70,7 @@ test('Codex Ultrafast round-trips every supported config argument spelling witho
         assert.equal(settings.fastMode, false);
         assert.equal(settings.additionalArgs, '--sandbox read-only');
         assert.equal(controller.buildCodexCustomArgs(settings),
-            '--model gpt-6-astra -c service_tier=ultrafast --enable fast_mode --sandbox read-only');
+            '--model gpt-6-astra -c service_tier=ultrafast -c features.fast_mode=true --sandbox read-only');
         assert.match(controller.buildCliSettingsHtml('codex', settings), /value="ultrafast" selected/);
     }
 });

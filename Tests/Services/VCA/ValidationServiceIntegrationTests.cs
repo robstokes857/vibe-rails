@@ -1,5 +1,6 @@
 using Moq;
 using VibeRails.Services;
+using VibeRails.Services.GitPreflight;
 using VibeRails.Services.VCA;
 using Xunit;
 
@@ -19,7 +20,87 @@ namespace Tests.Services.VCA
             _mockValidatorList = new Mock<IValidatorList>();
             _validationService = new VibeRails.Services.VCA.ValidationService(
                 _mockValidatorList.Object,
-                _mockFileAndRuleParser.Object);
+                _mockFileAndRuleParser.Object, Mock.Of<IGitStagedSnapshotProvider>(), Mock.Of<IGitWorkingTreeSnapshotProvider>());
+        }
+
+        [Theory]
+        [InlineData(false, "io")]
+        [InlineData(true, "io")]
+        [InlineData(false, "access")]
+        [InlineData(true, "access")]
+        [InlineData(false, "invalid")]
+        [InlineData(true, "invalid")]
+        [InlineData(false, "timeout")]
+        [InlineData(true, "timeout")]
+        public async Task SnapshotFailureOnlyFailsQualityRules(bool stagedOnly, string failure)
+        {
+            Exception exception = failure switch
+            {
+                "io" => new IOException("snapshot unavailable"),
+                "access" => new UnauthorizedAccessException("snapshot unavailable"),
+                "invalid" => new InvalidOperationException("snapshot unavailable"),
+                _ => new TimeoutException("git stalled")
+            };
+            var staged = new Mock<IGitStagedSnapshotProvider>(MockBehavior.Strict);
+            var working = new Mock<IGitWorkingTreeSnapshotProvider>(MockBehavior.Strict);
+            staged.Setup(p => p.CaptureAsync("/root", It.IsAny<CancellationToken>())).ThrowsAsync(exception);
+            working.Setup(p => p.CaptureWorkingTreeAsync("/root", It.IsAny<CancellationToken>())).ThrowsAsync(exception);
+            var service = new ValidationService(_mockValidatorList.Object, _mockFileAndRuleParser.Object,
+                staged.Object, working.Object);
+            var unrelated = new RuleWithEnforcement("Log all file changes", Enforcement.WARN);
+            var context = new ValidationContext("preserved commit message", new() { ["custom"] = "preserved" });
+            _mockFileAndRuleParser.Setup(p => p.GetFilesAndRulesAsync("/root", stagedOnly, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new Dictionary<string, List<VcaRuleWithSource>>
+                {
+                    ["test.cs"] = [new(new("Code quality minimum C", Enforcement.STOP), "vc.rules.md"),
+                        new(unrelated, "vc.rules.md"), new(new("Code quality minimum B", Enforcement.COMMIT), "vc.rules.md")]
+                });
+            _mockValidatorList.Setup(v => v.IsGoodCodeAsync("test.cs", unrelated, "vc.rules.md", "/root", context,
+                It.IsAny<CancellationToken>())).ReturnsAsync(false);
+
+            var result = await service.ValidateAsync("/root", stagedOnly, context, TestContext.Current.CancellationToken);
+
+            Assert.Equal(1, result.TotalFiles);
+            Assert.Equal(3, result.TotalRules);
+            Assert.Equal(3, result.Results.Count);
+            foreach (var index in new[] { 0, 2 })
+            {
+                var violation = result.Results[index];
+                Assert.False(violation.Passed);
+                Assert.Equal(index == 0 ? Enforcement.STOP : Enforcement.COMMIT, violation.Enforcement);
+                Assert.Equal("test.cs", violation.FilePath);
+                Assert.Equal("vc.rules.md", violation.SourceFile);
+                Assert.Equal($"UNSUPPORTED: Code quality could not be evaluated: {exception.Message}", violation.Message);
+            }
+            Assert.Equal(unrelated.RuleText, result.Results[1].RuleName);
+            _mockValidatorList.Verify(v => v.IsGoodCodeAsync("test.cs", unrelated, "vc.rules.md", "/root", context,
+                It.IsAny<CancellationToken>()), Times.Once);
+            _mockValidatorList.VerifyNoOtherCalls();
+            staged.Verify(p => p.CaptureAsync("/root", It.IsAny<CancellationToken>()), stagedOnly ? Times.Once() : Times.Never());
+            working.Verify(p => p.CaptureWorkingTreeAsync("/root", It.IsAny<CancellationToken>()), stagedOnly ? Times.Never() : Times.Once());
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task SnapshotCancellationPropagates(bool stagedOnly)
+        {
+            var staged = new Mock<IGitStagedSnapshotProvider>();
+            var working = new Mock<IGitWorkingTreeSnapshotProvider>();
+            staged.Setup(p => p.CaptureAsync("/root", It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new OperationCanceledException());
+            working.Setup(p => p.CaptureWorkingTreeAsync("/root", It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new OperationCanceledException());
+            var service = new ValidationService(_mockValidatorList.Object, _mockFileAndRuleParser.Object,
+                staged.Object, working.Object);
+            _mockFileAndRuleParser.Setup(p => p.GetFilesAndRulesAsync("/root", stagedOnly, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new Dictionary<string, List<VcaRuleWithSource>>
+                {
+                    ["test.cs"] = [new(new("Code quality minimum C", Enforcement.STOP), "vc.rules.md")]
+                });
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                service.ValidateAsync("/root", stagedOnly, cancellationToken: TestContext.Current.CancellationToken));
         }
 
         [Fact]

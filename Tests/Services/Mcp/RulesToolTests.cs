@@ -134,7 +134,7 @@ public class RulesToolTests
             """,
             "src/app.cs");
 
-        var report = await RulesTool.ValidateVcaReportAsync(
+        var report = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(),
             cancellationToken: TestContext.Current.CancellationToken,
             stagedSnapshot: snapshot);
 
@@ -162,7 +162,7 @@ public class RulesToolTests
             """,
             "src/app.cs");
 
-        var report = await RulesTool.ValidateVcaReportAsync(
+        var report = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(),
             cancellationToken: TestContext.Current.CancellationToken,
             stagedSnapshot: snapshot);
 
@@ -191,7 +191,7 @@ public class RulesToolTests
             """,
             "nested/package.json");
 
-        var report = await RulesTool.ValidateVcaReportAsync(
+        var report = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(),
             cancellationToken: TestContext.Current.CancellationToken,
             stagedSnapshot: snapshot);
 
@@ -218,7 +218,7 @@ public class RulesToolTests
             "src/app.cs",
             "bool IsReady(bool a, bool b, bool c) => a && b || c;");
 
-        var report = await RulesTool.ValidateVcaReportAsync(
+        var report = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(),
             cancellationToken: TestContext.Current.CancellationToken,
             stagedSnapshot: snapshot);
 
@@ -241,7 +241,7 @@ public class RulesToolTests
             "src/app.cs",
             "string? Select(Input? input) => input?.Value ?? string.Empty;");
 
-        var report = await RulesTool.ValidateVcaReportAsync(
+        var report = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(),
             cancellationToken: TestContext.Current.CancellationToken,
             stagedSnapshot: snapshot);
 
@@ -263,7 +263,7 @@ public class RulesToolTests
             "src/app.cs",
             GitStagedChangeKind.Modified);
 
-        var report = await RulesTool.ValidateVcaReportAsync(
+        var report = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(),
             cancellationToken: TestContext.Current.CancellationToken,
             stagedSnapshot: snapshot);
 
@@ -294,7 +294,7 @@ public class RulesToolTests
             changeKind,
             previousPath);
 
-        var report = await RulesTool.ValidateVcaReportAsync(
+        var report = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(),
             cancellationToken: TestContext.Current.CancellationToken,
             stagedSnapshot: snapshot);
 
@@ -316,7 +316,7 @@ public class RulesToolTests
             "locked-old/file.txt",
             GitStagedChangeKind.Modified);
 
-        var report = await RulesTool.ValidateVcaReportAsync(
+        var report = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(),
             cancellationToken: TestContext.Current.CancellationToken,
             stagedSnapshot: snapshot);
 
@@ -336,7 +336,7 @@ public class RulesToolTests
             "nested/config/settings.json",
             GitStagedChangeKind.Modified);
 
-        var report = await RulesTool.ValidateVcaReportAsync(
+        var report = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(),
             cancellationToken: TestContext.Current.CancellationToken,
             stagedSnapshot: snapshot);
 
@@ -356,7 +356,7 @@ public class RulesToolTests
             changedPath: null,
             GitStagedChangeKind.Modified);
 
-        var report = await RulesTool.ValidateVcaReportAsync(
+        var report = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(),
             cancellationToken: TestContext.Current.CancellationToken,
             stagedSnapshot: snapshot);
 
@@ -376,7 +376,7 @@ public class RulesToolTests
             "src/app.cs",
             GitStagedChangeKind.Deleted);
 
-        var report = await RulesTool.ValidateVcaReportAsync(
+        var report = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(),
             cancellationToken: TestContext.Current.CancellationToken,
             stagedSnapshot: snapshot);
 
@@ -396,7 +396,7 @@ public class RulesToolTests
             "locked/app.cs",
             GitStagedChangeKind.Modified);
 
-        var report = await RulesTool.ValidateVcaReportAsync(
+        var report = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(),
             cancellationToken: TestContext.Current.CancellationToken,
             stagedSnapshot: snapshot);
 
@@ -417,7 +417,7 @@ public class RulesToolTests
             "nested/app.cs",
             GitStagedChangeKind.Modified);
 
-        var report = await RulesTool.ValidateVcaReportAsync(
+        var report = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(),
             cancellationToken: TestContext.Current.CancellationToken,
             stagedSnapshot: snapshot);
 
@@ -443,7 +443,7 @@ public class RulesToolTests
             "nested/app.cs",
             GitStagedChangeKind.Modified);
 
-        var report = await RulesTool.ValidateVcaReportAsync(
+        var report = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(),
             cancellationToken: TestContext.Current.CancellationToken,
             stagedSnapshot: snapshot);
 
@@ -477,7 +477,7 @@ public class RulesToolTests
                 ExistsInIndex: true, IsBinary: false, ChangedLineCount: 20, Content: content)],
             [new GitIndexTextFile(agentPath, content)]);
 
-        var report = await RulesTool.ValidateVcaReportAsync(
+        var report = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(),
             cancellationToken: TestContext.Current.CancellationToken,
             stagedSnapshot: snapshot,
             workingTreeScope: workingTreeScope);
@@ -498,7 +498,7 @@ public class RulesToolTests
             "## Vibe Rails Rules\n- Log all file changes (STOP)\n",
             $"nested/{changedPath}");
 
-        var report = await RulesTool.ValidateVcaReportAsync(
+        var report = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(),
             cancellationToken: TestContext.Current.CancellationToken,
             stagedSnapshot: snapshot);
 
@@ -522,7 +522,7 @@ public class RulesToolTests
             Files = snapshot.Files.Select(file => file with { ChangedLineCount = 20 }).ToList()
         };
 
-        var report = await RulesTool.ValidateVcaReportAsync(
+        var report = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(),
             cancellationToken: TestContext.Current.CancellationToken,
             stagedSnapshot: snapshot);
 
@@ -539,16 +539,16 @@ public class RulesToolTests
     {
         var snapshot = CreateSnapshot("nested/vc.rules.md",
             $"## Vibe Rails Rules\n- Check commit message for: wip, do not merge ({enforcement})\n", "nested/app.cs");
-        var deferred = await RulesTool.ValidateVcaReportAsync(stagedSnapshot: snapshot, cancellationToken: TestContext.Current.CancellationToken);
+        var deferred = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(), stagedSnapshot: snapshot, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(VcaRuleFindingKind.Deferred, Assert.Single(deferred.Findings).Kind);
-        var report = await RulesTool.ValidateVcaReportAsync(commitMessage: "WIP: DO NOT MERGE", validateCommitMessage: true, stagedSnapshot: snapshot, cancellationToken: TestContext.Current.CancellationToken);
+        var report = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(), commitMessage: "WIP: DO NOT MERGE", validateCommitMessage: true, stagedSnapshot: snapshot, cancellationToken: TestContext.Current.CancellationToken);
         var finding = Assert.Single(report.Findings);
         Assert.Equal(expectedKind, finding.Kind);
         Assert.Equal("nested/vc.rules.md", finding.SourcePath);
         Assert.Contains("wip, do not merge", finding.Reason);
         Assert.Equal(enforcement == "STOP", report.HasStopViolation);
         Assert.Equal(enforcement == "COMMIT" ? 1 : 0, report.RequiredAcknowledgments.Count);
-        var passed = await RulesTool.ValidateVcaReportAsync(commitMessage: "Fix swipe handler", validateCommitMessage: true, stagedSnapshot: snapshot, cancellationToken: TestContext.Current.CancellationToken);
+        var passed = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(), commitMessage: "Fix swipe handler", validateCommitMessage: true, stagedSnapshot: snapshot, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Empty(passed.Findings);
     }
 
@@ -560,7 +560,7 @@ public class RulesToolTests
         var snapshot = CreateSnapshot("vc.rules.md", $"## Vibe Rails Rules\n- {text} (STOP)\n", "app.cs");
         foreach (var checkMessage in new[] { false, true })
         {
-            var report = await RulesTool.ValidateVcaReportAsync(commitMessage: "Add app", validateCommitMessage: checkMessage, stagedSnapshot: snapshot, cancellationToken: TestContext.Current.CancellationToken);
+            var report = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(), commitMessage: "Add app", validateCommitMessage: checkMessage, stagedSnapshot: snapshot, cancellationToken: TestContext.Current.CancellationToken);
             Assert.False(report.HasStopViolation);
             var finding = Assert.Single(report.Findings);
             Assert.Equal(VcaRuleFindingKind.Warning, finding.Kind);

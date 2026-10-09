@@ -16,8 +16,8 @@ boards/lanes and a card search, confirms the destination and lane Automation cou
 to replace an editor with unsaved drafts. Dispose it on close/replacement/unload. The existing
 navbar **Sign in** opens the device approval flow when signed out. The top navigation is the
 only application navigation. Quality is third and Rules fourth; they are separate destinations.
-Automation and its play button follow Rules, then ENVs, Vibe AI and MCP.
-Settings is an accessible icon-only cog after MCP.
+Automation follows Rules, then ENVs, Vibe AI and MCP. The standalone play button opens
+Quick actions for automations and signed scripts beside the accessible icon-only Settings cog.
 Rules runs validation only; Quality restores or starts its own cached scan when opened.
 
 Comments includes agent checkpoints and legacy note rows. Attention entries appear first; the
@@ -82,6 +82,12 @@ The Vibe AI link in the top navigation is always visible; there is no setting to
 hide it, and none should be added back. The retired `ShowVibeAiUi` key stays in `settings.json`
 for older versions that still read it: the settings route ignores a requested value, preserves
 the stored one, and always reports `showVibeAiUi: true`. The frontend neither sends nor reads it.
+
+## Retired HTTP relay setting
+
+General Settings no longer exposes **Route through viberails.ai**. The frontend does not
+read, send or track `routeThroughVibeRailsAi`. Keep its stored value and backend compatibility
+contract intact; the relay only serves the explicit proof/test endpoints.
 
 ## Navigation account sign-in
 

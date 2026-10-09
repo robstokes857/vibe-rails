@@ -128,7 +128,7 @@ internal sealed class VcaRegressionRepository : IAsyncDisposable
 
     /// <summary>The MCP <c>validate_vca</c> tool's reader: git commands over the live index, no snapshot.</summary>
     public Task<VcaToolValidationReport> ValidateWithMcpToolAsync(string? commitMessage = null) =>
-        RulesTool.ValidateVcaReportAsync(
+        RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(),
             RepositoryPath,
             commitMessage,
             validateCommitMessage: commitMessage is not null,

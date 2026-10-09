@@ -1,8 +1,9 @@
 import { escapeHtml } from './utils.js';
+import { BoardStepStatus as Status } from './board-step-status.js';
 
-const icons = { Passed: 'circle-check', Skipped: 'forward-step', Failed: 'circle-xmark',
-    Fixing: 'wrench', Reviewing: 'spinner', Running: 'spinner', Stopping: 'hourglass-half' };
-const completed = step => ['Passed', 'Skipped'].includes(step.stepStatus || step.status);
+const icons = { [Status.Passed]: 'circle-check', [Status.Skipped]: 'forward-step', [Status.Failed]: 'circle-xmark',
+    [Status.Fixing]: 'wrench', [Status.Reviewing]: 'spinner', [Status.Running]: 'spinner', [Status.Stopping]: 'hourglass-half' };
+const completed = step => [Status.Passed, Status.Skipped].includes(step.stepStatus || step.status);
 
 export function laneStepMarkup(id, workflows = []) {
     const entries = (workflows || []).flatMap(flow => (flow.steps || []).filter(step => step.jobId === id)
@@ -10,11 +11,11 @@ export function laneStepMarkup(id, workflows = []) {
     if (!entries.length) return '<span class="board-workflow-state is-idle">Ready</span>';
     return entries.map(({ flow, step }) => {
         const state = step.stepStatus || step.status;
-        const style = ['Passed', 'Skipped', 'Failed', 'Fixing', 'Reviewing', 'Running', 'Stopping'].includes(state)
+        const style = [Status.Passed, Status.Skipped, Status.Failed, Status.Fixing, Status.Reviewing, Status.Running, Status.Stopping].includes(state)
             ? state.toLowerCase() : 'waiting';
         const skip = step.canSkip ? `<button type="button" class="btn btn-sm btn-outline-secondary"
             data-agent-action="skip" data-card-id="${escapeHtml(flow.cardId)}" data-event-key="${escapeHtml(step.eventKey)}"
-            title="Skip this step for this card only">${['Queued', 'Running'].includes(step.status) ? 'Stop and skip' : 'Skip'}</button>` : '';
+            title="Skip this step for this card only">${[Status.Queued, Status.Running].includes(step.status) ? 'Stop and skip' : 'Skip'}</button>` : '';
         return `<div class="board-workflow-card">
             <span class="board-workflow-card-label">${escapeHtml(flow.cardLabel)}</span>
             <div class="board-workflow-progress"><span class="board-workflow-state is-${style}" title="${escapeHtml(step.reason)}">

@@ -28,6 +28,9 @@ public partial interface IBoardStore
 
     Task<BoardJiraLinkRecord?> FindJiraLinkAsync(string siteId, string issueId, CancellationToken cancellationToken = default);
 
+    /// <summary>Retained issue identities for a live card in this project, including after a lane/board move.</summary>
+    Task<IReadOnlyList<BoardJiraLinkRecord>> GetJiraLinksForCardAsync(string projectPath, string cardId, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Creates the card and its issue link in one transaction (the link's CardId is ignored), so a
     /// crash or a concurrent pull can never leave an unlinked card to be duplicated next time.

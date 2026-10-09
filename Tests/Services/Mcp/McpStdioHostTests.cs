@@ -1,4 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
+using Moq;
+using VibeRails.Services.Board;
+using VibeRails.Services.GitPreflight;
 using VibeRails.Services.BertV2;
 using VibeRails.Services.Mcp;
 using VibeRails.Services.Mcp.HostShell;
@@ -16,6 +19,22 @@ namespace Tests.Services.Mcp;
 [Collection("ProcessEnvIsolation")] // reads ParserConfigs.GetStatePath (process-global), which DataExportServiceTests rewrites
 public class McpStdioHostTests
 {
+    [Fact]
+    public void ConfigureServices_ResolvesWorkflowAndSnapshotDependencies()
+    {
+        var services = new ServiceCollection();
+        McpStdioHost.ConfigureServices(services);
+        services.AddSingleton(Mock.Of<IBoardStore>());
+        services.AddSingleton(Mock.Of<IBoardService>());
+        using var provider = services.BuildServiceProvider(validateScopes: true);
+        using var scope = provider.CreateScope();
+
+        Assert.NotNull(scope.ServiceProvider.GetRequiredService<BoardWorkflowService>());
+        Assert.NotNull(scope.ServiceProvider.GetRequiredService<RulesTool>());
+        Assert.Same(provider.GetRequiredService<IGitStagedSnapshotProvider>(),
+            provider.GetRequiredService<IGitWorkingTreeSnapshotProvider>());
+    }
+
     [Theory]
     [InlineData(new[] { "mcp" }, true)]
     [InlineData(new[] { "MCP" }, true)]
@@ -69,6 +88,8 @@ public class McpStdioHostTests
         McpStdioHost.ConfigureServices(services);
 
         Assert.Contains(services, d => d.ServiceType == typeof(BoardTool));
+        Assert.Contains(services, d => d.ServiceType == typeof(VibeRails.Services.Jira.JiraCommentService));
+        Assert.Contains(services, d => d.ServiceType == typeof(VibeRails.Services.Jira.IJiraCommentClient));
         Assert.Contains(services, d => d.ServiceType == typeof(VibeRails.Services.Board.IBoardStore));
         Assert.Contains(services, d => d.ServiceType == typeof(VibeRails.Services.Board.IBoardService));
         Assert.Contains(services, d => d.ServiceType == typeof(VibeRails.Services.Board.IBoardProjectResolver));

@@ -84,7 +84,6 @@ test('saving settings omits retired options and preserves following arguments', 
         /* codexTokenSaverEnabled */ true,
         /* openCodeTokenSaverEnabled */ true,
         /* grokTokenSaverEnabled */ true,
-        /* routeThroughVibeRailsAi */ true,
         /* clearApiKey */ true,
         /* createVibeStoryTracking */ false,
         /* createVibeStoryTrackingCustomEnvs */ true);
@@ -94,14 +93,14 @@ test('saving settings omits retired options and preserves following arguments', 
     assert.equal(calls[0].method, 'POST');
     assert.equal(calls[0].body.removeCoAuthorTrailers, undefined);
     assert.equal(calls[0].body.showVibeAiUi, undefined);
-    assert.equal(calls[0].body.routeThroughVibeRailsAi, true);
+    assert.equal(calls[0].body.routeThroughVibeRailsAi, undefined);
     assert.equal(calls[0].body.clearApiKey, true);
     assert.equal(calls[0].body.createVibeStoryTracking, false);
     assert.equal(calls[0].body.createVibeStoryTrackingCustomEnvs, true);
     assert.equal(calls[0].body.dataExportOptIn, true);
 
     await controller.saveSettings(false, '', false, true, '', false, 'subscription',
-        false, false, false, 'subscription', true, true, true, true, false, false);
+        false, false, false, 'subscription', true, true, true, true, false);
     assert.equal(calls[1].body.clearApiKey, false);
     assert.equal(calls[1].body.createVibeStoryTracking, true);
     assert.equal(calls[1].body.createVibeStoryTrackingCustomEnvs, false);

@@ -1,4 +1,5 @@
 using System.Globalization;
+using Microsoft.Data.Sqlite;
 using VibeRails.DTOs;
 
 namespace VibeRails.Services.Board;
@@ -38,12 +39,19 @@ public sealed partial class BoardStore
     public async Task<IReadOnlyList<BoardLaneAutomationDefinition>> DescribeLaneAutomationsAsync(
         string projectPath, IReadOnlyList<long> jobIds, CancellationToken cancellationToken = default)
     {
+        if (jobIds.Count == 0) return [];
+        await using var state = await OpenStateAsync(cancellationToken);
+        return await DescribeLaneAutomationsAsync(state, projectPath, jobIds, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<BoardLaneAutomationDefinition>> DescribeLaneAutomationsAsync(
+        SqliteConnection state, string projectPath, IReadOnlyList<long> jobIds, CancellationToken cancellationToken)
+    {
         var results = new List<BoardLaneAutomationDefinition>(jobIds.Count);
         if (jobIds.Count == 0) return results;
         var project = NormalizeProjectPath(projectPath);
         var ids = string.Join(", ", jobIds.Distinct().Select(id => id.ToString(CultureInfo.InvariantCulture)));
 
-        await using var state = await OpenStateAsync(cancellationToken);
         var hasJobs = await _stateFeatures.HasTableAsync(state, "Jobs", cancellationToken)
             && await _stateFeatures.HasTableAsync(state, "JobActions", cancellationToken)
             && await _stateFeatures.HasTableAsync(state, "JobRuns", cancellationToken);

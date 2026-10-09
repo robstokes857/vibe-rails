@@ -44,7 +44,7 @@ public sealed partial class BoardToolTests
         var foreign = await _service.CreateCardAsync(elsewhere, new CreateBoardCardRequest(Title: "Foreign retrieval"), Ct);
         await _service.AddCommentAsync(elsewhere, foreign.Id, BoardAuthor.User(), "uniquesearchdiscussion", Ct);
         var search = new BoardSearchService(SearchTestIndex.Build(_store, _project), () => throw new IOException("Model unavailable"), NullLogger<BoardSearchService>.Instance);
-        var tool = new BoardTool(_service, _resolver, _store, search: search);
+        var tool = new BoardTool(_service, _resolver, _store, new BoardWorkflowService(_store, new BoardReviewService(_store, _service)), search: search);
         _resolver.CurrentSessionId = "search-only";
         var results = await tool.SearchBoardCards("retrieval", cancellationToken: Ct);
         Assert.True(results.IndexOf(local.Id, StringComparison.Ordinal) < results.IndexOf(foreign.Id, StringComparison.Ordinal));

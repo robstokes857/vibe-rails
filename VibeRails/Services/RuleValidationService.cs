@@ -36,11 +36,11 @@ namespace VibeRails.Services
         private readonly IGitWorkingTreeSnapshotProvider _snapshotProvider;
 
         public RuleValidationService(IRulesService rulesService, IAgentFileService agentFileService,
-            IGitWorkingTreeSnapshotProvider? snapshotProvider = null)
+            IGitWorkingTreeSnapshotProvider snapshotProvider)
         {
             _rulesService = rulesService;
             _agentFileService = agentFileService;
-            _snapshotProvider = snapshotProvider ?? new GitStagedSnapshotProvider();
+            _snapshotProvider = snapshotProvider;
         }
 
         public async Task<ValidationResultSet> ValidateAsync(
@@ -195,7 +195,7 @@ namespace VibeRails.Services
                     snapshot.Files.Where(file => paths.Contains(file.FullPath)), cancellationToken);
                 return new(rule.RuleText, rule.Enforcement, quality.IsValid, quality.Message);
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or TimeoutException)
             {
                 return new(rule.RuleText, rule.Enforcement, false,
                     $"UNSUPPORTED: Code quality could not be evaluated: {exception.Message}");

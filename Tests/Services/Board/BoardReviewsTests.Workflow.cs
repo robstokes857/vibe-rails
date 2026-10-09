@@ -37,11 +37,39 @@ public sealed partial class BoardReviewsTests
         return session;
     }
 
+    [Theory]
+    [InlineData("resave")]
+    [InlineData("reorder")]
+    [InlineData("clear")]
+    public async Task SettingsSaveKeepsRunningAgentReportableAndSkippable(string change)
+    {
+        var flow = await Workflow();
+        var lane = (await store.FindCardAsync(repo, card.Id, Ct))!.ColumnId;
+        var before = (await store.GetLaneAutomationStatusesAsync(repo, card.Id, Ct))[0];
+        long[] selection = change == "clear" ? [] : change == "reorder"
+            ? [flow.NextJob, flow.ReviewJob] : [flow.ReviewJob, flow.NextJob];
+        await store.SaveLaneAutomationAsync(repo, lane, selection, 1, Ct);
+        var steps = Assert.Single(await store.GetLaneWorkflowsAsync(repo, lane, Ct)).Steps;
+        Assert.Equal(before.WorkflowId, steps[0].WorkflowId);
+        Assert.True(steps[0].CanSkip);
+        Assert.Equal("Reviewing", steps[0].StepStatus);
+        Assert.Equal("Cancelled", steps[1].StepStatus);
+        var workflow = new BoardWorkflowService(store, reviews);
+        await workflow.ReportAsync(repo, card.Id, repo, BoardAuthor.Agent("Codex", "codex", flow.Session),
+            "failed", "Findings recorded after settings save", null, null, Ct);
+        await new BoardCardAutomationService(store, jobs, Mock.Of<VibeRails.Services.Jobs.IJobService>())
+            .SkipAsync(repo, card.Id, flow.ReviewJob, flow.EventKey, Ct);
+        Assert.True(await jobs.IsCancelRequestedAsync(flow.RunId, Ct));
+        await jobs.CompleteRunAsync(flow.RunId, JobRunStatus.Cancelled, 1, "Stopped", Ct);
+        Assert.Empty(await jobs.EnqueueDueSchedulesAsync(DateTime.UtcNow.AddMinutes(3), Ct));
+        Assert.Empty(await jobs.GetRunsAsync(flow.NextJob, cancellationToken: Ct));
+    }
+
     [Fact]
     public async Task WorkflowReviewRequiresExplicitPassAndRunCompletion()
     {
         var flow = await Workflow();
-        var workflow = new BoardWorkflowService(store, service);
+        var workflow = new BoardWorkflowService(store, reviews);
         var author = BoardAuthor.Agent("Codex", "codex", flow.Session);
         var report = await reviews.BeginAsync(repo, card.Id, flow.Session, repo, "repository", "All code", null, null, true, Ct);
         await reviews.SaveAsync(repo, card.Id, flow.Session, report.Id, "Findings", "sample.cs:1 Low: optional naming improvement.", "Inspected", "None", Ct);
@@ -70,7 +98,7 @@ public sealed partial class BoardReviewsTests
     public async Task ReviewingWithoutVerdictDoesNotRemainActiveAfterExit()
     {
         var flow = await Workflow();
-        var workflow = new BoardWorkflowService(store, service);
+        var workflow = new BoardWorkflowService(store, reviews);
         await workflow.ReportAsync(repo, card.Id, repo, BoardAuthor.Agent("Codex", "codex", flow.Session),
             "reviewing", "Checking the changes", null, null, Ct);
         await jobs.CompleteRunAsync(flow.RunId, JobRunStatus.Succeeded, 0, null, Ct);
@@ -82,7 +110,7 @@ public sealed partial class BoardReviewsTests
     public async Task PassFollowedByProcessFailureCanBeRetriedAndSkippedWhileRetryRuns()
     {
         var flow = await Workflow();
-        var workflow = new BoardWorkflowService(store, service);
+        var workflow = new BoardWorkflowService(store, reviews);
         var report = await reviews.BeginAsync(repo, card.Id, flow.Session, repo, "repository", "All code", null, null, true, Ct);
         await reviews.SaveAsync(repo, card.Id, flow.Session, report.Id, "No findings reported", "None", "Inspected", "None", Ct);
         await workflow.ReportAsync(repo, card.Id, repo, BoardAuthor.Agent("Codex", "codex", flow.Session),
@@ -110,7 +138,7 @@ public sealed partial class BoardReviewsTests
     public async Task WorkflowRejectsStaleEvidenceAndUnrelatedOrOldSessions()
     {
         var flow = await Workflow();
-        var workflow = new BoardWorkflowService(store, service);
+        var workflow = new BoardWorkflowService(store, reviews);
         var author = BoardAuthor.Agent("Codex", "codex", flow.Session);
         await Assert.ThrowsAsync<BoardValidationException>(() =>
             workflow.ReportAsync(repo, card.Id, repo, author, "passed", "Done", null, null, Ct));
@@ -135,7 +163,7 @@ public sealed partial class BoardReviewsTests
     public async Task FailedStepCanShowFixingAndPassThroughAFreshRun()
     {
         var flow = await Workflow();
-        var workflow = new BoardWorkflowService(store, service);
+        var workflow = new BoardWorkflowService(store, reviews);
         var author = BoardAuthor.Agent("Codex", "codex", flow.Session);
         await workflow.ReportAsync(repo, card.Id, repo, author, "failed", "Blocking bug", null, null, Ct);
         await jobs.CompleteRunAsync(flow.RunId, JobRunStatus.Succeeded, 0, null, Ct);
@@ -162,7 +190,7 @@ public sealed partial class BoardReviewsTests
         projects.Setup(p => p.ResolveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(repo);
         projects.SetupGet(p => p.CurrentSessionId).Returns(flow.Session);
         projects.SetupGet(p => p.GitWorkingDirectory).Returns(repo);
-        var tool = new BoardTool(service, projects.Object, store, reviews);
+        var tool = new BoardTool(service, projects.Object, store, new BoardWorkflowService(store, new BoardReviewService(store, service)), reviews);
         Assert.StartsWith("FAIL:", await tool.ReportAutomationStep("skipped", "Bypass", card: card.Key, cancellationToken: Ct));
         Assert.StartsWith("Workflow status recorded", await tool.ReportAutomationStep("failed", "Blocking bug", card: card.Key, cancellationToken: Ct));
         Assert.Equal("Failed", (await store.GetLaneAutomationStatusesAsync(repo, card.Id, Ct))[0].StepStatus);

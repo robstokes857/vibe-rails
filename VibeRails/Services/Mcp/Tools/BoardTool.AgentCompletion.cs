@@ -101,7 +101,7 @@ public sealed partial class BoardTool
             if (entry.RunId is not null) text.Append(" · run ").Append(entry.RunId);
             text.Append(" · ").AppendLine(BoardPromptComposer.SanitizeLine(entry.Reason, 600));
         }
-        if (entries.Any(e => e.IsCurrent && e.StepStatus is "Failed" or "Awaiting result"))
+        if (entries.Any(e => e.IsCurrent && e.StepStatus is BoardStepStatus.Failed or BoardStepStatus.AwaitingResult))
             text.AppendLine("When you begin fixing a failed step, call report_automation_step status=fixing with its eventKey and a summary. Request a fresh review when ready; only a passing reviewer or user skip releases later steps.");
         return text.ToString();
     }

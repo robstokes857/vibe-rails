@@ -52,7 +52,7 @@ test('saving story tracking sends explicit on and off choices without shifting o
     for (const enabled of [true, false]) {
         const { controller, calls } = fixture();
         await controller.saveSettings(false, '', false, true, '', false, 'subscription', false, false,
-            false, 'subscription', true, true, true, true, false, false, enabled);
+            false, 'subscription', true, true, true, true, false, enabled);
         assert.equal(calls.length, 1);
         assert.equal(calls[0].url, '/api/v1/settings');
         assert.equal(calls[0].method, 'POST');

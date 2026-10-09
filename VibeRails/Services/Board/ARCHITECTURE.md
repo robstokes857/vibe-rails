@@ -1276,7 +1276,9 @@ execution-mode setting. The 60-second settling period applies to entry, and each
 one active run. Different cards may occupy different steps. A step releases its successor only
 after a successful run plus an explicit LLM pass, or a user skip. Script/check-only Automations
 use their existing run outcome; their advisory findings keep their existing meaning. Missing
-reports, process failures and unavailable Jobs hold the chain.
+reports and process failures hold the chain. Missing, deleted and disabled Automations are
+recorded as Skipped with a reason, so later steps can proceed without a per-card user skip.
+Wrong-project and actionless definitions remain Failed configuration errors.
 
 Deterministic retries retain the original lane event in their immutable trigger key. A manual
 card run started against a failed script/check step records the same exact entry. Status reads
@@ -1291,6 +1293,20 @@ new BEFORE card triggers establish the workflow before those AFTER triggers exec
 history is converted. Pre-upgrade pending entries use their shared entry timestamp and selected
 order until consumed. Older schedulers retain their old dispatch behavior; sequencing is enforced
 by the current scheduler. Run commits and Board receipts remain separate.
+The compatible `board-lane-workflow/2` migration removes settings-triggered snapshot invalidation.
+Saving, reordering or clearing a lane selection still cancels its uncommitted entries, but the
+current snapshot stays visible and committed runs can report or be skipped. The next card move
+retires that snapshot. Existing retired workflows are not rewritten, and older settings writers
+retain their pending-entry cancellation behavior.
+Status presentation orders by current entry first, due time newest first, ordinal workflow ID,
+then step position. All rows use those keys, including legacy entries whose steps can differ in
+current status after the lane selection changes.
+
+`BoardStepStatus` in Data.Abstractions owns the persisted/wire status names used by the store,
+workflow service and scheduler. The browser imports `board-step-status.js`; a Node contract test
+checks every value against the C# constants. These spellings stay stable for older versions.
+`BoardWorkflowService` and its `BoardReviewService` dependency are scoped DI services in both
+HTTP and stdio compositions.
 
 `report_automation_step` accepts reviewing, fixing, passed and failed. A decision belongs to the
 current linked Automation run and exact entry; a linked coding session can report fixing.
@@ -1302,8 +1318,9 @@ is still required before a reported pass releases a successor; a run that fails 
 pass can be retried. Reviewing without a verdict becomes Awaiting result when the run succeeds.
 
 The existing authenticated per-card skip route supports waiting, failed and running steps.
-Waiting skips and comments commit together; running skips request cancellation and display
-Stopping until the recorded run is terminal. A skip racing dispatch is retained and the scheduler
+Waiting skips and comments commit together; running skips first commit the exact-entry receipt,
+then request cancellation and display Stopping until the recorded run is terminal. A skip racing
+dispatch is retained and the scheduler
 requests cancellation of that exact run. Skip applies only to this card entry and is not exposed
 as an agent status. Card movement and settings edits retain their existing pending-entry
 cancellation behavior; the application does not move cards automatically.
@@ -1313,5 +1330,19 @@ only read Board state; Board receipts are still committed separately after the r
 
 The lane popup shows each card's status beneath its Automation, green completion arrows and
 Skip/Stop and skip. The existing running-agent poll also returns up to 100 current card workflows.
-The card rail and MCP status reads share the same step projection. Polls preserve add-form drafts,
+The card rail and MCP status reads share the same step projection. Lane polls batch all selected
+cards through one Board connection and one state connection. Read-local dictionaries share Job
+definitions, trigger-key run lookups, workflow metadata, selections and latest reports across the
+cards; report-associated runs and deterministic retries are also fetched in batches. Query count
+is independent of card count. These caches end with the read, so the next poll and every scheduler
+gate see other roots' committed run outcomes and skips.
+
+Unchanged Waiting dispatch receipts use a bounded, process-local cache (4,096 entries, five-minute
+refresh). A hit skips opening the Board writer transaction; changed reasons and terminal/queued
+receipts still persist immediately, and only successful writes populate the cache. Event/Job
+identity isolates reentries. In-memory attempt times participate in the due-entry ordering so
+suppressed writes still rotate Jobs beyond the 100-entry drain limit. Periodic durable refresh
+keeps restart/lease-handoff ordering useful. This cache never decides whether a step can run.
+
+Polls preserve add-form drafts,
 ignore stale results during mutations and stop when the popup closes.

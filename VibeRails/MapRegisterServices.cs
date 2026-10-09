@@ -19,6 +19,7 @@ using VibeRails.Services.Environments.Steps;
 using VibeRails.Services.FileSystem;
 using VibeRails.Services.LlmProxy;
 using VibeRails.Services.Mcp;
+using VibeRails.Services.Jira;
 using VibeRails.Services.Mcp.HostShell;
 using VibeRails.Services.Mcp.Tools;
 using VibeRails.Services.Mcp.WebResearch;
@@ -168,16 +169,10 @@ namespace VibeRails
             serviceCollection.AddScoped<Services.Board.IBoardService, Services.Board.BoardService>();
             serviceCollection.AddScoped<Services.Board.BoardStarterWorkflowService>();
             serviceCollection.AddScoped<Services.Board.BoardReviewService>();
+            serviceCollection.AddScoped<Services.Board.BoardWorkflowService>();
             // Jira Cloud pull (VB-40). The client follows redirects off and never logs the token.
             // The scheduler is ticked by the leased root job scheduler, so only one process pulls.
-            serviceCollection.AddHttpClient(Services.Jira.JiraCloudClient.HttpClientName, client =>
-            {
-                client.Timeout = TimeSpan.FromSeconds(30);
-            }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
-            serviceCollection.AddSingleton<Services.Jira.IJiraSecretStore, Services.Jira.JiraSecretStore>();
-            serviceCollection.AddSingleton<Services.Jira.IJiraCloudClient>(sp =>
-                new Services.Jira.JiraCloudClient(sp.GetRequiredService<IHttpClientFactory>().CreateClient(Services.Jira.JiraCloudClient.HttpClientName)));
-            serviceCollection.AddSingleton(_ => Services.Jira.JiraPullLock.BesideStateDatabase());
+            serviceCollection.AddJiraClients();
             serviceCollection.AddScoped<Services.Jira.IJiraPullService, Services.Jira.JiraPullService>();
             serviceCollection.AddSingleton<Services.Jira.IJiraPullScheduler, Services.Jira.JiraPullScheduler>();
             // Board sync with viberails.ai (VB-51). Outbound only, HTTPS, X-Api-Key, redirects off;
@@ -194,6 +189,7 @@ namespace VibeRails
             serviceCollection.AddSingleton<Services.Board.Sync.BoardSyncActivityCache>();
             serviceCollection.AddScoped<Services.Board.Sync.IBoardSyncService, Services.Board.Sync.BoardSyncService>();
             serviceCollection.AddScoped<Services.Board.Sync.BoardSharingService>();
+            serviceCollection.AddScoped<Services.Board.Sync.RemoteBoardsService>();
             serviceCollection.AddSingleton<Services.Board.Sync.IBoardSyncScheduler, Services.Board.Sync.BoardSyncScheduler>();
             serviceCollection.AddScoped<Services.Board.BoardAutomationService>();
             serviceCollection.AddScoped<Services.Board.BoardCardAutomationService>();
@@ -266,6 +262,7 @@ namespace VibeRails
             serviceCollection.AddScoped<IRuleValidationService, RuleValidationService>();
             serviceCollection.AddScoped<IHookInstallationService, HookInstallationService>();
             serviceCollection.AddGitPreflight();
+            serviceCollection.AddScoped<Services.Mcp.Tools.RulesTool>();
 
             // NEW VCA Validation Architecture (modular)
             // Infrastructure services

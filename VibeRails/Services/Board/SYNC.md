@@ -5,6 +5,28 @@ viberails.ai sync section, and manual publication/sync and automatic sync exclud
 including paused or expired Jira connections. Existing sync settings, ledgers and hosted copies
 are retained; there is no schema change or cleanup. Jira pulls remain available.
 
+## Remote board manager
+
+The Board toolbar's **Remote boards** screen lists owned and accepted shared boards, including
+remote-only boards left behind when a local board was deleted. It supports search within loaded
+pages, a **No local copy** filter, create, open, rename and confirmed owner-only deletion. Shared
+boards remain read-only in this manager. Local deletion does not implicitly delete a hosted board.
+
+`RemoteBoardsService` backs the root-only `/api/v1/board/remote` routes (GET/POST, PUT `/{id}`,
+POST `/{id}/delete`). Both local credentials are required. Discovery uses the existing hosted
+GET `/api/v1/boards?offset=…` in 100-board pages, ordered by name then identity; offset is a
+nonnegative multiple of 100. Paging requires the companion Front release. Refresh after concurrent
+catalog edits to rebuild the list. Old servers that repeat a page produce an explicit UI error.
+
+The list supplies an opaque destination context required by writes, protecting open screens from
+account changes. Create uses a stable random request ID as the hosted publication identity so an
+uncertain retry does not duplicate boards. It creates no local board. Rename updates linked local
+names under the cross-process sync lock. Delete takes that lock, checks ownership, pauses linked
+local boards across projects for the same destination, and then calls the hosted DELETE endpoint.
+Local cards, history and links stay stored, including after an uncertain deletion response.
+An owned board missing during sync also pauses; explicitly enabling sync publishes it again.
+Older running clients may still recreate removed remote copies; update those clients as well.
+
 ## VIBE-26: remote Start work
 
 The hosted card's **Start work** button saves edits and asks an open desktop for that project
@@ -269,9 +291,9 @@ sets that entry aside, keeps its complete local row, and continues with later el
 Arbitrary remote error text, unknown codes, malformed IDs and IDs outside the batch cannot change
 the outbox. The same bounded parser recognises three other codes, each reported in the desktop's
 own wording: `invalid_request` (400) keeps entries queued and asks the user to check board and
-lane names; `board_not_found` (404) recreates the deleted hosted copy and retries once, preserving
-local history and restarting delivery for its new remote identity; `write_conflict` (409) simply
-retries on the next tick. Publishing is never switched off automatically.
+lane names; `board_not_found` (404) pauses an owned board's sync and preserves local history and
+unsent changes. Explicitly turning sync back on republishes it and restarts delivery if its remote
+identity changed. `write_conflict` (409) simply retries on the next tick.
 The sync status API retains a rejected-entry count and the latest 50 identities even
 after subsequent syncs succeed. Comments and notes appear in Comments; field changes
 remain in History. Rejected creation entries keep that card and its dependent edits local; create

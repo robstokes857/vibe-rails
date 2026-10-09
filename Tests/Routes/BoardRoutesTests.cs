@@ -139,6 +139,45 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RemoteManagementRequiresBothCredentialsAndReturnsNoStoreJson()
+    {
+        const string path = "/api/v1/board/remote";
+        var id = Guid.NewGuid();
+        var client = Mock.Get(_app.Services.GetRequiredService<IBoardSyncClient>());
+        client.SetupGet(c => c.DestinationKey).Returns("account");
+        client.Setup(c => c.DiscoverPageAsync(0, It.IsAny<CancellationToken>(), "account"))
+            .ReturnsAsync([new BoardRemoteDescriptor(id.ToString(), "Remote", "VB", null, [], true, 0)]);
+        client.Setup(c => c.DescribeAsync(id.ToString(), It.IsAny<CancellationToken>(), "account"))
+            .ReturnsAsync(new BoardRemoteDescriptor(id.ToString(), "Remote", "VB", null, [], true, 0));
+        client.Setup(c => c.PublishAsync(It.IsAny<BoardSyncPublishRequest>(), It.IsAny<CancellationToken>(), "account"))
+            .ReturnsAsync(new BoardSyncPublishResponse(id, "Created", 0));
+        client.Setup(c => c.PushAsync(id.ToString(), It.IsAny<BoardSyncPushRequest>(), It.IsAny<CancellationToken>(), "account"))
+            .ReturnsAsync(new BoardSyncPushResponse([], 0));
+        client.Setup(c => c.DeleteRemoteBoardAsync(id.ToString(), It.IsAny<CancellationToken>(), "account")).Returns(Task.CompletedTask);
+        using var page = await GetJsonAsync(path);
+        var context = page.RootElement.GetProperty("context").GetString();
+        Assert.Equal("Remote", page.RootElement.GetProperty("boards")[0].GetProperty("name").GetString());
+        var body = new RemoteBoardWriteRequest(context, "Created", new string('a', 32));
+        foreach (var (method, url) in new[] { (HttpMethod.Get, path), (HttpMethod.Post, path),
+            (HttpMethod.Put, path + "/" + id), (HttpMethod.Post, path + "/" + id + "/delete") })
+        {
+            using var none = await SendAsync(method, url, body: body);
+            using var session = await SendAsync(method, url, "test-session", body: body);
+            using var tab = await SendAsync(method, url, tab: "test-tab", body: body);
+            Assert.Equal(HttpStatusCode.Unauthorized, none.StatusCode);
+            Assert.Equal(HttpStatusCode.Unauthorized, session.StatusCode);
+            Assert.Equal(HttpStatusCode.Unauthorized, tab.StatusCode);
+            using var valid = await SendAsync(method, url, "test-session", "test-tab", body);
+            valid.EnsureSuccessStatusCode();
+            Assert.True(valid.Headers.CacheControl!.NoStore);
+        }
+        using var stale = await SendAsync(HttpMethod.Post, path, "test-session", "test-tab", body with { Context = "old" });
+        Assert.Equal(HttpStatusCode.BadRequest, stale.StatusCode);
+        using var invalid = await SendAsync(HttpMethod.Get, path + "?offset=-1", "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+    }
+
+    [Fact]
     public async Task SharingRoutesRequireBothCredentialsAndScopeLocalBoardBeforeRemoteCalls()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -274,6 +313,7 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         builder.Services.AddSingleton<IFeatureLog>(NullFeatureLog.Instance);
         builder.Services.AddScoped<IBoardSyncService, BoardSyncService>();
         builder.Services.AddScoped<BoardSharingService>();
+        builder.Services.AddScoped<RemoteBoardsService>();
 
         _app = builder.Build();
         _app.UseMiddleware<CookieAuthMiddleware>();

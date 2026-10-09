@@ -87,13 +87,14 @@ public sealed class BoardSyncService(
             return null;
         if (enabled && await IsJiraBoardAsync(projectPath, boardId, cancellationToken))
             throw new BoardValidationException("Jira boards use Jira for remote access and cannot sync with viberails.ai.");
+        var wasEnabled = board.SyncEnabled;
         board = await store.SetBoardSyncEnabledAsync(projectPath, boardId, enabled, cancellationToken);
         if (board is null) return null;
         if (!enabled)
             return await StatusAsync(board, await store.GetSyncLinkAsync(projectPath, boardId, cancellationToken), cancellationToken);
-        var link = await EnsurePublishedAsync(board, cancellationToken);
+        var link = await EnsurePublishedAsync(board, cancellationToken, force: !wasEnabled);
         if (link is not null && client.IsConfigured) link = await SyncLinkAsync(link, cancellationToken, forceActivity: true);
-        return await StatusAsync(board, link, cancellationToken);
+        return await StatusAsync(await store.GetBoardAsync(projectPath, boardId, cancellationToken) ?? board, link, cancellationToken);
     }
 
     private async Task<BoardSyncLinkRecord?> EnsurePublishedAsync(BoardRecord board, CancellationToken cancellationToken, bool force = false)
@@ -173,7 +174,7 @@ public sealed class BoardSyncService(
         var link = await EnsurePublishedAsync(board, cancellationToken);
         if (link is not null && client.IsConfigured)
             link = await SyncLinkAsync(link, cancellationToken, forceActivity: true);
-        return await StatusAsync(board, link, cancellationToken);
+        return await StatusAsync(await store.GetBoardAsync(projectPath, boardId, cancellationToken) ?? board, link, cancellationToken);
     }
 
     public async Task SyncDueAsync(CancellationToken cancellationToken)
@@ -221,12 +222,10 @@ public sealed class BoardSyncService(
             }
             catch (BoardSyncClientException ex) when (ex.Code == BoardSyncWire.CodeBoardNotFound && !link.Imported)
             {
-                // The hosted copy may have been deleted. Recreate it once, then let any
-                // further failure reach the normal status path instead of retrying forever.
-                var board = await store.GetBoardAsync(link.ProjectPath, link.BoardId, cancellationToken)
-                    ?? throw new BoardValidationException("The board no longer exists.");
-                link = await EnsurePublishedAsync(board, cancellationToken, force: true) ?? link;
-                link = await SyncOnceAsync(link, cancellationToken, forceActivity: true);
+                // A missing remote board may be an intentional deletion. Keep local work,
+                // stop automatic publication, and require an explicit opt-in to publish again.
+                await store.SetBoardSyncEnabledAsync(link.ProjectPath, link.BoardId, false, cancellationToken);
+                throw new BoardValidationException("The remote board no longer exists. Sync is paused and local work is retained. Turn on sync in Board settings to publish it again.");
             }
             return await store.SaveSyncLinkAsync(link with { LastSyncUtc = DateTime.UtcNow, LastError = null }, cancellationToken) ?? link;
         }

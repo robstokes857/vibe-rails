@@ -11,6 +11,65 @@ namespace Tests.Services.Board;
 public sealed partial class BoardSettingsTests
 {
     [Fact]
+    public async Task LegacyWorkflowListsCurrentStepsBeforeUnselectedSteps()
+    {
+        var (_, lane, _, _) = await Lanes();
+        var first = await Job("Selected");
+        var second = await Job("Unselected");
+        await _boards.SaveLaneAutomationAsync(_root, lane, [first.Id, second.Id], 0, Ct);
+        var card = await Card(lane);
+        // Model a legacy entry with no workflow snapshot and a selection changed by an old writer.
+        await ExecuteSql($"""
+            DELETE FROM BoardLaneWorkflowSteps WHERE WorkflowId IN (SELECT Id FROM BoardLaneWorkflows WHERE CardId = '{card.Id}');
+            DELETE FROM BoardLaneWorkflows WHERE CardId = '{card.Id}';
+            DELETE FROM BoardLaneAdditionalAutomations WHERE ColumnId = '{lane}';
+            """);
+
+        var rows = await _boards.GetLaneAutomationStatusesAsync(_root, card.Id, Ct);
+
+        Assert.Equal(new[] { first.Id, second.Id }, rows.Select(row => row.JobId));
+        Assert.Equal(rows[0].WorkflowId, rows[1].WorkflowId);
+        Assert.True(rows[0].IsCurrent);
+        Assert.False(rows[1].IsCurrent);
+        Assert.Equal(-1, rows[1].Position);
+    }
+
+    [Fact]
+    public async Task WorkflowStatusOrdersByCurrentDueWorkflowAndPosition()
+    {
+        var (_, lane, _, _) = await Lanes();
+        var first = await Job("First");
+        var second = await Job("Second");
+        var card = await Card(lane);
+        await ExecuteSql($"""
+            INSERT INTO BoardLaneWorkflows (Id, CardId, ColumnId, CreatedUnixMs, Current) VALUES
+                ('z-current', '{card.Id}', '{lane}', 1000, 1),
+                ('newest', '{card.Id}', '{lane}', 3000, 0),
+                ('a-history', '{card.Id}', '{lane}', 2000, 0),
+                ('b-history', '{card.Id}', '{lane}', 2000, 0),
+                ('oldest', '{card.Id}', '{lane}', 1000, 0);
+            INSERT INTO BoardLaneWorkflowSteps (WorkflowId, JobId, Position, EventKey) VALUES
+                ('z-current', {first.Id}, 0, 'current'),
+                ('newest', {first.Id}, 0, 'newest'),
+                ('a-history', {first.Id}, 0, 'd'),
+                ('a-history', {second.Id}, 1, 'b'),
+                ('b-history', {first.Id}, 0, 'c'),
+                ('b-history', {second.Id}, 1, 'a'),
+                ('oldest', {first.Id}, 0, 'oldest');
+            INSERT INTO BoardLaneAutomationDispatch (EventKey, JobId, CardId, ColumnId, DueUnixMs, Status, Reason)
+                SELECT s.EventKey, s.JobId, w.CardId, w.ColumnId, w.CreatedUnixMs, 'Succeeded', ''
+                FROM BoardLaneWorkflows w JOIN BoardLaneWorkflowSteps s ON s.WorkflowId = w.Id
+                WHERE w.CardId = '{card.Id}';
+            """);
+
+        var rows = await _boards.GetLaneAutomationStatusesAsync(_root, card.Id, Ct);
+
+        Assert.Equal(new[] { "current", "newest", "d", "b", "c", "a", "oldest" }, rows.Select(row => row.EventKey));
+        Assert.True(rows[0].IsCurrent);
+        Assert.All(rows.Skip(1), row => Assert.False(row.IsCurrent));
+    }
+
+    [Fact]
     public async Task LanePollReturnsCurrentWorkflowProgressAfterSkip()
     {
         var (_, lane, _, _) = await Lanes();
@@ -97,8 +156,8 @@ public sealed partial class BoardSettingsTests
             DROP TRIGGER BoardCards_Workflow_Move;
             DROP TRIGGER BoardPendingAutomations_Workflow;
             DROP TRIGGER BoardPendingAdditionalAutomations_Workflow;
-            DROP TRIGGER BoardLaneAutomations_Workflow_UPDATE;
-            DROP TRIGGER BoardLaneAutomations_Workflow_DELETE;
+            DROP TRIGGER IF EXISTS BoardLaneAutomations_Workflow_UPDATE;
+            DROP TRIGGER IF EXISTS BoardLaneAutomations_Workflow_DELETE;
             DROP TABLE BoardLaneStepReports;
             DROP TABLE BoardLaneWorkflowSteps;
             DROP TABLE BoardLaneWorkflows;

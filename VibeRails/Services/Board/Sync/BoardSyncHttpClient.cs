@@ -26,6 +26,9 @@ public interface IBoardSyncClient
     Task<BoardSyncActivityAck> PutActivityAsync(string remoteBoardId, string cardId, BoardSyncActivityWire activity, CancellationToken cancellationToken, string? expectedDestination = null);
     Task<BoardRemoteDescriptor?> DescribeAsync(string remoteBoardId, CancellationToken ct, string? destination = null) => Task.FromResult<BoardRemoteDescriptor?>(null);
     Task<List<BoardRemoteDescriptor>> DiscoverAsync(CancellationToken ct, string? destination = null) => throw new NotSupportedException();
+    Task<List<BoardRemoteDescriptor>> DiscoverPageAsync(int offset, CancellationToken ct, string destination) => offset == 0
+        ? DiscoverAsync(ct, destination) : throw new NotSupportedException();
+    Task DeleteRemoteBoardAsync(string remoteBoardId, CancellationToken ct, string destination) => throw new NotSupportedException();
     Task<BoardSharingOverview> GetSharingAsync(string remoteBoardId, CancellationToken ct, string? destination = null) => throw new NotSupportedException();
     Task<BoardSharingResult> SaveInviteAsync(string remoteBoardId, string? invitationId, BoardSharingEmailRequest body, CancellationToken ct, string? destination = null) => throw new NotSupportedException();
     Task<BoardSharingResult> RemoveInviteAsync(string remoteBoardId, string invitationId, CancellationToken ct, string? destination = null) => throw new NotSupportedException();
@@ -77,6 +80,15 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Fu
             BoardSyncJsonContext.Default.BoardRemoteDescriptor, ct, destination);
     public Task<List<BoardRemoteDescriptor>> DiscoverAsync(CancellationToken ct, string? destination = null) =>
         SendAsync<object, List<BoardRemoteDescriptor>>(HttpMethod.Get, "", null, null, BoardSyncJsonContext.Default.ListBoardRemoteDescriptor, ct, destination);
+    public Task<List<BoardRemoteDescriptor>> DiscoverPageAsync(int offset, CancellationToken ct, string destination) =>
+        SendAsync<object, List<BoardRemoteDescriptor>>(HttpMethod.Get, "?offset=" + offset.ToString(CultureInfo.InvariantCulture),
+            null, null, BoardSyncJsonContext.Default.ListBoardRemoteDescriptor, ct, destination);
+    public async Task DeleteRemoteBoardAsync(string remoteBoardId, CancellationToken ct, string destination)
+    {
+        var ack = await SendAsync<object, BoardRemoteDeleteAck>(HttpMethod.Delete, Uri.EscapeDataString(remoteBoardId),
+            null, null, BoardSyncJsonContext.Default.BoardRemoteDeleteAck, ct, destination);
+        if (!ack.Deleted) throw new BoardSyncClientException("The server did not confirm deletion. Refresh remote boards before retrying.", "invalid_response");
+    }
     public Task<BoardSharingOverview> GetSharingAsync(string remoteBoardId, CancellationToken ct, string? destination = null) =>
         SendAsync<object, BoardSharingOverview>(HttpMethod.Get, Uri.EscapeDataString(remoteBoardId) + "/sharing", null, null,
             BoardSyncJsonContext.Default.BoardSharingOverview, ct, destination);

@@ -55,7 +55,7 @@ public sealed partial class BoardToolTests : IDisposable
             .ReturnsAsync(new BoardCommitDiff([], 0));
         _service = new BoardService(_store, commits.Object, new NullBoardLiveSessionProbe());
         _resolver = new FakeResolver(_project);
-        _tool = new BoardTool(_service, _resolver, _store);
+        _tool = new BoardTool(_service, _resolver, _store, new BoardWorkflowService(_store, new BoardReviewService(_store, _service)));
     }
 
     private CancellationToken Ct => TestContext.Current.CancellationToken;
@@ -779,7 +779,7 @@ public sealed partial class BoardToolTests : IDisposable
             .ReturnsAsync(new BoardCardRecord("card_1", _project, 1, "col", 0, "A", "", null, "medium", null, [], false, 0, DateTime.UtcNow, DateTime.UtcNow));
         busy.Setup(b => b.AddCommentAsync(_project, "card_1", It.IsAny<BoardAuthor>(), "hello", It.IsAny<CancellationToken>()))
             .ThrowsAsync(new SqliteException("SQLite Error 5: 'database is locked'.", 5));
-        var tool = new BoardTool(busy.Object, _resolver, _store);
+        var tool = new BoardTool(busy.Object, _resolver, _store, new BoardWorkflowService(_store, new BoardReviewService(_store, busy.Object)));
 
         var reply = await tool.AddBoardComment("hello", "PROJ-1", Ct);
         Assert.StartsWith("FAIL: could not add the comment: the Board is temporarily busy", reply);
@@ -955,7 +955,7 @@ public sealed partial class BoardToolTests : IDisposable
     }
 
     [Fact]
-    public async Task Move_ReportsWaitingAndBlockedEntries_ForActiveRunsAndUnavailableAutomations()
+    public async Task Move_ReportsWaitingAndSkippedEntries_ForActiveRunsAndUnavailableAutomations()
     {
         var (review, openPr) = await ReviewLaneAutomationsAsync();
         await _tool.CreateBoardCard("Fix the race", cancellationToken: Ct);
@@ -966,10 +966,12 @@ public sealed partial class BoardToolTests : IDisposable
         var lanes = await _tool.ListBoardColumns(cancellationToken: Ct);
         Assert.Contains($"  on entry: {ReviewDetail} — a run is already active (run {active}, queued); eligible entries wait durably for their turn\n", lanes);
         Assert.Contains($"  on entry: {OpenPrDetail} — will not run: the Automation is disabled\n", lanes);
+        var preview = await _tool.MoveBoardCard("PROJ-1", "review", preview: true, cancellationToken: Ct);
+        Assert.Contains("Would skip: \"Open PR\" — the Automation is disabled. Later steps can continue after this entry is skipped.", preview);
 
         Assert.Equal("Moved PROJ-1 to Review (position 0).\n"
             + $"Waiting: \"Automated code review\" — a run of this Automation is already active (run {active}, queued); this entry waits for its turn after the 60-second settling period.\n"
-            + "Blocked: \"Open PR\" — the Automation is disabled. Later steps wait for a pass or user skip.",
+            + "Will skip: \"Open PR\" — the Automation is disabled. Later steps can continue after this entry is skipped.",
             BoardKeyText.Short(await _tool.MoveBoardCard("PROJ-1", "review", cancellationToken: Ct)));
         // The scheduler applies the same gates when the entries settle: nothing new is queued.
         Assert.Empty(await TickAsync());

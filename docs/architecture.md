@@ -539,7 +539,10 @@ placeholder. **Unlink Jira** calls the root/project-scoped `DELETE …/boards/{b
 forgets the local token and deletes only the connection through `IBoardStore`. The board,
 imported cards, notes and historical issue links remain. The dialog restores local-board settings
 without replacing unrelated drafts. Jira is still the source of imported story fields; notes
-remain local and publishing them as Jira comments is not implemented.
+remain local. The explicit `add_jira_comment` MCP tool posts a completion summary and
+optional public replay links to the card's connected Jira issue, then saves an attributed
+Board receipt. Both transports use the saved connection and the shared Jira client;
+the tool is outside the local Board auto-grants. See the [Jira comment contract](../VibeRails/Services/Jira/Comments.md).
 
 VIBE-102 connects a board from a pasted Jira board link plus an API token; there is no site, JQL
 or story points field to type. `JiraBoardLink.Parse` (`Services/Jira`) reads the site, board id
@@ -581,6 +584,12 @@ VB-52 adds owner invitation controls, website recipient inbox/block screens and 
 import. The website enforces the three-collaborator cap and Board membership. Additive `board/26`
 stores pinned import origins; existing sync carries portable edits both ways. See the
 [sharing contract](../VibeRails/Services/Board/SYNC.md#vb-52-shared-boards) for lifecycle and limits.
+
+The toolbar's **Remote boards** manager (`board-remote.js`, `RemoteBoardsService`) pages all
+accessible hosted boards and labels their local copies across projects. Owners can create,
+rename or delete remote boards, including orphaned copies. Deletion pauses matching local sync
+while retaining local work; missing owned remote boards no longer recreate themselves on a tick.
+See the [manager contract](../VibeRails/Services/Board/SYNC.md#remote-board-manager).
 
 VIBE-1 adds the card editor's **Move or merge** actions, one Comments stream and human-only
 comment deletion. `BoardStore.CardActions.cs` keeps merge/transfer/tombstone writes atomic;

@@ -82,6 +82,7 @@ public sealed record BoardSyncPublishRequest(string LocalBoardId, string Name, s
     string? DisplayPrefix = null, string? SourceRepository = null, string? SourceComputer = null);
 
 public sealed record BoardSyncPublishResponse(Guid RemoteBoardId, string Name, long LastSeq);
+public sealed record BoardRemoteDeleteAck(bool Deleted);
 
 /// <summary>Null <see cref="Name"/>, <see cref="KeyPrefix"/> and <see cref="Lanes"/> mean unchanged.</summary>
 public sealed record BoardSyncPushRequest(string? Name, string? KeyPrefix, List<BoardSyncLaneWire>? Lanes, List<BoardSyncEntryWire> Entries,
@@ -112,6 +113,7 @@ public sealed record BoardSyncPullResponse(List<BoardSyncPulledEntryWire> Entrie
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(BoardSyncPublishRequest))]
 [JsonSerializable(typeof(BoardSyncPublishResponse))]
+[JsonSerializable(typeof(BoardRemoteDeleteAck))]
 [JsonSerializable(typeof(BoardSyncPushRequest))]
 [JsonSerializable(typeof(BoardSyncPushResponse))]
 [JsonSerializable(typeof(BoardSyncPullResponse))]

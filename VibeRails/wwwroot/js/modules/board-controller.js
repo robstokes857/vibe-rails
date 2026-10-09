@@ -40,6 +40,7 @@ import { boardContextSection, laneAutomationSection, mountBoardContext, mountLan
 import { boardJiraSection, BoardJiraPanel } from './board-jira.js';
 import { cardOrganizeSection, bindCardOrganization } from './board-card-organize.js';
 import { openBoardSharing, openSharedBoards } from './board-sharing.js';
+import { openRemoteBoards } from './board-remote.js';
 import { renderCardLinksSection, bindCardLinks } from './board-card-links.js';
 import { BoardSearch } from './board-search.js';
 import { openLocalCardEditor } from './board-local-card.js';
@@ -1167,6 +1168,10 @@ export class BoardController {
                 this.sharingDispose = openSharedBoards(this.app, async boardId => {
                     this.state.boardId = boardId; this.persistBoardSelection(); await this.refresh();
                 });
+                break;
+            case 'remote-boards':
+                this.sharingDispose?.();
+                this.sharingDispose = openRemoteBoards(this.app, () => this.refreshBoardSnapshot());
                 break;
             case 'edit-board':
                 this.openBoardEditor(this.state.boardId);

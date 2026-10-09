@@ -43,6 +43,7 @@
   </ItemGroup>
   <!-- Copy wwwroot to output directory -->
   <ItemGroup>
+    <EmbeddedResource Include="wwwroot/js/modules/codex-model-capabilities.json" LogicalName="CodexModelCapabilities.json" />
     <Content Update="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>

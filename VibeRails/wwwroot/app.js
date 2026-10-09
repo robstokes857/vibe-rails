@@ -475,7 +475,6 @@ export class VibeControlApp {
         return {
             remoteAccess: false,
             apiKey: '',
-            routeThroughVibeRailsAi: false,
             useVsCodeTheme: false,
             mcpEnabled: true,
             computerName: '',

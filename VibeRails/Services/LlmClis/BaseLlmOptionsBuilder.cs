@@ -66,7 +66,7 @@ public static partial class BaseLlmOptionsBuilder
         if (!string.IsNullOrEmpty(value.Effort))
             args.AddRange(llm == LLM.Codex ? ["-c", $"model_reasoning_effort={value.Effort}"] : ["--effort", value.Effort]);
         if (!string.IsNullOrEmpty(value.Speed))
-            args.AddRange(["-c", $"service_tier={value.Speed}", "--enable", "fast_mode"]);
+            args.AddRange(CodexSpeedConfig.BuildArguments(value.Speed));
         // No Codex special case needed: Normalize above has already cleared its mode, so every
         // mode that reaches here has a real provider flag to become.
         if (!string.IsNullOrEmpty(value.Mode))

@@ -5,6 +5,18 @@ namespace VibeRails.Services.Board;
 
 public sealed partial class BoardStore
 {
+    private static void PreserveWorkflowOnSettingsChange(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        // These bookkeeping triggers only changed the new workflow tables. Removing them
+        // preserves old card/settings writers and their pending-entry cancellation behavior.
+        // The card's next move still retires its snapshot; a settings save must not strand
+        // a committed run. Do not rewrite workflows already retired by an earlier version.
+        SqliteSchema.Execute(connection, transaction, """
+            DROP TRIGGER IF EXISTS BoardLaneAutomations_Workflow_UPDATE;
+            DROP TRIGGER IF EXISTS BoardLaneAutomations_Workflow_DELETE;
+            """);
+    }
+
     // Additive snapshots: old card/queue writers participate without changing their tables.
     // Each entry gets a random identity before any of the existing AFTER triggers run.
     private static void ApplyWorkflowSchema(SqliteConnection connection, SqliteTransaction transaction)

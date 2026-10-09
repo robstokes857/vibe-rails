@@ -1,14 +1,23 @@
+using System.Text.Json;
+
 namespace VibeRails.Services.LlmClis;
 
-// Keep in sync with llm-model-catalog.js and vibe-books/custom_envs/CLI_OPTIONS.md.
+// The browser imports the same JSON that is embedded here for AOT and stdio launches.
 // Verified against Codex's model metadata and speed guide, 2026-10-08.
 internal static class CodexModelCapabilities
 {
-    public static bool SupportsSpeed(string? model, string speed) => (model?.Trim().ToLowerInvariant(), speed) switch
+    private static readonly IReadOnlyDictionary<string, string[]> Speeds = LoadSpeeds();
+
+    public static bool SupportsSpeed(string? model, string speed) =>
+        Speeds.TryGetValue(model?.Trim() ?? "", out var speeds) && speeds.Contains(speed);
+
+    private static IReadOnlyDictionary<string, string[]> LoadSpeeds()
     {
-        ("gpt-6-astra", "fast" or "ultrafast") => true,
-        ("gpt-6.1-sol" or "gpt-6-sol" or "gpt-6-luna" or "gpt-5.6-sol"
-            or "gpt-5.6-terra" or "gpt-5.6-luna" or "gpt-5.5", "fast") => true,
-        _ => false
-    };
+        using var stream = typeof(CodexModelCapabilities).Assembly.GetManifestResourceStream("CodexModelCapabilities.json")
+            ?? throw new InvalidOperationException("The Codex model capability resource is missing.");
+        using var document = JsonDocument.Parse(stream);
+        return document.RootElement.EnumerateObject().ToDictionary(entry => entry.Name,
+            entry => entry.Value.EnumerateArray().Select(value => value.GetString()!).ToArray(),
+            StringComparer.OrdinalIgnoreCase);
+    }
 }

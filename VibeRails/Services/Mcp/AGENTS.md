@@ -115,6 +115,7 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 |------------------------|--------|-------------|
 | `validate_vca` | `RulesTool.ValidateVca` | Validates the staged Git index snapshot against `- [ENFORCEMENT] …` rules from the indexed vc.rules.md files. |
 | `create_session_share_link` | `SessionSharingTool.CreateSessionShareLink` | Creates a public replay link for the calling terminal's inherited session, with a required `displayName` (1–160 characters). Returns upload status, expiry and a ready-to-copy `vibe-share:<url>` commit line. Anyone with the link can view terminal output, prompts and saved code changes. |
+| `add_jira_comment` | `BoardTool.AddJiraComment` | Explicitly posts text and optional public `sessionLinks` to the card's connected Jira issue, then saves a Board receipt. Uses saved credentials; no Board auto-grant or automatic retry. See [Jira comments](../Jira/Comments.md). |
 | `search_history` | `SessionSearchTool.SearchHistory` | Semantic + keyword search over the developer's captured agent history. |
 | `pause_token_saver` | `TokenSaverTool.PauseTokenSaver` | Turns VibeRails' token compression off for 5 minutes for this terminal tab, so an agent can read elided output verbatim. |
 | `resume_token_saver` | `TokenSaverTool.ResumeTokenSaver` | Restores token compression immediately, ending an active pause early. |

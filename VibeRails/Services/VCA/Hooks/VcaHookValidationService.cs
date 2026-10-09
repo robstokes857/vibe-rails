@@ -16,7 +16,7 @@ public interface IVcaHookValidationService
         CancellationToken cancellationToken);
 }
 
-public sealed class VcaRulesHookValidationService : IVcaHookValidationService
+public sealed class VcaRulesHookValidationService(IGitStagedSnapshotProvider snapshotProvider) : IVcaHookValidationService
 {
     public async Task<VcaHookValidationResult> ValidateAsync(
         VcaHookInvocation invocation,
@@ -25,7 +25,7 @@ public sealed class VcaRulesHookValidationService : IVcaHookValidationService
     {
         var snapshot = invocation.DemoUi
             ? GitStagedSnapshot.Preview(workingDirectory)
-            : await new GitStagedSnapshotProvider().CaptureAsync(workingDirectory, cancellationToken);
+            : await snapshotProvider.CaptureAsync(workingDirectory, cancellationToken);
         return await ValidateAsync(invocation, snapshot, cancellationToken);
     }
 
@@ -61,6 +61,7 @@ public sealed class VcaRulesHookValidationService : IVcaHookValidationService
         }
 
         var report = await RulesTool.ValidateVcaReportAsync(
+            snapshotProvider,
             workingDirectory,
             commitMessage,
             validateCommitMessage,

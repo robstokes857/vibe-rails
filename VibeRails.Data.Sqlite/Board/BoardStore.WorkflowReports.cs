@@ -31,8 +31,8 @@ public sealed partial class BoardStore
     public async Task<bool> ReportLaneStepAsync(string projectPath, string cardId, BoardLaneStepReport report,
         BoardAuthor author, CancellationToken cancellationToken = default)
     {
-        if (report.Status is not ("Reviewing" or "Fixing" or "Passed" or "Failed" or "Skipped")
-            || report.Status == "Skipped" && author.Kind != BoardAuthor.User().Kind
+        if (report.Status is not (BoardStepStatus.Reviewing or BoardStepStatus.Fixing or BoardStepStatus.Passed or BoardStepStatus.Failed or BoardStepStatus.Skipped)
+            || report.Status == BoardStepStatus.Skipped && author.Kind != BoardAuthor.User().Kind
             || string.IsNullOrWhiteSpace(report.Summary) || report.Summary.Length > 4000)
             throw new BoardValidationException("Choose a valid step status and a summary of 1–4,000 characters.");
         await using var connection = await OpenAsync(cancellationToken);
@@ -66,8 +66,8 @@ public sealed partial class BoardStore
                 previous = reader.GetString(0);
                 previousRun = reader.IsDBNull(1) ? null : reader.GetString(1);
             }
-        if (previous == "Skipped") return report.Status == "Skipped";
-        if (previous == "Passed" && report.Status != "Skipped")
+        if (previous == BoardStepStatus.Skipped) return report.Status == BoardStepStatus.Skipped;
+        if (previous == BoardStepStatus.Passed && report.Status != BoardStepStatus.Skipped)
         {
             // A reported pass is final only if its run succeeds. Preserve the decision while
             // that run finishes, but allow a fresh attempt after a crash or cancellation.

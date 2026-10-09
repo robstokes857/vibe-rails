@@ -132,7 +132,7 @@ public sealed class BoardCommitServiceTests : IDisposable
         await board.GetColumnsAsync(_root, Ct);
         var card = await board.CreateCardAsync(_root, new CreateBoardCardRequest(Title: "Fix code"), Ct);
         await store.LinkSessionAsync(_root, card.Id, "clone-session", null, "base:claude", "claude", "Clone session", BoardSessionRecord.LaunchOrigin, Ct);
-        var tool = new BoardTool(board, new CloneResolver(_root, clone), store);
+        var tool = new BoardTool(board, new CloneResolver(_root, clone), store, new BoardWorkflowService(store, new BoardReviewService(store, board)));
 
         var result = await tool.LinkBoardCommit(sha[..7], cancellationToken: Ct);
         Assert.StartsWith($"Linked {sha[..7]}", result);

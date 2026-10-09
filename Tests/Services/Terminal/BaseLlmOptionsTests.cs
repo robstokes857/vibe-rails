@@ -18,7 +18,7 @@ public sealed class BaseLlmOptionsTests
     [InlineData("gpt-5.6-luna", "fast")]
     [InlineData("gpt-5.5", "fast")]
     public void CodexSpeedBecomesSessionArguments(string model, string speed) =>
-        Assert.Equal(["--model", model, "-c", "model_reasoning_effort=high", "-c", $"service_tier={speed}", "--enable", "fast_mode"],
+        Assert.Equal(["--model", model, "-c", "model_reasoning_effort=high", "-c", $"service_tier={speed}", "-c", "features.fast_mode=true"],
             BaseLlmOptionsBuilder.BuildArguments(LLM.Codex, new(model, "high", Speed: speed)));
 
     [Theory]

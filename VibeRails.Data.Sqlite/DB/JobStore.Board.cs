@@ -39,7 +39,7 @@ public sealed partial class JobStore
                 var blocker = current ? await _boards.GetLaneAutomationBlockReasonAsync(entry, cancellationToken) : null;
                 if (blocker is not null)
                 {
-                    await _boards.RecordLaneAutomationDispatchAsync(entry, new("Waiting", blocker), nowUtc, cancellationToken);
+                    await _boards.RecordLaneAutomationDispatchAsync(entry, new(BoardStepStatus.Waiting, blocker), nowUtc, cancellationToken);
                     continue;
                 }
                 var reviewLaunch = current ? await PrepareReviewAsync(entry.JobId, JobBoardContext.GetCardKey(JobTriggerKind.BoardLane, entry.TriggerKey), cancellationToken) : null;
@@ -55,8 +55,8 @@ public sealed partial class JobStore
                         JobTriggerKind.BoardLane, entry.TriggerKey, requireEnabled: true, cancellationToken,
                         expectedProjectPath: entry.ProjectPath, reviewLaunch: reviewLaunch) : null;
                     if (runId is not null) runIds.Add(runId);
-                    dispatch = runId is not null ? new("Queued", "Lane Automation queued.", runId)
-                        : blocker is not null ? new("Waiting", blocker)
+                    dispatch = runId is not null ? new(BoardStepStatus.Queued, "Lane Automation queued.", runId)
+                        : blocker is not null ? new(BoardStepStatus.Waiting, blocker)
                         : await DescribeBoardRunRejectionAsync(connection, transaction, entry, current, cancellationToken);
                     await transaction.CommitAsync(cancellationToken);
                 }
@@ -68,7 +68,7 @@ public sealed partial class JobStore
                 {
                     var observed = (await _boards.GetLaneAutomationStatusesAsync(entry.ProjectPath, entry.CardId, cancellationToken))
                         .FirstOrDefault(s => s.EventKey == entry.EventKey && s.JobId == entry.JobId);
-                    if (observed?.StepStatus == "Stopping") await RequestCancelAsync(dispatch.RunId, cancellationToken);
+                    if (observed?.StepStatus == BoardStepStatus.Stopping) await RequestCancelAsync(dispatch.RunId, cancellationToken);
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
@@ -97,8 +97,8 @@ public sealed partial class JobStore
         command.Parameters.AddWithValue("$key", entry.TriggerKey);
         command.Parameters.AddWithValue("$project", entry.ProjectPath);
         if (await command.ExecuteScalarAsync(cancellationToken) is string existing)
-            return new("Queued", "Already enqueued; recovered the committed run.", existing);
-        if (!current) return new("Cancelled", "Lane entry is no longer current.");
+            return new(BoardStepStatus.Queued, "Already enqueued; recovered the committed run.", existing);
+        if (!current) return new(BoardStepStatus.Cancelled, "Lane entry is no longer current.");
         command.CommandText = $"""
             SELECT CASE
                 WHEN DeletedUTC IS NOT NULL THEN 'Automation was deleted.'
@@ -108,13 +108,14 @@ public sealed partial class JobStore
                 ELSE NULL END FROM Jobs WHERE Id = $job;
             """;
         var reason = await command.ExecuteScalarAsync(cancellationToken);
-        if (reason is null) return new("Failed", "Automation no longer exists.");
-        if (reason is string message) return new("Failed", message);
+        if (reason is null) return new(BoardStepStatus.Skipped, "Automation no longer exists.");
+        if (reason is string message)
+            return new(message is "Automation was deleted." or "Automation is disabled." ? BoardStepStatus.Skipped : BoardStepStatus.Failed, message);
         command.CommandText = "SELECT Id FROM JobRuns WHERE JobId = $job AND Status IN ($queued, $running) LIMIT 1;";
         command.Parameters.AddWithValue("$queued", (int)JobRunStatus.Queued);
         command.Parameters.AddWithValue("$running", (int)JobRunStatus.Running);
         if (await command.ExecuteScalarAsync(cancellationToken) is string active)
-            return new("Waiting", $"Automation is busy with run {active}; waiting for its turn.");
-        return new("Waiting", "Run was not inserted; the scheduler will retry.");
+            return new(BoardStepStatus.Waiting, $"Automation is busy with run {active}; waiting for its turn.");
+        return new(BoardStepStatus.Waiting, "Run was not inserted; the scheduler will retry.");
     }
 }

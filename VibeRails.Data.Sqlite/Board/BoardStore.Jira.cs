@@ -6,6 +6,28 @@ namespace VibeRails.Services.Board;
 public sealed partial class BoardStore
 {
     /// <inheritdoc />
+    public async Task<IReadOnlyList<BoardJiraLinkRecord>> GetJiraLinksForCardAsync(
+        string projectPath, string cardId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT j.CardId, j.SiteId, j.IssueId, j.IssueKey, j.AssigneeDisplay, j.IssueUpdated, j.LastPulledUTC, j.Mapping
+            FROM BoardJiraLinks j
+            JOIN BoardCards c ON c.Id = j.CardId
+            WHERE c.Id = $card AND c.ProjectPath = $project{ProjectPathCollation} AND c.DeletedUTC IS NULL
+            ORDER BY j.SiteId, j.IssueId;
+            """;
+        command.Parameters.AddWithValue("$project", NormalizeProjectPath(projectPath));
+        command.Parameters.AddWithValue("$card", cardId);
+        var links = new List<BoardJiraLinkRecord>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            links.Add(ReadJiraLink(reader));
+        return links;
+    }
+
+    /// <inheritdoc />
     public async Task<bool> DeleteJiraConnectionAsync(
         string projectPath, string boardId, string connectionId, CancellationToken cancellationToken = default)
     {

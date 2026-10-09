@@ -1,3 +1,4 @@
+using Moq;
 using VibeRails.Services;
 using VibeRails.Services.GitPreflight;
 using VibeRails.Services.Mcp.Tools;
@@ -8,6 +9,22 @@ namespace Tests.VcaRegression;
 public sealed class CodeQualityTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    [Fact]
+    public async Task McpQualityValidationUsesItsInjectedSnapshotProvider()
+    {
+        await using var repo = await VcaRegressionRepository.CreateAsync("code-quality/minimum-c");
+        var snapshot = await new GitStagedSnapshotProvider().CaptureAsync(repo.RepositoryPath, Ct);
+        var provider = new Moq.Mock<IGitStagedSnapshotProvider>(Moq.MockBehavior.Strict);
+        provider.Setup(p => p.CaptureAsync(repo.RepositoryPath, Moq.It.IsAny<CancellationToken>()))
+            .ReturnsAsync(snapshot);
+
+        var output = await new RulesTool(provider.Object).ValidateVca(repo.RepositoryPath);
+
+        Assert.Contains("Code quality minimum C", output);
+        provider.Verify(p => p.CaptureAsync(repo.RepositoryPath, Moq.It.IsAny<CancellationToken>()), Moq.Times.Once);
+    }
+
     [Theory]
     [InlineData("a", "WARN")]
     [InlineData("a", "COMMIT")]
@@ -29,7 +46,7 @@ public sealed class CodeQualityTests
         await System.IO.File.WriteAllTextAsync(Path.Combine(repo.RepositoryPath, "Messy.cs"), "public class Clean { }\n", Ct);
         Expect.Blocked(await repo.RunPreCommitAndCrossCheckAsync(), "Code quality minimum C");
         var workingTree = await new GitStagedSnapshotProvider().CaptureWorkingTreeAsync(repo.RepositoryPath, TestContext.Current.CancellationToken);
-        var preview = await RulesTool.ValidateVcaReportAsync(stagedSnapshot: workingTree, workingTreeScope: true, cancellationToken: Ct);
+        var preview = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(), stagedSnapshot: workingTree, workingTreeScope: true, cancellationToken: Ct);
         Assert.False(preview.HasStopViolation, preview.Output);
     }
 

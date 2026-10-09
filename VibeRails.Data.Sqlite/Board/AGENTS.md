@@ -5,6 +5,9 @@ All current lane dispatch is sequential per card; the existing per-Job overlap g
 Use current workflow/event identity for decisions and user skips, and wait for actual run
 completion before advancing. Setup is additive with no history conversion or backfill. See
 [ordered lane workflows](../../VibeRails/Services/Board/ARCHITECTURE.md#ordered-lane-workflows).
+`board-lane-workflow/2` removes the settings triggers that retired the entire snapshot. Lane
+settings edits still cancel pending entries; committed runs retain their report/skip lifecycle
+until the card moves. No stored workflows or receipts are rewritten.
 
 VIBE-55 retires active use of `board-search/1`'s JSON-vector cache without deleting it.
 `GetSearchDocumentsAsync` pages full live titles/descriptions, visible Comments/retained notes

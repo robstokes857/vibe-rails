@@ -79,15 +79,17 @@ async function openSettings(page) {
     };
 }
 
-test('relay routing can be enabled without exposing test controls', async ({ page }) => {
-    const api = await installSettingsApi(page, buildSettings(false));
+test('settings omits the retired relay option when saving other preferences', async ({ page }) => {
+    const api = await installSettingsApi(page, buildSettings(true));
     const ui = await openSettings(page);
 
+    await expect(ui.toggle).toHaveCount(0);
     await expect(ui.root.locator('#settings-http-relay-test-button')).toHaveCount(0);
     await expect(page.locator('#http-relay-test-modal')).toHaveCount(0);
-    await ui.toggle.check();
+    await ui.root.locator('#setting-computer-name').fill('Updated computer');
 
     await ui.save.click();
     await expect.poll(() => api.writes.length).toBe(1);
-    expect(api.writes[0].routeThroughVibeRailsAi).toBe(true);
+    expect(api.writes[0]).not.toHaveProperty('routeThroughVibeRailsAi');
+    expect(api.writes[0].computerName).toBe('Updated computer');
 });

@@ -7,6 +7,7 @@ using VibeRails.Services.BertBaseClasses;
 using VibeRails.Services.BertV2;
 using VibeRails.Services.Mcp.HostShell;
 using VibeRails.Services.Mcp.Tools;
+using VibeRails.Services.Jira;
 using VibeRails.Services.Mcp.WebResearch;
 
 namespace VibeRails.Services.Mcp;
@@ -132,6 +133,7 @@ public static class McpStdioHost
         services.AddScoped<TokenSaverTool>();
         services.AddAgentSessionMcp();
         services.AddSessionSharingMcp();
+        services.AddJiraClients();
         // Kanban board tools. Backed by the board's own SQLite store (it owns its schema, so no
         // Repository migration pass runs in this short-lived child) and scoped to the project by
         // the CLI's inherited cwd / the launching session — see BoardProjectResolver. This is what
@@ -143,6 +145,9 @@ public static class McpStdioHost
         services.AddSingleton<VibeRails.Services.Board.IBoardLiveSessionProbe, VibeRails.Services.Board.NullBoardLiveSessionProbe>();
         services.AddScoped<VibeRails.Services.Board.IBoardService, VibeRails.Services.Board.BoardService>();
         services.AddScoped<VibeRails.Services.Board.BoardReviewService>();
+        services.AddScoped<VibeRails.Services.Board.BoardWorkflowService>();
+        VibeRails.Services.GitPreflight.GitPreflightServiceCollectionExtensions.AddGitSnapshots(services);
+        services.AddScoped<RulesTool>();
         services.AddScoped<BoardTool>();
         // HostShellTools (run_shell_command) and WebResearchTools (web_search/web_fetch) are
         // intentionally not exposed for now (security review 2026-07-02); mirrors MapRegisterServices.

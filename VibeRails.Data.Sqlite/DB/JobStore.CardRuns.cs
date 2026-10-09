@@ -1,5 +1,6 @@
 using System.Text.Json;
 using VibeRails.DTOs;
+using VibeRails.Services.Board;
 
 namespace VibeRails.DB;
 
@@ -18,7 +19,8 @@ public sealed partial class JobStore
         {
             var failed = (await _boards.GetLaneAutomationStatusesAsync(projectPath, card.Id, cancellationToken))
                 .SingleOrDefault(e => e.IsCurrent && e.JobId == jobId && !e.RequiresVerdict
-                    && e.StepStatus is "Failed" or "Fixing" or "Cancelled" or "TimedOut" or "Interrupted");
+                    && e.StepStatus is BoardStepStatus.Failed or BoardStepStatus.Fixing or BoardStepStatus.Cancelled
+                        or BoardStepStatus.TimedOut or BoardStepStatus.Interrupted);
             if (failed is not null)
                 triggerKey = $"{JobBoardContext.ManualPrefix}{cardKey}:lane:{failed.ColumnId}:{failed.EventKey}:{Guid.NewGuid():N}";
         }

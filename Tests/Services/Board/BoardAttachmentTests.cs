@@ -123,7 +123,7 @@ public sealed class BoardAttachmentTests : IDisposable
         var file = (await _service.AddAttachmentAsync(_project, card.Id, Request("scope.md", "abcdef"u8.ToArray()), Ct))!;
         var resolver = new Mock<IBoardProjectResolver>();
         resolver.Setup(x => x.ResolveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(_project);
-        var tool = new BoardTool(_service, resolver.Object, _store);
+        var tool = new BoardTool(_service, resolver.Object, _store, new BoardWorkflowService(_store, new BoardReviewService(_store, _service)));
         var detail = await tool.GetBoardCard(card.Key, cancellationToken: Ct);
         Assert.Contains($"{file.Id}: scope.md (text/markdown, 6 bytes)", detail);
         Assert.Contains("read_board_attachment", detail);
@@ -143,7 +143,7 @@ public sealed class BoardAttachmentTests : IDisposable
         var file = (await _service.AddAttachmentAsync(_project, card.Id, Request("screenshot.png", bytes), Ct))!;
         var resolver = new Mock<IBoardProjectResolver>();
         resolver.Setup(x => x.ResolveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(_project);
-        var tool = new BoardTool(_service, resolver.Object, _store);
+        var tool = new BoardTool(_service, resolver.Object, _store, new BoardWorkflowService(_store, new BoardReviewService(_store, _service)));
         var result = await tool.ReadBoardAttachment(file.Id, card.Key, cancellationToken: Ct);
         Assert.False(result.IsError == true);
         Assert.Equal(2, result.Content.Count);
@@ -180,7 +180,7 @@ public sealed class BoardAttachmentTests : IDisposable
         service.Setup(x => x.FindAttachmentAsync(project, card.Id, metadata.Id, It.IsAny<CancellationToken>())).ReturnsAsync(metadata);
         var resolver = new Mock<IBoardProjectResolver>(MockBehavior.Strict);
         resolver.Setup(x => x.ResolveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(project);
-        var tool = new BoardTool(service.Object, resolver.Object, Mock.Of<IBoardStore>());
+        var tool = new BoardTool(service.Object, resolver.Object, Mock.Of<IBoardStore>(), new BoardWorkflowService(Mock.Of<IBoardStore>(), new BoardReviewService(Mock.Of<IBoardStore>(), service.Object)));
 
         var result = await tool.ReadBoardAttachment(metadata.Id, card.Id, cancellationToken: Ct);
 
@@ -203,7 +203,7 @@ public sealed class BoardAttachmentTests : IDisposable
             Request("image.png", "<svg onload='alert(1)'/>"u8.ToArray(), declaredMime: "image/png"), Ct))!;
         var resolver = new Mock<IBoardProjectResolver>();
         resolver.Setup(x => x.ResolveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(_project);
-        var result = await new BoardTool(_service, resolver.Object, _store).ReadBoardAttachment(file.Id, card.Key, cancellationToken: Ct);
+        var result = await new BoardTool(_service, resolver.Object, _store, new BoardWorkflowService(_store, new BoardReviewService(_store, _service))).ReadBoardAttachment(file.Id, card.Key, cancellationToken: Ct);
         Assert.True(result.IsError);
         Assert.Empty(result.Content.OfType<ImageContentBlock>());
     }

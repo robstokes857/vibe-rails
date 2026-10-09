@@ -29,7 +29,7 @@ public sealed class BoardAgentCompletionTests : IDisposable
         jobs = new JobStore(state, store);
         service = new BoardService(store, Mock.Of<IBoardCommitService>(), new NullBoardLiveSessionProbe());
         resolver = new Resolver(root);
-        tool = new BoardTool(service, resolver, store);
+        tool = new BoardTool(service, resolver, store, new BoardWorkflowService(store, new BoardReviewService(store, service)));
     }
 
     [Fact]
@@ -52,7 +52,7 @@ public sealed class BoardAgentCompletionTests : IDisposable
             Assert.Single(await store.GetAgentCompletionsAsync(root, card.Id, Ct));
         }
 
-        var secondClient = new BoardTool(service, new Resolver(root), store);
+        var secondClient = new BoardTool(service, new Resolver(root), store, new BoardWorkflowService(store, new BoardReviewService(store, service)));
         var status = await secondClient.GetBoardAgentStatus(card.Key, session, Ct);
         Assert.Contains("Agent reported succeeded", status);
         Assert.Contains("Tests passed", status);

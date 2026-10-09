@@ -70,7 +70,7 @@ public class CommitMessageWordRuleTests
     [InlineData(false)]
     public async Task RulesPageReportsMalformedConfigurationAsWarningAndValidRuleAsDeferred(bool withSource)
     {
-        var service = new RuleValidationService(new RulesService(), Mock.Of<IAgentFileService>());
+        var service = new RuleValidationService(new RulesService(), Mock.Of<IAgentFileService>(), Moq.Mock.Of<VibeRails.Services.GitPreflight.IGitWorkingTreeSnapshotProvider>());
         var rules = new List<RuleWithEnforcement> {
             new(CommitMessageWordRule.Template, Enforcement.STOP),
             new("Check commit message for: wip", Enforcement.COMMIT)
@@ -107,7 +107,7 @@ public class CommitMessageWordRuleTests
             .ReturnsAsync(new Dictionary<string, List<VibeRails.Services.VCA.RuleWithSource>> {
                 ["app.cs"] = [new(new(CommitMessageWordRule.Template, Enforcement.STOP), "vc.rules.md")]
             });
-        var service = new ValidationService(Mock.Of<IValidatorList>(), parser.Object);
+        var service = new ValidationService(Mock.Of<IValidatorList>(), parser.Object, Moq.Mock.Of<VibeRails.Services.GitPreflight.IGitStagedSnapshotProvider>(), Moq.Mock.Of<VibeRails.Services.GitPreflight.IGitWorkingTreeSnapshotProvider>());
         var report = await service.ValidateAsync("/repo", true, cancellationToken: TestContext.Current.CancellationToken);
         var finding = Assert.Single(report.Results);
         Assert.False(finding.Passed);

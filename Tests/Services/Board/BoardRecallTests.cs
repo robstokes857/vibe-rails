@@ -169,7 +169,7 @@ public sealed class BoardRecallTests : IDisposable
         var card = await Card();
         await store.UpdateCardAsync(root, card.Id, new(Description: new string('a', 12000) + "SECOND PAGE"), Ct);
         var service = new BoardService(store, new Mock<IBoardCommitService>().Object, new NullBoardLiveSessionProbe());
-        var tool = new BoardTool(service, projects.Object, store);
+        var tool = new BoardTool(service, projects.Object, store, new BoardWorkflowService(store, new BoardReviewService(store, service)));
         Assert.StartsWith("Saved previous work", await tool.SaveBoardHandoff(new("Fixed", "", "Checked", "", [new("entry.cs", "Start here")]), card.Key, Ct));
         var first = await tool.GetBoardCard(card.Key, cancellationToken: Ct);
         Assert.Contains("descriptionOffset=12000", first);
@@ -218,7 +218,7 @@ public sealed class BoardRecallTests : IDisposable
         var recall = Recall(history: history.Object);
         Assert.Contains("Original implementation discussion", (await recall.SearchAsync("VB-1", 1, Ct)).Text);
         var service = new BoardService(store, new Mock<IBoardCommitService>().Object, new NullBoardLiveSessionProbe());
-        var tool = new BoardTool(service, projects.Object, store, history: history.Object);
+        var tool = new BoardTool(service, projects.Object, store, new BoardWorkflowService(store, new BoardReviewService(store, service)), history: history.Object);
         Assert.StartsWith("FAIL: session is not linked", await tool.ReadBoardSession("foreign", card.Key, cancellationToken: Ct));
         Assert.StartsWith("FAIL: document is not", await tool.ReadBoardSession(session, card.Key, "foreign:1", cancellationToken: Ct));
         history.Setup(h => h.GetSessionRecallPage(session, 0, 11)).Returns(Enumerable.Range(1, 11).Select(i => new BertStoredDocument(session + ":" + i, "preview", null)).ToList());

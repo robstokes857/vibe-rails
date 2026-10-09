@@ -36,7 +36,7 @@ public sealed class BoardChecksTests : IAsyncLifetime
     }
 
     private BoardCheckService Engine(IVcaHookValidationService? validator = null) =>
-        new(new GitStagedSnapshotProvider(), validator ?? new VcaRulesHookValidationService(), services);
+        new(new GitStagedSnapshotProvider(), validator ?? new VcaRulesHookValidationService(new GitStagedSnapshotProvider()), services);
     private Task<BoardCheckRecord> Run(JobActionKind kind, params string[] args) => Engine().ExecuteAsync(repo, repo,
         card.Key, Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), kind, args, Ct);
 

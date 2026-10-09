@@ -84,7 +84,7 @@ public interface IJiraCloudClient
         string siteUrl, string email, string apiToken, string filterId, CancellationToken cancellationToken);
 }
 
-public sealed class JiraCloudClient(HttpClient http) : IJiraCloudClient
+public sealed partial class JiraCloudClient(HttpClient http) : IJiraCloudClient, IJiraCommentClient
 {
     public const string HttpClientName = "jira-cloud";
     public const int PageSize = 50;

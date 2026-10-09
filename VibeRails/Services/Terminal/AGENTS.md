@@ -133,8 +133,10 @@ launch flag (`--dangerously-bypass-approvals-and-sandbox`, `--dangerously-skip-p
 
 Codex Board speed is Default (inherit CLI settings), Fast or Ultrafast. An explicit supported
 model is required for a speed override; `CodexModelCapabilities` validates it and
-`BaseLlmOptionsBuilder` emits `-c service_tier=fast|ultrafast --enable fast_mode`. Keep its
-model support table aligned with `llm-model-catalog.js` and the model-update checklist in
+`BaseLlmOptionsBuilder` emits `-c service_tier=fast|ultrafast -c features.fast_mode=true`.
+`CodexSpeedConfig` shares the configuration keys with saved Environments. Both backend validation
+and `llm-model-catalog.js` read `wwwroot/js/modules/codex-model-capabilities.json` (embedded in the
+backend assembly). Update that file using the model-update checklist in
 `vibe-books/custom_envs/CLI_OPTIONS.md`. Speed is optional JSON in existing Board options;
 older cards need no migration. Account eligibility remains enforced by Codex.
 

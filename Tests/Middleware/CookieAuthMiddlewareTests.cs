@@ -102,6 +102,20 @@ public sealed class CookieAuthMiddlewareTests
     }
 
     [Fact]
+    public async Task Mcp_WithoutSessionToken_IsRejectedEvenWithTabToken()
+    {
+        foreach (var tab in new[] { null, Auth.GetTabToken() })
+        {
+            var middleware = Build(out var reachedNext);
+            var ctx = Request("/mcp", tab: tab);
+            ctx.Request.Method = "POST";
+            await middleware.InvokeAsync(ctx);
+            Assert.False(reachedNext[0]);
+            Assert.Equal(401, ctx.Response.StatusCode);
+        }
+    }
+
+    [Fact]
     public async Task Mcp_WithSessionTokenOnly_IsRejected()
     {
         // The core of the finding: a session token alone must NOT reach /mcp, whose tools can

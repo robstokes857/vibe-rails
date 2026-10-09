@@ -20,6 +20,25 @@ public sealed class CodeQualityRuleTests
     private const string Clean = "public class Clean { public int Value => 1; }";
 
     [Theory]
+    [InlineData("Code quality minimum A", true)]
+    [InlineData(" code QUALITY minimum D", true)]
+    [InlineData("Code quality minimum", true)]
+    [InlineData("Code quality report", false)]
+    [InlineData("Code quality", false)]
+    public void RecognizesOnlyTheMinimumRuleFamily(string text, bool expected) =>
+        Assert.Equal(expected, CodeQualityRule.LooksLike(text));
+
+    [Fact]
+    public async Task OtherQualityRulesRemainUnrecognizedRatherThanInvalidThresholds()
+    {
+        var report = await RulesTool.ValidateVcaReportAsync(Mock.Of<IGitStagedSnapshotProvider>(),
+            stagedSnapshot: Snapshot("Code quality report", File("a.cs", Clean)), cancellationToken: Ct);
+        Assert.False(report.HasStopViolation);
+        Assert.Contains("UNRECOGNIZED", report.Output);
+        Assert.DoesNotContain("minimum must be", report.Output);
+    }
+
+    [Theory]
     [InlineData('A', 10, true, "A")]
     [InlineData('A', 10.01, false, "B")]
     [InlineData('B', 20, true, "B")]
@@ -62,7 +81,7 @@ public sealed class CodeQualityRuleTests
     {
         var rule = $"Code quality minimum {grade}";
         Assert.False(new RulesService().TryParse(rule, out _));
-        var report = await RulesTool.ValidateVcaReportAsync(stagedSnapshot: Snapshot(rule, File("a.cs", Clean)), cancellationToken: Ct);
+        var report = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(), stagedSnapshot: Snapshot(rule, File("a.cs", Clean)), cancellationToken: Ct);
         Assert.False(report.HasStopViolation);
         Assert.Contains("[WARN]", report.Output);
         Assert.Contains("UNSUPPORTED:", report.Output);
@@ -111,7 +130,7 @@ public sealed class CodeQualityRuleTests
     {
         var snapshot = Snapshot("Code quality minimum C", File("src/good.cs", Clean), File("src-other/bad.cs", Messy))
             with { AgentFiles = [new("src/vc.rules.md", "## Vibe Rails Rules\n- Code quality minimum C (STOP)\n")] };
-        var report = await RulesTool.ValidateVcaReportAsync(stagedSnapshot: snapshot, cancellationToken: Ct);
+        var report = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(), stagedSnapshot: snapshot, cancellationToken: Ct);
         Assert.False(report.HasError, report.Output);
         Assert.False(report.HasStopViolation, report.Output);
         Assert.Contains("Overall Code quality grade", report.Output);
@@ -144,18 +163,59 @@ public sealed class CodeQualityRuleTests
         Assert.True(Assert.Single(result.Results).Passed);
     }
 
-    [Fact]
-    public async Task RulesPageReportsSnapshotFailureAtDeclaredLevel()
+    [Theory]
+    [InlineData(false, "io")]
+    [InlineData(true, "io")]
+    [InlineData(false, "access")]
+    [InlineData(true, "access")]
+    [InlineData(false, "invalid")]
+    [InlineData(true, "invalid")]
+    [InlineData(false, "timeout")]
+    [InlineData(true, "timeout")]
+    public async Task RulesPageReportsSnapshotFailureAndContinuesOtherRules(bool withSource, string failure)
+    {
+        Exception exception = failure switch
+        {
+            "io" => new IOException("snapshot unavailable"),
+            "access" => new UnauthorizedAccessException("snapshot unavailable"),
+            "invalid" => new InvalidOperationException("snapshot unavailable"),
+            _ => new TimeoutException("git stalled")
+        };
+        var provider = new Mock<IGitWorkingTreeSnapshotProvider>();
+        provider.Setup(p => p.CaptureWorkingTreeAsync(Root, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(exception);
+        var service = new RuleValidationService(new RulesService(), Mock.Of<IAgentFileService>(), provider.Object);
+        List<RuleWithEnforcement> rules = [new("Code quality minimum C", Enforcement.STOP),
+            new("Skip test coverage", Enforcement.WARN), new("Code quality minimum B", Enforcement.COMMIT)];
+        var result = withSource
+            ? await service.ValidateWithSourceAsync(["bad.cs"], rules.Select(rule =>
+                new VibeRails.Services.RuleWithSource(rule, Path.Combine(Root, "vc.rules.md"))).ToList(), Root, Ct)
+            : await service.ValidateAsync(["bad.cs"], rules, Root, Ct);
+
+        Assert.Equal(3, result.Results.Count);
+        foreach (var index in new[] { 0, 2 })
+        {
+            Assert.False(result.Results[index].Passed);
+            Assert.Equal(rules[index].Enforcement, result.Results[index].Enforcement);
+            Assert.Equal($"UNSUPPORTED: Code quality could not be evaluated: {exception.Message}", result.Results[index].Message);
+        }
+        Assert.True(result.Results[1].Passed);
+        provider.Verify(p => p.CaptureWorkingTreeAsync(Root, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RulesPageDoesNotConvertCancellationToUnsupported(bool withSource)
     {
         var provider = new Mock<IGitWorkingTreeSnapshotProvider>();
         provider.Setup(p => p.CaptureWorkingTreeAsync(Root, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new IOException("snapshot unavailable"));
+            .ThrowsAsync(new OperationCanceledException());
         var service = new RuleValidationService(new RulesService(), Mock.Of<IAgentFileService>(), provider.Object);
-        var result = Assert.Single((await service.ValidateAsync(["bad.cs"],
-            [new("Code quality minimum C", Enforcement.STOP)], Root, TestContext.Current.CancellationToken)).Results);
-        Assert.False(result.Passed);
-        Assert.Equal(Enforcement.STOP, result.Enforcement);
-        Assert.Contains("UNSUPPORTED:", result.Message);
+        var rule = new RuleWithEnforcement("Code quality minimum C", Enforcement.STOP);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => withSource
+            ? service.ValidateWithSourceAsync(["bad.cs"], [new(rule, Path.Combine(Root, "vc.rules.md"))], Root, Ct)
+            : service.ValidateAsync(["bad.cs"], [rule], Root, Ct));
     }
 
     [Theory]
@@ -165,7 +225,7 @@ public sealed class CodeQualityRuleTests
     {
         var snapshot = Snapshot("Code quality minimum C", File("bad.cs", Messy))
             with { AgentFiles = [new("vc.rules.md", $"## Vibe Rails Rules\n- Code quality minimum C ({level})\n")] };
-        var report = await RulesTool.ValidateVcaReportAsync(stagedSnapshot: snapshot, cancellationToken: Ct);
+        var report = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(), stagedSnapshot: snapshot, cancellationToken: Ct);
         Assert.False(report.HasStopViolation);
         Assert.Equal(0, report.ApplicableRuleCount);
     }

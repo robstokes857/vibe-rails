@@ -44,6 +44,7 @@ public class McpServerHttpTests : IAsyncLifetime
         "resume_token_saver",
         "get_token_saver_status",
         "create_session_share_link",
+        "add_jira_comment",
     };
 
     public async ValueTask InitializeAsync()
@@ -64,6 +65,10 @@ public class McpServerHttpTests : IAsyncLifetime
         builder.Services.AddSingleton(Mock.Of<IBoardProjectResolver>());
         builder.Services.AddSingleton(Mock.Of<IBoardStore>());
         builder.Services.AddScoped<BoardTool>();
+        builder.Services.AddScoped<BoardReviewService>();
+        builder.Services.AddScoped<BoardWorkflowService>();
+        VibeRails.Services.GitPreflight.GitPreflightServiceCollectionExtensions.AddGitSnapshots(builder.Services);
+        builder.Services.AddScoped<RulesTool>();
 
         builder.Services
             .AddMcpServer(options =>
@@ -217,6 +222,24 @@ public class McpServerHttpTests : IAsyncLifetime
             Assert.Contains(expected, names);
         }
         Assert.Equal(ExpectedTools.Length + BoardMcpAuthorization.ToolNames.Count, names.Count);
+    }
+
+    [Fact]
+    public async Task JiraCommentToolBindsTextAndSessionLinksWithoutCredentialArguments()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var client = await ConnectAsync(ct);
+        var tool = Assert.Single(await client.GetAvailableToolsAsync(ct), t => t.Name == "add_jira_comment");
+        var properties = tool.JsonSchema.GetProperty("properties");
+        Assert.Equal(new[] { "body", "card", "sessionLinks" }, properties.EnumerateObject().Select(p => p.Name).OrderBy(n => n).ToArray());
+        var result = await client.CallToolAsync("add_jira_comment", new Dictionary<string, object?>
+        {
+            ["body"] = "Completed and tested",
+            ["sessionLinks"] = new[] { "https://viberails.ai/shared/session?key=" + new string('a', 64) },
+            ["card"] = "missing-card"
+        }, ct);
+        Assert.Contains("FAIL: card not found", result.Text);
+        Assert.DoesNotContain("add_jira_comment", BoardMcpAuthorization.ToolNames);
     }
 
     [Fact]

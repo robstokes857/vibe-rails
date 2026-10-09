@@ -150,13 +150,13 @@ namespace VibeRails.Services.LlmClis
 
         private static bool IsSpeedModeEnabled(string content, string tier)
         {
-            var serviceTier = GetRootTomlValue(content, "service_tier");
+            var serviceTier = GetRootTomlValue(content, CodexSpeedConfig.ServiceTier);
             if (!string.Equals(serviceTier, tier, StringComparison.OrdinalIgnoreCase))
                 return false;
 
             var featureEnabled =
-                GetRootTomlBoolValue(content, "features.fast_mode") ??
-                GetTomlSectionBoolValue(content, "features", "fast_mode");
+                GetRootTomlBoolValue(content, CodexSpeedConfig.FastModeKey) ??
+                GetTomlSectionBoolValue(content, CodexSpeedConfig.Features, CodexSpeedConfig.FastMode);
 
             return featureEnabled != false;
         }
@@ -355,20 +355,20 @@ namespace VibeRails.Services.LlmClis
         {
             if (!string.IsNullOrEmpty(tier))
             {
-                content = SetTomlValue(content, "service_tier", tier);
+                content = SetTomlValue(content, CodexSpeedConfig.ServiceTier, tier);
                 // Strip any root dotted form so we don't leave both `features.fast_mode` and a
                 // [features] fast_mode key (a duplicate-key TOML error).
-                content = RemoveTomlValue(content, "features.fast_mode");
-                return SetTomlSectionBoolValue(content, "features", "fast_mode", true);
+                content = RemoveTomlValue(content, CodexSpeedConfig.FastModeKey);
+                return SetTomlSectionBoolValue(content, CodexSpeedConfig.Features, CodexSpeedConfig.FastMode, true);
             }
 
-            var serviceTier = GetRootTomlValue(content, "service_tier");
+            var serviceTier = GetRootTomlValue(content, CodexSpeedConfig.ServiceTier);
             if (string.Equals(serviceTier, "fast", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(serviceTier, "ultrafast", StringComparison.OrdinalIgnoreCase))
-                content = RemoveTomlValue(content, "service_tier");
+                content = RemoveTomlValue(content, CodexSpeedConfig.ServiceTier);
 
-            content = RemoveTomlValue(content, "features.fast_mode");
-            return RemoveTomlSectionValue(content, "features", "fast_mode");
+            content = RemoveTomlValue(content, CodexSpeedConfig.FastModeKey);
+            return RemoveTomlSectionValue(content, CodexSpeedConfig.Features, CodexSpeedConfig.FastMode);
         }
 
         private static string SetAlternateScreen(string content, bool disabled)

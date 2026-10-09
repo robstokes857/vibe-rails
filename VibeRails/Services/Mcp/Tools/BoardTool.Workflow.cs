@@ -16,7 +16,7 @@ public sealed partial class BoardTool
             if (target.Error is not null) return target.Error;
             var author = await ResolveAuthorAsync(server, cancellationToken);
             if (author is null) return UnnamedClientHint;
-            await new BoardWorkflowService(store, service).ReportAsync(target.Project, target.CardId!, projects.GitWorkingDirectory,
+            await workflow.ReportAsync(target.Project, target.CardId!, projects.GitWorkingDirectory,
                 author, status, summary, eventKey, reviewId, cancellationToken);
             return "Workflow status recorded. Later steps wait for a pass and Automation completion, or a user skip. Save your handoff and finish your session when the work is complete.";
         }

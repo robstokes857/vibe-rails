@@ -23,8 +23,8 @@ public sealed partial class BoardSettingsTests
         DROP TRIGGER BoardCards_Workflow_Move;
         DROP TRIGGER BoardPendingAutomations_Workflow;
         DROP TRIGGER BoardPendingAdditionalAutomations_Workflow;
-        DROP TRIGGER BoardLaneAutomations_Workflow_UPDATE;
-        DROP TRIGGER BoardLaneAutomations_Workflow_DELETE;
+        DROP TRIGGER IF EXISTS BoardLaneAutomations_Workflow_UPDATE;
+        DROP TRIGGER IF EXISTS BoardLaneAutomations_Workflow_DELETE;
         DROP TABLE BoardLaneStepReports;
         DROP TABLE BoardLaneWorkflowSteps;
         DROP TABLE BoardLaneWorkflows;
@@ -97,9 +97,11 @@ public sealed partial class BoardSettingsTests
     [InlineData("disabled", true)]
     [InlineData("deleted", false)]
     [InlineData("deleted", true)]
+    [InlineData("missing", false)]
+    [InlineData("missing", true)]
     [InlineData("overlap", false)]
     [InlineData("overlap", true)]
-    public async Task UnavailableOrBusyAutomation_HoldsFollowingStepsUntilUserSkip(string reason, bool skipFirst)
+    public async Task UnavailableAutomationIsSkipped_AndBusyAutomationWaitsForUserSkip(string reason, bool skipFirst)
     {
         var (_, a, _, _) = await Lanes();
         var skipped = await Job("Skipped");
@@ -110,6 +112,15 @@ public sealed partial class BoardSettingsTests
         if (reason == "disabled")
             await _jobs.UpdateJobAsync(skipped.Id, new(skipped.Name, _root, LLM.NotSet, null, "", null, false, []), Ct);
         if (reason == "deleted") await _jobs.SoftDeleteJobAsync(skipped.Id, Ct);
+        if (reason == "missing")
+        {
+            await using var state = new SqliteConnection(_stateConnectionString);
+            await state.OpenAsync(Ct);
+            await using var delete = state.CreateCommand();
+            delete.CommandText = "DELETE FROM Jobs WHERE Id = $id;";
+            delete.Parameters.AddWithValue("$id", skipped.Id);
+            await delete.ExecuteNonQueryAsync(Ct);
+        }
         if (reason == "overlap") Assert.NotNull(await _jobs.EnqueueManualRunAsync(skipped.Id, Ct));
         var initial = await Tick(due);
         if (skipFirst) Assert.Empty(initial);
@@ -122,7 +133,13 @@ public sealed partial class BoardSettingsTests
         }
         var entry = (await _boards.GetLaneAutomationStatusesAsync(_root, card.Id, Ct)).Single(e => e.JobId == skipped.Id);
         var service = new BoardCardAutomationService(_boards, _jobs, Moq.Mock.Of<VibeRails.Services.Jobs.IJobService>());
-        await service.SkipAsync(_root, card.Id, skipped.Id, entry.EventKey, Ct);
+        if (reason == "overlap")
+            await service.SkipAsync(_root, card.Id, skipped.Id, entry.EventKey, Ct);
+        else
+        {
+            Assert.Equal("Skipped", entry.StepStatus);
+            Assert.False(entry.CanSkip);
+        }
         if (skipFirst) Assert.Equal(valid.Id, (await _jobs.GetRunAsync(Assert.Single(await Tick(due + 2)), Ct))!.JobId);
         else Assert.Empty(await Tick(due + 2));
 

@@ -36,8 +36,8 @@ function launcherItemIcon(item) {
 }
 
 /**
- * Nav-bar Automation launcher: a flyout on the play half of the merged Automation
- * nav entry, listing the project's automations and signed pwsh, bash and python scripts
+ * Nav-bar quick actions: a flyout on the standalone play button beside Settings,
+ * listing the project's automations and signed pwsh, bash and python scripts
  * (run-now on click; unsigned scripts are omitted), plus a customization
  * modal giving each entry an order and show/hide switch — the same treatment Custom
  * Environments get in the LLM launch pickers. Preferences are server-persisted per
@@ -75,11 +75,11 @@ export class AutomationNavLauncher {
         const flyout = document.createElement('div');
         flyout.className = 'automation-launch-flyout';
         flyout.setAttribute('role', 'menu');
-        flyout.setAttribute('aria-label', 'Launch an automation');
+        flyout.setAttribute('aria-label', 'Quick actions');
         flyout.innerHTML = `
             <div class="automation-launch-flyout-header">
                 <i class="fa-solid fa-play" aria-hidden="true"></i>
-                <span>Launch an automation</span>
+                <span>Quick actions</span>
             </div>
             <div class="automation-launch-flyout-items" data-automation-launch-items>
                 <div class="automation-launch-flyout-empty text-muted">
@@ -108,8 +108,7 @@ export class AutomationNavLauncher {
 
         flyout.querySelector('[data-automation-launch-action="customize"]')
             ?.addEventListener('click', () => {
-                // Remembered so closing the modal can hand focus back to the button that
-                // started it (there are two: top nav and sidebar, one usually hidden).
+                // Remembered so closing the modal can hand focus back to its nav button.
                 const triggerElement = this.triggerElement;
                 this.closeFlyout();
                 this.openCustomizationModal({ triggerElement });
@@ -250,10 +249,7 @@ export class AutomationNavLauncher {
     }
 
     _position(triggerElement, flyout) {
-        // Anchor to the whole merged Automation nav entry (the play trigger is only
-        // its narrow right half), so the flyout lines up with the item, not a sliver.
-        const anchor = triggerElement?.closest?.('.app-subnav-split') || triggerElement;
-        const rect = anchor?.getBoundingClientRect?.();
+        const rect = triggerElement?.getBoundingClientRect?.();
         if (!rect) return;
         // Measure after render so clamping uses the real size.
         const { offsetWidth: width, offsetHeight: height } = flyout;

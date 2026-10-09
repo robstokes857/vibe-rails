@@ -213,12 +213,12 @@ public sealed partial class BoardSettingsTests
     }
 
     [Theory]
-    [InlineData("disabled", "disabled")]
-    [InlineData("deleted", "deleted")]
-    [InlineData("missing", "no longer exists")]
-    [InlineData("project", "another project")]
-    [InlineData("actions", "no actions")]
-    public async Task UnavailableJobIsTerminalWithExplicitReason(string change, string reason)
+    [InlineData("disabled", "disabled", "Skipped")]
+    [InlineData("deleted", "deleted", "Skipped")]
+    [InlineData("missing", "no longer exists", "Skipped")]
+    [InlineData("project", "another project", "Failed")]
+    [InlineData("actions", "no actions", "Failed")]
+    public async Task UnavailableJobIsTerminalWithExplicitReason(string change, string reason, string expectedStatus)
     {
         var (_, lane, _, _) = await Lanes();
         var job = await Job();
@@ -239,7 +239,7 @@ public sealed partial class BoardSettingsTests
         Assert.Empty(await Tick(await Due(card.Id)));
         Assert.Equal(0, await Due(card.Id));
         var status = Assert.Single(await _boards.GetLaneAutomationStatusesAsync(_root, card.Id, Ct));
-        Assert.Equal("Failed", status.Status);
+        Assert.Equal(expectedStatus, status.Status);
         Assert.Contains(reason, status.Reason);
         Assert.Empty(await _boards.GetLaneAutomationStatusesAsync(_root + "-foreign", card.Id, Ct));
     }

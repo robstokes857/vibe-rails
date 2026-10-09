@@ -14,7 +14,7 @@ public static class CodeQualityRule
 
     /// <summary>Recognizes a quality rule, including malformed hand-written thresholds.</summary>
     public static bool LooksLike(string text) =>
-        text.TrimStart().StartsWith("Code quality", StringComparison.OrdinalIgnoreCase);
+        text.TrimStart().StartsWith("Code quality minimum", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Parses the supported minimum grades; C is the lowest configurable threshold.</summary>
     public static bool TryParse(string text, out char grade)

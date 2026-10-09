@@ -1,17 +1,10 @@
 import { escapeHtml } from './utils.js';
+import codexSpeeds from './codex-model-capabilities.json' with { type: 'json' };
 
 // Verified against Codex's model metadata and speed guide, 2026-10-08.
-// Keep in sync with CodexModelCapabilities.cs and vibe-books/custom_envs/CLI_OPTIONS.md.
-const codexSpeeds = Object.freeze({
-    'gpt-6-astra': ['fast', 'ultrafast'],
-    'gpt-6.1-sol': ['fast'],
-    'gpt-6-sol': ['fast'],
-    'gpt-6-luna': ['fast'],
-    'gpt-5.6-sol': ['fast'],
-    'gpt-5.6-terra': ['fast'],
-    'gpt-5.6-luna': ['fast'],
-    'gpt-5.5': ['fast']
-});
+// CodexModelCapabilities embeds this same data for backend validation.
+Object.values(codexSpeeds).forEach(Object.freeze);
+Object.freeze(codexSpeeds);
 
 export function codexModelSupportsSpeed(model, speed) {
     const key = String(model || '').trim().toLowerCase();

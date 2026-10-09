@@ -738,7 +738,7 @@ export class EnvironmentController {
         const serviceTier = this.codexServiceTier(s);
         if (serviceTier) {
             args.push('-c', `service_tier=${serviceTier}`);
-            args.push('--enable', 'fast_mode');
+            args.push('-c', 'features.fast_mode=true');
         }
 
         args.push(...this.parseArgString(s.additionalArgs || ''));

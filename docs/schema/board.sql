@@ -260,12 +260,6 @@ CREATE TRIGGER BoardColumns_HistoryDeleted AFTER DELETE ON BoardColumns BEGIN IN
 -- trigger BoardLaneAutomations_ClearAdditional
 CREATE TRIGGER BoardLaneAutomations_ClearAdditional AFTER UPDATE ON BoardLaneAutomations BEGIN DELETE FROM BoardLaneAdditionalAutomations WHERE ColumnId = NEW.ColumnId; END;
 
--- trigger BoardLaneAutomations_Workflow_DELETE
-CREATE TRIGGER BoardLaneAutomations_Workflow_DELETE AFTER DELETE ON BoardLaneAutomations BEGIN UPDATE BoardLaneWorkflows SET Current = 0 WHERE ColumnId = OLD.ColumnId AND Current = 1; END;
-
--- trigger BoardLaneAutomations_Workflow_UPDATE
-CREATE TRIGGER BoardLaneAutomations_Workflow_UPDATE AFTER UPDATE ON BoardLaneAutomations BEGIN UPDATE BoardLaneWorkflows SET Current = 0 WHERE ColumnId = OLD.ColumnId AND Current = 1; END;
-
 -- trigger BoardPendingAdditionalAutomations_RecordCancellation
 CREATE TRIGGER BoardPendingAdditionalAutomations_RecordCancellation BEFORE DELETE ON BoardPendingAdditionalAutomations BEGIN INSERT INTO BoardLaneAutomationDispatch (EventKey, JobId, CardId, ColumnId, DueUnixMs, Status, Reason) VALUES (OLD.EventKey, OLD.JobId, OLD.CardId, OLD.ColumnId, OLD.DueUnixMs, 'Cancelled', CASE WHEN NOT EXISTS (SELECT 1 FROM BoardCards WHERE Id = OLD.CardId AND DeletedUTC IS NULL) THEN 'Card was deleted.' WHEN NOT EXISTS (SELECT 1 FROM BoardCards WHERE Id = OLD.CardId AND ColumnId = OLD.ColumnId) THEN 'Card left the destination lane; a later entry starts a new settling period.' ELSE 'Lane Automation assignment changed or the pending entry was removed.' END) ON CONFLICT(EventKey, JobId) DO UPDATE SET Status = excluded.Status, Reason = excluded.Reason WHERE BoardLaneAutomationDispatch.Status = 'Waiting'; END;
 

@@ -29,9 +29,11 @@ public sealed partial class BoardTool(
     IBoardService service,
     IBoardProjectResolver projects,
     IBoardStore store,
+    BoardWorkflowService workflow,
     BoardReviewService? reviews = null,
     VibeRails.Services.BertV2.IBertSearchDbService? history = null,
-    BoardSearchService? search = null)
+    BoardSearchService? search = null,
+    VibeRails.Services.Jira.JiraCommentService? jiraComments = null)
 {
     /// <summary>
     /// MCP image payloads are base64 encoded and copied by the protocol stack. Keep this transfer
@@ -877,8 +879,13 @@ public sealed partial class BoardTool(
             foreach (var automation in report.Automations)
             {
                 if (automation.Unavailable is not null)
-                    builder.Append(blocked).Append(": \"").Append(automation.Name).Append("\" — the Automation ").Append(automation.Unavailable)
-                        .Append(". Later steps wait for a pass or user skip.\n");
+                {
+                    var skipped = automation.Unavailable is "no longer exists" or "was deleted" or "is disabled";
+                    builder.Append(skipped ? preview ? "Would skip" : "Will skip" : blocked)
+                        .Append(": \"").Append(automation.Name).Append("\" — the Automation ").Append(automation.Unavailable)
+                        .Append(skipped ? ". Later steps can continue after this entry is skipped.\n"
+                            : ". Later steps wait for a pass or user skip.\n");
+                }
                 else if (automation.ActiveRunId is not null)
                     builder.Append(preview ? "Would wait" : "Waiting").Append(": \"").Append(automation.Name).Append("\" — a run of this Automation is already active (")
                         .Append(RunLabel(automation)).Append("); this entry waits for its turn after the 60-second settling period.\n");
@@ -928,6 +935,10 @@ public sealed partial class BoardTool(
         if (card.AgentMade && card.AgentMadeSessionId is { } madeIn) builder.Append(" in session ").Append(madeIn);
         if (card.Tags.Count > 0) builder.Append(" · Tags: ").Append(string.Join(", ", card.Tags));
         builder.Append('\n');
+        if (!string.IsNullOrWhiteSpace(card.JiraIssueKey))
+            builder.Append("Jira issue: ").Append(card.JiraIssueKey)
+                .Append(". When asked to report completion to Jira, use add_jira_comment with the summary and sessionLinks. ")
+                .Append("Create or reuse public replay links with create_session_share_link; save links in the Board handoff for later sessions.\n");
         if (!string.IsNullOrWhiteSpace(boardName))
             builder.Append("Board: ").Append(boardName).Append('\n');
         if (laneNames is { Count: > 0 })

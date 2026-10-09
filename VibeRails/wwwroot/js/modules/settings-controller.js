@@ -35,7 +35,6 @@ export class SettingsController {
         let settings = {
             remoteAccess: false,
             apiKey: '',
-            routeThroughVibeRailsAi: false,
             useVsCodeTheme: false,
             createVibeStoryTracking: true,
             createVibeStoryTrackingCustomEnvs: false,
@@ -95,7 +94,6 @@ export class SettingsController {
 
             const remoteAccessToggle = root.querySelector('#setting-remote-access');
             const apiKeyInput = root.querySelector('#setting-api-key');
-            const routeThroughVibeRailsAiToggle = root.querySelector('#setting-route-through-viberails-ai');
             const exportDataButton = root.querySelector('#settings-export-data-button');
             const performanceModeToggle = root.querySelector('#setting-performance-mode');
             const useVsCodeThemeRow = root.querySelector('#setting-use-vscode-theme-row');
@@ -130,12 +128,6 @@ export class SettingsController {
             if (apiKeyInput) {
                 apiKeyInput.value = settings.apiKey || '';
                 apiKeyInput.dataset.originalValue = settings.apiKey || '';
-            }
-            if (routeThroughVibeRailsAiToggle) {
-                routeThroughVibeRailsAiToggle.checked = settings.routeThroughVibeRailsAi === true;
-                routeThroughVibeRailsAiToggle.dataset.originalValue = String(
-                    settings.routeThroughVibeRailsAi === true
-                );
             }
             this._dataExportConfigured = settings.dataExportConfigured === true;
             if (exportDataButton) {
@@ -249,7 +241,6 @@ export class SettingsController {
                             codexTokenSaverToggle?.checked ?? true,
                             opencodeTokenSaverToggle?.checked ?? true,
                             grokTokenSaverToggle?.checked ?? true,
-                            routeThroughVibeRailsAiToggle?.checked ?? false,
                             clearApiKey,
                             createVibeStoryTrackingToggle?.checked ?? true,
                             createVibeStoryTrackingCustomEnvsToggle?.checked ?? false
@@ -286,7 +277,7 @@ export class SettingsController {
         }
     }
 
-    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, openCodeLlmProxyEnabled, grokLlmProxyEnabled, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, routeThroughVibeRailsAi, clearApiKey = false, createVibeStoryTracking = true, createVibeStoryTrackingCustomEnvs = false) {
+    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, openCodeLlmProxyEnabled, grokLlmProxyEnabled, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, clearApiKey = false, createVibeStoryTracking = true, createVibeStoryTrackingCustomEnvs = false) {
         try {
             const savedSettings = await this.app.apiCall('/api/v1/settings', 'POST', {
                 remoteAccess: remoteAccess,
@@ -304,7 +295,6 @@ export class SettingsController {
                 codexTokenSaverEnabled: codexTokenSaverEnabled,
                 openCodeTokenSaverEnabled: openCodeTokenSaverEnabled,
                 grokTokenSaverEnabled: grokTokenSaverEnabled,
-                routeThroughVibeRailsAi: routeThroughVibeRailsAi,
                 clearApiKey: clearApiKey,
                 createVibeStoryTracking: createVibeStoryTracking,
                 createVibeStoryTrackingCustomEnvs: createVibeStoryTrackingCustomEnvs,
@@ -403,7 +393,6 @@ export class SettingsController {
         return [
             '#setting-remote-access',
             '#setting-api-key',
-            '#setting-route-through-viberails-ai',
             '#setting-use-vscode-theme',
             '#setting-create-vibe-story-tracking',
             '#setting-create-vibe-story-tracking-custom-envs',
@@ -428,7 +417,6 @@ export class SettingsController {
         return JSON.stringify({
             remoteAccess: isChecked('#setting-remote-access'),
             apiKey: valueOf('#setting-api-key'),
-            routeThroughVibeRailsAi: isChecked('#setting-route-through-viberails-ai'),
             useVsCodeTheme: isChecked('#setting-use-vscode-theme'),
             createVibeStoryTracking: isChecked('#setting-create-vibe-story-tracking'),
             createVibeStoryTrackingCustomEnvs: isChecked('#setting-create-vibe-story-tracking-custom-envs'),
@@ -519,7 +507,6 @@ export class SettingsController {
 
         const remoteAccessToggle = root.querySelector('#setting-remote-access');
         const apiKeyInput = root.querySelector('#setting-api-key');
-        const routeThroughVibeRailsAiToggle = root.querySelector('#setting-route-through-viberails-ai');
         const useVsCodeThemeToggle = root.querySelector('#setting-use-vscode-theme');
         const createVibeStoryTrackingToggle = root.querySelector('#setting-create-vibe-story-tracking');
         const createVibeStoryTrackingCustomEnvsToggle = root.querySelector('#setting-create-vibe-story-tracking-custom-envs');
@@ -537,12 +524,6 @@ export class SettingsController {
         if (apiKeyInput) {
             apiKeyInput.value = settings.apiKey || '';
             apiKeyInput.dataset.originalValue = settings.apiKey || '';
-        }
-        if (routeThroughVibeRailsAiToggle) {
-            routeThroughVibeRailsAiToggle.checked = settings.routeThroughVibeRailsAi === true;
-            routeThroughVibeRailsAiToggle.dataset.originalValue = String(
-                settings.routeThroughVibeRailsAi === true
-            );
         }
         this._dataExportConfigured = settings.dataExportConfigured === true;
         if (useVsCodeThemeToggle) useVsCodeThemeToggle.checked = settings.useVsCodeTheme === true;

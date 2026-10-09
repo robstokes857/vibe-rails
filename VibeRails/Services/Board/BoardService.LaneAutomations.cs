@@ -196,8 +196,8 @@ public sealed partial class BoardService
             : OneLine(definition.Name, AutomationNameChars);
         var unavailable = definition.Name is null ? "no longer exists"
             : definition.Deleted ? "was deleted"
-            : !definition.Enabled ? "is disabled"
             : !definition.InProject ? "belongs to another repository"
+            : !definition.Enabled ? "is disabled"
             : !definition.HasActions ? "has no actions"
             : null;
 

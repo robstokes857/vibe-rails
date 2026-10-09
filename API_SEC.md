@@ -328,6 +328,15 @@ retain their remote/destination identity and cannot auto-republish after revocat
 must respect the imported-board boundary. Membership does not grant live terminal control or
 account-wide archive access; Board activity playback follows its explicit hosted access rules.
 
+The root-only `/api/v1/board/remote` manager requires both local credentials and returns no-store
+responses. It pages accessible remote metadata and labels matching local copies across projects.
+Writes require the destination context captured when the list was loaded. Create publishes a
+remote-only board using a stable retry identity; rename/delete recheck hosted ownership. Rename
+updates matching local names. Delete takes the shared sync lock and pauses linked local copies
+before the outbound request, retaining local cards/history even when the remote outcome is unknown.
+Missing owned remote boards also pause background sync; only explicit re-enabling republishes them.
+These protections apply to updated clients; older running versions may ignore the pause switch.
+
 Remote Start work is outbound polling by an open root backend, only for its own project's
 published, non-imported boards. Requests carry opaque board/card IDs and a required sync sequence,
 never executable/path/argv/launch overrides. Sync and recheck destination/project/membership and
@@ -355,6 +364,17 @@ email is response-only, written with the key and its full SHA-256 fingerprint; a
 it. Never return the raw credential/fingerprint. See [account-link flow](docs/account-link-auth-flow.md).
 
 ### Jira (VB-40 / VIBE-102)
+
+`add_jira_comment` is an explicit outbound MCP write on both transports, outside the local
+Board auto-grants. It resolves the live card's retained issue link and original connected
+site within the owning project through `IBoardStore`, never caller-supplied credentials,
+site or issue ID. The existing Jira lock serializes with connection changes/unlink/pulls.
+The saved-origin `POST /rest/api/3/issue/{numericIssueId}/comment` uses basic auth, no
+redirects/cookies, a 30-second deadline and 256-KiB responses. Text and optional public
+session replay URLs are sent as ADF; posting creates no public shares. Responses disclose
+only fixed errors or a validated numeric comment ID. Unconfirmed delivery is never retried
+automatically; Board receipt failure does not turn confirmed Jira delivery into a failed
+post. See [Jira comments](VibeRails/Services/Jira/Comments.md).
 
 The four root/project-scoped `/api/v1/board/boards/{boardId}/jira` GET/PUT and `/test`, `/pull`
 POST routes use both credentials. API tokens are write-only, stored in plain text in the private

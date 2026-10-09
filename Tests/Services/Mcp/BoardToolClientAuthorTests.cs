@@ -208,6 +208,10 @@ public sealed partial class BoardToolClientAuthorTests : IAsyncDisposable
         services.AddSingleton<IBoardProjectResolver>(_resolver);
         services.AddSingleton<IBoardStore>(_store);
         services.AddScoped<BoardTool>();
+        services.AddScoped<BoardReviewService>();
+        services.AddScoped<BoardWorkflowService>();
+        VibeRails.Services.GitPreflight.GitPreflightServiceCollectionExtensions.AddGitSnapshots(services);
+        services.AddScoped<RulesTool>();
         services.AddMcpServer(options => options.ServerInfo = new() { Name = "viberails-mcp-test", Version = "1.0.0" })
             .WithStreamServerTransport(toServer.Reader.AsStream(), toClient.Writer.AsStream())
             .WithVibeRailsTools();

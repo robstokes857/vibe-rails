@@ -49,6 +49,31 @@ public class CodexSettingsTests : IDisposable
         Assert.False(settings.FastMode);
     }
 
+    [Theory]
+    [InlineData("fast")]
+    [InlineData("ultrafast")]
+    public async Task BoardOverridesAndEnvironmentSettingsUseTheSameSpeedConfiguration(string speed)
+    {
+        _mockFileService.SetFileExists(false);
+        await _service.SaveSettings("test-env", new CodexSettingsDto
+        {
+            Model = "gpt-6-astra", FastMode = speed == "fast", UltrafastMode = speed == "ultrafast"
+        }, TestContext.Current.CancellationToken);
+        var config = _mockFileService.GetWrittenContent();
+        var args = BaseLlmOptionsBuilder.BuildArguments(VibeRails.Services.LLM.Codex,
+            new BaseLlmOptions("gpt-6-astra", Speed: speed));
+
+        Assert.Contains($"service_tier = \"{speed}\"", config);
+        Assert.Contains("[features]", config);
+        Assert.Contains("fast_mode = true", config);
+        Assert.Equal(["--model", "gpt-6-astra", "-c", $"service_tier={speed}", "-c", "features.fast_mode=true"], args);
+        _mockFileService.SetFileExists(true);
+        _mockFileService.SetFileContent(config);
+        var saved = await _service.GetSettings("test-env", TestContext.Current.CancellationToken);
+        Assert.Equal(speed == "fast", saved.FastMode);
+        Assert.Equal(speed == "ultrafast", saved.UltrafastMode);
+    }
+
     [Fact]
     public async Task SettingsOperations_RejectEnvironmentPathTraversal()
     {

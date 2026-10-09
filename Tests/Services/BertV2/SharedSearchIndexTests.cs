@@ -69,7 +69,7 @@ public sealed class SharedSearchIndexTests : IDisposable
         var history = new UnifiedSearchService(model, new BertSearchDbService(index), new BertDocumentResponseMapper());
         Assert.Contains(relevant.Key, await new SessionSearchTool(history, recall).SearchHistory("tyres", cancellationToken: Ct));
         var service = new BoardService(board, Mock.Of<IBoardCommitService>(), new NullBoardLiveSessionProbe());
-        Assert.Contains(relevant.Key, await new BoardTool(service, projects.Object, board, search: Finder()).SearchBoardCards("tyres", cancellationToken: Ct));
+        Assert.Contains(relevant.Key, await new BoardTool(service, projects.Object, board, new BoardWorkflowService(board, new BoardReviewService(board, service)), search: Finder()).SearchBoardCards("tyres", cancellationToken: Ct));
     }
 
     [Fact]

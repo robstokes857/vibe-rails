@@ -8,7 +8,7 @@ namespace Tests.Services
     {
         private readonly RuleValidationService _service = new(
             new RulesService(),
-            Mock.Of<IAgentFileService>());
+            Mock.Of<IAgentFileService>(), Moq.Mock.Of<VibeRails.Services.GitPreflight.IGitWorkingTreeSnapshotProvider>());
 
         [Fact]
         public async Task ValidateAsync_FailsCoverageRule_WhenCodeFileHasNoMatchingTest()
@@ -67,7 +67,7 @@ namespace Tests.Services
             var agents = new Mock<IAgentFileService>();
             agents.Setup(x => x.GetDocumentedFilesAsync(source, It.IsAny<CancellationToken>()))
                 .ReturnsAsync([]);
-            var service = new RuleValidationService(new RulesService(), agents.Object);
+            var service = new RuleValidationService(new RulesService(), agents.Object, Moq.Mock.Of<VibeRails.Services.GitPreflight.IGitWorkingTreeSnapshotProvider>());
 
             var result = await service.ValidateWithSourceAsync(
                 ["nested/vc.rules.md", "nested/child/vc.rules.md", "nested/app.cs", "outside.txt"],
@@ -95,7 +95,7 @@ namespace Tests.Services
                 var agents = new Mock<IAgentFileService>();
                 agents.Setup(x => x.GetDocumentedFilesAsync(source, It.IsAny<CancellationToken>()))
                     .ReturnsAsync([]);
-                var service = new RuleValidationService(new RulesService(), agents.Object);
+                var service = new RuleValidationService(new RulesService(), agents.Object, Moq.Mock.Of<VibeRails.Services.GitPreflight.IGitWorkingTreeSnapshotProvider>());
 
                 var result = await service.ValidateWithSourceAsync(
                     ["./vc.rules.md"],

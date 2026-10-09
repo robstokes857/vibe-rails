@@ -126,6 +126,9 @@ are presentation settings and do not exempt code from this repository rule.
 
 Quality failures follow the standard WARN/COMMIT/STOP policy, including re-evaluation at
 commit-msg. Invalid handwritten thresholds warn as unsupported; rule writers accept only A/B/C.
+Rules-page and legacy validation report snapshot I/O, access, invalid-operation and Git timeout
+failures as `UNSUPPORTED:` quality results at the declared level, then continue unrelated rules.
+Cancellation still propagates to the caller.
 `CodeQualityRule` owns grading and scope, shared by the active validators and legacy adapter.
 Regression fixtures and real-hook coverage live under `Tests/VcaRegression/Fixtures/code-quality`
 and `CodeQualityTests.cs`; score boundaries and aggregate behavior are in `CodeQualityRuleTests.cs`.

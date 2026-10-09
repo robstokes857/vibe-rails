@@ -53,7 +53,8 @@ public sealed class BoardLaneAutomationDescribeTests
         Assert.Equal("Automation #7", BoardService.Describe(Definition(name: null)).Name);
         Assert.Equal("definition unavailable", BoardService.Describe(Definition(name: null, worker: null, scripts: [])).Summary);
         Assert.Equal("was deleted", BoardService.Describe(Definition(deleted: true, enabled: false)).Unavailable);
-        Assert.Equal("is disabled", BoardService.Describe(Definition(enabled: false, inProject: false)).Unavailable);
+        Assert.Equal("belongs to another repository", BoardService.Describe(Definition(enabled: false, inProject: false)).Unavailable);
+        Assert.Equal("is disabled", BoardService.Describe(Definition(enabled: false)).Unavailable);
         Assert.Equal("belongs to another repository", BoardService.Describe(Definition(inProject: false, hasActions: false)).Unavailable);
         Assert.Equal("has no actions", BoardService.Describe(Definition(hasActions: false)).Unavailable);
 

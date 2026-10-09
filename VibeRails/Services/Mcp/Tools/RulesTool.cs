@@ -15,7 +15,7 @@ namespace VibeRails.Services.Mcp.Tools;
 /// MCP normalizes the method name to snake_case (<c>validate_vca</c>).
 /// </summary>
 [McpServerToolType]
-public class RulesTool
+public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
 {
     private static readonly IFileClassifier FileClassifier = new FileClassifier();
     private static readonly StringComparer GitPathComparer = OperatingSystem.IsWindows()
@@ -74,14 +74,15 @@ public class RulesTool
 
     [McpServerTool]
     [Description("Validates staged files against VCA rules defined in vc.rules.md files. Supports '- [WARN] Rule' and '- Rule (WARN)' formats. Call this BEFORE attempting to commit changes. Returns validation results with any COMMIT-level violations that require acknowledgment.")]
-    public static async Task<string> ValidateVca(
+    public async Task<string> ValidateVca(
         [Description("Optional working directory. If not provided, uses current directory.")] string? workingDirectory = null)
     {
-        var report = await ValidateVcaReportAsync(workingDirectory);
+        var report = await ValidateVcaReportAsync(snapshotProvider, workingDirectory);
         return report.Output;
     }
 
     internal static async Task<VcaToolValidationReport> ValidateVcaReportAsync(
+        IGitStagedSnapshotProvider snapshotProvider,
         string? workingDirectory = null,
         string? commitMessage = null,
         bool validateCommitMessage = false,
@@ -163,8 +164,8 @@ public class RulesTool
                 && CodeQualityRule.TryParse(rule.RuleText, out _)
                 && GetScopedFiles(stagedFiles, rule.Source.FullPath, gitRoot).Count > 0))
             {
-                var qualitySnapshot = await new GitStagedSnapshotProvider().CaptureAsync(gitRoot, cancellationToken);
-                return await ValidateVcaReportAsync(gitRoot, commitMessage, validateCommitMessage,
+                var qualitySnapshot = await snapshotProvider.CaptureAsync(gitRoot, cancellationToken);
+                return await ValidateVcaReportAsync(snapshotProvider, gitRoot, commitMessage, validateCommitMessage,
                     cancellationToken, qualitySnapshot, workingTreeScope);
             }
 

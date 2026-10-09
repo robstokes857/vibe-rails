@@ -30,13 +30,15 @@ public sealed partial class BoardStore
             FROM ranked p JOIN BoardCards c ON c.Id = p.CardId
             {CardPrefixJoinSql}
             LEFT JOIN BoardLaneAutomationDispatch d ON d.EventKey = p.EventKey AND d.JobId = p.JobId
+            LEFT JOIN json_each($attempts) attempted ON attempted.key = p.EventKey || ':' || p.JobId
             WHERE p.rank = 1 AND NOT EXISTS (
                 SELECT 1 FROM BoardLaneWorkflowSteps target
                 JOIN BoardLaneWorkflowSteps prior ON prior.WorkflowId = target.WorkflowId AND prior.Position < target.Position
                 JOIN pending earlier ON earlier.EventKey = prior.EventKey AND earlier.JobId = prior.JobId
                 WHERE target.EventKey = p.EventKey AND target.JobId = p.JobId)
-            ORDER BY COALESCE(d.LastAttemptUnixMs, 0), p.DueUnixMs, p.CardId, p.JobId LIMIT 100;
+            ORDER BY COALESCE(attempted.value, d.LastAttemptUnixMs, 0), p.DueUnixMs, p.CardId, p.JobId LIMIT 100;
             """;
+        query.Parameters.AddWithValue("$attempts", WaitingDispatchAttemptsJson());
         query.Parameters.AddWithValue("$now", new DateTimeOffset(nowUtc).ToUnixTimeMilliseconds());
         var entries = new List<BoardLaneAutomationEvent>();
         await using var reader = await query.ExecuteReaderAsync(cancellationToken);
@@ -64,21 +66,28 @@ public sealed partial class BoardStore
     }
 
     public Task AcknowledgeLaneAutomationAsync(BoardLaneAutomationEvent entry, CancellationToken cancellationToken = default) =>
-        RecordLaneAutomationDispatchAsync(entry, new("Cancelled", "Lane entry acknowledged without a dispatch result."), DateTime.UtcNow, cancellationToken);
+        RecordLaneAutomationDispatchAsync(entry, new(BoardStepStatus.Cancelled, "Lane entry acknowledged without a dispatch result."), DateTime.UtcNow, cancellationToken);
 
     public async Task RecordLaneAutomationDispatchAsync(BoardLaneAutomationEvent entry, BoardLaneAutomationDispatch dispatch,
         DateTime nowUtc, CancellationToken cancellationToken = default)
     {
-        await using var connection = await OpenAsync(cancellationToken);
-        await using var transaction = connection.BeginTransaction(deferred: false);
-        await WriteLaneAutomationDispatchAsync(connection, transaction, entry, dispatch, nowUtc, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        await _dispatchGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (RememberedWaitingDispatch(entry, dispatch, nowUtc)) return;
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var transaction = connection.BeginTransaction(deferred: false);
+            await WriteLaneAutomationDispatchAsync(connection, transaction, entry, dispatch, nowUtc, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            RememberWaitingDispatch(entry, dispatch, nowUtc);
+        }
+        finally { _dispatchGate.Release(); }
     }
 
     private static async Task WriteLaneAutomationDispatchAsync(SqliteConnection connection, SqliteTransaction transaction,
         BoardLaneAutomationEvent entry, BoardLaneAutomationDispatch dispatch, DateTime nowUtc, CancellationToken cancellationToken)
     {
-        if (dispatch.Status is not ("Waiting" or "Queued" or "Skipped" or "Cancelled" or "Failed"))
+        if (dispatch.Status is not (BoardStepStatus.Waiting or BoardStepStatus.Queued or BoardStepStatus.Skipped or BoardStepStatus.Cancelled or BoardStepStatus.Failed))
             throw new ArgumentException("Invalid lane dispatch status.", nameof(dispatch));
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -100,7 +109,7 @@ public sealed partial class BoardStore
         command.Parameters.AddWithValue("$run", (object?)dispatch.RunId ?? DBNull.Value);
         command.Parameters.AddWithValue("$now", new DateTimeOffset(nowUtc).ToUnixTimeMilliseconds());
         await command.ExecuteNonQueryAsync(cancellationToken);
-        if (dispatch.Status != "Waiting")
+        if (dispatch.Status != BoardStepStatus.Waiting)
         {
             command.CommandText = """
                 DELETE FROM BoardPendingAutomations WHERE CardId = $card AND JobId = $job AND EventKey = $event;

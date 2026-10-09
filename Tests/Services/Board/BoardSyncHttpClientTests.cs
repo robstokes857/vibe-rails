@@ -10,6 +10,33 @@ public sealed class BoardSyncHttpClientTests
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Fact]
+    public async Task RemoteManagementPagesAndDeletesUsingPinnedCredentials()
+    {
+        var requests = new List<string>();
+        var client = Client(new Handler(request =>
+        {
+            Assert.Equal("test-key", Assert.Single(request.Headers.GetValues("X-Api-Key")));
+            requests.Add(request.Method + " " + request.RequestUri!.PathAndQuery);
+            return new(HttpStatusCode.OK) { Content = new StringContent(request.Method == HttpMethod.Get ? "[]" : "{\"deleted\":true}") };
+        }));
+        Assert.Empty(await client.DiscoverPageAsync(100, Ct, client.DestinationKey!));
+        await client.DeleteRemoteBoardAsync("remote", Ct, client.DestinationKey!);
+        Assert.Equal(["GET /api/v1/boards/?offset=100", "DELETE /api/v1/boards/remote"], requests);
+        await Assert.ThrowsAsync<BoardSyncClientException>(() => client.DeleteRemoteBoardAsync("remote", Ct, "changed"));
+        Assert.Equal(2, requests.Count);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"deleted\":false}")]
+    public async Task RemoteDeletionRequiresAnExplicitAcknowledgement(string body)
+    {
+        var client = Client(new Handler(_ => new(HttpStatusCode.OK) { Content = new StringContent(body) }));
+        var error = await Assert.ThrowsAsync<BoardSyncClientException>(() => client.DeleteRemoteBoardAsync("remote", Ct, client.DestinationKey!));
+        Assert.Equal("invalid_response", error.Code);
+    }
+
+    [Fact]
     public async Task RemoteLaunchUsesPinnedHeaderCredentialsAndSourceGeneratedWireTypes()
     {
         var id = Guid.NewGuid(); var board = Guid.NewGuid(); var instance = Guid.NewGuid();

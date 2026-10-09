@@ -421,7 +421,8 @@ code {
     min-width: 0;
 }
 
-.app-subnav .app-subnav-settings {
+.app-subnav .app-subnav-settings,
+.app-subnav .automation-launch-btn {
     flex: 0 0 34px;
     width: 34px;
     height: 34px;
@@ -17355,35 +17356,9 @@ body.vb-terminal-focus-active .app-subnav .nav-exit-btn-sm {
    Nav Automation launcher (flyout on the "Launch" nav button)
    ============================================================ */
 
-/* One nav item, two halves: the main half navigates to the Automation page, the
-   play half opens the launch flyout. Replaces the old separate "Launch" entry. */
-.app-subnav-split {
-    display: inline-flex;
-    align-items: stretch;
-}
-
-.app-subnav-split .app-subnav-link {
-    border-top-right-radius: 0;
-    border-bottom-right-radius: 0;
-}
-
-.app-subnav-split-trigger {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0.4rem 0.55rem;
-    border: none;
-    border-left: 1px solid color-mix(in srgb, var(--color-border, #334155) 70%, transparent);
-    border-radius: 0 6px 6px 0;
-    background: none;
-    color: var(--color-text-muted, #94a3b8);
-    font-size: 0.7rem;
-    cursor: pointer;
-    transition: color 0.18s ease, background 0.18s ease;
-}
-
-.app-subnav-split-trigger:hover,
-.app-subnav-split-trigger:focus-visible {
+/* Standalone quick-action button beside Settings. */
+.automation-launch-btn:hover,
+.automation-launch-btn:focus-visible {
     color: var(--color-success, #22c55e);
     background: rgba(255, 255, 255, 0.06);
 }

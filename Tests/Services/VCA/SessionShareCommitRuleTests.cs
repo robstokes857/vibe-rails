@@ -55,7 +55,7 @@ public sealed class SessionShareCommitRuleTests
     [InlineData(false)]
     public async Task RulesPageDefersAndExplainsHowToAddLink(bool withSource)
     {
-        var service = new RuleValidationService(new RulesService(), Mock.Of<IAgentFileService>());
+        var service = new RuleValidationService(new RulesService(), Mock.Of<IAgentFileService>(), Moq.Mock.Of<VibeRails.Services.GitPreflight.IGitWorkingTreeSnapshotProvider>());
         var rule = new RuleWithEnforcement(SessionShareCommitRule.Name, Enforcement.STOP);
         var root = Path.GetFullPath(Path.GetTempPath());
         var result = withSource

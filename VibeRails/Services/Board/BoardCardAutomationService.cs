@@ -17,9 +17,9 @@ public sealed class BoardCardAutomationService(IBoardStore boards, IJobStore job
         if (card is null) return null;
         var status = (await boards.GetLaneAutomationStatusesAsync(projectPath, card.Id, cancellationToken))
             .FirstOrDefault(entry => entry.JobId == jobId && entry.EventKey == eventKey);
-        if (status is null || !(status.CanSkip || status.Status == "Waiting" && status.RunId is null))
+        if (status is null || !(status.CanSkip || status.Status == BoardStepStatus.Waiting && status.RunId is null))
             throw new BoardConflictException("This step cannot be skipped. Refresh to see its current status.");
-        if (status.RunId is null && status.Status == "Waiting")
+        if (status.RunId is null && status.Status == BoardStepStatus.Waiting)
         {
             var entry = new BoardLaneAutomationEvent(card.Id, jobId, eventKey, card.ProjectPath,
                 $"board-lane:{card.Key}:{status.ColumnId}:{eventKey}", true);
@@ -29,12 +29,12 @@ public sealed class BoardCardAutomationService(IBoardStore boards, IJobStore job
         }
         else
         {
-            if (status.RunId is not null && status.Status is "Queued" or "Running")
-                await jobs.RequestCancelAsync(status.RunId, cancellationToken);
             if (!await boards.ReportLaneStepAsync(projectPath, card.Id,
-                new(eventKey, jobId, "Skipped", $"User skipped {status.Name} for this card's current workflow.", status.RunId),
+                new(eventKey, jobId, BoardStepStatus.Skipped, $"User skipped {status.Name} for this card's current workflow.", status.RunId),
                 BoardAuthor.User(), cancellationToken))
                 throw new BoardConflictException("This entry changed. Refresh to see its current status.");
+            if (status.RunId is not null && status.Status is BoardStepStatus.Queued or BoardStepStatus.Running)
+                await jobs.RequestCancelAsync(status.RunId, cancellationToken);
         }
         return await GetAsync(projectPath, card.Id, cancellationToken);
     }
