@@ -287,6 +287,9 @@ export class JobController {
             this.app.data.environments = this.environments;
             this.renderJobs();
             this.renderRuns();
+            // Automations were (re)loaded after a create, edit or delete: the VS Code
+            // Activity Bar launcher view lists the same catalog and re-reads it.
+            globalThis.__viberails_launcherChanged__?.();
         } catch (error) {
             if (!quiet) this.app.showError(error?.message || 'Could not load Automation.');
         }

@@ -11,6 +11,19 @@ export const COMMAND_OPEN = 'viberails.open';
 export const COMMAND_STOP = 'viberails.stop';
 export const COMMAND_ADD_SCRIPT = 'viberails.addScript';
 export const COMMAND_TEST_CONNECTION_INFO = 'viberails._test.getConnectionInfo';
+export const COMMAND_TEST_LAUNCHER_ITEMS = 'viberails._test.getLauncherItems';
+
+// --- Activity Bar launcher view ------------------------------------------
+
+/** Runs the launcher item passed as its argument (tree row click and the inline play icon). */
+export const COMMAND_LAUNCHER_RUN = 'viberails.launcher.run';
+export const COMMAND_LAUNCHER_REFRESH = 'viberails.launcher.refresh';
+export const COMMAND_LAUNCHER_CUSTOMIZE = 'viberails.launcher.customize';
+export const COMMAND_LAUNCHER_MANAGE = 'viberails.launcher.manage';
+/** Also hardcoded in the `view ==` clauses of the menu contributions in package.json. */
+export const LAUNCHER_VIEW_ID = 'viberails.launcher';
+/** Context key behind the view's welcome content; true while the dashboard panel exists. */
+export const CONTEXT_DASHBOARD_OPEN = 'viberails.dashboardOpen';
 
 // --- Webview / output -----------------------------------------------------
 
@@ -42,6 +55,12 @@ export const LAUNCH_ARG_VS_CODE = '--vs-code-v1';
 export const HEALTH_PATH = '/health';
 /** Auth-gated; returns 200 and then stops the host ~50ms later. */
 export const SHUTDOWN_PATH = '/api/v1/shutdown';
+/** The nav Play flyout's catalog: automations and scripts in the user's saved order. */
+export const AUTOMATION_NAV_PREFERENCES_PATH = '/api/v1/automation-nav/preferences';
+/** Queues an automation run for the scheduler, exactly what the dashboard's "Run now" posts. */
+export function jobRunPath(jobId: number): string {
+    return `/api/v1/jobs/${encodeURIComponent(String(jobId))}/run`;
+}
 
 // --- Settings -------------------------------------------------------------
 
@@ -67,6 +86,13 @@ export const BOOTSTRAP_RETRY_DELAY_MS = 500;
 export const HEALTH_CHECK_ATTEMPTS = 3;
 export const HEALTH_CHECK_DELAY_MS = 500;
 export const HEALTH_CHECK_TIMEOUT_MS = 2000;
+
+/** Ordinary authenticated API calls made by the extension host (launcher list, run now). */
+export const BACKEND_REQUEST_TIMEOUT_MS = 10000;
+/** How long a host → dashboard message waits for the page to install its bridge handlers. */
+export const DASHBOARD_MESSAGE_TIMEOUT_MS = 30000;
+/** How long the "queued" confirmation stays in the status bar. */
+export const LAUNCHER_STATUS_MESSAGE_MS = 5000;
 
 /** How long to wait for the POST /api/v1/shutdown response itself. */
 export const GRACEFUL_SHUTDOWN_REQUEST_TIMEOUT_MS = 2000;

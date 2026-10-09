@@ -387,6 +387,57 @@ test('a failed load leaves the customize modal honest: error alert and no Save; 
     assert.equal(state.items.length, 3);
 });
 
+test('the VS Code launcher view opens the customize modal over a freshly loaded catalog', async () => {
+    const app = createApp();
+    const launcher = new AutomationNavLauncher(app);
+    const steps = [];
+    launcher.closeFlyout = () => steps.push('close');
+    launcher.openCustomizationModal = async (options) => {
+        steps.push(['open', options, launcher.items?.map((item) => item.key)]);
+        return 'opened';
+    };
+    app.response = { items: CATALOG };
+
+    assert.equal(await launcher.openCustomizationFromHost(), 'opened');
+    assert.deepEqual(steps, ['close', ['open', undefined, ['job:7', 'script:backup.py', 'script:tidy.py', 'job:9']]]);
+    assert.deepEqual(app.calls.map((call) => [call.url, call.method]), [['/api/v1/automation-nav/preferences', 'GET']]);
+});
+
+test('a saved or reset list tells the VS Code launcher view; a rejected save and plain browsers do not', async (t) => {
+    t.mock.method(console, 'error', () => {});
+    const app = createApp();
+    const launcher = new AutomationNavLauncher(app);
+    launcher.modalState = {
+        items: normalizeLauncherItems(CATALOG), pending: false, loadFailed: false, disposed: false,
+        layer: { querySelector: () => null }
+    };
+    launcher._renderModalRows = () => {};
+    launcher._closeCustomizationModal = () => {};
+    launcher._showModalError = () => {};
+    const apiCall = app.apiCall;
+    let notified = 0;
+    globalThis.__viberails_launcherChanged__ = () => { notified += 1; };
+    try {
+        app.response = { items: CATALOG };
+        await launcher._savePreferences();
+        assert.equal(notified, 1);
+        await launcher._resetPreferences();
+        assert.equal(notified, 2);
+
+        // A rejected save changes nothing on the server, so the view is not told.
+        app.apiCall = async () => { throw new Error('stale'); };
+        await launcher._savePreferences();
+        assert.equal(notified, 2);
+    } finally {
+        delete globalThis.__viberails_launcherChanged__;
+    }
+
+    // Without the extension host there is nothing to notify and nothing to throw.
+    app.apiCall = apiCall;
+    await launcher._savePreferences();
+    assert.equal(notified, 2);
+});
+
 test('the customize modal body scrolls: its form must not break the modal flex chain', () => {
     // modal-dialog-scrollable only reaches .modal-body through .modal-content's flex column. The
     // <form> wrapping body + footer is a flex item with min-height: auto, so without this it

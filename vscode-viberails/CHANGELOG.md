@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Launch** view behind a play icon in the Activity Bar: the dashboard's nav Play launcher as a side-bar list. Automations queue from a row click, signed scripts open their run window in the dashboard, and the view title offers Refresh, Customize list… and Manage automations. The view shows an Open Dashboard button while the dashboard is closed.
+- `__viberails_launcherChanged__` webview bridge and the `runScript` / `openLauncherCustomize` / `manageAutomations` / `automationQueued` host-to-dashboard messages behind that view.
 - `Ctrl+Alt+V` (`Cmd+Alt+V` on macOS) keybinding for **VibeRails: Open Dashboard**.
 - `viberails.startupTimeoutMs` setting so a slow cold start can be given more than the previous hard-coded 30 seconds.
 - Readiness probe against the backend's `/health` endpoint after bootstrap, so a backend that binds its port before it can serve requests surfaces as an error instead of a blank dashboard.
