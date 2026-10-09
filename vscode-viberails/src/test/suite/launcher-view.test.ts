@@ -221,9 +221,15 @@ suite('Launcher view run dispatch', () => {
             notifyError: (message) => { errors.push(message); },
             refresh: () => { log.push('refresh'); },
             running: new Set<string>(),
+            // A zero cooldown still releases the row on the next macrotask: `await tick()` first.
+            clickCooldownMs: 0,
             ...overrides
         };
         return { deps, log, posts, errors, queued };
+    }
+
+    function elapsed(ms: number): Promise<void> {
+        return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
     test('an automation row is queued from the host and the dashboard is told', async () => {
@@ -233,6 +239,7 @@ suite('Launcher view run dispatch', () => {
         assert.deepEqual(f.queued, ['Nightly review: Automation queued.']);
         assert.deepEqual(f.posts, [{ command: 'automationQueued', jobId: 7, message: 'Automation queued.' }]);
         assert.deepEqual(f.errors, []);
+        await tick();
         assert.equal(f.deps.running.size, 0);
     });
 
@@ -264,6 +271,7 @@ suite('Launcher view run dispatch', () => {
         const noFolder = dependencies({ openDashboard: async () => { throw new Error('No workspace folder is open.'); } });
         await runLauncherItem(script('s.py', 'approved', 0), noFolder.deps);
         assert.deepEqual(noFolder.errors, ['s.py: No workspace folder is open.']);
+        await tick();
         assert.equal(noFolder.deps.running.size, 0);
     });
 
@@ -279,10 +287,38 @@ suite('Launcher view run dispatch', () => {
         release({ message: 'Automation queued.' });
         await first;
         assert.deepEqual(f.queued, ['Nightly review: Automation queued.']);
+        await tick();
         assert.equal(f.deps.running.size, 0);
 
         await runLauncherItem(undefined, f.deps);
         await runLauncherItem({ ...item, key: '' }, f.deps);
         assert.equal(f.queued.length, 1);
+    });
+
+    test('the double-click delivery of a quick run is ignored until the cooldown passes', async () => {
+        const f = dependencies({ clickCooldownMs: 40 });
+        const item = automation(7, 'Nightly review', 0);
+
+        await runLauncherItem(item, f.deps); // the click; the request settles at once
+        await runLauncherItem(item, f.deps); // the double-click's second delivery, a little later
+        assert.deepEqual(f.log, ['POST /api/v1/jobs/7/run']);
+        assert.deepEqual(f.queued, ['Nightly review: Automation queued.']);
+        assert.equal(f.deps.running.has('job:7'), true);
+
+        await elapsed(80);
+        assert.equal(f.deps.running.has('job:7'), false);
+        await runLauncherItem(item, f.deps); // a deliberate later click runs again
+        assert.deepEqual(f.log, ['POST /api/v1/jobs/7/run', 'POST /api/v1/jobs/7/run']);
+
+        // A failed first delivery is guarded the same way: one error dialog, not two.
+        const rejected = dependencies({
+            clickCooldownMs: 40,
+            request: async () => { throw new BackendRequestError(400, 'The codex CLI is not on PATH.'); }
+        });
+        await runLauncherItem(item, rejected.deps);
+        await runLauncherItem(item, rejected.deps);
+        assert.deepEqual(rejected.errors, ['Nightly review: The codex CLI is not on PATH.']);
+        await elapsed(80);
+        assert.equal(rejected.deps.running.size, 0);
     });
 });

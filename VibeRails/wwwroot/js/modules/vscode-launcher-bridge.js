@@ -6,6 +6,11 @@
  * the "Customize list…" modal, the Automation page — and dashboard feedback (the queued toast
  * plus a run-list refresh) is delegated here, so both entry points share one code path.
  *
+ * The other direction, dashboard → host, is `__viberails_launcherChanged__` (installed by the
+ * extension on `window`): the launcher's save/reset and the Automation catalog reload call it
+ * themselves, and this module relays the scripts controller's state updates to it, so a script
+ * that was signed, revoked, renamed, edited, imported or deleted re-sorts the view.
+ *
  * Install this BEFORE setupVSCodeScriptImport: that call posts the ready signal which releases
  * messages the extension queued while the page was still loading.
  */
@@ -35,6 +40,33 @@ export function setupVSCodeLauncherBridge(app, host = window) {
                 return;
         }
     });
+
+    followScriptChanges(app, host);
+}
+
+/**
+ * Only the scripts controller learns that a script was signed, revoked, renamed, edited,
+ * imported or deleted (it refetches its own state), so relay the launcher-relevant part of
+ * every state update. A focus refresh that brings back the same list stays quiet.
+ */
+function followScriptChanges(app, host) {
+    const scripts = app.jobController?.pythonScripts;
+    if (typeof scripts?.onStateChange !== 'function') return;
+    let last = launcherScriptSignature(scripts.state);
+    scripts.onStateChange((state) => {
+        const next = launcherScriptSignature(state);
+        if (next === last) return;
+        last = next;
+        host.__viberails_launcherChanged__?.();
+    });
+}
+
+/** The fields that decide a script's launcher row: id, label, file name (runtime icon) and approval. */
+function launcherScriptSignature(state) {
+    if (!Array.isArray(state?.scripts)) return null;
+    return state.scripts
+        .map((script) => [script.name, script.displayName, script.fileName, script.status].map((value) => value || '').join('\u001f'))
+        .join('\n');
 }
 
 /** Runs one action; a failure surfaces as the dashboard's usual error toast (silent when `fallback` is null). */

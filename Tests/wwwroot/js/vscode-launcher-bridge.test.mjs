@@ -64,6 +64,47 @@ test('malformed and unrelated messages are ignored; failures become the usual er
     assert.deepEqual(f.calls.map(([name]) => name), ['run', 'customize', 'refreshRuns']);
 });
 
+test('script list changes that touch the launcher reach the extension; identical refreshes stay quiet', () => {
+    let listener = null;
+    let notified = 0;
+    const host = {
+        __viberails_VSCODE__: true,
+        addEventListener: () => {},
+        __viberails_launcherChanged__: () => { notified += 1; }
+    };
+    const scripts = { state: null, onStateChange: (fn) => { listener = fn; return () => {}; } };
+    setupVSCodeLauncherBridge({ jobController: { pythonScripts: scripts } }, host);
+    assert.equal(typeof listener, 'function');
+
+    const unsigned = { name: 'abc123', displayName: 'Backup', fileName: 'backup.py', status: 'unapproved' };
+    listener({ scripts: [unsigned] });
+    assert.equal(notified, 1, 'first load');
+    listener({ scripts: [{ ...unsigned, approvedUtc: null, lastRun: { exitCode: 0 } }] });
+    assert.equal(notified, 1, 'a focus refresh with the same list');
+    listener({ scripts: [{ ...unsigned, status: 'approved' }] });
+    assert.equal(notified, 2, 'signed');
+    listener({ scripts: [{ ...unsigned, status: 'approved', displayName: 'Nightly backup' }] });
+    assert.equal(notified, 3, 'renamed');
+    listener({ scripts: [{ ...unsigned, status: 'modified', displayName: 'Nightly backup' }] });
+    assert.equal(notified, 4, 'edited after signing');
+    listener({ scripts: [] });
+    assert.equal(notified, 5, 'deleted');
+    listener(null);
+    assert.equal(notified, 6, 'list unknown again');
+
+    // The baseline is whatever the controller already holds when the bridge is installed.
+    let late = 0;
+    let lateListener = null;
+    setupVSCodeLauncherBridge(
+        { jobController: { pythonScripts: { state: { scripts: [unsigned] }, onStateChange: (fn) => { lateListener = fn; } } } },
+        { __viberails_VSCODE__: true, addEventListener: () => {}, __viberails_launcherChanged__: () => { late += 1; } }
+    );
+    lateListener({ scripts: [{ ...unsigned }] });
+    assert.equal(late, 0);
+    lateListener({ scripts: [{ ...unsigned, fileName: 'backup.ps1' }] });
+    assert.equal(late, 1);
+});
+
 test('plain browsers get no bridge and a dashboard without the controllers tolerates every command', async () => {
     let installed = false;
     setupVSCodeLauncherBridge({}, {});

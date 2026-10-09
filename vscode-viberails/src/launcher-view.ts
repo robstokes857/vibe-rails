@@ -219,13 +219,27 @@ export interface RunLauncherDependencies {
     notifyError(message: string): void;
     /** Asked for after a 404: the row no longer exists on the server. */
     refresh(): void;
-    /** Keys with a run in flight; a second click on the same row is ignored meanwhile. */
+    /**
+     * Keys guarded against a repeated delivery: a run in flight, or one that settled less than
+     * the click cooldown ago. A second click on the same row is ignored meanwhile.
+     */
     running: Set<string>;
+    /** Overrides `LAUNCHER_CLICK_COOLDOWN_MS`; tests use 0. */
+    clickCooldownMs?: number;
 }
 
 /**
- * Runs one row the way a flyout click would. The in-flight set also defuses the double
- * delivery a tree row's command gets from a double-click.
+ * How long a row stays guarded after its run settles. VS Code delivers a tree row's command
+ * once for the first click and again for the double-click, up to the OS double-click time
+ * later (900 ms at the Windows maximum). A quick run that settled between the two deliveries
+ * would otherwise let the second one queue the Automation again, which the backend rejects as
+ * an overlapping run.
+ */
+export const LAUNCHER_CLICK_COOLDOWN_MS = 1000;
+
+/**
+ * Runs one row the way a flyout click would. The guard set defuses the double delivery a
+ * tree row's command gets from a double-click, whether or not the first run is still in flight.
  */
 export async function runLauncherItem(item: LauncherItem | undefined, dependencies: RunLauncherDependencies): Promise<void> {
     if (!item || typeof item.key !== 'string' || !item.key || dependencies.running.has(item.key)) {
@@ -242,7 +256,8 @@ export async function runLauncherItem(item: LauncherItem | undefined, dependenci
     } catch (error) {
         dependencies.notifyError(`${item.label}: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
-        dependencies.running.delete(item.key);
+        // Not released at once: the double-click's second delivery may still be on its way.
+        setTimeout(() => dependencies.running.delete(item.key), dependencies.clickCooldownMs ?? LAUNCHER_CLICK_COOLDOWN_MS);
     }
 }
 

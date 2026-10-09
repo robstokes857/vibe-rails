@@ -77,7 +77,14 @@ The Launch view reuses that readiness signal: `WebviewPanelManager.postWhenReady
 page has posted `scriptImportReady`, which is why `app.js` installs `setupVSCodeLauncherBridge`
 (`wwwroot/js/modules/vscode-launcher-bridge.js`) before `setupVSCodeScriptImport`. The dashboard
 answers with `__viberails_launcherChanged__` (posts `{ command: 'launcherChanged' }`) after it saved
-or reset the launcher list or reloaded its Automation catalog, and the view re-reads the catalog.
+or reset the launcher list, reloaded its Automation catalog, or saw a script's id, display name,
+file name or approval change (the bridge follows `PythonScriptsController.onStateChange`), and the
+view re-reads the catalog.
+
+A tree row's command is delivered once for a click and again for a double-click, up to the OS
+double-click time later. `runLauncherItem` keeps the row in its guard set for
+`LAUNCHER_CLICK_COOLDOWN_MS` (1 s) after the run settles, not only while it is in flight, so a
+quick run cannot be queued twice; the backend rejects the overlapping run otherwise.
 
 `external-sign-in.ts` accepts only `https://viberails.ai/link`, optionally followed by the strict
 public user-code fragment `#code=ABCD-EFGH`, before calling
