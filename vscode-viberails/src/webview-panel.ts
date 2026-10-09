@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
-import { WEBVIEW_VIEW_TYPE } from './constants';
+import { DASHBOARD_MESSAGE_TIMEOUT_MS, WEBVIEW_VIEW_TYPE } from './constants';
 import { openExternalSignIn } from './external-sign-in';
 
 export class WebviewPanelManager {
@@ -16,9 +16,18 @@ export class WebviewPanelManager {
         reject: (error: Error) => void;
         timer: ReturnType<typeof setTimeout>;
     } | null = null;
+    /** Host → dashboard messages waiting for the page to install its bridge handlers. */
+    private pendingMessages: Array<{
+        message: object;
+        resolve: (delivered: boolean) => void;
+        timer: ReturnType<typeof setTimeout>;
+    }> = [];
 
     private _onCloseRequested: vscode.EventEmitter<void> = new vscode.EventEmitter<void>();
     public readonly onCloseRequested: vscode.Event<void> = this._onCloseRequested.event;
+    private _onLauncherChanged: vscode.EventEmitter<void> = new vscode.EventEmitter<void>();
+    /** The dashboard saved or reset the launcher's order and visibility, or its catalog changed. */
+    public readonly onLauncherChanged: vscode.Event<void> = this._onLauncherChanged.event;
 
     constructor(wwwrootPath: string) {
         this.wwwrootPath = wwwrootPath;
@@ -65,6 +74,47 @@ export class WebviewPanelManager {
         else pending.resolve();
     }
 
+    /**
+     * Delivers a message to the dashboard, holding it until the page has installed its
+     * bridge handlers (the same readiness signal script import waits for). Resolves true
+     * once the webview accepted it, false when the panel is gone or the page never got ready.
+     */
+    public postWhenReady(message: object, timeoutMs = DASHBOARD_MESSAGE_TIMEOUT_MS): Promise<boolean> {
+        if (!this.panel) return Promise.resolve(false);
+        if (this.dashboardReady) return this.deliver(message);
+        return new Promise((resolve) => {
+            const entry = {
+                message,
+                resolve,
+                timer: setTimeout(() => {
+                    this.pendingMessages = this.pendingMessages.filter(candidate => candidate !== entry);
+                    resolve(false);
+                }, timeoutMs)
+            };
+            this.pendingMessages.push(entry);
+        });
+    }
+
+    private deliver(message: object): Promise<boolean> {
+        const panel = this.panel;
+        if (!panel) return Promise.resolve(false);
+        return Promise.resolve(panel.webview.postMessage(message)).then(delivered => delivered, () => false);
+    }
+
+    private flushPendingMessages(): void {
+        for (const entry of this.pendingMessages.splice(0)) {
+            clearTimeout(entry.timer);
+            void this.deliver(entry.message).then(entry.resolve);
+        }
+    }
+
+    private dropPendingMessages(): void {
+        for (const entry of this.pendingMessages.splice(0)) {
+            clearTimeout(entry.timer);
+            entry.resolve(false);
+        }
+    }
+
     public reveal(): void {
         this.panel?.reveal(vscode.ViewColumn.One);
     }
@@ -95,9 +145,12 @@ export class WebviewPanelManager {
                 if (!this.dashboardReady) {
                     this.dashboardReady = true;
                     this.sendPendingImport();
+                    this.flushPendingMessages();
                 }
             } else if (message.command === 'scriptImportReceived' && message.requestId === this.pendingImport?.id) {
                 this.finishImport(typeof message.error === 'string' ? message.error : undefined);
+            } else if (message.command === 'launcherChanged') {
+                this._onLauncherChanged.fire();
             } else if (message.command === 'close') {
                 this._onCloseRequested.fire();
             } else if (message.command === 'openFile' && typeof message.path === 'string') {
@@ -124,6 +177,7 @@ export class WebviewPanelManager {
         this.panel.onDidDispose(() => {
             this.dashboardReady = false;
             this.finishImport('The VibeRails dashboard was closed.');
+            this.dropPendingMessages();
             this.panel = null;
             this._onCloseRequested.fire();
         });
@@ -262,10 +316,12 @@ export class WebviewPanelManager {
         // sidebar, both visible by default) and wires them in app.js `setupVSCodeIntegration()`.
         // The contract between the two is the injected globals below — `__viberails_VSCODE__`,
         // `__viberails_close__`, `__viberails_setTitle__`, `__viberails_openFile__`,
-        // `__viberails_openExternal__` — not any
+        // `__viberails_openExternal__`, `__viberails_launcherChanged__` — not any
         // DOM structure. Do not reintroduce markup-scraping button injection here.
         // The dashboard feature-detects `__viberails_openFile__`, so an older extension host
         // simply falls back to its in-app editor instead of posting a message nobody handles.
+        // `__viberails_launcherChanged__` tells the Activity Bar launcher view to reload after
+        // the dashboard saved or reset the launcher list (or its Automation catalog changed).
         const headInjection = `
     <meta http-equiv="Content-Security-Policy" content="${csp}">
     <base href="${assetsBaseUri}/">
@@ -284,6 +340,7 @@ export class WebviewPanelManager {
         window.__viberails_scriptImportReceived__ = function(requestId, error) {
             vscode.postMessage({ command: 'scriptImportReceived', requestId: requestId, error: error });
         };
+        window.__viberails_launcherChanged__ = function() { vscode.postMessage({ command: 'launcherChanged' }); };
         ${fetchPatch}
     </script>`;
 

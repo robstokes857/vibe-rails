@@ -7,6 +7,7 @@ This VS Code extension provides seamless integration with VibeRails, a dashboard
 - **Embedded Dashboard**: Opens the VibeRails dashboard directly inside VS Code as a webview panel
 - **Backend Management**: Automatically starts and stops the VibeRails .NET backend server
 - **Status Bar Integration**: A `$(terminal) VibeRails` button in the bottom left opens the dashboard; a `$(close)` Stop item appears beside it while the backend is running
+- **Activity Bar launcher**: A play icon in the Activity Bar opens the **Launch** view, the side-bar twin of the dashboard's nav Play button. It lists the project's automations and signed scripts in the nav launcher's saved order; clicking a row runs it, and the view title offers Refresh, Customize list… and Manage automations. While the dashboard is closed the view shows an Open Dashboard button instead (the backend only runs with the panel open)
 - **Local Context**: Runs in the context of your current workspace folder for project-specific configurations
 
 ## Usage
@@ -26,6 +27,16 @@ This VS Code extension provides seamless integration with VibeRails, a dashboard
   workspace folder (or its containing folder outside a workspace). An already open dashboard
   stays in its current project; external files offer Global scope and explain how to use Repo.
   Existing visible registrations open by ID. Adding never signs or runs a script.
+- `VibeRails: Run now` (`viberails.launcher.run`) — tree-row click and inline play icon in the
+  Launch view; hidden from the palette because it needs the row as its argument. Automations are
+  queued straight from the extension host (`POST /api/v1/jobs/{id}/run`, the same call as the
+  dashboard's "Run now"; a status-bar message confirms "Automation queued." and the dashboard, when
+  open, shows its usual toast). Scripts are handed to the dashboard (`runScript` bridge message)
+  because their run window collects arguments, stdin and a PIN; the panel is revealed for that.
+- `VibeRails: Refresh Launcher` (`viberails.launcher.refresh`), `VibeRails: Customize Launcher List…`
+  (`viberails.launcher.customize`) and `VibeRails: Manage Automations` (`viberails.launcher.manage`) —
+  Launch view title actions. Customize and Manage open the dashboard when needed and hand it the
+  flyout footer's actions (`openLauncherCustomize`, `manageAutomations`).
 
 ## Settings
 
@@ -33,12 +44,16 @@ This VS Code extension provides seamless integration with VibeRails, a dashboard
 
 ## Architecture
 
-The extension consists of three main components plus a shared constants module:
+The extension consists of these components plus a shared constants module:
 
-1. **Extension** (`extension.ts`) - Main activation logic, command registration, bootstrap/health handshake
+1. **Extension** (`extension.ts`) - Main activation logic, command registration, bootstrap/health handshake, the Launch view's wiring (`registerLauncherView`)
 2. **Backend Manager** (`backend-manager.ts`) - Manages the .NET backend server lifecycle
-3. **Webview Panel Manager** (`webview-panel.ts`) - Handles the VS Code webview panel and content
-4. **Constants** (`constants.ts`) - Command ids, token header names, backend paths, timeouts. Must not import `vscode`.
+3. **Webview Panel Manager** (`webview-panel.ts`) - Handles the VS Code webview panel and content; `postWhenReady` holds host → dashboard messages until the page's bridge is installed
+4. **Launcher view** (`launcher-view.ts`) - `LauncherTreeDataProvider` plus the pure catalog rules (`normalizeLauncherItems`, `isLauncherItemRunnable`, `launcherEmptyMessage`: ports of `wwwroot/js/modules/automation-launcher.js`, keep them in step) and `runLauncherItem`, all driven through injected dependencies so they are unit-tested without a backend
+5. **Backend API** (`backend-api.ts`) - `requestJson` for authenticated host → backend calls (session + tab headers, `ErrorResponse { error }` surfaced as `BackendRequestError`). Must not import `vscode`. The shutdown ladder keeps its own never-throwing `postShutdown`
+6. **Constants** (`constants.ts`) - Command ids, token header names, backend paths, timeouts. Must not import `vscode`.
+
+The Launch view only ever lists items while the dashboard panel exists: the backend starts in `createDashboard` and stops when the panel closes, and the `viberails.dashboardOpen` context key (set in `createDashboard` / `closeDashboard`) switches the view between its welcome content and the tree. The tree re-reads the catalog when the dashboard opens, when the view becomes visible, on Refresh, after a 404 on run, and whenever the dashboard posts `launcherChanged`.
 
 ### Webview bridge
 
@@ -55,6 +70,21 @@ sends `{ command: 'importScript', requestId, path }` only after the dashboard in
 handler. Receipt is acknowledged before user input, so the startup timeout never times out
 an open form. Concurrent requests preserve the first dialog; closing rejects pending delivery.
 The dashboard calls the existing root-only authenticated import API through its shared controller.
+
+The Launch view reuses that readiness signal: `WebviewPanelManager.postWhenReady` queues
+`{ command: 'runScript', name }`, `{ command: 'openLauncherCustomize' }`,
+`{ command: 'manageAutomations' }` and `{ command: 'automationQueued', jobId, message }` until the
+page has posted `scriptImportReady`, which is why `app.js` installs `setupVSCodeLauncherBridge`
+(`wwwroot/js/modules/vscode-launcher-bridge.js`) before `setupVSCodeScriptImport`. The dashboard
+answers with `__viberails_launcherChanged__` (posts `{ command: 'launcherChanged' }`) after it saved
+or reset the launcher list, reloaded its Automation catalog, or saw a script's id, display name,
+file name or approval change (the bridge follows `PythonScriptsController.onStateChange`), and the
+view re-reads the catalog.
+
+A tree row's command is delivered once for a click and again for a double-click, up to the OS
+double-click time later. `runLauncherItem` keeps the row in its guard set for
+`LAUNCHER_CLICK_COOLDOWN_MS` (1 s) after the run settles, not only while it is in flight, so a
+quick run cannot be queued twice; the backend rejects the overlapping run otherwise.
 
 `external-sign-in.ts` accepts only `https://viberails.ai/link`, optionally followed by the strict
 public user-code fragment `#code=ABCD-EFGH`, before calling

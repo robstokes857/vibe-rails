@@ -23,6 +23,12 @@ interface UserInputRecord {
     sequence: number;
 }
 
+interface LauncherViewSnapshot {
+    dashboardOpen: boolean;
+    items: Array<{ key: string; kind: string; label: string }>;
+    message: string | null;
+}
+
 type JsonValue = null | boolean | number | string | JsonObject | JsonValue[];
 type JsonObject = { [key: string]: JsonValue };
 
@@ -452,5 +458,36 @@ suite('VibeRails VS Code Smoke', function () {
                 `Codex terminal exited before the smoke test could confirm it stayed alive (attempt ${attempt + 1}).`
             );
         }
+    });
+
+    test('the Activity Bar launcher view lists the nav flyout catalog and empties when the dashboard closes', async () => {
+        await vscode.commands.executeCommand('viberails.open');
+        connectionInfo = await getConnectionInfo();
+
+        await vscode.commands.executeCommand('viberails.launcher.refresh');
+        const shown = await vscode.commands.executeCommand<LauncherViewSnapshot>('viberails._test.getLauncherItems');
+        assert.ok(shown, 'The launcher test command returned nothing.');
+        assert.equal(shown.dashboardOpen, true);
+
+        // Read-only on purpose: the suite runs against the user's real state.db, so the
+        // catalog is compared with what the view shows, never run, customized or reset.
+        const catalog = await requestJson<JsonObject>(connectionInfo, 'GET', '/api/v1/automation-nav/preferences');
+        const expected = ((catalog.items ?? []) as JsonObject[])
+            .filter((item) => item.enabled === true && (item.kind !== 'script' || item.status === 'approved'))
+            .sort((a, b) => Number(a.order) - Number(b.order))
+            .map((item) => `${String(item.kind)}|${String(item.key)}|${String(item.label)}`);
+        assert.deepEqual(shown.items.map((item) => `${item.kind}|${item.key}|${item.label}`), expected);
+        if (expected.length === 0) {
+            assert.ok(shown.message, 'An empty launcher view must explain itself.');
+        } else {
+            assert.equal(shown.message, null);
+        }
+
+        await vscode.commands.executeCommand('viberails.stop');
+        connectionInfo = null;
+        const closed = await vscode.commands.executeCommand<LauncherViewSnapshot>('viberails._test.getLauncherItems');
+        assert.equal(closed?.dashboardOpen, false);
+        assert.deepEqual(closed?.items, []);
+        assert.equal(closed?.message, null);
     });
 });

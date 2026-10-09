@@ -335,6 +335,18 @@ export class AutomationNavLauncher {
 
     // --- Customization modal (order + show/hide, mirroring the LLM picker modal) ---
 
+    /**
+     * "Customize list…" requested by the VS Code Activity Bar launcher view. The flyout
+     * stands down (the modal must not share Escape with it) and the catalog is re-read first:
+     * the modal only fetches on its own when nothing was loaded yet, and the host may have
+     * changed automations since the flyout last opened.
+     */
+    async openCustomizationFromHost() {
+        this.closeFlyout();
+        await this._loadPreferences();
+        return this.openCustomizationModal();
+    }
+
     async openCustomizationModal({ triggerElement = null } = {}) {
         this._closeCustomizationModal({ restoreFocus: false });
         const host = document.getElementById('modal-container');
@@ -679,6 +691,8 @@ export class AutomationNavLauncher {
 
     _acceptCatalog(response) {
         if (Array.isArray(response?.items)) this.items = normalizeLauncherItems(response.items);
+        // Only reached after a saved or reset list: the VS Code launcher view mirrors it.
+        globalThis.__viberails_launcherChanged__?.();
     }
 
     _showModalError(message) {
