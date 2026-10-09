@@ -274,7 +274,7 @@ public static partial class BoardRoutes
             .WithName("UnlinkBoardCard");
 
         app.MapPost("/api/v1/board/cards/{card}/comments", (IBoardService board, string card, AddBoardCommentRequest request, CancellationToken cancellationToken) =>
-            RunAsync(async () => OkOrNotFound(await board.AddCommentAsync(Project(), card, BoardAuthor.User(), request.Body ?? string.Empty, cancellationToken), "Card")))
+            RunAsync(async () => OkOrNotFound(await board.AddCommentAsync(Project(), card, BoardAuthor.User(), request.Body ?? string.Empty, cancellationToken, request.SyncToJira), "Card")))
             .WithName("AddBoardComment");
 
         // Agent notes: the scratchpad agents append over MCP. The dashboard reads it and may add
@@ -288,7 +288,7 @@ public static partial class BoardRoutes
             .WithName("GetBoardCardNotes");
 
         app.MapPost("/api/v1/board/cards/{card}/notes", (IBoardService board, string card, AddBoardNoteRequest request, CancellationToken cancellationToken) =>
-            RunAsync(async () => OkOrNotFound(await board.AddNoteAsync(Project(), card, BoardAuthor.User(), request.Body ?? string.Empty, cancellationToken), "Card")))
+            RunAsync(async () => OkOrNotFound(await board.AddNoteAsync(Project(), card, BoardAuthor.User(), request.Body ?? string.Empty, cancellationToken, request.SyncToJira), "Card")))
             .WithName("AddBoardCardNote");
 
         app.MapPost("/api/v1/board/cards/{card}/attachments", (IBoardService board, string card, AddBoardAttachmentRequest request, CancellationToken cancellationToken) =>

@@ -316,16 +316,6 @@
                                 <i class="fa-solid fa-rotate-right" data-button-icon aria-hidden="true"></i>
                                 <span data-button-label>Check again</span>
                             </button>
-                            <button class="btn btn-sm btn-outline-secondary" type="button"
-                                data-action="manage-rules">
-                                <i class="fa-solid fa-sliders" aria-hidden="true"></i>
-                                View/Edit Rules
-                            </button>
-                            <button class="btn btn-sm btn-outline-secondary" type="button"
-                                data-action="add-rule-file">
-                                <i class="fa-solid fa-plus" aria-hidden="true"></i>
-                                New rule file
-                            </button>
                             <div class="project-health-fix-controls" role="group" aria-label="Fix rules with an agent">
                                 <button class="btn btn-sm btn-outline-secondary" type="button"
                                     data-action="launch-health-fix" data-fix-scope="rules" disabled>
@@ -420,6 +410,36 @@
                             <button type="button" data-action="copy-hook-output">Copy transcript</button>
                             <button type="button" data-action="clear-hook-output">Clear results</button>
                         </div>
+                    </div>
+                </section>
+                <section class="card project-health-card project-health-rule-manager" data-rule-manager
+                    aria-labelledby="rule-manager-title">
+                    <header class="project-health-card-header project-health-rule-manager-header">
+                        <div>
+                            <h2 id="rule-manager-title">Rule files</h2>
+                            <p>Choose a rule file to manage the rules for its folder and subfolders.</p>
+                        </div>
+                        <div class="project-health-card-actions">
+                            <button class="btn btn-sm btn-outline-secondary" type="button"
+                                data-rule-manager-refresh title="Reload rule files">
+                                <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+                                Refresh
+                            </button>
+                            <button class="btn btn-sm btn-primary" type="button" data-rule-manager-create>
+                                <i class="fa-solid fa-plus" aria-hidden="true"></i>
+                                New rule file
+                            </button>
+                        </div>
+                    </header>
+                    <div class="rules-files-split project-health-rule-manager-grid">
+                        <div class="rules-files-rail">
+                            <label class="form-label small" for="rule-file-search">Find a rule file</label>
+                            <input class="form-control form-control-sm mb-3" type="search" id="rule-file-search"
+                                data-rule-file-search placeholder="Filter by path or name" autocomplete="off">
+                            <div data-agent-file-tree></div>
+                            <p class="text-muted small mt-3" data-rule-file-search-empty hidden>No rule files match this search.</p>
+                        </div>
+                        <div class="rules-files-detail" data-agent-rule-editor></div>
                     </div>
                 </section>
             </main>
@@ -545,7 +565,7 @@
         <div class="view rules-editor-page" data-view="agent-edit">
             <header class="rules-editor-header">
                 <button class="btn btn-sm btn-outline-secondary" type="button" data-action="go-back">
-                    <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back to Manage rules
+                    <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back to Rules
                 </button>
                 <div class="rules-editor-heading">
                     <span class="project-health-eyebrow">Rule file</span>
@@ -623,7 +643,7 @@
                             <path fill-rule="evenodd"
                                 d="M15 8a.5.5 0 0 0-.5-.5H2.707l3.147-3.146a.5.5 0 1 0-.708-.708l-4 4a.5.5 0 0 0 0 .708l4 4a.5.5 0 0 0 .708-.708L2.707 8.5H14.5A.5.5 0 0 0 15 8" />
                         </svg>
-                        Back to Manage rules
+                        Back to Rules
                     </button>
                 </div>
             </div>
@@ -2985,6 +3005,7 @@
 
                 .board-view .board-picker {
                     display: inline-flex;
+                    flex-wrap: wrap;
                     align-items: center;
                     gap: 0.4rem;
                     min-width: 0;
@@ -4827,7 +4848,7 @@
 
                     .board-view .board-picker-select {
                         flex: 1 1 80px;
-                        min-width: 0;
+                        min-width: 130px;
                         width: 80px;
                     }
 

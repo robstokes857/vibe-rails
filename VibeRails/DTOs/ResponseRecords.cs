@@ -143,7 +143,7 @@ namespace VibeRails.DTOs
     // A project has one or more boards (sprints, sub-projects); every lane belongs to one. Card
     // keys stay per project. Lane and card list calls take an optional board id and default to
     // the project's first board, so a single-board client keeps working unchanged.
-    public record BoardSummaryResponse(string Id, string Name, int Position, DateTime CreatedAt, int CardCount, List<BoardColumnResponse> Columns, string? DisplayPrefix = null);
+    public record BoardSummaryResponse(string Id, string Name, int Position, DateTime CreatedAt, int CardCount, List<BoardColumnResponse> Columns, string? DisplayPrefix = null, bool IsJiraBoard = false);
     public record BoardListResponse(List<BoardSummaryResponse> Boards);
     public record CreateBoardRequest(string? Name = null, string? DisplayPrefix = null);
 
@@ -250,7 +250,7 @@ namespace VibeRails.DTOs
     public record ReorderBoardColumnsRequest(List<string>? OrderedIds = null, string? BoardId = null);
     public record DeleteBoardColumnResponse(bool Ok, string MovedToColumnId, int MovedCards);
 
-    public record BoardCommentDto(string Id, BoardAuthorDto Author, string Body, DateTime CreatedAt, bool IsAttention = false, string? Purpose = null);
+    public record BoardCommentDto(string Id, BoardAuthorDto Author, string Body, DateTime CreatedAt, bool IsAttention = false, string? Purpose = null, bool SyncToJira = true);
     public sealed record AutomationScriptCatalogEntry(string Path, JobScriptRuntime Runtime, bool Approved, string? UnavailableReason);
     public sealed record AutomationScriptCatalogResponse(List<AutomationScriptCatalogEntry> Scripts, bool HasMore);
     public sealed record AgentSessionEndResponse(DateTimeOffset ClosesAtUtc);
@@ -350,10 +350,13 @@ namespace VibeRails.DTOs
         bool AgentMade = false, bool HasWaitingAutomation = false,
         string? AgentMadeBy = null, string? AgentMadeSessionId = null, string? JiraIssueKey = null)
     {
+        public string? JiraIssueUrl { get; init; }
+        public IReadOnlyList<BoardJiraDeliveryDto> JiraDeliveries { get; init; } = [];
         public List<BoardLinkedCardDto> LinkedCards { get; init; } = [];
         public BoardHandoff? PreviousWork { get; init; }
         public IReadOnlyList<BoardFileReference> FileCandidates { get; init; } = [];
     }
+    public record BoardJiraDeliveryDto(string SourceId, string Kind, string Status, string? Message);
     public record CreateBoardCardRequest(
         string? Title = null,
         string? ColumnId = null,
@@ -390,8 +393,8 @@ namespace VibeRails.DTOs
     // Automations. Per request, never sticky; the skip is recorded as a comment by the user.
     public record MoveBoardCardRequest(string? ColumnId = null, int? Position = null, bool SkipAutomations = false);
     public record MergeBoardCardsRequest(string? TargetCard = null);
-    public record AddBoardCommentRequest(string? Body = null);
-    public record AddBoardNoteRequest(string? Body = null);
+    public record AddBoardCommentRequest(string? Body = null, bool SyncToJira = true);
+    public record AddBoardNoteRequest(string? Body = null, bool SyncToJira = true);
     public record BoardNoteListResponse(List<BoardCommentDto> Notes);
     public record AddBoardAttachmentRequest(string? Name = null, string? DataUrl = null, long? Bytes = null, string? MimeType = null);
     public record LinkBoardCommitRequest(string? Sha = null);

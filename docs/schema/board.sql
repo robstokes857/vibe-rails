@@ -53,6 +53,12 @@ CREATE INDEX IX_BoardHandoffs_Card ON BoardHandoffs(CardId, CreatedUTC DESC, Id 
 -- index IX_BoardHistory_BoardTime
 CREATE INDEX IX_BoardHistory_BoardTime ON BoardHistory(BoardId, CreatedUTC);
 
+-- index IX_BoardJiraDeliveries_Card
+CREATE INDEX IX_BoardJiraDeliveries_Card ON BoardJiraDeliveries(CardId, CreatedUTC);
+
+-- index IX_BoardJiraDeliveries_Pending
+CREATE INDEX IX_BoardJiraDeliveries_Pending ON BoardJiraDeliveries(Status, CreatedUTC);
+
 -- index IX_BoardJiraLinks_Card
 CREATE INDEX IX_BoardJiraLinks_Card ON BoardJiraLinks(CardId);
 
@@ -161,6 +167,9 @@ CREATE TABLE BoardHistory ( Id TEXT PRIMARY KEY, BoardId TEXT NOT NULL, ProjectP
 -- table BoardJiraConnections
 CREATE TABLE BoardJiraConnections ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, BoardId TEXT NOT NULL, SiteUrl TEXT NOT NULL, Email TEXT NOT NULL DEFAULT '', HasToken INTEGER NOT NULL DEFAULT 0, AuthStatus TEXT NOT NULL DEFAULT 'none', StoryPointsFieldId TEXT NULL, Jql TEXT NOT NULL DEFAULT '', Enabled INTEGER NOT NULL DEFAULT 0, DisabledReason TEXT NULL, OverflowColumnId TEXT NULL, LastTestedUTC TEXT NULL, LastPullUTC TEXT NULL, LastReport TEXT NULL, BoardLink TEXT, JiraBoardId TEXT, JiraBoardName TEXT, ColumnMap TEXT, NarrowJql TEXT, SkipOldDone INTEGER, DedicatedBoard INTEGER, UNIQUE(ProjectPath, BoardId) );
 
+-- table BoardJiraDeliveries
+CREATE TABLE BoardJiraDeliveries ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, ConnectionId TEXT NOT NULL, IssueId TEXT NOT NULL, Kind TEXT NOT NULL, SourceId TEXT NOT NULL, Body TEXT NOT NULL, Status TEXT NOT NULL DEFAULT 'pending', Message TEXT, Url TEXT, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, UNIQUE(ConnectionId, IssueId, Kind, SourceId) );
+
 -- table BoardJiraLinks
 CREATE TABLE BoardJiraLinks ( CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, SiteId TEXT NOT NULL, IssueId TEXT NOT NULL, IssueKey TEXT NOT NULL, AssigneeDisplay TEXT NULL, IssueUpdated TEXT NOT NULL, LastPulledUTC TEXT NOT NULL, Mapping TEXT, UNIQUE(SiteId, IssueId) );
 
@@ -256,6 +265,9 @@ CREATE TRIGGER BoardColumns_HistoryCreated AFTER INSERT ON BoardColumns BEGIN IN
 
 -- trigger BoardColumns_HistoryDeleted
 CREATE TRIGGER BoardColumns_HistoryDeleted AFTER DELETE ON BoardColumns BEGIN INSERT INTO BoardHistory VALUES ('bh_' || lower(hex(randomblob(16))), COALESCE(OLD.BoardId, ''), OLD.ProjectPath, 'deleted', 'Deleted lane: ' || OLD.Name, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')); END;
+
+-- trigger BoardComments_QueueJira
+CREATE TRIGGER BoardComments_QueueJira AFTER INSERT ON BoardComments WHEN NEW.Kind IN ('comment', 'note') AND NEW.RemoteSeq IS NULL AND NEW.SyncBoardId IS NULL AND NOT (NEW.AuthorKind = 'agent' AND NEW.AuthorLabel = 'Jira' AND NEW.AuthorCli IS NULL AND NEW.SessionId IS NULL) AND COALESCE(NEW.DiscussionHidden, 0) = 0 AND CASE WHEN json_valid(NEW.Changes) THEN COALESCE(json_extract(NEW.Changes, '$.jiraCopy'), 0) ELSE 0 END = 0 AND CASE WHEN json_valid(NEW.Changes) THEN COALESCE(json_extract(NEW.Changes, '$.syncToJira.to'), 1) ELSE 1 END != 0 BEGIN INSERT OR IGNORE INTO BoardJiraDeliveries (Id, CardId, ConnectionId, IssueId, Kind, SourceId, Body, CreatedUTC, UpdatedUTC) SELECT lower(hex(randomblob(16))), c.Id, j.SiteId, j.IssueId, 'comment', NEW.Id, NEW.AuthorLabel || ': ' || NEW.Body, NEW.CreatedUTC, NEW.CreatedUTC FROM BoardCards c JOIN BoardJiraLinks j ON j.CardId = c.Id JOIN BoardJiraConnections conn ON conn.Id = j.SiteId AND conn.ProjectPath = c.ProjectPath WHERE c.Id = NEW.CardId AND c.DeletedUTC IS NULL; END;
 
 -- trigger BoardLaneAutomations_ClearAdditional
 CREATE TRIGGER BoardLaneAutomations_ClearAdditional AFTER UPDATE ON BoardLaneAutomations BEGIN DELETE FROM BoardLaneAdditionalAutomations WHERE ColumnId = NEW.ColumnId; END;

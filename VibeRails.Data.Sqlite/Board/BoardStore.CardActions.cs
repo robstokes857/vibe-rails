@@ -211,9 +211,11 @@ public sealed partial class BoardStore
             copy.Transaction = transaction;
             copy.CommandText = """
                 INSERT INTO BoardComments (Id, CardId, AuthorKind, AuthorLabel, AuthorCli, SessionId, Body, CreatedUTC, Kind, Changes)
-                VALUES ($id, $card, $kind, $label, $cli, $session, $body, $created, 'comment', $changes);
+                VALUES ($id, $card, $kind, $label, $cli, $session, $body, $created, 'comment',
+                    json_set(CASE WHEN json_valid($changes) THEN $changes ELSE '{}' END, '$.jiraCopy', json('true')));
                 """;
-            copy.Parameters.AddWithValue("$id", NewId("cm"));
+            var copyId = NewId("cm");
+            copy.Parameters.AddWithValue("$id", copyId);
             copy.Parameters.AddWithValue("$card", target);
             copy.Parameters.AddWithValue("$kind", row.Author.Kind);
             copy.Parameters.AddWithValue("$label", row.Author.Label);
@@ -223,6 +225,17 @@ public sealed partial class BoardStore
             copy.Parameters.AddWithValue("$created", ToDb(row.CreatedUtc));
             copy.Parameters.AddWithValue("$changes", (object?)row.Changes ?? DBNull.Value);
             await copy.ExecuteNonQueryAsync(ct);
+            if (source == target)
+            {
+                // A Board move republishes discussion with new IDs, not new Jira activity.
+                await using var rebind = connection.CreateCommand();
+                rebind.Transaction = transaction;
+                rebind.CommandText = "UPDATE BoardJiraDeliveries SET SourceId = $copy WHERE CardId = $card AND Kind = 'comment' AND SourceId = $original;";
+                rebind.Parameters.AddWithValue("$copy", copyId);
+                rebind.Parameters.AddWithValue("$card", target);
+                rebind.Parameters.AddWithValue("$original", row.Id);
+                await rebind.ExecuteNonQueryAsync(ct);
+            }
         }
     }
 

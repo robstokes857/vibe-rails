@@ -238,7 +238,12 @@ complete project-scoped order through `PUT /api/v1/board/boards/order`; the firs
 on each Board view load, regardless of the last selection. Explicit card navigation still opens
 that card's board, and refreshes keep the current selection. `board-picker.js` owns the Tom Select
 lifecycle and order dialog; unchanged polling snapshots preserve open searches. The current
-selection is still recorded in `localStorage` (`viberails.board.selected.v1`) for compatibility,
+board summary's `isJiraBoard` selects Jira or VibeRails artwork in both picker options and the
+selected item; connection changes refresh that artwork while retaining the open search.
+`board-brand.js` shares local image markup with the Jira card badges and settings heading.
+`assets/img/jira.svg` is the Jira brand icon from `@atlaskit/logo` 23.3.1, with its source and
+adaptation noted in the SVG and license in `jira-LICENSE.txt`; local boards reuse `logo.png`.
+The current selection is still recorded in `localStorage` (`viberails.board.selected.v1`) for compatibility,
 and every list call carries the board id. Refresh generations discard stale catalog, lane, card, and error
 responses; switching boards clears the previous lanes/cards until the new board loads. The card
 editor's Lane field offers lanes on the current board. Create a new card to work on another board;
@@ -845,14 +850,15 @@ started.
 
 ## Rule management forms
 
-`agent-controller.js` owns the Manage rules modal, full editor, and new-file wizard.
-The Rules page keeps **View/Edit Rules** and **New rule file** in the Rules card header.
-The card shows aggregate counts; browse individual rule files in the manager, not a badge strip.
-The manager shows searchable directory paths and scope. Add uses the same form in the
-manager and full editor; the editor has explicit per-rule Edit/Remove actions. Back from
-creation/details restores the selected manager through the parent route's
-`reopenRuleManager` data, consumed after that route loads. Do not bind `go-back` locally:
-`app.js` already handles it globally, and a second listener pops history twice.
+`agent-controller.js` owns the inline rule manager, full editor, and new-file wizard.
+The Rules page displays **Rule files** below validation, with a searchable file list beside
+the selected file's rules, enforcement controls, and Add rule action. **Refresh** and
+**New rule file** live in that section's header; narrow screens stack the list and editor.
+Add uses the same dialog in the manager and full editor; the full editor has explicit
+per-rule Edit/Remove actions. **Back to Rules** from creation/details restores the selected
+file through the parent route's `restoreRuleManager` data, consumed after that route loads.
+Do not bind `go-back` locally: `app.js` already handles it globally, and a second listener
+pops history twice.
 The full editor keeps individual file cards visible above Rules, using each file's type
 icon and filename. Large scopes scroll within the card grid. Display-name controls sit
 beside the name and use Set/Edit display name; the value is a friendly searchable label

@@ -44,9 +44,9 @@ public partial interface IBoardService
     Task<bool> DeleteCommentAsync(string projectPath, string idOrKey, string commentId, BoardAuthor author, CancellationToken cancellationToken = default);
     /// <summary>Atomically combines source content and activity into a destination card.</summary>
     Task<BoardCardResponse?> MergeCardsAsync(string projectPath, string sourceId, string targetId, CancellationToken cancellationToken = default);
-    Task<BoardCommentDto?> AddCommentAsync(string projectPath, string idOrKey, BoardAuthor author, string body, CancellationToken cancellationToken = default);
+    Task<BoardCommentDto?> AddCommentAsync(string projectPath, string idOrKey, BoardAuthor author, string body, CancellationToken cancellationToken = default, bool syncToJira = true);
     /// <summary>Compatibility alias for the shared Comments stream.</summary>
-    Task<BoardCommentDto?> AddNoteAsync(string projectPath, string idOrKey, BoardAuthor author, string body, CancellationToken cancellationToken = default);
+    Task<BoardCommentDto?> AddNoteAsync(string projectPath, string idOrKey, BoardAuthor author, string body, CancellationToken cancellationToken = default, bool syncToJira = true);
     Task<List<BoardCommentDto>?> GetNotesAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
     Task<BoardAttachmentDto?> AddAttachmentAsync(string projectPath, string idOrKey, AddBoardAttachmentRequest request, CancellationToken cancellationToken = default);
     /// <summary>Agent-written Markdown/TXT attachment. Only these two types; the text is stored as UTF-8 bytes.</summary>
@@ -106,9 +106,15 @@ public sealed partial class BoardService(
     {
         await EnsureDefaultBoardAsync(projectPath, cancellationToken);
         var boards = await store.GetBoardsAsync(projectPath, cancellationToken);
+        return await BoardListAsync(projectPath, boards, cancellationToken);
+    }
+
+    private async Task<BoardListResponse> BoardListAsync(string projectPath, IReadOnlyList<BoardRecord> boards, CancellationToken cancellationToken)
+    {
         var columns = await store.GetAllColumnsAsync(projectPath, cancellationToken);
         var counts = await store.CountCardsByBoardAsync(projectPath, cancellationToken);
-        return new BoardListResponse(boards.Select(board => ToDto(board, columns, counts)).ToList());
+        var jiraBoardIds = (await store.GetJiraConnectionsAsync(cancellationToken)).Select(connection => connection.BoardId).ToHashSet(StringComparer.Ordinal);
+        return new BoardListResponse(boards.Select(board => ToDto(board, columns, counts) with { IsJiraBoard = jiraBoardIds.Contains(board.Id) }).ToList());
     }
 
     public async Task<BoardSummaryResponse> CreateBoardAsync(string projectPath, CreateBoardRequest request, CancellationToken cancellationToken = default)
@@ -125,9 +131,7 @@ public sealed partial class BoardService(
     public async Task<BoardListResponse> ReorderBoardsAsync(string projectPath, IReadOnlyList<string> orderedIds, CancellationToken cancellationToken = default)
     {
         var boards = await store.ReorderBoardsAsync(projectPath, orderedIds, cancellationToken);
-        var columns = await store.GetAllColumnsAsync(projectPath, cancellationToken);
-        var counts = await store.CountCardsByBoardAsync(projectPath, cancellationToken);
-        return new BoardListResponse(boards.Select(board => ToDto(board, columns, counts)).ToList());
+        return await BoardListAsync(projectPath, boards, cancellationToken);
     }
 
     public async Task<BoardSummaryResponse?> UpdateBoardAsync(string projectPath, string boardId, UpdateBoardRequest request, CancellationToken cancellationToken = default)
@@ -143,7 +147,8 @@ public sealed partial class BoardService(
             return null;
         var columns = await store.GetColumnsAsync(projectPath, cancellationToken, board.Id);
         var counts = await store.CountCardsByBoardAsync(projectPath, cancellationToken);
-        return ToDto(board, columns, counts);
+        var isJiraBoard = await store.GetJiraConnectionAsync(projectPath, board.Id, cancellationToken) is not null;
+        return ToDto(board, columns, counts) with { IsJiraBoard = isJiraBoard };
     }
 
     public async Task<DeleteBoardResponse?> DeleteBoardAsync(string projectPath, string boardId, CancellationToken cancellationToken = default)
@@ -395,7 +400,7 @@ public sealed partial class BoardService(
 
     // ------------------------------------------------------------------ rails
 
-    public async Task<BoardCommentDto?> AddCommentAsync(string projectPath, string idOrKey, BoardAuthor author, string body, CancellationToken cancellationToken = default)
+    public async Task<BoardCommentDto?> AddCommentAsync(string projectPath, string idOrKey, BoardAuthor author, string body, CancellationToken cancellationToken = default, bool syncToJira = true)
     {
         var text = NormalizeCommentBody(body, "Comment");
         var existing = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
@@ -403,13 +408,13 @@ public sealed partial class BoardService(
             return null;
         author = author with { Purpose = author.Kind == BoardAuthor.AgentKind && author.SessionId is { } session
             ? await store.FindSessionPurposeAsync(projectPath, existing.Id, session, cancellationToken) : null };
-        var comment = await store.AddCommentAsync(projectPath, existing.Id, author, text, cancellationToken);
+        var comment = await store.AddCommentAsync(projectPath, existing.Id, author, text, cancellationToken, syncToJira);
         return comment is null ? null : ToDto(comment);
     }
 
-    public async Task<BoardCommentDto?> AddNoteAsync(string projectPath, string idOrKey, BoardAuthor author, string body, CancellationToken cancellationToken = default)
+    public async Task<BoardCommentDto?> AddNoteAsync(string projectPath, string idOrKey, BoardAuthor author, string body, CancellationToken cancellationToken = default, bool syncToJira = true)
     {
-        return await AddCommentAsync(projectPath, idOrKey, author, NormalizeCommentBody(body, "Note"), cancellationToken);
+        return await AddCommentAsync(projectPath, idOrKey, author, NormalizeCommentBody(body, "Note"), cancellationToken, syncToJira);
     }
 
     public async Task<List<BoardCommentDto>?> GetNotesAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default)
@@ -594,11 +599,30 @@ public sealed partial class BoardService(
             (await store.GetWaitingAutomationCardIdsAsync(detail.Card.ProjectPath, [detail.Card.Id], cancellationToken)).Count > 0,
             summary.AgentMadeBy, summary.AgentMadeSessionId, summary.JiraIssueKey)
         {
+            JiraIssueUrl = summary.JiraIssueKey is null ? null : await GetJiraIssueUrlAsync(detail.Card.ProjectPath, detail.Card.Id, cancellationToken),
+            JiraDeliveries = summary.JiraIssueKey is null ? [] : (await store.GetJiraDeliveriesAsync(detail.Card.ProjectPath, detail.Card.Id, cancellationToken))
+                .Select(d => new BoardJiraDeliveryDto(d.SourceId, d.Kind, d.Status, d.Message)).ToList(),
             LinkedCards = detail.LinkedCards.Select(card => ToDto(card, detail.Card.ProjectPath)).ToList(),
             PreviousWork = BoardHandoffService.WithFileStatus(detail.PreviousWork, detail.Card.ProjectPath),
             FileCandidates = detail.PreviousWork is null && detail.Commits.Count > 0
                 ? await store.GetHandoffCandidatesAsync(detail.Card.ProjectPath, detail.Card.Id, cancellationToken) : []
         };
+    }
+
+    private async Task<string?> GetJiraIssueUrlAsync(string project, string cardId, CancellationToken ct)
+    {
+        var links = await store.GetJiraLinksForCardAsync(project, cardId, ct);
+        if (links.Count == 0) return null;
+        var connections = await store.GetJiraConnectionsAsync(ct);
+        foreach (var link in links)
+        {
+            var connection = connections.FirstOrDefault(c => c.Id == link.SiteId
+                && string.Equals(BoardPaths.NormalizeProjectPath(c.ProjectPath), BoardPaths.NormalizeProjectPath(project), BoardPaths.ProjectPathComparison));
+            if (connection is null) continue;
+            try { return Jira.JiraSite.Parse(connection.SiteUrl).Origin + "/browse/" + Uri.EscapeDataString(link.IssueKey); }
+            catch (Jira.JiraConfigException) { }
+        }
+        return null;
     }
 
     private async Task<List<BoardCommentDto>> ResolveAuthorsAsync(IReadOnlyList<BoardCommentRecord> rows, Dictionary<string, BoardAuthor?> authors, CancellationToken cancellationToken)
@@ -637,7 +661,7 @@ public sealed partial class BoardService(
             columns.Where(c => c.BoardId == board.Id).OrderBy(c => c.Position).Select(ToDto).ToList(), board.EffectiveDisplayPrefix);
 
     internal static BoardCommentDto ToDto(BoardCommentRecord comment) =>
-        new(comment.Id, new BoardAuthorDto(comment.Author.Kind, comment.Author.Label, comment.Author.Cli, comment.Author.SessionId), comment.Body, comment.CreatedUtc, BoardAttention.IsAttention(comment.Changes), BoardCommentPurpose.Read(comment.Changes));
+        new(comment.Id, new BoardAuthorDto(comment.Author.Kind, comment.Author.Label, comment.Author.Cli, comment.Author.SessionId), comment.Body, comment.CreatedUtc, BoardAttention.IsAttention(comment.Changes), BoardCommentPurpose.Read(comment.Changes), BoardJiraCommentPolicy.ShouldSync(comment.Changes));
 
     internal static BoardAttachmentDto ToDto(BoardAttachmentRecord attachment) =>
         new(attachment.Id, attachment.Name, attachment.DataUrl, attachment.MimeType, attachment.Bytes, attachment.CreatedUtc);

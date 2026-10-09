@@ -1546,3 +1546,13 @@ Lane Automations always run in selected order per card. The lane popup and card 
 per-step progress, explicit LLM verdicts and user skips; no execution-mode setting is required.
 See [ordered lane workflows](../VibeRails/Services/Board/ARCHITECTURE.md#ordered-lane-workflows)
 for entry snapshots, review decisions, cancellation and compatibility.
+
+### Jira activity delivery
+
+Jira issue links are exposed in card detail. Pulls accept both ADF and plain-string descriptions;
+an otherwise unchanged issue can repair an empty local description without resetting other
+fields or its local lane. `BoardJiraDeliveries` records future comment and session intents in
+their Board transactions. The root Jira scheduler drains the ledger independently of pulls
+using `JiraDeliveryService` and the shared cross-process Jira lock. Session delivery composes
+with the existing public sharing/upload service. UI and MCP support per-comment
+`syncToJira=false`; see [the Jira delivery contract](../VibeRails/Services/Jira/Comments.md).

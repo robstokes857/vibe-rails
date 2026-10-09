@@ -34,6 +34,7 @@ import { escapeHtml, confirmDialog, parseLlmSelection, getCliBrand, canonicalLlm
 import { mountLlmPicker, setLlmPickerValue, getEnabledLlmItems } from './pickers/llm-picker.js';
 import { BoardApi } from './board-api.js';
 import { BoardPicker, openBoardOrderManager } from './board-picker.js';
+import { boardBrandLogo } from './board-brand.js';
 import { BoardLaneAgents } from './board-lane-agents.js';
 import { BOARD_SELECTION_STORAGE_KEY } from './board-selection.js';
 import { boardContextSection, laneAutomationSection, mountBoardContext, mountLaneAutomation, boardSettingsNavigation, mountBoardSettingsNavigation, boardSyncSection, mountBoardSync } from './board-settings.js';
@@ -380,10 +381,12 @@ export class BoardController {
                     || card.activeSessionId !== detail.activeSessionId || card.activeTabId !== detail.activeTabId;
                 const attachmentsChanged = JSON.stringify(card.attachments) !== JSON.stringify(detail.attachments);
                 const commitsChanged = JSON.stringify(card.commits) !== JSON.stringify(detail.commits);
-                const discussionChanged = cardActivitySnapshot(card) !== cardActivitySnapshot(detail);
+                const discussionChanged = cardActivitySnapshot(card) !== cardActivitySnapshot(detail)
+                    || JSON.stringify(card.jiraDeliveries) !== JSON.stringify(detail.jiraDeliveries);
                 Object.assign(card, { sessions: detail.sessions, activeSessionId: detail.activeSessionId,
                     activeTabId: detail.activeTabId, hasActiveAutomation: detail.hasActiveAutomation,
-                    comments: detail.comments, notes: detail.notes, attachments: detail.attachments, commits: detail.commits });
+                    comments: detail.comments, notes: detail.notes, attachments: detail.attachments, commits: detail.commits,
+                    jiraDeliveries: detail.jiraDeliveries, jiraIssueUrl: detail.jiraIssueUrl });
                 if (changed) this.renderSessionsPanel(editor, card);
                 if (attachmentsChanged) this.renderAttachmentsPanel(editor, card);
                 if (commitsChanged) this.renderCommitsPanel(editor, card);
@@ -777,7 +780,14 @@ export class BoardController {
     }
 
     jiraBadge(card) {
-        return card?.jiraIssueKey ? `<span class="badge text-bg-primary" title="Imported from Jira: ${escapeHtml(card.jiraIssueKey)}"><i class="fa-brands fa-jira" aria-hidden="true"></i> Jira · ${escapeHtml(card.jiraIssueKey)}</span>` : '';
+        if (!card?.jiraIssueKey) return '';
+        const badge = `<span class="badge text-bg-primary" title="Imported from Jira: ${escapeHtml(card.jiraIssueKey)}">${boardBrandLogo(true, '')} Jira · ${escapeHtml(card.jiraIssueKey)}</span>`;
+        try {
+            const url = new URL(card.jiraIssueUrl);
+            if (url.protocol === 'https:' && !url.username && !url.password)
+                return `<a href="${escapeHtml(url.href)}" target="_blank" rel="noopener noreferrer" aria-label="Open ${escapeHtml(card.jiraIssueKey)} in Jira">${badge}</a>`;
+        } catch { /* Unlinked or older card response. */ }
+        return badge;
     }
 
     renderCard(card) {
@@ -1284,7 +1294,9 @@ export class BoardController {
                             ${AGENT_PURPOSES.map(([value, label]) => `<option value="${value}">${escapeHtml(label)} agent comments</option>`).join('')}
                         </select>
                         <p class="board-editor-muted">Attention comments always appear first.</p>` : ''}
+                        <div data-board-jira-delivery-status></div>
                         <div class="board-comments" data-board-comments></div>
+                        ${card?.jiraIssueKey ? '<label class="form-check mb-2"><input class="form-check-input" type="checkbox" data-board-jira-sync checked> Post this comment to Jira</label><p class="board-editor-muted">Uncheck for an internal note. Linked sessions get a public replay link posted to Jira.</p>' : ''}
                         ${card ? this.composerMarkup({
                             name: 'comment',
                             value: '',
@@ -1884,6 +1896,13 @@ export class BoardController {
         if (!host) return;
         // Markdown, attachments, session and commit labels are shared with the comment composer.
         const textOptions = boardTextOptions(card);
+        const deliveryStatus = editor.querySelector('[data-board-jira-delivery-status]');
+        if (deliveryStatus) {
+            const issues = (card?.jiraDeliveries || []).filter(d => ['failed', 'uncertain'].includes(d.status));
+            const pending = (card?.jiraDeliveries || []).filter(d => ['pending', 'sending'].includes(d.status)).length;
+            deliveryStatus.innerHTML = issues.map(d => `<p class="text-warning">Jira ${d.kind === 'session' ? 'session link' : 'comment'}: ${escapeHtml(d.message || d.status)}</p>`).join('')
+                + (pending ? `<p class="board-editor-muted">${pending} Jira update${pending === 1 ? '' : 's'} waiting for delivery.</p>` : '');
+        }
         const comments = [...new Map([...(card?.comments || []), ...(card?.notes || [])].map(entry => [entry.id, entry])).values()]
             .sort((a, b) => Number(b.isAttention === true) - Number(a.isAttention === true)
                 || String(a.createdAt).localeCompare(String(b.createdAt)) || String(a.id).localeCompare(String(b.id)));
@@ -1934,6 +1953,7 @@ export class BoardController {
                 <div class="board-comment-content">
                     <div class="board-comment-meta">
                         <span class="board-comment-author">${escapeHtml(author?.label || 'Someone')}</span>
+                        ${entry.syncToJira === false ? '<span class="badge text-bg-secondary">Not sent to Jira</span>' : ''}
                         ${entry.purpose && entry.purpose !== 'work' ? `<span class="badge text-bg-secondary">${escapeHtml(agentPurposeLabel(entry.purpose))}</span>` : ''}
                         <span class="board-comment-when">${jump}${escapeHtml(this.formatDateTime(entry.createdAt))}<button type="button" class="btn btn-link btn-sm text-danger" data-board-delete-comment="${escapeHtml(entry.id)}" aria-label="Delete comment" title="Delete comment"><i class="fa-solid fa-trash" aria-hidden="true"></i></button></span>
                     </div>
@@ -1989,7 +2009,7 @@ export class BoardController {
         if (!cardId) return;
         const composerInput = editor.querySelector('[data-board-composer="comment"] [data-board-composer-input]');
         try {
-            await BoardApi.addBoardCommentAsync(cardId, { body });
+            await BoardApi.addBoardCommentAsync(cardId, { body, syncToJira: editor.querySelector('[data-board-jira-sync]')?.checked !== false });
             const card = await this.reloadEditingCard(editor);
             if (!card) return;
             if (composerInput) {
@@ -2568,7 +2588,7 @@ export class BoardController {
                 disposeSync = mountBoardSync(this.app, editor.querySelector('[data-board-sync]'), board.id, status => {
                     const title = header.querySelector('.modal-title');
                     if (status.isJiraBoard) {
-                        title.innerHTML = `Board · <span class="d-inline-block"><i class="fa-brands fa-jira text-primary" role="img" aria-label="Jira board"></i> ${escapeHtml(board.name)}</span>`;
+                        title.innerHTML = `Board · <span class="d-inline-block">${boardBrandLogo(true)} ${escapeHtml(board.name)}</span>`;
                         navigation.combineJira();
                     } else {
                         title.textContent = `Board · ${board.name}`;

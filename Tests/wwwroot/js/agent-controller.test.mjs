@@ -189,7 +189,7 @@ test('Rule-manager mutations focus the replacement control after a rerender', (t
     };
     const manager = {
         isConnected: true,
-        matches: selector => selector === '[data-rule-manager-modal]',
+        matches: selector => selector === '[data-rule-manager]',
         querySelector(selector) {
             return selector === '[data-rule-editor-add]' ? replacement : null;
         }
@@ -316,7 +316,7 @@ test('Validate rule file renders successful API responses without a missing rend
     assert.doesNotMatch(resultsContainer.innerHTML, /<rule>/);
 });
 
-test('Manage rules records the modal and selected file as the page Back destination', () => {
+test('Manage rules records the selected file as the page Back destination', () => {
     const app = createApp();
     const calls = [];
     app.navigationStack = [{ view: 'dashboard', data: { keep: 'context' } }];
@@ -330,12 +330,12 @@ test('Manage rules records the modal and selected file as the page Back destinat
     const agent = { path: 'C:\\repo\\src\\vc.rules.md' };
     controller.selectedAgentPath = agent.path;
     controller.navigateFromRuleManager('agent-edit', agent, {
-        matches: selector => selector === '[data-rule-manager-modal]'
+        matches: selector => selector === '[data-rule-manager]'
     });
     assert.deepEqual(app.navigationStack[0].data, {
-        keep: 'context', reopenRuleManager: true, selectedAgentPath: agent.path
+        keep: 'context', restoreRuleManager: true, selectedAgentPath: agent.path
     });
-    assert.deepEqual(calls, ['close', 'save-parent', { view: 'agent-edit', data: agent }]);
+    assert.deepEqual(calls, ['save-parent', { view: 'agent-edit', data: agent }]);
 });
 
 test('Full editor offers rule-specific Edit and Remove controls with no selection prerequisite', () => {
@@ -394,13 +394,13 @@ test('New rule file returns to Manage rules and selects the created path across 
     const createButton = { disabled: false };
     globalThis.document = { getElementById: () => createButton };
     const app = createApp();
-    app.navigationStack = [{ view: 'dashboard', data: { reopenRuleManager: true } }, { view: 'agent-create', data: {} }];
+    app.navigationStack = [{ view: 'dashboard', data: { restoreRuleManager: true } }, { view: 'agent-create', data: {} }];
     app.apiCall = async () => ({ path: 'C:\\repo\\src/vc.rules.md' });
     app.refreshDashboardData = async () => {};
     app.data.agents = [{ path: 'C:\\repo\\src\\vc.rules.md', rules: [] }];
     let returned = false;
     app.goBack = () => { returned = true; };
-    app.navigate = () => assert.fail('creation from Manage rules should return directly to the modal');
+    app.navigate = () => assert.fail('creation from Manage rules should return directly to the Rules page');
     const controller = new AgentController(app);
     controller.wizardState.directory = 'C:\\repo\\src/vc.rules.md';
     await controller.createAgent();
@@ -440,14 +440,14 @@ test('Rule pages rely on the single global Back handler instead of popping histo
     assert.doesNotMatch(AgentController.prototype.loadAgentCreate.toString(), /bindAction\(root, '\[data-action="go-back"\]'/);
 });
 
-test('Back reopens Manage rules only after the parent page finishes loading', async () => {
+test('Back restores the selected rule file only after the parent page finishes loading', async () => {
     const app = Object.create(VibeControlApp.prototype);
     let finishLoad;
     app.dashboardController = { loadDashboard: () => new Promise(resolve => { finishLoad = resolve; }) };
     app.updateActiveSubNav = app.applyViewLayoutState = app.queueScrollPageToTop = () => {};
     let opened = 0;
-    app.agentController = { openRuleManager: () => { opened++; } };
-    const data = { reopenRuleManager: true, selectedAgentPath: 'C:\\repo\\Tests\\vc.rules.md' };
+    app.agentController = { restoreRuleManager: () => { opened++; } };
+    const data = { restoreRuleManager: true, selectedAgentPath: 'C:\\repo\\Tests\\vc.rules.md' };
     app.currentView = 'dashboard';
     app.navigationStack = [{ view: 'dashboard', data }];
     app.loadView('dashboard', data);
@@ -456,16 +456,16 @@ test('Back reopens Manage rules only after the parent page finishes loading', as
     await Promise.resolve();
     assert.equal(opened, 1);
     assert.equal(app.agentController.selectedAgentPath, data.selectedAgentPath);
-    assert.equal(app.navigationStack[0].data.reopenRuleManager, false, 'the return flag is consumed');
+    assert.equal(app.navigationStack[0].data.restoreRuleManager, false, 'the return flag is consumed');
 });
 
-test('A stale parent-page load cannot reopen Manage rules after a later navigation', async () => {
+test('A stale parent-page load cannot restore rule selection after a later navigation', async () => {
     const app = Object.create(VibeControlApp.prototype);
     let finishLoad;
     app.dashboardController = { loadDashboard: () => new Promise(resolve => { finishLoad = resolve; }) };
     app.updateActiveSubNav = app.applyViewLayoutState = app.queueScrollPageToTop = () => {};
-    app.agentController = { openRuleManager: () => assert.fail('stale load must not reopen the modal') };
-    const data = { reopenRuleManager: true };
+    app.agentController = { restoreRuleManager: () => assert.fail('stale load must not restore the manager') };
+    const data = { restoreRuleManager: true };
     app.currentView = 'dashboard';
     app.navigationStack = [{ view: 'dashboard', data }];
     app.loadView('dashboard', data);

@@ -1,4 +1,5 @@
 import { BoardApi } from './board-api.js';
+import { boardBrandLogo } from './board-brand.js';
 import { enhanceSelectWithTomSelect, escapeHtml } from './utils.js';
 
 /** Owns the Board select without replacing a user's open search on each activity poll. */
@@ -11,7 +12,7 @@ export class BoardPicker {
 
     update(boards, selectedId) {
         const ordered = boards.slice().sort((a, b) => a.position - b.position);
-        const signature = JSON.stringify(ordered.map(board => [board.id, board.name]));
+        const signature = JSON.stringify(ordered.map(board => [board.id, board.name, Boolean(board.isJiraBoard)]));
         const select = this.select;
         if (signature !== this.signature) {
             const search = select.tomselect?.control_input?.value || '';
@@ -20,12 +21,15 @@ export class BoardPicker {
             select.innerHTML = ordered.map(board =>
                 `<option value="${escapeHtml(board.id)}">${escapeHtml(board.name)}</option>`).join('');
             select.value = selectedId || '';
+            const jiraBoards = new Set(ordered.filter(board => board.isJiraBoard).map(board => board.id));
+            const renderBoard = (data, escape) => `<div><span class="board-picker-label">${boardBrandLogo(jiraBoards.has(data.value))}<span class="board-picker-name">${escape(data.text)}</span></span></div>`;
             const ts = enhanceSelectWithTomSelect(select, {
                 placeholder: 'Select a board',
                 searchPlaceholder: 'Search boards...',
                 emptyMessage: 'No matching boards.',
                 customizeLabel: 'Manage boards',
-                onCustomize: this.onManage
+                onCustomize: this.onManage,
+                render: { option: renderBoard, item: renderBoard }
             });
             if (ts) {
                 ts.wrapper.classList.add('board-picker-control');

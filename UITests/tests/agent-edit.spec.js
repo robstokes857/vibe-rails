@@ -184,6 +184,7 @@ test.beforeEach(async ({ page }) => installRuleApi(page));
 
 async function openFirstRuleFileInManager(page) {
   const tree = page.locator('[data-agent-file-tree]');
+  await expect(tree).toBeVisible();
   const configured = tree.locator('.agent-files-configured .agent-file-tree-item');
   let item = configured.first();
 
@@ -227,13 +228,14 @@ test('Rules combines rule management, validation and Git Guard', async ({ page }
   await expect(page.getByRole('heading', { name: 'Code quality', exact: true })).toHaveCount(0);
   await expect(page.locator('#vb-terminal-panel')).toHaveCount(0);
   await expect(page.locator('[data-rule-files]')).toHaveCount(0);
-  const newRuleFile = page.locator('[data-health-card="rules"] .project-health-card-actions')
+  const newRuleFile = page.locator('[data-rule-manager] .project-health-card-actions')
     .getByRole('button', { name: 'New rule file', exact: true });
   await expect(newRuleFile).toBeVisible();
 
-  // Rule CRUD is one deliberate drill-in instead of another top-level page.
-  await page.getByRole('button', { name: 'View/Edit Rules' }).click();
-  await expect(page.locator('[data-rule-manager-modal]')).toBeVisible();
+  // The file browser and editor are visible directly on the Rules page.
+  await expect(page.getByRole('button', { name: 'View/Edit Rules' })).toHaveCount(0);
+  await expect(page.locator('#modal-container .modal')).toHaveCount(0);
+  await expect(page.locator('[data-rule-manager]')).toBeVisible();
 
   const container = page.locator('[data-agent-file-tree]');
   await expect(container).toBeVisible();
@@ -263,19 +265,18 @@ test('Rules combines rule management, validation and Git Guard', async ({ page }
   await expect(editor.getByRole('button', { name: 'Add rule' })).toBeVisible();
   await expect(page.locator('[data-view="agent-edit"]')).toHaveCount(0);
 
-  // Child CRUD dialogs layer above the manager. Cancel returns to the same
-  // selected file instead of destroying the manager underneath.
+  // Small edit dialogs return to the selected file on the page when cancelled.
   const renameRuleFile = editor.getByRole('button', { name: 'Edit display name', exact: true });
   await renameRuleFile.click();
-  const ruleCrudDialog = page.locator('.agent-rule-modal-layer');
-  await expect(ruleCrudDialog.getByRole('dialog', { name: 'Edit display name' })).toBeVisible();
+  const ruleCrudDialog = page.locator('#modal-container .modal');
+  await expect(ruleCrudDialog.getByRole('heading', { name: 'Edit display name' })).toBeVisible();
   await ruleCrudDialog.getByRole('button', { name: 'Cancel' }).click();
   await expect(ruleCrudDialog).toHaveCount(0);
-  await expect(page.locator('[data-rule-manager-modal]')).toBeVisible();
+  await expect(page.locator('[data-rule-manager]')).toBeVisible();
   await expect(renameRuleFile).toBeFocused();
 
-  await page.locator('#modal-container [data-action="close-modal"]').click();
-  await expect(page.locator('[data-rule-manager-modal]')).toHaveCount(0);
+  await expect(page.locator('#modal-container .modal')).toHaveCount(0);
+  await expect(page.locator('[data-rule-manager]')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Fix rules & code quality' })).toHaveCount(0);
   for (const scope of ['rules']) {
     const controls = page.getByRole('group', { name: `Fix ${scope} with an agent` });
@@ -290,14 +291,13 @@ test('rule-file workflows use policy terminology', async ({ page }) => {
   await page.goto('/');
 
   await page.locator('.app-subnav-link[data-action="navigate-home"]:visible').click();
-  await page.getByRole('button', { name: 'View/Edit Rules' }).click();
-  await page.locator('[data-rule-manager-modal]').getByRole('button', { name: 'New rule file' }).click();
+  await page.locator('[data-rule-manager]').getByRole('button', { name: 'New rule file' }).click();
 
   await expect(page.getByRole('heading', { name: 'Create New Rule File' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Create New Agent' })).toHaveCount(0);
 
-  await page.getByRole('button', { name: 'Back to Manage rules' }).click();
-  await expect(page.locator('[data-rule-manager-modal]')).toBeVisible();
+  await page.getByRole('button', { name: 'Back to Rules' }).click();
+  await expect(page.locator('[data-rule-manager]')).toBeVisible();
   const selected = await openFirstRuleFileInManager(page);
   const selectedPath = await selected.locator('.agent-file-tree-open').getAttribute('title');
   await page.locator('[data-agent-rule-editor]').getByRole('button', { name: 'Full editor' }).click();
@@ -307,14 +307,16 @@ test('rule-file workflows use policy terminology', async ({ page }) => {
   await expect(page.getByText('Full Agent File Content', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'View rule file content' }).click();
   await expect(page.locator('[data-agent-full-content]')).toContainText('## Vibe Rails Rules');
-  await page.getByRole('button', { name: 'Back to Manage rules' }).click();
-  await expect(page.locator('[data-rule-manager-modal]')).toBeVisible();
+  await page.getByRole('button', { name: 'Back to Rules' }).click();
+  await expect(page.locator('[data-rule-manager]')).toBeVisible();
   await expect(page.locator('.agent-file-tree-open[aria-current="true"]')).toHaveAttribute('title', selectedPath);
 });
 
 test('Rules stays scrollable without embedding the Quality report or terminal', async ({ page }) => {
   await page.goto('/?view=agents');
-  await expect(page.locator('.project-health-stack > .project-health-card')).toHaveCount(1);
+  await expect(page.locator('.project-health-stack > .project-health-card')).toHaveCount(2);
+  await expect(page.locator('[data-rule-manager] [data-agent-rule-editor]')).toBeVisible();
+  await expect(page.locator('#modal-container .modal')).toHaveCount(0);
   await expect(page.locator('[data-health-card="rules"]')).toBeVisible();
   expect(await page.locator('body').evaluate(body => getComputedStyle(body).overflowY)).not.toBe('hidden');
   await expect(page.locator('[data-code-analyzer-report], [data-terminal-section], [data-terminal-content]')).toHaveCount(0);
@@ -325,8 +327,7 @@ test('wizard Back preserves parameter drafts and creates one vc.rules.md path', 
   const expectedPath = `${directory}/vc.rules.md`;
   const csvDraft = 'WIP,fix later, temporary';
   await page.goto('/?view=agents');
-  await page.getByRole('button', { name: 'View/Edit Rules' }).click();
-  await page.locator('[data-rule-manager-modal]').getByRole('button', { name: 'New rule file' }).click();
+  await page.locator('[data-rule-manager]').getByRole('button', { name: 'New rule file' }).click();
   const wizard = page.locator('#wizard-content');
   await wizard.getByLabel('Directory for vc.rules.md').fill(directory);
   await wizard.locator('#wizard-next-btn').click();
@@ -357,7 +358,7 @@ test('wizard Back preserves parameter drafts and creates one vc.rules.md path', 
   expect(payload.rules).toEqual([
     "Directory Lock('build/output')", 'Check commit message for: WIP, fix later, temporary'
   ]);
-  const manager = page.locator('[data-rule-manager-modal]');
+  const manager = page.locator('[data-rule-manager]');
   await expect(manager).toBeVisible();
   await expect(manager.locator('.agent-file-tree-open[aria-current="true"]')).toHaveAttribute('title', expectedPath);
   await expect(manager.locator('[data-rule-enforcement="0"]')).toHaveValue('STOP');
@@ -365,7 +366,6 @@ test('wizard Back preserves parameter drafts and creates one vc.rules.md path', 
 
 test('full editor edits and removes the rule directly from its row', async ({ page }) => {
   await page.goto('/?view=agents');
-  await page.getByRole('button', { name: 'View/Edit Rules' }).click();
   await openFirstRuleFileInManager(page);
   await page.locator('[data-agent-rule-editor]').getByRole('button', { name: 'Full editor' }).click();
 
@@ -392,7 +392,6 @@ test('full editor edits and removes the rule directly from its row', async ({ pa
 
 test('full editor keeps individual file cards visible above Rules with compact actions', async ({ page }) => {
   await page.goto('/?view=agents');
-  await page.getByRole('button', { name: 'View/Edit Rules' }).click();
   await openFirstRuleFileInManager(page);
   await page.locator('[data-agent-rule-editor]').getByRole('button', { name: 'Full editor' }).click();
   const editor = page.locator('[data-view="agent-edit"]');
@@ -411,7 +410,6 @@ test('full editor keeps individual file cards visible above Rules with compact a
 
 test('display-name actions sit beside the name and save only a friendly searchable label', async ({ page }) => {
   await page.goto('/?view=agents');
-  await page.getByRole('button', { name: 'View/Edit Rules' }).click();
   await openFirstRuleFileInManager(page);
   const detail = page.locator('[data-agent-rule-editor]');
   await expect(detail.locator('.rules-editor-name-row').getByRole('button', { name: 'Edit display name', exact: true })).toBeVisible();
@@ -434,8 +432,8 @@ test('display-name actions sit beside the name and save only a friendly searchab
   expect((await requestPromise).postDataJSON()).toEqual({ path: CONFIGURED_RULE_PATH, customName: 'DB Rules for NoSQL DB 1' });
   await expect(editor.locator('[data-agent-display-name]')).toHaveText('DB Rules for NoSQL DB 1');
   await expect(editor.locator('[data-agent-path]')).toHaveText(CONFIGURED_RULE_PATH);
-  await editor.getByRole('button', { name: 'Back to Manage rules' }).click();
-  const manager = page.locator('[data-rule-manager-modal]');
+  await editor.getByRole('button', { name: 'Back to Rules' }).click();
+  const manager = page.locator('[data-rule-manager]');
   await manager.locator('[data-rule-file-search]').fill('NoSQL DB 1');
   await expect(manager.locator('.agent-file-tree-item:visible')).toHaveCount(1);
   await expect(manager.locator('.agent-file-tree-item:visible .agent-file-tree-name')).toHaveText('DB Rules for NoSQL DB 1');
@@ -443,7 +441,6 @@ test('display-name actions sit beside the name and save only a friendly searchab
 
 test('empty full editor explains how to add a first rule without dead edit actions', async ({ page }) => {
   await page.goto('/?view=agents');
-  await page.getByRole('button', { name: 'View/Edit Rules' }).click();
   await page.getByRole('button', { name: 'Open vc.rules.md', exact: true }).click();
   await page.locator('[data-agent-rule-editor]').getByRole('button', { name: 'Full editor' }).click();
   const editor = page.locator('[data-view="agent-edit"]');
@@ -456,8 +453,8 @@ test('empty full editor explains how to add a first rule without dead edit actio
   await form.getByRole('button', { name: 'Add rule', exact: true }).click();
   await expect(editor.getByRole('button', { name: 'Edit Log all file changes', exact: true })).toBeVisible();
   await expect(editor.getByText('No rules yet', { exact: true })).toHaveCount(0);
-  await editor.getByRole('button', { name: 'Back to Manage rules' }).click();
-  await expect(page.locator('[data-rule-manager-modal]')).toBeVisible();
+  await editor.getByRole('button', { name: 'Back to Rules' }).click();
+  await expect(page.locator('[data-rule-manager]')).toBeVisible();
   await expect(page.locator('.agent-file-tree-open[aria-current="true"]')).toHaveAttribute('title', EMPTY_RULE_PATH);
 });
 

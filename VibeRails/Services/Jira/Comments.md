@@ -1,49 +1,62 @@
-# Jira completion comments
+# Jira comments and session links
 
-`add_jira_comment` posts an explicit comment to the Jira issue connected to a VibeRails
-card. It is available on both MCP transports. It accepts `body` (plain text, 1–20,000
-characters), optional `card` (the usual Board key/ID; omitted uses the terminal's original
-card), and optional `sessionLinks` (up to 20 public VibeRails replay URLs).
+New comments on a Jira-linked card are posted to its connected Jira issues by default.
+The card editor links to the issue and offers **Post this comment to Jira**; uncheck it for
+an internal note. REST comment/note requests and both MCP tools `add_board_comment` and
+`append_board_note` accept `syncToJira=false`. The flag is retained in comment metadata and
+shown as **Not sent to Jira**. It affects Jira only, not the board's separate hosted sync.
+Launch prompts and `get_board_card` explain this behavior and ask agents to avoid progress spam.
 
-For a completion report:
+New local session attachments, including Start work and Automation recordings, queue creation
+of a named public replay link through the existing `SessionSharingService`, then post the link
+to Jira. Anyone holding the link can read the session; links expire after one month. Active
+sessions become readable after ending and uploading. A VibeRails account is required. No
+existing sessions or historical discussion are backfilled on upgrade.
 
-1. Call `create_session_share_link` with a descriptive `displayName`, or reuse the link
-   already created for this session. Save that link with the Board handoff so later
-   sessions can reuse it. Only create public shares when the user requests sharing.
-2. Call `add_jira_comment` with the completion summary and the links from all sessions
-   used for the work. Earlier sessions' links come from their saved handoffs. The tool
-   deduplicates identical links and renders them as clickable Jira links.
-3. Continue the normal Board handoff/completion workflow. Posting does not change Jira
-   status, move the card, or end a session.
+## Persistence and delivery
 
-Anyone holding a public replay link can read the shared session. Links expire one month
-after creation; active sessions become readable after they end and upload. Posting a
-comment neither creates a new share nor verifies upload, expiry, or ownership of an
-existing link. A text-only Jira update can omit `sessionLinks`.
+The additive `board-jira-delivery/1` migration creates `BoardJiraDeliveries` in board.db. A
+comment-insert trigger records its outbound intent in the comment transaction. Session intents
+are written in the local session-link transaction. Persistence remains behind `IBoardStore`.
+The destination is pinned to the original connection and numeric issue ID, including after a
+local board move. Moves remap delivery source IDs without requeueing old discussion. Merge
+copies, remote Board imports, Jira pull receipts and explicit Jira-post receipts are excluded.
+Older local comment writers also use the trigger; an opted-out comment stays excluded.
 
-The tool is an external write and is deliberately outside the automatic local Board tool
-grants, like `create_session_share_link`. Existing CLI approval settings still apply.
-It takes no token, site URL, issue ID, filesystem path, or arbitrary session target.
+The existing root scheduler starts a bounded delivery drain on its normal ticks, independently
+of the 15-minute pull interval. No daemon, listener or stdio background worker is introduced.
+Pending activity survives restarts and is delivered while a root backend is open. The existing
+cross-process Jira lock serializes drains with connection edits, unlinking and pulls. Before
+sending, the drain checks the live card, issue link, original connection and source activity.
+Deleted comments, removed session links and disconnected destinations are not posted.
 
-`JiraCommentService` reads live-card issue links through `IBoardStore` and joins them to
-the original saved connection in the owning project. A local board move retains that
-destination. Missing/disconnected or ambiguous connections fail before posting. The
-existing cross-process Jira lock serializes posting with connection edits/unlink/pulls.
-The saved token stays in `IJiraSecretStore`. There is no schema change or startup backfill.
+Each event transitions pending → sending → sent/failed/uncertain. A public capability is saved
+locally before the Jira POST. Claims and retained outcomes prevent duplicate sends across roots
+and repeated attachments. An abandoned sending claim becomes uncertain when the next process
+acquires the lock; it is never blindly retried. Rejected requests remain failed with a readable
+reason. Card detail exposes bounded delivery statuses and the editor refreshes pending/failure
+messages without replacing drafts. Inspect Jira and Sharing links before manually retrying an
+uncertain delivery. There is no exactly-once guarantee across a network failure.
 
-`JiraCloudClient` makes one `POST /rest/api/3/issue/{numericIssueId}/comment`, using
-Atlassian Document Format with literal text and explicit link marks. The shared root/
-stdio registration disables redirects and cookies. Requests have a 30-second deadline
-and a 256-KiB response cap (Jira echoes the comment). Only a 201 with a valid numeric
-comment ID confirms success. Error bodies and exception details are not returned or logged.
+The client posts ADF literal text to the saved-origin numeric issue endpoint with redirects and
+cookies disabled, a 30-second deadline and 256-KiB response cap. Comments carry their Board author.
+The existing 20,000-character Jira request limit applies; longer Board comments remain saved and
+report failed delivery. Public replay links use explicit ADF link marks. Tokens, response bodies,
+exception prose and sharing URLs are never logged. No Jira status or card movement is performed.
 
-A confirmed post returns a saved-origin issue/comment URL and adds an attributed receipt
-containing the text and links to Board Comments. If that local write fails, the tool still
-reports that Jira succeeded and explicitly says not to repost. Network failures, invalid
-success responses, redirects, and server failures report unconfirmed delivery; inspect
-Jira before retrying. There is no automatic retry or exactly-once guarantee. Ordinary Jira
-permission, missing issue, rejected text, and rate-limit failures have fixed messages.
+## Explicit posting
 
-Tests: `JiraCommentClientTests`, the `BoardToolJiraTests` partial, `McpServerHttpTests`,
-`McpStdioHostTests`, and `CookieAuthMiddlewareTests`. They use fake HTTP and disposable
-Board stores; they do not post to a real Jira site or create public shares.
+`add_jira_comment` remains available on both MCP transports for a deliberate additional post.
+It accepts body, optional card and up to 20 already-created public replay URLs. It does not create
+shares and remains outside automatic Board-tool grants. Its local Board receipt opts out of Jira
+sync, so the explicit post is not echoed back. Do not call it to duplicate an ordinary synced
+comment or the automatic session-link post.
+
+A confirmed explicit post returns a saved-origin comment URL. A failure to save its Board receipt
+does not invalidate Jira success; the tool says not to repost. Unconfirmed delivery requires
+inspection before retrying. Missing, disconnected or ambiguous explicit destinations fail before
+posting. The saved token stays in `IJiraSecretStore`.
+
+Tests cover descriptions returned as strings and ADF, default/opt-out comments, MCP and REST
+contracts, source deletion, moves, repeated attachments, public sharing, failures, interrupted
+claims, frontend controls, schema snapshots and previous-release compatibility.

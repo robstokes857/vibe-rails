@@ -10,6 +10,20 @@ namespace Tests.Services.Mcp;
 public sealed partial class BoardToolTests
 {
     [Fact]
+    public async Task OrdinaryCommentsSyncByDefaultAndMcpCanKeepInternalNotes()
+    {
+        var (card, _, _, _) = await JiraFixtureAsync();
+        var tool = new BoardTool(_service, _resolver, _store, new BoardWorkflowService(_store, new BoardReviewService(_store, _service)));
+        await tool.AddBoardComment("Shared update", card.Key, Ct);
+        await tool.AddBoardComment("Internal note", card.Key, Ct, syncToJira: false);
+        await tool.AppendBoardNote("Another internal note", card.Key, Ct, syncToJira: false);
+        Assert.Single(await _store.GetPendingJiraDeliveriesAsync(Ct));
+        var detail = (await _service.GetCardAsync(_project, card.Id, Ct))!;
+        Assert.Equal(2, detail.Comments.Count(c => !c.SyncToJira));
+        Assert.Contains("syncToJira=false", await tool.GetBoardCard(card.Key, cancellationToken: Ct));
+    }
+
+    [Fact]
     public async Task JiraCommentUsesDefaultCardSavedCredentialsAndRecordsAllLinks()
     {
         var (card, _, client, comments) = await JiraFixtureAsync();

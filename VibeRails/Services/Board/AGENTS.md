@@ -539,3 +539,12 @@ Jira pull reports keep `skipped` as the total of unchanged issues, previously de
 already-linked issues. The message breaks down those reasons and reports failures as `failed`.
 Deleted imports stay deleted on dry runs and writing pulls; never label them as unchanged or
 recreate them to populate an empty board.
+
+## Jira activity delivery
+
+New linked-card comments default to Jira delivery; `syncToJira=false` retains a note without
+posting it to Jira. New local session links queue public replay sharing. Keep the UI, MCP
+parameters and launch guidance aligned. Read [the delivery contract](../Jira/Comments.md) before
+changing comment copying, session linking or Jira scheduling. Copied/imported discussion and
+Jira receipts must not echo; Board moves rebind existing delivery IDs. Uncertain sends never
+retry automatically. The additive ledger stays behind `IBoardStore` in board.db.

@@ -540,8 +540,18 @@ public sealed class JiraPullService(
         // here stays put while neither the issue nor the mapping changes.
         var mapping = MappingKey(plan, laneTarget);
         var unchanged = link is not null && issue.Updated.ToUniversalTime() == link.IssueUpdated.ToUniversalTime();
-        if (unchanged && existing is not null && existing.BoardId == connection.BoardId && string.Equals(link!.Mapping, mapping, StringComparison.Ordinal))
-            return ApplyAction.Unchanged;
+        if (unchanged && existing is not null && existing.BoardId == connection.BoardId
+            && string.Equals(link!.Mapping, mapping, StringComparison.Ordinal))
+        {
+            if (!string.IsNullOrWhiteSpace(existing.Description) || mapped.Description.Length == 0)
+                return ApplyAction.Unchanged;
+            // Repair descriptions missed by older string-only endpoint handling, without moving
+            // the card or overwriting locally edited fields of an otherwise unchanged issue.
+            if (!dryRun)
+                await store.UpdateCardAsync(connection.ProjectPath, existing.Id,
+                    new BoardCardPatch(Description: mapped.Description), cancellationToken, JiraAuthor);
+            return ApplyAction.Updated;
+        }
         if (mapped.Title.Length == 0)
             throw new JiraConfigException("Issue title is empty after trimming.");
 
@@ -585,7 +595,7 @@ public sealed class JiraPullService(
                 new BoardCardMoveRequest(lane.ColumnId, null, SkipLaneAutomations: true, JiraAuthor), cancellationToken);
             await board.AddCommentAsync(connection.ProjectPath, existing.Id, JiraAuthor, unchanged
                 ? $"Moved to {lane.ColumnName} because this board's Jira lane mapping changed. Lane automations were skipped."
-                : $"Moved to {lane.ColumnName} because {issue.Key} changed status in Jira. Lane automations were skipped.", cancellationToken);
+                : $"Moved to {lane.ColumnName} because {issue.Key} changed status in Jira. Lane automations were skipped.", cancellationToken, syncToJira: false);
         }
         // Overflow: the status matches no lane and the overflow lane already exists, so MatchLane
         // names it. Unresolved: it does not exist yet (or the name matched several lanes).
@@ -642,7 +652,7 @@ public sealed class JiraPullService(
         var detail = await store.GetCardDetailAsync(projectPath, cardId, cancellationToken);
         if (detail?.Comments.Any(comment => comment.Body == body) == true)
             return;
-        await board.AddCommentAsync(projectPath, cardId, JiraAuthor, body, cancellationToken);
+        await board.AddCommentAsync(projectPath, cardId, JiraAuthor, body, cancellationToken, syncToJira: false);
     }
 
     private static string OverflowComment(string issueKey, string status) =>
@@ -749,11 +759,18 @@ public sealed class JiraPullScheduler(IServiceScopeFactory scopeFactory) : IJira
     private readonly Lock _gate = new();
     private DateTime _nextUtc = DateTime.MinValue;
     private Task _running = Task.CompletedTask;
+    private Task _delivering = Task.CompletedTask;
+    private DateTime _nextDeliveryUtc = DateTime.MinValue;
 
     public Task? Tick(DateTime nowUtc, CancellationToken stoppingToken)
     {
         lock (_gate)
         {
+            if (_delivering.IsCompleted && nowUtc >= _nextDeliveryUtc)
+            {
+                _nextDeliveryUtc = nowUtc.AddSeconds(5);
+                _delivering = Task.Run(() => DeliverAsync(stoppingToken), CancellationToken.None);
+            }
             if (nowUtc < _nextUtc || !_running.IsCompleted)
                 return null;
             _nextUtc = nowUtc.Add(Interval);
@@ -764,7 +781,19 @@ public sealed class JiraPullScheduler(IServiceScopeFactory scopeFactory) : IJira
     public Task WhenIdleAsync()
     {
         lock (_gate)
-            return _running;
+            return Task.WhenAll(_running, _delivering);
+    }
+
+    private async Task DeliverAsync(CancellationToken ct)
+    {
+        try
+        {
+            await using var scope = scopeFactory.CreateAsyncScope();
+            if (scope.ServiceProvider.GetService<JiraDeliveryService>() is { } delivery)
+                await delivery.DrainAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        catch (Exception) { Log.Warning("[Jira] Activity delivery could not complete; inspect card delivery status."); }
     }
 
     // Never throws: the task is observed only by WhenIdleAsync at shutdown.

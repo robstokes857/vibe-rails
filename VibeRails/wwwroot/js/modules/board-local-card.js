@@ -40,6 +40,7 @@ export function localCardEditorHtml({ card, projectPath, boardName, columns }) {
         <form data-local-comment-form class="mt-3">
             <label class="form-label" for="local-card-comment">Add a comment</label>
             <textarea id="local-card-comment" class="form-control" name="body" rows="3" required spellcheck="true"></textarea>
+            ${card.jiraIssueKey ? '<label class="form-check mt-2"><input class="form-check-input" type="checkbox" name="syncToJira" checked> Post this comment to Jira</label>' : ''}
             <button type="submit" class="btn btn-outline-primary btn-sm mt-2">Post comment</button>
         </form>
     </div>`;
@@ -65,6 +66,7 @@ function commentsHtml(card) {
     return entries.map(entry => `<article class="board-comment${entry.isAttention ? ' is-attention' : ''}">
         <div class="board-comment-content"><div class="board-comment-meta">
             <strong>${escapeHtml(entry.author?.label || 'Someone')}</strong>
+            ${entry.syncToJira === false ? '<span class="badge text-bg-secondary">Not sent to Jira</span>' : ''}
             <time>${escapeHtml(new Date(entry.createdAt).toLocaleString())}</time></div>
             ${entry.isAttention ? '<div class="board-comment-attention">Needs your attention</div>' : ''}
             <div class="board-comment-body board-local-comment-body">${renderCommentHtml(entry.body, { interactiveReferences: false })}</div></div></article>`).join('') || '<p class="text-muted small">No comments yet.</p>';
@@ -150,7 +152,7 @@ export function openLocalCardEditor(app, detail, { openCard, onChanged }) {
         if (!body.value.trim()) return;
         lock(true);
         try {
-            const entry = await BoardApi.addLocalBoardCommentAsync(card.id, { body: body.value.trim() });
+            const entry = await BoardApi.addLocalBoardCommentAsync(card.id, { body: body.value.trim(), syncToJira: commentForm.elements.namedItem('syncToJira')?.checked !== false });
             if (!alive()) return;
             card.comments = [...(card.comments || []), entry];
             comments.innerHTML = commentsHtml(card);

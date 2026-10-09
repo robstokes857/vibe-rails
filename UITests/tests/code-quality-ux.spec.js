@@ -217,7 +217,7 @@ for (const rulesView of ['dashboard', 'agents']) {
         await expect.poll(() => validations).toBe(1);
         expect(scanRequests).toHaveLength(0);
         await expect(page.locator('.code-report')).toHaveCount(0);
-        await expect(page.getByRole('button', { name: 'View/Edit Rules' })).toBeVisible();
+        await expect(page.locator('[data-rule-manager]')).toBeVisible();
 
         await qualityLink.click();
         await expect(page.locator('.code-report .qr')).toHaveAttribute('data-state', 'complete');
@@ -364,7 +364,7 @@ test('Quality actions use the shared app button styles', async ({ page }) => {
     await page.addStyleTag({ content: '.btn { transition: none !important; }' });
     await page.mouse.move(0, 0);
     const actions = page.locator('.project-health-page').locator([
-        '[data-action="launch-health-fix"]', '[data-action="manage-rules"]',
+        '[data-action="launch-health-fix"]', '[data-rule-manager-refresh]',
         '[data-action="toggle-health-details"]', '[data-action="run-hook-preview"]',
         '[data-action="run-code-analyzer"]', '[aria-label="More scan options"]'
     ].join(', '));

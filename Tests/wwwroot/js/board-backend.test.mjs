@@ -34,7 +34,7 @@ test('board-api.js is a thin client over /api/v1/board with no local placeholder
         "call('/boards', 'GET', null, extra)", "call('/boards', 'POST', payload)",
         "call(withBoard('/columns', boardId), 'GET', null, extra)", "call('/columns', 'POST', payload)", "call('/columns/order', 'PUT', { orderedIds, boardId: boardId || null })",
         "call(withBoard('/cards', boardId), 'GET', null, extra)", "call('/cards', 'POST', payload)", "/move`, 'POST'", "/launch`, 'POST'",
-        "/comments`, 'POST', { body })", "/attachments`, 'POST'", "/commits`, 'POST', { sha })", "/diff`)",
+        "/comments`, 'POST', { body, syncToJira })", "/attachments`, 'POST'", "/commits`, 'POST', { sha })", "/diff`)",
         "/sessions`, 'POST'"
     ]) {
         assert.ok(source.includes(route), `expected the client to build ${route}`);

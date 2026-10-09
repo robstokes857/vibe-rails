@@ -86,9 +86,10 @@ test('Rules retains its actions and Quality retains the log and coverage menu', 
     assert.doesNotMatch(template, /See what needs attention/);
     const rules = template;
     const rulesHeader = rules.match(/<header class="project-health-card-header">([\s\S]*?)<\/header>/)[1];
-    assert.match(rulesHeader, /data-action="run-hook-preview"[\s\S]*?data-action="manage-rules"/, 'Check again sits in the card header');
-    assert.match(rulesHeader, /data-action="manage-rules"[\s\S]*?View\/Edit Rules/);
-    assert.match(rulesHeader, /data-action="add-rule-file"[\s\S]*?New rule file/);
+    assert.match(rulesHeader, /data-action="run-hook-preview"/, 'Check again sits in the card header');
+    assert.doesNotMatch(rules, /data-action="manage-rules"/);
+    assert.match(rules, /data-rule-manager[\s\S]*?data-rule-manager-create[\s\S]*?New rule file/);
+    assert.match(rules, /data-rule-file-search[\s\S]*?data-agent-file-tree[\s\S]*?data-agent-rule-editor/);
     assert.match(rules, /data-rules-card-status[\s\S]*?data-action="toggle-health-details"/, 'the Details toggle sits in the verdict row');
     assert.doesNotMatch(rules, /data-rule-files|project-health-rule-file/);
     assert.match(rules, /visually-hidden">\s*<span class="rules-check-running"[\s\S]*?data-vca-console-state/, 'the console state badge is kept for the console, never shown');

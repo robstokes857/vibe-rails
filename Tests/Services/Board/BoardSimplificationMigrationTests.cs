@@ -76,6 +76,9 @@ public sealed class BoardSimplificationMigrationTests : IDisposable
         using var command = db.CreateCommand();
         command.CommandText = """
             -- Remove newer-only objects before reconstructing the old installed schema.
+            DROP TRIGGER BoardComments_QueueJira;
+            DROP TABLE BoardJiraDeliveries;
+            DELETE FROM SchemaMigrations WHERE Component = 'board-jira-delivery';
             DROP TRIGGER BoardCards_ResolveAttention;
             DROP TABLE BoardAttentionRequests;
             DELETE FROM SchemaMigrations WHERE Component = 'board-attention';

@@ -47,7 +47,7 @@ public static partial class BoardRoutes
         local.MapPost("/comments", ([FromServices] IBoardStore store, [FromServices] IBoardService board,
             string card, AddBoardCommentRequest request, CancellationToken ct) =>
             WithLocalCardAsync(store, card, async target =>
-                OkOrNotFound(await board.AddCommentAsync(target.ProjectPath, target.Id, BoardAuthor.User(), request.Body ?? "", ct), "Card"), ct))
+                OkOrNotFound(await board.AddCommentAsync(target.ProjectPath, target.Id, BoardAuthor.User(), request.Body ?? "", ct, request.SyncToJira), "Card"), ct))
             .WithName("CommentLocalBoardCard");
         local.MapGet("/links/candidates", ([FromServices] IBoardStore store, [FromServices] IBoardService board,
             string card, string? q, CancellationToken ct) =>

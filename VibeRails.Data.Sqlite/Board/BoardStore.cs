@@ -914,13 +914,13 @@ public sealed partial class BoardStore : IBoardStore
         return null;
     }
 
-    public Task<BoardCommentRecord?> AddCommentAsync(string projectPath, string cardId, BoardAuthor author, string body, CancellationToken cancellationToken = default)
-        => InsertCommentRowAsync(projectPath, cardId, author, body, BoardCommentKinds.Comment, cancellationToken);
+    public Task<BoardCommentRecord?> AddCommentAsync(string projectPath, string cardId, BoardAuthor author, string body, CancellationToken cancellationToken = default, bool syncToJira = true)
+        => InsertCommentRowAsync(projectPath, cardId, author, body, BoardCommentKinds.Comment, cancellationToken, syncToJira: syncToJira);
 
-    public Task<BoardCommentRecord?> AddNoteAsync(string projectPath, string cardId, BoardAuthor author, string body, CancellationToken cancellationToken = default)
-        => AddCommentAsync(projectPath, cardId, author, body, cancellationToken);
+    public Task<BoardCommentRecord?> AddNoteAsync(string projectPath, string cardId, BoardAuthor author, string body, CancellationToken cancellationToken = default, bool syncToJira = true)
+        => AddCommentAsync(projectPath, cardId, author, body, cancellationToken, syncToJira);
 
-    private async Task<BoardCommentRecord?> InsertCommentRowAsync(string projectPath, string cardId, BoardAuthor author, string body, string kind, CancellationToken cancellationToken, BoardSyncStamp? stamp = null)
+    private async Task<BoardCommentRecord?> InsertCommentRowAsync(string projectPath, string cardId, BoardAuthor author, string body, string kind, CancellationToken cancellationToken, BoardSyncStamp? stamp = null, bool syncToJira = true)
     {
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
@@ -933,7 +933,7 @@ public sealed partial class BoardStore : IBoardStore
         // Notes use their own id prefix so an agent can tell the two apart in tool output. A pulled
         // web comment keeps its remote id and time and is already marked sent (VB-51).
         var comment = new BoardCommentRecord(stamp?.EntryId ?? NewId(kind == BoardCommentKinds.Note ? "note" : "cm"), card.Id, author, body, stamp?.CreatedUtc ?? DateTime.UtcNow, kind,
-            stamp is null ? BoardCommentPurpose.Changes(author) : stamp.Changes);
+            stamp is null ? BoardJiraCommentPolicy.Changes(author, syncToJira) : stamp.Changes);
         if (stamp is not null && await HasSyncStampAsync(connection, transaction, stamp, cancellationToken)) return comment;
         await using (var insert = connection.CreateCommand())
         {
@@ -1060,6 +1060,7 @@ public sealed partial class BoardStore : IBoardStore
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
         await TouchCardAsync(connection, transaction, card.Id, cancellationToken);
+        await QueueJiraSessionAsync(connection, transaction, record, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return record;
     }
@@ -1941,6 +1942,8 @@ public sealed partial class BoardStore : IBoardStore
             SqliteSchema.Execute(db, transaction, ChecksSchemaSql));
         SqliteMigrationRunner.Apply(connection, "board-starter-workflows", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, StarterWorkflowSchemaSql));
+        SqliteMigrationRunner.Apply(connection, "board-jira-delivery", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, JiraDeliverySchemaSql));
         ReconcileDerivedRows(connection);
     }
 

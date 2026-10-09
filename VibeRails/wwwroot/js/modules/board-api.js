@@ -21,7 +21,7 @@
 //   commit     { sha, shortSha, author, message, committedAt, linkedAt }
 //   files      { files: ['repo/relative/path', …], truncated }   (searchFilesAsync, for `@path` refs)
 //
-//   board      { id, name, position, createdAt, cardCount, columns[] }
+//   board      { id, name, position, createdAt, cardCount, columns[], isJiraBoard }
 //
 // `assignee` is an LLM picker key ('base:claude' / 'env:7:codex'), never a person.
 // Boards are per project: the server scopes every call to the open workspace, and a project can
@@ -224,8 +224,8 @@ async function updateLocalBoardCardAsync(cardId, patch) {
     return call(`/local-cards/${enc(cardId)}`, 'PUT', patch);
 }
 
-async function addLocalBoardCommentAsync(cardId, { body }) {
-    return call(`/local-cards/${enc(cardId)}/comments`, 'POST', { body });
+async function addLocalBoardCommentAsync(cardId, { body, syncToJira = true }) {
+    return call(`/local-cards/${enc(cardId)}/comments`, 'POST', { body, syncToJira });
 }
 
 async function getLocalCardLinkCandidatesAsync(cardId, query = '', extra = {}) {
@@ -297,8 +297,8 @@ async function unlinkCardAsync(cardId, linkedCardId) {
 
 // ---------------------------------------------- comments
 
-async function addBoardCommentAsync(cardId, { body }) {
-    return call(`/cards/${enc(cardId)}/comments`, 'POST', { body });
+async function addBoardCommentAsync(cardId, { body, syncToJira = true }) {
+    return call(`/cards/${enc(cardId)}/comments`, 'POST', { body, syncToJira });
 }
 
 // ---------------------------------------------- agent notes

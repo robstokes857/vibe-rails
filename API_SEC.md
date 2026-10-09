@@ -365,6 +365,16 @@ it. Never return the raw credential/fingerprint. See [account-link flow](docs/ac
 
 ### Jira (VB-40 / VIBE-102)
 
+**Owner-requested automatic activity sharing (2026-10-09):** new Board comments on connected
+Jira cards queue outbound comments by default; `syncToJira=false` retains an internal note.
+New local session attachments also create public replay links and post them to the linked
+issue, using the existing fixed-origin sharing service and upload policy. The Board UI and
+agent prompts disclose both behaviors. This applies to existing Board write capabilities;
+no MCP grant, listener or authentication exception is added. An additive local delivery ledger
+pins the connection/issue, deduplicates events, excludes imports and copied discussion, and
+never automatically retries an uncertain POST. Connection changes and delivery share the Jira
+lock. Public links stay out of logs; old activity is not backfilled.
+
 `add_jira_comment` is an explicit outbound MCP write on both transports, outside the local
 Board auto-grants. It resolves the live card's retained issue link and original connected
 site within the owning project through `IBoardStore`, never caller-supplied credentials,

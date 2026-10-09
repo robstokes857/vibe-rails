@@ -860,10 +860,10 @@ export class VibeControlApp {
             Promise.resolve(loadResult).finally(() => {
                 // Rule management opens a full page for creation/details. Its Back
                 // destination is the same manager after the parent page has loaded.
-                if (this.currentView === view && this.navigationStack.at(-1)?.data === data && data.reopenRuleManager) {
-                    this.updateCurrentViewData({ ...data, reopenRuleManager: false });
+                if (this.currentView === view && this.navigationStack.at(-1)?.data === data && data.restoreRuleManager) {
+                    this.updateCurrentViewData({ ...data, restoreRuleManager: false });
                     this.agentController.selectedAgentPath = data.selectedAgentPath || null;
-                    this.agentController.openRuleManager();
+                    this.agentController.restoreRuleManager();
                 }
                 this.queueScrollPageToTop();
                 // [NavPerf] probe: view switches should feel instant. When one doesn't,

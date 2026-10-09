@@ -502,12 +502,6 @@ export class RuleController {
     bindProjectHealthControls(root) {
         this.disposeHealthFixPickers?.();
         this.disposeHealthFixPickers = mountProjectHealthFixPickers(this.app, root);
-        this.app.bindAction(root, '[data-action="manage-rules"]', () => {
-            this.app.agentController?.openRuleManager?.();
-        });
-        this.app.bindAction(root, '[data-action="add-rule-file"]', () => {
-            this.app.navigate('agent-create', {});
-        });
 
         root.querySelectorAll('[data-action="launch-health-fix"]').forEach(button => {
             button.addEventListener('click', () => this.launchProjectHealthFix(button.dataset.fixScope));

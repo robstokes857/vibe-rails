@@ -12,6 +12,9 @@ public static class AdfReader
 {
     public static string ToText(JsonElement document)
     {
+        // Agile/software endpoints can return a plain (or Jira-wiki) string instead of ADF.
+        if (document.ValueKind == JsonValueKind.String)
+            return document.GetString()?.Trim() ?? string.Empty;
         if (document.ValueKind != JsonValueKind.Object)
             return string.Empty;
         var builder = new StringBuilder();

@@ -9,6 +9,20 @@ namespace Tests.Services.Board;
 public sealed class BoardPromptComposerTests
 {
     [Fact]
+    public void JiraLaunchesExplainAutomaticSyncAndInternalNotes()
+    {
+        var card = Card() with { JiraIssueKey = "APP-1" };
+        foreach (var intent in new[] { "work", "chat", "code_review" })
+        {
+            var prompt = BoardPromptComposer.Compose(card, "Backlog", "Codex", null, intent: intent);
+            Assert.Contains("syncToJira=false", prompt);
+            Assert.Contains("do not spam", prompt);
+            Assert.Contains("public replay link", prompt);
+        }
+        Assert.Contains("syncToJira=false", BoardPromptComposer.ComposeAutomationPrompt(card.Key, "Work"));
+    }
+
+    [Fact]
     public void AutomationCompletionIsExplicitForBoardAndStandaloneWorkers()
     {
         foreach (var purpose in new[] { "code_review", "testing", "building", "deploying" })

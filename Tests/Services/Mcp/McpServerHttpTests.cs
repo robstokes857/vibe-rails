@@ -299,8 +299,9 @@ public class McpServerHttpTests : IAsyncLifetime
         var board = Mock.Get(_app.Services.GetRequiredService<IBoardService>());
         board.Setup(service => service.FindCardAsync(project, "author-card", It.IsAny<CancellationToken>())).ReturnsAsync(card);
         BoardAuthor? written = null;
-        board.Setup(service => service.AddCommentAsync(project, "author-card", It.IsAny<BoardAuthor>(), "Started", It.IsAny<CancellationToken>()))
-            .Callback<string, string, BoardAuthor, string, CancellationToken>((_, _, author, _, _) => written = author)
+        bool? syncToJira = null;
+        board.Setup(service => service.AddCommentAsync(project, "author-card", It.IsAny<BoardAuthor>(), "Started", It.IsAny<CancellationToken>(), It.IsAny<bool>()))
+            .Callback<string, string, BoardAuthor, string, CancellationToken, bool>((_, _, author, _, _, sync) => { written = author; syncToJira = sync; })
             .ReturnsAsync(new BoardCommentDto("cm_author", new BoardAuthorDto("agent", "Codex", "Codex"), "Started", DateTime.UtcNow));
         await using var client = await McpClient.CreateAsync(
             new HttpClientTransport(new HttpClientTransportOptions { Endpoint = _endpoint, TransportMode = HttpTransportMode.StreamableHttp }, SharedClient,
@@ -312,6 +313,10 @@ public class McpServerHttpTests : IAsyncLifetime
 
         Assert.Contains(" as Codex at ", Assert.Single(result.Content.OfType<TextContentBlock>()).Text);
         Assert.Equal(BoardAuthor.Agent("Codex", "Codex", null), written);
+        Assert.True(syncToJira);
+        await client.CallToolAsync("add_board_comment", new Dictionary<string, object?>
+            { ["body"] = "Started", ["card"] = "author-card", ["syncToJira"] = false }, cancellationToken: ct);
+        Assert.False(syncToJira);
     }
 
     [Fact]

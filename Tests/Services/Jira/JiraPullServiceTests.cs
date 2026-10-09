@@ -32,6 +32,27 @@ public sealed class JiraPullServiceTests : IDisposable
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Fact]
+    public async Task UnchangedIssueRepairsMissingDescriptionWithoutResettingLocalFields()
+    {
+        var service = Service();
+        var board = await BoardWithLanes();
+        var connection = await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct);
+        var issue = Issue("100", "PROJ-1", "2026-09-01T00:00:00.000Z", "Jira title", "Story", "Medium", "Backlog");
+        _jira.Pages.Enqueue(Page(issue with { DescriptionText = "" }));
+        await service.PullAsync(_project, connection.BoardId, false, Ct);
+        var card = Assert.Single(await _store.GetCardsAsync(_project, Ct, connection.BoardId));
+        await _board.UpdateCardAsync(_project, card.Id, new VibeRails.DTOs.UpdateBoardCardRequest(Title: "Local title"), Ct);
+        var lane = (await _store.GetColumnsAsync(_project, Ct, connection.BoardId)).First(l => l.Id != card.ColumnId);
+        await _store.MoveCardAsync(_project, card.Id, lane.Id, null, Ct);
+        _jira.Pages.Enqueue(Page(issue));
+        Assert.Equal(1, (await service.PullAsync(_project, connection.BoardId, false, Ct)).Updated);
+        var fixedCard = (await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Card;
+        Assert.Equal("body", fixedCard.Description);
+        Assert.Equal("Local title", fixedCard.Title);
+        Assert.Equal(lane.Id, fixedCard.ColumnId);
+    }
+
+    [Fact]
     public async Task ExistingConnectionSeparatesAtomically_PreservingCardsAndLaneChoices()
     {
         var source = await BoardWithLanes();

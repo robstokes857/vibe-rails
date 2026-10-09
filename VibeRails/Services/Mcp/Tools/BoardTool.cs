@@ -520,12 +520,13 @@ public sealed partial class BoardTool(
         }
     }
 
-    [McpServerTool, Description("Add a comment to a kanban card. Use it to record progress, decisions, blockers and hand-off notes so the next session can resume. Omit the card to comment on the card this terminal was launched for.")]
+    [McpServerTool, Description("Add a comment to a kanban card; linked Jira issues receive it by default. Use syncToJira=false for internal notes. Avoid repetitive progress updates. Use it to record progress, decisions, blockers and hand-off notes so the next session can resume. Omit the card to comment on the card this terminal was launched for.")]
     public async Task<string> AddBoardComment(
         [Description("Comment text.")] string body,
         [Description(CardArgumentHelp)] string? card = null,
         CancellationToken cancellationToken = default,
-        McpServer? server = null)
+        McpServer? server = null,
+        [Description("Default true: post this comment to linked Jira issues. Set false for internal notes that must not be sent to Jira. Keep synced updates concise; avoid progress spam.")] bool syncToJira = true)
     {
         try
         {
@@ -534,11 +535,11 @@ public sealed partial class BoardTool(
                 return target.Error;
             if (await ResolveAuthorAsync(server, cancellationToken) is not { } author)
                 return UnnamedClientHint;
-            var comment = await service.AddCommentAsync(target.Project, target.CardId!, author, body, cancellationToken);
+            var comment = await service.AddCommentAsync(target.Project, target.CardId!, author, body, cancellationToken, syncToJira);
             if (comment is null)
                 return $"FAIL: card not found: {card}";
             await AutoLinkSessionAsync(target.Project, target.CardId!, cancellationToken);
-            return $"Comment {comment.Id} added to {target.CardKey} as {author.Label} at {comment.CreatedAt:HH:mm:ss}Z.";
+            return $"Comment {comment.Id} added to {target.CardKey} as {author.Label} at {comment.CreatedAt:HH:mm:ss}Z." + (syncToJira ? "" : " Not sent to Jira.");
         }
         catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
         catch (BoardConflictException ex) { return "FAIL: " + ex.Message; }
@@ -553,7 +554,8 @@ public sealed partial class BoardTool(
         [Description("Note text.")] string body,
         [Description(CardArgumentHelp)] string? card = null,
         CancellationToken cancellationToken = default,
-        McpServer? server = null)
+        McpServer? server = null,
+        [Description("Default true: post this comment to linked Jira issues. Set false for internal notes that must not be sent to Jira. Keep synced updates concise; avoid progress spam.")] bool syncToJira = true)
     {
         try
         {
@@ -562,11 +564,11 @@ public sealed partial class BoardTool(
                 return target.Error;
             if (await ResolveAuthorAsync(server, cancellationToken) is not { } author)
                 return UnnamedClientHint;
-            var note = await service.AddNoteAsync(target.Project, target.CardId!, author, body, cancellationToken);
+            var note = await service.AddNoteAsync(target.Project, target.CardId!, author, body, cancellationToken, syncToJira);
             if (note is null)
                 return $"FAIL: card not found: {card}";
             await AutoLinkSessionAsync(target.Project, target.CardId!, cancellationToken);
-            return $"Comment {note.Id} added to {target.CardKey} as {author.Label} at {note.CreatedAt:HH:mm:ss}Z.";
+            return $"Comment {note.Id} added to {target.CardKey} as {author.Label} at {note.CreatedAt:HH:mm:ss}Z." + (syncToJira ? "" : " Not sent to Jira.");
         }
         catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
         catch (BoardConflictException ex) { return "FAIL: " + ex.Message; }
@@ -937,8 +939,7 @@ public sealed partial class BoardTool(
         builder.Append('\n');
         if (!string.IsNullOrWhiteSpace(card.JiraIssueKey))
             builder.Append("Jira issue: ").Append(card.JiraIssueKey)
-                .Append(". When asked to report completion to Jira, use add_jira_comment with the summary and sessionLinks. ")
-                .Append("Create or reuse public replay links with create_session_share_link; save links in the Board handoff for later sessions.\n");
+                .Append(". Comments sync to Jira by default. Keep updates concise; do not spam progress. Use add_board_comment or append_board_note with syncToJira=false for internal notes. Linked sessions automatically get public replay links posted to Jira. Do not duplicate those posts with add_jira_comment.\n");
         if (!string.IsNullOrWhiteSpace(boardName))
             builder.Append("Board: ").Append(boardName).Append('\n');
         if (laneNames is { Count: > 0 })

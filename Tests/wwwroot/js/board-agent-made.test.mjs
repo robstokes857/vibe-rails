@@ -51,7 +51,7 @@ test('Jira origins have an escaped logo badge and are excluded from the human fi
     board.state.filters.origin = 'human';
     assert.deepEqual(board.filteredCards().map(item => item.id), ['human']);
     const html = board.renderCard(imported);
-    assert.match(html, /fa-brands fa-jira/);
+    assert.match(html, /class="board-brand-logo" src="assets\/img\/jira.svg"/);
     assert.match(html, /Jira · PROJ-1&lt;svg&gt;/);
     assert.doesNotMatch(html, /<svg>/);
 });

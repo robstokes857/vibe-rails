@@ -175,6 +175,8 @@ namespace VibeRails
             serviceCollection.AddJiraClients();
             serviceCollection.AddScoped<Services.Jira.IJiraPullService, Services.Jira.JiraPullService>();
             serviceCollection.AddSingleton<Services.Jira.IJiraPullScheduler, Services.Jira.JiraPullScheduler>();
+            serviceCollection.AddScoped<Services.Jira.IJiraSessionSharing, Services.Jira.JiraSessionSharing>();
+            serviceCollection.AddScoped<Services.Jira.JiraDeliveryService>();
             // Board sync with viberails.ai (VB-51). Outbound only, HTTPS, X-Api-Key, redirects off;
             // the API key is re-read from settings on every call. Ticked every 60 s by the leased
             // root job scheduler beside the Jira pull, and one OS lock across root backends.

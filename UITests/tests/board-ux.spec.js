@@ -8,7 +8,15 @@ const DESCRIPTION = 'Repro screenshot\n![Screenshot.png](attachment:att_image)\n
 for (const width of [1440, 390]) {
     test(`Jira boards combine General and Jira settings at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 950 });
-        await openBoard(page);
+        await openBoard(page, { onCard: card => {
+            card.jiraIssueKey = 'PROJECT-WITH-A-LONG-KEY-123';
+            card.jiraIssueUrl = 'https://example.atlassian.net/browse/PROJECT-WITH-A-LONG-KEY-123';
+        } });
+        const badge = page.locator('.board-card-origin');
+        await expect(badge.locator('img')).toHaveAttribute('src', 'assets/img/jira.svg');
+        await expect.poll(() => badge.locator('img').evaluate(image => image.complete && image.naturalWidth > 0)).toBe(true);
+        expect(await badge.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+        await page.screenshot({ path: testInfo.outputPath(`board-jira-badge-${width}.png`) });
         let isJiraBoard = true;
         await page.route('**/api/v1/board/boards/brd_main/sync', route => route.fulfill({ json: {
             isJiraBoard, enabled: !isJiraBoard, configured: true
@@ -19,6 +27,7 @@ for (const width of [1440, 390]) {
             jiraBoardName: 'TEST', email: 'user@example.com', enabled: true, columns: [], lanes: []
         } }));
         await page.getByRole('button', { name: 'Board settings', exact: true }).click();
+        await expect(page.locator('.modal-title img')).toHaveAttribute('src', 'assets/img/jira.svg');
         await expect(page.locator('[data-board-sync-content]')).toBeEmpty();
         await expect(page.locator('[data-board-sync]')).toBeHidden();
         await expect(page.getByLabel('Sync this board with viberails.ai')).toHaveCount(0);

@@ -4,7 +4,7 @@ async function openBoards(page) {
     const state = {
         boards: [
             { id: 'alpha', name: 'Alpha', position: 0 },
-            { id: 'jira', name: 'Jira · SCRUM', position: 1 },
+            { id: 'jira', name: 'Jira · SCRUM', position: 1, isJiraBoard: true },
             { id: 'gamma', name: 'Gamma', position: 2 }
         ],
         writes: [],
@@ -56,8 +56,13 @@ for (const width of [1440, 390]) {
         const state = await openBoards(page);
         const select = page.locator('[data-board-select]');
         await expect(select).toHaveValue('alpha');
+        await expect(page.locator('.board-picker-control .item img')).toHaveAttribute('src', 'assets/img/logo.png');
+        expect((await page.locator('.board-picker-control').boundingBox()).width).toBeGreaterThanOrEqual(130);
         await page.locator('.board-picker-control .ts-control').click();
         await expect(page.locator('.board-picker-dropdown .option')).toHaveText(['Alpha', 'Jira · SCRUM', 'Gamma']);
+        await expect(page.locator('.board-picker-dropdown [data-value="jira"] img')).toHaveAttribute('src', 'assets/img/jira.svg');
+        await expect(page.locator('.board-picker-dropdown [data-value="alpha"] img')).toHaveAttribute('alt', 'VibeRails board');
+        await expect.poll(() => page.locator('.board-picker-dropdown img').evaluateAll(images => images.every(image => image.complete && image.naturalWidth > 0))).toBe(true);
         const search = page.getByPlaceholder('Search boards...', { exact: true });
         await search.fill('SCRUM');
         await page.evaluate(() => window.app.boardController.refreshBoardSnapshot());
@@ -65,6 +70,7 @@ for (const width of [1440, 390]) {
         await expect(page.locator('.board-picker-dropdown .option')).toHaveText(['Jira · SCRUM']);
         await page.locator('.board-picker-dropdown .option[data-value="jira"]').click();
         await expect(select).toHaveValue('jira');
+        await expect(page.locator('.board-picker-control .item img')).toHaveAttribute('alt', 'Jira board');
 
         const manager = await openManager(page);
         await manager.getByRole('button', { name: 'Move Gamma up', exact: true }).click();
@@ -94,6 +100,27 @@ for (const width of [1440, 390]) {
         await expect(select).toHaveValue('gamma');
     });
 }
+
+test('Board logo refresh follows connection changes while preserving an open search', async ({ page }) => {
+    const state = await openBoards(page);
+    state.boards[0].name = '<img src=x onerror=alert(1)> Jira';
+    await page.evaluate(() => window.app.boardController.refreshBoardSnapshot());
+    await expect(page.locator('.board-picker-control .item img')).toHaveCount(1);
+    await expect(page.locator('.board-picker-control .item')).toHaveText(state.boards[0].name);
+    await page.locator('.board-picker-control .ts-control').click();
+    const search = () => page.getByPlaceholder('Search boards...', { exact: true });
+    await search().fill('SCRUM');
+    state.boards[1].isJiraBoard = false;
+    await page.evaluate(() => window.app.boardController.refreshBoardSnapshot());
+    await expect(search()).toBeVisible();
+    await expect(search()).toHaveValue('SCRUM');
+    await expect(page.locator('.board-picker-dropdown .option img')).toHaveAttribute('src', 'assets/img/logo.png');
+    await page.locator('.board-picker-dropdown .option').click();
+    await expect(page.locator('.board-picker-control .item img')).toHaveAttribute('alt', 'VibeRails board');
+    state.boards[1].isJiraBoard = true;
+    await page.evaluate(() => window.app.boardController.refreshBoardSnapshot());
+    await expect(page.locator('.board-picker-control .item img')).toHaveAttribute('src', 'assets/img/jira.svg');
+});
 
 test('Board order errors preserve edits and reload recovers a changed catalog', async ({ page }) => {
     const state = await openBoards(page);

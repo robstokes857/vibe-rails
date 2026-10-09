@@ -7,6 +7,13 @@ namespace Tests.Services.Jira;
 public sealed class AdfReaderTests
 {
     [Fact]
+    public void PlainStringDescriptionFromSoftwareEndpointIsPreserved()
+    {
+        using var document = JsonDocument.Parse("\"Hello\\n* World\"");
+        Assert.Equal("Hello\n* World", AdfReader.ToText(document.RootElement));
+    }
+
+    [Fact]
     public void FlattensTheNodesPhaseOneKeeps()
     {
         const string json = """

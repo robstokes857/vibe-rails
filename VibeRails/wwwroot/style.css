@@ -6149,6 +6149,32 @@ h6 {
     color: var(--color-text);
 }
 
+.board-brand-logo {
+    width: 18px;
+    height: 18px;
+    object-fit: contain;
+    vertical-align: -0.2em;
+    flex-shrink: 0;
+}
+
+.board-picker-label {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 0;
+}
+
+.board-picker-name {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.board-picker-control .board-picker-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .board-settings-jira-combined {
     margin-top: 1.5rem;
     padding-top: 1.5rem;
@@ -19012,26 +19038,12 @@ body.performance-mode .brand-text-sm {
     display: none;
 }
 
-.project-health-rule-modal-dialog {
-    width: min(1180px, calc(100vw - 32px));
-    max-width: 1180px;
-}
-
-/* Rule add/remove/rename dialogs sit above the still-mounted Manage rules modal. */
-.agent-rule-modal-layer > .agent-rule-crud-modal {
-    z-index: 1070;
-}
-
-.agent-rule-modal-layer > .agent-rule-crud-backdrop {
-    z-index: 1065;
-}
-
 .project-health-rule-manager-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    margin-bottom: 14px;
+    margin-bottom: 0;
 }
 
 .project-health-rule-manager-header p {
@@ -19043,8 +19055,8 @@ body.performance-mode .brand-text-sm {
 .project-health-rule-manager-grid {
     min-height: min(580px, 66vh);
     overflow: hidden;
-    border: 1px solid var(--color-border, #334155);
-    border-radius: 10px;
+    border-top: 1px solid var(--color-border, #334155);
+    border-radius: 0 0 14px 14px;
 }
 
 @media (max-width: 820px) {

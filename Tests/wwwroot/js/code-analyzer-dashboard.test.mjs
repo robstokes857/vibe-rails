@@ -531,10 +531,11 @@ test('Rules and Code quality have independent pages without a docked terminal', 
     assert.match(agentsTemplate, /data-vca-console\b/);
     assert.doesNotMatch(agentsTemplate, /data-code-analyzer/);
     assert.match(agentsTemplate, /project-health-status-copy" role="status"[\s\S]*?aria-live="polite" aria-atomic="true"/);
-    assert.match(agentsTemplate, /data-action="manage-rules"/);
+    assert.match(agentsTemplate, /data-rule-manager/);
     assert.equal((agentsTemplate.match(/data-action="launch-health-fix"/g) || []).length, 1);
     assert.doesNotMatch(agentsTemplate, /data-terminal-section|data-terminal-content|renderTerminalPanel/);
-    assert.doesNotMatch(agentsTemplate, /data-agent-file-tree|data-rules-files-door/);
+    assert.match(agentsTemplate, /data-agent-file-tree/);
+    assert.doesNotMatch(agentsTemplate, /data-rules-files-door/);
 
     // The report renders in its own full-width workspace.
     const qualityTemplate = index.match(/<template id="code-quality-template">([\s\S]*?)<\/template>/)[1];

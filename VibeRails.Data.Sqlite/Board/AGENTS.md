@@ -291,3 +291,10 @@ connection's live imports still on the source board using the ordinary log-trans
 moves the connection. IDs, comments, attachments, sessions and commits survive; local cards stay.
 Repeated calls use the existing dedicated board. Old writers preserve the new column. Card reads
 project the Jira issue key from retained `BoardJiraLinks`; no card-origin backfill is required.
+
+`board-jira-delivery/1` adds the outbound Jira ledger and a future-comment trigger without
+backfilling history. Comment `Changes.syncToJira.to=false` suppresses delivery. Local session
+linking records a deduplicated intent in its transaction. Copied discussion carries `jiraCopy`
+and never requeues; same-card Board moves rebind existing source IDs. Preserve these rules
+when changing discussion copy/merge/sync. Public capability URLs in this local ledger must
+never enter logs or hosted Board projections.

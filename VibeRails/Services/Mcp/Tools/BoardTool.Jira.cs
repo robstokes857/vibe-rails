@@ -31,7 +31,7 @@ public sealed partial class BoardTool
             {
                 var receipt = confirmation + "\n\n" + content.Body;
                 if (content.Links.Count > 0) receipt += "\n\nVibeRails sessions:\n" + string.Join('\n', content.Links);
-                if (await service.AddCommentAsync(target.Project, target.CardId!, author, receipt, cancellationToken) is null)
+                if (await service.AddCommentAsync(target.Project, target.CardId!, author, receipt, cancellationToken, syncToJira: false) is null)
                     return confirmation + "\nThe Board receipt could not be saved. Do not repost the Jira comment.";
             }
             catch (Exception)
