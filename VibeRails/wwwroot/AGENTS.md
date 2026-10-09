@@ -568,7 +568,9 @@ ID with the permanent key and title in the tooltip. It navigates to `board` with
 set to the immutable row ID; the existing Board navigation handles local and cross-project cards.
 All associations get separate links, while unlinked sessions have none. Replay stays in Actions.
 
-The three-dot menu offers session replay but no Session Data Dump action. Send to keeps the
+The three-dot menu offers session replay and **Share session**, which opens the existing
+`terminal-session-share.js` dialog for the selected history entry's session ID and display name.
+There is no Session Data Dump action. Send to keeps the
 editable summary, regeneration and terminal launch; it does not display the raw transcript.
 These are presentation choices only: stored session data, transcripts and backend APIs remain intact.
 

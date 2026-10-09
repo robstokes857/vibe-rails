@@ -6,6 +6,7 @@ import {
     escapeHtml
 } from './utils.js';
 import * as SessionDebug from './session-viewer.js';
+import { showSessionShareModal } from './terminal-session-share.js';
 import { cardDisplayId, cardLabel, cardSearchText } from './board-card-label.js';
 import { BoardApi } from './board-api.js';
 import { CardSearchPicker } from './board-card-search-picker.js';
@@ -140,6 +141,7 @@ export class ChatHistorySidebar {
                     <div class="ch-context-menu-item text-danger" data-action="delete">Delete</div>
                     <div class="ch-context-menu-divider"></div>
                     <div class="ch-context-menu-item" data-action="get-session">Replay Session</div>
+                    <div class="ch-context-menu-item" data-action="share-session">Share session</div>
                 </div>
             </div>`;
     }
@@ -255,6 +257,12 @@ export class ChatHistorySidebar {
             e.stopPropagation();
             this._closeContextMenu();
             if (this.activeItem) void SessionDebug.showReplayModal(this.activeItem.id);
+        });
+        contextMenu?.querySelector('[data-action="share-session"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const item = this.activeItem;
+            this._closeContextMenu();
+            if (item) void showSessionShareModal(this.app, item.id, this._getDisplayName(item));
         });
         const searchInput = root.querySelector('#ch-search-input');
         if (searchInput) searchInput.value = this.filterText;
