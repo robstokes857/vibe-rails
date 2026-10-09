@@ -65,9 +65,88 @@
         "command": "viberails.addScript",
         "title": "Add to VibeRails Scripts…",
         "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "viberails.launcher.run",
+        "title": "Run now",
+        "category": "VibeRails",
+        "icon": "$(play)"
+      },
+      {
+        "command": "viberails.launcher.refresh",
+        "title": "Refresh Launcher",
+        "category": "VibeRails",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "viberails.launcher.customize",
+        "title": "Customize Launcher List…",
+        "category": "VibeRails",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "viberails.launcher.manage",
+        "title": "Manage Automations",
+        "category": "VibeRails",
+        "icon": "$(list-unordered)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "viberails",
+          "title": "VibeRails",
+          "icon": "$(play)"
+        }
+      ]
+    },
+    "views": {
+      "viberails": [
+        {
+          "id": "viberails.launcher",
+          "name": "Launch",
+          "contextualTitle": "VibeRails"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "viberails.launcher",
+        "when": "!viberails.dashboardOpen",
+        "contents": "Open the VibeRails dashboard to list your automations and scripts.\n[Open Dashboard](command:viberails.open)"
       }
     ],
     "menus": {
+      "view/title": [
+        {
+          "command": "viberails.launcher.refresh",
+          "when": "view == viberails.launcher",
+          "group": "navigation@1"
+        },
+        {
+          "command": "viberails.launcher.customize",
+          "when": "view == viberails.launcher",
+          "group": "navigation@2"
+        },
+        {
+          "command": "viberails.launcher.manage",
+          "when": "view == viberails.launcher",
+          "group": "navigation@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "viberails.launcher.run",
+          "when": "view == viberails.launcher && viewItem == launcherItem",
+          "group": "inline"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "viberails.launcher.run",
+          "when": "false"
+        }
+      ],
       "explorer/context": [
         {
           "command": "viberails.addScript",

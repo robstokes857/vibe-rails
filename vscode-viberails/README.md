@@ -111,6 +111,11 @@ Automations run repository scripts (`.py`, `.ps1`, `.sh`) and an optional Worker
 schedule, around commits, or when a card enters a Board lane. They run while VibeRails is open,
 with the same permissions as VibeRails, so review every Worker and script.
 
+The play icon in the Activity Bar opens the **Launch** view: the same list as the dashboard's
+nav Play button, in the order you chose there. Click an automation to queue it or a signed script
+to open its run window, and use the view's title buttons to refresh, customize the list, or open
+the Automation page.
+
 ## Get Started
 
 1. Install the extension from the VS Code Marketplace.
