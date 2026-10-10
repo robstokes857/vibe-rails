@@ -28,6 +28,10 @@
     border-color: var(--color-primary, #3b82f6);
     color: var(--color-primary, #3b82f6);
 }
+.board-lane-agents-button.is-running > .fa-robot {
+    filter: drop-shadow(0 0 3px currentColor);
+    animation: board-lane-agent-glow 2s ease-in-out infinite;
+}
 .board-lane-agents-button.is-running::after {
     content: '';
     position: absolute;
@@ -43,7 +47,12 @@
     0%, 100% { box-shadow: 0 0 0 0 transparent; }
     45% { box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 24%, transparent); }
 }
+@keyframes board-lane-agent-glow {
+    0%, 100% { opacity: .6; filter: drop-shadow(0 0 1px currentColor); }
+    50% { opacity: 1; filter: drop-shadow(0 0 6px currentColor); }
+}
 @media (prefers-reduced-motion: reduce) {
+    .board-lane-agents-button.is-running > .fa-robot,
     .board-lane-agents-button.is-running::after { animation: none; }
 }
 
@@ -210,4 +219,11 @@
 .board-workflow-state.is-failed { color: #ff8585; }
 .board-workflow-state.is-fixing, .board-workflow-state.is-stopping { color: #f5c366; }
 .board-workflow-state.is-running, .board-workflow-state.is-reviewing { color: #8bc4ff; }
+.board-workflow-state > .fa-spinner { animation: board-workflow-spin 1s linear infinite; }
+@keyframes board-workflow-spin {
+    to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .board-workflow-state > .fa-spinner { animation: none; }
+}
 .board-workflow-arrow { display: flex; justify-content: center; color: #8896a7; margin: -.3rem 0; }

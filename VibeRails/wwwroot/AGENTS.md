@@ -352,9 +352,10 @@ and its Environment. Script-only workflows use a code icon; the lane-entry butto
 The panel loads the Environment catalog alongside Jobs so direct Board navigation also resolves
 the Worker's saved model and effort. `llm-display.js` formats those argv values as friendly labels;
 unknown values remain escaped text and unset options stay absent. `cli-arguments.js` shares the
-tokenizer with the Environment editor. Lane buttons show a small pulsing dot and Running caption
+tokenizer with the Environment editor. Lane buttons show a softly glowing robot, a pulsing dot and Running caption
 from the activity endpoint's `activeAutomationColumnIds`, independently of filters and loaded
-cards. Polling preserves panel drafts; reduced-motion preferences leave a static dot.
+cards. Reviewing/Running step spinners rotate, including on reruns. Polling preserves panel drafts;
+reduced-motion preferences leave a static lit robot, dot and status icon.
 Lane selection saves use the existing revision check and cancel pending triggers. The existing
 endpoint only accepts enabled selections: an Add explains disabled selections that must first be
 enabled/removed, and a Remove confirmation lists other unavailable selections being cleared.

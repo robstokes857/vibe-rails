@@ -5,6 +5,12 @@ const { test, expect } = process.env.VIBERAILS_BOARD_STATIC === '1'
 const IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=';
 const DESCRIPTION = 'Repro screenshot\n![Screenshot.png](attachment:att_image)\n<img src=x onerror="window.__injected=true">';
 
+async function expectAnimatedStyle(locator, property) {
+    const read = () => locator.evaluate((element, name) => getComputedStyle(element)[name], property);
+    const initial = await read();
+    await expect.poll(read).not.toBe(initial);
+}
+
 for (const width of [1440, 390]) {
     test(`Jira boards combine General and Jira settings at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 950 });
@@ -1508,6 +1514,8 @@ for (const width of [1440, 390]) {
         await expect(button.locator('.board-lane-agents-caption')).toHaveText('Running');
         await expect(button.locator('.board-lane-agents-count')).toHaveText('2');
         expect(await button.evaluate(el => getComputedStyle(el, '::after').animationName)).toBe('board-lane-agent-pulse');
+        const robot = button.locator('.fa-robot');
+        await expectAnimatedStyle(robot, 'opacity');
         await expect(page.locator('.board-card .board-automation-running')).toHaveCount(1);
         await button.scrollIntoViewIfNeeded();
         await button.click();
@@ -1519,6 +1527,9 @@ for (const width of [1440, 390]) {
         await page.screenshot({ path: testInfo.outputPath(`lane-running-${width}.png`) });
         await page.emulateMedia({ reducedMotion: 'reduce' });
         expect(await button.evaluate(el => getComputedStyle(el, '::after').animationName)).toBe('none');
+        await expect(robot).toHaveCSS('animation-name', 'none');
+        await expect(robot).toHaveCSS('opacity', '1');
+        await expect(robot).not.toHaveCSS('filter', 'none');
         expect(await page.locator('.board-automation-running').evaluate(el => getComputedStyle(el).animationName)).toBe('none');
         // Activity updates preserve the open panel and its text drafts.
         await panel.getByRole('button', { name: 'Add agent', exact: true }).click();
@@ -1530,6 +1541,9 @@ for (const width of [1440, 390]) {
         await page.evaluate(() => window.app.boardController.refreshSessionActivity());
         await expect(button).not.toHaveClass(/is-running/);
         await expect(button.locator('.board-lane-agents-caption')).toHaveText('Agents');
+        await page.emulateMedia({ reducedMotion: 'no-preference' });
+        await expect(robot).toHaveCSS('animation-name', 'none');
+        await expect(robot).toHaveCSS('filter', 'none');
         await expect(page.locator('.board-automation-running')).toHaveCount(0);
         await expect(draft).toHaveValue('Keep this draft while the agent finishes');
         // Unknown model identifiers render as text.
@@ -2741,6 +2755,7 @@ for (const width of [1440, 390]) {
         await expect(panel.locator('[data-lane-step-id="12"]')).toContainText('Reviewing');
         await expect(panel.locator('[data-lane-step-id="12"]')).toContainText('VIBE-123');
         await expect(panel.locator('.board-workflow-arrow')).toHaveCount(2);
+        await expectAnimatedStyle(panel.locator('[data-lane-step-id="12"] .fa-spinner'), 'transform');
         for (const state of ['Failed', 'Fixing', 'Reviewing', 'Passed']) {
             steps[0].stepStatus = state;
             steps[0].reason = state === 'Passed' ? 'No blocking findings.' : state + ' in progress.';
