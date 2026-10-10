@@ -20,7 +20,13 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="xunit.v3" Version="4.0.2" />
+    <!-- xunit.v3 4.x defaults to Microsoft Testing Platform v2, whose MSBuild targets refuse the
+         classic VSTest-mode `dotnet test` on the .NET 10 SDK (this killed release v10.11.18).
+         The mtp-off variant is the same xunit with MTP support disabled, so `dotnet test`,
+         filter switches and the release workflow keep working unchanged. Moving to the MTP-mode
+         `dotnet test` needs a global.json test.runner opt-in and a different command-line
+         surface; do that as its own change, not as part of a package bump. -->
+    <PackageReference Include="xunit.v3.mtp-off" Version="4.0.2" />
   </ItemGroup>
 
   <ItemGroup>
