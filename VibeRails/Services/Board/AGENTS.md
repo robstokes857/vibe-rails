@@ -152,6 +152,12 @@ or impose a stay-in-lane default. Lane names, order and the meaning of Done rema
 The optional new-board review recipe uses Switch reviewer (Claude to Codex, Codex to Claude), with editable
 mappings and a fixed Codex review alternative; the implementation scope is tracked on VIBE-20–25.
 
+## Public card sharing
+
+The independent read-only card publication contract is in [Sharing/README.md](Sharing/README.md).
+Preserve saved-content capture, project/account binding, complete-payload rejection and draft-safe
+CRUD. This does not enable ordinary Board sync or create collaborator/terminal-control access.
+
 ## Board sharing (VB-52)
 
 See [SYNC.md](SYNC.md#vb-52-shared-boards) for the POC contract. Persistence stays behind

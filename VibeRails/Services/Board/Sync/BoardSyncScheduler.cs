@@ -54,6 +54,14 @@ public sealed class BoardSyncScheduler(IServiceScopeFactory scopeFactory) : IBoa
         {
             await using var scope = scopeFactory.CreateAsyncScope();
             await scope.ServiceProvider.GetRequiredService<IBoardSyncService>().SyncDueAsync(stoppingToken);
+            // Sequentially reuse the OS lock after ordinary sync, so the two never starve each
+            // other by racing for it. No extra background host or production listener.
+            if (scope.ServiceProvider.GetService<Sharing.CardSharePublisher>() is { } cards)
+            {
+                try { await cards.RefreshDueAsync(stoppingToken); }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
+                catch (Exception) { Log.Warning("[CardSharing] Scheduled refresh failed. Use Refresh shared card to inspect the result."); }
+            }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {

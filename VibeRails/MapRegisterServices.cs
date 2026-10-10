@@ -189,6 +189,11 @@ namespace VibeRails
                     sp.GetRequiredService<IHttpClientFactory>(), sp.GetRequiredService<IConfiguration>()));
             serviceCollection.AddSingleton(_ => Services.Board.Sync.BoardSyncLock.BesideStateDatabase());
             serviceCollection.AddSingleton<Services.Board.Sync.BoardSyncActivityCache>();
+            serviceCollection.AddScoped<Services.Board.Sharing.CardShareCapture>();
+            serviceCollection.AddScoped<Services.Board.Sharing.CardSharePublisher>();
+            serviceCollection.AddSingleton<Services.Board.Sharing.CardShareRefreshState>();
+            serviceCollection.AddHttpClient<Services.Board.Sharing.CardShareClient>(client => client.Timeout = TimeSpan.FromSeconds(90))
+                .ConfigurePrimaryHttpMessageHandler(Services.Board.Sharing.CardShareClient.CreateHandler);
             serviceCollection.AddScoped<Services.Board.Sync.IBoardSyncService, Services.Board.Sync.BoardSyncService>();
             serviceCollection.AddScoped<Services.Board.Sync.BoardSharingService>();
             serviceCollection.AddScoped<Services.Board.Sync.RemoteBoardsService>();
