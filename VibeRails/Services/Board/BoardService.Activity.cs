@@ -30,6 +30,8 @@ public sealed partial class BoardService
             .ToHashSet(StringComparer.Ordinal);
         var automationIds = await store.GetAutomationSessionIdsAsync(projectPath,
             activity.Where(a => a.SessionId is not null).Select(a => a.SessionId!).Distinct(StringComparer.Ordinal).ToList(), cancellationToken);
+        var desktopCards = await store.GetDesktopActiveCardIdsAsync(projectPath,
+            activity.Select(a => a.CardId).Distinct(StringComparer.Ordinal).ToList(), DateTime.UtcNow, cancellationToken);
         return new(activity.GroupBy(a => a.CardId).Select(group =>
         {
             // Same rule as the list/detail responses: an Automation's live session blinks the robot
@@ -39,7 +41,10 @@ public sealed partial class BoardService
             var active = liveRows.FirstOrDefault(a => !automationRows.Contains(a) && a.Origin is not ("chat" or "code_review"));
             return new BoardCardActivityResponse(group.Key, active?.SessionId,
                 active?.SessionId is { } id ? live[id] : null,
-                automationRows.Count > 0 || runningCards.Contains(group.Key), waiting.Contains(group.Key));
+                automationRows.Count > 0 || runningCards.Contains(group.Key), waiting.Contains(group.Key))
+            {
+                HasActiveDesktopAgent = desktopCards?.Contains(group.Key) == true
+            };
         }).ToList())
         {
             ActiveAutomationColumnIds = running.Where(run => run.ColumnId is not null)

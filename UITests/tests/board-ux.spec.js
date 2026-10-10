@@ -1010,7 +1010,8 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
             expect(cardIds.length).toBeLessThanOrEqual(100);
             return route.fulfill({ json: { cards: cardIds.includes(card.id) ? [{ id: card.id,
                 activeSessionId: card.activeSessionId, activeTabId: card.activeTabId,
-                hasActiveAutomation: Boolean(card.hasActiveAutomation) }] : [] } });
+                hasActiveAutomation: Boolean(card.hasActiveAutomation),
+                hasActiveDesktopAgent: Boolean(card.hasActiveDesktopAgent) }] : [] } });
         }
         if (relatedCard) {
             if (route.request().method() === 'PUT') Object.assign(relatedCard, route.request().postDataJSON());
@@ -2356,6 +2357,57 @@ for (const width of [1440, 520]) {
     });
 }
 
+
+for (const width of [1440, 390]) {
+    test(`Desktop agent activity keeps distinct indicators at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 900 });
+        const columns = ['Desktop app', 'CLI terminal', 'Desktop and CLI'].map((name, index) => ({
+            id: `col_${index}`, name, position: index, color: '#64748b', boardId: 'brd_main'
+        }));
+        let template;
+        await openBoard(page, { columns, assignee: 'base:codex', onCard(value) {
+            template = { ...value, description: '', attachments: [], comments: [], commentCount: 0, sessions: [] };
+        } });
+        const cards = columns.map((column, index) => ({
+            ...template, id: `activity_${index}`, key: `VB-${index + 1}`, columnId: column.id,
+            title: column.name, hasActiveDesktopAgent: index !== 1,
+            activeTabId: index === 0 ? null : `tab_${index}`,
+            activeSessionId: index === 0 ? null : `session_${index}`
+        }));
+        await page.route(url => url.pathname === '/api/v1/board/cards', route => route.fulfill({ json: { cards } }));
+        await page.route('**/api/v1/board/cards/activity', route => route.fulfill({ json: { cards } }));
+        await page.evaluate(() => window.app.boardController.refresh());
+        const tiles = cards.map(card => page.locator(`.board-card[data-card-id="${card.id}"]`));
+        await expect(tiles[0]).toHaveClass(/is-desktop-live/);
+        await expect(tiles[0].getByRole('img', { name: 'Desktop app is working on this card' })).toBeVisible();
+        await expect(tiles[0].locator('.board-live-dot')).toHaveCount(0);
+        await expect(tiles[1]).not.toHaveClass(/is-desktop-live/);
+        await expect(tiles[1].locator('.board-desktop-active')).toHaveCount(0);
+        await expect(tiles[1].locator('.board-live-dot')).toHaveCount(1);
+        await expect(tiles[2]).not.toHaveClass(/is-desktop-live/);
+        await expect(tiles[2].locator('.board-desktop-active')).toHaveCount(1);
+        await expect(tiles[2].locator('.board-live-dot')).toHaveCount(1);
+
+        for (const [index, tile] of tiles.entries()) {
+            await tile.scrollIntoViewIfNeeded();
+            await expect(tile).toHaveClass(/is-live/);
+            const style = await tile.evaluate(element => ({
+                image: getComputedStyle(element).backgroundImage,
+                overflow: element.scrollWidth > element.clientWidth
+            }));
+            expect(style.image).toContain(index === 0 ? 'rgb(168, 85, 247)' : 'rgb(6, 182, 212)');
+            expect(style.overflow).toBe(false);
+            if (index !== 1) await expect(tile.locator('.board-desktop-active')).toHaveCSS('color', 'rgb(168, 85, 247)');
+            if (index !== 0) await expect(tile.locator('.board-live-dot')).toHaveCSS('background-color', 'rgb(34, 197, 94)');
+            await expectAnimatedStyle(tile, 'backgroundPosition');
+            if (width === 390) await tile.screenshot({ path: testInfo.outputPath(`activity-${index}-${width}.png`) });
+        }
+        if (width === 1440) await page.screenshot({ path: testInfo.outputPath('desktop-cli-indicators.png') });
+        await page.emulateMedia({ reducedMotion: 'reduce' });
+        for (const tile of tiles) await expect(tile).toHaveCSS('animation-name', 'none');
+        for (const tile of [tiles[1], tiles[2]]) await expect(tile.locator('.board-live-dot')).toHaveCSS('animation-name', 'none');
+    });
+}
 
 test('Automation recordings have their own rail and live robot without overwriting the draft', async ({ page }, testInfo) => {
     let card;

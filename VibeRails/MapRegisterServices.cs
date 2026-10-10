@@ -321,6 +321,8 @@ namespace VibeRails
                 serviceCollection.AddScoped<TokenSaverTool>();
                 serviceCollection.AddAgentSessionMcp();
                 serviceCollection.AddSessionSharingMcp();
+                serviceCollection.AddBoardAgentLaunchMcp();
+                serviceCollection.AddDesktopMcpActivity(stdio: false);
                 // Kanban board tools (ctor-injected board services). Registered here AND in
                 // McpStdioHost.ConfigureServices — the two transports must expose the same tools.
                 serviceCollection.AddScoped<BoardTool>();

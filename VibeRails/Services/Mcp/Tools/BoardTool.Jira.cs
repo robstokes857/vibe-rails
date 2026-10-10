@@ -39,6 +39,7 @@ public sealed partial class BoardTool
                 // Jira has committed already. A local receipt failure must not invite another POST.
                 return confirmation + "\nThe Board receipt could not be saved. Do not repost the Jira comment.";
             }
+            await TrackDesktopActivityAsync(server, target.Project, target.CardId!, author.Label, cancellationToken);
             return confirmation + $"\nReceipt saved on {target.CardKey}.";
         }
         catch (JiraConfigException ex) { return "FAIL: " + ex.Message; }

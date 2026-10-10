@@ -58,6 +58,7 @@ public sealed partial class BoardTool
             var saved = await store.SaveHandoffAsync(target.Project, target.CardId!, normalized, author, cancellationToken);
             if (saved is null) return "FAIL: card not found.";
             await AutoLinkSessionAsync(target.Project, target.CardId!, cancellationToken);
+            await TrackDesktopActivityAsync(server, target.Project, target.CardId!, author.Label, cancellationToken);
             return $"Saved previous work {saved.Id} on {target.CardKey}; {saved.Files.Count} curated files. Description unchanged; receipt added to Comments.";
         }
         catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }

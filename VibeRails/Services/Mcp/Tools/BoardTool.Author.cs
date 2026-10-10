@@ -28,8 +28,9 @@ public sealed partial class BoardTool
     };
 
     /// <summary>
-    /// Who is writing. The launching VibeRails session comes first, because it knows the
-    /// environment name. Otherwise the name the MCP client gave in its handshake, which the
+    /// Who is writing. For terminals the launching VibeRails session comes first, because
+    /// it knows the environment name. Desktop clients use their MCP handshake without an
+    /// inherited terminal session. Otherwise the name the MCP client gave in its handshake, which the
     /// protocol requires, so an agent VibeRails did not launch is still recorded as Claude or
     /// Codex rather than "Agent" (VIBE-61). Null means the client named nothing usable: writers
     /// refuse it with <see cref="UnnamedClientHint"/>. Without a server the tool was called
@@ -37,7 +38,9 @@ public sealed partial class BoardTool
     /// </summary>
     private async Task<BoardAuthor?> ResolveAuthorAsync(McpServer? server, CancellationToken cancellationToken)
     {
-        var sessionId = projects.CurrentSessionId;
+        // Desktop clients can inherit correlation metadata without owning that terminal.
+        // Attribute their writes to the MCP client, with no terminal recording/replay link.
+        var sessionId = desktopActivity?.IsDesktop == true ? null : projects.CurrentSessionId;
         if (sessionId is not null)
         {
             var author = await store.FindSessionAuthorAsync(sessionId, cancellationToken);

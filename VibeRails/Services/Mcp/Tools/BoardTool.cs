@@ -33,7 +33,8 @@ public sealed partial class BoardTool(
     BoardReviewService? reviews = null,
     VibeRails.Services.BertV2.IBertSearchDbService? history = null,
     BoardSearchService? search = null,
-    VibeRails.Services.Jira.JiraCommentService? jiraComments = null)
+    VibeRails.Services.Jira.JiraCommentService? jiraComments = null,
+    DesktopMcpActivityTracker? desktopActivity = null)
 {
     /// <summary>
     /// MCP image payloads are base64 encoded and copied by the protocol stack. Keep this transfer
@@ -376,7 +377,9 @@ public sealed partial class BoardTool(
         [Description("Your VibeRails session id, if you have one: the VIBERAILS_TOOL_CURRENT_SESSION_ID environment variable of a terminal VibeRails launched. "
             + "Do not invent one. Ignored when this MCP server already knows the launching session.")] string? sessionId = null,
         CancellationToken cancellationToken = default,
-        McpServer? server = null)
+        McpServer? server = null,
+        [Description("LLM picker key from list_board_agent_options, e.g. base:codex or env:7:codex. Optional.")] string? assignee = null,
+        [Description("Base CLI launch settings, matching the Board UI: model, effort, mode, yolo, speed. Example: {model: gpt-6-astra, effort: xhigh, speed: ultrafast}. Only valid with a base assignee; saved environments use their own settings.")] BaseLlmOptions? baseLlmOptions = null)
     {
         try
         {
@@ -397,10 +400,13 @@ public sealed partial class BoardTool(
             if (await ResolveAuthorAsync(server, cancellationToken) is not { } author)
                 return UnnamedClientHint;
             var maker = await ResolveCardMakerAsync(author, agentName, sessionId, cancellationToken);
+            RequireBaseAssignee(assignee, baseLlmOptions);
             var created = await service.CreateCardAsync(project, new CreateBoardCardRequest(
                 Title: title,
                 ColumnId: columnId,
                 Description: description,
+                Assignee: assignee,
+                BaseLlmOptions: baseLlmOptions,
                 Priority: priority,
                 Tags: SplitTags(tags),
                 Type: type,
@@ -410,11 +416,13 @@ public sealed partial class BoardTool(
                 AgentMade: author.Kind == BoardAuthor.AgentKind,
                 AgentMadeBy: maker.Name, AgentMadeSessionId: maker.SessionId), cancellationToken, author);
             await AutoLinkSessionAsync(project, created.Id, cancellationToken);
+            await TrackDesktopActivityAsync(server, project, created.Id, author.Label, cancellationToken);
             return $"Created {created.Key}: {created.Title}"
                 // Confirms what was recorded to a caller that supplied either; older callers' reply is unchanged.
                 + (created.AgentMade && (agentName is not null || sessionId is not null)
                     ? "\n" + DescribeCardMaker(created.AgentMadeBy, created.AgentMadeSessionId, created.CreatedAt) : "")
                 + (maker.Note is null ? "" : "\n" + maker.Note)
+                + (assignee is not null || baseLlmOptions is not null ? "\n" + DescribeAgentSettings(created.Assignee, created.BaseLlmOptions) : "")
                 + (outsideProject ? $"\nOther local project: {project} (board {target.BoardName}, id {target.BoardId})" : "");
         }
         catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
@@ -425,7 +433,7 @@ public sealed partial class BoardTool(
         }
     }
 
-    [McpServerTool, Description("Update fields on a kanban card. Only the arguments you pass change; the rest stay as they are. Use descriptionAppend to add to the description without rewriting it.")]
+    [McpServerTool, Description("Update fields on a kanban card, including its saved agent assignment and launch settings. Use assignee=base:codex with baseLlmOptions={model: gpt-6-astra, effort: xhigh, speed: ultrafast} for Astra Ultrafast. Only arguments you pass change; baseLlmOptions replaces the whole options object. This does not change a running agent; start_board_agent uses the saved assignment for new work. Use descriptionAppend to append text.")]
     public async Task<string> UpdateBoardCard(
         [Description(CardArgumentHelp)] string card,
         [Description("New title.")] string? title = null,
@@ -439,7 +447,10 @@ public sealed partial class BoardTool(
         [Description("Reserve true for an important unresolved issue requiring the user's decision or intervention: a major bug, security/data-loss issue, or missing information that prevents the work. Requires flagReason. Routine progress, completion and review do not need a flag. Clear with false once resolved.")] bool? flagged = null,
         [Description("Required with flagged=true: explain the major issue and the specific information, decision or action needed from the user. Saved as a red attention comment in the same operation.")] string? flagReason = null,
         CancellationToken cancellationToken = default,
-        McpServer? server = null)
+        McpServer? server = null,
+        [Description("LLM picker key from list_board_agent_options, e.g. base:codex or env:7:codex. Empty string clears the assignment; omitted preserves it. Changing the assignee clears its old base options unless you supply new ones.")] string? assignee = null,
+        [Description("Replaces all saved base CLI options: model, effort, mode, yolo, speed. speed is default, fast or ultrafast (model dependent); Astra supports ultrafast. Omitted preserves options for the same assignee. Saved environments use their own settings and reject base overrides.")] BaseLlmOptions? baseLlmOptions = null,
+        [Description("Clear the saved base CLI options. Cannot be combined with baseLlmOptions.")] bool clearBaseLlmOptions = false)
     {
         try
         {
@@ -448,12 +459,22 @@ public sealed partial class BoardTool(
                 return target.Error;
             if (await ResolveAuthorAsync(server, cancellationToken) is not { } author)
                 return UnnamedClientHint;
+            if (clearBaseLlmOptions && baseLlmOptions is not null)
+                return "FAIL: supply baseLlmOptions or clearBaseLlmOptions, not both.";
+            if (baseLlmOptions is not null)
+            {
+                var existing = await service.FindCardAsync(target.Project, target.CardId!, cancellationToken);
+                RequireBaseAssignee(assignee ?? existing?.Assignee, baseLlmOptions);
+            }
             // One request, one store write: the append travels with the other fields, so an
             // invalid priority (or a lost writer lock) leaves nothing behind to duplicate on retry.
             var request = new UpdateBoardCardRequest(
                 Title: title,
                 Description: description,
                 DescriptionAppend: descriptionAppend,
+                Assignee: assignee,
+                BaseLlmOptions: baseLlmOptions,
+                ClearBaseLlmOptions: clearBaseLlmOptions,
                 Priority: priority,
                 Points: points is null ? default : PointsElement(points.Value),
                 Tags: tags is null ? null : SplitTags(tags) ?? [],
@@ -463,9 +484,13 @@ public sealed partial class BoardTool(
             if (updated is null)
                 return $"FAIL: card not found: {card}";
             await AutoLinkSessionAsync(target.Project, updated.Id, cancellationToken);
-            if (descriptionAppend is not null && title is null && priority is null && points is null && tags is null && blocked is null && type is null && flagged is null)
+            await TrackDesktopActivityAsync(server, target.Project, updated.Id, author.Label, cancellationToken);
+            if (descriptionAppend is not null && title is null && priority is null && points is null && tags is null && blocked is null && type is null && flagged is null
+                && assignee is null && baseLlmOptions is null && !clearBaseLlmOptions)
                 return $"Appended to the description of {updated.Key}.";
-            return $"Updated {updated.Key}: {updated.Title} ({updated.Priority}{(updated.Blocked ? ", blocked" : "")}{(updated.Flagged ? ", needs your attention" : "")})";
+            return $"Updated {updated.Key}: {updated.Title} ({updated.Priority}{(updated.Blocked ? ", blocked" : "")}{(updated.Flagged ? ", needs your attention" : "")})"
+                + (assignee is not null || baseLlmOptions is not null || clearBaseLlmOptions
+                    ? "\n" + DescribeAgentSettings(updated.Assignee, updated.BaseLlmOptions) + "\nApplies to the next launch; running agents are unchanged." : "");
         }
         catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
         catch (BoardConflictException ex) { return "FAIL: " + ex.Message; }
@@ -509,6 +534,7 @@ public sealed partial class BoardTool(
             var moved = result.Card;
             var lane = await service.FindColumnAsync(target.Project, moved.ColumnId, cancellationToken);
             await AutoLinkSessionAsync(target.Project, moved.Id, cancellationToken);
+            await TrackDesktopActivityAsync(server, target.Project, moved.Id, author.Label, cancellationToken);
             return $"Moved {moved.Key} to {lane?.Name ?? moved.ColumnId} (position {moved.Position}).\n"
                 + FormatLaneEntry(result.LaneEntry, moved.Key, preview: false);
         }
@@ -539,6 +565,7 @@ public sealed partial class BoardTool(
             if (comment is null)
                 return $"FAIL: card not found: {card}";
             await AutoLinkSessionAsync(target.Project, target.CardId!, cancellationToken);
+            await TrackDesktopActivityAsync(server, target.Project, target.CardId!, author.Label, cancellationToken);
             return $"Comment {comment.Id} added to {target.CardKey} as {author.Label} at {comment.CreatedAt:HH:mm:ss}Z." + (syncToJira ? "" : " Not sent to Jira.");
         }
         catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
@@ -568,6 +595,7 @@ public sealed partial class BoardTool(
             if (note is null)
                 return $"FAIL: card not found: {card}";
             await AutoLinkSessionAsync(target.Project, target.CardId!, cancellationToken);
+            await TrackDesktopActivityAsync(server, target.Project, target.CardId!, author.Label, cancellationToken);
             return $"Comment {note.Id} added to {target.CardKey} as {author.Label} at {note.CreatedAt:HH:mm:ss}Z." + (syncToJira ? "" : " Not sent to Jira.");
         }
         catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
@@ -629,6 +657,7 @@ public sealed partial class BoardTool(
             if (attachment is null)
                 return $"FAIL: card not found: {card}";
             await AutoLinkSessionAsync(target.Project, target.CardId!, cancellationToken);
+            await TrackDesktopActivityAsync(server, target.Project, target.CardId!, author.Label, cancellationToken);
             return $"Attached {attachment.Name} ({attachment.Id}, {attachment.Bytes} bytes) to {target.CardKey} as {author.Label}.";
         }
         catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
@@ -643,20 +672,25 @@ public sealed partial class BoardTool(
     public async Task<string> LinkBoardCommit(
         [Description("Commit sha (7-40 hex characters) from this terminal's checkout.")] string sha,
         [Description(CardArgumentHelp)] string? card = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        McpServer? server = null)
     {
         try
         {
             var target = await ResolveCardAsync(card, cancellationToken);
             if (target.Error is not null)
                 return target.Error;
+            if (await ResolveAuthorAsync(server, cancellationToken) is not { } author)
+                return UnnamedClientHint;
+            var terminalSessionId = desktopActivity?.IsDesktop == true ? null : projects.CurrentSessionId;
             var commit = await service.LinkCommitAsync(target.Project, target.CardId!, sha, cancellationToken,
-                gitWorkingDirectory: projects.GitWorkingDirectory, sessionId: projects.CurrentSessionId);
+                gitWorkingDirectory: projects.GitWorkingDirectory, sessionId: terminalSessionId);
             if (commit is null)
                 return $"FAIL: card not found: {card}";
             await AutoLinkSessionAsync(target.Project, target.CardId!, cancellationToken);
+            await TrackDesktopActivityAsync(server, target.Project, target.CardId!, author.Label, cancellationToken);
             return $"Linked {commit.ShortSha} \"{commit.Message}\" to {target.CardKey}."
-                + (projects.CurrentSessionId is null ? string.Empty : " Also linked to every card attached to this session in this project.");
+                + (terminalSessionId is null ? string.Empty : " Also linked to every card attached to this session in this project.");
         }
         catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
         catch (BoardConflictException ex) { return "FAIL: " + ex.Message; }
@@ -666,14 +700,15 @@ public sealed partial class BoardTool(
         }
     }
 
-    [McpServerTool, Description("Attach this terminal's current session to another kanban card when working on multiple cards. Requires a VibeRails session; no session id argument. Safe to repeat. Preserves existing attachments and the original default card. Each attached card shows this session and its live status when available. Future link_board_commit calls automatically link the commit to every attached card. Does not move cards or copy earlier commits.")]
+    [McpServerTool, Description("Link work to a card in the current project. In a VibeRails terminal, attach its current session without changing the original default; later link_board_commit calls share with all attached cards. In a desktop MCP client, show desktop activity without creating a terminal session or changing commit links. Desktop callers should pass the card explicitly on later calls. No session-id argument; safe to repeat. Does not move cards or copy earlier commits.")]
     public async Task<string> AttachBoardSession(
         [Description("Card key like VB-12 (or the card id) to attach the current session to.")] string card,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        McpServer? server = null)
     {
         try
         {
-            if (projects.CurrentSessionId is not { } sessionId)
+            if (desktopActivity?.IsDesktop != true && projects.CurrentSessionId is null)
                 return "FAIL: this terminal has no VibeRails session. Start a VibeRails terminal to attach its session to a card.";
             if (string.IsNullOrWhiteSpace(card))
                 return "FAIL: pass the card key to attach, e.g. card=\"VB-12\".";
@@ -682,8 +717,18 @@ public sealed partial class BoardTool(
                 return target.Error;
             if (!SameProject(target.Project, await projects.ResolveAsync(cancellationToken)))
                 return "FAIL: session attachments must stay in the current project. You can read and update other local cards by full permanent key or row ID without attaching this session.";
+            if (desktopActivity?.IsDesktop == true)
+            {
+                if (await ResolveAuthorAsync(server, cancellationToken) is not { } author) return UnnamedClientHint;
+                return await desktopActivity.TrackAsync(server, target.Project, target.CardId!, author.Label, cancellationToken)
+                    ? $"Linked desktop activity to {target.CardKey}. Pass this card explicitly on later calls. "
+                        + (desktopActivity.IsAggregate(server)
+                            ? "This app-name activity mark expires after 90 seconds without a new card update, or when the card closes."
+                            : "The activity mark ends on completion, expiry, or when the card closes.")
+                    : "FAIL: Could not mark desktop activity. The card may be closed; check its current state and retry if needed.";
+            }
             var tabId = Environment.GetEnvironmentVariable(LocalToolApiContext.CurrentTabIdVariable);
-            var attached = await service.AttachSessionAsync(target.Project, target.CardId!, sessionId,
+            var attached = await service.AttachSessionAsync(target.Project, target.CardId!, projects.CurrentSessionId!,
                 string.IsNullOrWhiteSpace(tabId) ? null : tabId.Trim(), cancellationToken);
             return attached is null
                 ? $"FAIL: card not found: {card}"
@@ -698,6 +743,16 @@ public sealed partial class BoardTool(
     }
 
     // ------------------------------------------------------------------ helpers
+
+    private async Task TrackDesktopActivityAsync(McpServer? server, string project, string cardId, string label, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (desktopActivity is not null && SameProject(project, await projects.ResolveAsync(cancellationToken)))
+                await desktopActivity.TrackAsync(server, project, cardId, label, cancellationToken);
+        }
+        catch (Exception) { /* Never turn an already-committed Board write into a failure. */ }
+    }
 
     private sealed record CardTarget(string Project, string? CardId, string? CardKey, string? Error);
 
@@ -779,6 +834,10 @@ public sealed partial class BoardTool(
     /// </summary>
     private async Task AutoLinkSessionAsync(string project, string cardId, CancellationToken cancellationToken)
     {
+        // Desktop clients may inherit a session correlation ID without owning a terminal tab.
+        // Their presence is tracked separately and must not manufacture a terminal attachment.
+        if (desktopActivity?.IsDesktop == true)
+            return;
         var sessionId = projects.CurrentSessionId;
         if (sessionId is null)
             return;
@@ -937,6 +996,10 @@ public sealed partial class BoardTool(
         if (card.AgentMade && card.AgentMadeSessionId is { } madeIn) builder.Append(" in session ").Append(madeIn);
         if (card.Tags.Count > 0) builder.Append(" · Tags: ").Append(string.Join(", ", card.Tags));
         builder.Append('\n');
+        if (card.HasActiveDesktopAgent)
+            builder.AppendLine("Desktop app activity: active or recently active through MCP (separate from terminal sessions).");
+        if (!string.IsNullOrWhiteSpace(card.Assignee))
+            builder.Append(DescribeAgentSettings(card.Assignee, card.BaseLlmOptions)).Append('\n');
         if (!string.IsNullOrWhiteSpace(card.JiraIssueKey))
             builder.Append("Jira issue: ").Append(card.JiraIssueKey)
                 .Append(". Comments sync to Jira by default. Keep updates concise; do not spam progress. Use add_board_comment or append_board_note with syncToJira=false for internal notes. Linked sessions automatically get public replay links posted to Jira. Do not duplicate those posts with add_jira_comment.\n");

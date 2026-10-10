@@ -355,22 +355,27 @@ export class BoardController {
                 const fresh = byId.get(card.id);
                 if (!fresh) continue;
                 const changed = card.activeTabId !== fresh.activeTabId || card.hasActiveAutomation !== fresh.hasActiveAutomation
-                    || card.hasWaitingAutomation !== fresh.hasWaitingAutomation;
+                    || card.hasWaitingAutomation !== fresh.hasWaitingAutomation
+                    || card.hasActiveDesktopAgent !== fresh.hasActiveDesktopAgent;
                 card.activeSessionId = fresh.activeSessionId;
                 card.activeTabId = fresh.activeTabId;
                 card.hasActiveAutomation = fresh.hasActiveAutomation;
                 card.hasWaitingAutomation = fresh.hasWaitingAutomation;
+                card.hasActiveDesktopAgent = fresh.hasActiveDesktopAgent;
                 if (!changed) continue;
                 const tile = tiles.get(card.id);
                 if (!tile) continue;
-                tile.classList.toggle('is-live', Boolean(card.activeTabId));
+                tile.classList.toggle('is-live', Boolean(card.activeTabId || card.hasActiveDesktopAgent));
+                tile.classList.toggle('is-desktop-live', Boolean(card.hasActiveDesktopAgent && !card.activeTabId));
                 const aside = tile.querySelector('.board-card-aside');
                 aside?.querySelector('.board-automation-running')?.remove();
                 tile.querySelector('.board-automation-waiting')?.remove();
                 if (card.hasWaitingAutomation) tile.querySelector('.board-card-title')?.insertAdjacentHTML('afterend', this.waitingAutomationIndicator());
                 aside?.querySelector('.board-live-dot')?.remove();
+                aside?.querySelector('.board-desktop-active')?.remove();
                 if (card.hasActiveAutomation) aside?.insertAdjacentHTML('afterbegin', this.automationIndicator());
                 if (card.activeTabId) aside?.insertAdjacentHTML('beforeend', '<span class="board-live-dot" title="A terminal session is working this card" aria-label="Session open"></span>');
+                if (card.hasActiveDesktopAgent) aside?.insertAdjacentHTML('beforeend', this.desktopAgentIndicator());
             }
             // Update only the rails and live controls. Never replace the user's draft fields.
             if (detail && editor.isConnected && editor === document.querySelector('[data-board-card-editor]') && editor.dataset.cardId === cardId
@@ -386,6 +391,7 @@ export class BoardController {
                     || JSON.stringify(card.jiraDeliveries) !== JSON.stringify(detail.jiraDeliveries);
                 Object.assign(card, { sessions: detail.sessions, activeSessionId: detail.activeSessionId,
                     activeTabId: detail.activeTabId, hasActiveAutomation: detail.hasActiveAutomation,
+                    hasActiveDesktopAgent: detail.hasActiveDesktopAgent,
                     comments: detail.comments, notes: detail.notes, attachments: detail.attachments, commits: detail.commits,
                     jiraDeliveries: detail.jiraDeliveries, jiraIssueUrl: detail.jiraIssueUrl });
                 if (changed) this.renderSessionsPanel(editor, card);
@@ -406,6 +412,10 @@ export class BoardController {
 
     automationIndicator() {
         return '<button type="button" class="board-icon-btn board-automation-running" data-board-action="go-to-automation" title="Go to running Automation" aria-label="Go to running Automation"><i class="fa-solid fa-robot" aria-hidden="true"></i></button>';
+    }
+
+    desktopAgentIndicator() {
+        return '<span class="board-desktop-active" title="Desktop app is working on this card" role="img" aria-label="Desktop app is working on this card"><i class="fa-solid fa-desktop" aria-hidden="true"></i></span>';
     }
 
     waitingAutomationIndicator() {
@@ -815,7 +825,7 @@ export class BoardController {
 
         // is-live paints the marching "an agent is on this" border (see the template CSS).
         return `
-            <article class="board-card${card.flagged ? ' is-flagged' : ''}${card.blocked ? ' is-blocked' : ''}${card.activeTabId ? ' is-live' : ''}" data-card-id="${escapeHtml(card.id)}"
+            <article class="board-card${card.flagged ? ' is-flagged' : ''}${card.blocked ? ' is-blocked' : ''}${card.activeTabId || card.hasActiveDesktopAgent ? ' is-live' : ''}${card.hasActiveDesktopAgent && !card.activeTabId ? ' is-desktop-live' : ''}" data-card-id="${escapeHtml(card.id)}"
                 tabindex="0" role="button" aria-label="${escapeHtml(cardDisplayId(card))}: ${escapeHtml(card.title)}${card.agentMade ? ` — ${escapeHtml(agentMadeSummary(card))}` : ''}${card.flagged ? ' — Needs your attention' : ''}">
                 <span class="board-card-rail" data-priority="${escapeHtml(card.priority)}"
                     title="${escapeHtml(card.priority)} priority"></span>
@@ -836,6 +846,7 @@ export class BoardController {
                         <div class="board-card-aside">
                             ${card.hasActiveAutomation ? this.automationIndicator() : ''}
                             ${live}
+                            ${card.hasActiveDesktopAgent ? this.desktopAgentIndicator() : ''}
                             ${card.blocked ? `<i class="fa-solid fa-triangle-exclamation board-blocked"
                                 title="Blocked" aria-hidden="true"></i>` : ''}
                             ${comments}

@@ -202,6 +202,22 @@ native grant is unverified. The explicit, default-off base-CLI YOLO option is a 
 choice; saved environments retain their own arguments. Resolve environments by ID and project
 visibility, with no name fallback. Launch options use argv and `ShellArgSanitizer`.
 
+Board MCP assignment parity (2026-10-10): create/update accept the UI's typed base launch
+options. `list_board_agent_options` and `start_board_agent` use inherited root tool API
+credentials to call the existing picker and card-launch routes. Both are explicit Board
+grants on both transports. The relay accepts only a loopback base, sends both credentials,
+disables redirects/proxies/cookies, and bounds time and response size. Start takes only a
+card identifier and uses its saved assignment; the root enforces its current project and
+ordinary launch validation. No caller-supplied executable, argv, project path or credential
+is accepted. Uncertain launch results require a status check, never an automatic retry.
+
+Desktop MCP presence uses server-generated connection identities and bounded local leases
+in `board.db`, through `IBoardStore`. It adds no endpoint or listener. Same-project writes or
+explicit attachment can mark activity; reads cannot. No fake terminal recording, launch grant,
+public replay or cross-project attachment is created. Stateless HTTP app-name aggregates are
+not client ownership and cannot be cleared as another caller's completion. Presence projects
+only a boolean into Board responses and is excluded from hosted sync.
+
 Agent completion reports use the current linked session and do not themselves stop processes
 or move cards. `end_agent_session` is the distinct own-session termination capability: no target
 arguments, both process-local credentials at `/llm/control/agent/end-session`, current GUID

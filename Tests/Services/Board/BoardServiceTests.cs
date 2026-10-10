@@ -30,6 +30,44 @@ public sealed class BoardServiceTests : IDisposable
 
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 
+    [Fact]
+    public async Task DesktopActivityReachesAllCardViews_WithoutPretendingToBeATerminal()
+    {
+        var card = await _service.CreateCardAsync(_project, new(Title: "Desktop work"), Ct);
+        var other = await _service.CreateCardAsync(_project, new(Title: "Not being worked"), Ct);
+        Assert.True(await _store.StartDesktopActivityAsync(_project, card.Id, "desktop-client", "Codex desktop",
+            DateTime.UtcNow.AddSeconds(90), Ct));
+
+        var summary = (await _service.GetCardsAsync(_project, Ct)).Cards.Single(c => c.Id == card.Id);
+        var detail = (await _service.GetCardAsync(_project, card.Id, Ct))!;
+        var page = (await _service.GetCardsPageAsync(_project, new(), Ct, card.BoardId)).Cards.Single(c => c.Id == card.Id);
+        var activity = (await _service.GetCardActivityAsync(_project, new(card.BoardId, [card.Id, other.Id]), Ct)).Cards;
+        Assert.True(summary.HasActiveDesktopAgent);
+        Assert.True(detail.HasActiveDesktopAgent);
+        Assert.True(page.HasActiveDesktopAgent);
+        Assert.True(activity.Single(c => c.Id == card.Id).HasActiveDesktopAgent);
+        Assert.False(activity.Single(c => c.Id == other.Id).HasActiveDesktopAgent);
+        Assert.Null(summary.ActiveTabId);
+        Assert.Null(summary.ActiveSessionId);
+        Assert.False(summary.HasActiveAutomation);
+        Assert.Empty(detail.Sessions);
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(detail, AppJsonSerializerContext.Default.BoardCardResponse));
+        Assert.True(json.RootElement.GetProperty("hasActiveDesktopAgent").GetBoolean());
+
+        // A real terminal can independently work on the same card.
+        const string session = "77777777-7777-4777-8777-777777777777";
+        await _service.LinkSessionAsync(_project, card.Id, session, "tab", "", "codex", "CLI", BoardSessionRecord.ManualOrigin, Ct);
+        _live.Sessions[session] = "tab";
+        detail = (await _service.GetCardAsync(_project, card.Id, Ct))!;
+        Assert.True(detail.HasActiveDesktopAgent);
+        Assert.Equal("tab", detail.ActiveTabId);
+        await _store.EndDesktopActivityAsync("desktop-client", card.Id, Ct);
+        detail = (await _service.GetCardAsync(_project, card.Id, Ct))!;
+        Assert.False(detail.HasActiveDesktopAgent);
+        Assert.Equal("tab", detail.ActiveTabId);
+        Assert.False(Assert.Single((await _service.GetCardActivityAsync(_project, new(card.BoardId, [card.Id]), Ct)).Cards).HasActiveDesktopAgent);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

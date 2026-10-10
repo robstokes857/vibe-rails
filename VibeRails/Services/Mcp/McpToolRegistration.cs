@@ -27,6 +27,8 @@ public static class McpToolRegistration
         .WithTools<TokenSaverTool>(SerializerOptions)
         .WithTools<AgentSessionTool>(SerializerOptions)
         .WithTools<SessionSharingTool>(SerializerOptions)
+        .WithTools<BoardAgentLaunchTool>(SerializerOptions)
+        .WithTools<BoardAgentOptionsTool>(SerializerOptions)
         .WithTools<BoardTool>(SerializerOptions);
 
     /// <summary>
@@ -57,6 +59,27 @@ public static class McpToolRegistration
                 AllowAutoRedirect = false, UseProxy = false, UseCookies = false
             });
         services.AddScoped<SessionSharingTool>();
+        return services;
+    }
+
+    /// <summary>Starts saved Board assignments only through the inherited authenticated root API.</summary>
+    public static IServiceCollection AddBoardAgentLaunchMcp(this IServiceCollection services)
+    {
+        services.AddHttpClient(BoardAgentLaunchTool.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(30))
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+            {
+                AllowAutoRedirect = false, UseProxy = false, UseCookies = false
+            });
+        services.AddScoped<BoardAgentLaunchTool>();
+        services.AddScoped<BoardAgentOptionsTool>();
+        return services;
+    }
+
+    /// <summary>Tracks desktop work within the existing MCP host; stdio owns its connection's heartbeat.</summary>
+    public static IServiceCollection AddDesktopMcpActivity(this IServiceCollection services, bool stdio)
+    {
+        services.AddSingleton(provider => new DesktopMcpActivityTracker(provider.GetRequiredService<VibeRails.Services.Board.IBoardStore>(), stdio));
+        services.AddHostedService(provider => provider.GetRequiredService<DesktopMcpActivityTracker>());
         return services;
     }
 

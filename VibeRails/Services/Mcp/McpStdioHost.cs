@@ -133,6 +133,8 @@ public static class McpStdioHost
         services.AddScoped<TokenSaverTool>();
         services.AddAgentSessionMcp();
         services.AddSessionSharingMcp();
+        services.AddBoardAgentLaunchMcp();
+        services.AddDesktopMcpActivity(stdio: true);
         services.AddJiraClients();
         // Kanban board tools. Backed by the board's own SQLite store (it owns its schema, so no
         // Repository migration pass runs in this short-lived child) and scoped to the project by

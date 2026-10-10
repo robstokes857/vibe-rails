@@ -292,7 +292,11 @@ namespace VibeRails.DTOs
         bool Flagged = false,
         bool HasActiveAutomation = false, string? DisplayId = null,
         bool AgentMade = false, bool HasWaitingAutomation = false,
-        string? AgentMadeBy = null, string? AgentMadeSessionId = null, string? JiraIssueKey = null);
+        string? AgentMadeBy = null, string? AgentMadeSessionId = null, string? JiraIssueKey = null)
+    {
+        /// <summary>A desktop MCP client has a current activity lease; this does not identify a terminal tab.</summary>
+        public bool HasActiveDesktopAgent { get; init; }
+    }
     public record BoardCardListResponse(List<BoardCardSummaryResponse> Cards)
     {
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -350,6 +354,8 @@ namespace VibeRails.DTOs
         bool AgentMade = false, bool HasWaitingAutomation = false,
         string? AgentMadeBy = null, string? AgentMadeSessionId = null, string? JiraIssueKey = null)
     {
+        /// <summary>A desktop MCP client has a current activity lease, independently of terminal activity.</summary>
+        public bool HasActiveDesktopAgent { get; init; }
         public string? JiraIssueUrl { get; init; }
         public IReadOnlyList<BoardJiraDeliveryDto> JiraDeliveries { get; init; } = [];
         public List<BoardLinkedCardDto> LinkedCards { get; init; } = [];

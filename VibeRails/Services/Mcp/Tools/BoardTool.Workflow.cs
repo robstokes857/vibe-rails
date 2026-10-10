@@ -18,6 +18,7 @@ public sealed partial class BoardTool
             if (author is null) return UnnamedClientHint;
             await workflow.ReportAsync(target.Project, target.CardId!, projects.GitWorkingDirectory,
                 author, status, summary, eventKey, reviewId, cancellationToken);
+            await TrackDesktopActivityAsync(server, target.Project, target.CardId!, author.Label, cancellationToken);
             return "Workflow status recorded. Later steps wait for a pass and Automation completion, or a user skip. Save your handoff and finish your session when the work is complete.";
         }
         catch (Exception ex) when (ex is BoardValidationException or BoardConflictException) { return "FAIL: " + ex.Message; }

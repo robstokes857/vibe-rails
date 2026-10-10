@@ -472,7 +472,8 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         Assert.Equal(JsonValueKind.Null, activity.GetProperty("activeTabId").ValueKind);
         Assert.False(activity.GetProperty("hasActiveAutomation").GetBoolean());
         Assert.False(activity.GetProperty("hasWaitingAutomation").GetBoolean());
-        Assert.Equal(5, activity.EnumerateObject().Count());
+        Assert.False(activity.GetProperty("hasActiveDesktopAgent").GetBoolean());
+        Assert.Equal(6, activity.EnumerateObject().Count());
         Assert.True(json.RootElement.GetRawText().Length < 250);
         using var oversized = await PostJsonAsync(path, new { boardId, cardIds = Enumerable.Repeat(card.Id, 101) });
         Assert.Equal(HttpStatusCode.BadRequest, oversized.StatusCode);
@@ -868,6 +869,37 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         using var duplicateBody = await ReadJsonAsync(duplicate);
         Assert.Contains("already running", duplicateBody.RootElement.GetProperty("error").GetString());
         _tabHost.Verify(t => t.CreateTabAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task LaunchRequiresBothCredentialsAndCurrentProjectBeforeStartingATerminal()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var store = _app.Services.GetRequiredService<IBoardStore>();
+        var foreignProject = _project + "-foreign";
+        await store.EnsureDefaultColumnsAsync(_project, ct);
+        await store.EnsureDefaultColumnsAsync(foreignProject, ct);
+        var local = await store.CreateCardAsync(_project,
+            new(null, "Local assigned card", "", "base:codex", "medium", null, [], false), ct);
+        var foreign = await store.CreateCardAsync(foreignProject,
+            new(null, "Foreign assigned card", "", "base:codex", "medium", null, [], false), ct);
+        var body = new LaunchBoardCardRequest(Intent: "work");
+        foreach (var credentials in new[] { (Session: (string?)null, Tab: (string?)null), ("test-session", null), (null, "test-tab") })
+        {
+            using var denied = await SendAsync(HttpMethod.Post, $"/api/v1/board/cards/{local.Id}/launch",
+                credentials.Session, credentials.Tab, body);
+            Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+        }
+        foreach (var identifier in new[] { foreign.Id, foreign.Key })
+        {
+            using var denied = await SendAsync(HttpMethod.Post, $"/api/v1/board/cards/{identifier}/launch",
+                "test-session", "test-tab", body);
+            Assert.Equal(HttpStatusCode.NotFound, denied.StatusCode);
+        }
+
+        // No live provider launch or terminal creation is possible along any denied path.
+        _tabHost.VerifyNoOtherCalls();
+        _repository.VerifyNoOtherCalls();
     }
 
     [Fact]

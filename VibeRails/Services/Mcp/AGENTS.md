@@ -1,5 +1,52 @@
 # MCP Server (in-process)
 
+## Board agent assignment and launch
+
+`list_board_agent_options` discovers the current root project's enabled Board picker and
+the shared base-CLI capabilities. `create_board_card` / `update_board_card` accept `assignee`
+and `baseLlmOptions` (`model`, `effort`, `mode`, `yolo`, `speed`); update also accepts
+`clearBaseLlmOptions`. Options replace the whole object, while omission preserves them for
+an unchanged assignee. Saved environments reject base overrides. For Astra use
+`assignee="base:codex"`, `baseLlmOptions={"model":"gpt-6-astra","effort":"xhigh","speed":"ultrafast"}`.
+Card reads and assignment receipts show saved settings, not the effective settings of a
+running session. Default speed inherits the CLI configuration.
+
+`start_board_agent(card)` calls the same root route as Start work, with no selection override,
+so shared validation and saved options govern launch. Discovery/start require inherited
+`VIBERAILS_TOOL_*` root credentials and an open root; standalone MCP clients and the root's
+MCP Explorer without that inherited context get an actionable failure. They use the existing
+loopback-only client pattern, both credentials, bounded responses and no redirects/proxies/cookies.
+Start is limited to the root's project. Poll `get_board_agent_status` using the returned session
+ID and then the whole card when waiting for workflows. Launch success is not completion;
+check status before retrying an uncertain launch. Never change a live TUI's settings by typing.
+Keep both tools in the exact Board grant list and both transports' shared registration.
+
+## Desktop client activity
+
+`DesktopMcpActivityTracker` marks successful same-project card writes (including moves,
+attachments, commit links, handoffs and discussion) and
+explicit `attach_board_session` calls when no inherited terminal tab exists. It never fabricates
+a session recording. Real terminal attachment/completion remains unchanged. Desktop callers
+pass the card explicitly; `complete_board_agent` records their result and ends their owned mark.
+Desktop completion rejects an omitted/blank card, and desktop write attribution never uses
+an inherited terminal correlation ID as its author/session recording.
+Presence failures must not turn an already-committed card write into a reported write failure.
+
+The in-process stdio host renews a 90-second lease every 20 seconds while its MCP connection
+lives; normal EOF stops the host and ends its marks, and crashes expire without a daemon.
+HTTP clients refresh on successful tracked card writes or explicit attachment only, not reads.
+Both HTTP modes expire after 90 seconds without one of those calls; neither observes app closure.
+Stateful HTTP identifies one MCP session and can end its mark explicitly on completion;
+stateless HTTP has no per-instance identity or app-close event, so it uses a short-lived aggregate
+per app name within this root lifetime. Completion cannot clear another instance's aggregate:
+it expires after 90 seconds without activity or when the card closes. Do not claim that
+stateless HTTP reliably detects app closure or an individual client's completion.
+
+The additive `board-desktop-activity/1` table is local-only behind `IBoardStore`; closed/deleted
+cards end leases, renewals cannot resurrect ended/expired work, and an explicit new action
+can start fresh on an open card. This is presence, not proof of thinking, review approval,
+terminal ownership, or an Automation run. The public DTO is only `hasActiveDesktopAgent`.
+
 ## Ordered lane progress
 
 `report_automation_step` records reviewing/fixing/passed/failed for the current lane entry.

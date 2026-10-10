@@ -745,6 +745,8 @@ public sealed partial class BoardToolTests : IDisposable
             .Returns<string, CancellationToken>((project, ct) => _store.GetRunningAutomationsAsync(project, ct));
         racing.Setup(s => s.GetWaitingAutomationCardIdsAsync(_project, It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
             .Returns<string, IReadOnlyList<string>, CancellationToken>((project, ids, ct) => _store.GetWaitingAutomationCardIdsAsync(project, ids, ct));
+        racing.Setup(s => s.GetDesktopActiveCardIdsAsync(_project, It.IsAny<IReadOnlyList<string>>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns<string, IReadOnlyList<string>, DateTime, CancellationToken>((project, ids, now, ct) => _store.GetDesktopActiveCardIdsAsync(project, ids, now, ct));
         var service = new BoardService(racing.Object, Mock.Of<IBoardCommitService>(), new NullBoardLiveSessionProbe());
 
         var updated = await service.UpdateCardAsync(_project, "PROJ-1", new UpdateBoardCardRequest(DescriptionAppend: "agent note"), Ct);

@@ -1944,6 +1944,8 @@ public sealed partial class BoardStore : IBoardStore
             SqliteSchema.Execute(db, transaction, StarterWorkflowSchemaSql));
         SqliteMigrationRunner.Apply(connection, "board-jira-delivery", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, JiraDeliverySchemaSql));
+        SqliteMigrationRunner.Apply(connection, "board-desktop-activity", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, DesktopActivitySchemaSql));
         ReconcileDerivedRows(connection);
     }
 

@@ -26,6 +26,8 @@ public static class BoardMcpAuthorization
         "report_automation_step",
         "get_board_notes",
         "get_board_agent_status",
+        "list_board_agent_options",
+        "start_board_agent",
         "complete_board_agent",
         "end_agent_session",
         "read_board_attachment",

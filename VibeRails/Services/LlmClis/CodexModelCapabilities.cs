@@ -8,6 +8,8 @@ internal static class CodexModelCapabilities
 {
     private static readonly IReadOnlyDictionary<string, string[]> Speeds = LoadSpeeds();
 
+    public static IEnumerable<string> Models => Speeds.Keys;
+
     public static bool SupportsSpeed(string? model, string speed) =>
         Speeds.TryGetValue(model?.Trim() ?? "", out var speeds) && speeds.Contains(speed);
 

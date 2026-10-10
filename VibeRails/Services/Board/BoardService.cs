@@ -261,6 +261,7 @@ public sealed partial class BoardService(
 
     private async Task<BoardCardListResponse> GetCardListResponseAsync(string projectPath, IReadOnlyList<BoardCardRecord> cards, CancellationToken cancellationToken)
     {
+        var desktopCards = await store.GetDesktopActiveCardIdsAsync(projectPath, cards.Select(card => card.Id).ToList(), DateTime.UtcNow, cancellationToken);
         var live = await liveSessions.GetLiveSessionsAsync(cancellationToken);
         var activeByCard = new Dictionary<string, (string SessionId, string TabId)>(StringComparer.Ordinal);
         var waiting = (await store.GetWaitingAutomationCardIdsAsync(projectPath, cards.Select(c => c.Id).ToList(), cancellationToken))
@@ -289,7 +290,8 @@ public sealed partial class BoardService(
         {
             activeByCard.TryGetValue(card.Id, out var active);
             return ToSummary(card, active.SessionId, active.TabId) with {
-                HasActiveAutomation = automationCards.Contains(card.Id), HasWaitingAutomation = waiting.Contains(card.Id) };
+                HasActiveAutomation = automationCards.Contains(card.Id), HasWaitingAutomation = waiting.Contains(card.Id),
+                HasActiveDesktopAgent = desktopCards?.Contains(card.Id) == true };
         }).ToList());
     }
 
@@ -573,6 +575,7 @@ public sealed partial class BoardService(
 
     private async Task<BoardCardResponse> ToDetailAsync(BoardCardDetailRecord detail, CancellationToken cancellationToken)
     {
+        var desktopCards = await store.GetDesktopActiveCardIdsAsync(detail.Card.ProjectPath, [detail.Card.Id], DateTime.UtcNow, cancellationToken);
         var live = await liveSessions.GetLiveSessionsAsync(cancellationToken);
         var sessions = await SessionDtosAsync(detail.Card.ProjectPath, detail.Sessions, live, cancellationToken);
         var hasActiveAutomation = sessions.Any(s => s.Active && s.IsAutomation)
@@ -599,6 +602,7 @@ public sealed partial class BoardService(
             (await store.GetWaitingAutomationCardIdsAsync(detail.Card.ProjectPath, [detail.Card.Id], cancellationToken)).Count > 0,
             summary.AgentMadeBy, summary.AgentMadeSessionId, summary.JiraIssueKey)
         {
+            HasActiveDesktopAgent = desktopCards?.Contains(detail.Card.Id) == true,
             JiraIssueUrl = summary.JiraIssueKey is null ? null : await GetJiraIssueUrlAsync(detail.Card.ProjectPath, detail.Card.Id, cancellationToken),
             JiraDeliveries = summary.JiraIssueKey is null ? [] : (await store.GetJiraDeliveriesAsync(detail.Card.ProjectPath, detail.Card.Id, cancellationToken))
                 .Select(d => new BoardJiraDeliveryDto(d.SourceId, d.Kind, d.Status, d.Message)).ToList(),

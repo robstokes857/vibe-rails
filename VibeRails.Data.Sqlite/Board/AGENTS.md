@@ -1,5 +1,13 @@
 # Board persistence
 
+`board-desktop-activity/1` adds leased desktop MCP activity behind `IBoardStore`, separately
+from terminal sessions. Client identity comes from the MCP host. Starts validate current
+project/card membership; renewal never revives expired or ended rows. Closing/deleting a card
+or renaming its lane to a completed/closed lane ends activity through additive triggers, so
+older writers also stop the indicator. Reopening requires an explicit new start. Queries only
+return requested, live, open cards with fresh leases. Ended rows remain stored; no backfill or
+legacy Board/session changes occur.
+
 `board-lane-workflow/1` adds per-entry ordered workflow snapshots and append-only step reports.
 All current lane dispatch is sequential per card; the existing per-Job overlap guard remains.
 Use current workflow/event identity for decisions and user skips, and wait for actual run

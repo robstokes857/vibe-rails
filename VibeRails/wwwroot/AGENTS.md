@@ -150,6 +150,12 @@ base64 encoding. The resulting JSON is for
 
 ## Board
 
+Desktop MCP activity uses `hasActiveDesktopAgent`, independently of `activeTabId`. Render a
+purple marching border plus a desktop icon for desktop-only activity; when a real terminal is
+also active, retain its cyan border/green dot and show the desktop icon too. Refresh the flag
+through the existing activity poll and respect reduced motion. It must not enable terminal
+navigation, manufacture a tab, or alter Automation status.
+
 **Local search (VIBE-6).** Typing in Board search switches from lanes to ranked results across
 every local board, including other projects; clearing it restores lanes and their filters.
 `board-search.js` owns debouncing, cancellation, escaped snippets and ownership labels.

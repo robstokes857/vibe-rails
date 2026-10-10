@@ -47,6 +47,9 @@ CREATE INDEX IX_BoardComments_Unsent ON BoardComments(CardId) WHERE RemoteSeq IS
 -- index IX_BoardContextSamples_Card
 CREATE INDEX IX_BoardContextSamples_Card ON BoardContextSamples(CardId, MeasuredUTC);
 
+-- index IX_BoardDesktopActivity_Client
+CREATE INDEX IX_BoardDesktopActivity_Client ON BoardDesktopActivity(ClientId, EndedUTC, ExpiresUTC);
+
 -- index IX_BoardHandoffs_Card
 CREATE INDEX IX_BoardHandoffs_Card ON BoardHandoffs(CardId, CreatedUTC DESC, Id DESC);
 
@@ -155,6 +158,9 @@ CREATE TABLE BoardContextSettings ( BoardId TEXT PRIMARY KEY REFERENCES Boards(I
 -- table BoardDeletedComments
 CREATE TABLE BoardDeletedComments ( CommentId TEXT PRIMARY KEY REFERENCES BoardComments(Id) ON DELETE CASCADE, DeletedUTC TEXT NOT NULL );
 
+-- table BoardDesktopActivity
+CREATE TABLE BoardDesktopActivity ( CardId TEXT NOT NULL, ClientId TEXT NOT NULL, ClientLabel TEXT NOT NULL, ExpiresUTC TEXT NOT NULL, EndedUTC TEXT, PRIMARY KEY (CardId, ClientId) );
+
 -- table BoardDisplaySequences
 CREATE TABLE BoardDisplaySequences ( ProjectPath TEXT NOT NULL COLLATE NOCASE, Prefix TEXT NOT NULL COLLATE NOCASE, LastNumber INTEGER NOT NULL, PRIMARY KEY (ProjectPath, Prefix) );
 
@@ -242,6 +248,12 @@ CREATE TRIGGER BoardCards_AdditionalLaneAutomation_Insert AFTER INSERT ON BoardC
 -- trigger BoardCards_AdditionalLaneAutomation_Move
 CREATE TRIGGER BoardCards_AdditionalLaneAutomation_Move AFTER UPDATE OF ColumnId ON BoardCards WHEN OLD.ColumnId <> NEW.ColumnId BEGIN DELETE FROM BoardPendingAdditionalAutomations WHERE CardId = NEW.Id; INSERT INTO BoardPendingAdditionalAutomations (CardId, ColumnId, JobId, EventKey, DueUnixMs) SELECT NEW.Id, NEW.ColumnId, a.JobId, lower(hex(randomblob(16))), CAST(unixepoch('subsec') * 1000 AS INTEGER) + 60000 FROM BoardLaneAdditionalAutomations a WHERE a.ColumnId = NEW.ColumnId; END;
 
+-- trigger BoardCards_DeleteDesktopActivity
+CREATE TRIGGER BoardCards_DeleteDesktopActivity AFTER DELETE ON BoardCards BEGIN UPDATE BoardDesktopActivity SET EndedUTC = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE CardId = OLD.Id AND EndedUTC IS NULL; END;
+
+-- trigger BoardCards_EndDesktopActivity
+CREATE TRIGGER BoardCards_EndDesktopActivity AFTER UPDATE OF ColumnId, DeletedUTC ON BoardCards WHEN NEW.DeletedUTC IS NOT NULL OR EXISTS ( SELECT 1 FROM BoardColumns lane WHERE lane.Id = NEW.ColumnId AND (instr(lower(lane.Name), 'ship') > 0 OR instr(lower(lane.Name), 'done') > 0 OR instr(lower(lane.Name), 'complete') > 0 OR instr(lower(lane.Name), 'closed') > 0)) BEGIN UPDATE BoardDesktopActivity SET EndedUTC = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE CardId = NEW.Id AND EndedUTC IS NULL; END;
+
 -- trigger BoardCards_LaneAutomation_Insert
 CREATE TRIGGER BoardCards_LaneAutomation_Insert AFTER INSERT ON BoardCards BEGIN INSERT INTO BoardPendingAutomations (CardId, ColumnId, JobId, EventKey, DueUnixMs) SELECT NEW.Id, NEW.ColumnId, a.JobId, lower(hex(randomblob(16))), CAST(unixepoch('subsec') * 1000 AS INTEGER) + 60000 FROM BoardLaneAutomations a WHERE a.ColumnId = NEW.ColumnId AND a.JobId IS NOT NULL; END;
 
@@ -256,6 +268,9 @@ CREATE TRIGGER BoardCards_Workflow_Insert BEFORE INSERT ON BoardCards BEGIN UPDA
 
 -- trigger BoardCards_Workflow_Move
 CREATE TRIGGER BoardCards_Workflow_Move BEFORE UPDATE OF ColumnId ON BoardCards WHEN OLD.ColumnId <> NEW.ColumnId BEGIN UPDATE BoardLaneWorkflows SET Current = 0 WHERE CardId = NEW.Id AND Current = 1; INSERT INTO BoardLaneWorkflows (Id, CardId, ColumnId, CreatedUnixMs) SELECT lower(hex(randomblob(16))), NEW.Id, NEW.ColumnId, CAST(unixepoch('subsec') * 1000 AS INTEGER) WHERE EXISTS (SELECT 1 FROM BoardLaneAutomations WHERE ColumnId = NEW.ColumnId AND JobId IS NOT NULL); INSERT INTO BoardLaneWorkflowSteps (WorkflowId, JobId, Position) SELECT w.Id, a.JobId, 0 FROM BoardLaneWorkflows w JOIN BoardLaneAutomations a ON a.ColumnId = w.ColumnId WHERE w.CardId = NEW.Id AND w.Current = 1 AND a.JobId IS NOT NULL UNION ALL SELECT w.Id, a.JobId, a.Position FROM BoardLaneWorkflows w JOIN BoardLaneAdditionalAutomations a ON a.ColumnId = w.ColumnId WHERE w.CardId = NEW.Id AND w.Current = 1; END;
+
+-- trigger BoardColumns_EndDesktopActivity
+CREATE TRIGGER BoardColumns_EndDesktopActivity AFTER UPDATE OF Name ON BoardColumns WHEN (instr(lower(NEW.Name), 'ship') > 0 OR instr(lower(NEW.Name), 'done') > 0 OR instr(lower(NEW.Name), 'complete') > 0 OR instr(lower(NEW.Name), 'closed') > 0) BEGIN UPDATE BoardDesktopActivity SET EndedUTC = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE EndedUTC IS NULL AND CardId IN ( SELECT Id FROM BoardCards WHERE ColumnId = NEW.Id); END;
 
 -- trigger BoardColumns_HistoryChanged
 CREATE TRIGGER BoardColumns_HistoryChanged AFTER UPDATE OF Name, Color, Position ON BoardColumns WHEN OLD.Name IS NOT NEW.Name OR OLD.Color IS NOT NEW.Color OR OLD.Position IS NOT NEW.Position BEGIN INSERT INTO BoardHistory VALUES ('bh_' || lower(hex(randomblob(16))), COALESCE(NEW.BoardId, ''), NEW.ProjectPath, 'change', 'Lane ' || OLD.Name || ': ' || CASE WHEN OLD.Name IS NOT NEW.Name THEN 'name → ' || NEW.Name || '; ' ELSE '' END || CASE WHEN OLD.Color IS NOT NEW.Color THEN 'colour → ' || NEW.Color || '; ' ELSE '' END || CASE WHEN OLD.Position IS NOT NEW.Position THEN 'position → ' || NEW.Position ELSE '' END, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')); END;

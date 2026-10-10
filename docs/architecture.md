@@ -612,6 +612,19 @@ Base Codex cards persist an optional Speed choice (Default/Fast/Ultrafast) in th
 model/tier pairs; `BaseLlmOptionsBuilder` validates them and emits session-only service-tier
 arguments. Default inherits CLI settings. See the model maintenance checklist in
 `vibe-books/custom_envs/CLI_OPTIONS.md` when adding models or speed tiers.
+Board MCP create/update uses the same typed assignment and `BaseLlmOptions` validation as
+the UI. `list_board_agent_options` and `start_board_agent` call the existing authenticated
+root picker/launch routes using inherited root credentials; Start uses the card's saved
+settings and returns a session ID to poll, without changing running agents or global config.
+Desktop MCP work is independent of terminal sessions: `DesktopMcpActivityTracker` writes
+90-second leases through `IBoardStore` into additive `BoardDesktopActivity` storage in
+`board.db`. Stdio renews while connected and ends owned marks at completion/EOF; HTTP
+uses recent successful same-project writes or explicit attachment. Stateful completion
+ends only its own mark; stateless app-name aggregates expire naturally. Card closure ends
+leases and retains their rows. Board responses/polling project `hasActiveDesktopAgent`
+for the purple border/desktop icon, alongside real CLI/Automation indicators. Activity
+creates no terminal navigation, session replay or hosted sync. See the
+[desktop lifecycle contract](../VibeRails/Services/Mcp/AGENTS.md#desktop-client-activity).
 VIBE-6 adds `BoardSearchService` for dashboard search, link candidates, `search_board_cards` and
 card recall: all local boards share current-text BGE/keyword retrieval with a bounded repository
 preference. VIBE-55 feeds full titles, descriptions, Comments, retained notes and handoffs through

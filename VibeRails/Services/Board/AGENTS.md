@@ -1,5 +1,27 @@
 # Working on Vibe Board
 
+## MCP agent settings parity
+
+MCP create/update accepts the UI's `assignee` and typed `baseLlmOptions`, including explicit
+Codex `speed="ultrafast"` with `model="gpt-6-astra"`. Shared normalization and launch builders
+remain authoritative. Options replace the object; omitted options stay intact when the
+assignee is unchanged. Base overrides on saved environments are rejected. Card reads show
+saved launch settings and must not imply a running agent was reconfigured.
+`list_board_agent_options` reads the root's ordinary picker; `start_board_agent` launches the
+saved assignment through the existing project-scoped root route and returns a session to poll.
+See the [MCP contract](../Mcp/AGENTS.md#board-agent-assignment-and-launch).
+
+## Desktop MCP activity
+
+Desktop activity is independent of terminal activity: `HasActiveDesktopAgent` is projected
+onto list, page, detail and activity responses from leases behind `IBoardStore`. Never use
+a fake tab or session to make the indicator appear, block Start work, or create a public replay.
+Same-project MCP writes and explicit `attach_board_session` mark desktop work; ordinary reads
+do not. The UI uses a purple marching border and desktop icon; real terminals retain cyan/green.
+Closing a card (a lane containing done, complete, ship or closed), deleting it, or explicitly
+completing owned desktop work ends its lease. No automatic lane movement is introduced.
+See the [MCP lifetime contract](../Mcp/AGENTS.md#desktop-client-activity).
+
 ## Local Board search (VIBE-6)
 
 `BoardSearchService` is shared by dashboard search, link candidates, `search_board_cards` and

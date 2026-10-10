@@ -61,9 +61,12 @@ public class McpServerHttpTests : IAsyncLifetime
         builder.Services.AddScoped<TokenSaverTool>();
         builder.Services.AddAgentSessionMcp();
         builder.Services.AddSessionSharingMcp();
+        builder.Services.AddBoardAgentLaunchMcp();
         builder.Services.AddSingleton(Mock.Of<IBoardService>());
         builder.Services.AddSingleton(Mock.Of<IBoardProjectResolver>());
         builder.Services.AddSingleton(Mock.Of<IBoardStore>());
+        builder.Services.AddSingleton(provider => new DesktopMcpActivityTracker(provider.GetRequiredService<IBoardStore>(), false, _ => null, TimeProvider.System));
+        builder.Services.AddHostedService(provider => provider.GetRequiredService<DesktopMcpActivityTracker>());
         builder.Services.AddScoped<BoardTool>();
         builder.Services.AddScoped<BoardReviewService>();
         builder.Services.AddScoped<BoardWorkflowService>();
@@ -258,6 +261,103 @@ public class McpServerHttpTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task AssignmentToolsExposeTypedUiOptionsIncludingSpeed()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var client = await ConnectAsync(ct);
+        var tools = await client.GetAvailableToolsAsync(ct);
+        foreach (var name in new[] { "create_board_card", "update_board_card" })
+        {
+            var tool = Assert.Single(tools, t => t.Name == name);
+            var properties = tool.JsonSchema.GetProperty("properties");
+            Assert.True(properties.TryGetProperty("assignee", out _));
+            var options = properties.GetProperty("baseLlmOptions").GetProperty("properties");
+            Assert.Equal(new[] { "effort", "mode", "model", "speed", "yolo" },
+                options.EnumerateObject().Select(p => p.Name).OrderBy(n => n).ToArray());
+        }
+        Assert.True(Assert.Single(tools, t => t.Name == "update_board_card").JsonSchema
+            .GetProperty("properties").TryGetProperty("clearBaseLlmOptions", out _));
+        Assert.Empty(Assert.Single(tools, t => t.Name == "list_board_agent_options").JsonSchema
+            .GetProperty("properties").EnumerateObject());
+    }
+
+    [Theory]
+    [InlineData("create_board_card")]
+    [InlineData("update_board_card")]
+    public async Task AssignmentCallsBindTypedOptionsOverHttp(string toolName)
+    {
+        const string project = "assignment-test-project";
+        const string cardId = "assignment-card";
+        var ct = TestContext.Current.CancellationToken;
+        var now = DateTime.UtcNow;
+        var options = new BaseLlmOptions(Model: "gpt-6-astra", Effort: "xhigh", Speed: "ultrafast");
+        var card = new BoardCardRecord(cardId, project, 1, "lane", 0, "Astra work", "", "base:codex",
+            "medium", null, [], false, 0, now, now);
+        var saved = new BoardCardResponse(cardId, "PROJ-1", "lane", 0, "Astra work", "", "base:codex",
+            "medium", null, [], false, 0, null, null, now, now, [], [], [], [], BaseLlmOptions: options);
+        Mock.Get(_app.Services.GetRequiredService<IBoardProjectResolver>())
+            .Setup(resolver => resolver.ResolveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(project);
+        var board = Mock.Get(_app.Services.GetRequiredService<IBoardService>());
+        board.Setup(service => service.FindCardAsync(project, cardId, It.IsAny<CancellationToken>())).ReturnsAsync(card);
+        CreateBoardCardRequest? createRequest = null;
+        UpdateBoardCardRequest? updateRequest = null;
+        board.Setup(service => service.CreateCardAsync(project, It.IsAny<CreateBoardCardRequest>(),
+                It.IsAny<CancellationToken>(), It.IsAny<BoardAuthor?>()))
+            .Callback<string, CreateBoardCardRequest, CancellationToken, BoardAuthor?>((_, request, _, _) => createRequest = request)
+            .ReturnsAsync(saved);
+        board.Setup(service => service.UpdateCardAsync(project, cardId, It.IsAny<UpdateBoardCardRequest>(),
+                It.IsAny<CancellationToken>(), It.IsAny<BoardAuthor?>()))
+            .Callback<string, string, UpdateBoardCardRequest, CancellationToken, BoardAuthor?>((_, _, request, _, _) => updateRequest = request)
+            .ReturnsAsync(saved);
+        await using var client = await McpClient.CreateAsync(
+            new HttpClientTransport(new HttpClientTransportOptions { Endpoint = _endpoint, TransportMode = HttpTransportMode.StreamableHttp },
+                SharedClient, NullLoggerFactory.Instance, ownsHttpClient: false),
+            new McpClientOptions { ClientInfo = new() { Name = "codex-mcp-client", Version = "1.0.0" } }, cancellationToken: ct);
+        var arguments = new Dictionary<string, object?>
+        {
+            ["assignee"] = "base:codex",
+            ["baseLlmOptions"] = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+                """{"model":"gpt-6-astra","effort":"xhigh","speed":"ultrafast"}""")
+        };
+        arguments[toolName == "create_board_card" ? "title" : "card"] = toolName == "create_board_card" ? "Astra work" : cardId;
+
+        var result = await client.CallToolAsync(toolName, arguments, cancellationToken: ct);
+
+        Assert.False(result.IsError == true);
+        Assert.Contains("model=gpt-6-astra; effort=xhigh; speed=ultrafast", Assert.Single(result.Content.OfType<TextContentBlock>()).Text);
+        if (toolName == "create_board_card")
+        {
+            Assert.NotNull(createRequest);
+            Assert.Equal("base:codex", createRequest.Assignee);
+            Assert.Equal(options, createRequest.BaseLlmOptions);
+            Assert.Null(updateRequest);
+        }
+        else
+        {
+            Assert.NotNull(updateRequest);
+            Assert.Equal("base:codex", updateRequest.Assignee);
+            Assert.Equal(options, updateRequest.BaseLlmOptions);
+            Assert.False(updateRequest.ClearBaseLlmOptions);
+            Assert.Null(createRequest);
+        }
+    }
+
+    [Fact]
+    public async Task StartBoardAgentResolvesAndExposesOnlyTheRequiredCard()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var client = await ConnectAsync(ct);
+        var tool = Assert.Single(await client.GetAvailableToolsAsync(ct), t => t.Name == "start_board_agent");
+        Assert.Equal("card", Assert.Single(tool.JsonSchema.GetProperty("properties").EnumerateObject()).Name);
+        Assert.Equal("card", Assert.Single(tool.JsonSchema.GetProperty("required").EnumerateArray()).GetString());
+        var result = await client.CallToolAsync("start_board_agent", new Dictionary<string, object?>
+        {
+            ["card"] = " " // Exercises binding/DI without launching a real agent.
+        }, ct);
+        Assert.Contains("FAIL: Enter a card key", result.Text);
+    }
+
+    [Fact]
     public async Task SaveBoardHandoff_TakesATypedHandoffThroughTheSharedSerializerOptions()
     {
         // Regression: the SDK's own JSON context knows protocol and primitive types only, so a tool parameter of an
@@ -320,20 +420,68 @@ public class McpServerHttpTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task AttachBoardSession_RequiresLaunchingSessionContext()
+    public async Task AttachBoardSession_RejectsUnknownDesktopCard()
     {
         await using var client = await ConnectAsync(TestContext.Current.CancellationToken);
         var result = await client.CallToolAsync("attach_board_session", new Dictionary<string, object?> { ["card"] = "VB-2" }, TestContext.Current.CancellationToken);
-        Assert.Contains("FAIL: this terminal has no VibeRails session", result.Text);
+        Assert.Contains("FAIL: card not found", result.Text);
+    }
+
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("2025-11-25", false)]
+    public async Task DesktopAttachmentAndCompletionTrackTheActualHttpClient(string? protocolVersion, bool aggregate)
+    {
+        const string project = "desktop-test-project";
+        const string cardId = "desktop-card";
+        var ct = TestContext.Current.CancellationToken;
+        var card = new BoardCardRecord(cardId, project, 1, "lane", 0, "Desktop", "", null, "medium", null, [], false, 0, DateTime.UtcNow, DateTime.UtcNow);
+        Mock.Get(_app.Services.GetRequiredService<IBoardProjectResolver>())
+            .Setup(resolver => resolver.ResolveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(project);
+        var board = Mock.Get(_app.Services.GetRequiredService<IBoardService>());
+        board.Setup(service => service.FindCardAsync(project, cardId, It.IsAny<CancellationToken>())).ReturnsAsync(card);
+        board.Setup(service => service.AddCommentAsync(project, cardId, It.IsAny<BoardAuthor>(), It.IsAny<string>(), It.IsAny<CancellationToken>(), false))
+            .ReturnsAsync(new BoardCommentDto("desktop-comment", new BoardAuthorDto("agent", "Codex", "Codex"), "Done", DateTime.UtcNow));
+        var store = Mock.Get(_app.Services.GetRequiredService<IBoardStore>());
+        var startedIds = new List<string>();
+        store.Setup(s => s.StartDesktopActivityAsync(project, cardId, It.IsAny<string>(), "Codex", It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, string, string, DateTime, CancellationToken>((_, _, id, _, _, _) => startedIds.Add(id)).ReturnsAsync(true);
+        await using var client = await McpClient.CreateAsync(
+            new HttpClientTransport(new HttpClientTransportOptions { Endpoint = _endpoint, TransportMode = HttpTransportMode.StreamableHttp },
+                SharedClient, NullLoggerFactory.Instance, ownsHttpClient: false),
+            new McpClientOptions { ClientInfo = new() { Name = "codex-mcp-client", Version = "1" }, ProtocolVersion = protocolVersion }, cancellationToken: ct);
+
+        var attached = await client.CallToolAsync("attach_board_session", new Dictionary<string, object?> { ["card"] = cardId }, cancellationToken: ct);
+        Assert.Contains("Linked desktop activity", Assert.Single(attached.Content.OfType<TextContentBlock>()).Text);
+        await client.CallToolAsync("add_board_comment", new Dictionary<string, object?>
+            { ["card"] = cardId, ["body"] = "Working", ["syncToJira"] = false }, cancellationToken: ct);
+        Assert.Equal(2, startedIds.Count);
+        Assert.Equal(startedIds[0], startedIds[1]);
+        Assert.DoesNotContain("codex", startedIds[0], StringComparison.OrdinalIgnoreCase);
+        // Two instances use the same app name. Stateful clients must own separate marks;
+        // stateless clients deliberately share one recent-activity aggregate.
+        await using var secondClient = await McpClient.CreateAsync(
+            new HttpClientTransport(new HttpClientTransportOptions { Endpoint = _endpoint, TransportMode = HttpTransportMode.StreamableHttp },
+                SharedClient, NullLoggerFactory.Instance, ownsHttpClient: false),
+            new McpClientOptions { ClientInfo = new() { Name = "codex-mcp-client", Version = "1" }, ProtocolVersion = protocolVersion }, cancellationToken: ct);
+        await secondClient.CallToolAsync("attach_board_session", new Dictionary<string, object?> { ["card"] = cardId }, cancellationToken: ct);
+        Assert.Equal(3, startedIds.Count);
+        Assert.Equal(aggregate, startedIds[0] == startedIds[2]);
+        var completed = await client.CallToolAsync("complete_board_agent", new Dictionary<string, object?>
+            { ["card"] = cardId, ["summary"] = "Implemented and tested" }, cancellationToken: ct);
+        Assert.Contains(aggregate ? "expires after 90 seconds" : "activity ended", Assert.Single(completed.Content.OfType<TextContentBlock>()).Text);
+        store.Verify(s => s.EndDesktopActivityAsync(startedIds[0], cardId, It.IsAny<CancellationToken>()), aggregate ? Times.Never() : Times.Once());
+        store.Verify(s => s.EndDesktopActivityAsync(startedIds[2], cardId, It.IsAny<CancellationToken>()), Times.Never());
+        board.Verify(s => s.AttachSessionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task CompleteBoardAgent_RequiresLaunchingSessionContextOverHttpToo()
+    public async Task CompleteBoardAgent_RejectsUnknownDesktopCard()
     {
         await using var client = await ConnectAsync(TestContext.Current.CancellationToken);
         var result = await client.CallToolAsync("complete_board_agent", new Dictionary<string, object?>
             { ["summary"] = "Reviewed", ["card"] = "VB-2" }, TestContext.Current.CancellationToken);
-        Assert.Contains("FAIL: this tool requires a current VibeRails agent session", result.Text);
+        Assert.Contains("FAIL: card not found", result.Text);
     }
 
     [Fact]

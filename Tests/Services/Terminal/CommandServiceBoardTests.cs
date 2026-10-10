@@ -151,6 +151,7 @@ public partial class CommandServiceTests
             "save_board_handoff",
             "read_board_session",
             "get_board_notes", "read_board_attachment", "read_board_check",
+            "list_board_agent_options", "start_board_agent",
             "create_board_card", "update_board_card", "move_board_card", "add_board_comment",
             "append_board_note", "add_board_attachment", "attach_board_session", "link_board_commit",
             "complete_board_agent", "end_agent_session", "get_board_agent_status", "begin_board_review", "save_board_review", "get_board_reviews", "report_automation_step"

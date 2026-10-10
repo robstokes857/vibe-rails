@@ -7,15 +7,37 @@ namespace VibeRails.Services.Mcp.Tools;
 
 public sealed partial class BoardTool
 {
-    [McpServerTool, Description("Report that this agent has finished its work, with a final summary and outcome. Call after posting your handoff and moving the card, just before exiting. Reports only the current VibeRails session; safe to repeat (the first report is retained). Does not stop a process, move a card, or complete an Automation's remaining actions. Once completely done, call end_agent_session LAST to close your PTY in 30 seconds, then send your final response.")]
+    [McpServerTool, Description("Report that this agent has finished its work, with a final summary and outcome. Call after posting your handoff and moving the card. A VibeRails terminal retains its first session report; then call end_agent_session LAST to close its PTY. A desktop MCP client must name the card; its summary is saved as an internal Board comment and its connection's desktop activity ends. Stateless HTTP shares an app-name activity mark that expires after 90 seconds of inactivity or when the card closes. Does not move cards or complete remaining Automation actions.")]
     public async Task<string> CompleteBoardAgent(
         [Description("Final result and validation, up to 4,000 characters.")] string summary,
         [Description("succeeded | failed | cancelled. Defaults to succeeded.")] string outcome = "succeeded",
         [Description("Card key or id. Omit for this terminal's original card.")] string? card = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        McpServer? server = null)
     {
         try
         {
+            if (desktopActivity?.IsDesktop == true)
+            {
+                if (string.IsNullOrWhiteSpace(card))
+                    return "FAIL: Desktop MCP completion requires an explicit card key or row ID.";
+                var result = outcome.Trim().ToLowerInvariant();
+                if (result is not ("succeeded" or "failed" or "cancelled"))
+                    return "FAIL: Outcome must be succeeded, failed or cancelled.";
+                if (string.IsNullOrWhiteSpace(summary) || summary.Length > 4000)
+                    return "FAIL: A completion summary of 1–4,000 characters is required.";
+                var desktopTarget = await ResolveCardAsync(card, cancellationToken);
+                if (desktopTarget.Error is not null) return desktopTarget.Error;
+                if (await ResolveAuthorAsync(server, cancellationToken) is not { } author) return UnnamedClientHint;
+                var comment = await service.AddCommentAsync(desktopTarget.Project, desktopTarget.CardId!, author,
+                    $"Desktop agent reported {result}: {summary.Trim()}", cancellationToken, syncToJira: false);
+                if (comment is null) return "FAIL: card not found.";
+                if (desktopActivity.IsAggregate(server))
+                    return "Desktop completion saved. This app-name activity mark is shared by stateless HTTP calls and expires after 90 seconds of inactivity or when the card closes.";
+                return await desktopActivity.EndAsync(server, desktopTarget.CardId!, author.Label, cancellationToken)
+                    ? "Desktop completion saved and this connection's activity ended. No terminal session was created or stopped."
+                    : "Desktop completion saved. The activity mark could not be cleared immediately; it will clear on expiry or when the card closes.";
+            }
             if (projects.CurrentSessionId is not { } sessionId)
                 return "FAIL: this tool requires a current VibeRails agent session.";
             var target = await ResolveCardAsync(card, cancellationToken);

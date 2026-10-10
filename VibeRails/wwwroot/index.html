@@ -3415,7 +3415,7 @@
                     border: 2px solid transparent;
                     background:
                         linear-gradient(var(--color-bg-elevated, #232323), var(--color-bg-elevated, #232323)) padding-box,
-                        repeating-linear-gradient(-45deg, #06b6d4 0 10px, var(--color-bg-surface, #1e1e1e) 10px 20px) border-box;
+                        repeating-linear-gradient(-45deg, var(--board-live-color, #06b6d4) 0 10px, var(--color-bg-surface, #1e1e1e) 10px 20px) border-box;
                     background-size: auto, 28px 28px;
                     animation: board-march 1s linear infinite;
                 }
@@ -3425,8 +3425,12 @@
                     border-color: transparent;
                     background:
                         linear-gradient(var(--color-bg-surface-hover, #2c2c2c), var(--color-bg-surface-hover, #2c2c2c)) padding-box,
-                        repeating-linear-gradient(-45deg, #06b6d4 0 10px, var(--color-bg-surface, #1e1e1e) 10px 20px) border-box;
+                        repeating-linear-gradient(-45deg, var(--board-live-color, #06b6d4) 0 10px, var(--color-bg-surface, #1e1e1e) 10px 20px) border-box;
                     background-size: auto, 28px 28px;
+                }
+
+                .board-view .board-card.is-desktop-live {
+                    --board-live-color: #a855f7;
                 }
 
                 @keyframes board-march {
@@ -3679,6 +3683,12 @@
                 }
                 @media (prefers-reduced-motion: reduce) {
                     .board-automation-running { animation: none; }
+                }
+
+                .board-desktop-active {
+                    color: #a855f7;
+                    display: inline-flex;
+                    align-items: center;
                 }
 
                 /* A terminal session is working this card right now. */

@@ -26,6 +26,8 @@ public sealed class BoardSimplificationMigrationTests : IDisposable
         Assert.Equal(3L, Scalar(db, "PRAGMA user_version;"));
         Assert.Equal(2L, Scalar(db, "SELECT COUNT(*) FROM SchemaMigrations WHERE Component='board' AND Version IN (8,9);"));
         Assert.Equal(1L, Scalar(db, "SELECT COUNT(*) FROM SchemaMigrations WHERE Component='board' AND Version = 11;"));
+        Assert.Equal(1L, Scalar(db, "SELECT COUNT(*) FROM SchemaMigrations WHERE Component='board-desktop-activity' AND Version = 1;"));
+        Assert.Equal(0L, Scalar(db, "SELECT COUNT(*) FROM BoardDesktopActivity;"));
         Assert.Equal("VB", Scalar(db, "SELECT Prefix FROM BoardProjectKeys;"));
     }
 
@@ -76,6 +78,11 @@ public sealed class BoardSimplificationMigrationTests : IDisposable
         using var command = db.CreateCommand();
         command.CommandText = """
             -- Remove newer-only objects before reconstructing the old installed schema.
+            DROP TRIGGER BoardCards_EndDesktopActivity;
+            DROP TRIGGER BoardCards_DeleteDesktopActivity;
+            DROP TRIGGER BoardColumns_EndDesktopActivity;
+            DROP TABLE BoardDesktopActivity;
+            DELETE FROM SchemaMigrations WHERE Component = 'board-desktop-activity';
             DROP TRIGGER BoardComments_QueueJira;
             DROP TABLE BoardJiraDeliveries;
             DELETE FROM SchemaMigrations WHERE Component = 'board-jira-delivery';

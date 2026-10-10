@@ -4,7 +4,11 @@ public sealed record SkipBoardCardAutomationRequest(long JobId, string EventKey)
 
 public sealed record BoardCardActivityRequest(string? BoardId, List<string>? CardIds);
 public sealed record BoardCardActivityResponse(string Id, string? ActiveSessionId, string? ActiveTabId, bool HasActiveAutomation,
-    bool HasWaitingAutomation = false);
+    bool HasWaitingAutomation = false)
+{
+    /// <summary>A desktop MCP client has recently marked this card as active.</summary>
+    public bool HasActiveDesktopAgent { get; init; }
+}
 public sealed record BoardCardActivityListResponse(List<BoardCardActivityResponse> Cards)
 {
     public IReadOnlyList<string> ActiveAutomationColumnIds { get; init; } = [];
