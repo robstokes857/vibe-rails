@@ -148,11 +148,14 @@ test('foreign editor saves only changed fields and preserves drafts after commen
         async apiCall(url, method, payload) {
             calls.push({ url, method, payload });
             if (fail) throw new Error('Save failed');
-            return url.endsWith('/comments') ? { id: 'new-comment', body: payload.body, createdAt: '2026-10-04T12:00:00Z' } : { id: 'foreign', ...payload };
+            return url.endsWith('/comments') ? { id: 'new-comment', body: payload.body, syncToJira: false, createdAt: '2026-10-04T12:00:00Z' } : { id: 'foreign', ...payload };
         }
     };
     BoardApi.attach(app);
-    const dispose = openLocalCardEditor(app, { card: { id: 'foreign', title: 'Original', comments: [] }, columns: [] }, { openCard() {}, onChanged() {} });
+    const detail = { card: { id: 'foreign', title: 'Original', jiraIssueKey: 'OLD-1',
+        comments: [{ id: 'internal', body: 'Internal note', syncToJira: false }] }, columns: [], isJiraBoard: false };
+    const dispose = openLocalCardEditor(app, detail, { openCard() {}, onChanged() {} });
+    assert.doesNotMatch(comments.innerHTML, /Not sent to Jira/, 'a retained issue key on a local board does not show Jira status');
     const submit = { preventDefault() {} };
     form.fields.description.value = 'Keep this draft';
     await commentForm.handlers.submit(submit);
@@ -161,6 +164,11 @@ test('foreign editor saves only changed fields and preserves drafts after commen
     assert.match(comments.innerHTML, /Comment draft/);
     assert.match(comments.innerHTML, /<strong>Comment draft<\/strong>/);
     assert.doesNotMatch(comments.innerHTML, /<script>|data-board-ref-commit/i);
+    assert.doesNotMatch(comments.innerHTML, /Not sent to Jira/);
+    detail.isJiraBoard = true;
+    commentForm.fields.body.value = 'Another internal note';
+    await commentForm.handlers.submit(submit);
+    assert.match(comments.innerHTML, /Not sent to Jira/);
     fail = true;
     await form.handlers.submit(submit);
     assert.equal(form.fields.description.value, 'Keep this draft');

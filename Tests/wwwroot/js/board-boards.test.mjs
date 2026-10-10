@@ -71,10 +71,10 @@ test('description editing has no preview or Markdown toggle', () => {
 
 test('a card with a live session marches its border and shows a larger dot', () => {
     const source = readFileSync(controllerPath, 'utf8');
-    assert.match(source, /\$\{card\.activeTabId \? ' is-live' : ''\}/);
+    assert.match(source, /\$\{card\.activeTabId \|\| card\.hasActiveDesktopAgent \? ' is-live' : ''\}/);
     const css = boardTemplate();
     const live = rule(css, '.board-view .board-card.is-live');
-    assert.match(live, /repeating-linear-gradient\(-45deg, #06b6d4 0 10px/);
+    assert.match(live, /repeating-linear-gradient\(-45deg, var\(--board-live-color, #06b6d4\) 0 10px/);
     assert.match(live, /background-size:\s*auto, 28px 28px/);
     assert.match(live, /animation:\s*board-march 1s linear infinite/);
     assert.match(css, /@keyframes board-march \{[\s\S]*to \{ background-position: 0 0, 28px 0; \}/);

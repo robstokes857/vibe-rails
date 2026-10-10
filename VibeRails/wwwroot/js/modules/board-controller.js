@@ -1935,8 +1935,9 @@ export class BoardController {
         this.updateSectionCount(editor, 'comments', comments.length);
         const filter = editor.querySelector('[data-board-comment-filter]')?.value || 'all';
         const visible = comments.filter(entry => matchesCommentFilter(entry, filter));
+        const isJiraBoard = Boolean(card?.boardId && this.boardById(card.boardId)?.isJiraBoard);
         host.innerHTML = visible.length
-            ? visible.map(entry => this.cardLogCommentHtml(entry, textOptions)).join('')
+            ? visible.map(entry => this.cardLogCommentHtml(entry, textOptions, isJiraBoard)).join('')
             : `<p class="board-editor-muted">${comments.length ? 'No comments match this filter.' : 'No comments yet.'}</p>`;
         editor._boardDiscussionImages?.hydrate(host);
         host.querySelectorAll('[data-board-delete-comment]').forEach(button => {
@@ -1962,7 +1963,7 @@ export class BoardController {
     }
 
     // Human and agent entries share the same discussion.
-    cardLogCommentHtml(entry, textOptions) {
+    cardLogCommentHtml(entry, textOptions, isJiraBoard = false) {
         const author = this.authorInfo(entry.author);
         // An agent entry knows the terminal session that wrote it and when: the link replays
         // that session seeked to this moment (session-viewer.js seekToUtc).
@@ -1979,7 +1980,7 @@ export class BoardController {
                 <div class="board-comment-content">
                     <div class="board-comment-meta">
                         <span class="board-comment-author">${escapeHtml(author?.label || 'Someone')}</span>
-                        ${entry.syncToJira === false ? '<span class="badge text-bg-secondary">Not sent to Jira</span>' : ''}
+                        ${isJiraBoard && entry.syncToJira === false ? '<span class="badge text-bg-secondary">Not sent to Jira</span>' : ''}
                         ${entry.purpose && entry.purpose !== 'work' ? `<span class="badge text-bg-secondary">${escapeHtml(agentPurposeLabel(entry.purpose))}</span>` : ''}
                         <span class="board-comment-when">${jump}${escapeHtml(this.formatDateTime(entry.createdAt))}<button type="button" class="btn btn-link btn-sm text-danger" data-board-delete-comment="${escapeHtml(entry.id)}" aria-label="Delete comment" title="Delete comment"><i class="fa-solid fa-trash" aria-hidden="true"></i></button></span>
                     </div>

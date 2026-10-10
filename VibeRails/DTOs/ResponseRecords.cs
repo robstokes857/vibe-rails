@@ -322,7 +322,7 @@ namespace VibeRails.DTOs
     public record BoardFileSearchResponse(List<string> Files, bool Truncated);
     public record BoardSearchResponse(IReadOnlyList<BoardSearchHit> Cards);
     public record LocalBoardCardResponse(BoardCardResponse Card, string ProjectPath, string BoardName,
-        List<BoardColumnResponse> Columns, bool IsCurrentProject);
+        List<BoardColumnResponse> Columns, bool IsCurrentProject, bool IsJiraBoard = false);
     public record LinkBoardCardRequest(string? Card = null);
     public record BoardCardResponse(
         string Id,

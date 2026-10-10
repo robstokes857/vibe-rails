@@ -21,7 +21,7 @@ test('comment API defaults to Jira delivery and preserves an explicit opt-out on
     assert.deepEqual(calls.map(c => c[2].syncToJira), [true, false, false]);
 });
 
-test('posting reads the current editor sync choice and unsynced comments are labelled', async () => {
+test('posting reads the current editor sync choice and labels unsynced comments only on Jira boards', async t => {
     globalThis.window = {};
     const calls = [];
     const controller = new BoardController({ apiCall: async (...args) => { calls.push(args); return {}; } });
@@ -30,5 +30,22 @@ test('posting reads the current editor sync choice and unsynced comments are lab
     const editor = { querySelector: selector => selector === '[data-board-jira-sync]' ? { checked: false } : null };
     await controller.postComment(editor, 'Keep here');
     assert.equal(calls[0][2].syncToJira, false);
-    assert.match(controller.cardLogCommentHtml({ id: 'comment', body: 'Note', author: {}, syncToJira: false }, {}), /Not sent to Jira/);
+    const comment = { id: 'comment', body: 'Note', author: {}, syncToJira: false };
+    assert.match(controller.cardLogCommentHtml(comment, {}, true), /Not sent to Jira/);
+    assert.doesNotMatch(controller.cardLogCommentHtml(comment, {}, false), /Not sent to Jira/);
+    assert.doesNotMatch(controller.cardLogCommentHtml(comment, {}), /Not sent to Jira/);
+    assert.doesNotMatch(controller.cardLogCommentHtml({ ...comment, syncToJira: true }, {}, true), /Not sent to Jira/);
+
+    const savedFrame = globalThis.requestAnimationFrame;
+    globalThis.requestAnimationFrame = () => 0;
+    t.after(() => { globalThis.requestAnimationFrame = savedFrame; });
+    const host = { innerHTML: '', isConnected: false, querySelectorAll: () => [] };
+    const discussion = { querySelector: selector => selector === '[data-board-comments]' ? host : null, querySelectorAll: () => [] };
+    controller.state.boards = [{ id: 'local', isJiraBoard: false }, { id: 'jira', isJiraBoard: true }];
+    controller.state.boardId = 'jira';
+    controller.renderCardDiscussion(discussion, { boardId: 'local', jiraIssueKey: 'OLD-1', comments: [comment] });
+    assert.doesNotMatch(host.innerHTML, /Not sent to Jira/, 'retained issue keys and the selected board do not determine the card board type');
+    controller.state.boardId = 'local';
+    controller.renderCardDiscussion(discussion, { boardId: 'jira', comments: [comment] });
+    assert.match(host.innerHTML, /Not sent to Jira/);
 });

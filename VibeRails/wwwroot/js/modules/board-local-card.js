@@ -60,13 +60,13 @@ export function localCardChanges(baseline, values) {
     return Object.fromEntries(Object.entries(values).filter(([name, value]) => JSON.stringify(value) !== JSON.stringify(baseline[name])));
 }
 
-function commentsHtml(card) {
+function commentsHtml(card, isJiraBoard) {
     const entries = [...(card.comments || []), ...(card.notes || [])].sort((a, b) =>
         Number(b.isAttention === true) - Number(a.isAttention === true) || String(a.createdAt).localeCompare(String(b.createdAt)));
     return entries.map(entry => `<article class="board-comment${entry.isAttention ? ' is-attention' : ''}">
         <div class="board-comment-content"><div class="board-comment-meta">
             <strong>${escapeHtml(entry.author?.label || 'Someone')}</strong>
-            ${entry.syncToJira === false ? '<span class="badge text-bg-secondary">Not sent to Jira</span>' : ''}
+            ${isJiraBoard === true && entry.syncToJira === false ? '<span class="badge text-bg-secondary">Not sent to Jira</span>' : ''}
             <time>${escapeHtml(new Date(entry.createdAt).toLocaleString())}</time></div>
             ${entry.isAttention ? '<div class="board-comment-attention">Needs your attention</div>' : ''}
             <div class="board-comment-body board-local-comment-body">${renderCommentHtml(entry.body, { interactiveReferences: false })}</div></div></article>`).join('') || '<p class="text-muted small">No comments yet.</p>';
@@ -108,7 +108,7 @@ export function openLocalCardEditor(app, detail, { openCard, onChanged }) {
         if (alive()) onChanged?.();
     };
     const showError = message => { if (alive()) app.showToast('Board', message, 'error'); };
-    comments.innerHTML = commentsHtml(card);
+    comments.innerHTML = commentsHtml(card, detail.isJiraBoard);
     linksDispose = bindCardLinks(editor, card, {
         api: {
             getCardLinkCandidatesAsync: BoardApi.getLocalCardLinkCandidatesAsync,
@@ -155,7 +155,7 @@ export function openLocalCardEditor(app, detail, { openCard, onChanged }) {
             const entry = await BoardApi.addLocalBoardCommentAsync(card.id, { body: body.value.trim(), syncToJira: commentForm.elements.namedItem('syncToJira')?.checked !== false });
             if (!alive()) return;
             card.comments = [...(card.comments || []), entry];
-            comments.innerHTML = commentsHtml(card);
+            comments.innerHTML = commentsHtml(card, detail.isJiraBoard);
             body.value = '';
             changed();
         } catch (error) { showError(error?.message || 'Could not post the comment.'); }
