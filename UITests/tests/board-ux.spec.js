@@ -2782,3 +2782,96 @@ for (const width of [1440, 390]) {
         await expect(panel).toHaveCount(0);
     });
 }
+
+
+for (const width of [1440, 390]) {
+    test(`Public card links support CRUD and preserve editor drafts at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 1000 });
+        const errors = []; page.on('pageerror', error => errors.push(error.message));
+        await page.route('https://viberails.ai/**', route => route.abort());
+        const requests = await openBoard(page);
+        let links = [], created = 0, refreshes = 0;
+        const date = '2026-10-10T12:00:00Z';
+        await page.route('**/api/v1/board/cards/card_test/sharing-links**', async route => {
+            const request = route.request(), method = request.method(), path = new URL(request.url()).pathname;
+            expect(request.headers().viberails_tab).toBe('board-fixture');
+            if (method === 'GET') return route.fulfill({ json: { success: true, links } });
+            if (path.endsWith('/refresh')) { refreshes++; return route.fulfill({ json: { success: true, message: 'Shared card updated.' } }); }
+            if (method === 'POST') {
+                created++; const link = { id: created, displayName: request.postDataJSON().displayName,
+                    sharePath: '/shared/card#key=' + 'a'.repeat(64), createdUtc: date, expiresUtc: '2026-11-10T12:00:00Z', updatedUtc: date, status: 'active' };
+                links.unshift(link);
+                return route.fulfill({ json: { success: true, link, message: 'Read-only card link created.' } });
+            }
+            if (method === 'PATCH') links[0].displayName = request.postDataJSON().displayName;
+            if (method === 'DELETE') links[0].status = 'revoked';
+            return route.fulfill({ json: { success: true, message: method === 'DELETE' ? 'Link revoked.' : 'Link renamed.' } });
+        });
+        await page.getByText('Description images', { exact: true }).click();
+        const editor = page.locator('[data-board-card-editor]');
+        const panel = editor.locator('[data-card-sharing]');
+        await panel.locator('summary').click();
+        await expect(panel).toContainText('No public links');
+        await editor.locator('#board-card-title').fill('Keep my unsaved title');
+        await panel.getByRole('button', { name: 'Create public link' }).click();
+        await expect(panel.locator('[role="status"]')).toContainText('drafts are still here');
+        expect(created).toBe(0);
+        await editor.locator('#board-card-title').fill('Description images');
+        const draft = editor.locator('[data-board-composer="comment"] textarea');
+        await draft.fill('Unposted comment');
+        await panel.getByRole('button', { name: 'Create public link' }).click();
+        expect(created).toBe(0); await expect(draft).toHaveValue('Unposted comment');
+        await draft.fill('');
+        await panel.locator('[data-card-share-name]').fill('<img src=x onerror="window.shareInjected=true">');
+        await panel.getByRole('button', { name: 'Create public link' }).click();
+        await expect(panel.locator('[data-card-share-id]')).toHaveCount(1);
+        await expect(panel.locator('[data-card-share-open]')).toHaveAttribute('href', 'https://viberails.ai/shared/card#key=' + 'a'.repeat(64));
+        expect(await page.evaluate(() => window.shareInjected)).toBeUndefined();
+        await editor.locator('#board-card-title').fill('Draft retained through link management');
+        await panel.locator('[data-card-share-rename]').fill('Release review');
+        await panel.getByRole('button', { name: 'Rename', exact: true }).click();
+        await expect(panel.locator('[data-card-share-rename]')).toHaveValue('Release review');
+        await expect(editor.locator('#board-card-title')).toHaveValue('Draft retained through link management');
+        await panel.getByRole('button', { name: 'Refresh shared card' }).click();
+        expect(refreshes).toBe(0);
+        await editor.locator('#board-card-title').fill('Description images');
+        await panel.getByRole('button', { name: 'Refresh shared card' }).click();
+        await expect.poll(() => refreshes).toBe(1);
+        await panel.scrollIntoViewIfNeeded();
+        expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+        await page.screenshot({ path: testInfo.outputPath(`card-sharing-${width}.png`) });
+        await panel.getByRole('button', { name: 'Revoke', exact: true }).click();
+        await page.getByRole('alertdialog').getByRole('button', { name: 'Revoke', exact: true }).click();
+        await expect(panel.locator('[data-card-share-open]')).toHaveCount(0);
+        await expect(panel.locator('[data-card-share-id]')).toContainText('revoked');
+        expect(created).toBe(1); expect(errors).toEqual([]);
+        expect(requests.filter(r => r.method === 'PUT' && r.path === '/api/v1/board/cards/card_test')).toEqual([]);
+    });
+}
+
+test('Public card links reconcile uncertain creation once and ignore a result after closing', async ({ page }) => {
+    await openBoard(page);
+    let creations = 0, links = [], release;
+    await page.route('**/api/v1/board/cards/card_test/sharing-links**', async route => {
+        if (route.request().method() === 'GET') return route.fulfill({ json: { success: true, links } });
+        creations++;
+        if (creations === 1) {
+            links = [{ id: 1, displayName: 'Created despite timeout', status: 'active', sharePath: '/shared/card#key=' + 'a'.repeat(64),
+                createdUtc: '2026-10-10T12:00:00Z', updatedUtc: '2026-10-10T12:00:00Z', expiresUtc: '2026-11-10T12:00:00Z' }];
+            return route.fulfill({ json: { success: false, message: 'The request may already have created a link.' } });
+        }
+        await new Promise(resolve => { release = resolve; });
+        await route.fulfill({ json: { success: true, message: 'Late creation' } });
+    });
+    await page.getByText('Description images', { exact: true }).click();
+    const panel = page.locator('[data-card-sharing]'); await panel.locator('summary').click();
+    await expect(panel).toContainText('No public links');
+    await panel.getByRole('button', { name: 'Create public link' }).click();
+    await expect(panel.locator('[data-card-share-rename]')).toHaveValue('Created despite timeout');
+    expect(creations).toBe(1);
+    await panel.getByRole('button', { name: 'Create public link' }).click();
+    await expect.poll(() => Boolean(release)).toBe(true);
+    await page.evaluate(() => window.app.closeModal()); release();
+    await expect(page.locator('[data-card-sharing]')).toHaveCount(0);
+    expect(creations).toBe(2);
+});

@@ -7,6 +7,9 @@ public interface ISessionArchiveReader
     /// <summary>Persists an explicit upload request without clearing any prior export evidence.</summary>
     Task<bool> QueueSessionShareUploadAsync(string sessionId, string keyFingerprint, DateTime requestedUtc, CancellationToken cancellationToken);
 
+    /// <summary>Ensures a server-requested upload exists, preserving retry backoff when already pending.</summary>
+    Task<bool> EnsureSessionShareUploadAsync(string sessionId, string keyFingerprint, DateTime requestedUtc, CancellationToken cancellationToken);
+
     /// <summary>Next completed shared session for this destination key, including previously exported sessions.</summary>
     Task<UnexportedSessionRef?> GetNextSharedSessionAsync(string keyFingerprint, DateTime nowUtc, CancellationToken cancellationToken);
 

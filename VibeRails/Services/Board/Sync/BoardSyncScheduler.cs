@@ -54,6 +54,17 @@ public sealed class BoardSyncScheduler(IServiceScopeFactory scopeFactory) : IBoa
         {
             await using var scope = scopeFactory.CreateAsyncScope();
             await scope.ServiceProvider.GetRequiredService<IBoardSyncService>().SyncDueAsync(stoppingToken);
+            // Card-share discovery paces itself (15 minutes, backing off while nothing is published)
+            // and takes the OS lock only around each local capture, so Board sync in other root
+            // backends keeps running while bytes move. No extra background host or production listener.
+            if (scope.ServiceProvider.GetService<Sharing.CardSharePublisher>() is { } cards)
+            {
+                try { await cards.RefreshDueAsync(stoppingToken); }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
+                // Logged in full for the same reason as the sync catch below: these messages are the
+                // desktop's own wording or runtime text, never a remote body, a link or the API key.
+                catch (Exception ex) { Log.Warning(ex, "[CardSharing] Scheduled refresh failed"); }
+            }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {

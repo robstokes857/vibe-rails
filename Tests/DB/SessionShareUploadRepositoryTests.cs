@@ -6,6 +6,28 @@ namespace Tests.DB;
 public sealed partial class SessionDataExportRepositoryTests
 {
     [Fact]
+    public async Task CardRefreshQueue_PreservesPendingBackoffAcrossRestarts_AndRecoversMissingCompletedArchives()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var now = DateTime.UtcNow;
+        var id = Guid.NewGuid().ToString("D");
+        var repo = new Repository(_connectionString);
+        await InsertSessionAsync(_connectionString, id, now.AddHours(-1), 0);
+        Assert.True(await repo.EnsureSessionShareUploadAsync(id, "key-a", now, ct));
+        Assert.True(await repo.DeferSessionExportAsync(id, now.AddHours(1), ct));
+        repo = new Repository(_connectionString);
+        Assert.True(await repo.EnsureSessionShareUploadAsync(id, "key-a", now.AddMinutes(1), ct));
+        Assert.Null(await repo.GetNextSharedSessionAsync("key-a", now.AddMinutes(2), ct));
+        Assert.Equal(1, (await repo.GetNextSharedSessionAsync("key-a", now.AddHours(1), ct))?.Attempts);
+        Assert.Null(await repo.GetNextSharedSessionAsync("key-b", now.AddHours(1), ct));
+        Assert.True(await repo.AcknowledgeSessionExportAsync("key-a", id, now, "included", 7, ct));
+        Assert.True(await repo.EnsureSessionShareUploadAsync(id, "key-a", now, ct));
+        Assert.Equal(0, (await repo.GetNextSharedSessionAsync("key-a", now, ct))?.Attempts);
+        Assert.Equal("included", await ScalarAsync<string>(_connectionString, "SELECT ExportedProxyCoverage FROM Sessions WHERE Id=$id", ("$id", id)));
+        Assert.False(await repo.EnsureSessionShareUploadAsync("missing", "key-a", now, ct));
+    }
+
+    [Fact]
     public async Task SharingQueue_Persists_WaitsForCompletion_AndBypassesOrdinarySettleDelay()
     {
         var ct = TestContext.Current.CancellationToken;

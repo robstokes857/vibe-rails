@@ -80,6 +80,13 @@ Uses the real frontend with mocked board APIs to verify compact board controls, 
 image rendering/editing/upload/deletion, save/reopen, running-agent controls, and desktop/narrow layouts.
 It starts a temporary static server and never touches the machine's board database.
 
+### Focused public-card sharing tests
+
+From the repository root, run `node UITests/node_modules/@playwright/test/cli.js test --config UITests/playwright.card-sharing.config.js`.
+Uses the actual Board editor and synthetic API responses with installed Chrome. Covers desktop/mobile
+create, rename, revoke, manual refresh, escaped link labels, draft preservation and uncertain/late results.
+No application database is opened and no card is uploaded.
+
 ### Focused Automation editor tests (No Backend Required)
 
 From `UITests`, run `npx playwright test --config playwright.automation-editor.config.js`.

@@ -628,6 +628,10 @@ retain the launching card/current-project defaults. See the [local discovery con
 launched on a card would receive, as characters and estimated tokens (`BoardContextEstimator`);
 each launch records the same measurement in `board.db` `BoardContextSamples` and as a `context`
 Card Log entry that Board sync carries (VB-63).
+`/api/v1/board/cards/{card}/sharing-links` (root-only, both credentials, no-store) publishes
+complete read-only card shares to viberails.ai: `GET` lists, `POST` creates, `PATCH`/`DELETE /{id}`
+rename and revoke, and `POST /refresh` republishes; the leased scheduler rediscovers publications
+every 15 minutes with backoff. See the [card-sharing contract](../VibeRails/Services/Board/Sharing/README.md).
 The review records open concurrency and workflow findings; documentation is not evidence that
 those findings have been fixed.
 Card text can reference repository files as `@path` (VB-35): the text is the only storage,
