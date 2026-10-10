@@ -46,6 +46,7 @@ import { renderCardLinksSection, bindCardLinks } from './board-card-links.js';
 import { BoardSearch } from './board-search.js';
 import { openLocalCardEditor } from './board-local-card.js';
 import { cardAutomationControls, bindCardAutomations } from './board-card-automations.js';
+import { cardSharingSection, bindCardSharing } from './board-card-sharing.js';
 import { contextSectionMarkup, bindCardContext } from './board-card-context.js';
 import { cardDisplayId, cardLabel } from './board-card-label.js';
 import { agentMadeSummary, agentProvenanceHtml, bindAgentProvenance } from './board-agent-provenance.js';
@@ -434,6 +435,8 @@ export class BoardController {
         this.cardChecks = null;
         this.cardAutomations?.dispose();
         this.cardAutomations = null;
+        this.cardSharing?.dispose();
+        this.cardSharing = null;
         try { this.launchOptionsDispose?.(); } catch { /* already torn down */ }
         this.launchOptionsDispose = null;
         try { this.assigneePickerDispose?.(); } catch { /* already torn down */ }
@@ -1409,6 +1412,8 @@ export class BoardController {
                         <div class="board-side-list" data-board-automations></div>
                     </section>
 
+                    ${cardSharingSection(Boolean(card))}
+
                     ${card ? `<section class="board-side-section"><details data-board-advanced>
                         <summary class="board-side-label">Advanced</summary>
                         <label class="board-editor-label mt-2" for="board-card-display-id">Display ID</label>
@@ -1474,6 +1479,17 @@ export class BoardController {
         return String(editor?.dataset?.cardId || '').trim() || null;
     }
 
+    /**
+     * True while the editor is busy or holds anything unsaved: field edits, a draft comment or
+     * attachments not yet uploaded. The one "save first" rule behind organizing and sharing a card.
+     */
+    cardHasDraft(editor) {
+        return Boolean(editor._boardSaving || editor._boardUploading || editor._boardStarting || editor._boardOrganizing
+            || Object.keys(this.cardChanges(editor, this.readCardForm(editor))).length > 0
+            || editor.querySelector('[data-board-composer="comment"] [data-board-composer-input]')?.value.trim()
+            || editor._boardCard?.pendingAttachments?.length);
+    }
+
     bindCardEditor(editor, card) {
         card = card || { id: null, attachments: [], pendingAttachments: [] };
         editor._boardCard = card;
@@ -1496,9 +1512,7 @@ export class BoardController {
         });
         this.cardOrganizeDispose?.();
         this.cardOrganizeDispose = bindCardOrganization(editor, card, {
-            hasDraft: () => editor._boardSaving || editor._boardUploading || editor._boardStarting
-                || Object.keys(this.cardChanges(editor, this.readCardForm(editor))).length > 0
-                || Boolean(editor.querySelector('[data-board-composer="comment"] [data-board-composer-input]')?.value.trim()),
+            hasDraft: () => this.cardHasDraft(editor),
             onChanged: async result => {
                 this.app.closeModal();
                 if (result.boardId !== this.state.boardId) await this.switchBoard(result.boardId);
@@ -1558,6 +1572,7 @@ export class BoardController {
         this.disposeCardPickers();
         const assigneeSelect = editor.querySelector('#board-card-assignee');
         this.cardChecks = bindCardChecks(editor, card, this.app);
+        this.cardSharing = bindCardSharing(editor, card, { app: this.app, hasDraft: () => this.cardHasDraft(editor) });
         bindAgentProvenance(editor.querySelector('[data-board-agent-provenance]'),
             (sessionId, seekToUtc) => this.openSessionReplay({ id: sessionId }, { seekToUtc }));
         this.cardAutomations = bindCardAutomations(editor, card, {

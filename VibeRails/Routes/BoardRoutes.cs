@@ -18,6 +18,7 @@ public static partial class BoardRoutes
 {
     public static void Map(WebApplication app)
     {
+        MapCardSharing(app);
         MapLocalSearch(app);
         MapRemoteBoards(app);
         // Attachment uploads are not size-limited. This has to run as middleware, before model

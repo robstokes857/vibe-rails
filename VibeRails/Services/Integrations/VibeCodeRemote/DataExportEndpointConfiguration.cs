@@ -7,10 +7,12 @@ namespace VibeRails.Services.Integrations.VibeCodeRemote;
 internal static class DataExportEndpointConfiguration
 {
     /// <summary>
-    /// The only host session and database uploads may use. Configuration, environment
+    /// The only host session, database and card-share uploads may use. Configuration, environment
     /// variables, and settings.json cannot retarget this.
     /// </summary>
-    internal const string ExportUrl = "https://viberails.ai/api/v1/data-exports";
+    internal const string Host = "https://viberails.ai";
+
+    internal const string ExportUrl = Host + "/api/v1/data-exports";
 
     internal static readonly Uri ExportUri = new(ExportUrl);
 }

@@ -27,6 +27,36 @@ public partial class Repository
         return true;
     }
 
+    public async Task<bool> EnsureSessionShareUploadAsync(string sessionId, string keyFingerprint,
+        DateTime requestedUtc, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        using var transaction = connection.BeginTransaction();
+        await using var cmd = connection.CreateCommand();
+        cmd.Transaction = transaction;
+        // The hosted response confirms this recording is missing. New requests and previously
+        // completed requests may restart; repeated refreshes of pending work preserve backoff.
+        cmd.CommandText = """
+            INSERT INTO SessionShareUploads(SessionId, KeyFingerprint, RequestedUTC)
+            SELECT Id, $key, $now FROM Sessions WHERE Id = $id
+            ON CONFLICT(SessionId, KeyFingerprint) DO UPDATE SET
+                RequestedUTC = excluded.RequestedUTC, CompletedUTC = NULL
+            WHERE SessionShareUploads.CompletedUTC IS NOT NULL;
+            """;
+        cmd.Parameters.AddWithValue("$id", sessionId);
+        cmd.Parameters.AddWithValue("$key", keyFingerprint);
+        cmd.Parameters.AddWithValue("$now", requestedUtc.ToUniversalTime().ToString("O"));
+        if (await cmd.ExecuteNonQueryAsync(cancellationToken) == 1)
+        {
+            cmd.CommandText = "UPDATE Sessions SET ExportAttempts = 0, ExportNextAttemptUTC = NULL WHERE Id = $id;";
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+        cmd.CommandText = "SELECT 1 FROM SessionShareUploads WHERE SessionId = $id AND KeyFingerprint = $key;";
+        var exists = await cmd.ExecuteScalarAsync(cancellationToken) is not null;
+        await transaction.CommitAsync(cancellationToken);
+        return exists;
+    }
+
     public async Task<UnexportedSessionRef?> GetNextSharedSessionAsync(string keyFingerprint,
         DateTime nowUtc, CancellationToken cancellationToken)
     {

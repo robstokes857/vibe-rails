@@ -300,6 +300,28 @@ store a key fingerprint, and uploads/ACKs stay bound to that exact captured key 
 change. They reuse the existing export protocol and locks. See the
 [component contract](VibeRails/Services/Integrations/VibeCodeRemote/SessionSharing.md).
 
+### Public card sharing
+
+The saved card's Share card controls explicitly publish its complete allowed content to fixed
+https://viberails.ai. Root/project-scoped `/api/v1/board/cards/{card}/sharing-links` CRUD and
+manual refresh inherit both credentials, no-store responses and bounded local name requests.
+The transport disables redirects/cookies, bounds response bytes/time, pins the operation's key,
+and validates returned card/local identities, share fragments, expiry and linked recording IDs.
+Account changes cannot retarget queued recordings. Uncertain creation is reconciled by listing,
+never an automatic POST retry. Public links remain read-only capabilities, not Board membership
+or terminal-control grants. Do not log links, keys, content or recordings.
+
+Automatic updates discover only the current creator key's active publications, every 15 minutes
+while any exist and backing off to two hours while none do, holding the Board sync lock only
+during local capture. Their private local row identity and matching card key resolve stored
+project ownership through IBoardStore; no remote path is accepted. Confirmed content hashes
+persist in `.card-share-state.json` beside `state.db`: an account fingerprint, local row IDs,
+publication numbers and hashes, never links, keys or content. Local deletion retains the last
+public version until its links expire or are revoked. All capture is saved content, with a 64 MiB
+whole-publication rejection bound. Archive queues preserve pending backoff, and card revocation
+ends all reads through that link without independent session sharing links. See
+[the card-sharing contract](VibeRails/Services/Board/Sharing/README.md).
+
 ### Board sync, sharing and remote Start work
 
 [SYNC.md](VibeRails/Services/Board/SYNC.md) defines the full content and hosted authorization
