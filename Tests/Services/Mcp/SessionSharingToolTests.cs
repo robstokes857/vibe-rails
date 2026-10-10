@@ -115,6 +115,28 @@ public sealed class SessionSharingToolTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Tool(client).CreateSessionShareLink("Fix bug", cancellation.Token));
     }
 
+    [Fact]
+    public async Task ListedPeopleBecomeAnEmailAudience_AndAreNamedInTheResult()
+    {
+        using var client = new HttpClient(new Handler(async (request, ct) =>
+        {
+            var body = await request.Content!.ReadFromJsonAsync(SessionSharingJsonContext.Default.CreateSessionShareRequest, ct);
+            Assert.Equal("email", body!.Access);
+            Assert.Equal(new[] { "reviewer@example.test", "lead@example.test" }, body.Emails);
+            return Response(new(true, "ready", "Your replay is ready to share.", SessionSharingCommitRuleUrl(), "Fix bug",
+                DateTimeOffset.UtcNow.AddDays(30), null, "email", body.Emails));
+        }));
+        var result = await Tool(client).CreateSessionShareLink("Fix bug", TestContext.Current.CancellationToken, " reviewer@example.test, lead@example.test ");
+        Assert.Contains("Only these people can open this link", result);
+        Assert.Contains("reviewer@example.test, lead@example.test", result);
+        Assert.DoesNotContain("Anyone with this link", result);
+        Assert.EndsWith("vibe-share:" + SessionShareCommitRuleTests.Url, result);
+        using var strict = new HttpClient(new Handler((_, _) => throw new InvalidOperationException("Unexpected request")));
+        Assert.StartsWith("FAIL:", await Tool(strict).CreateSessionShareLink("Fix bug", TestContext.Current.CancellationToken, "not an address"));
+    }
+
+    private static string SessionSharingCommitRuleUrl() => SessionShareCommitRuleTests.Url;
+
     private static SessionSharingTool Tool(HttpClient client, Dictionary<string, string?>? environment = null)
     {
         environment ??= Environment();

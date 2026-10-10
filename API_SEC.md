@@ -303,8 +303,10 @@ change. They reuse the existing export protocol and locks. See the
 ### Public card sharing
 
 The saved card's Share card controls explicitly publish its complete allowed content to fixed
-https://viberails.ai. Root/project-scoped `/api/v1/board/cards/{card}/sharing-links` CRUD and
-manual refresh inherit both credentials, no-store responses and bounded local name requests.
+https://viberails.ai, to anyone with the link or only to listed email addresses (validated
+locally, confirmed by the hosted response, and revoked immediately if the server ignored the
+choice). Root/project-scoped `/api/v1/board/cards/{card}/sharing-links` CRUD, `PUT /{id}/access`
+and manual refresh inherit both credentials, no-store responses and bounded (8 KiB) local requests.
 The transport disables redirects/cookies, bounds response bytes/time, pins the operation's key,
 and validates returned card/local identities, share fragments, expiry and linked recording IDs.
 Account changes cannot retarget queued recordings. Uncertain creation is reconciled by listing,

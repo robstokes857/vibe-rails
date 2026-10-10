@@ -82,8 +82,8 @@ public sealed class CardSharingRoundTripTests
             Assert.Equal(sessionId, (await sessions.GetNextSharedSessionAsync(fingerprint, DateTime.UtcNow, ct))!.SessionId);
 
             await using var readDb = Db();
-            var access = new Hosted.CardSharingAccess(readDb, TimeProvider.System);
-            var json = JsonSerializer.SerializeToElement(await access.ReadAsync(publicKey, ct), Hosted.CardShareContract.Json);
+            var access = new Hosted.CardSharingAccess(readDb, TimeProvider.System, new VibeRails_Front.Services.Sharing.ShareViewerResolver());
+            var json = JsonSerializer.SerializeToElement((await access.ReadAsync(publicKey, ct)).Value, Hosted.CardShareContract.Json);
             Assert.Equal("Shared work", json.GetProperty("title").GetString());
             Assert.Equal("Review notes", json.GetProperty("discussion")[0].GetProperty("body").GetString());
             Assert.Equal("after", json.GetProperty("commits")[0].GetProperty("files")[0].GetProperty("after").GetString());
@@ -91,9 +91,9 @@ public sealed class CardSharingRoundTripTests
             Assert.Equal("Full session summary", json.GetProperty("sessions")[0].GetProperty("summary").GetString());
             Assert.Contains(json.GetProperty("history").EnumerateArray(), h => h.GetProperty("body").GetString()!.Contains(fullDescription));
             var revision = json.GetProperty("revision").GetString();
-            var attachment = (await access.AttachmentAsync(publicKey, 1, revision, ct))!;
+            var attachment = (await access.AttachmentAsync(publicKey, 1, revision, ct)).Value!;
             Assert.Equal(document, Convert.FromBase64String(attachment.ContentBase64));
-            Assert.Null(await access.AttachmentAsync(publicKey, 2, revision, ct));
+            Assert.Null((await access.AttachmentAsync(publicKey, 2, revision, ct)).Value);
 
             // Transfer the actual local archive into synthetic private storage. Upload protocol
             // auth/retries are covered separately; this proves the current encoder/decoder pair.
@@ -124,17 +124,17 @@ public sealed class CardSharingRoundTripTests
             await publisher.RefreshDueAsync(ct);
             await publisher.RefreshDueAsync(ct);
             Assert.Equal(1, transport.Refreshes); // Includes desktop/hosted serialization and hash compatibility.
-            json = JsonSerializer.SerializeToElement(await access.ReadAsync(publicKey, ct), Hosted.CardShareContract.Json);
+            json = JsonSerializer.SerializeToElement((await access.ReadAsync(publicKey, ct)).Value, Hosted.CardShareContract.Json);
             Assert.Equal("Updated saved description", json.GetProperty("description").GetString());
             Assert.Contains(json.GetProperty("history").EnumerateArray(), h => h.GetProperty("body").GetString()!.Contains(fullDescription));
             Assert.Contains(json.GetProperty("history").EnumerateArray(), h => h.GetProperty("body").GetString()!.Contains("to: Updated saved description"));
             Assert.Equal("ready", json.GetProperty("sessions")[0].GetProperty("status").GetString());
-            Assert.Null(await access.AttachmentAsync(publicKey, 1, revision, ct));
+            Assert.Null((await access.AttachmentAsync(publicKey, 1, revision, ct)).Value);
             Assert.True((await publisher.RenameAsync(root, card.Id, result.Link.Id, "Renamed review", ct)).Success);
             Assert.Equal("Renamed review", Assert.Single((await publisher.ListAsync(root, card.Id, null, ct)).Links!).DisplayName);
             Assert.True((await publisher.RevokeAsync(root, card.Id, result.Link.Id, ct)).Success);
-            Assert.Null(await access.ReadAsync(publicKey, ct));
-            Assert.Null(await access.AttachmentAsync(publicKey, 1, json.GetProperty("revision").GetString(), ct));
+            Assert.Null((await access.ReadAsync(publicKey, ct)).Value);
+            Assert.Null((await access.AttachmentAsync(publicKey, 1, json.GetProperty("revision").GetString(), ct)).Value);
             Assert.Equal(SessionEnvelopeReadStatus.NotFound, (await replayReader.OpenCardSharedReplayPayloadAsync(publicKey, 1, revision, ct)).Status);
         }
         finally

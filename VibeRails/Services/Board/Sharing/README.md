@@ -4,8 +4,14 @@ Implemented locally 2026-10-10 (VB-9KWRU-16), paired with the Front CardSharing 
 The feature requires the companion hosted deployment and its additive CardSharingLinks migration.
 Implementation tests never publish actual user cards or run production migrations.
 
-The saved card editor's **Share card** section creates public read-only links and lists,
-renames, revokes, copies and opens them. New cards must be saved first. Creation and manual
+The saved card editor's **Share card** section creates read-only links and lists, renames,
+revokes, copies and opens them. Each link is for **anyone with the link** or **only people I
+list** (email addresses, up to 10 per card across its links; each person signs in to viberails.ai
+with that verified address; nobody is notified or looked up). The audience is chosen before
+Create link and can be changed per link with Edit access (`PUT .../{id}/access`). `ShareAudience`
+validates it locally; the hosted link must confirm the requested audience, otherwise the publisher
+revokes the link it just created and reports that the server needs the sharing update, so a
+card is never left public by a server that ignored the choice. New cards must be saved first. Creation and manual
 refresh refuse unsaved fields/comments/files; link management never saves or replaces drafts.
 The panel states that card text, discussion, documents, saved commit diffs, linked-session
 recordings and future saved updates become public to anyone with the link. A link expires
@@ -46,9 +52,10 @@ enter the public card projection. Remote IDs authorize only stored lookups, neve
 
 All routes are under `/api/v1/board/cards/{card}/sharing-links`, registered with BoardRoutes
 on the active root only. CookieAuthMiddleware requires both local credentials, and the dashboard
-project is derived server-side. GET lists (100 per page); POST creates; PATCH/DELETE `/{id}`
-rename/revoke; POST `/refresh` replaces existing active publications made with the current key.
-Names accept at most 160 characters; request bodies are capped at 4 KiB, including chunked bodies.
+project is derived server-side. GET lists (100 per page); POST creates (`{ displayName, access?, emails? }`); PATCH/DELETE
+`/{id}` rename/revoke; PUT `/{id}/access` replaces who can view; POST `/refresh` replaces existing
+active publications made with the current key. Names accept at most 160 characters; request
+bodies are capped at 8 KiB, including chunked bodies.
 Responses use no-store and a source-generated JSON context. Upstream failures stay domain results
 so a remote 401 cannot trigger local authentication bootstrap and repeat a creation POST.
 

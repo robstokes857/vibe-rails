@@ -9,13 +9,14 @@ using VibeRails.Utils;
 
 namespace VibeRails.Services.Integrations.VibeCodeRemote;
 
-public sealed record CreateSessionShareRequest(string DisplayName);
+/// <summary>Access is "public" (default) or "email"; Emails lists who may open an email-restricted link.</summary>
+public sealed record CreateSessionShareRequest(string DisplayName, string? Access = null, IReadOnlyList<string>? Emails = null);
 public sealed record SessionShareResponse(bool Success, string Status, string Message,
     string? Url = null, string? DisplayName = null, DateTimeOffset? ExpiresUtc = null,
-    int? HttpStatus = null);
-internal sealed record RemoteSessionShareRequest(Guid SessionId, string DisplayName);
+    int? HttpStatus = null, string? Access = null, IReadOnlyList<string>? Recipients = null);
+internal sealed record RemoteSessionShareRequest(Guid SessionId, string DisplayName, string? Access = null, IReadOnlyList<string>? Emails = null);
 internal sealed record RemoteSessionShareResponse(Guid SessionId, string Key, string SharePath,
-    DateTimeOffset ExpiresUtc, bool? UploadRequired);
+    DateTimeOffset ExpiresUtc, bool? UploadRequired, string? Access = null, IReadOnlyList<string>? Recipients = null);
 internal sealed record RemoteSessionShareError(string? Code);
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
@@ -26,7 +27,7 @@ internal sealed record RemoteSessionShareError(string? Code);
 [JsonSerializable(typeof(RemoteSessionShareError))]
 internal partial class SessionSharingJsonContext : JsonSerializerContext;
 
-/// <summary>Creates public capabilities at the pinned export origin and persists their upload intent.</summary>
+/// <summary>Creates sharing capabilities at the pinned export origin and persists their upload intent.</summary>
 public sealed class SessionSharingService(HttpClient client, ISessionStore sessions, ISessionArchiveReader archives)
 {
     private static readonly SemaphoreSlim CreationGate = new(1, 1);
@@ -35,11 +36,16 @@ public sealed class SessionSharingService(HttpClient client, ISessionStore sessi
 
     internal static string KeyFingerprint(string key) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(key)));
 
-    public async Task<SessionShareResponse> CreateAsync(Guid sessionId, string? displayName, CancellationToken ct)
+    public Task<SessionShareResponse> CreateAsync(Guid sessionId, string? displayName, CancellationToken ct)
+        => CreateAsync(sessionId, displayName, null, null, ct);
+
+    public async Task<SessionShareResponse> CreateAsync(Guid sessionId, string? displayName, string? access, IReadOnlyList<string>? emails, CancellationToken ct)
     {
         var name = displayName?.Trim();
         if (sessionId == Guid.Empty || string.IsNullOrEmpty(name) || name.Length > 160)
             return Failure("invalid_request", "Enter a link name of 1 to 160 characters.");
+        if (!ShareAudience.TryNormalize(access, emails, out var mode, out var addresses, out var audienceError))
+            return Failure("invalid_request", audienceError);
         var session = await sessions.GetSessionByIdAsync(sessionId.ToString("D"), ct);
         if (session is null) return Failure("not_found", "This session recording was not found.");
         var apiKey = ParserConfigs.GetApiKey();
@@ -51,7 +57,8 @@ public sealed class SessionSharingService(HttpClient client, ISessionStore sessi
             deadline.CancelAfter(TimeSpan.FromSeconds(20));
             using var request = new HttpRequestMessage(HttpMethod.Post, Endpoint);
             request.Headers.Add("X-Api-Key", apiKey);
-            request.Content = JsonContent.Create(new RemoteSessionShareRequest(sessionId, name),
+            var listed = mode == ShareAudience.Email ? addresses : null;
+            request.Content = JsonContent.Create(new RemoteSessionShareRequest(sessionId, name, mode, listed),
                 SessionSharingJsonContext.Default.RemoteSessionShareRequest);
             using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
             if (response.StatusCode != HttpStatusCode.Created)
@@ -63,6 +70,10 @@ public sealed class SessionSharingService(HttpClient client, ISessionStore sessi
                 || remote.SharePath != "/shared/session?key=" + remote.Key || remote.UploadRequired is null
                 || remote.ExpiresUtc <= DateTimeOffset.UtcNow || remote.ExpiresUtc > DateTimeOffset.UtcNow.AddDays(32))
                 return Failure("invalid_response", "The sharing server returned an invalid response.");
+            // A server without the sharing update ignores the audience and creates a public link. That
+            // link must not be presented as restricted, and its recording must not be uploaded for it.
+            if (!ShareAudience.Confirms(mode, remote.Access))
+                return Failure("server_update_required", "The sharing server does not support links for listed people yet, so this link was not confirmed. Ask the server administrator to deploy the sharing update, then check Sharing links on viberails.ai and revoke any public link it created.");
 
             // Capture the key actually used for creation. A later settings/account change must
             // not retarget this request, including while this HTTP response is in flight.
@@ -78,7 +89,8 @@ public sealed class SessionSharingService(HttpClient client, ISessionStore sessi
                 _ when session.EndedUTC is not null => "Your session is at the front of the upload queue. Keep VibeRails open until it uploads.",
                 _ => "Available after the session ends and uploads. Keep VibeRails open to finish the upload."
             };
-            return new(true, status, message, Endpoint.GetLeftPart(UriPartial.Authority) + remote.SharePath, name, remote.ExpiresUtc);
+            return new(true, status, message, Endpoint.GetLeftPart(UriPartial.Authority) + remote.SharePath, name, remote.ExpiresUtc,
+                null, mode, listed);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         { return Failure("timeout", "viberails.ai did not respond in time. Check Sharing links before trying again; the link may already have been created."); }
@@ -135,7 +147,7 @@ public sealed class SessionSharingService(HttpClient client, ISessionStore sessi
             HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed or HttpStatusCode.NotImplemented =>
                 Failure("server_update_required", $"Session sharing is not available on the deployed server (HTTP {status}). Ask the server administrator to deploy the sharing update.", status),
             HttpStatusCode.BadRequest or HttpStatusCode.UnprocessableEntity =>
-                Failure("invalid_request", $"The sharing server rejected the session or link name (HTTP {status}). Refresh the terminal and try again.", status),
+                Failure("invalid_request", $"The sharing server rejected the session, link name or listed people (HTTP {status}). Up to {ShareAudience.RecipientLimit} people can be listed per session across its links. Refresh the terminal and try again.", status),
             HttpStatusCode.TooManyRequests => Failure("rate_limited", "Too many sharing requests. Try again in a minute.", status),
             HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout =>
                 Failure("server_unavailable", $"viberails.ai is temporarily unavailable (HTTP {status}). Try again shortly, or contact the server administrator if it continues.", status),

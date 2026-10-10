@@ -224,7 +224,7 @@ public sealed class SessionSharingTests : IDisposable
             foreach (var chunked in new[] { false, true })
             {
                 using var request = Request();
-                request.Content = new StringContent(new string('x', 4100), Encoding.UTF8, "application/json");
+                request.Content = new StringContent(new string('x', 8200), Encoding.UTF8, "application/json");
                 request.Headers.TransferEncodingChunked = chunked;
                 using var response = await client.SendAsync(request, Ct);
                 Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
@@ -250,6 +250,46 @@ public sealed class SessionSharingTests : IDisposable
         Assert.Equal("no_api_key", (await service.CreateAsync(_id, "Demo", Ct)).Status);
         _repository.Setup(r => r.GetSessionByIdAsync(_id.ToString("D"), It.IsAny<CancellationToken>())).ReturnsAsync((SessionResponse?)null);
         Assert.Equal("not_found", (await service.CreateAsync(_id, "Demo", Ct)).Status);
+    }
+
+    [Fact]
+    public async Task ListedPeopleAreSentAsAnEmailAudience_AndMustBeConfirmedBeforeAnyUploadIsQueued()
+    {
+        var confirm = true;
+        using var client = new HttpClient(new Handler(async request =>
+        {
+            var body = await request.Content!.ReadFromJsonAsync(SessionSharingJsonContext.Default.RemoteSessionShareRequest, Ct);
+            Assert.Equal("email", body!.Access);
+            Assert.Equal(new[] { "Reviewer@example.test", "lead@example.test" }, body.Emails);
+            var remote = confirm ? Remote(true) with { Access = "email", Recipients = body.Emails } : Remote(true);
+            return new HttpResponseMessage(HttpStatusCode.Created) { Content = JsonContent.Create(remote, SessionSharingJsonContext.Default.RemoteSessionShareResponse) };
+        }));
+        var service = Service(client);
+        var emails = new[] { " Reviewer@example.test ", "lead@example.test", "reviewer@EXAMPLE.test", "" };
+        var result = await service.CreateAsync(_id, "Private review", "email", emails, Ct);
+        Assert.True(result.Success); Assert.Equal("email", result.Access);
+        Assert.Equal(new[] { "Reviewer@example.test", "lead@example.test" }, result.Recipients);
+        _repository.Verify(r => r.QueueSessionShareUploadAsync(_id.ToString("D"), SessionSharingService.KeyFingerprint(ApiKey), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Once);
+        // A server that ignores the audience would have created a public link: report it and queue nothing more.
+        confirm = false;
+        var unconfirmed = await service.CreateAsync(_id, "Private review", "email", emails, Ct);
+        Assert.False(unconfirmed.Success); Assert.Equal("server_update_required", unconfirmed.Status);
+        Assert.Contains("revoke", unconfirmed.Message);
+        _repository.Verify(r => r.QueueSessionShareUploadAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("public", new[] { "someone@example.test" })]
+    [InlineData("email", new string[0])]
+    [InlineData("email", new[] { "not an address" })]
+    [InlineData("friends", new[] { "someone@example.test" })]
+    [InlineData("email", new[] { "a@x.test", "b@x.test", "c@x.test", "d@x.test", "e@x.test", "f@x.test", "g@x.test", "h@x.test", "i@x.test", "j@x.test", "k@x.test" })]
+    public async Task InvalidAudiencesNeverCallRemote(string access, string[] emails)
+    {
+        using var client = new HttpClient(new Handler(_ => throw new InvalidOperationException("Unexpected outbound request")));
+        var result = await Service(client).CreateAsync(_id, "Demo", access, emails, Ct);
+        Assert.Equal("invalid_request", result.Status);
+        Assert.DoesNotContain("example", result.Message);
     }
 
     private HttpRequestMessage Request() => new(HttpMethod.Post, $"/api/v1/sessions/{_id:D}/sharing-links")

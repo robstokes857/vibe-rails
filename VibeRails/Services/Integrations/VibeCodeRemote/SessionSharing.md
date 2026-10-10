@@ -1,14 +1,23 @@
 # Session sharing (VIBE-35)
 
-The terminal tab's Share action creates a named public replay link on viberails.ai, captures
-the current recording id, and opens a modal with Copy link, expiry and upload status. The name
-defaults to the tab title and can be renamed or revoked in the website's Sharing links page.
-The modal explains that terminal output, prompts and saved code changes become visible to
-anyone holding the link. The public server omits proxy captures. Closing the modal hides its
-result while the creation request finishes; it does not deliberately cancel upload scheduling.
+The terminal tab's Share action captures the current recording id and opens a modal that asks
+**who can view** before anything is created: anyone with the link (the default), or only people
+the user lists by email (up to 10 per session across its links; each person signs in to
+viberails.ai with that verified address; nobody is notified or looked up). Create link then
+creates the named replay link on viberails.ai and shows Copy link, the audience, expiry and
+upload status. The name defaults to the tab title and can be renamed, revoked or re-audienced in
+the website's Sharing links page. The modal explains that terminal output, prompts and saved code
+changes become visible through the link. The public server omits proxy captures. Closing the
+modal hides its result while the creation request finishes; it does not cancel upload scheduling.
+
+`ShareAudience` validates the choice locally with fixed wording. The hosted response must
+confirm the requested audience (`access: "email"`): a server without the sharing update ignores
+the fields and creates a public link, which the client reports as `server_update_required`
+without queuing the recording, telling the user to revoke that link on the website.
 
 The `create_session_share_link` MCP tool uses this same root route for the calling terminal's
-inherited recording id. It accepts a `displayName` and returns status, expiry and a commit line:
+inherited recording id. It accepts a `displayName`, an optional comma-separated `emails` list
+that restricts the link to those people, and returns status, expiry, the audience and a commit line:
 `vibe-share:<public URL>`. Multiple sessions can be listed on separate lines. The optional VCA rule
 `Require VibeRails session link` checks these lines first, then public URLs elsewhere in the commit
 message. It validates URL shape locally, not ownership, upload completion, expiry or revocation.
@@ -18,8 +27,9 @@ open the database or upload live sessions itself.
 
 `POST /api/v1/sessions/{sessionId:guid}/sharing-links` is active-root-only and requires both
 normal process/session and tab credentials through CookieAuthMiddleware. It accepts only
-`{ displayName }`, checks the local recording, caps JSON at 4 KiB and names at 160 characters,
-and returns no-store `{ success, status, message, url, displayName, expiresUtc, httpStatus }`. Remote errors
+`{ displayName, access?, emails? }`, checks the local recording, caps JSON at 8 KiB and names at
+160 characters, and returns no-store `{ success, status, message, url, displayName, expiresUtc,
+httpStatus, access, recipients }`. Remote errors
 are HTTP-200 domain results so a remote 401 cannot trigger local bootstrap/repeat POSTs.
 Failed remote responses retain the numeric `httpStatus` and distinguish missing server updates,
 database migrations, account permissions, rate limits and server failures. Network, timeout and

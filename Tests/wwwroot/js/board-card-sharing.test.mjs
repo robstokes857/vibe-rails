@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { publicCardUrl, cardSharingSection, bindCardSharing } from '../../../VibeRails/wwwroot/js/modules/board-card-sharing.js';
+import { publicCardUrl, cardSharingSection, bindCardSharing, describeAudience, parseShareEmails } from '../../../VibeRails/wwwroot/js/modules/board-card-sharing.js';
 
 const turn = () => new Promise(resolve => setImmediate(resolve));
 function fixture(apiCall, hasDraft = () => false) {
@@ -58,4 +58,23 @@ test('a submitted creation can finish after close without repainting or rereadin
     f.control.dispose(); resolve({ success: true, message: 'Created', link: {} }); await pending;
     assert.equal(calls.length, 1);
     assert.equal(f.nodes.get('[data-card-share-links]').innerHTML, '');
+});
+
+test('creation forwards the chosen audience and describes link audiences without markup', async () => {
+    const calls = [];
+    const f = fixture(async (...args) => { calls.push(args); return { success: true, links: [] }; });
+    f.nodes.set('[data-card-share-audience-mode]:checked', { value: 'email' });
+    f.nodes.set('[data-card-share-audience-emails]', { value: 'a@example.test, A@example.test\nb@example.test' });
+    await f.click('create');
+    assert.equal(calls[0][1], 'POST');
+    assert.deepEqual(calls[0][2], { displayName: 'Example', access: 'email', emails: ['a@example.test', 'A@example.test', 'b@example.test'] });
+    f.control.dispose();
+    const g = fixture(async (...args) => { calls.push(args); return { success: true, links: [] }; });
+    await g.click('create');
+    assert.deepEqual(calls.at(-2)[2], { displayName: 'Example', access: 'public', emails: [] });
+    g.control.dispose();
+    assert.equal(describeAudience({ access: 'public' }), 'Anyone with the link');
+    assert.equal(describeAudience({ access: 'email', recipients: ['x@example.test'] }), '1 person: x@example.test');
+    assert.deepEqual(parseShareEmails(' one@example.test;two@example.test two@example.test '), ['one@example.test', 'two@example.test']);
+    assert.match(cardSharingSection(true), /Who can view/);
 });

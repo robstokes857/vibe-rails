@@ -220,7 +220,7 @@ public sealed class CardSharePublisherTests : IDisposable
             Assert.False((await foreign.Content.ReadFromJsonAsync(CardSharingJsonContext.Default.CardShareResult, Ct))!.Success);
             foreach (var chunked in new[] { false, true })
             {
-                using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = new StringContent(new string('x', 4100), Encoding.UTF8, "application/json") };
+                using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = new StringContent(new string('x', 8200), Encoding.UTF8, "application/json") };
                 request.Headers.TransferEncodingChunked = chunked;
                 Assert.Equal(HttpStatusCode.RequestEntityTooLarge, (await local.SendAsync(request, Ct)).StatusCode);
             }
@@ -360,6 +360,52 @@ public sealed class CardSharePublisherTests : IDisposable
 
     private sealed class Handler(Func<HttpRequestMessage, Task<HttpResponseMessage>> callback) : HttpMessageHandler
     { protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) => callback(request); }
+    [Fact]
+    public async Task ListedPeopleAreSentWithTheCard_AndAnUnconfirmedAudienceIsRevokedImmediately()
+    {
+        var confirm = true; var revoked = new List<string>();
+        using var http = new HttpClient(new Handler(async request =>
+        {
+            if (request.Method == HttpMethod.Delete) { revoked.Add(request.RequestUri!.AbsolutePath); return new HttpResponseMessage(HttpStatusCode.NoContent); }
+            var sent = await request.Content!.ReadFromJsonAsync(CardSharingJsonContext.Default.CardSharePublishRequest, Ct);
+            Assert.Equal("email", sent!.Access); Assert.Equal(new[] { "reviewer@example.test", "lead@example.test" }, sent.Emails);
+            var link = confirm ? Link() with { Access = "email", Recipients = sent.Emails } : Link();
+            return Published(new CardSharePublished(link, [_session]));
+        }));
+        var publisher = Publisher(http);
+        var result = await publisher.CreateAsync("project", "card_test", "Demo", "email", [" reviewer@example.test ", "lead@example.test", "REVIEWER@example.test"], Ct);
+        Assert.True(result.Success); Assert.Equal("email", result.Link!.Access); Assert.Empty(revoked);
+        confirm = false;
+        var unconfirmed = await publisher.CreateAsync("project", "card_test", "Demo", "email", ["reviewer@example.test", "lead@example.test"], Ct);
+        Assert.False(unconfirmed.Success); Assert.Contains("revoked", unconfirmed.Message);
+        Assert.Equal(new[] { "/api/v1/card-sharing-links/7" }, revoked);
+        foreach (var (access, emails) in new (string, string[])[] { ("public", ["x@example.test"]), ("email", []), ("email", ["no-at-sign"]), ("friends", ["x@example.test"]) })
+            Assert.False((await publisher.CreateAsync("project", "card_test", "Demo", access, emails, Ct)).Success);
+    }
+
+    [Fact]
+    public async Task SetAccessIsScopedToTheCardsOwnLinks_AndReplacesTheAudience()
+    {
+        CardShareAccessRequest? sent = null;
+        using var http = new HttpClient(new Handler(async request =>
+        {
+            if (request.Method == HttpMethod.Get)
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(new List<CardShareLinkDto> { Link() }, CardSharingJsonContext.Default.ListCardShareLinkDto) };
+            Assert.Equal(HttpMethod.Put, request.Method); Assert.Equal("/api/v1/card-sharing-links/7/access", request.RequestUri!.AbsolutePath);
+            sent = await request.Content!.ReadFromJsonAsync(CardSharingJsonContext.Default.CardShareAccessRequest, Ct);
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        }));
+        var publisher = Publisher(http);
+        Assert.False((await publisher.SetAccessAsync("project", "card_test", 8, "email", ["x@example.test"], Ct)).Success);
+        Assert.False((await publisher.SetAccessAsync("foreign", "card_test", 7, "public", null, Ct)).Success);
+        Assert.Null(sent);
+        var result = await publisher.SetAccessAsync("project", "card_test", 7, "email", ["Lead@example.test"], Ct);
+        Assert.True(result.Success); Assert.Contains("listed people", result.Message);
+        Assert.Equal("email", sent!.Access); Assert.Equal(new[] { "Lead@example.test" }, sent.Emails);
+        Assert.True((await publisher.SetAccessAsync("project", "card_test", 7, "public", [], Ct)).Success);
+        Assert.Equal("public", sent!.Access); Assert.Empty(sent.Emails!);
+    }
+
     public void Dispose()
     {
         ParserConfigs.SetApiKey(_originalKey); ParserConfigs.SetGitState(_originalProject, _originalGit);

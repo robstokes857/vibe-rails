@@ -17,9 +17,23 @@ public sealed class CardShareClient(HttpClient client)
     internal static bool IsSourceKey(string? value) => value is { Length: >= 2 and <= 160 }
         && char.IsAsciiLetter(value[0]) && value.All(c => char.IsAsciiLetterOrDigit(c) || c == '-');
 
-    public async Task<CardSharePublished> PublishAsync(string key, string name, string localCardId, CardShareDocument document, CancellationToken ct)
+    public Task<CardSharePublished> PublishAsync(string key, string name, string localCardId, CardShareDocument document, CancellationToken ct)
+        => PublishAsync(key, name, localCardId, document, ShareAudience.Public, null, ct);
+
+    public async Task<CardSharePublished> PublishAsync(string key, string name, string localCardId, CardShareDocument document,
+        string access, IReadOnlyList<string>? emails, CancellationToken ct)
     {
-        var body = Envelope(w => w.WriteString("displayName", name), document.Json, w => w.WriteString("localCardId", localCardId));
+        var body = Envelope(w =>
+        {
+            w.WriteString("displayName", name);
+            w.WriteString("access", access);
+            if (emails is not null)
+            {
+                w.WriteStartArray("emails");
+                foreach (var email in emails) w.WriteStringValue(email);
+                w.WriteEndArray();
+            }
+        }, document.Json, w => w.WriteString("localCardId", localCardId));
         var result = await SendAsync(key, HttpMethod.Post, "", body, HttpStatusCode.Created, CardSharingJsonContext.Default.CardSharePublished, ct);
         ValidateLink(result.Link, document.Snapshot.SourceKey, localCardId);
         if (result.Link.Status != "active" || result.Link.ExpiresUtc <= DateTime.UtcNow || result.Link.ExpiresUtc > DateTime.UtcNow.AddDays(32)) throw Invalid();
@@ -68,6 +82,10 @@ public sealed class CardShareClient(HttpClient client)
     public async Task RenameAsync(string key, int id, string name, CancellationToken ct) =>
         await SendEmptyAsync(key, HttpMethod.Patch, "/" + id, JsonContent.Create(new CardShareNameRequest(name),
             CardSharingJsonContext.Default.CardShareNameRequest), ct);
+    /// <summary>Replaces who may open one link; the hosted service enforces the per-card limit across links.</summary>
+    public async Task SetAccessAsync(string key, int id, string access, IReadOnlyList<string> emails, CancellationToken ct) =>
+        await SendEmptyAsync(key, HttpMethod.Put, "/" + id + "/access", JsonContent.Create(new CardShareAccessRequest(access, emails),
+            CardSharingJsonContext.Default.CardShareAccessRequest), ct);
     public async Task RevokeAsync(string key, int id, CancellationToken ct) => await SendEmptyAsync(key, HttpMethod.Delete, "/" + id, null, ct);
 
     private async Task<T> SendAsync<T>(string key, HttpMethod method, string path, HttpContent? body,
@@ -98,7 +116,7 @@ public sealed class CardShareClient(HttpClient client)
     /// <summary>Wraps the already-serialized complete card (the same bytes its hash covers) without serializing it again.</summary>
     private static HttpContent Envelope(Action<Utf8JsonWriter> before, byte[] snapshotJson, Action<Utf8JsonWriter>? after = null)
     {
-        var buffer = new ArrayBufferWriter<byte>(snapshotJson.Length + 512);
+        var buffer = new ArrayBufferWriter<byte>(snapshotJson.Length + 4096);
         using (var writer = new Utf8JsonWriter(buffer))
         {
             writer.WriteStartObject();
@@ -118,7 +136,9 @@ public sealed class CardShareClient(HttpClient client)
         if (link is null || link.Id <= 0 || link.SourceKey != sourceKey || link.LocalCardId != localCardId || link.DisplayName is not { Length: >= 1 and <= 160 }
             || link.SharePath is null || !link.SharePath.StartsWith(prefix, StringComparison.Ordinal) || !IsHex(link.SharePath[prefix.Length..])
             || link.CreatedUtc == default || link.ExpiresUtc <= link.CreatedUtc || link.ExpiresUtc > link.CreatedUtc.AddDays(32)
-            || link.UpdatedUtc == default || link.Status is not ("active" or "expired" or "revoked" or "key_unavailable")) throw Invalid();
+            || link.UpdatedUtc == default || link.Status is not ("active" or "expired" or "revoked" or "key_unavailable")
+            || link.Access is not (null or "" or ShareAudience.Public or ShareAudience.Email)
+            || link.Recipients is { } people && (people.Count > ShareAudience.RecipientLimit || people.Any(p => p is not { Length: >= 1 and <= 320 }))) throw Invalid();
     }
     private static void ValidateSessions(IReadOnlyList<Guid>? requested, CardShareSnapshot snapshot)
     {
@@ -134,7 +154,7 @@ public sealed class CardShareClient(HttpClient client)
         HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed => "The share was not found, or the server needs the card-sharing update.",
         HttpStatusCode.Conflict => "The shared card changed. Refresh the links and try again.",
         HttpStatusCode.RequestEntityTooLarge => "The complete card exceeds the sharing transfer limit. No partial card was published.",
-        HttpStatusCode.BadRequest => "The server rejected the card or link name. Check account permissions and update both applications.",
+        HttpStatusCode.BadRequest => $"The server rejected the card, link name or listed people. Up to {ShareAudience.RecipientLimit} people can be listed per card across its links; check account permissions and update both applications.",
         HttpStatusCode.TooManyRequests => "Too many sharing requests. Try again in a minute.",
         _ => "viberails.ai could not complete the request. Check the connection and server deployment."
     });
