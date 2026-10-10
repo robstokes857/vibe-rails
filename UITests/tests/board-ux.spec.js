@@ -2920,7 +2920,8 @@ for (const width of [1440, 390]) {
             if (method === 'GET') return route.fulfill({ json: { success: true, links } });
             if (path.endsWith('/refresh')) { refreshes++; return route.fulfill({ json: { success: true, message: 'Shared card updated.' } }); }
             if (method === 'POST') {
-                created++; const link = { id: created, displayName: request.postDataJSON().displayName,
+                created++; const body = request.postDataJSON();
+                const link = { id: created, displayName: body.displayName, access: body.access, recipients: body.emails,
                     sharePath: '/shared/card#key=' + 'a'.repeat(64), createdUtc: date, expiresUtc: '2026-11-10T12:00:00Z', updatedUtc: date, status: 'active' };
                 links.unshift(link);
                 return route.fulfill({ json: { success: true, link, message: 'Read-only card link created.' } });
@@ -2933,20 +2934,24 @@ for (const width of [1440, 390]) {
         const editor = page.locator('[data-board-card-editor]');
         const panel = editor.locator('[data-card-sharing]');
         await panel.locator('summary').click();
-        await expect(panel).toContainText('No public links');
+        await expect(panel).toContainText('No sharing links');
         await editor.locator('#board-card-title').fill('Keep my unsaved title');
-        await panel.getByRole('button', { name: 'Create public link' }).click();
+        await panel.getByRole('button', { name: 'Create link', exact: true }).click();
         await expect(panel.locator('[role="status"]')).toContainText('drafts are still here');
         expect(created).toBe(0);
         await editor.locator('#board-card-title').fill('Description images');
         const draft = editor.locator('[data-board-composer="comment"] textarea');
         await draft.fill('Unposted comment');
-        await panel.getByRole('button', { name: 'Create public link' }).click();
+        await panel.getByRole('button', { name: 'Create link', exact: true }).click();
         expect(created).toBe(0); await expect(draft).toHaveValue('Unposted comment');
         await draft.fill('');
         await panel.locator('[data-card-share-name]').fill('<img src=x onerror="window.shareInjected=true">');
-        await panel.getByRole('button', { name: 'Create public link' }).click();
+        await panel.locator('[data-card-share-audience-mode][value="email"]').check();
+        await panel.locator('[data-card-share-audience-emails]').fill('reviewer@example.test, <b>lead</b>@example.test');
+        await panel.getByRole('button', { name: 'Create link', exact: true }).click();
         await expect(panel.locator('[data-card-share-id]')).toHaveCount(1);
+        await expect(panel.locator('[data-card-share-audience-summary]')).toContainText('2 people: reviewer@example.test, <b>lead</b>@example.test');
+        expect(links[0].access).toBe('email'); expect(links[0].recipients).toEqual(['reviewer@example.test', '<b>lead</b>@example.test']);
         await expect(panel.locator('[data-card-share-open]')).toHaveAttribute('href', 'https://viberails.ai/shared/card#key=' + 'a'.repeat(64));
         expect(await page.evaluate(() => window.shareInjected)).toBeUndefined();
         await editor.locator('#board-card-title').fill('Draft retained through link management');
@@ -2987,11 +2992,11 @@ test('Public card links reconcile uncertain creation once and ignore a result af
     });
     await page.getByText('Description images', { exact: true }).click();
     const panel = page.locator('[data-card-sharing]'); await panel.locator('summary').click();
-    await expect(panel).toContainText('No public links');
-    await panel.getByRole('button', { name: 'Create public link' }).click();
+    await expect(panel).toContainText('No sharing links');
+    await panel.getByRole('button', { name: 'Create link', exact: true }).click();
     await expect(panel.locator('[data-card-share-rename]')).toHaveValue('Created despite timeout');
     expect(creations).toBe(1);
-    await panel.getByRole('button', { name: 'Create public link' }).click();
+    await panel.getByRole('button', { name: 'Create link', exact: true }).click();
     await expect.poll(() => Boolean(release)).toBe(true);
     await page.evaluate(() => window.app.closeModal()); release();
     await expect(page.locator('[data-card-sharing]')).toHaveCount(0);

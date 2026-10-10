@@ -246,18 +246,24 @@ public class McpServerHttpTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SessionSharingToolResolvesAndExposesOnlyTheLinkName()
+    public async Task SessionSharingToolResolvesAndExposesOnlyTheLinkNameAndAudience()
     {
         var ct = TestContext.Current.CancellationToken;
         await using var client = await ConnectAsync(ct);
         var tool = Assert.Single(await client.GetAvailableToolsAsync(ct), t => t.Name == "create_session_share_link");
         var properties = tool.JsonSchema.GetProperty("properties");
-        Assert.Equal("displayName", Assert.Single(properties.EnumerateObject()).Name);
+        // The link name and who may open it; never a session id, so only the calling terminal can be shared.
+        Assert.Equal(new[] { "displayName", "emails" }, properties.EnumerateObject().Select(p => p.Name).OrderBy(n => n).ToArray());
         var result = await client.CallToolAsync("create_session_share_link", new Dictionary<string, object?>
         {
             ["displayName"] = " " // Exercises binding/DI without sharing a real session.
         }, ct);
         Assert.Contains("FAIL: Enter a link name", result.Text);
+        result = await client.CallToolAsync("create_session_share_link", new Dictionary<string, object?>
+        {
+            ["displayName"] = "Fix bug", ["emails"] = "not an address" // Audience validation also runs before any request.
+        }, ct);
+        Assert.Contains("FAIL: Enter valid email addresses", result.Text);
     }
 
     [Fact]

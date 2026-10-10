@@ -224,7 +224,7 @@ public sealed class SessionSharingTests : IDisposable
             foreach (var chunked in new[] { false, true })
             {
                 using var request = Request();
-                request.Content = new StringContent(new string('x', 4100), Encoding.UTF8, "application/json");
+                request.Content = new StringContent(new string('x', 8200), Encoding.UTF8, "application/json");
                 request.Headers.TransferEncodingChunked = chunked;
                 using var response = await client.SendAsync(request, Ct);
                 Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
@@ -250,6 +250,118 @@ public sealed class SessionSharingTests : IDisposable
         Assert.Equal("no_api_key", (await service.CreateAsync(_id, "Demo", Ct)).Status);
         _repository.Setup(r => r.GetSessionByIdAsync(_id.ToString("D"), It.IsAny<CancellationToken>())).ReturnsAsync((SessionResponse?)null);
         Assert.Equal("not_found", (await service.CreateAsync(_id, "Demo", Ct)).Status);
+    }
+
+    [Fact]
+    public async Task ListedPeopleAreSentAsAnEmailAudience_AfterTheServerConfirmsSupport_AndMustBeConfirmedBeforeAnyUploadIsQueued()
+    {
+        var confirm = true; var calls = new List<string>();
+        using var client = new HttpClient(new Handler(async request =>
+        {
+            calls.Add(request.Method + " " + request.RequestUri!.AbsolutePath);
+            Assert.Equal(ApiKey, Assert.Single(request.Headers.GetValues("X-Api-Key")));
+            if (request.Method == HttpMethod.Get)
+            {
+                Assert.Equal("https://viberails.ai/api/v1/session-sharing-links/capabilities", request.RequestUri.AbsoluteUri);
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(new ShareCapabilitiesResponse(["public", "email"], 10), SessionSharingJsonContext.Default.ShareCapabilitiesResponse) };
+            }
+            var body = await request.Content!.ReadFromJsonAsync(SessionSharingJsonContext.Default.RemoteSessionShareRequest, Ct);
+            Assert.Equal("email", body!.Access);
+            Assert.Equal(new[] { "Reviewer@example.test", "lead@example.test" }, body.Emails);
+            var remote = confirm ? Remote(true) with { Access = "email", Recipients = body.Emails } : Remote(true);
+            return new HttpResponseMessage(HttpStatusCode.Created) { Content = JsonContent.Create(remote, SessionSharingJsonContext.Default.RemoteSessionShareResponse) };
+        }));
+        var service = Service(client);
+        var emails = new[] { " Reviewer@example.test ", "lead@example.test", "reviewer@EXAMPLE.test", "" };
+        var result = await service.CreateAsync(_id, "Private review", "email", emails, Ct);
+        Assert.True(result.Success); Assert.Equal("email", result.Access);
+        Assert.Equal(new[] { "Reviewer@example.test", "lead@example.test" }, result.Recipients);
+        // Support is established before the creating POST, never after it.
+        Assert.Equal(["GET /api/v1/session-sharing-links/capabilities", "POST /api/v1/session-sharing-links"], calls);
+        _repository.Verify(r => r.QueueSessionShareUploadAsync(_id.ToString("D"), SessionSharingService.KeyFingerprint(ApiKey), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Once);
+        // A server that confirmed support but returned a link without the audience gave an invalid
+        // answer. The link exists: name it for revocation, never present it as restricted, queue nothing.
+        confirm = false;
+        var unconfirmed = await service.CreateAsync(_id, "Private review", "email", emails, Ct);
+        Assert.False(unconfirmed.Success); Assert.Equal("invalid_response", unconfirmed.Status);
+        Assert.Contains("revoke", unconfirmed.Message); Assert.Contains("\"Private review\"", unconfirmed.Message);
+        Assert.Null(unconfirmed.Url); Assert.Null(unconfirmed.Access);
+        _repository.Verify(r => r.QueueSessionShareUploadAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(404, "server_update_required")]
+    [InlineData(405, "server_update_required")]
+    [InlineData(200, "server_update_required")]
+    [InlineData(401, "invalid_api_key")]
+    public async Task ListedPeopleAreRefusedBeforeAnyLinkIsCreated_WhenTheServerCannotRestrictLinks(int httpStatus, string status)
+    {
+        // The reviewed defect: an older server created a public link before the client noticed, so an
+        // already uploaded recording became anonymously readable. Now nothing is created at all.
+        var posted = false;
+        using var client = new HttpClient(new Handler(request =>
+        {
+            if (request.Method != HttpMethod.Get) { posted = true; throw new InvalidOperationException("No link may be created"); }
+            return Task.FromResult(httpStatus == 200
+                ? new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(new ShareCapabilitiesResponse(["public"], 10), SessionSharingJsonContext.Default.ShareCapabilitiesResponse) }
+                : new HttpResponseMessage((HttpStatusCode)httpStatus) { Content = new StringContent("<html>" + ApiKey + "</html>", Encoding.UTF8, "text/html") });
+        }));
+        var result = await Service(client).CreateAsync(_id, "Private review", "email", ["reviewer@example.test"], Ct);
+        Assert.False(posted);
+        Assert.False(result.Success); Assert.Equal(status, result.Status);
+        Assert.Equal(httpStatus == 200 ? null : httpStatus, result.HttpStatus);
+        if (status == "server_update_required") Assert.Contains("no link was created", result.Message);
+        Assert.DoesNotContain(ApiKey, result.Message); Assert.Null(result.Url);
+        _repository.Verify(r => r.QueueSessionShareUploadAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task LocalCapabilitiesRoute_RequiresBothCredentials_AndNamesListedPeopleSupport()
+    {
+        using var remote = new HttpClient(new Handler(_ => throw new InvalidOperationException("Unexpected outbound request")));
+        var auth = new AuthService();
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.Logging.ClearProviders();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Services.AddSingleton<IAuthService>(auth);
+        builder.Services.AddSingleton(Service(remote));
+        await using var app = builder.Build();
+        app.UseMiddleware<CookieAuthMiddleware>();
+        SessionSharingRoutes.Map(app);
+        await app.StartAsync(Ct);
+        try
+        {
+            const string path = "/api/v1/session-sharing/capabilities";
+            using var client = new HttpClient { BaseAddress = new Uri(app.Urls.Single()) };
+            Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync(path, Ct)).StatusCode);
+            client.DefaultRequestHeaders.Add("viberails_session", auth.GetInstanceToken());
+            Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync(path, Ct)).StatusCode);
+            client.DefaultRequestHeaders.Add("viberails_tab", auth.GetTabToken());
+            using var response = await client.GetAsync(path, Ct);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.True(response.Headers.CacheControl!.NoStore);
+            var capabilities = await response.Content.ReadFromJsonAsync(SessionSharingJsonContext.Default.ShareCapabilitiesResponse, Ct);
+            Assert.Equal(new[] { "public", "email" }, capabilities!.Access);
+            Assert.Equal(ShareAudience.RecipientLimit, capabilities.RecipientLimit);
+            Assert.True(ShareAudience.Supports(capabilities));
+            Assert.False(ShareAudience.Supports(new ShareCapabilitiesResponse(["public"], 10)));
+            Assert.False(ShareAudience.Supports(null));
+        }
+        finally { await app.StopAsync(CancellationToken.None); }
+    }
+
+    [Theory]
+    [InlineData("public", new[] { "someone@example.test" })]
+    [InlineData("email", new string[0])]
+    [InlineData("email", new[] { "not an address" })]
+    [InlineData("friends", new[] { "someone@example.test" })]
+    [InlineData("email", new[] { "a@x.test", "b@x.test", "c@x.test", "d@x.test", "e@x.test", "f@x.test", "g@x.test", "h@x.test", "i@x.test", "j@x.test", "k@x.test" })]
+    public async Task InvalidAudiencesNeverCallRemote(string access, string[] emails)
+    {
+        using var client = new HttpClient(new Handler(_ => throw new InvalidOperationException("Unexpected outbound request")));
+        var result = await Service(client).CreateAsync(_id, "Demo", access, emails, Ct);
+        Assert.Equal("invalid_request", result.Status);
+        Assert.DoesNotContain("example", result.Message);
     }
 
     private HttpRequestMessage Request() => new(HttpMethod.Post, $"/api/v1/sessions/{_id:D}/sharing-links")

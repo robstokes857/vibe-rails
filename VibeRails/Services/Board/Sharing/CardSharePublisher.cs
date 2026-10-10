@@ -27,14 +27,30 @@ public sealed class CardSharePublisher(IBoardStore boards, CardShareCapture capt
         return new(true, "", Links: links, NextBefore: links.Count == 100 ? links[^1].Id : null);
     }, ct);
 
-    public Task<CardShareResult> CreateAsync(string project, string identity, string? displayName, CancellationToken ct) => RunAsync(async () =>
+    public Task<CardShareResult> CreateAsync(string project, string identity, string? displayName, CancellationToken ct)
+        => CreateAsync(project, identity, displayName, null, null, ct);
+
+    /// <summary>Access is "public" (default) or "email" with the people who may open the link.</summary>
+    public Task<CardShareResult> CreateAsync(string project, string identity, string? displayName, string? access, IReadOnlyList<string>? emails, CancellationToken ct) => RunAsync(async () =>
     {
         var name = Name(displayName);
+        var (mode, addresses) = Audience(access, emails);
         var key = Key();
         var card = await CardAsync(project, identity, ct);
+        // A server without the sharing update ignores the audience and would publish the card to
+        // anyone. Ask it first, before anything is captured or sent, so it publishes nothing.
+        if (mode == ShareAudience.Email && !await SupportsListedPeopleAsync(key, ct))
+            throw new BoardValidationException("The sharing server does not support links for listed people yet, so no link was created. Ask the server administrator to deploy the sharing update, or share with anyone who has the link.");
         var document = await CaptureAsync(project, card.Id, ct);
         RequireSameAccount(key);
-        var result = await client.PublishAsync(key, name, card.Id, document, ct);
+        var result = await client.PublishAsync(key, name, card.Id, document, mode, mode == ShareAudience.Email ? addresses : null, ct);
+        if (!ShareAudience.Confirms(mode, result.Link.Access) || (mode == ShareAudience.Email && !ShareAudience.SamePeople(addresses, result.Link.Recipients)))
+        {
+            // The server confirmed support above but did not apply the audience, so this link is
+            // not what was asked for. Take it back before anyone receives it; nothing is queued for it.
+            await client.RevokeAsync(key, result.Link.Id, ct);
+            throw new BoardValidationException("The sharing server did not confirm the listed people for this link; the link it created was revoked. Contact the server administrator.");
+        }
         // Publication may already exist even if queuing fails or the client closes. The scheduler
         // rediscovers it from this exact key; never retry this creation POST automatically.
         var queued = await QueueAsync(key, result.UploadSessions, ct);
@@ -54,6 +70,15 @@ public sealed class CardSharePublisher(IBoardStore boards, CardShareCapture capt
         RequireSameAccount(key);
         await client.RenameAsync(key, id, name, ct);
         return new(true, "Link renamed.");
+    }, ct);
+    /// <summary>Replaces who may open one of this card's links. A revoked link stays revoked.</summary>
+    public Task<CardShareResult> SetAccessAsync(string project, string identity, int id, string? access, IReadOnlyList<string>? emails, CancellationToken ct) => RunAsync(async () =>
+    {
+        var (mode, addresses) = Audience(access, emails); var key = Key();
+        await OwnedLinkAsync(project, identity, key, id, ct);
+        RequireSameAccount(key);
+        await client.SetAccessAsync(key, id, mode, mode == ShareAudience.Email ? addresses : [], ct);
+        return new(true, mode == ShareAudience.Email ? "Only the listed people can open this link now." : "Anyone with this link can open it now.");
     }, ct);
     public Task<CardShareResult> RevokeAsync(string project, string identity, int id, CancellationToken ct) => RunAsync(async () =>
     {
@@ -179,6 +204,15 @@ public sealed class CardSharePublisher(IBoardStore boards, CardShareCapture capt
         }
     }
 
+    /// <summary>The capabilities question creates nothing, so its failures carry no "a link may exist" note.</summary>
+    private async Task<bool> SupportsListedPeopleAsync(string key, CancellationToken ct)
+    {
+        try { return await client.SupportsListedPeopleAsync(key, ct); }
+        catch (CardShareTransportException ex) { throw new BoardValidationException(ex.Message); }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or JsonException or InvalidDataException || ex is OperationCanceledException && !ct.IsCancellationRequested)
+        { throw new BoardValidationException("Could not reach the sharing server to confirm support for listed people. Check your connection and try again; no link was created."); }
+    }
+
     private async Task<bool> QueueAsync(string key, IReadOnlyList<Guid> sessions, CancellationToken ct)
     {
         var complete = true; var fingerprint = SessionSharingService.KeyFingerprint(key);
@@ -202,6 +236,8 @@ public sealed class CardSharePublisher(IBoardStore boards, CardShareCapture capt
     }
     private static string Name(string? name) => name?.Trim() is { Length: >= 1 and <= 160 } value
         ? value : throw new BoardValidationException("Enter a link name of 1 to 160 characters.");
+    private static (string Mode, IReadOnlyList<string> Addresses) Audience(string? access, IReadOnlyList<string>? emails)
+        => ShareAudience.TryNormalize(access, emails, out var mode, out var addresses, out var error) ? (mode, addresses) : throw new BoardValidationException(error);
     private static void RequireSameAccount(string key)
     {
         if (!string.Equals(key, ParserConfigs.GetApiKey(), StringComparison.Ordinal))

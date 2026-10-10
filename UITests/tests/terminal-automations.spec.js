@@ -19,8 +19,10 @@ for (const width of [1280, 390]) {
         const requests = [];
         const shareUrl = 'https://viberails.ai/shared/session?key=' + 'a'.repeat(64);
         await page.route('**/sharing-links', async route => {
-            requests.push({ url: route.request().url(), body: route.request().postDataJSON(), headers: route.request().headers() });
-            await route.fulfill({ json: { success: true, status: 'pending_upload', url: shareUrl,
+            const body = route.request().postDataJSON();
+            requests.push({ url: route.request().url(), body, headers: route.request().headers() });
+            // The desktop service only reports success once the server confirmed the requested audience.
+            await route.fulfill({ json: { success: true, status: 'pending_upload', url: shareUrl, access: body.access, recipients: body.emails,
                 expiresUtc: '2026-11-06T20:00:00Z', message: 'Available after the session ends and uploads.' } });
         });
         await page.evaluate(() => {
@@ -40,7 +42,13 @@ for (const width of [1280, 390]) {
         await share.click();
         const modal = page.locator('#terminal-session-share');
         await expect(modal).toBeVisible();
+        await expect(modal.locator('[data-share-emails]')).toBeHidden();
+        await modal.locator('#session-share-access-email').check();
+        await expect(modal.locator('[data-share-emails]')).toBeVisible();
+        await modal.locator('#session-share-emails').fill('reviewer@example.test\nreviewer@example.test, lead@example.test');
+        await modal.getByRole('button', { name: 'Create link', exact: true }).click();
         await expect(modal.locator('#session-share-url')).toHaveValue(shareUrl);
+        await expect(modal.locator('[data-share-audience]')).toContainText('reviewer@example.test, lead@example.test');
         await expect(modal.locator('[data-share-name]')).toHaveText('<img src=x onerror=alert(1)> Demo');
         await expect(modal.locator('img')).toHaveCount(0);
         await expect(modal).toContainText('Available after the session ends and uploads.');
@@ -58,6 +66,8 @@ for (const width of [1280, 390]) {
         expect(requests).toHaveLength(1);
         expect(requests[0].url).toContain('/sessions/d88b7a85-0c2d-4203-acf1-6b9f22227f57/sharing-links');
         expect(requests[0].body.displayName).toBe('<img src=x onerror=alert(1)> Demo');
+        expect(requests[0].body.access).toBe('email');
+        expect(requests[0].body.emails).toEqual(['reviewer@example.test', 'lead@example.test']);
         expect(requests[0].headers.viberails_tab).toBe('automation-fixture');
         expect(await modal.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
         await page.screenshot({ path: testInfo.outputPath(`session-sharing-${width}.png`) });
@@ -79,6 +89,7 @@ test('session sharing handles sign-in errors, ready sessions and late replies af
             url: 'https://viberails.ai/shared/session?key=' + 'b'.repeat(64), expiresUtc: '2026-11-06T20:00:00Z' } });
     });
     await page.evaluate(() => { void window.app.terminalController.manager.shareTab('ordinary'); });
+    await page.locator('#terminal-session-share').getByRole('button', { name: 'Create link', exact: true }).click();
     await expect(page.locator('#terminal-session-share')).toContainText('Sign in before sharing.');
     await page.getByRole('button', { name: 'Try again', exact: true }).click();
     await expect.poll(() => count).toBe(2);
@@ -88,6 +99,7 @@ test('session sharing handles sign-in errors, ready sessions and late replies af
     await expect(page.locator('#terminal-session-share')).toHaveCount(0);
     await page.keyboard.press('Escape');
     await page.evaluate(() => { void window.app.terminalController.manager.shareTab('ordinary'); });
+    await page.locator('#terminal-session-share').getByRole('button', { name: 'Create link', exact: true }).click();
     await expect(page.locator('#terminal-session-share')).toContainText('Your replay is ready to share.');
     expect(count).toBe(3);
 });
@@ -101,6 +113,7 @@ test('session sharing shows an actionable migration error on a phone', async ({ 
     } }));
     await page.evaluate(() => { void window.app.terminalController.manager.shareTab('ordinary'); });
     const modal = page.locator('#terminal-session-share');
+    await modal.getByRole('button', { name: 'Create link', exact: true }).click();
     await expect(modal).toContainText(message);
     await expect(modal.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
     await expect(modal.locator('[data-share-result]')).toBeHidden();
