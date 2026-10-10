@@ -60,4 +60,19 @@ public static class ShareAudience
     /// </summary>
     public static bool Confirms(string requestedMode, string? returnedAccess)
         => requestedMode == Public ? returnedAccess is null or "" or Public : returnedAccess == Email;
+
+    /// <summary>
+    /// Whether a server's capabilities answer says it can restrict links to listed people. Clients
+    /// ask before any restricted creation: a server without the sharing update has no capabilities
+    /// route and ignores unknown request fields, so asking first means it creates nothing.
+    /// </summary>
+    public static bool Supports(ShareCapabilitiesResponse? capabilities)
+        => capabilities?.Access?.Any(a => string.Equals(a, Email, StringComparison.Ordinal)) == true;
+
+    /// <summary>Whether the people a server reports for a link are exactly the people requested, ignoring case and order.</summary>
+    public static bool SamePeople(IEnumerable<string> requested, IReadOnlyList<string>? reported)
+        => reported is not null && new HashSet<string>(requested.Select(r => r.Trim()), StringComparer.OrdinalIgnoreCase).SetEquals(reported.Select(r => r.Trim()));
 }
+
+/// <summary>What a sharing server (hosted, or the local root for MCP) supports: `{ "access": ["public", "email"], "recipientLimit": 10 }`.</summary>
+public sealed record ShareCapabilitiesResponse(IReadOnlyList<string>? Access = null, int? RecipientLimit = null);

@@ -286,10 +286,17 @@ The stdio child calls the existing root route with both inherited root credentia
 only loopback HTTP(S), disables redirects/proxies/cookies, and bounds the local hop to 30 seconds
 and 16 KiB. Codex forwards environment variable names per launch, never credential values in argv
 or shared config. No Board auto-grant is added. Callers without a terminal/root context fail;
-tool descriptions disclose that creating the link grants public read access.
+tool descriptions disclose that creating the link grants public read access. With `emails`, the
+tool first reads root-only `GET /api/v1/session-sharing/capabilities` (both credentials, no-store,
+static answer, no outbound request) and creates nothing when an older running root lacks it; it
+prints a URL or commit line only when the root confirmed the email audience with exactly those
+people, so an older root can never publish the recording as a public link through the tool.
 
 Root-only `POST /api/v1/sessions/{id}/sharing-links` requires both local credentials and validates
-the exact local recording. It creates the capability at fixed `https://viberails.ai` using only
+the exact local recording. For listed people it first reads the host's
+`GET /api/v1/session-sharing-links/capabilities` and creates nothing when the host lacks it or
+does not list `email`; a created link must still confirm the audience and people before any URL
+is returned or a recording is queued. It creates the capability at fixed `https://viberails.ai` using only
 header `X-Api-Key`, no redirects/cookies, 20-second requests and 16-KiB responses. Local JSON is
 capped at 4 KiB. Returned session/key/path/expiry/upload-required fields are checked before a
 fixed-origin public URL is returned; raw credentials and remote error prose never enter the modal.
@@ -304,8 +311,10 @@ change. They reuse the existing export protocol and locks. See the
 
 The saved card's Share card controls explicitly publish its complete allowed content to fixed
 https://viberails.ai, to anyone with the link or only to listed email addresses (validated
-locally, confirmed by the hosted response, and revoked immediately if the server ignored the
-choice). Root/project-scoped `/api/v1/board/cards/{card}/sharing-links` CRUD, `PUT /{id}/access`
+locally; the host's `GET /api/v1/card-sharing-links/capabilities` is read before any restricted
+publication so a server without the sharing update publishes nothing; the hosted response must
+still confirm the audience and people, otherwise the link is revoked immediately).
+Root/project-scoped `/api/v1/board/cards/{card}/sharing-links` CRUD, `PUT /{id}/access`
 and manual refresh inherit both credentials, no-store responses and bounded (8 KiB) local requests.
 The transport disables redirects/cookies, bounds response bytes/time, pins the operation's key,
 and validates returned card/local identities, share fragments, expiry and linked recording IDs.

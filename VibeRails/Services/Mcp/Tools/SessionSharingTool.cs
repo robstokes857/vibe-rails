@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using ModelContextProtocol.Server;
@@ -52,14 +53,32 @@ public sealed class SessionSharingTool
         {
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             deadline.CancelAfter(TimeSpan.FromSeconds(30));
+            var http = clients.CreateClient(HttpClientName);
+            if (listed.Length > 0)
+            {
+                // This process may be newer than the root it inherited. An older root ignores the new
+                // fields, creates a public link and uploads the recording for it, so ask it first:
+                // an older root has no capabilities route and is then never asked to create anything.
+                using var probe = new HttpRequestMessage(HttpMethod.Get, new Uri(new Uri(baseUrl), "/api/v1/session-sharing/capabilities"));
+                probe.Headers.Add(LlmProxyCodexConfig.SessionHeaderName, sessionToken);
+                probe.Headers.Add(LlmProxyCodexConfig.TabHeaderName, tabToken);
+                using var support = await http.SendAsync(probe, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
+                if (support.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed)
+                    return "FAIL: The running VibeRails backend does not support links for listed people, so no link was created. Update VibeRails and restart it, then try again; or leave emails empty for a public link.";
+                if (!support.IsSuccessStatusCode)
+                    return $"FAIL: The local VibeRails backend could not confirm sharing support (HTTP {(int)support.StatusCode}). Use Share session in the terminal tab to check the connection.";
+                var capabilities = JsonSerializer.Deserialize(await SessionSharingService.ReadBoundedAsync(
+                    await support.Content.ReadAsStreamAsync(deadline.Token), 16 * 1024, deadline.Token), SessionSharingJsonContext.Default.ShareCapabilitiesResponse);
+                if (!ShareAudience.Supports(capabilities))
+                    return "FAIL: The running VibeRails backend does not support links for listed people, so no link was created. Update VibeRails and restart it, then try again.";
+            }
             using var request = new HttpRequestMessage(HttpMethod.Post,
                 new Uri(new Uri(baseUrl), $"/api/v1/sessions/{sessionId:D}/sharing-links"));
             request.Headers.Add(LlmProxyCodexConfig.SessionHeaderName, sessionToken);
             request.Headers.Add(LlmProxyCodexConfig.TabHeaderName, tabToken);
             var body = listed.Length > 0 ? new CreateSessionShareRequest(name, ShareAudience.Email, listed) : new CreateSessionShareRequest(name);
             request.Content = JsonContent.Create(body, SessionSharingJsonContext.Default.CreateSessionShareRequest);
-            using var response = await clients.CreateClient(HttpClientName)
-                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
+            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
             if (!response.IsSuccessStatusCode)
                 return $"FAIL: The local VibeRails backend could not create a sharing link (HTTP {(int)response.StatusCode}). Use Share session in the terminal tab to check the connection.";
 
@@ -70,9 +89,14 @@ public sealed class SessionSharingTool
             if (!result.Success) return $"FAIL: {result.Message}";
             if (!SessionShareCommitRule.IsShareUrl(result.Url) || result.ExpiresUtc is null)
                 return "FAIL: The local backend returned an invalid sharing link.";
+            // The backend must confirm the requested audience before any URL or commit trailer is
+            // handed out: a link whose people were not confirmed may be readable by anyone.
+            if (!ShareAudience.Confirms(listed.Length > 0 ? ShareAudience.Email : ShareAudience.Public, result.Access)
+                || (listed.Length > 0 && !ShareAudience.SamePeople(listed, result.Recipients)))
+                return "FAIL: The local VibeRails backend did not confirm the listed people for this link, so no link is reported. Check Sharing links on viberails.ai and revoke any public link created for this session, then update VibeRails and restart it.";
 
-            var audience = result.Access == ShareAudience.Email
-                ? "Only these people can open this link after signing in with that verified email: " + string.Join(", ", result.Recipients ?? listed) + "."
+            var audience = listed.Length > 0
+                ? "Only these people can open this link after signing in with that verified email: " + string.Join(", ", result.Recipients!) + "."
                 : "Anyone with this link can view the shared session.";
             return $"{result.Message}\nStatus: {result.Status}\nExpires: {result.ExpiresUtc:O}\n"
                 + audience + " Add this line to the commit message:\n"

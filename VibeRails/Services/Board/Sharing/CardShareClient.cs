@@ -88,6 +88,23 @@ public sealed class CardShareClient(HttpClient client)
             CardSharingJsonContext.Default.CardShareAccessRequest), ct);
     public async Task RevokeAsync(string key, int id, CancellationToken ct) => await SendEmptyAsync(key, HttpMethod.Delete, "/" + id, null, ct);
 
+    /// <summary>
+    /// Whether the host can restrict links to listed people. Asked before any restricted publication:
+    /// a server without the sharing update has no such route and ignores unknown fields, so asking
+    /// first means it never publishes a card it would have made public.
+    /// </summary>
+    public async Task<bool> SupportsListedPeopleAsync(string key, CancellationToken ct)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(TimeSpan.FromSeconds(30));
+        using var request = Request(key, HttpMethod.Get, "/capabilities", null);
+        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
+        if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed or HttpStatusCode.NotImplemented) return false;
+        if (response.StatusCode != HttpStatusCode.OK) throw Failure(response.StatusCode);
+        var bytes = await SessionSharingService.ReadBoundedAsync(await response.Content.ReadAsStreamAsync(deadline.Token), 16 * 1024, deadline.Token);
+        return ShareAudience.Supports(JsonSerializer.Deserialize(bytes, SessionSharingJsonContext.Default.ShareCapabilitiesResponse));
+    }
+
     private async Task<T> SendAsync<T>(string key, HttpMethod method, string path, HttpContent? body,
         HttpStatusCode expected, JsonTypeInfo<T> json, CancellationToken ct)
     {

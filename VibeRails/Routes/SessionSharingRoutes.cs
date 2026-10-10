@@ -11,6 +11,16 @@ public static class SessionSharingRoutes
 
     public static void Map(WebApplication app)
     {
+        // A newer MCP process can inherit an older root that is still running. The sharing tool asks
+        // here before creating a link for listed people; an older root has no such route, so it is
+        // never asked to create a link it would silently make public.
+        app.MapGet("/api/v1/session-sharing/capabilities", (HttpContext context) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            return Results.Json(new ShareCapabilitiesResponse([ShareAudience.Public, ShareAudience.Email], ShareAudience.RecipientLimit),
+                SessionSharingJsonContext.Default.ShareCapabilitiesResponse);
+        });
+
         app.MapPost("/api/v1/sessions/{sessionId:guid}/sharing-links", async (
             Guid sessionId, HttpContext context, SessionSharingService sharing, CancellationToken ct) =>
         {

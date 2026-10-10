@@ -37,15 +37,19 @@ public sealed class CardSharePublisher(IBoardStore boards, CardShareCapture capt
         var (mode, addresses) = Audience(access, emails);
         var key = Key();
         var card = await CardAsync(project, identity, ct);
+        // A server without the sharing update ignores the audience and would publish the card to
+        // anyone. Ask it first, before anything is captured or sent, so it publishes nothing.
+        if (mode == ShareAudience.Email && !await SupportsListedPeopleAsync(key, ct))
+            throw new BoardValidationException("The sharing server does not support links for listed people yet, so no link was created. Ask the server administrator to deploy the sharing update, or share with anyone who has the link.");
         var document = await CaptureAsync(project, card.Id, ct);
         RequireSameAccount(key);
         var result = await client.PublishAsync(key, name, card.Id, document, mode, mode == ShareAudience.Email ? addresses : null, ct);
-        if (!ShareAudience.Confirms(mode, result.Link.Access))
+        if (!ShareAudience.Confirms(mode, result.Link.Access) || (mode == ShareAudience.Email && !ShareAudience.SamePeople(addresses, result.Link.Recipients)))
         {
-            // A server without the sharing update ignores the audience and made the card public.
-            // Take that link back before anyone receives it; nothing is queued for it.
+            // The server confirmed support above but did not apply the audience, so this link is
+            // not what was asked for. Take it back before anyone receives it; nothing is queued for it.
             await client.RevokeAsync(key, result.Link.Id, ct);
-            throw new BoardValidationException("The sharing server does not support links for listed people yet; the public link it created was revoked. Ask the server administrator to deploy the sharing update.");
+            throw new BoardValidationException("The sharing server did not confirm the listed people for this link; the link it created was revoked. Contact the server administrator.");
         }
         // Publication may already exist even if queuing fails or the client closes. The scheduler
         // rediscovers it from this exact key; never retry this creation POST automatically.
@@ -198,6 +202,15 @@ public sealed class CardSharePublisher(IBoardStore boards, CardShareCapture capt
             if (DateTime.UtcNow >= deadline) return null;
             await Task.Delay(250, ct);
         }
+    }
+
+    /// <summary>The capabilities question creates nothing, so its failures carry no "a link may exist" note.</summary>
+    private async Task<bool> SupportsListedPeopleAsync(string key, CancellationToken ct)
+    {
+        try { return await client.SupportsListedPeopleAsync(key, ct); }
+        catch (CardShareTransportException ex) { throw new BoardValidationException(ex.Message); }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or JsonException or InvalidDataException || ex is OperationCanceledException && !ct.IsCancellationRequested)
+        { throw new BoardValidationException("Could not reach the sharing server to confirm support for listed people. Check your connection and try again; no link was created."); }
     }
 
     private async Task<bool> QueueAsync(string key, IReadOnlyList<Guid> sessions, CancellationToken ct)

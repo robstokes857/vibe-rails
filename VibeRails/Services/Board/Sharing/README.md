@@ -9,9 +9,12 @@ revokes, copies and opens them. Each link is for **anyone with the link** or **o
 list** (email addresses, up to 10 per card across its links; each person signs in to viberails.ai
 with that verified address; nobody is notified or looked up). The audience is chosen before
 Create link and can be changed per link with Edit access (`PUT .../{id}/access`). `ShareAudience`
-validates it locally; the hosted link must confirm the requested audience, otherwise the publisher
-revokes the link it just created and reports that the server needs the sharing update, so a
-card is never left public by a server that ignored the choice. New cards must be saved first. Creation and manual
+validates it locally. Before publishing for listed people the publisher asks the host what it
+supports (`GET /api/v1/card-sharing-links/capabilities`, which only a server with the sharing
+update answers) and fails with "no link was created" when the answer is missing or lacks `email`,
+so a server that would have ignored the choice never publishes the card. The returned link must
+still confirm the requested audience and people; otherwise the publisher revokes the link it just
+created and reports it, so a card is never left public. New cards must be saved first. Creation and manual
 refresh refuse unsaved fields/comments/files; link management never saves or replaces drafts.
 The panel states that card text, discussion, documents, saved commit diffs, linked-session
 recordings and future saved updates become public to anyone with the link. A link expires

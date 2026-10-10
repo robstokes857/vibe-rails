@@ -361,24 +361,44 @@ public sealed class CardSharePublisherTests : IDisposable
     private sealed class Handler(Func<HttpRequestMessage, Task<HttpResponseMessage>> callback) : HttpMessageHandler
     { protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) => callback(request); }
     [Fact]
-    public async Task ListedPeopleAreSentWithTheCard_AndAnUnconfirmedAudienceIsRevokedImmediately()
+    public async Task ListedPeopleAreSentWithTheCard_OnlyAfterTheServerConfirmsSupport_AndAnUnconfirmedAudienceIsRevokedImmediately()
     {
-        var confirm = true; var revoked = new List<string>();
+        var supported = true; var confirm = true; var revoked = new List<string>(); var calls = new List<string>();
         using var http = new HttpClient(new Handler(async request =>
         {
-            if (request.Method == HttpMethod.Delete) { revoked.Add(request.RequestUri!.AbsolutePath); return new HttpResponseMessage(HttpStatusCode.NoContent); }
+            calls.Add(request.Method + " " + request.RequestUri!.AbsolutePath);
+            if (request.Method == HttpMethod.Get)
+            {
+                Assert.Equal("/api/v1/card-sharing-links/capabilities", request.RequestUri.AbsolutePath);
+                return supported
+                    ? new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(new ShareCapabilitiesResponse(["public", "email"], 10), SessionSharingJsonContext.Default.ShareCapabilitiesResponse) }
+                    : new HttpResponseMessage(HttpStatusCode.NotFound) { Content = new StringContent("legacy page") };
+            }
+            if (request.Method == HttpMethod.Delete) { revoked.Add(request.RequestUri.AbsolutePath); return new HttpResponseMessage(HttpStatusCode.NoContent); }
             var sent = await request.Content!.ReadFromJsonAsync(CardSharingJsonContext.Default.CardSharePublishRequest, Ct);
-            Assert.Equal("email", sent!.Access); Assert.Equal(new[] { "reviewer@example.test", "lead@example.test" }, sent.Emails);
-            var link = confirm ? Link() with { Access = "email", Recipients = sent.Emails } : Link();
+            if (sent!.Access == "email") Assert.Equal(new[] { "reviewer@example.test", "lead@example.test" }, sent.Emails);
+            var link = confirm && sent.Access == "email" ? Link() with { Access = "email", Recipients = sent.Emails } : Link();
             return Published(new CardSharePublished(link, [_session]));
         }));
         var publisher = Publisher(http);
         var result = await publisher.CreateAsync("project", "card_test", "Demo", "email", [" reviewer@example.test ", "lead@example.test", "REVIEWER@example.test"], Ct);
         Assert.True(result.Success); Assert.Equal("email", result.Link!.Access); Assert.Empty(revoked);
+        // Support is established before the publishing POST, never after it.
+        Assert.Equal(["GET /api/v1/card-sharing-links/capabilities", "POST /api/v1/card-sharing-links"], calls);
+        // A server that confirmed support but returned a public link gave an invalid answer: take the link back at once.
         confirm = false;
         var unconfirmed = await publisher.CreateAsync("project", "card_test", "Demo", "email", ["reviewer@example.test", "lead@example.test"], Ct);
         Assert.False(unconfirmed.Success); Assert.Contains("revoked", unconfirmed.Message);
         Assert.Equal(new[] { "/api/v1/card-sharing-links/7" }, revoked);
+        // A server without the sharing update is never asked to publish: nothing is sent, nothing to revoke.
+        supported = false; calls.Clear(); revoked.Clear();
+        var unsupported = await publisher.CreateAsync("project", "card_test", "Demo", "email", ["reviewer@example.test"], Ct);
+        Assert.False(unsupported.Success); Assert.Contains("no link was created", unsupported.Message); Assert.DoesNotContain("may already have created", unsupported.Message);
+        Assert.Equal(["GET /api/v1/card-sharing-links/capabilities"], calls); Assert.Empty(revoked);
+        // Public links never ask.
+        calls.Clear();
+        Assert.True((await publisher.CreateAsync("project", "card_test", "Demo", Ct)).Success);
+        Assert.Equal(["POST /api/v1/card-sharing-links"], calls);
         foreach (var (access, emails) in new (string, string[])[] { ("public", ["x@example.test"]), ("email", []), ("email", ["no-at-sign"]), ("friends", ["x@example.test"]) })
             Assert.False((await publisher.CreateAsync("project", "card_test", "Demo", access, emails, Ct)).Success);
     }

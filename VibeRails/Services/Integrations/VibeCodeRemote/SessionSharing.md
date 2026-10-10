@@ -10,10 +10,14 @@ the website's Sharing links page. The modal explains that terminal output, promp
 changes become visible through the link. The public server omits proxy captures. Closing the
 modal hides its result while the creation request finishes; it does not cancel upload scheduling.
 
-`ShareAudience` validates the choice locally with fixed wording. The hosted response must
-confirm the requested audience (`access: "email"`): a server without the sharing update ignores
-the fields and creates a public link, which the client reports as `server_update_required`
-without queuing the recording, telling the user to revoke that link on the website.
+`ShareAudience` validates the choice locally with fixed wording. For listed people the client
+first asks the server what it supports (`GET /api/v1/session-sharing-links/capabilities`, which
+only a server with the sharing update answers) and reports `server_update_required` **before any
+link is created** when the answer is missing, not 200, or lacks `email`. A server without the
+update ignores the fields and would otherwise have created a public link, which exposes an already
+uploaded recording to anyone (PR #80 review, 2026-10-10). The created link must then still confirm
+the audience (`access: "email"` with exactly the requested people); an unconfirmed link is reported
+as `invalid_response`, naming the link to revoke on the website, and no recording is queued for it.
 
 The `create_session_share_link` MCP tool uses this same root route for the calling terminal's
 inherited recording id. It accepts a `displayName`, an optional comma-separated `emails` list
@@ -23,9 +27,17 @@ that restricts the link to those people, and returns status, expiry, the audienc
 message. It validates URL shape locally, not ownership, upload completion, expiry or revocation.
 Creating another link is unnecessary for subsequent commits from the same session. MCP uses the
 inherited root credentials over loopback, not the terminal child's control endpoint; it does not
-open the database or upload live sessions itself.
+open the database or upload live sessions itself. A newer MCP process can inherit an older root
+that is still running, and that root would ignore `emails`, create a public link and upload the
+recording for it. With `emails` the tool therefore first reads the root's
+`GET /api/v1/session-sharing/capabilities` (both root credentials; an older root has no such route
+and is then never asked to create anything), and after creation it prints a URL or commit line only
+when the root confirmed `access: "email"` with exactly those people; otherwise it reports a failure
+that names the link for revocation.
 
-`POST /api/v1/sessions/{sessionId:guid}/sharing-links` is active-root-only and requires both
+`GET /api/v1/session-sharing/capabilities` is active-root-only, requires both credentials, and
+answers no-store `{ "access": ["public", "email"], "recipientLimit": 10 }` without contacting
+the server. `POST /api/v1/sessions/{sessionId:guid}/sharing-links` is active-root-only and requires both
 normal process/session and tab credentials through CookieAuthMiddleware. It accepts only
 `{ displayName, access?, emails? }`, checks the local recording, caps JSON at 8 KiB and names at
 160 characters, and returns no-store `{ success, status, message, url, displayName, expiresUtc,

@@ -25,6 +25,7 @@ internal sealed record RemoteSessionShareError(string? Code);
 [JsonSerializable(typeof(RemoteSessionShareRequest))]
 [JsonSerializable(typeof(RemoteSessionShareResponse))]
 [JsonSerializable(typeof(RemoteSessionShareError))]
+[JsonSerializable(typeof(ShareCapabilitiesResponse))]
 internal partial class SessionSharingJsonContext : JsonSerializerContext;
 
 /// <summary>Creates sharing capabilities at the pinned export origin and persists their upload intent.</summary>
@@ -32,6 +33,8 @@ public sealed class SessionSharingService(HttpClient client, ISessionStore sessi
 {
     private static readonly SemaphoreSlim CreationGate = new(1, 1);
     internal static readonly Uri Endpoint = new(DataExportEndpointConfiguration.ExportUri, "/api/v1/session-sharing-links");
+    internal static readonly Uri CapabilitiesEndpoint = new(DataExportEndpointConfiguration.ExportUri, "/api/v1/session-sharing-links/capabilities");
+    private const string NoListedPeopleSupport = "The sharing server does not support links for listed people yet, so no link was created. Ask the server administrator to deploy the sharing update, or share with anyone who has the link.";
     internal static HttpMessageHandler CreateHandler() => new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false };
 
     internal static string KeyFingerprint(string key) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(key)));
@@ -55,6 +58,11 @@ public sealed class SessionSharingService(HttpClient client, ISessionStore sessi
         {
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
             deadline.CancelAfter(TimeSpan.FromSeconds(20));
+            // Ask the server whether it can restrict links before creating one. A server without the
+            // sharing update ignores unknown request fields and would create a public link, which can
+            // expose an already uploaded recording to anyone. Asked first, it creates nothing.
+            if (mode == ShareAudience.Email && await UnsupportedAsync(apiKey, deadline.Token) is { } unsupported)
+                return unsupported;
             using var request = new HttpRequestMessage(HttpMethod.Post, Endpoint);
             request.Headers.Add("X-Api-Key", apiKey);
             var listed = mode == ShareAudience.Email ? addresses : null;
@@ -70,10 +78,11 @@ public sealed class SessionSharingService(HttpClient client, ISessionStore sessi
                 || remote.SharePath != "/shared/session?key=" + remote.Key || remote.UploadRequired is null
                 || remote.ExpiresUtc <= DateTimeOffset.UtcNow || remote.ExpiresUtc > DateTimeOffset.UtcNow.AddDays(32))
                 return Failure("invalid_response", "The sharing server returned an invalid response.");
-            // A server without the sharing update ignores the audience and creates a public link. That
-            // link must not be presented as restricted, and its recording must not be uploaded for it.
-            if (!ShareAudience.Confirms(mode, remote.Access))
-                return Failure("server_update_required", "The sharing server does not support links for listed people yet, so this link was not confirmed. Ask the server administrator to deploy the sharing update, then check Sharing links on viberails.ai and revoke any public link it created.");
+            // The server confirmed listed-people support above, so a link that does not carry the
+            // requested audience is an invalid answer. It exists; never present it as restricted,
+            // and never upload the recording for it.
+            if (!ShareAudience.Confirms(mode, remote.Access) || (mode == ShareAudience.Email && !ShareAudience.SamePeople(addresses, remote.Recipients)))
+                return Failure("invalid_response", $"The sharing server did not confirm the listed people for this link, so it was not confirmed and nothing was queued for it. Check Sharing links on viberails.ai, revoke the link named \"{name}\", and contact the server administrator.");
 
             // Capture the key actually used for creation. A later settings/account change must
             // not retarget this request, including while this HTTP response is in flight.
@@ -110,6 +119,20 @@ public sealed class SessionSharingService(HttpClient client, ISessionStore sessi
         catch (IOException)
         { return Failure("network_error", "The connection to viberails.ai was interrupted. Check Sharing links before trying again; the link may already have been created."); }
         finally { CreationGate.Release(); }
+    }
+
+    /// <summary>The failure to report when the server cannot restrict links to listed people, or null when it can.</summary>
+    private async Task<SessionShareResponse?> UnsupportedAsync(string apiKey, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, CapabilitiesEndpoint);
+        request.Headers.Add("X-Api-Key", apiKey);
+        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed or HttpStatusCode.NotImplemented)
+            return Failure("server_update_required", NoListedPeopleSupport, (int)response.StatusCode);
+        if (response.StatusCode != HttpStatusCode.OK) return await ServerFailureAsync(response, ct);
+        var bytes = await ReadBoundedAsync(await response.Content.ReadAsStreamAsync(ct), 16 * 1024, ct);
+        var capabilities = JsonSerializer.Deserialize(bytes, SessionSharingJsonContext.Default.ShareCapabilitiesResponse);
+        return ShareAudience.Supports(capabilities) ? null : Failure("server_update_required", NoListedPeopleSupport);
     }
 
     private static async Task<SessionShareResponse> ServerFailureAsync(HttpResponseMessage response, CancellationToken ct)
