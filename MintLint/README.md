@@ -32,6 +32,11 @@ normalization thresholds, category weights, breadth-gated roll-up, or rating ban
 The standalone `MintLintAnalyzer.AnalyzePath` and `AnalyzeFile` APIs continue to analyze
 complete files; change scoping belongs to VibeRails’ Git preflight integration.
 
+Added-line fragments may have unmatched delimiters. Metric traversal must keep moving
+forward through incomplete blocks; in particular, an unclosed `switch`, `match`, or
+`select` body must never reset the scan position to its missing closing brace. Source-input
+regression tests cover these fragments, including PowerShell `[switch]` parameters.
+
 ---
 
 *Last checked: 2026-08-06T18:21:17Z by opencode (glm-5.2)*

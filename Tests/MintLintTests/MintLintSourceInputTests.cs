@@ -71,6 +71,25 @@ public sealed class MintLintSourceInputTests
     }
 
     [Theory]
+    [InlineData("fragment.cs", "switch (value) { case 1: break; if (ready) { work(); }")]
+    [InlineData("fragment.js", "switch (value) { case 1: break; if (ready) { work(); }")]
+    [InlineData("fragment.rs", "match value { 1 => work(), if ready { work(); }")]
+    [InlineData("fragment.go", "select { case <-ready: work(); if ready { work(); }")]
+    [InlineData("fragment.ps1", "function Resolve-Root([switch]$SearchParents) {\nif ($SearchParents) { work }\n")]
+    public async Task AnalyzeSources_UnclosedSelectionBodyStillScansFollowingCode(string path, string content)
+    {
+        // Bound the regression: the old NPath traversal loops forever on these fragments.
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var results = await Task.Run(
+                () => MintLintAnalyzer.AnalyzeSources([new SourceInput(path, content)]), cancellationToken)
+            .WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+
+        FileMetrics result = Assert.Single(results);
+        Assert.True(result.CyclomaticSum > 0);
+        Assert.Equal(2, result.NPathMax);
+    }
+
+    [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("README.md")]

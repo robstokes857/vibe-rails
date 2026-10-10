@@ -322,7 +322,9 @@ internal static class MetricEngine
             {
                 int bodyStart = FindControlBodyStart(parsed, i, end);
                 int caseCount = 0;
-                if (bodyStart >= 0)
+                // Added-line fragments can contain a switch/match/select body without
+                // its closing brace. Never rewind the scan to an unmatched partner (-1).
+                if (bodyStart >= 0 && parsed.BracePartner[bodyStart] > bodyStart)
                 {
                     int bodyEnd = parsed.BracePartner[bodyStart];
                     for (int j = bodyStart + 1; j < bodyEnd; j++)
