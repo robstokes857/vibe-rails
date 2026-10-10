@@ -137,10 +137,18 @@ export function mountLaneAgentBody({ app, panel, column, signal, position, updat
             app.navigate('jobs', action === 'edit' ? { editJobId: id } : { newJob: true, triggerKind: 3 });
             return;
         }
-        if (action === 'skip') {
-            const button = event.target.closest('[data-agent-action="skip"]');
+        if (action === 'skip' || action === 'rerun') {
+            const button = event.target.closest('[data-agent-action]');
             void run(async () => {
-                await BoardApi.skipCardAutomationAsync(button.dataset.cardId, id, button.dataset.eventKey);
+                if (action === 'rerun') {
+                    const result = await BoardApi.rerunCardAutomationAsync(button.dataset.cardId, id, button.dataset.eventKey);
+                    if (!alive()) return;
+                    const step = settings.workflows?.find(flow => flow.cardId === button.dataset.cardId)?.steps
+                        ?.find(step => step.jobId === id && step.eventKey === button.dataset.eventKey);
+                    if (step) Object.assign(step, { status: 'Queued', stepStatus: 'Queued', canRerun: false,
+                        runId: result.runId, reason: 'Re-run queued.' });
+                } else await BoardApi.skipCardAutomationAsync(button.dataset.cardId, id, button.dataset.eventKey);
+                if (!alive()) return;
                 const fresh = await BoardApi.getLaneRunningAgentsAsync(column.id, { signal });
                 if (alive()) { settings.runningAgents = fresh.runningAgents; settings.workflows = fresh.workflows; }
             }, '[data-agent-action="add"]');

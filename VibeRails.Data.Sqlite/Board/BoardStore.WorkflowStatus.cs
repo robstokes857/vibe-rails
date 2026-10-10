@@ -21,16 +21,23 @@ public sealed partial class BoardStore
                 ? row.RequiresVerdict ? BoardStepStatus.AwaitingResult : BoardStepStatus.Passed
                 : row.Status == BoardStepStatus.Running && row.Purpose == "code_review" ? BoardStepStatus.Reviewing : row.Status;
             var reason = step == BoardStepStatus.AwaitingResult ? "The agent finished without an explicit pass/fail decision. Later steps remain waiting." : row.Reason;
-            // Fixing describes the failed attempt. Once a deterministic retry is queued,
-            // its own process outcome supersedes that progress note. A user skip still wins.
-            if (reports.TryGetValue(key, out var report)
+            var hasReport = reports.TryGetValue(key, out var report);
+            var newerRun = hasReport && row.RunId is not null && report.Run is not null
+                && data.RunOrder.GetValueOrDefault(row.RunId) > data.RunOrder.GetValueOrDefault(report.Run);
+            // A newer exact-entry retry needs its own verdict. Reports on the old attempt
+            // cannot hide its queued/running state or pass it. A user skip still wins.
+            if (hasReport
+                && !(report.Status != BoardStepStatus.Skipped && newerRun
+                    && !(report.Status == BoardStepStatus.Passed
+                        && data.RunStatuses.GetValueOrDefault(report.Run!) == BoardStepStatus.Succeeded))
                 && !(report.Status == BoardStepStatus.Fixing && !row.RequiresVerdict
                     && row.RunId is not null && report.Run != row.RunId))
             {
                 var process = row.Status;
-                if (report.Run is not null && report.Run != row.RunId)
+                var skipNewerRun = report.Status == BoardStepStatus.Skipped && newerRun;
+                if (!skipNewerRun && report.Run is not null && report.Run != row.RunId)
                     process = data.RunStatuses.GetValueOrDefault(report.Run, BoardStepStatus.Unknown);
-                if (report.Run is not null) row = row with { RunId = report.Run, Status = process };
+                if (!skipNewerRun && report.Run is not null) row = row with { RunId = report.Run, Status = process };
                 step = report.Status switch
                 {
                     BoardStepStatus.Skipped => row.RunId is not null && row.Status is BoardStepStatus.Queued or BoardStepStatus.Running

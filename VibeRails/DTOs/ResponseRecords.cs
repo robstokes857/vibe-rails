@@ -1902,6 +1902,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(BoardCheckReportResponse))]
     [JsonSerializable(typeof(VibeRails.Services.GitPreflight.GitPreflightStepResult))]
     [JsonSerializable(typeof(RunBoardCardAutomationRequest))]
+    [JsonSerializable(typeof(RerunBoardCardAutomationRequest))]
     [JsonSerializable(typeof(UpdateBoardLaneAutomationRequest))]
     [JsonSerializable(typeof(BoardLaneAutomation))]
     [JsonSerializable(typeof(DeleteBoardResponse))]

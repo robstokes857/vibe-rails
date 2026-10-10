@@ -213,7 +213,8 @@
 .board-workflow-card-label, .board-workflow-reason { display: block; overflow-wrap: anywhere; }
 .board-workflow-card-label { font-size: .8rem; margin-bottom: .35rem; }
 .board-workflow-reason { font-size: .75rem; opacity: .8; margin-top: .3rem; }
-.board-workflow-progress { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.board-workflow-progress { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; }
+.board-workflow-actions { display: inline-flex; flex-wrap: wrap; gap: .35rem; }
 .board-workflow-state { display: inline-flex; align-items: center; gap: .4rem; font-size: .8rem; border-radius: 1rem; padding: .2rem .6rem; background: rgba(127, 127, 127, .12); }
 .board-workflow-state.is-passed, .board-workflow-arrow.is-complete { color: #59d38a; }
 .board-workflow-state.is-failed { color: #ff8585; }

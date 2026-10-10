@@ -27,7 +27,7 @@ public sealed class SessionReplayRoutesTests
         auth.Setup(a => a.ValidateTabToken(It.IsAny<string?>())).Returns((string? s) => s == "test-tab");
         var store = new Mock<IReplayStore>(MockBehavior.Strict);
         var manifest = new Manifest(new("one", "codex", "", "", "", "Recording", 0, 1, 0, true, 0),
-            [], [], [], [], "raw", 1, 0, 1, 3, 1, []);
+            [], [], [], [], "raw", 1, 0, 1, 3, 1, [], 12345);
         store.Setup(s => s.Manifest("one")).Returns(manifest);
         store.Setup(s => s.Manifest("missing")).Returns((Manifest?)null);
         store.Setup(s => s.Frames("one", 0, 1, "raw")).Returns(new FramePage([new(1, 0, [65, 66, 67], 80, 24)], 1, true));
@@ -60,6 +60,7 @@ public sealed class SessionReplayRoutesTests
             Assert.True(success.Headers.CacheControl?.NoStore);
             var loaded = await success.Content.ReadFromJsonAsync<Manifest>(TestContext.Current.CancellationToken);
             Assert.Equal("VIBE-1", Assert.Single(loaded!.Cards).Key);
+            Assert.Equal(12345, loaded.TokensSaved);
             using var frames = await Get(paths[3]);
             Assert.Equal("ABC", System.Text.Encoding.UTF8.GetString((await frames.Content.ReadFromJsonAsync<FramePage>(TestContext.Current.CancellationToken))!.Items[0].Data));
             foreach (var path in new[] { "sessions/missing", "sessions/wrong-session/changes/1", "sessions/wrong-session/exchanges/capture" })

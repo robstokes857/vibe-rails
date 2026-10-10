@@ -6,6 +6,40 @@ import {parseResponseTools} from '../../../VibeRails/wwwroot/session-replay/tool
 const stamp = '2026-09-30T00:00:00.1234567';
 const b64 = value => Buffer.from(value).toString('base64');
 const base = () => ({session:{id:'one',startedUtc:stamp},userInputs:[],sessionLogs:[],terminalSessionLogs:[]});
+test('savings use exact session capture sizes, net expansions, and round the total once', async()=>{
+    const rows = [
+        {sessionId:'one',charsBefore:10,charsAfter:3},
+        {sessionId:'one',charsBefore:10,charsAfter:3},
+        {sessionId:'one',charsBefore:2,charsAfter:4},
+        {sessionId:'two',charsBefore:99999,charsAfter:0},
+        {sessionId:null,charsBefore:99999,charsAfter:0}
+    ];
+    for (const field of ['proxyExchanges','proxySavings']) {
+        const source=createEnvelopeSource({...base(),[field]:rows});
+        assert.equal((await source('/api/sessions/one')).tokensSaved,3);
+    }
+});
+test('savings distinguish unavailable, measured zero, large totals and legacy body sizes', async()=>{
+    for (const [rows,expected] of [
+        [[],null],
+        [[{}],null],
+        [[{charsBefore:-1,charsAfter:0}],null],
+        [[{charsBefore:'400',charsAfter:0}],null],
+        [[{charsBefore:NaN,charsAfter:0}],null],
+        [[{charsBefore:10,charsAfter:10}],0],
+        [[{charsBefore:10,charsAfter:20}],0],
+        [[{charsBefore:12000000000,charsAfter:0}],3000000000],
+        [[{requestBefore:'😀abcdef',requestAfter:'😀ab'}],1]
+    ]) {
+        const source=createEnvelopeSource({...base(),proxyExchanges:rows.map(row=>({sessionId:'one',...row}))});
+        assert.equal((await source('/api/sessions/one')).tokensSaved,expected);
+    }
+    assert.equal((await createEnvelopeSource(base())('/api/sessions/one')).tokensSaved,null);
+    // Never combine compact metadata and full captures from the same recording.
+    const source=createEnvelopeSource({...base(),proxyExchanges:[{sessionId:'one',charsBefore:4,charsAfter:0}],
+        proxySavings:[{sessionId:'one',charsBefore:100,charsAfter:0}]});
+    assert.equal((await source('/api/sessions/one')).tokensSaved,1);
+});
 test('byte geometry splits raw frames; final zero-byte resize and fallback preserve output once',async()=>{
     const envelope=base();
     envelope.sessionLogs=[{id:1,rawBytes:b64('abcdef'),timestampUtc:stamp}];

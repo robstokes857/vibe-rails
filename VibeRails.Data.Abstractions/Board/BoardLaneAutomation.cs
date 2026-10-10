@@ -18,7 +18,13 @@ public sealed record BoardLaneAutomationDispatch(string Status, string Reason, s
 public sealed record BoardLaneAutomationStatus(string EventKey, long JobId, string ColumnId,
     DateTime DueUtc, string Name, string Status, string Reason, string? RunId = null, string Purpose = "work",
     string? WorkflowId = null, int Position = 0, bool IsCurrent = false, string? StepStatus = null,
-    bool CanSkip = false, bool RequiresVerdict = false);
+    bool CanSkip = false, bool RequiresVerdict = false)
+{
+    /// <summary>A stopped, failed current step can be explicitly rerun by the user.</summary>
+    public bool CanRerun => IsCurrent && Status is not (BoardStepStatus.Queued or BoardStepStatus.Running)
+        && (StepStatus ?? Status) is BoardStepStatus.Failed or BoardStepStatus.Cancelled
+            or BoardStepStatus.TimedOut or BoardStepStatus.Interrupted;
+}
 
 /// <summary>
 /// A lane Automation read from its local definition so agents can be told what a lane entry

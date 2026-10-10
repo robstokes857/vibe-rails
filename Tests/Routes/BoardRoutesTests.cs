@@ -281,7 +281,7 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         builder.Services.AddSqliteBoardStorage(_ => Path.Combine(_root, "state.db"));
         builder.Services.AddSingleton<ISearchIndexStore>(new SqliteSearchIndexStore(
             Path.Combine(_root, "search.db"), Path.Combine(_root, "state.db")));
-        builder.Services.AddSqliteJobStorage(_ => Path.Combine(_root, "state.db"));
+        builder.Services.AddSingleton<IJobStore>(sp => new JobStore(_connectionString, sp.GetRequiredService<IBoardStore>()));
         builder.Services.AddScoped<BoardAutomationService>();
         builder.Services.AddScoped<BoardCardAutomationService>();
         builder.Services.AddGitPreflight();

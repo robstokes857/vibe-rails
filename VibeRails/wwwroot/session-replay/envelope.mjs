@@ -31,6 +31,19 @@ export function createEnvelopeSource(envelope) {
     const inputs = [...(envelope.userInputs || [])].sort((a,b) => a.sequence-b.sequence || a.id-b.id);
     const proxies = (Array.isArray(envelope.proxyExchanges) ? envelope.proxyExchanges : [])
         .filter(row => row.sessionId === id);
+    // Compact hosted playback retains only these sizes, without the request/response bodies.
+    const savingsRows = Array.isArray(envelope.proxyExchanges) ? proxies
+        : (Array.isArray(envelope.proxySavings) ? envelope.proxySavings : []).filter(row => row?.sessionId === id);
+    let savedCharacters = 0, measuredRequests = 0;
+    for (const row of savingsRows) {
+        const before = row.charsBefore ?? (typeof row.requestBefore === 'string' ? row.requestBefore.length : null);
+        const after = row.charsAfter ?? (typeof row.requestAfter === 'string' ? row.requestAfter.length : null);
+        if (!Number.isSafeInteger(before) || before < 0 || !Number.isSafeInteger(after) || after < 0) continue;
+        savedCharacters += before - after;
+        measuredRequests++;
+    }
+    const tokensSaved = measuredRequests && Number.isSafeInteger(savedCharacters)
+        ? Math.floor(Math.max(0, savedCharacters) / 4) : null;
     const summaries = new Map();
     const bodyLimit = 2000000;
     const bodyText = value => typeof value === 'string' ? value : '';
@@ -71,7 +84,7 @@ export function createEnvelopeSource(envelope) {
         'Saved patches describe prompt windows, not complete file snapshots.'];
     const manifest = { session, cards:[], prompts:inputs.map(row => ({id:row.id,sequence:row.sequence,at:time(row.timestampUtc,started),text:row.inputText || ''})),
         changes, geometry:terminal.map(({data,...row}) => ({...row,bytes:data.length})), frameSource, frameMaxId:frames.length,
-        proxyMaxId:proxies.length, frameCount:frames.length, frameBytes:frames.reduce((n,row)=>n+row.data.length,0), end, notes };
+        proxyMaxId:proxies.length, frameCount:frames.length, frameBytes:frames.reduce((n,row)=>n+row.data.length,0), end, notes, tokensSaved };
     if (raw.length && terminal.reduce((n,row)=>n+row.data.length,0) !== manifest.frameBytes)
         notes.push('Raw and buffered terminal byte totals differ. Resize alignment may be incomplete.');
     return async (path, { signal } = {}) => {

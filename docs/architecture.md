@@ -1537,6 +1537,14 @@ capture change is involved. The website adapts its existing authenticated envelo
 browser. At mobile widths the replay displays delayed HTML snapshots from the reconstructed
 terminal; live terminal rendering is independent.
 
+Replay metadata includes nullable `tokensSaved`, estimated from the net character
+reduction across proxy captures attributed to that exact session, divided by four.
+The snapshot reads this total with its proxy maximum ID; reloading updates open sessions.
+The website computes the same estimate from full envelopes or compact `proxySavings`
+size records. Missing measurements display Unavailable, and measured zero remains zero.
+See the [viewer contract](../VibeRails/wwwroot/session-replay/README.md) for the estimation
+and cross-checkout compatibility details.
+
 ## Card check evidence (VIBE-24)
 
 Code quality and VCA are ordered Automation actions beside the optional single Worker.
@@ -1548,6 +1556,8 @@ moves a card. See [scope, persistence, status and starter contracts](../VibeRail
 
 Lane Automations always run in selected order per card. The lane popup and card rail share
 per-step progress, explicit LLM verdicts and user skips; no execution-mode setting is required.
+The lane popup offers **Re-run** for failed, stopped current steps, preserving their entry and
+original run snapshot in a new linked terminal tab. Stale requests and overlapping runs are rejected.
 See [ordered lane workflows](../VibeRails/Services/Board/ARCHITECTURE.md#ordered-lane-workflows)
 for entry snapshots, review decisions, cancellation and compatibility.
 

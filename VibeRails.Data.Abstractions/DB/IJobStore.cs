@@ -29,6 +29,9 @@ public interface IJobStore
     Task<IReadOnlyList<JobRunRecord>> GetBoardCardRunsAsync(string projectPath, string cardKey, CancellationToken cancellationToken = default,
         IReadOnlyList<string>? linkedRecordingIds = null);
     Task<string?> EnqueueRetryAsync(string runId, CancellationToken cancellationToken = default);
+    /// <summary>Rerun a failed exact lane entry, preserving the source snapshot when one exists.</summary>
+    Task<string?> EnqueueLaneRerunAsync(VibeRails.Services.Board.BoardLaneAutomationEvent entry,
+        string? sourceRunId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<string>> EnqueueEventRunsAsync(string projectPath, JobTriggerKind kind, string eventKey, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<string>> EnqueueDueSchedulesAsync(DateTime nowUtc, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<JobRunRecord>> GetRunsAsync(long? jobId = null, int limit = 100, CancellationToken cancellationToken = default);

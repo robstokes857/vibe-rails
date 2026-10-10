@@ -330,6 +330,9 @@ editor for description, workflow and reviewer changes. Removing a lane selection
 Automation and recordings. New Automation opens that same editor.
 
 `board-lane-workflow.js` renders per-card step badges, completion arrows and user Skip/Stop and skip.
+Failed, stopped current entries also offer **Re-run** when `canRerun` is true. The scoped rerun
+endpoint takes the exact Job/event identity, preserves the failed run snapshot and opens its new
+attempt in a Board terminal tab. Duplicate clicks are disabled; stale polls cannot repaint a rerun.
 The running-agent poll carries workflows too; update only status containers so add-form drafts
 survive. Selected checkbox order must survive a settings save. There is no sequencing toggle.
 

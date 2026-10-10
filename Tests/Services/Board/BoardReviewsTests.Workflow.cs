@@ -9,6 +9,81 @@ namespace Tests.Services.Board;
 
 public sealed partial class BoardReviewsTests
 {
+    [Theory]
+    [InlineData("failed", JobRunStatus.Failed)]
+    [InlineData("failed", JobRunStatus.Succeeded)]
+    [InlineData("passed", JobRunStatus.Failed)]
+    public async Task LaneWorkerRerunRequiresFreshVerdictAndCannotReportOnReentry(string verdict, JobRunStatus outcome)
+    {
+        var flow = await Workflow();
+        var workflow = new BoardWorkflowService(store, reviews);
+        // Exercise both an explicit rejection and a reported pass followed by a process failure.
+        await store.ReportLaneStepAsync(repo, card.Id, new(flow.EventKey, flow.ReviewJob,
+            verdict == "passed" ? "Passed" : "Failed", "Original result", flow.RunId),
+            BoardAuthor.Agent("Codex", "codex", flow.Session), Ct);
+        await jobs.CompleteRunAsync(flow.RunId, outcome, outcome == JobRunStatus.Succeeded ? 0 : 1, "Original process ended", Ct);
+        var source = (await jobs.GetRunAsync(flow.RunId, Ct))!;
+        var lane = (await store.FindCardAsync(repo, card.Id, Ct))!.ColumnId;
+        var entry = new BoardLaneAutomationEvent(card.Id, flow.ReviewJob, flow.EventKey, repo,
+            $"board-lane:{card.Key}:{lane}:{flow.EventKey}", true);
+        var retry = (await jobs.EnqueueLaneRerunAsync(entry, flow.RunId, Ct))!;
+        var snapshot = (await jobs.GetRunAsync(retry, Ct))!;
+        Assert.Equal(source.ReviewLaunch, snapshot.ReviewLaunch);
+        Assert.Equal(source.Purpose, snapshot.Purpose);
+        Assert.True(snapshot.LaunchInTerminalTab);
+        var queued = (await store.GetLaneAutomationStatusesAsync(repo, card.Id, Ct))[0];
+        Assert.Equal(retry, queued.RunId);
+        Assert.Equal("Queued", queued.StepStatus);
+        Assert.True(queued.RequiresVerdict);
+        Assert.False(queued.CanRerun);
+        var session = await LinkWorkflowRun(retry);
+        var author = BoardAuthor.Agent("Codex", "codex", session);
+        await workflow.ReportAsync(repo, card.Id, repo, author, "reviewing", "Trying again", null, null, Ct);
+        if (verdict == "passed")
+        {
+            var review = await reviews.BeginAsync(repo, card.Id, session, repo, "repository", "All code", null, null, true, Ct);
+            await reviews.SaveAsync(repo, card.Id, session, review.Id, "No findings reported", "No findings", "Inspected", "None", Ct);
+            await workflow.ReportAsync(repo, card.Id, repo, author, "passed", "Fresh pass", null, review.Id, Ct);
+            Assert.Empty(await jobs.EnqueueDueSchedulesAsync(DateTime.UtcNow.AddMinutes(3), Ct));
+            await jobs.CompleteRunAsync(retry, JobRunStatus.Succeeded, 0, null, Ct);
+            Assert.Equal("Passed", (await store.GetLaneAutomationStatusesAsync(repo, card.Id, Ct))[0].StepStatus);
+            Assert.Single(await jobs.EnqueueDueSchedulesAsync(DateTime.UtcNow.AddMinutes(3), Ct));
+            return;
+        }
+        await jobs.CompleteRunAsync(retry, JobRunStatus.Succeeded, 0, null, Ct);
+        Assert.Equal("Awaiting result", (await store.GetLaneAutomationStatusesAsync(repo, card.Id, Ct))[0].StepStatus);
+        Assert.Empty(await jobs.EnqueueDueSchedulesAsync(DateTime.UtcNow.AddMinutes(3), Ct));
+
+        // Even with a supplied event key, the old retry must not decide a newer lane entry.
+        var away = (await store.GetColumnsAsync(repo, Ct)).First(c => c.Id != lane).Id;
+        await store.MoveCardAsync(repo, card.Id, away, null, Ct);
+        await store.MoveCardAsync(repo, card.Id, lane, null, Ct);
+        var fresh = (await store.GetLaneAutomationStatusesAsync(repo, card.Id, Ct)).First(e => e.IsCurrent);
+        await Assert.ThrowsAsync<BoardValidationException>(() => workflow.ReportAsync(repo, card.Id, repo,
+            author, "failed", "Old run", fresh.EventKey, null, Ct));
+    }
+
+    [Fact]
+    public async Task SkipRacingLaneRerunStopsTheNewAttemptBeforeReleasingSuccessor()
+    {
+        var flow = await Workflow();
+        await jobs.CompleteRunAsync(flow.RunId, JobRunStatus.Failed, 1, "Failed", Ct);
+        var lane = (await store.FindCardAsync(repo, card.Id, Ct))!.ColumnId;
+        var entry = new BoardLaneAutomationEvent(card.Id, flow.ReviewJob, flow.EventKey, repo,
+            $"board-lane:{card.Key}:{lane}:{flow.EventKey}", true);
+        var retry = (await jobs.EnqueueLaneRerunAsync(entry, flow.RunId, Ct))!;
+        // A skip that read the old run before the independent retry commit still applies.
+        await store.ReportLaneStepAsync(repo, card.Id,
+            new(flow.EventKey, flow.ReviewJob, "Skipped", "Skip", flow.RunId), BoardAuthor.User(), Ct);
+        var stopping = (await store.GetLaneAutomationStatusesAsync(repo, card.Id, Ct))[0];
+        Assert.Equal("Stopping", stopping.StepStatus);
+        Assert.Equal(retry, stopping.RunId);
+        Assert.Empty(await jobs.EnqueueDueSchedulesAsync(DateTime.UtcNow.AddMinutes(3), Ct));
+        await jobs.CompleteRunAsync(retry, JobRunStatus.Cancelled, 1, "Stopped", Ct);
+        Assert.Equal("Skipped", (await store.GetLaneAutomationStatusesAsync(repo, card.Id, Ct))[0].StepStatus);
+        Assert.Single(await jobs.EnqueueDueSchedulesAsync(DateTime.UtcNow.AddMinutes(3), Ct));
+    }
+
     private async Task<(long ReviewJob, long NextJob, string RunId, string Session, string EventKey)> Workflow()
     {
         var env = await repository.SaveEnvironmentAsync(new() { CustomName = "Workflow reviewer",

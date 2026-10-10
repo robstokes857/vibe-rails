@@ -16,10 +16,14 @@ export function laneStepMarkup(id, workflows = []) {
         const skip = step.canSkip ? `<button type="button" class="btn btn-sm btn-outline-secondary"
             data-agent-action="skip" data-card-id="${escapeHtml(flow.cardId)}" data-event-key="${escapeHtml(step.eventKey)}"
             title="Skip this step for this card only">${[Status.Queued, Status.Running].includes(step.status) ? 'Stop and skip' : 'Skip'}</button>` : '';
+        const rerun = step.canRerun ? `<button type="button" class="btn btn-sm btn-outline-primary"
+            data-agent-action="rerun" data-card-id="${escapeHtml(flow.cardId)}" data-event-key="${escapeHtml(step.eventKey)}"
+            title="Re-run this failed step for this card">Re-run</button>` : '';
         return `<div class="board-workflow-card">
             <span class="board-workflow-card-label">${escapeHtml(flow.cardLabel)}</span>
             <div class="board-workflow-progress"><span class="board-workflow-state is-${style}" title="${escapeHtml(step.reason)}">
-                <i class="fa-solid fa-${icons[state] || 'clock'}" aria-hidden="true"></i> ${escapeHtml(state)}</span>${skip}</div>
+                <i class="fa-solid fa-${icons[state] || 'clock'}" aria-hidden="true"></i> ${escapeHtml(state)}</span>
+                <span class="board-workflow-actions">${rerun}${skip}</span></div>
             <small class="board-workflow-reason">${escapeHtml(step.reason)}</small>
         </div>`;
     }).join('');
@@ -37,9 +41,11 @@ export function refreshLaneSteps(content, workflows = []) {
         const active = host.contains(document.activeElement) ? document.activeElement : null;
         const cardId = active?.dataset.cardId;
         const eventKey = active?.dataset.eventKey;
+        const action = active?.dataset.agentAction;
         host.innerHTML = laneStepMarkup(Number(host.dataset.laneStepId), workflows);
-        if (cardId && eventKey) [...host.querySelectorAll('[data-agent-action="skip"]')]
-            .find(button => button.dataset.cardId === cardId && button.dataset.eventKey === eventKey)?.focus();
+        if (cardId && eventKey) [...host.querySelectorAll('[data-agent-action]')]
+            .find(button => button.dataset.cardId === cardId && button.dataset.eventKey === eventKey
+                && button.dataset.agentAction === action)?.focus();
     });
     content.querySelectorAll('[data-lane-arrow-id]').forEach(host => {
         host.innerHTML = laneArrowMarkup(Number(host.dataset.laneArrowId), workflows);

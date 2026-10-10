@@ -1,6 +1,7 @@
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Utils;
+using VibeRails.Services.Board;
 
 namespace VibeRails.Services.Jobs;
 
@@ -13,6 +14,8 @@ public interface IJobService
     Task DeleteJobAsync(long id, CancellationToken cancellationToken = default);
     Task<JobActionResponse> RunNowAsync(long id, CancellationToken cancellationToken = default);
     Task<JobActionResponse> RunForBoardCardAsync(long id, string projectPath, string cardKey, CancellationToken cancellationToken = default);
+    /// <summary>Retry a failed Board lane step with its original run snapshot.</summary>
+    Task<JobActionResponse> RerunBoardLaneAsync(BoardLaneAutomationEvent entry, string? sourceRunId, CancellationToken cancellationToken = default);
     Task<JobRunListResponse> GetRunsAsync(long? jobId, int limit, CancellationToken cancellationToken = default);
     Task<JobRunListResponse> GetRunsPageAsync(long jobId, int page, int pageSize, CancellationToken cancellationToken = default);
     Task<JobRunResponse> GetRunAsync(string runId, CancellationToken cancellationToken = default);
@@ -127,6 +130,29 @@ public sealed class JobService(
             ?? throw JobServiceException.Conflict("The Automation is busy (already queued or running), or became unavailable in this project. This manual card request was not queued; retry when it is available.");
         scheduler.Kick();
         return new JobActionResponse(true, "Automation queued and linked to this card.", runId);
+    }
+
+    /// <summary>Retry a stopped lane step without changing its card, entry or saved run configuration.</summary>
+    public async Task<JobActionResponse> RerunBoardLaneAsync(BoardLaneAutomationEvent entry, string? sourceRunId,
+        CancellationToken cancellationToken = default)
+    {
+        var job = await store.GetJobAsync(entry.JobId, cancellationToken);
+        if (job is null || job.DeletedUtc is not null || !ProjectPathComparer.Matches(job.ProjectPath, entry.ProjectPath))
+            throw JobServiceException.NotFound("Automation not found in this project.");
+        if (!job.Enabled) throw JobServiceException.BadRequest("Enable this Automation before rerunning it.");
+        if (sourceRunId is not null)
+        {
+            var source = await store.GetRunAsync(sourceRunId, cancellationToken);
+            if (source is null || source.JobId != entry.JobId || !ProjectPathComparer.Matches(source.ProjectPath, entry.ProjectPath))
+                throw JobServiceException.NotFound("Automation run not found in this project.");
+            ValidateRunRequirements(source.Actions, source.Llm);
+        }
+        else await ValidateDefinitionRunRequirementsAsync(job, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        var runId = await store.EnqueueLaneRerunAsync(entry, sourceRunId, CancellationToken.None)
+            ?? throw JobServiceException.Conflict("This step is no longer ready to rerun, or the Automation is busy. Refresh its status.");
+        scheduler.Kick();
+        return new(true, "Automation re-run queued and linked to this card.", runId);
     }
 
     public async Task<JobRunListResponse> GetRunsAsync(long? jobId, int limit, CancellationToken cancellationToken = default)

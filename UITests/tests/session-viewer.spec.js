@@ -31,6 +31,7 @@ test('independent instances, patch/events, playback, rewind and complete disposa
     await shell(page);
     const frame = await mount(page);
     await expect(frame.locator('#session-title')).toHaveText('Replay fixture');
+    await expect(frame.locator('#tokens-saved')).toHaveText('Unavailable');
     await expect(frame.locator('.html-preview')).toHaveCount(0);
     await page.evaluate(async envelope => {
         const {mountSessionViewer}=await import('/session-replay/viewer.mjs');
@@ -57,6 +58,41 @@ test('independent instances, patch/events, playback, rewind and complete disposa
     await expect(page.frameLocator('#host iframe').locator('#play')).toBeEnabled();
     expect(errors).toEqual([]);
 });
+test('token savings display full and compact captures, zero, reloads and missing measurements', async ({page}) => {
+    await shell(page);
+    await page.evaluate(async envelope => {
+        const {mountSessionViewer}=await import('/session-replay/viewer.mjs');
+        const {createEnvelopeSource}=await import('/session-replay/envelope.mjs');
+        window.recording = envelope;
+        window.recording.proxyExchanges = [{sessionId:'fixture',charsBefore:50000,charsAfter:600},
+            {sessionId:'another',charsBefore:999999,charsAfter:0}];
+        window.replaySource = createEnvelopeSource(recording);
+        window.viewer=mountSessionViewer(document.getElementById('host'),{
+            sessionId:'fixture',request:(...args)=>window.replaySource(...args)});
+        await viewer.ready;
+    },envelope);
+    const frame = page.frameLocator('#host iframe');
+    await expect(frame.locator('#tokens-saved')).toHaveText('≈ 12,350');
+    await expect(frame.locator('#tokens-saved')).toHaveAttribute('title', /4 characters per token/);
+    await page.screenshot({path:'test-results/session-replay-savings-desktop.png',fullPage:false});
+    await page.setViewportSize({width:390,height:844});
+    await expect(frame.locator('#tokens-saved')).toBeVisible();
+    const inner=page.frames().find(f=>f.url()==='about:srcdoc');
+    expect(await inner.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+    await page.screenshot({path:'test-results/session-replay-savings-mobile.png',fullPage:false});
+    for (const [sizes, expected] of [[[{sessionId:'fixture',charsBefore:400,charsAfter:0}], '≈ 100'],
+        [[{sessionId:'fixture',charsBefore:20,charsAfter:20}], '≈ 0'], [[], 'Unavailable']]) {
+        await page.evaluate(async sizes => {
+            const {createEnvelopeSource}=await import('/session-replay/envelope.mjs');
+            delete recording.proxyExchanges;
+            recording.proxySavings = sizes;
+            window.replaySource = createEnvelopeSource(recording);
+            await viewer.reload();
+        }, sizes);
+        await expect(frame.locator('#tokens-saved')).toHaveText(expected);
+    }
+});
+
 test('mobile readable screen, safe text, narrow layout and 3-second sampling', async ({page})=>{
     await page.setViewportSize({width:390,height:844});
     await shell(page); const frame=await mount(page);

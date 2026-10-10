@@ -2781,6 +2781,76 @@ for (const width of [1440, 390]) {
         await page.clock.fastForward(20000);
         await expect(panel).toHaveCount(0);
     });
+
+    test(`failed lane steps can be rerun safely at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        await page.clock.install();
+        const { settings, writes } = await openLaneAgentsBoard(page);
+        const step = { jobId: 12, eventKey: 'failed-entry', status: 'Failed', stepStatus: 'Failed',
+            canSkip: true, canRerun: true, reason: 'Agent process failed.' };
+        settings.lane_2.workflows = [{ cardId: 'card_test', cardLabel: 'VIBE-123 · Example change', steps: [step] }];
+        let holdPoll = false, heldPoll = false, releasePoll;
+        await page.route('**/api/v1/board/columns/lane_2/automation/running', async route => {
+            const snapshot = structuredClone({ runningAgents: [], workflows: settings.lane_2.workflows });
+            if (holdPoll) {
+                holdPoll = false;
+                await new Promise(resolve => { heldPoll = true; releasePoll = resolve; });
+            }
+            await route.fulfill({ json: snapshot });
+        });
+        const requests = [];
+        let reject = true, releaseRun;
+        await page.route('**/api/v1/board/cards/card_test/automations/rerun', async route => {
+            requests.push(route.request().postDataJSON());
+            if (reject) return route.fulfill({ status: 409, json: { error: 'Automation is busy. Try again.' } });
+            await new Promise(resolve => { releaseRun = resolve; });
+            Object.assign(step, { status: 'Queued', stepStatus: 'Queued', canRerun: false, reason: 'Re-run queued.' });
+            await route.fulfill({ json: { success: true, runId: 'rerun-id' } });
+        });
+        await page.getByRole('button', { name: 'Agents on entry to Review', exact: true }).click();
+        const panel = page.getByRole('dialog', { name: 'Lane agents', exact: true });
+        const rerun = panel.getByRole('button', { name: 'Re-run', exact: true });
+        await expect(rerun).toBeVisible();
+        await rerun.focus();
+        await page.clock.fastForward(10100);
+        await expect(rerun).toBeFocused();
+        expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+        await page.screenshot({ path: testInfo.outputPath(`lane-rerun-${width}.png`) });
+        await rerun.click();
+        await expect(panel.locator('[data-agent-error]')).toContainText('Automation is busy');
+        await expect(rerun).toBeEnabled();
+        reject = false;
+        holdPoll = true;
+        await page.clock.fastForward(10100);
+        await expect.poll(() => heldPoll).toBe(true);
+        await rerun.click();
+        await expect(rerun).toBeDisabled();
+        await expect.poll(() => typeof releaseRun).toBe('function');
+        releaseRun();
+        await expect(panel.locator('[data-lane-step-id="12"]')).toContainText('Queued');
+        releasePoll();
+        await page.clock.fastForward(100);
+        await expect(rerun).toHaveCount(0);
+        await expect(panel.locator('[data-lane-step-id="12"]')).toContainText('Queued');
+        expect(requests).toEqual([{ jobId: 12, eventKey: 'failed-entry' }, { jobId: 12, eventKey: 'failed-entry' }]);
+        expect(writes).toEqual([]);
+        for (const state of ['Reviewing', 'Running']) {
+            Object.assign(step, { status: 'Running', stepStatus: state, reason: 'Automation retry running.' });
+            await page.clock.fastForward(10100);
+            await expect(panel.locator('.board-workflow-state').first()).toHaveText(state);
+            const spinner = panel.locator('[data-lane-step-id="12"] .fa-spinner');
+            await expectAnimatedStyle(spinner, 'transform');
+            await page.emulateMedia({ reducedMotion: 'reduce' });
+            await expect(spinner).toHaveCSS('animation-name', 'none');
+            await expect(spinner).toHaveCSS('transform', 'none');
+            await page.emulateMedia({ reducedMotion: 'no-preference' });
+        }
+        await page.screenshot({ path: testInfo.outputPath(`lane-rerun-running-${width}.png`) });
+        Object.assign(step, { status: 'Succeeded', stepStatus: 'Passed', canSkip: false, reason: 'Review passed.' });
+        await page.clock.fastForward(10100);
+        await expect(panel.locator('[data-lane-step-id="12"]')).toContainText('Passed');
+        await expect(panel.locator('[data-lane-step-id="12"] .fa-spinner')).toHaveCount(0);
+    });
 }
 
 

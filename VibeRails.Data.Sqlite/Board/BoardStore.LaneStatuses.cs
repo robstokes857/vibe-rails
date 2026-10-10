@@ -106,9 +106,9 @@ public sealed partial class BoardStore
                         Reason = reader.IsDBNull(4) ? $"Automation run {status.ToString().ToLowerInvariant()}." : reader.GetString(4),
                         Purpose = reader.GetString(5), RequiresVerdict = reader.GetBoolean(6) };
                 }
-            if (hasActions) await ApplyDeterministicRetriesAsync(state, project, cards, byTrigger, ct);
+            if (hasActions) await ApplyLaneRetriesAsync(state, project, cards, byTrigger, ct);
         }
-        var workflow = await ReadWorkflowStatusDataAsync(board, state, project, cards, allRows, hasRuns, ct);
+        var workflow = await ReadWorkflowStatusDataAsync(board, state, project, cards, result.Values.SelectMany(rows => rows).ToList(), hasRuns, ct);
         foreach (var card in cards) ApplyWorkflowStatuses(card, result[card.Id], workflow);
         return result;
     }

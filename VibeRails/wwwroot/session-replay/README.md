@@ -95,6 +95,18 @@ session page. It shows prompts and saved patches, plus proxy/model/tool details 
 includes them. Older uploads have no proxy captures. Board context is not included in envelopes.
 Missing metadata/patches/output have explicit empty states.
 
+The manifest's nullable `tokensSaved` is the estimated net request reduction for this
+recording: sum the attributed proxy captures' `charsBefore - charsAfter`, clamp the
+total at zero, then divide by four (rounding down once). The header labels it as an
+estimate; these stored UTF-16 character sizes are not provider token usage or the
+live meter's wire-byte tally. Only exact session IDs contribute. A snapshot's total
+and proxy maximum ID are read together; reload an open recording to update it.
+No attributed measurements means “Unavailable”, while measured passthroughs show zero.
+This uses existing captures without schema changes or historical backfills.
+Full uploads use `proxyExchanges`; compact website playback retains only
+`proxySavings: [{sessionId, charsBefore, charsAfter}]`, so savings remain visible
+without transferring proxy bodies. Older uploads without either show “Unavailable”.
+
 ### Exchange summary limits
 
 Summary reads select at most 2,000,000 response characters in SQLite before materializing or
@@ -136,7 +148,10 @@ There is no separate Session v2 panel or live-terminal replacement.
 
 ## Sharing and checks
 
-This directory is canonical. From the desktop repo root, update the two copies explicitly:
+This directory is canonical. Check recipient diffs before syncing: the website currently
+has its own simple view and envelope caching/timestamp fixes. Preserve those changes when
+porting viewer features until the copies are reconciled. From the desktop repo root, the
+explicit full-copy commands are:
 
 ```powershell
 node Scripts/sync-session-viewer.mjs ../vibe-books/session_replay_2/wwwroot ../VibeRails-Front/VibeRails-Front/wwwroot/session-replay

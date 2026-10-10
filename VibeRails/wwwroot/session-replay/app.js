@@ -161,6 +161,7 @@ async function loadSession(id) {
     $('activity-list').replaceChildren(node('div', 'small-empty', 'Reading the recording…'));
     showCodeEmpty('Loading code captures…');
     text('playback-status', 'Reading session metadata…');
+    text('tokens-saved', '—'); $('tokens-saved').title = '';
     try {
         const data = await api(`/api/sessions/${encodeURIComponent(id)}`, signal);
         if (run !== version) return;
@@ -238,6 +239,12 @@ function renderMetadata() {
     text('session-state', session.ended ? 'Completed' : 'Open · snapshot'); $('session-state').hidden = false;
     text('started', new Date(session.started).toLocaleString(undefined, { month:'short',day:'numeric',hour:'numeric',minute:'2-digit' }));
     text('duration', durationLabel(manifest.end - session.started)); text('total', durationLabel(manifest.end - session.started));
+    const savings = manifest.tokensSaved;
+    const hasSavings = Number.isSafeInteger(savings) && savings >= 0;
+    text('tokens-saved', hasSavings ? `≈ ${savings.toLocaleString()}` : 'Unavailable');
+    $('tokens-saved').title = hasSavings
+        ? 'Estimated from the net request size reduction in this recording, at about 4 characters per token.'
+        : 'No token savings measurements are available for this recording.';
     text('environment', session.environment || session.cli); $('environment').title = session.environment;
     text('board', cards.map(card => card.key).join(', ') || 'No linked card'); $('board').title = cards.map(card => `${card.key}: ${card.title}`).join('\n');
     text('working-directory', session.directory); $('working-directory').title = session.directory;

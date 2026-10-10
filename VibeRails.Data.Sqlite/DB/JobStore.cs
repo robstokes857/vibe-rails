@@ -337,7 +337,10 @@ public sealed partial class JobStore : IJobStore
     public Task<string?> EnqueueManualRunAsync(long jobId, CancellationToken cancellationToken = default) =>
         EnqueueJobRunAsync(jobId, JobTriggerKind.Manual, $"manual:{Guid.NewGuid():N}", requireEnabled: false, cancellationToken);
 
-    public async Task<string?> EnqueueRetryAsync(string runId, CancellationToken cancellationToken = default)
+    public Task<string?> EnqueueRetryAsync(string runId, CancellationToken cancellationToken = default) =>
+        EnqueueRetryCoreAsync(runId, null, cancellationToken);
+
+    private async Task<string?> EnqueueRetryCoreAsync(string runId, BoardLaneAutomationEvent? laneEntry, CancellationToken cancellationToken)
     {
         // Retry the definition that actually ran, not whatever the editor contains now. This keeps
         // script path/runtime/hash and action order truthful while preserving the original run and
@@ -357,12 +360,21 @@ public sealed partial class JobStore : IJobStore
             if (await reader.ReadAsync(cancellationToken))
             {
                 var source = ReadRun(reader);
+                if (laneEntry is not null && (source.JobId != laneEntry.JobId
+                    || !string.Equals(NormalizeProjectPath(source.ProjectPath), NormalizeProjectPath(laneEntry.ProjectPath), BoardPaths.ProjectPathComparison))) return null;
                 var cardKey = source.ReviewLaunch?.Resolution.CardKey ?? JobBoardContext.GetCardKey(source.TriggerKind, source.TriggerKey);
                 if (source.Purpose == "code_review" && cardKey is not null)
                     triggerKey = $"{JobBoardContext.ReviewRetryPrefix}{cardKey}:{triggerKey}";
                 else if (JobBoardContext.GetLaneTriggerKey(source.TriggerKind, source.TriggerKey) is { } laneTrigger)
                     laneRetry = laneTrigger;
             }
+        }
+
+        if (laneEntry is not null)
+        {
+            if (!await CanRerunLaneAsync(laneEntry, runId, cancellationToken)) return null;
+            triggerKey = LaneRerunTrigger(laneEntry);
+            laneRetry = null;
         }
         if (laneRetry is not null)
         {
@@ -380,17 +392,18 @@ public sealed partial class JobStore : IJobStore
         await using (var insertRun = connection.CreateCommand())
         {
             insertRun.Transaction = transaction;
-            insertRun.CommandText = """
+            insertRun.CommandText = $"""
                 INSERT INTO JobRuns
                     (Id, JobId, TriggerKind, TriggerKey, Status, JobName, ProjectPath, Llm,
                      EnvironmentId, EnvironmentName, TimeoutMinutes, QueuedUTC, LaunchMinimized, LaunchInTerminalTab, Purpose, ReviewLaunchJson)
                 SELECT $retryId, source.JobId, $manual, $triggerKey, $queued, source.JobName,
                        source.ProjectPath, source.Llm, source.EnvironmentId,
                        source.EnvironmentName, source.TimeoutMinutes, $queuedUtc,
-                       source.LaunchMinimized, 0, source.Purpose, source.ReviewLaunchJson
+                       source.LaunchMinimized, $terminalTab, source.Purpose, source.ReviewLaunchJson
                 FROM JobRuns source
                 JOIN Jobs job ON job.Id = source.JobId AND job.DeletedUTC IS NULL
                 WHERE source.Id = $sourceId AND source.DeletedUTC IS NULL
+                  AND ($terminalTab = 0 OR (job.Enabled = 1 AND job.ProjectPath = $project{ProjectPathCollation}))
                   AND source.Status NOT IN ($queued, $running)
                   AND NOT EXISTS (
                       SELECT 1 FROM JobRuns active
@@ -400,6 +413,8 @@ public sealed partial class JobStore : IJobStore
             insertRun.Parameters.AddWithValue("$sourceId", runId);
             insertRun.Parameters.AddWithValue("$manual", (int)JobTriggerKind.Manual);
             insertRun.Parameters.AddWithValue("$triggerKey", triggerKey);
+            insertRun.Parameters.AddWithValue("$terminalTab", laneEntry is not null ? 1 : 0);
+            insertRun.Parameters.AddWithValue("$project", laneEntry is null ? "" : NormalizeProjectPath(laneEntry.ProjectPath));
             insertRun.Parameters.AddWithValue("$queued", (int)JobRunStatus.Queued);
             insertRun.Parameters.AddWithValue("$running", (int)JobRunStatus.Running);
             insertRun.Parameters.AddWithValue("$queuedUtc", ToDb(DateTime.UtcNow));

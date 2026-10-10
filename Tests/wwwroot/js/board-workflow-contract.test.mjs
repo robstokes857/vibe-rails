@@ -20,3 +20,14 @@ test('only passed and skipped steps complete arrows; awaiting verdict and stoppi
         assert.ok(laneStepMarkup(7, flows).includes(status));
     }
 });
+
+test('rerun is offered only when authorized and carries the exact card and entry', () => {
+    const step = { jobId: 7, eventKey: 'entry"1', status: Status.Failed, canRerun: true, canSkip: true };
+    const flows = [{ cardId: 'card<1', cardLabel: 'Card', steps: [step] }];
+    const markup = laneStepMarkup(7, flows);
+    assert.match(markup, /data-agent-action="rerun" data-card-id="card&lt;1" data-event-key="entry&quot;1"/);
+    assert.match(markup, />Re-run<\/button>/);
+    assert.match(markup, /data-agent-action="skip"/);
+    step.canRerun = false;
+    assert.doesNotMatch(laneStepMarkup(7, flows), /data-agent-action="rerun"/);
+});

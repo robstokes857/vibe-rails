@@ -78,11 +78,15 @@ public sealed class ReplayStore : IReplayStore
             notes.Add("Raw and buffered terminal byte totals differ. Resize alignment uses the captured byte offsets and may be incomplete.");
         if(geometry.Count==0 && count>0) notes.Add("No terminal dimensions were captured. Using a 120 × 30 grid.");
         long proxyMax = 0;
+        long? tokensSaved = null;
         if(File.Exists(proxy))
         {
             using var p=Open(proxy);
-            using var c=Query(p,"SELECT coalesce(max(rowid),0),max(CreatedUTC) FROM ProxyExchanges WHERE SessionId=$id",("$id",id));
+            // Read the total and snapshot boundary together. Use stored sizes so a replay
+            // does not materialize every request body just to display its savings.
+            using var c=Query(p,"SELECT coalesce(max(rowid),0),max(CreatedUTC),sum(CharsBefore-CharsAfter) FROM ProxyExchanges WHERE SessionId=$id",("$id",id));
             using var r=c.ExecuteReader(); r.Read(); proxyMax=r.GetInt64(0); end=Math.Max(end,Time(S(r,1)));
+            if (!r.IsDBNull(2)) tokensSaved = Math.Max(0, r.GetInt64(2)) / 4;
         }
         else notes.Add("The proxy database is unavailable; terminal and code history are still available.");
         end=Math.Max(end,session.Ended ?? session.Started);
@@ -101,7 +105,7 @@ public sealed class ReplayStore : IReplayStore
         List<BoardLink> cards=[];
         if(changes.Count>0) notes.Add("Code captures cover prompt windows. Exact edit times and complete file snapshots were not recorded; the viewer shows the saved patches.");
         if(session.Ended is null) notes.Add("This is a snapshot of an open session. Reload to include newly captured activity.");
-        return new(session,cards,prompts,changes,geometry,source,maxId,proxyMax,count,bytes,end,notes);
+        return new(session,cards,prompts,changes,geometry,source,maxId,proxyMax,count,bytes,end,notes,tokensSaved);
     }
     public FramePage Frames(string id,long after,long max,string source)
     {

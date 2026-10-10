@@ -1329,7 +1329,14 @@ so concurrent roots cannot insert a skipped step after its successor has started
 only read Board state; Board receipts are still committed separately after the run transaction.
 
 The lane popup shows each card's status beneath its Automation, green completion arrows and
-Skip/Stop and skip. The existing running-agent poll also returns up to 100 current card workflows.
+Skip/Stop and skip. Failed current steps also offer **Re-run** after their process stops.
+`POST /cards/{card}/automations/rerun` validates the exact Job/event and project, then rechecks
+the current failed attempt under the Job writer lock. It retains the original run/action/reviewer
+snapshot and opens a new linked terminal tab; failures before any run was created use the current
+definition. The immutable manual trigger retains the lane entry. A new Worker attempt needs its
+own verdict; prior failed reports cannot hide it or release successors. Prior runs and reports stay
+stored. Card movement and ordinary Automation-page retries keep their existing behavior.
+The existing running-agent poll also returns up to 100 current card workflows.
 The card rail and MCP status reads share the same step projection. Lane polls batch all selected
 cards through one Board connection and one state connection. Read-local dictionaries share Job
 definitions, trigger-key run lookups, workflow metadata, selections and latest reports across the

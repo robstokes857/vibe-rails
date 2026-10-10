@@ -1,3 +1,5 @@
+using VibeRails.DTOs;
+
 namespace VibeRails.Services.Board;
 
 /// <summary>Explicit agent progress and decisions for the current ordered lane workflow.</summary>
@@ -34,7 +36,10 @@ public sealed class BoardWorkflowService(IBoardStore store, BoardReviewService r
         {
             if (run is null || !run.Active || run.JobId != entry.JobId || run.QueuedUtc < entry.DueUtc.AddSeconds(-60))
                 throw new BoardValidationException("Only a current run of this Automation can report its decision.");
-            if (run.TriggerKey.StartsWith("board-lane:", StringComparison.Ordinal) && !run.TriggerKey.EndsWith(":" + entry.EventKey, StringComparison.Ordinal))
+            if (JobBoardContext.GetLaneTriggerKey(
+                    run.TriggerKey.StartsWith("board-lane:", StringComparison.Ordinal)
+                        ? JobTriggerKind.BoardLane : JobTriggerKind.Manual, run.TriggerKey) is { } laneTrigger
+                && !laneTrigger.EndsWith(":" + entry.EventKey, StringComparison.Ordinal))
                 throw new BoardValidationException("This run belongs to a different lane entry.");
         }
         if (status == BoardStepStatus.Passed && entry.Purpose == "code_review")

@@ -139,6 +139,10 @@ async function skipCardAutomationAsync(cardId, jobId, eventKey) {
     return call(`/cards/${enc(cardId)}/automations/skip`, 'POST', { jobId, eventKey });
 }
 
+async function rerunCardAutomationAsync(cardId, jobId, eventKey) {
+    return call(`/cards/${enc(cardId)}/automations/rerun`, 'POST', { jobId, eventKey });
+}
+
 async function runCardAutomationAsync(cardId, jobId) {
     return call(`/cards/${enc(cardId)}/automations`, 'POST', { jobId });
 }
@@ -420,6 +424,7 @@ export const BoardApi = {
     getCardAutomationsAsync,
     skipCardAutomationAsync,
     runCardAutomationAsync,
+    rerunCardAutomationAsync,
     getCardContextAsync,
     deleteBoardAsync,
     getBoardColumnsAsync,

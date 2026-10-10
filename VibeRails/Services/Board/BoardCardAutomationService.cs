@@ -7,6 +7,36 @@ namespace VibeRails.Services.Board;
 /// <summary>Run an existing project Automation and retain the card in its immutable run context.</summary>
 public sealed class BoardCardAutomationService(IBoardStore boards, IJobStore jobs, IJobService runner)
 {
+    /// <summary>Rerun only the failed entry the user selected, retaining its immutable run snapshot.</summary>
+    public async Task<JobActionResponse?> RerunAsync(string projectPath, string cardKeyOrId,
+        long jobId, string eventKey, CancellationToken cancellationToken)
+    {
+        if (jobId <= 0 || string.IsNullOrWhiteSpace(eventKey) || eventKey.Length > 100)
+            throw new BoardValidationException("Choose a failed lane Automation.");
+        var card = await boards.FindCardAsync(projectPath, cardKeyOrId, cancellationToken);
+        if (card is null) return null;
+        var status = (await boards.GetLaneAutomationStatusesAsync(projectPath, card.Id, cancellationToken))
+            .SingleOrDefault(entry => entry.JobId == jobId && entry.EventKey == eventKey);
+        if (status is null || !status.CanRerun)
+            throw new BoardConflictException("This step cannot be rerun. Refresh to see its current status.");
+        var entry = new BoardLaneAutomationEvent(card.Id, jobId, eventKey, card.ProjectPath,
+            $"board-lane:{card.Key}:{status.ColumnId}:{eventKey}", true);
+        var result = await runner.RerunBoardLaneAsync(entry, status.RunId, cancellationToken);
+        // Skip and the run commit live in separate databases. A racing skip must stop the
+        // newly committed attempt before its successor can proceed.
+        await CancelSkippedRerunAsync(projectPath, card.Id, jobId, eventKey, CancellationToken.None);
+        return result;
+    }
+
+    private async Task CancelSkippedRerunAsync(string projectPath, string cardId, long jobId,
+        string eventKey, CancellationToken cancellationToken)
+    {
+        var current = (await boards.GetLaneAutomationStatusesAsync(projectPath, cardId, cancellationToken))
+            .FirstOrDefault(entry => entry.JobId == jobId && entry.EventKey == eventKey);
+        if (current is { StepStatus: BoardStepStatus.Stopping, RunId: not null })
+            await jobs.RequestCancelAsync(current.RunId, cancellationToken);
+    }
+
     /// <summary>Skip one current step, requesting cancellation before a running step releases its successor.</summary>
     public async Task<BoardCardAutomationsResponse?> SkipAsync(string projectPath, string cardKeyOrId,
         long jobId, string eventKey, CancellationToken cancellationToken)
@@ -36,6 +66,7 @@ public sealed class BoardCardAutomationService(IBoardStore boards, IJobStore job
             if (status.RunId is not null && status.Status is BoardStepStatus.Queued or BoardStepStatus.Running)
                 await jobs.RequestCancelAsync(status.RunId, cancellationToken);
         }
+        await CancelSkippedRerunAsync(projectPath, card.Id, jobId, eventKey, CancellationToken.None);
         return await GetAsync(projectPath, card.Id, cancellationToken);
     }
 

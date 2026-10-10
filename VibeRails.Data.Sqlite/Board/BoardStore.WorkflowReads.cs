@@ -12,6 +12,7 @@ public sealed partial class BoardStore
         public Dictionary<string, (string Status, string Summary, string? Run)> Reports { get; } = [];
         public Dictionary<string, List<long>> Selections { get; } = [];
         public Dictionary<string, string> RunStatuses { get; } = [];
+        public Dictionary<string, long> RunOrder { get; } = [];
     }
 
     private static async Task<WorkflowStatusData> ReadWorkflowStatusDataAsync(SqliteConnection board,
@@ -66,14 +67,18 @@ public sealed partial class BoardStore
         {
             await using var runs = state.CreateCommand();
             runs.CommandText = $"""
-                SELECT Id, Status FROM JobRuns WHERE ProjectPath = $project{ProjectPathCollation}
+                SELECT Id, Status, rowid FROM JobRuns WHERE ProjectPath = $project{ProjectPathCollation}
                     AND Id IN (SELECT value FROM json_each($runs));
                 """;
             runs.Parameters.AddWithValue("$project", project);
-            runs.Parameters.AddWithValue("$runs", JsonSerializer.Serialize(reportRuns, StorageJsonSerializerContext.Default.ListString));
+            runs.Parameters.AddWithValue("$runs", JsonSerializer.Serialize(reportRuns.Concat(rows.Where(r => r.RunId is not null)
+                .Select(r => r.RunId!)).Distinct().ToList(), StorageJsonSerializerContext.Default.ListString));
             await using var reader = await runs.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct))
+            {
                 data.RunStatuses[reader.GetString(0)] = ((JobRunStatus)reader.GetInt32(1)).ToString();
+                data.RunOrder[reader.GetString(0)] = reader.GetInt64(2);
+            }
         }
         return data;
     }
