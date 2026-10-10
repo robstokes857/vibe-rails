@@ -146,14 +146,13 @@ public sealed class CardSharePublisherTests : IDisposable
     public async Task BackgroundRefresh_OnlyFindsStoredLocalSources_DoesNotResendUnchangedContent_AndRecoversAfterRestart(bool recordingAvailable)
     {
         _archives.Setup(a => a.EnsureSessionShareUploadAsync(_session.ToString("D"), SessionSharingService.KeyFingerprint(Key), It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).ReturnsAsync(recordingAvailable);
-        var snapshot = await Capture().CaptureAsync("project", "card_test", Ct);
-        var hash = Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(snapshot, CardSharingJsonContext.Default.CardShareSnapshot)));
-        var updates = 0;
+        var hash = (await Capture().CaptureAsync("project", "card_test", Ct)).Hash;
+        var updates = 0; var discoveries = 0;
         using var http = new HttpClient(new Handler(async request =>
         {
             Assert.Equal(Key, request.Headers.GetValues("X-Api-Key").Single());
-            if (request.Method == HttpMethod.Get) return new(HttpStatusCode.OK)
-            { Content = JsonContent.Create(new List<CardShareSource> { new(1, "VB-OTHER-1", hash), new(2, _card.Key, hash, _card.Id) }, CardSharingJsonContext.Default.ListCardShareSource) };
+            if (request.Method == HttpMethod.Get) { discoveries++; return new(HttpStatusCode.OK)
+            { Content = JsonContent.Create(new List<CardShareSource> { new(1, "VB-OTHER-1", hash), new(2, _card.Key, hash, _card.Id) }, CardSharingJsonContext.Default.ListCardShareSource) }; }
             Assert.Equal(HttpMethod.Put, request.Method);
             Assert.EndsWith("/sources/2", request.RequestUri!.AbsoluteUri);
             var body = await request.Content!.ReadFromJsonAsync(CardSharingJsonContext.Default.CardShareRefreshRequest, Ct);
@@ -164,6 +163,8 @@ public sealed class CardSharePublisherTests : IDisposable
         await Publisher(http).RefreshDueAsync(Ct);
         await Publisher(http).RefreshDueAsync(Ct);
         Assert.Equal(1, updates);
+        Assert.Equal(1, discoveries); // The second tick within the interval makes no request at all.
+        // Memory-only state: a restart reconciles each publication once. The persisted state test covers the file.
         var restarted = new CardSharePublisher(_boards.Object, Capture(), new(http), _archives.Object, new(_lockPath), new());
         await restarted.RefreshDueAsync(Ct);
         Assert.Equal(2, updates);
@@ -226,6 +227,135 @@ public sealed class CardSharePublisherTests : IDisposable
             Assert.Equal(4, calls);
         }
         finally { await app.StopAsync(CancellationToken.None); }
+    }
+
+    [Fact]
+    public async Task CreateConfirmsThePublishedSnapshot_SoTheNextSweepTransfersNothing()
+    {
+        var hash = (await Capture().CaptureAsync("project", "card_test", Ct)).Hash;
+        var puts = 0;
+        using var http = new HttpClient(new Handler(request =>
+        {
+            if (request.Method == HttpMethod.Post) return Task.FromResult(Published());
+            if (request.Method == HttpMethod.Put) puts++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(
+                new List<CardShareSource> { new(2, _card.Key, hash, _card.Id) }, CardSharingJsonContext.Default.ListCardShareSource) });
+        }));
+        var publisher = Publisher(http);
+        Assert.True((await publisher.CreateAsync("project", "card_test", "Demo", Ct)).Success);
+        await publisher.RefreshDueAsync(Ct);
+        Assert.Equal(0, puts);
+    }
+
+    [Fact]
+    public async Task BackgroundDiscovery_RunsEveryFifteenMinutes_AndBacksOffWhileNothingIsPublished()
+    {
+        var start = new DateTime(2026, 10, 10, 12, 0, 0, DateTimeKind.Utc); var now = start;
+        var sources = new List<CardShareSource>();
+        var gets = 0;
+        using var http = new HttpClient(new Handler(request =>
+        {
+            Assert.Equal(HttpMethod.Get, request.Method); gets++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(sources, CardSharingJsonContext.Default.ListCardShareSource) });
+        }));
+        var publisher = new CardSharePublisher(_boards.Object, Capture(), new(http), _archives.Object, new(_lockPath), new(null, () => now));
+        async Task<int> At(int minutes) { now = start.AddMinutes(minutes); await publisher.RefreshDueAsync(Ct); return gets; }
+        Assert.Equal(1, await At(0));     // the first tick discovers once
+        Assert.Equal(1, await At(1));     // never every minute
+        Assert.Equal(1, await At(14));
+        Assert.Equal(2, await At(15));    // nothing published: back off to 30
+        Assert.Equal(2, await At(44));
+        Assert.Equal(3, await At(45));    // 60
+        Assert.Equal(3, await At(104));
+        Assert.Equal(4, await At(105));   // 120, the ceiling
+        Assert.Equal(4, await At(224));
+        Assert.Equal(5, await At(225));   // stays at 120
+        Assert.Equal(5, await At(344));
+        sources.Add(new(1, "VB-OTHER-1", new string('a', 64)));
+        Assert.Equal(6, await At(345));   // a publication exists: back to every 15 minutes
+        Assert.Equal(6, await At(359));
+        Assert.Equal(7, await At(360));
+    }
+
+    [Fact]
+    public async Task BackgroundRefresh_StopsAfterOneTransfer_WhenTheHostRevisionNeverMatchesUnchangedContent()
+    {
+        var now = DateTime.UtcNow; var puts = 0;
+        using var http = new HttpClient(new Handler(request =>
+        {
+            if (request.Method == HttpMethod.Put) { puts++; return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                { Content = JsonContent.Create(new CardShareRefreshResult(true, []), CardSharingJsonContext.Default.CardShareRefreshResult) }); }
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(
+                new List<CardShareSource> { new(2, _card.Key, new string('f', 64), _card.Id) }, CardSharingJsonContext.Default.ListCardShareSource) });
+        }));
+        var publisher = new CardSharePublisher(_boards.Object, Capture(), new(http), _archives.Object, new(_lockPath), new(null, () => now));
+        await publisher.RefreshDueAsync(Ct);
+        now = now.AddMinutes(15); await publisher.RefreshDueAsync(Ct);
+        now = now.AddMinutes(15); await publisher.RefreshDueAsync(Ct);
+        Assert.Equal(1, puts);
+    }
+
+    [Fact]
+    public async Task BackgroundRefresh_ContinuesPastOnePublicationThatFailsUnexpectedly()
+    {
+        var refreshed = new List<string>();
+        using var http = new HttpClient(new Handler(request =>
+        {
+            if (request.Method == HttpMethod.Get) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(
+                new List<CardShareSource> { new(2, _card.Key, new string('a', 64), _card.Id), new(3, _card.Key, new string('b', 64), _card.Id) }, CardSharingJsonContext.Default.ListCardShareSource) });
+            if (request.RequestUri!.AbsolutePath.EndsWith("/sources/2")) throw new HttpRequestException(Key);
+            refreshed.Add(request.RequestUri.AbsolutePath);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(new CardShareRefreshResult(true, [_session]), CardSharingJsonContext.Default.CardShareRefreshResult) });
+        }));
+        await Publisher(http).RefreshDueAsync(Ct);
+        Assert.Equal("/api/v1/card-sharing-links/sources/3", Assert.Single(refreshed));
+    }
+
+    [Fact]
+    public async Task PersistedRefreshState_SurvivesRestart_SoUnchangedCardsAreNotResent_AndHoldsNoSecrets()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "card-share-state-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            var hash = (await Capture().CaptureAsync("project", "card_test", Ct)).Hash;
+            var puts = 0;
+            using var http = new HttpClient(new Handler(request =>
+            {
+                if (request.Method == HttpMethod.Put) { puts++; return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                    { Content = JsonContent.Create(new CardShareRefreshResult(true, []), CardSharingJsonContext.Default.CardShareRefreshResult) }); }
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(
+                    new List<CardShareSource> { new(2, _card.Key, hash, _card.Id) }, CardSharingJsonContext.Default.ListCardShareSource) });
+            }));
+            var now = DateTime.UtcNow;
+            await new CardSharePublisher(_boards.Object, Capture(), new(http), _archives.Object, new(_lockPath), new(path, () => now)).RefreshDueAsync(Ct);
+            Assert.Equal(1, puts);
+            now = now.AddMinutes(15);
+            await new CardSharePublisher(_boards.Object, Capture(), new(http), _archives.Object, new(_lockPath), new(path, () => now)).RefreshDueAsync(Ct);
+            Assert.Equal(1, puts);
+            var stored = await File.ReadAllTextAsync(path, Ct);
+            Assert.Contains(hash, stored); Assert.DoesNotContain(Key, stored); Assert.DoesNotContain("shared/card", stored);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task CreateWaitsForAShortBoardSync_InsteadOfFailing_AndTransfersWithoutTheLock()
+    {
+        var lockedDuringTransfer = true;
+        using var http = new HttpClient(new Handler(_ =>
+        {
+            using var probe = new BoardSyncLock(_lockPath).TryAcquire();
+            lockedDuringTransfer = probe is null;
+            return Task.FromResult(Published());
+        }));
+        var held = new BoardSyncLock(_lockPath).TryAcquire();
+        Assert.NotNull(held);
+        var create = Publisher(http).CreateAsync("project", "card_test", "Demo", Ct);
+        await Task.Delay(500, Ct);
+        Assert.False(create.IsCompleted);
+        held.Dispose();
+        Assert.True((await create).Success);
+        Assert.False(lockedDuringTransfer);
     }
 
     private sealed class Handler(Func<HttpRequestMessage, Task<HttpResponseMessage>> callback) : HttpMessageHandler

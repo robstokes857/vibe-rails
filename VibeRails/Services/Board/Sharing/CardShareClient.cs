@@ -1,4 +1,6 @@
+using System.Buffers;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
@@ -9,19 +11,19 @@ namespace VibeRails.Services.Board.Sharing;
 /// <summary>Bounded transport to the approved public-card host. The caller pins the account for a whole operation.</summary>
 public sealed class CardShareClient(HttpClient client)
 {
-    internal static readonly Uri Endpoint = new("https://viberails.ai/api/v1/card-sharing-links");
+    internal static readonly Uri Endpoint = new(DataExportEndpointConfiguration.Host + "/api/v1/card-sharing-links");
     internal static HttpMessageHandler CreateHandler() => new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false };
     internal static bool IsHex(string? value) => value is { Length: 64 } && value.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
     internal static bool IsSourceKey(string? value) => value is { Length: >= 2 and <= 160 }
         && char.IsAsciiLetter(value[0]) && value.All(c => char.IsAsciiLetterOrDigit(c) || c == '-');
 
-    public async Task<CardSharePublished> PublishAsync(string key, string name, string localCardId, CardShareSnapshot snapshot, CancellationToken ct)
+    public async Task<CardSharePublished> PublishAsync(string key, string name, string localCardId, CardShareDocument document, CancellationToken ct)
     {
-        var result = await SendAsync(key, HttpMethod.Post, "", JsonContent.Create(new CardSharePublishRequest(name, snapshot, localCardId),
-            CardSharingJsonContext.Default.CardSharePublishRequest), HttpStatusCode.Created, CardSharingJsonContext.Default.CardSharePublished, ct);
-        ValidateLink(result.Link, snapshot.SourceKey, localCardId);
+        var body = Envelope(w => w.WriteString("displayName", name), document.Json, w => w.WriteString("localCardId", localCardId));
+        var result = await SendAsync(key, HttpMethod.Post, "", body, HttpStatusCode.Created, CardSharingJsonContext.Default.CardSharePublished, ct);
+        ValidateLink(result.Link, document.Snapshot.SourceKey, localCardId);
         if (result.Link.Status != "active" || result.Link.ExpiresUtc <= DateTime.UtcNow || result.Link.ExpiresUtc > DateTime.UtcNow.AddDays(32)) throw Invalid();
-        ValidateSessions(result.UploadSessions, snapshot);
+        ValidateSessions(result.UploadSessions, document.Snapshot);
         return result;
     }
 
@@ -54,13 +56,12 @@ public sealed class CardShareClient(HttpClient client)
         return result;
     }
 
-    public async Task<CardShareRefreshResult> RefreshAsync(string key, CardShareSource source, CardShareSnapshot snapshot, CancellationToken ct)
+    public async Task<CardShareRefreshResult> RefreshAsync(string key, CardShareSource source, CardShareDocument document, CancellationToken ct)
     {
-        var result = await SendAsync(key, HttpMethod.Put, "/sources/" + source.Id,
-            JsonContent.Create(new CardShareRefreshRequest(source.Revision, snapshot), CardSharingJsonContext.Default.CardShareRefreshRequest),
-            HttpStatusCode.OK, CardSharingJsonContext.Default.CardShareRefreshResult, ct);
+        var body = Envelope(w => w.WriteString("revision", source.Revision), document.Json);
+        var result = await SendAsync(key, HttpMethod.Put, "/sources/" + source.Id, body, HttpStatusCode.OK, CardSharingJsonContext.Default.CardShareRefreshResult, ct);
         if (!result.Updated) throw Invalid();
-        ValidateSessions(result.UploadSessions, snapshot);
+        ValidateSessions(result.UploadSessions, document.Snapshot);
         return result;
     }
 
@@ -93,6 +94,23 @@ public sealed class CardShareClient(HttpClient client)
         var request = new HttpRequestMessage(method, Endpoint.AbsoluteUri + path) { Content = body };
         request.Headers.Add("X-Api-Key", key);
         return request;
+    }
+    /// <summary>Wraps the already-serialized complete card (the same bytes its hash covers) without serializing it again.</summary>
+    private static HttpContent Envelope(Action<Utf8JsonWriter> before, byte[] snapshotJson, Action<Utf8JsonWriter>? after = null)
+    {
+        var buffer = new ArrayBufferWriter<byte>(snapshotJson.Length + 512);
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartObject();
+            before(writer);
+            writer.WritePropertyName("snapshot");
+            writer.WriteRawValue(snapshotJson, skipInputValidation: true);
+            after?.Invoke(writer);
+            writer.WriteEndObject();
+        }
+        var content = new ReadOnlyMemoryContent(buffer.WrittenMemory);
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
+        return content;
     }
     private static void ValidateLink(CardShareLinkDto? link, string sourceKey, string localCardId)
     {

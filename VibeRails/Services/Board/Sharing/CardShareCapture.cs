@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using VibeRails.DB;
 using VibeRails.Services.Board.Sync;
@@ -8,7 +9,7 @@ namespace VibeRails.Services.Board.Sharing;
 public sealed class CardShareCapture(IBoardStore boards, ISessionStore sessions, IChatSummaryStore summaries)
 {
     public const int MaxBytes = 64 * 1024 * 1024;
-    public async Task<CardShareSnapshot> CaptureAsync(string project, string identity, CancellationToken ct)
+    public async Task<CardShareDocument> CaptureAsync(string project, string identity, CancellationToken ct)
     {
         var card = await boards.FindCardAsync(project, identity, ct) ?? throw new BoardValidationException("Card not found.");
         var metadata = await boards.GetSyncActivityAsync(project, card.BoardId, card.Id, ct)
@@ -86,11 +87,13 @@ public sealed class CardShareCapture(IBoardStore boards, ISessionStore sessions,
             detail.Comments.Concat(detail.Notes).DistinctBy(c => c.Id).OrderBy(c => c.CreatedUtc).Select(Entry).ToList(),
             (await boards.GetCardHistoryAsync(project, card.Id, ct)).Select(c => HistoryEntry(c, card.Key)).ToList(), recordings, commits, files,
             detail.LinkedCards.Select(c => new CardShareRelated(c.Key, c.DisplayId, c.Title)).ToList(), evidence);
-        if (JsonSerializer.SerializeToUtf8Bytes(snapshot, CardSharingJsonContext.Default.CardShareSnapshot).Length > MaxBytes - 1024) throw TooLarge();
+        // Serialize the complete card once: these bytes are both the transfer body and the content hash.
+        var json = JsonSerializer.SerializeToUtf8Bytes(snapshot, CardSharingJsonContext.Default.CardShareSnapshot);
+        if (json.Length > MaxBytes - 1024) throw TooLarge();
         var current = await boards.FindCardAsync(project, card.Id, ct);
         if (current is null || current.UpdatedUtc != card.UpdatedUtc)
             throw new BoardValidationException("The card changed while preparing the share. Try again.");
-        return snapshot;
+        return new(snapshot, json, Convert.ToHexStringLower(SHA256.HashData(json)));
     }
     private static CardShareEntry HistoryEntry(BoardCommentRecord entry, string cardKey)
     {
@@ -112,3 +115,6 @@ public sealed class CardShareCapture(IBoardStore boards, ISessionStore sessions,
     }
     private static BoardValidationException TooLarge() => new("The complete card exceeds the 64 MiB sharing transfer limit. No partial card was published.");
 }
+
+/// <summary>A captured snapshot with its single serialization, hashed once and transferred as-is.</summary>
+public sealed record CardShareDocument(CardShareSnapshot Snapshot, byte[] Json, string Hash);

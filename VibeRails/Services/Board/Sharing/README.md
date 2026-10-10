@@ -52,15 +52,24 @@ Names accept at most 160 characters; request bodies are capped at 4 KiB, includi
 Responses use no-store and a source-generated JSON context. Upstream failures stay domain results
 so a remote 401 cannot trigger local authentication bootstrap and repeat a creation POST.
 
-The existing leased root BoardSyncScheduler refreshes cards after ordinary Board sync, reusing
-the cross-process BoardSyncLock. Each sweep reads up to 100 creator-key-bound publications and
-has a two-minute deadline; its in-memory cursor continues next cycle. Saved content is captured
-again, but validated unchanged snapshots are not retransferred. The first sweep after restart
-reconciles upload requests. Missing local cards never delete or overwrite a remote publication.
-If a linked recording is absent locally, restore it and use Refresh shared card; unchanged
-large documents are not repeatedly resent because that recording is missing. A failed or
-oversized update preserves the last complete public version; manual Refresh reports the error.
-No new database diagnostics, visitor counters, background host or listener is introduced.
+The leased root BoardSyncScheduler ticks card-share discovery after ordinary Board sync.
+Discovery runs every 15 minutes while the current account key has publications and backs off,
+doubling to a two-hour ceiling, while it has none or the host is unreachable, so a signed-in
+desktop with no shared cards is not polling viberails.ai every minute. Each sweep reads up to
+100 creator-key-bound publications under a two-minute deadline; a full page continues on the
+next tick. The cross-process BoardSyncLock is held only around each local capture, never during
+a transfer, and Create/Refresh wait up to ten seconds for a running sync instead of failing.
+The complete card is serialized once per capture; those bytes are both the transfer body and the
+content hash. Confirmed hashes persist in `.card-share-state.json` beside `state.db` (account
+fingerprint, local row IDs, publication numbers, hashes and the next due time; never links, keys
+or content), so restarts and lease handoffs between root backends do not resend unchanged cards.
+If the host keeps reporting a revision that differs from the desktop hash of unchanged content,
+the desktop transfers once, logs a warning and stops rather than resending every sweep. One
+publication that fails is logged and skipped; the rest of the sweep continues. Missing local
+cards never delete or overwrite a remote publication. If a linked recording is absent locally,
+restore it and use Refresh shared card. A failed or oversized update preserves the last complete
+public version; manual Refresh reports the error. No new database diagnostics, visitor counters,
+background host or listener is introduced.
 
 ## Tests
 

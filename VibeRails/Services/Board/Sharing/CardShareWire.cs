@@ -43,4 +43,5 @@ public sealed record CardShareResult(bool Success, string Message, CardShareLink
 [JsonSerializable(typeof(List<CardShareSource>))]
 [JsonSerializable(typeof(List<CardShareLinkDto>))]
 [JsonSerializable(typeof(CardShareResult))]
+[JsonSerializable(typeof(CardShareRefreshFile))]
 internal partial class CardSharingJsonContext : JsonSerializerContext;

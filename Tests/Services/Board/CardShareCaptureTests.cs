@@ -46,7 +46,7 @@ public sealed class CardShareCaptureTests
             .ReturnsAsync(new SandboxDiffResponse([new("app.cs", "csharp", "before", code)], 1));
         _summaries.Setup(s => s.GetChatSummariesBySessionAsync(sessions[0].SessionId, It.IsAny<CancellationToken>()))
             .ReturnsAsync([new ChatSummary { SummaryText = new string('s', 20000), Date = Now }]);
-        var snapshot = await capture.CaptureAsync("project", "card_test", Ct);
+        var snapshot = (await capture.CaptureAsync("project", "card_test", Ct)).Snapshot;
         Assert.Equal(205, snapshot.Sessions.Count);
         Assert.Equal(20000, snapshot.Sessions[0].Summary!.Length);
         Assert.Equal(document, Convert.FromBase64String(Assert.Single(snapshot.Attachments).ContentBase64));
@@ -69,7 +69,7 @@ public sealed class CardShareCaptureTests
         _boards.Setup(b => b.GetCardHistoryAsync("project", "card_test", It.IsAny<CancellationToken>()))
             .ReturnsAsync([new("change", "card_test", BoardAuthor.User(), "Assignee: env:456:claude → env:123:codex", Now,
                 BoardCommentKinds.Change, changes)]);
-        var snapshot = await capture.CaptureAsync("project", "card_test", Ct);
+        var snapshot = (await capture.CaptureAsync("project", "card_test", Ct)).Snapshot;
         Assert.Equal("base:codex", snapshot.Assignee);
         var history = Assert.Single(snapshot.History).Body;
         Assert.Contains(description, history);
@@ -98,7 +98,7 @@ public sealed class CardShareCaptureTests
             .ReturnsAsync((string p, string c, int offset, CancellationToken token) => reviews.Skip(offset).Take(50).ToList());
         _boards.Setup(b => b.GetReviewAsync("project", "card_test", It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string p, string c, string id, CancellationToken token) => reviews.Single(r => r.Id == id));
-        var snapshot = await capture.CaptureAsync("project", "card_test", Ct);
+        var snapshot = (await capture.CaptureAsync("project", "card_test", Ct)).Snapshot;
         Assert.Equal(51, snapshot.Evidence.Count);
         Assert.Contains("Findings 50", snapshot.Evidence[^1].Body);
     }

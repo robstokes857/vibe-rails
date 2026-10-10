@@ -1479,6 +1479,17 @@ export class BoardController {
         return String(editor?.dataset?.cardId || '').trim() || null;
     }
 
+    /**
+     * True while the editor is busy or holds anything unsaved: field edits, a draft comment or
+     * attachments not yet uploaded. The one "save first" rule behind organizing and sharing a card.
+     */
+    cardHasDraft(editor) {
+        return Boolean(editor._boardSaving || editor._boardUploading || editor._boardStarting || editor._boardOrganizing
+            || Object.keys(this.cardChanges(editor, this.readCardForm(editor))).length > 0
+            || editor.querySelector('[data-board-composer="comment"] [data-board-composer-input]')?.value.trim()
+            || editor._boardCard?.pendingAttachments?.length);
+    }
+
     bindCardEditor(editor, card) {
         card = card || { id: null, attachments: [], pendingAttachments: [] };
         editor._boardCard = card;
@@ -1501,9 +1512,7 @@ export class BoardController {
         });
         this.cardOrganizeDispose?.();
         this.cardOrganizeDispose = bindCardOrganization(editor, card, {
-            hasDraft: () => editor._boardSaving || editor._boardUploading || editor._boardStarting
-                || Object.keys(this.cardChanges(editor, this.readCardForm(editor))).length > 0
-                || Boolean(editor.querySelector('[data-board-composer="comment"] [data-board-composer-input]')?.value.trim()),
+            hasDraft: () => this.cardHasDraft(editor),
             onChanged: async result => {
                 this.app.closeModal();
                 if (result.boardId !== this.state.boardId) await this.switchBoard(result.boardId);
@@ -1563,12 +1572,7 @@ export class BoardController {
         this.disposeCardPickers();
         const assigneeSelect = editor.querySelector('#board-card-assignee');
         this.cardChecks = bindCardChecks(editor, card, this.app);
-        this.cardSharing = bindCardSharing(editor, card, {
-            app: this.app,
-            hasDraft: () => Object.keys(this.cardChanges(editor, this.readCardForm(editor))).length > 0
-                || Boolean(editor.querySelector('[data-board-composer="comment"] [data-board-composer-input]')?.value.trim())
-                || Boolean(editor._boardCard?.pendingAttachments?.length)
-        });
+        this.cardSharing = bindCardSharing(editor, card, { app: this.app, hasDraft: () => this.cardHasDraft(editor) });
         bindAgentProvenance(editor.querySelector('[data-board-agent-provenance]'),
             (sessionId, seekToUtc) => this.openSessionReplay({ id: sessionId }, { seekToUtc }));
         this.cardAutomations = bindCardAutomations(editor, card, {

@@ -311,12 +311,16 @@ Account changes cannot retarget queued recordings. Uncertain creation is reconci
 never an automatic POST retry. Public links remain read-only capabilities, not Board membership
 or terminal-control grants. Do not log links, keys, content or recordings.
 
-Automatic updates discover only the current creator key's active publications. Their private
-local row identity and matching card key resolve stored project ownership through IBoardStore;
-no remote path is accepted. Local deletion retains the last public version until its links expire
-or are revoked. All capture is saved content, with a 64 MiB whole-publication rejection bound.
-Archive queues preserve pending backoff, and card revocation ends all reads through that link
-without independent session sharing links. See [the card-sharing contract](VibeRails/Services/Board/Sharing/README.md).
+Automatic updates discover only the current creator key's active publications, every 15 minutes
+while any exist and backing off to two hours while none do, holding the Board sync lock only
+during local capture. Their private local row identity and matching card key resolve stored
+project ownership through IBoardStore; no remote path is accepted. Confirmed content hashes
+persist in `.card-share-state.json` beside `state.db`: an account fingerprint, local row IDs,
+publication numbers and hashes, never links, keys or content. Local deletion retains the last
+public version until its links expire or are revoked. All capture is saved content, with a 64 MiB
+whole-publication rejection bound. Archive queues preserve pending backoff, and card revocation
+ends all reads through that link without independent session sharing links. See
+[the card-sharing contract](VibeRails/Services/Board/Sharing/README.md).
 
 ### Board sync, sharing and remote Start work
 

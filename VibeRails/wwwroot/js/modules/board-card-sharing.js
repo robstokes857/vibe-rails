@@ -99,7 +99,7 @@ export function bindCardSharing(editor, card, { app, hasDraft = () => false }) {
             catch { if (current()) { input.focus(); input.select(); message.textContent = 'Select and copy the public URL.'; } }
             return;
         }
-        if (['create', 'refresh'].includes(action) && (hasDraft() || editor._boardSaving || editor._boardUploading || editor._boardStarting)) {
+        if (['create', 'refresh'].includes(action) && hasDraft()) {
             message.textContent = 'Save the card and post any draft comments before sharing. Your drafts are still here.'; return;
         }
         const displayName = (action === 'rename' ? row?.querySelector('[data-card-share-rename]')?.value : name.value)?.trim();
