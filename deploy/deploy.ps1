@@ -360,6 +360,8 @@ function Wait-ForReleaseWorkflow {
         [int]$TimeoutMinutes = 90
     )
 
+    # Inspect native exit codes explicitly, even if the caller enables native error promotion.
+    $PSNativeCommandUseErrorActionPreference = $false
     $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
     $runId = $null
 
@@ -386,10 +388,45 @@ function Wait-ForReleaseWorkflow {
         throw "Timed out waiting for workflow run for tag $Tag."
     }
 
-    Write-Host "Watching run $runId..." -ForegroundColor Cyan
-    gh run watch $runId --repo $GithubRepo --exit-status
-    if ($LASTEXITCODE -ne 0) {
-        throw "Release workflow failed. Check run: https://github.com/$GithubRepo/actions/runs/$runId"
+    $completed = $false
+    $watchAttempt = 0
+    while ((Get-Date) -lt $deadline) {
+        $watchAttempt++
+        Write-Host "Watching run $runId (attach $watchAttempt)..." -ForegroundColor Cyan
+
+        # A watch can outlive the deadline, so bound the child process as well as retries.
+        # Inherit its output to keep the live progress in the deploy transcript.
+        $ghPath = (Get-Command gh -CommandType Application | Select-Object -First 1).Source
+        $watchStart = [System.Diagnostics.ProcessStartInfo]::new($ghPath)
+        $watchStart.UseShellExecute = $false
+        foreach ($argument in @("run", "watch", [string]$runId, "--repo", $GithubRepo, "--exit-status")) {
+            $watchStart.ArgumentList.Add($argument)
+        }
+        $watch = [System.Diagnostics.Process]::Start($watchStart)
+        try {
+            $remainingMs = [int][Math]::Max(0, ($deadline - (Get-Date)).TotalMilliseconds)
+            if (-not $watch.WaitForExit($remainingMs)) {
+                break
+            }
+            $watchExitCode = $watch.ExitCode
+        } finally {
+            if (-not $watch.HasExited) { $watch.Kill($true) }
+            $watch.Dispose()
+        }
+
+        # Watch failures can be API/connection errors; only run details decide the verdict.
+        $runStatus = gh run view $runId --repo $GithubRepo --json status --jq .status
+        if ($LASTEXITCODE -eq 0 -and $runStatus -eq "completed") {
+            $completed = $true
+            break
+        }
+
+        Write-Host "  Watch exited with code $watchExitCode; completion not confirmed. Re-attaching in 5 seconds..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 5
+    }
+
+    if (-not $completed) {
+        throw "Timed out waiting for release workflow completion after $TimeoutMinutes minutes. Check run: https://github.com/$GithubRepo/actions/runs/$runId"
     }
 
     $runViewJson = gh run view $runId --repo $GithubRepo --json conclusion,jobs,url
