@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text;
 using MintLint;
 using Serilog;
+using VibeRails.Services.Git;
 
 namespace VibeRails.Services.GitPreflight;
 
@@ -1554,13 +1555,15 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         string workingDirectory,
         IReadOnlyList<string> arguments,
         TimeSpan timeout,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ReadOnlyMemory<byte>? standardInput = null)
     {
         var result = await RunBinaryGitAsync(
             workingDirectory,
             arguments,
             cancellationToken,
-            timeoutOverride: timeout);
+            timeoutOverride: timeout,
+            standardInput: standardInput);
         return (result.TimedOut, result.Bytes);
     }
 
@@ -1572,32 +1575,14 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         TimeSpan? timeoutOverride = null,
         ReadOnlyMemory<byte>? standardInput = null)
     {
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "git",
-                WorkingDirectory = workingDirectory,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                RedirectStandardInput = standardInput.HasValue,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                StandardErrorEncoding = Encoding.UTF8
-            }
-        };
-        foreach (var argument in arguments)
-        {
-            process.StartInfo.ArgumentList.Add(argument);
-        }
+        using var process = new Process { StartInfo = GitCli.CreateStartInfo(workingDirectory, arguments) };
 
         process.Start();
-        if (standardInput.HasValue)
-        {
-            if (!standardInput.Value.IsEmpty)
-                await process.StandardInput.BaseStream.WriteAsync(standardInput.Value, cancellationToken);
-            process.StandardInput.Close();
-        }
+        if (standardInput is { IsEmpty: false } input)
+            await process.StandardInput.BaseStream.WriteAsync(input, cancellationToken);
+        // Always send EOF. Inheriting the MCP server's live JSON-RPC stdin can wedge Git even
+        // when this particular command is not intended to read input.
+        process.StandardInput.Close();
         await using var output = new MemoryStream();
         var copyTask = CopyStandardOutputAsync(
             process.StandardOutput.BaseStream,

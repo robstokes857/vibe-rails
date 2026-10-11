@@ -1124,6 +1124,13 @@ failed capture leave freshness unknown. Unknown scope forces an Incomplete repor
 `save_board_review` requires the same linked session and saves findings, validation and limitations
 with No findings reported, Findings or Incomplete. A successful exit without it is Report missing.
 
+Review snapshots use the same Git process launch settings as `GitCli`: disable fsmonitor for each
+invocation and redirect/close stdin after any explicit input. This prevents the Git child from
+inheriting the MCP server's live input and avoids fsmonitor pipe hangs; repository settings stay
+unchanged. Capture failures retain the failed stage and timeout category in the review limitations,
+and log the exception through Serilog. Failed captures still have no fingerprint and cannot establish
+freshness; a new review is required after repairing the running capture path.
+
 `get_board_reviews` and the root-only `/cards/{card}/reviews` reads expose the same record. History
 pages direct attempts and review Automation runs by 50; the latest saved report is fetched
 independently, so many newer unfinished attempts cannot hide it. Freshness comparison only reads

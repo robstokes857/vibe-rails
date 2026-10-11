@@ -33,31 +33,7 @@ public static class GitCli
         if (maxOutputChars is < 0)
             throw new ArgumentOutOfRangeException(nameof(maxOutputChars));
 
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "git",
-                WorkingDirectory = workingDirectory,
-                RedirectStandardInput = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                // Git's paths and text output use UTF-8, independently of the Windows console code page.
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            }
-        };
-
-        // A one-shot index/object read never needs the fsmonitor daemon. Forcing it off keeps this
-        // child from starting or hand-shaking the daemon — which wedges when git is spawned inside the
-        // stdio MCP server, because the daemon inherits the redirected pipe handles and never lets go.
-        // git then runs past the timeout and is killed, surfacing as a bogus "commit not found". VB-14.
-        process.StartInfo.ArgumentList.Add("-c");
-        process.StartInfo.ArgumentList.Add("core.fsmonitor=false");
-        foreach (var argument in arguments)
-            process.StartInfo.ArgumentList.Add(argument);
+        using var process = new Process { StartInfo = CreateStartInfo(workingDirectory, arguments) };
 
         try
         {
@@ -121,6 +97,35 @@ public static class GitCli
         var stderr = await stderrComplete;
         timedOut |= stdout.TimedOut || stderr.TimedOut;
         return new GitCliResult(process.HasExited ? process.ExitCode : -1, stdout.Text, stderr.Text, timedOut);
+    }
+
+    /// <summary>
+    /// Shared launch settings for text and binary Git readers. Callers must close the redirected
+    /// stdin after writing any explicit input, including when there is no input to write.
+    /// </summary>
+    internal static ProcessStartInfo CreateStartInfo(string workingDirectory, IReadOnlyList<string> arguments)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "git",
+            WorkingDirectory = workingDirectory,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            // Git's paths and text output use UTF-8, independently of the Windows console code page.
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        // One-shot reads must not start or handshake with fsmonitor from an MCP stdio process:
+        // the daemon can inherit redirected pipes and keep the Git call from finishing (VB-14).
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add("core.fsmonitor=false");
+        foreach (var argument in arguments)
+            startInfo.ArgumentList.Add(argument);
+        return startInfo;
     }
 
     private static async Task<string> ReadOutputAsync(StreamReader reader, int? maxChars, CancellationToken cancellationToken)

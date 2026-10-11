@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Serilog;
 using VibeRails.DTOs;
 using VibeRails.Services.Git;
 using VibeRails.Services.GitPreflight;
@@ -136,12 +137,17 @@ public sealed class BoardReviewService(IBoardStore store, IBoardService board)
     internal static async Task<Capture> CaptureAsync(string workspace, string scope, string? baseCommit, string? headCommit, bool dirty, CancellationToken ct)
     {
         if (scope == "unknown") return new(null, baseCommit, headCommit, "Scope ambiguous; freshness cannot be established.");
+        var stage = "resolve HEAD";
         try
         {
             IReadOnlyList<string>? files = null;
             async Task<(string? Hash, string? Base, string? Head)> Once()
             {
+                stage = "resolve HEAD";
                 var head = await GitCli.RunAsync(workspace, ["rev-parse", "--verify", "HEAD^{commit}"], ct);
+                if (head.TimedOut) throw new TimeoutException("Git timed out resolving HEAD.");
+                if (!head.Succeeded) throw new InvalidOperationException($"Git could not resolve HEAD: {head.StdErr.Trim()}");
+                stage = $"capture {scope} changes";
                 var snapshot = scope switch
                 {
                     "range" => await snapshots.CaptureRangeAsync(workspace, baseCommit!, headCommit!, ct),
@@ -149,7 +155,9 @@ public sealed class BoardReviewService(IBoardStore store, IBoardService board)
                     "repository" => await snapshots.CaptureRepositoryAsync(workspace, ct),
                     _ => await snapshots.CaptureWorkingTreeAsync(workspace, ct)
                 };
+                stage = "capture working-tree changes";
                 var extra = dirty && scope != "working-tree" ? await snapshots.CaptureWorkingTreeAsync(workspace, ct) : null;
+                stage = "fingerprint captured inputs";
                 files = snapshot.Files.Select(f => $"{scope}: {f.ChangeKind} {f.RelativePath}")
                     .Concat(extra?.Files.Select(f => $"dirty: {f.ChangeKind} {f.RelativePath}") ?? []).Take(1000).ToList();
                 // Binary/omitted contents cannot establish a trustworthy content identity.
@@ -167,7 +175,13 @@ public sealed class BoardReviewService(IBoardStore store, IBoardService board)
                 : new(null, first.Base, first.Head, "Inputs changed during capture, or binary/omitted content prevents complete freshness verification.", files);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
-        { return new(null, baseCommit, headCommit, "Scope capture unavailable; describe what was actually reviewed and its limitations."); }
+        {
+            Log.Warning(ex, "[BoardReview] Scope capture failed: workspace={Workspace}, scope={Scope}, stage={Stage}",
+                workspace, scope, stage);
+            var reason = ex is TimeoutException ? "Git timed out" : "Capture failed";
+            return new(null, baseCommit, headCommit,
+                $"Scope capture unavailable: {reason} while trying to {stage}. See application logs for details; describe what was actually reviewed and its limitations.");
+        }
     }
 
     private static void RequireText(string value, string label, int max)

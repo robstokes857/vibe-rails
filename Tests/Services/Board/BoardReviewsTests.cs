@@ -232,6 +232,7 @@ public sealed partial class BoardReviewsTests : IAsyncLifetime
     [Fact]
     public async Task RangePlusDirtyScopeIncludesBothInputs_AndUnrelatedCheckoutIsUnknown()
     {
+        await Git("config", "core.fsmonitor", "true");
         await File.WriteAllTextAsync(Path.Combine(repo, "sample.cs"), "class Committed {}\n", Ct);
         await Git("add", "."); await Git("-c", "core.hooksPath=", "commit", "-m", "change");
         var head = await Git("rev-parse", "HEAD");
@@ -243,6 +244,21 @@ public sealed partial class BoardReviewsTests : IAsyncLifetime
         Assert.StartsWith("Current", (await reviews.ReportAsync(repo, card.Id, begun.Id, true, repo, Ct))!.Freshness);
         await File.WriteAllTextAsync(Path.Combine(repo, "dirty.txt"), "two\n", Ct);
         Assert.StartsWith("Stale", (await reviews.ReportAsync(repo, card.Id, begun.Id, true, repo, Ct))!.Freshness);
+    }
+
+    [Fact]
+    public async Task FailedRangeCaptureReportsStage_AndKeepsFreshnessUnknown()
+    {
+        var session = await DirectReview();
+        var begun = await reviews.BeginAsync(repo, card.Id, session, repo, "range", "Unavailable base",
+            new string('0', 40), baseline, true, Ct);
+
+        Assert.Null(begun.SnapshotHash);
+        Assert.Contains("Scope capture unavailable", begun.CaptureLimitations);
+        Assert.Contains("capture range changes", begun.CaptureLimitations);
+        Assert.Contains("application logs", begun.CaptureLimitations);
+        await reviews.SaveAsync(repo, card.Id, session, begun.Id, "Incomplete", "None", "Capture failed", "Scope unavailable", Ct);
+        Assert.StartsWith("Unknown", (await reviews.ReportAsync(repo, card.Id, begun.Id, true, repo, Ct))!.Freshness);
     }
 
     [Fact]

@@ -689,12 +689,53 @@ public sealed class GitStagedSnapshotProviderTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RunBinaryGitAsync_DisablesFsmonitorEvenWhenEnabledInRepository()
+    {
+        await GitAsync("config", "core.fsmonitor", "true");
+
+        var result = await GitStagedSnapshotProvider.RunBinaryGitForTestAsync(
+            _repository, ["config", "--get", "core.fsmonitor"],
+            TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        Assert.False(result.TimedOut);
+        Assert.Equal("false", Encoding.UTF8.GetString(result.Bytes).Trim());
+    }
+
+    [Fact]
+    public async Task RunBinaryGitAsync_ClosesUnusedStdin()
+    {
+        var result = await GitStagedSnapshotProvider.RunBinaryGitForTestAsync(
+            _repository, ["hash-object", "--stdin"],
+            TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        Assert.False(result.TimedOut);
+        Assert.Equal("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391", Encoding.UTF8.GetString(result.Bytes).Trim());
+    }
+
+    [Fact]
+    public async Task RunBinaryGitAsync_PreservesExplicitBinaryInputBeforeClosingStdin()
+    {
+        byte[] input = [0, 255, 128, 13, 10, 42];
+        var header = Encoding.ASCII.GetBytes($"blob {input.Length}\0");
+        var expected = Convert.ToHexString(System.Security.Cryptography.SHA1.HashData([.. header, .. input])).ToLowerInvariant();
+
+        var result = await GitStagedSnapshotProvider.RunBinaryGitForTestAsync(
+            _repository, ["hash-object", "--stdin"],
+            TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken, input);
+
+        Assert.False(result.TimedOut);
+        Assert.Equal(expected, Encoding.UTF8.GetString(result.Bytes).Trim());
+    }
+
+    [Fact]
     public async Task RunBinaryGitAsync_TimeoutDrainsStdoutCopyBeforeReturningBytes()
     {
+        // Allow Git and its shell to start under full-suite load before timing out the sleep.
+        // A 150 ms deadline can kill the shell before printf, testing startup scheduling instead.
         var result = await GitStagedSnapshotProvider.RunBinaryGitForTestAsync(
             _repository,
             ["-c", "alias.vr-timeout=!printf pre-timeout; sleep 5", "vr-timeout"],
-            TimeSpan.FromMilliseconds(150),
+            TimeSpan.FromSeconds(2),
             TestContext.Current.CancellationToken);
 
         Assert.True(result.TimedOut);
