@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.Extensions.Logging;
+using VibeRails.Utils;
 
 namespace VibeRails.Services
 {
@@ -953,10 +954,16 @@ namespace VibeRails.Services
             return true;
         }
 
+        /// <summary>
+        /// Hooks record the per-user install when one exists (see
+        /// <see cref="InstalledVibeRails.ExecutableForCallbacks"/>), so a commit from a plain
+        /// terminal keeps working after an extension update removes the directory this process
+        /// ran from. A framework-dependent build still records its dotnet host and entry dll.
+        /// </summary>
         private static HookLaunchCommand GetCurrentLaunchCommand()
         {
             return ResolveLaunchCommand(
-                Environment.ProcessPath,
+                InstalledVibeRails.ExecutableForCallbacks(Environment.ProcessPath),
                 Environment.GetCommandLineArgs());
         }
 

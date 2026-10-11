@@ -42,6 +42,7 @@ VibeRails includes a sophisticated git hook installation system that automatical
 - **Auto-install on startup** - Hooks installed automatically when VibeRails starts (configurable)
 - **Preserves existing hooks** - Inserts VCA ahead of existing shell-hook exits and chains non-shell/binary/symlink hooks through a preserved sidecar
 - **App-versioned health checks** - Installed hooks carry the running VibeRails version (for example `1.9.8`); startup detects missing, disabled, stale/older-version, partial, missing-launcher, or mismatched-launcher hooks and replaces them
+- **Install-tracking launcher** - Hooks record the per-user install (`~/.vibe_rails/vb[.exe]`) whenever it exists, through `InstalledVibeRails.ExecutableForCallbacks`, so a commit from a plain terminal keeps working after an extension update removes the directory the backend ran from; the hook simply runs whatever is installed. Without an install the running binary is recorded, and a framework-dependent build records its dotnet host and entry dll (VB-K5SCD-210)
 - **Git-aware path resolution** - Honors linked worktrees and `core.hooksPath`
 - **Safe hook chaining** - Runs before existing shell hooks and preserves non-shell hooks as executable sidecars
 - **Safe uninstallation** - Removes only VibeRails sections, keeps other hooks intact

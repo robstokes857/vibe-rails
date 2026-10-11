@@ -518,7 +518,7 @@ Owns session preparation (`PrepareSessionAsync`) — builds the `PreparedTermina
   (Claude, Codex, Antigravity, Copilot, native Grok, and OpenCode-backed CLIs incl. GLM 5.2 / GLM 5.3 / DeepSeek V4 Pro / Kimi K3).
 - Builds base env vars (`LANG`, `LC_ALL`, `PYTHONIOENCODING`).
 - Merges CLI-specific env vars via `LlmCliEnvironmentService` when an environment name is provided.
-- Resolves the MCP stdio server command path: the per-user install (`~/.vibe_rails/vb[.exe]`, what install.ps1/install.sh overlay) when it is the same build as the running process, so the registration survives extension upgrades; otherwise the running `vb.exe mcp`, or `dotnet <dll> mcp` for a framework-dependent build (VB-K5SCD-210).
+- Resolves the MCP stdio server command path through `InstalledVibeRails.ExecutableForCallbacks`: the per-user install (`~/.vibe_rails/vb[.exe]`, what install.ps1/install.sh overlay) whenever it exists, so the registration tracks whatever the user has installed and survives extension upgrades; otherwise the running `vb.exe mcp`, or `dotnet <dll> mcp` for a framework-dependent build. A version difference between install and running backend is logged, not a reason to fall back (VB-K5SCD-210).
 - Runs CLI MCP auto-registration commands (remove + add) via the platform shell.
 - Builds Claude/Codex proxy env vars via `ILocalLlmProxyContext` (the current process's proxy URL
   and auth), so each terminal-tab child can apply its own process-local token-saver gate without

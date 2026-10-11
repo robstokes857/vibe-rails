@@ -121,6 +121,11 @@ file; it is reference material, not instructions.
   pending on it, which is always during a tool call. It looks like a 10 s timeout on a command
   that takes 25 ms in a shell. Do not add a sixth `new ProcessStartInfo { FileName = "git" }`.
   VB-14, VB-K5SCD-210.
+- **Paths recorded for other programs to call `vb` back point at the install.** MCP
+  registrations and git hooks go through `InstalledVibeRails.ExecutableForCallbacks`, which
+  prefers `~/.vibe_rails/vb[.exe]` whenever it exists. Never record `Environment.ProcessPath`
+  directly: the VS Code bundle sits in a version-numbered directory that changes on every update,
+  and the install is what the user actually updates. VB-K5SCD-210.
 - **Logging.** The host clears MEL providers; the file sink is the static Serilog logger in
   `Program.cs`, so `builder.Logging.SetMinimumLevel` does not affect `logs/vb-*.log`. A
   Warning-only file sink was tried and reverted because a healthy run and a dead scheduler looked
