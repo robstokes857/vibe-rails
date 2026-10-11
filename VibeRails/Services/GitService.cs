@@ -46,7 +46,7 @@ namespace VibeRails.Services
 
         public async Task<string> GetRootPathAsync(CancellationToken cancellationToken = default)
         {
-            var rootPath = await RunGitCommandAsync("rev-parse --show-toplevel", RootCommandTimeout, cancellationToken);
+            var rootPath = await RunGitCommandAsync(["rev-parse", "--show-toplevel"], RootCommandTimeout, cancellationToken);
             return rootPath;
         }
 
@@ -54,7 +54,7 @@ namespace VibeRails.Services
         {
             try
             {
-                var remote = await RunGitCommandAsync("remote get-url origin", RootCommandTimeout, cancellationToken);
+                var remote = await RunGitCommandAsync(["remote", "get-url", "origin"], RootCommandTimeout, cancellationToken);
                 return string.IsNullOrWhiteSpace(remote) ? null : remote.Trim();
             }
             catch
@@ -67,7 +67,7 @@ namespace VibeRails.Services
         {
 
             var output = await RunGitCommandAsync(
-                "status --porcelain=v1 --untracked-files=all --ignore-submodules",
+                ["status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules"],
                 StatusCommandTimeout,
                 cancellationToken);
 
@@ -99,7 +99,7 @@ namespace VibeRails.Services
         public async Task<List<string>> GetStagedFilesAsync(CancellationToken cancellationToken)
         {
             var output = await RunGitCommandAsync(
-                "diff --cached --name-only",
+                ["diff", "--cached", "--name-only"],
                 StatusCommandTimeout,
                 cancellationToken);
 
@@ -191,7 +191,7 @@ namespace VibeRails.Services
         {
             try
             {
-                var hash = await RunGitCommandAsync("rev-parse HEAD", RootCommandTimeout, cancellationToken);
+                var hash = await RunGitCommandAsync(["rev-parse", "HEAD"], RootCommandTimeout, cancellationToken);
                 return string.IsNullOrWhiteSpace(hash) ? null : hash.Trim();
             }
             catch
@@ -204,7 +204,7 @@ namespace VibeRails.Services
         {
             try
             {
-                var branch = await RunGitCommandAsync("rev-parse --abbrev-ref HEAD", RootCommandTimeout, cancellationToken);
+                var branch = await RunGitCommandAsync(["rev-parse", "--abbrev-ref", "HEAD"], RootCommandTimeout, cancellationToken);
                 return string.IsNullOrWhiteSpace(branch) ? null : branch.Trim();
             }
             catch
@@ -222,13 +222,13 @@ namespace VibeRails.Services
                 // Get file stats (lines added/deleted) since the commit
                 // Using diff against the commit to see what changed in working directory
                 var numstatOutput = await RunGitCommandAsync(
-                    $"diff --numstat {commitHash}",
+                    ["diff", "--numstat", commitHash],
                     DiffCommandTimeout,
                     cancellationToken);
 
                 // Also get status to detect new untracked files
                 var statusOutput = await RunGitCommandAsync(
-                    "status --porcelain=v1 --untracked-files=all",
+                    ["status", "--porcelain=v1", "--untracked-files=all"],
                     StatusCommandTimeout,
                     cancellationToken);
 
@@ -303,7 +303,7 @@ namespace VibeRails.Services
             try
             {
                 var diff = await RunGitCommandAsync(
-                    $"diff {commitHash} -- \"{filePath}\"",
+                    ["diff", commitHash, "--", filePath],
                     DiffCommandTimeout,
                     cancellationToken);
 
@@ -331,13 +331,13 @@ namespace VibeRails.Services
                    .ToList();
 
         private async Task<string> RunGitCommandAsync(
-            string arguments,
+            IReadOnlyList<string> arguments,
             TimeSpan timeout,
             CancellationToken cancellationToken)
         {
             var workingDirectory = _workingDirectory ?? Directory.GetCurrentDirectory();
             var result = await GitProcessRunner.RunAsync(
-                $"--no-pager {arguments}",
+                ["--no-pager", .. arguments],
                 workingDirectory,
                 timeout,
                 cancellationToken);
@@ -347,7 +347,7 @@ namespace VibeRails.Services
                 Log.Warning(
                     "[Git] Timed out after {TimeoutSeconds}s: git {Arguments} (cwd: {WorkingDirectory})",
                     timeout.TotalSeconds,
-                    arguments,
+                    string.Join(' ', arguments),
                     workingDirectory);
                 return string.Empty;
             }

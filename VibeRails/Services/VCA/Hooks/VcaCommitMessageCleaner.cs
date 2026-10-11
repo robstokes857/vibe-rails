@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Text;
+using VibeRails.Services.Git;
 
 namespace VibeRails.Services.VCA.Hooks;
 
@@ -17,21 +19,12 @@ internal static class VcaCommitMessageCleaner
         string workingDirectory,
         CancellationToken cancellationToken)
     {
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "git",
-                WorkingDirectory = workingDirectory,
-                RedirectStandardInput = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            }
-        };
-        process.StartInfo.ArgumentList.Add("stripspace");
-        process.StartInfo.ArgumentList.Add("--strip-comments");
+        // Shared launch contract (closed stdin after the message, fsmonitor off, UTF-8 out). The
+        // message goes in as UTF-8 without a BOM so stripspace hands back the same bytes it read;
+        // the output side is UTF-8 too, so a non-ASCII message round-trips unchanged.
+        var startInfo = GitCli.CreateStartInfo(workingDirectory, ["stripspace", "--strip-comments"]);
+        startInfo.StandardInputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+        using var process = new Process { StartInfo = startInfo };
 
         process.Start();
         var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);

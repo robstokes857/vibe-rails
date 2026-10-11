@@ -1,84 +1,42 @@
 using System.Diagnostics;
 using Serilog;
+using VibeRails.Services.Git;
 
 namespace VibeRails.Services;
 
+/// <summary>
+/// Text-oriented git runner for services that want trimmed output and a timeout flag instead of an
+/// exception. Every child is launched through <see cref="GitCli.CreateStartInfo"/>: argv only, stdin
+/// redirected and closed, fsmonitor off. Arguments are never shell text.
+/// </summary>
 internal static class GitProcessRunner
 {
     internal sealed record Result(int ExitCode, string StdOut, string StdErr, bool TimedOut);
 
-    public static async Task<Result> RunAsync(
-        string arguments,
-        string workingDirectory,
-        TimeSpan timeout,
-        CancellationToken cancellationToken = default)
-    {
-        var startInfo = CreateStartInfo(workingDirectory);
-        startInfo.Arguments = arguments;
-        return await RunAsync(startInfo, arguments, timeout, trimOutput: true, cancellationToken);
-    }
-
-    public static async Task<Result> RunAsync(
+    public static Task<Result> RunAsync(
         IReadOnlyList<string> arguments,
         string workingDirectory,
         TimeSpan timeout,
         CancellationToken cancellationToken = default)
-    {
-        var startInfo = CreateStartInfo(workingDirectory);
-        foreach (var argument in arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
+        => RunAsync(arguments, workingDirectory, timeout, trimOutput: true, cancellationToken);
 
-        return await RunAsync(
-            startInfo,
-            string.Join(' ', arguments),
-            timeout,
-            trimOutput: true,
-            cancellationToken);
-    }
-
-    public static async Task<Result> RunRawAsync(
+    /// <summary>Same as <see cref="RunAsync(IReadOnlyList{string}, string, TimeSpan, CancellationToken)"/> but keeps stdout untrimmed (NUL-separated listings).</summary>
+    public static Task<Result> RunRawAsync(
         IReadOnlyList<string> arguments,
         string workingDirectory,
         TimeSpan timeout,
         CancellationToken cancellationToken = default)
-    {
-        var startInfo = CreateStartInfo(workingDirectory);
-        foreach (var argument in arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
-
-        return await RunAsync(
-            startInfo,
-            string.Join(' ', arguments),
-            timeout,
-            trimOutput: false,
-            cancellationToken);
-    }
-
-    private static ProcessStartInfo CreateStartInfo(string workingDirectory) => new()
-    {
-        FileName = "git",
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-        UseShellExecute = false,
-        CreateNoWindow = true,
-        WorkingDirectory = workingDirectory
-    };
+        => RunAsync(arguments, workingDirectory, timeout, trimOutput: false, cancellationToken);
 
     private static async Task<Result> RunAsync(
-        ProcessStartInfo startInfo,
-        string displayArguments,
+        IReadOnlyList<string> arguments,
+        string workingDirectory,
         TimeSpan timeout,
         bool trimOutput,
         CancellationToken cancellationToken)
     {
-        using var process = new Process
-        {
-            StartInfo = startInfo
-        };
+        var displayArguments = string.Join(' ', arguments);
+        using var process = new Process { StartInfo = GitCli.CreateStartInfo(workingDirectory, arguments) };
 
         try
         {
@@ -90,9 +48,15 @@ internal static class GitProcessRunner
                 ex,
                 "[Git] Failed to start git {Arguments} in {WorkingDirectory}",
                 displayArguments,
-                startInfo.WorkingDirectory);
+                workingDirectory);
             return new Result(-1, string.Empty, ex.Message, false);
         }
+
+        // EOF on stdin at once. A git child that inherits this process's stdin pipe hangs at startup
+        // while the parent has a read pending on it, which the stdio MCP host always does during a
+        // tool call. See GitCli.CreateStartInfo.
+        try { process.StandardInput.Close(); }
+        catch { /* the write end still closes when the process is disposed, so git still gets EOF */ }
 
         var stdoutTask = process.StandardOutput.ReadToEndAsync();
         var stderrTask = process.StandardError.ReadToEndAsync();

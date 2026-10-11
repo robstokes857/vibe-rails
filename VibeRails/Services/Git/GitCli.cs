@@ -100,9 +100,27 @@ public static class GitCli
     }
 
     /// <summary>
-    /// Shared launch settings for text and binary Git readers. Callers must close the redirected
-    /// stdin after writing any explicit input, including when there is no input to write.
+    /// The one launch contract for every git child in the process: <see cref="GitCli"/>,
+    /// <see cref="GitProcessRunner"/>, the staged-snapshot provider and the hook's message cleaner.
+    /// Callers must close the redirected stdin after writing any explicit input, including when
+    /// there is no input to write.
     /// </summary>
+    /// <remarks>
+    /// Two guards, both required.
+    /// <para>
+    /// Stdin is always redirected. A git child that inherits this process's stdin pipe blocks at
+    /// startup for as long as the parent has a read pending on that pipe, and the stdio MCP host's
+    /// JSON-RPC reader always has one while a tool call runs. Reproduced 2026-10-11: rev-parse,
+    /// merge-base and ls-files all ran until killed, fsmonitor on or off, while the same command
+    /// with a closed redirected stdin finished in about 25 ms. A shell never shows it because a
+    /// shell has no pending read, so "works from the terminal, times out in the MCP host" is this.
+    /// </para>
+    /// <para>
+    /// <c>core.fsmonitor=false</c> keeps index-reading commands from hand-shaking with or spawning
+    /// the fsmonitor daemon, which can inherit the redirected pipes and hold them past git's exit,
+    /// so the output drain never sees EOF (VB-14).
+    /// </para>
+    /// </remarks>
     internal static ProcessStartInfo CreateStartInfo(string workingDirectory, IReadOnlyList<string> arguments)
     {
         var startInfo = new ProcessStartInfo
@@ -119,8 +137,6 @@ public static class GitCli
             CreateNoWindow = true
         };
 
-        // One-shot reads must not start or handshake with fsmonitor from an MCP stdio process:
-        // the daemon can inherit redirected pipes and keep the Git call from finishing (VB-14).
         startInfo.ArgumentList.Add("-c");
         startInfo.ArgumentList.Add("core.fsmonitor=false");
         foreach (var argument in arguments)

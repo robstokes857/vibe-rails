@@ -14,7 +14,7 @@ public sealed class VcaHookFileProvider : IVcaHookFileProvider
         CancellationToken cancellationToken)
     {
         var result = await GitProcessRunner.RunAsync(
-            "--no-pager diff --cached --name-only",
+            ["--no-pager", "diff", "--cached", "--name-only"],
             workingDirectory,
             StagedFileTimeout,
             cancellationToken);

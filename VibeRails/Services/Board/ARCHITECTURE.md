@@ -1124,12 +1124,19 @@ failed capture leave freshness unknown. Unknown scope forces an Incomplete repor
 `save_board_review` requires the same linked session and saves findings, validation and limitations
 with No findings reported, Findings or Incomplete. A successful exit without it is Report missing.
 
-Review snapshots use the same Git process launch settings as `GitCli`: disable fsmonitor for each
-invocation and redirect/close stdin after any explicit input. This prevents the Git child from
-inheriting the MCP server's live input and avoids fsmonitor pipe hangs; repository settings stay
-unchanged. Capture failures retain the failed stage and timeout category in the review limitations,
-and log the exception through Serilog. Failed captures still have no fingerprint and cannot establish
-freshness; a new review is required after repairing the running capture path.
+Review snapshots and every other git launch share `GitCli.CreateStartInfo`: argv only, stdin
+redirected and closed after any explicit input, `core.fsmonitor=false`; repository settings stay
+unchanged. The stdin rule is the one that matters for the MCP host. A git child that inherits the
+host's stdin pipe blocks at startup for as long as the host has a read pending on that pipe, and
+the stdio JSON-RPC reader always has one while a tool call runs. Reproduced on 2026-10-11 with
+`rev-parse`, `merge-base --is-ancestor` and `ls-files`, fsmonitor on or off: each ran until killed,
+while a closed redirected stdin let the same command finish in about 25 ms. A shell never shows
+it because a shell has no pending read, which is why "works from the terminal, times out in the
+MCP host" went undiagnosed for two review runs. Capture failures carry the failed stage, the
+timeout category and the provider's exception text (operation, directory, git stderr) inside the
+review limitations the agent reads, with an instruction to report it verbatim, and log at Error.
+Failed captures have no fingerprint and cannot establish freshness; a new review is required once
+the running build carries the fix.
 
 `get_board_reviews` and the root-only `/cards/{card}/reviews` reads expose the same record. History
 pages direct attempts and review Automation runs by 50; the latest saved report is fetched

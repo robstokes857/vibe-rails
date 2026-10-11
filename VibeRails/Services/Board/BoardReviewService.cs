@@ -176,12 +176,23 @@ public sealed class BoardReviewService(IBoardStore store, IBoardService board)
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Log.Warning(ex, "[BoardReview] Scope capture failed: workspace={Workspace}, scope={Scope}, stage={Stage}",
+            // Loud on purpose. The agent reading this record is the only one who sees the failure
+            // in time to report it, so the exact cause travels with the limitation, not just a log.
+            Log.Error(ex, "[BoardReview] Scope capture failed: workspace={Workspace}, scope={Scope}, stage={Stage}",
                 workspace, scope, stage);
             var reason = ex is TimeoutException ? "Git timed out" : "Capture failed";
             return new(null, baseCommit, headCommit,
-                $"Scope capture unavailable: {reason} while trying to {stage}. See application logs for details; describe what was actually reviewed and its limitations.");
+                $"Scope capture unavailable: {reason} while trying to {stage}. {OneLine(ex.Message, 600)} "
+                + "This is a VibeRails capture failure, not a finding about the change: report it verbatim, "
+                + "then describe what was actually reviewed and its limitations.");
         }
+    }
+
+    /// <summary>Collapses an exception message to one bounded line so it can ride inside a limitation.</summary>
+    private static string OneLine(string text, int max)
+    {
+        var line = string.Join(' ', text.Split((char[])['\r', '\n', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        return line.Length <= max ? line : string.Concat(line.AsSpan(0, max - 1), "…");
     }
 
     private static void RequireText(string value, string label, int max)

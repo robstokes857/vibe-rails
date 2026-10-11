@@ -115,6 +115,12 @@ file; it is reference material, not instructions.
 - **Launch arguments are argv, never shell text.** Automation scripts, VibeRails child launches
   and CustomArgs go through explicit executables and `ShellArgSanitizer`; do not build command
   strings from user fields.
+- **Every git launch goes through `GitCli.CreateStartInfo`** (`GitCli`, `GitProcessRunner`, the
+  staged-snapshot provider, the hook's message cleaner): argv only, stdin redirected and closed,
+  fsmonitor off. A git child that inherits the MCP host's stdin hangs while the host has a read
+  pending on it, which is always during a tool call. It looks like a 10 s timeout on a command
+  that takes 25 ms in a shell. Do not add a sixth `new ProcessStartInfo { FileName = "git" }`.
+  VB-14, VB-K5SCD-210.
 - **Logging.** The host clears MEL providers; the file sink is the static Serilog logger in
   `Program.cs`, so `builder.Logging.SetMinimumLevel` does not affect `logs/vb-*.log`. A
   Warning-only file sink was tried and reverted because a healthy run and a dead scheduler looked

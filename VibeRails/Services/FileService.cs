@@ -51,7 +51,7 @@ namespace VibeRails.Services
             try
             {
                 var result = await GitProcessRunner.RunAsync(
-                    "rev-parse --show-toplevel",
+                    ["rev-parse", "--show-toplevel"],
                     cwd,
                     GitRootTimeout,
                     cancellationToken);

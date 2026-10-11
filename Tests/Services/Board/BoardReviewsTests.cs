@@ -256,7 +256,11 @@ public sealed partial class BoardReviewsTests : IAsyncLifetime
         Assert.Null(begun.SnapshotHash);
         Assert.Contains("Scope capture unavailable", begun.CaptureLimitations);
         Assert.Contains("capture range changes", begun.CaptureLimitations);
-        Assert.Contains("application logs", begun.CaptureLimitations);
+        // The provider's own failure text rides inside the limitation, so the agent that reads the
+        // record learns the cause without access to the application log.
+        Assert.Contains("ancestor of the selected head", begun.CaptureLimitations);
+        Assert.Contains("not a finding about the change", begun.CaptureLimitations);
+        Assert.DoesNotContain('\n', begun.CaptureLimitations!);
         await reviews.SaveAsync(repo, card.Id, session, begun.Id, "Incomplete", "None", "Capture failed", "Scope unavailable", Ct);
         Assert.StartsWith("Unknown", (await reviews.ReportAsync(repo, card.Id, begun.Id, true, repo, Ct))!.Freshness);
     }

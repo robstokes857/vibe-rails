@@ -5,6 +5,7 @@ using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services;
+using VibeRails.Services.Git;
 
 namespace VibeRails.Routes;
 
@@ -100,27 +101,27 @@ public static class ProjectRoutes
             }
 
             // Check if git is installed
-            if (!await IsGitInstalledAsync())
+            if (!await IsGitInstalledAsync(launchDirectory, cancellationToken))
             {
                 return Results.BadRequest(new ErrorResponse("Git is not installed or not found in PATH."));
             }
 
             // Run: git init
-            var initResult = await RunGitCommandAsync("init", launchDirectory);
+            var initResult = await RunGitCommandAsync(["init"], launchDirectory, cancellationToken);
             if (!initResult.Success)
             {
                 return Results.BadRequest(new ErrorResponse($"git init failed: {initResult.Output}"));
             }
 
             // Run: git add .
-            var addResult = await RunGitCommandAsync("add .", launchDirectory);
+            var addResult = await RunGitCommandAsync(["add", "."], launchDirectory, cancellationToken);
             if (!addResult.Success)
             {
                 return Results.BadRequest(new ErrorResponse($"git add failed: {addResult.Output}"));
             }
 
             // Run: git commit -m "Initial commit" — may fail if nothing to commit, that's fine
-            await RunGitCommandAsync("commit -m \"Initial commit\"", launchDirectory);
+            await RunGitCommandAsync(["commit", "-m", "Initial commit"], launchDirectory, cancellationToken);
 
             // Re-detect git root and update state
             var detected = await fileService.TryGetProjectRootPathAsync(cancellationToken: cancellationToken);
@@ -319,59 +320,16 @@ public static class ProjectRoutes
         return false;
     }
 
-    private static async Task<bool> IsGitInstalledAsync()
-    {
-        try
-        {
-            using var process = new Process
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = "git",
-                    Arguments = "--version",
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true
-                }
-            };
-            process.Start();
-            await process.WaitForExitAsync();
-            return process.ExitCode == 0;
-        }
-        catch
-        {
-            return false;
-        }
-    }
+    /// <summary>A missing git binary surfaces as a failed start inside <see cref="GitCli"/>, never as a thrown exception.</summary>
+    private static async Task<bool> IsGitInstalledAsync(string workingDirectory, CancellationToken cancellationToken)
+        => (await GitCli.RunAsync(workingDirectory, ["--version"], cancellationToken)).Succeeded;
 
-    private static async Task<(bool Success, string Output)> RunGitCommandAsync(string arguments, string workingDirectory)
+    /// <summary>Runs one argv git command through the shared launch contract; output is stdout then stderr, trimmed.</summary>
+    private static async Task<(bool Success, string Output)> RunGitCommandAsync(
+        IReadOnlyList<string> arguments, string workingDirectory, CancellationToken cancellationToken)
     {
-        try
-        {
-            using var process = new Process
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = "git",
-                    Arguments = arguments,
-                    WorkingDirectory = workingDirectory,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true
-                }
-            };
-            process.Start();
-            var stdout = await process.StandardOutput.ReadToEndAsync();
-            var stderr = await process.StandardError.ReadToEndAsync();
-            await process.WaitForExitAsync();
-            var combined = string.Concat(stdout, stderr).Trim();
-            return (process.ExitCode == 0, combined);
-        }
-        catch (Exception ex)
-        {
-            return (false, ex.Message);
-        }
+        var result = await GitCli.RunAsync(workingDirectory, arguments, cancellationToken, timeout: TimeSpan.FromSeconds(30));
+        var output = string.Concat(result.StdOut, result.StdErr).Trim();
+        return (result.Succeeded, result.TimedOut ? $"git {string.Join(' ', arguments)} timed out. {output}".Trim() : output);
     }
 }

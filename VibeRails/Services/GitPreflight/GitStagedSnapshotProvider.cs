@@ -1680,7 +1680,8 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
     {
         if (result.TimedOut)
         {
-            throw new TimeoutException($"Git timed out while trying to {operation} in {directory}.");
+            throw new TimeoutException(
+                $"Git timed out after {GitTimeout.TotalSeconds:0} s while trying to {operation} in {directory}.");
         }
 
         if (result.ExitCode != 0)
