@@ -15,9 +15,10 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  # Pin Ubuntu 24.04 before the 2026-10-19 label move; revisit only with a deliberate Linux glibc/toolchain floor change.
   test:
     name: Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -48,7 +49,7 @@ jobs:
           - rid: win-x64
             os: windows-latest
           - rid: linux-x64
-            os: ubuntu-latest
+            os: ubuntu-24.04
           - rid: osx-arm64
             # macos-15 (arm64, Xcode 16) ships the Swift static libs the .NET Apple
             # crypto PAL needs for NativeAOT linking; macos-14 does not, so the
@@ -268,6 +269,26 @@ jobs:
             exit 1
           fi
 
+          if [ "$rid" = 'linux-x64' ]; then
+            # Measured from v10.11.19; raise only with a deliberate Linux compatibility floor change.
+            max_glibc='GLIBC_2.34'
+            for binary in vb libonnxruntime.so libe_sqlite3.so vec0.so; do
+              required_glibc="$(objdump -T "$verify_dir/$binary" |
+                awk 'match($0, /GLIBC_[0-9]+(\.[0-9]+)+/) { print substr($0, RSTART, RLENGTH) }' |
+                sort -Vu | tail -n 1)"
+              if [ -z "$required_glibc" ]; then
+                echo "Could not determine the glibc requirement of $binary." >&2
+                exit 1
+              fi
+              echo "$binary requires $required_glibc (release ceiling: $max_glibc)"
+              highest_glibc="$(printf '%s\n' "$max_glibc" "$required_glibc" | sort -V | tail -n 1)"
+              if [ "$highest_glibc" != "$max_glibc" ]; then
+                echo "$binary requires $required_glibc, exceeding the deliberate release ceiling $max_glibc." >&2
+                exit 1
+              fi
+            done
+          fi
+
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -297,7 +318,7 @@ jobs:
             binary_name: vb.exe
           - target: linux-x64
             rid: linux-x64
-            os: ubuntu-latest
+            os: ubuntu-24.04
             binary_name: vb
           - target: darwin-arm64
             rid: osx-arm64
@@ -355,7 +376,7 @@ jobs:
 
   publish_extension:
     name: Publish VS Code Extension
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     needs: package_extension
     # VSCE_PAT is deliberately NOT job-wide: only the publish step below sees the Marketplace
@@ -463,7 +484,7 @@ jobs:
 
   upload:
     name: Upload Assets To GitHub Release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs:
       - build
       - package_extension

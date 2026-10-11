@@ -17,7 +17,8 @@ param(
     # Linux build (docker)
     [string] $LinuxRid = "linux-x64",
     [switch] $BuildLinuxViaDocker = $true,
-    [string] $LinuxDockerImage = "mcr.microsoft.com/dotnet/sdk:10.0-aot"
+    # Match release.yml's Ubuntu 24.04 glibc/toolchain floor; revisit only with a deliberate compatibility change.
+    [string] $LinuxDockerImage = "mcr.microsoft.com/dotnet/sdk:10.0-noble-aot"
 )
 
 $ErrorActionPreference = "Stop"

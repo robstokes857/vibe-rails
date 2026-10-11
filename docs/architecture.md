@@ -1277,6 +1277,38 @@ dotnet build
 dotnet publish -c Release
 ```
 
+### Release runners and Linux glibc baseline
+
+The tag-triggered [release workflow](../.github/workflows/release.yml) pins every Linux
+job to `ubuntu-24.04`, including tests, NativeAOT builds, VSIX packaging and publishing,
+and GitHub release uploads. This avoids the `ubuntu-latest` move to Ubuntu 26 beginning
+2026-10-19 changing the linker and apt toolchain underneath a release. The local
+[build script](../deploy/build.ps1) uses `mcr.microsoft.com/dotnet/sdk:10.0-noble-aot`;
+the [Dockerfile](../VibeRails/Dockerfile) also pins its .NET stages to Ubuntu 24.04 (Noble).
+
+Measured on 2026-10-11 from the checksum-verified `vb-linux-x64.tar.gz` asset in
+[v10.11.19](https://github.com/robstokes857/vibe-rails/releases/tag/v10.11.19):
+
+| Packaged ELF | Highest required glibc symbol version |
+| --- | --- |
+| `vb` | `GLIBC_2.34` |
+| `libonnxruntime.so` | `GLIBC_2.28` |
+| `libe_sqlite3.so` | `GLIBC_2.34` |
+| `vec0.so` | `GLIBC_2.14` |
+
+The Linux release archive verification logs each requirement and rejects any of these
+files requiring more than `GLIBC_2.34`, or an unreadable/missing numeric glibc requirement.
+After the next patch release, confirm the runner migration annotation is absent, the
+archive verification passes, and remeasure the extracted executable with version-aware sorting:
+
+```bash
+objdump -T vb | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sort -Vu | tail -n 1
+```
+
+An Ubuntu 26 build remains a separate, deliberate decision about newer tools and the
+minimum supported user environment. Revisit the runner/image pins only with that decision;
+update the measured baseline and verification ceiling together if the floor is raised.
+
 ### Cross-Platform Builds
 ```powershell
 # Windows (local AOT) + Linux (AOT via Docker) — single script handles both
