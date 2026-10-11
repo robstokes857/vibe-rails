@@ -1,9 +1,12 @@
 # Board sync (VB-51)
 
-Boards with a saved Jira connection use Jira for remote access. Board settings hide the
-viberails.ai sync section, and manual publication/sync and automatic sync exclude these boards,
-including paused or expired Jira connections. Existing sync settings, ledgers and hosted copies
-are retained; there is no schema change or cleanup. Jira pulls remain available.
+Only boards whose current Jira connection has `DedicatedBoard=true` use Jira for remote access.
+Board settings hide the viberails.ai sync section, and manual publication/sync and automatic sync
+exclude those boards, including paused or expired connections. A legacy connection on an ordinary
+Vibe board does not change its identity or hosted-sync eligibility; Connect/save or a writing pull
+separates that connection and its imports into a dedicated board. Unlink makes the retained board
+local again. Existing sync settings, ledgers and hosted copies are retained; no history or schema
+is rewritten. Jira pulls remain available.
 
 ## Remote board manager
 

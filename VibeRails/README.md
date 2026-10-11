@@ -743,8 +743,8 @@ http://localhost:<auto-detected-port>/api/v1/
 | GET | `/context` | Get project context (replaces the old `/IsLocal`) |
 | GET | `/projects/name` · PUT | Get/set project display name |
 | GET | `/health` | Health check (extension startup verification) |
-| GET/POST | `/settings` · `/settings/db-size` · `/settings/pin` | App settings, DB size, pin status |
-| POST | `/settings/export-data` | Export all data as a zip |
+| GET/POST | `/settings` · `/settings/pin` | App settings, pin status |
+| GET | `/settings/backups` | Smaller complete-backup coverage |
 | POST | `/search` · `/bert/search` | Unified / BERT semantic search |
 | GET | `/version` · `/update/check` · `/update/version` | Version + update checks |
 | GET | `/token-savings` | Token savings metrics |

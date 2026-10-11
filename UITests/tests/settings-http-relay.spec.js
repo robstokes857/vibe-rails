@@ -30,12 +30,6 @@ async function installSettingsApi(page, initialSettings) {
     let settings = { ...initialSettings };
     const writes = [];
 
-    await page.route('**/api/v1/settings/db-size', route => route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ bytes: 0 })
-    }));
-
     await page.route('**/api/v1/settings/pin/status', route => route.fulfill({
         status: 200,
         contentType: 'application/json',

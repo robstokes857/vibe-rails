@@ -71,13 +71,13 @@ public sealed class BoardServiceTests : IDisposable
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task BoardSummariesIdentifyJiraConnectionsThroughRenameReorderAndUnlink(bool dedicated)
+    public async Task BoardSummariesIdentifyOnlyDedicatedJiraConnectionsThroughRenameReorderAndUnlink(bool dedicated)
     {
         var local = await _service.CreateBoardAsync(_project, new("Jira in name only"), Ct);
         var linked = await _service.CreateBoardAsync(_project, new("Connected board"), Ct);
         var foreign = await _service.CreateBoardAsync(_project + "-other", new("Other project"), Ct);
         Assert.False(local.IsJiraBoard);
-        // A disabled connection still makes this a Jira board; imports and names do not.
+        // Dedicated boards remain Jira while paused/expired; legacy connections do not change local board identity.
         await _store.SaveJiraConnectionAsync(new("jira_own", _project, linked.Id,
             "https://example.atlassian.net", "user@example.com", false, BoardJiraAuthStatus.Expired,
             null, "project = TEST", false, null, null, null, null, null, DedicatedBoard: dedicated), Ct);
@@ -86,16 +86,16 @@ public sealed class BoardServiceTests : IDisposable
             null, "project = TEST", true, null, null, null, null, null), Ct);
 
         var boards = (await _service.GetBoardsAsync(_project, Ct)).Boards;
-        Assert.True(boards.Single(board => board.Id == linked.Id).IsJiraBoard);
+        Assert.Equal(dedicated, boards.Single(board => board.Id == linked.Id).IsJiraBoard);
         Assert.False(boards.Single(board => board.Id == local.Id).IsJiraBoard);
         Assert.DoesNotContain(boards, board => board.Id == foreign.Id);
         var json = JsonSerializer.Serialize(boards.Single(board => board.Id == linked.Id), AppJsonSerializerContext.Default.BoardSummaryResponse);
-        Assert.True(JsonDocument.Parse(json).RootElement.GetProperty("isJiraBoard").GetBoolean());
+        Assert.Equal(dedicated, JsonDocument.Parse(json).RootElement.GetProperty("isJiraBoard").GetBoolean());
 
         var renamed = await _service.UpdateBoardAsync(_project, linked.Id, new(Name: "Renamed"), Ct);
-        Assert.True(renamed!.IsJiraBoard);
+        Assert.Equal(dedicated, renamed!.IsJiraBoard);
         var reordered = await _service.ReorderBoardsAsync(_project, boards.Select(board => board.Id).Reverse().ToArray(), Ct);
-        Assert.True(reordered.Boards.Single(board => board.Id == linked.Id).IsJiraBoard);
+        Assert.Equal(dedicated, reordered.Boards.Single(board => board.Id == linked.Id).IsJiraBoard);
         await _store.DeleteJiraConnectionAsync(_project, linked.Id, "jira_own", Ct);
         Assert.All((await _service.GetBoardsAsync(_project, Ct)).Boards, board => Assert.False(board.IsJiraBoard));
     }

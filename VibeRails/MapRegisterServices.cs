@@ -430,11 +430,6 @@ namespace VibeRails
                 })
                 .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
 
-            // Legacy one-shot export (full state.db upload from the Settings modal). Runs beside
-            // the incremental session exporter above; both upload to the fixed viberails.ai export URL.
-            // Progress for the running export, polled by the settings modal. Singleton because a
-            // process-wide gate means only one export can ever be in flight here.
-            serviceCollection.AddSingleton<IDataExportProgress, DataExportProgress>();
             serviceCollection.AddSingleton<Services.Backups.BackupFiles>();
             serviceCollection.AddSingleton<Services.Backups.CompleteBackupService>();
             // A named client, not AddHttpClient<BackupTransport>: the transient typed client would be captured
@@ -442,15 +437,6 @@ namespace VibeRails
             serviceCollection.AddSingleton<Services.Backups.BackupTransport>();
             serviceCollection.AddHttpClient(Services.Backups.BackupTransport.HttpClientName, client =>
                 client.Timeout = TimeSpan.FromMinutes(2))
-                .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
-
-            // Complete state.db export. Large databases are streamed, so allow a deliberate
-            // long-running upload window while still propagating request cancellation.
-            serviceCollection
-                .AddHttpClient<IDataExportService, DataExportService>(client =>
-                {
-                    client.Timeout = TimeSpan.FromMinutes(30);
-                })
                 .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
 
             // Push Notification Service (forwards per-tab "ready/waiting" pushes to VibeRails-Front); sends X-Api-Key.

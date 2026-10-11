@@ -16,7 +16,7 @@ namespace Tests.Services.Mcp;
 /// read-path + tools are registered. We assert on service descriptors rather than resolving
 /// them, so no ONNX model is loaded.
 /// </summary>
-[Collection("ProcessEnvIsolation")] // reads ParserConfigs.GetStatePath (process-global), which DataExportServiceTests rewrites
+[Collection("ProcessEnvIsolation")] // reads ParserConfigs.GetStatePath (process-global)
 public class McpStdioHostTests
 {
     [Fact]

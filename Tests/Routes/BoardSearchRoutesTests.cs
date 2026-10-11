@@ -9,8 +9,10 @@ namespace Tests.Routes;
 
 public sealed partial class BoardRoutesTests
 {
-    [Fact]
-    public async Task LocalCardDetailReportsItsOwningBoardsJiraConnection()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LocalCardDetailReportsOnlyItsOwningBoardsDedicatedJiraConnection(bool dedicated)
     {
         var ct = TestContext.Current.CancellationToken;
         var store = _app.Services.GetRequiredService<IBoardStore>();
@@ -22,12 +24,12 @@ public sealed partial class BoardRoutesTests
         using var local = await GetJsonAsync(path);
         Assert.False(local.RootElement.GetProperty("isJiraBoard").GetBoolean());
 
-        // A saved connection defines a Jira board even while delivery is disabled.
+        // Only a dedicated connection defines a Jira board, including while delivery is disabled.
         await store.SaveJiraConnectionAsync(new("jira_local_detail", elsewhere, card.BoardId,
             "https://example.atlassian.net", "user@example.com", false, BoardJiraAuthStatus.Expired,
-            null, "project = TEST", false, null, null, null, null, null), ct);
+            null, "project = TEST", false, null, null, null, null, null, DedicatedBoard: dedicated), ct);
         using var connected = await GetJsonAsync(path);
-        Assert.True(connected.RootElement.GetProperty("isJiraBoard").GetBoolean());
+        Assert.Equal(dedicated, connected.RootElement.GetProperty("isJiraBoard").GetBoolean());
 
         Assert.True(await store.DeleteJiraConnectionAsync(elsewhere, card.BoardId, "jira_local_detail", ct));
         using var unlinked = await GetJsonAsync(path);

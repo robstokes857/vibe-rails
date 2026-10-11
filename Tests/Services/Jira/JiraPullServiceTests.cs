@@ -68,6 +68,7 @@ public sealed class JiraPullServiceTests : IDisposable
             null, lane.Id, null, null, null,
             ColumnMap: JiraColumnMap.Serialize([new JiraColumnChoice("To Do", lane.Id)])), Ct);
 
+        Assert.False((await _board.GetBoardsAsync(_project, Ct)).Boards.Single(board => board.Id == source.Id).IsJiraBoard);
         var destination = await _store.EnsureDedicatedJiraBoardAsync(_project, "jira_old", Ct);
         Assert.NotEqual(source.Id, destination.BoardId);
         Assert.True(destination.DedicatedBoard);
@@ -85,6 +86,9 @@ public sealed class JiraPullServiceTests : IDisposable
         Assert.Equal(destination.BoardId, (await _store.EnsureDedicatedJiraBoardAsync(_project, "jira_old", Ct)).BoardId);
         Assert.Equal(2, (await _store.GetBoardsAsync(_project, Ct)).Count);
         Assert.Empty(await _store.GetPendingLaneAutomationsAsync(_project, moved.Id, Ct));
+        var boards = (await _board.GetBoardsAsync(_project, Ct)).Boards;
+        Assert.False(boards.Single(board => board.Id == source.Id).IsJiraBoard);
+        Assert.True(boards.Single(board => board.Id == destination.BoardId).IsJiraBoard);
     }
 
     [Fact]

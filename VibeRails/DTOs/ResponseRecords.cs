@@ -1160,30 +1160,6 @@ namespace VibeRails.DTOs
         string? ImageBase64 = null
     );
 
-    // Legacy one-shot export (full state.db upload from the Settings modal). Kept alongside the
-    // incremental SessionDataExport drain — see DataExportRoutes and data-export-modal.js.
-    public record DataExportResponse(
-        bool Success,
-        string Status,
-        string Message,
-        string? Sha256 = null
-    );
-
-    // Polled by the export modal while a data export runs. TotalBytes is 0 when the current stage
-    // has no known total, which the client renders as an indeterminate bar instead of inventing a
-    // percentage. RunId lets the client ignore a snapshot belonging to some other export.
-    public record DataExportProgressResponse(
-        bool Active,
-        int RunId,
-        string Stage,
-        long ProcessedBytes,
-        long TotalBytes,
-        long ElapsedMs,
-        long StageElapsedMs
-    );
-
-    public record StateDatabaseSizeResponse(long Bytes);
-
     public record AppSettingsDto(
         bool RemoteAccess,
         string ApiKey,
@@ -1213,8 +1189,8 @@ namespace VibeRails.DTOs
         // could never be cleared from the UI. Nullable for the same stale-client guard as the
         // proxy fields — a client that omits it must never wipe the key by accident.
         bool? ClearApiKey = null,
-        // Read-only. The export host is fixed in code, so this is always true; the legacy
-        // one-shot export button still hides until an API key is saved.
+        // The one-shot export button is gone. Retained for older clients; responses always
+        // report true.
         bool DataExportConfigured = false,
         // Trailer removal is always on. Retained for older clients; requests are ignored and
         // responses always report true. The legacy stored value is preserved.
@@ -1849,10 +1825,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(MessageResponse))]
     // Push Notification DTOs
     [JsonSerializable(typeof(PushSendRequest))]
-    [JsonSerializable(typeof(DataExportResponse))]
     [JsonSerializable(typeof(InternalLogResponse))]
-    [JsonSerializable(typeof(DataExportProgressResponse))]
-    [JsonSerializable(typeof(StateDatabaseSizeResponse))]
     [JsonSerializable(typeof(UpdateInfo))]
     [JsonSerializable(typeof(AppSettingsDto))]
     [JsonSerializable(typeof(UpdateComputerNameDto))]

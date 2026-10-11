@@ -48,7 +48,7 @@ title rules, uppercase utilities, inline letter spacing or gradient page titles.
 |------|---------|
 | [app.js](app.js) | Central controller, routing, API layer |
 | [js/modules/internal-tools-modal.js](js/modules/internal-tools-modal.js) | Triple-click the brand icon to open Internal tools: About/version, retained upload attempts, and filterable application/Demon logs and feature journal; lazy loaded with bounded pages and no polling |
-| [js/modules/settings-controller.js](js/modules/settings-controller.js) | App settings, split into General / LLMs / KEYS section tabs (panels stay in the DOM so dirty tracking and the save bar keep reading hidden-tab controls; `_initSettingsTabs` owns click + arrow-key switching). Git Guard trailer cleanup and completed-session sharing are always on (no switches). The legacy one-shot **Export Data** button and progress modal remain ([js/modules/data-export-modal.js](js/modules/data-export-modal.js)) |
+| [js/modules/settings-controller.js](js/modules/settings-controller.js) | App settings, split into General / LLMs / KEYS section tabs (panels stay in the DOM so dirty tracking and the save bar keep reading hidden-tab controls; `_initSettingsTabs` owns click + arrow-key switching). Git Guard trailer cleanup and completed-session sharing are always on (no switches). The one-shot Export Data button and its progress modal are gone; smaller complete backups stay. |
 | [js/modules/remote-account-link.js](js/modules/remote-account-link.js) | Navigation account modal: user code, external browser link, countdown, polling and cancellation over the protected local `settings/remote-link` API. |
 | [js/modules/settings-keys.js](js/modules/settings-keys.js) | Lazy KEYS panel: create password-protected RSA-4096 keys, sync public keys to the saved API-key account, download public/encrypted private PEMs, and sign a message/file into public-verification JSON. Independent of the settings save bar. |
 | [js/modules/terminal-multitab.js](js/modules/terminal-multitab.js) | Reusable xterm.js terminal manager with per-tab lifecycle and environment picker |
@@ -209,8 +209,10 @@ fields: **New card** opens the editor, whose Lane selector chooses the destinati
 The settings modal has General, Jira Cloud, Agent context and History tabs (VIBE-103) for local
 boards. Jira boards combine the board settings and Jira controls in **General**, followed by
 Agent context and History, with a Jira logo beside the board name in the modal header.
-The sync status's `isJiraBoard` determines this layout and logo; move existing
-controls without replacing drafts or interrupting the selected section when status arrives.
+The sync status's `isJiraBoard` determines this layout and logo from the current dedicated
+connection, never past links or imported-card badges. Moving a legacy connection to its dedicated
+board refreshes the source settings status while preserving General/Agent context drafts. Move
+existing controls without replacing drafts or interrupting the selected section when status arrives.
 Each tab has a thin button border, with a filled active tab. Jira controls (`board-jira.js`) target
 the explicit board being edited. The Jira Cloud connection status sits at the right of the modal
 header while the Jira controls' tab is selected. Since VIBE-102 it asks for a Jira board link, an API token (with a

@@ -69,6 +69,13 @@ for (const width of [1440, 390]) {
         await expect(page.getByLabel('Sync this board with viberails.ai')).toBeChecked();
         await expect(page.getByRole('button', { name: 'Sync now', exact: true })).toBeVisible();
         await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Agent context', 'History']);
+        // A saved legacy connection and retained imported cards do not override the board type.
+        await page.getByRole('tab', { name: 'Jira Cloud', exact: true }).click();
+        await expect(page.getByLabel('Jira board link')).toHaveValue('https://example.atlassian.net/jira/software/projects/TEST/boards/1');
+        await expect(page.locator('.modal-title img')).toHaveCount(0);
+        await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Agent context', 'History']);
+        await page.getByRole('tab', { name: 'General', exact: true }).click();
+        await expect(page.getByLabel('Sync this board with viberails.ai')).toBeVisible();
     });
 }
 
@@ -193,9 +200,13 @@ test('Connect selects its dedicated Jira board and preserves other settings draf
         if (path.endsWith('/jira')) return route.fulfill({ json: connection });
         if (path.endsWith('/jira/test')) return route.fulfill({ json: { ok: true, account: 'Ada' } });
         if (path.endsWith('/jira/pull')) return route.fulfill({ json: { outcome: 'ok', boardId: 'brd_jira', message: 'Pull complete' } });
+        if (path.endsWith('/sync')) return route.fulfill({ json: {
+            isJiraBoard: path.includes('/brd_jira/'), enabled: false, configured: true
+        } });
         if (path.endsWith('/context')) return route.fulfill({ json: { revision: 1, context: { defaultMessage: '', typeOverrides: [] } } });
         if (path.endsWith('/boards')) return route.fulfill({ json: { boards: [
-            { id: 'brd_main', name: 'Main', position: 0 }, ...(connected ? [{ id: 'brd_jira', name: 'Jira · TEST', position: 1 }] : [])
+            { id: 'brd_main', name: 'Main', position: 0, isJiraBoard: false },
+            ...(connected ? [{ id: 'brd_jira', name: 'Jira · TEST', position: 1, isJiraBoard: true }] : [])
         ] } });
         if (path.endsWith('/columns')) return route.fulfill({ json: { columns: [] } });
         return route.fulfill({ json: { cards: [] } });
@@ -210,12 +221,17 @@ test('Connect selects its dedicated Jira board and preserves other settings draf
     await expect(panel.locator('[data-jira-board]')).toHaveText('Jira · TEST');
     await expect(page.locator('[data-board-select]')).toHaveValue('brd_jira');
     await expect(panel.locator('[data-jira-report]')).toHaveText('Connected as Ada.');
+    await expect.poll(() => calls.filter(call => call === 'GET /api/v1/board/boards/brd_main/sync').length).toBe(2);
+    await expect(page.locator('.modal-title img')).toHaveCount(0);
+    await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Agent context', 'History']);
+    await expect(page.locator('.board-picker-control .ts-control img')).toHaveAttribute('src', 'assets/img/jira.svg');
     await panel.getByRole('button', { name: 'Pull now' }).click();
     await expect(panel.locator('[data-jira-report]')).toHaveText('Pull complete');
     expect(calls).toContain('POST /api/v1/board/boards/brd_jira/jira/test');
     expect(calls).toContain('POST /api/v1/board/boards/brd_jira/jira/pull');
     await page.getByRole('tab', { name: 'General', exact: true }).click();
     await expect(page.locator('#board-board-name')).toHaveValue('Keep this name draft');
+    await expect(page.getByLabel('Sync this board with viberails.ai')).toBeVisible();
 });
 
 for (const width of [1440, 390]) {

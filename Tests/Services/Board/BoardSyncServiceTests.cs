@@ -89,14 +89,14 @@ public sealed partial class BoardSyncServiceTests : IDisposable
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task JiraBoardsCannotEnableOrRunHostedSync(bool dedicated)
+    [InlineData(true, BoardJiraAuthStatus.Saved)]
+    [InlineData(false, BoardJiraAuthStatus.Expired)]
+    public async Task DedicatedJiraBoardsCannotEnableOrRunHostedSync(bool enabled, string authStatus)
     {
         var card = await Card();
         await store.SaveJiraConnectionAsync(new("jira_test", root, card.BoardId,
-            "https://example.atlassian.net", "user@example.com", true, BoardJiraAuthStatus.Saved,
-            null, "project = TEST", true, null, null, null, null, null, DedicatedBoard: dedicated), Ct);
+            "https://example.atlassian.net", "user@example.com", true, authStatus,
+            null, "project = TEST", enabled, null, null, null, null, null, DedicatedBoard: true), Ct);
 
         await Assert.ThrowsAsync<BoardValidationException>(() => service.SetPublishedAsync(root, card.BoardId, true, Ct));
         await Assert.ThrowsAsync<BoardValidationException>(() => service.SyncNowAsync(root, card.BoardId, Ct));
@@ -108,6 +108,35 @@ public sealed partial class BoardSyncServiceTests : IDisposable
         Assert.False((await store.GetBoardAsync(root, card.BoardId, Ct))!.SyncEnabled);
         Assert.Null(await store.GetSyncLinkAsync(root, card.BoardId, Ct));
         Assert.Equal(0, client.Calls);
+    }
+
+    [Fact]
+    public async Task LegacyJiraConnectionKeepsSourceLocalAndSyncingBeforeAndAfterSeparation()
+    {
+        var card = await Card();
+        await store.SaveJiraConnectionAsync(new("jira_legacy", root, card.BoardId,
+            "https://example.atlassian.net", "user@example.com", true, BoardJiraAuthStatus.Saved,
+            null, "project = TEST", true, null, null, null, null, null), Ct);
+        Assert.False((await service.GetStatusAsync(root, card.BoardId, Ct))!.IsJiraBoard);
+
+        var published = (await service.SetPublishedAsync(root, card.BoardId, true, Ct))!;
+        Assert.True(published.Enabled);
+        Assert.True(published.Published);
+        Assert.True(published.ActivityEnabled);
+        await store.UpdateCardAsync(root, card.Id, new(Title: "Manual sync with legacy connection"), Ct);
+        Assert.Null((await service.SyncNowAsync(root, card.BoardId, Ct))!.LastError);
+        Assert.Equal(2, client.Entries.Count);
+        await store.UpdateCardAsync(root, card.Id, new(Title: "Automatic sync with legacy connection"), Ct);
+        await service.SyncDueAsync(Ct);
+        Assert.Equal(3, client.Entries.Count);
+
+        var dedicated = await store.EnsureDedicatedJiraBoardAsync(root, "jira_legacy", Ct);
+        Assert.NotEqual(card.BoardId, dedicated.BoardId);
+        Assert.True((await service.GetStatusAsync(root, card.BoardId, Ct))!.ActivityEnabled);
+        Assert.True((await service.GetStatusAsync(root, dedicated.BoardId, Ct))!.IsJiraBoard);
+        Assert.False((await service.GetStatusAsync(root, dedicated.BoardId, Ct))!.ActivityEnabled);
+        await Assert.ThrowsAsync<BoardValidationException>(() => service.SetPublishedAsync(root, dedicated.BoardId, true, Ct));
+        Assert.Equal(card.BoardId, (await store.FindCardAsync(root, card.Id, Ct))!.BoardId);
     }
 
     [Fact]

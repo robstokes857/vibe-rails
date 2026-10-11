@@ -157,34 +157,6 @@ public sealed class AppJsonSerializerContextTests
     }
 
     [Fact]
-    public void DataExportResponse_UsesCamelCaseAndSha256()
-    {
-        const string sha256 =
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-        var json = JsonSerializer.Serialize(
-            new DataExportResponse(
-                Success: true,
-                Status: "ok",
-                Message: "Data exported successfully.",
-                Sha256: sha256),
-            AppJsonSerializerContext.Default.DataExportResponse);
-
-        Assert.Equal(
-            """{"success":true,"status":"ok","message":"Data exported successfully.","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}""",
-            json);
-    }
-
-    [Fact]
-    public void StateDatabaseSizeResponse_UsesBytesOnTheWire()
-    {
-        var json = JsonSerializer.Serialize(
-            new StateDatabaseSizeResponse(12_345_678),
-            AppJsonSerializerContext.Default.StateDatabaseSizeResponse);
-
-        Assert.Equal("""{"bytes":12345678}""", json);
-    }
-
-    [Fact]
     public void LlmPickerPreferences_UseTheAotContextAndStableWireNames()
     {
         var response = new LlmPickerPreferencesResponse([

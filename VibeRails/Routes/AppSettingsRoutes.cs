@@ -11,21 +11,6 @@ public static class AppSettingsRoutes
 {
     public static void Map(WebApplication app)
     {
-        // Legacy one-shot export support: the Settings modal shows the state.db size next to the
-        // Export Data button. Completed-session sharing itself is always on.
-        app.MapGet("/api/v1/settings/db-size", () =>
-        {
-            // ParserConfigs is the source used by DataExportService and respects a custom
-            // install-directory configuration. The fallback also keeps this route useful in
-            // small hosts/tests that map routes before FileService initializes ParserConfigs.
-            var configuredPath = ParserConfigs.GetStatePath();
-            var path = string.IsNullOrWhiteSpace(configuredPath)
-                ? PathConstants.GetStateFilePath()
-                : configuredPath;
-
-            return Results.Ok(new StateDatabaseSizeResponse(SafeFileSize(path)));
-        }).WithName("GetDbSize");
-
         // GET /api/v1/settings - Read current app settings
         app.MapGet("/api/v1/settings", () =>
         {
@@ -207,8 +192,8 @@ public static class AppSettingsRoutes
             ComputerNameFormatter.Machine(),
             // Response-only; the request flag is never echoed back.
             ClearApiKey: null,
-            // The export host is fixed in code. A saved API key is the only remaining gate
-            // for the legacy one-shot export button.
+            // The one-shot export button is gone. Kept on the wire so older clients still
+            // deserialize; responses always report true.
             DataExportConfigured: true,
             RemoveCoAuthorTrailers: true,
             RouteThroughVibeRailsAi: settings.RouteThroughVibeRailsAi,
@@ -231,20 +216,5 @@ public static class AppSettingsRoutes
         bool? requestedValue,
         string? finalApiKey) =>
         !string.IsNullOrWhiteSpace(finalApiKey) && (requestedValue ?? storedValue);
-
-    private static long SafeFileSize(string path)
-    {
-        try
-        {
-            return File.Exists(path) ? new FileInfo(path).Length : 0;
-        }
-        catch
-        {
-            // This value is display-only. A transient file-system race or permission problem
-            // should not break Settings or prevent the export route from returning its own,
-            // more specific result if the user still chooses to export.
-            return 0;
-        }
-    }
 
 }

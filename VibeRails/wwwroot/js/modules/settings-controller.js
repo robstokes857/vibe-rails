@@ -1,4 +1,3 @@
-import { showDataExportModal } from './data-export-modal.js';
 import { confirmDialog } from './utils.js';
 import { SettingsKeysPanel } from './settings-keys.js';
 import { getToastTheme, setToastTheme } from './toast-service.js';
@@ -13,9 +12,6 @@ export class SettingsController {
         this._settingsSnapshot = '';
         this._removeNavigationGuard = null;
         this._beforeUnloadHandler = null;
-        this._dataExportInProgress = false;
-        this._dataExportConfigured = false;
-        this._dataExportSizeBytes = null;
         this._settingsRoot = null;
         this._keysPanel = null;
         this._linkedKeyVersion = 0;
@@ -49,17 +45,14 @@ export class SettingsController {
             claudeTokenSaverEnabled: true,
             codexTokenSaverEnabled: true,
             openCodeTokenSaverEnabled: true,
-            dataExportConfigured: false,
             machineName: ''
         };
-        const dataExportSizePromise = this._loadDataExportSize();
         try {
             settings = await this.app.apiCall('/api/v1/settings', 'GET');
             this.app.setAppSettings(settings);
         } catch (error) {
             console.error('Failed to fetch settings:', error);
         }
-        await dataExportSizePromise;
         content.innerHTML = '';
         const fragment = this.app.cloneTemplate('settings-template');
         const root = fragment.querySelector('[data-view="settings"]');
@@ -94,7 +87,6 @@ export class SettingsController {
 
             const remoteAccessToggle = root.querySelector('#setting-remote-access');
             const apiKeyInput = root.querySelector('#setting-api-key');
-            const exportDataButton = root.querySelector('#settings-export-data-button');
             const performanceModeToggle = root.querySelector('#setting-performance-mode');
             const useVsCodeThemeRow = root.querySelector('#setting-use-vscode-theme-row');
             const useVsCodeThemeToggle = root.querySelector('#setting-use-vscode-theme');
@@ -129,11 +121,6 @@ export class SettingsController {
                 apiKeyInput.value = settings.apiKey || '';
                 apiKeyInput.dataset.originalValue = settings.apiKey || '';
             }
-            this._dataExportConfigured = settings.dataExportConfigured === true;
-            if (exportDataButton) {
-                exportDataButton.addEventListener('click', () => this._exportData(root));
-            }
-            this._updateDataExportAvailability(root);
             if (performanceModeToggle) {
                 performanceModeToggle.checked = this.performanceMode?.isEnabled?.() === true;
                 performanceModeToggle.addEventListener('change', () => {
@@ -325,7 +312,6 @@ export class SettingsController {
         this._settingsDirty = false;
         this._settingsSaving = false;
         this._settingsSnapshot = '';
-        this._dataExportSizeBytes = null;
         this._settingsRoot = null;
     }
 
@@ -437,7 +423,6 @@ export class SettingsController {
     _updateDirtyState(root) {
         this._settingsDirty = this._captureSettingsSnapshot(root) !== this._settingsSnapshot;
         this._updateSaveBar(root);
-        this._updateDataExportAvailability(root);
     }
 
     _markSettingsClean(root) {
@@ -525,7 +510,6 @@ export class SettingsController {
             apiKeyInput.value = settings.apiKey || '';
             apiKeyInput.dataset.originalValue = settings.apiKey || '';
         }
-        this._dataExportConfigured = settings.dataExportConfigured === true;
         if (useVsCodeThemeToggle) useVsCodeThemeToggle.checked = settings.useVsCodeTheme === true;
         if (createVibeStoryTrackingToggle) createVibeStoryTrackingToggle.checked = settings.createVibeStoryTracking !== false;
         if (createVibeStoryTrackingCustomEnvsToggle) createVibeStoryTrackingCustomEnvsToggle.checked = settings.createVibeStoryTrackingCustomEnvs === true;
@@ -553,120 +537,6 @@ export class SettingsController {
         if (codexTokenSaverToggle) codexTokenSaverToggle.checked = settings.codexTokenSaverEnabled !== false;
         if (opencodeTokenSaverToggle) opencodeTokenSaverToggle.checked = settings.openCodeTokenSaverEnabled !== false;
         if (grokTokenSaverToggle) grokTokenSaverToggle.checked = settings.grokTokenSaverEnabled !== false;
-
-        this._updateDataExportAvailability(root);
-    }
-
-    _updateDataExportAvailability(root) {
-        const wrapper = root.querySelector('#settings-export-data-wrapper');
-        const button = root.querySelector('#settings-export-data-button');
-        const apiKeyInput = root.querySelector('#setting-api-key');
-        const savedValue = apiKeyInput?.dataset.originalValue || '';
-        // Also requires a configured export URL: the shipped placeholder is rejected server-side,
-        // so without this the button would be visible and enabled for every user with a key and
-        // could only ever return "Data export is not configured."
-        const available = this._dataExportConfigured === true
-            && savedValue.trim().length > 0
-            && apiKeyInput?.value === savedValue;
-
-        if (wrapper) {
-            wrapper.hidden = !available;
-        }
-        if (button) {
-            button.disabled = !available || this._dataExportInProgress;
-            button.textContent = this._getDataExportButtonText();
-        }
-    }
-
-    async _loadDataExportSize() {
-        this._dataExportSizeBytes = null;
-        try {
-            const response = await this.app.apiCall(
-                '/api/v1/settings/db-size',
-                'GET',
-                null,
-                { showLoading: false }
-            );
-            const bytes = Number(response?.bytes);
-            if (Number.isFinite(bytes) && bytes >= 0) {
-                this._dataExportSizeBytes = bytes;
-            }
-        } catch (error) {
-            // Size is supplemental display information. Keep export available if an older
-            // backend or a transient file-system problem cannot provide it.
-            console.error('Failed to fetch state database size:', error);
-        }
-    }
-
-    _getDataExportButtonText() {
-        const action = this._dataExportInProgress ? 'Exporting…' : 'Export Data';
-        const size = this._formatBytes(this._dataExportSizeBytes);
-        return size ? `${action} (${size})` : action;
-    }
-
-    _formatBytes(bytes) {
-        if (!Number.isFinite(bytes) || bytes < 0) {
-            return '';
-        }
-
-        const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-        let value = bytes;
-        let unitIndex = 0;
-        while (value >= 1024 && unitIndex < units.length - 1) {
-            value /= 1024;
-            unitIndex++;
-        }
-
-        const decimals = value >= 100 || unitIndex === 0
-            ? 0
-            : value >= 10
-                ? 1
-                : 2;
-        return `${value.toFixed(decimals)} ${units[unitIndex]}`;
-    }
-
-    async _exportData(root) {
-        if (this._dataExportInProgress) {
-            return;
-        }
-
-        const apiKeyInput = root.querySelector('#setting-api-key');
-        const savedValue = apiKeyInput?.dataset.originalValue || '';
-        if (this._dataExportConfigured !== true
-            || savedValue.trim().length === 0
-            || apiKeyInput?.value !== savedValue) {
-            this._updateDataExportAvailability(root);
-            return;
-        }
-
-        this._dataExportInProgress = true;
-        this._updateDataExportAvailability(root);
-        try {
-            // Resolves when the export finishes, not when the modal is dismissed — the button
-            // comes back while the result stays on screen for the user to read.
-            const result = await showDataExportModal(this.app, {
-                sizeBytes: this._dataExportSizeBytes
-            });
-            if (result) {
-                this.app.showToast(
-                    'Data Export',
-                    result?.message || (result?.success ? 'Data exported successfully.' : 'Failed to export data.'),
-                    result?.success ? 'success' : 'error'
-                );
-            }
-        } catch (error) {
-            this.app.showToast(
-                'Data Export',
-                error?.message || 'Failed to export data.',
-                'error'
-            );
-        } finally {
-            this._dataExportInProgress = false;
-            this._updateDataExportAvailability(root);
-            if (this._settingsRoot && this._settingsRoot !== root) {
-                this._updateDataExportAvailability(this._settingsRoot);
-            }
-        }
     }
 
     _getCodexLlmProxyMode(root) {

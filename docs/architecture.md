@@ -534,12 +534,19 @@ cards and existing card identities/discussion/files/session/commit links survive
 have no copied Automations. `board/30` adds nullable `DedicatedBoard` on the connection with no
 startup backfill; older connection writers preserve it. Connect/pull returns the destination board
 ID, and the UI selects it. Save, connection tests, unlink and writing pulls share the cross-process
-Jira lock. Board settings show a Jira logo beside the board name and a fixed 32-dot saved-token
+Jira lock. Board branding and hosted-sync exclusion require the current connection's
+`DedicatedBoard=true`; a legacy connection, board name or retained issue link alone does not
+turn a Vibe board into a Jira board. Paused/expired dedicated connections still count as Jira,
+and unlink makes the retained board local again. When a connection moves, the open source
+settings refreshes its sync status while preserving other drafts. Board settings show a Jira
+logo beside the board name and a fixed 32-dot saved-token
 placeholder. **Unlink Jira** calls the root/project-scoped `DELETE …/boards/{boardId}/jira`,
 forgets the local token and deletes only the connection through `IBoardStore`. The board,
 imported cards, notes and historical issue links remain. The dialog restores local-board settings
-without replacing unrelated drafts. Jira is still the source of imported story fields; notes
-remain local. The explicit `add_jira_comment` MCP tool posts a completion summary and
+without replacing unrelated drafts. Jira is the source of mapped story fields while connected.
+New linked-card comments post to Jira by default; `syncToJira=false` keeps an internal note,
+and new local session attachments queue public replay links to the issue. The explicit
+`add_jira_comment` MCP tool posts a completion summary and
 optional public replay links to the card's connected Jira issue, then saves an attributed
 Board receipt. Both transports use the saved connection and the shared Jira client;
 the tool is outside the local Board auto-grants. See the [Jira comment contract](../VibeRails/Services/Jira/Comments.md).
@@ -555,7 +562,9 @@ status id names its Jira column, and `JiraColumnMap` puts the column in a lane (
 whole-word match, first column to first lane, last column to Done, otherwise the "Jira" overflow
 lane), with per-column picks under Advanced. Each issue link records where the last pull placed
 it (`BoardJiraLinks.Mapping`), so a changed pick or points field re-applies unchanged issues,
-while a card dragged locally stays put until the issue or the mapping changes. Old Done issues are left out by default
+while a card dragged between lanes of that Jira board stays put until the issue or mapping changes.
+A manual move to another board retains the issue link; a later pull can update the card and
+bring it back to its connection's board. Old Done issues are left out by default
 (`statusCategory != Done OR updated >= -30d`). The board filter's JQL is still written to
 `BoardJiraConnections.Jql`, so an older VibeRails keeps pulling the same issues. Without the
 configuration (a 403), lanes fall back to status-name matching and story points stay off unless

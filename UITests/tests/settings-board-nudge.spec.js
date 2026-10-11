@@ -21,7 +21,6 @@ for (const baseEnabled of [false, true]) {
                 const payloads = {
                     '/api/v1/context': { isInGit: false, rootPath: 'C:/fixture', launchDirectory: 'C:/fixture' },
                     '/api/v1/settings/pin/status': { isSet: false },
-                    '/api/v1/settings/db-size': { bytes: 0 },
                     '/api/v1/settings/remote-link': { status: 'idle' },
                     '/api/v1/environments': { environments: [] },
                     '/api/v1/llm-picker/preferences': { items: [] }

@@ -563,6 +563,12 @@ moves the connection. IDs, comments, attachments, sessions and commits survive; 
 Repeated calls use the existing dedicated board. Old writers preserve the new column. Card reads
 project the Jira issue key from retained `BoardJiraLinks`; no card-origin backfill is required.
 
+Board identity follows the current connection's `DedicatedBoard=true`, not connection history,
+board names or retained issue links. Legacy non-dedicated connections leave their source Vibe
+board local and eligible for hosted sync. Pausing pulls or expired authentication does not change
+a dedicated board's identity; unlinking makes the retained board local again. Keep list/detail,
+foreign-card metadata and sync/settings projections consistent with this rule.
+
 Jira pull reports keep `skipped` as the total of unchanged issues, previously deleted cards and
 already-linked issues. The message breaks down those reasons and reports failures as `failed`.
 Deleted imports stay deleted on dry runs and writing pulls; never label them as unchanged or

@@ -113,7 +113,8 @@ public sealed partial class BoardService(
     {
         var columns = await store.GetAllColumnsAsync(projectPath, cancellationToken);
         var counts = await store.CountCardsByBoardAsync(projectPath, cancellationToken);
-        var jiraBoardIds = (await store.GetJiraConnectionsAsync(cancellationToken)).Select(connection => connection.BoardId).ToHashSet(StringComparer.Ordinal);
+        var jiraBoardIds = (await store.GetJiraConnectionsAsync(cancellationToken))
+            .Where(connection => connection.DedicatedBoard).Select(connection => connection.BoardId).ToHashSet(StringComparer.Ordinal);
         return new BoardListResponse(boards.Select(board => ToDto(board, columns, counts) with { IsJiraBoard = jiraBoardIds.Contains(board.Id) }).ToList());
     }
 
@@ -147,7 +148,7 @@ public sealed partial class BoardService(
             return null;
         var columns = await store.GetColumnsAsync(projectPath, cancellationToken, board.Id);
         var counts = await store.CountCardsByBoardAsync(projectPath, cancellationToken);
-        var isJiraBoard = await store.GetJiraConnectionAsync(projectPath, board.Id, cancellationToken) is not null;
+        var isJiraBoard = await store.GetJiraConnectionAsync(projectPath, board.Id, cancellationToken) is { DedicatedBoard: true };
         return ToDto(board, columns, counts) with { IsJiraBoard = isJiraBoard };
     }
 

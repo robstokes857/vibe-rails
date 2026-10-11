@@ -2591,7 +2591,10 @@ export class BoardController {
                 }
                 // Keep the modal and its other sections' unsaved drafts. Only the Jira panel
                 // follows the connection; General and Agent context still edit the opened board.
-                if (action === 'unlink' && destination === board.id) reloadSync();
+                // A moved connection no longer determines the opened board's branding or sync
+                // controls. Refresh that board's status without replacing its settings drafts.
+                if ((action === 'unlink' && destination === board.id)
+                    || (destination && destination !== board.id)) reloadSync();
                 if (action === 'pull' || action === 'unlink' || destination !== board.id) void this.refresh().then(() => {
                     if (editor.isConnected && destination) {
                         const label = editor.querySelector('[data-jira-board]');

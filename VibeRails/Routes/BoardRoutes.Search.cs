@@ -30,7 +30,7 @@ public static partial class BoardRoutes
                 if (detail is null) return NotFound("Card", card);
                 var owner = await board.FindBoardAsync(target.ProjectPath, detail.BoardId, ct);
                 var columns = await board.GetColumnsAsync(target.ProjectPath, ct, detail.BoardId);
-                var isJiraBoard = await store.GetJiraConnectionAsync(target.ProjectPath, detail.BoardId, ct) is not null;
+                var isJiraBoard = await store.GetJiraConnectionAsync(target.ProjectPath, detail.BoardId, ct) is { DedicatedBoard: true };
                 return Results.Ok(new LocalBoardCardResponse(ForCurrentProject(detail)!, target.ProjectPath,
                     owner?.Name ?? detail.BoardId, columns.Columns, IsCurrentProject(target.ProjectPath), isJiraBoard));
             }, ct)).WithName("GetLocalBoardCard");

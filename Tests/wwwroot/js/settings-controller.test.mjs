@@ -50,8 +50,36 @@ test('settings page always shares completed sessions and has no sharing switch',
     assert.doesNotMatch(html, /Share session data/);
     assert.doesNotMatch(html, /id="settings-session-sharing-wrapper"/);
     assert.match(source, /dataExportOptIn:\s*true/);
-    // The legacy one-shot export (Export Data button + modal) stays.
-    assert.match(html, /id="settings-export-data-button"/);
+    assert.doesNotMatch(html, /id="settings-export-data-button"|Export Data/);
+    assert.doesNotMatch(source, /showDataExportModal|settings-export-data|\/settings\/db-size|_updateDataExportAvailability/);
+});
+
+test('dirty-state updates no longer call the removed export-availability method', () => {
+    globalThis.window = { VibeRailsPerformance: null };
+    const controller = new SettingsController({ setAppSettings() {} });
+    const key = { value: '', dataset: { originalValue: '' } };
+    const computerName = { value: 'Saved machine' };
+    const saveState = { textContent: '', classList: { toggle() {} } };
+    const saveButton = { disabled: true };
+    const root = {
+        querySelector(selector) {
+            if (selector === '#setting-api-key') return key;
+            if (selector === '#setting-computer-name') return computerName;
+            if (selector === '#settings-save-state') return saveState;
+            if (selector === '#settings-save-button') return saveButton;
+            return null;
+        }
+    };
+
+    controller._settingsRoot = root;
+    controller._settingsSnapshot = controller._captureSettingsSnapshot(root);
+    computerName.value = 'Unsaved machine';
+    assert.doesNotThrow(() => controller._updateDirtyState(root));
+    assert.equal(controller._settingsDirty, true);
+
+    assert.doesNotThrow(() => controller._applyLinkedApiKey(root, '••••••••new1'));
+    assert.equal(key.value, '••••••••new1');
+    assert.equal(controller._settingsDirty, true);
 });
 
 test('saving settings omits retired options and preserves following arguments', async () => {

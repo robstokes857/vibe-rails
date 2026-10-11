@@ -32,21 +32,7 @@ async function installSettingsApi(
 ) {
     let settings = buildSettings(initialApiKey, dataExportConfigured);
     const writes = [];
-    // The legacy one-shot export is still mapped. Saving ordinary settings must never trigger it.
-    const legacyExportRequests = [];
 
-    await page.route('**/api/v1/settings/export-data', async route => {
-        legacyExportRequests.push(route.request().url());
-        await route.fulfill({ status: 410, body: '' });
-    });
-    await page.route('**/api/v1/settings/db-size', async route => {
-        // Still called by the Settings page for the legacy Export Data button label.
-        await route.fulfill({
-            status: 200,
-            contentType: 'application/json',
-            body: JSON.stringify({ bytes: 0 })
-        });
-    });
     await page.route('**/api/v1/settings', async route => {
         const request = route.request();
         if (request.method() === 'POST') {
@@ -81,7 +67,7 @@ async function installSettingsApi(
         });
     });
 
-    return { writes, legacyExportRequests };
+    return { writes };
 }
 
 async function openSettings(page) {
@@ -111,7 +97,9 @@ test('settings has no session-sharing switch and saving still shares', async ({ 
 
     await expect(ui.root.locator('#setting-data-export-opt-in')).toHaveCount(0);
     await expect(ui.root.locator('#settings-session-sharing-wrapper')).toHaveCount(0);
+    await expect(ui.root.locator('#settings-export-data-button')).toHaveCount(0);
     await expect(ui.root).not.toContainText('Share session data');
+    await expect(ui.root).not.toContainText('Export Data');
 
     await ui.apiKey.fill('new-api-key');
     await expect(ui.saveButton).toBeEnabled();
@@ -121,7 +109,6 @@ test('settings has no session-sharing switch and saving still shares', async ({ 
     expect(api.writes[0].apiKey).toBe('new-api-key');
     expect(api.writes[0].dataExportOptIn).toBe(true);
     await expect(ui.apiKey).toHaveValue(MASKED_API_KEY);
-    expect(api.legacyExportRequests).toEqual([]);
     await expect(page.locator('#data-export-modal')).toHaveCount(0);
 });
 

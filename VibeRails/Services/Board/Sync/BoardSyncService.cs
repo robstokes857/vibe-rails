@@ -791,7 +791,7 @@ public sealed class BoardSyncService(
     }
 
     private async Task<bool> IsJiraBoardAsync(string projectPath, string boardId, CancellationToken cancellationToken) =>
-        await store.GetJiraConnectionAsync(projectPath, boardId, cancellationToken) is not null;
+        await store.GetJiraConnectionAsync(projectPath, boardId, cancellationToken) is { DedicatedBoard: true };
 
     private static string Trim(string value) => value.Length <= MaxErrorLength ? value : value[..MaxErrorLength];
 
