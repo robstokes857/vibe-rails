@@ -148,7 +148,8 @@ When a managed LLM launch has no
 nonblank initial message or continuation summary, `CommandService` reads the shared settings file
 and uses optional story-tracking guidance as its default prompt only if that launch's switch is on.
 Explicit tasks, Board, Automation and continuation prompts pass through unchanged. The default guidance
-asks the agent to wait for a user task; story creation stays discretionary, and an existing story
+tells the agent to reply only that it is ready to help (no tools, work, or invented request) and
+then wait for a user task; story creation stays discretionary, and an existing story
 should be reused. This uses the normal provider prompt argv, never TUI input or rewritten provider
 config. Disabling it affects new sessions. It does not set `AuthorizeBoardTools`, grant tool
 permissions, remove explicit Board instructions, or apply to plain shell sessions.

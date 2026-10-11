@@ -59,8 +59,10 @@ reads the shared settings file and uses optional Board tracking guidance as the 
 Each launch uses only its corresponding switch; explicit task, Board, Automation and continuation
 prompts pass through unchanged. Existing task/summary precedence and provider argv conventions
 are preserved. The guidance asks agents to use their discretion, reuse an existing story and
-record progress/results and session history when useful. A guidance-only launch waits for a user
-task. Plain shells are unaffected; toggling applies to new sessions and does not grant Board tools
+record progress/results and session history when useful. A guidance-only launch replies only that
+the agent is ready to help, without tools, work, or an invented request, then waits for a user task.
+The prompt names that exact reply because a bare "wait" left agents to fill the forced first turn;
+on 2026-10-11 a Claude session wrote a Board request in the user's voice. Plain shells are unaffected; toggling applies to new sessions and does not grant Board tools
 or change the CLI's approval policy. Tracking uses the existing Board MCP tools and storage.
 Focused browser save/reload coverage: from `UITests`, run
 `npx playwright test --config playwright.board-nudge.config.js` (static frontend with mocked APIs).

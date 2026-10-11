@@ -69,7 +69,9 @@ public partial class CommandServiceTests
         Assert.Contains("Reuse a story already tracking this work", prompt);
         Assert.Contains("add_board_comment", prompt);
         Assert.Contains("attach_board_session", prompt);
-        Assert.Contains("wait for the user's request", prompt);
+        Assert.Contains("This message is not a task.", prompt);
+        Assert.Contains("tell the user you're ready to help", prompt);
+        Assert.Contains("write a request on their behalf", prompt);
         Assert.Contains("Creating a story is optional and at your discretion.", prepared.LaunchCommand);
         Assert.DoesNotContain(prepared.Argv!, arg => arg.Contains(".approval_mode=") || arg.StartsWith("--allowedTools")
             || arg.StartsWith("--allow-tool") || arg.StartsWith("--allow="));
