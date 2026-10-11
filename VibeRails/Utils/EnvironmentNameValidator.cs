@@ -16,14 +16,14 @@ public static partial class EnvironmentNameValidator
     // Anchored: 1..MaxLength chars. First char must be alphanumeric — blocks a
     // leading '-' (which looks like a CLI flag if the name is ever emitted
     // unquoted) and a leading space. Remaining chars: letters/digits/space/
-    // underscore/hyphen — no dot (blocks "."/".."), no separator (/ \), no colon
+    // underscore/hyphen/period — no leading dot, no separator (/ \), no colon
     // (drive letters / ADS), no quote / wildcard / control char.
-    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9_\- ]{0,63}$")]
+    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9_\-. ]{0,63}$")]
     private static partial Regex SafeNamePattern();
 
     // Windows reserved device names (case-insensitive): Directory.CreateDirectory
     // resolves these to a device rather than a folder, so envs/{name} would break.
-    // The charset above forbids the trailing-extension forms ("CON.txt") by banning '.'.
+    // Extensions do not make a device name safe ("CON.txt" still resolves to CON).
     private static readonly HashSet<string> ReservedDeviceNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "CON", "PRN", "AUX", "NUL",
@@ -53,10 +53,15 @@ public static partial class EnvironmentNameValidator
 
         if (!SafeNamePattern().IsMatch(trimmed))
         {
-            return "Name must start with a letter or digit and may contain only letters, digits, spaces, underscores, and hyphens.";
+            return "Name must start with a letter or digit and may contain only letters, digits, spaces, underscores, hyphens, and periods.";
         }
 
-        if (ReservedDeviceNames.Contains(trimmed))
+        // Windows strips a trailing period, which would alias a different saved setup.
+        if (trimmed.EndsWith('.'))
+            return "Name must not end with a period.";
+
+        var deviceName = trimmed.Split('.')[0].TrimEnd();
+        if (ReservedDeviceNames.Contains(deviceName))
         {
             return $"'{trimmed}' is a reserved device name on Windows. Choose a different name.";
         }

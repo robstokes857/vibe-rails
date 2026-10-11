@@ -1591,11 +1591,11 @@ test('The Agents page lists saved setups with a message, one card per Automation
 
     // The message-less setup is a Quick Launch and the check-only Job is an Automation: neither is here.
     assert.doesNotMatch(html, /Fast Opus|VCA · Done/);
-    // A setup with no Automation behind it still runs: straight into a terminal tab, no switch.
+    // A setup with no Automation behind it runs in a terminal tab and can also be disabled.
     assert.match(html, /<h3>code review<\/h3>/);
     assert.match(html, /data-job-action="run-environment" data-env-id="1"/);
     assert.match(html, /data-job-action="edit-environment" data-env-id="1"/);
-    assert.doesNotMatch(html, /data-job-action="toggle"[^>]*data-env-id="1"/);
+    assert.match(html, /aria-checked="true"[^>]*data-job-action="toggle-environment" data-env-id="1"/);
     // Two Automations on one setup are two cards, each with its own name and switch.
     assert.match(html, /<h3>Nightly<\/h3>/);
     assert.match(html, /<h3>Weekly<\/h3>/);
@@ -1618,6 +1618,56 @@ test('The Agents page lists saved setups with a message, one card per Automation
     assert.match(list.innerHTML, /<h3>VCA · Done<\/h3>/);
     assert.match(list.innerHTML, /job-card-automation/);
     assert.doesNotMatch(list.innerHTML, /Nightly|code review|Old helper|data-shared-agents/);
+});
+
+test('Disabling a standalone Agent persists an unscheduled Job and subsequent toggles reuse it', async () => {
+    const app = createApp();
+    app.data.configs.rootPath = '/repo';
+    const controller = new JobController(app);
+    controller.environments = [{ id: 42, name: 'Commit', cli: 'codex', customPrompt: 'Commit the changes.', projectPath: '/repo' }];
+    controller.renderJobs = () => {};
+    controller.refreshAll = async () => { throw new Error('Refresh failed'); };
+    app.showError = () => {};
+    app.apiCall = async (url, method, body) => {
+        app.calls.push({ url, method, body });
+        return { id: 7, ...body };
+    };
+
+    await controller.toggleStandaloneAgent(42, null);
+    assert.equal(app.calls.length, 1);
+    assert.deepEqual(app.calls[0], {
+        url: '/api/v1/jobs', method: 'POST', body: {
+            name: 'Commit', projectPath: '/repo', llm: 1, environmentId: 42, prompt: 'Commit the changes.',
+            timeoutMinutes: null, enabled: false, launchMinimized: false,
+            triggers: [], actions: [{ kind: 0, environmentId: 42 }]
+        }
+    });
+    assert.equal(controller.jobs[0].enabled, false, 'a failed refresh must retain the successful write');
+    controller.refreshAll = async () => {};
+    await controller.toggleStandaloneAgent(42, null);
+    assert.equal(app.calls.length, 2);
+    assert.equal(app.calls[1].url, '/api/v1/jobs/7');
+    assert.equal(app.calls[1].method, 'PUT');
+    assert.equal(app.calls[1].body.enabled, true);
+});
+
+test('A failed standalone Agent toggle leaves no Job and can be retried', async () => {
+    const app = createApp();
+    app.data.configs.rootPath = '/repo';
+    const errors = [];
+    app.showError = message => errors.push(message);
+    const controller = new JobController(app);
+    controller.environments = [{ id: 42, name: 'Commit', cli: 'codex', customPrompt: 'Commit the changes.' }];
+    controller.renderJobs = () => {};
+    controller.refreshAll = async () => {};
+    app.apiCall = async () => { throw new Error('Save failed'); };
+    await controller.toggleStandaloneAgent(42, null);
+    assert.deepEqual(errors, ['Save failed']);
+    assert.equal(controller.jobs.length, 0);
+    assert.equal(controller.pendingAgentToggles.size, 0);
+    app.apiCall = async (url, method, body) => ({ id: 7, ...body });
+    await controller.toggleStandaloneAgent(42, null);
+    assert.equal(controller.jobs[0].enabled, false);
 });
 
 test('Deleting an Agent removes its Automation, then its setup only when nothing else uses it', async () => {

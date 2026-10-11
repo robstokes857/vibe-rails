@@ -325,6 +325,7 @@ export class JobController {
             if (action === 'edit') return this.openEditor(this.jobs.find(job => job.id === jobId));
             if (action === 'run') return this.runNow(jobId, actionElement);
             if (action === 'toggle') return this.toggleJob(jobId, actionElement);
+            if (action === 'toggle-environment') return this.toggleStandaloneAgent(environmentId, actionElement);
             if (action === 'delete') return this.deleteJob(jobId);
             // An Agent with no Automation behind it: its setup is launched and edited directly.
             if (action === 'edit-environment') {
@@ -588,7 +589,7 @@ export class JobController {
                     </div>
                 </div>
                 <div class="job-card-actions">
-                    ${job ? this.renderEnabledSwitch(job, jobId, safeName) : ''}
+                    ${this.renderEnabledSwitch(job || { enabled: true }, jobId, safeName, envId)}
                     ${job
                         ? `<button class="btn btn-sm btn-primary" type="button" data-job-action="run" data-job-id="${jobId}" aria-label="Run ${safeName} now"><i class="fa-solid fa-play me-1" aria-hidden="true"></i>Run now</button>`
                         : `<button class="btn btn-sm btn-primary" type="button" data-job-action="run-environment" data-env-id="${envId}" aria-label="Run ${safeName} now"><i class="fa-solid fa-play me-1" aria-hidden="true"></i>Run now</button>`}
@@ -703,12 +704,16 @@ export class JobController {
     // said the opposite of what the automation was actually doing. It renders in the
     // card's action row so it sits on the same line as Run now / Edit / More — floating
     // it in the topline left it visibly off-center from the buttons it belongs with.
-    renderEnabledSwitch(job, jobId, safeName) {
+    renderEnabledSwitch(job, jobId, safeName, envId = '') {
         const enabled = job.enabled === true;
         const title = enabled
             ? 'Enabled — scheduled and Git-triggered runs are on. Click to disable.'
             : 'Disabled — scheduled and Git-triggered runs are off. Click to enable.';
-        return `<button class="job-switch" type="button" role="switch" aria-checked="${enabled}" data-job-action="toggle" data-job-id="${jobId}" title="${title}" aria-label="${safeName} automatic runs"><span class="job-switch-track" aria-hidden="true"><span class="job-switch-thumb"></span></span><span class="job-switch-text">${enabled ? 'Enabled' : 'Disabled'}</span></button>`;
+        const target = jobId
+            ? `data-job-action="toggle" data-job-id="${jobId}"`
+            : `data-job-action="toggle-environment" data-env-id="${envId}"`;
+        const switchTitle = jobId ? title : 'Enabled — on demand. Click to disable in this project; Run now remains available.';
+        return `<button class="job-switch" type="button" role="switch" aria-checked="${enabled}" ${target} title="${switchTitle}" aria-label="${safeName} automatic runs"><span class="job-switch-track" aria-hidden="true"><span class="job-switch-thumb"></span></span><span class="job-switch-text">${enabled ? 'Enabled' : 'Disabled'}</span></button>`;
     }
 
     nextRunSummary(job) {
@@ -1754,6 +1759,39 @@ export class JobController {
             await this.refreshAll({ quiet: true });
         }
         return this.runNow(id, null);
+    }
+
+    async toggleStandaloneAgent(environmentId, button) {
+        const environment = this.findEnvironment(environmentId);
+        if (!environment || button?.disabled) return;
+        // A successful first toggle is retained even if the subsequent refresh fails.
+        const existing = this.jobs.find(job => Number(workerActionOf(job)?.environmentId) === Number(environmentId));
+        if (existing) return this.toggleJob(existing.id, button);
+        const llm = getJobLlmForCli(environment.cli);
+        if (llm === null || !this.currentProjectPath()) {
+            this.app.showError('This agent needs a supported CLI and an open project before changing its state.');
+            return;
+        }
+        this.pendingAgentToggles ??= new Set();
+        if (this.pendingAgentToggles.has(environmentId)) return;
+        this.pendingAgentToggles.add(environmentId);
+        try {
+            return await this.withBusy(button, 'Disabling…', async () => {
+                // Enabled state lives on Jobs. An on-demand setup gets its first Job only
+                // when the user changes that state; no schedule or setup rewrite is needed.
+                const job = await this.app.apiCall('/api/v1/jobs', 'POST', {
+                    name: environment.name, projectPath: this.currentProjectPath(), llm,
+                    environmentId: Number(environment.id), prompt: environment.customPrompt,
+                    timeoutMinutes: null, enabled: false, launchMinimized: false,
+                    triggers: [], actions: [{ kind: JOB_ACTION.WORKER, environmentId: Number(environment.id) }]
+                }, { preferErrorResponseMessage: true });
+                this.jobs.push(job);
+                this.renderJobs();
+                await this.refreshAll({ quiet: true });
+            });
+        } finally {
+            this.pendingAgentToggles.delete(environmentId);
+        }
     }
 
     async toggleJob(jobId, button) {

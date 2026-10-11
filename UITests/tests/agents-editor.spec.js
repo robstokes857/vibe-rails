@@ -259,6 +259,40 @@ async function openJobs(page, { expandDisabled = true } = {}) {
     }
 }
 
+test('standalone Agents have an Enabled switch that persists through reload and can be re-enabled', async ({ page }) => {
+    const { state, writes } = await installStatefulApi(page);
+    state.environments.push({
+        id: 44, name: 'Commit helper', cli: 'codex', customArgs: '--model gpt-6.1-sol',
+        customPrompt: 'Commit the changes.', projectPath: CURRENT_REPOSITORY,
+        hidden: false, automationWorker: false
+    });
+    await openApp(page);
+    const card = page.locator('.job-card-agent').filter({ has: page.getByRole('heading', { name: 'Commit helper', exact: true }) });
+    await expect(card.getByRole('switch')).toHaveAttribute('aria-checked', 'true');
+    await card.getByRole('switch').click();
+    await expect(page.locator('[data-disabled-jobs] > summary')).toContainText('2');
+    expect(writes.jobs).toHaveLength(1);
+    expect(writes.jobs[0]).toMatchObject({ method: 'POST', body: {
+        name: 'Commit helper', environmentId: 44, enabled: false, triggers: [],
+        actions: [{ kind: 0, environmentId: 44 }]
+    } });
+    expect(writes.environmentCreates).toEqual([]);
+    expect(writes.environments).toEqual([]);
+    expect(writes.settings).toEqual([]);
+
+    // Reload the Agents entry URL: normal navigation clears its one-shot view query.
+    await openApp(page);
+    await expect(page.locator('[data-disabled-jobs] > summary')).toBeVisible();
+    await page.locator('[data-disabled-jobs] > summary').click();
+    await expect(card.getByRole('switch')).toHaveAttribute('aria-checked', 'false');
+    await expect(card.getByRole('button', { name: 'Run Commit helper now' })).toBeEnabled();
+    await card.getByRole('switch').click();
+    await expect(card.getByRole('switch')).toHaveAttribute('aria-checked', 'true');
+    expect(writes.jobs).toHaveLength(2);
+    expect(writes.jobs[1]).toMatchObject({ method: 'PUT', body: { enabled: true } });
+    expect(state.jobs.filter(job => job.environmentId === 44)).toHaveLength(1);
+});
+
 async function openSetupForm(page, name) {
     // The saved CLI setup behind an Agent is edited in the shared form (environment-editor.js). The
     // Agents page opens it for a setup without an Automation, the picker's "Manage quick launches"

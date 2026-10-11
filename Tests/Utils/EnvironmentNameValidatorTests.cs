@@ -15,6 +15,8 @@ public class EnvironmentNameValidatorTests
     [Theory]
     [InlineData("nightly-summary")]
     [InlineData("Daily Codex Review")]
+    [InlineData("Claude Fable 5.1 X High")]
+    [InlineData("gpt-6.1-sol")]
     [InlineData("job_42")]
     [InlineData("a")]
     public void Accepts_SafeNames(string name)
@@ -62,6 +64,11 @@ public class EnvironmentNameValidatorTests
     [InlineData("Aux")]
     [InlineData("COM1")]
     [InlineData("lpt9")]
+    [InlineData("CON.txt")]
+    [InlineData("con .profile")]
+    [InlineData("NUL.5.1")]
+    [InlineData("COM1.settings")]
+    [InlineData("lpt9.json")]
     public void Rejects_WindowsReservedDeviceNames(string name)
     {
         // These resolve to a device, not a folder, so envs/{name} would break on Windows.
@@ -91,6 +98,15 @@ public class EnvironmentNameValidatorTests
     {
         var tooLong = new string('a', 65);
         Assert.NotNull(EnvironmentNameValidator.Validate(tooLong));
+    }
+
+    [Theory]
+    [InlineData("Claude.")]
+    [InlineData("Claude.  ")]
+    [InlineData("Claude..5.1")]
+    public void Rejects_PeriodsThatAliasOrTraverseDirectories(string name)
+    {
+        Assert.NotNull(EnvironmentNameValidator.Validate(name));
     }
 
     [Fact]

@@ -241,14 +241,14 @@ export function mountEnvironmentEditor(controller, host, {
             savedEnvironment = await app.apiCall('/api/v1/environments', 'POST', {
                 name: draft.name, cli: draft.cli, ...draft.payload,
                 ...(workerOnly ? { automationWorker: true } : {})
-            });
+            }, { preferErrorResponseMessage: true });
             // The POST returns the new record. Keep it before the settings write can fail.
             lastEnvironmentPayload = payloadKey;
             cliSelect.disabled = true;
             cliSelect.tomselect?.disable();
             if (get('env-name')) get('env-name').disabled = true;
         } else if (lastEnvironmentPayload !== payloadKey) {
-            savedEnvironment = await app.apiCall(`/api/v1/environments/${encodeURIComponent(savedEnvironment.name)}`, 'PUT', draft.payload);
+            savedEnvironment = await app.apiCall(`/api/v1/environments/${encodeURIComponent(savedEnvironment.name)}`, 'PUT', draft.payload, { preferErrorResponseMessage: true });
             lastEnvironmentPayload = payloadKey;
         }
         const settingsKey = JSON.stringify(draft.settings);

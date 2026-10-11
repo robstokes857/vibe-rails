@@ -31,7 +31,7 @@ function catalogFor(environments) {
 async function openManageModal(page) {
     const environments = fixtureEnvironments();
     const writes = { preferences: [], environments: [], deletes: [] };
-    const server = { refuseDelete: false, nextId: 903 };
+    const server = { refuseDelete: false, refuseCreate: false, nextId: 903 };
     await page.addInitScript(() => sessionStorage.setItem('viberails_tab', 'quick-launch-fixture'));
     await page.routeWebSocket('**/api/v1/events/ws*', () => {});
     await page.route('**/api/v1/**', route => {
@@ -46,6 +46,9 @@ async function openManageModal(page) {
         if (path === '/api/v1/environments' && method === 'POST') {
             const body = request.postDataJSON();
             writes.environments.push(body);
+            if (server.refuseCreate) {
+                return route.fulfill({ status: 400, json: { error: 'Name must not end with a period.' } });
+            }
             const created = { id: server.nextId++, hidden: false, ...body };
             environments.push(created);
             return route.fulfill({ json: created });
@@ -129,20 +132,39 @@ test('New quick launch opens the setup form without a message field and saves an
     await expect(page.locator('[data-env-steps-open]')).toHaveCount(0);
     await expect(form.locator('button[type="submit"]')).toHaveText(/Create quick launch/);
 
-    await page.locator('#env-name').fill('Terse Codex');
+    await page.locator('#env-name').fill('Codex gpt-6.1 High');
     // The form starts on the first built-in CLI; pick Codex so the saved setup and its settings are Codex's.
     await page.locator('#env-cli').selectOption('codex');
     await expect(page.locator('[data-primary-options] #codex-model')).toBeVisible();
     await form.locator('button[type="submit"]').click();
     await expect(form).toHaveCount(0);
     expect(writes.environments).toHaveLength(1);
-    expect(writes.environments[0]).toMatchObject({ name: 'Terse Codex', cli: 'codex', customPrompt: '' });
+    expect(writes.environments[0]).toMatchObject({ name: 'Codex gpt-6.1 High', cli: 'codex', customPrompt: '' });
     expect(writes.environments[0].automationWorker).toBeUndefined();
 
     // The dialog comes back with the new Quick Launch listed.
     const reopened = page.getByRole('dialog', { name: 'Manage quick launches', exact: true });
     await expect(reopened).toBeVisible();
     await expect(reopened.locator('[data-llm-picker-key="env:903:codex"]')).toBeVisible();
+});
+
+test('Quick Launch creation shows validation details and preserves the draft for retry', async ({ page }) => {
+    const { modal, server, writes } = await openManageModal(page);
+    await modal.locator('[data-llm-picker-action="create"]').click();
+    const form = page.locator('#env-form');
+    await page.locator('#env-name').fill('Claude Fable 5.1 X High.');
+    server.refuseCreate = true;
+    await form.locator('button[type="submit"]').click();
+    await expect(page.locator('.vr-toast-body')).toContainText('Name must not end with a period.');
+    await expect(form).toBeVisible();
+    await expect(page.locator('#env-name')).toHaveValue('Claude Fable 5.1 X High.');
+    await expect(form.locator('button[type="submit"]')).toBeEnabled();
+    server.refuseCreate = false;
+    await page.locator('#env-name').fill('Claude Fable 5.1 X High');
+    await form.locator('button[type="submit"]').click();
+    await expect(form).toHaveCount(0);
+    expect(writes.environments).toHaveLength(2);
+    expect(writes.environments[1]).toMatchObject({ name: 'Claude Fable 5.1 X High', cli: 'claude', customPrompt: '' });
 });
 
 test('Delete asks first, shows the server refusal inline, and removes the row once allowed', async ({ page }) => {

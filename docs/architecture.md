@@ -798,6 +798,9 @@ Agent name (stepping around built-in CLI, numeric and device names the backend r
 validates the workflow, then saves through the existing Environment, CLI settings and Job
 endpoints. Successful intermediate writes are retained for retries within the open editor, and
 an existing Worker whose controls are unchanged is not written at all.
+Every Agent card has an Enabled switch. Disabling an on-demand setup with no Job creates a
+disabled, unscheduled Job referencing it in the current project, retaining state through the
+existing Job API without changing the setup. Manual Run now remains available.
 The Environments modal mounts the same editor; model catalogs and launch argument handling
 remain in their existing shared modules.
 

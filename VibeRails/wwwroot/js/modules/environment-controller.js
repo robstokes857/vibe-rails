@@ -280,7 +280,7 @@ export class EnvironmentController {
         if (!endpoint) return;
         const settingsPayload = payload || this.extractCliSettingsPayload(cli);
         if (!settingsPayload) return;
-        await this.app.apiCall(`/api/v1/${endpoint}/settings/${encodeURIComponent(envName)}`, 'PUT', settingsPayload);
+        await this.app.apiCall(`/api/v1/${endpoint}/settings/${encodeURIComponent(envName)}`, 'PUT', settingsPayload, { preferErrorResponseMessage: true });
     }
 
     buildEnvironmentSavePayload(cli, settingsPayload = null, root = document) {

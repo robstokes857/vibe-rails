@@ -755,7 +755,10 @@ stays an alias of the Agents page and redirects an Automation's `editJobId` to i
 Agents page lists one card per Automation that runs a setup (name, CLI, model summary, the first
 line of the message, triggers, the Enabled switch, Run now) and one card per message-bearing
 setup with no Automation (Run now opens it in a terminal tab, Edit opens the setup form, Delete
-removes the setup). `deleteAgent` deletes the card's Automation and then the setup only when no
+removes the setup). Every Agent has an Enabled switch. Disabling a setup with no Job creates an
+on-demand, disabled Job referencing that setup in the current project; subsequent toggles use
+that Job. No setup is rewritten or schedule added, and Run now remains available while disabled.
+`deleteAgent` deletes the card's Automation and then the setup only when no
 other Automation uses it. A setup with no `projectPath` (saved before project scoping landed on
 2026-08-08) is listed by the server in every project; the page keeps it out of the project's own
 list unless one of this project's Jobs runs it, and shows it under a collapsed **Shared with every
