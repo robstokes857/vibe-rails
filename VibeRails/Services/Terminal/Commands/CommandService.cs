@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Security.Cryptography;
 using Serilog;
 using TokenSaver;
 using VibeRails.Interfaces;
@@ -680,11 +682,34 @@ public class CommandService : ICommandService
             : $"{command} >/dev/null 2>&1";
     }
 
+    /// <summary>
+    /// The stdio server command every CLI is registered with. The per-user install
+    /// (<c>~/.vibe_rails/vb[.exe]</c>, which install.ps1/install.sh overlay in place and put on
+    /// PATH) wins whenever it is the same build as the running process, so the registered path
+    /// survives upgrades. The VS Code bundle lives under a version-numbered extension directory;
+    /// a registration pointing there goes stale on every extension update and dead once VS Code
+    /// removes the old directory, which is how a Codex session kept running a build without the
+    /// Board review-capture fix (VB-K5SCD-210). With no matching install, the running binary is
+    /// registered as before.
+    /// </summary>
     private static string[] ResolveMcpServerCommandParts()
+        => ResolveMcpServerCommandParts(Environment.ProcessPath, StableInstallExecutablePath(), IsSameBuild);
+
+    internal static string[] ResolveMcpServerCommandParts(
+        string? processPath,
+        string? stableInstallPath,
+        Func<string, string, bool> isSameBuild)
     {
-        var processPath = Environment.ProcessPath;
         if (IsVibeRailsExecutable(processPath))
         {
+            if (stableInstallPath is not null
+                && File.Exists(stableInstallPath)
+                && (string.Equals(Path.GetFullPath(stableInstallPath), Path.GetFullPath(processPath!), StringComparison.OrdinalIgnoreCase)
+                    || isSameBuild(stableInstallPath, processPath!)))
+            {
+                return [stableInstallPath, "mcp"];
+            }
+
             return [processPath!, "mcp"];
         }
 
@@ -695,6 +720,50 @@ public class CommandService : ICommandService
         }
 
         return ["vb", "mcp"];
+    }
+
+    /// <summary>The installer's fixed location, independent of the data-directory override: install.ps1/install.sh only know this path.</summary>
+    private static string? StableInstallExecutablePath()
+    {
+        try
+        {
+            return Path.Combine(PathConstants.GetInstallDirPath(), OperatingSystem.IsWindows() ? "vb.exe" : "vb");
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or IOException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Same build means the installed binary may stand in for the running one. Length must match;
+    /// then the PE version resource decides, and binaries without one (ELF, Mach-O) are hashed.
+    /// Any read failure means "not the same", which keeps the running binary registered.
+    /// </summary>
+    internal static bool IsSameBuild(string first, string second)
+    {
+        try
+        {
+            if (new FileInfo(first).Length != new FileInfo(second).Length)
+            {
+                return false;
+            }
+
+            var firstVersion = FileVersionInfo.GetVersionInfo(first).ProductVersion;
+            var secondVersion = FileVersionInfo.GetVersionInfo(second).ProductVersion;
+            if (!string.IsNullOrWhiteSpace(firstVersion) && !string.IsNullOrWhiteSpace(secondVersion))
+            {
+                return string.Equals(firstVersion, secondVersion, StringComparison.Ordinal);
+            }
+
+            using var firstStream = File.OpenRead(first);
+            using var secondStream = File.OpenRead(second);
+            return SHA256.HashData(firstStream).AsSpan().SequenceEqual(SHA256.HashData(secondStream));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return false;
+        }
     }
 
     private static bool IsVibeRailsExecutable(string? processPath)
