@@ -15,6 +15,10 @@ export function laneReviewerSummary(environment, environments = []) {
         : `Reviewer: ${label(routing.fallback)} for every coding source.`;
 }
 
+/**
+ * How a lane entry introduces itself. `kindLabel` is what the user sees it as: an Agent
+ * (the Job runs a saved CLI setup) or an Automation (scripts and checks only).
+ */
 export function workerIdentity(job, environments = []) {
     const actions = Array.isArray(job?.actions) ? job.actions : [];
     const worker = actions.length
@@ -24,14 +28,14 @@ export function workerIdentity(job, environments = []) {
         const checks = actions.filter(action => [2, 3].includes(Number(action.kind)));
         const label = checks.length
             ? checks.map(action => `${Number(action.kind) === 2 ? 'Code quality' : 'VCA'} · ${action.arguments?.join(' ') || 'working-tree'}`).join('; ')
-            : job ? 'Script workflow' : 'Unavailable Automation';
-        return { label, icon: checks.length ? 'list-check' : job ? 'code' : 'question' };
+            : job ? 'Script workflow' : 'Unavailable';
+        return { label, icon: checks.length ? 'list-check' : job ? 'code' : 'question', kindLabel: job ? 'Automation' : 'Unavailable' };
     }
     const environment = environments.find(item => worker.environmentId != null && Number(item.id) === Number(worker.environmentId));
     if (environment?.reviewerRouting?.mode === 'switch')
-        return { label: 'Reviewer selection', icon: 'shuffle', workerName: environment.name };
+        return { label: 'Reviewer selection', icon: 'shuffle', workerName: environment.name, kindLabel: 'Agent' };
     const cli = environment?.cli || getJobCliForLlm(worker.llm || job.llm);
-    return { ...getCliBrand(cli || ''), icon: 'user-gear',
+    return { ...getCliBrand(cli || ''), icon: 'user-gear', kindLabel: 'Agent',
         workerName: environment?.name || worker.environmentName || job.environmentName,
         modelSummary: workerModelSummary(cli, environment?.customArgs) };
 }

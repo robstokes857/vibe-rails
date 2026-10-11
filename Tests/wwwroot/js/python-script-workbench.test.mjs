@@ -293,11 +293,11 @@ test('The workbench is registered as the python-script view and torn down like e
     assert.ok(loadViewIndex > 0 && loadViewIndex < unloadIndex && unloadIndex < viewsIndex,
         'unload must sit in loadView\'s teardown list');
 
-    // Automation stays highlighted, and a duplicated tab lands on the Automation page.
+    // Automations stays highlighted, and a duplicated tab lands on the Automations page.
     const subNav = app.slice(app.indexOf('updateActiveSubNav(view) {'), app.indexOf('goBack() {'));
-    assert.match(subNav, /view === 'python-script'\s*\?\s*'jobs'/);
+    assert.match(subNav, /view === 'python-script'\s*\?\s*'automations'/);
     const duplicate = app.slice(app.indexOf('getDuplicateTabViewName(view) {'), app.indexOf('async openDuplicateTab() {'));
-    assert.match(duplicate, /view === 'python-script'\s*\?\s*'jobs'/);
+    assert.match(duplicate, /view === 'python-script'\s*\?\s*'automations'/);
     assert.doesNotMatch(duplicate, /'python-script',/, 'the workbench itself is not a duplicateable view');
 
     // The workbench keeps the viewport-filling shell (the board shares it);

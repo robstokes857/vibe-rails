@@ -2341,7 +2341,7 @@ export class TerminalManager {
         this._headerPickerDisposer?.();
         this._headerPickerDisposer = mountLlmPicker(this.app, this.headerSelect, {
             context: 'terminal',
-            placeholder: 'Select LLM...',
+            placeholder: 'Choose a CLI or Quick Launch…',
             includeDefaultSuffix: true,
             getLaunchWorkingDirectory: () => this.getDefaultWorkingDirectory()
         });
@@ -3698,7 +3698,7 @@ export class TerminalController {
                 </div>
                 <div class="d-flex gap-2 align-items-center flex-wrap px-3 py-2 border-bottom vb-terminal-controls-bar" id="vb-terminal-controls-bar">
                     <select class="form-select form-select-sm" id="terminal-header-select" style="width: auto;">
-                        <option value="" disabled selected>Select LLM...</option>
+                        <option value="" disabled selected>Choose a CLI or Quick Launch…</option>
                     </select>
                     <div class="d-flex gap-2 align-items-center vb-terminal-controls-actions">
                         <button class="btn btn-sm btn-outline-success d-inline-flex align-items-center gap-1" id="terminal-start-btn">

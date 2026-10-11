@@ -30,8 +30,8 @@ for (const baseEnabled of [false, true]) {
 
             await page.goto('/?view=settings', { waitUntil: 'domcontentloaded' });
             const root = page.locator('#app-content [data-view="settings"]');
-            const base = root.getByRole('checkbox', { name: 'Vibe Board Nudge', exact: true });
-            const custom = root.getByRole('checkbox', { name: 'Vibe Board Nudge - Custom Envs', exact: true });
+            const base = root.getByRole('checkbox', { name: 'Vibe Board nudge — built-in CLIs', exact: true });
+            const custom = root.getByRole('checkbox', { name: 'Vibe Board nudge — Quick Launches', exact: true });
             const save = root.locator('#settings-save-button');
             await expect(base).toBeChecked();
             await expect(custom).not.toBeChecked();

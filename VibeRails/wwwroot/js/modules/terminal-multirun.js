@@ -87,9 +87,7 @@ export class TerminalMultiRun {
 
     _buildBaseCliSelect(selectEl, defaultValue) {
         if (!selectEl) return null;
-        // Empty environments list → only base CLIs render in the dropdown.
-        // When sandboxes are tied to a CLI/env (see terminal-multirun.md), the
-        // sandbox list goes here in a custom group.
+        // Built-in CLIs only: a multi-run row has no saved setup to apply.
         const dispose = mountLlmPicker(this.app, selectEl, {
             context: 'multi-run',
             placeholder: null,

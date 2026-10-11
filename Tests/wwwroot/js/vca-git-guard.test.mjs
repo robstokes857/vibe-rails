@@ -365,9 +365,9 @@ function projectHealthLauncherHarness(t, { remembered = '', launch = () => true 
             environments: [{ id: 7, name: 'Quality reviewer', cli: 'opencode' }]
         },
         llmPickerController: {
-            getEnabledItems(context) { assert.equal(context, 'sandbox'); return catalog; },
+            getEnabledItems(context) { assert.equal(context, 'assignee'); return catalog; },
             mount(element, options) {
-                assert.equal(options.context, 'sandbox');
+                assert.equal(options.context, 'assignee');
                 element.value = options.selectedValue;
                 state.mounted += 1;
                 return () => { state.disposed += 1; };

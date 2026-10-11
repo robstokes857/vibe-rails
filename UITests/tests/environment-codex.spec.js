@@ -5,12 +5,10 @@ const { test, expect } = require('./fixtures');
 async function openCodexEnvironmentForm(page) {
     await page.goto('/');
 
-    const environmentsNav = page.locator('.app-subnav-link[data-view="environments"]:visible');
-    await expect(environmentsNav).toBeVisible({ timeout: 15_000 });
-    await environmentsNav.click();
-    await expect(page.getByRole('heading', { name: /environment \/ workers/i })).toBeVisible({ timeout: 10_000 });
-
-    await page.locator('[data-action="create-environment"]').click();
+    // The saved CLI setup form is shared by Agents and Quick Launches. Open it the way the Agents
+    // page's card Edit and the picker's "Manage quick launches" do, through the controller.
+    await page.waitForFunction(() => Boolean(window.app?.environmentController));
+    await page.evaluate(() => window.app.environmentController.createEnvironment({ variant: 'agent' }));
     await expect(page.locator('#env-form')).toBeVisible({ timeout: 5_000 });
 
     await page.locator('#env-cli').selectOption('codex');
@@ -66,7 +64,9 @@ test.describe('Codex environment form – Model field', () => {
             expect(savedEnvironment.customArgs).toBe(`--model ${model}`);
             expect(savedSettings.model).toBe(model);
 
-            await page.locator(`[data-action="edit-environment"][data-env-name="e2e-${model}"]`).click();
+            await expect.poll(() => page.evaluate(() => window.app.data.environments.map(env => env.name))).toContain(`e2e-${model}`);
+            await page.evaluate(name => window.app.environmentController.editEnvironment(name, { variant: 'agent' }), `e2e-${model}`);
+            await expect(page.locator('#env-form')).toBeVisible();
             await expect(page.locator('#codex-model')).toHaveValue(model);
             await expect(page.locator('#codex-model option:checked')).toHaveText(model);
         });
@@ -115,7 +115,7 @@ test.describe('Environment form – visibility switch', () => {
         const hiddenSwitch = page.locator('#env-hidden');
         await expect(hiddenSwitch).toBeVisible();
         await expect(hiddenSwitch).not.toBeChecked();
-        await expect(page.locator('label[for="env-hidden"]')).toHaveText('Hide from launch pickers');
+        await expect(page.locator('label[for="env-hidden"]')).toHaveText('Hide from Board pickers');
 
         // Intercept the writes so the test never mutates real machine-wide state;
         // the assertion is on the request payload, not the backend result.

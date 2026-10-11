@@ -215,7 +215,7 @@ test('Chat requires its own selection before saving, even when the card is assig
 
     assert.deepEqual(h.calls, []);
     assert.equal(focused, true);
-    assert.deepEqual(h.toasts, [['Board', 'Choose an LLM beside Chat with.', 'warning']]);
+    assert.deepEqual(h.toasts, [['Board', 'Choose who to chat with.', 'warning']]);
 });
 
 test('Start work still uses the assignee when another chat target is selected', async () => {
@@ -229,7 +229,7 @@ test('Start work still uses the assignee when another chat target is selected', 
     h.fields['[data-board-start-work]'].disabled = false;
     await h.controller.startWork(h.editor, h.card);
     assert.deepEqual(h.calls, []);
-    assert.deepEqual(h.toasts.at(-1), ['Board', 'Assign an LLM to this card first.', 'warning']);
+    assert.deepEqual(h.toasts.at(-1), ['Board', 'Assign a CLI, Quick Launch or Agent to this card first.', 'warning']);
 });
 
 test('Chat waits for the save and keeps the selection captured at click time', async () => {

@@ -1,3 +1,5 @@
+import { launchKind } from './launch-kind.js';
+
 export class SessionController {
     constructor(app) {
         this.app = app;
@@ -79,7 +81,9 @@ export class SessionController {
 
             const envContainer = node.querySelector('[data-session-env-container]');
             if (envContainer && session.environmentName) {
-                envContainer.textContent = `Env: ${session.environmentName}`;
+                const environment = (this.app.data?.environments || []).find(env => env.name === session.environmentName);
+                const kind = environment ? (launchKind(environment) === 'agent' ? 'Agent' : 'Quick Launch') : 'Setup';
+                envContainer.textContent = `${kind}: ${session.environmentName}`;
             }
 
             const statusBadge = node.querySelector('[data-session-status]');

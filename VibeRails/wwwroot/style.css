@@ -5305,6 +5305,59 @@ body.vb-terminal-focus-active .vb-terminal-element .xterm-viewport {
     white-space: nowrap;
 }
 
+/* Edit, Delete and Launch share the row's last column so the grid stays six columns wide. */
+.llm-picker-row-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.llm-picker-icon-button {
+    display: inline-grid;
+    width: 31px;
+    height: 31px;
+    padding: 0;
+    place-items: center;
+}
+
+.llm-picker-modal-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.llm-picker-modal-section-head h6 { margin: 0; }
+
+.llm-picker-nudge-note { margin-top: 8px; }
+
+/* The quick-launch flavour of the setup editor has no message, so its note stands in. */
+.environment-editor.is-quick-launch .env-quick-launch-note {
+    margin: 0 0 1rem;
+    padding: 0.6rem 0.8rem;
+    border-left: 2px solid color-mix(in srgb, var(--color-accent, #06b6d4) 55%, transparent);
+    background-color: color-mix(in srgb, var(--color-accent, #06b6d4) 6%, var(--color-bg-surface, #1e1e1e));
+    border-radius: 0 8px 8px 0;
+}
+
+/* Board: a lane entry says what kind it is before its name details. */
+.board-lane-agent-kind {
+    display: inline-block;
+    margin-right: 0.2rem;
+    padding: 0 0.4rem;
+    border: 1px solid var(--color-border, #334155);
+    border-radius: 999px;
+    color: var(--color-text, #f8fafc);
+    font-size: 0.7rem;
+    font-weight: 600;
+}
+
+.board-assignee-hint { margin: 0.35rem 0 0; }
+
+/* Play-button menu: Agents and Automations get their own marks. */
+.automation-launch-item[data-launch-kind="agent"] > i { color: var(--color-accent, #06b6d4); }
+
 .llm-picker-modal-row.is-dragging {
     opacity: 0.35;
     transform: scale(0.99);
@@ -14742,6 +14795,14 @@ body.git-guard-focus-active #app-content {
     border-radius: 8px;
 }
 .jobs-collapsible-list > summary > i { font-size: 0.7rem; }
+
+/* One line of context inside a collapsed group (why these setups sit apart). */
+.jobs-collapsible-hint {
+    margin: 0 0 0.6rem;
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 0.82rem;
+    line-height: 1.45;
+}
 .jobs-collapsible-list[open] > summary > i { transform: rotate(90deg); }
 
 .python-scripts-list > .jobs-collapsible-list > summary {
@@ -15436,6 +15497,93 @@ body.git-guard-focus-active #app-content {
 }
 
 .job-card:last-child { border-bottom: 0; }
+
+/* The Agents and Automations lists share one row anatomy: a brand mark on the left that makes
+   the list scannable by CLI, the body, and the action cluster on the right. The mark is the
+   one deliberate visual move; everything else stays quiet. */
+.job-card-agent,
+.job-card-automation {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    column-gap: 1rem;
+}
+
+.job-card-mark {
+    display: inline-grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    align-self: start;
+    border: 1px solid var(--color-border, #334155);
+    border-radius: 10px;
+    background-color: var(--color-bg-surface, #1e1e1e);
+    color: var(--color-text-muted, #94a3b8);
+}
+
+.job-card-mark img {
+    width: 22px;
+    height: 22px;
+    object-fit: contain;
+}
+
+.job-card-mark-fallback i { font-size: 1rem; }
+.job-card-mark[data-provider="automation"] { color: var(--color-accent, #06b6d4); }
+
+.job-card[data-enabled="false"] .job-card-mark { opacity: 0.6; }
+
+/* The saved model/effort line and the starting message read as one quiet block under the title. */
+.job-card-settings {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    min-width: 0;
+    margin: 0.35rem 0 0;
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 0.8rem;
+}
+
+.job-card-settings i { flex: 0 0 auto; width: 0.9rem; text-align: center; }
+/* A setup name is one unbroken identifier; it must wrap rather than widen a phone-width page. */
+.job-card-settings > span { min-width: 0; overflow-wrap: anywhere; }
+.job-card-setup-name { color: var(--color-text-muted, #94a3b8); }
+
+.job-card-pill {
+    padding: 0.12rem 0.45rem;
+    border: 1px solid var(--color-border, #334155);
+    border-radius: 999px;
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+
+.job-card-missing {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    margin: 0.35rem 0 0;
+    color: var(--color-warning, #f59e0b);
+    font-size: 0.8rem;
+}
+
+.job-card-missing i { flex: 0 0 auto; width: 0.9rem; text-align: center; }
+
+.job-provider[data-provider="automation"] { color: var(--color-text-muted, #94a3b8); }
+
+/* The agent step's own header inside the editor; the message under it is the agent. */
+.job-worker-card > header strong i { margin-right: 0.4rem; color: var(--color-accent, #06b6d4); }
+
+@media (max-width: 960px) {
+    .job-card-agent,
+    .job-card-automation {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .job-card-agent .job-card-actions,
+    .job-card-automation .job-card-actions {
+        grid-column: 1 / -1;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+}
 
 /* State is worth more than one badge: a live automation gets a green edge, a disabled one a
    red edge over a faint red wash with its detail lines dimmed, so a stopped row is obvious

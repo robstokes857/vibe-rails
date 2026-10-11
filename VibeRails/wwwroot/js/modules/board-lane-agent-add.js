@@ -23,29 +23,46 @@ export const laneWorker = (job, environments) => {
     return environments.find(env => Number(env.id) === Number(id));
 };
 
+/** Which page an existing lane choice belongs to: an Agent runs a saved CLI setup. */
+const laneJobKind = job => (Array.isArray(job?.actions) && job.actions.length
+    ? job.actions.some(action => Number(action.kind) === 0)
+    : job?.environmentId != null) ? 'agent' : 'automation';
+
 /** Creation has its own body and drafts; no existing rows sit above the form. */
 export function laneAgentAddMarkup(draft, settings, jobs, environments, scripts) {
     const ids = selectedLaneJobIds(settings);
     const available = (settings.jobs || []).filter(job => !ids.includes(job.id));
+    // The lane settings only carry id/name/enabled; the project catalog says which kind each is.
+    const kindOf = option => laneJobKind(jobs.find(job => job.id === option.id) || option);
+    const wantsAgent = draft.kind === 'agent';
+    const choices = available.filter(job => (kindOf(job) === 'agent') === wantsAgent);
     const worker = laneWorker(jobs.find(job => job.id === Number(draft.jobId)), environments);
     const scriptOptions = scripts?.scripts || [];
+    const pickingExisting = draft.kind === 'agent' || draft.kind === 'automation';
+    const noun = wantsAgent ? 'Agent' : 'Automation';
     return `<form class="board-lane-agents-add">
-        <button type="button" class="btn btn-sm btn-outline-secondary mb-3" data-agent-action="back">← Lane agents</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary mb-3" data-agent-action="back">← Back</button>
         <h3>Add to lane</h3>
         <label for="board-lane-agent-choice">What would you like to add?</label>
         <select id="board-lane-agent-choice" class="form-select" data-lane-draft="kind" required>
-            <option value="">Choose a type…</option>
-            ${[['automation', 'Existing Automation'], ['new', 'New Automation'], ['check:2', 'Code quality'], ['check:3', 'VCA'], ['script', 'Repository script']].map(([value, label]) =>
-                `<option value="${value}"${draft.kind === value ? ' selected' : ''}>${label}</option>`).join('')}
+            <option value="">Choose…</option>
+            <optgroup label="Agent">
+                ${[['agent', 'Existing Agent'], ['new-agent', 'New Agent…']].map(([value, label]) =>
+                    `<option value="${value}"${draft.kind === value ? ' selected' : ''}>${label}</option>`).join('')}
+            </optgroup>
+            <optgroup label="Automation">
+                ${[['automation', 'Existing Automation'], ['check:2', 'Code quality'], ['check:3', 'VCA'], ['script', 'Repository script'], ['new', 'New Automation…']].map(([value, label]) =>
+                    `<option value="${value}"${draft.kind === value ? ' selected' : ''}>${label}</option>`).join('')}
+            </optgroup>
         </select>
-        ${draft.kind === 'automation' ? `<label for="board-lane-automation">Automation</label>
-            <select id="board-lane-automation" class="form-select" data-lane-draft="jobId" required>
-                <option value="">Choose an Automation…</option>
-                ${available.map(job => `<option value="${Number(job.id)}"${String(job.id) === draft.jobId ? ' selected' : ''} ${job.enabled ? '' : 'disabled'}>${escapeHtml(job.name)}${job.enabled ? '' : ' (disabled)'}</option>`).join('')}
-            </select>${!available.some(job => job.enabled) ? '<p class="board-lane-agents-help">No enabled Automations available. Create one or enable it in the Automation editor.</p>' : ''}
+        ${pickingExisting ? `<label for="${wantsAgent ? 'board-lane-agent' : 'board-lane-automation'}">${noun}</label>
+            <select id="${wantsAgent ? 'board-lane-agent' : 'board-lane-automation'}" class="form-select" data-lane-draft="jobId" required>
+                <option value="">Choose an ${noun}…</option>
+                ${choices.map(job => `<option value="${Number(job.id)}"${String(job.id) === draft.jobId ? ' selected' : ''} ${job.enabled ? '' : 'disabled'}>${escapeHtml(job.name)}${job.enabled ? '' : ' (disabled)'}</option>`).join('')}
+            </select>${!choices.some(job => job.enabled) ? `<p class="board-lane-agents-help">No enabled ${noun}s available. Create one, or enable it on the ${noun}s page.</p>` : ''}
             ${worker ? `<label for="board-lane-purpose">What kind of work? <span class="text-muted">(optional)</span></label>
                 <select id="board-lane-purpose" class="form-select" data-lane-draft="purpose">${agentPurposeOptions(draft.purpose ?? worker.purpose)}</select>
-                <small>Saved on Worker “${escapeHtml(worker.name)}” wherever it is used. Future agent comments can be filtered by this purpose.</small>` : ''}` : ''}
+                <small>Saved on the agent “${escapeHtml(worker.name)}” wherever it is used. Future agent comments can be filtered by this purpose.</small>` : ''}` : ''}
         ${draft.kind.startsWith('check:') ? '<p class="board-lane-check-summary">Checks working changes, including staged and unstaged edits. Committed code is covered by Git Guard.</p>' : ''}
         ${draft.kind === 'script' ? `<label for="board-lane-script-search">Find script</label>
             <input id="board-lane-script-search" type="search" class="form-control" data-lane-draft="scriptQuery" maxlength="256" value="${escapeHtml(draft.scriptQuery || '')}" placeholder="Search by file name or path">
@@ -60,11 +77,14 @@ export function laneAgentAddMarkup(draft, settings, jobs, environments, scripts)
             <input id="board-lane-script-name" class="form-control" data-lane-draft="name" maxlength="100" value="${escapeHtml(draft.name)}" required placeholder="Run lane script">
             <label for="board-lane-script-arguments">Arguments — one per line</label>
             <textarea id="board-lane-script-arguments" class="form-control" data-lane-draft="arguments" rows="4">${escapeHtml(draft.arguments)}</textarea>
-            <small>Each line is one argument. Adding approves the current file contents. Later file changes require approval in the Automation editor.</small>` : ''}
-        ${draft.kind === 'new' ? '<p>Create a workflow with a Worker, scripts or checks in the full Automation editor, then return here to add it to the lane.</p>' : ''}
+            <small>Each line is one argument. Adding approves the current file contents. Later file changes need approval on the Automations page.</small>` : ''}
+        ${draft.kind === 'new' ? '<p>Build the automation — scripts and checks — on the Automations page, then return here to add it to the lane.</p>' : ''}
+        ${draft.kind === 'new-agent' ? '<p>Create the agent — a CLI with its starting message — on the Agents page, then return here to add it to the lane.</p>' : ''}
         <div data-agent-error role="alert"></div>
         <footer class="board-lane-agents-footer">
-            ${draft.kind === 'new' ? '<button type="button" class="btn btn-outline-primary" data-agent-action="create">Open Automation editor</button>' : `<button type="submit" class="btn btn-outline-primary" ${!draft.kind || draft.kind === 'script' && !scripts ? 'disabled' : ''}>Add to lane</button>`}
+            ${draft.kind === 'new' ? '<button type="button" class="btn btn-outline-primary" data-agent-action="create">Open Automations page</button>'
+                : draft.kind === 'new-agent' ? '<button type="button" class="btn btn-outline-primary" data-agent-action="create-agent">Open Agents page</button>'
+                : `<button type="submit" class="btn btn-outline-primary" ${!draft.kind || draft.kind === 'script' && !scripts ? 'disabled' : ''}>Add to lane</button>`}
             <button type="button" class="btn btn-outline-secondary" data-agent-action="back">Cancel</button>
         </footer>
     </form>`;
@@ -74,11 +94,11 @@ export function laneAgentAddMarkup(draft, settings, jobs, environments, scripts)
 export async function prepareLaneAutomation(context) {
     const { draft, settings, jobs, environments, scripts, column, projectPath, api, updateJob, alive } = context;
     if (selectedLaneJobIds(settings).some(id => !settings.jobs?.some(job => job.id === id && job.enabled)))
-        throw new Error('Enable or remove disabled/unavailable selections before adding another Automation.');
+        throw new Error('Enable or remove disabled/unavailable selections before adding another entry.');
     if (draft.createdId) return draft.createdId;
-    if (draft.kind === 'automation') {
+    if (draft.kind === 'automation' || draft.kind === 'agent') {
         const id = Number(draft.jobId);
-        if (!settings.jobs?.some(job => job.id === id && job.enabled)) throw new Error('Choose an enabled Automation.');
+        if (!settings.jobs?.some(job => job.id === id && job.enabled)) throw new Error(`Choose an enabled ${draft.kind === 'agent' ? 'Agent' : 'Automation'}.`);
         const worker = laneWorker(jobs.find(job => job.id === id), environments);
         if (worker && draft.purpose != null && draft.purpose !== worker.purpose) {
             await api(`/api/v1/environments/${encodeURIComponent(worker.name)}`, 'PUT', { purpose: draft.purpose });
@@ -99,7 +119,7 @@ export async function prepareLaneAutomation(context) {
         action = { kind, arguments: ['working-tree'] };
         description = `${kind === 2 ? 'Code quality' : 'VCA'} checks working changes when a card enters ${column.name}.`;
         existing = findCheckAutomation(jobs, { name, kind, scope: 'working-tree' });
-        if (existing && !existing.reuse) throw new Error(`An Automation named “${existing.job.name}” already exists with a different workflow. Rename or edit it in the Automation editor.`);
+        if (existing && !existing.reuse) throw new Error(`An Automation named “${existing.job.name}” already exists with a different workflow. Rename or edit it on the Automations page.`);
     } else throw new Error('Choose what to add.');
     let saved = existing?.job;
     if (!saved) saved = await api('/api/v1/jobs', 'POST', {

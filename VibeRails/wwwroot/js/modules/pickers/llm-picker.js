@@ -1,14 +1,18 @@
 /**
- * LLM / Environment launch-picker facade.
+ * Launch-target picker facade.
  *
  * Import this (not LlmPickerController directly) wherever a launch target is
- * chosen: terminal header, sandbox CLI, multi-run rows, and the environment
- * modal's provider select. Contexts: 'terminal' | 'sandbox' | 'multi-run' |
- * 'environment-provider'.
+ * chosen. Contexts:
+ *   'terminal'             — built-in CLIs (incl. the plain Terminal shell) and Quick
+ *                            Launches; the only picker with the "Manage quick launches…"
+ *                            footer.
+ *   'assignee'             — built-in CLIs (no shell), Quick Launches and Agents: the Board
+ *                            card assignee, card chat, reviewer targets and Fix pickers.
+ *   'multi-run'            — built-in CLIs only.
+ *   'environment-provider' — built-in CLIs only, plain CLI values (the setup editor).
  *
- * Automation Workers NEVER appear in these pickers — the server excludes them
- * from the preferences catalog regardless of `hidden`. The Automation editor
- * configures its Worker through the shared 'environment-provider' form.
+ * A saved setup with a starting message is an Agent; without one it is a Quick Launch
+ * (see launch-kind.js). Automation Workers never enter the server-resolved catalog.
  */
 export function mountLlmPicker(app, selectEl, options = {}) {
     return app.llmPickerController.mount(selectEl, options);

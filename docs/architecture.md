@@ -49,8 +49,8 @@ report `true`.
 
 ## Optional Vibe Story tracking
 
-General Settings exposes **Vibe Board Nudge** for default/base LLM launches (on by default) and
-**Vibe Board Nudge - Custom Envs** for saved/custom environments (off by default). The existing
+General Settings exposes **Vibe Board nudge — built-in CLIs** (on by default) and
+**Vibe Board nudge — Quick Launches** for saved setups launched without a message of their own (off by default). The existing
 `CreateVibeStoryTracking` setting keeps the base choice; `CreateVibeStoryTrackingCustomEnvs` is
 independent and defaults off in new and older settings files. Nullable API updates preserve
 each saved choice when an older client omits its field.
@@ -108,10 +108,10 @@ does not attach the new session or change tool authorization.
 - **Rule File Management** - Create and manage `vc.rules.md` files with customizable coding rules
 - **Rule Enforcement** - Define standards with three enforcement levels (WARN/COMMIT/STOP)
 - **Multi-LLM Support** - Unified interface for Claude, Codex, Antigravity, Copilot, and OpenCode CLIs
-- **Environment Management** - Configure separate environments for different LLM providers with custom args and prompts. Launch environments directly in the Web UI terminal with the "Web UI" button or select from the terminal's environment dropdown
-- **Sandbox Management** - Create isolated git clone sandboxes for parallel AI workflows. Shallow clones current branch with all dirty/untracked files. Launch terminals or VS Code directly into sandbox directories.
+- **Agents and Quick Launches** - A saved CLI setup (model, arguments, settings, workspace) is a Quick Launch in the terminal picker; with a starting message it is an Agent that runs on demand, on a schedule, around commits or from a Board lane. Both are `Environments` rows
+- **Workspace clones** - An Agent or Quick Launch can run in its own git clone or a fresh clone each run (`Sandboxes` rows; no UI of their own since 2026-10-11)
 - **Session Logging** - Track and monitor all CLI session history and outputs
-- **Automations** - Ordered workflows of repository `.py`, `.ps1`, and `.sh` scripts plus at most one optional Worker, on a schedule or a commit trigger; they run while a VibeRails root backend is open
+- **Automations** - Ordered workflows of repository `.py`, `.ps1`, and `.sh` scripts and checks (VCA, Code quality) with no LLM step, on a schedule, a commit trigger or a Board lane; they run while a VibeRails root backend is open
 - **MCP Integration** - Custom Model Context Protocol server with specialized tools
 
 ## Technology Stack
@@ -198,8 +198,8 @@ vibe-rails/
 │       ├── style.css               # Custom styling
 │       ├── js/modules/
 │       │   ├── terminal-multitab.js      # Web terminal (multi-tab, environment-aware)
-│       │   ├── environment-controller.js # Environment CRUD + Web UI launch button
-│       │   ├── sandbox-controller.js   # Sandbox CRUD + launch into sandbox directory
+│       │   ├── environment-controller.js # Saved CLI setup form (Agent / Quick Launch) + launch
+│       │   ├── launch-kind.js          # Agent / Automation / Quick Launch display rule
 │       │   └── dashboard-controller.js  # Dashboard with state passing for preselection
 │       └── assets/                 # Images, fonts, icons
 │
@@ -401,7 +401,7 @@ Passes to terminalController.bindTerminalActions(container, envId)
   ↓
 populateTerminalSelector() fetches from app.data.environments
   ↓
-Renders <optgroup> for Base CLIs + <optgroup> for Custom Environments
+Renders <optgroup> Built-in CLIs + <optgroup> Quick Launches (+ Agents for the Board)
   ↓
 Preselected environment auto-selected in dropdown
   ↓
@@ -790,10 +790,11 @@ An Automation is an ordered, fail-fast list of actions. An action is either a re
 up to 20 total actions. Existing Worker-only Automations migrate to a one-Worker action without
 changing their behavior.
 
-The frontend creates and edits the Automation and its required Worker in one modal using
-the shared `environment-editor.js` controls. Existing script/check-only workflows open without a
-Worker until **Add instructions** converts them. It derives the internal Worker name from the
-Automation name (stepping around built-in CLI, numeric and device names the backend rejects),
+The frontend shows a Job with a Worker action as an **Agent** (Agents page) and one without as an
+**Automation** (Automations page). The Agent editor creates and edits the Job and its required
+Worker setup in one modal using the shared `environment-editor.js` controls; the Automation editor
+has no LLM step at all. It derives the internal Worker name from the
+Agent name (stepping around built-in CLI, numeric and device names the backend rejects),
 validates the workflow, then saves through the existing Environment, CLI settings and Job
 endpoints. Successful intermediate writes are retained for retries within the open editor, and
 an existing Worker whose controls are unchanged is not written at all.
@@ -875,7 +876,7 @@ tools (security review 2026-07-02).
 
 **Database Tables** (see [database reference](../VibeRails.Data.Sqlite/DB/AGENTS.md) for the full reference):
 - `Environments` - Environment configurations (global, not project-scoped)
-  - `Id`, `CustomName`, `LLM`, `Path`, `CustomArgs`, `CustomPrompt`, `CreatedUTC`, `LastUsedUTC`, `Hidden`
+  - `Id`, `CustomName`, `LLM`, `Path`, `CustomArgs`, `CustomPrompt`, `CreatedUTC`, `LastUsedUTC`, `Hidden`, `ProjectPath` (null before 2026-08-08 scoping; such rows are visible in every project and the Agents page groups them as shared)
   - `UNIQUE(CustomName, LLM)`
 - `Sandboxes` - Sandbox git clones (project-scoped via ProjectPath)
   - `Id`, `Name`, `Path`, `ProjectPath`, `Branch`, `CommitHash`, `RemoteUrl`, `SourceBranch`, `CreatedUTC`

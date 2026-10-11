@@ -43,10 +43,10 @@ test('approve without a valid PIN is always refused', async ({ context }) => {
     expect(status.pinConfigured === true || status.pinConfigured === false).toBeTruthy();
 });
 
-test('Automation page shows the Scripts section (pwsh, bash and python)', async ({ page, context }) => {
+test('Automations page shows the Scripts section (pwsh, bash and python)', async ({ page, context }) => {
     const status = await (await context.request.get(API)).json();
     await page.goto('/?view=terminal-focus', { waitUntil: 'domcontentloaded' });
-    await page.locator('.app-subnav-link[data-view="jobs"]:visible').click();
+    await page.locator('.app-subnav-link[data-view="automations"]:visible').click();
 
     const section = page.locator('[data-python-scripts-root]');
     await expect(section).toBeVisible({ timeout: 15_000 });
@@ -78,9 +78,9 @@ test('Opening a script lands in the workbench: editor over an agent terminal in 
     const status = await (await context.request.get(API)).json();
     test.skip(status.scripts.length === 0, 'needs at least one script in ~/.vibe_rails/scripts');
 
-    // Same way in as the section test: the Automation page, then the first row's name.
+    // Same way in as the section test: the Automations page, then the first row's name.
     await page.goto('/?view=terminal-focus', { waitUntil: 'domcontentloaded' });
-    await page.locator('.app-subnav-link[data-view="jobs"]:visible').click();
+    await page.locator('.app-subnav-link[data-view="automations"]:visible').click();
     const section = page.locator('[data-python-scripts-root]');
     await expect(section).toBeVisible({ timeout: 15_000 });
     const firstRow = section.locator('.python-script-row').first();

@@ -8,7 +8,7 @@ function rememberAgent(value) {
 }
 
 function initialAgent(app) {
-    const enabled = getEnabledLlmItems(app, 'sandbox');
+    const enabled = getEnabledLlmItems(app, 'assignee');
     let remembered = '';
     try { remembered = localStorage.getItem(LAST_AGENT_KEY) || ''; } catch { /* use shared order */ }
     return enabled.find(item => item.key === remembered)?.key || enabled[0]?.key || '';
@@ -20,8 +20,8 @@ export function mountProjectHealthFixPickers(app, root) {
     const selectedValue = initialAgent(app);
     let syncing = false;
     const disposers = selects.map(select => mountLlmPicker(app, select, {
-        context: 'sandbox',
-        placeholder: 'Select an agent…',
+        context: 'assignee',
+        placeholder: 'Fix with…',
         selectedValue
     }));
     const onChange = event => {
@@ -48,7 +48,7 @@ export async function launchProjectHealthFix(app, { title, prompt, workingDirect
     const selection = parseLlmSelection(selectionValue, app.data?.environments || []);
     if (!selection.cli || selection.cli === 'shell'
         || (selection.kind === 'environment' && !selection.environmentName)) {
-        app.showToast('Choose an agent', 'Select an available agent or environment beside the Fix button.', 'warning');
+        app.showToast('Choose an agent', 'Choose a CLI, Quick Launch or Agent beside the Fix button.', 'warning');
         return false;
     }
     rememberAgent(selectionValue);

@@ -16,9 +16,9 @@ export class BoardLaneAgents {
     button(column) {
         return `<button type="button" class="board-lane-agents-button" data-board-action="lane-agents"
             data-column-id="${escapeHtml(column.id)}" aria-haspopup="dialog" aria-expanded="false"
-            aria-label="Agents on entry to ${escapeHtml(column.name)}" title="Manage agents on entry to ${escapeHtml(column.name)}">
+            aria-label="Agents and Automations on entry to ${escapeHtml(column.name)}" title="Manage Agents and Automations on entry to ${escapeHtml(column.name)}">
             ${icon('robot')}<span class="board-lane-agents-count" aria-hidden="true">…</span>
-            <span class="board-lane-agents-caption">Agents</span>
+            <span class="board-lane-agents-caption">On entry</span>
         </button>`;
     }
 
@@ -46,7 +46,7 @@ export class BoardLaneAgents {
             }).catch(error => {
                 if (signal.aborted || !button.isConnected) return;
                 button.querySelector('.board-lane-agents-count').textContent = '!';
-                button.title = `Could not load agents. Click to retry. ${error?.message || ''}`;
+                button.title = `Could not load this lane's agents and automations. Click to retry. ${error?.message || ''}`;
             });
         }
     }
@@ -56,7 +56,7 @@ export class BoardLaneAgents {
         button.dataset.agentsRevision = String(settings.revision ?? 0);
         const count = selectedIds(settings).length;
         button.querySelector('.board-lane-agents-count').textContent = String(count);
-        button.title = `${count} ${count === 1 ? 'Automation' : 'Automations'} on entry. Click to manage.`;
+        button.title = `${count} on entry (Agents and Automations). Click to manage.`;
     }
 
     updateColumnCount(columnId, settings) {
@@ -70,8 +70,8 @@ export class BoardLaneAgents {
         this.root?.querySelectorAll('[data-board-action="lane-agents"]').forEach(button => {
             const active = running.has(button.dataset.columnId);
             button.classList.toggle('is-running', active);
-            button.querySelector('.board-lane-agents-caption').textContent = active ? 'Running' : 'Agents';
-            button.setAttribute('aria-description', active ? 'An Automation from this lane is running.' : '');
+            button.querySelector('.board-lane-agents-caption').textContent = active ? 'Running' : 'On entry';
+            button.setAttribute('aria-description', active ? 'An Agent or Automation from this lane is running.' : '');
         });
     }
 
@@ -87,10 +87,10 @@ export class BoardLaneAgents {
         panel.setAttribute('aria-labelledby', 'board-lane-agents-title');
         panel.innerHTML = `<header class="board-lane-agents-heading">
             <span class="board-lane-agents-heading-icon" aria-hidden="true">${icon('robot')}</span>
-            <div class="board-lane-agents-heading-copy"><h2 id="board-lane-agents-title">Lane agents</h2><p>On entry to <strong>${escapeHtml(column.name)}</strong></p></div>
-            <button type="button" class="board-lane-agents-action" data-agent-action="close" aria-label="Close lane agents">${icon('xmark')}</button>
+            <div class="board-lane-agents-heading-copy"><h2 id="board-lane-agents-title">Agents and Automations</h2><p>On entry to <strong>${escapeHtml(column.name)}</strong></p></div>
+            <button type="button" class="board-lane-agents-action" data-agent-action="close" aria-label="Close lane panel">${icon('xmark')}</button>
         </header>
-        <p class="board-lane-agents-help">Automations run top to bottom after a card stays here for 60 seconds. Each step waits for the previous step to pass or be skipped. Each Automation handles one card at a time.</p>
+        <p class="board-lane-agents-help">They run top to bottom after a card stays here for 60 seconds. Each step waits for the previous one to pass or be skipped, and each handles one card at a time.</p>
         <section data-lane-running aria-label="Running agents" aria-live="polite"></section>
         <div data-lane-agents-content role="status">Loading agents…</div>`;
         this.anchor = button;

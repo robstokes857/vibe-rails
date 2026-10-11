@@ -82,15 +82,15 @@
                 <i class="fa-solid fa-shield-halved me-1"></i>
                 <span>Rules</span>
             </button>
-            <button class="app-subnav-link" data-action="navigate" data-view="jobs"
-                title="Scheduled and Git-triggered Automations">
-                <i class="fa-solid fa-clock-rotate-left me-1"></i>
-                <span>Automation</span>
+            <button class="app-subnav-link" data-action="navigate" data-view="ai-agents"
+                title="Agents — saved CLI setups with a starting message, run on demand or on triggers">
+                <i class="fa-solid fa-robot me-1"></i>
+                <span>Agents</span>
             </button>
-            <button class="app-subnav-link" data-action="navigate" data-view="environments"
-                title="Manage Environment / Workers & Sandboxes">
-                <img src="assets/img/icons/layer-group-solid-full.svg" alt="" class="me-1 icon-light">
-                <span>ENVS</span>
+            <button class="app-subnav-link" data-action="navigate" data-view="automations"
+                title="Automations — scripts and checks on a schedule, around commits or from Board lanes">
+                <i class="fa-solid fa-list-check me-1"></i>
+                <span>Automations</span>
             </button>
             <button class="app-subnav-link" data-action="navigate" data-view="vibe-rails-ai"
                 title="Vibe Rails AI — search captured sessions">
@@ -103,8 +103,8 @@
                 <span>MCP</span>
             </button>
             <button type="button" class="app-subnav-link automation-launch-btn" data-action="automation-launcher"
-                title="Launch an automation or script" aria-haspopup="menu" aria-expanded="false"
-                aria-label="Launch an automation or script">
+                title="Launch an agent or automation" aria-haspopup="menu" aria-expanded="false"
+                aria-label="Launch an agent or automation">
                 <i class="fa-solid fa-play" aria-hidden="true"></i>
             </button>
             <button type="button" class="app-subnav-link app-subnav-settings" data-action="navigate-settings"
@@ -178,91 +178,6 @@
         <div class="dashboard" data-dashboard="unified">
             <!-- DashboardController mounts the unified, terminal-free Project health view here. -->
             <div class="rules-dashboard-host" data-rules-overview-host></div>
-        </div>
-    </template>
-
-    <!-- Sandbox list item, rendered by SandboxController on the Sandboxes view. -->
-    <template id="sandbox-item-template">
-        <div class="sandbox-item-card" data-sandbox-item>
-            <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-2 mb-2">
-                <div class="d-flex flex-wrap align-items-center gap-2 flex-grow-1 min-w-0">
-                    <span class="sandbox-item-name" data-sandbox-name></span>
-                    <span class="sandbox-item-branch" data-sandbox-branch></span>
-                    <span class="sandbox-item-path text-muted small" data-sandbox-path></span>
-                </div>
-                <span class="sandbox-item-time" data-sandbox-time></span>
-            </div>
-            <div class="row g-2 mt-3">
-                <div class="col-12">
-                    <div class="row g-2 row-cols-2 row-cols-xl-4">
-                        <div class="col d-grid">
-                            <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 w-100"
-                                type="button" data-sandbox-diff title="View Diff">
-                                <i class="fa-solid fa-code-compare"></i>
-                                <span>Diff</span>
-                            </button>
-                        </div>
-                        <div class="col d-grid">
-                            <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 w-100"
-                                type="button" data-sandbox-merge-local title="Merge into local branch">
-                                <i class="fa-solid fa-code-merge"></i>
-                                <span>Merge</span>
-                            </button>
-                        </div>
-                        <div class="col d-grid">
-                            <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 w-100"
-                                type="button" data-sandbox-push-remote title="Push to remote">
-                                <i class="fa-solid fa-cloud-arrow-up"></i>
-                                <span>Push</span>
-                            </button>
-                        </div>
-                        <div class="col d-grid">
-                            <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 w-100"
-                                type="button" data-sandbox-vscode title="Open in VS Code">
-                                <img src="assets/img/vscode.svg" alt="" class="icon-light" style="width: 13px; height: 13px;">
-                                <span>Code</span>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-12">
-                    <div class="row g-2 align-items-stretch">
-                        <div class="col-12 col-lg-4">
-                            <select class="form-select form-select-sm sandbox-item-cli-select w-100"
-                                data-sandbox-cli-select>
-                                <option value="" disabled selected>Select LLM...</option>
-                            </select>
-                        </div>
-                        <div class="col-12 col-sm-4 col-lg">
-                            <div class="d-grid">
-                                <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 w-100"
-                                    type="button" data-sandbox-launch-cli title="Native Terminal">
-                                    <i class="fa-solid fa-terminal"></i>
-                                    <span>Native</span>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="col-12 col-sm-4 col-lg">
-                            <div class="d-grid">
-                                <button class="btn btn-sm btn-outline-success d-flex align-items-center gap-1 w-100"
-                                    type="button" data-sandbox-launch-webui title="Web Terminal">
-                                    <i class="fa-solid fa-display"></i>
-                                    <span>Web</span>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="col-12 col-sm-4 col-lg">
-                            <div class="d-grid">
-                                <button class="btn btn-sm btn-outline-danger d-flex align-items-center gap-1 w-100"
-                                    type="button" data-sandbox-delete title="Delete sandbox">
-                                    <i class="fa-solid fa-trash"></i>
-                                    <span>Delete</span>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
         </div>
     </template>
 
@@ -987,73 +902,6 @@
         </div>
     </template>
 
-    <template id="environments-template">
-        <div class="view" data-view="environments">
-            <header class="vb-page-header">
-                <div class="vb-page-heading">
-                    <h1 class="vb-page-title">Environment / Workers</h1>
-                </div>
-            </header>
-
-            <div class="row">
-                <div class="col-12">
-                    <div class="card mb-4">
-                        <div class="card-header d-flex justify-content-between align-items-center">
-                            <span class="text-uppercase fw-bold" style="letter-spacing: 0.05em;"><img
-                                    src="assets/img/icons/sliders-solid-full.svg" alt="" class="icon-light"
-                                    style="height: 18px; width: 18px; margin-right: 8px; vertical-align: text-bottom;">Environment /
-                                Workers</span>
-                            <div class="d-flex align-items-center gap-2">
-                                <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-2" type="button"
-                                    data-action="customize-llm-list" title="Choose what appears in the LLM launch pickers">
-                                    <i class="fa-solid fa-sliders" aria-hidden="true"></i>
-                                    <span>View/Edit all LLMs</span>
-                                </button>
-                                <button class="btn btn-sm btn-outline-primary d-flex align-items-center gap-2" type="button"
-                                    data-action="create-environment">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor"
-                                        viewBox="0 0 16 16">
-                                        <path
-                                            d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4" />
-                                    </svg>
-                                    <span>Add Environment</span>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="card-body">
-                            <div data-environments-table></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="row">
-                <div class="col-12">
-                    <div class="card">
-                        <div class="card-header d-flex justify-content-between align-items-center">
-                            <span class="text-uppercase fw-bold" style="letter-spacing: 0.05em;"><img
-                                    src="assets/img/icons/boxes-stacked-solid-full.svg" alt="" class="icon-light"
-                                    style="height: 18px; width: 18px; margin-right: 8px; vertical-align: text-bottom;">Custom
-                                Sandboxes</span>
-                            <button class="btn btn-sm btn-outline-primary d-flex align-items-center gap-2" type="button"
-                                data-action="create-sandbox">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor"
-                                    viewBox="0 0 16 16">
-                                    <path
-                                        d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4" />
-                                </svg>
-                                <span>Add</span>
-                            </button>
-                        </div>
-                        <div class="card-body">
-                            <div data-sandboxes-table></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </template>
-
     <template id="configuration-template">
         <div class="view" data-view="config">
             <div class="row">
@@ -1380,19 +1228,18 @@
                             <div class="mb-4">
                                 <div class="form-check form-switch">
                                     <input class="form-check-input" type="checkbox" id="setting-create-vibe-story-tracking" checked>
-                                    <label class="form-check-label" for="setting-create-vibe-story-tracking">Vibe Board Nudge</label>
+                                    <label class="form-check-label" for="setting-create-vibe-story-tracking">Vibe Board nudge — built-in CLIs</label>
                                 </div>
-                                <small class="form-text text-muted">For default LLM launches without an initial message or continuation summary, ask the LLM to consider
-                                    tracking terminal work with a Vibe Story. Creating a story is at the agent's discretion.
-                                    On by default; applies to new sessions.</small>
+                                <small class="form-text text-muted">When a built-in CLI starts with no message of its own, open with the Vibe Board prompt:
+                                    consider tracking this work as a Vibe Story (the agent decides). Agents always start with their own
+                                    message, so this never applies to them. On by default; applies to new sessions.</small>
                             </div>
                             <div class="mb-4">
                                 <div class="form-check form-switch">
                                     <input class="form-check-input" type="checkbox" id="setting-create-vibe-story-tracking-custom-envs">
-                                    <label class="form-check-label" for="setting-create-vibe-story-tracking-custom-envs">Vibe Board Nudge - Custom Envs</label>
+                                    <label class="form-check-label" for="setting-create-vibe-story-tracking-custom-envs">Vibe Board nudge — Quick Launches</label>
                                 </div>
-                                <small class="form-text text-muted">For custom environment launches without an initial message or continuation summary, ask the LLM to consider
-                                    tracking terminal work with a Vibe Story. Creating a story is at the agent's discretion.
+                                <small class="form-text text-muted">The same opening prompt for a Quick Launch started with no message or continuation summary.
                                     Off by default; applies to new sessions.</small>
                             </div>
                             <div class="mb-4">

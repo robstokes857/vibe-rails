@@ -247,7 +247,7 @@ for (const width of [1920, 1492, 1210, 1100, 1000, 768, 390]) {
         await expect(nav.locator('.app-subnav-links > button').nth(2)).toHaveText('QUALITY');
         await expect(nav.locator('.app-subnav-links > button').nth(3)).toHaveText('Rules');
         const cog = nav.getByRole('button', { name: 'Settings', exact: true });
-        const play = nav.getByRole('button', { name: 'Launch an automation or script', exact: true });
+        const play = nav.getByRole('button', { name: 'Launch an agent or automation', exact: true });
         await expect(cog.locator('.fa-gear')).toHaveCount(1);
         expect(await cog.innerText()).toBe('');
         expect(await nav.evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
@@ -349,7 +349,7 @@ for (const view of ['code-quality']) {
         await expect(report.locator('.details-panel')).toBeHidden();
         await expect(report).toBeVisible();
 
-        await page.locator('[data-action="navigate"][data-view="environments"]:visible').click();
+        await page.locator('[data-action="navigate"][data-view="automations"]:visible').click();
         await expect(report).toHaveCount(0);
         await page.locator('[data-action="navigate"][data-view="code-quality"]:visible').click();
         await expect(report.locator('.qr')).toHaveAttribute('data-state', 'complete');
@@ -456,7 +456,7 @@ test('leaving a ready map cancels its opening selection and returning replays it
         await viewer.ready;
         window.oldMapSelections = 0;
         viewer.focusFile = () => { window.oldMapSelections++; };
-        window.app.navigate('environments');
+        window.app.navigate('automations');
     });
     await expect(page.locator('.code-report iframe')).toHaveCount(0);
     await page.waitForTimeout(1700);
@@ -1086,7 +1086,7 @@ test('navigation aborts a late graph and route re-entry uses the cached report',
     });
     await openQuality(page);
     await expect.poll(() => started).toBe(true);
-    await page.locator('[data-action="navigate"][data-view="environments"]:visible').click();
+    await page.locator('[data-action="navigate"][data-view="automations"]:visible').click();
     release();
     await expect(page.locator('.code-report iframe')).toHaveCount(0);
     await page.locator('[data-action="navigate"][data-view="code-quality"]:visible').click();
@@ -1156,7 +1156,8 @@ for (const choice of [
         await expect(picker.locator('option[value="base:shell"]')).toHaveCount(0);
         await control.click();
         const dropdown = page.locator('.ts-dropdown:visible');
-        await expect(dropdown.locator('.llm-picker-customize-button')).toBeVisible();
+        // Quick Launches are managed from the terminal picker only; the Fix picker has no footer.
+        await expect(dropdown.locator('.llm-picker-customize-button')).toHaveCount(0);
         await dropdown.locator(`[data-value="${choice.value}"]`).click();
         await expectInlineAgentSelection(page, choice.value);
         await expect.poll(() => page.evaluate(() => window.__qualityLaunches.length)).toBe(0);
@@ -1250,8 +1251,8 @@ test('returning to QUALITY restores the completed empty transcript without resca
     const { scanRequests } = await installQualityApi(page, { empty: true });
     await openQuality(page);
     await expect.poll(() => scanRequests.length).toBe(1);
-    await page.locator('[data-action="navigate"][data-view="environments"]:visible').click();
-    await expect(page.locator('#app-content [data-view="environments"]')).toBeVisible();
+    await page.locator('[data-action="navigate"][data-view="automations"]:visible').click();
+    await expect(page.locator('#app-content [data-view="automations"]')).toBeVisible();
     await page.locator('[data-action="navigate"][data-view="code-quality"]:visible').click();
     const quality = page.locator('.project-health-quality');
     await expect(quality.locator('.code-report')).toContainText('No source files in this report.');
@@ -1304,7 +1305,10 @@ async function expectDropdownInsideViewport(page, dropdown) {
     expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewport.width - 7);
     expect(bounds.y + bounds.height).toBeLessThanOrEqual(viewport.height - 7);
     await expect(dropdown.locator('.dropdown-input')).toBeInViewport({ ratio: 1 });
-    await expect(dropdown.locator('.llm-picker-customize-button')).toBeInViewport({ ratio: 1 });
+    // Only the terminal picker carries the Manage quick launches footer; when a dropdown has one
+    // it is the last row and must stay in view too.
+    const footer = dropdown.locator('.llm-picker-customize-button');
+    if (await footer.count() > 0) await expect(footer).toBeInViewport({ ratio: 1 });
     // The host's sidebar/main width transition takes 250 ms at the mobile breakpoint.
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
 }

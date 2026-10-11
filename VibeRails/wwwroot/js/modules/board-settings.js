@@ -1,5 +1,6 @@
 import { escapeHtml } from './utils.js';
 import { BoardApi } from './board-api.js';
+import { jobLaunchKind } from './launch-kind.js';
 
 export const boardSettingsNavigation = () => `
     <nav class="nav nav-pills board-settings-nav gap-2 mb-3" aria-label="Board settings" role="tablist">
@@ -97,10 +98,10 @@ export const boardContextSection = () => `
 
 export const laneAutomationSection = () => `
     <section class="mt-3 border-top pt-3" data-lane-automation>
-        <h6>Automations</h6>
-        <p class="board-editor-muted">Run selected Automations after a card enters this lane and stays for 60 seconds. They run in the order shown, each waiting for the preceding step to pass or be skipped. Moving again restarts the wait. Reordering or editing a card in the same lane does not trigger them.</p>
-        <div data-board-settings-content>Loading Automations…</div>
-        <p class="board-editor-muted mt-2">Runs while a VibeRails backend is open. Busy Automations wait for their turn. Saving settings cancels pending entries for this lane and applies to future entries; it does not launch an agent. Lane agents shows each workflow’s purpose, output and reviewer choices. Removing a selection keeps the shared Automation. You define what each lane, including Done, means.</p>
+        <h6>Agents and Automations</h6>
+        <p class="board-editor-muted">Run the selected Agents and Automations after a card enters this lane and stays for 60 seconds. They run in the order shown, each waiting for the preceding step to pass or be skipped. Moving again restarts the wait. Reordering or editing a card in the same lane does not trigger them.</p>
+        <div data-board-settings-content>Loading…</div>
+        <p class="board-editor-muted mt-2">Runs while a VibeRails backend is open. Busy entries wait for their turn. Saving cancels pending entries for this lane and applies to future entries; it does not launch anything. The lane's panel shows each entry's purpose, output and reviewer choices. Removing a selection keeps the shared Agent or Automation. You define what each lane, including Done, means.</p>
     </section>`;
 
 export const boardSyncSection = () => `
@@ -266,25 +267,38 @@ export function mountBoardContext(app, element, boardId) {
 // Automatic account sync status and an immediate retry.
 export function mountLaneAutomation(app, element, columnId, onSaved) {
     return mountSettings(app, element, {
-        load: extra => BoardApi.getLaneAutomationAsync(columnId, extra),
-        render: ({ jobs, jobIds, jobId, starterSetupPending }) => {
+        // The lane settings carry id/name/enabled; the project catalog says which entries are
+        // Agents. Losing the catalog only loses the grouping.
+        load: async extra => {
+            const projectPath = app.data?.configs?.rootPath || '';
+            const [lane, catalog] = await Promise.all([
+                BoardApi.getLaneAutomationAsync(columnId, extra),
+                projectPath
+                    ? app.apiCall(`/api/v1/jobs?projectPath=${encodeURIComponent(projectPath)}`, 'GET', null, { showLoading: false, ...extra }).catch(() => null)
+                    : Promise.resolve(null)
+            ]);
+            return { ...lane, kinds: new Map((catalog?.jobs || []).map(job => [job.id, jobLaunchKind(job)])) };
+        },
+        render: ({ jobs, jobIds, jobId, starterSetupPending, kinds }) => {
             const selected = new Set(jobIds ?? (jobId ? [jobId] : []));
             const choices = [...[...selected].map(id => jobs.find(job => job.id === id)
-                || { id, name: `Unavailable Automation (${id})`, enabled: false }), ...jobs.filter(job => !selected.has(job.id))];
-            return `${starterSetupPending ? '<p role="status">Starter review setup is pending. Reopen to retry, or save your lane selection to cancel the default.</p>' : ''}<fieldset class="mb-2">
-                <legend class="board-editor-label">Automations on entry</legend>
-                <p class="board-editor-muted">Select any number, or clear all to turn off Automations for this lane. Remove unavailable or disabled selections before saving.</p>
-                ${choices.map(job => `<label class="d-flex align-items-start gap-2 mb-2">
+                || { id, name: `Unavailable entry (${id})`, enabled: false }), ...jobs.filter(job => !selected.has(job.id))];
+            const row = job => `<label class="d-flex align-items-start gap-2 mb-2">
                     <input type="checkbox" class="form-check-input flex-shrink-0" data-lane-automation-job value="${Number(job.id)}" ${selected.has(job.id) ? 'checked' : ''} ${!job.enabled && !selected.has(job.id) ? 'disabled' : ''}>
                     <span class="text-break">${escapeHtml(job.name)}${job.enabled ? '' : ' (disabled)'}</span>
-                </label>`).join('')}
-            </fieldset>
-            ${jobs.length ? '' : '<p class="board-editor-muted">Create an Automation for this project on the Automations page first.</p>'}
-            <button type="button" class="btn btn-sm btn-outline-primary" data-settings-save>Save automations</button>`;
+                </label>`;
+            const agents = choices.filter(job => kinds?.get(job.id) === 'agent');
+            const automations = choices.filter(job => kinds?.get(job.id) !== 'agent');
+            return `${starterSetupPending ? '<p role="status">Starter review setup is pending. Reopen to retry, or save your lane selection to cancel the default.</p>' : ''}
+            <p class="board-editor-muted">Select any number, or clear all so nothing runs on entry. Remove unavailable or disabled selections before saving.</p>
+            ${agents.length ? `<fieldset class="mb-2"><legend class="board-editor-label">Agents on entry</legend>${agents.map(row).join('')}</fieldset>` : ''}
+            ${automations.length ? `<fieldset class="mb-2"><legend class="board-editor-label">Automations on entry</legend>${automations.map(row).join('')}</fieldset>` : ''}
+            ${jobs.length ? '' : '<p class="board-editor-muted">Create an Agent or Automation for this project first.</p>'}
+            <button type="button" class="btn btn-sm btn-outline-primary" data-settings-save>Save lane settings</button>`;
         },
         read: root => ({ jobIds: [...root.querySelectorAll('[data-lane-automation-job]:checked')].map(input => Number(input.value)) }),
         save: payload => BoardApi.saveLaneAutomationAsync(columnId, payload),
-        savedMessage: 'Lane automations saved.',
+        savedMessage: 'Lane settings saved.',
         onSaved
     });
 }

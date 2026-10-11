@@ -108,7 +108,7 @@ async function navigateTo(page, view) {
 }
 
 async function leaveAndReturnToTerminals(page) {
-    await navigateTo(page, 'environments');
+    await navigateTo(page, 'automations');
     await expect(page.locator('.view[data-view="terminal-focus"]')).toHaveCount(0, { timeout: 15_000 });
     await navigateTo(page, 'terminal-focus');
     await expect(page.locator('.view[data-view="terminal-focus"]')).toBeVisible({ timeout: 15_000 });

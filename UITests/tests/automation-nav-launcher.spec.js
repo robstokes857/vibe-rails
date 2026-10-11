@@ -67,7 +67,8 @@ test('nav Launch button opens and closes the automation flyout', async ({ page, 
         await expect(page.locator('.automation-launch-flyout-empty')).toBeVisible();
     }
     await expect(page.locator('[data-automation-launch-action="customize"]')).toBeVisible();
-    await expect(page.locator('[data-automation-launch-action="manage"]')).toBeVisible();
+    await expect(page.locator('[data-automation-launch-action="agents"]')).toBeVisible();
+    await expect(page.locator('[data-automation-launch-action="automations"]')).toBeVisible();
 
     // Toggling the trigger again closes the flyout.
     await page.locator('[data-action="automation-launcher"]:visible').click();
@@ -83,7 +84,7 @@ test('customize modal lists every automation and cancels cleanly', async ({ page
     await expect(page.locator('.automation-launch-flyout')).toHaveCount(0);
     const modal = page.locator('.llm-picker-customization-modal:visible');
     await expect(modal).toBeVisible();
-    await expect(modal.locator('#automation-nav-modal-title')).toHaveText('Customize Automation launcher');
+    await expect(modal.locator('#automation-nav-modal-title')).toHaveText('Customize launcher');
 
     if (prefs.length > 0) {
         await expect(modal.locator('[data-automation-nav-key]')).toHaveCount(prefs.length);

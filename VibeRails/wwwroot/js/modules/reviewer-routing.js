@@ -33,7 +33,7 @@ export function mountReviewerTarget(app, host, target, onChange = () => {}, excl
         if (excluded && provider(selected) === excluded) options = {};
         disposePicker?.();
         disposePicker = mountLlmPicker(app, picker, {
-            context: 'sandbox', includeHidden: true, filterItem: allowed,
+            context: 'assignee', includeHidden: true, filterItem: allowed,
             selectedValue: excluded && provider(selected) === excluded ? '' : selected,
             placeholder: 'Choose reviewer',
             selectedFallback: value => ({ value, cli: provider(value), label: `Unavailable selection (${value})` })
@@ -44,7 +44,7 @@ export function mountReviewerTarget(app, host, target, onChange = () => {}, excl
         const selection = picker.value;
         const cli = selection.startsWith('base:') ? selection.slice(5) : null;
         model.innerHTML = cli ? `<label class="form-label small">Model<select class="form-select form-select-sm" data-reviewer-model-value aria-label="Reviewer model">${renderLlmModelOptions(cli, options.model || '')}</select></label>`
-            : `<small class="text-muted">${selection ? 'Uses the saved environment’s model and settings.' : 'Choose a reviewer.'}</small>`;
+            : `<small class="text-muted">${selection ? 'Uses the Quick Launch’s or Agent’s saved model and settings.' : 'Choose a reviewer.'}</small>`;
     }
     const change = () => { options = {}; renderModel(); onChange(); };
     picker.addEventListener('change', change);
@@ -62,9 +62,9 @@ export function routingEditorMarkup() {
         <div data-reviewer-fallback>${reviewerTargetMarkup()}</div>
         <label class="form-label d-block mt-2">When the default reviewer did the coding, switch to</label>
         <div data-reviewer-alternate>${reviewerTargetMarkup()}</div>
-        <p class="text-muted small">Choose any different LLM or environment. Other coding providers use the default reviewer unless a mapping below overrides it. Unknown, mixed or human coding sources use the default.</p>
+        <p class="text-muted small">Choose any different CLI, Quick Launch or Agent. Other coding providers use the default reviewer unless a mapping below overrides it. Unknown, mixed or human coding sources use the default.</p>
         <div data-reviewer-mappings></div><button type="button" class="btn btn-sm btn-link" data-reviewer-add>Add provider mapping</button>
-        <p class="text-muted small">The selected reviewer supplies model and permission settings; a Switch Worker supplies its initial message. Put step functions and their prompt references in the reviewer environments. Review runs keep their selected provider and scope. This preset reviews the stated project checkout, including when a selected environment normally creates a clone.</p>`;
+        <p class="text-muted small">The selected reviewer supplies model and permission settings; a Switch reviewer agent supplies its starting message. Put step functions and their prompt references in the reviewer environments. Review runs keep their selected provider and scope. This preset reviews the stated project checkout, including when a selected environment normally creates a clone.</p>`;
 }
 
 export function mountRoutingEditor(app, host, initial = switchReviewerDefaults(), onChange = () => {}) {

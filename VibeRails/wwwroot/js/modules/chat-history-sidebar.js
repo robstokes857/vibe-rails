@@ -690,7 +690,9 @@ export class ChatHistorySidebar {
     }
 
     _getLlmOptions() {
-        return buildLlmSelectionOptions(this.app.data.environments || []);
+        // A continuation summary is sent instead of a saved message, so only settings-only
+        // Quick Launches make sense here.
+        return buildLlmSelectionOptions(this.app.data.environments || [], { includeAgents: false });
     }
 
     _closeContextMenu() {

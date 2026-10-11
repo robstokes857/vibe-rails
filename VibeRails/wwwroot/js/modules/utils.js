@@ -225,7 +225,11 @@ export function buildLlmSelectionOptions(environments = [], options = {}) {
         includeDefaultSuffix = true,
         includeShell = false,
         includeBase = true,
-        includeHidden = false
+        includeHidden = false,
+        // A saved setup with a starting message is an Agent. Lists that only want
+        // settings-only Quick Launches (chat history's "Send to…", whose summary would
+        // override the message anyway) pass false.
+        includeAgents = true
     } = options;
 
     const items = [];
@@ -237,8 +241,8 @@ export function buildLlmSelectionOptions(environments = [], options = {}) {
             return;
         }
 
-        // Automation Workers never appear in LLM/environment selects — they belong to
-        // the automation editor's Worker picker (pickers/worker-picker.js) only.
+        // Automation Workers stay out of these selects; the server-resolved picker
+        // catalog excludes them too, so the two never disagree.
         if (environment?.automationWorker) {
             return;
         }
@@ -250,10 +254,15 @@ export function buildLlmSelectionOptions(environments = [], options = {}) {
             return;
         }
 
+        const isAgent = String(environment?.customPrompt ?? '').trim() !== '';
+        if (isAgent && !includeAgents) {
+            return;
+        }
+
         const environmentName = (environment?.name || '').toString().trim();
         const displayName = environmentName || `Env ${environmentId}`;
         items.push({
-            group: includeGroups ? 'Custom Environments' : null,
+            group: includeGroups ? (isAgent ? 'Agents' : 'Quick Launches') : null,
             value: buildLlmSelectionValue(cli, environmentId),
             label: `${displayName} (${cli})`,
             cli,
@@ -266,7 +275,7 @@ export function buildLlmSelectionOptions(environments = [], options = {}) {
     if (includeBase) {
         BASE_LLM_CHOICES.forEach((baseCli) => {
             items.push({
-                group: includeGroups ? 'Base CLIs' : null,
+                group: includeGroups ? 'Built-in CLIs' : null,
                 value: buildLlmSelectionValue(baseCli.cli),
                 label: includeDefaultSuffix ? `${baseCli.label} (default)` : baseCli.label,
                 cli: baseCli.cli,
@@ -279,7 +288,7 @@ export function buildLlmSelectionOptions(environments = [], options = {}) {
 
     if (includeShell) {
         items.push({
-            group: includeGroups ? 'Base CLIs' : null,
+            group: includeGroups ? 'Built-in CLIs' : null,
             value: buildLlmSelectionValue(SHELL_LLM_CHOICE.cli),
             label: SHELL_LLM_CHOICE.label,
             cli: SHELL_LLM_CHOICE.cli,
@@ -381,7 +390,7 @@ export function populateLlmSelectionSelect(selectEl, environments = [], options 
                 const cli = normalizeCliValue(hiddenEnv.cli);
                 const environmentName = (hiddenEnv.name || '').toString().trim();
                 optionItems.push({
-                    group: includeGroups ? 'Custom Environments' : null,
+                    group: includeGroups ? (String(hiddenEnv.customPrompt ?? '').trim() ? 'Agents' : 'Quick Launches') : null,
                     value: normalizedSelectedValue,
                     label: `${environmentName || `Env ${selectedEnvId}`} (${cli})`,
                     cli,
@@ -414,6 +423,7 @@ export function populateLlmSelectionItemsSelect(selectEl, optionItems = [], opti
         searchable = true,
         searchPlaceholder = 'Search LLMs...',
         onCustomize = null,
+        customizeLabel = 'Manage quick launches…',
         emptyMessage = 'No matching LLMs.'
     } = options;
     const normalizedSelectedValue = String(selectedValue || '');
@@ -465,6 +475,7 @@ export function populateLlmSelectionItemsSelect(selectEl, optionItems = [], opti
             searchable,
             searchPlaceholder,
             onCustomize,
+            customizeLabel,
             emptyMessage
         });
     }
@@ -506,7 +517,7 @@ export function enhanceSelectWithTomSelect(selectEl, options = {}) {
         searchable = true,
         searchPlaceholder = 'Search...',
         onCustomize = null,
-        customizeLabel = 'View/Edit all LLMs',
+        customizeLabel = 'Manage quick launches…',
         emptyMessage = 'No matching options.',
         render = {}
     } = options;

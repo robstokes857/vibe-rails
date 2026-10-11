@@ -9,12 +9,10 @@ const { test, expect } = require('./fixtures');
 async function openKimiEnvironmentForm(page) {
     await page.goto('/');
 
-    const environmentsNav = page.locator('.app-subnav-link[data-view="environments"]:visible');
-    await expect(environmentsNav).toBeVisible({ timeout: 15_000 });
-    await environmentsNav.click();
-    await expect(page.getByRole('heading', { name: /environment \/ workers/i })).toBeVisible({ timeout: 10_000 });
-
-    await page.locator('[data-action="create-environment"]').click();
+    // The saved CLI setup form is shared by Agents and Quick Launches. Open it the way the Agents
+    // page's card Edit and the picker's "Manage quick launches" do, through the controller.
+    await page.waitForFunction(() => Boolean(window.app?.environmentController));
+    await page.evaluate(() => window.app.environmentController.createEnvironment({ variant: 'agent' }));
     await expect(page.locator('#env-form')).toBeVisible({ timeout: 5_000 });
 
     await page.locator('#env-cli').selectOption('kimi-k3');

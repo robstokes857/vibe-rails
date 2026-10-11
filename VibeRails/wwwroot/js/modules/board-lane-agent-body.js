@@ -45,7 +45,7 @@ export function mountLaneAgentBody({ app, panel, column, signal, position, updat
         if (!alive()) return;
         const host = content.querySelector('[data-agent-error]');
         if (host) {
-            host.textContent = error?.message || 'Could not update lane agents.';
+            host.textContent = error?.message || 'Could not update the lane.';
             const retry = document.createElement('button');
             retry.type = 'button'; retry.className = 'btn btn-sm btn-link';
             retry.dataset.agentAction = retryAction; retry.textContent = 'Reload'; host.append(retry);
@@ -70,7 +70,7 @@ export function mountLaneAgentBody({ app, panel, column, signal, position, updat
     };
     const reload = async () => {
         await run(load, '[data-agent-action="add"]');
-        if (alive() && !settings) content.innerHTML = '<p role="alert">Could not load lane agents.</p><button type="button" class="btn btn-outline-secondary" data-agent-action="retry">Retry</button>';
+        if (alive() && !settings) content.innerHTML = '<p role="alert">Could not load this lane.</p><button type="button" class="btn btn-outline-secondary" data-agent-action="retry">Retry</button>';
     };
     const renderScriptResults = () => {
         if (!adding || draft.kind !== 'script' || busy) return;
@@ -132,9 +132,11 @@ export function mountLaneAgentBody({ app, panel, column, signal, position, updat
             content.querySelector(adding ? '#board-lane-agent-choice' : '[data-agent-action="add"]')?.focus();
             return;
         }
-        if (action === 'edit' || action === 'create') {
+        if (action === 'edit' || action === 'create' || action === 'create-agent') {
             close(false);
-            app.navigate('jobs', action === 'edit' ? { editJobId: id } : { newJob: true, triggerKind: 3 });
+            // 'jobs' is the Agents page; it sends an Automation's edit request on to its own page.
+            if (action === 'edit') app.navigate('jobs', { editJobId: id });
+            else app.navigate(action === 'create-agent' ? 'ai-agents' : 'automations', { newJob: true, triggerKind: 3 });
             return;
         }
         if (action === 'skip' || action === 'rerun') {
@@ -155,12 +157,12 @@ export function mountLaneAgentBody({ app, panel, column, signal, position, updat
             return;
         }
         if (action === 'remove') {
-            const name = settings.jobs?.find(job => job.id === id)?.name || `Automation ${id}`;
+            const name = settings.jobs?.find(job => job.id === id)?.name || `Entry ${id}`;
             const retained = selectedLaneJobIds(settings).filter(value => value !== id && settings.jobs?.some(job => job.id === value && job.enabled));
             const alsoRemoved = selectedLaneJobIds(settings).filter(value => value !== id && !retained.includes(value));
             const extra = alsoRemoved.length ? ` Also clear disabled or unavailable selections: ${alsoRemoved.map(value => settings.jobs?.find(job => job.id === value)?.name || value).join(', ')}.` : '';
             void run(async () => {
-                const confirmed = await confirmDialog({ title: `Remove “${name}” from ${column.name}?`, message: `The Automation and recordings are kept. Saving cancels pending triggers for this lane.${extra}`, confirmLabel: 'Remove', danger: true });
+                const confirmed = await confirmDialog({ title: `Remove “${name}” from ${column.name}?`, message: `It is only removed from this lane; the Agent or Automation and its recordings are kept. Saving cancels pending entries for this lane.${extra}`, confirmLabel: 'Remove', danger: true });
                 if (alive() && confirmed) await saveSelection(retained);
             }, '[data-agent-action="add"]');
         }
@@ -183,7 +185,7 @@ export function mountLaneAgentBody({ app, panel, column, signal, position, updat
             delete draft.createdId;
             delete draft.purpose;
             render();
-            content.querySelector(key === 'kind' ? '#board-lane-agent-choice' : '#board-lane-automation')?.focus();
+            content.querySelector(key === 'kind' ? '#board-lane-agent-choice' : '#board-lane-agent, #board-lane-automation')?.focus();
         }
         if (key === 'kind' && draft.kind === 'script' && !scripts) void loadScripts();
     }, { signal });

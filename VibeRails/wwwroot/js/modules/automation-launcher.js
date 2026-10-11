@@ -1,5 +1,6 @@
 import { escapeHtml, isConfirmDialogOpen } from './utils.js';
 import { scriptRuntimeFor } from './script-runtimes.js';
+import { jobLaunchKind } from './launch-kind.js';
 
 const PREFERENCES_ENDPOINT = '/api/v1/automation-nav/preferences';
 
@@ -30,24 +31,29 @@ export function isLauncherItemRunnable(item) {
     return item?.kind !== 'script' || item?.status === 'approved';
 }
 
-function launcherItemIcon(item) {
-    // A script's label is its file name, whose extension says python, pwsh or bash.
-    return item.kind === 'script' ? scriptRuntimeFor(item.scriptFileName || item.label).icon : 'fa-solid fa-play';
+/**
+ * A script's label is its file name, whose extension says python, pwsh or bash. A Job shows
+ * as the robot (an Agent) or the list (an Automation) when the project catalog is known.
+ */
+export function launcherItemIcon(item, kinds = null) {
+    if (item.kind === 'script') return scriptRuntimeFor(item.scriptFileName || item.label).icon;
+    const kind = kinds?.get?.(item.jobId);
+    return kind === 'agent' ? 'fa-solid fa-robot' : kind === 'automation' ? 'fa-solid fa-list-check' : 'fa-solid fa-play';
 }
 
 /**
  * Nav-bar quick actions: a flyout on the standalone play button beside Settings,
- * listing the project's automations and signed pwsh, bash and python scripts
- * (run-now on click; unsigned scripts are omitted), plus a customization
- * modal giving each entry an order and show/hide switch — the same treatment Custom
- * Environments get in the LLM launch pickers. Preferences are server-persisted per
- * install (GET/PUT/DELETE /api/v1/automation-nav/preferences) and fetched fresh on every
- * open, so there is no client cache to invalidate. Automation launches delegate to
+ * listing the project's Agents and Automations (both are Jobs to the server) and signed
+ * pwsh, bash and python scripts (run-now on click; unsigned scripts are omitted), plus a
+ * customization modal giving each entry an order and show/hide switch — the same treatment
+ * Quick Launches get in the terminal picker. Preferences are server-persisted per install
+ * (GET/PUT/DELETE /api/v1/automation-nav/preferences) and fetched fresh on every open, so
+ * there is no client cache to invalidate. Job launches delegate to
  * JobController.launchFromNav, which queues the run for the scheduler exactly like the
- * Automation page's own "Run now" — it opens in its own native terminal window, never in a
- * Web UI terminal tab; script runs go through PythonScriptsController.run, so
- * they open the same little run window as a run from the page — inputs, output and return
- * value in one place, no terminal to find.
+ * pages' own "Run now" — it opens in its own native terminal window, never in a Web UI
+ * terminal tab; script runs go through PythonScriptsController.run, so they open the same
+ * little run window as a run from the page — inputs, output and return value in one
+ * place, no terminal to find.
  *
  * The customization modal intentionally reuses the llm-picker-* modal CSS classes so
  * both "order and show/hide" dialogs stay visually identical.
@@ -89,13 +95,18 @@ export class AutomationNavLauncher {
             <div class="automation-launch-flyout-footer">
                 <button type="button" class="automation-launch-footer-btn" role="menuitem"
                         data-automation-launch-action="customize"
-                        title="Choose which automations appear here and arrange their order">
+                        title="Choose which agents and automations appear here and arrange their order">
                     <i class="fa-solid fa-sliders" aria-hidden="true"></i><span>Customize list…</span>
                 </button>
                 <button type="button" class="automation-launch-footer-btn" role="menuitem"
-                        data-automation-launch-action="manage"
-                        title="Open the Automation page">
-                    <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i><span>Manage automations</span>
+                        data-automation-launch-action="agents"
+                        title="Open the Agents page">
+                    <i class="fa-solid fa-robot" aria-hidden="true"></i><span>Agents</span>
+                </button>
+                <button type="button" class="automation-launch-footer-btn" role="menuitem"
+                        data-automation-launch-action="automations"
+                        title="Open the Automations page">
+                    <i class="fa-solid fa-list-check" aria-hidden="true"></i><span>Automations</span>
                 </button>
             </div>`;
 
@@ -113,10 +124,15 @@ export class AutomationNavLauncher {
                 this.closeFlyout();
                 this.openCustomizationModal({ triggerElement });
             });
-        flyout.querySelector('[data-automation-launch-action="manage"]')
+        flyout.querySelector('[data-automation-launch-action="agents"]')
             ?.addEventListener('click', () => {
                 this.closeFlyout();
-                this.app.navigate('jobs');
+                this.app.navigate('ai-agents');
+            });
+        flyout.querySelector('[data-automation-launch-action="automations"]')
+            ?.addEventListener('click', () => {
+                this.closeFlyout();
+                this.app.navigate('automations');
             });
 
         const onDocumentClick = (event) => {
@@ -262,13 +278,22 @@ export class AutomationNavLauncher {
     }
 
     async _loadPreferences() {
+        // The catalog says only "automation" for every Job; the project's Jobs say which of
+        // them are Agents. That second read is for the icons alone, so its failure is silent.
+        const projectPath = this.app.data?.configs?.rootPath || '';
+        const kindsRequest = projectPath
+            ? this.app.apiCall(`/api/v1/jobs?projectPath=${encodeURIComponent(projectPath)}`, 'GET', null, { showLoading: false })
+                .then((response) => new Map((response?.jobs || []).map((job) => [Number(job.id), jobLaunchKind(job)])))
+                .catch(() => null)
+            : Promise.resolve(null);
         try {
             const response = await this.app.apiCall(PREFERENCES_ENDPOINT, 'GET', null, { showLoading: false });
             this.items = normalizeLauncherItems(response?.items);
         } catch (error) {
-            console.error('Failed to load Automation launcher preferences.', error);
+            console.error('Failed to load launcher preferences.', error);
             this.items = null;
         }
+        this.kinds = await kindsRequest;
     }
 
     _renderFlyoutItem(item, index, running) {
@@ -276,12 +301,12 @@ export class AutomationNavLauncher {
         const title = running ? `${label} is running` : `Run ${label} now`;
         return `
             <button type="button" class="automation-launch-item${running ? ' is-running' : ''}"
-                    role="menuitem" data-automation-launch-index="${index}"
+                    role="menuitem" data-automation-launch-index="${index}" data-launch-kind="${this.kinds?.get?.(item.jobId) || item.kind}"
                     ${running ? 'disabled aria-disabled="true" aria-busy="true"' : ''}
                     title="${title}">
                 ${running
                     ? '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span>'
-                    : `<i class="${launcherItemIcon(item)}" aria-hidden="true"></i>`}
+                    : `<i class="${launcherItemIcon(item, this.kinds)}" aria-hidden="true"></i>`}
                 <span class="automation-launch-item-label">${label}</span>
             </button>`;
     }
@@ -295,7 +320,7 @@ export class AutomationNavLauncher {
         if (!target) return;
 
         if (this.items === null) {
-            target.innerHTML = '<div class="automation-launch-flyout-empty text-muted">Could not load automations.</div>';
+            target.innerHTML = '<div class="automation-launch-flyout-empty text-muted">Could not load agents and automations.</div>';
             return;
         }
 
@@ -304,10 +329,10 @@ export class AutomationNavLauncher {
         if (visible.length === 0) {
             const hiddenCount = runnable.length - visible.length;
             target.innerHTML = hiddenCount > 0
-                ? '<div class="automation-launch-flyout-empty text-muted">All automations are hidden. Use "Customize list…" to show some.</div>'
+                ? '<div class="automation-launch-flyout-empty text-muted">Everything is hidden. Use "Customize list…" to show some.</div>'
                 : this.items.length > 0
-                    ? '<div class="automation-launch-flyout-empty text-muted">No automations or signed scripts available. Sign a script on the Automation page.</div>'
-                    : '<div class="automation-launch-flyout-empty text-muted">No automations yet. Create one from the Automation page.</div>';
+                    ? '<div class="automation-launch-flyout-empty text-muted">No agents, automations or signed scripts available. Sign a script on the Automations page.</div>'
+                    : '<div class="automation-launch-flyout-empty text-muted">No agents or automations yet. Create one from the Agents or Automations page.</div>';
         } else {
             const runningNames = this.app.jobController?.pythonScripts?.runningNames;
             target.innerHTML = visible.map((item, index) => this._renderFlyoutItem(
@@ -366,26 +391,31 @@ export class AutomationNavLauncher {
                     <div class="modal-content">
                         <div class="modal-header">
                             <div>
-                                <h5 class="modal-title" id="automation-nav-modal-title">Customize Automation launcher</h5>
-                                <p class="text-muted small mb-0">Choose which automations appear in the nav launcher and arrange their order.</p>
+                                <h5 class="modal-title" id="automation-nav-modal-title">Customize launcher</h5>
+                                <p class="text-muted small mb-0">Choose which agents and automations the play button offers, in which order.</p>
                             </div>
                             <button type="button" class="btn-close" data-automation-nav-action="cancel"
-                                    aria-label="Close Automation launcher customization"></button>
+                                    aria-label="Close launcher settings"></button>
                         </div>
                         <form data-automation-nav-form>
                             <div class="modal-body">
                                 <div class="llm-picker-modal-section">
-                                    <h6>Automations</h6>
+                                    <h6>Agents and automations</h6>
                                     <div data-automation-nav-group></div>
                                 </div>
                                 <div class="llm-picker-modal-section automation-nav-add">
-                                    <h6>Add automations</h6>
-                                    <p class="text-muted small mb-2">Anything you add on the Automation page shows up in this list.</p>
+                                    <h6>Add more</h6>
+                                    <p class="text-muted small mb-2">Anything you add on the Agents or Automations page shows up in this list.</p>
                                     <div class="automation-nav-add-actions">
                                         <button type="button" class="btn btn-sm btn-outline-secondary"
                                                 data-automation-nav-action="import-repository"
                                                 title="Copy an automation from another repository on this machine">
                                             <i class="fa-solid fa-code-branch me-1" aria-hidden="true"></i>Import from repository…
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary"
+                                                data-automation-nav-action="new-agent"
+                                                title="Create a new agent for this repository">
+                                            <i class="fa-solid fa-robot me-1" aria-hidden="true"></i>New agent…
                                         </button>
                                         <button type="button" class="btn btn-sm btn-outline-secondary"
                                                 data-automation-nav-action="new-automation"
@@ -439,7 +469,7 @@ export class AutomationNavLauncher {
         this._renderModalRows();
         this._bindModalActions();
         if (loadFailed) {
-            this._showModalError('Could not load the automations and scripts. Close this dialog and try again.');
+            this._showModalError('Could not load the agents, automations and scripts. Close this dialog and try again.');
         }
 
         state.observer = new MutationObserver(() => {
@@ -459,7 +489,7 @@ export class AutomationNavLauncher {
         container.innerHTML = state.items.length === 0
             ? `<p class="llm-picker-group-empty text-muted small mb-0">${state.loadFailed
                 ? 'The list could not be loaded.'
-                : 'No automations yet. Create one from the Automation page first.'}</p>`
+                : 'No agents or automations yet. Create one from the Agents or Automations page first.'}</p>`
             : state.items.map((item, index) => this._renderModalRow(item, index, state.items.length)).join('');
 
         this._bindModalRows();
@@ -479,13 +509,13 @@ export class AutomationNavLauncher {
                       aria-label="Drag ${label} to reorder" title="Drag to reorder">
                     <i class="fa-solid fa-grip-vertical" aria-hidden="true"></i>
                 </span>
-                <span class="llm-picker-row-logo llm-picker-row-logo-fallback"><i class="${launcherItemIcon(item)}" aria-hidden="true"></i></span>
+                <span class="llm-picker-row-logo llm-picker-row-logo-fallback"><i class="${launcherItemIcon(item, this.kinds)}" aria-hidden="true"></i></span>
                 <span class="llm-picker-row-label">${label}</span>
                 <div class="form-check form-switch llm-picker-visibility-switch">
                     <input class="form-check-input" type="checkbox" role="switch"
                            id="automation-nav-visible-${escapeHtml(item.key.replace(/[^a-zA-Z0-9_-]/g, '-'))}"
                            data-automation-nav-enabled ${item.enabled ? 'checked' : ''}
-                           aria-label="Show ${label} in the nav launcher">
+                           aria-label="Show ${label} in the play button menu">
                 </div>
                 <div class="llm-picker-move-buttons" role="group" aria-label="Move ${label}">
                     <button type="button" class="btn btn-sm btn-outline-secondary"
@@ -513,12 +543,17 @@ export class AutomationNavLauncher {
         state.layer.querySelector('[data-automation-nav-action="import-repository"]')
             ?.addEventListener('click', () => {
                 this._closeCustomizationModal({ restoreFocus: false });
-                this.app.navigate('jobs', { importFromRepository: true });
+                this.app.navigate('ai-agents', { importFromRepository: true });
+            });
+        state.layer.querySelector('[data-automation-nav-action="new-agent"]')
+            ?.addEventListener('click', () => {
+                this._closeCustomizationModal({ restoreFocus: false });
+                this.app.navigate('ai-agents', { newJob: true });
             });
         state.layer.querySelector('[data-automation-nav-action="new-automation"]')
             ?.addEventListener('click', () => {
                 this._closeCustomizationModal({ restoreFocus: false });
-                this.app.navigate('jobs', { newJob: true });
+                this.app.navigate('automations', { newJob: true });
             });
         state.layer.querySelector('[data-automation-nav-form]')
             ?.addEventListener('submit', (event) => {
@@ -628,10 +663,10 @@ export class AutomationNavLauncher {
                 PREFERENCES_ENDPOINT, 'PUT', payload,
                 { showLoading: false, preferErrorResponseMessage: true });
             this._acceptCatalog(response);
-            this.app.showToast('Automation launcher updated', 'Nav launcher preferences were saved.', 'success');
+            this.app.showToast('Launcher updated', 'The play button shows your choices.', 'success');
             this._closeCustomizationModal();
         } catch (error) {
-            const message = error?.message || 'Could not save Automation launcher preferences.';
+            const message = error?.message || 'Could not save the launcher list.';
             // The server rejects a snapshot that no longer matches its catalog (an
             // automation was added, renamed or removed meanwhile). Rather than a dead end,
             // pull the current list, keep the user's arrangement for what survived, and
@@ -683,7 +718,7 @@ export class AutomationNavLauncher {
             state.layer.querySelector('[data-automation-nav-action="save"]')?.toggleAttribute('disabled', state.loadFailed);
             this._renderModalRows();
         } catch (error) {
-            this._showModalError(error?.message || 'Could not reset Automation launcher preferences.');
+            this._showModalError(error?.message || 'Could not reset the launcher list.');
         } finally {
             state.pending = false;
         }

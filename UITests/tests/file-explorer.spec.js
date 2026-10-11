@@ -19,7 +19,7 @@ function pathKey(value) {
 
 async function openJobsPage(page) {
     await page.goto('/?view=terminal-focus', { waitUntil: 'domcontentloaded' });
-    await page.locator('.app-subnav-link[data-view="jobs"]:visible').click();
+    await page.locator('.app-subnav-link[data-view="automations"]:visible').click();
     await expect(page.locator('[data-python-scripts-root]')).toBeVisible({ timeout: 15_000 });
 }
 

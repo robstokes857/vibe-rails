@@ -1,22 +1,32 @@
 import { BoardApi } from './board-api.js';
 import { escapeHtml } from './utils.js';
+import { jobLaunchKind } from './launch-kind.js';
 
 export function cardAutomationControls(saved) {
-    if (!saved) return '<p class="board-side-empty">Save the card to run an Automation.</p>';
+    if (!saved) return '<p class="board-side-empty">Save the card to run an Agent or Automation on it.</p>';
     return `<div data-board-automation-controls>
         <div class="board-automation-launch">
-            <select class="form-select form-select-sm" aria-label="Automation to run" data-board-automation-choice disabled>
-                <option value="">Loading Automations…</option>
+            <select class="form-select form-select-sm" aria-label="Agent or Automation to run" data-board-automation-choice disabled>
+                <option value="">Loading…</option>
             </select>
             <button type="button" class="btn btn-sm btn-outline-primary" data-board-run-automation disabled>
-                <i class="fa-solid fa-play" aria-hidden="true"></i> Run automation
+                <i class="fa-solid fa-play" aria-hidden="true"></i> Run
             </button>
         </div>
         <p class="board-side-empty">Uses the saved card. The run and its recording stay linked here.</p>
         <p class="board-side-empty" data-board-automation-message role="status" aria-live="polite"></p>
-        <button type="button" class="btn btn-sm btn-outline-secondary" data-board-reload-automations hidden>Reload automations</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-board-reload-automations hidden>Reload</button>
         <div class="board-side-list" data-board-automation-runs></div>
     </div>`;
+}
+
+/** Agents first, then Automations, each group only when it has an entry. */
+function groupedJobOptions(jobs, kinds) {
+    const option = job => `<option value="${escapeHtml(String(job.id))}"${job.enabled ? '' : ' disabled'}>${escapeHtml(job.name)}${job.enabled ? '' : ' (disabled)'}</option>`;
+    const groups = [['Agents', jobs.filter(job => kinds.get(job.id) === 'agent')],
+        ['Automations', jobs.filter(job => kinds.get(job.id) !== 'agent')]];
+    return groups.filter(([, items]) => items.length)
+        .map(([label, items]) => `<optgroup label="${label}">${items.map(option).join('')}</optgroup>`).join('');
 }
 
 const STATUSES = ['Queued', 'Running', 'Succeeded', 'Failed', 'Cancelled', 'Timed out', 'Interrupted'];
@@ -44,13 +54,22 @@ export function bindCardAutomations(editor, card, { app, onQueued }) {
         request?.abort();
         const abort = request = new AbortController();
         try {
-            const result = await BoardApi.getCardAutomationsAsync(card.id, { signal: abort.signal });
+            // The card endpoint lists id/name/enabled; the project catalog says which are Agents.
+            // Its failure only loses the grouping, never the list.
+            const projectPath = app.data?.configs?.rootPath || '';
+            const [result, catalog] = await Promise.all([
+                BoardApi.getCardAutomationsAsync(card.id, { signal: abort.signal }),
+                projectPath
+                    ? app.apiCall(`/api/v1/jobs?projectPath=${encodeURIComponent(projectPath)}`, 'GET', null, { showLoading: false, signal: abort.signal }).catch(() => null)
+                    : Promise.resolve(null)
+            ]);
             if (!current() || generation !== version) return;
             const selected = select.value;
             const jobs = result?.jobs || [];
+            const kinds = new Map((catalog?.jobs || []).map(job => [job.id, jobLaunchKind(job)]));
             hasEnabledJobs = jobs.some(job => job.enabled);
-            select.innerHTML = `<option value="">${hasEnabledJobs ? 'Choose an Automation…' : 'No enabled Automations'}</option>`
-                + jobs.map(job => `<option value="${escapeHtml(String(job.id))}"${job.enabled ? '' : ' disabled'}>${escapeHtml(job.name)}${job.enabled ? '' : ' (disabled)'}</option>`).join('');
+            select.innerHTML = `<option value="">${hasEnabledJobs ? 'Choose…' : 'Nothing enabled yet'}</option>`
+                + groupedJobOptions(jobs, kinds);
             if (jobs.some(job => String(job.id) === selected && job.enabled)) select.value = selected;
             select.disabled = !hasEnabledJobs;
             const entries = result?.laneEntries || [];
@@ -70,11 +89,11 @@ export function bindCardAutomations(editor, card, { app, onQueued }) {
             if (count) count.textContent = String(entries.length + (result?.runs?.length || 0)
                 + editor.querySelectorAll('[data-board-automations] [data-session-id]').length);
             loaded = true;
-            message.textContent = jobs.length ? '' : 'Create an Automation for this project on the Automations page.';
+            message.textContent = jobs.length ? '' : 'Create an Agent or Automation for this project first.';
             retry.hidden = true;
         } catch (error) {
             if (!current() || generation !== version || abort.signal.aborted) return;
-            message.textContent = error?.message || 'Could not load Automations.';
+            message.textContent = error?.message || 'Could not load the list.';
             retry.hidden = false;
         } finally {
             if (current() && generation === version) updateButton();
@@ -94,19 +113,19 @@ export function bindCardAutomations(editor, card, { app, onQueued }) {
         request?.abort();
         select.disabled = true;
         updateButton();
-        message.textContent = 'Queuing Automation…';
+        message.textContent = 'Queuing…';
         try {
             // Do not abort a submitted launch on close: it may already have committed.
             await BoardApi.runCardAutomationAsync(card.id, jobId);
             if (!current()) return;
-            app.showToast('Board', 'Automation queued and linked to this card.', 'success');
-            message.textContent = 'Automation queued.';
+            app.showToast('Board', 'Run queued and linked to this card.', 'success');
+            message.textContent = 'Queued.';
             running = false;
             await refresh();
             if (current()) onQueued?.();
         } catch (error) {
             if (current()) {
-                message.textContent = error?.message || 'Could not queue the Automation.';
+                message.textContent = error?.message || 'Could not queue the run.';
                 app.showToast('Board', message.textContent, 'error');
             }
         } finally {
@@ -132,8 +151,8 @@ export function bindCardAutomations(editor, card, { app, onQueued }) {
             if (!current()) return;
             const entry = result?.laneEntries?.find(item => item.eventKey === target.dataset.eventKey && item.jobId === Number(target.dataset.jobId));
             const state = entry?.stepStatus || entry?.status;
-            app.showToast('Board', state === 'Skipped' ? 'Continuing without this Automation.'
-                : state === 'Stopping' ? 'Stopping this Automation before continuing.'
+            app.showToast('Board', state === 'Skipped' ? 'Continuing without this step.'
+                : state === 'Stopping' ? 'Stopping this step before continuing.'
                 : 'The entry changed while you were skipping it. Its current status is shown below.', 'info');
             running = false;
             await refresh();
@@ -142,7 +161,7 @@ export function bindCardAutomations(editor, card, { app, onQueued }) {
             if (current()) {
                 running = false;
                 await refresh();
-                if (current()) message.textContent = error?.message || 'Could not skip the Automation.';
+                if (current()) message.textContent = error?.message || 'Could not skip this step.';
             }
         } finally {
             running = false;

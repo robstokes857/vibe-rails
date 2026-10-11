@@ -66,7 +66,7 @@ independent Rules/Quality checks, and responsive navigation with the Settings co
 ### Focused Page Header Tests (No Backend Required)
 
 From `UITests`, run `npx playwright test --config playwright.page-headers.config.js`.
-Uses all six production views with intercepted APIs to compare title typography and header
+Uses the five production views that share the header, with intercepted APIs, to compare title typography and header
 treatment at desktop, tablet and phone widths, exercise retained controls, and verify theme colors.
 The static fixture never opens application databases or launches a CLI.
 
@@ -87,15 +87,17 @@ Uses the actual Board editor and synthetic API responses with installed Chrome. 
 create, rename, revoke, manual refresh, escaped link labels, draft preservation and uncertain/late results.
 No application database is opened and no card is uploaded.
 
-### Focused Automation editor tests (No Backend Required)
+### Focused Agents editor tests (No Backend Required)
 
-From `UITests`, run `npx playwright test --config playwright.automation-editor.config.js`.
+From `UITests`, run `npx playwright test --config playwright.agents-editor.config.js`.
 The real frontend runs against intercepted API fixtures and a temporary static server.
-Coverage includes one-name creation, shared Environment editing, provider switching, draft
-preservation, clickable prompt tokens, modal focus/cleanup, cancellation, save retries and narrow layouts. No application database or CLI
-is used. It also pins VIBE-58: a rename writes no Worker, Worker edits keep unrepresented
-Codex arguments, reserved CLI names get a valid Worker identifier (the fixture rejects them like
-`EnvironmentRoutes`), and check-only workflows save unchanged until instructions are added.
+Coverage includes one-name Agent creation, the shared CLI setup form (an Agent is a setup with a
+starting message, a Quick Launch the same setup without one), provider switching, draft
+preservation, clickable prompt tokens, modal focus/cleanup, cancellation, save retries and narrow
+layouts. No application database or CLI is used. It also pins VIBE-58: a rename writes no setup,
+setup edits keep unrepresented Codex arguments, reserved CLI names get a valid setup identifier
+(the fixture rejects them like `EnvironmentRoutes`), and check-only Automations list on their own
+page and save unchanged.
 
 ### Focused Automation terminal menu tests (No Backend Required)
 

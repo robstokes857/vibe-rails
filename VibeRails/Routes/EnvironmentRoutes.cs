@@ -433,7 +433,8 @@ public static class EnvironmentRoutes
             workspace?.Id,
             workspace?.Path,
             workspace?.Branch,
-            EnvironmentStepRoutes.ToDtos(steps), environment.Purpose, environment.ReviewerRouting);
+            EnvironmentStepRoutes.ToDtos(steps), environment.Purpose, environment.ReviewerRouting,
+            ProjectPath: environment.ProjectPath);
 
     /// <summary>
     /// Parses a wire workspace mode. Explicit rather than casting the int straight to the enum:

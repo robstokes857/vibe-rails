@@ -2,6 +2,7 @@ import { agentPurposeOptions } from './agent-purpose.js';
 import { switchReviewerDefaults, routingEditorMarkup, mountRoutingEditor } from './reviewer-routing.js';
 import { getEnabledLlmItems, mountLlmPicker, setLlmPickerValue } from './pickers/llm-picker.js';
 import { normalizeSteps, openStepsEditor, renderStepsSummaryButton, serializeSteps, summarizeSteps } from './environment-steps.js';
+import { hasStartingMessage } from './launch-kind.js';
 
 /** A form-scoped lookup, also accepting Document and the lightweight unit-test documents. */
 export function environmentField(root, id) {
@@ -31,17 +32,24 @@ export function automationWorkerName(name, environments = []) {
 }
 
 /**
- * Mount the existing Environment controls without owning a modal or submit button.
+ * Mount the saved-CLI-setup controls without owning a modal or submit button.
  * Provider catalogs, normalization, argument builders and settings APIs stay on the controller.
  * Nothing is written until save(); dispose() only tears down UI resources.
+ *
+ * `variant` is what the user is editing. An 'agent' carries a starting message (required when
+ * the form belongs to an Automation), work type, reviewer choice, workspace and steps. A
+ * 'quick-launch' is the same record with settings only: no message field, and the record is
+ * saved with an empty message — exactly what submitting the old form with the message blank
+ * wrote. `automationWorker` keeps the Automation editor's create flag as it always was.
  */
 export function mountEnvironmentEditor(controller, host, {
-    env = null, cliSettings = {}, initialName = '', automationWorker = false, getName = null
+    env = null, cliSettings = {}, initialName = '', automationWorker = false, getName = null, variant = null
 } = {}) {
     const app = controller.app;
     const escape = value => app.escapeHtml(value ?? '');
     const isEdit = Boolean(env);
     const workerOnly = automationWorker || Boolean(env?.automationWorker);
+    const isQuickLaunch = (variant || (workerOnly || hasStartingMessage(env) ? 'agent' : 'quick-launch')) === 'quick-launch';
     const initialCli = env?.cli || getEnabledLlmItems(app, 'environment-provider')[0]?.cli || 'claude';
     const workspaceMode = env?.workspaceMode || 0;
     const initialSteps = normalizeSteps(env?.steps);
@@ -59,21 +67,24 @@ export function mountEnvironmentEditor(controller, host, {
     let currentCli = initialCli;
 
     host.classList.add('environment-editor');
+    host.classList.toggle('is-quick-launch', isQuickLaunch);
     host.innerHTML = `
-        ${!isEdit && !getName ? `<div class="mb-3"><label class="form-label" for="env-name">${workerOnly ? 'Worker Name' : 'Environment / Worker Name'}</label><input class="form-control" id="env-name" required maxlength="64" value="${escape(initialName)}"></div>` : ''}
-        <div class="env-editor-presets" ${isEdit || getName ? 'hidden' : ''}><span>Start with</span><div class="env-preset-actions">
+        ${!isEdit && !getName ? `<div class="mb-3"><label class="form-label" for="env-name">${isQuickLaunch ? 'Quick Launch name' : 'Name'}</label><input class="form-control" id="env-name" required maxlength="64" value="${escape(initialName)}"></div>` : ''}
+        ${isQuickLaunch ? '' : `<div class="env-editor-presets" ${isEdit || getName ? 'hidden' : ''}><span>Start with</span><div class="env-preset-actions">
             <button type="button" class="btn btn-sm btn-outline-secondary" data-code-review-preset>Code review</button>
             <button type="button" class="btn btn-sm btn-outline-secondary" data-switch-reviewer-preset>Switch reviewer</button>
-        </div></div>
+        </div></div>`}
         <div class="env-primary-options" data-primary-options>
             <div class="env-provider-field"><label class="form-label" for="env-cli">LLM</label>${isEdit
                 ? `<input class="form-control" id="env-cli" value="${escape(env.cli)}" disabled>`
                 : '<select class="form-select" id="env-cli" required></select>'}</div>
         </div>
-        ${controller.renderInitialMessageField(initialCli, escape(cliSettings.initialMessage ?? cliSettings.prompt ?? ''))}
+        ${isQuickLaunch
+            ? `<p class="env-quick-launch-note text-muted small">Opens <span data-initial-message-cli>${escape(controller.cliDisplayName(initialCli))}</span> with these settings and no starting message. If the Quick Launch nudge is on in Settings, the Vibe Board prompt opens the session instead.</p>`
+            : controller.renderInitialMessageField(initialCli, escape(cliSettings.initialMessage ?? cliSettings.prompt ?? ''))}
         <section class="env-secondary-options" aria-label="Run settings">
             <div class="env-secondary-content">
-                <div class="mb-3 env-purpose-group"><label class="form-label" for="env-purpose">Work type <span class="text-muted">(optional)</span></label>
+                ${isQuickLaunch ? '' : `<div class="mb-3 env-purpose-group"><label class="form-label" for="env-purpose">Work type <span class="text-muted">(optional)</span></label>
                     <select id="env-purpose" class="form-select">${agentPurposeOptions(env?.purpose)}</select>
                     <small class="form-text text-muted">Code review also saves a report on the originating card.</small>
                 </div>
@@ -81,29 +92,31 @@ export function mountEnvironmentEditor(controller, host, {
                     <label class="form-label" for="env-reviewer-mode">Reviewer selection</label>
                     <select id="env-reviewer-mode" class="form-select mb-2"><option value="fixed">Fixed provider</option><option value="switch" ${env?.reviewerRouting?.mode === 'switch' ? 'selected' : ''}>Switch reviewer</option></select>
                     <div data-reviewer-routing ${env?.reviewerRouting?.mode === 'switch' ? '' : 'hidden'}>
-                        <p class="text-muted small">Saved for this review Automation and reused for every card it reviews in the repository.</p>${routingEditorMarkup()}</div>
+                        <p class="text-muted small">Saved for this review agent and reused for every card it reviews in the repository.</p>${routingEditorMarkup()}</div>
                 </div>
                 ${app.data.isInGit ? `<div class="mb-3 env-workspace-group"><label class="form-label" for="env-workspace-mode">Workspace</label><select class="form-select" id="env-workspace-mode">
                     <option value="0" ${workspaceMode === 0 ? 'selected' : ''}>Project directory</option>
-                    ${!workerOnly || workspaceMode === 1 ? `<option value="1" ${workspaceMode === 1 ? 'selected' : ''}>Its own clone — reused each launch</option>` : ''}
-                    <option value="2" ${workspaceMode === 2 ? 'selected' : ''}>Clean Git checkout every run</option>
-                </select><small class="form-text text-muted">A fresh checkout starts from the current branch's last commit. Uncommitted and ignored files are not copied.</small></div>` : ''}
-                ${!workerOnly ? `<div class="mb-3 form-check form-switch"><input class="form-check-input" type="checkbox" id="env-hidden" ${env?.hidden ? 'checked' : ''}><label class="form-check-label" for="env-hidden">Hide from launch pickers</label></div>` : ''}
+                    ${!workerOnly || workspaceMode === 1 ? `<option value="1" ${workspaceMode === 1 ? 'selected' : ''}>Its own copy of the repo — reused each run</option>` : ''}
+                    <option value="2" ${workspaceMode === 2 ? 'selected' : ''}>A clean copy of the repo every run</option>
+                </select><small class="form-text text-muted">A clean copy starts from the current branch's last commit. Uncommitted and ignored files are not copied.</small></div>` : ''}`}
+                ${!workerOnly && !isQuickLaunch ? `<div class="mb-3 form-check form-switch"><input class="form-check-input" type="checkbox" id="env-hidden" ${env?.hidden ? 'checked' : ''}><label class="form-check-label" for="env-hidden">Hide from Board pickers</label></div>` : ''}
                 <div data-cli-settings-slot></div>
                 <div class="mb-3" data-custom-args-group><label class="form-label" for="env-custom-args">Extra CLI arguments</label><input class="form-control" id="env-custom-args" value="${escape(env?.customArgs || '')}"></div>
-                ${renderStepsSummaryButton(initialSteps)}
+                ${isQuickLaunch ? '' : renderStepsSummaryButton(initialSteps)}
             </div>
         </section>`;
     const get = id => environmentField(host, id);
     const message = get('env-initial-message');
-    message.rows = 3;
-    const context = document.createElement('div');
-    context.className = 'env-context-options';
-    for (const selector of ['.env-purpose-group', '.env-workspace-group', '[data-reviewer-policy]']) {
-        const field = host.querySelector(selector);
-        if (field) context.append(field);
+    if (message) {
+        message.rows = 3;
+        const context = document.createElement('div');
+        context.className = 'env-context-options';
+        for (const selector of ['.env-purpose-group', '.env-workspace-group', '[data-reviewer-policy]']) {
+            const field = host.querySelector(selector);
+            if (field) context.append(field);
+        }
+        message.parentElement.before(context);
     }
-    message.parentElement.before(context);
     const slot = host.querySelector('[data-cli-settings-slot]');
     const primary = host.querySelector('[data-primary-options]');
     const routingHost = host.querySelector('[data-reviewer-routing]');
@@ -132,8 +145,10 @@ export function mountEnvironmentEditor(controller, host, {
         slot.querySelectorAll(':scope > hr, :scope > h6').forEach(element => element.remove());
         controller.bindCliSettingsInteractions(cli, host);
         host.querySelector('[data-custom-args-group]').hidden = controller.usesManagedCustomArgs(cli);
-        get('env-initial-message').placeholder = getName ? 'Describe what should happen each time this runs.' : controller.initialMessagePlaceholder(cli);
-        host.querySelector('[data-initial-message-cli]').textContent = controller.cliDisplayName(cli);
+        const messageField = get('env-initial-message');
+        if (messageField) messageField.placeholder = getName ? 'What this agent should do each time it runs.' : controller.initialMessagePlaceholder(cli);
+        const cliName = host.querySelector('[data-initial-message-cli]');
+        if (cliName) cliName.textContent = controller.cliDisplayName(cli);
     };
     const pickerDisposer = isEdit ? null : mountLlmPicker(app, cliSelect, {
         context: 'environment-provider', placeholder: null, selectedValue: initialCli, includeGroups: false
@@ -146,15 +161,17 @@ export function mountEnvironmentEditor(controller, host, {
         renderSettings(currentCli, drafts.get(currentCli) || {});
     });
     const reviewerMode = get('env-reviewer-mode');
+    const purposeField = get('env-purpose');
     const updateReviewerControls = () => {
-        const switching = get('env-purpose').value === 'code_review' && reviewerMode.value === 'switch';
+        if (!reviewerMode || !purposeField) return;
+        const switching = purposeField.value === 'code_review' && reviewerMode.value === 'switch';
         routingHost.hidden = !switching;
         primary.hidden = switching;
         slot.hidden = switching;
         host.querySelector('[data-custom-args-group]').hidden = switching || controller.usesManagedCustomArgs(currentCli);
     };
-    reviewerMode.addEventListener('change', updateReviewerControls);
-    get('env-purpose').addEventListener('change', event => {
+    reviewerMode?.addEventListener('change', updateReviewerControls);
+    purposeField?.addEventListener('change', event => {
         host.querySelector('[data-reviewer-policy]').hidden = event.target.value !== 'code_review';
         updateReviewerControls();
         if (!savedEnvironment && event.target.value === 'code_review') {
@@ -163,20 +180,20 @@ export function mountEnvironmentEditor(controller, host, {
     });
     updateReviewerControls();
     for (const [selector, mode, name] of [['[data-code-review-preset]', 'fixed', 'Code review'], ['[data-switch-reviewer-preset]', 'switch', 'Switch reviewer']]) {
-        host.querySelector(selector).addEventListener('click', event => {
+        host.querySelector(selector)?.addEventListener('click', event => {
             if (!savedEnvironment) {
                 setLlmPickerValue(app, cliSelect, 'codex');
                 cliSelect.dispatchEvent(new Event('change', { bubbles: true }));
             }
-            get('env-purpose').value = 'code_review';
-            get('env-purpose').dispatchEvent(new Event('change', { bubbles: true }));
+            purposeField.value = 'code_review';
+            purposeField.dispatchEvent(new Event('change', { bubbles: true }));
             reviewerMode.value = mode;
             reviewerMode.dispatchEvent(new Event('change'));
             if (get('env-name') && !get('env-name').value.trim()) get('env-name').value = name;
         });
     }
-    const refreshRefs = controller.bindInitialMessageField(() => editedSteps ?? initialSteps, host);
-    host.querySelector('[data-env-steps-open]').addEventListener('click', event => {
+    const refreshRefs = message ? controller.bindInitialMessageField(() => editedSteps ?? initialSteps, host) : () => {};
+    host.querySelector('[data-env-steps-open]')?.addEventListener('click', event => {
         stepsEditor = openStepsEditor(app, {
             triggerElement: event.currentTarget,
             steps: editedSteps ?? initialSteps,
@@ -193,7 +210,15 @@ export function mountEnvironmentEditor(controller, host, {
     const read = () => {
         const cli = savedEnvironment?.cli || cliSelect.value;
         const settings = controller.extractCliSettingsPayload(cli, host);
-        const purpose = get('env-purpose').value;
+        if (isQuickLaunch) {
+            // No message field exists, and a stale `prompt` can still arrive from a Codex
+            // config.toml through loadEditorSettings; a Quick Launch always saves an empty one.
+            if ('prompt' in settings) settings.prompt = '';
+            if ('initialMessage' in settings) settings.initialMessage = '';
+            const payload = { ...controller.buildEnvironmentSavePayload(cli, settings, host), customPrompt: '' };
+            return { cli, settings, payload, name: savedEnvironment?.name || getName?.() || get('env-name')?.value.trim() || '' };
+        }
+        const purpose = purposeField.value;
         const payload = {
             ...controller.buildEnvironmentSavePayload(cli, settings, host), purpose,
             reviewerRouting: purpose === 'code_review' && reviewerMode.value === 'switch'

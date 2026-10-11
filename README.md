@@ -112,21 +112,21 @@ Run Claude Code and Codex side by side in real PTY-backed terminal tabs, alongsi
 CLIs or a plain shell. Sessions keep running when you switch pages, and tabs reconnect when you
 come back.
 
-**View/Edit all LLMs** decides which CLIs and saved environments the launcher shows, and in what
-order. It can also launch any of them, hidden ones included.
+**Manage quick launches** decides which CLIs and Quick Launches the terminal's play button shows,
+and in what order. It also adds, edits and deletes Quick Launches, and can launch any of them,
+hidden ones included.
 
-![The View/Edit all LLMs dialog, with a visibility toggle, ordering arrows and a Launch button for each CLI](docs/images/all-llms.png)
+![The Manage quick launches dialog, with a visibility toggle, ordering arrows and a Launch button for each CLI](docs/images/all-llms.png)
 
-## Envs
+## Quick Launches and Agents
 
-Save a CLI with its model, arguments and initial prompt as a named environment, like Conda for
-LLMs, and launch it from any picker. An environment can work in the project folder, in its own git
-clone or in a fresh clone each run, and can run setup commands before the CLI starts.
+Save a CLI with its model, arguments and settings as a **Quick Launch**, like Conda for LLMs, and
+open it from the terminal's play button. Give the same setup a starting message and it is an
+**Agent**: run it now, on a schedule, before or after a commit, or when a Board card enters a lane.
+Either can work in the project folder, in its own git clone or in a fresh clone each run, and can
+run setup commands before the CLI starts.
 
-**Workers** are environments marked for Automations, so reviews and other unattended work always
-run with the same setup.
-
-![Saved code-review environments above the Workers used by Automations](docs/images/environments-workers.png)
+![The Agents page, listing saved CLI setups with their starting messages](docs/images/environments-workers.png)
 
 ## Vibe AI
 
@@ -151,19 +151,20 @@ arguments you give. **Remote** mode inspects an external MCP server inside an is
 
 ![The MCP Explorer inspecting the save_board_handoff tool, with its arguments and input schema](docs/images/mcp-explorer.png)
 
-## Automation
+## Automations
 
-An Automation is an ordered workflow of repository scripts (`.py`, `.ps1`, `.sh`) and at most one
-Worker. Run it on demand, on a schedule, before or after a commit, or when a Board card enters a
-lane. The signed scripts library keeps reusable pwsh, bash and Python scripts that run only after
-you sign them. Automations run only while VibeRails is open; there is no background service.
+An Automation is an ordered workflow of repository scripts (`.py`, `.ps1`, `.sh`) and checks (VCA,
+Code quality) with no LLM step. Run it on demand, on a schedule, before or after a commit, or when
+a Board card enters a lane. The signed scripts library keeps reusable pwsh, bash and Python scripts
+that run only after you sign them. Agents and Automations run only while VibeRails is open; there
+is no background service.
 
 > [!WARNING]
-> Automations are not sandboxed. They run unattended with the same operating-system permissions
-> as VibeRails. A Worker set to use its own clone or a fresh clone works in a throwaway checkout,
-> but that is not a security boundary: an agent can still reach files outside it through CLI
-> arguments, configuration, MCP servers, tools or scripts. Review every Worker and script, and use
-> a disposable account or machine for untrusted prompts, tools or repositories.
+> Agents and Automations are not sandboxed. They run unattended with the same operating-system
+> permissions as VibeRails. An Agent set to use its own clone or a fresh clone works in a
+> throwaway checkout, but that is not a security boundary: it can still reach files outside it
+> through CLI arguments, configuration, MCP servers, tools or scripts. Review every Agent and
+> script, and use a disposable account or machine for untrusted prompts, tools or repositories.
 
 ---
 

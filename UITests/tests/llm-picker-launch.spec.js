@@ -54,8 +54,8 @@ async function openPicker(page, { nested = false, workingDirectory = null } = {}
         });
         select.tomselect.open();
     }, { nested, workingDirectory });
-    await page.getByRole('button', { name: 'View/Edit all LLMs', exact: true }).click();
-    const modal = page.getByRole('dialog', { name: 'View/Edit all LLMs', exact: true });
+    await page.getByRole('button', { name: 'Manage quick launches…', exact: true }).click();
+    const modal = page.getByRole('dialog', { name: 'Manage quick launches', exact: true });
     await expect(modal).toBeVisible();
     return { modal, preferenceWrites };
 }
@@ -65,7 +65,7 @@ for (const choice of [
     { key: 'base:shell', cli: 'shell', environmentName: null },
     { key: 'env:902:codex', cli: 'codex', environmentName: ENVIRONMENT_NAME }
 ]) {
-    test(`View/Edit launches hidden ${choice.key} without saving preferences`, async ({ page }) => {
+    test(`Manage quick launches launches hidden ${choice.key} without saving preferences`, async ({ page }) => {
         const { modal, preferenceWrites } = await openPicker(page);
         const row = modal.locator(`[data-llm-picker-key="${choice.key}"]`);
         await expect(row.locator('[data-llm-picker-enabled]')).not.toBeChecked();

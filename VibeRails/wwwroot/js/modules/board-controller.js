@@ -32,6 +32,7 @@ import { previousWorkHtml } from './board-previous-work.js';
 
 import { escapeHtml, confirmDialog, parseLlmSelection, getCliBrand, canonicalLlmSelection } from './utils.js';
 import { mountLlmPicker, setLlmPickerValue, getEnabledLlmItems } from './pickers/llm-picker.js';
+import { launchKind } from './launch-kind.js';
 import { BoardApi } from './board-api.js';
 import { BoardPicker, openBoardOrderManager } from './board-picker.js';
 import { boardBrandLogo } from './board-brand.js';
@@ -533,6 +534,17 @@ export class BoardController {
     // Derived data
     // ============================================
 
+    /** One line under the assignee picker for a saved setup; nothing for a built-in CLI. */
+    assigneeLaunchHint(selection) {
+        const parsed = parseLlmSelection(canonicalLlmSelection(selection), this.app.data?.environments || []);
+        if (parsed?.kind !== 'environment') return '';
+        const environment = (this.app.data?.environments || []).find(env => Number(env.id) === Number(parsed.envId));
+        if (!environment) return 'This saved setup is no longer available.';
+        return launchKind(environment) === 'agent'
+            ? 'Agent: uses its saved settings and adds its starting message to the card prompt.'
+            : 'Quick Launch: uses its saved model and permissions.';
+    }
+
     // An assignee is an LLM picker key. Label comes from the picker catalog
     // (which knows environment names), then from the raw key; the avatar is the
     // CLI's brand mark, the closest thing an LLM has to a face.
@@ -541,7 +553,7 @@ export class BoardController {
         if (!key) return null;
         let item = null;
         try {
-            item = getEnabledLlmItems(this.app, 'sandbox').find(entry => entry.key === key) || null;
+            item = getEnabledLlmItems(this.app, 'assignee').find(entry => entry.key === key) || null;
         } catch {
             item = null;
         }
@@ -741,7 +753,7 @@ export class BoardController {
 
         const assignee = this.query('[data-board-filter-assignee]');
         if (assignee) {
-            assignee.innerHTML = '<option value="">Any LLM</option>'
+            assignee.innerHTML = '<option value="">Anyone</option>'
                 + this.allAssignees().map(info =>
                     `<option value="${escapeHtml(info.key)}">${escapeHtml(info.label)}</option>`).join('');
             assignee.value = this.state.filters.assignee;
@@ -1338,7 +1350,7 @@ export class BoardController {
                             </select>
                         </div>
                         <div>
-                            <label class="board-editor-label" for="board-card-assignee">Assignee (LLM)</label>
+                            <label class="board-editor-label" for="board-card-assignee">Assignee</label>
                             <div class="board-assignee-row">
                                 <select class="form-select form-select-sm" id="board-card-assignee" aria-label="Assignee"></select>
                                 <button type="button" class="board-side-remove board-assignee-clear" data-board-clear-assignee
@@ -1366,7 +1378,7 @@ export class BoardController {
                         <div class="board-chat-controls">
                             <select id="board-chat-agent" class="form-select form-select-sm" data-board-chat-agent aria-label="Agent for card discussion"></select>
                             <button type="button" class="btn btn-link btn-sm" data-board-chat aria-describedby="board-chat-help">
-                                <i class="fa-solid fa-comments" aria-hidden="true"></i> Chat with agent
+                                <i class="fa-solid fa-comments" aria-hidden="true"></i> Chat
                             </button>
                         </div>
                         <label class="board-editor-label mt-2" for="board-chat-question">Initial question (optional)</label>
@@ -1417,7 +1429,7 @@ export class BoardController {
                     <section class="board-side-section">
                         <h3 class="board-side-label">
                             <i class="fa-solid fa-robot" aria-hidden="true"></i>
-                            Automations <span class="board-count" data-board-count="automations">${(card?.sessions || []).filter(session => session.isAutomation || session.isReview || session.origin === 'code_review').length}</span>
+                            Agent &amp; Automation runs <span class="board-count" data-board-count="automations">${(card?.sessions || []).filter(session => session.isAutomation || session.isReview || session.origin === 'code_review').length}</span>
                         </h3>
                         ${cardAutomationControls(Boolean(card))}
                         <div class="board-side-list" data-board-automations></div>
@@ -1578,8 +1590,8 @@ export class BoardController {
         editor.querySelector('[data-board-start-work]')?.addEventListener('click', () => this.startWork(editor, card));
         editor.querySelector('[data-board-chat]')?.addEventListener('click', () => this.startWork(editor, card, 'chat'));
 
-        // The Assignee field is the app-wide LLM picker ('sandbox' context: saved
-        // environments plus the bare CLIs, never a shell, never a Worker).
+        // The Assignee field is the app-wide launch picker ('assignee' context: built-in
+        // CLIs, Quick Launches and Agents; never a shell, never an Automation Worker).
         this.disposeCardPickers();
         const assigneeSelect = editor.querySelector('#board-card-assignee');
         this.cardChecks = bindCardChecks(editor, card, this.app);
@@ -1592,7 +1604,7 @@ export class BoardController {
         });
         if (assigneeSelect) {
             this.assigneePickerDispose = mountLlmPicker(this.app, assigneeSelect, {
-                context: 'sandbox',
+                context: 'assignee',
                 placeholder: 'Unassigned',
                 selectedValue: card?.assignee || ''
             });
@@ -1601,6 +1613,10 @@ export class BoardController {
                 const host = editor.querySelector('[data-board-launch-options]');
                 if (!host) return;
                 host.innerHTML = renderBoardLaunchOptions(selection, options);
+                // A saved setup brings its own settings; say which kind so the missing
+                // model/effort controls read as intended, not broken.
+                const hint = this.assigneeLaunchHint(selection);
+                if (hint) host.insertAdjacentHTML('beforeend', `<p class="board-editor-muted board-assignee-hint">${escapeHtml(hint)}</p>`);
                 this.launchOptionsDispose = bindBoardLaunchOptions(host, selection);
             };
             renderOptions(card.baseLlmOptions || {}, card.assignee || '');
@@ -1615,9 +1631,9 @@ export class BoardController {
         const chatSelect = editor.querySelector('[data-board-chat-agent]');
         if (chatSelect) {
             this.chatPickerDispose = mountLlmPicker(this.app, chatSelect, {
-                context: 'sandbox',
-                placeholder: 'Select an agent…',
-                selectedValue: card.sessions?.filter(session => session.origin === 'chat').at(-1)?.selection || card.assignee || getEnabledLlmItems(this.app, 'sandbox')[0]?.key || ''
+                context: 'assignee',
+                placeholder: 'Choose a CLI, Quick Launch or Agent…',
+                selectedValue: card.sessions?.filter(session => session.origin === 'chat').at(-1)?.selection || card.assignee || getEnabledLlmItems(this.app, 'assignee')[0]?.key || ''
             });
         }
 
@@ -2468,7 +2484,7 @@ export class BoardController {
         if (!this.validateCardTitle(editor, payload)) return;
         const selection = intent === 'chat' ? editor.querySelector('[data-board-chat-agent]')?.value : payload.assignee;
         if (!selection) {
-            this.app.showToast('Board', intent === 'chat' ? 'Choose an LLM beside Chat with.' : 'Assign an LLM to this card first.', 'warning');
+            this.app.showToast('Board', intent === 'chat' ? 'Choose who to chat with.' : 'Assign a CLI, Quick Launch or Agent to this card first.', 'warning');
             const select = editor.querySelector(intent === 'chat' ? '[data-board-chat-agent]' : '#board-card-assignee');
             if (select?.tomselect) select.tomselect.focus();
             else select?.focus();

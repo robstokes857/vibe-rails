@@ -8,18 +8,22 @@ import {
     populateLlmSelectionItemsSelect,
     canonicalLlmSelection
 } from './utils.js';
+import { LAUNCH_KIND_LABELS, launchKind } from './launch-kind.js';
 
 const PREFERENCES_ENDPOINT = '/api/v1/llm-picker/preferences';
+// The server's group strings. They are echoed back verbatim on save (the preferences PUT
+// compares them) and never shown: display grouping comes from LAUNCH_KIND_LABELS.
 const BASE_GROUP = 'Base CLIs';
 const ENVIRONMENT_GROUP = 'Custom Environments';
-const CUSTOMIZABLE_CONTEXTS = new Set(['terminal', 'sandbox', 'multi-run']);
+const CUSTOMIZABLE_CONTEXTS = new Set(['terminal']);
+const KIND_RANK = Object.freeze({ base: 0, 'quick-launch': 1, agent: 2 });
 
-// The automation editor is NOT a context here: its Worker picker is a separate
-// component (pickers/worker-picker.js) sourced from /api/v1/environments, because
-// Automation Workers are excluded from this catalog entirely.
+// Each matcher sees the catalog item and its launch kind: 'base', or for a saved setup
+// 'quick-launch' (no starting message) / 'agent' (has one). The terminal picker is where a
+// user types their own task, so Agents stay out of it; Board pickers assign either.
 const CONTEXT_MATCHERS = Object.freeze({
-    terminal: () => true,
-    sandbox: (item) => item.kind === 'environment' || (item.kind === 'base' && item.cli !== 'shell'),
+    terminal: (item, kind) => item.kind === 'base' || kind === 'quick-launch',
+    assignee: (item) => item.kind === 'environment' || (item.kind === 'base' && item.cli !== 'shell'),
     'multi-run': (item) => item.kind === 'base' && item.cli !== 'shell',
     'environment-provider': (item) => item.kind === 'base' && item.cli !== 'shell'
 });
@@ -82,7 +86,10 @@ export class LlmPickerController {
                 String(environment?.cli || '').toLowerCase(),
                 environment?.name || '',
                 environment?.hidden ? 1 : 0,
-                environment?.automationWorker ? 1 : 0
+                environment?.automationWorker ? 1 : 0,
+                // Saving or clearing a starting message moves a setup between the Quick
+                // Launch and Agent groups, so mounted pickers must re-resolve.
+                launchKind(environment) === 'agent' ? 1 : 0
             ].join(':'))
             .join('|');
         if (fingerprint === this.lastEnvironmentsFingerprint
@@ -106,9 +113,9 @@ export class LlmPickerController {
         const record = {
             selectEl,
             configuration: {
-                placeholder: 'Select LLM...',
+                placeholder: context === 'terminal' ? 'Choose a CLI or Quick Launch…' : 'Select LLM...',
                 searchable: true,
-                searchPlaceholder: 'Search LLMs...',
+                searchPlaceholder: 'Search…',
                 includeGroups: context !== 'multi-run' && context !== 'environment-provider',
                 includeDefaultSuffix: context === 'terminal',
                 plainCliValues: context === 'environment-provider',
@@ -213,9 +220,10 @@ export class LlmPickerController {
             selectedValue,
             searchable: configuration.searchable,
             searchPlaceholder: configuration.searchPlaceholder,
+            customizeLabel: 'Manage quick launches…',
             emptyMessage: CUSTOMIZABLE_CONTEXTS.has(configuration.context)
-                ? 'No launch targets are currently visible.'
-                : 'No matching LLMs.',
+                ? 'Nothing is shown here yet. Open "Manage quick launches…" to add or show one.'
+                : 'No matching options.',
             onCustomize: CUSTOMIZABLE_CONTEXTS.has(configuration.context)
                 ? ({ triggerElement }) => this.openCustomizationModal({
                     originSelect: selectEl,
@@ -249,8 +257,9 @@ export class LlmPickerController {
                 || item.enabled
                 || this._selectionValue(item, plainCliValues) === selectedValue)
         );
-        const optionItems = visibleItems.map((item) => {
+        const toOption = (item, suffix = '') => {
             const value = this._selectionValue(item, plainCliValues);
+            const kind = this._launchKind(item);
             let label = item.label;
             if (item.kind === 'base' && includeDefaultSuffix && item.cli !== 'shell') {
                 label = `${label} (default)`;
@@ -259,17 +268,33 @@ export class LlmPickerController {
                 label = `${label} (hidden)`;
             }
             return {
-                group: includeGroups ? item.group : null,
+                group: includeGroups ? LAUNCH_KIND_LABELS[kind] : null,
                 value,
-                label,
+                label: `${label}${suffix}`,
                 cli: item.cli,
                 environmentId: item.environmentId,
                 environmentName: item.kind === 'environment'
                     ? item.label.replace(/ \([^)]*\)$/, '')
                     : null,
-                kind: item.kind
+                kind: item.kind,
+                launchKind: kind
             };
-        });
+        };
+        // Stable: built-ins, then Quick Launches, then Agents, each in the saved order.
+        const optionItems = visibleItems.map((item) => toOption(item))
+            .sort((left, right) => KIND_RANK[left.launchKind] - KIND_RANK[right.launchKind]);
+
+        // A tab restored with an Agent selected (opened from the Agents page or the Board) is
+        // shown where it is, marked, and dropped on the next change — the same courtesy a
+        // hidden selection gets, so the dropdown never silently clears a live reference.
+        if (selectedValue && !optionItems.some((item) => item.value === selectedValue)
+            && context !== 'environment-provider') {
+            const outOfContext = (this.catalog || []).find((item) =>
+                item.kind === 'environment' && this._selectionValue(item, plainCliValues) === selectedValue);
+            if (outOfContext && (!configuration.filterItem || configuration.filterItem(outOfContext))) {
+                optionItems.push(toOption(outOfContext, ' (agent)'));
+            }
+        }
 
         const alreadyIncluded = optionItems.some((item) => item.value === selectedValue);
         const fallback = typeof configuration.selectedFallback === 'function'
@@ -301,7 +326,24 @@ export class LlmPickerController {
         const catalog = this.usingFallbackCatalog
             ? this._buildFallbackCatalog()
             : (this.catalog || this._buildFallbackCatalog());
-        return catalog.filter(matcher);
+        return catalog.filter((item) => matcher(item, this._launchKind(item)));
+    }
+
+    /**
+     * 'base' for a built-in CLI; for a saved setup, whether it carries a starting message. An
+     * environment the app has not loaded yet counts as an Agent: the conservative answer keeps
+     * an unknown setup out of the terminal picker rather than offering it without its message.
+     */
+    _launchKind(item) {
+        if (item.kind !== 'environment') return 'base';
+        const environment = this._environmentFor(item);
+        return environment ? launchKind(environment) : 'agent';
+    }
+
+    _environmentFor(item) {
+        return (this.app.data.environments || []).find((candidate) =>
+            Number(candidate.id) === item.environmentId
+            && String(candidate.cli).toLowerCase() === item.cli) || null;
     }
 
     _normalizeCatalog(items) {
@@ -385,21 +427,28 @@ export class LlmPickerController {
                     <div class="modal-content">
                         <div class="modal-header">
                             <div>
-                                <h5 class="modal-title" id="llm-picker-modal-title">View/Edit all LLMs</h5>
-                                <p class="text-muted small mb-0">Launch any LLM, including hidden ones. Save visibility and order changes before launching.</p>
+                                <h5 class="modal-title" id="llm-picker-modal-title">Manage quick launches</h5>
+                                <p class="text-muted small mb-0">A Quick Launch opens a CLI with saved model, effort and permission settings and no starting message. Choose what the terminal picker shows, in which order. Agents — saved setups with their own message — live on the Agents page.</p>
                             </div>
                             <button type="button" class="btn-close" data-llm-picker-action="cancel"
-                                    aria-label="Close LLM list customization"></button>
+                                    aria-label="Close quick launch settings"></button>
                         </div>
                         <form data-llm-picker-form>
                             <div class="modal-body">
                                 <div class="llm-picker-modal-section">
-                                    <h6>Base CLIs</h6>
+                                    <h6>Built-in CLIs</h6>
                                     <div data-llm-picker-group="${BASE_GROUP}"></div>
                                 </div>
                                 <div class="llm-picker-modal-section mt-4">
-                                    <h6>Custom Environments</h6>
+                                    <div class="llm-picker-modal-section-head">
+                                        <h6>Quick Launches</h6>
+                                        <button type="button" class="btn btn-sm btn-outline-primary"
+                                                data-llm-picker-action="create">
+                                            <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>New quick launch
+                                        </button>
+                                    </div>
                                     <div data-llm-picker-group="${ENVIRONMENT_GROUP}"></div>
+                                    <p class="llm-picker-nudge-note text-muted small mb-0">A Quick Launch sends no message. If the Quick Launch nudge is on in Settings, a new session opens with the Vibe Board prompt instead.</p>
                                 </div>
                                 <div class="alert alert-danger mt-3 mb-0 d-none" role="alert"
                                      data-llm-picker-error></div>
@@ -466,9 +515,11 @@ export class LlmPickerController {
         for (const group of [BASE_GROUP, ENVIRONMENT_GROUP]) {
             const container = state.layer.querySelector(`[data-llm-picker-group="${group}"]`);
             if (!container) continue;
-            const groupItems = state.items.filter((item) => item.group === group);
+            // Agents stay in state.items (the save echoes every catalog entry) but are not
+            // listed: this dialog manages Quick Launches only.
+            const groupItems = state.items.filter((item) => item.group === group && this._modalVisible(item));
             container.innerHTML = groupItems.length === 0
-                ? '<p class="llm-picker-group-empty text-muted small mb-0">No custom Environments yet.</p>'
+                ? '<p class="llm-picker-group-empty text-muted small mb-0">No quick launches yet. Create one to save a CLI with its model and permissions.</p>'
                 : groupItems.map((item, index) => this._renderModalRow(item, index, groupItems.length)).join('');
         }
 
@@ -490,6 +541,7 @@ export class LlmPickerController {
             : '<span class="llm-picker-row-logo llm-picker-row-logo-fallback"><i class="fa-solid fa-terminal" aria-hidden="true"></i></span>';
         const key = escapeHtml(item.key);
         const label = escapeHtml(item.label);
+        const editable = item.kind === 'environment';
         return `
             <div class="llm-picker-modal-row has-launch-action${item.enabled ? '' : ' is-hidden'}"
                  data-llm-picker-key="${key}" data-llm-picker-group-name="${escapeHtml(item.group)}">
@@ -503,7 +555,7 @@ export class LlmPickerController {
                     <input class="form-check-input" type="checkbox" role="switch"
                            id="llm-picker-visible-${escapeHtml(item.key.replace(/[^a-zA-Z0-9_-]/g, '-'))}"
                            data-llm-picker-enabled ${item.enabled ? 'checked' : ''}
-                           aria-label="Show ${label} in launch pickers">
+                           aria-label="Show ${label} in the terminal picker">
                 </div>
                 <div class="llm-picker-move-buttons" role="group" aria-label="Move ${label}">
                     <button type="button" class="btn btn-sm btn-outline-secondary"
@@ -515,11 +567,99 @@ export class LlmPickerController {
                         <i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
                     </button>
                 </div>
-                <button type="button" class="btn btn-sm btn-outline-primary llm-picker-launch-button"
-                        data-llm-picker-launch aria-label="Launch ${label}">
-                    <i class="fa-solid fa-play" aria-hidden="true"></i> Launch
-                </button>
+                <div class="llm-picker-row-actions" role="group" aria-label="${label} actions">
+                    ${editable ? `<button type="button" class="btn btn-sm btn-outline-secondary llm-picker-icon-button"
+                            data-llm-picker-edit aria-label="Edit ${label}" title="Edit">
+                        <i class="fa-solid fa-pen" aria-hidden="true"></i>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-danger llm-picker-icon-button"
+                            data-llm-picker-delete aria-label="Delete ${label}" title="Delete">
+                        <i class="fa-solid fa-trash" aria-hidden="true"></i>
+                    </button>` : ''}
+                    <button type="button" class="btn btn-sm btn-outline-primary llm-picker-launch-button"
+                            data-llm-picker-launch aria-label="Launch ${label}">
+                        <i class="fa-solid fa-play" aria-hidden="true"></i> Launch
+                    </button>
+                </div>
             </div>`;
+    }
+
+    /** Built-in CLIs and Quick Launches are listed; Agents are carried but not shown. */
+    _modalVisible(item) {
+        return item.kind === 'base' || this._launchKind(item) === 'quick-launch';
+    }
+
+    /**
+     * Opening the setup form replaces #modal-container, so this dialog closes first and
+     * returns once the form is done, either way. A dirty draft is saved before leaving so a
+     * reordering is not lost behind a create.
+     */
+    async _withSetupForm(open) {
+        const state = this.modalState;
+        if (!state || state.disposed || state.pending) return;
+        if (state.dirty && !(await this._savePreferences({ close: false, toast: false }))) return;
+        if (this.modalState !== state || state.disposed) return;
+        const { originSelect, triggerElement } = state;
+        const reopen = () => this.openCustomizationModal({ originSelect, triggerElement });
+        this._closeCustomizationModal({ restoreFocus: false });
+        open({ onChanged: reopen, onCancel: reopen });
+    }
+
+    _createQuickLaunch() {
+        void this._withSetupForm((callbacks) =>
+            this.app.environmentController.createEnvironment({ variant: 'quick-launch', ...callbacks }));
+    }
+
+    _editQuickLaunch(key) {
+        const item = this.modalState?.items.find((candidate) => candidate.key === key);
+        const environment = item ? this._environmentFor(item) : null;
+        if (!environment?.name) {
+            this._showModalError('This quick launch is no longer available. Reopen the list to refresh it.');
+            return;
+        }
+        void this._withSetupForm((callbacks) =>
+            void this.app.environmentController.editEnvironment(environment.name, { variant: 'quick-launch', ...callbacks }));
+    }
+
+    async _deleteQuickLaunch(key) {
+        const state = this.modalState;
+        const item = state?.items.find((candidate) => candidate.key === key);
+        const environment = item ? this._environmentFor(item) : null;
+        if (!state || state.disposed || state.pending) return;
+        if (!environment?.name) {
+            this._showModalError('This quick launch is no longer available. Reopen the list to refresh it.');
+            return;
+        }
+        const confirmed = await confirmDialog({
+            title: `Delete quick launch “${environment.name}”?`,
+            message: 'Its saved CLI settings are removed. Terminals already running are not affected.',
+            confirmLabel: 'Delete',
+            danger: true
+        });
+        if (!confirmed || this.modalState !== state || state.pending) return;
+        this._showModalError('');
+        this._setModalPending(true, 'Deleting…');
+        try {
+            await this.app.apiCall(`/api/v1/environments/${encodeURIComponent(environment.name)}`, 'DELETE', null,
+                { showLoading: false, preferErrorResponseMessage: true });
+            await this.app.environmentController.refreshEnvironments();
+            if (this.modalState !== state) return;
+            // The catalog was re-resolved by the refresh; rebuild the list from it, keeping the
+            // draft's order and visibility for everything that survived.
+            const fresh = new Map((this.catalog || []).map((entry) => [entry.key, entry]));
+            state.items = state.items.filter((entry) => fresh.has(entry.key)).map((entry) => ({ ...fresh.get(entry.key), enabled: entry.enabled }));
+            for (const entry of fresh.values()) {
+                if (!state.items.some((candidate) => candidate.key === entry.key)) state.items.push({ ...entry });
+            }
+            this.app.showToast('Quick launch deleted', `${environment.name} was removed.`, 'info');
+        } catch (error) {
+            if (this.modalState === state) {
+                // The server refuses while an Automation still uses it; its message says which.
+                this._showModalError(error?.message || 'Could not delete this quick launch.');
+            }
+        } finally {
+            if (this.modalState === state) this._setModalPending(false);
+        }
     }
 
     _bindModalActions() {
@@ -529,6 +669,8 @@ export class LlmPickerController {
             .forEach((button) => button.addEventListener('click', () => this._closeCustomizationModal()));
         state.layer.querySelector('[data-llm-picker-action="reset"]')
             ?.addEventListener('click', () => void this._resetPreferences());
+        state.layer.querySelector('[data-llm-picker-action="create"]')
+            ?.addEventListener('click', () => this._createQuickLaunch());
         state.layer.querySelector('[data-llm-picker-form]')
             ?.addEventListener('submit', (event) => {
                 event.preventDefault();
@@ -556,6 +698,10 @@ export class LlmPickerController {
             const key = row.dataset.llmPickerKey;
             row.querySelector('[data-llm-picker-launch]')?.addEventListener('click', () => {
                 void this._launchModalItem(key);
+            });
+            row.querySelector('[data-llm-picker-edit]')?.addEventListener('click', () => this._editQuickLaunch(key));
+            row.querySelector('[data-llm-picker-delete]')?.addEventListener('click', () => {
+                void this._deleteQuickLaunch(key);
             });
             row.querySelector('[data-llm-picker-enabled]')?.addEventListener('change', (event) => {
                 const item = state.items.find((candidate) => candidate.key === key);
@@ -610,7 +756,8 @@ export class LlmPickerController {
         const state = this.modalState;
         const item = state?.items.find((candidate) => candidate.key === key);
         if (!state || state.pending || !item) return;
-        const groupItems = state.items.filter((candidate) => candidate.group === item.group);
+        // Neighbours are the rows the user can see; unlisted Agents in between are stepped over.
+        const groupItems = state.items.filter((candidate) => candidate.group === item.group && this._modalVisible(candidate));
         const currentIndex = groupItems.findIndex((candidate) => candidate.key === key);
         const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
         if (targetIndex < 0 || targetIndex >= groupItems.length) return;
@@ -649,7 +796,7 @@ export class LlmPickerController {
                 && !candidate.automationWorker)
             : null;
         if (item.kind === 'environment' && !environment?.name) {
-            this._showModalError('This environment is no longer available. Reopen the list to refresh it.');
+            this._showModalError('This quick launch is no longer available. Reopen the list to refresh it.');
             return;
         }
 
@@ -671,16 +818,17 @@ export class LlmPickerController {
             }
         } catch (error) {
             if (this.modalState === state) {
-                this._showModalError(error?.message || 'Could not launch this LLM.');
+                this._showModalError(error?.message || 'Could not open this in a terminal.');
             }
         } finally {
             if (this.modalState === state) this._setModalPending(false);
         }
     }
 
-    async _savePreferences() {
+    /** Resolves true when the draft landed. `close: false` keeps the dialog open afterwards. */
+    async _savePreferences({ close = true, toast = true } = {}) {
         const state = this.modalState;
-        if (!state || state.pending) return;
+        if (!state || state.pending) return false;
         this._setModalPending(true);
         this._showModalError('');
         try {
@@ -691,12 +839,16 @@ export class LlmPickerController {
                 { showLoading: false });
             this.catalog = this._normalizeCatalog(response?.items);
             this.usingFallbackCatalog = false;
+            state.dirty = false;
             this.refreshAll();
-            this._closeCustomizationModal();
-            this.app.showToast('LLM list updated', 'Launch picker preferences were saved.', 'success');
+            if (close) this._closeCustomizationModal();
+            else if (this.modalState === state) this._setModalPending(false);
+            if (toast) this.app.showToast('Quick launches updated', 'The terminal picker shows your choices.', 'success');
+            return true;
         } catch (error) {
-            this._showModalError(error?.message || 'Could not save LLM picker preferences.');
+            this._showModalError(error?.message || 'Could not save the quick launch list.');
             this._setModalPending(false);
+            return false;
         }
     }
 
@@ -707,8 +859,8 @@ export class LlmPickerController {
             // In-app dialog — window.confirm is a silent no-op in the VS Code
             // webview, which made this reset unreachable once the list was dirty.
             const confirmed = await confirmDialog({
-                title: 'Reset the LLM list?',
-                message: 'Your unsaved changes are discarded and every launch target returns to the default order.',
+                title: 'Reset the quick launch list?',
+                message: 'Your unsaved changes are discarded and every entry returns to the default order, shown.',
                 confirmLabel: 'Reset',
                 danger: true
             });
@@ -727,9 +879,9 @@ export class LlmPickerController {
             this.usingFallbackCatalog = false;
             this.refreshAll();
             this._closeCustomizationModal();
-            this.app.showToast('LLM list reset', 'All launch targets are visible in the default order.', 'success');
+            this.app.showToast('Quick launch list reset', 'Every entry is shown in the default order.', 'success');
         } catch (error) {
-            this._showModalError(error?.message || 'Could not reset LLM picker preferences.');
+            this._showModalError(error?.message || 'Could not reset the quick launch list.');
             this._setModalPending(false);
         }
     }

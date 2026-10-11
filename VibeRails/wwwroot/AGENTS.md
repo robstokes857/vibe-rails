@@ -33,7 +33,7 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 
 ## Page headings (VIBE-70)
 
-Rules, Quality, ENVs, Vibe AI, MCP and Settings use `vb-page-header`, `vb-page-heading` and
+Rules, Quality, Vibe AI, MCP and Settings use `vb-page-header`, `vb-page-heading` and
 one `h1.vb-page-title` in their view templates. `style.css` owns the shared title typography,
 left alignment, divider, shared top inset, spacing and narrow-screen stacking. Optional supporting text uses
 `vb-page-description`; grouped controls use `vb-page-actions`. Grid workspaces supply their
@@ -55,18 +55,18 @@ title rules, uppercase utilities, inline letter spacing or gradient page titles.
 | [js/modules/llm-picker-controller.js](js/modules/llm-picker-controller.js) | Shared launch-picker catalog, Tom Select lifecycle, customization modal, and live preference refresh |
 | [js/modules/terminal-token-compression.js](js/modules/terminal-token-compression.js) | Persistent token-savings meter and per-tab pause-badge display (the per-tab on/off toggle was removed 2026-07-19; the saver is now per-LLM in Settings) |
 | [js/modules/terminal-snapshot-renderer.js](js/modules/terminal-snapshot-renderer.js) | Renders reserved `xterm_ui_bytes` payloads into xterm.js and captures PNG data URLs for MCP Explorer previews |
-| [js/modules/environment-controller.js](js/modules/environment-controller.js) | Environment CRUD + "Web UI" launch button |
-| [js/modules/sandbox-controller.js](js/modules/sandbox-controller.js) | Sandbox CRUD + launch terminals/VS Code into sandbox dirs |
+| [js/modules/environment-controller.js](js/modules/environment-controller.js) | The saved CLI setup form — an **Agent** (with a starting message) or a **Quick Launch** (without one) — plus launch into a terminal tab or a separate window, and delete |
+| [js/modules/launch-kind.js](js/modules/launch-kind.js) | The one display rule (2026-10-11): a setup with a non-blank `customPrompt` is an Agent, otherwise a Quick Launch; a Job with a Worker action is an Agent's job, otherwise an Automation (`classifyCatalog`) |
 | [js/modules/dashboard-controller.js](js/modules/dashboard-controller.js) | Independent Rules (dashboard/agents) and full-width Quality (code-quality) pages; no embedded terminal |
 | [js/modules/code-analyzer-dashboard.js](js/modules/code-analyzer-dashboard.js) | MintLint report model helpers (plus the unmounted legacy workspace renderer) |
 | [js/modules/code-report/viewer.js](js/modules/code-report/viewer.js) | Code Atlas / Quality Lab report in the dedicated Quality workspace: real repository graph, inline saved-details panel and explicit teardown; see [integration contract](js/modules/code-report/README.md) |
 | [js/modules/project-health-fix-launcher.js](js/modules/project-health-fix-launcher.js) | Inline shared agent/environment pickers beside Rules and Quality Fix actions; synchronizes and remembers the target for direct launch |
-| [js/modules/jobs-controller.js](js/modules/jobs-controller.js) | Automation page: ordered repository-script/Worker workflow editor, automation CRUD, per-action run details, recipes, and "Run now" (queues a native-terminal run; `launchFromNav` for the nav launcher); owns the shared `PythonScriptsController` |
-| [js/modules/python-scripts-controller.js](js/modules/python-scripts-controller.js) | "Scripts" section of the Automation page (pwsh, bash and python) + shared lifecycle and signing flows |
+| [js/modules/jobs-controller.js](js/modules/jobs-controller.js) | Agents and Automations pages (one controller, `mode`): cards, the editor (an Agent step plus scripts/checks, or scripts/checks only), per-action run details, recipes, and "Run now" (queues a native-terminal run; `launchFromNav` for the nav launcher); owns the shared `PythonScriptsController` |
+| [js/modules/python-scripts-controller.js](js/modules/python-scripts-controller.js) | "Scripts" section of the Automations page (pwsh, bash and python) + shared lifecycle and signing flows |
 | [js/modules/script-runtimes.js](js/modules/script-runtimes.js) | The `.ps1`/`.sh`/`.py` → pwsh/bash/python table (labels, icons, Monaco language, starter templates, name rule) every script surface reads |
 | [js/modules/python-script-workbench.js](js/modules/python-script-workbench.js) | `python-script` view: Monaco editor beside a docked agent terminal for one script (see "Python script workbench" below) |
 | [js/modules/python-run-window.js](js/modules/python-run-window.js) | The little run window: argument rows + stdin in, exit code / output / return value out, no terminal (see "Python script run window" below) |
-| [js/modules/automation-launcher.js](js/modules/automation-launcher.js) | Nav "Launch" flyout (automations + signed scripts; unsigned or modified scripts omitted) and its order/show-hide customize modal over `/api/v1/automation-nav/preferences`; `openCustomizationFromHost()` serves the VS Code launcher view, and a saved/reset list calls `__viberails_launcherChanged__` |
+| [js/modules/automation-launcher.js](js/modules/automation-launcher.js) | Nav "Launch" flyout (agents, automations and signed scripts; unsigned or modified scripts omitted) and its order/show-hide customize modal over `/api/v1/automation-nav/preferences`; `openCustomizationFromHost()` serves the VS Code launcher view, and a saved/reset list calls `__viberails_launcherChanged__` |
 | [js/modules/vscode-launcher-bridge.js](js/modules/vscode-launcher-bridge.js) | VS Code Activity Bar launcher view → dashboard commands (`runScript`, `openLauncherCustomize`, `manageAutomations`, `automationQueued`), each routed to the exact call the nav flyout makes; installed before the script-import bridge posts the ready signal that releases queued host messages. Also relays `PythonScriptsController.onStateChange` to `__viberails_launcherChanged__` when a script's id, display name, file name or approval changed (signed, revoked, renamed, edited, imported, deleted), so the view re-sorts; an identical refresh stays quiet |
 | [js/modules/board-controller.js](js/modules/board-controller.js) | `board` view: the lane board — drag cards between lanes, drag lanes to reorder, filter, and the card editor with comments |
 | [js/modules/board-api.js](js/modules/board-api.js) | Board data layer: a thin client over `/api/v1/board/*` (every call rides `app.apiCall`, so cookie + tab header apply). `BoardApi.attach(app)` once from the controller |
@@ -75,7 +75,7 @@ title rules, uppercase utilities, inline letter spacing or gradient page titles.
 | [js/modules/board-file-refs.js](js/modules/board-file-refs.js) | The composer's `@` typeahead over `GET /api/v1/board/files`: inserts `@path` / `@"path"` text, "Browse for a file…" fallback through the shared file explorer; pure helpers are node-tested |
 | [js/modules/board-card-context.js](js/modules/board-card-context.js) | The card editor's **Agent context** block (VB-63), inside the saved card's collapsed **Advanced** section: fetches `GET /api/v1/board/cards/{id}/context` when Advanced is opened and after rail changes while it stays open, and shows ≈tokens for the launch prompt, `get_board_card` and `list_board_columns`, a by-content breakdown, what is available but not sent, and the last recorded launch; a failed measurement reports inline only; node-tested |
 | [js/modules/board-card-label.js](js/modules/board-card-label.js) | The one card-naming rule: `cardDisplayId` (display ID, else key), `cardLabel` (`ID · Title`), `shortCardKey` and `cardSearchText`. Board, linked cards and chat history import it rather than composing labels themselves |
-| [js/modules/diff-modal.js](js/modules/diff-modal.js) | Shared Monaco diff viewer as a nested modal layer. Used by Board commits and the sandbox "View Diff" |
+| [js/modules/diff-modal.js](js/modules/diff-modal.js) | Shared Monaco diff viewer as a nested modal layer. Used by Board commits |
 
 ## Vibe AI navigation
 
@@ -270,8 +270,8 @@ named after the custom project name, or the repository folder when none is set. 
 
 **Cards are work items for LLMs.** `card.assignee` is an LLM picker key (`base:claude`,
 `env:7:codex`), never a person: the editor's Assignee field is `mountLlmPicker(app, select,
-{ context: 'sandbox' })` from `pickers/llm-picker.js` (environments + bare CLIs, no shell, no
-Automation Workers) with an unassign button beside it; `assigneeInfo()` turns a key into a label
+{ context: 'assignee' })` from `pickers/llm-picker.js` (built-in CLIs without the plain Terminal,
+Quick Launches and Agents) with an unassign button beside it; `assigneeInfo()` turns a key into a label
 (from the picker catalog) and a CLI-brand avatar (`getCliBrand`), and the toolbar's assignee
 filter lists the keys present on the board. **Start work** (`startWork`) saves the form, POSTs
 `/cards/{id}/launch`, remembers the tab with `taskKey: 'board-card:<cardId>'`, and refreshes
@@ -558,7 +558,8 @@ and, on close, restore focus past both dialogs. The layers append themselves, `i
 children, own their focus trap and Escape, and restore on close — the same pattern as
 `environment-steps.js`. Their classes are registered in `app.js`'s `hasActiveNestedModalLayer`.
 
-`diff-modal.js` is shared with `sandbox-controller.js`. Two behaviours must not regress: Monaco
+`diff-modal.js` began in the Sandboxes card (UI removed 2026-10-11) and now serves Board commits.
+Two behaviours must not regress: Monaco
 does **not** dispose externally-set models with the editor (each holds a whole file's text), so
 they are disposed explicitly and always before the container is removed; and an Escape raised from
 inside `.monaco-editor` belongs to Monaco's own widgets and must be left alone. Note that
@@ -736,31 +737,53 @@ session in the tab clears it. Clicking navigates to `board` with one-shot `openC
 `BoardController.loadView` deletes, then `openCardFromNavigation` selects the card's board and opens
 its editor. Tests: `Tests/wwwroot/js/terminal-board-card-link.test.mjs`, `TerminalTabsRoutesTests`.
 
-## Automation workflow editor
+## Agents and Automations pages (2026-10-11)
 
-The Automation list shows enabled workflows first, with disabled workflows behind a collapsed
-**Disabled automations** caret and count. The Scripts list keeps unsigned or changed scripts behind **Unsigned scripts**, leaving signed (`approved`) scripts visible. Both native
+The user sees three things and nothing else: an **Agent** (a saved CLI setup with a starting
+message — run it now, on a schedule, around commits or from a Board lane), an **Automation**
+(scripts and checks — VCA, Code quality — with no LLM step) and a **Quick Launch** (a saved CLI
+setup with no message, offered only by the terminal picker). Nothing changed underneath: an Agent
+and a Quick Launch are both `Environments` rows and share `environment-editor.js`; an Agent's
+schedule and an Automation are both `Jobs` rows. `launch-kind.js` holds the one display rule
+(`launchKind`, `jobLaunchKind`, `classifyCatalog`): a non-blank `customPrompt` makes a setup an
+Agent, a Worker action (kind 0, or a legacy top-level `environmentId`) makes a Job an Agent's job.
+Every save writes exactly what it wrote before this split; do not add fields, flags or endpoints
+for it.
+
+`jobs-controller.js` renders both pages from one `mode` (`ai-agents` / `automations` views; `jobs`
+stays an alias of the Agents page and redirects an Automation's `editJobId` to its own page). The
+Agents page lists one card per Automation that runs a setup (name, CLI, model summary, the first
+line of the message, triggers, the Enabled switch, Run now) and one card per message-bearing
+setup with no Automation (Run now opens it in a terminal tab, Edit opens the setup form, Delete
+removes the setup). `deleteAgent` deletes the card's Automation and then the setup only when no
+other Automation uses it. A setup with no `projectPath` (saved before project scoping landed on
+2026-08-08) is listed by the server in every project; the page keeps it out of the project's own
+list unless one of this project's Jobs runs it, and shows it under a collapsed **Shared with every
+project** group (`entry.shared` from `classifyCatalog`; `EnvironmentResponse.ProjectPath` was
+added for this and is never written back). The Automations page lists the rest, with the Scripts
+section beneath.
+Both keep disabled entries behind a collapsed **Disabled agents / automations** caret and count,
+and the Scripts list keeps unsigned or changed scripts behind **Unsigned scripts**; the native
 `details` groups start closed and preserve their open state across list refreshes.
 
-`jobs-controller.js` owns an ordered workflow made of repository Script actions and at most one
-Worker action. Script actions select `.py`, `.ps1`, or `.sh`, an explicit matching runtime,
-optional repository-relative working directory, optional per-action timeout, and zero or more
-argument rows. Each row is one argv value; never replace the rows with a command-line textbox or
-join them into shell text. The backend remains authoritative for containment, links, runtime
-availability, and SHA-256 approval.
+An Automation is an ordered workflow of repository Script actions and checks. Script actions
+select `.py`, `.ps1`, or `.sh`, an explicit matching runtime, optional repository-relative working
+directory, optional per-action timeout, and zero or more argument rows. Each row is one argv
+value; never replace the rows with a command-line textbox or join them into shell text. The
+backend remains authoritative for containment, links, runtime availability, and SHA-256 approval.
 
-The Automation editor opens through `app.showModal`, with focus trapping, inert background,
-scrollable content and one submit action. Both creation and editing mount `environment-editor.js`,
-the same provider form used by Environments. New Automations and existing Worker workflows
-include one required Worker action; there is no Worker picker, second name or nested
-configuration save. Existing script/check-only workflows (lane VCA/Code quality checks among
-them) open without one and save unchanged; their **Add instructions** button converts them
-explicitly, and only that added Worker can be removed again (VIBE-58 F3).
-New Worker names derive from the Automation name, normalized for the identifier rules, existing
-names, and the names `EnvironmentRoutes` rejects: a built-in CLI name, any number or a Windows
-device name gets a ` Worker` suffix (`Codex` → `Codex Worker`) while the Automation keeps its
-display name. Editing loads that action's Environment through `loadEditorSettings` and saves its
-settings along with the Automation. Existing descriptions are retained on save.
+The editor opens through `app.showModal`, with focus trapping, inert background, scrollable
+content and one submit action. In Agents mode it always carries one required **Agent** step that
+mounts `environment-editor.js` (the same form as the setup modal; the created setup is flagged
+`automationWorker: true` exactly as before); there is no Worker picker, second name or nested
+configuration save. In Automations mode the Agent step is neither shown nor offered, so a
+check-only workflow (lane VCA/Code quality checks among them) saves unchanged (VIBE-58 F3); the
+old **Add instructions** conversion left the UI with this split. New setup names derive from the
+Agent name, normalized for the identifier rules, existing names, and the names
+`EnvironmentRoutes` rejects: a built-in CLI name, any number or a Windows device name gets a
+` Worker` suffix (`Codex` → `Codex Worker`) while the Agent keeps its display name. Editing loads
+that step's setup through `loadEditorSettings` and saves its settings along with the Job.
+Existing descriptions are retained on save.
 
 **A save writes only what changed.** An existing Worker's loaded form is the editor's baseline,
 so a save that touched none of its controls (an Automation rename, a schedule change) sends no
@@ -769,7 +792,7 @@ Environment or settings write. Codex and Claude flags without a control (`--sand
 field, as the other providers' already did, and are appended again when supported controls
 change; an unlisted saved effort stays selected as `(custom)`. Rebuilding `CustomArgs` from the
 controls alone silently removed launch restrictions from every user of a shared Worker
-(VB-8WE2S-129 F1); keep both guards and their `jobs-environment.spec.js` round-trip tests.
+(VB-8WE2S-129 F1); keep both guards and their `agents-editor.spec.js` round-trip tests.
 
 Model, Effort and YOLO sit beside the LLM picker. Work type, workspace, provider settings and
 prompt helpers are normal visible form fields. Prompt-variable buttons insert at the instruction
@@ -783,8 +806,7 @@ Canceling an unsaved draft writes nothing. These writes are not a backend transa
 The workflow is state-backed in `editorActions`. Text/select input updates state without a rerender.
 Structural operations (add/remove/move script/check action, argument rows, file/folder picker)
 rerender the list. Detach and reattach the shared editor so text, provider drafts and step edits
-survive. The required Worker can move in the sequence but cannot be removed from this form; a
-removed optional Worker keeps its detached draft until the modal closes.
+survive. The required Agent step can move in the sequence but cannot be removed from this form.
 Dispose the form when the modal closes, is replaced, or navigation unloads the page. Late settings
 loads must not open a dialog after navigation or supersede a newer modal.
 
@@ -808,8 +830,10 @@ through `applyRepositoryImport` -> `POST /api/v1/jobs/import`; the server copies
 reuses or clones the Worker and creates the Automation disabled, so the browser never creates the
 environment itself on this path. The catalog is already de-duplicated server-side: a copy records
 its origin and is hidden while that origin exists (VB-33), so the picker needs no client filtering. A 409 (Worker name taken) stays in the modal. The header groups
-Import from repository, Import recipe and New automation in `.jobs-page-actions`; the nav
-launcher customize modal hands off with `app.navigate('jobs', { importFromRepository: true })`.
+Import from repository, Import recipe and New agent / New automation in `.jobs-page-actions`; the
+nav launcher customize modal hands off with `app.navigate('ai-agents', { importFromRepository: true })`.
+The catalog picker shows entries with a Worker on the Agents page and scripts-only entries on the
+Automations page.
 
 Card/run-detail styles use the `job-action-*`, `job-script-*`, and `job-run-action-*` prefixes and
 must keep explicit `var(--token, #fallback)` colors in every theme scope.
@@ -891,8 +915,8 @@ and CSV quote wrappers are rejected. Backend write validation remains authoritat
 
 ## Customizable LLM Pickers
 
-Rules and Quality Fix actions use inline selectors with the shared `sandbox` picker context,
-including custom environments. Selecting an agent remembers the choice across both pages; each Fix button launches directly without an intermediate dialog.
+Rules and Quality Fix actions use inline selectors with the shared `assignee` picker context,
+including Quick Launches and Agents. Selecting one remembers the choice across both pages; each Fix button launches directly without an intermediate dialog.
 The page disposes its pickers on unload, and the inline quality report is destroyed with it.
 
 `LlmPickerController` loads the resolved machine-wide catalog from
@@ -905,19 +929,19 @@ The controller applies one of four contexts after the global ordering is resolve
 
 | Context | Items shown |
 |---|---|
-| `terminal` | Base CLIs, custom Environments, and plain Terminal |
-| `sandbox` | Base CLIs and custom Environments |
-| `multi-run` | Base CLIs only, excluding plain Terminal |
+| `terminal` | Built-in CLIs (plain Terminal included) and Quick Launches; the only context with the **Manage quick launches…** footer |
+| `assignee` | Built-in CLIs without the plain Terminal, Quick Launches and Agents (Board assignee and chat, reviewer routing, Fix launchers) |
+| `multi-run` | Built-in CLIs only, excluding plain Terminal |
 | `environment-provider` | Supported providers, excluding Terminal; ignores visibility preferences |
 
 Consumers import the facades in `js/modules/pickers/` instead of touching the controller:
 `llm-picker.js` (`mountLlmPicker` / `setLlmPickerValue` / `getEnabledLlmItems`) for the contexts
-above. Automation creation now uses `environment-provider` through the shared form, with no
-separate Worker picker. The reusable `worker-picker.js` facade is not a controller context:
-it lists environments flagged `automationWorker` straight from
-`app.data.environments`, ignores `hidden` entirely (a Worker can never be hidden there), and has
-no customization footer. Workers, in turn, never appear in any launch context — the server
-excludes them from the preferences catalog.
+above. The Agent editor uses `environment-provider` through the shared form; the old
+`worker-picker.js` facade is gone. Setups flagged `automationWorker` never appear in any launch
+context — the server excludes them from the preferences catalog — and a regular setup with a
+starting message is grouped under **Agents** (listed in `assignee`, hidden in `terminal`). The
+catalog's `group` and `label` strings are the server's (`Base CLIs` / `Custom Environments`) and
+are echoed back on save; `LAUNCH_KIND_LABELS` renames the groups at display time only.
 
 Environments are scoped to a project. The list endpoint filters them, so `app.data.environments`
 already contains only what this project may see — with one deliberate exception: an environment
@@ -925,26 +949,25 @@ created before scoping has a null `projectPath` and appears everywhere.
 
 Each environment also carries `workspaceMode` (0 project dir / 1 own clone / 2 fresh clone each
 run) plus `workspaceSandboxId` / `workspacePath` / `workspaceBranch`, exported as `WORKSPACE_MODE`
-from `environment-controller.js`. A clone-mode environment shows a `fa-code-branch` badge that
-stacks alongside the worker/hidden badges — whether something is a Worker and where it runs are
-independent facts. When `workspaceSandboxId` is set the row also grows Diff / Merge / Push buttons
-emitting the same `data-action="sandbox-*"` handlers the Sandboxes card uses
-(`bindSandboxGitActions` binds both). The Sandboxes card renders only sandboxes with no
-`environmentId`, so releasing a workspace moves it back there with no extra plumbing.
+from `environment-controller.js`. The Agent form offers the mode. The clone badge, the
+Diff / Merge / Push row buttons and the Sandboxes card that showed a workspace clone left the UI
+on 2026-10-11; the backend routes and the clone handling are unchanged.
 
-The three launch contexts add a persistent **View/Edit all LLMs** footer to their dropdowns. Its
-nested modal changes visibility and within-group order globally. Every row also offers **Launch**,
-including hidden items, through the existing focused Web Terminal flow. Launch never saves draft
-preferences or enables an item; custom environments are resolved by id from the current catalog's
-environment data. Picker owners can pass `getLaunchWorkingDirectory` to retain their sandbox or
-terminal host directory; otherwise launch uses the project directory. A disabled selection that is
-already referenced is reinserted with a `(hidden)` label so editing another field cannot silently
-clear it. The Environment provider picker deliberately has no customization footer, and Chat
+The `terminal` context adds a persistent **Manage quick launches…** footer to its dropdown. Its
+nested modal lists built-in CLIs and Quick Launches, changes visibility and within-group order
+globally (Agents ride along in the save untouched), and offers **New quick launch** plus per-row
+**Edit** and **Delete** (today's environment create / edit / delete; a server 409 stays in the
+modal) and **Launch**, including hidden items, through the existing focused Web Terminal flow.
+Launch never saves draft preferences or enables an item; custom environments are resolved by id
+from the current catalog's environment data. Picker owners can pass `getLaunchWorkingDirectory`
+to retain their terminal host directory; otherwise launch uses the project directory. A disabled
+or out-of-context selection that is already referenced is reinserted with a `(hidden)` or
+`(agent)` label so editing another field cannot silently clear it. The Environment provider picker deliberately has no customization footer, and Chat
 History remains unfiltered so launch preferences never hide historical sessions.
 
 ### Flow: Launching a Custom Environment
 
-1. User selects environment from dropdown (or clicks "Web UI" button on environments page)
+1. User selects a Quick Launch from the terminal picker (or clicks Run now on an Agent card that has no Automation)
 2. `startFromSelection()` creates a tab via `POST /api/v1/terminal/tabs`
 3. `tab.instance.startSession(body)` calls `POST /api/v1/terminal/tabs/{tabId}/start` with `{ cli, environmentName, workingDirectory, title }`. The client **always** sends the project root here — if the environment has a workspace mode, the server swaps in the clone directory (`TerminalTabHostService.ApplyWorkspaceAsync`). Do not try to resolve workspaces client-side; a failed clone comes back as a 400 with the reason.
 4. Frontend opens a WebSocket to `/api/v1/terminal/tabs/{tabId}/ws`
@@ -974,43 +997,28 @@ entries across reloads; unavailable status must not be treated as completed. Ord
 keeps its independent two-minute grace window. The root's cap is 100; at capacity it may reclaim
 the oldest finished Automation host after the recording is finalized, preserving history.
 
-### Flow: "Web UI" Button
+### Flow: Run now on an Agent card / Launch in the Manage quick launches dialog
 
-1. User clicks "Web UI" on environments page
+1. User clicks Run now on an Agent card with no Automation (Agents page) or Launch on a row of the Manage quick launches dialog
 2. `launchInWebUI(envId, envName, cli)` calls `terminalController.launchInFocus(...)`
 3. `launchInFocus` navigates to `terminal-focus` carrying one-shot `launchOptions`
 4. `loadTerminalFocusView` mounts and binds the terminal manager, consumes those options, and calls `startTerminalWithOptions`
 5. A fresh tab starts the selected environment. Project health remains terminal-free.
 
-## Sandbox Management
+## Sandboxes (no UI since 2026-10-11)
 
-The sandbox section appears on the dashboard when running in a local git project context (`isLocal`).
-
-### Flow: Creating a Sandbox
-
-1. User clicks "+ New Sandbox" button on dashboard
-2. `sandboxController.createSandbox()` shows modal with name input
-3. On submit, POSTs to `/api/v1/sandboxes` with `{ name }`
-4. Backend clones repo, copies dirty files, saves to DB
-5. Dashboard refreshes sandbox list
-
-### Flow: Launching Terminal in Sandbox
-
-1. User selects a CLI/environment from the dropdown on a sandbox card, then clicks the Web Terminal launch button
-2. `sandboxController.launchInWebUI(sandboxId, sandboxName, cli, environmentName)` calls `terminalController.launchInFocus()`
-3. The focused terminal consumes the launch options, creates a tab (`POST /api/v1/terminal/tabs`), and starts the session (`POST /api/v1/terminal/tabs/{tabId}/start`) with `{ cli, environmentName, workingDirectory: sandboxPath, title: "Sandbox: {name}" }`
-4. Terminal starts in sandbox directory with title bar showing sandbox name
-
-### Flow: Launch VS Code in Sandbox
-
-1. User clicks VS Code button on a sandbox card
-2. POSTs to `/api/v1/sandboxes/{id}/launch/vscode`
-3. Backend calls `Process.Start("code", ".")` with `WorkingDirectory = sandbox.Path`
+The Sandboxes card and `sandbox-controller.js` were removed with the Agents / Automations / Quick
+Launch split. `SandboxRoutes` and `SandboxService` are unchanged: an Agent or Quick Launch with a
+clone workspace mode still creates and reuses sandbox rows through `EnvironmentLaunchService`,
+and `DELETE /api/v1/sandboxes/{id}` still refuses an owned clone. Launching a terminal into a
+directory is unchanged too: the focused terminal consumes the launch options, creates a tab
+(`POST /api/v1/terminal/tabs`) and starts the session (`POST /api/v1/terminal/tabs/{tabId}/start`)
+with `{ cli, environmentName, workingDirectory, title }`.
 
 ### Key Design Decisions
 
 - **Backend spawns the CLI directly** — the frontend sends the CLI type + optional environment to the tab start endpoint; the backend spawns the LLM CLI in a PTY (no command string is sent to a shell by the frontend)
-- **optgroups** separate base CLIs from custom environments visually
+- **optgroups** separate built-in CLIs, Quick Launches and (for the Board) Agents visually
 - **Value format**: `base:cli` vs `env:id:cli` enables easy parsing in `startTerminal()`
 - **Navigation data** passed as object through `app.navigate()` (same pattern as agent-edit)
 

@@ -61,7 +61,7 @@ export function bindCardOrganization(editor, card, { hasDraft, onChanged }) {
                 if (!alive()) return;
                 const jobs = automation?.jobIds || (automation?.jobId ? [automation.jobId] : []);
                 message = `Move this card to ${board.selectedOptions[0]?.textContent} / ${lane.selectedOptions[0]?.textContent}?`
-                    + (jobs.length ? ` Entering this lane can run ${jobs.length} configured Automation${jobs.length === 1 ? '' : 's'}.` : '');
+                    + (jobs.length ? ` Entering this lane can run ${jobs.length} configured ${jobs.length === 1 ? 'Agent or Automation' : 'Agents or Automations'}.` : '');
             } else {
                 message = `Merge this card into ${target.selectedOptions[0]?.textContent}? Its description, comments, files, sessions, commits and links will be copied. The destination's settings are kept, and this card is deleted.`;
             }

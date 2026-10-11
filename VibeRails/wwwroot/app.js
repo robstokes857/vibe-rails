@@ -11,7 +11,6 @@ import { ConfigController } from './js/modules/config-controller.js';
 import { RuleController } from './js/modules/rule-controller.js';
 import { CliLauncher } from './js/modules/cli-launcher.js';
 import { TerminalController } from './js/modules/terminal-multitab.js';
-import { SandboxController } from './js/modules/sandbox-controller.js';
 import { SettingsController } from './js/modules/settings-controller.js';
 import { RemoteAccountLinkPanel } from './js/modules/remote-account-link.js';
 import { VibeRailsAiController } from './js/modules/vibe-rails-ai-controller.js';
@@ -37,7 +36,6 @@ export class VibeControlApp {
         this.data = {
             agents: [],
             environments: [],
-            sandboxes: [],
             availableRulesWithDescriptions: [],
             isInGit: false,
             configs: null,
@@ -56,7 +54,6 @@ export class VibeControlApp {
         this.ruleController = new RuleController(this);
         this.cliLauncher = new CliLauncher(this);
         this.terminalController = new TerminalController(this);
-        this.sandboxController = new SandboxController(this);
         this.settingsController = new SettingsController(this);
         this.vibeRailsAiController = new VibeRailsAiController(this);
         this.mcpController = new McpController(this);
@@ -573,12 +570,15 @@ export class VibeControlApp {
 
     getDuplicateTabViewName(view) {
         // Detail views land on their parent page: a duplicated Python workbench tab
-        // opens the Automation page (the script list), not the single-script editor.
+        // opens the Automations page (the script list), not the single-script editor.
+        // 'jobs' is the historical id Board and VS Code links still use; it is the Agents page.
         const normalizedView = ['agents', 'rule-files', 'agent-edit', 'agent-create'].includes(view)
             ? 'dashboard'
                 : view === 'python-script'
-                    ? 'jobs'
-                    : view;
+                    ? 'automations'
+                    : view === 'jobs'
+                        ? 'ai-agents'
+                        : view;
         const duplicateableViews = new Set([
             'dashboard',
             'launch-cli',
@@ -587,15 +587,14 @@ export class VibeControlApp {
             'git-guard',
             'code-quality',
             'rule-files',
-            'environments',
             'config',
             'sessions',
             'settings',
             'terminal-focus',
-            'sandboxes',
             'vibe-rails-ai',
             'mcp',
-            'jobs',
+            'ai-agents',
+            'automations',
             'board'
         ]);
 
@@ -756,11 +755,14 @@ export class VibeControlApp {
 
     updateActiveSubNav(view) {
         // Rule editors retain the Rules highlight; Quality has its own destination.
+        // The Python workbench belongs to Automations; the legacy 'jobs' id is the Agents page.
         const highlightView = ['agents', 'rule-files', 'agent-edit', 'agent-create'].includes(view)
             ? 'dashboard'
             : view === 'python-script'
-                    ? 'jobs'
-                    : view;
+                    ? 'automations'
+                    : view === 'jobs'
+                        ? 'ai-agents'
+                        : view;
         document.querySelectorAll('.app-subnav-link').forEach(link => {
             const linkView = link.getAttribute('data-view') || (link.getAttribute('data-action') === 'navigate-home' ? 'dashboard' : (link.getAttribute('data-action') === 'navigate-settings' ? 'settings' : ''));
 
@@ -825,7 +827,6 @@ export class VibeControlApp {
         this.pythonScriptWorkbench?.unload?.();
         this.boardController?.unload?.();
         this.environmentController?.unload?.();
-        this.sandboxController?.unload?.();
         this.updateActiveSubNav(view);
         this.terminalController?.resetLayoutStateForNavigation();
         // Tear down the MCP Explorer's global listener / xterm instances when navigating away
@@ -844,15 +845,18 @@ export class VibeControlApp {
             'rule-files': () => this.agentController.loadRuleFiles(),
             'check-violations': () => this.ruleController.loadCheckViolations(),
             'git-guard': () => this.ruleController.loadFocusedGitGuard(),
-            'environments': () => this.environmentController.loadEnvironments(),
             'config': () => this.configController.loadConfiguration(),
             'sessions': () => this.sessionController.loadSessions(),
             'settings': () => this.settingsController.loadSettings(),
             'terminal-focus': () => this.terminalController.loadTerminalFocusView(data),
-            'sandboxes': () => this.sandboxController.loadSandboxes(),
             'vibe-rails-ai': () => this.vibeRailsAiController.loadView(),
             'mcp': () => this.mcpController.loadView(),
-            'jobs': () => this.jobController.loadView(data),
+            // One controller serves both pages. 'jobs' stays as the historical id that Board
+            // lane links and the VS Code launcher bridge navigate to; it opens the Agents page,
+            // which redirects an Automation's edit request to its own page.
+            'ai-agents': () => this.jobController.loadView({ ...data, mode: 'agents' }),
+            'automations': () => this.jobController.loadView({ ...data, mode: 'automations' }),
+            'jobs': () => this.jobController.loadView({ ...data, mode: 'agents' }),
             'python-script': () => this.pythonScriptWorkbench.loadView(data),
             'board': () => this.boardController.loadView(data)
         };
@@ -1612,7 +1616,7 @@ export class VibeControlApp {
     // ============================================ 
 
     async refreshDashboardData() {
-        // The four data sources below are independent, so they fetch concurrently:
+        // The three data sources below are independent, so they fetch concurrently:
         // a view switch pays for the slowest call instead of the sum of all of them.
         // Each task still owns its error handling — one failing source must not
         // block or blank the others.
@@ -1666,18 +1670,8 @@ export class VibeControlApp {
                     this.data.availableRulesWithDescriptions = [];
                 }
             })());
-
-            gitTasks.push((async () => {
-                try {
-                    await this.sandboxController.refreshSandboxes();
-                } catch (error) {
-                    console.error('Failed to fetch sandboxes:', error);
-                    this.data.sandboxes = [];
-                }
-            })());
         } else {
             this.data.agents = [];
-            this.data.sandboxes = [];
         }
 
         await Promise.all([environmentsTask, ...gitTasks]);

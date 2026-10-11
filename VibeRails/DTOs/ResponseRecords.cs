@@ -528,7 +528,11 @@ namespace VibeRails.DTOs
         string? WorkspaceBranch = null,
         List<EnvironmentStepDto>? Steps = null,
         string Purpose = "work",
-        ReviewerRouting? ReviewerRouting = null
+        ReviewerRouting? ReviewerRouting = null,
+        // The project the setup was saved in; null for setups saved before project scoping
+        // (2026-08-08), which the list route shows in every project. Lets the Agents page keep
+        // those apart from this project's own setups. Display only; never written back.
+        string? ProjectPath = null
     );
 
     public record EnvironmentListResponse(

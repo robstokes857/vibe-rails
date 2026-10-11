@@ -796,7 +796,7 @@ export class VibeRailsAiController {
         const metaCells = isSession ? [
             ['kind', 'session aggregate'],
             ['cli', i.cli || 'unknown'],
-            ['env', i.environmentName || '—'],
+            ['launch', i.environmentName || '—'],
             ['session ended', fmtDate(i.timestampUTC)],
             ['chunk #', i.chunkIndex ?? 'n/a'],
             ['session id', shortId(i.sessionId)],
@@ -804,7 +804,7 @@ export class VibeRailsAiController {
             ['file count', i.fileChangeCount ?? 0],
         ] : [
             ['cli', i.cli || 'unknown'],
-            ['env', i.environmentName || '—'],
+            ['launch', i.environmentName || '—'],
             ['timestamp', fmtDate(i.timestampUTC)],
             ['sequence', i.sequence ?? 'n/a'],
             ['session id', shortId(i.sessionId)],

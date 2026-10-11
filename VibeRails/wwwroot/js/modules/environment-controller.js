@@ -2,6 +2,7 @@ import { mountEnvironmentEditor, environmentField } from './environment-editor.j
 import { parseCliArguments } from './cli-arguments.js';
 import { codexModelSupportsSpeed, normalizeLlmModel, renderLlmModelOptions } from './llm-model-catalog.js';
 import { isConfirmDialogOpen } from './utils.js';
+import { hasStartingMessage } from './launch-kind.js';
 import {
     normalizeSteps,
     stepDisplayName
@@ -13,12 +14,6 @@ export const WORKSPACE_MODE = Object.freeze({
     PROJECT: 0,
     PERSISTENT: 1,
     PER_RUN: 2
-});
-
-const WORKSPACE_MODE_LABELS = Object.freeze({
-    [WORKSPACE_MODE.PROJECT]: 'Project directory',
-    [WORKSPACE_MODE.PERSISTENT]: 'Its own clone (kept)',
-    [WORKSPACE_MODE.PER_RUN]: 'Fresh clone each run'
 });
 
 export class EnvironmentController {
@@ -67,373 +62,6 @@ export class EnvironmentController {
         const container = document.getElementById('modal-container');
         return container === origin.container
             && (container?.firstElementChild || null) === origin.modal;
-    }
-
-    async loadEnvironments() {
-        const content = document.getElementById('app-content');
-        if (!content) return;
-
-        // One concurrent refresh covers everything this page renders: environments
-        // (including the LLM picker catalog re-resolve) plus sandboxes. Calling
-        // refreshEnvironments() first duplicated the environments fetch and the
-        // picker refresh, serially, on every visit.
-        await this.app.refreshDashboardData();
-
-        content.innerHTML = '';
-        const fragment = this.app.cloneTemplate('environments-template');
-        const root = fragment.querySelector('[data-view="environments"]');
-
-        if (root) {
-            this.app.bindAction(root, '[data-action="go-back"]', () => this.app.goBack());
-            this.app.bindAction(root, '[data-action="create-environment"]', () => this.createEnvironment());
-            this.app.bindAction(root, '[data-action="customize-llm-list"]', (event) => {
-                this.app.llmPickerController.openCustomizationModal({
-                    triggerElement: event?.currentTarget || null
-                });
-            });
-            this.app.bindAction(root, '[data-action="create-sandbox"]', () => {
-                this.app.sandboxController.createSandbox();
-            });
-
-            const tableSlot = root.querySelector('[data-environments-table]');
-            if (tableSlot) {
-                tableSlot.innerHTML = this.renderEnvironmentsTable();
-                this.bindEnvironmentTableActions(tableSlot);
-                // Environment rows carry the same git actions for their workspace, pointing at
-                // the same sandbox ids, so they get the same handlers.
-                this.bindSandboxGitActions(tableSlot);
-            }
-
-            const sandboxesTableSlot = root.querySelector('[data-sandboxes-table]');
-            if (sandboxesTableSlot) {
-                sandboxesTableSlot.innerHTML = this.renderSandboxesTable();
-
-                // Populate selects
-                sandboxesTableSlot.querySelectorAll('[data-sb-cli-select]').forEach(select => {
-                    this.app.sandboxController.populateSandboxCliSelect(select);
-                });
-
-                this.bindSandboxGitActions(sandboxesTableSlot);
-                this.app.bindActions(sandboxesTableSlot, '[data-action="sandbox-vscode"]', (el) => {
-                    this.app.sandboxController.launchVSCode(el.dataset.sbId, el.dataset.sbName);
-                });
-                this.app.bindActions(sandboxesTableSlot, '[data-action="sandbox-delete"]', (el) => {
-                    this.app.sandboxController.deleteSandbox(el.dataset.sbId, el.dataset.sbName);
-                });
-
-                const resolveCli = (el) => {
-                    const row = el.closest('tr');
-                    const select = row.querySelector('[data-sb-cli-select]');
-                    const selection = this.app.sandboxController.parseSandboxCliSelection(select);
-                    
-                    if (!selection) {
-                        const ts = select.tomselect;
-                        const shakeTarget = ts?.wrapper || select;
-                        shakeTarget.classList.remove('vb-terminal-selection-shake');
-                        void shakeTarget.offsetWidth;
-                        shakeTarget.classList.add('vb-terminal-selection-shake');
-                        if (ts) {
-                            try { ts.focus(); ts.open(); } catch {}
-                        } else {
-                            select.focus();
-                            if (typeof select.showPicker === 'function') {
-                                try { select.showPicker(); } catch {}
-                            }
-                        }
-                        return null;
-                    }
-                    return selection;
-                };
-
-                this.app.bindActions(sandboxesTableSlot, '[data-action="sandbox-launch-cli"]', (el) => {
-                    const selection = resolveCli(el);
-                    if (selection) {
-                        this.app.sandboxController.launchInExternalTerminal(el.dataset.sbId, el.dataset.sbName, selection.cli, selection.environmentName);
-                    }
-                });
-
-                this.app.bindActions(sandboxesTableSlot, '[data-action="sandbox-launch-web"]', (el) => {
-                    const selection = resolveCli(el);
-                    if (selection) {
-                        this.app.sandboxController.launchInWebUI(el.dataset.sbId, el.dataset.sbName, selection.cli, selection.environmentName);
-                    }
-                });
-            }
-        }
-
-        content.appendChild(fragment);
-    }
-
-    bindEnvironmentTableActions(tableSlot, { onChanged = null } = {}) {
-        if (!tableSlot) return;
-
-        this.app.bindActions(tableSlot, '[data-action="remove-environment"]', (element) => {
-            const name = element.dataset.envName;
-            if (name) {
-                this.removeEnvironment(name, { onChanged });
-            }
-        });
-        this.app.bindActions(tableSlot, '[data-action="edit-environment"]', (element) => {
-            const name = element.dataset.envName;
-            if (name) {
-                this.editEnvironment(name, { onChanged });
-            }
-        });
-        this.app.bindActions(tableSlot, '[data-action="launch-environment"]', (element) => {
-            const name = element.dataset.envName;
-            const cli = element.dataset.envCli;
-            if (name && cli) {
-                this.launchEnvironment(name, cli);
-            }
-        });
-        this.app.bindActions(tableSlot, '[data-action="launch-in-webui"]', (element) => {
-            const envId = parseInt(element.dataset.envId);
-            const envName = element.dataset.envName;
-            const envCli = element.dataset.envCli;
-            if (envId && envName && envCli) {
-                this.launchInWebUI(envId, envName, envCli);
-            }
-        });
-    }
-
-    renderEnvironmentsTable() {
-        if (this.app.data.environments.length === 0) {
-            return '<p class="text-muted text-center py-3">No Environment / Workers configured. Create your first worker to get started.</p>';
-        }
-
-        const escape = (value) => this.app.escapeHtml(value);
-        const renderRows = environments => environments.map(env => {
-                            const brand = this.app.getCliBrand(env.cli);
-                            const safeName = escape(env.name);
-                            const safeCli = escape(env.cli);
-                            const safeEnvId = escape(env.id);
-                            const safeLastUsed = escape(env.lastUsed || 'Never');
-                            const safeBrandLabel = escape(brand.label || env.cli || 'CLI');
-                            const safeLogo = escape(brand.logo || '');
-                            const cliKey = (env.cli || '').toLowerCase();
-                            const iconLightClass = ['codex', 'chatgpt', 'openai'].includes(cliKey) ? ' icon-light' : '';
-                            const logoMarkup = safeLogo
-                                ? `<img class="env-cli-logo${iconLightClass}" src="${safeLogo}" alt="${safeBrandLabel} logo" loading="lazy">`
-                                : `<i class="fa-solid fa-terminal env-cli-logo-fallback" aria-hidden="true"></i>`;
-                            // Workers get the robot badge; the eye-slash hidden badge only
-                            // applies to regular envs (a Worker is never in launch pickers,
-                            // so "hidden" would be redundant noise on it).
-                            const hiddenBadge = env.automationWorker
-                                ? `<span class="env-worker-badge" title="Automation Worker — appears in the automation editor's Worker picker, never in launch pickers" aria-label="Automation Worker"><i class="fa-solid fa-robot" aria-hidden="true"></i></span>`
-                                : env.hidden
-                                    ? `<span class="env-hidden-badge" title="Hidden from launch pickers" aria-label="Hidden from launch pickers"><i class="fa-solid fa-eye-slash" aria-hidden="true"></i></span>`
-                                    : '';
-                            // Clone-mode environments get their own badge. It reports the mode
-                            // even before the clone exists, because the mode is what the user
-                            // chose — the directory is just when it happens.
-                            const workspaceMode = env.workspaceMode || WORKSPACE_MODE.PROJECT;
-                            const workspaceBadge = workspaceMode === WORKSPACE_MODE.PROJECT
-                                ? ''
-                                : `<span class="env-workspace-badge" title="${escape(
-                                      workspaceMode === WORKSPACE_MODE.PER_RUN
-                                          ? `Clones the project fresh for every run${env.workspaceBranch ? ` — latest branch ${env.workspaceBranch}` : ''}`
-                                          : `Runs in its own clone of the project${env.workspaceBranch ? ` on branch ${env.workspaceBranch}` : ' (created on first launch)'}`
-                                  )}" aria-label="${escape(WORKSPACE_MODE_LABELS[workspaceMode])}"><i class="fa-solid fa-code-branch" aria-hidden="true"></i></span>`;
-                            // The workspace's git actions are the sandbox actions, on the
-                            // sandbox row that backs it — same handlers, same ids.
-                            const safeWorkspaceId = escape(env.workspaceSandboxId ?? '');
-                            const safeWorkspaceBranch = escape(env.workspaceBranch || '');
-                            const workspaceActions = env.workspaceSandboxId
-                                ? `<button class="btn btn-xs btn-outline-secondary env-action-btn" type="button" data-action="sandbox-diff" data-sb-id="${safeWorkspaceId}" data-sb-name="${safeName}" title="View workspace diff" aria-label="View ${safeName} workspace diff">
-                                            <i class="fa-solid fa-code-compare"></i>
-                                        </button>
-                                        <button class="btn btn-xs btn-outline-secondary env-action-btn" type="button" data-action="sandbox-merge" data-sb-id="${safeWorkspaceId}" data-sb-name="${safeName}" data-sb-branch="${safeWorkspaceBranch}" title="Merge workspace into local branch" aria-label="Merge ${safeName} workspace">
-                                            <i class="fa-solid fa-code-merge"></i>
-                                        </button>
-                                        <button class="btn btn-xs btn-outline-secondary env-action-btn" type="button" data-action="sandbox-push" data-sb-id="${safeWorkspaceId}" data-sb-name="${safeName}" title="Push workspace to remote" aria-label="Push ${safeName} workspace">
-                                            <i class="fa-solid fa-cloud-arrow-up"></i>
-                                        </button>`
-                                : '';
-                            const customArgs = env.customArgs || '';
-                            const prompt = env.customPrompt || '';
-                            const promptMarkup = prompt.trim()
-                                ? `<details class="env-prompt-details">
-                                        <summary class="env-prompt-toggle">
-                                            <span class="env-prompt-toggle-icon" aria-hidden="true"></span>
-                                            <span>Initial prompt</span>
-                                        </summary>
-                                        <pre class="env-prompt-preview">${escape(prompt)}</pre>
-                                   </details>`
-                                : '';
-
-                            return `
-                            <tr>
-                                <td class="env-name-cell">
-                                    <div class="env-name-wrap">
-                                        <div class="env-cli-logo-wrap" title="${safeBrandLabel}" aria-label="${safeBrandLabel}">
-                                            ${logoMarkup}
-                                        </div>
-                                        <strong class="env-name-text">${safeName}</strong>
-                                        ${hiddenBadge}
-                                        ${workspaceBadge}
-                                    </div>
-                                </td>
-                                <td class="env-command-cell">
-                                    ${customArgs ? `<code class="env-command-code">${escape(customArgs)}</code>` : '<span class="env-empty-value">-</span>'}
-                                    ${promptMarkup}
-                                </td>
-                                <td class="small text-muted text-nowrap">${safeLastUsed}</td>
-                                <td class="env-actions-cell">
-                                    <div class="env-actions">
-                                        <button class="btn btn-xs btn-outline-secondary env-action-btn" type="button" data-action="launch-environment" data-env-name="${safeName}" data-env-cli="${safeCli}" title="Launch in external terminal" aria-label="Launch ${safeName} in external terminal">
-                                            <i class="fa-solid fa-terminal"></i>
-                                        </button>
-                                        <button class="btn btn-xs btn-outline-success env-action-btn" type="button" data-action="launch-in-webui" data-env-id="${safeEnvId}" data-env-name="${safeName}" data-env-cli="${safeCli}" title="Launch in Web Terminal" aria-label="Launch ${safeName} in Web Terminal">
-                                            <i class="fa-solid fa-display"></i>
-                                        </button>
-                                        ${workspaceActions}
-                                        <button class="btn btn-xs btn-outline-secondary env-action-btn" type="button" data-action="edit-environment" data-env-name="${safeName}" title="Settings" aria-label="Edit ${safeName} settings">
-                                            <i class="fa-solid fa-sliders"></i>
-                                        </button>
-                                        <button class="btn btn-xs btn-outline-danger env-action-btn" type="button" data-action="remove-environment" data-env-name="${safeName}" title="Delete" aria-label="Delete ${safeName}">
-                                            <i class="fa-solid fa-trash"></i>
-                                        </button>
-                                    </div>
-                                </td>
-                            </tr>
-                        `}).join('');
-
-        const renderTable = (title, description, environments, workerList = false, emptyText = 'No regular environments configured.') => `
-            <section class="environment-list-group${workerList ? ' is-workers' : ''}" aria-label="${escape(title)}">
-                <header class="environment-list-heading">
-                    <span class="environment-list-heading-icon" aria-hidden="true"><i class="fa-solid ${workerList ? 'fa-robot' : 'fa-layer-group'}"></i></span>
-                    <div>
-                        <h5>${escape(title)} <span>${environments.length}</span></h5>
-                        <p>${escape(description)}</p>
-                    </div>
-                </header>
-                ${environments.length > 0 ? `
-                    <div class="table-responsive">
-                        <table class="table table-hover align-middle environments-table">
-                            <colgroup>
-                                <col class="env-col-name">
-                                <col class="env-col-commands">
-                                <col class="env-col-last-used">
-                                <col class="env-col-actions">
-                            </colgroup>
-                            <thead>
-                                <tr>
-                                    <th>Name</th>
-                                    <th>Custom Args</th>
-                                    <th>Last Used</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>${renderRows(environments)}</tbody>
-                        </table>
-                    </div>` : `<p class="environment-list-empty">${escape(emptyText)}</p>`}
-            </section>`;
-
-        const regularEnvironments = this.app.data.environments.filter(environment => environment.automationWorker !== true);
-        const workers = this.app.data.environments.filter(environment => environment.automationWorker === true);
-
-        return `
-            <div class="environment-list-groups">
-                ${renderTable('Environments', 'Profiles you launch directly from terminals and sandboxes.', regularEnvironments)}
-                ${workers.length > 0
-                    ? renderTable('Workers', 'Robot-marked profiles used by Automations.', workers, true, 'No Workers configured.')
-                    : ''}
-            </div>`;
-    }
-
-    /**
-     * Diff / merge / push for a sandbox, wherever its row is rendered. Both the Sandboxes card
-     * (standalone sandboxes) and the Environments table (owned workspaces) emit these actions
-     * against a sandbox id, so the handlers are identical and live in one place.
-     */
-    bindSandboxGitActions(scope) {
-        if (!scope) return;
-        this.app.bindActions(scope, '[data-action="sandbox-diff"]', (el) => {
-            this.app.sandboxController.showDiff(el.dataset.sbId, el.dataset.sbName);
-        });
-        this.app.bindActions(scope, '[data-action="sandbox-merge"]', (el) => {
-            this.app.sandboxController.mergeLocally(el.dataset.sbId, el.dataset.sbName, el.dataset.sbBranch);
-        });
-        this.app.bindActions(scope, '[data-action="sandbox-push"]', (el) => {
-            this.app.sandboxController.pushToRemote(el.dataset.sbId, el.dataset.sbName);
-        });
-    }
-
-    renderSandboxesTable() {
-        // Only standalone sandboxes. A sandbox owned by an environment is that environment's
-        // workspace and is shown on its row instead — and because deleting or re-moding an
-        // environment releases its workspace, an orphaned one reappears here automatically.
-        const sandboxes = (this.app.data.sandboxes || []).filter(sb => !sb.environmentId);
-        if (sandboxes.length === 0) {
-            return '<p class="text-muted text-center py-3">No sandboxes yet. Create one to work in an isolated copy of your project.</p>';
-        }
-
-        return `
-            <div class="table-responsive">
-                <table class="table table-hover align-middle">
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th>Branch</th>
-                            <th>Created</th>
-                            <th>Git Actions</th>
-                            <th>Launch Tools</th>
-                            <th class="text-end">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${sandboxes.map(sb => `
-                            <tr>
-                                <td>
-                                    <div class="fw-bold text-white">${this.app.escapeHtml(sb.name)}</div>
-                                </td>
-                                <td>
-                                    <div class="x-small text-muted"><code class="text-accent">${this.app.escapeHtml(sb.branch)}</code></div>
-                                </td>
-                                <td class="small text-muted">${sb.created}</td>
-                                <td>
-                                    <div class="d-flex gap-1">
-                                        <button class="btn btn-xs btn-outline-secondary" data-action="sandbox-diff" data-sb-id="${sb.id}" data-sb-name="${this.app.escapeHtml(sb.name)}" title="View Diff">Diff</button>
-                                        <button class="btn btn-xs btn-outline-secondary" data-action="sandbox-merge" data-sb-id="${sb.id}" data-sb-name="${this.app.escapeHtml(sb.name)}" data-sb-branch="${this.app.escapeHtml(sb.branch)}" title="Merge into local branch">Merge</button>
-                                        <button class="btn btn-xs btn-outline-secondary" data-action="sandbox-push" data-sb-id="${sb.id}" data-sb-name="${this.app.escapeHtml(sb.name)}" title="Push to remote">Push</button>
-                                    </div>
-                                </td>
-                                <td>
-                                    <div class="d-flex gap-1 align-items-center">
-                                        <select class="form-select form-select-xs" style="width: 140px;" data-sb-cli-select data-sb-id="${sb.id}">
-                                            <!-- To be populated -->
-                                        </select>
-                                        <button class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1" type="button" data-action="sandbox-launch-cli" data-sb-id="${sb.id}" data-sb-name="${this.app.escapeHtml(sb.name)}" title="Launch in external terminal">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                                <path d="M6 9a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 9M2.854 4.146a.5.5 0 1 0-.708.708L4.293 7 2.146 9.146a.5.5 0 1 0 .708.708l2.5-2.5a.5.5 0 0 0 0-.708z"></path>
-                                                <path d="M14 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2z"></path>
-                                            </svg>
-                                            <span>Launch in CLI</span>
-                                        </button>
-                                        <button class="btn btn-sm btn-outline-success d-inline-flex align-items-center gap-1" type="button" data-action="sandbox-launch-web" data-sb-id="${sb.id}" data-sb-name="${this.app.escapeHtml(sb.name)}" title="Launch in Web Terminal">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                                <path d="M2 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v1H1V3a1 1 0 0 1 1-1zm1 11a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V5h14z"></path>
-                                                <path d="M4.146 7.146a.5.5 0 0 1 .708 0L6.707 9 4.854 10.854a.5.5 0 0 1-.708-.708L5.293 9 4.146 7.854a.5.5 0 0 1 0-.708M7.5 10.5a.5.5 0 0 1 0-1H10a.5.5 0 0 1 0 1z"></path>
-                                            </svg>
-                                            <span>Launch in Web</span>
-                                        </button>
-                                        <button class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1" type="button" data-action="sandbox-vscode" data-sb-id="${sb.id}" data-sb-name="${this.app.escapeHtml(sb.name)}" title="Open in VS Code">
-                                            <img src="assets/img/vscode.svg" alt="" class="icon-light" style="width: 13px; height: 13px;">
-                                            <span>Open In VS Code</span>
-                                        </button>
-                                    </div>
-                                </td>
-                                <td class="text-end">
-                                    <button class="btn btn-xs btn-outline-danger" data-action="sandbox-delete" data-sb-id="${sb.id}" data-sb-name="${this.app.escapeHtml(sb.name)}" title="Delete Sandbox">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16"><path d="M11 1.5v1h3.5a.5.5 0 0 1 0 1h-.538l-.853 10.66A2 2 0 0 1 11.115 16h-6.23a2 2 0 0 1-1.994-1.84L2.038 3.5H1.5a.5.5 0 0 1 0-1H5v-1A1.5 1.5 0 0 1 6.5 0h3A1.5 1.5 0 0 1 11 1.5m-5 0v1h4v-1a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5M4.5 5.029l.5 8.5a.5.5 0 1 0 .998-.06l-.5-8.5a.5.5 0 1 0-.998.06m6.53-.06a.5.5 0 0 0-.515.479l-.5 8.5a.5.5 0 1 0 .998.06l.5-8.5a.5.5 0 0 0-.484-.539M8 5.5a.5.5 0 0 0-.5.5v8.5a.5.5 0 0 0 1 0V6a.5.5 0 0 0-.5-.5"/></svg>
-                                    </button>
-                                </td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            </div>
-        `;
     }
 
     createEnvironment(options = {}) {
@@ -511,16 +139,21 @@ export class EnvironmentController {
         return cliSettings;
     }
 
-    showEnvironmentForm({ mode, env = null, cliSettings = {}, initialName = null, automationWorker = false, onChanged = null, onCancel = null }) {
+    /**
+     * The one modal for a saved CLI setup. `variant` decides what the user is editing: an
+     * `agent` (with its starting message) or a `quick-launch` (settings only). Both write the
+     * same record; the quick-launch form simply has no message field.
+     */
+    showEnvironmentForm({ mode, env = null, cliSettings = {}, initialName = null, automationWorker = false, variant = null, onChanged = null, onCancel = null }) {
         this.disposeEnvironmentFormLifecycle();
         const isEdit = mode === 'edit';
-        const workerOnly = automationWorker || Boolean(env?.automationWorker);
-        const title = isEdit ? `Edit ${workerOnly ? 'Worker' : 'Environment / Worker'}: ${env.name}`
-            : workerOnly ? 'Create Worker' : 'Create Environment / Worker';
+        const resolvedVariant = variant || (automationWorker || Boolean(env?.automationWorker) || hasStartingMessage(env) ? 'agent' : 'quick-launch');
+        const noun = resolvedVariant === 'agent' ? 'agent' : 'quick launch';
+        const title = isEdit ? `Edit ${noun}: ${env.name}` : `New ${noun}`;
         this.app.showModal(title, `<form id="env-form"><div data-environment-editor></div>
-            <button type="submit" class="btn btn-primary">${isEdit ? 'Save Changes' : workerOnly ? 'Create Worker' : 'Create Environment'}</button></form>`);
+            <button type="submit" class="btn btn-primary">${isEdit ? 'Save changes' : `Create ${noun}`}</button></form>`);
         const form = document.getElementById('env-form');
-        const editor = this.mountEditor(form.querySelector('[data-environment-editor]'), { env, cliSettings, initialName, automationWorker });
+        const editor = this.mountEditor(form.querySelector('[data-environment-editor]'), { env, cliSettings, initialName, automationWorker, variant: resolvedVariant });
         const modalContainer = document.getElementById('modal-container');
         const closeButtons = [...(modalContainer?.querySelectorAll('[data-action="close-modal"]') || [])];
         const keydownTarget = typeof window !== 'undefined' ? window : document;
@@ -569,10 +202,9 @@ export class EnvironmentController {
                 await this.refreshEnvironments();
                 if (generation !== this.environmentFormRequestGeneration) return;
                 if (onChanged) await onChanged();
-                else this.app.navigate('environments');
             } catch (error) {
                 if (completed || generation !== this.environmentFormRequestGeneration || !form.isConnected) return;
-                this.app.showError(`Failed to ${isEdit ? 'update' : 'create'} environment: ${error.message}`);
+                this.app.showError(`Failed to ${isEdit ? 'update' : 'create'} the ${noun}: ${error.message}`);
             } finally {
                 form.inert = false;
                 button.disabled = false;
@@ -2034,27 +1666,28 @@ export class EnvironmentController {
         });
     }
 
-    async removeEnvironment(name, { onChanged = null } = {}) {
+    async removeEnvironment(name, { onChanged = null, noun = 'quick launch' } = {}) {
         // Steps cascade with the environment row, so say so rather than letting a configured
         // setup chain disappear silently behind a generic "delete this profile".
         const stepCount = (this.app.data.environments.find(env => env.name === name)?.steps || []).length;
         const stepNote = stepCount === 0
             ? ''
             : ` and its ${stepCount} step${stepCount === 1 ? '' : 's'}`;
+        const nounTitle = noun.charAt(0).toUpperCase() + noun.slice(1);
 
-        this.app.showModal('Remove Environment', `
+        this.app.showModal(`Delete ${noun}`, `
             <div class="text-center py-3">
                 <div class="mb-3 text-danger">
                     <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="currentColor" viewBox="0 0 16 16">
                         <path d="M11 1.5v1h3.5a.5.5 0 0 1 0 1h-.538l-.853 10.66A2 2 0 0 1 11.115 16h-6.23a2 2 0 0 1-1.994-1.84L2.038 3.5H1.5a.5.5 0 0 1 0-1H5v-1A1.5 1.5 0 0 1 6.5 0h3A1.5 1.5 0 0 1 11 1.5m-5 0v1h4v-1a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5M4.5 5.029l.5 8.5a.5.5 0 1 0 .998-.06l-.5-8.5a.5.5 0 1 0-.998.06m6.53-.06a.5.5 0 0 0-.515.479l-.5 8.5a.5.5 0 1 0 .998.06l.5-8.5a.5.5 0 0 0-.484-.539M8 5.5a.5.5 0 0 0-.5.5v8.5a.5.5 0 0 0 1 0V6a.5.5 0 0 0-.5-.5"/>
                     </svg>
                 </div>
-                <h5>Remove environment "${this.app.escapeHtml(name)}"?</h5>
-                <p class="text-muted small px-4">This will permanently delete this environment profile${stepNote}. This action cannot be undone.</p>
+                <h5>Delete ${this.app.escapeHtml(noun)} "${this.app.escapeHtml(name)}"?</h5>
+                <p class="text-muted small px-4">Its saved CLI settings${stepNote} are removed. Terminals already running are not affected. This cannot be undone.</p>
             </div>
             <div class="d-flex gap-2 justify-content-end">
                 <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>
-                <button type="button" class="btn btn-danger" id="confirm-delete-btn">Remove Environment</button>
+                <button type="button" class="btn btn-danger" id="confirm-delete-btn">Delete ${this.app.escapeHtml(noun)}</button>
             </div>
         `);
 
@@ -2064,13 +1697,10 @@ export class EnvironmentController {
             try {
                 await this.app.apiCall(`/api/v1/environments/${encodeURIComponent(name)}`, 'DELETE');
                 await this.refreshEnvironments();
-                if (onChanged) {
-                    await onChanged();
-                } else {
-                    this.app.navigate('environments');
-                }
+                if (onChanged) await onChanged();
             } catch (error) {
-                this.app.showError(`Failed to remove environment: ${error.message}`);
+                // The server refuses while an Automation still uses it; say so in its words.
+                this.app.showError(`${nounTitle} not deleted: ${error.message}`);
             }
         };
     }
@@ -2118,12 +1748,12 @@ export class EnvironmentController {
             const response = await this.app.apiCall(`/api/v1/cli/launch/${cli.toLowerCase()}`, 'POST', requestBody);
 
             if (response.success) {
-                this.app.showToast('Environment Launched', `${envName} launched successfully`, 'success');
+                this.app.showToast('Opened in a separate window', `${envName} is running.`, 'success');
             } else {
-                this.app.showToast('Launch Error', response.message, 'error');
+                this.app.showToast('Could not open', response.message, 'error');
             }
         } catch (error) {
-            this.app.showError(`Failed to launch environment: ${error.message}`);
+            this.app.showError(`Could not open ${envName}: ${error.message}`);
         }
     }
 
@@ -2139,6 +1769,9 @@ export class EnvironmentController {
             automationWorker: Boolean(env.automationWorker),
             purpose: env.purpose || 'work',
             reviewerRouting: env.reviewerRouting || null,
+            // null = saved before project scoping (the server lists it in every project); only
+            // carried when the API sends it, so an older backend changes nothing.
+            ...(env.projectPath !== undefined ? { projectPath: env.projectPath } : {}),
             // Workspace mode is set the moment the environment is created, but the clone is
             // only made on first launch — so a mode of 1/2 with a null sandbox id is the
             // normal "configured, not provisioned yet" state, not an error.
@@ -2159,6 +1792,9 @@ export class EnvironmentController {
             const response = await this.app.apiCall('/api/v1/environments', 'GET');
             this.setEnvironments(response.environments || []);
             await this.app.llmPickerController.refreshFromEnvironments(response.environments || []);
+            // The Agents page keeps its own copy for its cards and editor; keep it in step so a
+            // setup saved from any other surface shows up there without a reload.
+            await this.app.jobController?.environmentChanged?.();
         } catch (error) {
             console.error('Failed to refresh environments:', error);
             // Keep the last known-good profiles. Clearing them after a successful edit can make
@@ -2168,8 +1804,8 @@ export class EnvironmentController {
     }
 
     async launchInWebUI(envId, envName, cli) {
-        this.app.showToast('Web Terminal',
-            `Launching ${envName} (${cli})...`,
+        this.app.showToast('Terminal',
+            `Opening ${envName} (${cli})…`,
             'info');
         return this.app.terminalController.launchInFocus({
             cli,

@@ -95,7 +95,7 @@ export function openLocalCardEditor(app, detail, { openCard, onChanged }) {
     const comments = editor.querySelector('[data-local-card-comments]');
     const status = editor.querySelector('[data-local-card-status]');
     pickerDispose = mountLlmPicker(app, form.elements.namedItem('assignee'), {
-        context: 'sandbox', placeholder: 'Unassigned', selectedValue: card.assignee || '',
+        context: 'assignee', placeholder: 'Unassigned', selectedValue: card.assignee || '',
         selectedFallback: value => ({ value, label: `Unavailable selection (${value})` })
     });
     let baseline = readLocalCardForm(form);

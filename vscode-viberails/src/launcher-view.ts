@@ -27,10 +27,10 @@ export interface LauncherItem {
     scriptFileName?: string;
 }
 
-export const LAUNCHER_LOAD_FAILED_MESSAGE = 'Could not load automations.';
-export const LAUNCHER_ALL_HIDDEN_MESSAGE = 'All automations are hidden. Use "Customize list…" to show some.';
-export const LAUNCHER_NONE_RUNNABLE_MESSAGE = 'No automations or signed scripts available. Sign a script on the Automation page.';
-export const LAUNCHER_EMPTY_MESSAGE = 'No automations yet. Create one from the Automation page.';
+export const LAUNCHER_LOAD_FAILED_MESSAGE = 'Could not load agents and automations.';
+export const LAUNCHER_ALL_HIDDEN_MESSAGE = 'Everything is hidden. Use "Customize list…" to show some.';
+export const LAUNCHER_NONE_RUNNABLE_MESSAGE = 'No agents, automations or signed scripts available. Sign a script on the Automations page.';
+export const LAUNCHER_EMPTY_MESSAGE = 'No agents or automations yet. Create one from the Agents or Automations page.';
 export const LAUNCHER_ITEM_CONTEXT = 'launcherItem';
 const SCRIPT_KEY_PREFIX = 'script:';
 

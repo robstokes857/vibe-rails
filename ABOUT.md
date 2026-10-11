@@ -24,15 +24,15 @@ See source relationships alongside a health summary and file-level concerns. Swi
 
 ![The same fictional repository shown as connected module cards](vscode-viberails/media/screenshots/07-code-cards.png)
 
-## Reuse coding environments
+## Reuse coding setups
 
-Keep prompts and workspace choices in named environments. Automation Workers provide reusable configurations for reviews and other repeatable tasks.
+Keep a CLI's model, arguments and settings as a Quick Launch for the terminal's play button. Add a starting message and it is an Agent that runs on demand, on a schedule, around commits or from a Board lane.
 
-![Coding environments and Automation Workers](vscode-viberails/media/screenshots/10-environments.png)
+![Agents with their saved CLI settings](vscode-viberails/media/screenshots/10-environments.png)
 
 ## Automate repeatable work
 
-Combine repository scripts and an optional Worker into workflows. Run them manually, from a Board lane, on a schedule, or around commits. Automations run while VibeRails is open.
+Combine repository scripts and checks into Automations with no LLM step. Run them manually, from a Board lane, on a schedule, or around commits. Agents and Automations run while VibeRails is open.
 
 ![Sample Automations and signed Python scripts](vscode-viberails/media/screenshots/11-automations.png)
 

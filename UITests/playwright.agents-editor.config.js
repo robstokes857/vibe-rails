@@ -2,7 +2,7 @@ const { defineConfig } = require('@playwright/test');
 process.env.VIBERAILS_AUTOMATION_STATIC = '1';
 module.exports = defineConfig({
     testDir: './tests',
-    testMatch: 'jobs-environment.spec.js',
+    testMatch: 'agents-editor.spec.js',
     workers: 1,
     reporter: 'list',
     use: {

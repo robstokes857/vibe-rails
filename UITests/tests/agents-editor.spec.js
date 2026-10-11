@@ -241,30 +241,31 @@ async function installStatefulApi(page) {
 
 async function openApp(page) {
     // The SPA keeps long-lived status/WebSocket traffic open, so networkidle is not a valid
-    // readiness signal. Start directly on Jobs so the asynchronous terminal-focus bootstrap
-    // cannot race a test navigation and replace the Jobs DOM after it has rendered.
-    await page.goto('/?view=jobs', { waitUntil: 'domcontentloaded' });
-    await expect(page.locator('.app-subnav-link[data-view="jobs"]:visible')).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator('.jobs-view[data-view="jobs"]')).toBeVisible({ timeout: 10_000 });
+    // readiness signal. Start directly on Agents so the asynchronous terminal-focus bootstrap
+    // cannot race a test navigation and replace the page after it has rendered.
+    await page.goto('/?view=ai-agents', { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('.app-subnav-link[data-view="ai-agents"]:visible')).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('.jobs-view[data-view="ai-agents"]')).toBeVisible({ timeout: 10_000 });
 }
 
 async function openJobs(page, { expandDisabled = true } = {}) {
-    if (!await page.locator('.jobs-view[data-view="jobs"]').isVisible()) {
-        await page.locator('.app-subnav-link[data-view="jobs"]:visible').click();
+    if (!await page.locator('.jobs-view[data-view="ai-agents"]').isVisible()) {
+        await page.locator('.app-subnav-link[data-view="ai-agents"]:visible').click();
     }
-    await expect(page.locator('.jobs-view[data-view="jobs"]')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('.jobs-view[data-view="ai-agents"]')).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('[data-jobs-list]')).toContainText('Environment review');
     if (expandDisabled && !await page.locator('[data-job-action="edit"][data-job-id="17"]').isVisible()) {
         await page.locator('[data-disabled-jobs] > summary').click();
     }
 }
 
-async function openWorkers(page) {
-    await page.locator('.app-subnav-link[data-view="environments"]:visible').click();
-    // Scope to the view container: [data-view="environments"] now also matches the top subnav link
-    // and the sidebar link, and an unscoped locator is a Playwright strict-mode violation.
-    await expect(page.locator('.view[data-view="environments"]')).toBeVisible({ timeout: 10_000 });
-    await expect(page.locator('[data-environments-table]')).toContainText('Nightly Codex');
+async function openSetupForm(page, name) {
+    // The saved CLI setup behind an Agent is edited in the shared form (environment-editor.js). The
+    // Agents page opens it for a setup without an Automation, the picker's "Manage quick launches"
+    // for a Quick Launch; a setup behind an Automation is reached through the controller here.
+    await expect.poll(() => page.evaluate(() => window.app.data.environments.map(env => env.name))).toContain(name);
+    await page.evaluate(([name, variant]) => window.app.environmentController.editEnvironment(name, { variant }), [name, 'agent']);
+    await expect(page.locator('#env-form')).toBeVisible({ timeout: 10_000 });
 }
 
 async function openAutomationEditorForExistingJob(page) {
@@ -296,9 +297,9 @@ async function closeEnvironmentModal(page) {
     await expect(page.locator('#env-form')).toHaveCount(0);
 }
 
-test.describe('Jobs Worker / Environments integration', () => {
+test.describe('Agents editor', () => {
     for (const cli of ['claude', 'copilot', 'antigravity', 'grok', 'opencode', 'glm-5.2', 'glm-5.3', 'deepseek-v4-pro', 'kimi-k3']) {
-        test(`Automation modal saves the shared ${cli} controls`, async ({ page }) => {
+        test(`the Agent editor saves the shared ${cli} controls`, async ({ page }) => {
             const { writes } = await installStatefulApi(page);
             await openApp(page);
             await page.locator('[data-job-action="new"]').click();
@@ -351,16 +352,20 @@ test.describe('Jobs Worker / Environments integration', () => {
         expect(writes.settings).toHaveLength(0);
     });
 
-    test('regular Environment creation still trims its name and allows an empty prompt', async ({ page }) => {
+    test('a Quick Launch is the same form without a message: trimmed name, empty prompt, no flags', async ({ page }) => {
         const { writes } = await installStatefulApi(page);
         await openApp(page);
-        await openWorkers(page);
-        await page.locator('[data-action="create-environment"]').click();
+        await page.evaluate(() => window.app.environmentController.createEnvironment({ variant: 'quick-launch' }));
+        await expect(page.locator('#env-form')).toBeVisible();
+        await expect(page.locator('#env-initial-message')).toHaveCount(0);
+        await expect(page.locator('#env-hidden')).toHaveCount(0);
+        await expect(page.locator('[data-env-steps-open]')).toHaveCount(0);
         await page.locator('#env-name').fill('  My environment  ');
         await expect(page.locator('[data-primary-options] #codex-model')).toBeVisible();
+        await expect(page.locator('#env-form button[type="submit"]')).toHaveText(/Create quick launch/);
         await page.locator('#env-form button[type="submit"]').click();
         await expect(page.locator('#env-form')).toHaveCount(0);
-        expect(writes.environmentCreates[0].body.name).toBe('My environment');
+        expect(writes.environmentCreates[0].body).toMatchObject({ name: 'My environment', customPrompt: '' });
         expect(writes.environmentCreates[0].body.automationWorker).toBeUndefined();
         expect(writes.environmentCreates[0].body.steps).toBeUndefined();
     });
@@ -369,8 +374,8 @@ test.describe('Jobs Worker / Environments integration', () => {
     test('Codex Speed saves and reopens Ultrafast, Fast and Default, restricted to Astra', async ({ page }) => {
         const { writes } = await installStatefulApi(page);
         await openApp(page);
-        await openWorkers(page);
-        await page.locator('[data-action="create-environment"]').click();
+        await page.evaluate(() => window.app.environmentController.createEnvironment({ variant: 'agent' }));
+        await expect(page.locator('#env-form')).toBeVisible();
         await page.locator('#env-name').fill('Astra speed');
         const speed = page.getByLabel('Speed', { exact: true });
         const model = page.locator('#codex-model');
@@ -390,11 +395,11 @@ test.describe('Jobs Worker / Environments integration', () => {
             await expect(page.locator('#env-form')).toHaveCount(0);
             const write = tier === 'ultrafast' ? writes.environmentCreates.at(-1) : writes.environments.at(-1);
             expect(write.body.customArgs).toBe('--model gpt-6-astra'
-                + (tier ? ` -c service_tier=${tier} --enable fast_mode` : ''));
+                + (tier ? ` -c service_tier=${tier} -c features.fast_mode=true` : ''));
             expect(writes.settings.at(-1).body).toMatchObject({
                 model: 'gpt-6-astra', fastMode: tier === 'fast', ultrafastMode: tier === 'ultrafast'
             });
-            await page.locator('[data-action="edit-environment"][data-env-name="Astra speed"]').click();
+            await openSetupForm(page, 'Astra speed');
             await expect(speed).toHaveValue(tier);
         }
     });
@@ -507,7 +512,7 @@ test.describe('Jobs Worker / Environments integration', () => {
         }
     });
 
-    test('editing the automation and Environments uses the same settings and one save', async ({ page }) => {
+    test('editing the Agent and its saved setup uses the same settings and one save', async ({ page }) => {
         const { state, writes } = await installStatefulApi(page);
         await openApp(page);
         await openAutomationEditorForExistingJob(page);
@@ -521,8 +526,7 @@ test.describe('Jobs Worker / Environments integration', () => {
         await expect(page.locator('[data-job-form]')).toHaveCount(0);
         expect(writes.jobs[0].body.prompt).toBe('Security review configured from Automation.');
         expect(writes.environmentCreates).toHaveLength(0);
-        await openWorkers(page);
-        await page.locator('[data-action="edit-environment"][data-env-name="Nightly Codex"]').click();
+        await openSetupForm(page, 'Nightly Codex');
         await expect(page.locator('#env-initial-message')).toHaveValue('Security review configured from Automation.');
         await expect(page.locator('#codex-model')).toHaveValue('gpt-5.6-luna');
         await page.locator('#env-initial-message').fill('Updated from Environments.');
@@ -538,7 +542,7 @@ test.describe('Jobs Worker / Environments integration', () => {
 
     // VIBE-58 / VB-8WE2S-129 F1: renaming an Automation used to PUT a Worker rebuilt from its
     // controls, dropping --sandbox read-only and --search for every user of that Worker.
-    test('a rename leaves the Worker untouched and Worker edits keep unrepresented arguments', async ({ page }) => {
+    test('a rename leaves the setup untouched and setup edits keep unrepresented arguments', async ({ page }) => {
         const { state, writes } = await installStatefulApi(page);
         const stored = '--model gpt-5.6-sol -c model_reasoning_effort=high --sandbox read-only --search';
         state.environments[0].customArgs = stored;
@@ -564,9 +568,8 @@ test.describe('Jobs Worker / Environments integration', () => {
         expect(writes.environments[0].body.customArgs).toBe('--model gpt-5.6-luna -c model_reasoning_effort=high --sandbox read-only --search');
         expect(state.environments[0].customArgs).toBe('--model gpt-5.6-luna -c model_reasoning_effort=high --sandbox read-only --search');
 
-        // The Environments page mounts the same editor: saving it unchanged writes nothing.
-        await openWorkers(page);
-        await page.locator('[data-action="edit-environment"][data-env-name="Nightly Codex"]').click();
+        // The setup form mounts the same editor: saving it unchanged writes nothing.
+        await openSetupForm(page, 'Nightly Codex');
         await expect(page.locator('#codex-additional-args')).toHaveValue('--sandbox read-only --search');
         await page.locator('#env-form button[type="submit"]').click();
         await expect(page.locator('#env-form')).toHaveCount(0);
@@ -575,7 +578,7 @@ test.describe('Jobs Worker / Environments integration', () => {
     });
 
     // F2: the derived Worker identifier must not be a name EnvironmentRoutes rejects.
-    test('an Automation named after a built-in CLI keeps its name and gets a valid Worker', async ({ page }) => {
+    test('an Agent named after a built-in CLI keeps its name and gets a valid setup name', async ({ page }) => {
         const { writes } = await installStatefulApi(page);
         await openApp(page);
         await page.locator('[data-job-action="new"]').click();
@@ -588,8 +591,9 @@ test.describe('Jobs Worker / Environments integration', () => {
         expect(writes.jobs[0].body).toMatchObject({ name: 'Codex', environmentId: 60 });
     });
 
-    // F3: lane checks and other script/check-only workflows must stay editable as they are.
-    test('a check-only Automation saves unchanged and converts only when instructions are added', async ({ page }) => {
+    // F3: lane checks and other script/check-only workflows are Automations: they list on their
+    // own page, open without an Agent step and save unchanged. A new Agent always has its step.
+    test('a check-only Automation lists on the Automations page and saves unchanged', async ({ page }) => {
         const { state, writes } = await installStatefulApi(page);
         const checks = Array.from({ length: 20 }, (_, index) => ({ id: `check-${index}`, kind: index % 2 ? 2 : 3, arguments: ['working-tree'] }));
         state.jobs.push({
@@ -597,13 +601,19 @@ test.describe('Jobs Worker / Environments integration', () => {
             prompt: '', timeoutMinutes: null, enabled: true, triggers: [], actions: checks
         });
         const submit = page.locator('[data-job-form] button[type="submit"]');
-        const addInstructions = page.locator('[data-job-action="add-worker-action"]');
         await openApp(page);
+        await expect(page.locator('[data-jobs-list]')).toContainText('Environment review');
+        await expect(page.locator('[data-jobs-list]')).not.toContainText('Lane checks');
+        await page.locator('.app-subnav-link[data-view="automations"]:visible').click();
+        await expect(page.locator('.jobs-view[data-view="automations"]')).toBeVisible({ timeout: 10_000 });
+        await expect(page.locator('[data-jobs-list]')).toContainText('Lane checks');
+        await expect(page.locator('[data-jobs-list]')).not.toContainText('Environment review');
         await page.locator('[data-job-action="edit"][data-job-id="19"]').click();
         await expect(page.locator('[data-job-form]')).toBeVisible();
         await expect(page.locator('[data-kind="worker"]')).toHaveCount(0);
         await expect(page.locator('#env-initial-message')).toHaveCount(0);
-        await expect(addInstructions).toBeVisible();
+        await expect(page.locator('[data-job-action="add-worker-action"]')).toHaveCount(0);
+        await expect(submit).toHaveText(/Save automation/);
         await submit.click();
         await expect(page.locator('[data-job-form]')).toHaveCount(0);
         expect(writes.environmentCreates).toHaveLength(0);
@@ -611,34 +621,22 @@ test.describe('Jobs Worker / Environments integration', () => {
         expect(writes.jobs[0].body).toMatchObject({ name: 'Lane checks', environmentId: null, prompt: '' });
         expect(writes.jobs[0].body.actions).toEqual(checks);
 
-        // Conversion is explicit: drop one check to make room, add instructions, and the added
-        // Worker can be removed again (its draft comes back with it) before anything is saved.
-        await page.locator('[data-job-action="edit"][data-job-id="19"]').click();
-        await page.locator('[data-job-action-id="check-19"] [data-workflow-action="remove"]').click();
-        await addInstructions.click();
-        await expect(addInstructions).toBeHidden();
-        await page.locator('#env-initial-message').fill('Review the check results.');
-        await page.locator('[data-kind="worker"] [data-workflow-action="remove"]').click();
+        // A new Automation starts with scripts and checks only; a new Agent always includes its step.
+        await page.locator('[data-job-action="new"]').click();
+        await expect(page.locator('[data-job-form]')).toBeVisible();
         await expect(page.locator('[data-kind="worker"]')).toHaveCount(0);
-        await addInstructions.click();
-        await expect(page.locator('#env-initial-message')).toHaveValue('Review the check results.');
-        await submit.click();
+        await expect(page.locator('[data-job-action="add-script-action"]')).toBeVisible();
+        await page.locator('[data-job-action="cancel-editor"]').first().click();
         await expect(page.locator('[data-job-form]')).toHaveCount(0);
-        expect(writes.environmentCreates).toHaveLength(1);
-        expect(writes.environmentCreates[0].body).toMatchObject({ name: 'Lane checks', automationWorker: true, customPrompt: 'Review the check results.' });
-        const converted = writes.jobs[1].body;
-        expect(converted).toMatchObject({ environmentId: 60, prompt: 'Review the check results.' });
-        expect(converted.actions).toHaveLength(20);
-        expect(converted.actions.at(-1)).toMatchObject({ kind: 0, environmentId: 60 });
-
-        // A new Automation still always includes its required Worker.
+        await page.locator('.app-subnav-link[data-view="ai-agents"]:visible').click();
+        await expect(page.locator('.jobs-view[data-view="ai-agents"]')).toBeVisible({ timeout: 10_000 });
         await page.locator('[data-job-action="new"]').click();
         await expect(page.locator('[data-kind="worker"]')).toHaveCount(1);
         await expect(page.locator('[data-kind="worker"] [data-workflow-action="remove"]')).toHaveCount(0);
-        await expect(addInstructions).toBeHidden();
+        await expect(page.locator('[data-job-action="add-worker-action"]')).toHaveCount(0);
     });
 
-    test('new automation includes its own configuration and commit triggers', async ({ page }) => {
+    test('a new Agent includes its own setup and commit triggers', async ({ page }) => {
         const { writes } = await installStatefulApi(page);
         await openApp(page);
         await page.locator('[data-job-action="new"]').click();
@@ -719,7 +717,7 @@ test.describe('Jobs Worker / Environments integration', () => {
         const toggle = page.locator('[data-job-action="toggle"][data-job-id="17"]');
         const group = page.locator('[data-disabled-jobs]');
         await expect(toggle).toBeHidden();
-        await expect(group.locator(':scope > summary')).toHaveText('Disabled automations1');
+        await expect(group.locator(':scope > summary')).toHaveText('Disabled agents1');
         await group.locator(':scope > summary').focus();
         await page.keyboard.press('Enter');
         await expect(toggle).toBeVisible();
@@ -737,6 +735,33 @@ test.describe('Jobs Worker / Environments integration', () => {
         await expect(group).toHaveCount(0);
         await expect(enabledToggle).toHaveAttribute('aria-checked', 'true');
         await expect(enabledToggle.locator('.job-switch-text')).toHaveText('Enabled');
+    });
+
+    test('setups saved before project scoping sit in a collapsed shared group', async ({ page }) => {
+        const { state } = await installStatefulApi(page);
+        // The server lists a setup with no projectPath in every project; nothing here runs it.
+        state.environments.push({
+            id: 45, name: 'Old shared helper', cli: 'claude', path: 'C:\test-envs\old-shared-helper', customArgs: '',
+            customPrompt: 'Help with whatever project is open.', hidden: false, automationWorker: false, projectPath: null,
+            lastUsedUTC: '2026-07-21T12:00:00Z'
+        });
+        await openApp(page);
+        await openJobs(page, { expandDisabled: false });
+
+        const group = page.locator('[data-shared-agents]');
+        await expect(group.locator(':scope > summary')).toHaveText('Shared with every project1');
+        await expect(group).not.toHaveJSProperty('open', true);
+        await expect(page.locator('.job-card').filter({ hasText: 'Old shared helper' })).toHaveCount(1);
+        await expect(group.locator('.job-card').filter({ hasText: 'Old shared helper' })).toHaveCount(1);
+        // The project's own two (the disabled Automation and the Copilot setup); the shared one is not counted.
+        await expect(page.locator('[data-jobs-count]')).toHaveText('2 agents');
+
+        await group.locator(':scope > summary').click();
+        await expect(group).toContainText('Saved before setups belonged to a project');
+        await expect(group.locator('[data-job-action="run-environment"][data-env-id="45"]')).toBeVisible();
+        // The group stays open across the list poll.
+        await page.evaluate(() => window.app.jobController.refreshJobs({ quiet: true }));
+        await expect(group).toHaveJSProperty('open', true);
     });
 
     for (const width of [1440, 390]) {
@@ -786,7 +811,7 @@ test.describe('Jobs Worker / Environments integration', () => {
         });
     }
 
-    test('Automation opens a real modal with ordinary visible form settings', async ({ page }) => {
+    test('the Agent editor opens a real modal with ordinary visible form settings', async ({ page }) => {
         await installStatefulApi(page);
         await openApp(page);
         await openJobs(page);
@@ -809,7 +834,7 @@ test.describe('Jobs Worker / Environments integration', () => {
         await expect(page.locator('#job-trigger-schedule')).toHaveCSS('appearance', 'none');
     });
 
-    test('Automation More actions stay inside a narrow viewport', async ({ page }) => {
+    test('Agent card More actions stay inside a narrow viewport', async ({ page }) => {
         await page.setViewportSize({ width: 320, height: 800 });
         const { state } = await installStatefulApi(page);
         const longName = 'AutomationWithAnIntentionallyLongUnbrokenNameThatMustWrapWithoutMakingThePageScrollSideways';

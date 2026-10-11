@@ -45,6 +45,7 @@ function createApp() {
                 .replaceAll('"', '&quot;');
         },
         formatRelativeTime() { return 'just now'; },
+        getCliBrand(cli) { return { label: cli, logo: '' }; },
         async apiCall(url, method = 'GET', body = null, requestOptions = undefined) {
             calls.push({
                 url,
@@ -92,29 +93,44 @@ test('Switch reviewer recipe export and import preserve mappings and options', a
     assert.equal(app.calls[1].body.enabled, false);
     recipe.worker.reviewerRouting.fallback = { selection: 'env:12:codex' };
     const writes = app.calls.length;
-    await assert.rejects(controller.applyRecipe(recipe, { addEnv: true, addJob: true, button: null }), /machine-local reviewer environments/);
+    await assert.rejects(controller.applyRecipe(recipe, { addEnv: true, addJob: true, button: null }), /reviewer setups saved on another machine/);
     assert.equal(app.calls.length, writes);
 });
 
-test('Automation page makes automations primary', () => {
+test('One controller renders the Agents page and the Automations page', () => {
     const controller = new JobController(createApp());
-    const html = controller.renderPage();
+    const agents = controller.renderPage();
 
-    assert.match(html, /<h1 class="jobs-page-title">Automation<\/h1>/);
-    assert.match(html, /id="jobs-list-title">Your automations/);
-    assert.match(html, /Run history/);
-    assert.doesNotMatch(html, /text-gradient/);
-    assert.doesNotMatch(html, /jobs-runtime-strip/);
-    assert.doesNotMatch(html, /VibeRails must stay open/);
-    assert.doesNotMatch(html, /data-job-environments-table/);
+    assert.match(agents, /data-view="ai-agents" data-mode="agents"/);
+    assert.match(agents, /<h1 class="jobs-page-title">Agents<\/h1>/);
+    assert.match(agents, /id="jobs-list-title">Your agents/);
+    assert.match(agents, /New agent\s*<\/button>/);
+    assert.match(agents, /Run history/);
+    // Scripts belong to the Automations page; an Agent is a CLI with a starting message.
+    assert.doesNotMatch(agents, /data-python-scripts-root/);
+    assert.doesNotMatch(agents, /text-gradient/);
+    assert.doesNotMatch(agents, /jobs-runtime-strip/);
+    assert.doesNotMatch(agents, /VibeRails must stay open/);
+    assert.doesNotMatch(agents, /data-job-environments-table/);
+
+    controller.mode = 'automations';
+    const automations = controller.renderPage();
+    assert.match(automations, /data-view="automations" data-mode="automations"/);
+    assert.match(automations, /<h1 class="jobs-page-title">Automations<\/h1>/);
+    assert.match(automations, /id="jobs-list-title">Your automations/);
+    assert.match(automations, /New automation\s*<\/button>/);
+    assert.match(automations, /data-python-scripts-root/);
 });
 
-test('Navigation calls the feature Automation and the Rules page stays out of it', () => {
+test('Navigation offers Agents and Automations, and the Rules page stays out of it', () => {
     const index = readFileSync(indexPath, 'utf8');
     const ruleController = readFileSync(ruleControllerPath, 'utf8');
     const jobsController = readFileSync(modulePath, 'utf8');
 
-    assert.match(index, /title="Scheduled and Git-triggered Automations"/);
+    assert.match(index, /data-view="ai-agents"[^>]*\n\s*title="Agents — /);
+    assert.match(index, /data-view="automations"[^>]*\n\s*title="Automations — /);
+    // The old page ids are gone from the nav; the ENVS page and its Sandboxes card with them.
+    assert.doesNotMatch(index, /data-view="environments"|data-view="jobs"|environments-template|sandbox-item-template|Environment \/ Workers/);
     assert.doesNotMatch(index, />Open Jobs<|previews never queue jobs|>Jobs<\/span>/i);
     // The Rules page no longer hosts an Automation section — the standalone
     // Automation page owns the whole feature.
@@ -132,12 +148,15 @@ test('Automation modal includes its configuration and optional script actions', 
     assert.match(source, /job-repository-context/);
     assert.match(source, /Runs in<\/span>/);
     assert.doesNotMatch(source, /mountWorkerPicker/);
-    assert.match(source, /<legend>Task <small>Runs from top to bottom<\/small><\/legend>/);
+    assert.match(source, /<legend>What runs <small>Top to bottom<\/small><\/legend>/);
     assert.match(source, />Add script<\/button>/);
-    assert.doesNotMatch(source, />Add Worker<\/button>/);
+    assert.doesNotMatch(source, />Add Worker<\/button>|>Add instructions<\/button>|add-worker-action/);
     assert.doesNotMatch(source, />Saved Worker<\/label>/);
     assert.match(source, /Each row is one argv value/);
     assert.doesNotMatch(source, /Environment \/ Worker/);
+    // The agent step is named for what it is; the setup editor keeps its own field label.
+    assert.match(source, /<strong><i class="fa-solid fa-robot" aria-hidden="true"><\/i>Agent<\/strong>/);
+    assert.doesNotMatch(source, /textContent = 'Instructions'/);
 });
 
 test('Automation maps every non-shell Environment CLI to the shared LLM enum values', () => {
@@ -179,7 +198,7 @@ test('Automation editor does not promise read-only or clone isolation', () => {
     assert.doesNotMatch(source, /executionMode/);
 });
 
-test('Automation renderer escapes data and shows Worker, triggers, and next run', () => {
+test('Agent renderer escapes data and shows the CLI, triggers, and next run', () => {
     const app = createApp();
     const controller = new JobController(app);
     const list = { innerHTML: '' };
@@ -216,11 +235,14 @@ test('Automation renderer escapes data and shows Worker, triggers, and next run'
 
     controller.renderJobs();
 
-    assert.equal(count.textContent, '1 automation');
+    assert.equal(count.textContent, '1 agent');
+    assert.match(list.innerHTML, /job-card-agent/);
     assert.match(list.innerHTML, /&lt;Security review&gt;/);
+    // The setup's name differs from the Automation's, so it is shown — escaped — beside the settings.
     assert.match(list.innerHTML, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
     assert.doesNotMatch(list.innerHTML, /<script>/i);
-    assert.match(list.innerHTML, /title="Worker"/);
+    assert.match(list.innerHTML, /job-card-mark/);
+    assert.match(list.innerHTML, /job-provider" data-provider="codex">Codex</);
     assert.match(list.innerHTML, /Every 15 min/);
     assert.match(list.innerHTML, /After successful commit/);
     assert.match(list.innerHTML, /Manual/);
@@ -231,6 +253,8 @@ test('Automation renderer escapes data and shows Worker, triggers, and next run'
 
 test('Automation renderer escapes ids used in data attributes', () => {
     const controller = new JobController(createApp());
+    // No saved setup behind it: this Job is an Automation and lists on that page.
+    controller.mode = 'automations';
     const list = { innerHTML: '' };
     controller.root = {
         querySelector(selector) {
@@ -256,7 +280,7 @@ test('Automation renderer escapes ids used in data attributes', () => {
     assert.match(list.innerHTML, /data-job-id="7&quot; data-owned=&quot;yes"/);
 });
 
-test('Automation rows display every supported Environment provider', () => {
+test('Agent rows display every supported CLI by its app-wide name', () => {
     const controller = new JobController(createApp());
     const list = { innerHTML: '' };
     controller.root = {
@@ -762,6 +786,8 @@ test('Run history exposes stop only while active and run-again after completion'
 
 test('The run-history table lists one row per automation, not one per run', () => {
     const controller = new JobController(createApp());
+    // Runs whose Job is unknown (deleted, or never an Agent) stay reachable on the Automations page.
+    controller.mode = 'automations';
     controller.runSummaries = [{
         jobId: 4,
         jobName: 'Security <review>',
@@ -976,10 +1002,28 @@ test('The runs table distinguishes "no project open" from "no runs yet"', () => 
     const controller = new JobController(app);
 
     app.data = { configs: { rootPath: 'C:\\repo' }, isInGit: true };
+    assert.match(controller.renderRunsHtml(), /No agent runs yet/);
+    controller.mode = 'automations';
     assert.match(controller.renderRunsHtml(), /No automation runs yet/);
 
     app.data = { configs: { rootPath: '' }, isInGit: true };
     assert.match(controller.renderRunsHtml(), /Open a project/);
+});
+
+test('Run history is split between the pages by what each Job runs', () => {
+    const controller = new JobController(createApp());
+    controller.app.data = { configs: { rootPath: 'C:\\repo' }, isInGit: true };
+    controller.environments = [{ id: 1, name: 'Reviewer', cli: 'codex', customPrompt: 'Review.' }];
+    controller.jobs = [
+        { id: 10, name: 'Review', actions: [{ kind: 0, environmentId: 1 }], triggers: [] },
+        { id: 11, name: 'Lint', actions: [{ kind: 1, scriptPath: 'lint.py' }], triggers: [] }
+    ];
+    const summary = (jobId, jobName) => ({ jobId, jobName, totalRuns: 1, activeRuns: 0, lastRunId: 'r', lastStatus: 2, lastTriggerKind: 0, lastLlm: 1, lastQueuedUtc: '2026-07-19T12:00:00Z' });
+    controller.runSummaries = [summary(10, 'Review'), summary(11, 'Lint'), summary(12, 'Gone')];
+
+    assert.deepEqual(controller.pageRunSummaries().map(entry => entry.jobName), ['Review']);
+    controller.mode = 'automations';
+    assert.deepEqual(controller.pageRunSummaries().map(entry => entry.jobName), ['Lint', 'Gone']);
 });
 
 test('A long initial message is truncated in the hover tooltip but retained in the row markup', () => {
@@ -1153,6 +1197,7 @@ test('The run-history poll skips the DOM when the markup is unchanged', async ()
     app.apiCall = async () => ({ summaries });
 
     const controller = new JobController(app);
+    controller.mode = 'automations';
     let assignments = 0;
     const target = {
         _html: '',
@@ -1304,9 +1349,9 @@ test('Workflow run details escape script output and expose Worker replay separat
     assert.match(script, /&lt;script&gt;alert\(&quot;stdout&quot;\)&lt;\/script&gt;/);
     assert.match(script, /&lt;img src=x onerror=alert\(1\)&gt;/);
     assert.doesNotMatch(script, /<script>|<img/i);
-    assert.match(worker, /Worker — Review &lt;Worker&gt;/);
+    assert.match(worker, /Agent — Review &lt;Worker&gt;/);
     assert.match(worker, /data-run-action-session="session&lt;&amp;&gt;"/);
-    assert.match(worker, /Replay Worker terminal/);
+    assert.match(worker, /Replay agent terminal/);
 });
 
 test('A time limit is optional: blank sends null and a number opts in', () => {
@@ -1522,29 +1567,79 @@ test('Run now queues the Automation without claiming a Web UI terminal tab', asy
 
     assert.deepEqual(tabCalls, []);
     assert.deepEqual(navigations, []);
-    assert.deepEqual(toasts, [{ title: 'Automation', body: 'Automation queued.' }]);
+    assert.deepEqual(toasts, [{ title: 'Agent', body: 'Automation queued.' }]);
 });
 
-test('Environment UI groups robot-marked Workers below regular Environments', () => {
-    const app = createApp();
-    app.getCliBrand = cli => ({ label: cli, logo: '' });
-    app.data.environments = [
-        { id: 2, name: 'Automation Worker', cli: 'claude', automationWorker: true },
-        { id: 1, name: 'Daily Environment', cli: 'codex', automationWorker: false }
+test('The Agents page lists saved setups with a message, one card per Automation behind them', () => {
+    const controller = new JobController(createApp());
+    const list = { innerHTML: '' };
+    controller.root = { querySelector: selector => (selector === '[data-jobs-list]' ? list : null) };
+    controller.environments = [
+        { id: 1, name: 'code review', cli: 'codex', customPrompt: 'Review the branch.' },
+        { id: 2, name: 'Fast Opus', cli: 'claude', customPrompt: '' },
+        { id: 3, name: 'Shared reviewer', cli: 'claude', customPrompt: 'Review.', automationWorker: true },
+        // Saved before setups belonged to a project: the server lists it everywhere.
+        { id: 4, name: 'Old helper', cli: 'codex', customPrompt: 'Help with whatever is open.', projectPath: null }
     ];
-    const html = new EnvironmentController(app).renderEnvironmentsTable();
+    controller.jobs = [
+        { id: 10, name: 'Nightly', enabled: true, actions: [{ kind: 0, environmentId: 3 }], triggers: [] },
+        { id: 11, name: 'Weekly', enabled: false, actions: [{ kind: 0, environmentId: 3 }], triggers: [] },
+        { id: 12, name: 'VCA · Done', enabled: true, actions: [{ kind: 3, arguments: ['working-tree'] }], triggers: [] }
+    ];
+    controller.renderJobs();
+    const html = list.innerHTML;
 
-    const environmentsHeading = html.indexOf('<h5>Environments');
-    const regularRow = html.indexOf('Daily Environment');
-    const workersHeading = html.indexOf('<h5>Workers');
-    const workerRow = html.indexOf('Automation Worker');
+    // The message-less setup is a Quick Launch and the check-only Job is an Automation: neither is here.
+    assert.doesNotMatch(html, /Fast Opus|VCA · Done/);
+    // A setup with no Automation behind it still runs: straight into a terminal tab, no switch.
+    assert.match(html, /<h3>code review<\/h3>/);
+    assert.match(html, /data-job-action="run-environment" data-env-id="1"/);
+    assert.match(html, /data-job-action="edit-environment" data-env-id="1"/);
+    assert.doesNotMatch(html, /data-job-action="toggle"[^>]*data-env-id="1"/);
+    // Two Automations on one setup are two cards, each with its own name and switch.
+    assert.match(html, /<h3>Nightly<\/h3>/);
+    assert.match(html, /<h3>Weekly<\/h3>/);
+    assert.match(html, /aria-checked="true"[^>]*data-job-action="toggle" data-job-id="10"/);
+    assert.match(html, /aria-checked="false"[^>]*data-job-action="toggle" data-job-id="11"/);
+    assert.match(html, /<span>Disabled agents<\/span><span class="jobs-count">1<\/span>/);
+    assert.match(html, /data-job-action="delete-agent" data-job-id="10" data-env-id="3"/);
+    // A setup with no project of its own sits behind the collapsed shared group, after the
+    // project's own list, and still gets a full card there.
+    assert.match(html, /<details class="jobs-collapsible-list" data-shared-agents>/);
+    assert.match(html, /<span>Shared with every project<\/span><span class="jobs-count">1<\/span>/);
+    assert.match(html, /Saved before setups belonged to a project/);
+    assert.ok(html.indexOf('<h3>Old helper</h3>') > html.indexOf('data-shared-agents'));
+    assert.ok(html.indexOf('<h3>Weekly</h3>') < html.indexOf('data-shared-agents'));
+    assert.match(html, /data-job-action="run-environment" data-env-id="4"/);
 
-    assert.ok(environmentsHeading >= 0);
-    assert.ok(environmentsHeading < regularRow);
-    assert.ok(regularRow < workersHeading);
-    assert.ok(workersHeading < workerRow);
-    assert.match(html, /environment-list-group is-workers/);
-    assert.match(html, /env-worker-badge/);
+    controller.mode = 'automations';
+    controller._lastJobsListHtml = null;
+    controller.renderJobs();
+    assert.match(list.innerHTML, /<h3>VCA · Done<\/h3>/);
+    assert.match(list.innerHTML, /job-card-automation/);
+    assert.doesNotMatch(list.innerHTML, /Nightly|code review|Old helper|data-shared-agents/);
+});
+
+test('Deleting an Agent removes its Automation, then its setup only when nothing else uses it', async () => {
+    const app = createApp();
+    app.environmentController = { refreshEnvironments: async () => {} };
+    const controller = new JobController(app);
+    controller.refreshAll = async () => {};
+    controller.confirm = async () => true;
+    controller.environments = [{ id: 3, name: 'Shared reviewer', cli: 'claude', customPrompt: 'Review.' }];
+    controller.jobs = [
+        { id: 10, name: 'Nightly', actions: [{ kind: 0, environmentId: 3 }] },
+        { id: 11, name: 'Weekly', actions: [{ kind: 0, environmentId: 3 }] }
+    ];
+
+    await controller.deleteAgent({ jobId: 10, environmentId: 3 });
+    assert.deepEqual(app.calls.map(call => [call.method, call.url]), [['DELETE', '/api/v1/jobs/10']]);
+
+    app.calls.length = 0;
+    controller.jobs = [controller.jobs[1]];
+    await controller.deleteAgent({ jobId: 11, environmentId: 3 });
+    assert.deepEqual(app.calls.map(call => [call.method, call.url]),
+        [['DELETE', '/api/v1/jobs/11'], ['DELETE', '/api/v1/environments/Shared%20reviewer']]);
 });
 
 test('Environment Initial Message help documents the Board lane card placeholder', () => {
@@ -1581,12 +1676,12 @@ test('Recipe import confirmation discloses and escapes executable Environment co
     assert.equal(modals[0].title, 'Import recipe');
     assert.match(modals[0].html, /Custom arguments/);
     assert.match(modals[0].html, /--dangerously-skip-permissions/);
-    assert.match(modals[0].html, /Initial message/);
+    assert.match(modals[0].html, /Starting message/);
     assert.match(modals[0].html, /Ignore safeguards/);
     assert.match(modals[0].html, /approval or sandbox permissions/);
-    assert.match(modals[0].html, /Review the workflow before importing/);
-    assert.match(modals[0].html, /new Worker will import the fields shown below exactly/);
-    assert.match(modals[0].html, /reviewed the Worker settings and repository script actions/);
+    assert.match(modals[0].html, /Review the steps before importing/);
+    assert.match(modals[0].html, /new CLI setup will import the fields shown below exactly/);
+    assert.match(modals[0].html, /reviewed the CLI settings and repository script steps/);
     assert.match(modals[0].html, /created disabled/);
     assert.match(modals[0].html, /&lt;script&gt;/);
     assert.doesNotMatch(modals[0].html, /<script>/i);
@@ -1928,23 +2023,30 @@ test('The catalog picker groups automations by repository and explains what an i
     assert.match(html, /Gone project[\s\S]*?Folder missing/);
     assert.match(html, /data-job-import-source="42"[^>]*title="Import Nightly review"/);
     assert.match(html, /Nightly · Claude · opus/);
-    assert.match(html, /Worker copied[\s\S]*?2 scripts to copy/);
-    assert.match(html, /data-job-import-source="43"[^>]*disabled[^>]*title="Script not found in either repository: scripts\/missing\.py"/);
-    assert.match(html, /Cannot import/);
-    assert.match(html, /Script-only/);
-    assert.match(html, /Worker reused/);
+    assert.match(html, /Setup copied[\s\S]*?2 scripts to copy/);
+    assert.match(html, /Setup reused/);
     assert.match(html, /&lt;b&gt;Bot&lt;\/b&gt;/);
     assert.doesNotMatch(html, /<b>Bot<\/b>/);
+    // The Agents page imports agents; a scripts-only entry belongs to the Automations page.
+    assert.doesNotMatch(html, /data-job-import-source="43"/);
 
-    // Search matches names, Workers, scripts and repositories; nothing hides the empty state.
+    // Search matches names, setups, scripts and repositories; nothing hides the empty state.
     assert.match(controller.renderImportGroups(catalog, 'reused'), /Reused worker/);
     assert.doesNotMatch(controller.renderImportGroups(catalog, 'reused'), /Nightly review/);
-    assert.match(controller.renderImportGroups(catalog, 'missing.py'), /Script-only checks/);
     assert.match(controller.renderImportGroups(catalog, 'gone project'), /Reused worker/);
     assert.match(controller.renderImportGroups(catalog, 'zzz'), /Nothing matches that search/);
-    assert.match(controller.renderImportGroups([], ''), /No other repository on this machine has an automation yet/);
+    assert.match(controller.renderImportGroups([], ''), /No other repository on this machine has an agent yet/);
     assert.equal(controller.findImportEntry('44')?.name, 'Reused worker');
     assert.equal(controller.findImportEntry(99), null);
+
+    controller.mode = 'automations';
+    const automations = controller.renderImportGroups(catalog, '');
+    assert.match(automations, /data-job-import-source="43"[^>]*disabled[^>]*title="Script not found in either repository: scripts\/missing\.py"/);
+    assert.match(automations, /Cannot import/);
+    assert.match(automations, /Scripts and checks/);
+    assert.doesNotMatch(automations, /Nightly review|Reused worker/);
+    assert.match(controller.renderImportGroups(catalog, 'missing.py'), /Script-only checks/);
+    assert.match(controller.renderImportGroups([], ''), /No other repository on this machine has an automation yet/);
 });
 
 test('Reviewing a catalog entry shows the source, names the copied Worker and states the fate of each script', (t) => {
@@ -1963,7 +2065,7 @@ test('Reviewing a catalog entry shows the source, names the copied Worker and st
     assert.match(html, /job-recipe-source[^>]*title="C:\\src\\other"/);
     assert.match(html, /copied into this repository under the name below/);
     assert.match(html, /id="recipe-worker-name"[^>]*value="Nightly - repo"/);
-    assert.match(html, /copied with its steps and initial message/);
+    assert.match(html, /copied with its steps and starting message/);
     assert.match(html, /2 scripts are copied into this working tree/);
     assert.match(html, /1\. Python  scripts\/a\.py  — will be copied from the source repository/);
     assert.match(html, /3\. Python  scripts\/c\.py  — already in this repository/);
@@ -1984,7 +2086,7 @@ test('Reviewing a catalog entry shows the source, names the copied Worker and st
     controller.confirmImportRecipe(controller.recipeFromCatalogEntry(blocked), { importSource: blocked });
     html = modals[2].html;
     assert.match(html, /scripts\/missing\.py  — MISSING in both repositories/);
-    assert.match(html, /Worker: none \(script-only\)/);
+    assert.match(html, /Automation: scripts and checks only, no LLM step/);
 
     // The file-based path is untouched: same modal, same checkboxes, same title.
     controller.environments = [];
@@ -2017,9 +2119,9 @@ test('Applying a catalog import posts the source id and the Worker name, then re
     assert.equal(app.calls[0].requestOptions.preferErrorResponseMessage, true);
     assert.equal(closed, 1);
     assert.equal(refreshed, 1);
-    assert.equal(toasts[0].title, 'Automation imported');
+    assert.equal(toasts[0].title, 'Agent imported');
     assert.match(toasts[0].message, /Added disabled for review/);
-    assert.match(toasts[0].message, /Worker copied as “Nightly - repo”/);
+    assert.match(toasts[0].message, /CLI setup copied as “Nightly - repo”/);
     assert.match(toasts[0].message, /1 script copied/);
 
     // A reused Worker never sends a name — the server ignores it anyway.
@@ -2051,7 +2153,7 @@ test('A rejected catalog import stays in the modal so the Worker name can be fix
     app.apiCall = async (...args) => { app.calls.push(args); return {}; };
     await controller.applyRepositoryImport(other.automations[0], { workerName: '   ', button: null });
     assert.equal(app.calls.length, 0);
-    assert.match(alertElement.textContent, /Give the copied Worker a name/);
+    assert.match(alertElement.textContent, /Give the copied CLI setup a name/);
 });
 
 test('import picker CSS keeps a fallback on every colour token', () => {

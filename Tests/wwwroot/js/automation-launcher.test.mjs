@@ -11,7 +11,7 @@ const jobsControllerPath = path.resolve('VibeRails/wwwroot/js/modules/jobs-contr
 const indexPath = path.resolve('VibeRails/wwwroot/index.html');
 const stylePath = path.resolve('VibeRails/wwwroot/style.css');
 
-const { AutomationNavLauncher, normalizeLauncherItems, isLauncherItemRunnable } =
+const { AutomationNavLauncher, normalizeLauncherItems, isLauncherItemRunnable, launcherItemIcon } =
     await import(pathToFileURL(modulePath).href);
 const { PythonScriptsController } = await import(pathToFileURL(scriptsModulePath).href);
 
@@ -157,17 +157,17 @@ test('the empty states tell an unsigned-only library, an all-hidden list and no 
     const unsignedOnly = launcherWith([CATALOG[0]]);
     unsignedOnly._renderFlyoutItems();
     assert.match(unsignedOnly.flyout.target.html,
-        /automation-launch-flyout-empty[^>]*>No automations or signed scripts available\. Sign a script on the Automation page\./);
+        /automation-launch-flyout-empty[^>]*>No agents, automations or signed scripts available\. Sign a script on the Automations page\./);
     assert.doesNotMatch(unsignedOnly.flyout.target.html, /<button/);
 
     // Runnable rows exist but every one is hidden; the unsigned script does not count as hidden.
     const allHidden = launcherWith([{ ...CATALOG[1], enabled: false }, CATALOG[0]]);
     allHidden._renderFlyoutItems();
-    assert.match(allHidden.flyout.target.html, /All automations are hidden\. Use "Customize list/);
+    assert.match(allHidden.flyout.target.html, /Everything is hidden\. Use "Customize list/);
 
     const nothing = launcherWith([]);
     nothing._renderFlyoutItems();
-    assert.match(nothing.flyout.target.html, /No automations yet\. Create one from the Automation page\./);
+    assert.match(nothing.flyout.target.html, /No agents or automations yet\. Create one from the Agents or Automations page\./);
 });
 
 test('a script with a run in flight shows a busy row instead of a second Run', () => {
@@ -285,8 +285,8 @@ test('arrow keys, Home and End cycle through the rows and footer buttons', (t) =
 test('flyout keyboard contract: menu roles, focus hand-off, Escape restores the trigger while the flyout owns focus', () => {
     const source = readFileSync(modulePath, 'utf8');
 
-    // Footer buttons are part of the menu, so the arrow-key cycle reaches them.
-    assert.equal((source.match(/automation-launch-footer-btn" role="menuitem"/g) || []).length, 2);
+    // Footer buttons (Customize, Agents, Automations) are part of the menu, so the arrow-key cycle reaches them.
+    assert.equal((source.match(/automation-launch-footer-btn" role="menuitem"/g) || []).length, 3);
     // Opening hands focus to the first reachable item; Escape hands it back.
     assert.match(source, /await this\._loadPreferences\(\);\s*this\._renderFlyoutItems\(\);\s*\/\/[^\n]*\n\s*this\._focusFlyoutItem\(\);/);
     // Escape restores the trigger only while the flyout owns focus; when a script
@@ -319,12 +319,15 @@ test('the customize modal restores focus to its trigger or the visible top navig
     const source = readFileSync(modulePath, 'utf8');
     assert.match(source, /const triggerElement = this\.triggerElement;\s*this\.closeFlyout\(\);\s*this\.openCustomizationModal\(\{ triggerElement \}\);/);
     assert.match(source, /if \(restoreFocus\) this\._restoreTriggerFocus\(state\.triggerElement\);/);
-    // Rows in the flyout and the customize modal share one icon per kind.
-    assert.equal((source.match(/launcherItemIcon\(item\)/g) || []).length, 3, 'one helper, used by both renderers plus its definition');
-    assert.doesNotMatch(source, /fa-robot/);
+    // Rows in the flyout and the customize modal share one icon per kind: a script's runtime,
+    // the robot for an Agent, the list for an Automation.
+    assert.equal((source.match(/launcherItemIcon\(item, this\.kinds\)/g) || []).length, 2, 'one helper, used by both renderers');
+    assert.equal(launcherItemIcon({ kind: 'automation', jobId: 1 }, new Map([[1, 'agent']])), 'fa-solid fa-robot');
+    assert.equal(launcherItemIcon({ kind: 'automation', jobId: 2 }, new Map([[2, 'automation']])), 'fa-solid fa-list-check');
+    assert.equal(launcherItemIcon({ kind: 'automation', jobId: 3 }, null), 'fa-solid fa-play');
     const index = readFileSync(indexPath, 'utf8');
-    assert.equal((index.match(/title="Launch an automation or script"/g) || []).length, 1);
-    assert.doesNotMatch(index, /Launch an Automation now/);
+    assert.equal((index.match(/title="Launch an agent or automation"/g) || []).length, 1);
+    assert.doesNotMatch(index, /Launch an Automation now|Launch an automation or script/);
 });
 
 test('the flyout reloads on every open, so nothing invalidates a cache anywhere', () => {
@@ -343,7 +346,7 @@ test('a failed load leaves the customize modal honest: error alert and no Save; 
     const source = readFileSync(modulePath, 'utf8');
     assert.match(source, /const loadFailed = this\.items === null;/);
     assert.match(source, /data-automation-nav-action="save" \$\{loadFailed \? 'disabled' : ''\}/);
-    assert.match(source, /Could not load the automations and scripts\. Close this dialog and try again\./);
+    assert.match(source, /Could not load the agents, automations and scripts\. Close this dialog and try again\./);
     assert.match(source, /if \(!state \|\| state\.pending \|\| state\.loadFailed\) return;/);
     assert.match(source, /The list changed — review and save again\./);
 
@@ -468,10 +471,11 @@ test('launcher CSS keeps a fallback on every colour token', () => {
     }
 });
 
-test('the customize modal offers Import from repository and New automation, and hands both off to the Automation page', (t) => {
+test('the customize modal offers Import from repository, New agent and New automation, and hands each off to its page', (t) => {
     const source = readFileSync(modulePath, 'utf8');
-    assert.match(source, /<h6>Add automations<\/h6>/);
+    assert.match(source, /<h6>Add more<\/h6>/);
     assert.match(source, /data-automation-nav-action="import-repository"/);
+    assert.match(source, /data-automation-nav-action="new-agent"/);
     assert.match(source, /data-automation-nav-action="new-automation"/);
 
     // The modal is a nested layer over #modal-container, so it cannot host the picker or the
@@ -502,7 +506,7 @@ test('the customize modal offers Import from repository and New automation, and 
     launcher._bindModalActions();
 
     buttons['import-repository'].handlers.click();
-    assert.deepEqual(app.navigations, [{ view: 'jobs', data: { importFromRepository: true } }]);
+    assert.deepEqual(app.navigations, [{ view: 'ai-agents', data: { importFromRepository: true } }]);
     assert.equal(state.disposed, true);
     assert.equal(removed, 1);
     assert.equal(launcher.modalState, null);
@@ -510,7 +514,12 @@ test('the customize modal offers Import from repository and New automation, and 
     launcher.modalState = { ...state, disposed: false };
     launcher._bindModalActions();
     buttons['new-automation'].handlers.click();
-    assert.deepEqual(app.navigations[1], { view: 'jobs', data: { newJob: true } });
+    assert.deepEqual(app.navigations[1], { view: 'automations', data: { newJob: true } });
+
+    launcher.modalState = { ...state, disposed: false };
+    launcher._bindModalActions();
+    buttons['new-agent'].handlers.click();
+    assert.deepEqual(app.navigations[2], { view: 'ai-agents', data: { newJob: true } });
 });
 
 test('script rows carry their runtime icon: python, or the terminal glyph for pwsh and bash', () => {

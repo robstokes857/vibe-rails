@@ -5,7 +5,7 @@ const { test, expect } = require('./fixtures');
 const CURRENT_REPOSITORY = 'C:\\source\\fixture-repository';
 
 /**
- * Same fake-backend shape as jobs-environment.spec.js, narrowed to what the Steps editor touches:
+ * Same fake-backend shape as agents-editor.spec.js, narrowed to what the Steps editor touches:
  * the environments list (which now carries a `steps` child collection), the per-CLI settings the
  * edit form loads, and the streaming step-test endpoint.
  */
@@ -18,7 +18,8 @@ function createFixtureState() {
                 cli: 'claude',
                 path: 'C:\\test-envs\\terminal-helper',
                 customArgs: '',
-                customPrompt: '',
+                // A starting message makes this an Agent, so the Agents page lists it.
+                customPrompt: 'Help with the terminal.',
                 hidden: false,
                 automationWorker: false,
                 workspaceMode: 0,
@@ -71,6 +72,8 @@ async function installStatefulApi(page) {
         if (method === 'GET' && path === '/api/v1/environments') {
             return respond({ environments: state.environments });
         }
+        if (method === 'GET' && path === '/api/v1/jobs') return respond({ jobs: [] });
+        if (method === 'GET' && path === '/api/v1/jobs/runs/summary') return respond({ summaries: [] });
         if (path === '/api/v1/llm-picker/preferences') {
             if (method === 'GET') return respond({ items: state.pickerItems });
             if (method === 'PUT') return respond({ items: state.pickerItems });
@@ -122,16 +125,16 @@ async function installStatefulApi(page) {
     return { state, writes };
 }
 
-async function openEnvironments(page) {
+async function openAgents(page) {
     // The SPA keeps long-lived status/WebSocket traffic open, so networkidle is never a valid
     // readiness signal here.
-    await page.goto('/?view=environments', { waitUntil: 'domcontentloaded' });
-    await expect(page.locator('.view[data-view="environments"]')).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator('[data-environments-table]')).toContainText('Terminal helper');
+    await page.goto('/?view=ai-agents', { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('.jobs-view[data-view="ai-agents"]')).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('[data-jobs-list]')).toContainText('Terminal helper');
 }
 
 async function openStepsEditor(page) {
-    await page.locator('[data-action="edit-environment"][data-env-name="Terminal helper"]').click();
+    await page.locator('[data-job-action="edit-environment"][data-env-id="43"]').click();
     await expect(page.locator('#env-form')).toBeVisible();
     await page.locator('[data-env-steps-open]').click();
     await expect(page.locator('.env-steps-modal')).toBeVisible();
@@ -145,9 +148,9 @@ async function saveSteps(page) {
 test.describe('Environment Steps editor', () => {
     test('the summary button reports the saved steps and opens a nested layer', async ({ page }) => {
         await installStatefulApi(page);
-        await openEnvironments(page);
+        await openAgents(page);
 
-        await page.locator('[data-action="edit-environment"][data-env-name="Terminal helper"]').click();
+        await page.locator('[data-job-action="edit-environment"][data-env-id="43"]').click();
         await expect(page.locator('#env-form')).toBeVisible();
         await expect(page.locator('[data-env-steps-summary]')).toHaveText('1 before');
 
@@ -164,7 +167,7 @@ test.describe('Environment Steps editor', () => {
 
     test('adding, reordering, and saving steps sends them in run order', async ({ page }) => {
         const { writes } = await installStatefulApi(page);
-        await openEnvironments(page);
+        await openAgents(page);
         await openStepsEditor(page);
 
         // Add a second pre-launch step and one post-exit step.
@@ -209,9 +212,9 @@ test.describe('Environment Steps editor', () => {
 
     test('saving the form without opening the editor omits steps entirely', async ({ page }) => {
         const { writes } = await installStatefulApi(page);
-        await openEnvironments(page);
+        await openAgents(page);
 
-        await page.locator('[data-action="edit-environment"][data-env-name="Terminal helper"]').click();
+        await page.locator('[data-job-action="edit-environment"][data-env-id="43"]').click();
         await expect(page.locator('#env-form')).toBeVisible();
         await page.locator('#env-form button[type="submit"]').click();
         await expect(page.locator('#env-form')).toHaveCount(0);
@@ -224,7 +227,7 @@ test.describe('Environment Steps editor', () => {
 
     test('Test runs the command as typed and renders its output and exit code', async ({ page }) => {
         const { writes } = await installStatefulApi(page);
-        await openEnvironments(page);
+        await openAgents(page);
         await openStepsEditor(page);
 
         const row = page.locator('[data-env-steps-section="0"] .env-step-row').first();
@@ -242,7 +245,7 @@ test.describe('Environment Steps editor', () => {
 
     test('deleting a step confirms in-app and only then removes the row', async ({ page }) => {
         await installStatefulApi(page);
-        await openEnvironments(page);
+        await openAgents(page);
         await openStepsEditor(page);
 
         await page.locator('[data-env-steps-section="0"] .env-step-row').first()
@@ -261,7 +264,7 @@ test.describe('Environment Steps editor', () => {
     test('a long step list scrolls inside the modal body instead of running off screen', async ({ page }) => {
         await installStatefulApi(page);
         await page.setViewportSize({ width: 1280, height: 700 });
-        await openEnvironments(page);
+        await openAgents(page);
         await openStepsEditor(page);
 
         // Enough rows to overflow any reasonable viewport.
@@ -294,7 +297,7 @@ test.describe('Environment Steps editor', () => {
 
     test('a step with no command blocks Done instead of saving a broken list', async ({ page }) => {
         await installStatefulApi(page);
-        await openEnvironments(page);
+        await openAgents(page);
         await openStepsEditor(page);
 
         await page.locator('[data-env-steps-add="0"]').click();
