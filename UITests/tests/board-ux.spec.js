@@ -1928,6 +1928,62 @@ test('lane automation conflicts preserve selections and unavailable jobs can be 
     await page.screenshot({ path: '../.codex-test-artifacts/vb22-lane-narrow.png' });
 });
 
+// VIBE-145: the lane card's Unassigned chip assigns without opening the editor.
+test('the Unassigned chip assigns from the card face and the chip then filters', async ({ page }, testInfo) => {
+    const requests = await openBoard(page);
+    const chip = page.locator('.board-card .board-assignee-chip');
+    await expect(chip).toHaveText(/Unassigned/);
+    await chip.click();
+    const menu = page.locator('#board-assign-panel');
+    await expect(menu).toBeVisible();
+    await expect(page.locator('[data-board-card-editor]')).toHaveCount(0, { timeout: 500 });
+    await expect(menu.locator('.board-assign-group-title')).toHaveText(['Built-in CLIs', 'Agents']);
+    await expect(menu.locator('[data-assign-value]')).toHaveCount(3);
+    await expect(menu.locator('.board-assign-unassign')).toHaveCount(0);
+    await page.screenshot({ path: testInfo.outputPath('assign-menu.png') });
+
+    // Typing narrows the list; Enter takes the first match.
+    await menu.locator('[data-assign-search]').fill('card rev');
+    await expect(menu.locator('[data-assign-value]')).toHaveText(['Card review (claude)']);
+    await menu.locator('[data-assign-search]').press('Enter');
+    await expect(menu).toHaveCount(0);
+    const write = requests.find(item => item.method === 'PUT' && item.path === '/api/v1/board/cards/card_test');
+    expect(write.body).toEqual({ assignee: 'env:7:claude' });
+    await expect(chip).toHaveText(/Card review/);
+    await expect(chip).toHaveAttribute('data-assignee-id', 'env:7:claude');
+
+    // The assigned chip keeps click-to-filter (a second click clears it); the caret opens the menu instead.
+    await chip.locator('.board-assignee-name').click();
+    await expect(page.locator('[data-board-filter-assignee]')).toHaveValue('env:7:claude');
+    await expect(menu).toHaveCount(0);
+    await chip.locator('.board-assignee-name').click();
+    await expect(page.locator('[data-board-filter-assignee]')).toHaveValue('');
+    await chip.locator('.board-assign-caret').click();
+    await expect(menu).toBeVisible();
+    await expect(menu.locator('[aria-checked="true"]')).toHaveText(/Card review/);
+    await expect(page.locator('[data-board-filter-assignee]')).toHaveValue('', { timeout: 500 });
+    await menu.locator('.board-assign-unassign').click();
+    await expect(menu).toHaveCount(0);
+    const writes = requests.filter(item => item.method === 'PUT' && item.path === '/api/v1/board/cards/card_test');
+    expect(writes.at(-1).body).toEqual({ assignee: '' });
+    await expect(page.locator('.board-card .board-assignee-chip.is-empty')).toHaveText(/Unassigned/);
+});
+
+test('the assignee menu closes on Escape and outside clicks without saving', async ({ page }) => {
+    const requests = await openBoard(page, { assignee: 'base:codex' });
+    await page.locator('.board-card .board-assign-caret').click();
+    const menu = page.locator('#board-assign-panel');
+    await expect(menu).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await expect(page.locator('[data-board-card-editor]')).toHaveCount(0);
+    await page.locator('.board-card .board-assign-caret').click();
+    await expect(menu).toBeVisible();
+    await page.locator('.board-lane-head').first().click();
+    await expect(menu).toHaveCount(0);
+    expect(requests.filter(item => item.method === 'PUT')).toEqual([]);
+});
+
 test('Chat defaults to the assignee, saves first and focuses the returned tab', async ({ page }) => {
     const requests = await openBoard(page, { assignee: 'base:codex' });
     await page.evaluate(() => {

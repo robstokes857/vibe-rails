@@ -583,6 +583,9 @@ merge; local alert attribution stays local. See `BoardStore.Attention.cs` and th
 Lane agent buttons include the first lane and open the destination lane's Automation settings.
 `board-lane-agents.js` handles assignment/removal, descriptions, reviewer selection and setup state.
 Its Add form can create a repository script Automation using the existing Jobs approval path.
+`board-card-assign.js` is the lane card's assignee menu (VIBE-145): the Unassigned chip, or the caret
+on an assigned chip, lists the editor's `assignee` picker items and saves `assignee` alone through
+the ordinary card patch without opening the editor; the server clears old base launch options.
 Waiting cards show a badge backed by the durable lane queue; the card's Automations rail can skip
 one exact pending entry with **Continue without this Automation**. Cards stay in their chosen lane
 while entries wait for an available Automation.

@@ -37,6 +37,7 @@ import { BoardApi } from './board-api.js';
 import { BoardPicker, openBoardOrderManager } from './board-picker.js';
 import { boardBrandLogo } from './board-brand.js';
 import { BoardLaneAgents } from './board-lane-agents.js';
+import { BoardCardAssign, ASSIGN_ACTION } from './board-card-assign.js';
 import { BOARD_SELECTION_STORAGE_KEY } from './board-selection.js';
 import { boardContextSection, laneAutomationSection, mountBoardContext, mountLaneAutomation, boardSettingsNavigation, mountBoardSettingsNavigation, boardSyncSection, mountBoardSync } from './board-settings.js';
 import { boardJiraSection, BoardJiraPanel } from './board-jira.js';
@@ -123,6 +124,11 @@ export class BoardController {
         this._activityGeneration = 0;
         BoardApi.attach(app);
         this.laneAgents = new BoardLaneAgents(app, agent => this.goToCardAutomation(agent.cardId, agent.terminalSessionId || agent.sessionId));
+        // The lane card's assignee menu (VIBE-145): rows wear the same brand marks as the chips.
+        this.cardAssign = new BoardCardAssign(app, {
+            avatar: row => this.avatarHtml(this.assigneeInfo(row.key), 18, { filterable: false }),
+            assign: (card, selection) => this.assignCardFromFace(card, selection)
+        });
         this.state = {
             boards: [],
             boardId: null,
@@ -199,6 +205,7 @@ export class BoardController {
         this.localCardDispose?.();
         this.localCardDispose = null;
         this.laneAgents.dispose();
+        this.cardAssign.dispose();
         this.sharingDispose?.();
         this.sharingDispose = null;
         this.disposeSessionActivity();
@@ -835,12 +842,18 @@ export class BoardController {
                 <i class="fa-regular fa-comment" aria-hidden="true"></i>${commentCount}</span>`
             : '';
         // The assignee is an LLM, and which one is the point of the card — so it gets a name, not
-        // just a mark. The chip is the click-to-filter control; the avatar inside it is inert.
+        // just a mark. The chip is the click-to-filter control; the avatar inside it is inert. The
+        // caret at its end, and the whole Unassigned chip, open the assignee menu (VIBE-145).
+        const changeAssignee = `<button type="button" class="board-assign-caret" data-board-action="${ASSIGN_ACTION}" tabindex="-1"
+                aria-haspopup="dialog" aria-expanded="false" title="Change assignee" aria-label="Change assignee of ${escapeHtml(cardDisplayId(card))}"
+                ><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button>`;
         const assignee = member
             ? `<span class="board-assignee-chip" data-assignee-id="${escapeHtml(member.key)}" role="button" tabindex="-1"
                 title="${escapeHtml(member.label)} — click to filter"
-                >${this.avatarHtml(member, 18, { filterable: false })}<span class="board-assignee-name">${escapeHtml(member.label)}</span></span>`
-            : `<span class="board-assignee-chip is-empty" title="Unassigned">${this.avatarHtml(null, 18)}<span class="board-assignee-name">Unassigned</span></span>`;
+                >${this.avatarHtml(member, 18, { filterable: false })}<span class="board-assignee-name">${escapeHtml(member.label)}</span>${changeAssignee}</span>`
+            : `<button type="button" class="board-assignee-chip is-empty" data-board-action="${ASSIGN_ACTION}" tabindex="-1"
+                aria-haspopup="dialog" aria-expanded="false" title="Unassigned — click to assign" aria-label="Assign ${escapeHtml(cardDisplayId(card))}"
+                >${this.avatarHtml(null, 18)}<span class="board-assignee-name">Unassigned</span><i class="fa-solid fa-chevron-down board-assign-caret-mark" aria-hidden="true"></i></button>`;
 
         // is-live paints the marching "an agent is on this" border (see the template CSS).
         return `
@@ -933,6 +946,7 @@ export class BoardController {
         if (host) {
             this.laneAgents.mount(host);
             this.laneAgents.updateActivity(this._activeAutomationColumnIds);
+            this.cardAssign.mount(host);
         }
         this.restoreScroll(scroll);
         this.bindDragAndDrop();
@@ -1163,6 +1177,14 @@ export class BoardController {
         const avatar = event.target.closest('[data-assignee-id]');
         if (action !== 'lane-agents') this.laneAgents.close(false);
 
+        // The caret sits inside the click-to-filter chip, so it is routed before the chip is.
+        if (action === ASSIGN_ACTION && cardEl) {
+            event.stopPropagation();
+            const card = this.state.cards.find(item => item.id === cardEl.dataset.cardId);
+            if (card) this.cardAssign.open(trigger, card);
+            return;
+        }
+
         if (avatar && cardEl) {
             event.stopPropagation();
             const id = avatar.dataset.assigneeId;
@@ -1235,6 +1257,31 @@ export class BoardController {
             event.preventDefault();
             this.openCardEditor(event.target.dataset.cardId);
         }
+    }
+
+    // Assign (or unassign) from the lane card's menu (VIBE-145). The patch carries only the
+    // assignee: the server clears the previous base launch options on a change, the same as
+    // saving the editor with a new Assignee. The lane repaints from the server's card so the
+    // chip, the toolbar's assignee filter and a paged board all agree; a failure throws so the
+    // menu stays open for another try.
+    async assignCardFromFace(card, selection) {
+        const root = this.root;
+        const assignee = canonicalLlmSelection(selection);
+        if (assignee === canonicalLlmSelection(card.assignee)) return;
+        let saved;
+        try {
+            saved = await BoardApi.updateBoardCardAsync(card.id, { assignee });
+        } catch (error) {
+            this.app.showToast('Board', error?.message || 'Could not change the assignee.', 'error');
+            throw error;
+        }
+        const label = assignee ? this.assigneeInfo(assignee)?.label || assignee : '';
+        this.app.showToast('Board', assignee ? `${cardDisplayId(card)} assigned to ${label}.` : `${cardDisplayId(card)} unassigned.`, 'success');
+        if (root !== this.root || !root?.isConnected) return;
+        const current = this.state.cards.find(item => item.id === card.id);
+        if (current) Object.assign(current, { assignee: saved?.assignee ?? (assignee || null), baseLlmOptions: saved?.baseLlmOptions ?? null });
+        this.renderAll();
+        await this.refreshBoardSnapshot();
     }
 
     // ============================================

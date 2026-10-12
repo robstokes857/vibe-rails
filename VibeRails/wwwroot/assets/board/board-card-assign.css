@@ -1,0 +1,160 @@
+/* Assign from the card face (VIBE-145): the chip triggers and the anchored assignee menu. */
+
+/* The Unassigned chip is a real button now; keep the chip look, drop the button chrome. */
+.board-view button.board-assignee-chip {
+    border: 1px dashed color-mix(in srgb, var(--color-text-muted, #94a3b8) 55%, transparent);
+    font: inherit;
+    font-size: 0.72rem;
+    line-height: inherit;
+    cursor: pointer;
+}
+.board-view button.board-assignee-chip:hover,
+.board-view button.board-assignee-chip[aria-expanded="true"] {
+    border-style: solid;
+    border-color: var(--color-primary, #3b82f6);
+    color: var(--color-text, #f8fafc);
+}
+.board-assign-caret-mark { font-size: 0.6rem; opacity: 0.7; }
+
+/* The caret at the end of an assigned chip: a second control inside the click-to-filter chip. */
+.board-assign-caret {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 18px;
+    height: 18px;
+    margin-left: 2px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 0.6rem;
+    cursor: pointer;
+}
+.board-assign-caret:hover,
+.board-assign-caret[aria-expanded="true"] {
+    background: color-mix(in srgb, var(--color-primary, #3b82f6) 25%, transparent);
+    color: var(--color-text, #f8fafc);
+}
+.board-assign-caret:focus-visible,
+.board-view button.board-assignee-chip:focus-visible,
+.board-assign-panel button:focus-visible,
+.board-assign-panel input:focus-visible {
+    outline: 2px solid var(--color-primary, #3b82f6);
+    outline-offset: 2px;
+}
+
+.board-assign-panel {
+    position: fixed;
+    z-index: 1040;
+    width: min(300px, calc(100vw - 16px));
+    max-height: min(420px, calc(100dvh - 16px));
+    display: flex;
+    flex-direction: column;
+    padding: 10px;
+    border: 1px solid var(--color-border, #334155);
+    border-radius: 12px;
+    background: var(--color-bg-surface, #1e1e1e);
+    color: var(--color-text, #f8fafc);
+    box-shadow: 0 16px 48px #0004, 0 4px 12px #0002;
+    font: 13px/1.4 system-ui, sans-serif;
+}
+.board-assign-panel.is-busy { opacity: 0.7; cursor: progress; }
+
+.board-assign-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.board-assign-heading {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    font-weight: 600;
+}
+.board-assign-close {
+    flex: none;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-text-muted, #94a3b8);
+    cursor: pointer;
+}
+.board-assign-close:hover { background: var(--color-bg-surface-hover, #2c2c2c); color: var(--color-text, #f8fafc); }
+
+.board-assign-search {
+    width: 100%;
+    margin-bottom: 8px;
+    padding: 5px 8px;
+    border: 1px solid var(--color-border, #334155);
+    border-radius: 8px;
+    background: var(--color-bg-elevated, #232323);
+    color: var(--color-text, #f8fafc);
+    font: inherit;
+}
+.board-assign-search::placeholder { color: var(--color-text-muted, #94a3b8); }
+
+.board-assign-list {
+    min-height: 0;
+    overflow-y: auto;
+    display: grid;
+    gap: 2px;
+}
+.board-assign-group { display: grid; gap: 2px; }
+.board-assign-group + .board-assign-group { margin-top: 6px; }
+.board-assign-group-title {
+    padding: 4px 8px 2px;
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+.board-assign-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+    padding: 5px 8px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--color-text, #f8fafc);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.board-assign-option:hover,
+.board-assign-option:focus-visible { background: var(--color-bg-surface-hover, #2c2c2c); outline-offset: -2px; }
+.board-assign-option.is-current { color: var(--color-primary, #3b82f6); }
+.board-assign-option:disabled { cursor: progress; }
+.board-assign-option-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.board-assign-option-icon {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1px dashed var(--color-border, #334155);
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 9px;
+}
+.board-assign-unassign { color: var(--color-text-muted, #94a3b8); margin-bottom: 4px; }
+.board-assign-check { flex: none; font-size: 11px; }
+.board-assign-empty { margin: 0; padding: 10px 8px; color: var(--color-text-muted, #94a3b8); font-size: 12px; }

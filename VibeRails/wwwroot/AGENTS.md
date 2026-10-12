@@ -391,6 +391,20 @@ button, preserving creation drafts, focus and pending panel requests. Navigation
 the lane button disposes the panel, requests and document listeners; Escape restores focus to the
 current button. Theme-aware styling lives in `assets/board/board-lane-agents.css`.
 
+### Assign from the card face (VIBE-145)
+
+`board-card-assign.js` is the lane card's assignee menu. The **Unassigned** chip is a button that
+opens it; an assigned chip keeps click-to-filter and gains a caret at its end that opens the same
+menu with an **Unassign** row. The menu lists the enabled `assignee`-context picker items grouped
+Built-in CLIs / Quick Launches / Agents (`launch-kind.js` decides the group, an unloaded setup
+counts as an Agent) behind a type-to-filter box; Enter takes the first match only after typing.
+Choosing a row sends the ordinary card patch with only `assignee`, so the server clears the old
+base launch options exactly as a Save with a new Assignee does; model/effort stay in the editor.
+The controller repaints from the saved card and resyncs the board snapshot so the toolbar's
+assignee filter agrees; a failed save toasts and leaves the menu open. The menu is body-mounted
+and positioned like the lane Agents panel, re-anchors to the replacement chip after a lane
+repaint, and is disposed on navigation. Styling lives in `assets/board/board-card-assign.css`.
+
 The view uses the app's shared surfaces rather than its own: `app.showModal` (upgraded to
 `modal-xl` for the card editor, the same way the rule and quality modals do it), `confirmDialog`
 for every delete, and `app.showToast` for results. It owns no toast stack, no Bootstrap modal, and

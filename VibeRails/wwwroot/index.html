@@ -42,7 +42,7 @@
         appStyleLink.rel = 'stylesheet';
         appStyleLink.href = window.__viberails_asset_url__('style.css');
         document.head.appendChild(appStyleLink);
-        for (const path of ['js/modules/code-report/vendor/quality/quality-report.css', 'js/modules/code-report/styles.css', 'assets/board/board-lane-agents.css']) {
+        for (const path of ['js/modules/code-report/vendor/quality/quality-report.css', 'js/modules/code-report/styles.css', 'assets/board/board-lane-agents.css', 'assets/board/board-card-assign.css']) {
             const link = document.createElement('link');
             link.rel = 'stylesheet';
             link.href = window.__viberails_asset_url__(path);
@@ -3556,7 +3556,7 @@
 
                 .board-assignee-chip.is-empty {
                     color: var(--color-text-muted, #94a3b8);
-                    cursor: default;
+                    cursor: pointer; /* opens the assignee menu (assets/board/board-card-assign.css) */
                 }
 
                 .board-assignee-name {
