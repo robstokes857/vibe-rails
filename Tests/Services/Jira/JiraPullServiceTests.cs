@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -199,12 +200,12 @@ public sealed class JiraPullServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task NewerJiraUpdatePatchesMappedFields_MovesWithAutomationsSkipped_AndComments()
+    public async Task NewerJiraUpdatePatchesMappedFields_NotesTheStatusChange_AndNeverMovesTheCard()
     {
         var service = Service();
         var board = await BoardWithLanes();
         board = board with { Id = (await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct)).BoardId };
-        var review = (await _store.GetColumnsAsync(_project, Ct, board.Id)).Single(column => column.Name == "Review");
+        var backlog = (await _store.GetColumnsAsync(_project, Ct, board.Id)).Single(column => column.Name == "Backlog");
 
         _jira.Pages.Enqueue(Page(Issue("100", "PROJ-1", "2026-09-01T00:00:00.000Z", "Fix login", "Bug", "High", "Backlog")));
         await service.PullAsync(_project, board.Id, dryRun: false, Ct);
@@ -216,9 +217,15 @@ public sealed class JiraPullServiceTests : IDisposable
         var card = Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id));
         Assert.Equal("Fix login again", card.Title);
         Assert.Equal("low", card.Priority);
-        Assert.Equal(review.Id, card.ColumnId);
-        var detail = (await _store.GetCardDetailAsync(_project, card.Id, Ct))!;
-        Assert.Contains(detail.Comments, comment => comment.Body.Contains("changed status in Jira", StringComparison.Ordinal));
+        Assert.Equal(backlog.Id, card.ColumnId);
+        var comment = Assert.Single((await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Comments);
+        Assert.Contains("PROJ-1 is now \"Review\" in Jira (was \"Backlog\")", comment.Body);
+        Assert.Contains("was not moved", comment.Body);
+
+        // An edit that keeps the status is not a change worth another comment.
+        _jira.Pages.Enqueue(Page(Issue("100", "PROJ-1", "2026-09-03T00:00:00.000Z", "Fix login once more", "Bug", "Low", "Review")));
+        Assert.Equal(1, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).Updated);
+        Assert.Single((await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Comments);
     }
 
     [Fact]
@@ -347,26 +354,130 @@ public sealed class JiraPullServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task AnExistingCardMovesToTheOverflowLaneWhenJiraChangesItToAnUnknownStatus()
+    public async Task ExistingCardsStayPutWhenJiraMovesThemToUnknownStatuses_AndNoOverflowLaneIsMade()
     {
         var service = Service();
         var board = await BoardWithLanes();
         board = board with { Id = (await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct)).BoardId };
         _jira.Pages.Enqueue(Page(
-            Issue("100", "PROJ-1", "2026-09-01T00:00:00.000Z", "Parked", "Task", "Medium", "In QA"),
-            Issue("101", "PROJ-2", "2026-09-01T00:00:00.000Z", "Known", "Task", "Medium", "Backlog")));
+            Issue("100", "PROJ-1", "2026-09-01T00:00:00.000Z", "One", "Task", "Medium", "Backlog"),
+            Issue("101", "PROJ-2", "2026-09-01T00:00:00.000Z", "Two", "Task", "Medium", "Backlog")));
         await service.PullAsync(_project, board.Id, dryRun: false, Ct);
+        var lanes = await _store.GetColumnsAsync(_project, Ct, board.Id);
+        Assert.DoesNotContain(lanes, lane => lane.Name == "Jira");
+        var backlog = lanes.Single(lane => lane.Name == "Backlog");
+
+        // Both change to a status with no lane in the same pull: the fields update, nothing
+        // moves, and the overflow lane a new card would need is not created for them.
+        _jira.Pages.Enqueue(Page(
+            Issue("100", "PROJ-1", "2026-09-02T00:00:00.000Z", "One", "Task", "Medium", "In QA"),
+            Issue("101", "PROJ-2", "2026-09-02T00:00:00.000Z", "Two", "Task", "Medium", "Blocked upstream")));
+        Assert.Equal(2, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).Updated);
+
+        Assert.DoesNotContain(await _store.GetColumnsAsync(_project, Ct, board.Id), lane => lane.Name == "Jira");
+        var cards = await _store.GetCardsAsync(_project, Ct, board.Id);
+        Assert.Equal(2, cards.Count);
+        foreach (var card in cards)
+        {
+            Assert.Equal(backlog.Id, card.ColumnId);
+            var comment = Assert.Single((await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Comments);
+            Assert.Contains("was not moved", comment.Body);
+        }
+    }
+
+    [Fact]
+    public async Task TwoNewIssuesWithUnknownStatusesShareOneOverflowLane_AndBothAreCommented()
+    {
+        var service = Service();
+        var board = await BoardWithLanes();
+        board = board with { Id = (await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct)).BoardId };
+        _jira.Pages.Enqueue(Page(
+            Issue("100", "PROJ-1", "2026-09-01T00:00:00.000Z", "One", "Task", "Medium", "In QA"),
+            Issue("101", "PROJ-2", "2026-09-01T00:00:00.000Z", "Two", "Task", "Medium", "Blocked upstream")));
+        Assert.Equal(2, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).Created);
+
         var overflow = Assert.Single(await _store.GetColumnsAsync(_project, Ct, board.Id), lane => lane.Name == "Jira");
+        var cards = await _store.GetCardsAsync(_project, Ct, board.Id);
+        Assert.Equal(2, cards.Count);
+        foreach (var card in cards)
+        {
+            Assert.Equal(overflow.Id, card.ColumnId);
+            Assert.Contains("Parked in Jira", Assert.Single((await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Comments).Body);
+        }
+    }
 
-        // The overflow lane already exists, so the lane match is Overflow (not Unresolved).
-        _jira.Pages.Enqueue(Page(Issue("101", "PROJ-2", "2026-09-02T00:00:00.000Z", "Known", "Task", "Medium", "Blocked upstream")));
+    [Fact]
+    public async Task ACardMovedToAnotherLocalBoardStaysThere_WhileJiraStillUpdatesItsFields()
+    {
+        var service = Service();
+        var source = await BoardWithLanes();
+        var connection = await service.SaveAsync(_project, source.Id, Save("secret-token"), "secret-token", Ct);
+        var issue = Issue("100", "PROJ-1", "2026-09-01T00:00:00.000Z", "Plan it", "Task", "Medium", "Backlog");
+        _jira.Pages.Enqueue(Page(issue));
+        await service.PullAsync(_project, connection.BoardId, dryRun: false, Ct);
+        var card = Assert.Single(await _store.GetCardsAsync(_project, Ct, connection.BoardId));
+
+        // The developer tracks the work on another local board.
+        var sprint = await _store.CreateBoardAsync(_project, "Sprint", Ct);
+        var lane = (await _store.GetColumnsAsync(_project, Ct, sprint.Id))[0];
+        await _board.MoveCardAsync(_project, card.Id, new BoardCardMoveRequest(lane.Id, SkipLaneAutomations: true), Ct);
+
+        _jira.Pages.Enqueue(Page(issue));
+        Assert.Equal(1, (await service.PullAsync(_project, connection.BoardId, dryRun: false, Ct)).Skipped);
+        _jira.Pages.Enqueue(Page(issue with
+        {
+            Updated = DateTime.Parse("2026-09-02T00:00:00Z").ToUniversalTime(),
+            Summary = "Plan it better",
+            StatusName = "Done"
+        }));
+        Assert.Equal(1, (await service.PullAsync(_project, connection.BoardId, dryRun: false, Ct)).Updated);
+
+        var kept = (await _store.FindCardAsync(_project, card.Id, Ct))!;
+        Assert.Equal(sprint.Id, kept.BoardId);
+        Assert.Equal(lane.Id, kept.ColumnId);
+        Assert.Equal("Plan it better", kept.Title);
+        Assert.Contains((await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Comments,
+            comment => comment.Body.Contains("is now \"Done\" in Jira", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task TheSchedulerSkipsAnExpiredConnection_UntilTheTokenIsSavedAgain()
+    {
+        var service = Service();
+        var board = await BoardWithLanes();
+        board = board with { Id = (await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct)).BoardId };
+        _jira.Outcome = JiraCallOutcome.Unauthorized;
+        Assert.Equal("expired", (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).Outcome);
+        var searches = _jira.Searches;
+
+        _jira.Outcome = JiraCallOutcome.Ok;
+        Assert.True(await service.PullDueAsync(Ct));
+        Assert.Equal(searches, _jira.Searches);
+        await Assert.ThrowsAsync<JiraConfigException>(() => service.PullAsync(_project, board.Id, dryRun: false, Ct));
+
+        // Saving the token again restores the connection for both paths.
+        await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct);
+        _jira.Pages.Enqueue(Page(Issue("100", "PROJ-1", "2026-09-01T00:00:00.000Z", "Back", "Task", "Medium", "Backlog")));
+        Assert.True(await service.PullDueAsync(Ct));
+        Assert.Equal(searches + 1, _jira.Searches);
+    }
+
+    [Fact]
+    public async Task ARateLimitedPullStopsAtOnce_InsteadOfSleepingThroughRetryAfterUnderTheLock()
+    {
+        var service = Service();
+        var board = await BoardWithLanes();
+        board = board with { Id = (await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct)).BoardId };
+        _jira.Outcome = JiraCallOutcome.RateLimited;
+        _jira.RetryAfter = TimeSpan.FromSeconds(30);
+
+        var started = Stopwatch.StartNew();
         var report = await service.PullAsync(_project, board.Id, dryRun: false, Ct);
-        Assert.Equal(1, report.Updated);
-
-        var card = Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id), card => card.Title == "Known");
-        Assert.Equal(overflow.Id, card.ColumnId);
-        var detail = (await _store.GetCardDetailAsync(_project, card.Id, Ct))!;
-        Assert.Contains(detail.Comments, comment => comment.Body.Contains("\"Blocked upstream\"", StringComparison.Ordinal));
+        Assert.Equal("rate-limited", report.Outcome);
+        Assert.True(started.Elapsed < TimeSpan.FromSeconds(5), $"waited {started.Elapsed} for Retry-After");
+        var connection = (await _store.GetJiraConnectionAsync(_project, board.Id, Ct))!;
+        Assert.True(connection.Enabled);
+        Assert.StartsWith("rate-limited:", connection.LastReport);
     }
 
     [Fact]
@@ -461,7 +572,7 @@ public sealed class JiraPullServiceTests : IDisposable
             Assert.NotNull(held);
             var busy = await service.PullAsync(_project, board.Id, dryRun: false, Ct);
             Assert.Equal("busy", busy.Outcome);
-            await service.PullDueAsync(Ct);
+            Assert.False(await service.PullDueAsync(Ct));
         }
 
         Assert.Equal(0, _jira.Searches);
@@ -586,16 +697,22 @@ public sealed class JiraPullServiceTests : IDisposable
         var comment = Assert.Single((await _store.GetCardDetailAsync(_project, parked.Id, Ct))!.Comments);
         Assert.Contains("Jira column \"In Progress\"", comment.Body);
 
-        // A lane picked for the column under Advanced wins over the automatic match.
+        // A lane picked for the column under Advanced places the next new card from it; the
+        // existing parked card is updated where it is.
         var build = lanes.Single(lane => lane.Name == "Build");
         await service.SaveAsync(_project, board.Id, LinkSave() with
         {
             ColumnMap = new Dictionary<string, string?> { ["In Progress"] = build.Id }
         }, null, Ct);
         _jira.Pages.Enqueue(Page(
-            Issue("101", "SCRUM-2", "2026-09-02T00:00:00.000Z", "Build it", "Task", "Medium", "In Progress") with { StatusId = "3" }));
-        Assert.Equal(1, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).Updated);
-        Assert.Equal(build.Id, Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id), card => card.Title == "Build it").ColumnId);
+            Issue("101", "SCRUM-2", "2026-09-02T00:00:00.000Z", "Build it", "Task", "Medium", "In Progress") with { StatusId = "3" },
+            Issue("103", "SCRUM-4", "2026-09-02T00:00:00.000Z", "Test it", "Task", "Medium", "In Progress") with { StatusId = "3" }));
+        var second = await service.PullAsync(_project, board.Id, dryRun: false, Ct);
+        Assert.Equal(1, second.Updated);
+        Assert.Equal(1, second.Created);
+        cards = await _store.GetCardsAsync(_project, Ct, board.Id);
+        Assert.Equal(overflow.Id, Assert.Single(cards, card => card.Title == "Build it").ColumnId);
+        Assert.Equal(build.Id, Assert.Single(cards, card => card.Title == "Test it").ColumnId);
     }
 
     [Fact]
@@ -638,7 +755,7 @@ public sealed class JiraPullServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ALanePickOrPointsFieldChangeReappliesUnchangedIssues_ButALocalMoveStaysWhileNothingChanges()
+    public async Task APointsFieldChangeReappliesUnchangedIssues_ALanePickDoesNot_AndALocalMoveAlwaysStays()
     {
         var service = Service();
         var board = await BoardWithLanes();
@@ -652,37 +769,39 @@ public sealed class JiraPullServiceTests : IDisposable
         var card = Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id));
         Assert.Equal(lanes.Single(lane => lane.Name == "Backlog").Id, card.ColumnId);
 
-        // Dragged here and nothing changed in Jira or in the map: the pull leaves it alone.
+        // Dragged here and nothing changed in Jira: the pull leaves it alone.
         var ready = lanes.Single(lane => lane.Name == "Ready");
         await _board.MoveCardAsync(_project, card.Id, new BoardCardMoveRequest(ready.Id, SkipLaneAutomations: true), Ct);
         _jira.Pages.Enqueue(Page(issue));
         Assert.Equal(1, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).Skipped);
         Assert.Equal(ready.Id, Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id)).ColumnId);
 
-        // A lane picked for the column applies to the same, unedited issue.
+        // A lane picked for the column only places new cards: this unedited one stays where it was dragged.
         var review = lanes.Single(lane => lane.Name == "Review");
         await service.SaveAsync(_project, board.Id, LinkSave() with
         {
             ColumnMap = new Dictionary<string, string?> { ["To Do"] = review.Id }
         }, null, Ct);
         _jira.Pages.Enqueue(Page(issue));
-        Assert.Equal(1, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).Updated);
+        Assert.Equal(1, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).Skipped);
         card = Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id));
-        Assert.Equal(review.Id, card.ColumnId);
-        Assert.Contains((await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Comments,
-            comment => comment.Body.Contains("lane mapping changed", StringComparison.Ordinal));
+        Assert.Equal(ready.Id, card.ColumnId);
+        Assert.Empty((await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Comments);
 
-        // So does a new estimation field on the board.
+        // A new estimation field on the board re-reads the unedited issue, still without moving it.
         _jira.Configuration = ScrumConfiguration() with { EstimationFieldId = "customfield_10020" };
         _jira.Pages.Enqueue(Page(issue with { StoryPoints = 8 }));
         Assert.Equal(1, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).Updated);
-        Assert.Equal(8, Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id)).Points);
+        card = Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id));
+        Assert.Equal(8, card.Points);
+        Assert.Equal(ready.Id, card.ColumnId);
+        Assert.Empty((await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Comments);
         _jira.Pages.Enqueue(Page(issue with { StoryPoints = 8 }));
         Assert.Equal(1, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).Skipped);
     }
 
     [Fact]
-    public async Task AJqlConnectionSwitchedToABoardLink_PlacesItsExistingCardsByColumn()
+    public async Task AJqlConnectionSwitchedToABoardLink_KeepsItsExistingCardsWhereTheyAre()
     {
         var service = Service();
         var board = await BoardWithLanes();
@@ -693,15 +812,17 @@ public sealed class JiraPullServiceTests : IDisposable
         var overflow = Assert.Single(await _store.GetColumnsAsync(_project, Ct, board.Id), lane => lane.Name == "Jira");
         Assert.Equal(overflow.Id, Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id)).ColumnId);
 
-        // Same site, so the saved token is kept; the issue itself is untouched in Jira.
+        // Same site, so the saved token is kept; the issue itself is untouched in Jira. The board's
+        // estimation field is new to the link, so the issue is re-read, but the card is not re-placed.
         board = board with { Id = (await service.SaveAsync(_project, board.Id, LinkSave("https://acme.atlassian.net/jira/software/projects/PROJ/boards/1"), null, Ct)).BoardId };
         _jira.Configuration = ScrumConfiguration();
         await service.TestAsync(_project, board.Id, Ct);
-        _jira.Pages.Enqueue(Page(issue with { StatusId = "10000" }));
+        _jira.Pages.Enqueue(Page(issue with { StatusId = "10000", StoryPoints = 3 }));
         Assert.Equal(1, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).Updated);
 
-        var backlog = (await _store.GetColumnsAsync(_project, Ct, board.Id)).Single(lane => lane.Name == "Backlog");
-        Assert.Equal(backlog.Id, Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id)).ColumnId);
+        var card = Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id));
+        Assert.Equal(3, card.Points);
+        Assert.Equal(overflow.Id, card.ColumnId);
     }
 
     [Fact]
@@ -898,6 +1019,7 @@ public sealed class JiraPullServiceTests : IDisposable
         public Queue<JiraSearchPage> Pages { get; } = new();
         public JiraCallOutcome Outcome { get; set; } = JiraCallOutcome.Ok;
         public string? Detail { get; set; }
+        public TimeSpan RetryAfter { get; set; } = TimeSpan.FromSeconds(1);
         public int Searches { get; private set; }
 
         // Board calls (VIBE-102).
@@ -937,7 +1059,7 @@ public sealed class JiraPullServiceTests : IDisposable
             BoardSearchJql.Add(jql);
             BoardSearchFields.Add(storyPointsFieldId);
             if (Outcome != JiraCallOutcome.Ok)
-                return Task.FromResult(new JiraCallResult<JiraSearchPage>(Outcome, null, Detail, TimeSpan.FromSeconds(1)));
+                return Task.FromResult(new JiraCallResult<JiraSearchPage>(Outcome, null, Detail, RetryAfter));
             return Task.FromResult(new JiraCallResult<JiraSearchPage>(JiraCallOutcome.Ok, Pages.Dequeue(), null, null));
         }
 
@@ -962,7 +1084,7 @@ public sealed class JiraPullServiceTests : IDisposable
             Assert.Equal("secret-token", apiToken);
             Assert.DoesNotContain("/rest/api/3/search?", siteUrl);
             if (Outcome != JiraCallOutcome.Ok)
-                return Task.FromResult(new JiraCallResult<JiraSearchPage>(Outcome, null, Detail, TimeSpan.FromSeconds(1)));
+                return Task.FromResult(new JiraCallResult<JiraSearchPage>(Outcome, null, Detail, RetryAfter));
             return Task.FromResult(new JiraCallResult<JiraSearchPage>(JiraCallOutcome.Ok, Pages.Dequeue(), null, null));
         }
 

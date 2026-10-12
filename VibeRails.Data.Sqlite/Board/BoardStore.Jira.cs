@@ -296,9 +296,10 @@ public sealed partial class BoardStore
     ];
 
     /// <summary>
-    /// board/29 (VIBE-102): where the last pull placed each mirrored issue (lane target and points
-    /// field). Nullable, no backfill: an older binary's link UPDATE leaves it as written, and a
-    /// NULL row is pulled again once by a board connection, which is the switch-over it needs.
+    /// board/29 (VIBE-102): what the last pull applied to each mirrored issue, read and written by
+    /// the pull service's link mapping (the points field it read and the Jira status it saw; the
+    /// lane target written before 1.12 is ignored, since a pull no longer moves cards). Nullable,
+    /// no backfill: an older binary's link UPDATE leaves it as written.
     /// </summary>
     internal const string JiraLinkMappingColumnSql = "ALTER TABLE BoardJiraLinks ADD COLUMN Mapping TEXT";
 }

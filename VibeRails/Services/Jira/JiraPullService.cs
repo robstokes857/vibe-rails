@@ -54,14 +54,19 @@ public interface IJiraPullService
     /// <summary>Checks the token and, for a board link, reads the board, its columns and an issue count.</summary>
     Task<JiraTestReport> TestAsync(string projectPath, string boardId, CancellationToken cancellationToken);
     Task<JiraPullReport> PullAsync(string projectPath, string boardId, bool dryRun, CancellationToken cancellationToken);
-    /// <summary>Every enabled connection, for the root scheduler. One failure never stops the next.</summary>
-    Task PullDueAsync(CancellationToken cancellationToken);
+    /// <summary>
+    /// Every enabled connection, for the root scheduler. One failure never stops the next. False
+    /// when another process holds the Jira lock, so nothing was pulled and the interval is not spent.
+    /// </summary>
+    Task<bool> PullDueAsync(CancellationToken cancellationToken);
 }
 
 /// <summary>
 /// One-way pull of one Jira board, or one saved JQL filter, into one board. Jira wins on the mapped
 /// fields. Assignee, flagged, blocked, options, notes, sessions, commits, attachments and the card
-/// number are never written. A status change moves the card with lane automations skipped.
+/// number are never written. A pull places a new card by its Jira column or status and never moves
+/// a card again: its lane and board are the local workflow, and a later Jira status change is only
+/// noted in a comment.
 /// </summary>
 public sealed class JiraPullService(
     IBoardStore store,
@@ -71,7 +76,6 @@ public sealed class JiraPullService(
     JiraPullLock pullLock) : IJiraPullService
 {
     public const string OverflowLaneName = JiraFieldMapping.OverflowLaneName;
-    private static readonly TimeSpan MaxRetryWait = TimeSpan.FromSeconds(60);
     private static readonly BoardAuthor JiraAuthor = BoardAuthor.Agent("Jira", null, null);
 
     public async Task<BoardJiraConnectionRecord?> GetAsync(string projectPath, string boardId, CancellationToken cancellationToken)
@@ -304,20 +308,24 @@ public sealed class JiraPullService(
         return report;
     }
 
-    public async Task PullDueAsync(CancellationToken cancellationToken)
+    public async Task<bool> PullDueAsync(CancellationToken cancellationToken)
     {
         // Tokens whose connection is gone (its board was deleted) are removed here.
         await secrets.PruneAsync(async ct =>
             (await store.GetJiraConnectionsAsync(ct)).Select(connection => connection.Id).ToList(), cancellationToken);
 
-        // A root backend that lost the scheduler lease mid-pull may still be pulling; skip rather
-        // than run the same filter twice. The next interval tries again.
+        // A root backend that lost the scheduler lease mid-pull may still be pulling, or an
+        // activity drain holds the lock: skip rather than run the same filter twice. The
+        // scheduler tries again on its next tick rather than after a whole interval.
         using var held = pullLock.TryAcquire();
         if (held is null)
-            return;
+            return false;
         foreach (var connection in await store.GetJiraConnectionsAsync(cancellationToken))
         {
-            if (!connection.Enabled || !connection.HasToken || !HasSource(connection))
+            // An expired token is refused until it is saved again, as RequireReady does for a
+            // manual pull; retrying it every interval only hammers Jira with a dead credential.
+            if (!connection.Enabled || !connection.HasToken || !HasSource(connection)
+                || connection.AuthStatus == BoardJiraAuthStatus.Expired)
                 continue;
             var token = secrets.ReadToken(connection.Id);
             if (token is null)
@@ -337,6 +345,7 @@ public sealed class JiraPullService(
                 // One board's pull never sinks the scheduler cycle. The next interval tries again.
             }
         }
+        return true;
     }
 
     private async Task<JiraPullReport> PullConnectionAsync(
@@ -355,7 +364,7 @@ public sealed class JiraPullService(
 
         var plan = await PlanAsync(connection, token, lanes, cancellationToken);
         if (plan.Outcome != JiraCallOutcome.Ok)
-            return await StoppedAsync(plan.Outcome, plan.Detail, plan.RetryAfter);
+            return Stopped(plan.Outcome, plan.Detail);
 
         while (true)
         {
@@ -365,7 +374,7 @@ public sealed class JiraPullService(
                 : await jira.SearchAsync(connection.SiteUrl, connection.Email, token, plan.Jql ?? connection.Jql,
                     pageToken, plan.PointsField, cancellationToken);
             if (page.Outcome != JiraCallOutcome.Ok || page.Value is null)
-                return await StoppedAsync(page.Outcome, page.Detail, page.RetryAfter);
+                return Stopped(page.Outcome, page.Detail);
 
             foreach (var issue in page.Value.Issues)
             {
@@ -414,23 +423,16 @@ public sealed class JiraPullService(
         }
         return Report(dryRun, "ok", created, updated, skipped, failed, dryRun ? "Dry run. " + message : message);
 
-        async Task<JiraPullReport> StoppedAsync(JiraCallOutcome outcome, string? detail, TimeSpan? retryAfter)
+        JiraPullReport Stopped(JiraCallOutcome outcome, string? detail) => outcome switch
         {
-            switch (outcome)
-            {
-                case JiraCallOutcome.Unauthorized:
-                    return Report(dryRun, "expired", created, updated, skipped, failed, detail);
-                case JiraCallOutcome.RateLimited:
-                    if (retryAfter is TimeSpan wait && wait > TimeSpan.Zero && wait <= MaxRetryWait)
-                        await Task.Delay(wait, cancellationToken);
-                    return Report(dryRun, "rate-limited", created, updated, skipped, failed,
-                        "Jira rate limited the pull. The next interval tries again.");
-                case JiraCallOutcome.BadJql:
-                    return Report(dryRun, "bad-jql", created, updated, skipped, failed, detail);
-                default:
-                    return Report(dryRun, "failed", created, updated, skipped, failed, detail ?? "Jira did not return the issues.");
-            }
-        }
+            JiraCallOutcome.Unauthorized => Report(dryRun, "expired", created, updated, skipped, failed, detail),
+            // Retry-After is not waited for: the wait would hold the cross-process Jira lock
+            // (blocking saves, tests, unlinks and activity delivery) only to give up afterwards.
+            JiraCallOutcome.RateLimited => Report(dryRun, "rate-limited", created, updated, skipped, failed,
+                "Jira rate limited the pull. The next interval tries again."),
+            JiraCallOutcome.BadJql => Report(dryRun, "bad-jql", created, updated, skipped, failed, detail),
+            _ => Report(dryRun, "failed", created, updated, skipped, failed, detail ?? "Jira did not return the issues.")
+        };
     }
 
     /// <summary>
@@ -461,7 +463,7 @@ public sealed class JiraPullService(
             case JiraCallOutcome.Unauthorized or JiraCallOutcome.RateLimited:
                 return new PullPlan(config.Outcome, config.Detail, config.RetryAfter, jiraBoardId, null, null, null);
             // Only a refusal falls back to status names. A transient failure stops the pull instead:
-            // matching by name for one pull would move updated cards out of their mapped lanes.
+            // matching by name for one pull would place new cards away from their mapped lanes.
             case not (JiraCallOutcome.Ok or JiraCallOutcome.Forbidden or JiraCallOutcome.NotFound):
                 return new PullPlan(JiraCallOutcome.Failed,
                     (config.Detail ?? "Jira did not return the board's configuration.") + " The next interval tries again.",
@@ -514,39 +516,22 @@ public sealed class JiraPullService(
             return ApplyAction.SkippedDeleted;
 
         var mapped = JiraFieldMapping.Map(issue, plan.PointsField, existing?.Type);
-        // A board connection places the issue by its Jira column; a status the board's columns
-        // don't list (or a JQL connection) falls back to matching the status name to a lane name.
-        JiraLaneDecision lane;
-        string laneTarget;
-        string overflowComment;
-        if (plan.StatusLanes is not null && issue.StatusId is not null
-            && plan.StatusLanes.TryGetValue(issue.StatusId, out var target))
-        {
-            lane = JiraFieldMapping.DecideLane(target.LaneId, existing?.ColumnId, lanes, overflowId);
-            laneTarget = target.LaneId ?? OverflowTarget;
-            overflowComment = ColumnOverflowComment(issue.Key, target.Column);
-        }
-        else
-        {
-            lane = JiraFieldMapping.MatchLane(mapped.StatusName, existing?.ColumnId, lanes, overflowId);
-            var byName = JiraFieldMapping.MatchLane(mapped.StatusName, null, lanes, null);
-            laneTarget = byName.Match == JiraLaneMatch.Matched ? byName.ColumnId! : OverflowTarget;
-            overflowComment = OverflowComment(issue.Key, mapped.StatusName);
-        }
+        var mapping = JiraLinkMapping.Serialize(plan.PointsField, mapped.StatusName);
+        var applied = JiraLinkMapping.Parse(link?.Mapping);
 
-        // An unchanged issue is skipped only while it would land in the same place: a lane picked
-        // under Advanced, a new story points field or a JQL connection switched to a board link
-        // re-applies it without anyone editing the issue in Jira. A card dragged to another lane
-        // here stays put while neither the issue nor the mapping changes.
-        var mapping = MappingKey(plan, laneTarget);
+        // An unchanged issue is skipped while the same story points field is read; a new field
+        // re-reads it without anyone editing the issue in Jira. Where the card sits, lane or
+        // board, never matters: a pull does not move cards, so a local move always stays.
         var unchanged = link is not null && issue.Updated.ToUniversalTime() == link.IssueUpdated.ToUniversalTime();
-        if (unchanged && existing is not null && existing.BoardId == connection.BoardId
-            && string.Equals(link!.Mapping, mapping, StringComparison.Ordinal))
+        if (unchanged && existing is not null && string.Equals(applied.PointsField, plan.PointsField, StringComparison.Ordinal))
         {
+            // Record the status an older link never stored, so its next change can be noted.
+            if (!dryRun && !string.Equals(link!.Mapping, mapping, StringComparison.Ordinal))
+                await store.UpdateJiraLinkAsync(link with { Mapping = mapping }, cancellationToken);
             if (!string.IsNullOrWhiteSpace(existing.Description) || mapped.Description.Length == 0)
                 return ApplyAction.Unchanged;
-            // Repair descriptions missed by older string-only endpoint handling, without moving
-            // the card or overwriting locally edited fields of an otherwise unchanged issue.
+            // Repair descriptions missed by older string-only endpoint handling, without
+            // overwriting locally edited fields of an otherwise unchanged issue.
             if (!dryRun)
                 await store.UpdateCardAsync(connection.ProjectPath, existing.Id,
                     new BoardCardPatch(Description: mapped.Description), cancellationToken, JiraAuthor);
@@ -556,17 +541,16 @@ public sealed class JiraPullService(
             throw new JiraConfigException("Issue title is empty after trimming.");
 
         if (dryRun)
-            return existing is null ? ApplyAction.Created : link is null ? ApplyAction.Created : ApplyAction.Updated;
+            return existing is null ? ApplyAction.Created : ApplyAction.Updated;
 
         if (existing is null)
         {
-            var columnId = lane.ColumnId;
-            var parked = false;
-            if (columnId is null)
-            {
-                columnId = await EnsureOverflowLaneAsync(connection, lanes, cancellationToken);
-                parked = true;
-            }
+            // Only a new card is placed. The overflow lane is made on demand for one whose
+            // column or status has no lane; the lane list is refreshed by the caller afterwards.
+            var placement = Place(plan, issue, mapped.StatusName, lanes, overflowId);
+            var columnId = placement.Lane.ColumnId;
+            var madeLane = columnId is null;
+            columnId ??= await EnsureOverflowLaneAsync(connection, lanes, cancellationToken);
             // Card and link commit together: a crash or a concurrent pull between them would leave
             // an unlinked card, and the next pull would create a duplicate.
             var card = await store.CreateJiraCardAsync(connection.ProjectPath, new NewBoardCard(
@@ -576,9 +560,9 @@ public sealed class JiraPullService(
                 cancellationToken);
             if (card is null)
                 return ApplyAction.Skipped;
-            if (parked)
-                await CommentOnceAsync(connection.ProjectPath, card.Id, overflowComment, cancellationToken);
-            return parked ? ApplyAction.CreatedOverflow : ApplyAction.Created;
+            if (placement.Lane.Match != JiraLaneMatch.Matched)
+                await board.AddCommentAsync(connection.ProjectPath, card.Id, JiraAuthor, placement.OverflowComment, cancellationToken, syncToJira: false);
+            return madeLane ? ApplyAction.CreatedOverflow : ApplyAction.Created;
         }
 
         await store.UpdateCardAsync(connection.ProjectPath, existing.Id, new BoardCardPatch(
@@ -589,43 +573,32 @@ public sealed class JiraPullService(
             ClearPoints: mapped.ClearPoints,
             Tags: mapped.Tags.ToList(),
             Type: mapped.Type), cancellationToken, JiraAuthor);
-        if (lane.Match == JiraLaneMatch.Matched && lane.ColumnId is not null && lane.Comment)
-        {
-            await board.MoveCardAsync(connection.ProjectPath, existing.Id,
-                new BoardCardMoveRequest(lane.ColumnId, null, SkipLaneAutomations: true, JiraAuthor), cancellationToken);
-            await board.AddCommentAsync(connection.ProjectPath, existing.Id, JiraAuthor, unchanged
-                ? $"Moved to {lane.ColumnName} because this board's Jira lane mapping changed. Lane automations were skipped."
-                : $"Moved to {lane.ColumnName} because {issue.Key} changed status in Jira. Lane automations were skipped.", cancellationToken, syncToJira: false);
-        }
-        // Overflow: the status matches no lane and the overflow lane already exists, so MatchLane
-        // names it. Unresolved: it does not exist yet (or the name matched several lanes).
-        else if (lane.Match is JiraLaneMatch.Overflow or JiraLaneMatch.Unresolved)
-        {
-            var overflow = await EnsureOverflowLaneAsync(connection, lanes, cancellationToken);
-            if (!string.Equals(existing.ColumnId, overflow, StringComparison.Ordinal))
-            {
-                await board.MoveCardAsync(connection.ProjectPath, existing.Id,
-                    new BoardCardMoveRequest(overflow, null, SkipLaneAutomations: true, JiraAuthor), cancellationToken);
-                await CommentOnceAsync(connection.ProjectPath, existing.Id, overflowComment, cancellationToken);
-            }
-        }
+        // The card keeps its lane and board: a Jira status change is noted, never applied.
+        if (!unchanged && applied.Status is not null && !string.Equals(applied.Status, mapped.StatusName, StringComparison.Ordinal))
+            await board.AddCommentAsync(connection.ProjectPath, existing.Id, JiraAuthor,
+                StatusChangeComment(issue.Key, applied.Status, mapped.StatusName), cancellationToken, syncToJira: false);
         await store.UpdateJiraLinkAsync(new BoardJiraLinkRecord(
             existing.Id, connection.Id, issue.Id, issue.Key, mapped.AssigneeDisplay, issue.Updated, DateTime.UtcNow, mapping), cancellationToken);
         return ApplyAction.Updated;
     }
 
-    private const string OverflowTarget = "overflow";
+    private sealed record Placement(JiraLaneDecision Lane, string OverflowComment);
 
     /// <summary>
-    /// Where a pull places an issue, stored on its link (<see cref="BoardJiraLinkRecord.Mapping"/>):
-    /// a board connection's lane target and story points field. A JQL connection only names its
-    /// points field (its lanes follow status names, which nobody configures), and none without
-    /// one, so a VB-40 link written before the column existed still matches.
+    /// Where a new card goes. A board connection places it by its Jira column; a status the board's
+    /// columns don't list (or a JQL connection) matches the status name to a lane name. A null lane
+    /// means the overflow lane, which does not exist yet.
     /// </summary>
-    private static string? MappingKey(PullPlan plan, string laneTarget) =>
-        plan.JiraBoardId is not null ? $"lane:{laneTarget};points:{plan.PointsField}"
-        : plan.PointsField is { } field ? $"points:{field}"
-        : null;
+    private static Placement Place(
+        PullPlan plan, JiraIssue issue, string statusName, IReadOnlyList<BoardColumnRecord> lanes, string? overflowId)
+    {
+        if (plan.StatusLanes is not null && issue.StatusId is not null
+            && plan.StatusLanes.TryGetValue(issue.StatusId, out var target))
+            return new Placement(JiraFieldMapping.DecideLane(target.LaneId, null, lanes, overflowId),
+                ColumnOverflowComment(issue.Key, target.Column));
+        return new Placement(JiraFieldMapping.MatchLane(statusName, null, lanes, overflowId),
+            OverflowComment(issue.Key, statusName));
+    }
 
     private async Task<string> EnsureOverflowLaneAsync(
         BoardJiraConnectionRecord connection, IReadOnlyList<BoardColumnRecord> lanes, CancellationToken cancellationToken)
@@ -647,13 +620,8 @@ public sealed class JiraPullService(
     private async Task<string?> RefreshOverflowAsync(BoardJiraConnectionRecord connection, CancellationToken cancellationToken) =>
         (await store.GetJiraConnectionAsync(connection.ProjectPath, connection.BoardId, cancellationToken))?.OverflowColumnId;
 
-    private async Task CommentOnceAsync(string projectPath, string cardId, string body, CancellationToken cancellationToken)
-    {
-        var detail = await store.GetCardDetailAsync(projectPath, cardId, cancellationToken);
-        if (detail?.Comments.Any(comment => comment.Body == body) == true)
-            return;
-        await board.AddCommentAsync(projectPath, cardId, JiraAuthor, body, cancellationToken, syncToJira: false);
-    }
+    private static string StatusChangeComment(string issueKey, string before, string after) =>
+        $"{issueKey} is now \"{after}\" in Jira (was \"{before}\"). The card was not moved: its lane and board are local.";
 
     private static string OverflowComment(string issueKey, string status) =>
         $"{issueKey} is in Jira status \"{status}\", which matches no lane on this board. Parked in {OverflowLaneName}. No lane was created for that status.";
@@ -750,12 +718,16 @@ public interface IJiraPullScheduler
 }
 
 /// <summary>
-/// Singleton so the interval survives between scheduler cycles. The pull service is scoped
+/// Singleton so the intervals survive between scheduler cycles. The pull service is scoped
 /// (it needs the scoped <see cref="IBoardService"/>), so each pull resolves it from a fresh scope.
+/// The pull and the activity drain share the cross-process Jira lock, so a due pull is started
+/// ahead of the drain and the drain waits out a running pull; a pull that still found the lock
+/// held (another process) is due again on the next tick instead of after a whole interval.
 /// </summary>
 public sealed class JiraPullScheduler(IServiceScopeFactory scopeFactory) : IJiraPullScheduler
 {
     public static readonly TimeSpan Interval = TimeSpan.FromMinutes(15);
+    public static readonly TimeSpan DeliveryInterval = TimeSpan.FromSeconds(5);
     private readonly Lock _gate = new();
     private DateTime _nextUtc = DateTime.MinValue;
     private Task _running = Task.CompletedTask;
@@ -766,15 +738,17 @@ public sealed class JiraPullScheduler(IServiceScopeFactory scopeFactory) : IJira
     {
         lock (_gate)
         {
-            if (_delivering.IsCompleted && nowUtc >= _nextDeliveryUtc)
+            if (_running.IsCompleted && nowUtc >= _nextUtc)
             {
-                _nextDeliveryUtc = nowUtc.AddSeconds(5);
+                _nextUtc = nowUtc.Add(Interval);
+                return _running = Task.Run(() => PullAsync(nowUtc, stoppingToken), CancellationToken.None);
+            }
+            if (_running.IsCompleted && _delivering.IsCompleted && nowUtc >= _nextDeliveryUtc)
+            {
+                _nextDeliveryUtc = nowUtc.Add(DeliveryInterval);
                 _delivering = Task.Run(() => DeliverAsync(stoppingToken), CancellationToken.None);
             }
-            if (nowUtc < _nextUtc || !_running.IsCompleted)
-                return null;
-            _nextUtc = nowUtc.Add(Interval);
-            return _running = Task.Run(() => PullAsync(stoppingToken), CancellationToken.None);
+            return null;
         }
     }
 
@@ -797,12 +771,17 @@ public sealed class JiraPullScheduler(IServiceScopeFactory scopeFactory) : IJira
     }
 
     // Never throws: the task is observed only by WhenIdleAsync at shutdown.
-    private async Task PullAsync(CancellationToken stoppingToken)
+    private async Task PullAsync(DateTime nowUtc, CancellationToken stoppingToken)
     {
         try
         {
             await using var scope = scopeFactory.CreateAsyncScope();
-            await scope.ServiceProvider.GetRequiredService<IJiraPullService>().PullDueAsync(stoppingToken);
+            if (!await scope.ServiceProvider.GetRequiredService<IJiraPullService>().PullDueAsync(stoppingToken))
+            {
+                // Nothing was pulled, so the interval was not spent: due again on the next tick.
+                lock (_gate)
+                    _nextUtc = nowUtc;
+            }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {

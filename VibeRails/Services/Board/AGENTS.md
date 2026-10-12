@@ -604,6 +604,14 @@ already-linked issues. The message breaks down those reasons and reports failure
 Deleted imports stay deleted on dry runs and writing pulls; never label them as unchanged or
 recreate them to populate an empty board.
 
+**A pull never moves a card.** Jira wins on the mapped fields; the lane and board are the local
+workflow for doing the work, and Jira has no say in them. The column map and the "Jira" overflow
+lane place a card once, when it is created. A later Jira status change updates the fields and
+adds a Jira-authored comment that the card was not moved; a card moved to another lane or
+another local board stays there. `BoardJiraLinks.Mapping` (read through `JiraLinkMapping`) holds
+the points field the last pull read and the status it saw; only a new points field re-applies
+unchanged issues. Do not reintroduce lane moves, drag-backs or "lane mapping changed" moves.
+
 ## Jira activity delivery
 
 New linked-card comments default to Jira delivery; `syncToJira=false` retains a note without

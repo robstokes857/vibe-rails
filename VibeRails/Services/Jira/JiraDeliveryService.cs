@@ -57,7 +57,12 @@ public sealed class JiraDeliveryService(IBoardStore store, IJiraSecretStore secr
                     var share = await sharing.CreateAsync(sessionId, name[..Math.Min(name.Length, 160)], cancellationToken);
                     if (!share.Success)
                     {
-                        await FinishAsync(delivery, "sending", "failed", share.Message, null, cancellationToken);
+                        // A local "busy" (another link is being created in this process) definitely
+                        // sent nothing, so the event goes back to pending for the next drain. Every
+                        // other outcome stays failed: a request whose network outcome is unknown is
+                        // never retried blindly, and a missing account would block the queue.
+                        await FinishAsync(delivery, "sending", share.Status == "busy" ? "pending" : "failed",
+                            share.Message, null, cancellationToken);
                         continue;
                     }
                     url = share.Url;

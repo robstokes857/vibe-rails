@@ -11,7 +11,7 @@ export const boardJiraSection = () => `
         <h6 class="mb-0" data-jira-heading>Jira Cloud <span class="badge text-bg-secondary ms-2" data-jira-status>Not connected</span></h6>
         <fieldset class="mt-3" data-jira-fields disabled>
             <p class="small mb-2">Board: <strong data-jira-board></strong></p>
-            <p class="text-muted small">Connect creates a separate Jira board for imported issues. Existing Jira cards move there with their comments, files and sessions. Use the board picker to switch between Jira and your local work. Jira wins on title, description, lane, type, priority, tags and story points. A local edit to those fields is replaced on the next pull. Assignee, flagged, blocked, comments, sessions and commits stay here.</p>
+            <p class="text-muted small">Connect creates a separate Jira board for imported issues. Existing Jira cards move there with their comments, files and sessions. Use the board picker to switch between Jira and your local work. Jira wins on title, description, type, priority, tags and story points. A local edit to those fields is replaced on the next pull. A new card is placed by its Jira column; after that its lane and board are yours, and a Jira status change is only noted in a comment. Assignee, flagged, blocked, comments, sessions and commits stay here.</p>
             <div class="mb-3">
                 <label class="form-label" for="jira-link">Jira board link</label>
                 <input class="form-control" id="jira-link" data-jira-link type="url" autocomplete="off" spellcheck="false"
@@ -59,7 +59,7 @@ export const boardJiraSection = () => `
                         placeholder="From the board">
                     <small class="form-text text-muted">Leave blank to use the board's estimation field. A field id looks like customfield_10016.</small>
                 </div>
-                <p class="form-label mb-1">Lane for each Jira column</p>
+                <p class="form-label mb-1">Lane for new cards from each Jira column</p>
                 <div data-jira-lanes></div>
             </details>
         </fieldset>

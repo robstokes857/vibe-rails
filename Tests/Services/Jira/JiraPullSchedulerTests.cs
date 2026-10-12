@@ -34,7 +34,7 @@ public sealed class JiraPullSchedulerTests
     [Fact]
     public async Task Tick_StartsAPullWithoutWaiting_AndNeverOverlapsOrRepeatsWithinTheInterval()
     {
-        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var pulls = 0;
         using var provider = Provider(() =>
         {
@@ -48,7 +48,7 @@ public sealed class JiraPullSchedulerTests
         Assert.False(running.IsCompleted);
         Assert.Null(scheduler.Tick(Start.Add(JiraPullScheduler.Interval), Ct));
 
-        release.SetResult();
+        release.SetResult(true);
         await running;
         Assert.Null(scheduler.Tick(Start.AddMinutes(5), Ct));
         var next = scheduler.Tick(Start.Add(JiraPullScheduler.Interval), Ct);
@@ -71,7 +71,35 @@ public sealed class JiraPullSchedulerTests
         Assert.True(running.IsCompletedSuccessfully);
     }
 
-    private static ServiceProvider Provider(Func<Task> pullDue)
+    /// <summary>
+    /// A pull that found the cross-process Jira lock held pulled nothing, so it is due again on
+    /// the next tick rather than after a whole interval (VIBE-125 review P2).
+    /// </summary>
+    [Fact]
+    public async Task ABusyPullIsDueAgainOnTheNextTick_InsteadOfAfterAWholeInterval()
+    {
+        var results = new Queue<bool>([false, true]);
+        var pulls = 0;
+        using var provider = Provider(() =>
+        {
+            Interlocked.Increment(ref pulls);
+            return Task.FromResult(results.Dequeue());
+        });
+        var scheduler = new JiraPullScheduler(provider.GetRequiredService<IServiceScopeFactory>());
+
+        var busy = scheduler.Tick(Start, Ct);
+        Assert.NotNull(busy);
+        await busy;
+        var retry = scheduler.Tick(Start.AddSeconds(10), Ct);
+        Assert.NotNull(retry);
+        await retry;
+        Assert.Null(scheduler.Tick(Start.AddSeconds(20), Ct));
+        Assert.Null(scheduler.Tick(Start.AddMinutes(14), Ct));
+        await scheduler.WhenIdleAsync();
+        Assert.Equal(2, pulls);
+    }
+
+    private static ServiceProvider Provider(Func<Task<bool>> pullDue)
     {
         var services = new ServiceCollection();
         services.AddScoped(_ =>

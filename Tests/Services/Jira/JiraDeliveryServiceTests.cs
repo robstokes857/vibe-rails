@@ -138,6 +138,33 @@ public sealed class JiraDeliveryServiceTests : IDisposable
         Assert.Equal("Sign in before sharing.", Assert.Single(await store.GetJiraDeliveriesAsync(Project, card.Id, Ct)).Message);
     }
 
+    /// <summary>
+    /// A local "busy" share response sent nothing, so the event waits for the next drain; any
+    /// other share failure stays failed (VIBE-125 review P2).
+    /// </summary>
+    [Fact]
+    public async Task ALocalBusyShareIsRetriedOnTheNextDrain()
+    {
+        var card = await CardAsync();
+        await boards.LinkSessionAsync(Project, card.Id, Guid.NewGuid().ToString(), null, "base:codex", "codex", "Session", "launch", Ct);
+        sharing.SetupSequence(s => s.CreateAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SessionShareResponse(false, "busy", "Another sharing link is being created. Try again shortly."))
+            .ReturnsAsync(new SessionShareResponse(true, "pending_upload", "Available after upload", ShareUrl));
+
+        await Service().DrainAsync(Ct);
+        Assert.Empty(client.Invocations);
+        var waiting = Assert.Single(await store.GetJiraDeliveriesAsync(Project, card.Id, Ct));
+        Assert.Equal("pending", waiting.Status);
+        Assert.Contains("Another sharing link", waiting.Message);
+
+        await Service().DrainAsync(Ct);
+        Assert.Equal(2, sharing.Invocations.Count);
+        Assert.Single(client.Invocations);
+        var sent = Assert.Single(await store.GetJiraDeliveriesAsync(Project, card.Id, Ct));
+        Assert.Equal("sent", sent.Status);
+        Assert.Equal(ShareUrl, sent.Url);
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();
