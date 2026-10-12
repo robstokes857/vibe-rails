@@ -988,7 +988,7 @@ test('display IDs are visible and editable while permanent IDs remain available'
 });
 
 async function openBoard(page, { active = false, assignee = null, relatedCards = false, empty = false,
-    onCard = () => {},
+    onCard = () => {}, extraPickerItems = [],
     columns = [{ id: 'col_ready', name: 'Ready', position: 0, color: '#3b82f6', boardId: 'brd_main' }] } = {}) {
     if (process.env.VIBERAILS_BOARD_STATIC === '1') {
         await page.addInitScript(() => sessionStorage.setItem('viberails_tab', 'board-fixture'));
@@ -1110,7 +1110,8 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
                 { key: 'base:codex', kind: 'base', group: 'Base CLIs', label: 'Codex', cli: 'codex', enabled: true, order: 0 },
                 { key: 'base:claude', kind: 'base', group: 'Base CLIs', label: 'Claude', cli: 'claude', enabled: true, order: 1 },
                 { key: 'env:7:claude', kind: 'environment', group: 'Custom Environments', label: 'Card review (claude)',
-                    cli: 'claude', environmentId: 7, enabled: true, order: 2 }
+                    cli: 'claude', environmentId: 7, enabled: true, order: 2 },
+                ...extraPickerItems
             ] },
             '/api/v1/board/boards': { boards: [{ id: 'brd_main', name: 'Main', position: 0, cardCount: empty ? 0 : 1,
                 columns },
@@ -1928,9 +1929,13 @@ test('lane automation conflicts preserve selections and unavailable jobs can be 
     await page.screenshot({ path: '../.codex-test-artifacts/vb22-lane-narrow.png' });
 });
 
-// VIBE-145: the lane card's Unassigned chip assigns without opening the editor.
-test('the Unassigned chip assigns from the card face and the chip then filters', async ({ page }, testInfo) => {
-    const requests = await openBoard(page);
+// VIBE-145: the lane card's assignee chip assigns without opening the editor. The whole chip is
+// the selector and never filters (a filter that looked like a selector made cards seem to vanish),
+// and targets hidden from the launch picker are still assignable.
+test('the assignee chip assigns from the card face, hidden targets included, and never filters', async ({ page }, testInfo) => {
+    const requests = await openBoard(page, { extraPickerItems: [
+        { key: 'base:grok', kind: 'base', group: 'Base CLIs', label: 'Grok', cli: 'grok', enabled: false, order: 3 }
+    ] });
     const chip = page.locator('.board-card .board-assignee-chip');
     await expect(chip).toHaveText(/Unassigned/);
     await chip.click();
@@ -1938,7 +1943,7 @@ test('the Unassigned chip assigns from the card face and the chip then filters',
     await expect(menu).toBeVisible();
     await expect(page.locator('[data-board-card-editor]')).toHaveCount(0, { timeout: 500 });
     await expect(menu.locator('.board-assign-group-title')).toHaveText(['Built-in CLIs', 'Agents']);
-    await expect(menu.locator('[data-assign-value]')).toHaveCount(3);
+    await expect(menu.locator('.board-assign-option-label')).toHaveText(['Codex', 'Claude', 'Grok', 'Card review (claude)']);
     await expect(menu.locator('.board-assign-unassign')).toHaveCount(0);
     await page.screenshot({ path: testInfo.outputPath('assign-menu.png') });
 
@@ -1950,34 +1955,46 @@ test('the Unassigned chip assigns from the card face and the chip then filters',
     const write = requests.find(item => item.method === 'PUT' && item.path === '/api/v1/board/cards/card_test');
     expect(write.body).toEqual({ assignee: 'env:7:claude' });
     await expect(chip).toHaveText(/Card review/);
-    await expect(chip).toHaveAttribute('data-assignee-id', 'env:7:claude');
+    await expect(chip).not.toHaveAttribute('data-assignee-id');
+    const writes = () => requests.filter(item => item.method === 'PUT' && item.path === '/api/v1/board/cards/card_test');
 
-    // The assigned chip keeps click-to-filter (a second click clears it); the caret opens the menu instead.
+    // Anywhere on the assigned chip, name or avatar, opens the menu; the board is never filtered.
     await chip.locator('.board-assignee-name').click();
-    await expect(page.locator('[data-board-filter-assignee]')).toHaveValue('env:7:claude');
-    await expect(menu).toHaveCount(0);
-    await chip.locator('.board-assignee-name').click();
-    await expect(page.locator('[data-board-filter-assignee]')).toHaveValue('');
-    await chip.locator('.board-assign-caret').click();
     await expect(menu).toBeVisible();
     await expect(menu.locator('[aria-checked="true"]')).toHaveText(/Card review/);
     await expect(page.locator('[data-board-filter-assignee]')).toHaveValue('', { timeout: 500 });
+    await menu.locator('[data-assign-value="base:grok"]').click();
+    await expect(menu).toHaveCount(0);
+    expect(writes().at(-1).body).toEqual({ assignee: 'base:grok' });
+    await expect(chip).toHaveText(/Grok/);
+    await expect(page.locator('.board-card')).toHaveCount(1);
+    await chip.hover();
+    await page.screenshot({ path: testInfo.outputPath('assigned-chip.png') });
+    await expect(page.locator('[data-board-filter-assignee]')).toHaveValue('');
+
+    await chip.locator('.board-avatar').click();
+    await expect(menu).toBeVisible();
     await menu.locator('.board-assign-unassign').click();
     await expect(menu).toHaveCount(0);
-    const writes = requests.filter(item => item.method === 'PUT' && item.path === '/api/v1/board/cards/card_test');
-    expect(writes.at(-1).body).toEqual({ assignee: '' });
+    expect(writes().at(-1).body).toEqual({ assignee: '' });
     await expect(page.locator('.board-card .board-assignee-chip.is-empty')).toHaveText(/Unassigned/);
+    await expect(page.locator('[data-board-filter-assignee]')).toHaveValue('');
+
+    // The editor's Assignee picker offers the hidden target too.
+    await page.getByText('Description images', { exact: true }).click();
+    await expect.poll(() => page.evaluate(() => Object.keys(document.querySelector('#board-card-assignee')?.tomselect?.options || {})))
+        .toContain('base:grok');
 });
 
 test('the assignee menu closes on Escape and outside clicks without saving', async ({ page }) => {
     const requests = await openBoard(page, { assignee: 'base:codex' });
-    await page.locator('.board-card .board-assign-caret').click();
+    await page.locator('.board-card .board-assignee-chip').click();
     const menu = page.locator('#board-assign-panel');
     await expect(menu).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(menu).toHaveCount(0);
     await expect(page.locator('[data-board-card-editor]')).toHaveCount(0);
-    await page.locator('.board-card .board-assign-caret').click();
+    await page.locator('.board-card .board-assignee-chip').click();
     await expect(menu).toBeVisible();
     await page.locator('.board-lane-head').first().click();
     await expect(menu).toHaveCount(0);

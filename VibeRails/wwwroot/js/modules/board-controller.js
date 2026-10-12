@@ -31,7 +31,7 @@ import { previousWorkHtml } from './board-previous-work.js';
 //   - Font Awesome icons and the --color-* theme tokens
 
 import { escapeHtml, confirmDialog, parseLlmSelection, getCliBrand, canonicalLlmSelection } from './utils.js';
-import { mountLlmPicker, setLlmPickerValue, getEnabledLlmItems } from './pickers/llm-picker.js';
+import { mountLlmPicker, setLlmPickerValue, getEnabledLlmItems, getAllLlmItems } from './pickers/llm-picker.js';
 import { launchKind } from './launch-kind.js';
 import { BoardApi } from './board-api.js';
 import { BoardPicker, openBoardOrderManager } from './board-picker.js';
@@ -126,7 +126,7 @@ export class BoardController {
         this.laneAgents = new BoardLaneAgents(app, agent => this.goToCardAutomation(agent.cardId, agent.terminalSessionId || agent.sessionId));
         // The lane card's assignee menu (VIBE-145): rows wear the same brand marks as the chips.
         this.cardAssign = new BoardCardAssign(app, {
-            avatar: row => this.avatarHtml(this.assigneeInfo(row.key), 18, { filterable: false }),
+            avatar: row => this.avatarHtml(this.assigneeInfo(row.key), 18),
             assign: (card, selection) => this.assignCardFromFace(card, selection)
         });
         this.state = {
@@ -559,14 +559,14 @@ export class BoardController {
     }
 
     // An assignee is an LLM picker key. Label comes from the picker catalog
-    // (which knows environment names), then from the raw key; the avatar is the
-    // CLI's brand mark, the closest thing an LLM has to a face.
+    // (which knows environment names, hidden ones included), then from the raw key;
+    // the avatar is the CLI's brand mark, the closest thing an LLM has to a face.
     assigneeInfo(selection) {
         const key = canonicalLlmSelection(selection);
         if (!key) return null;
         let item = null;
         try {
-            item = getEnabledLlmItems(this.app, 'assignee').find(entry => entry.key === key) || null;
+            item = getAllLlmItems(this.app, 'assignee').find(entry => entry.key === key) || null;
         } catch {
             item = null;
         }
@@ -791,9 +791,9 @@ export class BoardController {
     }
 
     // info comes from assigneeInfo()/authorInfo(). A CLI brand mark when there is
-    // one, initials on the brand colour otherwise; the lane-card variant is a
-    // click-to-filter control, the comment variant is not.
-    avatarHtml(info, size = 22, { filterable = true } = {}) {
+    // one, initials on the brand colour otherwise. Always inert: the lane card's
+    // assignee chip around it is the control (VIBE-145).
+    avatarHtml(info, size = 22) {
         if (!info) {
             return `<span class="board-avatar is-empty" style="width:${size}px;height:${size}px"
                 title="Unassigned" aria-label="Unassigned">?</span>`;
@@ -804,15 +804,12 @@ export class BoardController {
         const face = info.logo
             ? `<img class="board-avatar-logo" src="${escapeHtml(info.logo)}" alt="" loading="lazy"${logoStyle}>`
             : escapeHtml(initials);
-        const filterAttrs = filterable
-            ? ` data-assignee-id="${escapeHtml(info.key)}" role="button" tabindex="-1" title="${escapeHtml(info.label)} — click to filter"`
-            : ` title="${escapeHtml(info.label)}"`;
         // A logo needs contrast with its own brand colour (Claude's orange mark on Claude's orange
         // accent is a blank disc), so it sits on the surface inside an accent ring.
         const paint = info.logo
             ? `background:var(--color-bg-surface, #1e1e1e);border-color:${escapeHtml(info.color)}`
             : `background:${escapeHtml(info.color)}`;
-        return `<span class="board-avatar${info.logo ? ' has-logo' : ''}"${filterAttrs}
+        return `<span class="board-avatar${info.logo ? ' has-logo' : ''}" title="${escapeHtml(info.label)}"
             style="width:${size}px;height:${size}px;${paint};font-size:${fontSize}px"
             >${face}</span>`;
     }
@@ -842,18 +839,16 @@ export class BoardController {
                 <i class="fa-regular fa-comment" aria-hidden="true"></i>${commentCount}</span>`
             : '';
         // The assignee is an LLM, and which one is the point of the card — so it gets a name, not
-        // just a mark. The chip is the click-to-filter control; the avatar inside it is inert. The
-        // caret at its end, and the whole Unassigned chip, open the assignee menu (VIBE-145).
-        const changeAssignee = `<button type="button" class="board-assign-caret" data-board-action="${ASSIGN_ACTION}" tabindex="-1"
-                aria-haspopup="dialog" aria-expanded="false" title="Change assignee" aria-label="Change assignee of ${escapeHtml(cardDisplayId(card))}"
-                ><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button>`;
-        const assignee = member
-            ? `<span class="board-assignee-chip" data-assignee-id="${escapeHtml(member.key)}" role="button" tabindex="-1"
-                title="${escapeHtml(member.label)} — click to filter"
-                >${this.avatarHtml(member, 18, { filterable: false })}<span class="board-assignee-name">${escapeHtml(member.label)}</span>${changeAssignee}</span>`
-            : `<button type="button" class="board-assignee-chip is-empty" data-board-action="${ASSIGN_ACTION}" tabindex="-1"
-                aria-haspopup="dialog" aria-expanded="false" title="Unassigned — click to assign" aria-label="Assign ${escapeHtml(cardDisplayId(card))}"
-                >${this.avatarHtml(null, 18)}<span class="board-assignee-name">Unassigned</span><i class="fa-solid fa-chevron-down board-assign-caret-mark" aria-hidden="true"></i></button>`;
+        // just a mark. The whole chip is one button that opens the assignee menu (VIBE-145); it
+        // never filters the board, so a click meant to reassign cannot make cards vanish. The
+        // toolbar's assignee filter is the way to filter.
+        const id = escapeHtml(cardDisplayId(card));
+        const assignee = `<button type="button" class="board-assignee-chip${member ? '' : ' is-empty'}" data-board-action="${ASSIGN_ACTION}" tabindex="-1"
+                aria-haspopup="dialog" aria-expanded="false"
+                ${member
+                    ? `title="${escapeHtml(member.label)} — click to change the assignee" aria-label="Change assignee of ${id} (${escapeHtml(member.label)})"`
+                    : `title="Unassigned — click to assign" aria-label="Assign ${id}"`}
+                >${this.avatarHtml(member, 18)}<span class="board-assignee-name">${member ? escapeHtml(member.label) : 'Unassigned'}</span><i class="fa-solid fa-chevron-down board-assign-caret-mark" aria-hidden="true"></i></button>`;
 
         // is-live paints the marching "an agent is on this" border (see the template CSS).
         return `
@@ -885,7 +880,7 @@ export class BoardController {
                             ${comments}
                         </div>
                     </div>
-                    <div class="board-card-foot">${manager ? `<span class="board-manager-chip" title="Manager: ${escapeHtml(manager.label)}">${this.avatarHtml(manager, 18, { filterable: false })}<span class="board-assignee-name">Manager · ${escapeHtml(manager.label)}</span></span>` : ''}${assignee}</div>
+                    <div class="board-card-foot">${manager ? `<span class="board-manager-chip" title="Manager: ${escapeHtml(manager.label)}">${this.avatarHtml(manager, 18)}<span class="board-assignee-name">Manager · ${escapeHtml(manager.label)}</span></span>` : ''}${assignee}</div>
                 </div>
             </article>`;
     }
@@ -1174,23 +1169,13 @@ export class BoardController {
         const trigger = event.target.closest('[data-board-action]');
         const action = trigger?.dataset.boardAction;
         const cardEl = event.target.closest('.board-card');
-        const avatar = event.target.closest('[data-assignee-id]');
         if (action !== 'lane-agents') this.laneAgents.close(false);
 
-        // The caret sits inside the click-to-filter chip, so it is routed before the chip is.
+        // The assignee chip opens the menu; the card body behind it must not open the editor.
         if (action === ASSIGN_ACTION && cardEl) {
             event.stopPropagation();
             const card = this.state.cards.find(item => item.id === cardEl.dataset.cardId);
             if (card) this.cardAssign.open(trigger, card);
-            return;
-        }
-
-        if (avatar && cardEl) {
-            event.stopPropagation();
-            const id = avatar.dataset.assigneeId;
-            this.state.filters.assignee = this.state.filters.assignee === id ? '' : id;
-            this.persistFilters();
-            this.filtersChanged();
             return;
         }
 
@@ -1664,7 +1649,8 @@ export class BoardController {
         editor.querySelector('[data-board-chat]')?.addEventListener('click', () => this.startWork(editor, card, 'chat'));
 
         // The Assignee field is the app-wide launch picker ('assignee' context: built-in
-        // CLIs, Quick Launches and Agents; never a shell, never an Automation Worker).
+        // CLIs, Quick Launches and Agents; never a shell, never an Automation Worker). It lists
+        // targets hidden from the launch picker too: hiding curates launching, not assignment.
         this.disposeCardPickers();
         const assigneeSelect = editor.querySelector('#board-card-assignee');
         this.cardChecks = bindCardChecks(editor, card, this.app);
@@ -1678,6 +1664,7 @@ export class BoardController {
         if (assigneeSelect) {
             this.assigneePickerDispose = mountLlmPicker(this.app, assigneeSelect, {
                 context: 'assignee',
+                includeHidden: true,
                 placeholder: 'Unassigned',
                 selectedValue: card?.assignee || ''
             });
@@ -1704,6 +1691,7 @@ export class BoardController {
         if (managerSelect) {
             this.managerPickerDispose = mountLlmPicker(this.app, managerSelect, {
                 context: 'assignee',
+                includeHidden: true,
                 placeholder: 'Choose a manager agent…',
                 selectedValue: card.managerSelection || ''
             });
@@ -2097,7 +2085,7 @@ export class BoardController {
             : '';
         return `
             <article class="board-comment${entry.author?.kind === 'agent' ? ' is-agent' : ''}${entry.isAttention === true ? ' is-attention' : ''}">
-                ${this.avatarHtml(author, 28, { filterable: false })}
+                ${this.avatarHtml(author, 28)}
                 <div class="board-comment-content">
                     <div class="board-comment-meta">
                         <span class="board-comment-author">${escapeHtml(author?.label || 'Someone')}</span>

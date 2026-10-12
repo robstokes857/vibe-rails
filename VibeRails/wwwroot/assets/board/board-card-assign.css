@@ -1,12 +1,18 @@
 /* Assign from the card face (VIBE-145): the chip triggers and the anchored assignee menu. */
 
-/* The Unassigned chip is a real button now; keep the chip look, drop the button chrome. */
+/* The whole assignee chip is the menu button, assigned or not; keep the chip look, drop the
+   button chrome. It never filters the board. */
 .board-view button.board-assignee-chip {
-    border: 1px dashed color-mix(in srgb, var(--color-text-muted, #94a3b8) 55%, transparent);
+    border: 1px solid transparent;
     font: inherit;
     font-size: 0.72rem;
+    font-weight: 500;
     line-height: inherit;
     cursor: pointer;
+}
+.board-view button.board-assignee-chip.is-empty {
+    border: 1px dashed color-mix(in srgb, var(--color-text-muted, #94a3b8) 55%, transparent);
+    font-weight: inherit;
 }
 .board-view button.board-assignee-chip:hover,
 .board-view button.board-assignee-chip[aria-expanded="true"] {
@@ -14,30 +20,8 @@
     border-color: var(--color-primary, #3b82f6);
     color: var(--color-text, #f8fafc);
 }
-.board-assign-caret-mark { font-size: 0.6rem; opacity: 0.7; }
+.board-assign-caret-mark { flex: none; font-size: 0.6rem; opacity: 0.7; }
 
-/* The caret at the end of an assigned chip: a second control inside the click-to-filter chip. */
-.board-assign-caret {
-    display: inline-grid;
-    place-items: center;
-    flex: none;
-    width: 18px;
-    height: 18px;
-    margin-left: 2px;
-    padding: 0;
-    border: 0;
-    border-radius: 50%;
-    background: transparent;
-    color: var(--color-text-muted, #94a3b8);
-    font-size: 0.6rem;
-    cursor: pointer;
-}
-.board-assign-caret:hover,
-.board-assign-caret[aria-expanded="true"] {
-    background: color-mix(in srgb, var(--color-primary, #3b82f6) 25%, transparent);
-    color: var(--color-text, #f8fafc);
-}
-.board-assign-caret:focus-visible,
 .board-view button.board-assignee-chip:focus-visible,
 .board-assign-panel button:focus-visible,
 .board-assign-panel input:focus-visible {

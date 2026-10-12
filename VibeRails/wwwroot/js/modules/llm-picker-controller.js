@@ -194,8 +194,14 @@ export class LlmPickerController {
     }
 
     getEnabledItems(context) {
+        return this.getItems(context);
+    }
+
+    // `includeHidden` also returns the items hidden in "Manage quick launches…": that list
+    // curates the launch picker, while assigning a card can name any target (VIBE-145).
+    getItems(context, { includeHidden = false } = {}) {
         return this._contextCatalog(context)
-            .filter((item) => context === 'environment-provider' || item.enabled)
+            .filter((item) => includeHidden || context === 'environment-provider' || item.enabled)
             .map((item) => ({ ...item }));
     }
 
@@ -211,7 +217,8 @@ export class LlmPickerController {
         const selectedCatalogItem = this._contextCatalog(configuration.context)
             .find((item) => this._selectionValue(item, configuration.plainCliValues) === selectedValue);
         record.preservedSelectionValue = selectedValue && (
-            (selectedCatalogItem && !selectedCatalogItem.enabled && configuration.context !== 'environment-provider')
+            (selectedCatalogItem && !selectedCatalogItem.enabled && !configuration.includeHidden
+                && configuration.context !== 'environment-provider')
             || (!selectedCatalogItem && optionItems.some((item) => item.value === selectedValue))
         ) ? selectedValue : null;
 
@@ -264,7 +271,9 @@ export class LlmPickerController {
             if (item.kind === 'base' && includeDefaultSuffix && item.cli !== 'shell') {
                 label = `${label} (default)`;
             }
-            if (!item.enabled && value === selectedValue && context !== 'environment-provider') {
+            // A picker that lists hidden items anyway has nothing to explain.
+            if (!item.enabled && value === selectedValue && !configuration.includeHidden
+                && context !== 'environment-provider') {
                 label = `${label} (hidden)`;
             }
             return {

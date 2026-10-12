@@ -43,10 +43,10 @@ test('board-api.js is a thin client over /api/v1/board with no local placeholder
 
 test('the assignee is the app-wide LLM picker, not a list of people', () => {
     const source = readFileSync(controllerPath, 'utf8');
-    assert.match(source, /import \{ mountLlmPicker, setLlmPickerValue, getEnabledLlmItems \} from '\.\/pickers\/llm-picker\.js'/,
+    assert.match(source, /import \{ mountLlmPicker, setLlmPickerValue, getEnabledLlmItems, getAllLlmItems \} from '\.\/pickers\/llm-picker\.js'/,
         'consumers import the picker facade, never llm-picker-controller directly');
-    assert.match(source, /mountLlmPicker\(this\.app, assigneeSelect, \{\s*context: 'assignee'/,
-        "the card editor mounts the picker in the 'assignee' context (built-in CLIs, Quick Launches and Agents; no shell, no Automation Workers)");
+    assert.match(source, /mountLlmPicker\(this\.app, assigneeSelect, \{\s*context: 'assignee',\s*includeHidden: true,/,
+        "the card editor mounts the picker in the 'assignee' context (built-in CLIs, Quick Launches and Agents; no shell, no Automation Workers), hidden launch targets included (VIBE-145)");
     assert.doesNotMatch(source, /state\.members|memberById|assigneeId:|BoardApi\.getBoardMembersAsync/,
         'no member list remains');
     assert.match(source, /assignee: value\('#board-card-assignee'\),/, 'the form reads the picker key, including an empty string to unassign');

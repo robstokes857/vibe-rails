@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BoardCardAssign, assignMenuItems, assignMenuMarkup, matchesAssignQuery, ASSIGN_ACTION } from '../../../VibeRails/wwwroot/js/modules/board-card-assign.js';
 import { BoardController } from '../../../VibeRails/wwwroot/js/modules/board-controller.js';
+import { LlmPickerController } from '../../../VibeRails/wwwroot/js/modules/llm-picker-controller.js';
 
 // VIBE-145: assign an agent from the lane card without opening the editor.
 
@@ -65,7 +66,37 @@ test('an unassigned card gets no Unassign row and a filter narrows or empties th
     assert.match(narrowed, /env:9:codex/);
     assert.doesNotMatch(narrowed, /board-assign-unassign/, 'a typed filter hides Unassign so Enter cannot pick it');
     assert.match(assignMenuMarkup(rows, { query: 'zzz' }), /No matching agents\./);
-    assert.match(assignMenuMarkup([], {}), /No agents are enabled/);
+    assert.match(assignMenuMarkup([], {}), /No agents are available/);
+});
+
+// Rob: "Manage quick launches…" curates the launch picker; it must not limit assignment.
+test('the menu, the chip label and the editor picker include targets hidden from the launch picker', t => {
+    // getCliBrand resolves logo paths against window.
+    const originalWindow = globalThis.window;
+    globalThis.window = {};
+    t.after(() => { globalThis.window = originalWindow; });
+    const app ={ data: { environments: [{ id: 7, cli: 'claude', customPrompt: 'Review the card.' }] } };
+    const picker = new LlmPickerController(app);
+    picker.catalog = [
+        { key: 'base:claude', kind: 'base', label: 'Claude', cli: 'claude', enabled: true },
+        { key: 'base:codex', kind: 'base', label: 'Codex', cli: 'codex', enabled: false },
+        { key: 'env:7:claude', kind: 'environment', label: 'Card review (claude)', cli: 'claude', environmentId: 7, enabled: false },
+        { key: 'base:shell', kind: 'base', label: 'Terminal', cli: 'shell', enabled: false }
+    ];
+    app.llmPickerController = picker;
+
+    assert.deepEqual(picker.getEnabledItems('assignee').map(item => item.key), ['base:claude'], 'launching still honours hiding');
+    assert.deepEqual(new BoardCardAssign(app).rows().map(row => row.key), ['base:claude', 'base:codex', 'env:7:claude'],
+        'hidden targets are assignable; the shell never is');
+    assert.equal(new BoardController(app).assigneeInfo('env:7:claude').label, 'Card review (claude)',
+        'a hidden assignee keeps its real name on the chip');
+
+    const editor = picker._buildOptionItems({ context: 'assignee', includeHidden: true, includeGroups: true }, 'base:codex');
+    assert.deepEqual(editor.map(option => option.label), ['Claude', 'Codex', 'Card review (claude)'],
+        'the Assignee picker lists everything and marks nothing (hidden)');
+    const launch = picker._buildOptionItems({ context: 'assignee', includeGroups: true }, 'base:codex');
+    assert.deepEqual(launch.map(option => option.label), ['Claude', 'Codex (hidden)'],
+        'without includeHidden only the saved hidden choice survives, marked');
 });
 
 function card(overrides = {}) {
@@ -73,7 +104,9 @@ function card(overrides = {}) {
         priority: 'medium', columnId: 'backlog', tags: [], assignee: null, ...overrides };
 }
 
-test('the lane card offers the menu from the Unassigned chip and from a caret beside an assignee', () => {
+// Rob: a chip that was both a big filter and a tiny selector made reassigning clicks filter the
+// lane, so cards looked deleted. The whole chip is now the selector and nothing on it filters.
+test('the whole assignee chip opens the menu, assigned or not, and never filters', () => {
     const controller = new BoardController({});
     controller.assigneeInfo = key => key ? { key, cli: 'codex', label: 'Codex', logo: '', logoFilter: '', color: '#70a597' } : null;
 
@@ -81,58 +114,53 @@ test('the lane card offers the menu from the Unassigned chip and from a caret be
     assert.match(unassigned, new RegExp(`<button type="button" class="board-assignee-chip is-empty" data-board-action="${ASSIGN_ACTION}"`));
     assert.match(unassigned, /aria-label="Assign VIBE-145"/);
     assert.match(unassigned, /aria-haspopup="dialog"/);
-    assert.doesNotMatch(unassigned, /data-assignee-id=/, 'nothing to filter by on an unassigned card');
 
     const assigned = controller.renderCard(card({ assignee: 'base:codex' }));
-    assert.match(assigned, /class="board-assignee-chip" data-assignee-id="base:codex"/, 'click-to-filter stays');
-    assert.match(assigned, new RegExp(`class="board-assign-caret" data-board-action="${ASSIGN_ACTION}"`));
-    assert.match(assigned, /aria-label="Change assignee of VIBE-145"/);
-    assert.doesNotMatch(assigned, /class="board-assignee-chip is-empty"/);
+    assert.match(assigned, new RegExp(`<button type="button" class="board-assignee-chip" data-board-action="${ASSIGN_ACTION}"`));
+    assert.match(assigned, /aria-label="Change assignee of VIBE-145 \(Codex\)"/);
+    assert.match(assigned, /<span class="board-assignee-name">Codex<\/span>/);
+    for (const html of [unassigned, assigned]) {
+        assert.doesNotMatch(html, /data-assignee-id=|click to filter|board-assign-caret"/, 'no part of the card face filters the board');
+        assert.equal((html.match(new RegExp(`data-board-action="${ASSIGN_ACTION}"`, 'g')) || []).length, 1,
+            'one control, not a chip plus a caret');
+    }
 });
 
-// A fake event whose closest() answers the three selectors onClick asks about.
-function clickOn({ action = null, cardId = null, assigneeId = null } = {}) {
+// A fake event whose closest() answers the selectors onClick asks about.
+function clickOn({ action = null, cardId = null } = {}) {
     const cardEl = cardId ? { dataset: { cardId } } : null;
     const trigger = action ? { dataset: { boardAction: action } } : null;
-    const avatar = assigneeId ? { dataset: { assigneeId } } : null;
     const stops = [];
     return {
         stops,
         event: {
             stopPropagation() { stops.push('stop'); },
             target: { closest: selector => selector === '[data-board-action]' ? trigger
-                : selector === '.board-card' ? cardEl
-                : selector === '[data-assignee-id]' ? avatar : null }
+                : selector === '.board-card' ? cardEl : null }
         }
     };
 }
 
-test('clicks on the caret open the menu for that card instead of filtering or opening the editor', () => {
+test('a chip click opens the menu for that card instead of filtering or opening the editor', () => {
     const controller = new BoardController({});
     const opened = [];
-    const filtered = [];
     const editors = [];
     controller.laneAgents = { close() {} };
     controller.cardAssign = { open: (trigger, target) => opened.push([trigger.dataset.boardAction, target.id]), close() {} };
     controller.openCardEditor = id => editors.push(id);
-    controller.persistFilters = () => {};
-    controller.filtersChanged = () => filtered.push(controller.state.filters.assignee);
+    controller.persistFilters = () => assert.fail('the card face must not touch the filters');
+    controller.filtersChanged = () => assert.fail('the card face must not filter the board');
     controller.state.cards = [card({ assignee: 'base:codex' }), card({ id: 'card-2', key: 'VB-2' })];
 
-    // The caret lives inside the data-assignee-id chip: the action wins, the filter does not fire.
-    const caret = clickOn({ action: ASSIGN_ACTION, cardId: 'card-1', assigneeId: 'base:codex' });
-    controller.onClick(caret.event);
-    assert.deepEqual(opened, [[ASSIGN_ACTION, 'card-1']]);
-    assert.deepEqual(filtered, []);
-    assert.deepEqual(caret.stops, ['stop']);
-
-    // The chip itself still filters.
-    controller.onClick(clickOn({ cardId: 'card-1', assigneeId: 'base:codex' }).event);
-    assert.deepEqual(filtered, ['base:codex']);
-
-    // The Unassigned chip opens the menu; the card body still opens the editor.
+    // Assigned and Unassigned chips are the same control.
+    const assigned = clickOn({ action: ASSIGN_ACTION, cardId: 'card-1' });
+    controller.onClick(assigned.event);
     controller.onClick(clickOn({ action: ASSIGN_ACTION, cardId: 'card-2' }).event);
-    assert.deepEqual(opened.at(-1), [ASSIGN_ACTION, 'card-2']);
+    assert.deepEqual(opened, [[ASSIGN_ACTION, 'card-1'], [ASSIGN_ACTION, 'card-2']]);
+    assert.deepEqual(assigned.stops, ['stop']);
+    assert.equal(controller.state.filters.assignee || '', '');
+
+    // The card body still opens the editor.
     controller.onClick(clickOn({ cardId: 'card-2' }).event);
     assert.deepEqual(editors, ['card-2']);
 

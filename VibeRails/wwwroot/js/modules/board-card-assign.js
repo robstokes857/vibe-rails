@@ -1,15 +1,17 @@
 // Assign from the card face (VIBE-145).
 //
-// The lane card's assignee chip opens a small anchored menu listing the same launch targets
-// as the editor's Assignee picker ('assignee' context: Built-in CLIs, Quick Launches and
-// Agents; never a shell, never an Automation Worker). Choosing one saves at once through the
-// ordinary card patch, so the server clears the previous base launch options exactly as a
+// The lane card's assignee chip is one button: it opens a small anchored menu and never
+// filters the board (the toolbar's assignee filter does that). The menu lists the same launch
+// targets as the editor's Assignee picker ('assignee' context: Built-in CLIs, Quick Launches
+// and Agents; never a shell, never an Automation Worker), including any hidden from the launch
+// picker, since that list curates launching, not assignment. Choosing one saves at once through
+// the ordinary card patch, so the server clears the previous base launch options exactly as a
 // Save from the editor would. The menu owns its own positioning, keyboard handling and
 // document listeners, the same way the lane Agents panel does; the controller only opens it,
 // re-anchors it after a lane repaint and performs the save.
 
 import { escapeHtml, isConfirmDialogOpen, canonicalLlmSelection } from './utils.js';
-import { getEnabledLlmItems } from './pickers/llm-picker.js';
+import { getAllLlmItems } from './pickers/llm-picker.js';
 import { LAUNCH_KIND_LABELS, launchKind } from './launch-kind.js';
 import { cardDisplayId } from './board-card-label.js';
 
@@ -67,7 +69,7 @@ export function assignMenuMarkup(rows, { current = '', query = '', avatar = () =
         </button>`
         : '';
     if (!visible.length) {
-        return `${unassign}<p class="board-assign-empty" role="presentation">${rows.length ? 'No matching agents.' : 'No agents are enabled in the launch picker.'}</p>`;
+        return `${unassign}<p class="board-assign-empty" role="presentation">${rows.length ? 'No matching agents.' : 'No agents are available.'}</p>`;
     }
     return unassign + groups.map(group => `<div class="board-assign-group" role="group" aria-label="${escapeHtml(LAUNCH_KIND_LABELS[group.kind] || group.kind)}">
         <div class="board-assign-group-title" aria-hidden="true">${escapeHtml(LAUNCH_KIND_LABELS[group.kind] || group.kind)}</div>
@@ -119,7 +121,7 @@ export class BoardCardAssign {
 
     rows() {
         let items = [];
-        try { items = getEnabledLlmItems(this.app, 'assignee'); } catch { items = []; }
+        try { items = getAllLlmItems(this.app, 'assignee'); } catch { items = []; }
         return assignMenuItems(items, this.app?.data?.environments || []);
     }
 

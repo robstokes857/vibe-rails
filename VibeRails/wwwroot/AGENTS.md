@@ -393,9 +393,13 @@ current button. Theme-aware styling lives in `assets/board/board-lane-agents.css
 
 ### Assign from the card face (VIBE-145)
 
-`board-card-assign.js` is the lane card's assignee menu. The **Unassigned** chip is a button that
-opens it; an assigned chip keeps click-to-filter and gains a caret at its end that opens the same
-menu with an **Unassign** row. The menu lists the enabled `assignee`-context picker items grouped
+`board-card-assign.js` is the lane card's assignee menu. The whole assignee chip, assigned or
+**Unassigned**, is one button that opens it; an assigned card's menu leads with an **Unassign** row.
+The chip never filters the board: sharing one chip between a large filter target and a small
+selector made reassigning clicks filter the lane, so cards looked deleted. Filtering by assignee
+belongs to the toolbar. The menu lists every `assignee`-context picker item, including those hidden
+in "Manage quick launches…" (that list curates the launch picker, not assignment; the editor's
+Assignee and Manager pickers pass `includeHidden: true` for the same reason), grouped
 Built-in CLIs / Quick Launches / Agents (`launch-kind.js` decides the group, an unloaded setup
 counts as an Agent) behind a type-to-filter box; Enter takes the first match only after typing.
 Choosing a row sends the ordinary card patch with only `assignee`, so the server clears the old
