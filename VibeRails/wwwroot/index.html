@@ -438,6 +438,84 @@
                             aria-live="polite" aria-atomic="false" tabindex="0"></pre>
                     </div>
                 </details>
+                <!-- What this scan checks: a collapsed guide to MintLint's categories, thresholds, grading and
+                     languages. Static markup; project-health-theme.test.mjs keeps it in step with ScoringProfile,
+                     ScoreCalculator and the language parsers. -->
+                <details class="rules-console-transcript project-health-scan-guide" data-code-analyzer-guide>
+                    <summary>
+                        <span class="rules-console-transcript-label">What this scan checks</span>
+                        <small>7 categories · 15 measurements · 13 languages</small>
+                    </summary>
+                    <div class="scan-guide">
+                        <p class="scan-guide-lead">MintLint, the analyzer built into VibeRails, parses the source files you changed and grades each one in seven categories. Only the lines you added are measured; removed lines never score. The default scan covers staged, unstaged and untracked changes against HEAD, <b>Scan unpushed commits</b> scores what your local commits add over the upstream branch, and files on the exclusion list are left out.</p>
+                        <p class="scan-guide-thresholds">Thresholds read warn · critical: a measurement scores 50 concern at the first number and 100 at the second.</p>
+                        <ul class="scan-guide-categories" aria-label="Scan categories">
+                            <li data-scan-category="Complexity" data-weight="1.0">
+                                <div class="scan-guide-category-head"><strong>Complexity</strong><span>weight 1.0</span></div>
+                                <p>Branching, execution paths and nesting inside each function.</p>
+                                <ul>
+                                    <li data-metric="cyclomatic_complexity" data-warn="10" data-critical="20"><span>Cyclomatic complexity</span><b>10 · 20</b></li>
+                                    <li data-metric="cognitive_complexity" data-warn="15" data-critical="30"><span>Cognitive complexity</span><b>15 · 30</b></li>
+                                    <li data-metric="npath_complexity" data-warn="1000" data-critical="100000"><span>NPath execution paths</span><b>1,000 · 100,000</b></li>
+                                    <li data-metric="nesting_depth" data-warn="4" data-critical="6"><span>Nesting depth</span><b>4 · 6</b></li>
+                                </ul>
+                            </li>
+                            <li data-scan-category="Size" data-weight="0.7">
+                                <div class="scan-guide-category-head"><strong>Size</strong><span>weight 0.7</span></div>
+                                <p>File length and how much each type and function carries.</p>
+                                <ul>
+                                    <li data-metric="lines_of_code" data-warn="300" data-critical="600"><span>Lines of code</span><b>300 · 600</b></li>
+                                    <li data-metric="method_count" data-warn="15" data-critical="30"><span>Methods per type</span><b>15 · 30</b></li>
+                                    <li data-metric="field_count" data-warn="10" data-critical="20"><span>Fields per type</span><b>10 · 20</b></li>
+                                    <li data-metric="parameter_count" data-warn="4" data-critical="7"><span>Parameters per function</span><b>4 · 7</b></li>
+                                </ul>
+                            </li>
+                            <li data-scan-category="Cohesion" data-weight="1.0">
+                                <div class="scan-guide-category-head"><strong>Cohesion</strong><span>weight 1.0</span></div>
+                                <p>Whether a type's methods share its fields and call each other, or do unrelated jobs.</p>
+                                <ul>
+                                    <li data-metric="lack_of_cohesion" data-warn="2" data-critical="4"><span>Lack of cohesion (LCOM4)</span><b>2 · 4</b></li>
+                                </ul>
+                            </li>
+                            <li data-scan-category="Coupling" data-weight="0.8">
+                                <div class="scan-guide-category-head"><strong>Coupling</strong><span>weight 0.8</span></div>
+                                <p>How much other code a file imports and constructs for itself.</p>
+                                <ul>
+                                    <li data-metric="fan_out" data-warn="15" data-critical="30"><span>Fan-out (modules imported)</span><b>15 · 30</b></li>
+                                    <li data-metric="hard_coded_dependencies" data-warn="3" data-critical="8"><span>Hard-coded dependencies</span><b>3 · 8</b></li>
+                                </ul>
+                            </li>
+                            <li data-scan-category="Testability" data-weight="1.0">
+                                <div class="scan-guide-category-head"><strong>Testability</strong><span>weight 1.0</span></div>
+                                <p>Seams a test cannot substitute: collaborators built inline and calls into the clock, filesystem, network, environment, randomness or console.</p>
+                                <ul>
+                                    <li data-metric="hard_coded_dependencies" data-warn="3" data-critical="8"><span>Hard-coded dependencies</span><b>3 · 8</b></li>
+                                    <li data-metric="ambient_dependencies" data-warn="3" data-critical="10"><span>Ambient dependencies</span><b>3 · 10</b></li>
+                                </ul>
+                            </li>
+                            <li data-scan-category="Duplication" data-weight="0.6">
+                                <div class="scan-guide-category-head"><strong>Duplication</strong><span>weight 0.6</span></div>
+                                <p>Runs of five normalized lines that appear again within the scanned files.</p>
+                                <ul>
+                                    <li data-metric="duplication" data-warn="0.10" data-critical="0.30"><span>Duplicated lines</span><b>10% · 30%</b></li>
+                                </ul>
+                            </li>
+                            <li data-scan-category="Maintainability" data-weight="0.8">
+                                <div class="scan-guide-category-head"><strong>Maintainability</strong><span>weight 0.8</span></div>
+                                <p>Composite readability signals from volume, vocabulary and complexity.</p>
+                                <ul>
+                                    <li data-metric="maintainability_index" data-warn="50" data-critical="25"><span>Maintainability index (higher is healthier)</span><b>50 · 25</b></li>
+                                    <li data-metric="halstead_difficulty" data-warn="20" data-critical="40"><span>Halstead difficulty</span><b>20 · 40</b></li>
+                                </ul>
+                            </li>
+                        </ul>
+                        <div class="scan-guide-notes">
+                            <p><strong>How the grade is made.</strong> A category takes its worst measurement. A file's score is its fourth-worst weighted category, floored at 30% of its single worst, so one hot spot flags a file without condemning it. Ratings: <b>Clean</b> under 30, <b>Okay</b> under 55, <b>Needs work</b> under 75, <b>At risk</b> from 75. The scan's score is the mean of its files.</p>
+                            <p><strong>Reach.</strong> Files are ranked by concern × (1 + log₁₀(1 + referencing files)), counting the other tracked source files that mention one of the file's declared class or function names, so a smell in code the repository leans on outranks the same smell in code nothing uses. <b>Full repository</b> extends that count to every source file on disk, untracked ones included.</p>
+                            <p><strong>Languages.</strong> JavaScript, TypeScript, Python, C#, Go, Rust, C, Java, C++, PHP, Ruby, Bash and PowerShell, recognized by file extension. The repository map beside the report shows structure only; no grade is inferred from it.</p>
+                        </div>
+                    </div>
+                </details>
                 <button type="button" data-action="clear-code-analyzer-output" hidden>Clear results</button>
             </section>
         </div>

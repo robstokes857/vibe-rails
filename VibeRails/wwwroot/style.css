@@ -19186,6 +19186,106 @@ body.performance-mode .brand-text-sm {
     display: none;
 }
 
+/* What this scan checks: the collapsed guide at the foot of the Code quality card. Static template
+   markup; the viewer counts it as chrome below the map, so opening it shortens the map, never the page. */
+.project-health-scan-guide {
+    margin: 0 18px 16px;
+}
+
+.project-health-scan-guide .scan-guide {
+    display: grid;
+    gap: 12px;
+    padding: 12px 14px 14px;
+    border-top: 1px solid color-mix(in srgb, var(--color-border, #334155) 55%, transparent);
+    color: var(--color-text, #e2e8f0);
+    font-size: .8rem;
+    line-height: 1.5;
+}
+
+.project-health-scan-guide .scan-guide p {
+    margin: 0;
+}
+
+.project-health-scan-guide .scan-guide-lead,
+.project-health-scan-guide .scan-guide-notes {
+    max-width: 96ch;
+    color: color-mix(in srgb, var(--color-text, #e2e8f0) 84%, var(--color-text-muted, #94a3b8));
+}
+
+.project-health-scan-guide .scan-guide-thresholds {
+    color: var(--color-text-muted, #94a3b8);
+    font-size: .72rem;
+}
+
+.project-health-scan-guide .scan-guide-notes {
+    display: grid;
+    gap: 8px;
+}
+
+.project-health-scan-guide .scan-guide-categories {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.project-health-scan-guide .scan-guide-categories > li {
+    display: grid;
+    align-content: start;
+    gap: 6px;
+    padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--color-border, #334155) 55%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--color-bg-surface, #1e1e1e) 70%, transparent);
+}
+
+.project-health-scan-guide .scan-guide-category-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.project-health-scan-guide .scan-guide-category-head strong {
+    font-size: .82rem;
+}
+
+.project-health-scan-guide .scan-guide-category-head span {
+    color: var(--color-text-muted, #94a3b8);
+    font: 500 .66rem/1.3 var(--vb-font-mono, ui-monospace, monospace);
+    white-space: nowrap;
+}
+
+.project-health-scan-guide .scan-guide-categories > li > p {
+    color: var(--color-text-muted, #94a3b8);
+    font-size: .74rem;
+}
+
+.project-health-scan-guide .scan-guide-categories ul {
+    display: grid;
+    gap: 3px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.project-health-scan-guide .scan-guide-categories ul li {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: .76rem;
+}
+
+.project-health-scan-guide .scan-guide-categories ul b {
+    flex-shrink: 0;
+    color: var(--quality-warn, #f5b74a);
+    font: 600 .68rem/1.4 var(--vb-font-mono, ui-monospace, monospace);
+    white-space: nowrap;
+}
+
 .project-health-rule-manager-header {
     display: flex;
     align-items: center;
@@ -19282,7 +19382,8 @@ body.performance-mode .brand-text-sm {
 
     .project-health-rules-summary,
     .project-health-quality-report,
-    .project-health-scan-transcript {
+    .project-health-scan-transcript,
+    .project-health-scan-guide {
         margin-inline: 14px;
     }
 

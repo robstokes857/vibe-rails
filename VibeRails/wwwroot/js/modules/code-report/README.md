@@ -7,7 +7,13 @@ and opening Quality does not run rule validation. Settings is the cog beside Aut
 button, leaving room for both navigation destinations. The controller supplies the latest real
 MintLint response from its scan cache; the viewer requests a current repository graph through
 `app.apiCall`. Scan scope, exclusions, Scan again, Fix and Copy scan summary stay in the Quality
-header. There is no second report store, scan engine or theme preference.
+header. There is no second report store, scan engine or theme preference. The collapsed
+**What this scan checks** guide at the foot of the card (`data-code-analyzer-guide`) is static
+template markup, not viewer output: it lists MintLint's seven categories with their metrics,
+warn/critical thresholds and weights, the grading pipeline, reach ranking and the supported
+languages. `Tests/wwwroot/js/project-health-theme.test.mjs` pins it to `ScoringProfile`,
+`ScoreCalculator` and `LanguageRegistry`, so a tuning change fails that test until the guide
+is updated. The viewer counts it as chrome below the map, so opening it shortens the map.
 
 ## Composition and lifetime
 

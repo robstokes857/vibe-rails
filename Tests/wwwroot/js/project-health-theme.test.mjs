@@ -101,6 +101,62 @@ test('Rules retains its actions and Quality retains the log and coverage menu', 
     assert.match(styleCss, /\.main-container:has\(\.vb-page-header\) \{\s*padding-top: 14px;/);
 });
 
+// The guide at the foot of the Quality card is static markup, so it is pinned to the MintLint
+// sources it describes: a threshold, weight, category wiring, rating band or language that
+// changes there must change here too, or the page tells the user the wrong thing.
+test('Quality explains what the scan checks, in step with MintLint scoring and its languages', () => {
+    const profile = readFileSync(path.resolve('MintLint/Scoring/ScoringProfile.cs'), 'utf8');
+    const calculator = readFileSync(path.resolve('MintLint/Scoring/ScoreCalculator.cs'), 'utf8');
+    const registry = readFileSync(path.resolve('MintLint/Languages/LanguageRegistry.cs'), 'utf8');
+    const thresholds = Object.fromEntries([...profile.matchAll(/\["([a-z_]+)"\] = new\(([\d.]+), ([\d.]+)(, HigherIsBetter: true)?\)/g)]
+        .map(([, name, warn, critical, higher]) => [name, { warn: Number(warn), critical: Number(critical), higherIsBetter: Boolean(higher) }]));
+    const weights = Object.fromEntries([...profile.matchAll(/\["([A-Za-z]+)"\] = ([\d.]+),/g)].map(([, name, weight]) => [name, Number(weight)]));
+    const breadthRank = Number(profile.match(/public int BreadthRank \{ get; init; \} = (\d+);/)[1]);
+    const depthFloor = Number(profile.match(/public double DepthFloor \{ get; init; \} = ([\d.]+);/)[1]);
+    const categories = [...calculator.matchAll(/new\("([A-Za-z]+)", \[([^\]]+)\]\)/g)]
+        .map(([, name, metrics]) => ({ name, metrics: [...metrics.matchAll(/"([a-z_]+)"/g)].map(m => m[1]) }));
+    const bands = calculator.match(/if \(score < (\d+)\)\s*\{\s*return "Clean";[\s\S]*?if \(score < (\d+)\)\s*\{\s*return "Okay";[\s\S]*?return score < (\d+) \? "NeedsWork" : "AtRisk";/);
+    const parsers = [...registry.matchAll(/new ([A-Za-z]+)LanguageParser\(\)/g)].map(m => m[1]);
+    assert.equal(categories.length, 7);
+    assert.ok(bands && parsers.length > 0);
+
+    const quality = indexHtml.match(/<template id="code-quality-template">([\s\S]*?)<\/template>/)[1];
+    assert.match(quality, /data-code-analyzer-log hidden>[\s\S]*<details class="rules-console-transcript project-health-scan-guide" data-code-analyzer-guide>[\s\S]*data-action="clear-code-analyzer-output"/,
+        'the guide sits under the scan log, inside the card, and is collapsed (no open attribute)');
+    const guide = quality.match(/<details class="rules-console-transcript project-health-scan-guide" data-code-analyzer-guide>([\s\S]*?)<\/details>/)[1];
+    const measured = new Set(categories.flatMap(category => category.metrics));
+    assert.match(guide, new RegExp(`<small>${categories.length} categories · ${measured.size} measurements · ${parsers.length} languages</small>`));
+
+    const listed = [...guide.matchAll(/<li data-scan-category="([A-Za-z]+)" data-weight="([\d.]+)">([\s\S]*?)<\/ul>\s*<\/li>/g)];
+    assert.deepEqual(listed.map(m => m[1]), categories.map(c => c.name), 'every category, in the calculator order');
+    for (const [, name, weight, body] of listed) {
+        assert.equal(Number(weight), weights[name], `${name} shows its roll-up weight`);
+        assert.match(body, new RegExp(`<span>weight ${weight}</span>`));
+        const metrics = [...body.matchAll(/<li data-metric="([a-z_]+)" data-warn="([\d.]+)" data-critical="([\d.]+)"><span>([^<]+)<\/span><b>([^<]+)<\/b><\/li>/g)];
+        assert.deepEqual(metrics.map(m => m[1]), categories.find(c => c.name === name).metrics, `${name} lists the metrics the calculator wires into it`);
+        for (const [, metric, warn, critical, label, shown] of metrics) {
+            const expected = thresholds[metric];
+            assert.ok(expected, `${metric} has a threshold in the scoring profile`);
+            assert.equal(Number(warn), expected.warn, `${metric} warn`);
+            assert.equal(Number(critical), expected.critical, `${metric} critical`);
+            const show = value => metric === 'duplication' ? `${Math.round(value * 100)}%` : value.toLocaleString('en-US');
+            assert.equal(shown, `${show(expected.warn)} · ${show(expected.critical)}`, `${metric} shows warn · critical`);
+            assert.equal(/higher is healthier/.test(label), expected.higherIsBetter, `${metric} says which way it reads`);
+        }
+    }
+    for (const metric of Object.keys(thresholds)) assert.ok(measured.has(metric), `${metric} is wired into a category`);
+
+    const ordinal = { 1: 'worst', 2: 'second-worst', 3: 'third-worst', 4: 'fourth-worst', 5: 'fifth-worst' }[breadthRank];
+    assert.match(guide, new RegExp(`its ${ordinal} weighted category, floored at ${Math.round(depthFloor * 100)}% of its single worst`));
+    assert.match(guide, new RegExp(`<b>Clean</b> under ${bands[1]}, <b>Okay</b> under ${bands[2]}, <b>Needs work</b> under ${bands[3]}, <b>At risk</b> from ${bands[3]}`));
+    const names = { CSharp: 'C#', Cpp: 'C++', Php: 'PHP' };
+    const shown = parsers.map(parser => names[parser] || parser);
+    assert.match(guide, new RegExp(`${shown.slice(0, -1).join(', ')} and ${shown.at(-1)}`.replace(/[+#]/g, '\\$&')), 'the languages are the registered parsers, in order');
+    assert.match(guide, /Full repository<\/b> extends that count to every source file on disk/, 'the toggle widens the reach count, not the grading');
+    assert.match(styleCss, /\.project-health-scan-guide \{\s*margin: 0 18px 16px;/);
+    assert.match(styleCss, /\.project-health-scan-transcript,\s*\.project-health-scan-guide \{\s*margin-inline: 14px;/);
+});
+
 test('the map keeps the wheel, fills the viewport, draws tinted spheres on a globe and ends the page without slack (VIBE-71)', () => {
     const template = JSON.parse(bundle.match(/^const rendererTemplate = (.*);$/m)[1]);
     // The canvas fills the map body under the floating camera rail; the frame owns every wheel.
