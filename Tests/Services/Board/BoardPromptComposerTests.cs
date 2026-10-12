@@ -9,6 +9,145 @@ namespace Tests.Services.Board;
 public sealed class BoardPromptComposerTests
 {
     [Fact]
+    public void ManagerRemainsResponsibleUntilClosureAndDelegatesThroughBoardTools()
+    {
+        var prompt = BoardPromptComposer.Compose(Card() with { WorkflowMode = "agent", ManagerSelection = "base:codex" },
+            "Build", "codex", "Generic environment instructions", intent: "manager");
+        Assert.StartsWith("You are the manager agent", prompt);
+        Assert.Contains("until it is closed", prompt);
+        Assert.Contains("start_board_agent using intent=worker", prompt);
+        Assert.Contains("Delegate implementation, fixes, testing and other execution to a separate Board worker session", prompt);
+        Assert.Contains("do not implement the task or edit project files yourself, even for a small change", prompt);
+        Assert.Contains("If a worker launch fails or is uncertain, check status before retrying", prompt);
+        Assert.DoesNotContain("You may do work yourself", prompt);
+        Assert.DoesNotContain("otherwise begin with the repository instructions and task", prompt);
+        Assert.Contains(" · Manager: codex", prompt);
+        Assert.DoesNotContain(" · Assignee: codex", prompt);
+        Assert.Contains("Default worker selection: env:7:codex", prompt);
+        Assert.Contains("start_board_agent(card=\"VB-12\", intent=\"worker\", task=\"<bounded assignment and expected output>\")", prompt);
+        Assert.Contains("one worker at a time", prompt);
+        Assert.Contains("worker completion does not complete your workflow", prompt);
+        Assert.Contains("required checks/reviews", prompt);
+        Assert.Contains("flagReason", prompt);
+        Assert.DoesNotContain("outcome=blocked", prompt);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ManagerRecoversWorkflowBeforeDelegatingEvenOnFreshOrFlaggedCards(bool flagged)
+    {
+        var context = new BoardPromptComposer.LaunchContext([], [], [], Activity: new(0, 0, 0));
+        var card = Card() with { WorkflowMode = "agent", ManagerSelection = "base:codex", Flagged = flagged, JiraIssueKey = "APP-1" };
+        var prompt = BoardPromptComposer.Compose(card, "Build", "codex", "Implement and finish immediately", context, "manager");
+
+        Assert.StartsWith("You are the manager agent", prompt);
+        Assert.Contains("even if the activity counts above are zero", prompt);
+        Assert.Contains("recover existing handoffs, workers, review reports and pending lane Automations before starting more work", prompt);
+        Assert.Contains("must launch a worker before execution begins", prompt);
+        Assert.DoesNotContain("before project work only if", prompt);
+        Assert.Contains("do not implement or edit project files yourself", prompt[prompt.IndexOf("Implement and finish immediately", StringComparison.Ordinal)..]);
+    }
+
+    [Fact]
+    public void ManagerWithoutDefaultWorkerDiscoversAnEnabledSelectionInsteadOfImplementing()
+    {
+        var prompt = BoardPromptComposer.Compose(Card() with { WorkflowMode = "agent", Assignee = null, ManagerSelection = "base:codex" },
+            "Build", "codex", null, intent: "manager");
+
+        Assert.Contains("Default worker selection: (none configured)", prompt);
+        Assert.Contains("start_board_agent(card=\"VB-12\", intent=\"worker\", selection=\"<enabled picker key from list_board_agent_options>\", task=", prompt);
+        Assert.Contains("do not fall back to doing the worker's task yourself", prompt);
+    }
+
+    [Fact]
+    public void WorkerLaunchStartsWithItsAssignedRoleAndLeavesThePipelineToTheManager()
+    {
+        var prompt = BoardPromptComposer.Compose(Card() with { WorkflowMode = "agent", ManagerSelection = "base:codex" },
+            "Build", "claude", "Complete and move the card to Done", intent: "worker", workerTask: "Fix only the refresh-token race");
+
+        Assert.StartsWith("This is a delegated worker in an Agent workflow", prompt);
+        Assert.Contains("Fix only the refresh-token race", prompt);
+        Assert.Contains("Your assignment is the delegated task above", prompt);
+        Assert.DoesNotContain("otherwise begin with the repository instructions and task", prompt);
+        Assert.DoesNotContain("You are the manager agent", prompt);
+        Assert.Contains("Do not move or close the card", prompt);
+        Assert.EndsWith("Leave card movement and closure to the manager.", prompt);
+    }
+
+    [Theory]
+    [InlineData("work")]
+    [InlineData("code_review")]
+    [InlineData("chat")]
+    public void ManualLaunchRetainsTheOriginalPromptDespiteRetainedManagerSettings(string intent)
+    {
+        var card = Card();
+        var original = BoardPromptComposer.Compose(card, "Build", "codex", "Read AGENTS.md first", intent: intent);
+        var manual = BoardPromptComposer.Compose(card with { WorkflowMode = "manual", ManagerSelection = "base:claude" },
+            "Build", "codex", "Read AGENTS.md first", intent: intent);
+
+        Assert.Equal(original, manual);
+        Assert.DoesNotContain("manager agent", manual);
+        Assert.DoesNotContain("delegated worker", manual);
+        Assert.DoesNotContain("Default worker selection:", manual);
+        if (intent == "work")
+        {
+            Assert.StartsWith("You are working on kanban card VB-12", manual);
+            Assert.Contains("otherwise begin with the repository instructions and task", manual);
+            Assert.EndsWith("Read AGENTS.md first", manual);
+        }
+    }
+
+    [Fact]
+    public void DelegatedReviewerSavesEvidenceAndLeavesMovementToTheManager()
+    {
+        var prompt = BoardPromptComposer.Compose(Card() with { WorkflowMode = "agent" },
+            "Review", "codex", null, intent: "code_review");
+        Assert.Contains("begin_board_review", prompt);
+        Assert.Contains("save_board_review", prompt);
+        Assert.Contains("manager owns pipeline decisions and lane movement", prompt);
+        Assert.DoesNotContain("Save the review and handoff before moving", prompt);
+        Assert.DoesNotContain("Link commits and post your handoff summary before moving", prompt);
+        Assert.Contains("complete_board_agent", prompt);
+        Assert.Contains("end_agent_session LAST", prompt);
+    }
+
+    [Theory]
+    [InlineData("work")]
+    [InlineData("code_review")]
+    [InlineData("testing")]
+    public void AgentWorkflowLaneAutomationsReportTheirOwnStepWithoutMovingTheCard(string purpose)
+    {
+        var prompt = BoardPromptComposer.ComposeAutomationPrompt("VB-12", "Custom instructions", purpose, managedWorkflow: true);
+        Assert.StartsWith("This is a delegated worker in an Agent workflow", prompt);
+        Assert.Contains("report_automation_step with passed or failed", prompt);
+        Assert.Contains("manager owns lane movement and closure", prompt);
+        Assert.Contains("do not wait for later lane steps", prompt);
+        Assert.Contains("complete_board_agent and end_agent_session LAST", prompt);
+        Assert.DoesNotContain("Save the review and handoff before moving", prompt);
+        Assert.DoesNotContain("Before moving, save your handoff", prompt);
+        Assert.DoesNotContain("The original coding agent waits", prompt);
+        Assert.Contains("The manager waits for required workflow steps and decides the card's next move", prompt);
+        if (purpose == "code_review") Assert.Contains("begin_board_review", prompt);
+    }
+
+    [Theory]
+    [InlineData("work")]
+    [InlineData("code_review")]
+    [InlineData("testing")]
+    public void ManualLaneAutomationsKeepTheirOriginalMovementAndCompletionInstructions(string purpose)
+    {
+        var prompt = BoardPromptComposer.ComposeAutomationPrompt("VB-12", "Custom instructions", purpose);
+
+        Assert.Contains("The original coding agent waits for required workflow steps before its final card move", prompt);
+        Assert.Contains("Before moving, save your handoff", prompt);
+        Assert.Contains("end_agent_session LAST", prompt);
+        Assert.DoesNotContain("delegated worker", prompt);
+        Assert.DoesNotContain("manager owns", prompt);
+        Assert.EndsWith("Custom instructions", prompt);
+    }
+
+    [Fact]
     public void JiraLaunchesExplainAutomaticSyncAndInternalNotes()
     {
         var card = Card() with { JiraIssueKey = "APP-1" };

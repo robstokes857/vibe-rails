@@ -878,6 +878,37 @@ test('move and merge use explicit destinations and preserve drafts until saved',
     await expect(editor).toHaveAttribute('data-card-id', 'card_related');
 });
 
+test('move rechecks edits made while loading the destination before confirmation', async ({ page }) => {
+    await openBoard(page, { relatedCards: true });
+    let releaseDestination;
+    const destinationResponse = new Promise(resolve => { releaseDestination = resolve; });
+    let destinationRequested = false;
+    let moved = false;
+    await page.route('**/api/v1/board/columns/col_build/automation', async route => {
+        destinationRequested = true;
+        await destinationResponse;
+        return route.fulfill({ json: { jobIds: [] } });
+    });
+    await page.route('**/api/v1/board/cards/card_test/move', route => {
+        moved = true;
+        return route.fulfill({ json: {} });
+    });
+    await page.getByText('Description images', { exact: true }).click();
+    const editor = page.locator('[data-board-card-editor]');
+    await editor.getByText('Move or merge', { exact: true }).click();
+    await editor.locator('[data-move-board]').selectOption('brd_sprint');
+    await expect(editor.locator('[data-move-lane]')).toHaveValue('col_build');
+    await editor.locator('[data-move-card]').click();
+    await expect.poll(() => destinationRequested).toBe(true);
+    await editor.locator('#board-card-title').fill('Keep this new draft');
+    releaseDestination();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Move', exact: true }).click();
+    await expect(editor.locator('[data-organize-status]')).toContainText('Save your edits');
+    await expect(editor.locator('#board-card-title')).toHaveValue('Keep this new draft');
+    await expect(editor.locator('[data-move-card]')).toBeEnabled();
+    expect(moved).toBe(false);
+});
+
 test('human can delete an agent comment without discarding a draft', async ({ page }) => {
     let current;
     await openBoard(page, { onCard: card => { current = card; card.comments[0].author = { kind: 'agent', label: 'Codex' }; } });
@@ -1022,12 +1053,14 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
         const relatedCard = related.find(item => path === `/api/v1/board/cards/${item.id}`);
         if (path === '/api/v1/board/cards/activity') {
             const { boardId, cardIds } = route.request().postDataJSON();
-            expect(boardId).toBe('brd_main');
+            expect(relatedCards ? ['brd_main', 'brd_sprint'] : ['brd_main']).toContain(boardId);
             expect(cardIds.length).toBeLessThanOrEqual(100);
-            return route.fulfill({ json: { cards: cardIds.includes(card.id) ? [{ id: card.id,
-                activeSessionId: card.activeSessionId, activeTabId: card.activeTabId,
-                hasActiveAutomation: Boolean(card.hasActiveAutomation),
-                hasActiveDesktopAgent: Boolean(card.hasActiveDesktopAgent) }] : [] } });
+            return route.fulfill({ json: { cards: [card, ...related]
+                .filter(item => item.boardId === boardId && cardIds.includes(item.id))
+                .map(item => ({ id: item.id,
+                    activeSessionId: item.activeSessionId, activeTabId: item.activeTabId,
+                    hasActiveAutomation: Boolean(item.hasActiveAutomation),
+                    hasActiveDesktopAgent: Boolean(item.hasActiveDesktopAgent) })) } });
         }
         if (relatedCard) {
             if (route.request().method() === 'PUT') Object.assign(relatedCard, route.request().postDataJSON());
@@ -1490,10 +1523,10 @@ for (const width of [1440, 390]) {
         expect(buttonBox.x).toBeGreaterThanOrEqual(0);
         await button.click();
         const panel = page.getByRole('dialog', { name: 'Agents and Automations', exact: true });
-        await expect(panel).toContainText('Claude → Codex; Codex → Claude');
-        await expect(panel).toContainText('Code review report');
+        await expect(panel).not.toContainText('Claude → Codex; Codex → Claude');
+        await expect(panel).not.toContainText('Code review report');
         await expect(panel).toContainText('Each step waits for the previous one to pass or be skipped');
-        await expect(panel).toContainText('Setup needed: Install/sign in to claude');
+        await expect(panel).not.toContainText('Setup needed: Install/sign in to claude');
         expect(await page.evaluate(() => window.__setupXss)).toBeUndefined();
         await expect(panel.getByRole('button', { name: 'Choose reviewer / edit mappings' })).toHaveCount(0);
         await expect(panel.getByRole('button', { name: 'Edit Code reviewer', exact: true })).toBeEnabled();
@@ -1608,7 +1641,7 @@ for (const width of [1440, 390]) {
         await page.screenshot({ path: testInfo.outputPath(`lane-agents-${width}.png`) });
         await expect(panel.getByRole('switch')).toHaveCount(0);
         await expect(panel.locator('[data-agent-description]')).toHaveCount(0);
-        await expect(panel.locator('[data-agent-id="12"] .board-lane-agent-description-preview')).toHaveText('Checks the changes');
+        await expect(panel.locator('.board-lane-agent-description-preview')).toHaveCount(0);
         await expect(panel.getByRole('button', { name: /Edit description|Choose reviewer/ })).toHaveCount(0);
         await panel.getByRole('button', { name: 'Add agent or automation', exact: true }).click();
         await expect(panel.locator('[data-agent-id]')).toHaveCount(0);
@@ -2057,6 +2090,58 @@ test('a running agent exposes Go to agent while keeping Save and the session ava
     expect(await page.evaluate(() => window.__agentTabs)).toEqual(['agent_tab']);
     expect(requests.filter(request => request.method === 'PUT' || request.path.endsWith('/launch'))).toHaveLength(0);
 });
+
+for (const width of [1440, 390]) {
+    test(`Agent workflow keeps manager and worker choices separate at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        const requests = await openBoard(page, { assignee: 'base:claude' });
+        await page.getByText('Description images', { exact: true }).click();
+        const editor = page.locator('[data-board-card-editor]');
+        await expect(editor.locator('[data-board-manager-fields]')).toBeHidden();
+        await editor.locator('#board-card-workflow').selectOption('agent');
+        await expect(editor.locator('[data-board-manager-fields]')).toBeVisible();
+        await expect(editor.locator('[data-board-assignee-label]')).toHaveText('Worker');
+        await expect(editor.locator('[data-board-start-work]')).toHaveText('Start Agent workflow');
+        await editor.locator('[data-board-save-card]').click();
+        await expect(page.getByText('Choose a manager agent for the Agent workflow.', { exact: true })).toBeVisible();
+        expect(requests.filter(request => request.method === 'PUT')).toHaveLength(0);
+        await expect.poll(() => editor.locator('#board-card-manager').evaluate(select => Boolean(select.tomselect))).toBe(true);
+        await editor.locator('#board-card-manager').evaluate(select => select.tomselect.setValue('base:codex'));
+        const manager = editor.locator('[data-board-manager-launch-options]');
+        const worker = editor.locator('[data-board-worker-launch-options]');
+        await manager.locator('[data-board-launch-model]').selectOption('gpt-6-astra');
+        await manager.locator('[data-board-launch-speed]').selectOption('ultrafast');
+        await manager.locator('[data-board-launch-effort]').selectOption('high');
+        await worker.locator('[data-board-launch-effort]').selectOption('low');
+        await worker.locator('[data-board-launch-yolo]').check();
+        await expect(manager.locator('[data-board-launch-yolo]')).not.toBeChecked();
+        await editor.locator('#board-card-workflow').selectOption('manual');
+        await expect(manager).toBeHidden();
+        await editor.locator('#board-card-workflow').selectOption('agent');
+        await expect(manager.locator('[data-board-launch-speed]')).toHaveValue('ultrafast');
+        await manager.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: testInfo.outputPath(`board-agent-workflow-${width}.png`) });
+        await editor.locator('[data-board-start-work]').click();
+        await expect(editor).toHaveCount(0);
+        await expect(page.locator('#app-content [data-view="board"]')).toBeVisible();
+        const saved = requests.find(request => request.method === 'PUT').body;
+        expect(saved.workflowMode).toBe('agent');
+        expect(saved.managerSelection).toBe('base:codex');
+        expect(saved.managerBaseLlmOptions).toEqual({ model: 'gpt-6-astra', effort: 'high', mode: '', yolo: false, speed: 'ultrafast' });
+        expect(saved.baseLlmOptions.effort).toBe('low');
+        expect(saved.baseLlmOptions.yolo).toBe(true);
+        expect(saved).not.toHaveProperty('assignee');
+        expect(requests.find(request => request.path.endsWith('/launch')).body).toEqual({ selection: 'base:codex', intent: 'manager' });
+        await expect(page.locator('.board-workflow-chip')).toHaveText('Agent');
+        await expect(page.locator('.board-manager-chip')).toContainText('Manager · Codex');
+        await page.getByText('Description images', { exact: true }).click();
+        await expect(page.locator('#board-card-workflow')).toHaveValue('agent');
+        await expect(page.locator('#board-card-manager')).toHaveValue('base:codex');
+        await expect(page.locator('#board-card-assignee')).toHaveValue('base:claude');
+        await expect(page.locator('[data-board-manager-launch-options] [data-board-launch-speed]')).toHaveValue('ultrafast');
+        await expect(page.locator('[data-board-worker-launch-options] [data-board-launch-yolo]')).toBeChecked();
+    });
+}
 
 test('Start work preserves the board and stores base launch options including YOLO', async ({ page }) => {
     const requests = await openBoard(page, { assignee: 'base:codex' });
@@ -2852,12 +2937,13 @@ for (const width of [1440, 390]) {
         await expect(panel).toHaveCount(0);
     });
 
-    test(`failed lane steps can be rerun safely at ${width}px`, async ({ page }, testInfo) => {
+    for (const initialState of ['Failed', 'Awaiting result']) test(`${initialState} lane steps can be retried safely at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 950 });
         await page.clock.install();
         const { settings, writes } = await openLaneAgentsBoard(page);
-        const step = { jobId: 12, eventKey: 'failed-entry', status: 'Failed', stepStatus: 'Failed',
-            canSkip: true, canRerun: true, reason: 'Agent process failed.' };
+        const step = { jobId: 12, eventKey: 'retry-entry', status: initialState === 'Failed' ? 'Failed' : 'Succeeded', stepStatus: initialState,
+            canSkip: true, canRerun: true, reason: initialState === 'Failed' ? 'Agent process failed.'
+                : 'The agent finished without an explicit pass/fail decision. Later steps remain waiting.' };
         settings.lane_2.workflows = [{ cardId: 'card_test', cardLabel: 'VIBE-123 · Example change', steps: [step] }];
         let holdPoll = false, heldPoll = false, releasePoll;
         await page.route('**/api/v1/board/columns/lane_2/automation/running', async route => {
@@ -2879,8 +2965,9 @@ for (const width of [1440, 390]) {
         });
         await page.getByRole('button', { name: 'Agents and Automations on entry to Review', exact: true }).click();
         const panel = page.getByRole('dialog', { name: 'Agents and Automations', exact: true });
-        const rerun = panel.getByRole('button', { name: 'Re-run', exact: true });
+        const rerun = panel.getByRole('button', { name: 'Retry', exact: true });
         await expect(rerun).toBeVisible();
+        await expect(panel.locator('[data-lane-step-id="12"]').getByRole('button', { name: 'Skip', exact: true })).toBeVisible();
         await rerun.focus();
         await page.clock.fastForward(10100);
         await expect(rerun).toBeFocused();
@@ -2902,7 +2989,7 @@ for (const width of [1440, 390]) {
         await page.clock.fastForward(100);
         await expect(rerun).toHaveCount(0);
         await expect(panel.locator('[data-lane-step-id="12"]')).toContainText('Queued');
-        expect(requests).toEqual([{ jobId: 12, eventKey: 'failed-entry' }, { jobId: 12, eventKey: 'failed-entry' }]);
+        expect(requests).toEqual([{ jobId: 12, eventKey: 'retry-entry' }, { jobId: 12, eventKey: 'retry-entry' }]);
         expect(writes).toEqual([]);
         for (const state of ['Reviewing', 'Running']) {
             Object.assign(step, { status: 'Running', stepStatus: state, reason: 'Automation retry running.' });

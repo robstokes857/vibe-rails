@@ -21,8 +21,19 @@ using Xunit;
 namespace Tests.Routes;
 
 [Collection("ProcessEnvIsolation")]
-public sealed class EnvironmentRoutesDeletionTests
+public sealed class EnvironmentRoutesDeletionTests : IDisposable
 {
+    private readonly string _originalRoot = VibeRails.Utils.ParserConfigs.GetRootPath();
+    private readonly bool _originalIsInGit = VibeRails.Utils.ParserConfigs.GetIsInGit();
+    private readonly string? _originalBranch = VibeRails.Utils.ParserConfigs.GetGitBranch();
+    private readonly string? _originalRemote = VibeRails.Utils.ParserConfigs.GetGitRemoteUrl();
+
+    public EnvironmentRoutesDeletionTests() =>
+        VibeRails.Utils.ParserConfigs.SetGitState(AppContext.BaseDirectory, isInGit: true);
+
+    public void Dispose() =>
+        VibeRails.Utils.ParserConfigs.SetGitState(_originalRoot, _originalIsInGit, _originalBranch, _originalRemote);
+
     [Fact]
     public async Task UpdateEnvironment_BlankPromptIsRejectedWhenJobReferencesWorker()
     {
@@ -397,6 +408,7 @@ public sealed class EnvironmentRoutesDeletionTests
         Id = id,
         CustomName = "review",
         LLM = LLM.Codex,
+        ProjectPath = ParserConfigs.GetRootPath(),
         Path = path
     };
 

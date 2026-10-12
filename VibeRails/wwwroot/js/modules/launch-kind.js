@@ -42,11 +42,10 @@ export function workerActionOf(job) {
 }
 
 /**
- * A setup saved before setups belonged to a project (2026-08-08) has no projectPath, and the
- * server lists it in every project. Only an explicit empty value counts: an older API that
- * omits the field changes nothing.
+ * Legacy setups without a project stay stored but do not belong in any project's catalog.
+ * An older API that omits the field still owns filtering; only an explicit empty value counts.
  */
-export function isSharedWithEveryProject(environment) {
+function isUnscoped(environment) {
     const value = environment?.projectPath;
     return value === null || (typeof value === 'string' && value.trim() === '');
 }
@@ -65,11 +64,10 @@ export function jobLaunchKind(job) {
  * never silently hidden. An environment without a message that a Job references (legacy data;
  * the server no longer allows saving that) is listed as an Agent for the same reason.
  *
- * `shared` marks an entry every project sees (no projectPath) that nothing here runs; the Agents
- * page keeps those behind a collapsed group so a project's own list stays its own.
+ * The server filters by project. Also ignore explicitly unscoped setups from stale responses.
  */
 export function classifyCatalog(environments = [], jobs = []) {
-    const environmentList = Array.isArray(environments) ? environments : [];
+    const environmentList = Array.isArray(environments) ? environments.filter(environment => !isUnscoped(environment)) : [];
     const jobList = Array.isArray(jobs) ? jobs : [];
     const byEnvironmentId = new Map();
     const unresolved = [];
@@ -95,13 +93,13 @@ export function classifyCatalog(environments = [], jobs = []) {
     for (const environment of environmentList) {
         const referencing = byEnvironmentId.get(Number(environment?.id)) || [];
         if (hasStartingMessage(environment) || referencing.length > 0) {
-            agents.push({ environment, jobs: referencing, shared: referencing.length === 0 && isSharedWithEveryProject(environment) });
+            agents.push({ environment, jobs: referencing });
         } else {
             quickLaunches.push(environment);
         }
     }
     for (const job of unresolved) {
-        agents.push({ environment: null, jobs: [job], shared: false });
+        agents.push({ environment: null, jobs: [job] });
     }
 
     return { agents, automations, quickLaunches };

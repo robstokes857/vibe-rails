@@ -13,15 +13,20 @@ public sealed partial class BoardReviewsTests
     [InlineData("failed", JobRunStatus.Failed)]
     [InlineData("failed", JobRunStatus.Succeeded)]
     [InlineData("passed", JobRunStatus.Failed)]
-    public async Task LaneWorkerRerunRequiresFreshVerdictAndCannotReportOnReentry(string verdict, JobRunStatus outcome)
+    [InlineData(null, JobRunStatus.Succeeded)]
+    public async Task LaneWorkerRerunRequiresFreshVerdictAndCannotReportOnReentry(string? verdict, JobRunStatus outcome)
     {
         var flow = await Workflow();
         var workflow = new BoardWorkflowService(store, reviews);
         // Exercise both an explicit rejection and a reported pass followed by a process failure.
-        await store.ReportLaneStepAsync(repo, card.Id, new(flow.EventKey, flow.ReviewJob,
-            verdict == "passed" ? "Passed" : "Failed", "Original result", flow.RunId),
-            BoardAuthor.Agent("Codex", "codex", flow.Session), Ct);
+        if (verdict is not null)
+            await store.ReportLaneStepAsync(repo, card.Id, new(flow.EventKey, flow.ReviewJob,
+                verdict == "passed" ? "Passed" : "Failed", "Original result", flow.RunId),
+                BoardAuthor.Agent("Codex", "codex", flow.Session), Ct);
         await jobs.CompleteRunAsync(flow.RunId, outcome, outcome == JobRunStatus.Succeeded ? 0 : 1, "Original process ended", Ct);
+        var stopped = (await store.GetLaneAutomationStatusesAsync(repo, card.Id, Ct))[0];
+        Assert.True(stopped.CanRerun);
+        if (verdict is null) Assert.Equal("Awaiting result", stopped.StepStatus);
         var source = (await jobs.GetRunAsync(flow.RunId, Ct))!;
         var lane = (await store.FindCardAsync(repo, card.Id, Ct))!.ColumnId;
         var entry = new BoardLaneAutomationEvent(card.Id, flow.ReviewJob, flow.EventKey, repo,
@@ -36,6 +41,7 @@ public sealed partial class BoardReviewsTests
         Assert.Equal("Queued", queued.StepStatus);
         Assert.True(queued.RequiresVerdict);
         Assert.False(queued.CanRerun);
+        Assert.Null(await jobs.EnqueueLaneRerunAsync(entry, flow.RunId, Ct));
         var session = await LinkWorkflowRun(retry);
         var author = BoardAuthor.Agent("Codex", "codex", session);
         await workflow.ReportAsync(repo, card.Id, repo, author, "reviewing", "Trying again", null, null, Ct);

@@ -1,5 +1,14 @@
 # Board persistence
 
+`board-agent-workflow/1` adds nullable `BoardCards.WorkflowMode`, `ManagerSelection` and
+`ManagerOptionsJson` without converting older cards. NULL workflow reads as `manual`.
+Agent workflow manager settings are independent of worker `Assignee`/`BaseLlmOptions`;
+partial updates retain them and clearing the manager requires switching to manual in the
+same transaction. Settings history is local-only (`RemoteSeq=0`), preserving the hosted
+sync field contract. Existing session Origin text distinguishes `agent_manager` and
+`agent_worker` without changing session tables. Lightweight activity reads include workflow
+mode; older writers continue to omit and preserve the new columns.
+
 `board-desktop-activity/1` adds leased desktop MCP activity behind `IBoardStore`, separately
 from terminal sessions. Client identity comes from the MCP host. Starts validate current
 project/card membership; renewal never revives expired or ended rows. Closing/deleting a card

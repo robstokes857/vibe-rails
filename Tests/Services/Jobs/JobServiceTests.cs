@@ -575,6 +575,7 @@ public sealed class JobServiceTests : IDisposable
                     Id = id,
                     LLM = llm,
                     CustomName = "nightly",
+                    ProjectPath = _repoRoot,
                     CustomArgs = "",
                     CustomPrompt = customPrompt
                 }

@@ -58,6 +58,7 @@ npx playwright test --config playwright.quality.config.js
 This starts a temporary local static server and runs `code-quality-ux.spec.js` against the real
 frontend, combined code report viewer and shared agent picker, with mocked API responses and launch dispatch.
 It needs no database or installed LLM CLI and does not change the standard suite's configuration.
+Set `VIBERAILS_QUALITY_TEST_PORT` to use another local port if the default 18763 is occupied.
 The tests cover compact actions, file-to-map selection, visible domain links and large overviews,
 saved metrics, radar keyboard access, themes/reduced motion, independent scrolling, narrow layouts,
 failure/empty states, request cancellation and cleanup, exclusion/restore flow, agent choice,

@@ -21,6 +21,24 @@ test('attention comments render in red with an escaped body, ordinary comments s
     assert.doesNotMatch(controller.cardLogCommentHtml({ ...entry, isAttention: false }), /is-attention|Needs your attention/);
 });
 
+test('organization can recheck drafts while its busy flag still blocks other card actions', () => {
+    const h = harness();
+    h.editor._boardFormBaseline = h.controller.readCardForm(h.editor);
+    h.editor._boardOrganizing = true;
+    const recheck = () => h.controller.cardHasDraft(h.editor, { ignoreOrganizing: true });
+
+    assert.equal(h.controller.cardHasDraft(h.editor), true);
+    assert.equal(recheck(), false);
+    h.fields['#board-card-title'].value = 'Edited during confirmation';
+    assert.equal(recheck(), true);
+    h.fields['#board-card-title'].value = h.editor._boardFormBaseline.title;
+    h.fields['[data-board-composer="comment"] [data-board-composer-input]'] = { value: 'Unposted comment' };
+    assert.equal(recheck(), true);
+    h.fields['[data-board-composer="comment"] [data-board-composer-input]'].value = '';
+    h.editor._boardUploading = true;
+    assert.equal(recheck(), true);
+});
+
 function harness() {
     const calls = [];
     const toasts = [];

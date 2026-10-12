@@ -1578,7 +1578,7 @@ test('The Agents page lists saved setups with a message, one card per Automation
         { id: 1, name: 'code review', cli: 'codex', customPrompt: 'Review the branch.' },
         { id: 2, name: 'Fast Opus', cli: 'claude', customPrompt: '' },
         { id: 3, name: 'Shared reviewer', cli: 'claude', customPrompt: 'Review.', automationWorker: true },
-        // Saved before setups belonged to a project: the server lists it everywhere.
+        // Even a stale response must not reintroduce an unscoped setup.
         { id: 4, name: 'Old helper', cli: 'codex', customPrompt: 'Help with whatever is open.', projectPath: null }
     ];
     controller.jobs = [
@@ -1603,14 +1603,7 @@ test('The Agents page lists saved setups with a message, one card per Automation
     assert.match(html, /aria-checked="false"[^>]*data-job-action="toggle" data-job-id="11"/);
     assert.match(html, /<span>Disabled agents<\/span><span class="jobs-count">1<\/span>/);
     assert.match(html, /data-job-action="delete-agent" data-job-id="10" data-env-id="3"/);
-    // A setup with no project of its own sits behind the collapsed shared group, after the
-    // project's own list, and still gets a full card there.
-    assert.match(html, /<details class="jobs-collapsible-list" data-shared-agents>/);
-    assert.match(html, /<span>Shared with every project<\/span><span class="jobs-count">1<\/span>/);
-    assert.match(html, /Saved before setups belonged to a project/);
-    assert.ok(html.indexOf('<h3>Old helper</h3>') > html.indexOf('data-shared-agents'));
-    assert.ok(html.indexOf('<h3>Weekly</h3>') < html.indexOf('data-shared-agents'));
-    assert.match(html, /data-job-action="run-environment" data-env-id="4"/);
+    assert.doesNotMatch(html, /Old helper|data-shared-agents|Shared with every project|data-env-id="4"/);
 
     controller.mode = 'automations';
     controller._lastJobsListHtml = null;
@@ -1793,6 +1786,35 @@ test('A failed standalone Agent toggle leaves no Job and can be retried', async 
     app.apiCall = async (url, method, body) => ({ id: 7, ...body });
     await controller.toggleStandaloneAgent(42, null);
     assert.equal(controller.jobs[0].enabled, false);
+});
+
+test('The standalone Agent Delete button confirms and deletes its setup without a job id', async () => {
+    const app = createApp();
+    app.environmentController = { refreshEnvironments: async () => {} };
+    const controller = new JobController(app);
+    controller.refreshAll = async () => {};
+    controller.environments = [{ id: 42, name: 'Review helper', cli: 'codex', customPrompt: 'Review.' }];
+    let onClick;
+    controller.root = { addEventListener: (_, handler) => { onClick = handler; } };
+    controller.bindPageActions();
+    const button = {
+        dataset: { jobAction: 'delete-agent', jobId: '', envId: '42' },
+        closest: () => null
+    };
+    const event = { target: { closest: () => button } };
+    const confirmations = [];
+    let confirmed = false;
+    controller.confirm = async options => { confirmations.push(options); return confirmed; };
+
+    await onClick(event);
+    assert.equal(confirmations.length, 1);
+    assert.equal(confirmations[0].title, 'Delete “Review helper”?');
+    assert.deepEqual(app.calls, []);
+
+    confirmed = true;
+    await onClick(event);
+    assert.deepEqual(app.calls.map(call => [call.method, call.url]),
+        [['DELETE', '/api/v1/environments/Review%20helper']]);
 });
 
 test('Deleting an Agent removes its Automation, then its setup only when nothing else uses it', async () => {

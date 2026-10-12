@@ -5,6 +5,36 @@ namespace VibeRails.Services.Board;
 public sealed partial class BoardStore
 {
     /// <inheritdoc />
+    public async Task<bool> ConfirmSessionLaunchOriginAsync(string projectPath, string cardId, string sessionId,
+        string origin, CancellationToken cancellationToken = default)
+    {
+        if (origin is not (BoardSessionRecord.LaunchOrigin or BoardSessionRecord.ManagerOrigin
+            or BoardSessionRecord.WorkerOrigin or BoardSessionRecord.PlanningWorkerOrigin or "chat" or "planning" or "code_review"))
+            throw new BoardValidationException("Choose an explicit launch origin.");
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = connection.BeginTransaction(System.Data.IsolationLevel.Serializable);
+        var card = await ReadCardAsync(connection, transaction, NormalizeProjectPath(projectPath), cardId, cancellationToken);
+        if (card is null) return false;
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        // Only the current launch handshake may refine an attachment's unspecified provenance.
+        // Keep timestamps, names and all other link fields; never relabel another explicit launch.
+        command.CommandText = """
+            UPDATE BoardCardSessions SET Origin = $origin
+            WHERE CardId = $card AND SessionId = $session AND Origin IN ('mcp', 'manual', $origin);
+            UPDATE BoardAdditionalCardSessions SET Origin = $origin
+            WHERE CardId = $card AND SessionId = $session AND Origin IN ('mcp', 'manual', $origin);
+            """;
+        command.Parameters.AddWithValue("$card", card.Id);
+        command.Parameters.AddWithValue("$session", sessionId);
+        command.Parameters.AddWithValue("$origin", origin);
+        if (await command.ExecuteNonQueryAsync(cancellationToken) == 0) return false;
+        await TouchCardAsync(connection, transaction, card.Id, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return true;
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<BoardSessionCard>> GetSessionCardsAsync(IReadOnlyList<string> sessionIds,
         CancellationToken cancellationToken = default)
     {

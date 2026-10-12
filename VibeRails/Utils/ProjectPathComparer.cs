@@ -41,12 +41,11 @@ public static class ProjectPathComparer
 
     /// <summary>
     /// True when an environment scoped to <paramref name="environmentProjectPath"/> should be
-    /// visible in <paramref name="currentProjectPath"/>. A null scope means the environment
-    /// predates project scoping and stays visible everywhere — the no-backfill guarantee.
+    /// visible in <paramref name="currentProjectPath"/>. Saved setups belong to one project;
+    /// legacy rows without a project remain stored but are not visible or launchable.
     /// </summary>
     public static bool IsVisibleIn(string? environmentProjectPath, string? currentProjectPath)
-        => string.IsNullOrWhiteSpace(environmentProjectPath)
-            || Matches(environmentProjectPath, currentProjectPath);
+        => Matches(environmentProjectPath, currentProjectPath);
 
     private static string Normalize(string path)
     {

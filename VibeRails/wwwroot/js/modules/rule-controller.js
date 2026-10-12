@@ -515,6 +515,7 @@ export class RuleController {
         });
         this.app.bindAction(root, '[data-action="toggle-code-analyzer-log"]', () => this.toggleCodeAnalyzerLog());
         this.app.bindAction(root, '[data-action="toggle-map-coverage"]', () => this.codeReportViewer?.toggleDiagnostics());
+        this.app.bindAction(root, '[data-action="toggle-scan-guide"]', () => this.toggleScanGuide());
     }
 
     setHealthDetailsExpanded(target, expanded) {
@@ -534,6 +535,17 @@ export class RuleController {
             log.open = true;
             log.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
         }
+    }
+
+    // The guide opens under the Quality bar; the viewer counts it as chrome below the map and
+    // gives the map the rest, the same as the scan log.
+    toggleScanGuide() {
+        const guide = this.query('[data-code-analyzer-guide]');
+        if (!guide) return;
+        const show = guide.hidden;
+        guide.hidden = !show;
+        this.query('[data-action="toggle-scan-guide"]')?.setAttribute('aria-expanded', String(show));
+        if (show) guide.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
     }
 
     renderRuleInventorySummary() {

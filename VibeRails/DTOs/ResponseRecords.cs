@@ -264,7 +264,7 @@ namespace VibeRails.DTOs
         string Origin,
         DateTime CreatedAt,
         bool Active,
-        bool IsAutomation = false, bool IsReview = false);
+        bool IsAutomation = false, bool IsReview = false, bool IsNonCoding = false);
 
     // LinkedAt is when the commit was put on the card; CommittedAt is the commit's own date. "Since"
     // views filter on LinkedAt: linking an old commit during a session is that session's activity.
@@ -292,7 +292,8 @@ namespace VibeRails.DTOs
         bool Flagged = false,
         bool HasActiveAutomation = false, string? DisplayId = null,
         bool AgentMade = false, bool HasWaitingAutomation = false,
-        string? AgentMadeBy = null, string? AgentMadeSessionId = null, string? JiraIssueKey = null)
+        string? AgentMadeBy = null, string? AgentMadeSessionId = null, string? JiraIssueKey = null,
+        string WorkflowMode = "manual", string? ManagerSelection = null, BaseLlmOptions? ManagerBaseLlmOptions = null)
     {
         /// <summary>A desktop MCP client has a current activity lease; this does not identify a terminal tab.</summary>
         public bool HasActiveDesktopAgent { get; init; }
@@ -352,7 +353,8 @@ namespace VibeRails.DTOs
         bool Flagged = false,
         bool HasActiveAutomation = false, string? DisplayId = null,
         bool AgentMade = false, bool HasWaitingAutomation = false,
-        string? AgentMadeBy = null, string? AgentMadeSessionId = null, string? JiraIssueKey = null)
+        string? AgentMadeBy = null, string? AgentMadeSessionId = null, string? JiraIssueKey = null,
+        string WorkflowMode = "manual", string? ManagerSelection = null, BaseLlmOptions? ManagerBaseLlmOptions = null)
     {
         /// <summary>A desktop MCP client has a current activity lease, independently of terminal activity.</summary>
         public bool HasActiveDesktopAgent { get; init; }
@@ -377,7 +379,8 @@ namespace VibeRails.DTOs
         // Which board's left-most lane takes the card when ColumnId is omitted; null = the first board.
         string? BoardId = null,
         bool? Flagged = null, string? DisplayId = null, List<string>? LinkedCardIds = null,
-        bool? AgentMade = null, string? AgentMadeBy = null, string? AgentMadeSessionId = null);
+        bool? AgentMade = null, string? AgentMadeBy = null, string? AgentMadeSessionId = null,
+        string? WorkflowMode = null, string? ManagerSelection = null, BaseLlmOptions? ManagerBaseLlmOptions = null);
     public record UpdateBoardCardRequest(
         string? Title = null,
         string? ColumnId = null,
@@ -393,7 +396,9 @@ namespace VibeRails.DTOs
         // field of this request. Mutually exclusive with Description.
         string? DescriptionAppend = null,
         string? Type = null,
-        bool? Flagged = null, string? DisplayId = null, string? FlagReason = null);
+        bool? Flagged = null, string? DisplayId = null, string? FlagReason = null,
+        string? WorkflowMode = null, string? ManagerSelection = null, BaseLlmOptions? ManagerBaseLlmOptions = null,
+        bool ClearManagerBaseLlmOptions = false);
 
     // SkipAutomations (VB-34): move without recording a lane entry for the destination lane's
     // Automations. Per request, never sticky; the skip is recorded as a comment by the user.
@@ -406,7 +411,7 @@ namespace VibeRails.DTOs
     public record LinkBoardCommitRequest(string? Sha = null);
     public record AddBoardSessionRequest(string? Id = null, string? DisplayName = null);
     public record UpdateBoardSessionRequest(string? DisplayName = null);
-    public record LaunchBoardCardRequest(string? Selection = null, string? Intent = null, ReviewLaunchRequest? Review = null, string? Question = null);
+    public record LaunchBoardCardRequest(string? Selection = null, string? Intent = null, ReviewLaunchRequest? Review = null, string? Question = null, string? Task = null);
     public record ReviewLaunchRequest(ReviewerRouting? Routing = null, ReviewerTarget? Override = null);
     public record LaunchBoardCardResponse(
         string TabId,

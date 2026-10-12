@@ -15,7 +15,7 @@ using Xunit;
 
 namespace Tests.Services.Board;
 
-public sealed class SwitchReviewerTests : IAsyncLifetime
+public sealed partial class SwitchReviewerTests : IAsyncLifetime
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "switch-reviewer-" + Guid.NewGuid().ToString("N"));
     private string project = null!, state = null!;
@@ -133,6 +133,8 @@ public sealed class SwitchReviewerTests : IAsyncLifetime
     [InlineData("chat")]
     [InlineData("planning")]
     [InlineData("code_review")]
+    [InlineData("agent_manager")]
+    [InlineData("agent_worker_planning")]
     public async Task DiscussionPlanningAndReviewsCannotBeDeclaredAsCoder_EvenOnAdditionalCards(string intent)
     {
         var session = await Session("claude", intent);
@@ -142,11 +144,13 @@ public sealed class SwitchReviewerTests : IAsyncLifetime
             new("session", session, "Claimed coding"), Ct));
     }
 
-    [Fact]
-    public async Task HistoricalChatContextExcludesOldLaunchOriginWithoutRewritingIt()
+    [Theory]
+    [InlineData("chat")]
+    [InlineData("manager")]
+    public async Task HistoricalNonCodingContextExcludesOldLaunchOriginWithoutRewritingIt(string intent)
     {
         var session = await Session("claude", "launch");
-        await boards.RecordContextSampleAsync(project, card.Id, new(session, "chat", "claude", "base:claude", 0, 0, 0, 0, "{}"), Ct);
+        await boards.RecordContextSampleAsync(project, card.Id, new(session, intent, "claude", "base:claude", 0, 0, 0, 0, "{}"), Ct);
         await Assert.ThrowsAsync<BoardValidationException>(() => routing.SaveSettingsAsync(project, card.Id, new("session", session, "Coding"), Ct));
         Assert.Equal("launch", (await boards.GetAgentSessionsAsync(project, card.Id, session, Ct)).Single().Session.Origin);
     }

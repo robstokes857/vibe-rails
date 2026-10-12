@@ -162,6 +162,17 @@ only the reviewed Board tools and own-session completion tool in `ToolNames`, us
 MCP tools retain their normal approval policy. Never add a server-wide grant: future tools must
 be reviewed individually before they enter this allowlist.
 
+Board cards may select the Agent workflow with an independent saved manager. Starting work
+launches that manager with its own base options or saved environment. It delegates through the
+existing `start_board_agent` tool using `intent=worker`, optional worker `selection`, and bounded
+`task` text; no assignment is rewritten. Linked `agent_manager` and `agent_worker` origins allow
+one live manager and one live worker together. Worker prompts hand results back without moving
+the card; the manager stays active through required workers, lane Automations and review reports
+until it closes the card or records a blocker requiring the user. The manager uses ordinary Board
+tools and its existing PTY; it has no background host or restart watchdog. Saved code review
+environments can be workers and cannot silently become the selected manager. All launches retain
+argv-only prompts and the existing narrow tool grants.
+
 | Provider | Session-only Board grants and evidence |
 |---|---|
 | Codex | `--config mcp_servers.viberails-mcp.tools.<tool>.approval_mode="approve"` per listed Board tool; [official MCP reference](https://developers.openai.com/codex/mcp/). |

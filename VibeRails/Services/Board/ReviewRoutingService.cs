@@ -77,9 +77,9 @@ public sealed class ReviewRoutingService(IBoardStore boards, IRepository reposit
         var linked = (await boards.GetAgentSessionsAsync(project, cardId, settings.SourceSessionId, ct)).SingleOrDefault()?.Session;
         if (linked is null) throw new BoardValidationException("The coding session is no longer linked to this card. Choose the source again.");
         var reviews = await boards.GetReviewSessionIdsAsync(project, [linked.SessionId], ct);
-        if (linked.Origin is "chat" or "planning" or "code_review" || reviews.Contains(linked.SessionId)
+        if (linked.Origin is "chat" or "planning" or "code_review" or BoardSessionRecord.ManagerOrigin or BoardSessionRecord.PlanningWorkerOrigin || reviews.Contains(linked.SessionId)
             || await boards.IsNonCodingSessionAsync(project, linked.SessionId, ct))
-            throw new BoardValidationException("Discussion, planning and review sessions cannot be selected as coding evidence.");
+            throw new BoardValidationException("Manager, discussion, planning and review sessions cannot be selected as coding evidence.");
         var session = await repository.GetSessionByIdAsync(linked.SessionId, ct);
         var provider = LlmParser.ParseValue(session?.Cli ?? linked.Cli);
         if (provider is LLM.NotSet or LLM.Shell)

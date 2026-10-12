@@ -333,7 +333,7 @@ public sealed class EnvironmentLaunchServiceTests
     }
 
     [Fact]
-    public async Task LaunchAsync_AllowsAnEnvironmentThatPredatesProjectScoping()
+    public async Task LaunchAsync_RejectsAnEnvironmentThatPredatesProjectScoping()
     {
         var environment = Environment(
             id: 8,
@@ -341,7 +341,7 @@ public sealed class EnvironmentLaunchServiceTests
             customArgs: "",
             prompt: "",
             lastUsedUtc: DateTime.UtcNow);
-        // Null scope is the no-backfill state — it must keep working in every project.
+        // Retained legacy data does not grant permission to launch in an arbitrary project.
         environment.ProjectPath = null;
 
         var repository = new Mock<IRepository>();
@@ -368,7 +368,10 @@ public sealed class EnvironmentLaunchServiceTests
             environmentId: 8,
             cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.True(result.Success);
+        Assert.False(result.Success);
+        Assert.Contains("was not found", result.Message, StringComparison.OrdinalIgnoreCase);
+        launcher.VerifyNoOtherCalls();
+        repository.Verify(r => r.TouchEnvironmentLastUsedAsync(8, It.IsAny<CancellationToken>()), Times.Never);
     }
 
     private static LLM_Environment Environment(

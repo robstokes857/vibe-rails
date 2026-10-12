@@ -180,7 +180,7 @@ public static class EnvironmentRoutes
                 ReviewerRouting = request.ReviewerRouting?.Mode == "fixed" ? null : request.ReviewerRouting,
                 WorkspaceMode = workspaceMode,
                 // Every environment created from now on belongs to the project it was created
-                // in. Existing rows keep a null scope and stay visible everywhere.
+                // in. Legacy rows keep their null scope and are not listed or launched.
                 ProjectPath = projectPath,
                 CreatedUTC = DateTime.UtcNow,
                 LastUsedUTC = DateTime.UtcNow
@@ -408,8 +408,7 @@ public static class EnvironmentRoutes
     /// 403 keeps the two cases indistinguishable: whether a name exists elsewhere is itself
     /// information this project has no business learning.
     ///
-    /// A null scope is an environment that predates project scoping and stays visible
-    /// everywhere — the no-backfill guarantee.
+    /// A null or blank legacy scope stays stored but is not available in any project.
     /// </summary>
     private static bool IsVisibleHere(LLM_Environment environment) =>
         ProjectPathComparer.IsVisibleIn(environment.ProjectPath, ParserConfigs.GetRootPath());

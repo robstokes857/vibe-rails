@@ -1,5 +1,46 @@
 # Vibe Board architecture and review
 
+## Agent workflow (VIBE-52, 2026-10-11)
+
+The card editor offers Manual (the existing behavior) and Agent. Agent cards save a required
+`managerSelection` and independent `managerBaseLlmOptions`; `assignee`/`baseLlmOptions` remain
+the default worker. The shared CLI normalization applies to both, including saved-environment
+scope and base model/effort/speed validation. Changing either selection clears only its own
+old overrides; ordinary edits preserve both.
+
+`BoardLaunchService` promotes default work intent on Agent cards to manager intent. Managers
+launch in ordinary PTYs with exact Board tool grants and the saved manager configuration.
+`start_board_agent` accepts worker/review intent and a picker selection without reassigning the
+card; worker task data is limited to 4,000 characters and uses the existing prompt sanitization.
+Linked session origins distinguish `agent_manager` and `agent_worker`. The root-local launch
+gate allows one of each together, while direct Agent-card reviews count as workers. Manual
+cards retain their existing work/review behavior. List/detail/page/activity project the manager
+as the Agent card's active session, regardless of a newer worker link.
+
+Launch prompts separate Manual execution, Agent orchestration and delegated worker roles.
+Manager instructions come before card data and require implementation, fixes and testing to run
+in a separate Board worker session, including small tasks. They identify the saved default worker
+and give a per-card `start_board_agent` example with `intent=worker`; failed launches never permit
+self-implementation. Manual launches retain their original prompts.
+Manager guidance reads current card, lane Automations, handoffs and reviews; delegates a focused
+step; polls its result; requests repairs and fresh required review evidence; and chooses lane
+movement under the user's Board context. Delegated workers finish their own task, report and exit.
+`CliLoop` resolves a lane Automation's originating card behind `IBoardStore` at launch and uses
+the same manager-owned movement guidance on Agent cards. Ordered lane steps still require their
+explicit reports and retain their ordinary queue and settling delay.
+
+This is a resident CLI manager while the root backend is open. It stops after closure, a switch
+to Manual, or an unresolved owner blocker. Start Agent workflow can start a fresh manager that
+recovers durable handoffs and existing runs after interruption. It is not an event-driven host;
+there is no automatic restart, daemon, deterministic lane movement or application-enforced
+owner approval gate. Existing Board instructions govern approvals, merge and deployment.
+
+`board-agent-workflow/1` adds nullable WorkflowMode/ManagerSelection/ManagerOptionsJson to
+BoardCards. NULL reads as Manual; older versions ignore the columns and preserve settings.
+There is no stored-data conversion or backfill. Manager launch configuration and local History
+receipts do not enter hosted sync; a hosted-only editor cannot configure this local workflow.
+The ordinary authenticated root API remains the launch boundary.
+
 ## Card editor and local refresh (VIBE-44)
 
 Previous work preserves the card-recall handoff and file entry points in a collapsed sidebar
@@ -1177,7 +1218,15 @@ seeding consumes this default in VIBE-23; this change does not enable or replace
 
 Coding attribution is an explicit per-card declaration through `BoardReviewSettings`: unknown,
 mixed, human/external, or a linked coding session with a description of its contribution. Assignment,
-link order and previous reviewers are never attribution. Known chat/planning/review links and
+link order and previous reviewers are never attribution. Agent managers (`agent_manager`) and
+planning-only workers (`agent_worker_planning`) are not coding sources. New worker launches
+retain both worker role and planning purpose in their origin, independently of best-effort context
+measurement; ordinary coding workers remain `agent_worker`. Worker reviews retain their canonical
+review records. A current launch confirms its origin if an early MCP/manual attachment won the
+link race, preserving the link's other fields and refusing to replace another explicit launch origin.
+This confirmation does not change ordinary duplicate-link behavior or backfill historical sessions.
+Session DTOs expose batched project-scoped `isNonCoding` classification so additional-card links
+cannot hide non-coding provenance from the source picker. No purpose is inferred from current card settings. Known chat/planning/review links and
 historical context samples exclude those sessions even when attached to another card. Each card
 in a multi-card session needs its own declaration. Unknown or unmapped sources visibly use fallback.
 
@@ -1343,9 +1392,9 @@ so concurrent roots cannot insert a skipped step after its successor has started
 only read Board state; Board receipts are still committed separately after the run transaction.
 
 The lane popup shows each card's status beneath its Automation, green completion arrows and
-Skip/Stop and skip. Failed current steps also offer **Re-run** after their process stops.
+Skip/Stop and skip. Failed current steps and steps **Awaiting result** offer **Retry** after their process stops.
 `POST /cards/{card}/automations/rerun` validates the exact Job/event and project, then rechecks
-the current failed attempt under the Job writer lock. It retains the original run/action/reviewer
+the current eligible attempt under the Job writer lock. It retains the original run/action/reviewer
 snapshot and opens a new linked terminal tab; failures before any run was created use the current
 definition. The immutable manual trigger retains the lane entry. A new Worker attempt needs its
 own verdict; prior failed reports cannot hide it or release successors. Prior runs and reports stay

@@ -1,6 +1,6 @@
 import { laneStepMarkup, laneArrowMarkup } from './board-lane-workflow.js';
 import { escapeHtml } from './utils.js';
-import { workerIdentity, laneReviewerSummary } from './board-lane-agent-display.js';
+import { workerIdentity } from './board-lane-agent-display.js';
 import { agentPurposeLabel } from './agent-purpose.js';
 
 export const selectedLaneJobIds = settings => settings.jobIds ?? (settings.jobId ? [settings.jobId] : []);
@@ -32,10 +32,6 @@ export function laneAgentListMarkup(settings, jobs, environments) {
                 <button type="button" class="board-lane-agents-action" data-agent-action="remove" aria-label="Remove ${escapeHtml(name)} from this lane" title="Remove from this lane"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>
             </div>
             <div data-lane-step-id="${Number(id)}" aria-live="polite">${laneStepMarkup(Number(id), settings.workflows || [])}</div>
-            ${environment?.purpose === 'code_review' ? `<p class="board-lane-agent-reviewer">${escapeHtml(laneReviewerSummary(environment, environments))}</p>
-                <p class="small">Output: configured Checks, a Code review report and a card handoff.</p>
-                ${option?.setup ? `<p class="small" role="status">${escapeHtml(option.setup)}</p>` : ''}` : ''}
-            <p class="board-lane-agent-description-preview">${escapeHtml(job?.description || 'No description yet.')}</p>
         </article>${index < ids.length - 1 ? `<div data-lane-arrow-id="${Number(id)}">${laneArrowMarkup(Number(id), settings.workflows || [])}</div>` : ''}`;
     }).join('');
     return `${settings.starterSetupPending ? '<p role="status">Starter review setup is pending. Reopen to retry, or save your own lane selection.</p>' : ''}

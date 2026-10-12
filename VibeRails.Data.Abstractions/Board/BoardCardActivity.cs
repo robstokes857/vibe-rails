@@ -1,7 +1,8 @@
 namespace VibeRails.Services.Board;
 
 /// <summary>Only live session references for a selected card; no card text or historical sessions.</summary>
-public sealed record BoardCardActivityRecord(string CardId, string? SessionId, string? Origin);
+public sealed record BoardCardActivityRecord(string CardId, string? SessionId, string? Origin,
+    string WorkflowMode = BoardWorkflowModes.Manual);
 
 /// <summary>A running local Automation, shared by all root windows. ColumnId is its entry lane, if still on the card's board.</summary>
 public sealed record BoardRunningAutomation(string CardId, string BoardId, string? ColumnId, string? RunId = null);

@@ -269,6 +269,8 @@ public sealed partial class BoardService(
             .ToHashSet(StringComparer.Ordinal);
         var automationCards = (await store.GetRunningAutomationsAsync(projectPath, cancellationToken))
             .Select(run => run.CardId).ToHashSet(StringComparer.Ordinal);
+        var agentCards = cards.Where(card => card.WorkflowMode == BoardWorkflowModes.Agent)
+            .Select(card => card.Id).ToHashSet(StringComparer.Ordinal);
         if (live.Count > 0)
         {
             var sessions = await store.GetSessionsForProjectAsync(projectPath, cancellationToken);
@@ -282,7 +284,7 @@ public sealed partial class BoardService(
                 // is back to Start work, not "Go to agent" into the review terminal (VB-6Q8ZS-68).
                 if (IsAutomation(session, automationIds))
                     automationCards.Add(session.CardId);
-                else if (session.Origin is not ("chat" or "code_review") && !activeByCard.ContainsKey(session.CardId))
+                else if (IsWorkflowAgent(session.Origin, agentCards.Contains(session.CardId)) && !activeByCard.ContainsKey(session.CardId))
                     activeByCard[session.CardId] = (session.SessionId, tabId);
             }
         }
@@ -308,6 +310,10 @@ public sealed partial class BoardService(
     public async Task<BoardCardResponse> CreateCardAsync(string projectPath, CreateBoardCardRequest request, CancellationToken cancellationToken = default, BoardAuthor? author = null)
     {
         var title = NormalizeTitle(request.Title) ?? throw new BoardValidationException("Title is required.");
+        var workflowMode = NormalizeWorkflowMode(request.WorkflowMode);
+        var managerSelection = NormalizeAssignee(request.ManagerSelection);
+        ValidateManager(workflowMode, managerSelection);
+        var managerOptions = NormalizeManagerOptions(managerSelection, request.ManagerBaseLlmOptions);
         // A brand-new project's first card may arrive over MCP before anything listed the lanes.
         await EnsureDefaultBoardAsync(projectPath, cancellationToken);
         var card = await store.CreateCardAsync(projectPath, new NewBoardCard(
@@ -327,7 +333,8 @@ public sealed partial class BoardService(
             // when that call's author is an agent, so a later edit cannot relabel a human card.
             // The agent's name and session go with the mark; the store drops them without it.
             AgentMade: request.AgentMade == true && author?.Kind == BoardAuthor.AgentKind,
-            AgentMadeBy: request.AgentMadeBy, AgentMadeSessionId: request.AgentMadeSessionId), cancellationToken, author);
+            AgentMadeBy: request.AgentMadeBy, AgentMadeSessionId: request.AgentMadeSessionId,
+            WorkflowMode: workflowMode, ManagerSelection: managerSelection, ManagerBaseLlmOptions: managerOptions), cancellationToken, author);
         return (await GetCardAsync(projectPath, card.Id, cancellationToken))!;
     }
 
@@ -371,6 +378,18 @@ public sealed partial class BoardService(
         var clearOptions = request.ClearBaseLlmOptions || assigneeChanged
             || (request.BaseLlmOptions is not null && options is null);
         if (options is not null) clearOptions = false;
+        if (request.ClearManagerBaseLlmOptions && request.ManagerBaseLlmOptions is not null)
+            throw new BoardValidationException("Supply managerBaseLlmOptions or clearManagerBaseLlmOptions, not both.");
+        var workflowMode = request.WorkflowMode is null ? existing.WorkflowMode : NormalizeWorkflowMode(request.WorkflowMode);
+        var clearManager = request.ManagerSelection is not null && string.IsNullOrWhiteSpace(request.ManagerSelection);
+        var managerSelection = clearManager ? null : NormalizeAssignee(request.ManagerSelection);
+        var finalManager = clearManager ? null : managerSelection ?? existing.ManagerSelection;
+        ValidateManager(workflowMode, finalManager);
+        var managerChanged = !string.Equals(finalManager, existing.ManagerSelection, StringComparison.Ordinal);
+        var managerOptions = NormalizeManagerOptions(finalManager, request.ManagerBaseLlmOptions);
+        var clearManagerOptions = request.ClearManagerBaseLlmOptions || managerChanged
+            || (request.ManagerBaseLlmOptions is not null && managerOptions is null);
+        if (managerOptions is not null) clearManagerOptions = false;
         var patch = new BoardCardPatch(
             Title: title,
             Description: description is null ? null : NormalizeDescription(description),
@@ -385,7 +404,10 @@ public sealed partial class BoardService(
             ColumnId: request.ColumnId,
             BaseLlmOptions: options,
             ClearBaseLlmOptions: clearOptions,
-            Type: type, Flagged: request.Flagged, DisplayId: request.DisplayId is null ? null : BoardDisplayIds.Normalize(request.DisplayId), FlagReason: flagReason);
+            Type: type, Flagged: request.Flagged, DisplayId: request.DisplayId is null ? null : BoardDisplayIds.Normalize(request.DisplayId), FlagReason: flagReason,
+            WorkflowMode: request.WorkflowMode is null ? null : workflowMode,
+            ManagerSelection: managerSelection, ClearManagerSelection: clearManager,
+            ManagerBaseLlmOptions: managerOptions, ClearManagerBaseLlmOptions: clearManagerOptions);
         var updated = await store.UpdateCardAsync(projectPath, existing.Id, patch, cancellationToken, author);
         if (updated is null) return null;
         var detail = await store.GetCardDetailAsync(projectPath, updated.Id, cancellationToken);
@@ -583,7 +605,7 @@ public sealed partial class BoardService(
             || (await store.GetRunningAutomationsAsync(detail.Card.ProjectPath, cancellationToken))
                 .Any(run => run.CardId == detail.Card.Id);
         // The working agent is the first live session that is not an Automation's (see GetCardListResponseAsync).
-        var active = sessions.FirstOrDefault(s => s.Active && !s.IsAutomation && s.Origin is not ("chat" or "code_review"));
+        var active = sessions.FirstOrDefault(s => s.Active && !s.IsAutomation && IsWorkflowAgent(s.Origin, detail.Card.WorkflowMode == BoardWorkflowModes.Agent));
         var summary = ToSummary(detail.Card, active?.Id, active?.TabId);
         // Older comments may have been written before their session was linked.
         // Resolve those labels on read without rewriting historical comment rows.
@@ -601,7 +623,8 @@ public sealed partial class BoardService(
             detail.Card.BaseLlmOptions,
             notes, summary.Type, summary.BoardId, summary.Flagged, hasActiveAutomation, summary.DisplayId, summary.AgentMade,
             (await store.GetWaitingAutomationCardIdsAsync(detail.Card.ProjectPath, [detail.Card.Id], cancellationToken)).Count > 0,
-            summary.AgentMadeBy, summary.AgentMadeSessionId, summary.JiraIssueKey)
+            summary.AgentMadeBy, summary.AgentMadeSessionId, summary.JiraIssueKey,
+            summary.WorkflowMode, summary.ManagerSelection, summary.ManagerBaseLlmOptions)
         {
             HasActiveDesktopAgent = desktopCards?.Contains(detail.Card.Id) == true,
             JiraIssueUrl = summary.JiraIssueKey is null ? null : await GetJiraIssueUrlAsync(detail.Card.ProjectPath, detail.Card.Id, cancellationToken),
@@ -655,7 +678,34 @@ public sealed partial class BoardService(
         card.Id, card.Key, card.ColumnId, card.Position, card.Title, card.Description, PresentAssignee(card.Assignee), card.Priority,
         card.Points, card.Tags.ToList(), card.Blocked, card.CommentCount, activeSessionId, activeTabId, card.CreatedUtc, card.UpdatedUtc,
         card.BaseLlmOptions, card.Type, card.BoardId, card.Flagged, DisplayId: card.DisplayId, AgentMade: card.AgentMade,
-        AgentMadeBy: card.AgentMadeBy, AgentMadeSessionId: card.AgentMadeSessionId, JiraIssueKey: card.JiraIssueKey);
+        AgentMadeBy: card.AgentMadeBy, AgentMadeSessionId: card.AgentMadeSessionId, JiraIssueKey: card.JiraIssueKey,
+        WorkflowMode: card.WorkflowMode, ManagerSelection: PresentAssignee(card.ManagerSelection), ManagerBaseLlmOptions: card.ManagerBaseLlmOptions);
+
+    private static bool IsWorkflowAgent(string origin, bool agentWorkflow) => agentWorkflow
+        ? origin == "agent_manager"
+        : origin is not ("chat" or "code_review");
+
+    private static string NormalizeWorkflowMode(string? value)
+    {
+        var mode = value?.Trim().ToLowerInvariant() ?? BoardWorkflowModes.Manual;
+        if (mode is not (BoardWorkflowModes.Manual or BoardWorkflowModes.Agent))
+            throw new BoardValidationException("Workflow must be manual or agent.");
+        return mode;
+    }
+
+    private static void ValidateManager(string mode, string? selection)
+    {
+        if (mode == BoardWorkflowModes.Agent && !BoardSelection.TryParse(selection, out _))
+            throw new BoardValidationException("Choose a manager agent for the Agent workflow.");
+    }
+
+    private static BaseLlmOptions? NormalizeManagerOptions(string? selection, BaseLlmOptions? options)
+    {
+        if (options is null) return null;
+        if (!BoardSelection.TryParse(selection, out var parsed) || parsed is null || parsed.IsEnvironment)
+            throw new BoardValidationException("Manager base options require a base CLI manager. Saved environments use their own launch settings.");
+        return NormalizeBaseOptions(selection, options);
+    }
 
     internal static BoardColumnResponse ToDto(BoardColumnRecord column) =>
         new(column.Id, column.Name, column.Position, column.Color, column.BoardId);
@@ -701,8 +751,10 @@ public sealed partial class BoardService(
         var automationIds = await store.GetAutomationSessionIdsAsync(projectPath,
             sessions.Select(s => s.SessionId).ToList(), cancellationToken);
         var reviewIds = await store.GetReviewSessionIdsAsync(projectPath, sessions.Select(s => s.SessionId).ToList(), cancellationToken);
+        var nonCodingIds = await store.GetNonCodingSessionIdsAsync(projectPath, sessions.Select(s => s.SessionId).ToList(), cancellationToken);
         return sessions.Select(s => ToDto(s, live) with { IsAutomation = IsAutomation(s, automationIds),
-            IsReview = s.Origin == "code_review" || reviewIds.Contains(s.SessionId) }).ToList();
+            IsReview = s.Origin == "code_review" || reviewIds.Contains(s.SessionId),
+            IsNonCoding = nonCodingIds.Contains(s.SessionId) || reviewIds.Contains(s.SessionId) }).ToList();
     }
 
     // ------------------------------------------------------------------ normalisation

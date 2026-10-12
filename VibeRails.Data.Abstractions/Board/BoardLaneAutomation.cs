@@ -20,10 +20,10 @@ public sealed record BoardLaneAutomationStatus(string EventKey, long JobId, stri
     string? WorkflowId = null, int Position = 0, bool IsCurrent = false, string? StepStatus = null,
     bool CanSkip = false, bool RequiresVerdict = false)
 {
-    /// <summary>A stopped, failed current step can be explicitly rerun by the user.</summary>
+    /// <summary>A stopped current step that failed or has no verdict can be explicitly retried by the user.</summary>
     public bool CanRerun => IsCurrent && Status is not (BoardStepStatus.Queued or BoardStepStatus.Running)
         && (StepStatus ?? Status) is BoardStepStatus.Failed or BoardStepStatus.Cancelled
-            or BoardStepStatus.TimedOut or BoardStepStatus.Interrupted;
+            or BoardStepStatus.TimedOut or BoardStepStatus.Interrupted or BoardStepStatus.AwaitingResult;
 }
 
 /// <summary>

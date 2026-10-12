@@ -7,12 +7,12 @@ namespace VibeRails.Services.Board;
 /// <summary>Run an existing project Automation and retain the card in its immutable run context.</summary>
 public sealed class BoardCardAutomationService(IBoardStore boards, IJobStore jobs, IJobService runner)
 {
-    /// <summary>Rerun only the failed entry the user selected, retaining its immutable run snapshot.</summary>
+    /// <summary>Retry only the eligible entry the user selected, retaining its immutable run snapshot.</summary>
     public async Task<JobActionResponse?> RerunAsync(string projectPath, string cardKeyOrId,
         long jobId, string eventKey, CancellationToken cancellationToken)
     {
         if (jobId <= 0 || string.IsNullOrWhiteSpace(eventKey) || eventKey.Length > 100)
-            throw new BoardValidationException("Choose a failed lane Automation.");
+            throw new BoardValidationException("Choose a lane Automation to retry.");
         var card = await boards.FindCardAsync(projectPath, cardKeyOrId, cancellationToken);
         if (card is null) return null;
         var status = (await boards.GetLaneAutomationStatusesAsync(projectPath, card.Id, cancellationToken))

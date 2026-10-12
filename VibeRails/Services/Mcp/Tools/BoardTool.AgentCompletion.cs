@@ -77,7 +77,9 @@ public sealed partial class BoardTool
                     : ended?.EndedUtc is not null ? $"exited {ended.EndedUtc:O}, exit code {ended.ExitCode?.ToString() ?? "unknown"}"
                     : "liveness unknown (no confirmed exit)";
                 text.Append("- Session ").Append(session.SessionId).Append(" · ")
-                    .Append(BoardPromptComposer.SanitizeLine(session.DisplayName, 120)).Append(" · process: ").AppendLine(process);
+                    .Append(BoardPromptComposer.SanitizeLine(session.DisplayName, 120))
+                    .Append(" · role: ").Append(session.Origin == "agent_manager" ? "manager" : session.Origin == "agent_worker_planning" ? "worker (planning)" : session.Origin == "agent_worker" ? "worker" : BoardPromptComposer.SanitizeLine(session.Origin, 40))
+                    .Append(" · process: ").AppendLine(process);
                 if (status.Completion is { } report)
                     text.Append("  Agent reported ").Append(report.Outcome).Append(" at ").Append(report.CompletedUtc.ToString("O"))
                         .Append(": ").AppendLine(BoardPromptComposer.SanitizeLine(report.Summary, 4000));

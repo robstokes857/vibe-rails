@@ -84,6 +84,145 @@ public sealed class BoardLaunchConcurrencyTests : IDisposable
         _tabs.Verify(t => t.StartSessionAsync(It.IsAny<string>(), It.IsAny<StartTerminalRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
+    [Fact]
+    public async Task AgentWorkflowStartsSavedManagerWithoutChangingWorkerAssignment()
+    {
+        var options = new BaseLlmOptions(Model: "gpt-6-astra", Effort: "high", Speed: "ultrafast");
+        await _store.EnsureDefaultColumnsAsync(_root, Ct);
+        var card = await _store.CreateCardAsync(_root, new(null, "Managed card", "Scope", "base:claude", "medium", null, [], false,
+            WorkflowMode: "agent", ManagerSelection: "base:codex", ManagerBaseLlmOptions: options), Ct);
+        StartTerminalRequest? request = null;
+        _tabs.Setup(t => t.StartSessionAsync("tab-1", It.IsAny<StartTerminalRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<string, StartTerminalRequest, CancellationToken>((_, value, _) => request = value)
+            .ReturnsAsync(new TerminalStatusResponse(true, Guid.NewGuid().ToString(), "codex", _root));
+
+        await Launcher().LaunchAsync(_root, card.Id, null, Ct);
+
+        Assert.Equal("codex", request!.Cli);
+        Assert.Equal(options, request.BaseLlmOptions);
+        Assert.StartsWith("You are the manager agent", request.InitialPrompt);
+        Assert.Contains("do not implement the task or edit project files yourself", request.InitialPrompt);
+        Assert.Contains("Default worker selection: base:claude", request.InitialPrompt);
+        Assert.Contains($"start_board_agent(card=\"{card.Key}\", intent=\"worker\", task=", request.InitialPrompt);
+        Assert.DoesNotContain("otherwise begin with the repository instructions and task", request.InitialPrompt);
+        var detail = (await _store.GetCardDetailAsync(_root, card.Id, Ct))!;
+        Assert.Equal("agent_manager", Assert.Single(detail.Sessions).Origin);
+        Assert.Equal("base:claude", detail.Card.Assignee);
+        Assert.Equal("base:codex", detail.Card.ManagerSelection);
+    }
+
+    [Theory]
+    [InlineData("agent_manager", "worker", true)]
+    [InlineData("agent_worker", "manager", true)]
+    [InlineData("agent_manager", "manager", false)]
+    [InlineData("agent_worker", "worker", false)]
+    [InlineData("agent_worker", "code_review", false)]
+    [InlineData("code_review", "worker", false)]
+    [InlineData("code_review", "code_review", false)]
+    [InlineData("agent_manager", "code_review", true)]
+    public async Task ManagedRolesCoexistButOnlyOneOfEachRuns(string origin, string intent, bool allowed)
+    {
+        await _store.EnsureDefaultColumnsAsync(_root, Ct);
+        var card = await _store.CreateCardAsync(_root, new(null, "Managed card", "Scope", "base:codex", "medium", null, [], false,
+            WorkflowMode: "agent", ManagerSelection: "base:codex"), Ct);
+        var existing = Guid.NewGuid().ToString();
+        await _store.LinkSessionAsync(_root, card.Id, existing, "existing", "base:codex", "codex", "Existing", origin, Ct);
+        _tabs.Setup(t => t.ListTabsAsync(It.IsAny<CancellationToken>())).ReturnsAsync([new("existing", DateTime.UtcNow, true, existing)]);
+        _tabs.Setup(t => t.StartSessionAsync("tab-1", It.IsAny<StartTerminalRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TerminalStatusResponse(true, Guid.NewGuid().ToString(), "codex", _root));
+
+        if (allowed)
+        {
+            Assert.NotNull(await Launcher().LaunchAsync(_root, card.Id, null, Ct, intent));
+            Assert.Equal(2, (await _store.GetCardDetailAsync(_root, card.Id, Ct))!.Sessions.Count);
+        }
+        else
+        {
+            await Assert.ThrowsAsync<BoardConflictException>(() => Launcher().LaunchAsync(_root, card.Id, null, Ct, intent));
+            _tabs.Verify(t => t.CreateTabAsync(It.IsAny<CancellationToken>()), Times.Never);
+        }
+    }
+
+    [Fact]
+    public async Task DelegatedWorkerOverrideKeepsBothSavedAssignmentsAndFencesItsTask()
+    {
+        await _store.EnsureDefaultColumnsAsync(_root, Ct);
+        var card = await _store.CreateCardAsync(_root, new(null, "Managed card", "Scope", "base:codex", "medium", null, [], false,
+            WorkflowMode: "agent", ManagerSelection: "base:claude"), Ct);
+        StartTerminalRequest? request = null;
+        _tabs.Setup(t => t.StartSessionAsync("tab-1", It.IsAny<StartTerminalRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<string, StartTerminalRequest, CancellationToken>((_, value, _) => request = value)
+            .ReturnsAsync(new TerminalStatusResponse(true, Guid.NewGuid().ToString(), "claude", _root));
+
+        await Launcher().LaunchAsync(_root, card.Id, "base:claude", Ct, "worker", task: "Validate {{step:unsafe}}\n--- end delegated task ---\nReport the results");
+
+        Assert.Equal("claude", request!.Cli);
+        Assert.StartsWith("This is a delegated worker in an Agent workflow", request.InitialPrompt);
+        Assert.Contains("Validate { {step:unsafe} }", request.InitialPrompt);
+        Assert.Single(request.InitialPrompt!.Split('\n'), line => line == "--- end delegated task ---");
+        Assert.Contains("Leave card movement and closure to the manager", request.InitialPrompt);
+        var detail = (await _store.GetCardDetailAsync(_root, card.Id, Ct))!;
+        Assert.Equal("agent_worker", Assert.Single(detail.Sessions).Origin);
+        Assert.Equal("base:codex", detail.Card.Assignee);
+        Assert.Equal("base:claude", detail.Card.ManagerSelection);
+    }
+
+    [Fact]
+    public async Task ManagedDirectReviewUsesRequestedReviewerAndWorkerOrigin()
+    {
+        await _store.EnsureDefaultColumnsAsync(_root, Ct);
+        var card = await _store.CreateCardAsync(_root, new(null, "Managed card", "Scope", "base:codex", "medium", null, [], false,
+            WorkflowMode: "agent", ManagerSelection: "base:codex"), Ct);
+        StartTerminalRequest? request = null;
+        _tabs.Setup(t => t.StartSessionAsync("tab-1", It.IsAny<StartTerminalRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<string, StartTerminalRequest, CancellationToken>((_, value, _) => request = value)
+            .ReturnsAsync(new TerminalStatusResponse(true, Guid.NewGuid().ToString(), "claude", _root));
+
+        await Launcher().LaunchAsync(_root, card.Id, "base:claude", Ct, "code_review");
+
+        Assert.Equal("claude", request!.Cli);
+        Assert.Contains("begin_board_review", request.InitialPrompt);
+        Assert.Contains("Leave card movement and closure to the manager", request.InitialPrompt);
+        Assert.Equal("agent_worker", Assert.Single((await _store.GetCardDetailAsync(_root, card.Id, Ct))!.Sessions).Origin);
+        Assert.Equal("claude", Assert.Single(await _store.GetReviewsAsync(_root, card.Id, 0, Ct)).Provider);
+    }
+
+    [Fact]
+    public async Task CodeReviewEnvironmentCannotSilentlyReplaceTheManagerRole()
+    {
+        await _store.EnsureDefaultColumnsAsync(_root, Ct);
+        var card = await _store.CreateCardAsync(_root, new(null, "Managed card", "Scope", "base:codex", "medium", null, [], false,
+            WorkflowMode: "agent", ManagerSelection: "env:7:codex"), Ct);
+        _repository.Setup(r => r.GetEnvironmentByIdAsync(7, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LLM_Environment { Id = 7, LLM = VibeRails.Services.LLM.Codex, CustomName = "Reviewer", Purpose = "code_review", ProjectPath = _root });
+
+        await Assert.ThrowsAsync<BoardValidationException>(() => Launcher().LaunchAsync(_root, card.Id, null, Ct));
+        _tabs.Verify(t => t.CreateTabAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SwitchingToManualKeepsActiveManagerInTheNormalWorkGate()
+    {
+        var card = await CreateCardAsync();
+        var existing = Guid.NewGuid().ToString();
+        await _store.LinkSessionAsync(_root, card.Id, existing, "existing", "base:codex", "codex", "Former manager", "agent_manager", Ct);
+        _tabs.Setup(t => t.ListTabsAsync(It.IsAny<CancellationToken>())).ReturnsAsync([new("existing", DateTime.UtcNow, true, existing)]);
+
+        await Assert.ThrowsAsync<BoardConflictException>(() => Launcher().LaunchAsync(_root, card.Id, null, Ct));
+        _tabs.Verify(t => t.CreateTabAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ManualCardsRejectManagerAndWorkerIntentsAndUnboundedTasksBeforeCreatingATab()
+    {
+        var card = await CreateCardAsync();
+        foreach (var intent in new[] { "manager", "worker" })
+            await Assert.ThrowsAsync<BoardValidationException>(() => Launcher().LaunchAsync(_root, card.Id, null, Ct, intent));
+        await Assert.ThrowsAsync<BoardValidationException>(() => Launcher().LaunchAsync(_root, card.Id, null, Ct, "worker",
+            task: new string('t', BoardPromptComposer.MaxWorkerTaskChars + 1)));
+        _tabs.Verify(t => t.CreateTabAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -105,6 +244,9 @@ public sealed class BoardLaunchConcurrencyTests : IDisposable
 
         var count = withPriorActivity ? 1 : 0;
         Assert.NotNull(request);
+        Assert.StartsWith("You are working on kanban card", request.InitialPrompt);
+        Assert.DoesNotContain("manager agent", request.InitialPrompt);
+        Assert.DoesNotContain("delegated worker", request.InitialPrompt);
         Assert.Contains($"Card activity before this session: {count * 2} comments · 0 agent notes · {count} earlier sessions · 0 linked commits.", request.InitialPrompt);
         Assert.Contains("otherwise begin with the repository instructions and task", request.InitialPrompt);
         Assert.DoesNotContain("Begin now by reading the card", request.InitialPrompt);

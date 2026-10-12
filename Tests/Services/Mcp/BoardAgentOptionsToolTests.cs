@@ -69,6 +69,34 @@ public sealed class BoardAgentOptionsToolTests
         Assert.Contains("not an already-running agent", result);
     }
 
+    [Fact]
+    public async Task ExplainsWorkerDelegationWithoutAssignmentChangesAndSeparatesManualSetup()
+    {
+        using var client = new HttpClient(new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = JsonContent.Create(new LlmPickerPreferencesResponse([
+                new("base:codex", "base", "Base CLIs", "Codex", "codex", null, true, 0),
+                new("env:7:codex", "environment", "Custom Environments", "Saved worker", "codex", 7, true, 0)
+            ]), AppJsonSerializerContext.Default.LlmPickerPreferencesResponse)
+        })));
+
+        var result = await Tool(client).ListBoardAgentOptions(TestContext.Current.CancellationToken);
+
+        Assert.Contains("launch a separate worker session", result);
+        Assert.Contains("start_board_agent(card=..., intent=\"worker\", selection=\"<enabled picker key>\", task=\"<bounded assignment and expected output>\")", result);
+        Assert.Contains("Omit selection to use the saved Assignee as the default worker", result);
+        Assert.Contains("Do not update the card's assignment to delegate", result);
+        Assert.Contains("leaves both saved worker and manager assignments intact", result);
+        Assert.Contains("without intent=worker starts the saved manager on an Agent card", result);
+        Assert.Contains("On a Manual card, start_board_agent(card=...) starts the saved Assignee", result);
+        Assert.Contains("separate managerSelection and managerBaseLlmOptions", result);
+        Assert.Contains("Uses saved environment settings; baseLlmOptions cannot override it", result);
+        Assert.Contains("update_board_card(card=...", result);
+        Assert.True(result.IndexOf("Agent workflow delegation:", StringComparison.Ordinal)
+            < result.IndexOf("Saved-assignment setup:", StringComparison.Ordinal));
+        Assert.DoesNotContain("Then start_board_agent(card=...) uses the saved choices", result);
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.Unauthorized)]
     [InlineData(HttpStatusCode.Redirect)]

@@ -11,6 +11,7 @@ const styleCss = readFileSync(path.resolve('VibeRails/wwwroot/style.css'), 'utf8
 const indexHtml = readFileSync(path.resolve('VibeRails/wwwroot/index.html'), 'utf8');
 const viewerSource = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/code-report/viewer.js'), 'utf8');
 const viewerCss = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/code-report/styles.css'), 'utf8');
+const ruleControllerSource = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/rule-controller.js'), 'utf8');
 const bundle = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/code-report/vendor/atlas/code-atlas.mjs'), 'utf8');
 const { RuleController, describeCodeAnalyzerScan } = await import(
     pathToFileURL(path.resolve('VibeRails/wwwroot/js/modules/rule-controller.js')).href);
@@ -121,9 +122,9 @@ test('Quality explains what the scan checks, in step with MintLint scoring and i
     assert.ok(bands && parsers.length > 0);
 
     const quality = indexHtml.match(/<template id="code-quality-template">([\s\S]*?)<\/template>/)[1];
-    assert.match(quality, /data-code-analyzer-log hidden>[\s\S]*<details class="rules-console-transcript project-health-scan-guide" data-code-analyzer-guide>[\s\S]*data-action="clear-code-analyzer-output"/,
-        'the guide sits under the scan log, inside the card, and is collapsed (no open attribute)');
-    const guide = quality.match(/<details class="rules-console-transcript project-health-scan-guide" data-code-analyzer-guide>([\s\S]*?)<\/details>/)[1];
+    assert.match(quality, /data-action="toggle-scan-guide"\s+aria-expanded="false"[\s\S]*<\/header>\s*(<!--[\s\S]*?-->\s*)?<section class="project-health-scan-guide" data-code-analyzer-guide hidden[^>]*>[\s\S]*data-code-analyzer-log hidden>/,
+        'the bar toggles the guide, which opens under the bar and starts hidden');
+    const guide = quality.match(/<section class="project-health-scan-guide" data-code-analyzer-guide hidden[^>]*>([\s\S]*?)<\/section>/)[1];
     const measured = new Set(categories.flatMap(category => category.metrics));
     assert.match(guide, new RegExp(`<small>${categories.length} categories · ${measured.size} measurements · ${parsers.length} languages</small>`));
 
@@ -153,8 +154,37 @@ test('Quality explains what the scan checks, in step with MintLint scoring and i
     const shown = parsers.map(parser => names[parser] || parser);
     assert.match(guide, new RegExp(`${shown.slice(0, -1).join(', ')} and ${shown.at(-1)}`.replace(/[+#]/g, '\\$&')), 'the languages are the registered parsers, in order');
     assert.match(guide, /Full repository<\/b> extends that count to every source file on disk/, 'the toggle widens the reach count, not the grading');
-    assert.match(styleCss, /\.project-health-scan-guide \{\s*margin: 0 18px 16px;/);
+    assert.match(styleCss, /\.project-health-scan-guide \{\s*margin: 0 18px 14px;/);
+    assert.match(styleCss, /\.project-health-scan-guide\[hidden\] \{\s*display: none;/);
     assert.match(styleCss, /\.project-health-scan-transcript,\s*\.project-health-scan-guide \{\s*margin-inline: 14px;/);
+    assert.match(ruleControllerSource, /toggleScanGuide\(\) \{[\s\S]*?guide\.hidden = !show;[\s\S]*?setAttribute\('aria-expanded', String\(show\)\)/);
+});
+
+// The map leads: nothing sits between the nav and the map, and the title, scan line and every
+// action move into a compact bar under it. The viewer's chrome-below measurement gives the map
+// the room the old header took.
+test('the map leads the Quality page; the bar with the title, scan line and actions follows it', () => {
+    const quality = indexHtml.match(/<template id="code-quality-template">([\s\S]*?)<\/template>/)[1];
+    const positions = ['data-code-analyzer-report', '<header class="vb-page-header project-health-header code-quality-bar">',
+        'data-code-analyzer-guide', 'data-code-analyzer-log'].map(marker => quality.indexOf(marker));
+    assert.ok(positions.every((at, index) => at >= 0 && (index === 0 || at > positions[index - 1])),
+        'map, then the bar, then the guide and the scan log');
+    const header = quality.match(/<header class="vb-page-header project-health-header code-quality-bar">([\s\S]*?)<\/header>/)[1];
+    assert.match(header, /<h1 class="vb-page-title">Code quality<\/h1>\s*<span class="project-health-scan-meta" data-code-analyzer-meta/, 'title and scan line share the heading');
+    assert.match(header, /<button class="code-quality-guide-toggle" type="button" data-action="toggle-scan-guide"/);
+    for (const action of ['run-code-analyzer', 'run-code-analyzer-unpushed', 'manage-analyzer-ignores', 'toggle-map-coverage',
+        'toggle-code-analyzer-log', 'copy-code-analyzer-output', 'launch-health-fix'])
+        assert.match(header, new RegExp(`data-action="${action}"`), `${action} stays in the bar`);
+    assert.match(header, /<div class="project-health-fix-controls" role="group"[^>]*>\s*<button[^>]*data-action="launch-health-fix"[^>]*>\s*<i class="fa-solid fa-screwdriver-wrench"[^>]*><\/i>\s*Fix with\s*<\/button>\s*<label class="project-health-fix-picker">/,
+        'Fix is a short label ahead of the picker, inside one group');
+    // The bar is a compact strip under the map, its menu opens upward, and the Fix group is one pill.
+    assert.match(styleCss, /\.code-quality-page \.project-health-header \{[^}]*border-bottom: 0;[^}]*border-top: 1px solid/);
+    assert.match(styleCss, /\.code-quality-page \.vb-page-title \{\s*font-size: 1rem;/);
+    assert.match(styleCss, /\.code-quality-page \.rules-action-menu-popover \{\s*top: auto;\s*bottom: calc\(100% \+ 0\.4rem\);/);
+    assert.match(styleCss, /\.project-health-fix-controls \{[^}]*border-radius: 999px;/);
+    assert.match(styleCss, /\.project-health-fix-picker \.ts-wrapper \.ts-control \{[^}]*border: 0;/);
+    assert.doesNotMatch(styleCss, /\.project-health-fix-controls > \.btn \{[^}]*padding-inline: 12px;\s*\}/, 'the boxed button rule is gone');
+    assert.match(ruleControllerSource, /bindAction\(root, '\[data-action="toggle-scan-guide"\]', \(\) => this\.toggleScanGuide\(\)\)/);
 });
 
 test('the map keeps the wheel, fills the viewport, draws tinted spheres on a globe and ends the page without slack (VIBE-71)', () => {

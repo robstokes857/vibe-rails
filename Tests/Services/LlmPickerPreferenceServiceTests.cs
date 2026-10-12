@@ -7,8 +7,20 @@ using Xunit;
 
 namespace Tests.Services;
 
-public sealed class LlmPickerPreferenceServiceTests
+[Collection("ProcessEnvIsolation")]
+public sealed class LlmPickerPreferenceServiceTests : IDisposable
 {
+    private readonly string _originalRoot = VibeRails.Utils.ParserConfigs.GetRootPath();
+    private readonly bool _originalIsInGit = VibeRails.Utils.ParserConfigs.GetIsInGit();
+    private readonly string? _originalBranch = VibeRails.Utils.ParserConfigs.GetGitBranch();
+    private readonly string? _originalRemote = VibeRails.Utils.ParserConfigs.GetGitRemoteUrl();
+
+    public LlmPickerPreferenceServiceTests() =>
+        VibeRails.Utils.ParserConfigs.SetGitState(AppContext.BaseDirectory, isInGit: true);
+
+    public void Dispose() =>
+        VibeRails.Utils.ParserConfigs.SetGitState(_originalRoot, _originalIsInGit, _originalBranch, _originalRemote);
+
     [Fact]
     public async Task GetAsync_ReturnsCanonicalDefaultsAndHonorsEnvironmentHidden()
     {
@@ -260,6 +272,30 @@ public sealed class LlmPickerPreferenceServiceTests
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Fact]
+    public async Task GetAndReset_ExcludeUnscopedAndForeignSetups()
+    {
+        var own = Environment(80, "Here", LLM.Codex, hidden: true);
+        var legacy = Environment(81, "Legacy", LLM.Claude, hidden: true);
+        legacy.ProjectPath = null;
+        var foreign = Environment(82, "Elsewhere", LLM.Codex, hidden: true);
+        foreign.ProjectPath = Path.Combine(own.ProjectPath!, "another-repository");
+        var repository = NewRepository([own, legacy, foreign], (string?)null);
+        var service = new LlmPickerPreferenceService(repository.Object);
+
+        var response = await service.GetAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(["env:80:codex"], response.Items.Where(item => item.Kind == "environment").Select(item => item.Key));
+
+        await service.ResetAsync(TestContext.Current.CancellationToken);
+        repository.Verify(item => item.SaveLlmPickerStateAsync(
+            LlmPickerPreferenceService.CacheKey, null,
+            It.Is<IReadOnlyDictionary<int, bool>>(values => values.Count == 1 && values.ContainsKey(80)),
+            It.IsAny<CancellationToken>()), Times.Once);
+        Assert.True(legacy.Hidden);
+        Assert.Null(legacy.ProjectPath);
+        Assert.True(foreign.Hidden);
+    }
+
     private static Mock<IRepository> NewRepository(
         List<LLM_Environment> environments,
         string? document)
@@ -286,6 +322,7 @@ public sealed class LlmPickerPreferenceServiceTests
         CustomName = name,
         LLM = llm,
         Hidden = hidden,
+        ProjectPath = VibeRails.Utils.ParserConfigs.GetRootPath(),
         AutomationWorker = automationWorker
     };
 

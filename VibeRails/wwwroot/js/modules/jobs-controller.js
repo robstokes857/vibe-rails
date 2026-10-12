@@ -65,8 +65,6 @@ const PAGES = Object.freeze({
         emptyText: 'Save a CLI with the message it should start with, then run it whenever you like.',
         emptyAction: 'Create your first agent',
         disabledTitle: 'Disabled agents',
-        sharedTitle: 'Shared with every project',
-        sharedHint: 'Saved before setups belonged to a project, so every project lists them. Run or edit one here as usual; delete it only if no project still needs it.',
         historyHint: 'Latest result for each agent'
     },
     automations: {
@@ -442,14 +440,9 @@ export class JobController {
      */
     pageEntries() {
         if (this.mode !== 'agents') return this.catalog.automations;
-        return this.catalog.agents.filter(entry => !entry.shared).flatMap(entry => entry.jobs.length
+        return this.catalog.agents.flatMap(entry => entry.jobs.length
             ? entry.jobs.map(job => ({ environment: entry.environment, jobs: [job] }))
             : [entry]);
-    }
-
-    /** Setups with no project of their own (every project lists them) that nothing here runs. */
-    sharedEntries() {
-        return this.mode === 'agents' ? this.catalog.agents.filter(entry => entry.shared) : [];
     }
 
     renderJobs() {
@@ -464,7 +457,7 @@ export class JobController {
         // aren't wiped by an identical re-render.
         if (html === this._lastJobsListHtml) return;
         this._lastJobsListHtml = html;
-        const openGroups = ['[data-disabled-jobs]', '[data-shared-agents]']
+        const openGroups = ['[data-disabled-jobs]']
             .filter(selector => this.root.querySelector(selector)?.open === true);
         target.innerHTML = html;
         for (const selector of openGroups) {
@@ -476,28 +469,14 @@ export class JobController {
     renderJobsListHtml() {
         const page = this.page;
         const entries = this.pageEntries();
-        const shared = this.sharedEntries();
-        const sharedGroup = shared.length ? `
-            <details class="jobs-collapsible-list" data-shared-agents>
-                <summary>
-                    <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
-                    <span>${page.sharedTitle}</span><span class="jobs-count">${shared.length}</span>
-                </summary>
-                <div>
-                    <p class="jobs-collapsible-hint">${page.sharedHint}</p>
-                    ${shared.map(entry => this.renderAgentCard(entry)).join('')}
-                </div>
-            </details>` : '';
         if (entries.length === 0) {
-            return (shared.length
-                ? `<div class="jobs-empty" role="status">Nothing saved for this project yet. ${page.newLabel} adds one here.</div>`
-                : `
+            return `
                 <div class="jobs-empty jobs-empty-large">
                     <i class="fa-solid ${this.mode === 'agents' ? 'fa-robot' : 'fa-list-check'}" aria-hidden="true"></i>
                     <strong>${page.emptyTitle}</strong>
                     <span>${page.emptyText}</span>
                     <button class="btn btn-primary" type="button" data-job-action="new">${page.emptyAction}</button>
-                </div>`) + sharedGroup;
+                </div>`;
         }
 
         const render = this.mode === 'agents' ? entry => this.renderAgentCard(entry) : job => this.renderAutomationCard(job);
@@ -512,7 +491,7 @@ export class JobController {
                     <span>${page.disabledTitle}</span><span class="jobs-count">${disabled.length}</span>
                 </summary>
                 <div>${disabled.map(render).join('')}</div>
-            </details>` : '') + sharedGroup;
+            </details>` : '');
     }
 
     /** The CLI's brand mark: the one thing that makes a list of agents scannable at a glance. */
@@ -667,7 +646,9 @@ export class JobController {
      * Automation still points at, and its message is shown as is.
      */
     async deleteAgent({ jobId, environmentId }) {
-        const byJob = Number.isFinite(jobId);
+        // Standalone cards have data-job-id="", which the click handler converts to 0.
+        // Only a positive ID identifies a Job; otherwise delete by the saved setup's ID.
+        const byJob = Number.isInteger(jobId) && jobId > 0;
         const entry = this.catalog.agents.find(candidate => byJob
             ? candidate.jobs.some(job => Number(job.id) === jobId)
             : Number.isFinite(environmentId) && Number(candidate.environment?.id) === environmentId);

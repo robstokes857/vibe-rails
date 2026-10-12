@@ -16,8 +16,20 @@ using Xunit;
 
 namespace Tests.Routes;
 
-public sealed class EnvironmentStepRoutesTests
+[Collection("ProcessEnvIsolation")]
+public sealed class EnvironmentStepRoutesTests : IDisposable
 {
+    private readonly string _originalRoot = VibeRails.Utils.ParserConfigs.GetRootPath();
+    private readonly bool _originalIsInGit = VibeRails.Utils.ParserConfigs.GetIsInGit();
+    private readonly string? _originalBranch = VibeRails.Utils.ParserConfigs.GetGitBranch();
+    private readonly string? _originalRemote = VibeRails.Utils.ParserConfigs.GetGitRemoteUrl();
+
+    public EnvironmentStepRoutesTests() =>
+        VibeRails.Utils.ParserConfigs.SetGitState(AppContext.BaseDirectory, isInGit: true);
+
+    public void Dispose() =>
+        VibeRails.Utils.ParserConfigs.SetGitState(_originalRoot, _originalIsInGit, _originalBranch, _originalRemote);
+
     // One client for the whole class — per-test HttpClients leave TIME_WAIT sockets behind and
     // can destabilize the machine running the suite.
     private static readonly HttpClient SharedClient = new();
@@ -332,6 +344,7 @@ public sealed class EnvironmentStepRoutesTests
         Id = 91,
         CustomName = "review",
         LLM = LLM.Codex,
+        ProjectPath = VibeRails.Utils.ParserConfigs.GetRootPath(),
         Path = "unused"
     };
 

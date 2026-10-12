@@ -43,9 +43,8 @@ namespace VibeRails.DTOs
         // Where this environment's CLI runs — the project directory, a persistent clone, or a
         // fresh clone per launch. Clone modes are backed by a Sandboxes row pointing back here.
         public EnvironmentWorkspaceMode WorkspaceMode { get; set; } = EnvironmentWorkspaceMode.Project;
-        // The project this environment belongs to. Null means it predates project scoping and
-        // stays visible in every project — there is no backfill, so an environment already in
-        // use never vanishes from a project. Set for every environment created from now on.
+        // The one project this environment belongs to. Legacy null/blank scopes remain stored
+        // without backfilling, but are excluded from project catalogs and launches.
         public string? ProjectPath { get; set; }
 
         /// <summary>True when this environment runs in a git clone rather than the project directory.</summary>

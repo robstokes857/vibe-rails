@@ -549,6 +549,7 @@ public sealed partial class BoardStore : IBoardStore
         SqliteConnection connection, SqliteTransaction transaction, string project, NewBoardCard card, BoardAuthor author, CancellationToken cancellationToken,
         SyncedCardIdentity? synced = null, BoardSyncStamp? stamp = null)
     {
+        ValidateAgentWorkflow(card.WorkflowMode, card.ManagerSelection);
         BoardColumnRecord column;
         if (string.IsNullOrWhiteSpace(card.ColumnId))
         {
@@ -592,9 +593,9 @@ public sealed partial class BoardStore : IBoardStore
             insert.Transaction = transaction;
             insert.CommandText = """
                 INSERT INTO BoardCards
-                    (Id, ProjectPath, Number, ColumnId, Position, Title, Description, Assignee, Priority, Type, Points, Tags, Blocked, Flagged, CreatedUTC, UpdatedUTC, CardKey, DisplayId, AgentMade, AgentMadeBy, AgentMadeSessionId)
+                    (Id, ProjectPath, Number, ColumnId, Position, Title, Description, Assignee, Priority, Type, Points, Tags, Blocked, Flagged, CreatedUTC, UpdatedUTC, CardKey, DisplayId, AgentMade, AgentMadeBy, AgentMadeSessionId, WorkflowMode, ManagerSelection, ManagerOptionsJson)
                 VALUES
-                    ($id, $project, $number, $column, $position, $title, $description, $assignee, $priority, $type, $points, $tags, $blocked, $flagged, $created, $updated, $cardKey, $displayId, $agentMade, $agentMadeBy, $agentMadeSession);
+                    ($id, $project, $number, $column, $position, $title, $description, $assignee, $priority, $type, $points, $tags, $blocked, $flagged, $created, $updated, $cardKey, $displayId, $agentMade, $agentMadeBy, $agentMadeSession, $workflow, $manager, $managerOptions);
                 """;
             insert.Parameters.AddWithValue("$id", id);
             insert.Parameters.AddWithValue("$cardKey", cardKey);
@@ -615,6 +616,7 @@ public sealed partial class BoardStore : IBoardStore
             insert.Parameters.AddWithValue("$agentMade", card.AgentMade ? 1 : 0);
             insert.Parameters.AddWithValue("$agentMadeBy", (object?)agentMadeBy ?? DBNull.Value);
             insert.Parameters.AddWithValue("$agentMadeSession", (object?)agentMadeSessionId ?? DBNull.Value);
+            AddManagerParameters(insert, card.WorkflowMode, card.ManagerSelection, card.ManagerBaseLlmOptions);
             insert.Parameters.AddWithValue("$created", ToDb(now));
             insert.Parameters.AddWithValue("$updated", ToDb(now));
             await insert.ExecuteNonQueryAsync(cancellationToken);
@@ -624,8 +626,13 @@ public sealed partial class BoardStore : IBoardStore
 
         var created = new BoardCardRecord(id, project, number, column.Id, position, card.Title, card.Description,
             card.Assignee, card.Priority, card.Points, card.Tags, card.Blocked, 0, now, now, card.BaseLlmOptions, Type: card.Type, BoardId: column.BoardId, Flagged: card.Flagged, KeyPrefix: prefix, StoredKey: cardKey, StoredDisplayId: displayId, AgentMade: card.AgentMade,
-            AgentMadeBy: agentMadeBy, AgentMadeSessionId: agentMadeSessionId);
+            AgentMadeBy: agentMadeBy, AgentMadeSessionId: agentMadeSessionId, WorkflowMode: card.WorkflowMode,
+            ManagerSelection: card.ManagerSelection, ManagerBaseLlmOptions: card.ManagerBaseLlmOptions);
         await LogCardCreatedAsync(connection, transaction, created, column.Name, author, cancellationToken, stamp);
+        if (created.WorkflowMode != BoardWorkflowModes.Manual || created.ManagerSelection is not null || created.ManagerBaseLlmOptions is not null)
+            await LogAgentWorkflowChangedAsync(connection, transaction,
+                created with { WorkflowMode = BoardWorkflowModes.Manual, ManagerSelection = null, ManagerBaseLlmOptions = null },
+                created, author, cancellationToken);
         if (synced is not null) await ReconcileSyncedDisplayIdAsync(connection, transaction, created, card.DisplayId, cancellationToken);
         await InsertDraftLinksAsync(connection, transaction, created, card.LinkedCardIds, cancellationToken);
         return created;
@@ -713,15 +720,20 @@ public sealed partial class BoardStore : IBoardStore
             Blocked = patch.Blocked ?? existing.Blocked,
             Flagged = patch.Flagged ?? existing.Flagged,
             UpdatedUtc = DateTime.UtcNow,
-            BaseLlmOptions = patch.ClearBaseLlmOptions ? null : patch.BaseLlmOptions ?? existing.BaseLlmOptions
+            BaseLlmOptions = patch.ClearBaseLlmOptions ? null : patch.BaseLlmOptions ?? existing.BaseLlmOptions,
+            WorkflowMode = patch.WorkflowMode ?? existing.WorkflowMode,
+            ManagerSelection = patch.ClearManagerSelection ? null : patch.ManagerSelection ?? existing.ManagerSelection,
+            ManagerBaseLlmOptions = patch.ClearManagerBaseLlmOptions ? null : patch.ManagerBaseLlmOptions ?? existing.ManagerBaseLlmOptions
         };
+        ValidateAgentWorkflow(updated.WorkflowMode, updated.ManagerSelection);
 
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
             command.CommandText = """
                 UPDATE BoardCards SET ColumnId = $column, Position = $position, Title = $title, Description = $description,
-                    Assignee = $assignee, Priority = $priority, Type = $type, Points = $points, Tags = $tags, Blocked = $blocked, Flagged = $flagged, DisplayId = $displayId, UpdatedUTC = $updated
+                    Assignee = $assignee, Priority = $priority, Type = $type, Points = $points, Tags = $tags, Blocked = $blocked, Flagged = $flagged, DisplayId = $displayId, UpdatedUTC = $updated,
+                    WorkflowMode = $workflow, ManagerSelection = $manager, ManagerOptionsJson = $managerOptions
                 WHERE Id = $id;
                 """;
             command.Parameters.AddWithValue("$column", updated.ColumnId);
@@ -736,6 +748,7 @@ public sealed partial class BoardStore : IBoardStore
             command.Parameters.AddWithValue("$blocked", updated.Blocked ? 1 : 0);
             command.Parameters.AddWithValue("$flagged", updated.Flagged ? 1 : 0);
             command.Parameters.AddWithValue("$displayId", updated.DisplayId);
+            AddManagerParameters(command, updated.WorkflowMode, updated.ManagerSelection, updated.ManagerBaseLlmOptions);
             command.Parameters.AddWithValue("$updated", ToDb(updated.UpdatedUtc));
             command.Parameters.AddWithValue("$id", updated.Id);
             await command.ExecuteNonQueryAsync(cancellationToken);
@@ -749,6 +762,7 @@ public sealed partial class BoardStore : IBoardStore
         await TransferCardLogAsync(connection, transaction, existing, updated, author, cancellationToken);
         await LogCardChangedAsync(connection, transaction, existing, updated, fromLaneName, toLaneName,
             author, cancellationToken, stamp);
+        await LogAgentWorkflowChangedAsync(connection, transaction, existing, updated, author, cancellationToken);
         if (flagReason is not null)
             await InsertAttentionAsync(connection, transaction, updated.Id, author, flagReason, cancellationToken);
         await ReconcileMissingSyncedLaneAsync(connection, transaction, updated, stamp, cancellationToken);
@@ -1300,7 +1314,8 @@ public sealed partial class BoardStore : IBoardStore
                c.Type,
                (SELECT k.BoardId FROM BoardColumns k WHERE k.Id = c.ColumnId), c.Flagged,
                {CardPrefixSql}, c.CardKey, c.DisplayId, c.AgentMade, c.AgentMadeBy, c.AgentMadeSessionId,
-               (SELECT j.IssueKey FROM BoardJiraLinks j WHERE j.CardId = c.Id ORDER BY j.LastPulledUTC DESC LIMIT 1)
+               (SELECT j.IssueKey FROM BoardJiraLinks j WHERE j.CardId = c.Id ORDER BY j.LastPulledUTC DESC LIMIT 1),
+               COALESCE(c.WorkflowMode, 'manual'), c.ManagerSelection, c.ManagerOptionsJson
         FROM BoardCards c
         {CardPrefixJoinSql}
         """;
@@ -1493,7 +1508,10 @@ public sealed partial class BoardStore : IBoardStore
         AgentMade: !reader.IsDBNull(22) && reader.GetInt32(22) != 0,
         AgentMadeBy: reader.IsDBNull(23) ? null : reader.GetString(23),
         AgentMadeSessionId: reader.IsDBNull(24) ? null : reader.GetString(24),
-        JiraIssueKey: reader.IsDBNull(25) ? null : reader.GetString(25));
+        JiraIssueKey: reader.IsDBNull(25) ? null : reader.GetString(25),
+        WorkflowMode: reader.GetString(26),
+        ManagerSelection: reader.IsDBNull(27) ? null : reader.GetString(27),
+        ManagerBaseLlmOptions: reader.IsDBNull(28) ? null : JsonSerializer.Deserialize(reader.GetString(28), StorageJsonSerializerContext.Default.BaseLlmOptions));
 
     private static async Task<IReadOnlyList<BoardCommentRecord>> ReadCommentsAsync(SqliteConnection connection, string cardId, CancellationToken cancellationToken)
     {
@@ -1946,6 +1964,12 @@ public sealed partial class BoardStore : IBoardStore
             SqliteSchema.Execute(db, transaction, JiraDeliverySchemaSql));
         SqliteMigrationRunner.Apply(connection, "board-desktop-activity", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, DesktopActivitySchemaSql));
+        SqliteMigrationRunner.Apply(connection, "board-agent-workflow", 1, MigrationKind.Additive, (db, transaction) =>
+        {
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardCards ADD COLUMN WorkflowMode TEXT");
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardCards ADD COLUMN ManagerSelection TEXT");
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardCards ADD COLUMN ManagerOptionsJson TEXT");
+        });
         ReconcileDerivedRows(connection);
     }
 

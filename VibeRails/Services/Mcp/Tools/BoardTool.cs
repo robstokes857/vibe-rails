@@ -379,7 +379,10 @@ public sealed partial class BoardTool(
         CancellationToken cancellationToken = default,
         McpServer? server = null,
         [Description("LLM picker key from list_board_agent_options, e.g. base:codex or env:7:codex. Optional.")] string? assignee = null,
-        [Description("Base CLI launch settings, matching the Board UI: model, effort, mode, yolo, speed. Example: {model: gpt-6-astra, effort: xhigh, speed: ultrafast}. Only valid with a base assignee; saved environments use their own settings.")] BaseLlmOptions? baseLlmOptions = null)
+        [Description("Base CLI launch settings, matching the Board UI: model, effort, mode, yolo, speed. Example: {model: gpt-6-astra, effort: xhigh, speed: ultrafast}. Only valid with a base assignee; saved environments use their own settings.")] BaseLlmOptions? baseLlmOptions = null,
+        [Description("manual (default) | agent. Agent gives a selected manager responsibility for the card's pipeline.")] string? workflowMode = null,
+        [Description("Manager picker key from list_board_agent_options. Required for agent workflow; separate from worker assignee.")] string? managerSelection = null,
+        [Description("Saved base CLI settings for the manager. Saved environments use their own settings.")] BaseLlmOptions? managerBaseLlmOptions = null)
     {
         try
         {
@@ -401,6 +404,7 @@ public sealed partial class BoardTool(
                 return UnnamedClientHint;
             var maker = await ResolveCardMakerAsync(author, agentName, sessionId, cancellationToken);
             RequireBaseAssignee(assignee, baseLlmOptions);
+            RequireBaseAssignee(managerSelection, managerBaseLlmOptions);
             var created = await service.CreateCardAsync(project, new CreateBoardCardRequest(
                 Title: title,
                 ColumnId: columnId,
@@ -414,7 +418,8 @@ public sealed partial class BoardTool(
                 // The tool is the agent path. A session whose author resolves to a person
                 // (a hand-driven call) stays a human card.
                 AgentMade: author.Kind == BoardAuthor.AgentKind,
-                AgentMadeBy: maker.Name, AgentMadeSessionId: maker.SessionId), cancellationToken, author);
+                AgentMadeBy: maker.Name, AgentMadeSessionId: maker.SessionId,
+                WorkflowMode: workflowMode, ManagerSelection: managerSelection, ManagerBaseLlmOptions: managerBaseLlmOptions), cancellationToken, author);
             await AutoLinkSessionAsync(project, created.Id, cancellationToken);
             await TrackDesktopActivityAsync(server, project, created.Id, author.Label, cancellationToken);
             return $"Created {created.Key}: {created.Title}"
@@ -423,6 +428,7 @@ public sealed partial class BoardTool(
                     ? "\n" + DescribeCardMaker(created.AgentMadeBy, created.AgentMadeSessionId, created.CreatedAt) : "")
                 + (maker.Note is null ? "" : "\n" + maker.Note)
                 + (assignee is not null || baseLlmOptions is not null ? "\n" + DescribeAgentSettings(created.Assignee, created.BaseLlmOptions) : "")
+                + (workflowMode is not null || managerSelection is not null || managerBaseLlmOptions is not null ? "\n" + DescribeManagerSettings(created) : "")
                 + (outsideProject ? $"\nOther local project: {project} (board {target.BoardName}, id {target.BoardId})" : "");
         }
         catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
@@ -450,7 +456,11 @@ public sealed partial class BoardTool(
         McpServer? server = null,
         [Description("LLM picker key from list_board_agent_options, e.g. base:codex or env:7:codex. Empty string clears the assignment; omitted preserves it. Changing the assignee clears its old base options unless you supply new ones.")] string? assignee = null,
         [Description("Replaces all saved base CLI options: model, effort, mode, yolo, speed. speed is default, fast or ultrafast (model dependent); Astra supports ultrafast. Omitted preserves options for the same assignee. Saved environments use their own settings and reject base overrides.")] BaseLlmOptions? baseLlmOptions = null,
-        [Description("Clear the saved base CLI options. Cannot be combined with baseLlmOptions.")] bool clearBaseLlmOptions = false)
+        [Description("Clear the saved base CLI options. Cannot be combined with baseLlmOptions.")] bool clearBaseLlmOptions = false,
+        [Description("manual | agent. Omitted preserves the card's workflow.")] string? workflowMode = null,
+        [Description("Manager picker key. Empty clears it when switching to manual; omitted preserves it. Changing manager clears its old base settings.")] string? managerSelection = null,
+        [Description("Replace all saved manager base CLI settings; saved environments reject overrides.")] BaseLlmOptions? managerBaseLlmOptions = null,
+        [Description("Clear saved manager base CLI options. Cannot be combined with managerBaseLlmOptions.")] bool clearManagerBaseLlmOptions = false)
     {
         try
         {
@@ -461,10 +471,17 @@ public sealed partial class BoardTool(
                 return UnnamedClientHint;
             if (clearBaseLlmOptions && baseLlmOptions is not null)
                 return "FAIL: supply baseLlmOptions or clearBaseLlmOptions, not both.";
+            if (clearManagerBaseLlmOptions && managerBaseLlmOptions is not null)
+                return "FAIL: supply managerBaseLlmOptions or clearManagerBaseLlmOptions, not both.";
             if (baseLlmOptions is not null)
             {
                 var existing = await service.FindCardAsync(target.Project, target.CardId!, cancellationToken);
                 RequireBaseAssignee(assignee ?? existing?.Assignee, baseLlmOptions);
+            }
+            if (managerBaseLlmOptions is not null)
+            {
+                var existing = await service.FindCardAsync(target.Project, target.CardId!, cancellationToken);
+                RequireBaseAssignee(managerSelection ?? existing?.ManagerSelection, managerBaseLlmOptions);
             }
             // One request, one store write: the append travels with the other fields, so an
             // invalid priority (or a lost writer lock) leaves nothing behind to duplicate on retry.
@@ -479,18 +496,23 @@ public sealed partial class BoardTool(
                 Points: points is null ? default : PointsElement(points.Value),
                 Tags: tags is null ? null : SplitTags(tags) ?? [],
                 Blocked: blocked,
-                Type: type, Flagged: flagged, FlagReason: flagReason);
+                Type: type, Flagged: flagged, FlagReason: flagReason,
+                WorkflowMode: workflowMode, ManagerSelection: managerSelection, ManagerBaseLlmOptions: managerBaseLlmOptions,
+                ClearManagerBaseLlmOptions: clearManagerBaseLlmOptions);
             var updated = await service.UpdateCardAsync(target.Project, target.CardId!, request, cancellationToken, author);
             if (updated is null)
                 return $"FAIL: card not found: {card}";
             await AutoLinkSessionAsync(target.Project, updated.Id, cancellationToken);
             await TrackDesktopActivityAsync(server, target.Project, updated.Id, author.Label, cancellationToken);
             if (descriptionAppend is not null && title is null && priority is null && points is null && tags is null && blocked is null && type is null && flagged is null
-                && assignee is null && baseLlmOptions is null && !clearBaseLlmOptions)
+                && assignee is null && baseLlmOptions is null && !clearBaseLlmOptions
+                && workflowMode is null && managerSelection is null && managerBaseLlmOptions is null && !clearManagerBaseLlmOptions)
                 return $"Appended to the description of {updated.Key}.";
             return $"Updated {updated.Key}: {updated.Title} ({updated.Priority}{(updated.Blocked ? ", blocked" : "")}{(updated.Flagged ? ", needs your attention" : "")})"
                 + (assignee is not null || baseLlmOptions is not null || clearBaseLlmOptions
-                    ? "\n" + DescribeAgentSettings(updated.Assignee, updated.BaseLlmOptions) + "\nApplies to the next launch; running agents are unchanged." : "");
+                    ? "\n" + DescribeAgentSettings(updated.Assignee, updated.BaseLlmOptions) + "\nApplies to the next launch; running agents are unchanged." : "")
+                + (workflowMode is not null || managerSelection is not null || managerBaseLlmOptions is not null || clearManagerBaseLlmOptions
+                    ? "\n" + DescribeManagerSettings(updated) + "\nApplies to the next launch; running agents are unchanged." : "");
         }
         catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
         catch (BoardConflictException ex) { return "FAIL: " + ex.Message; }
@@ -1000,6 +1022,8 @@ public sealed partial class BoardTool(
             builder.AppendLine("Desktop app activity: active or recently active through MCP (separate from terminal sessions).");
         if (!string.IsNullOrWhiteSpace(card.Assignee))
             builder.Append(DescribeAgentSettings(card.Assignee, card.BaseLlmOptions)).Append('\n');
+        if (card.WorkflowMode == BoardWorkflowModes.Agent)
+            builder.Append(DescribeManagerSettings(card)).Append('\n');
         if (!string.IsNullOrWhiteSpace(card.JiraIssueKey))
             builder.Append("Jira issue: ").Append(card.JiraIssueKey)
                 .Append(". Comments sync to Jira by default. Keep updates concise; do not spam progress. Use add_board_comment or append_board_note with syncToJira=false for internal notes. Linked sessions automatically get public replay links posted to Jira. Do not duplicate those posts with add_jira_comment.\n");

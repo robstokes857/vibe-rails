@@ -11,8 +11,13 @@ an unchanged assignee. Saved environments reject base overrides. For Astra use
 Card reads and assignment receipts show saved settings, not the effective settings of a
 running session. Default speed inherits the CLI configuration.
 
-`start_board_agent(card)` calls the same root route as Start work, with no selection override,
-so shared validation and saved options govern launch. Discovery/start require inherited
+`start_board_agent(card)` calls the same root route as Start work: Agent cards launch the saved
+manager by default. `intent=worker` launches the saved worker, with optional `selection` and
+bounded `task` instructions; `intent=code_review` launches a direct reviewer. Overrides never
+rewrite saved assignments, and the manager retains pipeline responsibility. Create/update accept
+`workflowMode`, `managerSelection` and `managerBaseLlmOptions` (update also accepts
+`clearManagerBaseLlmOptions`); shared validation applies independently from worker settings.
+Agent status names each session's manager/worker role. Discovery/start require inherited
 `VIBERAILS_TOOL_*` root credentials and an open root; standalone MCP clients and the root's
 MCP Explorer without that inherited context get an actionable failure. They use the existing
 loopback-only client pattern, both credentials, bounded responses and no redirects/proxies/cookies.

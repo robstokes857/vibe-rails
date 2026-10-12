@@ -68,6 +68,15 @@ public sealed class BoardAgentCompletionTests : IDisposable
     }
 
     [Fact]
+    public async Task StatusPreservesPlanningWorkerRole()
+    {
+        var card = await Card();
+        var session = Guid.NewGuid().ToString();
+        await store.LinkSessionAsync(root, card.Id, session, null, "base:claude", "claude", "Planner", "agent_worker_planning", Ct);
+        Assert.Contains("role: worker (planning)", await tool.GetBoardAgentStatus(card.Key, session, Ct));
+    }
+
+    [Fact]
     public async Task PollingSeesPendingQueuedAndFailedRunsBeforeARecordingExists()
     {
         var card = await Card();

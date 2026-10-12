@@ -13,7 +13,7 @@ export function cardReviewsSection(card) {
                 <p class="small">Choose the session that contributed the coding work. Session links and assignment alone do not establish authorship. Use Mixed if other agents or people also contributed.</p>
                 <label class="form-label">Coding source<select class="form-select" data-review-source>
                     <option value="unknown">Unknown</option><option value="mixed">Mixed sources</option><option value="human">Human / external work</option>
-                    ${(card.sessions || []).filter(s => !['chat', 'planning', 'code_review'].includes(s.origin)).map(s => `<option value="session:${esc(s.id)}">${esc(s.displayName || s.cli)} · ${esc(s.id)}</option>`).join('')}
+                    ${(card.sessions || []).filter(s => !s.isNonCoding && !s.isReview && !['chat', 'planning', 'code_review', 'agent_manager', 'agent_worker_planning'].includes(s.origin)).map(s => `<option value="session:${esc(s.id)}">${esc(s.displayName || s.cli)} · ${esc(s.id)}</option>`).join('')}
                 </select></label>
                 <label class="form-label d-block">Coding work in this scope<textarea class="form-control" maxlength="2000" data-review-description></textarea></label>
                 <label class="form-label">Review scope<select class="form-select" data-review-scope>
@@ -100,7 +100,8 @@ export function bindCardReviews(editor, card, app, onQueued) {
             if (!current()) return;
             const source = value.sourceKind === 'session' ? `session:${value.sourceSessionId}` : value.sourceKind || 'unknown';
             if (![...find('source').options].some(o => o.value === source)) {
-                const option = document.createElement('option'); option.value = source; option.textContent = `Selected coding session ${value.sourceSessionId}`; find('source').append(option);
+                const option = document.createElement('option'); option.value = source; option.disabled = true;
+                option.textContent = `Unavailable coding session ${value.sourceSessionId} — choose another source`; find('source').append(option);
             }
             find('source').value = source; find('description').value = value.description || ''; find('scope').value = value.scope || 'working-tree';
             find('base').value = value.baseCommit || ''; find('head').value = value.headCommit || ''; find('dirty').checked = value.includeDirty === true;

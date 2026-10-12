@@ -366,12 +366,20 @@
         <div class="view project-health-page code-quality-page" data-view="code-quality">
             <section class="card project-health-card project-health-quality vca-console-card"
                 data-code-analyzer-console data-tone="neutral" aria-busy="false">
-                <header class="vb-page-header project-health-header">
-                    <div class="vb-page-heading">
+                <!-- The map leads: Code Atlas + Quality Lab fill the viewport under the nav, mounted inline by
+                     RuleController.attachCodeQualityOverview. The title, scan line and actions sit in the bar
+                     beneath them, so nothing pushes the map down. -->
+                <div class="project-health-quality-report" data-code-analyzer-report></div>
+                <header class="vb-page-header project-health-header code-quality-bar">
+                    <div class="vb-page-heading code-quality-bar-heading">
                         <h1 class="vb-page-title">Code quality</h1>
+                        <span class="project-health-scan-meta" data-code-analyzer-meta aria-live="polite"></span>
+                        <button class="code-quality-guide-toggle" type="button" data-action="toggle-scan-guide"
+                            aria-expanded="false">
+                            <i class="fa-solid fa-circle-info" aria-hidden="true"></i>What this scan checks
+                        </button>
                     </div>
                     <div class="vb-page-actions project-health-card-actions">
-                        <span class="project-health-scan-meta" data-code-analyzer-meta aria-live="polite"></span>
                         <details class="rules-action-menu">
                             <summary class="btn btn-sm btn-outline-secondary" aria-label="More scan options" title="More scan options">
                                 <i class="fa-solid fa-ellipsis" aria-hidden="true"></i>
@@ -409,11 +417,12 @@
                             <i class="fa-solid fa-rotate-right" data-button-icon aria-hidden="true"></i>
                             <span data-button-label>Scan again</span>
                         </button>
+                        <!-- One pill: the Fix action and the shared agent picker it launches with. -->
                         <div class="project-health-fix-controls" role="group" aria-label="Fix code quality with an agent">
                             <button class="btn btn-sm btn-outline-secondary" type="button"
                                 data-action="launch-health-fix" data-fix-scope="quality" disabled>
                                 <i class="fa-solid fa-screwdriver-wrench" aria-hidden="true"></i>
-                                Fix code quality with:
+                                Fix with
                             </button>
                             <label class="project-health-fix-picker">
                                 <span class="visually-hidden">Agent for code quality</span>
@@ -423,30 +432,12 @@
                         </div>
                     </div>
                 </header>
-
-                <!-- Code Atlas + Quality Lab, mounted inline by RuleController.attachCodeQualityOverview. -->
-                <div class="project-health-quality-report" data-code-analyzer-report></div>
-                <!-- The scan log opens from the menu; the header line carries the scan's size and age. -->
-                <details class="rules-console-transcript project-health-scan-transcript" data-code-analyzer-log hidden>
-                    <summary>
-                        <span class="vca-console-pulse" aria-hidden="true"></span>
-                        <span class="rules-console-transcript-label">Technical details</span>
-                        <small data-vca-console-meta>Waiting for analysis</small>
-                    </summary>
-                    <div class="vca-console-shell">
-                        <pre class="vca-console-output" data-vca-console-output role="log"
-                            aria-live="polite" aria-atomic="false" tabindex="0"></pre>
-                    </div>
-                </details>
-                <!-- What this scan checks: a collapsed guide to MintLint's categories, thresholds, grading and
-                     languages. Static markup; project-health-theme.test.mjs keeps it in step with ScoringProfile,
-                     ScoreCalculator and the language parsers. -->
-                <details class="rules-console-transcript project-health-scan-guide" data-code-analyzer-guide>
-                    <summary>
-                        <span class="rules-console-transcript-label">What this scan checks</span>
-                        <small>7 categories · 15 measurements · 13 languages</small>
-                    </summary>
+                <!-- What this scan checks: opens under the bar from its toggle. A guide to MintLint's categories,
+                     thresholds, grading and languages. Static markup; project-health-theme.test.mjs keeps it in
+                     step with ScoringProfile, ScoreCalculator and the language parsers. -->
+                <section class="project-health-scan-guide" data-code-analyzer-guide hidden aria-label="What this scan checks">
                     <div class="scan-guide">
+                        <div class="scan-guide-head"><strong>What this scan checks</strong><small>7 categories · 15 measurements · 13 languages</small></div>
                         <p class="scan-guide-lead">MintLint, the analyzer built into VibeRails, parses the source files you changed and grades each one in seven categories. Only the lines you added are measured; removed lines never score. The default scan covers staged, unstaged and untracked changes against HEAD, <b>Scan unpushed commits</b> scores what your local commits add over the upstream branch, and files on the exclusion list are left out.</p>
                         <p class="scan-guide-thresholds">Thresholds read warn · critical: a measurement scores 50 concern at the first number and 100 at the second.</p>
                         <ul class="scan-guide-categories" aria-label="Scan categories">
@@ -514,6 +505,18 @@
                             <p><strong>Reach.</strong> Files are ranked by concern × (1 + log₁₀(1 + referencing files)), counting the other tracked source files that mention one of the file's declared class or function names, so a smell in code the repository leans on outranks the same smell in code nothing uses. <b>Full repository</b> extends that count to every source file on disk, untracked ones included.</p>
                             <p><strong>Languages.</strong> JavaScript, TypeScript, Python, C#, Go, Rust, C, Java, C++, PHP, Ruby, Bash and PowerShell, recognized by file extension. The repository map beside the report shows structure only; no grade is inferred from it.</p>
                         </div>
+                    </div>
+                </section>
+                <!-- The scan log opens from the menu; the bar's scan line carries the scan's size and age. -->
+                <details class="rules-console-transcript project-health-scan-transcript" data-code-analyzer-log hidden>
+                    <summary>
+                        <span class="vca-console-pulse" aria-hidden="true"></span>
+                        <span class="rules-console-transcript-label">Technical details</span>
+                        <small data-vca-console-meta>Waiting for analysis</small>
+                    </summary>
+                    <div class="vca-console-shell">
+                        <pre class="vca-console-output" data-vca-console-output role="log"
+                            aria-live="polite" aria-atomic="false" tabindex="0"></pre>
                     </div>
                 </details>
                 <button type="button" data-action="clear-code-analyzer-output" hidden>Clear results</button>
@@ -3463,6 +3466,18 @@
                 .board-view .board-type-chip[data-type="research-spike"] { color: #c084fc; border-color: color-mix(in srgb, #c084fc 45%, transparent); }
                 .board-view .board-type-chip[data-type="chore"] { color: #fbbf24; border-color: color-mix(in srgb, #fbbf24 45%, transparent); }
 
+                .board-view .board-workflow-chip {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.25rem;
+                    padding: 1px 6px;
+                    border: 1px solid color-mix(in srgb, #c084fc 45%, transparent);
+                    border-radius: 999px;
+                    color: #c084fc;
+                    font-size: 0.62rem;
+                    white-space: nowrap;
+                }
+
                 .board-view .board-priority-chip {
                     flex-shrink: 0;
                     white-space: nowrap;
@@ -3502,7 +3517,9 @@
                 /* Assignee row: avatar + name, the click-to-filter control. */
                 .board-view .board-card-foot {
                     display: flex;
+                    flex-wrap: wrap;
                     align-items: center;
+                    gap: 0.3rem;
                     margin-top: 0.45rem;
                     padding-top: 0.4rem;
                     border-top: 1px solid color-mix(in srgb, var(--color-border, #334155) 60%, transparent);
@@ -3521,6 +3538,16 @@
                     font-size: 0.72rem;
                     font-weight: 500;
                     cursor: pointer;
+                }
+
+                .board-manager-chip {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.4rem;
+                    min-width: 0;
+                    max-width: 100%;
+                    color: #c084fc;
+                    font-size: 0.72rem;
                 }
 
                 .board-assignee-chip:hover {
@@ -4724,6 +4751,21 @@
                 .board-swatch.is-on {
                     outline: 2px solid var(--color-text, #f8fafc);
                     outline-offset: 2px;
+                }
+
+                @media (min-width: 861px) and (max-width: 1050px) {
+                    .board-view .board-head {
+                        gap: 0.5rem;
+                    }
+
+                    .board-view .board-picker-select {
+                        width: 130px;
+                    }
+
+                    .board-view .board-stats {
+                        gap: 0.4rem;
+                        padding-left: 0;
+                    }
                 }
 
                 @media (max-width: 860px) {

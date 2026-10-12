@@ -14,7 +14,7 @@ public sealed partial class BoardStore
         // Select only requested cards and currently live links. Large descriptions and ended
         // session histories never enter this result, including cards in partially loaded lanes.
         command.CommandText = $"""
-            SELECT c.Id, s.SessionId, s.Origin
+            SELECT c.Id, s.SessionId, s.Origin, COALESCE(c.WorkflowMode, 'manual')
             FROM BoardCards c
             JOIN BoardColumns lane ON lane.Id = c.ColumnId AND lane.ProjectPath = c.ProjectPath
             JOIN Boards b ON b.Id = lane.BoardId AND b.ProjectPath = c.ProjectPath
@@ -41,7 +41,7 @@ public sealed partial class BoardStore
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
             result.Add(new(reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1),
-                reader.IsDBNull(2) ? null : reader.GetString(2)));
+                reader.IsDBNull(2) ? null : reader.GetString(2), reader.GetString(3)));
         return result;
     }
 }

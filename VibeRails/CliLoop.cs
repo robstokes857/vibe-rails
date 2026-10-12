@@ -156,9 +156,18 @@ public static class CliLoop
         string? initialPrompt = null;
         var runPurpose = jobRun?.Purpose ?? "work";
         var workerPrompt = jobRun?.ReviewLaunch is {} frozen ? frozen.WorkerPrompt + "\n" + environment?.CustomPrompt : environment?.CustomPrompt;
+        var managedWorkflow = false;
+        if (boardCardKey is not null)
+        {
+            // A review may run in its explicit checkout. Resolve ownership from the originating
+            // Job project, not that checkout; all Board persistence stays behind IBoardStore.
+            var card = await scopedServices.GetRequiredService<Services.Board.IBoardStore>()
+                .FindCardAsync(jobRun?.ProjectPath ?? workingDirectory, boardCardKey, cancellationToken);
+            managedWorkflow = card?.WorkflowMode == Services.Board.BoardWorkflowModes.Agent;
+        }
         var promptTemplate = boardCardKey is null
             ? jobRun is null ? workerPrompt : Services.Board.BoardPromptComposer.ComposeStandaloneAutomationPrompt(workerPrompt)
-            : Services.Board.BoardPromptComposer.ComposeAutomationPrompt(boardCardKey, workerPrompt, runPurpose);
+            : Services.Board.BoardPromptComposer.ComposeAutomationPrompt(boardCardKey, workerPrompt, runPurpose, managedWorkflow);
         if (jobRun?.ReviewLaunch is {} routed) promptTemplate += Services.Board.ReviewRoutingService.Prompt(routed.Resolution);
         if (!string.IsNullOrWhiteSpace(promptTemplate))
         {

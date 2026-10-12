@@ -1,5 +1,29 @@
 # Working on Vibe Board
 
+## Agent workflow (VIBE-52)
+
+Cards default to Manual. Agent mode has a separate manager picker/settings and keeps Assignee
+as the default worker. `BoardLaunchService` starts the saved manager for ordinary work intent;
+explicit worker launches accept a selection and bounded task without rewriting assignments.
+Managers and direct workers/reviewers use `agent_manager` / `agent_worker` session origins.
+Planning-only workers use `agent_worker_planning`, retaining their Worker role. Managers and
+planning workers cannot be coding sources; reviewer workers are excluded by review metadata.
+One manager may coexist with one direct worker; launch exclusion remains root-local. List,
+detail, paging and activity responses focus the manager on Agent cards. Real worker recordings
+stay in Sessions; desktop presence remains independent.
+
+Launch prompts are role-specific: Manual launches retain their existing work/review/discussion
+instructions; Agent managers start with orchestration instructions, must delegate execution to a
+separate Board worker session, and never implement the task themselves. The saved Assignee is
+the default worker. Agent workers start with their bounded assignment role.
+The manager's prompt owns evidence-based lane movement and closure through existing tools.
+Delegated workers and lane Automation prompts report their own step and hand off without moving
+the card. A manager polls status/reviews, preserves handoffs, and stops after closure, Manual
+selection or an owner blocker. No deterministic lane transitions, live TUI input or background
+host are added. Restart a stopped manager using Start Agent workflow; it recovers saved work.
+Nullable `board-agent-workflow/1` columns are additive with no backfill. Manager configuration
+and its change history stay local, preserving the existing hosted sync protocol.
+
 ## MCP agent settings parity
 
 MCP create/update accepts the UI's `assignee` and typed `baseLlmOptions`, including explicit

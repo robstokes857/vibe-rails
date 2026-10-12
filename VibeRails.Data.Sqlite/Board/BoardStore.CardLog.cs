@@ -260,6 +260,27 @@ public sealed partial class BoardStore
             _summary.Add($"Moved {fromName} → {toName}");
         }
 
+        public void AgentWorkflow(BoardCardRecord before, BoardCardRecord after)
+        {
+            if (before.WorkflowMode != after.WorkflowMode)
+            {
+                WriteFromTo("workflowMode", w => w.WriteStringValue(before.WorkflowMode), w => w.WriteStringValue(after.WorkflowMode));
+                _summary.Add($"Workflow: {before.WorkflowMode} → {after.WorkflowMode}");
+            }
+            if (before.ManagerSelection != after.ManagerSelection)
+            {
+                WriteFromTo("managerSelection", w => WriteNullableString(w, before.ManagerSelection), w => WriteNullableString(w, after.ManagerSelection));
+                _summary.Add($"Manager: {Show(before.ManagerSelection)} → {Show(after.ManagerSelection)}");
+            }
+            if (before.ManagerBaseLlmOptions != after.ManagerBaseLlmOptions)
+            {
+                WriteFromTo("managerBaseLlmOptions",
+                    w => System.Text.Json.JsonSerializer.Serialize(w, before.ManagerBaseLlmOptions, VibeRails.DTOs.StorageJsonSerializerContext.Default.BaseLlmOptions),
+                    w => System.Text.Json.JsonSerializer.Serialize(w, after.ManagerBaseLlmOptions, VibeRails.DTOs.StorageJsonSerializerContext.Default.BaseLlmOptions));
+                _summary.Add("Manager launch options changed");
+            }
+        }
+
         private void WriteTo(string field, Action<Utf8JsonWriter> to)
         {
             _json.WriteStartObject(field);

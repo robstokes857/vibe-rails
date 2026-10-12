@@ -19,6 +19,8 @@ public partial interface IBoardStore
     Task<string?> FindSessionPurposeAsync(string projectPath, string cardId, string sessionId, CancellationToken cancellationToken = default);
     /// <summary>Known discussion/planning/review provenance on any linked card in this project.</summary>
     Task<bool> IsNonCodingSessionAsync(string projectPath, string sessionId, CancellationToken cancellationToken = default);
+    /// <summary>Batch known non-coding link/context provenance for session pickers, scoped to this project.</summary>
+    Task<IReadOnlySet<string>> GetNonCodingSessionIdsAsync(string projectPath, IReadOnlyList<string> sessionIds, CancellationToken cancellationToken = default);
     /// <summary>Explicit per-card coding source and scope; absent settings mean unknown source.</summary>
     Task<VibeRails.DTOs.BoardReviewSettings?> GetReviewSettingsAsync(string projectPath, string cardId, CancellationToken cancellationToken = default);
     /// <summary>Save review inputs on a live project-scoped card without rewriting run history.</summary>

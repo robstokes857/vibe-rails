@@ -35,6 +35,103 @@ public sealed class BoardStoreTests : IDisposable
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Fact]
+    public async Task AgentWorkflow_PersistsIndependentManagerSettings_AndPartialUpdatesPreserveThem()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var workerOptions = new BaseLlmOptions(Model: "worker-model", Effort: "medium");
+        var managerOptions = new BaseLlmOptions(Model: "manager-model", Effort: "high", Yolo: true);
+        var card = await _store.CreateCardAsync(_project, NewCard("Managed") with
+        {
+            Assignee = "base:claude", BaseLlmOptions = workerOptions,
+            WorkflowMode = BoardWorkflowModes.Agent, ManagerSelection = "base:codex", ManagerBaseLlmOptions = managerOptions
+        }, Ct);
+        await _store.UpdateCardAsync(_project, card.Id, new BoardCardPatch(Title: "Renamed"), Ct);
+
+        var reopened = new BoardStore(_connectionString, _connectionString);
+        var loaded = (await reopened.FindCardAsync(_project, card.Id, Ct))!;
+        Assert.Equal(BoardWorkflowModes.Agent, loaded.WorkflowMode);
+        Assert.Equal("base:codex", loaded.ManagerSelection);
+        Assert.Equal(managerOptions, loaded.ManagerBaseLlmOptions);
+        Assert.Equal("base:claude", loaded.Assignee);
+        Assert.Equal(workerOptions, loaded.BaseLlmOptions);
+        var history = await reopened.GetCardHistoryAsync(_project, card.Id, Ct);
+        Assert.Contains(history, entry => entry.Body.Contains("Workflow: manual → agent", StringComparison.Ordinal));
+        var activity = Assert.Single(await reopened.GetCardActivityAsync(_project, loaded.BoardId, [loaded.Id], [], Ct));
+        Assert.Equal(BoardWorkflowModes.Agent, activity.WorkflowMode);
+
+        // Launch settings are local; unchanged hosted sync must never receive new settings fields.
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(Ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM BoardSyncLog WHERE CardId = $card AND RemoteSeq IS NULL AND (json_extract(Changes, '$.workflowMode') IS NOT NULL OR json_extract(Changes, '$.managerSelection') IS NOT NULL OR json_extract(Changes, '$.managerBaseLlmOptions') IS NOT NULL);";
+        command.Parameters.AddWithValue("$card", card.Id);
+        Assert.Equal(0L, await command.ExecuteScalarAsync(Ct));
+    }
+
+    [Fact]
+    public async Task AgentWorkflow_ClearManagerRequiresManualMode_AndRollsBackInvalidPatch()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var card = await _store.CreateCardAsync(_project, NewCard("Managed") with
+        {
+            WorkflowMode = BoardWorkflowModes.Agent, ManagerSelection = "base:codex",
+            ManagerBaseLlmOptions = new BaseLlmOptions(Model: "manager-model")
+        }, Ct);
+        await Assert.ThrowsAsync<BoardValidationException>(() => _store.UpdateCardAsync(_project, card.Id,
+            new BoardCardPatch(Title: "Must roll back", ClearManagerSelection: true), Ct));
+        var unchanged = (await _store.FindCardAsync(_project, card.Id, Ct))!;
+        Assert.Equal("Managed", unchanged.Title);
+        Assert.Equal("base:codex", unchanged.ManagerSelection);
+        var cleared = (await _store.UpdateCardAsync(_project, card.Id, new BoardCardPatch(
+            WorkflowMode: BoardWorkflowModes.Manual, ClearManagerSelection: true, ClearManagerBaseLlmOptions: true), Ct))!;
+        Assert.Equal(BoardWorkflowModes.Manual, cleared.WorkflowMode);
+        Assert.Null(cleared.ManagerSelection);
+        Assert.Null(cleared.ManagerBaseLlmOptions);
+        var loaded = (await _store.FindCardAsync(_project, card.Id, Ct))!;
+        Assert.Null(loaded.ManagerBaseLlmOptions);
+        await Assert.ThrowsAsync<BoardValidationException>(() => _store.CreateCardAsync(_project,
+            NewCard("Invalid") with { WorkflowMode = BoardWorkflowModes.Agent }, Ct));
+        await Assert.ThrowsAsync<BoardValidationException>(() => _store.CreateCardAsync(_project,
+            NewCard("Invalid") with { WorkflowMode = "unknown" }, Ct));
+    }
+
+    [Fact]
+    public async Task AgentWorkflowUpgrade_IsAdditiveWithoutBackfill_AndOldWritersPreserveManager()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var legacyCard = await _store.CreateCardAsync(_project, NewCard("Legacy"), Ct);
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(Ct);
+        await using var command = connection.CreateCommand();
+        // Disposable fixture models the schema before this component was added.
+        command.CommandText = "ALTER TABLE BoardCards DROP COLUMN WorkflowMode; ALTER TABLE BoardCards DROP COLUMN ManagerSelection; ALTER TABLE BoardCards DROP COLUMN ManagerOptionsJson; DELETE FROM SchemaMigrations WHERE Component = 'board-agent-workflow';";
+        await command.ExecuteNonQueryAsync(Ct);
+        var upgraded = new BoardStore(_connectionString, _connectionString);
+        var loaded = (await upgraded.FindCardAsync(_project, legacyCard.Id, Ct))!;
+        Assert.Equal(BoardWorkflowModes.Manual, loaded.WorkflowMode);
+        Assert.Null(loaded.ManagerSelection);
+        command.CommandText = "SELECT WorkflowMode FROM BoardCards WHERE Id = $card;";
+        command.Parameters.AddWithValue("$card", legacyCard.Id);
+        Assert.Equal(DBNull.Value, await command.ExecuteScalarAsync(Ct));
+
+        var managerOptions = new BaseLlmOptions(Model: "manager-model");
+        await upgraded.UpdateCardAsync(_project, legacyCard.Id, new BoardCardPatch(
+            WorkflowMode: BoardWorkflowModes.Agent, ManagerSelection: "base:codex", ManagerBaseLlmOptions: managerOptions), Ct);
+        command.CommandText = "UPDATE BoardCards SET Title = 'Old writer title', Assignee = 'base:claude' WHERE Id = $card;";
+        await command.ExecuteNonQueryAsync(Ct);
+        loaded = (await upgraded.FindCardAsync(_project, legacyCard.Id, Ct))!;
+        Assert.Equal("Old writer title", loaded.Title);
+        Assert.Equal("base:claude", loaded.Assignee);
+        Assert.Equal(BoardWorkflowModes.Agent, loaded.WorkflowMode);
+        Assert.Equal("base:codex", loaded.ManagerSelection);
+        Assert.Equal(managerOptions, loaded.ManagerBaseLlmOptions);
+        command.CommandText = "PRAGMA user_version;";
+        Assert.Equal(3L, await command.ExecuteScalarAsync(Ct));
+        command.CommandText = "SELECT COUNT(*) FROM SchemaMigrations WHERE Component = 'board-agent-workflow' AND Version = 1;";
+        Assert.Equal(1L, await command.ExecuteScalarAsync(Ct));
+    }
+
+    [Fact]
     public async Task HistorySessionCards_ReturnOnlyRequestedActiveCards_DefaultFirst_AcrossBatches()
     {
         await _store.EnsureDefaultColumnsAsync(_project, Ct);

@@ -68,6 +68,8 @@ public partial interface IBoardStore
     Task<BoardSessionOutcomeRecord?> FindSessionOutcomeAsync(string sessionId, CancellationToken cancellationToken = default);
 
     Task<BoardSessionRecord?> LinkSessionAsync(string projectPath, string cardId, string sessionId, string? tabId, string selection, string cli, string displayName, string origin, CancellationToken cancellationToken = default);
+    /// <summary>Confirm an in-flight launch's origin when an early attachment already linked that exact session/card.</summary>
+    Task<bool> ConfirmSessionLaunchOriginAsync(string projectPath, string cardId, string sessionId, string origin, CancellationToken cancellationToken = default);
     Task<BoardSessionRecord?> RenameSessionAsync(string projectPath, string cardId, string sessionId, string displayName, CancellationToken cancellationToken = default);
     Task<bool> UnlinkSessionAsync(string projectPath, string cardId, string sessionId, CancellationToken cancellationToken = default);
     /// <summary>The original link, or the oldest remaining attachment if it was removed. Additional links never change the default.</summary>

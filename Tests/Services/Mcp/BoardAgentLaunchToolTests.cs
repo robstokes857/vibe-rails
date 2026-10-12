@@ -78,6 +78,46 @@ public sealed class BoardAgentLaunchToolTests
         Assert.DoesNotContain("sensitive-checkout", result);
     }
 
+    [Fact]
+    public async Task DelegatedWorkerLaunchSendsSelectionAndBoundedInstructionsWithoutReassigningCard()
+    {
+        using var client = new HttpClient(new Handler(async (request, ct) =>
+        {
+            var body = await request.Content!.ReadFromJsonAsync(AppJsonSerializerContext.Default.LaunchBoardCardRequest, ct);
+            Assert.Equal("worker", body!.Intent);
+            Assert.Equal("base:claude", body.Selection);
+            Assert.Equal("Fix the saved review's blocking findings.", body.Task);
+            return Response();
+        }));
+        Assert.Contains("Started agent", await Tool(client).StartBoardAgent("VIBE-42", TestContext.Current.CancellationToken,
+            intent: "worker", selection: "base:claude", task: "Fix the saved review's blocking findings."));
+    }
+
+    [Theory]
+    [InlineData("invalid", null, null)]
+    [InlineData("work", "base:claude", null)]
+    [InlineData("manager", "base:claude", null)]
+    [InlineData("manager", null, "Task")]
+    [InlineData("worker", "shell;inject", null)]
+    public async Task InvalidDelegationNeverSends(string intent, string? selection, string? task)
+    {
+        var clients = new Mock<IHttpClientFactory>(MockBehavior.Strict);
+        var tool = new BoardAgentLaunchTool(clients.Object, _ => null);
+        Assert.StartsWith("FAIL:", await tool.StartBoardAgent("VIBE-42", TestContext.Current.CancellationToken,
+            intent: intent, selection: selection, task: task));
+        clients.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task OversizedDelegationNeverSends()
+    {
+        var clients = new Mock<IHttpClientFactory>(MockBehavior.Strict);
+        var tool = new BoardAgentLaunchTool(clients.Object, _ => null);
+        Assert.StartsWith("FAIL:", await tool.StartBoardAgent("VIBE-42", TestContext.Current.CancellationToken,
+            intent: "worker", task: new string('x', 4001)));
+        clients.VerifyNoOtherCalls();
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.NotFound)]
     [InlineData(HttpStatusCode.BadRequest)]

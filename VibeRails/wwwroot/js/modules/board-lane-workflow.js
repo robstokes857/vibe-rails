@@ -18,13 +18,12 @@ export function laneStepMarkup(id, workflows = []) {
             title="Skip this step for this card only">${[Status.Queued, Status.Running].includes(step.status) ? 'Stop and skip' : 'Skip'}</button>` : '';
         const rerun = step.canRerun ? `<button type="button" class="btn btn-sm btn-outline-primary"
             data-agent-action="rerun" data-card-id="${escapeHtml(flow.cardId)}" data-event-key="${escapeHtml(step.eventKey)}"
-            title="Re-run this failed step for this card">Re-run</button>` : '';
+            title="Retry this step for this card">Retry</button>` : '';
         return `<div class="board-workflow-card">
             <span class="board-workflow-card-label">${escapeHtml(flow.cardLabel)}</span>
-            <div class="board-workflow-progress"><span class="board-workflow-state is-${style}" title="${escapeHtml(step.reason)}">
+            <div class="board-workflow-progress"><span class="board-workflow-state is-${style}">
                 <i class="fa-solid fa-${icons[state] || 'clock'}" aria-hidden="true"></i> ${escapeHtml(state)}</span>
                 <span class="board-workflow-actions">${rerun}${skip}</span></div>
-            <small class="board-workflow-reason">${escapeHtml(step.reason)}</small>
         </div>`;
     }).join('');
 }

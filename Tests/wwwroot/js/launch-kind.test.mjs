@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-    agentDisplayName, classifyCatalog, isSharedWithEveryProject, jobLaunchKind, launchKind, workerActionOf
+    agentDisplayName, classifyCatalog, jobLaunchKind, launchKind, workerActionOf
 } from '../../../VibeRails/wwwroot/js/modules/launch-kind.js';
 
 const env = (id, name, customPrompt = '', extra = {}) => ({ id, name, cli: 'codex', customPrompt, ...extra });
@@ -64,19 +64,17 @@ test('several Jobs on one Agent stay in server order; empty inputs are safe', ()
     assert.deepEqual(classifyCatalog(undefined, undefined), { agents: [], automations: [], quickLaunches: [] });
 });
 
-test('a setup with no project of its own is shared unless something here runs it', () => {
+test('unscoped setups are omitted while project jobs retain their missing-worker entry', () => {
     const legacy = env(7, 'Old helper', 'Help.', { projectPath: null });
     const owned = env(8, 'Here', 'Help.', { projectPath: 'C:\repo' });
     const olderApi = env(9, 'No field', 'Help.');
-    assert.equal(isSharedWithEveryProject(legacy), true);
-    assert.equal(isSharedWithEveryProject(env(10, 'Blank', 'Help.', { projectPath: '  ' })), true);
-    assert.equal(isSharedWithEveryProject(owned), false);
-    // An API that does not send the field changes nothing.
-    assert.equal(isSharedWithEveryProject(olderApi), false);
+    const blank = env(10, 'Blank', 'Help.', { projectPath: '  ' });
+    const quickLaunch = env(11, 'Unscoped quick launch', '', { projectPath: null });
 
-    const { agents } = classifyCatalog([legacy, owned, olderApi], [{ id: 1, name: 'Runs old', actions: [worker(7)] }]);
-    assert.deepEqual(agents.map(entry => [entry.environment.name, entry.shared]),
-        [['Old helper', false], ['Here', false], ['No field', false]]);
-    assert.equal(classifyCatalog([legacy], []).agents[0].shared, true);
-    assert.equal(classifyCatalog([], [{ id: 2, name: 'Gone', actions: [worker(99)] }]).agents[0].shared, false);
+    const { agents, quickLaunches } = classifyCatalog([legacy, owned, olderApi, blank, quickLaunch],
+        [{ id: 1, name: 'Runs old', actions: [worker(7)] }]);
+    assert.deepEqual(agents.map(entry => entry.environment?.name ?? null), ['Here', 'No field', null]);
+    assert.deepEqual(agents[2].jobs.map(job => job.id), [1]);
+    assert.deepEqual(quickLaunches, []);
+    assert.deepEqual(classifyCatalog([legacy, blank], []).agents, []);
 });

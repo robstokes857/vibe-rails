@@ -48,20 +48,21 @@ public sealed class ProjectPathComparerTests
     [Fact]
     public void Matches_TreatsBlankAsNoMatch()
     {
-        // "Unscoped" is a different state from "same project" — callers that want the global
-        // behaviour have to ask for it through IsVisibleIn.
+        // "Unscoped" is a different state from "same project".
         Assert.False(ProjectPathComparer.Matches(null, null));
         Assert.False(ProjectPathComparer.Matches("", @"C:\source\app"));
         Assert.False(ProjectPathComparer.Matches(@"C:\source\app", "   "));
     }
 
-    [Fact]
-    public void IsVisibleIn_KeepsUnscopedEnvironmentsEverywhere()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void IsVisibleIn_HidesUnscopedEnvironments(string? projectPath)
     {
-        // The no-backfill guarantee: an environment created before project scoping must not
-        // disappear from a project it was already being used in.
-        Assert.True(ProjectPathComparer.IsVisibleIn(null, @"C:\source\app"));
-        Assert.True(ProjectPathComparer.IsVisibleIn("", @"C:\source\other"));
+        Assert.False(ProjectPathComparer.IsVisibleIn(projectPath, @"C:\source\app"));
+        Assert.False(ProjectPathComparer.IsVisibleIn(projectPath, @"C:\source\other"));
+        Assert.False(ProjectPathComparer.IsVisibleIn(projectPath, null));
     }
 
     [Fact]

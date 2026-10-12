@@ -38,8 +38,9 @@ public sealed class BoardContextEstimator(
         var card = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
         if (card is null)
             return null;
-        var assignee = await ResolveAssigneeAsync(projectPath, card.Assignee, cancellationToken);
-        var prompt = await BoardLaunchService.ComposePromptAsync(store, projectPath, card, assignee.Label, assignee.EnvironmentPrompt, "work", cancellationToken);
+        var isManaged = card.WorkflowMode == "agent";
+        var assignee = await ResolveAssigneeAsync(projectPath, isManaged ? card.ManagerSelection : card.Assignee, cancellationToken);
+        var prompt = await BoardLaunchService.ComposePromptAsync(store, projectPath, card, assignee.Label, assignee.EnvironmentPrompt, isManaged ? "manager" : "work", cancellationToken);
         var measurement = await MeasureAsync(projectPath, card, prompt, cancellationToken);
         var last = await store.GetLatestContextSampleAsync(projectPath, card.Id, cancellationToken);
         return new BoardContextEstimateResponse(card.Id, card.Key, measurement.Tokens, measurement.Chars, ContextTokenEstimator.Method, DateTime.UtcNow,

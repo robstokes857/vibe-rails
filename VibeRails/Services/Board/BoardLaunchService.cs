@@ -7,10 +7,10 @@ using VibeRails.Utils;
 
 namespace VibeRails.Services.Board;
 
-/// <summary>"Start work": open a web terminal tab for a card with the card prepended to the environment's Initial Message.</summary>
+/// <summary>Open a card terminal for work, its Agent workflow manager, a delegated worker, review or discussion.</summary>
 public interface IBoardLaunchService
 {
-    Task<LaunchBoardCardResponse?> LaunchAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken = default, string intent = "work", ReviewLaunchRequest? reviewRequest = null, string? question = null);
+    Task<LaunchBoardCardResponse?> LaunchAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken = default, string intent = "work", ReviewLaunchRequest? reviewRequest = null, string? question = null, string? task = null);
 }
 
 /// <summary>
@@ -31,8 +31,9 @@ public sealed record BoardLaunchPrompt(string Prompt, string? EnvironmentPrompt,
 /// context the card put in front of the agent (VB-63). That measurement never fails a launch: a
 /// terminal that started is reported as started, and the missing sample is a warning in the log.
 ///
-/// TODO(board): "Auto Launch" — an option on the card (and/or a lane) that runs this automatically
-/// when an assigned card lands in that lane. Not built yet; plan 2026-09-09.
+/// Agent workflow managers and their delegated workers have separate saved assignments and
+/// terminal origins. One manager and one worker may run together; the manager owns lane decisions
+/// through the ordinary Board tools. Nothing injects input into their live TUIs or launches a daemon.
 /// </summary>
 public sealed class BoardLaunchService(
     IBoardStore store,
@@ -44,10 +45,14 @@ public sealed class BoardLaunchService(
     // queued semaphore, so removal cannot strand waiters or create two gates for one card.
     private static readonly ConcurrentDictionary<string, byte> LaunchingCards = new(StringComparer.Ordinal);
 
-    public async Task<LaunchBoardCardResponse?> LaunchAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken = default, string intent = "work", ReviewLaunchRequest? reviewRequest = null, string? question = null)
+    public async Task<LaunchBoardCardResponse?> LaunchAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken = default, string intent = "work", ReviewLaunchRequest? reviewRequest = null, string? question = null, string? task = null)
     {
-        if (intent is not ("work" or "chat" or "code_review"))
-            throw new BoardValidationException("Launch intent must be work, chat or code_review.");
+        if (intent is not ("work" or "chat" or "code_review" or "manager" or "worker"))
+            throw new BoardValidationException("Launch intent must be work, chat, code_review, manager or worker.");
+        if (task?.Length > BoardPromptComposer.MaxWorkerTaskChars)
+            throw new BoardValidationException($"A delegated worker task is limited to {BoardPromptComposer.MaxWorkerTaskChars} characters.");
+        if (!string.IsNullOrWhiteSpace(task) && intent is not ("worker" or "code_review"))
+            throw new BoardValidationException("Task instructions apply only to a delegated worker launch.");
         var card = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
         if (card is null) return null;
         // Card ids are globally unique in the shared database; VB numbers are project-local.
@@ -58,7 +63,7 @@ public sealed class BoardLaunchService(
         try
         {
             // Re-read after the reservation: fields may have changed while resolving the key.
-            launched = await LaunchCoreAsync(projectPath, card.Id, selectionOverride, cancellationToken, intent, reviewRequest, question);
+            launched = await LaunchCoreAsync(projectPath, card.Id, selectionOverride, cancellationToken, intent, reviewRequest, question, task);
         }
         finally { LaunchingCards.TryRemove(reservation, out _); }
         if (launched is null)
@@ -73,11 +78,19 @@ public sealed class BoardLaunchService(
     /// <summary>A started launch and what its context sample needs.</summary>
     private sealed record Launched(LaunchBoardCardResponse Response, BoardCardRecord Card, BoardLaunchPrompt Prompt, string Cli, string Selection, string Intent, bool Reused = false);
 
-    private async Task<Launched?> LaunchCoreAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken, string intent, ReviewLaunchRequest? reviewRequest, string? question)
+    private async Task<Launched?> LaunchCoreAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken, string intent, ReviewLaunchRequest? reviewRequest, string? question, string? task)
     {
         var card = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
         if (card is null)
             return null;
+
+        if (intent == "work" && card.WorkflowMode == "agent") intent = "manager";
+        var isManager = intent == "manager";
+        var isWorker = intent == "worker" || (intent == "code_review" && card.WorkflowMode == "agent");
+        if ((isManager || isWorker) && card.WorkflowMode != "agent")
+            throw new BoardValidationException("Manager and delegated worker launches require the card's Agent workflow.");
+        if (!string.IsNullOrWhiteSpace(task) && !isWorker)
+            throw new BoardValidationException("Task instructions apply only to a delegated worker launch.");
 
         ReviewLaunchSnapshot? routingSnapshot = null;
         if (reviewRequest is not null)
@@ -89,9 +102,11 @@ public sealed class BoardLaunchService(
             selectionOverride = routingSnapshot.Resolution.Selected.Selection;
         }
 
-        var selectionText = string.IsNullOrWhiteSpace(selectionOverride) ? card.Assignee : selectionOverride;
+        // The manager is a separate saved assignment. A delegated worker override never changes it.
+        var savedSelection = isManager ? card.ManagerSelection : card.Assignee;
+        var selectionText = string.IsNullOrWhiteSpace(selectionOverride) ? savedSelection : selectionOverride;
         if (string.IsNullOrWhiteSpace(selectionText))
-            throw new BoardValidationException("Assign an LLM to this card first, or pick one to start with.");
+            throw new BoardValidationException(isManager ? "Pick a manager agent for this card first." : "Assign an LLM to this card first, or pick one to start with.");
         if (!BoardSelection.TryParse(selectionText, out var parsed) || parsed is null)
             throw new BoardValidationException("That assignee is not a launchable LLM selection.");
 
@@ -107,6 +122,9 @@ public sealed class BoardLaunchService(
             if (!ProjectPathComparer.IsVisibleIn(environment.ProjectPath, projectPath))
                 throw new BoardValidationException("The assigned environment belongs to another project.");
         }
+
+        if (isManager && (environment?.Purpose == "code_review" || environment?.ReviewerRouting?.Mode == "switch"))
+            throw new BoardValidationException("Choose a work environment or base agent as manager; a code review environment is a worker.");
 
         string? routingWorkerPrompt = null;
         if (routingSnapshot is null && intent != "chat" && environment?.ReviewerRouting?.Mode == "switch")
@@ -125,12 +143,12 @@ public sealed class BoardLaunchService(
         var assigneeLabel = environment is not null
             ? $"{environment.CustomName} ({parsed.Cli})"
             : parsed.Cli;
-        var composed = await ComposePromptAsync(store, projectPath, card, assigneeLabel, routingWorkerPrompt is null ? environment?.CustomPrompt : routingWorkerPrompt + "\n" + environment?.CustomPrompt, intent, cancellationToken);
+        var composed = await ComposePromptAsync(store, projectPath, card, assigneeLabel, routingWorkerPrompt is null ? environment?.CustomPrompt : routingWorkerPrompt + "\n" + environment?.CustomPrompt, intent, cancellationToken, task, isWorker);
         if (intent == "chat") composed = composed with { Prompt = BoardPromptComposer.ComposeDiscussion(card, environment?.CustomPrompt, question) };
         var prompt = composed.Prompt + (routingSnapshot is null ? "" : ReviewRoutingService.Prompt(routingSnapshot.Resolution));
         var title = $"{card.DisplayId} · {Truncate(card.Title, 60)}";
         var launchOptions = routingSnapshot is not null ? routingSnapshot.Resolution.Selected.Options
-            : !parsed.IsEnvironment && string.Equals(parsed.Key, card.Assignee, StringComparison.Ordinal) ? card.BaseLlmOptions : null;
+            : !parsed.IsEnvironment && string.Equals(parsed.Key, savedSelection, StringComparison.Ordinal) ? isManager ? card.ManagerBaseLlmOptions : card.BaseLlmOptions : null;
         var launchArgs = environment is null ? VibeRails.Services.LlmClis.BaseLlmOptionsBuilder.BuildArguments(parsed.Llm, launchOptions)
             : ShellArgSanitizer.ParseAndValidate(environment.CustomArgs).ToArray();
         if (intent == "chat" && launchArgs.Sum(arg => arg.Length + 1) > 4000)
@@ -142,15 +160,20 @@ public sealed class BoardLaunchService(
         // The detail the prompt was composed from, rather than a second read of the same card.
         var detail = composed.Detail;
         var tabs = await tabHost.ListTabsAsync(cancellationToken);
-        // Only a working agent blocks another launch. A lane Automation (and the CLI it spawned) is
+        // Managers and workers have independent live-session gates. Only a working agent blocks
+        // another worker launch. A lane Automation (and the CLI it spawned) is
         // linked to the card it came from but is not the card's agent, so a review still running
         // must not turn Start work into "already running" (VB-6Q8ZS-68 follow-up).
         IReadOnlyList<BoardSessionRecord> linkedSessions = detail?.Sessions ?? [];
         var automationIds = await store.GetAutomationSessionIdsAsync(projectPath,
             linkedSessions.Select(session => session.SessionId).ToList(), cancellationToken);
         var workingSessionIds = linkedSessions
-            .Where(session => !BoardService.IsAutomationSession(session.Origin, session.SessionId, automationIds))
-            .Where(session => intent == "chat" ? session.Origin == "chat" : session.Origin is not ("chat" or "code_review"))
+            .Where(session => isWorker && session.Origin == "code_review" && !automationIds.Contains(session.SessionId)
+                || !BoardService.IsAutomationSession(session.Origin, session.SessionId, automationIds))
+            .Where(session => intent == "chat" ? session.Origin == "chat"
+                : isManager ? session.Origin == "agent_manager"
+                : isWorker ? session.Origin is not ("chat" or "agent_manager")
+                : session.Origin is not ("chat" or "code_review"))
             .Where(session => intent != "chat" || session.Selection == parsed.Key)
             .Select(session => session.SessionId)
             .ToHashSet(StringComparer.Ordinal);
@@ -163,8 +186,9 @@ public sealed class BoardLaunchService(
                     card, composed, existingSession.Cli, existingSession.Selection, intent, Reused: true);
             // A different question/agent starts fresh; never paste generated input into a live TUI.
         }
-        else if (!isReview && existingTab is not null)
-            throw new BoardConflictException("An agent is already running on this card. Open it from Sessions.");
+        else if ((!isReview || isWorker) && existingTab is not null)
+            throw new BoardConflictException(isManager ? "A manager is already running on this card. Open it from Sessions."
+                : "A worker is already running on this card. Wait for its session to finish or open it from Sessions.");
         if (tabs.Count >= tabHost.MaxTabs)
             throw new BoardConflictException($"All {tabHost.MaxTabs} terminal tabs are in use. Close one first.");
 
@@ -190,15 +214,20 @@ public sealed class BoardLaunchService(
 
             if (!string.IsNullOrWhiteSpace(session.SessionId))
             {
+                var origin = isManager ? BoardSessionRecord.ManagerOrigin
+                    : isWorker ? isPlanning && !isReview ? BoardSessionRecord.PlanningWorkerOrigin : BoardSessionRecord.WorkerOrigin
+                    : isReview ? "code_review" : intent == "chat" ? "chat" : isPlanning ? "planning" : BoardSessionRecord.LaunchOrigin;
                 try
                 {
                     var linked = await store.LinkSessionAsync(projectPath, card.Id, session.SessionId!, tab.TabId, parsed.Key, parsed.Cli,
-                        title, isReview ? "code_review" : intent == "chat" ? "chat" : isPlanning ? "planning" : BoardSessionRecord.LaunchOrigin, cancellationToken);
+                        title, origin, cancellationToken);
                     if (linked is null)
                         throw new BoardValidationException("The card was deleted while its agent was starting. The terminal has been closed.");
                 }
                 catch (BoardConflictException ex)
                 {
+                    if (!await store.ConfirmSessionLaunchOriginAsync(projectPath, card.Id, session.SessionId!, origin, cancellationToken))
+                        throw;
                     Log.Warning("[Board] Session {SessionId} was already linked: {Message}", session.SessionId, ex.Message);
                 }
             }
@@ -243,7 +272,7 @@ public sealed class BoardLaunchService(
     /// Automations ride along too, so the agent can sequence its moves (VB-34).
     /// </summary>
     internal static async Task<BoardLaunchPrompt> ComposePromptAsync(IBoardStore store, string projectPath, BoardCardRecord card,
-        string? assigneeLabel, string? environmentPrompt, string intent, CancellationToken cancellationToken)
+        string? assigneeLabel, string? environmentPrompt, string intent, CancellationToken cancellationToken, string? task = null, bool delegatedWorker = false)
     {
         var boardId = string.IsNullOrEmpty(card.BoardId) ? null : card.BoardId;
         var columns = await store.GetColumnsAsync(projectPath, cancellationToken, boardId);
@@ -262,7 +291,7 @@ public sealed class BoardLaunchService(
             orderedColumns.Select(c => (IReadOnlyList<string>)laneAutomations[c.Id].Select(a => a.Name).ToList()).ToList(),
             detail is null ? null : new BoardPromptComposer.CardActivity(detail.Comments.Count, detail.Notes.Count, detail.Sessions.Count),
             orderedColumns.SelectMany(c => laneAutomations[c.Id].Select(a => $"{c.Name} / {a.Name}: {a.Summary}. Output and next action: {a.Output}")).ToList());
-        var prompt = BoardPromptComposer.Compose(card, column?.Name ?? "(no lane)", assigneeLabel, environmentPrompt, context, intent);
+        var prompt = BoardPromptComposer.Compose(card, column?.Name ?? "(no lane)", assigneeLabel, environmentPrompt, context, intent, workerTask: task, delegatedWorker: delegatedWorker);
         return new BoardLaunchPrompt(prompt, environmentPrompt, boardContext?.Context, boardId, boardName, detail, intent);
     }
 

@@ -30,14 +30,26 @@ public sealed class BoardAgentLaunchTool
 
     /// <summary>Starts work and returns the linked session to poll; launch success is not completion.</summary>
     [McpServerTool]
-    [Description("Start work on a card using its saved assignee and launch options, exactly like the Board's Start work action. Save the desired model, reasoning effort and service tier with update_board_card first. Requires an open VibeRails root backend and inherited root API credentials; only cards in that root's project can launch. Starts a new agent terminal, applies the normal workspace and Board tool grants, and links its session. Returns the session ID for get_board_agent_status; starting is not completing. When asked to wait, poll that session until its completion/exit and check remaining workflow status. Do not retry an uncertain launch before checking status; an agent may already be running.")]
+    [Description("Start a card's saved workflow agent, or delegate a worker/reviewer without changing the saved manager or worker assignment. intent=work (default) starts the manager on Agent cards; intent=worker starts the saved worker, selection optionally picks another enabled agent; intent=code_review requests a direct review. task supplies bounded worker instructions. Requires an open VibeRails root and inherited credentials; launches remain project-scoped. Returns a session to poll with get_board_agent_status. Launch success is not completion; check status before retrying an uncertain launch.")]
     public async Task<string> StartBoardAgent(
         [Description("Required card key or row ID in the current root backend's project.")] string card,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        [Description("work | manager | worker | code_review. Default work starts the saved manager on Agent cards.")] string intent = "work",
+        [Description("Optional enabled picker key for a delegated worker/reviewer from list_board_agent_options. Does not change saved assignments.")] string? selection = null,
+        [Description("Optional worker task or repair instructions, up to 4,000 characters. Only with intent=worker.")] string? task = null)
     {
         var target = card?.Trim();
         if (!IsCardIdentifier(target))
             return "FAIL: Enter a card key or row ID (1 to 256 letters, digits, hyphens or underscores).";
+        intent = intent.Trim().ToLowerInvariant();
+        if (intent is not ("work" or "manager" or "worker" or "code_review"))
+            return "FAIL: intent must be work, manager, worker or code_review.";
+        if (task is not null && (task.Length > 4000 || intent != "worker"))
+            return "FAIL: task is supported only for worker launches and must be at most 4,000 characters.";
+        if (selection is not null && (intent is "work" or "manager"))
+            return "FAIL: selection overrides are supported only for worker or code_review launches; save the manager on the card.";
+        if (selection is not null && !VibeRails.Services.Board.BoardSelection.TryParse(selection, out _))
+            return "FAIL: selection must be an enabled base agent or saved environment picker key.";
 
         var sessionToken = readEnvironment(LocalToolApiContext.SessionTokenVariable);
         var tabToken = readEnvironment(LocalToolApiContext.TabTokenVariable);
@@ -54,7 +66,7 @@ public sealed class BoardAgentLaunchTool
                 new Uri(new Uri(baseUrl), $"/api/v1/board/cards/{Uri.EscapeDataString(target!)}/launch"));
             request.Headers.Add(LlmProxyCodexConfig.SessionHeaderName, sessionToken);
             request.Headers.Add(LlmProxyCodexConfig.TabHeaderName, tabToken);
-            request.Content = JsonContent.Create(new LaunchBoardCardRequest(Intent: "work"),
+            request.Content = JsonContent.Create(new LaunchBoardCardRequest(Selection: selection, Intent: intent, Task: task),
                 AppJsonSerializerContext.Default.LaunchBoardCardRequest);
             using var response = await clients.CreateClient(HttpClientName)
                 .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);

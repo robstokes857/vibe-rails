@@ -523,6 +523,66 @@ public sealed class BoardServiceTests : IDisposable
         Assert.DoesNotContain((await _service.GetCardAsync(_project, created.Id, Ct))!.Sessions, s => s.Id.Contains('<', StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task AgentWorkflowValidatesManagerBeforeWritesAndKeepsWorkerSettingsIndependent()
+    {
+        var managerOptions = new BaseLlmOptions(Model: "gpt-6-astra", Effort: "xhigh", Speed: "ultrafast");
+        var created = await _service.CreateCardAsync(_project, new(Title: "Managed", WorkflowMode: "agent",
+            ManagerSelection: "base:codex", ManagerBaseLlmOptions: managerOptions, Assignee: "base:claude"), Ct);
+        Assert.Equal("agent", created.WorkflowMode);
+        Assert.Equal("base:codex", created.ManagerSelection);
+        Assert.Equal("base:claude", created.Assignee);
+        Assert.Equal("ultrafast", created.ManagerBaseLlmOptions!.Speed);
+
+        await Assert.ThrowsAsync<BoardValidationException>(() => _service.UpdateCardAsync(_project, created.Id,
+            new(Title: "Invalid change", ManagerSelection: ""), Ct));
+        await Assert.ThrowsAsync<BoardValidationException>(() => _service.UpdateCardAsync(_project, created.Id,
+            new(Title: "Invalid change", WorkflowMode: "automatic"), Ct));
+        var unchanged = (await _service.GetCardAsync(_project, created.Id, Ct))!;
+        Assert.Equal("Managed", unchanged.Title);
+        await Assert.ThrowsAsync<BoardValidationException>(() => _service.UpdateCardAsync(_project, created.Id,
+            new(Title: "Invalid change", ManagerSelection: "env:7:codex", ManagerBaseLlmOptions: managerOptions), Ct));
+        Assert.Equal("Managed", (await _service.GetCardAsync(_project, created.Id, Ct))!.Title);
+        var edited = (await _service.UpdateCardAsync(_project, created.Id, new(Assignee: "base:codex", Description: "Worker change"), Ct))!;
+        Assert.Equal(created.ManagerBaseLlmOptions, edited.ManagerBaseLlmOptions);
+        var changed = (await _service.UpdateCardAsync(_project, created.Id, new(ManagerSelection: "base:claude"), Ct))!;
+        Assert.Null(changed.ManagerBaseLlmOptions);
+        Assert.Equal("base:codex", changed.Assignee);
+        var manual = (await _service.UpdateCardAsync(_project, created.Id, new(WorkflowMode: "manual", ManagerSelection: ""), Ct))!;
+        Assert.Null(manual.ManagerSelection);
+        Assert.Equal("manual", manual.WorkflowMode);
+        await Assert.ThrowsAsync<BoardValidationException>(() => _service.CreateCardAsync(_project,
+            new(Title: "Missing manager", WorkflowMode: "agent"), Ct));
+    }
+
+    [Fact]
+    public async Task AgentWorkflowAllViewsFocusManagerWhileDelegatedWorkersRemainLinked()
+    {
+        var card = await _service.CreateCardAsync(_project, new(Title: "Managed", WorkflowMode: "agent", ManagerSelection: "base:codex"), Ct);
+        var manager = Guid.NewGuid().ToString("D");
+        var worker = Guid.NewGuid().ToString("D");
+        await _service.LinkSessionAsync(_project, card.Id, manager, "manager-tab", "base:codex", "codex", "Manager", "agent_manager", Ct);
+        await _service.LinkSessionAsync(_project, card.Id, worker, "worker-tab", "base:claude", "claude", "Worker", "agent_worker", Ct);
+        _live.Sessions[manager] = "manager-tab";
+        _live.Sessions[worker] = "worker-tab";
+        var detail = (await _service.GetCardAsync(_project, card.Id, Ct))!;
+        var list = Assert.Single((await _service.GetCardsAsync(_project, Ct)).Cards);
+        var page = Assert.Single((await _service.GetCardsPageAsync(_project, new(), Ct, card.BoardId)).Cards);
+        var activity = Assert.Single((await _service.GetCardActivityAsync(_project, new(card.BoardId, [card.Id]), Ct)).Cards);
+        Assert.Equal(manager, detail.ActiveSessionId);
+        Assert.Equal(manager, list.ActiveSessionId);
+        Assert.Equal(manager, page.ActiveSessionId);
+        Assert.Equal(manager, activity.ActiveSessionId);
+        Assert.Equal(2, detail.Sessions.Count(session => session.Active));
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(detail, AppJsonSerializerContext.Default.BoardCardResponse));
+        Assert.Equal("agent", json.RootElement.GetProperty("workflowMode").GetString());
+        Assert.Equal("base:codex", json.RootElement.GetProperty("managerSelection").GetString());
+        _live.Sessions.Remove(manager);
+        Assert.Null((await _service.GetCardAsync(_project, card.Id, Ct))!.ActiveSessionId);
+        Assert.Null(Assert.Single((await _service.GetCardsAsync(_project, Ct)).Cards).ActiveSessionId);
+        Assert.Null(Assert.Single((await _service.GetCardActivityAsync(_project, new(card.BoardId, [card.Id]), Ct)).Cards).ActiveSessionId);
+    }
+
     private static SandboxDiffResponse Snapshot() =>
         new([new SandboxDiffFileResponse("a.cs", "csharp", "old\n", "new\n")], 1);
 

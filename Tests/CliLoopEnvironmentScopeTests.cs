@@ -6,6 +6,7 @@ using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services;
 using VibeRails.Services.AgentTools;
+using VibeRails.Services.Board;
 using VibeRails.Services.Environments;
 using VibeRails.Services.Environments.Steps;
 using VibeRails.Services.LlmProxy;
@@ -78,13 +79,12 @@ public sealed class CliLoopEnvironmentScopeTests
     }
 
     [Fact]
-    public async Task AnEnvironmentThatPredatesProjectScoping_IsStillLaunchable()
+    public async Task AnEnvironmentThatPredatesProjectScoping_IsNotLaunchable()
     {
-        // Null ProjectPath means "created before scoping existed". There is no backfill, so
-        // refusing these would strand every environment a user already had.
+        // Legacy rows remain stored without being available in every repository.
         var (services, _) = BuildServices(Environment("legacy-env", projectPath: null), throwAtPromptStage: true);
 
-        await Assert.ThrowsAsync<ReachedThePromptStage>(() =>
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
             CliLoop.RunTerminalWithWebAsync(
                 Args("legacy-env", Path.Combine(Path.GetTempPath(), "cliloop-here")),
                 services,
@@ -153,6 +153,29 @@ public sealed class CliLoopEnvironmentScopeTests
         Assert.Equal("VB-23", captured?.BoardCardKey);
     }
 
+    [Fact]
+    public async Task AgentWorkflowCardMakesAutomationWorkerLeaveMovementToTheManager()
+    {
+        var here = Path.Combine(Path.GetTempPath(), "cliloop-managed");
+        var boardStore = new Mock<IBoardStore>();
+        boardStore.Setup(s => s.FindCardAsync(here, "VB-23", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BoardCardRecord("card_23", here, 23, "lane_1", 0, "Task", "Scope", "base:claude", "medium", null, [], false, 0,
+                DateTime.UtcNow, DateTime.UtcNow, WorkflowMode: "agent", ManagerSelection: "base:codex"));
+        var (services, placeholders) = BuildServices(Environment("board-worker", here), boardStore: boardStore.Object);
+        string? template = null;
+        placeholders.Setup(p => p.ResolveAsync(It.IsAny<string>(), It.IsAny<PromptPlaceholderContext>(), It.IsAny<CancellationToken>()))
+            .Callback<string?, PromptPlaceholderContext, CancellationToken>((value, _, _) => template = value)
+            .ThrowsAsync(new ReachedThePromptStage());
+
+        await Assert.ThrowsAsync<ReachedThePromptStage>(() => CliLoop.RunTerminalWithWebAsync(Args("board-worker", here), services,
+            boardCardKey: "VB-23", cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Contains("manager owns lane movement and closure", template);
+        Assert.Contains("report_automation_step with passed or failed", template);
+        Assert.DoesNotContain("Before moving, save your handoff", template);
+        boardStore.Verify(s => s.FindCardAsync(here, "VB-23", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     private static ParsedArgs Args(string environmentName, string workDir) => new()
     {
         IsLMBootstrap = true,
@@ -174,18 +197,18 @@ public sealed class CliLoopEnvironmentScopeTests
 
     private static (IServiceProvider Services, Mock<IPromptPlaceholderService> Placeholders) BuildServices(
         LLM_Environment? environment,
-        bool throwAtPromptStage = false)
+        bool throwAtPromptStage = false, IBoardStore? boardStore = null)
     {
         var repository = new Mock<IRepository>();
         repository
             .Setup(item => item.FindEnvironmentByNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(environment);
-        return BuildServices(repository, throwAtPromptStage);
+        return BuildServices(repository, throwAtPromptStage, boardStore);
     }
 
     private static (IServiceProvider Services, Mock<IPromptPlaceholderService> Placeholders) BuildServices(
         Mock<IRepository> repository,
-        bool throwAtPromptStage)
+        bool throwAtPromptStage, IBoardStore? boardStore = null)
     {
         var placeholders = new Mock<IPromptPlaceholderService>();
         if (throwAtPromptStage)
@@ -198,6 +221,7 @@ public sealed class CliLoopEnvironmentScopeTests
 
         var services = new ServiceCollection();
         services.AddSingleton(repository.Object);
+        services.AddSingleton(boardStore ?? new Mock<IBoardStore>().Object);
         services.AddSingleton(placeholders.Object);
         services.AddSingleton<ILlmParser, LlmParser>();
         services.AddSingleton(new Mock<ITerminalSessionService>().Object);

@@ -618,6 +618,11 @@ For Board UI, API, SQLite, launch and MCP work, start with the
 [architecture and VB-18 review](../VibeRails/Services/Board/ARCHITECTURE.md).
 The Board uses `~/.vibe_rails/board.db`; its contracts live in `VibeRails.Data.Abstractions/Board`
 and its store/migrations in `VibeRails.Data.Sqlite/Board`. REST and MCP share `BoardService`.
+Cards optionally select an Agent workflow with a separate saved manager and default worker.
+The resident manager uses existing authenticated launches, status/review polling and handoffs
+to drive the pipeline while the root is open. Direct workers and lane Automations finish their
+own steps; the manager chooses movement. Configuration is additive and local-only. See the
+[Agent workflow contract](../VibeRails/Services/Board/ARCHITECTURE.md#agent-workflow-vibe-52-2026-10-11).
 Base Codex cards persist an optional Speed choice (Default/Fast/Ultrafast) in their existing
 `BaseLlmOptions` JSON. `llm-model-catalog.js` and `CodexModelCapabilities` define supported
 model/tier pairs; `BaseLlmOptionsBuilder` validates them and emits session-only service-tier
@@ -878,8 +883,8 @@ tools (security review 2026-07-02).
 **Purpose**: SQLite data access implementation
 
 **Database Tables** (see [database reference](../VibeRails.Data.Sqlite/DB/AGENTS.md) for the full reference):
-- `Environments` - Environment configurations (global, not project-scoped)
-  - `Id`, `CustomName`, `LLM`, `Path`, `CustomArgs`, `CustomPrompt`, `CreatedUTC`, `LastUsedUTC`, `Hidden`, `ProjectPath` (null before 2026-08-08 scoping; such rows are visible in every project and the Agents page groups them as shared)
+- `Environments` - Environment configurations (stored centrally, owned by one project)
+  - `Id`, `CustomName`, `LLM`, `Path`, `CustomArgs`, `CustomPrompt`, `CreatedUTC`, `LastUsedUTC`, `Hidden`, `ProjectPath` (null before 2026-08-08 scoping; null/blank legacy rows remain stored but are excluded from project lists, pickers and launches)
   - `UNIQUE(CustomName, LLM)`
 - `Sandboxes` - Sandbox git clones (project-scoped via ProjectPath)
   - `Id`, `Name`, `Path`, `ProjectPath`, `Branch`, `CommitHash`, `RemoteUrl`, `SourceBranch`, `CreatedUTC`

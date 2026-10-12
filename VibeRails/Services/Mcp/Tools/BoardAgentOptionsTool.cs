@@ -28,7 +28,7 @@ public sealed class BoardAgentOptionsTool
 
     /// <summary>Lists enabled Board assignees and the model, effort, mode and speed options for base CLIs.</summary>
     [McpServerTool]
-    [Description("List the same enabled base agents and saved environments as the current VibeRails project's Board picker, plus supported base launch settings, including Codex model/speed combinations. Use the returned assignee key and baseLlmOptions with create_board_card or update_board_card, then start_board_agent. Requires a VibeRails-launched terminal with an open root backend. Saved environment settings and credentials are not returned.")]
+    [Description("List the same enabled base agents and saved environments as the current VibeRails project's Board picker, plus supported base launch settings, including Codex model/speed combinations. An Agent workflow manager delegates with start_board_agent(card=..., intent=worker, selection=<returned picker key>, task=<assignment and expected output>); no assignment update is needed. To configure future launches, use the returned picker key and baseLlmOptions with create_board_card or update_board_card. Requires a VibeRails-launched terminal with an open root backend. Saved environment settings and credentials are not returned.")]
     public async Task<string> ListBoardAgentOptions(CancellationToken cancellationToken = default)
     {
         var sessionToken = readEnvironment(LocalToolApiContext.SessionTokenVariable);
@@ -93,11 +93,17 @@ public sealed class BoardAgentOptionsTool
             builder.Append("- ").Append(model).Append(": default, ")
                 .AppendJoin(", ", new[] { "fast", "ultrafast" }.Where(speed => CodexModelCapabilities.SupportsSpeed(model, speed)))
                 .Append('\n');
-        builder.Append("\nbaseLlmOptions fields: model, effort, mode, yolo, speed. Omitted/default options inherit CLI configuration. ")
+        builder.Append("\nAgent workflow delegation: use a key from the enabled agents above to launch a separate worker session with ")
+            .Append("start_board_agent(card=..., intent=\"worker\", selection=\"<enabled picker key>\", task=\"<bounded assignment and expected output>\"). ")
+            .Append("Omit selection to use the saved Assignee as the default worker. Do not update the card's assignment to delegate; ")
+            .Append("the selection override leaves both saved worker and manager assignments intact. ")
+            .Append("start_board_agent(card=...) without intent=worker starts the saved manager on an Agent card, not a delegated worker.\n")
+            .Append("\nSaved-assignment setup: baseLlmOptions fields: model, effort, mode, yolo, speed. Omitted/default options inherit CLI configuration. ")
             .Append("For other selectable models use the provider's model ID; fixed-model agents do not accept a different model. ")
             .Append("YOLO is optional and defaults to false. Speed is Codex-only; ultrafast requires gpt-6-astra.\n")
             .Append("Example: update_board_card(card=..., assignee=\"base:codex\", baseLlmOptions={\"model\":\"gpt-6-astra\",\"effort\":\"xhigh\",\"speed\":\"ultrafast\"}). ")
-            .Append("Then start_board_agent(card=...) uses the saved choices. Passing baseLlmOptions replaces the whole options object; ")
+            .Append("On a Manual card, start_board_agent(card=...) starts the saved Assignee with its saved choices. ")
+            .Append("Agent cards keep separate managerSelection and managerBaseLlmOptions for their manager. Passing baseLlmOptions replaces the whole options object; ")
             .Append("omitting it preserves options for an unchanged assignee. clearBaseLlmOptions=true removes all card overrides. ")
             .Append("Assignment changes affect future launches, not an already-running agent.");
         return builder.ToString();

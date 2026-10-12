@@ -103,6 +103,8 @@ export class BoardController {
         this.sessionLayer = null;
         // Shared LLM pickers for assignment and the independent discussion target.
         this.assigneePickerDispose = null;
+        this.managerPickerDispose = null;
+        this.managerLaunchOptionsDispose = null;
         this.chatPickerDispose = null;
         this.launchOptionsDispose = null;
         this.cardLinksDispose = null;
@@ -452,6 +454,10 @@ export class BoardController {
         this.launchOptionsDispose = null;
         try { this.assigneePickerDispose?.(); } catch { /* already torn down */ }
         this.assigneePickerDispose = null;
+        try { this.managerPickerDispose?.(); } catch { /* already torn down */ }
+        this.managerPickerDispose = null;
+        try { this.managerLaunchOptionsDispose?.(); } catch { /* already torn down */ }
+        this.managerLaunchOptionsDispose = null;
         try { this.chatPickerDispose?.(); } catch { /* already torn down */ }
         this.chatPickerDispose = null;
     }
@@ -817,6 +823,7 @@ export class BoardController {
 
     renderCard(card) {
         const member = this.assigneeInfo(card.assignee);
+        const manager = card.workflowMode === 'agent' ? this.assigneeInfo(card.managerSelection) : null;
         const type = cardType(card.type);
         const live = card.activeTabId
             ? `<span class="board-live-dot" title="A terminal session is working this card" aria-label="Session open"></span>`
@@ -847,6 +854,7 @@ export class BoardController {
                         <span class="board-card-top-right">
                             <span class="board-type-chip" data-type="${escapeHtml(type.value)}"
                                 title="${escapeHtml(type.label)}">${escapeHtml(type.label)}</span>
+                            ${card.workflowMode === 'agent' ? '<span class="board-workflow-chip" title="A manager coordinates this card through the pipeline"><i class="fa-solid fa-diagram-project" aria-hidden="true"></i> Agent</span>' : ''}
                             <span class="board-priority-chip" data-priority="${escapeHtml(card.priority)}">${escapeHtml(card.priority)}</span>
                         </span>
                     </div>
@@ -864,7 +872,7 @@ export class BoardController {
                             ${comments}
                         </div>
                     </div>
-                    <div class="board-card-foot">${assignee}</div>
+                    <div class="board-card-foot">${manager ? `<span class="board-manager-chip" title="Manager: ${escapeHtml(manager.label)}">${this.avatarHtml(manager, 18, { filterable: false })}<span class="board-assignee-name">Manager · ${escapeHtml(manager.label)}</span></span>` : ''}${assignee}</div>
                 </div>
             </article>`;
     }
@@ -1350,7 +1358,20 @@ export class BoardController {
                             </select>
                         </div>
                         <div>
-                            <label class="board-editor-label" for="board-card-assignee">Assignee</label>
+                            <label class="board-editor-label" for="board-card-workflow">Workflow</label>
+                            <select class="form-select form-select-sm" id="board-card-workflow">
+                                <option value="manual"${card?.workflowMode !== 'agent' ? ' selected' : ''}>Manual</option>
+                                <option value="agent"${card?.workflowMode === 'agent' ? ' selected' : ''}>Agent</option>
+                            </select>
+                        </div>
+                        <div data-board-manager-fields${card?.workflowMode === 'agent' ? '' : ' hidden'}>
+                            <label class="board-editor-label" for="board-card-manager">Manager agent</label>
+                            <select class="form-select form-select-sm" id="board-card-manager" aria-label="Manager agent"></select>
+                            <p class="board-editor-muted mt-2">The manager guides this card through the pipeline, coordinates workers and checks their results until the card is closed.</p>
+                            <div data-board-manager-launch-options></div>
+                        </div>
+                        <div>
+                            <label class="board-editor-label" for="board-card-assignee" data-board-assignee-label>${card?.workflowMode === 'agent' ? 'Worker' : 'Assignee'}</label>
                             <div class="board-assignee-row">
                                 <select class="form-select form-select-sm" id="board-card-assignee" aria-label="Assignee"></select>
                                 <button type="button" class="board-side-remove board-assignee-clear" data-board-clear-assignee
@@ -1359,7 +1380,7 @@ export class BoardController {
                                 </button>
                             </div>
                         </div>
-                        <div data-board-launch-options></div>
+                        <div data-board-worker-launch-options data-board-launch-options></div>
                         ${agentProvenanceHtml(card)}
                         <div class="form-check">
                             <input class="form-check-input" type="checkbox" id="board-card-flagged"
@@ -1506,8 +1527,9 @@ export class BoardController {
      * True while the editor is busy or holds anything unsaved: field edits, a draft comment or
      * attachments not yet uploaded. The one "save first" rule behind organizing and sharing a card.
      */
-    cardHasDraft(editor) {
-        return Boolean(editor._boardSaving || editor._boardUploading || editor._boardStarting || editor._boardOrganizing
+    cardHasDraft(editor, { ignoreOrganizing = false } = {}) {
+        return Boolean(editor._boardSaving || editor._boardUploading || editor._boardStarting
+            || (!ignoreOrganizing && editor._boardOrganizing)
             || Object.keys(this.cardChanges(editor, this.readCardForm(editor))).length > 0
             || editor.querySelector('[data-board-composer="comment"] [data-board-composer-input]')?.value.trim()
             || editor._boardCard?.pendingAttachments?.length);
@@ -1535,7 +1557,8 @@ export class BoardController {
         });
         this.cardOrganizeDispose?.();
         this.cardOrganizeDispose = bindCardOrganization(editor, card, {
-            hasDraft: () => this.cardHasDraft(editor),
+            // Organization owns this busy flag; its confirmation must still check real drafts.
+            hasDraft: () => this.cardHasDraft(editor, { ignoreOrganizing: true }),
             onChanged: async result => {
                 this.app.closeModal();
                 if (result.boardId !== this.state.boardId) await this.switchBoard(result.boardId);
@@ -1610,7 +1633,7 @@ export class BoardController {
             });
             const renderOptions = (options = {}, selection = assigneeSelect.value) => {
                 this.launchOptionsDispose?.();
-                const host = editor.querySelector('[data-board-launch-options]');
+                const host = editor.querySelector('[data-board-worker-launch-options]');
                 if (!host) return;
                 host.innerHTML = renderBoardLaunchOptions(selection, options);
                 // A saved setup brings its own settings; say which kind so the missing
@@ -1627,13 +1650,45 @@ export class BoardController {
             });
         }
 
+        const managerSelect = editor.querySelector('#board-card-manager');
+        if (managerSelect) {
+            this.managerPickerDispose = mountLlmPicker(this.app, managerSelect, {
+                context: 'assignee',
+                placeholder: 'Choose a manager agent…',
+                selectedValue: card.managerSelection || ''
+            });
+            const renderManagerOptions = (options = {}, selection = managerSelect.value) => {
+                this.managerLaunchOptionsDispose?.();
+                const host = editor.querySelector('[data-board-manager-launch-options]');
+                if (!host) return;
+                host.innerHTML = renderBoardLaunchOptions(selection, options, { idPrefix: 'board-manager-launch' });
+                const hint = this.assigneeLaunchHint(selection);
+                if (hint) host.insertAdjacentHTML('beforeend', `<p class="board-editor-muted board-assignee-hint">${escapeHtml(hint)}</p>`);
+                this.managerLaunchOptionsDispose = bindBoardLaunchOptions(host, selection);
+            };
+            renderManagerOptions(card.managerBaseLlmOptions || {}, card.managerSelection || '');
+            managerSelect.addEventListener('change', () => renderManagerOptions());
+        }
+        const workflowSelect = editor.querySelector('#board-card-workflow');
+        const updateWorkflow = () => {
+            const agent = workflowSelect?.value === 'agent';
+            const managerFields = editor.querySelector('[data-board-manager-fields]');
+            if (managerFields) managerFields.hidden = !agent;
+            if (managerSelect) managerSelect.required = agent;
+            const workerLabel = editor.querySelector('[data-board-assignee-label]');
+            if (workerLabel) workerLabel.textContent = agent ? 'Worker' : 'Assignee';
+            this.updateStartWorkButton(editor, card);
+        };
+        workflowSelect?.addEventListener('change', updateWorkflow);
+        updateWorkflow();
+
         // Chat can use any launch target without changing the card's assignment.
         const chatSelect = editor.querySelector('[data-board-chat-agent]');
         if (chatSelect) {
             this.chatPickerDispose = mountLlmPicker(this.app, chatSelect, {
                 context: 'assignee',
                 placeholder: 'Choose a CLI, Quick Launch or Agent…',
-                selectedValue: card.sessions?.filter(session => session.origin === 'chat').at(-1)?.selection || card.assignee || getEnabledLlmItems(this.app, 'assignee')[0]?.key || ''
+                selectedValue: card.sessions?.filter(session => session.origin === 'chat').at(-1)?.selection || (card.workflowMode === 'agent' ? card.managerSelection : card.assignee) || getEnabledLlmItems(this.app, 'assignee')[0]?.key || ''
             });
         }
 
@@ -2190,7 +2245,8 @@ export class BoardController {
         host.innerHTML = sessions.map(session => {
             const when = this.formatDateTime(session.createdAt);
             const status = session.active ? 'open' : 'ended';
-            const sub = [when, session.cli ? getCliBrand(session.cli)?.label || session.cli : '', status].filter(Boolean).join(' · ');
+            const role = session.origin === 'agent_manager' ? 'Manager' : session.origin === 'agent_worker_planning' ? 'Worker (planning)' : session.origin === 'agent_worker' ? 'Worker' : '';
+            const sub = [when, role, session.cli ? getCliBrand(session.cli)?.label || session.cli : '', status].filter(Boolean).join(' · ');
             return `
             <div class="board-side-row${session.active ? ' is-live' : ''}" data-session-id="${escapeHtml(session.id)}">
                 <button type="button" class="board-side-main" data-board-open-session="${escapeHtml(session.id)}"
@@ -2341,7 +2397,10 @@ export class BoardController {
             columnId: value('#board-card-lane'),
             type: value('#board-card-type'),
             assignee: value('#board-card-assignee'),
-            baseLlmOptions: readBoardLaunchOptions(editor, value('#board-card-assignee')),
+            baseLlmOptions: readBoardLaunchOptions(editor.querySelector('[data-board-worker-launch-options]') || editor, value('#board-card-assignee')),
+            workflowMode: value('#board-card-workflow') === 'agent' ? 'agent' : 'manual',
+            managerSelection: value('#board-card-manager'),
+            managerBaseLlmOptions: readBoardLaunchOptions(editor.querySelector('[data-board-manager-launch-options]') || editor, value('#board-card-manager')),
             blocked: Boolean(editor.querySelector('[data-board-blocked]')?.checked),
             flagged: Boolean(editor.querySelector('[data-board-flagged]')?.checked)
         };
@@ -2351,6 +2410,13 @@ export class BoardController {
         if (!payload.title) {
             this.app.showToast('Board', 'A card needs a title.', 'warning');
             editor.querySelector('#board-card-title')?.focus();
+            return false;
+        }
+        if (payload.workflowMode === 'agent' && !payload.managerSelection) {
+            this.app.showToast('Board', 'Choose a manager agent for the Agent workflow.', 'warning');
+            const manager = editor.querySelector('#board-card-manager');
+            if (manager?.tomselect) manager.tomselect.focus();
+            else manager?.focus();
             return false;
         }
         return true;
@@ -2427,8 +2493,10 @@ export class BoardController {
         return Boolean(session?.active && !session.isAutomation && !['chat', 'code_review'].includes(session.origin));
     }
 
-    hasRunningSession(card) {
-        return Boolean(card?.activeSessionId || card?.sessions?.some(session => this.isWorkingSession(session)));
+    hasRunningSession(card, workflowMode = card?.workflowMode) {
+        return Boolean((workflowMode !== 'agent' || card?.workflowMode === 'agent') && card?.activeSessionId
+            || card?.sessions?.some(session => this.isWorkingSession(session)
+            && (workflowMode !== 'agent' || session.origin === 'agent_manager')));
     }
 
     updateStartWorkButton(editor, card) {
@@ -2439,29 +2507,34 @@ export class BoardController {
         }
         const button = editor.querySelector('[data-board-start-work]');
         if (!button) return;
-        const running = this.hasRunningSession(card);
+        const agent = (editor.querySelector('#board-card-workflow')?.value || card?.workflowMode) === 'agent';
+        const running = this.hasRunningSession(card, agent ? 'agent' : 'manual');
         button.disabled = Boolean(editor._boardStarting);
         button.title = running
-            ? 'Go to the agent terminal for this card'
-            : 'Start the assigned LLM in the background with this card as its first message';
+            ? `Go to the ${agent ? 'manager' : 'agent'} terminal for this card`
+            : agent ? 'Start the manager to coordinate this card through the pipeline'
+                : 'Start the assigned LLM in the background with this card as its first message';
         const label = button.querySelector?.('[data-board-start-work-label]');
-        if (label) label.textContent = running ? 'Go to agent' : 'Start work';
+        if (label) label.textContent = running ? (agent ? 'Go to manager' : 'Go to agent') : (agent ? 'Start Agent workflow' : 'Start work');
         const icon = button.querySelector?.('i');
         if (icon) icon.className = `fa-solid ${running ? 'fa-terminal' : 'fa-play'}`;
     }
 
     async goToAgent(editor, card) {
-        let session = card.sessions?.find(item => this.isWorkingSession(item) && item.tabId);
+        const manager = (editor.querySelector('#board-card-workflow')?.value || card.workflowMode) === 'agent';
+        const workingSession = item => this.isWorkingSession(item) && item.tabId && (!manager || item.origin === 'agent_manager');
+        const selection = manager ? card.managerSelection : card.assignee;
+        let session = card.sessions?.find(workingSession);
         if (!session && card.activeTabId) {
-            session = { id: card.activeSessionId, tabId: card.activeTabId, selection: card.assignee, displayName: card.title };
+            session = { id: card.activeSessionId, tabId: card.activeTabId, selection, displayName: card.title };
         }
         if (!session) {
             const fresh = await BoardApi.getBoardCardAsync(card.id);
             Object.assign(card, fresh);
             this.renderSessionsPanel(editor, card);
-            session = card.sessions?.find(item => this.isWorkingSession(item) && item.tabId);
+            session = card.sessions?.find(workingSession);
             if (!session && card.activeTabId)
-                session = { id: card.activeSessionId, tabId: card.activeTabId, selection: card.assignee, displayName: card.title };
+                session = { id: card.activeSessionId, tabId: card.activeTabId, selection, displayName: card.title };
         }
         if (session) await this.focusSessionTab(card, session);
         else this.app.showToast('Board', 'The agent terminal is no longer available. You can replay its session from Sessions.', 'info');
@@ -2470,19 +2543,20 @@ export class BoardController {
     async startWork(editor, card, intent = 'work') {
         if (!card?.id) return;
         if (editor._boardSaving || editor._boardUploading || editor._boardStarting || editor._boardOrganizing) return;
-        if (intent === 'work' && this.hasRunningSession(card)) {
+        const workflowMode = editor.querySelector('#board-card-workflow')?.value || card.workflowMode || 'manual';
+        if (intent !== 'chat' && this.hasRunningSession(card, workflowMode)) {
             this.updateStartWorkButton(editor, card);
-            if (intent === 'work') {
-                try { await this.goToAgent(editor, card); }
-                catch (error) { this.app.showToast('Board', error?.message || 'Failed to open the agent terminal.', 'error'); }
-            }
+            try { await this.goToAgent(editor, card); }
+            catch (error) { this.app.showToast('Board', error?.message || 'Failed to open the agent terminal.', 'error'); }
             return;
         }
         const button = editor.querySelector(intent === 'chat' ? '[data-board-chat]' : '[data-board-start-work]');
         if (button?.disabled) return;
         const payload = this.readCardForm(editor);
         if (!this.validateCardTitle(editor, payload)) return;
-        const selection = intent === 'chat' ? editor.querySelector('[data-board-chat-agent]')?.value : payload.assignee;
+        if (intent === 'work' && payload.workflowMode === 'agent') intent = 'manager';
+        const selection = intent === 'chat' ? editor.querySelector('[data-board-chat-agent]')?.value
+            : intent === 'manager' ? payload.managerSelection : payload.assignee;
         if (!selection) {
             this.app.showToast('Board', intent === 'chat' ? 'Choose who to chat with.' : 'Assign a CLI, Quick Launch or Agent to this card first.', 'warning');
             const select = editor.querySelector(intent === 'chat' ? '[data-board-chat-agent]' : '#board-card-assignee');
@@ -2495,11 +2569,11 @@ export class BoardController {
         try {
             const saved = await BoardApi.updateBoardCardAsync(card.id, this.cardChanges(editor, payload));
             editor._boardFormBaseline = payload;
-            if (intent === 'work' && this.hasRunningSession(saved)) {
+            if (intent !== 'chat' && this.hasRunningSession(saved, payload.workflowMode)) {
                 Object.assign(card, saved);
                 editor._boardStarting = false;
                 this.updateStartWorkButton(editor, saved);
-                if (intent === 'work') await this.goToAgent(editor, card);
+                await this.goToAgent(editor, card);
                 return;
             }
             const question = intent === 'chat' ? editor.querySelector('[data-board-chat-question]')?.value?.trim() : undefined;

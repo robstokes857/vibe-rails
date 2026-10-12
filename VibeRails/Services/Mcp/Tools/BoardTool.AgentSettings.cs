@@ -23,4 +23,9 @@ public sealed partial class BoardTool
     }
 
     private static string Setting(string? value) => string.IsNullOrEmpty(value) ? "default" : value;
+
+    private static string DescribeManagerSettings(BoardCardResponse card) =>
+        $"Workflow: {card.WorkflowMode}. Manager: " + DescribeAgentSettings(card.ManagerSelection, card.ManagerBaseLlmOptions)
+        + (card.WorkflowMode == BoardWorkflowModes.Agent
+            ? " Use start_board_agent intent=worker to delegate without changing the manager; the manager owns card movement and closure." : "");
 }

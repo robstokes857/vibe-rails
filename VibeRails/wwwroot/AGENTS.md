@@ -38,7 +38,9 @@ one `h1.vb-page-title` in their view templates. `style.css` owns the shared titl
 left alignment, divider, shared top inset, spacing and narrow-screen stacking. Optional supporting text uses
 `vb-page-description`; grouped controls use `vb-page-actions`. Grid workspaces supply their
 own gap after the header. Keep page-specific status/action styles, but do not restore local
-title rules, uppercase utilities, inline letter spacing or gradient page titles.
+title rules, uppercase utilities, inline letter spacing or gradient page titles. Quality is the
+one exception in placement: its header is the Quality bar (`.code-quality-bar`) under the map,
+so the map fills the viewport beneath the nav; the bar keeps the shared classes and hooks.
 
 **Terminology:** "Web UI Chat" refers to the xterm.js-based terminal, NOT a separate chat UI.
 
@@ -290,6 +292,18 @@ Initial Message (`Services/Board/BoardPromptComposer.cs`), then links the sessio
 Both card pickers are disposed on modal replacement/close and Board unload.
 Task-key namespace: `board-card:<cardId>` (keep it distinct from `python-script*:`).
 
+Cards offer **Manual** and **Agent** workflows. Agent mode requires a separate **Manager agent**
+selection (`managerSelection`) and relabels the usual assignee as **Worker**. Both use the shared
+assignee picker; model/effort/start mode/speed/YOLO controls remain scoped to their own host and
+persist as `managerBaseLlmOptions` and `baseLlmOptions`. The YOLO labels use different IDs.
+Switching workflow mode keeps the draft manager settings. Saving never launches the manager;
+**Start Agent workflow** saves first and launches with `intent: 'manager'`, staying on Board.
+**Go to manager** focuses the active `agent_manager` session, even when worker sessions appear
+first. `agent_worker` sessions do not block manager launch. For Agent cards the server's
+`activeSessionId`/`activeTabId` refer to the manager. Dispose the manager picker and launch-option
+listeners alongside the existing card controls. Chat defaults to the manager in Agent mode and
+retains its independent launch selection.
+
 Every card also has one canonical work type: `task` (the neutral default and legacy backfill),
 `bug`, `feature`, `research-spike`, or `chore` (shown as **Chore / tech debt**). The fixed taxonomy
 lives in `BoardCardTypes`; the editor, tile chip, toolbar filter, REST responses, MCP tools, and
@@ -338,15 +352,17 @@ editor for description, workflow and reviewer changes. Removing a lane selection
 Automation and recordings. New Automation opens that same editor.
 
 `board-lane-workflow.js` renders per-card step badges, completion arrows and user Skip/Stop and skip.
-Failed, stopped current entries also offer **Re-run** when `canRerun` is true. The scoped rerun
-endpoint takes the exact Job/event identity, preserves the failed run snapshot and opens its new
+Detailed step reasons stay out of the lane display, including badge tooltips.
+Failed, stopped current entries and entries **Awaiting result** offer **Retry** when `canRerun`
+is true. The scoped rerun endpoint takes the exact Job/event identity, preserves the run snapshot and opens its new
 attempt in a Board terminal tab. Duplicate clicks are disabled; stale polls cannot repaint a rerun.
 The running-agent poll carries workflows too; update only status containers so add-form drafts
 survive. Selected checkbox order must survive a settings save. There is no sequencing toggle.
 
 `board-lane-agents.js` owns positioning/disposal, `board-lane-agent-body.js` owns asynchronous
 CRUD and drafts, `board-lane-agent-list.js` and `board-lane-agent-add.js` render each body, and
-`board-lane-agent-display.js` resolves Worker identity. Preserve a created Job ID through lane
+`board-lane-agent-display.js` resolves Worker identity. The list shows identity and per-card progress;
+reviewer, output, setup and description text stay in the full editor. Preserve a created Job ID through lane
 revision conflicts so retries do not duplicate it. Failed/stale script loads cannot repaint a
 closed form. The repository-script picker shows discovered paths and valid/approved counts;
 approval means the saved Automation hash matches current contents, not a digital signature.
@@ -759,11 +775,13 @@ removes the setup). Every Agent has an Enabled switch. Disabling a setup with no
 on-demand, disabled Job referencing that setup in the current project; subsequent toggles use
 that Job. No setup is rewritten or schedule added, and Run now remains available while disabled.
 `deleteAgent` deletes the card's Automation and then the setup only when no
-other Automation uses it. A setup with no `projectPath` (saved before project scoping landed on
-2026-08-08) is listed by the server in every project; the page keeps it out of the project's own
-list unless one of this project's Jobs runs it, and shows it under a collapsed **Shared with every
-project** group (`entry.shared` from `classifyCatalog`; `EnvironmentResponse.ProjectPath` was
-added for this and is never written back). The Automations page lists the rest, with the Scripts
+other Automation uses it. Standalone cards have an empty `data-job-id` (numeric zero after click
+parsing); only positive Job IDs select an Automation, otherwise deletion uses the setup ID.
+Saved setups belong to exactly one project. Legacy setups with a null
+or blank `projectPath` stay stored but are excluded from project lists and launch pickers; there
+is no shared group. `classifyCatalog` also omits explicitly unscoped setups from stale responses.
+Project Jobs with an unavailable Worker remain manageable as missing-worker entries.
+The Automations page lists the rest, with the Scripts
 section beneath.
 Both keep disabled entries behind a collapsed **Disabled agents / automations** caret and count,
 and the Scripts list keeps unsigned or changed scripts behind **Unsigned scripts**; the native
@@ -947,8 +965,8 @@ catalog's `group` and `label` strings are the server's (`Base CLIs` / `Custom En
 are echoed back on save; `LAUNCH_KIND_LABELS` renames the groups at display time only.
 
 Environments are scoped to a project. The list endpoint filters them, so `app.data.environments`
-already contains only what this project may see — with one deliberate exception: an environment
-created before scoping has a null `projectPath` and appears everywhere.
+already contains only setups owned by this project. Legacy null or blank `projectPath` rows are
+excluded, and the same ownership rule is enforced when resolving a saved launch.
 
 Each environment also carries `workspaceMode` (0 project dir / 1 own clone / 2 fresh clone each
 run) plus `workspaceSandboxId` / `workspacePath` / `workspaceBranch`, exported as `WORKSPACE_MODE`

@@ -45,7 +45,7 @@ function startModes(cli) {
     return openCodeClis.includes(cli) ? ['build', 'plan'] : ['plan'];
 }
 
-export function renderBoardLaunchOptions(selection, options = {}) {
+export function renderBoardLaunchOptions(selection, options = {}, { idPrefix = 'board-launch' } = {}) {
     const cli = baseCli(selection);
     if (!cli) return '';
     const values = normalizeBoardLaunchOptions(selection, options);
@@ -64,8 +64,8 @@ export function renderBoardLaunchOptions(selection, options = {}) {
         ${efforts[cli] ? `<label class="form-label mt-2">Effort</label><select class="form-select form-select-sm" data-board-launch-effort aria-label="Effort">${optionTags(efforts[cli], values.effort)}</select>` : ''}
         ${modes.length ? `<label class="form-label mt-2">Start mode</label><select class="form-select form-select-sm" data-board-launch-mode aria-label="Start mode">${optionTags(modes, values.mode)}</select>` : ''}
         <div class="form-check mt-2">
-            <input class="form-check-input" type="checkbox" id="board-launch-yolo" data-board-launch-yolo ${values.yolo ? 'checked' : ''}>
-            <label class="form-check-label" for="board-launch-yolo">YOLO mode</label>
+            <input class="form-check-input" type="checkbox" id="${escapeHtml(idPrefix)}-yolo" data-board-launch-yolo ${values.yolo ? 'checked' : ''}>
+            <label class="form-check-label" for="${escapeHtml(idPrefix)}-yolo">YOLO mode</label>
         </div>
     </div>`;
 }

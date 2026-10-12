@@ -349,12 +349,13 @@ public class McpServerHttpTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task StartBoardAgentResolvesAndExposesOnlyTheRequiredCard()
+    public async Task StartBoardAgentResolvesAndExposesDelegationWithOnlyCardRequired()
     {
         var ct = TestContext.Current.CancellationToken;
         await using var client = await ConnectAsync(ct);
         var tool = Assert.Single(await client.GetAvailableToolsAsync(ct), t => t.Name == "start_board_agent");
-        Assert.Equal("card", Assert.Single(tool.JsonSchema.GetProperty("properties").EnumerateObject()).Name);
+        Assert.Equal(new[] { "card", "intent", "selection", "task" },
+            tool.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal));
         Assert.Equal("card", Assert.Single(tool.JsonSchema.GetProperty("required").EnumerateArray()).GetString());
         var result = await client.CallToolAsync("start_board_agent", new Dictionary<string, object?>
         {

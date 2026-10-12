@@ -111,7 +111,8 @@ async function installStatefulApi(page) {
         environments: [],
         environmentCreates: [],
         settings: [],
-        jobs: []
+        jobs: [],
+        deletes: []
     };
 
     await page.route('**/api/v1/**', async route => {
@@ -176,6 +177,12 @@ async function installStatefulApi(page) {
             writes.environments.push({ name, body });
             return respond(environment);
         }
+        if (method === 'DELETE' && path.startsWith('/api/v1/environments/')) {
+            const name = decodeURIComponent(path.slice('/api/v1/environments/'.length));
+            writes.deletes.push(path);
+            state.environments = state.environments.filter(item => item.name !== name);
+            return respond({ success: true });
+        }
         if (/^\/api\/v1\/(codex|claude)\/settings\//.test(path)) {
             const name = decodeURIComponent(path.slice(path.indexOf('/settings/') + '/settings/'.length));
             if (method === 'GET') {
@@ -219,6 +226,12 @@ async function installStatefulApi(page) {
             writes.jobs.push({ method, path, body });
             return respond(job);
         }
+        if (method === 'DELETE' && /^\/api\/v1\/jobs\/\d+$/.test(path)) {
+            const id = Number(path.split('/').pop());
+            writes.deletes.push(path);
+            state.jobs = state.jobs.filter(item => Number(item.id) !== id);
+            return respond({ success: true });
+        }
         if (method === 'GET' && path === '/api/v1/jobs/runs') {
             return respond({ runs: [] });
         }
@@ -257,6 +270,40 @@ async function openJobs(page, { expandDisabled = true } = {}) {
     if (expandDisabled && !await page.locator('[data-job-action="edit"][data-job-id="17"]').isVisible()) {
         await page.locator('[data-disabled-jobs] > summary').click();
     }
+}
+
+for (const { name, environment, jobId } of [
+    { name: 'Copilot reviewer', environment: 'Copilot reviewer', jobId: null },
+    { name: 'Environment review', environment: 'Nightly Codex', jobId: 17 }
+]) {
+    test(`Agent Delete confirms and removes ${jobId ? 'a scheduled' : 'a standalone'} agent`, async ({ page }) => {
+        const { state, writes } = await installStatefulApi(page);
+        await openApp(page);
+        await openJobs(page);
+        const card = page.locator('.job-card-agent').filter({ has: page.getByRole('heading', { name, exact: true }) });
+        const openDelete = async () => {
+            await card.getByLabel(`More actions for ${name}`, { exact: true }).click();
+            await card.getByRole('button', { name: `Delete ${name}`, exact: true }).click();
+        };
+        await openDelete();
+        const confirmation = page.getByRole('alertdialog');
+        await expect(confirmation).toBeVisible();
+        await expect(confirmation).toContainText(`Delete “${name}”?`);
+        await confirmation.getByRole('button', { name: 'Cancel', exact: true }).click();
+        await expect(confirmation).toHaveCount(0);
+        await expect(card).toBeVisible();
+        expect(writes.deletes).toEqual([]);
+
+        await openDelete();
+        await confirmation.getByRole('button', { name: 'Delete', exact: true }).click();
+        await expect(card).toHaveCount(0);
+        expect(writes.deletes).toEqual([
+            ...(jobId ? [`/api/v1/jobs/${jobId}`] : []),
+            `/api/v1/environments/${encodeURIComponent(environment)}`
+        ]);
+        expect(state.environments.some(item => item.name === environment)).toBe(false);
+        expect(state.environments.some(item => item.name === 'Terminal helper')).toBe(true);
+    });
 }
 
 test('standalone Agents have an Enabled switch that persists through reload and can be re-enabled', async ({ page }) => {
@@ -771,9 +818,9 @@ test.describe('Agents editor', () => {
         await expect(enabledToggle.locator('.job-switch-text')).toHaveText('Enabled');
     });
 
-    test('setups saved before project scoping sit in a collapsed shared group', async ({ page }) => {
+    test('setups without a project are absent from the Agents page', async ({ page }) => {
         const { state } = await installStatefulApi(page);
-        // The server lists a setup with no projectPath in every project; nothing here runs it.
+        // An old or stale response must not make an unscoped setup visible again.
         state.environments.push({
             id: 45, name: 'Old shared helper', cli: 'claude', path: 'C:\test-envs\old-shared-helper', customArgs: '',
             customPrompt: 'Help with whatever project is open.', hidden: false, automationWorker: false, projectPath: null,
@@ -782,20 +829,12 @@ test.describe('Agents editor', () => {
         await openApp(page);
         await openJobs(page, { expandDisabled: false });
 
-        const group = page.locator('[data-shared-agents]');
-        await expect(group.locator(':scope > summary')).toHaveText('Shared with every project1');
-        await expect(group).not.toHaveJSProperty('open', true);
-        await expect(page.locator('.job-card').filter({ hasText: 'Old shared helper' })).toHaveCount(1);
-        await expect(group.locator('.job-card').filter({ hasText: 'Old shared helper' })).toHaveCount(1);
-        // The project's own two (the disabled Automation and the Copilot setup); the shared one is not counted.
+        await expect(page.locator('[data-shared-agents]')).toHaveCount(0);
+        await expect(page.locator('.job-card').filter({ hasText: 'Old shared helper' })).toHaveCount(0);
+        // Only this project's disabled Automation and Copilot setup are counted.
         await expect(page.locator('[data-jobs-count]')).toHaveText('2 agents');
-
-        await group.locator(':scope > summary').click();
-        await expect(group).toContainText('Saved before setups belonged to a project');
-        await expect(group.locator('[data-job-action="run-environment"][data-env-id="45"]')).toBeVisible();
-        // The group stays open across the list poll.
         await page.evaluate(() => window.app.jobController.refreshJobs({ quiet: true }));
-        await expect(group).toHaveJSProperty('open', true);
+        await expect(page.locator('[data-env-id="45"]')).toHaveCount(0);
     });
 
     for (const width of [1440, 390]) {

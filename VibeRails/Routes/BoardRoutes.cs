@@ -237,7 +237,7 @@ public static partial class BoardRoutes
             .WithName("DeleteBoardComment");
 
         app.MapPost("/api/v1/board/cards/{card}/launch", (IBoardLaunchService launcher, string card, LaunchBoardCardRequest? request, CancellationToken cancellationToken) =>
-            RunAsync(async () => OkOrNotFound(await launcher.LaunchAsync(Project(), card, request?.Selection, cancellationToken, request?.Intent ?? "work", request?.Review, request?.Question), "Card")))
+            RunAsync(async () => OkOrNotFound(await launcher.LaunchAsync(Project(), card, request?.Selection, cancellationToken, request?.Intent ?? "work", request?.Review, request?.Question, request?.Task), "Card")))
             .WithName("LaunchBoardCard");
 
         // The context an agent launched on this card right now would receive (VB-63): the launch

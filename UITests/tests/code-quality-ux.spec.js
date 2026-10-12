@@ -1191,7 +1191,7 @@ for (const viewport of [{ width: 1366, height: 768 }, { width: 390, height: 844 
             const button = page.locator(`[data-action="launch-health-fix"][data-fix-scope="${scope}"]`);
             const group = button.locator('..');
             await expect(group).toHaveAttribute('role', 'group');
-            await expect(button).toContainText(scope === 'rules' ? 'Fix rules with:' : 'Fix code quality with:');
+            await expect(button).toContainText(scope === 'rules' ? 'Fix rules with:' : 'Fix with');
             await expect(button.locator('.fa-screwdriver-wrench')).toHaveCount(1);
             expect(await group.evaluate(element => element.firstElementChild.tagName)).toBe('BUTTON');
             expect(await group.evaluate(element => getComputedStyle(element).borderTopWidth)).toBe('1px');

@@ -67,7 +67,10 @@ public sealed record BoardCardRecord(
     bool AgentMade = false,
     string? AgentMadeBy = null,
     string? AgentMadeSessionId = null,
-    string? JiraIssueKey = null)
+    string? JiraIssueKey = null,
+    string WorkflowMode = BoardWorkflowModes.Manual,
+    string? ManagerSelection = null,
+    BaseLlmOptions? ManagerBaseLlmOptions = null)
 {
     /// <summary>The stored <c>PREFIX-RRRRR-n</c> key (cards created since board/14), else the
     /// computed legacy <c>PREFIX-n</c>.</summary>
@@ -160,6 +163,9 @@ public sealed record BoardSessionRecord(
     public const string AutomationOrigin = "automation";
     public const string McpOrigin = "mcp";
     public const string ManualOrigin = "manual";
+    public const string ManagerOrigin = "agent_manager";
+    public const string WorkerOrigin = "agent_worker";
+    public const string PlanningWorkerOrigin = "agent_worker_planning";
 }
 
 /// <summary>A session's default card link and that card's project; other attachments may also exist.</summary>
@@ -218,7 +224,10 @@ public sealed record NewBoardCard(
     IReadOnlyList<string>? LinkedCardIds = null,
     bool AgentMade = false,
     string? AgentMadeBy = null,
-    string? AgentMadeSessionId = null);
+    string? AgentMadeSessionId = null,
+    string WorkflowMode = BoardWorkflowModes.Manual,
+    string? ManagerSelection = null,
+    BaseLlmOptions? ManagerBaseLlmOptions = null);
 
 /// <summary>Partial update. Null = leave untouched. <see cref="ClearAssignee"/> / <see cref="ClearPoints"/> express "set to null".</summary>
 public sealed record BoardCardPatch(
@@ -238,7 +247,24 @@ public sealed record BoardCardPatch(
     string? Type = null,
     bool? Flagged = null,
     string? DisplayId = null,
-    string? FlagReason = null);
+    string? FlagReason = null,
+    string? WorkflowMode = null,
+    string? ManagerSelection = null,
+    bool ClearManagerSelection = false,
+    BaseLlmOptions? ManagerBaseLlmOptions = null,
+    bool ClearManagerBaseLlmOptions = false);
+
+/// <summary>Stable card workflow values; manager settings remain independent of the worker assignment.</summary>
+public static class BoardWorkflowModes
+{
+    public const string Manual = "manual";
+    public const string Agent = "agent";
+    public const string Default = Manual;
+
+    public static readonly IReadOnlyList<string> All = [Manual, Agent];
+
+    public static bool IsValid(string? value) => value is Manual or Agent;
+}
 
 /// <summary>
 /// A card key is <c>PREFIX-n</c>: the project's prefix and the card's number within the project.

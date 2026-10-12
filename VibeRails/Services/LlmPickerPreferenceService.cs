@@ -306,9 +306,8 @@ public sealed class LlmPickerPreferenceService(IRepository repository) : ILlmPic
     }
 
     /// <summary>
-    /// The custom environments this project may see. Environments created before project
-    /// scoping have a null ProjectPath and stay visible everywhere, so no existing setup loses
-    /// entries from its pickers.
+    /// The custom environments owned by this project. Legacy rows with no ProjectPath remain
+    /// stored but are excluded from every project's pickers.
     ///
     /// Filtering here rather than inside <see cref="IsSupportedCustomEnvironment"/> means an
     /// out-of-scope environment is absent from the catalog entirely — so, exactly as with
