@@ -1641,7 +1641,9 @@ test('lane agents recover from conflicts, escape text and discard late loads', a
     const button = page.getByRole('button', { name: 'Agents and Automations on entry to Review', exact: true });
     await button.click();
     const panel = page.getByRole('dialog', { name: 'Agents and Automations', exact: true });
-    await expect(panel).toContainText(jobs[0].description);
+    await expect(panel.locator('[data-agent-id="12"] .board-lane-agent-copy strong')).toHaveText(jobs[0].name);
+    await expect(panel).not.toContainText(jobs[0].description);
+    await expect(panel.locator('.board-lane-agent-description-preview')).toHaveCount(0);
     await expect(panel.locator('script, img[onerror]')).toHaveCount(0);
     await expect(panel.locator('.board-lane-agent-icon img')).toHaveCount(2);
     await page.route('**/api/v1/board/columns/lane_2/automation', route => {
@@ -1680,7 +1682,8 @@ test('lane agents handle paused selections, sync the settings badge, and open th
     await button.click();
     const panel = page.getByRole('dialog', { name: 'Agents and Automations', exact: true });
     await expect(panel).toContainText('Unavailable entry (99)');
-    await expect(panel.locator('[data-agent-id="99"]')).toContainText('No description yet.');
+    await expect(panel.locator('[data-agent-id="99"]')).not.toContainText('No description yet.');
+    await expect(panel.locator('[data-agent-id="99"] .board-lane-agent-description-preview')).toHaveCount(0);
     await expect(panel.locator('[data-agent-id="99"] textarea')).toHaveCount(0);
     await panel.getByRole('button', { name: 'Add agent or automation', exact: true }).click();
     await panel.getByLabel('What would you like to add?').selectOption('automation');
