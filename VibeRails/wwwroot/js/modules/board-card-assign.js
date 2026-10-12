@@ -93,14 +93,24 @@ export class BoardCardAssign {
         this.cleanup = null;
     }
 
-    /** Lane repaints replace the chip; keep an open menu attached to the card's new chip. */
-    mount(root) {
+    /**
+     * Lane repaints replace the chip and the card summaries: keep an open menu attached to the
+     * card's new chip and bound to its refreshed summary, so the current marker and the Unassign
+     * row follow an assignment made elsewhere (another client, the 10-second poll).
+     */
+    mount(root, cards = []) {
         if (this.root !== root) this.close(false);
         this.root = root;
         if (!this.panel) return;
         const anchor = [...root.querySelectorAll(`[data-board-action="${ASSIGN_ACTION}"]`)]
             .find(button => button.closest('.board-card')?.dataset.cardId === this.card?.id);
         if (!anchor) { this.close(false); return; }
+        const latest = (cards || []).find(card => card?.id === this.card?.id);
+        if (latest && latest !== this.card) {
+            const changed = canonicalLlmSelection(latest.assignee) !== canonicalLlmSelection(this.card.assignee);
+            this.card = latest;
+            if (changed) this.render?.();
+        }
         this.anchor = anchor;
         anchor.setAttribute('aria-expanded', 'true');
         anchor.setAttribute('aria-controls', this.panel.id);
@@ -142,6 +152,7 @@ export class BoardCardAssign {
         const render = () => {
             list.innerHTML = assignMenuMarkup(rows, { current: this.card?.assignee || '', query: search.value, avatar: this.avatar });
         };
+        this.render = render;
         render();
 
         const alive = () => panel.isConnected && this.panel === panel;
@@ -237,6 +248,7 @@ export class BoardCardAssign {
         this.cleanup?.();
         this.cleanup = null;
         this.positionPanel = null;
+        this.render = null;
         this.panel?.remove();
         this.panel = null;
         this.card = null;

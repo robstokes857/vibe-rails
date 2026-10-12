@@ -402,8 +402,10 @@ Choosing a row sends the ordinary card patch with only `assignee`, so the server
 base launch options exactly as a Save with a new Assignee does; model/effort stay in the editor.
 The controller repaints from the saved card and resyncs the board snapshot so the toolbar's
 assignee filter agrees; a failed save toasts and leaves the menu open. The menu is body-mounted
-and positioned like the lane Agents panel, re-anchors to the replacement chip after a lane
-repaint, and is disposed on navigation. Styling lives in `assets/board/board-card-assign.css`.
+and positioned like the lane Agents panel; after a lane repaint it re-anchors to the replacement
+chip and rebinds to the refreshed card summary (its current marker follows an assignment made
+elsewhere, and the no-op test reads the board's current card, never the menu's stale copy). It is
+disposed on navigation. Styling lives in `assets/board/board-card-assign.css`.
 
 The view uses the app's shared surfaces rather than its own: `app.showModal` (upgraded to
 `modal-xl` for the card editor, the same way the rule and quality modals do it), `confirmDialog`

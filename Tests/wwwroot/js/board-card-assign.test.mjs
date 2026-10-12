@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assignMenuItems, assignMenuMarkup, matchesAssignQuery, ASSIGN_ACTION } from '../../../VibeRails/wwwroot/js/modules/board-card-assign.js';
+import { BoardCardAssign, assignMenuItems, assignMenuMarkup, matchesAssignQuery, ASSIGN_ACTION } from '../../../VibeRails/wwwroot/js/modules/board-card-assign.js';
 import { BoardController } from '../../../VibeRails/wwwroot/js/modules/board-controller.js';
 
 // VIBE-145: assign an agent from the lane card without opening the editor.
@@ -185,6 +185,66 @@ test('Unassign sends an empty assignee and the same selection sends nothing', as
     await same.controller.assignCardFromFace(same.controller.state.cards[0], 'base:Claude');
     assert.deepEqual(same.calls, []);
     assert.deepEqual(same.toasts, []);
+});
+
+// Review F1 (codex, f6cd93ad): an open menu must follow an assignment made elsewhere.
+function openMenuHarness(cardId = 'card-1', assignee = 'base:codex') {
+    const menu = new BoardCardAssign({}, { avatar: () => '' });
+    const renders = [];
+    menu.root = null;
+    menu.panel = { id: 'board-assign-panel', remove() { this.removed = true; } };
+    menu.card = card({ id: cardId, assignee });
+    menu.render = () => renders.push(menu.card.assignee);
+    menu.positionPanel = () => {};
+    const attributes = {};
+    const button = id => ({
+        closest: selector => selector === '.board-card' ? { dataset: { cardId: id } } : null,
+        setAttribute: (name, value) => { attributes[name] = value; },
+        removeAttribute: name => { delete attributes[name]; },
+        focus() {},
+        isConnected: true
+    });
+    const root = buttons => ({ querySelectorAll: () => buttons });
+    return { menu, renders, attributes, button, root };
+}
+
+test('a lane repaint rebinds the open menu to the refreshed card and re-renders only on a change', () => {
+    const h = openMenuHarness();
+    const root = h.root([h.button('card-9'), h.button('card-1')]);
+    h.menu.root = root;
+    const same = card({ assignee: 'base:codex' });
+    h.menu.mount(root, [same]);
+    assert.equal(h.menu.card, same, 'the latest summary replaces the retained one');
+    assert.deepEqual(h.renders, [], 'an unchanged assignee needs no repaint');
+    assert.equal(h.attributes['aria-expanded'], 'true');
+    assert.equal(h.attributes['aria-controls'], 'board-assign-panel');
+
+    const elsewhere = card({ assignee: 'base:claude' });
+    h.menu.mount(root, [elsewhere]);
+    assert.equal(h.menu.card, elsewhere);
+    assert.deepEqual(h.renders, ['base:claude'], 'the current marker and Unassign row follow the saved assignee');
+
+    // The card left the loaded lanes: the menu closes rather than pointing at nothing.
+    h.menu.mount(root, []);
+    assert.equal(h.menu.card, elsewhere, 'a missing summary keeps the last known one');
+    h.menu.mount(h.root([h.button('card-9')]), [elsewhere]);
+    assert.equal(h.menu.panel, null);
+    assert.equal(h.menu.card, null);
+});
+
+test('a choice is compared with the board\'s current card, not the menu\'s stale copy', async () => {
+    const h = saveHarness();
+    // The menu opened while the card said Codex; another client saved Claude and the poll refreshed the lane.
+    const stale = card({ assignee: 'base:codex' });
+    h.controller.state.cards = [card({ assignee: 'base:claude' })];
+    await h.controller.assignCardFromFace(stale, 'base:codex');
+    assert.deepEqual(h.calls.map(call => call.body), [{ assignee: 'base:codex' }], 'Codex is no longer saved, so choosing it must save');
+    assert.equal(h.controller.state.cards[0].assignee, 'base:codex');
+
+    const unchanged = saveHarness();
+    unchanged.controller.state.cards = [card({ assignee: 'base:claude' })];
+    await unchanged.controller.assignCardFromFace(card({ assignee: 'base:codex' }), 'base:claude');
+    assert.deepEqual(unchanged.calls, [], 'Claude is already saved, whatever the menu remembered');
 });
 
 test('a failed save reports once and rethrows so the menu stays open', async () => {

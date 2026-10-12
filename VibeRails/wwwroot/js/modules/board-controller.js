@@ -946,7 +946,7 @@ export class BoardController {
         if (host) {
             this.laneAgents.mount(host);
             this.laneAgents.updateActivity(this._activeAutomationColumnIds);
-            this.cardAssign.mount(host);
+            this.cardAssign.mount(host, this.state.cards);
         }
         this.restoreScroll(scroll);
         this.bindDragAndDrop();
@@ -1267,7 +1267,10 @@ export class BoardController {
     async assignCardFromFace(card, selection) {
         const root = this.root;
         const assignee = canonicalLlmSelection(selection);
-        if (assignee === canonicalLlmSelection(card.assignee)) return;
+        // The menu may hold a summary from before a background refresh; the no-op test reads the
+        // board's current one so a choice that differs from what is saved is never dropped.
+        const current = this.state.cards.find(item => item.id === card.id) || card;
+        if (assignee === canonicalLlmSelection(current.assignee)) return;
         let saved;
         try {
             saved = await BoardApi.updateBoardCardAsync(card.id, { assignee });
@@ -1278,8 +1281,8 @@ export class BoardController {
         const label = assignee ? this.assigneeInfo(assignee)?.label || assignee : '';
         this.app.showToast('Board', assignee ? `${cardDisplayId(card)} assigned to ${label}.` : `${cardDisplayId(card)} unassigned.`, 'success');
         if (root !== this.root || !root?.isConnected) return;
-        const current = this.state.cards.find(item => item.id === card.id);
-        if (current) Object.assign(current, { assignee: saved?.assignee ?? (assignee || null), baseLlmOptions: saved?.baseLlmOptions ?? null });
+        const listed = this.state.cards.find(item => item.id === card.id);
+        if (listed) Object.assign(listed, { assignee: saved?.assignee ?? (assignee || null), baseLlmOptions: saved?.baseLlmOptions ?? null });
         this.renderAll();
         await this.refreshBoardSnapshot();
     }
