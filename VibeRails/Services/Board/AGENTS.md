@@ -510,8 +510,9 @@ Board context and lane Automation settings still use their own expected revision
 Lane-entry triggers write one pending row per selected Automation and card in the move transaction;
 a caller-requested skip deletes those rows before that transaction commits.
 Deleting an Automation unlinks it from every lane: `JobStore.SoftDeleteJobAsync` calls
-`IBoardStore.RemoveJobFromLanesAsync` after its own commit, and the dashboard's lane settings read
-prunes selections an older binary deleted without reaching the Board. Both rewrite the lane like a
+`IBoardStore.RemoveJobFromLanesAsync` after its own commit (a locked, damaged or newer board.db is
+logged, not reported as a failed delete), and the dashboard's lane settings read prunes selections
+that call, an older binary or a Board-less host left behind. Both rewrite the lane like a
 settings save, so its revision advances and its pending entries are cancelled; a selection that
 merely belongs to another repository, or has no definition, stays listed as unavailable.
 `DescribeLaneAutomationsAsync` reads Job definitions from `state.db` for wording only and must keep

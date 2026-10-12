@@ -1,3 +1,4 @@
+using Moq;
 using VibeRails.DB;
 using VibeRails.Services.Board;
 using Xunit;
@@ -65,5 +66,27 @@ public sealed partial class BoardSettingsTests
         Assert.Equal(settings.JobIds, (await _boards.GetLaneAutomationAsync(_root, a, Ct))!.JobIds);
         // Idempotent: a second read changes nothing.
         Assert.Equal(2, (await new BoardAutomationService(_boards, _jobs).GetAsync(_root, a, Ct))!.Revision);
+    }
+
+    [Fact]
+    public async Task BoardUnlinkFailure_IsLogged_AndTheDeleteStillSucceeds()
+    {
+        // board.db locked, damaged or newer must not report a deleted Automation as not deleted.
+        var (_, a, _, _) = await Lanes();
+        var job = await Job();
+        await _boards.SaveLaneAutomationAsync(_root, a, [job.Id], 0, Ct);
+        var unavailable = new Mock<IBoardStore>(MockBehavior.Strict);
+        unavailable.Setup(store => store.RemoveJobFromLanesAsync(job.Id, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new IOException("board.db is locked"));
+
+        Assert.True(await new JobStore(_stateConnectionString, unavailable.Object).SoftDeleteJobAsync(job.Id, Ct));
+
+        unavailable.Verify(store => store.RemoveJobFromLanesAsync(job.Id, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.NotNull((await _jobs.GetJobAsync(job.Id, Ct))!.DeletedUtc);
+        // The Board was never reached, so the selection survives until the lane settings read prunes it.
+        Assert.Equal(new[] { job.Id }, (await _boards.GetLaneAutomationAsync(_root, a, Ct))!.JobIds);
+        var settings = (await new BoardAutomationService(_boards, _jobs).GetAsync(_root, a, Ct))!;
+        Assert.Empty(settings.JobIds);
+        Assert.Equal(2, settings.Revision);
     }
 }

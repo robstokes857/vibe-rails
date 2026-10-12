@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using Serilog;
 using VibeRails.DTOs;
 using VibeRails.Data.Sqlite;
 using VibeRails.Services;
@@ -184,11 +185,19 @@ public sealed partial class JobStore : IJobStore
         if (changed > 0)
             await CancelQueuedRunsAsync(connection, transaction, id, "Automation deleted before the run started.", now, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        if (changed == 0 || _boards is null) return changed > 0;
         // Lane selections live in board.db and commit separately, like every Board handoff. The
-        // dashboard's lane settings read prunes a selection this call never reached.
-        if (changed > 0 && _boards is not null)
+        // Automation is already deleted, so a locked, damaged or newer board.db must not turn
+        // this into a failed delete; the dashboard's lane settings read prunes what this missed.
+        try
+        {
             await _boards.RemoveJobFromLanesAsync(id, cancellationToken);
-        return changed > 0;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            Log.Warning(ex, "[Jobs] Automation {JobId} was deleted but its lane selections were not unlinked; the lane settings read prunes them.", id);
+        }
+        return true;
     }
 
     public async Task<int> CountJobsForEnvironmentAsync(int environmentId, CancellationToken cancellationToken = default)
