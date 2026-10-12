@@ -1701,6 +1701,81 @@ test('Agent toggles retain saved state when a follow-up read fails', async (t) =
     }
 });
 
+test('A late refresh cannot overwrite a newer successful Agent toggle', async () => {
+    const app = createApp();
+    app.data.configs.rootPath = '/repo';
+    const controller = new JobController(app);
+    const list = { innerHTML: '' };
+    controller.root = { querySelector: selector => (selector === '[data-jobs-list]' ? list : null) };
+    controller.environments = [{ id: 42, name: 'Commit', cli: 'codex', customPrompt: 'Commit.', projectPath: '/repo' }];
+    let persisted = { id: 7, name: 'Commit', enabled: false, actions: [{ kind: 0, environmentId: 42 }], triggers: [] };
+    controller.jobs = [structuredClone(persisted)];
+    const writes = [];
+    let releaseOlderRead;
+    let notifyReadStarted;
+    const readStarted = new Promise(resolve => { notifyReadStarted = resolve; });
+    app.apiCall = async (url, method, body) => {
+        if (method === 'PUT') {
+            writes.push(body.enabled);
+            persisted = { ...persisted, ...body };
+            return structuredClone(persisted);
+        }
+        if (url.startsWith('/api/v1/jobs?')) {
+            const snapshot = { jobs: [structuredClone(persisted)] };
+            if (writes.length === 1) {
+                return new Promise(resolve => {
+                    releaseOlderRead = () => resolve(snapshot);
+                    notifyReadStarted();
+                });
+            }
+            return snapshot;
+        }
+        if (url === '/api/v1/environments') return { environments: controller.environments };
+        return { summaries: [] };
+    };
+
+    const firstToggle = controller.toggleJob(7, null);
+    await readStarted;
+    await controller.toggleJob(7, null);
+    releaseOlderRead();
+    await firstToggle;
+
+    assert.deepEqual(writes, [true, false]);
+    assert.equal(persisted.enabled, false);
+    assert.deepEqual(controller.jobs, [persisted]);
+    assert.match(list.innerHTML, /aria-checked="false"[^>]*data-job-action="toggle" data-job-id="7"/);
+});
+
+test('Pending refreshes cannot undo a standalone Agent first disable', async (t) => {
+    for (const refresh of ['refreshAll', 'refreshJobs']) {
+        await t.test(refresh, async () => {
+            const app = createApp();
+            app.data.configs.rootPath = '/repo';
+            const controller = new JobController(app);
+            controller.environments = [{ id: 42, name: 'Commit', cli: 'codex', customPrompt: 'Commit.', projectPath: '/repo' }];
+            let persisted;
+            let releaseOlderRead;
+            app.apiCall = async (url, method, body) => {
+                if (method === 'POST') return persisted = { id: 7, ...body };
+                if (url.startsWith('/api/v1/jobs?')) {
+                    if (persisted) return { jobs: [structuredClone(persisted)] };
+                    return new Promise(resolve => { releaseOlderRead = () => resolve({ jobs: [] }); });
+                }
+                if (url === '/api/v1/environments') return { environments: controller.environments };
+                return { summaries: [] };
+            };
+
+            const olderRefresh = controller[refresh]({ quiet: true });
+            await controller.toggleStandaloneAgent(42, null);
+            releaseOlderRead();
+            await olderRefresh;
+
+            assert.equal(persisted.enabled, false);
+            assert.deepEqual(controller.jobs, [persisted]);
+        });
+    }
+});
+
 test('A failed standalone Agent toggle leaves no Job and can be retried', async () => {
     const app = createApp();
     app.data.configs.rootPath = '/repo';

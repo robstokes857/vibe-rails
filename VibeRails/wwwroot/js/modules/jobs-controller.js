@@ -138,6 +138,7 @@ export class JobController {
         this.root = null;
         this.mode = 'agents';
         this.jobs = [];
+        this.jobMutationGeneration = 0;
         // What the pages show: Jobs and saved setups split into Agents, Automations and
         // Quick Launches (launch-kind.js). Rebuilt whenever either list is refreshed.
         // One entry per automation for the page-level table; the full run list is fetched per
@@ -352,6 +353,7 @@ export class JobController {
     }
 
     async refreshAll({ quiet = false } = {}) {
+        const generation = this.jobMutationGeneration;
         try {
             const projectPath = this.currentProjectPath();
             const jobsRequest = projectPath
@@ -362,6 +364,8 @@ export class JobController {
                 this.app.apiCall(`/api/v1/jobs/runs/summary?projectPath=${encodeURIComponent(projectPath)}`, 'GET', null, { showLoading: false }),
                 this.app.apiCall('/api/v1/environments', 'GET', null, { showLoading: false })
             ]);
+            // Reads started before a successful toggle must not restore its old state.
+            if (generation !== this.jobMutationGeneration) return;
             this.jobs = jobsResponse?.jobs || [];
             this.runSummaries = runsResponse?.summaries || [];
             const environmentRecords = environmentsResponse?.environments || [];
@@ -401,13 +405,14 @@ export class JobController {
     }
 
     async refreshJobs({ quiet = false } = {}) {
+        const generation = this.jobMutationGeneration;
         try {
             const projectPath = this.currentProjectPath();
             if (projectPath) {
                 const response = await this.app.apiCall(
                     `/api/v1/jobs?projectPath=${encodeURIComponent(projectPath)}`,
                     'GET', null, { showLoading: false });
-                this.jobs = response?.jobs || [];
+                if (generation === this.jobMutationGeneration) this.jobs = response?.jobs || [];
             }
         } catch (error) {
             if (!quiet) this.app.showError(error?.message || `Could not refresh ${this.page.noun}s.`);
@@ -1785,6 +1790,7 @@ export class JobController {
                     timeoutMinutes: null, enabled: false, launchMinimized: false,
                     triggers: [], actions: [{ kind: JOB_ACTION.WORKER, environmentId: Number(environment.id) }]
                 }, { preferErrorResponseMessage: true });
+                this.jobMutationGeneration++;
                 this.jobs.push(job);
                 this.renderJobs();
                 await this.refreshAll({ quiet: true });
@@ -1820,6 +1826,7 @@ export class JobController {
         return this.withBusy(button, job.enabled ? 'Disabling…' : 'Enabling…', async () => {
             const savedJob = await this.app.apiCall(`/api/v1/jobs/${jobId}`, 'PUT', payload);
             // Keep the confirmed state even if a follow-up refresh fails.
+            this.jobMutationGeneration++;
             this.jobs = this.jobs.map(item => item.id === jobId ? savedJob : item);
             this.renderJobs();
             await this.refreshAll({ quiet: true });
