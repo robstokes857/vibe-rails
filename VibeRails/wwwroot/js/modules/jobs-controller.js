@@ -1818,7 +1818,10 @@ export class JobController {
             triggers: (job.triggers || []).map(({ kind, scheduleKind, intervalMinutes, localTime, daysOfWeekMask, timeZoneId }) => ({ kind, scheduleKind, intervalMinutes, localTime, daysOfWeekMask, timeZoneId }))
         };
         return this.withBusy(button, job.enabled ? 'Disabling…' : 'Enabling…', async () => {
-            await this.app.apiCall(`/api/v1/jobs/${jobId}`, 'PUT', payload);
+            const savedJob = await this.app.apiCall(`/api/v1/jobs/${jobId}`, 'PUT', payload);
+            // Keep the confirmed state even if a follow-up refresh fails.
+            this.jobs = this.jobs.map(item => item.id === jobId ? savedJob : item);
+            this.renderJobs();
             await this.refreshAll({ quiet: true });
         });
     }

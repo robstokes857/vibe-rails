@@ -1651,6 +1651,56 @@ test('Disabling a standalone Agent persists an unscheduled Job and subsequent to
     assert.equal(app.calls[1].body.enabled, true);
 });
 
+test('Agent toggles retain saved state when a follow-up read fails', async (t) => {
+    for (const failedRead of ['jobs', 'runs', 'environments']) {
+        await t.test(failedRead, async () => {
+            const app = createApp();
+            app.data.configs.rootPath = '/repo';
+            const controller = new JobController(app);
+            const list = { innerHTML: '' };
+            controller.root = { querySelector: selector => (selector === '[data-jobs-list]' ? list : null) };
+            controller.environments = [{ id: 42, name: 'Commit', cli: 'codex', customPrompt: 'Commit the changes.', projectPath: '/repo' }];
+            const writes = [];
+            const refreshSnapshots = [];
+            let persisted;
+            app.apiCall = async (url, method, body) => {
+                if (method === 'POST' || method === 'PUT') {
+                    writes.push({ url, method, enabled: body.enabled });
+                    persisted = { ...persisted, ...body, id: 7, description: `Server revision ${writes.length}` };
+                    return structuredClone(persisted);
+                }
+                const read = url.startsWith('/api/v1/jobs?') ? 'jobs'
+                    : url.startsWith('/api/v1/jobs/runs/') ? 'runs' : 'environments';
+                refreshSnapshots.push({ enabled: controller.jobs[0].enabled, html: list.innerHTML });
+                if (read === failedRead) throw new Error('Refresh failed');
+                if (read === 'jobs') return { jobs: [structuredClone(persisted)] };
+                if (read === 'runs') return { summaries: [] };
+                return { environments: controller.environments };
+            };
+
+            for (const enabled of [false, true, false]) {
+                refreshSnapshots.length = 0;
+                // First disable creates a Job; later clicks use that Job's switch.
+                if (!persisted) await controller.toggleStandaloneAgent(42, null);
+                else await controller.toggleJob(7, null);
+                assert.equal(persisted.enabled, enabled);
+                assert.deepEqual(controller.jobs, [persisted], 'retain the full successful write response');
+                assert.equal(refreshSnapshots.length, 3);
+                for (const snapshot of refreshSnapshots) {
+                    assert.equal(snapshot.enabled, enabled, 'update the cache before starting refresh reads');
+                    assert.match(snapshot.html, new RegExp(`aria-checked="${enabled}"[^>]*data-job-action="toggle" data-job-id="7"`));
+                }
+                assert.equal(list.innerHTML, refreshSnapshots[0].html, 'a failed refresh keeps the rendered saved state');
+            }
+            assert.deepEqual(writes, [
+                { url: '/api/v1/jobs', method: 'POST', enabled: false },
+                { url: '/api/v1/jobs/7', method: 'PUT', enabled: true },
+                { url: '/api/v1/jobs/7', method: 'PUT', enabled: false }
+            ]);
+        });
+    }
+});
+
 test('A failed standalone Agent toggle leaves no Job and can be retried', async () => {
     const app = createApp();
     app.data.configs.rootPath = '/repo';
