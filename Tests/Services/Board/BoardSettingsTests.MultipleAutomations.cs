@@ -111,7 +111,9 @@ public sealed partial class BoardSettingsTests
         var due = await Due(card.Id);
         if (reason == "disabled")
             await _jobs.UpdateJobAsync(skipped.Id, new(skipped.Name, _root, LLM.NotSet, null, "", null, false, []), Ct);
-        if (reason == "deleted") await _jobs.SoftDeleteJobAsync(skipped.Id, Ct);
+        // A store opened without the Board (an older binary, a stdio MCP host) leaves the selection in
+        // place, so the scheduler must still skip the entry. This root's own delete unlinks it instead.
+        if (reason == "deleted") Assert.True(await new JobStore(_stateConnectionString).SoftDeleteJobAsync(skipped.Id, Ct));
         if (reason == "missing")
         {
             await using var state = new SqliteConnection(_stateConnectionString);
@@ -150,6 +152,7 @@ public sealed partial class BoardSettingsTests
     [InlineData("clear")]
     [InlineData("delete-card")]
     [InlineData("delete-board")]
+    [InlineData("delete-job")]
     public async Task SettingChangesAndDeletion_CancelEveryPendingAutomation(string operation)
     {
         var (board, a, _, _) = await Lanes();
@@ -166,12 +169,15 @@ public sealed partial class BoardSettingsTests
             await _boards.CreateBoardAsync(_root, "Other", Ct);
             await _boards.DeleteBoardAsync(_root, board, Ct);
         }
+        // Deleting a selected Automation unlinks it, which rewrites the lane like a save.
+        if (operation == "delete-job") Assert.True(await _jobs.SoftDeleteJobAsync(first.Id, Ct));
         Assert.Equal(0, await Due(card.Id));
         Assert.Empty(await Tick(due));
-        if (operation == "save")
+        if (operation is "save" or "delete-job")
         {
             var next = await Card(a);
-            Assert.Single(await Tick(await Due(next.Id)));
+            var run = Assert.Single(await Tick(await Due(next.Id)));
+            Assert.Equal(second.Id, (await _jobs.GetRunAsync(run, Ct))!.JobId);
         }
     }
 

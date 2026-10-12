@@ -184,6 +184,10 @@ public sealed partial class JobStore : IJobStore
         if (changed > 0)
             await CancelQueuedRunsAsync(connection, transaction, id, "Automation deleted before the run started.", now, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        // Lane selections live in board.db and commit separately, like every Board handoff. The
+        // dashboard's lane settings read prunes a selection this call never reached.
+        if (changed > 0 && _boards is not null)
+            await _boards.RemoveJobFromLanesAsync(id, cancellationToken);
         return changed > 0;
     }
 

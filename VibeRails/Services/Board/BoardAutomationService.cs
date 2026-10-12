@@ -15,6 +15,7 @@ public sealed class BoardAutomationService(IBoardStore boards, IJobStore jobs,
         var setting = await boards.GetLaneAutomationAsync(projectPath, columnId, cancellationToken);
         if (setting is null) return null;
         var catalog = await jobs.GetJobsAsync(projectPath, cancellationToken: cancellationToken);
+        setting = await PruneDeletedAsync(projectPath, columnId, setting, catalog, cancellationToken);
         var choices = new List<BoardAutomationOption>();
         foreach (var job in catalog)
             choices.Add(new(job.Id, job.Name, job.Enabled, setting.JobIds.Contains(job.Id)
@@ -22,6 +23,24 @@ public sealed class BoardAutomationService(IBoardStore boards, IJobStore jobs,
         var pending = (await boards.GetPendingStarterWorkflowsAsync(projectPath, cancellationToken)).Any(seed => seed.ColumnId == columnId);
         return new(setting.JobId, setting.Revision, choices, setting.JobIds, pending, await ReadRunningAgentsAsync(projectPath, columnId, cancellationToken),
             await boards.GetLaneWorkflowsAsync(projectPath, columnId, cancellationToken));
+    }
+
+    /// <summary>
+    /// A selection can outlive its Automation when an older binary or a host without the Board
+    /// store deleted the Job. Deleted entries are unlinked on this read so the lane never lists
+    /// them; entries that merely belong to another repository or no definition stay visible.
+    /// </summary>
+    private async Task<BoardLaneAutomation> PruneDeletedAsync(string projectPath, string columnId, BoardLaneAutomation setting,
+        IReadOnlyList<JobDefinitionRecord> catalog, CancellationToken cancellationToken)
+    {
+        var pruned = false;
+        foreach (var jobId in setting.JobIds.Where(id => catalog.All(job => job.Id != id)))
+        {
+            var job = await jobs.GetJobAsync(jobId, cancellationToken);
+            if (job?.DeletedUtc is null) continue;
+            pruned |= await boards.RemoveJobFromLanesAsync(jobId, cancellationToken) > 0;
+        }
+        return pruned ? await boards.GetLaneAutomationAsync(projectPath, columnId, cancellationToken) ?? setting : setting;
     }
 
     /// <summary>

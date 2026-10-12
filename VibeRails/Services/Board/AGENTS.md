@@ -509,6 +509,11 @@ application actions are not required setup for unit tests.
 Board context and lane Automation settings still use their own expected revisions. Settings writes must remain project-scoped and reject stale revisions.
 Lane-entry triggers write one pending row per selected Automation and card in the move transaction;
 a caller-requested skip deletes those rows before that transaction commits.
+Deleting an Automation unlinks it from every lane: `JobStore.SoftDeleteJobAsync` calls
+`IBoardStore.RemoveJobFromLanesAsync` after its own commit, and the dashboard's lane settings read
+prunes selections an older binary deleted without reaching the Board. Both rewrite the lane like a
+settings save, so its revision advances and its pending entries are cancelled; a selection that
+merely belongs to another repository, or has no definition, stays listed as unavailable.
 `DescribeLaneAutomationsAsync` reads Job definitions from `state.db` for wording only and must keep
 tolerating absent tables, because a stdio MCP host can open a state.db without Automations.
 The first selection uses the board/6 tables; additional selections use the additive board/7 tables.

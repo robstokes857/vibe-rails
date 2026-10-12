@@ -159,6 +159,8 @@ in `board.db`. The unique run TriggerKey deduplicates retries after a failed ack
 No transaction spans both files; a move/settings edit racing an already-read event can still
 queue a run, an accepted best-effort tradeoff. Card/lane deletion cascades pending entries;
 editing a lane's Automation cancels its pending entries without triggering existing cards.
+Soft-deleting a Job rewrites every lane that selected it the same way (`RemoveJobFromLanesAsync`),
+so a deleted Automation never lingers in lane settings or queues entries for new cards.
 
 `board/7` adds `BoardLaneAdditionalAutomations` and `BoardPendingAdditionalAutomations` for
 multiple selections. The first job stays in the board/6 tables, preserving existing selections,

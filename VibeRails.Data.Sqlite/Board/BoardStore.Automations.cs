@@ -36,31 +36,79 @@ public sealed partial class BoardStore
                 throw new BoardValidationException("Choose an enabled Automation from this project.");
         }
         var saved = new BoardLaneAutomation(selected, checked(current.Revision + 1));
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            INSERT INTO BoardLaneAutomations (ColumnId, JobId, Revision) VALUES ($column, $job, $revision)
-            ON CONFLICT(ColumnId) DO UPDATE SET JobId = excluded.JobId, Revision = excluded.Revision;
-            DELETE FROM BoardPendingAutomations WHERE ColumnId = $column;
-            """;
-        command.Parameters.AddWithValue("$column", columnId.Trim());
-        command.Parameters.AddWithValue("$job", (object?)saved.JobId ?? DBNull.Value);
-        command.Parameters.AddWithValue("$revision", saved.Revision);
-        await command.ExecuteNonQueryAsync(cancellationToken);
-        // Updating the legacy header clears additional selections and pending entries, including
-        // when an older binary saves a single selection. Rebuild the remainder in this transaction.
-        for (var position = 1; position < selected.Length; position++)
+        await WriteLaneSelectionAsync(connection, transaction, columnId.Trim(), saved, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return saved;
+    }
+
+    /// <summary>
+    /// A deleted Automation must neither keep showing in lane settings nor queue entries for new
+    /// cards. Each lane that selects it is rewritten through the settings-save path, so the lane's
+    /// pending entries are cancelled and its revision advances for any open editor.
+    /// </summary>
+    public async Task<int> RemoveJobFromLanesAsync(long jobId, CancellationToken cancellationToken = default)
+    {
+        if (jobId <= 0) return 0;
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
+        var lanes = new Dictionary<string, (List<long> JobIds, int Revision)>(StringComparer.Ordinal);
+        await using (var query = connection.CreateCommand())
+        {
+            query.Transaction = transaction;
+            query.CommandText = """
+                SELECT a.ColumnId, a.JobId, a.Revision, extra.JobId FROM BoardLaneAutomations a
+                LEFT JOIN BoardLaneAdditionalAutomations extra ON extra.ColumnId = a.ColumnId
+                WHERE a.JobId = $job OR a.ColumnId IN (SELECT ColumnId FROM BoardLaneAdditionalAutomations WHERE JobId = $job)
+                ORDER BY a.ColumnId, extra.Position;
+                """;
+            query.Parameters.AddWithValue("$job", jobId);
+            await using var reader = await query.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var columnId = reader.GetString(0);
+                if (!lanes.TryGetValue(columnId, out var lane))
+                {
+                    lanes[columnId] = lane = ([], reader.GetInt32(2));
+                    if (!reader.IsDBNull(1)) lane.JobIds.Add(reader.GetInt64(1));
+                }
+                if (!reader.IsDBNull(3)) lane.JobIds.Add(reader.GetInt64(3));
+            }
+        }
+        foreach (var (columnId, lane) in lanes)
+            await WriteLaneSelectionAsync(connection, transaction, columnId,
+                new(lane.JobIds.Where(id => id != jobId).ToArray(), checked(lane.Revision + 1)), cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return lanes.Count;
+    }
+
+    // Updating the legacy header clears additional selections and pending entries, including
+    // when an older binary saves a single selection. Rebuild the remainder in this transaction.
+    private static async Task WriteLaneSelectionAsync(SqliteConnection connection, SqliteTransaction transaction, string columnId,
+        BoardLaneAutomation selection, CancellationToken cancellationToken)
+    {
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = """
+                INSERT INTO BoardLaneAutomations (ColumnId, JobId, Revision) VALUES ($column, $job, $revision)
+                ON CONFLICT(ColumnId) DO UPDATE SET JobId = excluded.JobId, Revision = excluded.Revision;
+                DELETE FROM BoardPendingAutomations WHERE ColumnId = $column;
+                """;
+            command.Parameters.AddWithValue("$column", columnId);
+            command.Parameters.AddWithValue("$job", (object?)selection.JobId ?? DBNull.Value);
+            command.Parameters.AddWithValue("$revision", selection.Revision);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+        for (var position = 1; position < selection.JobIds.Count; position++)
         {
             await using var insert = connection.CreateCommand();
             insert.Transaction = transaction;
             insert.CommandText = "INSERT INTO BoardLaneAdditionalAutomations (ColumnId, JobId, Position) VALUES ($column, $job, $position);";
-            insert.Parameters.AddWithValue("$column", columnId.Trim());
-            insert.Parameters.AddWithValue("$job", selected[position]);
+            insert.Parameters.AddWithValue("$column", columnId);
+            insert.Parameters.AddWithValue("$job", selection.JobIds[position]);
             insert.Parameters.AddWithValue("$position", position);
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
-        await transaction.CommitAsync(cancellationToken);
-        return saved;
     }
 
     private static async Task<BoardLaneAutomation?> ReadLaneAutomationAsync(SqliteConnection connection, SqliteTransaction? transaction, string project, string columnId, CancellationToken cancellationToken)

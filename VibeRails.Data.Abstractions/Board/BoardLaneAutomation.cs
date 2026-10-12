@@ -76,6 +76,12 @@ public partial interface IBoardStore
         CancellationToken cancellationToken = default);
     Task<BoardLaneAutomation?> GetLaneAutomationAsync(string projectPath, string columnId, CancellationToken cancellationToken = default);
     Task<BoardLaneAutomation?> SaveLaneAutomationAsync(string projectPath, string columnId, IReadOnlyList<long> jobIds, int expectedRevision, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Unlinks one Automation from every lane selection that includes it, in any project, and
+    /// advances those lanes' revisions. Like a settings save, it cancels the pending entries of
+    /// each changed lane. Returns the number of lanes changed; zero when nothing selects the job.
+    /// </summary>
+    Task<int> RemoveJobFromLanesAsync(long jobId, CancellationToken cancellationToken = default);
     /// <summary>Reads a bounded batch without claiming or removing entries.</summary>
     Task<IReadOnlyList<BoardLaneAutomationEvent>> GetDueLaneAutomationsAsync(DateTime nowUtc, CancellationToken cancellationToken = default);
     /// <summary>Removes only the observed entry; a subsequent lane entry must survive.</summary>
