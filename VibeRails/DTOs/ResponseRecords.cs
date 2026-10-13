@@ -1138,10 +1138,6 @@ namespace VibeRails.DTOs
         JsonElement? Data = null
     );
 
-    public record BootstrapCommandResponse(
-        string Command
-    );
-
     // Version/Update DTOs
     public record VersionResponse(
         string Version
@@ -1827,7 +1823,6 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(AgentToolTerminalListResponse))]
     [JsonSerializable(typeof(AgentToolControlRequest))]
     [JsonSerializable(typeof(AgentToolControlResponse))]
-    [JsonSerializable(typeof(BootstrapCommandResponse))]
     // Summary DTOs
     [JsonSerializable(typeof(SummaryPostDto))]
     [JsonSerializable(typeof(SummaryResponseDto))]

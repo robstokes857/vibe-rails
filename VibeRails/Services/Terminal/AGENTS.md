@@ -642,7 +642,6 @@ From `Routes/TerminalRoutes.cs`:
 - `POST /api/v1/terminal/stop`
 - `POST /api/v1/terminal/input`
 - `GET /api/v1/terminal/snapshot`
-- `GET /api/v1/terminal/bootstrap-command`
 - `WS /api/v1/terminal/ws`
 
 Agent/tool control surface (from `Routes/AgentToolRoutes.cs`):

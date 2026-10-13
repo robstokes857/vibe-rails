@@ -681,7 +681,6 @@ http://localhost:<auto-detected-port>/api/v1/
 | POST | `/terminal/input` | Send input to terminal |
 | GET | `/terminal/snapshot` | Get terminal snapshot |
 | GET | `/terminal/status` | Get terminal status |
-| GET | `/terminal/bootstrap-command` | Get bootstrap command |
 | GET/POST/DELETE | `/terminal/tabs[/{tabId}]` | Multi-tab terminal management |
 
 #### Sandboxes
