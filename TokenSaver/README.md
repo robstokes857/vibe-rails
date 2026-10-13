@@ -2,7 +2,7 @@ Himan made note:
 
 Hey next time we go through the optimization process I want to look for re-runs. When the LLM had to call again to get something we trunked.
 
-> Measured 2026-09-03: on Claude 75% of elisions were followed by a re-fetch turn and `truncate-long` cost ~3× what it saved; on Codex it paid for itself.
+> Re-measured 2026-10-13 by content (vibe-books `token_saver/recovery_2026-10-13.md`): on Claude the cut lines came back within 3 turns in ~70% of truncations (3% for long outputs that were not cut), so `truncate-long` netted roughly break-even; on Codex it was a large net win. It is now **off by default** for every provider (VIBE-154), so the saver's claim covers only stages that never hide anything the agent needs. This supersedes the 2026-09-03 estimate that it cost ~3× what it saved on Claude.
 
 # TokenSaver
 
@@ -120,7 +120,7 @@ payload under the truncation threshold).
 | 9 | `find-group` | Reshaping | on | Groups a flat path list under one header per directory. |
 | 10 | `elide-passed-tests` | Lossy | on | Runs of individual passing-test lines from a recognised test runner → one `[... N passed ...]` marker. Failures/errors/skips/logs/summaries kept verbatim, in place. |
 | 11 | `dedupe-lines` | Lossy | on | 3+ identical lines → one, tagged `[xN]`. |
-| 12 | `truncate-long` | Lossy | on | Keeps first 150 + last 50 lines, elides the middle. Widens to 1200/200 when the producing command reads file contents and the payload is at most 256 KiB — see [the side door](#the-side-door-scope-read-is-off-cat-is-not). |
+| 12 | `truncate-long` | Lossy | **off** | Keeps first 150 + last 50 lines, elides the middle. Widens to 1200/200 when the producing command reads file contents and the payload is at most 256 KiB — see [the side door](#the-side-door-scope-read-is-off-cat-is-not). |
 
 **Why are `cr-collapse` and `ansi-strip` off by default?** They are the two largest
 lossless wins available, and they are off by deliberate product decision (2026-07-15,
@@ -128,20 +128,27 @@ reaffirmed 2026-07-18): they reshape terminal-looking output, and the owner want
 opt into that consciously rather than inherit it. This is a preference, not a safety
 finding. Do not "fix" it by flipping the defaults.
 
-**Why are the three lossy stages on by default?** Curated-set decision (2026-07-18/19):
-they are the largest wins on the payloads that actually burn tokens (log/build/test
-spew), and each leaves an explicit marker (`[... N passed ...]`, `[xN]`,
-`[... N lines elided ...]`) where content was removed, so the model always knows
-something is missing and can re-run the command with a narrower filter. The default
-set is pinned by `LlmProxySettingsServiceTests.CuratedDefaults_*`.
+**Why are two of the three lossy stages on by default?** Curated-set decision
+(2026-07-18/19, narrowed 2026-10-13): `elide-passed-tests` and `dedupe-lines` leave an
+explicit marker (`[... N passed ...]`, `[xN]`) and drop only content with no further
+information in it, a green test's pass line or an identical repeat. `truncate-long`
+also leaves a marker, but the middle it elides is often what the agent needed: the
+content-based re-check found Claude re-fetching the cut lines within 3 turns in ~70%
+of truncations, which erased the saving. It shipped on from 2026-07-19 and is **off
+by default since 2026-10-13 (VIBE-154)**. On Codex it was a large net win (~85% of the
+cost Codex's saver removed in Sep/Oct); turning it off gives that up knowingly, so the
+saver's claim covers only stages that never hide anything. The catalog default is
+global: keeping it on for one provider would need per-provider defaults. The stage, its
+file-read budget and its tests remain, and `TokenSaverStageOverride` can switch it back
+on. The default set is pinned by `LlmProxySettingsServiceTests.CuratedDefaults_*`.
 
 **`elide-passed-tests` earns its place twice.** A green test's only information is
 that it passed, so per-test pass lines (pytest -v, jest/vitest `✓`, dotnet test,
 go test -v, cargo test — commands recognised in `CommandShape.Classify`, wrappers
 and pipes declined) compress to a counting marker at near-zero information cost.
 And because it runs *before* `truncate-long`, it fixes that stage's worst case on
-test output: without it, a big suite's failure section can land in the truncated
-middle while 150 lines of passes survive at the head.
+test output when an override enables truncation: without it, a big suite's failure
+section can land in the truncated middle while 150 lines of passes survive at the head.
 
 ### Scopes — a separate axis
 
@@ -180,6 +187,8 @@ an agent loads source into context.
 
 `CommandShapes.ReadsFileContents` now recognises those commands (including explicit executable
 paths such as `/usr/bin/cat`) and widens `truncate-long`'s keep budget to 1200/200 for their output.
+Since 2026-10-13 `truncate-long` is off by default, so this budget only applies when a
+`TokenSaverStageOverride` switches the stage back on.
 Responses `shell_call.action.commands` is correlated with `shell_call_output`; an output-only native
 shell item conservatively gets the wider budget because its command may live behind
 `previous_response_id`. Three things about this are easy to get wrong:

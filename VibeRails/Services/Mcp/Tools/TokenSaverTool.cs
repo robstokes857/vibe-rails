@@ -55,10 +55,11 @@ public sealed class TokenSaverTool
     [McpServerTool]
     [Description(
         "Turns VibeRails' token compression off for " + PauseWindowText + " for this terminal tab. "
-        + "Tool output is normally compressed before you see it: long output keeps only the first "
-        + "150 and last 50 lines ('[... N lines elided ...]'), 3+ identical lines collapse to one "
-        + "('[xN]'), and runs of passing test lines collapse to '[... N passed ...]'. Call this when "
-        + "you need to read one of those elided regions verbatim, then re-run the command that "
+        + "Tool output is normally compressed before you see it: 3+ identical lines collapse to one "
+        + "('[xN]') and runs of passing test lines collapse to '[... N passed ...]'. Long-output "
+        + "truncation is off by default; where it has been switched on, long output keeps only the "
+        + "first 150 and last 50 lines ('[... N lines elided ...]'). Call this when you need to "
+        + "read one of those collapsed or elided regions verbatim, then re-run the command that "
         + "produced it. The pause expires on its own after " + PauseWindowText + "; call "
         + "resume_token_saver as soon as you have what you needed. Do not call it speculatively or "
         + "on a hunch: switching compression on or off invalidates the provider's prompt cache for "
@@ -111,8 +112,9 @@ public sealed class TokenSaverTool
             return "Token compression is switched off for this session. Tool output reaches you verbatim.";
 
         return state.PausedUntilUtc is null
-            ? "Token compression is on. Long tool output may be truncated ('[... N lines elided ...]'), "
-                + "deduplicated ('[xN]'), or have passing tests elided ('[... N passed ...]'). "
+            ? "Token compression is on. Repeated lines may be deduplicated ('[xN]') and passing "
+                + "tests elided ('[... N passed ...]'); long output is truncated "
+                + "('[... N lines elided ...]') only where truncation has been switched on. "
                 + "Call pause_token_saver if you need to read an elided region."
             : $"Token compression is on but paused until {FormatExpiry(state.PausedUntilUtc)}; "
                 + "tool output is reaching you verbatim until then.";

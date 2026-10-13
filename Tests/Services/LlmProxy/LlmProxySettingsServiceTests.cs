@@ -114,16 +114,18 @@ public sealed class LlmProxySettingsServiceTests
     }
 
     [Fact]
-    public void CuratedDefaults_IncludeTheLossyMarkerStages_AndExcludeTuiAndEditRiskIds()
+    public void CuratedDefaults_IncludeTheSafeLossyStages_AndExcludeTruncationTuiAndEditRiskIds()
     {
-        // Pins the curated-set decision (2026-07-18). Dedupe and truncation are the big safe wins
-        // and ship on; the TUI-shaped transforms (cr-collapse, ansi-strip) and the failed-Edit
-        // risk scopes (Read, Grep) must never ride in on a defaults change.
+        // Pins the curated-set decision (2026-07-18, narrowed 2026-10-13 by VIBE-154). Passing-test
+        // elision and dedupe drop nothing the agent needs and ship on. truncate-long ships off:
+        // agents re-fetched the elided middle often enough to erase its saving on Claude. The
+        // TUI-shaped transforms (cr-collapse, ansi-strip) and the failed-Edit risk scopes (Read,
+        // Grep) must never ride in on a defaults change either.
         var defaults = CompressionCatalog.DefaultSelection;
 
         Assert.Contains(CompressionCatalog.ElidePassedTests, defaults);
         Assert.Contains(CompressionCatalog.DedupeLines, defaults);
-        Assert.Contains(CompressionCatalog.TruncateLong, defaults);
+        Assert.DoesNotContain(CompressionCatalog.TruncateLong, defaults);
         Assert.Contains(CompressionCatalog.ScopeShell, defaults);
         Assert.Contains(CompressionCatalog.ScopeShellBackground, defaults);
         Assert.DoesNotContain(CompressionCatalog.CrCollapse, defaults);

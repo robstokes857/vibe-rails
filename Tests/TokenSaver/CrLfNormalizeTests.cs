@@ -104,11 +104,6 @@ public sealed class CrLfNormalizeTests
         Assert.Equal(
             StageOutcome.Applied,
             trace.Single(s => s.StageId == CompressionCatalog.ElidePassedTests).Outcome);
-        // truncate-long legitimately has nothing left to do: elide runs first by design and has
-        // already taken 402 lines down to 3, far under its 201-line threshold.
-        Assert.Equal(
-            StageOutcome.NoChange,
-            trace.Single(s => s.StageId == CompressionCatalog.TruncateLong).Outcome);
 
         // The same payload with LF endings was always compressed; line endings no longer decide
         // whether the saver works.
@@ -118,13 +113,13 @@ public sealed class CrLfNormalizeTests
 
     /// <summary>
     /// The condense phase has its own CR fail-open, so reaching the shape phase does not prove it
-    /// was reached too. Unshaped output (no recognised command) isolates it: truncate-long is then
-    /// the only stage that can fire.
+    /// was reached too. Unshaped output (no recognised command) isolates it: with truncate-long
+    /// switched on (it is off by default since VIBE-154), it is then the only stage that can fire.
     /// </summary>
     [Fact]
     public void Pipeline_CrLfUnshapedOutput_ReachesTheCondensePhase()
     {
-        var plan = CompressionCatalog.Resolve(null);
+        var plan = FileReadTruncationTests.DefaultsWithTruncation;
         var builder = new StringBuilder();
         for (var i = 0; i < 400; i++)
             builder.Append($"C:/source/vibe-rails/File{i:D3}.cs:{i}: match").Append("\r\n");

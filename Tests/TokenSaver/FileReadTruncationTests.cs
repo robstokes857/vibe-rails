@@ -27,6 +27,15 @@ public class FileReadTruncationTests
     private static readonly CondenseOptions TruncatePreserving = new(
         DedupeConsecutiveLines: false, TruncateLongOutput: true, PreserveVerbatimFileContents: true);
 
+    /// <summary>
+    /// The curated defaults with <c>truncate-long</c> switched back on, which is what a
+    /// <c>TokenSaverStageOverride</c> re-enabling it resolves to. The stage has been off by default
+    /// since 2026-10-13 (VIBE-154), so pipeline tests about truncation build their plan here rather
+    /// than from <c>Resolve(null)</c>.
+    /// </summary>
+    internal static readonly CompressionPlan DefaultsWithTruncation = CompressionCatalog.Resolve(
+        [.. CompressionCatalog.DefaultSelection, CompressionCatalog.TruncateLong]);
+
     /// <summary>Source-shaped lines: long enough that 450 of them clear MinElidedChars (4096).</summary>
     private static string SourceDump(int lines)
     {
@@ -280,7 +289,7 @@ public class FileReadTruncationTests
     public void Pipeline_KeepsEveryFileReadLine_ButTruncatesTheSameBytesOtherwise()
     {
         var input = SourceDump(454);
-        var plan = CompressionCatalog.Resolve(null);
+        var plan = DefaultsWithTruncation;
 
         var asFileRead = RunPipeline(input, plan, readsFileContents: true);
         var asSpew = RunPipeline(input, plan, readsFileContents: false);
@@ -303,10 +312,29 @@ public class FileReadTruncationTests
     public void Pipeline_StillTracesTruncateLong_WhenTheWiderBudgetDeclines()
     {
         var trace = new List<StageTrace>();
-        RunPipeline(SourceDump(454), CompressionCatalog.Resolve(null), true, trace);
+        RunPipeline(SourceDump(454), DefaultsWithTruncation, true, trace);
 
         var truncate = Assert.Single(trace, t => t.StageId == CompressionCatalog.TruncateLong);
         Assert.Equal(StageOutcome.NoChange, truncate.Outcome);
+    }
+
+    /// <summary>
+    /// VIBE-154: the curated defaults no longer truncate. The same spew the test above cuts must
+    /// pass through whole, and the trace must say the stage was off rather than that it declined.
+    /// </summary>
+    [Fact]
+    public void Pipeline_DefaultPlan_LeavesLongSpewWhole()
+    {
+        var input = SourceDump(454);
+        var trace = new List<StageTrace>();
+
+        var output = RunPipeline(input, CompressionCatalog.Resolve(null), false, trace);
+
+        Assert.DoesNotContain("lines elided ...]", output);
+        Assert.Equal(454, output.TrimEnd('\n').Split('\n').Length);
+        Assert.Contains("Method0227(", output);
+        var truncate = Assert.Single(trace, t => t.StageId == CompressionCatalog.TruncateLong);
+        Assert.Equal(StageOutcome.Disabled, truncate.Outcome);
     }
 
     private static string RunPipeline(

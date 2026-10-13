@@ -163,10 +163,10 @@ public static class CompressionCatalog
             + "was a recognised `find`.",
             StageKind.Reshaping, OnByDefault: true, Order: 9),
 
-        // The three lossy stages ship ON (2026-07-18/19, curated-set decision): they are the
-        // largest wins on the exact payloads that burn tokens (log/build/test spew), and each
-        // leaves an explicit marker where content was removed, so the model can always tell and
-        // re-run the command with a narrower filter if it needs what was elided.
+        // Lossy stages ship ON only when they never hide anything the agent needs (curated-set
+        // decision 2026-07-18/19, narrowed 2026-10-13): elide-passed-tests and dedupe-lines
+        // leave a marker AND drop only content with no further information (a green test's pass
+        // line, an identical repeat). truncate-long ships OFF; see its entry below.
         new(ElidePassedTests, "Collapse passing tests",
             "Replaces each run of individual passing-test lines (pytest -v, jest/vitest, dotnet "
             + "test, go test -v, cargo test) with a `[... N passed ...]` marker. Failures, "
@@ -180,10 +180,19 @@ public static class CompressionCatalog
             + "count survives, the repeats do not.",
             StageKind.Lossy, OnByDefault: true, Order: 11),
 
+        // OFF by owner decision (2026-10-13, VIBE-154): the elided middle is often exactly what
+        // the agent needed. A content-based re-check of every truncation in the surviving logs
+        // (vibe-books token_saver/recovery_2026-10-13.md) found the cut lines re-fetched within 3
+        // turns in ~70% of Claude truncations (3% for long outputs that were not cut), netting
+        // roughly break-even. On Codex it was a large net win (~85% of Codex's removed cost in
+        // Sep/Oct), and turning it off gives that up knowingly: TokenSaver's claim covers only the
+        // stages that never hide anything. The stage, its file-read budget and its tests stay;
+        // TokenSaverStageOverride can still enable it. This one default covers every provider;
+        // keeping it on for one would need per-provider defaults.
         new(TruncateLong, "Truncate very long output",
             "Keeps the first 150 and last 50 lines and replaces the middle with a "
             + "`[... N lines elided ...]` marker. Lossy: the middle is gone.",
-            StageKind.Lossy, OnByDefault: true, Order: 12),
+            StageKind.Lossy, OnByDefault: false, Order: 12),
     ];
 
     /// <summary>

@@ -316,7 +316,7 @@ public class CodexResponsesRewriterTests
     {
         var source = LongUniqueOutput(454);
         var body = NativeShellBody(source, includeCall: true, command: "/usr/bin/cat src/main.cs");
-        var plan = CompressionCatalog.Resolve(null);
+        var plan = FileReadTruncationTests.DefaultsWithTruncation;
         var captures = new RecordingCaptureSink();
 
         var (_, rewritten, _) = RewriteIncludingNoOp(body, plan: plan, captures: captures);
@@ -337,7 +337,7 @@ public class CodexResponsesRewriterTests
         var sourceShapedSpew = LongUniqueOutput(454);
         var body = NativeShellBody(
             sourceShapedSpew, includeCall: true, command: "dotnet test --no-restore");
-        var plan = CompressionCatalog.Resolve(null);
+        var plan = FileReadTruncationTests.DefaultsWithTruncation;
 
         var (_, rewritten, _) = RewriteIncludingNoOp(body, plan: plan);
         var output = ReadShellStdout(rewritten, outputItemIndex: 1);
@@ -351,7 +351,7 @@ public class CodexResponsesRewriterTests
     {
         var source = LongUniqueOutput(454);
         var body = NativeShellBody(source, includeCall: false, command: null);
-        var plan = CompressionCatalog.Resolve(null);
+        var plan = FileReadTruncationTests.DefaultsWithTruncation;
 
         var (_, rewritten, _) = RewriteIncludingNoOp(body, plan: plan);
         var output = ReadShellStdout(rewritten, outputItemIndex: 0);

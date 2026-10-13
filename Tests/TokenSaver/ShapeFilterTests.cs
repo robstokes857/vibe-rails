@@ -20,11 +20,11 @@ public class ShapeFilterTests
     private const string Esc = "\u001b";
 
     [Fact]
-    public void Catalog_WiresGitStatusFilter_AndRunsTheLossyMarkerStagesByDefault()
+    public void Catalog_WiresGitStatusFilter_AndRunsOnlyTheSafeLossyStagesByDefault()
     {
-        // Curated-set decision (2026-07-18/19): the marker-leaving lossy stages ride in the
-        // defaults; the TUI-shaped cleanups stay off. The exclusion pins live in
-        // LlmProxySettingsServiceTests.CuratedDefaults_*.
+        // Curated-set decision (2026-07-18/19, narrowed 2026-10-13 by VIBE-154): passing-test
+        // elision and dedupe ride in the defaults; truncate-long and the TUI-shaped cleanups stay
+        // off. The exclusion pins live in LlmProxySettingsServiceTests.CuratedDefaults_*.
         var plan = CompressionCatalog.Resolve(null);
 
         Assert.Contains(CompressionCatalog.GitStatusGroup, plan.EnabledIds);
@@ -32,9 +32,9 @@ public class ShapeFilterTests
         Assert.Contains(CompressionCatalog.ElidePassedTests, plan.EnabledIds);
         Assert.Contains(CommandShape.TestRun, plan.Shapes);
         Assert.Contains(CompressionCatalog.DedupeLines, plan.EnabledIds);
-        Assert.Contains(CompressionCatalog.TruncateLong, plan.EnabledIds);
+        Assert.DoesNotContain(CompressionCatalog.TruncateLong, plan.EnabledIds);
         Assert.True(plan.Condense.DedupeConsecutiveLines);
-        Assert.True(plan.Condense.TruncateLongOutput);
+        Assert.False(plan.Condense.TruncateLongOutput);
     }
 
     // ---------------------------------------------------------------------
