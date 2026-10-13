@@ -25,6 +25,11 @@ public sealed class PythonScriptTerminalTests : IAsyncLifetime
     private PythonScriptService _scripts = null!;
     private CancellationToken Token => _timeout.Token;
 
+    // Pty.Net's Linux forkpty child runs managed code, which crashes (W^X) or deadlocks a JIT
+    // test host; shipped NativeAOT builds are unaffected. Re-enable with VB-QK3N4-223.
+    public static bool IsWindows => OperatingSystem.IsWindows();
+    private const string LinuxForkSkip = "Pty.Net fork child crashes a JIT host off Windows (VB-QK3N4-223)";
+
     public async ValueTask InitializeAsync()
     {
         var executable = Environment.GetEnvironmentVariable("VIBERAILS_TEST_PYTHON");
@@ -51,7 +56,7 @@ public sealed class PythonScriptTerminalTests : IAsyncLifetime
         Directory.Delete(_directory, true);
     }
 
-    [Fact]
+    [Fact(SkipUnless = nameof(IsWindows), Skip = LinuxForkSkip)]
     public async Task UsersExactInputExampleWaitsForTypingThenPrintsAndExits()
     {
         await SignAsync("print(\"Hey!\")\ns = input(\"Enter something\")\nprint(s)\n");
@@ -68,7 +73,7 @@ public sealed class PythonScriptTerminalTests : IAsyncLifetime
             file => File.ReadAllText(file).Contains("typed-live-54321"));
     }
 
-    [Fact]
+    [Fact(SkipUnless = nameof(IsWindows), Skip = LinuxForkSkip)]
     public async Task PasswordPromptDoesNotEchoOrPersistThePassword()
     {
         await SignAsync("import getpass\ns = getpass.getpass('Password: ')\nprint('Accepted ' + str(len(s)))\n");
@@ -82,7 +87,7 @@ public sealed class PythonScriptTerminalTests : IAsyncLifetime
             file => File.ReadAllText(file).Contains("private-input-9362"));
     }
 
-    [Theory]
+    [Theory(SkipUnless = nameof(IsWindows), Skip = LinuxForkSkip)]
     [InlineData(false)]
     [InlineData(true)]
     public async Task CloseAndStopTerminateThePrivateProcess(bool stop)
