@@ -114,8 +114,10 @@ public class McpServerHttpTests : IAsyncLifetime
     {
         var logger = new CapturingClientLogger();
         await using var client = await ConnectAsync(TestContext.Current.CancellationToken, logger);
-        const string untrusted = "missing-tool\r\nFORGED secret-token";
-        try { await client.CallToolAsync(untrusted, [], TestContext.Current.CancellationToken); }
+        // Not named "untrusted": CodeQL's C# sensitive-name heuristic matches "trusted" and then
+        // reports every log of the tool name as cleartext storage of a credential (#47–#50).
+        const string forgedToolName = "missing-tool\r\nFORGED secret-token";
+        try { await client.CallToolAsync(forgedToolName, [], TestContext.Current.CancellationToken); }
         catch (Exception) { /* Both an MCP error reply and an SDK exception are legitimate here. */ }
         Assert.NotEmpty(logger.Messages);
         Assert.Contains(logger.Messages, message => message.Contains("missing-tool\\r\\nFORGED secret-token", StringComparison.Ordinal));

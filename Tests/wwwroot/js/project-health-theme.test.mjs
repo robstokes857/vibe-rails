@@ -152,7 +152,7 @@ test('Quality explains what the scan checks, in step with MintLint scoring and i
     assert.match(guide, new RegExp(`<b>Clean</b> under ${bands[1]}, <b>Okay</b> under ${bands[2]}, <b>Needs work</b> under ${bands[3]}, <b>At risk</b> from ${bands[3]}`));
     const names = { CSharp: 'C#', Cpp: 'C++', Php: 'PHP' };
     const shown = parsers.map(parser => names[parser] || parser);
-    assert.match(guide, new RegExp(`${shown.slice(0, -1).join(', ')} and ${shown.at(-1)}`.replace(/[+#]/g, '\\$&')), 'the languages are the registered parsers, in order');
+    assert.match(guide, new RegExp(`${shown.slice(0, -1).join(', ')} and ${shown.at(-1)}`.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'the languages are the registered parsers, in order');
     assert.match(guide, /Full repository<\/b> extends that count to every source file on disk/, 'the toggle widens the reach count, not the grading');
     assert.match(styleCss, /\.project-health-scan-guide \{\s*margin: 0 18px 14px;/);
     assert.match(styleCss, /\.project-health-scan-guide\[hidden\] \{\s*display: none;/);

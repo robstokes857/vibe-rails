@@ -93,7 +93,7 @@ test('workflow progress identifies each card and only offers server-authorized s
     assert.match(html, /Stop and skip/);
     assert.match(html, /data-card-id="card-1"/);
     assert.match(html, /entry&quot;1/);
-    assert.doesNotMatch(html, /<img|<script>/);
+    assert.doesNotMatch(html, /<img|<script/i);
     flow[0].steps[0].canSkip = false;
     flow[0].steps[0].stepStatus = 'Passed';
     assert.doesNotMatch(laneStepMarkup(7, flow), /data-agent-action="skip"/);

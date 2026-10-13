@@ -151,32 +151,25 @@ namespace VibeRails.Services.LlmClis.Launchers
             var exePath = Environment.ProcessPath ?? "vb";
             var argv = BuildVbArgv(launchLlm, workingDirectory, args, envName, vbArgs);
 
-            // Build a temp .ps1 script and let PowerShell's call operator (`&`) plus
-            // splatting (`@argv`) pass each arg as its own argv element. This avoids
-            // every nested-quote pitfall of `pwsh -Command "..."` when args contain
-            // spaces, quotes, $, or backticks.
-            var sb = new StringBuilder();
-            sb.AppendLine("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8");
-            sb.AppendLine($"$exe = {QuotePowerShellSingleQuoted(exePath)}");
-            sb.Append("$argv = @(");
-            for (int i = 0; i < argv.Length; i++)
-            {
-                if (i > 0) sb.Append(", ");
-                sb.Append(QuotePowerShellSingleQuoted(argv[i]));
-            }
-            sb.AppendLine(")");
-            sb.AppendLine("try { Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -ErrorAction SilentlyContinue } catch { }");
-            sb.AppendLine("& $exe @argv");
+            // The script enters the project directory; ShellExecute is never handed it. As the
+            // lpDirectory, a request-selected directory would be pwsh.exe's startup directory and
+            // so part of its DLL search. PowerShell starts native commands in its current
+            // location, so vb and the shell that -NoExit leaves behind still run in the project.
+            // Checking here keeps a missing directory a failed launch, as ShellExecute made it.
+            if (!Directory.Exists(workingDirectory))
+                throw new DirectoryNotFoundException($"Working directory not found: {workingDirectory}");
 
             var tempScript = Path.Combine(
                 Path.GetTempPath(),
                 $"viberails-launch-{Guid.NewGuid():N}.ps1");
-            File.WriteAllText(tempScript, sb.ToString(), new UTF8Encoding(false));
+            File.WriteAllText(
+                tempScript,
+                BuildWindowsLaunchScript(exePath, argv, workingDirectory),
+                new UTF8Encoding(false));
 
             var startInfo = new ProcessStartInfo
             {
                 FileName = shellPath,
-                WorkingDirectory = workingDirectory,
                 UseShellExecute = true,
                 WindowStyle = launchMinimized ? ProcessWindowStyle.Minimized : ProcessWindowStyle.Normal,
             };
@@ -208,6 +201,29 @@ namespace VibeRails.Services.LlmClis.Launchers
                 Message: $"{CliExecutable} launched in new terminal window with session tracking",
                 ProcessId: null
             );
+        }
+
+        internal static string BuildWindowsLaunchScript(string exePath, string[] argv, string workingDirectory)
+        {
+            // Build a temp .ps1 script and let PowerShell's call operator (`&`) plus
+            // splatting (`@argv`) pass each arg as its own argv element. This avoids
+            // every nested-quote pitfall of `pwsh -Command "..."` when args contain
+            // spaces, quotes, $, or backticks.
+            var sb = new StringBuilder();
+            sb.AppendLine("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8");
+            sb.AppendLine($"$exe = {QuotePowerShellSingleQuoted(exePath)}");
+            sb.Append("$argv = @(");
+            for (int i = 0; i < argv.Length; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(QuotePowerShellSingleQuoted(argv[i]));
+            }
+            sb.AppendLine(")");
+            sb.AppendLine("try { Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -ErrorAction SilentlyContinue } catch { }");
+            // Stop: vb must never start in whatever directory the shell happened to open in.
+            sb.AppendLine($"Set-Location -LiteralPath {QuotePowerShellSingleQuoted(workingDirectory)} -ErrorAction Stop");
+            sb.AppendLine("& $exe @argv");
+            return sb.ToString();
         }
 
         private LaunchResult LaunchInMacTerminal(
