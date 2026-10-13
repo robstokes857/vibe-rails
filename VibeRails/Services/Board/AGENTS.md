@@ -511,10 +511,12 @@ Lane-entry triggers write one pending row per selected Automation and card in th
 a caller-requested skip deletes those rows before that transaction commits.
 Deleting an Automation unlinks it from every lane: `JobStore.SoftDeleteJobAsync` calls
 `IBoardStore.RemoveJobFromLanesAsync` after its own commit (a locked, damaged or newer board.db is
-logged, not reported as a failed delete), and the dashboard's lane settings read prunes selections
-that call, an older binary or a Board-less host left behind. Both rewrite the lane like a
-settings save, so its revision advances and its pending entries are cancelled; a selection that
-merely belongs to another repository, or has no definition, stays listed as unavailable.
+logged, not reported as a failed delete). The unlink rewrites the lane like a settings save, so its
+revision advances and its pending entries are cancelled. The dashboard's lane settings read hides
+deleted selections that call, an older binary or a Board-less host left behind, but never writes:
+every board render reads lane settings, so the next lane save drops them instead, and the scheduler
+already skips deleted Jobs. A selection that merely belongs to another repository, or has no
+definition, stays listed as unavailable.
 `DescribeLaneAutomationsAsync` reads Job definitions from `state.db` for wording only and must keep
 tolerating absent tables, because a stdio MCP host can open a state.db without Automations.
 The first selection uses the board/6 tables; additional selections use the additive board/7 tables.

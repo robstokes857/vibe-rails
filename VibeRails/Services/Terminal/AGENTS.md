@@ -621,21 +621,19 @@ Closure removes only the host; saved sessions, Job history, and Board links rema
 The root emits `automation_terminal_closed` after removal (including child exit); the browser
 disposes its viewer and removes its menu entry. A WebSocket disconnect alone is not completion.
 
-### 4) Interactive signed Python script
+### 4) Private signed script terminal
 
-Entry:
-- `POST /api/v1/python-scripts/run/interactive` in `Routes/PythonScriptRoutes.cs`
+The Scripts UI uses `GET /api/v1/python-scripts/run/terminal/ws` on the authenticated root host.
+`PythonScriptTerminalSession` starts a verified `.py`, `.ps1` or `.sh` interpreter directly in a
+socket-owned PTY. It subscribes only a WebSocket output consumer and writes binary input straight
+to `Terminal.WriteBytesAsync`, deliberately bypassing the recording/observer input router. There
+is no main terminal tab, recorded session, replay or remote sharing. The launch request is bounded
+and verifies the signature and required PIN. Stop, disconnect and shutdown kill the process tree;
+minimizing only hides the frontend window. There is no script run timeout.
 
-Flow:
-1. `TerminalTabHostService.CreatePythonScriptTabAsync` validates that the saved script still matches
-   its signature before consuming tab capacity.
-2. It creates an ordinary tab child, starts a plain `shell` session in the scripts directory, and
-   submits only `vb --run-python-script <validated-name>` (quoted for PowerShell/POSIX) to the PTY.
-3. `PythonScriptRunProcessHost` revalidates the signature, copies the exact approved bytes to a
-   temporary file, and starts the discovered Python interpreter with inherited stdin/stdout/stderr.
-   The browser therefore gets live output, `input()` prompts, and Ctrl+C through the normal terminal
-   WebSocket without exposing an API that accepts arbitrary command text.
-4. The helper deletes the verified copy when Python exits; the shell remains usable in the tab.
+The legacy `POST /api/v1/python-scripts/run/interactive` still creates a normal shell tab through
+`TerminalTabHostService.CreatePythonScriptTabAsync`. Its helper runs the verified cache copy and
+leaves the shell usable after completion. The Scripts UI no longer selects this recorded path.
 
 ## Local API Surface
 From `Routes/TerminalRoutes.cs`:

@@ -387,6 +387,18 @@ namespace VibeRails
                 // LMBootstrap (--env) processes, which have no global background-job role.
                 if (isActiveRootBackendProcess)
                 {
+                    serviceCollection.AddHttpClient(ConversationTitleClient.HttpClientName,
+                            client => client.Timeout = TimeSpan.FromSeconds(20))
+                        .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+                        {
+                            AllowAutoRedirect = false,
+                            UseCookies = false
+                        })
+                        .RemoveAllLoggers();
+                    serviceCollection.AddSingleton(sp => new ConversationTitleClient(
+                        sp.GetRequiredService<IHttpClientFactory>().CreateClient(ConversationTitleClient.HttpClientName)));
+                    serviceCollection.AddScoped<ConversationTitleService>();
+                    serviceCollection.AddHostedService<ConversationTitleJob>();
                     serviceCollection.AddHostedService<BertEmbeddingBackfillJob>();
                     // A named client, not AddHttpClient<TokenSavingsPublishJob>: that registers a
                     // transient typed client nothing resolves, while AddHostedService<T> activates

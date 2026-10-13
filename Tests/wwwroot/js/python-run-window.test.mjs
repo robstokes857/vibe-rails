@@ -1,492 +1,152 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { PythonRunWindow, isPythonRunOk, formatPythonRunOutput, pythonRunStatus } from '../../../VibeRails/wwwroot/js/modules/python-run-window.js';
 
-const modulePath = path.resolve('VibeRails/wwwroot/js/modules/python-run-window.js');
-const servicePath = path.resolve('VibeRails/Services/PythonScripts/PythonScriptService.cs');
-const stylePath = path.resolve('VibeRails/wwwroot/style.css');
-
-const {
-    PythonRunWindow,
-    formatPythonRunOutput,
-    isPythonRunOk,
-    pythonRunStatus,
-    prettyJson,
-    quoteForDisplay,
-    readRemembered,
-    resolveArgv,
-    returnValueOf
-} = await import(pathToFileURL(modulePath).href);
-
-test('argument rows preserve their order and keep each value as one argv token', () => {
-    const extras = [
-        { flag: '--out', value: 'report.csv' },
-        { flag: '', value: 'extra-positional' },
-        { flag: '--quiet', value: '' },
-        { flag: '', value: '' }
-    ];
-    assert.deepEqual(resolveArgv({ extras }).argv,
-        ['--out', 'report.csv', 'extra-positional', '--quiet']);
-});
-
-test('a script with nothing declared still runs, with no arguments at all', () => {
-    assert.deepEqual(resolveArgv({}), { argv: [], error: null });
-    assert.deepEqual(resolveArgv(), { argv: [], error: null });
-});
-
-test('the command line quotes only what needs it, so one argument reads as one argument', () => {
-    assert.equal(quoteForDisplay('report.csv'), 'report.csv');
-    assert.equal(quoteForDisplay('two words'), '"two words"');
-    assert.equal(quoteForDisplay('say "hi"'), '"say \\"hi\\""');
-    assert.equal(quoteForDisplay(undefined), '');
-    for (const token of ['C:\\path with spaces\\', 'slash\\"quote', 'line\nnext']) {
-        assert.equal(JSON.parse(quoteForDisplay(token)), token);
+function fixture(t, pin = undefined) {
+    const sockets = [];
+    class Socket {
+        static OPEN = 1;
+        readyState = 0;
+        sent = [];
+        constructor(url, protocols) { this.url = url; this.protocols = protocols; sockets.push(this); }
+        send(data) { this.sent.push(data); }
+        close() { this.readyState = 3; }
+        connect() { this.readyState = 1; this.onopen?.(); }
+        message(data) { this.onmessage?.({ data }); }
     }
-});
-
-// --- the return value ---
-
-test('a JSON object or array is a return value; a bare scalar is just output', () => {
-    assert.equal(prettyJson('{"rows":2}'), '{\n  "rows": 2\n}');
-    assert.equal(prettyJson('[1, 2]'), '[\n  1,\n  2\n]');
-    assert.equal(prettyJson('42'), null, 'a number a script printed is output, not a return value');
-    assert.equal(prettyJson('"done"'), null);
-    assert.equal(prettyJson('true'), null);
-    assert.equal(prettyJson('{oops'), null);
-    assert.equal(prettyJson(''), null);
-    assert.equal(prettyJson(null), null);
-});
-
-test('the return value comes from the server, or is recovered from stdout the same way', () => {
-    // What the server extracted wins.
-    assert.equal(returnValueOf({ returnJson: '{"ok":true}', standardOutput: 'noise\n' }),
-        '{\n  "ok": true\n}');
-
-    // An older backend sends no returnJson: the whole of stdout…
-    assert.equal(returnValueOf({ standardOutput: '  {"ok": false}  ' }), '{\n  "ok": false\n}');
-
-    // …or its last line, so a script can log freely and still return something.
-    assert.equal(returnValueOf({ standardOutput: 'scanning…\ndone\n{"rows": 3}\n' }),
-        '{\n  "rows": 3\n}');
-
-    assert.equal(returnValueOf({ standardOutput: 'just a log line\n' }), null);
-    assert.equal(returnValueOf({ standardOutput: '' }), null);
-    assert.equal(returnValueOf(null), null);
-});
-
-test('the client convention matches the server that produces it', () => {
-    const service = readFileSync(servicePath, 'utf8');
-    // Whole stdout, else the last line, and objects/arrays only.
-    assert.match(service, /internal static string\? ExtractReturnJson\(string\? standardOutput\)/);
-    assert.match(service, /LastIndexOfAny\(\['\\n', '\\r'\]\)/);
-    assert.match(service, /candidate\[0\] is not \('\{' or '\['\)/);
-    assert.match(service, /JsonValueKind\.Object or JsonValueKind\.Array/);
-});
-
-test('argv and stdin are bounded on the server, since they arrive as request data', () => {
-    const service = readFileSync(servicePath, 'utf8');
-    assert.match(service, /MaxRunArguments = 64;/);
-    assert.match(service, /MaxRunArgumentChars = 8_000;/);
-    assert.match(service, /MaxStandardInputChars = 256_000;/);
-    assert.match(service, /ValidateRunInputs\(arguments, standardInput\);/);
-});
-
-// --- run output shared with the row drawer ---
-
-test('formatPythonRunOutput labels stderr and never renders an empty box', () => {
-    assert.equal(formatPythonRunOutput({ standardOutput: 'hi\n', standardError: '' }), 'hi');
-    assert.equal(formatPythonRunOutput({ standardOutput: 'hi\n', standardError: 'boom\n' }),
-        'hi\n\n[stderr]\nboom');
-    assert.equal(formatPythonRunOutput({ standardOutput: '', standardError: '' }), '(no output)');
-    assert.equal(formatPythonRunOutput(null), '(no output)');
-});
-
-test('a run only "worked" when it exited 0 without timing out', () => {
-    assert.equal(isPythonRunOk({ exitCode: 0, timedOut: false }), true);
-    assert.equal(isPythonRunOk({ exitCode: 1, timedOut: false }), false);
-    assert.equal(isPythonRunOk({ exitCode: 0, timedOut: true }), false);
-    assert.equal(isPythonRunOk(null), false);
-});
-
-// --- remembered inputs ---
-
-test('remembered inputs survive a reopen and shrug off anything unreadable', () => {
-    const stored = JSON.stringify({ values: { out: 'x.csv' }, extras: [{ flag: '--v', value: '' }], stdin: 'hi' });
-    assert.deepEqual(readRemembered({ getItem: () => stored }, 'report.py'), {
-        hadDeclaredInputs: true, extras: [{ flag: '--v', value: '' }], stdin: 'hi'
-    });
-    assert.equal(readRemembered({ getItem: () => null }, 'report.py'), null);
-    assert.equal(readRemembered({ getItem: () => '{oops' }, 'report.py'), null);
-    assert.equal(readRemembered({ getItem: () => '"a string"' }, 'report.py'), null);
-    assert.equal(readRemembered({ getItem: () => { throw new Error('denied'); } }, 'x.py'), null);
-    assert.equal(readRemembered(undefined, 'x.py'), null);
-    // Shapes are coerced, never trusted.
-    assert.deepEqual(readRemembered({ getItem: () => '{"values":7,"extras":"no","stdin":9}' }, 'x.py'),
-        { hadDeclaredInputs: false, extras: [], stdin: '' });
-});
-
-// --- posting a run ---
-
-function windowFor({ run = null, fail = null } = {}) {
-    const posted = [];
-    const app = {
-        calls: posted,
-        async apiCall(url, method, body) {
-            posted.push({ url, method, body });
-            if (fail) throw new Error(fail);
-            return run;
-        },
-        showError() {}
-    };
-    // Mirrors PythonScriptsController's run bookkeeping: the window drives busy state through
-    // markRunning/clearRunning so rows, the workbench and the nav flyout all learn about it.
+    const previous = new Map();
+    for (const [name, value] of Object.entries({
+        WebSocket: Socket,
+        window: { location: { origin: 'http://localhost:5000' }, removeEventListener() {} },
+        document: { activeElement: null, removeEventListener() {} },
+        sessionStorage: { getItem: () => 'tab-token==' },
+        localStorage: { getItem() { throw Error('must not read inputs'); }, setItem() { throw Error('must not save inputs'); } }
+    })) { previous.set(name, globalThis[name]); globalThis[name] = value; }
+    t.after(() => { for (const [name, value] of previous) globalThis[name] = value; });
     const scripts = {
-        runningNames: new Set(),
-        recorded: [],
-        runChanges: [],
-        recordRun(name, result) { this.recorded.push({ name, result }); },
-        markRunning(name) { this.runningNames.add(name); this.runChanges.push(['start', name]); },
-        clearRunning(name) { this.runningNames.delete(name); this.runChanges.push(['end', name]); },
-        async runInTerminal(name) { this.terminalLaunch = name; return { tabId: 'tab-1' }; },
-        _render() {}
+        runningNames: new Set(), requestRunPin: async () => pin,
+        markRunning(name) { this.runningNames.add(name); }, clearRunning(name) { this.runningNames.delete(name); },
+        recordRun() { assert.fail('terminal output must not be recorded'); },
+        displayName: () => 'Test script', scriptByName: () => ({ fileName: 'test.py' })
     };
-    const view = new PythonRunWindow(app, scripts);
-    // Headless: the window paints into a layer it never has here.
-    view.layer = null;
-    view.name = 'report.py';
-    return { view, app, scripts, posted };
+    const view = new PythonRunWindow({ showError: message => assert.fail(message) }, scripts);
+    const writes = [];
+    const statuses = [];
+    view._mount = () => {
+        view.layer = { remove() {}, querySelector() { return null; } };
+        view._input = () => { view.inputDetached = true; };
+        view.terminal = { cols: 80, rows: 24, reset() {}, fit() {}, focus() {}, dispose() {}, write(data) { writes.push(data); } };
+    };
+    view._paintState = (text, tone) => statuses.push({ text, tone });
+    return { view, scripts, sockets, writes, statuses };
 }
+const tick = () => new Promise(resolve => setImmediate(resolve));
 
-test('Run posts exactly the argv the command line shows, plus stdin when there is any', async () => {
-    const { view, posted } = windowFor({
-        run: { name: 'report.py', exitCode: 0, timedOut: false, durationMs: 8, standardOutput: '{"rows":1}', standardError: '' }
-    });
-    view.extras = [{ value: 'fast' }, { flag: '--out', value: 'x.csv' }];
-    view.stdin = 'piped text';
-
-    const result = await view.execute();
-
-    assert.equal(result.exitCode, 0);
-    assert.deepEqual(posted, [{
-        url: '/api/v1/python-scripts/run',
-        method: 'POST',
-        body: { name: 'report.py', arguments: ['fast', '--out', 'x.csv'], standardInput: 'piped text' }
-    }]);
-    // The preview is built from the same call, so it cannot drift from the payload.
-    assert.deepEqual(resolveArgv(view).argv, posted[0].body.arguments);
-});
-
-test('A pending PIN prompt prevents duplicate runs and does not store the PIN with inputs', async () => {
-    const { view, scripts, posted } = windowFor({ run: { exitCode: 0 } });
-    let resolvePin;
-    scripts.requestRunPin = () => new Promise(resolve => { resolvePin = resolve; });
-    const saved = [];
-    const originalStorage = globalThis.localStorage;
-    globalThis.localStorage = { setItem(key, value) { saved.push({ key, value }); } };
-    try {
-        const pending = view.execute();
-        assert.equal(await view.execute(), null);
-        assert.equal(posted.length, 0);
-        resolvePin('1234');
-        await pending;
-        assert.equal(posted.length, 1);
-        assert.equal(posted[0].body.pin, '1234');
-        assert.equal(saved.length, 1);
-        assert.ok(saved.every(item => !item.value.includes('1234')));
-        assert.equal(scripts.runningNames.size, 0);
-    } finally {
-        globalThis.localStorage = originalStorage;
-    }
-});
-
-test('A PIN prompt finishing after the run window changed starts no script', async () => {
-    const { view, scripts, posted } = windowFor({});
-    let resolvePin;
-    scripts.requestRunPin = () => new Promise(resolve => { resolvePin = resolve; });
-    const pending = view.execute();
-    view.name = 'different.py';
-    resolvePin('1234');
-    assert.equal(await pending, null);
-    assert.equal(posted.length, 0);
+test('Run opens a private authenticated socket, streams output and sends input without storing it', async t => {
+    const { view, scripts, sockets, writes } = fixture(t);
+    const closed = view.open('script-id');
+    await tick();
+    const socket = sockets[0];
+    assert.match(socket.url, /python-scripts\/run\/terminal\/ws$/);
+    assert.deepEqual(socket.protocols, ['tab-token']);
+    socket.connect();
+    assert.deepEqual(JSON.parse(socket.sent[0]), { name: 'script-id', cols: 80, rows: 24 });
+    socket.message('ready');
+    socket.message(new TextEncoder().encode('Hey!\r\nEnter something').buffer);
+    view._sendInput('a password\r');
+    assert.equal(new TextDecoder().decode(socket.sent[1]), 'a password\r');
+    assert.ok(socket.sent[1] instanceof Uint8Array);
+    assert.equal(new TextDecoder().decode(writes[0]), 'Hey!\r\nEnter something');
+    assert.ok(scripts.runningNames.has('script-id'));
+    socket.message('exit:0');
+    assert.equal(view.running, false);
+    assert.equal(view.lastRun.exitCode, 0);
     assert.equal(scripts.runningNames.size, 0);
+    view.close();
+    assert.equal((await closed).exitCode, 0);
 });
 
-test('an empty stdin box is sent as null, not an empty pipe', async () => {
-    const { view, posted } = windowFor({ run: { exitCode: 0, timedOut: false, durationMs: 1, standardOutput: '', standardError: '' } });
-    await view.execute();
-    assert.equal(posted[0].body.standardInput, null);
+test('PIN is sent only in the initial message and a cancelled PIN starts no connection', async t => {
+    const { view, scripts, sockets } = fixture(t, '1234');
+    view.open('script-id'); await tick();
+    sockets[0].connect();
+    assert.equal(JSON.parse(sockets[0].sent[0]).pin, '1234');
+    assert.equal(sockets[0].onopen, null, 'release the launch handler after sending the PIN');
+    assert.equal(view.pin, undefined);
+    view.close();
+    scripts.requestRunPin = async () => null;
+    view.open('script-id'); await tick();
+    assert.equal(sockets.length, 1);
+    assert.equal(view.running, false);
+    view.close();
 });
 
-test('a run marks the script busy for every surface, and releases it however the run ends', async () => {
-    const ok = { exitCode: 0, timedOut: false, durationMs: 3, standardOutput: 'x', standardError: '' };
-    const { view, scripts } = windowFor({ run: ok });
-    const inFlight = view.execute();
-    assert.ok(scripts.runningNames.has('report.py'), 'rows and the nav flyout show it running immediately');
-    await inFlight;
+test('Close disposes the socket and renderer; late output cannot paint a new run', async t => {
+    const { view, scripts, sockets, writes } = fixture(t);
+    const closed = view.open('first'); await tick();
+    sockets[0].connect(); sockets[0].message('ready');
+    view.close(); await closed;
+    assert.equal(sockets[0].readyState, 3);
+    assert.equal(view.terminal, null);
+    assert.equal(view.inputDetached, true);
     assert.equal(scripts.runningNames.size, 0);
-    assert.deepEqual(scripts.recorded, [{ name: 'report.py', result: ok }],
-        'the row drawer keeps the result after the window closes');
-
-    // A failed request releases the name too — a stuck "Running…" row would be worse
-    // than the error the window shows.
-    const broken = windowFor({ fail: 'Python could not be started.' });
-    await broken.view.execute();
-    assert.equal(broken.scripts.runningNames.size, 0);
-    assert.equal(broken.view.running, false);
-});
-
-test('a second Run while one is in flight is ignored, not queued', async () => {
-    const { view, posted } = windowFor({ run: { exitCode: 0, timedOut: false, durationMs: 1, standardOutput: '', standardError: '' } });
-    const first = view.execute();
-    assert.equal(await view.execute(), null);
-    await first;
-    assert.equal(posted.length, 1);
-});
-
-function pendingRuns(app) {
-    const calls = [];
-    app.apiCall = (url, method, body, options) => new Promise((resolve, reject) => {
-        calls.push({ body, signal: options.signal, resolve });
-        options.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
-    });
-    return calls;
-}
-
-test('Stop aborts the run request, records cancellation without a fake exit code and allows another run', async () => {
-    const { view, app, scripts } = windowFor();
-    const calls = pendingRuns(app);
-    const problems = [];
-    view._showProblem = text => { if (text) problems.push(text); };
-    const first = view.execute();
-    assert.equal(view.canStop(), true);
-    view._onClick({ target: { closest: () => ({ dataset: { runAction: 'stop' } }) } });
-    assert.equal(calls[0].signal.aborted, true);
-    assert.equal(view.canStop(), false);
-    assert.equal(view.running, true, 'the pending request still owns the busy state');
-    assert.equal(await view.execute(), null);
-    view.stop(); // Repeated clicks are harmless.
-    const cancelled = await first;
-    assert.equal(cancelled.cancelled, true);
-    assert.equal(cancelled.exitCode, null);
-    assert.equal(pythonRunStatus(cancelled), 'Stop requested');
-    assert.equal(isPythonRunOk(cancelled), false);
-    assert.equal(isPythonRunOk({ exitCode: 0, cancelled: true }), false);
-    assert.deepEqual(problems, []);
-    assert.deepEqual(scripts.recorded, [{ name: 'report.py', result: cancelled }]);
-    assert.equal(scripts.runningNames.size, 0);
-    assert.equal(view._runs.size, 0);
-
-    const second = view.execute();
-    assert.notEqual(calls[1].signal, calls[0].signal);
-    assert.equal(calls[1].signal.aborted, false);
-    calls[1].resolve({ exitCode: 0 });
-    assert.equal((await second).exitCode, 0);
-});
-
-test('Stop targets the named background script and reopening restores the correct run handle', async () => {
-    const { view, app, scripts } = windowFor();
-    const calls = pendingRuns(app);
-    const first = view.execute();
-    view._mount = () => {};
-    globalThis.requestAnimationFrame ??= fn => fn();
-    view.open('other.py'); // Opening an input-free script automatically starts it.
-    assert.equal(calls.length, 2);
-    view.open('report.py');
-    assert.equal(calls.length, 2, 'reopening an active script does not run it twice');
-    assert.equal(view.canStop(), true);
-    view.stop('other.py');
-    await new Promise(resolve => setImmediate(resolve));
-    assert.equal(calls[1].signal.aborted, true);
-    assert.equal(calls[0].signal.aborted, false);
+    view.open('second'); await tick();
+    sockets[0].message(new TextEncoder().encode('old output').buffer);
+    sockets[0].onclose();
+    assert.equal(writes.length, 0);
     assert.equal(view.running, true);
-    assert.equal(view.lastRun, null, 'the background result does not overwrite this window');
-    assert.equal(scripts.runningNames.has('report.py'), true);
+    view.close();
+});
+
+test('Stop waits for acknowledgment; Run again opens a fresh socket', async t => {
+    const { view, sockets, statuses } = fixture(t);
+    view.open('script-id'); await tick();
+    sockets[0].connect(); sockets[0].message('ready');
+    await view.execute();
+    assert.equal(sockets.length, 1, 'no duplicate run');
     view.stop();
-    await first;
-    assert.equal(view.lastRun.cancelled, true);
+    assert.equal(sockets[0].sent.at(-1), 'stop');
+    assert.equal(view.running, true);
+    sockets[0].message('stopped');
+    assert.equal(statuses.at(-1).text, 'Stopped');
+    await view.execute();
+    assert.equal(sockets.length, 2);
+    view.close();
+});
+
+test('Lost connections never automatically run a script again', async t => {
+    const { view, sockets, statuses } = fixture(t);
+    view.open('script-id'); await tick();
+    sockets[0].connect(); sockets[0].onclose();
+    assert.equal(view.running, false);
+    assert.match(statuses.at(-1).text, /Connection closed/);
+    assert.equal(sockets.length, 1);
+    view.close();
+});
+
+test('Closing before PIN entry finishes prevents a late launch', async t => {
+    const { view, scripts, sockets } = fixture(t);
+    let resolve;
+    scripts.requestRunPin = () => new Promise(r => { resolve = r; });
+    view.open('script-id'); view.close(); resolve('1234'); await tick();
+    assert.equal(sockets.length, 0);
     assert.equal(scripts.runningNames.size, 0);
 });
 
-test('Stop while awaiting a PIN prevents a late answer from launching a script', async () => {
-    const { view, scripts, posted } = windowFor();
-    let resolvePin;
-    scripts.requestRunPin = () => new Promise(resolve => { resolvePin = resolve; });
-    const pending = view.execute();
-    view.stop();
-    resolvePin('1234');
-    assert.equal(await pending, null);
-    assert.equal(posted.length, 0);
-    assert.equal(view.running, false);
-    assert.equal(view.canStop(), false);
+test('Large paste uses bounded binary frames with exact bytes', async t => {
+    const { view, sockets } = fixture(t);
+    view.open('script-id'); await tick(); sockets[0].connect(); sockets[0].message('ready');
+    const input = '秘密'.repeat(50000);
+    view._sendInput(input);
+    const chunks = sockets[0].sent.slice(1);
+    assert.ok(chunks.every(chunk => chunk.byteLength <= 65536));
+    assert.equal(Buffer.concat(chunks).toString('utf8'), input);
+    view.close();
 });
 
-test('Stop is hidden when idle, available while running and disabled while cancellation settles', async () => {
-    const { view, app } = windowFor();
-    pendingRuns(app);
-    const submit = {};
-    const stop = {};
-    const result = {};
-    view.layer = { querySelector: selector => ({
-        '[data-run-submit]': submit,
-        '[data-run-action="stop"]': stop,
-        '[data-run-result]': result
-    })[selector] };
-    view._paintRunState();
-    assert.equal(stop.hidden, true);
-    const pending = view.execute();
-    assert.equal(stop.hidden, false);
-    assert.equal(stop.disabled, false);
-    assert.equal(submit.disabled, true);
-    view.stop();
-    assert.equal(stop.disabled, true);
-    assert.match(result.innerHTML, /Stopping/);
-    await pending;
-    assert.equal(stop.hidden, true);
-    assert.equal(submit.disabled, false);
-    assert.match(result.innerHTML, /Stop requested/);
-    assert.doesNotMatch(result.innerHTML, /exit null|is-ok|Print a JSON/);
-});
-
-test('a request failure is not reported as cancellation just because Stop was clicked', async () => {
-    const { view, app } = windowFor();
-    let fail;
-    app.apiCall = () => new Promise((resolve, reject) => { fail = reject; });
-    const problems = [];
-    view._showProblem = text => { if (text) problems.push(text); };
-    const pending = view.execute();
-    view.stop();
-    fail(new Error('Connection lost'));
-    assert.equal(await pending, null);
-    assert.deepEqual(problems, ['Connection lost']);
-});
-
-// A run outlives its window: close it mid-run and the interpreter keeps going. The window is
-// one shared instance, so nothing but runningNames can tell it the script is still busy.
-test('reopening a window while the script is still running never starts a second interpreter', async () => {
-    const { view, posted, scripts } = windowFor({ run: { exitCode: 0, timedOut: false, durationMs: 1, standardOutput: '', standardError: '' } });
-    const first = view.execute();
-
-    // The window is closed and reopened for the same script, exactly as Escape-then-Run does.
-    // Headless: open() only has to make its decision, not build the DOM it normally would.
-    view.name = null;
-    view._mount = () => {};
-    globalThis.requestAnimationFrame ??= (fn) => fn();
-    view.open('report.py');
-    assert.equal(view.running, true, 'the reopened window shows the run that is still in flight');
-    assert.equal(await view.execute(), null, 'and refuses to start another');
-
-    await first;
-    assert.equal(posted.length, 1, 'one POST, one interpreter');
-    assert.equal(view.running, false, 'the surviving run still releases the window it landed in');
-    assert.equal(scripts.runningNames.size, 0);
-});
-
-test('remembered legacy typed inputs require a manual run after argument review', t => {
-    const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
-    globalThis.localStorage = { getItem: () => JSON.stringify({ values: { target: 'old-path' } }) };
-    t.after(() => {
-        if (original) Object.defineProperty(globalThis, 'localStorage', original);
-        else delete globalThis.localStorage;
-    });
-    const { view, posted } = windowFor();
-    view._mount = () => {};
-    view.open('report.py');
-    assert.equal(view.hadDeclaredInputs, true);
-    assert.deepEqual(posted, []);
-});
-
-test('a run that outlived its window records its result but does not repaint a newer one', async () => {
-    const slow = { exitCode: 0, timedOut: false, durationMs: 9, standardOutput: 'slow', standardError: '' };
-    const { view, scripts } = windowFor({ run: slow });
-    const first = view.execute();
-
-    // The window moves on to a different script while the first POST is still in flight.
-    view.name = 'other.py';
-    view.running = false;
-    view._runToken = {};
-
-    await first;
-    assert.deepEqual(scripts.recorded, [{ name: 'report.py', result: slow }],
-        'the row drawer and the workbench still get the result');
-    assert.equal(view.lastRun, null, 'but the window now showing other.py is left alone');
-    assert.equal(view.running, false);
-    assert.ok(!scripts.runningNames.has('report.py'));
-});
-
-test('Run in terminal refuses while a captured run is going, instead of closing onto nothing', async () => {
-    const { view, scripts } = windowFor({ run: { exitCode: 0, timedOut: false, durationMs: 1, standardOutput: '', standardError: '' } });
-    let closed = false;
-    view.close = () => { closed = true; };
-
-    const inFlight = view.execute();
-    await view.runInTerminal();
-    assert.equal(closed, false, 'the window stays put and says why');
-    assert.equal(scripts.terminalLaunch, undefined);
-
-    await inFlight;
-    await view.runInTerminal();
-    assert.equal(closed, true);
-    assert.equal(scripts.terminalLaunch, 'report.py');
-});
-
-// --- the design contract ---
-
-test('the return value survives truncated stdout', () => {
-    const service = readFileSync(servicePath, 'utf8');
-    assert.match(service, /ExtractReturnJson\(result\.StandardOutput\)\);/);
-    assert.match(service, /Truncate\(result\.StandardOutput\),/);
-});
-
-test('the PTY escape hatch says it drops the inputs, because /run/interactive takes only a name', () => {
-    const source = readFileSync(modulePath, 'utf8');
-    assert.match(source, /_paintTerminalLink\(argv\.length > 0 \|\| Boolean\(this\.stdin\)\)/);
-    assert.match(source, /without these inputs/);
-    const routes = readFileSync(path.resolve('VibeRails/Routes/PythonScriptRoutes.cs'), 'utf8');
-    assert.match(routes, /RunPythonScriptInteractive/);
-});
-
-test('the run window CSS keeps a fallback on every colour token and spends cyan only on the command line', () => {
-    const css = readFileSync(stylePath, 'utf8');
-    const block = css.slice(css.indexOf('The run window (python-run-window.js)'),
-        css.indexOf('/* --- Script authoring:'));
-    assert.ok(block.length > 0, 'the run window has its own CSS block');
-    // The slice starts inside the block's header comment; drop what is left of it so the
-    // prose below (which names --color-accent) is not read as a rule.
-    const rules = block.slice(block.indexOf('*/') + 2).replace(/\/\*[\s\S]*?\*\//g, '');
-
-    for (const match of block.matchAll(/var\((--color-[a-z-]+)([^)]*)\)/g)) {
-        assert.ok(match[2].includes(','), `${match[1]} is used without a fallback: ${match[0]}`);
-    }
-
-    // The command line is the one accent in the window: the values you supplied, and the
-    // rail beside them. Anything else reaching for --color-accent dilutes it.
-    const accented = rules.split('}')
-        .filter((rule) => rule.includes('--color-accent') && rule.includes('{'))
-        .map((rule) => rule.slice(0, rule.indexOf('{')).trim().split(/\r?\n/).pop().trim());
-    assert.deepEqual(accented, ['.vb-run-command', '.vb-run-value']);
-
-    // Reduced motion stops the only animation in the window.
-    assert.match(block, /@media \(prefers-reduced-motion: reduce\) \{\s*\.vb-run-status\.is-waiting \.vb-run-dot \{\s*animation: none;/);
-});
-
-test('the window names the interpreter that will run the script: pwsh, bash or python', () => {
-    const box = { innerHTML: '', classList: { toggle() {} } };
-    const layer = { querySelector: (selector) => (selector === '[data-run-command]' ? box : null) };
-    const cases = [
-        ['deploy.ps1', 'pwsh', '$args (or a param() block)', 'fa-solid fa-terminal'],
-        ['backup.sh', 'bash', '$1, $2, … ("$@")', 'fa-solid fa-terminal'],
-        ['report.py', 'python', 'sys.argv', 'fa-brands fa-python']
-    ];
-    for (const [name, command, hint, icon] of cases) {
-        const view = new PythonRunWindow({}, { runningNames: new Set() });
-        view.name = name;
-        view.extras = [];
-        view.layer = layer;
-        view._paintCommandLine();
-        assert.match(box.innerHTML, new RegExp(`^<span class="vb-run-exec">${command}</span> <span class="vb-run-script">`));
-        assert.ok(view._renderFields().includes(`<code>${hint.replace(/"/g, '&quot;')}</code>`), `${name} argument hint`);
-        assert.ok(view._shell().includes(`<i class="${icon}" aria-hidden="true"></i>`), `${name} header icon`);
-    }
+test('Captured API summary helpers retain their compatibility behavior', () => {
+    assert.equal(isPythonRunOk({ exitCode: 0 }), true);
+    assert.equal(isPythonRunOk({ exitCode: 0, cancelled: true }), false);
+    assert.equal(pythonRunStatus({ cancelled: true }), 'Stop requested');
+    assert.equal(formatPythonRunOutput({ standardOutput: 'hello\n', standardError: 'oops' }), 'hello\n\n[stderr]\noops');
 });

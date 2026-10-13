@@ -110,6 +110,16 @@ test('Board labels replace automatic names and preserve explicit renames', () =>
     assert.equal(sidebar._getDisplayName(session('a')), 'First prompt');
 });
 
+test('a late Board attachment takes precedence over a generated title', () => {
+    const sidebar = historySidebar();
+    const item = session('generated', { sessionDisplayName: 'Fix login', sessionTitleGenerated: true });
+    assert.equal(sidebar._getDisplayName(item), 'Fix login');
+    item.boardCards = cards;
+    assert.equal(sidebar._getDisplayName(item), 'VB-M66G2-64 · Better filters');
+    item.sessionTitleGenerated = false; // A deliberate rename to the same visible text.
+    assert.equal(sidebar._getDisplayName(item), 'Fix login');
+});
+
 test('provider, selected card and folder intersect without environment or outcome filtering', () => {
     const sidebar = historySidebar();
     sidebar.allItems = [

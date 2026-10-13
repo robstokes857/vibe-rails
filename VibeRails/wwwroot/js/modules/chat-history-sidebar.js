@@ -889,7 +889,7 @@ export class ChatHistorySidebar {
         const sessionName = item.sessionDisplayName?.trim();
         // The parser stores the first 120 prompt characters as an automatic name.
         // Board prompts start with boilerplate; prefer the actual card in that case.
-        if (sessionName && sessionName !== item.inputText?.trim()) {
+        if (sessionName && !item.sessionTitleGenerated && sessionName !== item.inputText?.trim()) {
             return sessionName;
         }
 

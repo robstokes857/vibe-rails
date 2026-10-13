@@ -10,6 +10,22 @@ namespace Tests;
 public class SessionTranscriptServiceTests
 {
     [Fact]
+    public async Task BuildCurrentAsync_UsesAllRecordedTurnsWithoutCachingOrMarkingProcessed()
+    {
+        var chunks = new List<SessionLogChunkRecord> { new(1, DateTime.UtcNow, new byte[] { 1 }) };
+        var inputs = new List<UserInputRecord> { new(1, "live", 1, "Question", null, DateTime.UtcNow) };
+        var repository = new Mock<IRepository>(MockBehavior.Strict);
+        repository.Setup(r => r.GetSessionLogChunksAsync("live", It.IsAny<CancellationToken>())).ReturnsAsync(chunks);
+        repository.Setup(r => r.GetUserInputsForSessionAsync("live", It.IsAny<CancellationToken>())).ReturnsAsync(inputs);
+        var parser = new Mock<ISessionOutputParser>(MockBehavior.Strict);
+        parser.Setup(p => p.ParseTranscriptAsync(chunks, inputs, It.IsAny<CancellationToken>())).ReturnsAsync("User: Question\nAgent: Answer");
+        var result = await new SessionTranscriptService(repository.Object, parser.Object)
+            .BuildCurrentAsync("live", TestContext.Current.CancellationToken);
+        Assert.Equal("User: Question\nAgent: Answer", result);
+        repository.VerifyAll();
+    }
+
+    [Fact]
     public async Task GetOrBuildAsync_CallsParseTranscriptAsync_WithAllChunksAndUserInputs()
     {
         const string sessionId = "session-1";

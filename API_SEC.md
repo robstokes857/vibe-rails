@@ -233,6 +233,13 @@ incident below. Ordinary authenticated terminal-input routes remain their own ca
 
 ### Repository access, scripts and local reads
 
+The root-only script terminal WebSocket (`/api/v1/python-scripts/run/terminal/ws`) uses the
+existing authenticated Kestrel listener and both credentials, with no middleware exception.
+Its bounded first message carries a registered script ID, dimensions and optional run PIN;
+verified bytes and discrete interpreter argv are resolved server-side before launch. Binary input
+is never routed to session recording, observers or remote sharing. Stop/disconnect kills the
+process tree; no input/output or PIN is persisted by this private runner.
+
 - Root-only filesystem browsing returns bounded single-level metadata, never contents. Reject
   relative, UNC/device, mapped/unknown Windows-drive and symlink/junction/reparse-component
   paths. Linked rows are metadata-only. Unix network mounts cannot be classified portably;
@@ -293,6 +300,44 @@ receives the submitted payload/signature and **discloses the verified signer's a
 an owner-approved behavior explained by the KEYS UI. See [SigningKeyRoutes](VibeRails/Routes/SigningKeyRoutes.cs).
 
 ## Outbound services and credentials
+
+### Automatic conversation titles (VIBE-149)
+
+The owner authorized automatic full-transcript title requests on 2026-10-12. Only newly created,
+eligible conversations enroll: first at 300 cumulative user-input characters or two messages,
+then one refresh at 750 characters or ten messages after new input. Root-only background work
+sends the current user/agent transcript through the Send-to transcript builder and credential
+redactor to fixed `https://viberails.ai/api/v1/conversation-title`. It requires the saved API key
+and Remote Access; hosted Integrations permission failures preserve existing labels.
+
+Keys use only `X-Api-Key`. No redirects, cookies, HTTP body/error logging or new listener is added.
+Requests have a 20-second deadline and 8-KiB response bound; titles are validated before saving.
+Fresh settings are checked before sending and applying, with cancellation when they change.
+Durable two-minute claims coordinate open roots. Rejected keys, rate limits, unavailable
+endpoints and network failures back off every request for the key; a failure that belongs to one
+conversation (a rejected title, a server error, a timeout) backs off only that conversation and
+gives up after five tries. Explicit names cancel work; Board/Automation/resume labels and
+historical sessions are preserved. The complete transcript is sent, with no opening-prompt
+truncation; this does not alter the cached resume summary.
+
+**Redaction is best effort, by owner decision (2026-10-13).** `RedactTranscript` masks the obvious
+credential shapes and replaces each value with `XXXXX`: key/value fields (`password=`,
+`"api_key":`, `DB_PASSWORD=`, connection-string `Pwd=`), credential CLI flags, `Authorization`,
+`Bearer` and `Cookie` headers, URL user-info, PEM private keys, well-known token formats
+(`sk-`, `ghp_`, `AKIA`, JWTs and similar) and the user's own API key. Labels and the rest of
+the transcript are kept, so titles and resume summaries keep their context. Someone asking why
+PBKDF2 beats Blowfish is far more likely than someone pasting a password, and a random password
+in prose cannot be recognized. We do not chase every representation, and we do not degrade
+titles, summaries or performance to try: a user who really wants to put a password in the input
+can. The same masking applies to an Automation's stored failure reason (the last line its
+Worker printed), which is served beyond the root backend. Every pattern is linear, so masking a
+multi-megabyte transcript stays fast and never throws a regex timeout.
+
+Credential cleaning lives in the pure static `VibeRails.Security.CredentialRedactor` in
+`VibeRails.Data.Abstractions/Security`. Titles and summaries use `RedactTranscript`; backup
+exports use its configuration-value, argument and property helpers inside their JSON/TOML
+parsers. Search uses `ContainsKnownSecret`, preserving its existing filtering policy.
+Configuration cleaning and search detection are not substitutes for outbound transcript redaction.
 
 ### Public session sharing links
 

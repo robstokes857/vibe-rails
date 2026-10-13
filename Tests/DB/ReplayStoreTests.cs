@@ -46,4 +46,52 @@ public sealed class ReplayStoreTests
         }
         finally { Directory.Delete(directory, recursive: true); }
     }
+
+    [Fact]
+    public void TailReadsOnlyTheNewestFramesOfOneSession_WithoutWritingStorage()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "viberails-replay-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "state.db");
+        try
+        {
+            using (var db = new SqliteConnection($"Data Source={path};Pooling=False"))
+            {
+                db.Open();
+                using var command = db.CreateCommand();
+                // Ids deliberately disagree with Sequence: the recording order is Sequence.
+                command.CommandText = """
+                    CREATE TABLE SessionLogs(Id INTEGER PRIMARY KEY, SessionId TEXT, Timestamp TEXT, Content BLOB);
+                    CREATE TABLE TerminalSessionLogs(Id INTEGER PRIMARY KEY, SessionId TEXT, Sequence INTEGER, IsAlternateScreen INTEGER, Data BLOB, Cols INTEGER, Rows INTEGER, Timestamp TEXT);
+                    INSERT INTO TerminalSessionLogs VALUES
+                        (10,'tui',1,0,X'4141',80,24,'2026-10-12T00:00:00Z'),
+                        (13,'tui',2,1,X'4242',80,24,'2026-10-12T00:00:01Z'),
+                        (11,'tui',3,1,X'4343',100,30,'2026-10-12T00:00:02Z'),
+                        (12,'other',1,0,X'5858',80,24,'2026-10-12T00:00:00Z');
+                    INSERT INTO SessionLogs VALUES(1,'legacy','2026-10-12T00:00:00Z',X'4C31'),(2,'legacy','2026-10-12T00:00:01Z',X'4C32');
+                    """;
+                command.ExecuteNonQuery();
+            }
+            var before = File.ReadAllBytes(path);
+            var store = new ReplayStore(new SqliteStoragePaths(path));
+
+            var tail = store.Tail("tui", maxBytes: 4);
+            Assert.Equal(["BB", "CC"], tail.Frames.Select(frame => Encoding.UTF8.GetString(frame.Data)));
+            Assert.True(tail.StartsOnAlternateScreen);
+            Assert.Equal((100, 30), (tail.Frames[^1].Cols, tail.Frames[^1].Rows));
+
+            var whole = store.Tail("tui", maxBytes: 1024);
+            Assert.Equal(["AA", "BB", "CC"], whole.Frames.Select(frame => Encoding.UTF8.GetString(frame.Data)));
+            Assert.False(whole.StartsOnAlternateScreen);
+
+            // Recordings older than the buffered table replay their raw chunks on the default grid.
+            var legacy = store.Tail("legacy", maxBytes: 1024);
+            Assert.Equal(["L1", "L2"], legacy.Frames.Select(frame => Encoding.UTF8.GetString(frame.Data)));
+            Assert.All(legacy.Frames, frame => Assert.Equal((120, 30), (frame.Cols, frame.Rows)));
+
+            Assert.Empty(store.Tail("missing", maxBytes: 1024).Frames);
+            Assert.Equal(before, File.ReadAllBytes(path));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
 }

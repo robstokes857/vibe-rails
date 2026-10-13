@@ -957,9 +957,11 @@ and its ignore file in new and existing cache folders without editing repository
 Each launch verifies the original approval and compares cached bytes with bounded reads;
 missing/changed cache files, including oversized regular files, are published atomically under
 the signing lock. Original scripts retain the 5 MB limit. The cache rejects links and junctions and survives completion or
-cancellation. `$PSScriptRoot` and `__file__` refer to its directory. The captured run window and active Scripts rows offer
-Stop, which aborts the exact HTTP request and propagates cancellation through PyBridge to the
-process tree. Closing the window keeps its run alive; handles remain scoped to each script.
+cancellation. `$PSScriptRoot` and `__file__` refer to its directory. The Scripts UI now uses a private, socket-owned PTY in a floating xterm
+window through `/api/v1/python-scripts/run/terminal/ws`. Minimize preserves the live process and
+shows a restore button; Stop/Close/disconnect kill the process tree. Input and output are not
+recorded, remembered or attached to normal terminal tabs. The captured HTTP run API remains
+available to existing callers.
 
 - `GET /api/v1/python-scripts` - List scripts with signing status
 - `POST /api/v1/python-scripts/settings` - Update display name, Global/Repo scope and PIN-on-each-run requirement
@@ -1001,7 +1003,10 @@ The flyout shows visible automations and currently approved scripts; unsigned or
 **Automation workflows**:
 - `GET|POST /api/v1/jobs`, `GET|PUT|DELETE /api/v1/jobs/{id}` - List/create/read/update/remove workflows
 - `POST /api/v1/jobs/{id}/run` - Queue Run now through the same native-terminal scheduler as every trigger
-- `GET /api/v1/jobs/runs`, `GET /api/v1/jobs/runs/{runId}` - Run history and per-action detail
+- `GET /api/v1/jobs/runs`, `GET /api/v1/jobs/runs/{runId}` - Run history and per-action detail. On the
+  root backend, a run that ended Failed, Cancelled, Timed out or Interrupted also carries `lastScreen`: the
+  bottom of its recorded terminal, rebuilt by replaying the recording's last 256 KB through `TerminalEmulator`
+  (`JobRunLastScreen`). A failing Worker's own error message ends with the last line its CLI printed.
 - `POST /api/v1/jobs/runs/{runId}/cancel` | `/retry` - Cancel an active run or retry its immutable snapshot
 - `GET /api/v1/jobs/catalog`, `POST /api/v1/jobs/import` - Root backend only. List every non-deleted Automation that belongs to another repository on this machine (grouped by repository, with its Worker, per-script found/missing flags and a suggested Worker name), and copy one into the current repository: missing scripts are copied from the source repository (existing files are never overwritten), the Worker is reused when one with the same name and CLI is visible here or cloned under a new name (steps copied, `{{step:id}}` tokens remapped), and the Automation is created disabled. One-way copy; the copy only records the id of
   the root Automation it came from (`Jobs.ImportedFromJobId`) so the catalog never offers a copy back while

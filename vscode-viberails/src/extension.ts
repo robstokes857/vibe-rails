@@ -6,7 +6,7 @@ import { BackendManager } from './backend-manager';
 import { WebviewPanelManager } from './webview-panel';
 import { resolveScriptImportTarget } from './script-import';
 import { BackendConnection, requestJson } from './backend-api';
-import { LauncherItem, LauncherTreeDataProvider, runLauncherItem } from './launcher-view';
+import { LauncherItem, LauncherNode, LauncherTreeDataProvider, runLauncherItem } from './launcher-view';
 import {
     AUTOMATION_NAV_PREFERENCES_PATH,
     BOOTSTRAP_REQUEST_TIMEOUT_MS,
@@ -246,7 +246,7 @@ function registerLauncherView(context: vscode.ExtensionContext): void {
     });
     launcherProvider = provider;
 
-    const view = vscode.window.createTreeView<LauncherItem>(LAUNCHER_VIEW_ID, {
+    const view = vscode.window.createTreeView<LauncherNode>(LAUNCHER_VIEW_ID, {
         treeDataProvider: provider,
         showCollapseAll: false
     });

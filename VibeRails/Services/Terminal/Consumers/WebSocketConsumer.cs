@@ -23,6 +23,9 @@ public sealed class WebSocketConsumer : ITerminalConsumer, IDisposable
     private readonly Task _sendLoop;
     private readonly Func<bool>? _isSyncOutputActive;
 
+    /// <summary>Completes after queued output drains, so a private viewer can send its exit status last.</summary>
+    internal Task Completion => _sendLoop;
+
     public WebSocketConsumer(WebSocket webSocket, CancellationToken ct, Func<bool>? isSyncOutputActive = null)
     {
         _webSocket = webSocket;

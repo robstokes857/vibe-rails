@@ -15,32 +15,35 @@ public sealed class BoardAutomationService(IBoardStore boards, IJobStore jobs,
         var setting = await boards.GetLaneAutomationAsync(projectPath, columnId, cancellationToken);
         if (setting is null) return null;
         var catalog = await jobs.GetJobsAsync(projectPath, cancellationToken: cancellationToken);
-        setting = await PruneDeletedAsync(projectPath, columnId, setting, catalog, cancellationToken);
+        var selected = await WithoutDeletedAsync(setting.JobIds, catalog, cancellationToken);
         var choices = new List<BoardAutomationOption>();
         foreach (var job in catalog)
-            choices.Add(new(job.Id, job.Name, job.Enabled, setting.JobIds.Contains(job.Id)
+            choices.Add(new(job.Id, job.Name, job.Enabled, selected.Contains(job.Id)
                 ? await ReviewSetupAsync(projectPath, job, cancellationToken) : null));
         var pending = (await boards.GetPendingStarterWorkflowsAsync(projectPath, cancellationToken)).Any(seed => seed.ColumnId == columnId);
-        return new(setting.JobId, setting.Revision, choices, setting.JobIds, pending, await ReadRunningAgentsAsync(projectPath, columnId, cancellationToken),
+        return new(selected.Count == 0 ? null : selected[0], setting.Revision, choices, selected,
+            pending, await ReadRunningAgentsAsync(projectPath, columnId, cancellationToken),
             await boards.GetLaneWorkflowsAsync(projectPath, columnId, cancellationToken));
     }
 
     /// <summary>
-    /// A selection can outlive its Automation when an older binary or a host without the Board
-    /// store deleted the Job. Deleted entries are unlinked on this read so the lane never lists
-    /// them; entries that merely belong to another repository or no definition stay visible.
+    /// A selection can outlive its Automation when an older binary, a host without the Board store,
+    /// or a failed Board unlink deleted the Job. The lane never lists a deleted entry; entries that
+    /// merely belong to another repository or no definition stay visible. Every board render reads
+    /// this, so it never writes: the next lane save drops the hidden entry, and the scheduler
+    /// already skips deleted Jobs.
     /// </summary>
-    private async Task<BoardLaneAutomation> PruneDeletedAsync(string projectPath, string columnId, BoardLaneAutomation setting,
+    private async Task<IReadOnlyList<long>> WithoutDeletedAsync(IReadOnlyList<long> jobIds,
         IReadOnlyList<JobDefinitionRecord> catalog, CancellationToken cancellationToken)
     {
-        var pruned = false;
-        foreach (var jobId in setting.JobIds.Where(id => catalog.All(job => job.Id != id)))
+        var selected = new List<long>(jobIds.Count);
+        foreach (var jobId in jobIds)
         {
-            var job = await jobs.GetJobAsync(jobId, cancellationToken);
-            if (job?.DeletedUtc is null) continue;
-            pruned |= await boards.RemoveJobFromLanesAsync(jobId, cancellationToken) > 0;
+            if (catalog.All(job => job.Id != jobId) && (await jobs.GetJobAsync(jobId, cancellationToken))?.DeletedUtc is not null)
+                continue;
+            selected.Add(jobId);
         }
-        return pruned ? await boards.GetLaneAutomationAsync(projectPath, columnId, cancellationToken) ?? setting : setting;
+        return selected;
     }
 
     /// <summary>

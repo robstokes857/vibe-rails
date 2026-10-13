@@ -1118,8 +1118,7 @@ recovery rechecks content after a library refresh: retained registrations do not
 - **Scripts section**: authoring/import actions and PIN/refresh controls have a separate
   wrapping toolbar. Since VIBE-56 the signed library holds pwsh (`.ps1`), bash (`.sh`) and
   python (`.py`) scripts; the extension picks the interpreter, and every surface says which
-  one through `script-runtimes.js` (row chip, workbench icon + "runs with", run-window command
-  line and argument hint, launcher icon, terminal tab title). New script has a **Runs with**
+  one through `script-runtimes.js` (row chip, workbench icon + "runs with", run-window title, launcher icon). New script has a **Runs with**
   picker kept in step with the file name (picking bash renames `script.py` to `script.sh`;
   typing `deploy.ps1` moves the picker; a bare name takes the picked extension). Repository
   scripts still go through **New automation → Add script**. The API, view and class names
@@ -1150,46 +1149,33 @@ recovery rechecks content after a library refresh: retained registrations do not
 - **Shared flows**: signing (PIN prompt), revoke, rename, delete, duplicate, copy path,
   run and `saveContent` are public methods on `PythonScriptsController`
   (`app.jobController.pythonScripts`) that work unmounted; the workbench follows list
-  updates through `onStateChange`. There are two run paths, and both refuse an unsigned or
-  unsaved script:
-  - **Run** (primary everywhere) → `PythonScriptsController.run(name)` → the run window
-    below. Captured, no terminal.
-  - **Run in terminal…** (kebab menu, and the run window's footer) →
-    `runInTerminal(name, button)` → `/api/v1/python-scripts/run/interactive`: the backend
-    verifies the signature, creates a shell tab and invokes the verified-byte helper inside
-    its PTY, so stdin, prompts, live output and Ctrl+C stay interactive. The tab is adopted
-    in place when a terminal panel is already on screen, otherwise `terminal-focus` opens.
+  updates through `onStateChange`. **Run** everywhere opens the private script terminal below,
+  refusing unsigned or unsaved scripts. `runInTerminal` remains a compatibility alias.
 
 ## Python script run window
 
-- **Module** `js/modules/python-run-window.js` (`PythonRunWindow`); one instance lives on
-  `PythonScriptsController.runWindow`, so the Automation row, the workbench and the nav
-  Launch flyout all drive the same surface. Styles: the "The run window" block in
-  `style.css` (`.vb-run-*`). It is the small-space answer to the interactive tab — inputs,
-  output and return value in one modal, nothing spawned.
-- **Inputs**. Scripts take **argument** rows (optional flag + value) and a **Standard input**
-  box. Values persist per script in localStorage `viberails.pythonRun.<name>`. A script without
-  remembered inputs runs when the window opens. Legacy remembered typed MCP inputs suppress that
-  automatic run so the user can review argument rows first.
-- **The command line** under the inputs is the payload: `resolveArgv()` builds one array,
-  and the window prints and posts the same values.
-- **Run PIN**. Global or per-script `requirePinEachRun` status uses the shared masked PIN prompt
-  before each captured or terminal launch. The prompt preserves the run window, clears fields
-  on completion/cancellation, and cancellation starts nothing. Never remember the PIN with
-  arguments/stdin or put it in controller/window state.
-- **Output**. `POST /api/v1/python-scripts/run` with `{ name, arguments, standardInput, pin? }`
-  returns exit code, duration, stdout/stderr and `returnJson` — the JSON object or array
-  the script printed as the whole of stdout or on its last line
-  (`PythonScriptService.ExtractReturnJson`; a bare scalar is output, not a return value).
-  The window shows **Returned** (pretty-printed, copyable) only when there is one, then
-  **Output**. Argv and stdin are bounded server-side (64 args, 8k chars each, 256k stdin).
-  The result also lands in the row's last-run drawer through `recordRun`.
-- **Stop**. The run window and active Scripts row cancel the exact captured request through its
-  `AbortController`; the backend request token terminates the process tree. The signed cache
-  in `.vb-scripts` is retained for reuse. Closing the window does not cancel. Run handles survive close/reopen and stay
-  separate per script. Cancelled requests show **Stop requested**, with no invented exit code
-  or final output, because the disconnected response cannot acknowledge process completion.
-- **Keys**: Escape closes, Ctrl/⌘+Enter runs from anywhere including the stdin box.
+- **Module** `js/modules/python-run-window.js` (`PythonRunWindow`), shared by the Scripts row,
+  workbench and nav launcher. `PythonScriptsController.runWindows` owns one window per script.
+  Styles are `.vb-run-*` and `.vb-script-terminal-layer` in `style.css`.
+- **Private PTY**: xterm connects to the authenticated root-only
+  `/api/v1/python-scripts/run/terminal/ws`. It runs the signed interpreter directly, separate from
+  main terminal tabs, agent sessions, recordings, history and remote sharing.
+- **Input** goes straight to the PTY as binary frames, so `input()`, `getpass`, `Read-Host`,
+  live output and Ctrl+C work. There are no remembered argument/stdin fields. Legacy localStorage
+  run-input values are ignored, not read, migrated or deleted. Nothing is recorded by this runner;
+  scripts still control whether their own terminal input is echoed or written to files.
+- **Run PIN** uses the shared masked prompt before each required launch. Cancellation starts
+  nothing; fields and launch closures release the PIN after use. Never store it in window state.
+- **Minimize** hides the floating, nonmodal window and creates a restore button with live status.
+  The socket and process keep running without a run timeout; ordinary SPA navigation and other
+  dialogs do not dispose them. Restore reuses the same terminal and never launches again.
+- **Stop** terminates the process tree and waits for acknowledgment. **Close**, page unload,
+  connection loss and backend shutdown terminate it too. Run again creates a fresh PTY.
+  Output stays only in the open window's bounded xterm scrollback; closing disposes it.
+- **Keys** are passed to the program while xterm is focused. The window does not trap focus or
+  block the page. Escape from its title-bar controls minimizes it.
+- The older captured HTTP run and main-tab interactive APIs remain compatible for callers;
+  the Scripts UI uses neither and does not call `recordRun` for private terminal output.
 - **Python MCP removed (2026-09-18)**: the exposure switch, configurator, and special Explorer
   group are gone. Signed scripts remain available for human-initiated runs.
 - **Live reload**: while mounted and visible, `GET /api/v1/python-scripts/content` is

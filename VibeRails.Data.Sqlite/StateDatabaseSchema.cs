@@ -164,6 +164,43 @@ internal static class StateDatabaseSchema
                 CREATE INDEX idx_session_share_uploads_pending
                     ON SessionShareUploads(KeyFingerprint, RequestedUTC) WHERE CompletedUTC IS NULL;
                 """));
+        SqliteMigrationRunner.Apply(connection, "conversation-titles", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, """
+                CREATE TABLE ConversationTitleRequests (
+                    SessionId TEXT PRIMARY KEY REFERENCES Sessions(Id) ON DELETE CASCADE,
+                    UserInputId INTEGER NOT NULL REFERENCES UserInputs(Id) ON DELETE CASCADE,
+                    Attempts INTEGER NOT NULL DEFAULT 0,
+                    RetryAfterUTC TEXT NOT NULL,
+                    Lease TEXT NULL,
+                    LeaseUntilUTC TEXT NULL,
+                    CompletedUTC TEXT NULL
+                );
+                CREATE INDEX idx_conversation_titles_pending ON ConversationTitleRequests(RetryAfterUTC, UserInputId)
+                    WHERE CompletedUTC IS NULL;
+                """));
+        SqliteMigrationRunner.Apply(connection, "conversation-titles", 2, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, """
+                ALTER TABLE ConversationTitleRequests ADD COLUMN MessageCount INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE ConversationTitleRequests ADD COLUMN CharacterCount INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE ConversationTitleRequests ADD COLUMN LatestInputId INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE ConversationTitleRequests ADD COLUMN GenerationCount INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE ConversationTitleRequests ADD COLUMN LastInputId INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE ConversationTitleRequests ADD COLUMN LastTitle TEXT NULL;
+                ALTER TABLE ConversationTitleRequests ADD COLUMN Cancelled INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE ConversationTitleRequests ADD COLUMN SettingsFingerprint TEXT NULL;
+                ALTER TABLE Sessions ADD COLUMN ConversationTitleEligible INTEGER NOT NULL DEFAULT 0;
+                CREATE TABLE ConversationTitleApiBackoff (
+                    Fingerprint TEXT PRIMARY KEY,
+                    RetryAfterUTC TEXT NOT NULL
+                );
+                CREATE INDEX idx_conversation_titles_due ON ConversationTitleRequests(RetryAfterUTC,UserInputId)
+                    WHERE Cancelled=0 AND GenerationCount<2
+                        AND ((GenerationCount=0 AND (MessageCount>=2 OR CharacterCount>=300))
+                            OR (GenerationCount=1 AND LatestInputId>LastInputId
+                                AND (MessageCount>=10 OR CharacterCount>=750)));
+                CREATE INDEX idx_conversation_titles_updated ON ConversationTitleRequests(CompletedUTC DESC)
+                    WHERE LastTitle IS NOT NULL;
+                """));
         JobStore.EnsureSessionLinkSchema(connection);
         // Every breaking step above has now been applied (or was already), so the file is at this
         // build's generation. Stamping after the fact also covers databases migrated before the

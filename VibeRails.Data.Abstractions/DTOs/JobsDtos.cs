@@ -246,7 +246,11 @@ public sealed record JobRunResponse(
     bool CancelRequested,
     List<JobRunActionDto>? Actions = null,
     string? TerminalSessionId = null,
-    string Purpose = "work", ReviewRoutingSnapshot? ReviewRouting = null);
+    string Purpose = "work", ReviewRoutingSnapshot? ReviewRouting = null,
+    // The bottom of the run's recorded screen, when it ended without succeeding: what the CLI
+    // last printed is usually the only account of why. Only the root's single-run read fills it
+    // (session replay is root-only); null there means no recording, empty means no output.
+    List<string>? LastScreen = null);
 
 public sealed record JobRunActionDto(
     string Id,

@@ -1322,6 +1322,85 @@ test('A finished session-less run offers retry instead of cancel', async (t) => 
     assert.doesNotMatch(html, /data-run-cancel/);
 });
 
+// "Worker exited with code 1." was all a failed run said while its terminal had printed the
+// cause. The server now sends the bottom of that screen; these pin where it reaches the user.
+test('A run that ended badly opens its detail from the status cell', () => {
+    const controller = new JobController(createApp());
+    const run = { id: 'run"1', jobName: 'commit', llm: 2, triggerKind: 3, queuedUtc: '2026-10-12T12:00:00Z' };
+
+    const failed = controller.renderHistoryRow({ ...run, status: 3, errorMessage: 'Worker exited with code 1: Error: unauthorized (401)' });
+    assert.match(failed, /<button class="job-run-why" type="button" data-history-action="watch" data-run-id="run&quot;1"/);
+    assert.match(failed, /class="job-run-status-detail" title="Worker exited with code 1: Error: unauthorized \(401\)/);
+    for (const status of [0, 1, 2]) {
+        assert.doesNotMatch(controller.renderHistoryRow({ ...run, status }), /job-run-why/);
+    }
+
+    const summary = {
+        jobId: 4, jobName: 'commit', lastRunId: 'run-9', lastStatus: 6, lastLlm: 2, totalRuns: 3, activeRuns: 0,
+        lastQueuedUtc: '2026-10-12T12:00:00Z', lastErrorMessage: 'The terminal running this Automation is no longer open.'
+    };
+    assert.match(controller.renderSummaryRow(summary), /class="job-run-why" type="button" data-job-action="view-run" data-run-id="run-9"/);
+    assert.doesNotMatch(controller.renderSummaryRow({ ...summary, lastStatus: 2, lastErrorMessage: null }), /job-run-why/);
+});
+
+test('A failed run shows its last screen, newest line in view, before offering replay', async (t) => {
+    const originalDocument = globalThis.document;
+    t.after(() => { globalThis.document = originalDocument; });
+    const pre = { scrollTop: 0, scrollHeight: 640 };
+    const detail = { querySelector: selector => selector === '[data-run-last-screen] pre' ? pre : null, querySelectorAll: () => [] };
+    globalThis.document = { querySelector: selector => selector === '.job-run-detail' ? detail : null };
+
+    const app = createApp();
+    const modals = [];
+    app.showModal = (title, html) => modals.push({ title, html });
+    // No actions and a session: a legacy run, which used to jump straight into replay.
+    app.apiCall = async () => ({
+        id: 'run-c',
+        jobName: 'commit',
+        status: 3,
+        sessionId: 'session-9',
+        projectPath: '/repo',
+        errorMessage: 'Worker exited with code 1.',
+        lastScreen: ["Added global MCP server 'viberails-mcp'.", 'Error: <401> unauthorized']
+    });
+
+    await new JobController(app).openRun('run-c');
+
+    assert.equal(modals.length, 1);
+    const { html } = modals[0];
+    assert.match(html, /Last screen before the run stopped/);
+    assert.match(html, /Added global MCP server 'viberails-mcp'\.\nError: &lt;401&gt; unauthorized/);
+    assert.doesNotMatch(html, /<401>/);
+    assert.match(html, /data-run-action-session="session-9"><i [^>]*><\/i>Replay terminal</);
+    assert.doesNotMatch(html, /no recorded terminal/);
+    assert.equal(pre.scrollTop, 640);
+});
+
+test('A run whose terminal printed nothing says so instead of drawing an empty screen', async (t) => {
+    const originalDocument = globalThis.document;
+    t.after(() => { globalThis.document = originalDocument; });
+    globalThis.document = { querySelector: () => null };
+
+    const app = createApp();
+    const modals = [];
+    app.showModal = (title, html) => modals.push({ title, html });
+    app.apiCall = async () => ({
+        id: 'run-d',
+        jobName: 'API_SEC',
+        status: 6,
+        sessionId: 'session-0',
+        projectPath: '/repo',
+        errorMessage: 'The terminal running this Automation is no longer open.',
+        lastScreen: []
+    });
+
+    await new JobController(app).openRun('run-d');
+
+    const { html } = modals[0];
+    assert.match(html, /recorded no output before the run stopped/);
+    assert.doesNotMatch(html, /<pre>/);
+});
+
 test('Workflow run details escape script output and expose Worker replay separately', () => {
     const controller = new JobController(createApp());
     const script = controller.renderRunActionDetail({

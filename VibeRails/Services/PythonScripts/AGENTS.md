@@ -15,13 +15,11 @@ classes, `/api/v1/python-scripts`, `--run-python-script`), but since VIBE-56 a s
    being added twice. Repo scope is offered for files in the dashboard's project or managed
    UserScripts folder; other files offer Global scope.
 2. Sign the exact script version with the user's Python signing PIN.
-3. Choose **Run** for the captured run window, with argument rows and optional standard input,
-   or **Run in terminal** for interactive scripts. The terminal path takes the script name and
-   an optional required run PIN. **Stop** in the captured run window or its active Scripts row
-   aborts that run's request; the request cancellation token terminates the interpreter and its
-   children. Closing the window alone keeps the run alive.
+3. Choose **Run** for a private xterm window with interactive stdin. **Minimize** keeps the
+   script running while the app stays usable; restoring resumes the same terminal. **Stop** or
+   **Close** terminates its process tree. No inputs or output are saved by this runner.
 4. Edit scripts in the workbench, which pairs Monaco with an agent terminal. Changed bytes need
-   signing again before either run path can execute them.
+   signing again before another launch can execute them.
 
 Only explicit registrations in `~/.vibe_rails/user_script_library.json` appear. No folder is scanned;
 legacy scripts and approvals are not imported, moved or deleted. `scripts` outside `UserScripts`
@@ -83,8 +81,12 @@ from `AutomationScriptService.MissingRuntimeMessage`.
 - `PythonScriptRunProcessHost.cs` executes verified bytes inside an inherited console/PTY.
 - `Routes/PythonScriptRoutes.cs` provides the authenticated list, authoring, signing, and run API.
 - `wwwroot/js/modules/python-scripts-controller.js` owns shared lifecycle and signing flows.
-- `python-run-window.js` sends discrete argument values and optional stdin, then displays stdout,
-  stderr, exit status, and structured JSON return values.
+- `PythonScriptTerminalSession.cs` owns the private socket/PTY lifetime. The initial bounded
+  message verifies the script and optional PIN before launching the interpreter with argv.
+  Binary frames carry raw input, text frames carry Stop/resize/status. No terminal tab, observer,
+  session recorder or sharing connection is registered. Disconnect kills the process tree.
+- `python-run-window.js` renders that PTY in a floating, minimizable xterm window. No input or
+  output is persisted; the terminal lives across SPA navigation until closed or disconnected.
 - `python-script-workbench.js` owns the editor and docked agent terminal.
 
 Signing pins the canonical SHA-256 of strict UTF-8 bytes (BOM removed, line endings normalized,
@@ -112,12 +114,11 @@ Python tools or a dynamic call handler. The three `/api/v1/python-scripts/mcp` c
 routes, exposure switch, and MCP parameter editor are gone.
 
 Legacy `~/.vibe_rails/python_script_mcp.json` files are ignored, not deleted. Ordinary script
-files, signatures, automations, and human-initiated runs remain. The run window accepts argument
-rows and stdin; it no longer derives typed fields from MCP configuration. Remembered legacy typed
-inputs suppress automatic execution on opening, so the user can review the argument rows first.
+files, signatures, automations, and human-initiated runs remain. The run window uses interactive PTY input only and ignores all legacy remembered input fields.
 
 ## Tests
 
 Keep the Python signing, script service, shell runtime (`PythonScriptShellRuntimeTests`, which
 also runs real pwsh and bash when they are installed), process-host, route, workbench, and
-run-window suites green. MCP transport tests verify that removed Python tool names are unavailable.
+run-window suites green. `PythonScriptTerminalTests` runs real PTYs for input(), getpass,
+Stop/Close cleanup and signature/PIN rejection; `VIBERAILS_TEST_PYTHON` can select a test interpreter. MCP transport tests verify that removed Python tool names are unavailable.

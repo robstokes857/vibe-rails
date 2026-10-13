@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
+using VibeRails.Data.Replay;
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services.Board;
@@ -367,6 +368,7 @@ public static class JobRunner
             isLastAction);
 
         var workerExitCode = 0;
+        string? workerSessionId = null;
         try
         {
             workerExitCode = await CliLoop.RunTerminalWithWebAsync(
@@ -376,6 +378,7 @@ public static class JobRunner
                 boardCardKey: boardCardKey,
                 onSessionCreated: sessionId =>
                 {
+                    workerSessionId = sessionId;
                     Log.Information(
                         "[Jobs] Run {RunId} is recording Worker terminal session {SessionId}",
                         runId,
@@ -434,9 +437,18 @@ public static class JobRunner
         if (automationConsumer.IdleShutdownRequested)
             return ActionOutcome.Succeeded;
 
-        return workerExitCode == 0
-            ? ActionOutcome.Succeeded
-            : ActionOutcome.Failed($"Worker exited with code {workerExitCode}.", workerExitCode);
+        if (workerExitCode == 0)
+            return ActionOutcome.Succeeded;
+
+        // The exit code alone said nothing ("Worker exited with code 1."); what the CLI printed on
+        // its way out usually names the cause. The session is complete by now: closing it flushes
+        // the recording before the terminal call returns.
+        var finalLine = JobRunLastScreen.FinalLine(services.GetService<IReplayStore>(), workerSessionId);
+        return ActionOutcome.Failed(
+            finalLine is null
+                ? $"Worker exited with code {workerExitCode}."
+                : $"Worker exited with code {workerExitCode}: {finalLine}",
+            workerExitCode);
     }
 
     /// <summary>

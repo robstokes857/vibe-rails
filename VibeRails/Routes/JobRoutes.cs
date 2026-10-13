@@ -1,4 +1,5 @@
 using Serilog;
+using VibeRails.Data.Replay;
 using VibeRails.DTOs;
 using VibeRails.Services;
 using VibeRails.Services.Jobs;
@@ -137,12 +138,28 @@ public static class JobRoutes
             ExecuteAsync(() => service.DeleteRunsAsync(request.RunIds ?? [], cancellationToken)))
             .WithName("DeleteJobRuns");
 
-        app.MapGet("/api/v1/jobs/runs/{runId}", (
-            IJobService service,
-            string runId,
-            CancellationToken cancellationToken) =>
-            ExecuteAsync(() => service.GetRunAsync(runId, cancellationToken)))
-            .WithName("GetJobRun");
+        // A run that ended badly carries the bottom of its recorded screen, the CLI's own account of
+        // why. That text is session replay, which API_SEC.md keeps on the root backend.
+        if (isActiveRootBackend)
+        {
+            app.MapGet("/api/v1/jobs/runs/{runId}", (
+                IJobService service,
+                IReplayStore replay,
+                string runId,
+                CancellationToken cancellationToken) =>
+                ExecuteAsync(async () => JobRunLastScreen.Attach(
+                    await service.GetRunAsync(runId, cancellationToken), replay)))
+                .WithName("GetJobRun");
+        }
+        else
+        {
+            app.MapGet("/api/v1/jobs/runs/{runId}", (
+                IJobService service,
+                string runId,
+                CancellationToken cancellationToken) =>
+                ExecuteAsync(() => service.GetRunAsync(runId, cancellationToken)))
+                .WithName("GetJobRun");
+        }
 
         app.MapDelete("/api/v1/jobs/runs/{runId}", (
             IJobService service,

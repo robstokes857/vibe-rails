@@ -43,9 +43,8 @@ public static class PythonScriptRoutes
             ExecuteAsync(() => service.RevokeAsync(request, cancellationToken)))
             .WithName("RevokePythonScript");
 
-        // Captured run: argv and stdin in, exit code + output + return value out. This is
-        // what the run window drives; /run/interactive below is the same script in a PTY
-        // for the cases that need typing or Ctrl+C.
+        // Captured run API retained for existing callers. The Scripts UI uses the private
+        // PTY WebSocket below so prompts and long-running commands stay interactive.
         app.MapPost("/api/v1/python-scripts/run", (
             IPythonScriptService service,
             PythonScriptRunRequest request,
@@ -56,6 +55,23 @@ public static class PythonScriptRoutes
 
         if (isActiveRootBackend)
         {
+            // Private, unrecorded PTY owned by one run window. The normal two-credential
+            // WebSocket middleware applies; the first message authorizes the signed script.
+            app.MapGet("/api/v1/python-scripts/run/terminal/ws", async (
+                HttpContext context, IPythonScriptService service, IHostApplicationLifetime lifetime) =>
+            {
+                if (!context.WebSockets.IsWebSocketRequest)
+                {
+                    context.Response.StatusCode = 400;
+                    return;
+                }
+                using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                    context.RequestAborted, lifetime.ApplicationStopping);
+                using var socket = await context.WebSockets.AcceptWebSocketAsync(
+                    context.Items["viberails_accepted_subprotocol"] as string);
+                await PythonScriptTerminalSession.RunAsync(socket, service, cancellation.Token);
+            }).WithName("RunPythonScriptTerminal");
+
             app.MapPost("/api/v1/python-scripts/run/interactive", async (
                 ITerminalTabHostService tabHost,
                 IPythonScriptService service,

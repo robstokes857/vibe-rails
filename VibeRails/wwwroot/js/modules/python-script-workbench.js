@@ -558,7 +558,6 @@ export class PythonScriptWorkbench {
                 <i class="fa-solid ${icon}" aria-hidden="true"></i><span>${label}</span>
             </button>`;
         return [
-            this.status === 'approved' ? item('run-terminal', 'fa-terminal', 'Run in terminal…') : '',
             this.scripts?.canOpenInVsCode?.() ? item('open-vscode', 'fa-arrow-up-right-from-square', 'Open in VS Code') : '',
             item('duplicate', 'fa-copy', 'Duplicate…'),
             item('rename', 'fa-i-cursor', 'Rename…'),
@@ -1123,7 +1122,7 @@ export class PythonScriptWorkbench {
         return this._withRunnableScript((name, scripts) => scripts.run(name));
     }
 
-    /** Hands the script to a PTY tab instead — for runs that need typing or Ctrl+C. */
+    /** Compatibility alias for the same private script terminal. */
     async runInTerminal(button = null) {
         return this._withRunnableScript((name, scripts) => scripts.runInTerminal(name, button));
     }

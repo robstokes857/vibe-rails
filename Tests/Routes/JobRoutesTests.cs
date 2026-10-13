@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
 using VibeRails.Auth;
+using VibeRails.Data.Replay;
 using VibeRails.DB;
 using VibeRails.Middleware;
 using VibeRails.Services.Board;
@@ -41,6 +42,7 @@ public sealed class JobRoutesTests : IDisposable
     private readonly bool _originalIsInGit = ParserConfigs.GetIsInGit();
     private readonly Mock<IAutomationImportService> _importService = new();
     private readonly Mock<IJobService> _jobService = new();
+    private readonly Mock<IReplayStore> _replay = new(MockBehavior.Strict);
 
     public JobRoutesTests()
     {
@@ -72,6 +74,44 @@ public sealed class JobRoutesTests : IDisposable
         }, isActiveRootBackend: false);
 
         _importService.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task AFailedRunCarriesItsLastScreenOnlyFromTheRootBackend()
+    {
+        // The screen is session replay text, which API_SEC.md keeps on the root backend.
+        _jobService
+            .Setup(service => service.GetRunAsync("run-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new JobRunResponse(
+                "run-1", 1, "commit", JobTriggerKind.Manual, JobRunStatus.Failed, _repoRoot, LLM.Codex, "commit",
+                "worker-session", 60, DateTime.UtcNow, DateTime.UtcNow, DateTime.UtcNow, 1,
+                "Worker exited with code 1.", false));
+        _replay
+            .Setup(replay => replay.Tail("worker-session", JobRunLastScreen.TailBytes))
+            .Returns(new SessionTail(
+                [new Frame(1, 0, "Error: account/read failed: unauthorized (401)\r\n"u8.ToArray(), 80, 24)],
+                false));
+
+        await WithHostAsync(async baseUri =>
+        {
+            var run = await SharedClient.GetFromJsonAsync(
+                new Uri(baseUri, "/api/v1/jobs/runs/run-1"),
+                AppJsonSerializerContext.Default.JobRunResponse,
+                TestContext.Current.CancellationToken);
+            Assert.Equal(["Error: account/read failed: unauthorized (401)"], run!.LastScreen);
+        });
+
+        await WithHostAsync(async baseUri =>
+        {
+            var run = await SharedClient.GetFromJsonAsync(
+                new Uri(baseUri, "/api/v1/jobs/runs/run-1"),
+                AppJsonSerializerContext.Default.JobRunResponse,
+                TestContext.Current.CancellationToken);
+            Assert.Null(run!.LastScreen);
+            Assert.Equal("Worker exited with code 1.", run.ErrorMessage);
+        }, isActiveRootBackend: false);
+
+        _replay.Verify(replay => replay.Tail(It.IsAny<string>(), It.IsAny<int>()), Times.Once);
     }
 
     [Fact]
@@ -272,6 +312,7 @@ public sealed class JobRoutesTests : IDisposable
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Services.AddSingleton(_importService.Object);
         builder.Services.AddSingleton(_jobService.Object);
+        builder.Services.AddSingleton(_replay.Object);
         var jobStore = new Mock<IJobStore>();
         jobStore.Setup(j => j.GetJobsAsync(It.IsAny<string>(), false, It.IsAny<CancellationToken>())).ReturnsAsync([]);
         builder.Services.AddSingleton(jobStore.Object);

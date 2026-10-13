@@ -170,3 +170,12 @@ When adding features to app.js or index.html, add a corresponding spec file in .
 ---
 
 *Last checked: 2026-08-06T17:22:10Z by opencode (glm-5.2)*
+
+### Private script terminal tests (No Backend Required)
+
+From `UITests`, run `npx playwright test --config playwright.script-run.config.js`.
+Uses the production xterm window with a simulated socket to check typing, Stop/Close, PIN
+cancellation, narrow layout and minimize/restore across ordinary SPA navigation. The live fixture
+also exposes a notes field to demonstrate that the page remains usable while minimized.
+Real interpreter input, getpass, cleanup and approval checks are covered by the .NET
+`PythonScriptTerminalTests` suite. Neither fixture records user input.

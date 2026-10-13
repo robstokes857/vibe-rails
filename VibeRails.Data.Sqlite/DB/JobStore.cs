@@ -187,15 +187,16 @@ public sealed partial class JobStore : IJobStore
         await transaction.CommitAsync(cancellationToken);
         if (changed == 0 || _boards is null) return changed > 0;
         // Lane selections live in board.db and commit separately, like every Board handoff. The
-        // Automation is already deleted, so a locked, damaged or newer board.db must not turn
-        // this into a failed delete; the dashboard's lane settings read prunes what this missed.
+        // Automation is already deleted, so neither a locked, damaged or newer board.db nor a
+        // cancelled request may turn this into a failed delete. Lane settings hide whatever this
+        // misses, and the lane's next save drops it.
         try
         {
-            await _boards.RemoveJobFromLanesAsync(id, cancellationToken);
+            await _boards.RemoveJobFromLanesAsync(id, CancellationToken.None);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        catch (Exception ex)
         {
-            Log.Warning(ex, "[Jobs] Automation {JobId} was deleted but its lane selections were not unlinked; the lane settings read prunes them.", id);
+            Log.Warning(ex, "[Jobs] Automation {JobId} was deleted but its lane selections were not unlinked; lane settings hide them until the lane is saved.", id);
         }
         return true;
     }

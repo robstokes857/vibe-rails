@@ -56,6 +56,7 @@ public static class SqliteStorage
         services.TryAddScoped<ISandboxStore>(sp => sp.GetRequiredService<IRepository>());
         services.TryAddScoped<IMetadataStore>(sp => sp.GetRequiredService<IRepository>());
         services.TryAddScoped<IChatSummaryStore>(sp => sp.GetRequiredService<IRepository>());
+        services.TryAddSingleton<IConversationTitleStore>(sp => new ConversationTitleStore(StateConnectionString(sp)));
         services.TryAddSingleton<IBoardStore>(sp => CreateBoardStore(sp.GetRequiredService<SqliteStoragePaths>().StatePath));
         services.TryAddSingleton<IJobStore>(sp => new JobStore(StateConnectionString(sp), sp.GetService<BoardAutomationEventSource>()?.Store, sp.GetService<IReviewRunSnapshotFactory>()));
         services.TryAddSingleton<ITokenSavingsStore>(sp => new TokenSavingsStore(StateConnectionString(sp)));

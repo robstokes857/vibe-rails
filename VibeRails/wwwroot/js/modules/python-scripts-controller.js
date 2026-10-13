@@ -78,6 +78,7 @@ export class PythonScriptsController {
         // The little run window (python-run-window.js). One instance for the whole section:
         // the row, the workbench and the nav launcher all drive the same surface.
         this.runWindow = new PythonRunWindow(app, this);
+        this.runWindows = new Map();
         this.confirm = confirmDialog;
         this._stateListeners = new Set();
         this._runListeners = new Set();
@@ -185,8 +186,7 @@ export class PythonScriptsController {
     /**
      * Follows every start and finish of a run, and every recorded result. The section rows
      * repaint through _render(), but the workbench is a different view with its own Run
-     * button and output panel — a captured run outlives its little window, so that view
-     * cannot learn the run ended any other way. Returns the unsubscribe.
+     * button and output panel. A minimized run can finish while another view is open. Returns the unsubscribe.
      * @param {(name: string) => void} listener
      */
     onRunChanged(listener) {
@@ -313,7 +313,7 @@ export class PythonScriptsController {
         const name = escapeHtml(script.name);
         const label = escapeHtml(script.displayName || script.fileName || script.name);
         const running = this.runningNames.has(script.name);
-        const canRun = script.status === 'approved' && !running;
+        const canRun = script.status === 'approved' && (!running || this.runWindows.has(script.name));
         const lastRun = this.lastRunByName.get(script.name);
         const approveLabel = script.status === 'approved' ? 'Re-sign' : 'Sign';
         const details = [
@@ -350,10 +350,10 @@ export class PythonScriptsController {
                     </button>
                     <button class="btn btn-sm btn-primary" type="button" data-python-scripts-action="run"
                             data-name="${name}" ${canRun ? '' : 'disabled'}
-                            title="${running ? `${label} is running` : canRun ? `Run ${label} and read its output here` : 'Sign the script before running it'}">
+                            title="${running ? `Restore ${label} terminal` : canRun ? `Run ${label} in its own terminal` : 'Sign the script before running it'}">
                         ${running ? RUNNING_BUTTON_HTML : '<i class="fa-solid fa-play me-1" aria-hidden="true"></i>Run'}
                     </button>
-                    ${running && this.runWindow.canStop(script.name) ? `
+                    ${running && this.getRunWindow(script.name).canStop(script.name) ? `
                     <button class="btn btn-sm btn-outline-danger" type="button" data-python-scripts-action="stop"
                             data-name="${name}" title="Stop ${label}">
                         <i class="fa-solid fa-stop me-1" aria-hidden="true"></i>Stop
@@ -391,9 +391,6 @@ export class PythonScriptsController {
         // Editing has its own visible button on the row (and the name opens the file too),
         // so the menu holds only the secondary actions.
         return [
-            script.status === 'approved'
-                ? item('run-terminal', 'fa-terminal', 'Run in terminal…')
-                : '',
             this.canOpenInVsCode() ? item('open-vscode', 'fa-arrow-up-right-from-square', 'Open in VS Code') : '',
             item('settings', 'fa-sliders', 'Script settings…'),
             item('duplicate', 'fa-copy', 'Duplicate…'),
@@ -445,7 +442,7 @@ export class PythonScriptsController {
         if (action === 'revoke') return void this.revoke(name);
         if (action === 'delete') return void this.deleteScript(name);
         if (action === 'run') return void this.run(name);
-        if (action === 'stop') return this.runWindow.stop(name);
+        if (action === 'stop') return this.getRunWindow(name).stop(name);
         if (action === 'run-terminal') return void this.runInTerminal(name, button);
     }
 
@@ -1039,9 +1036,8 @@ export class PythonScriptsController {
     }
 
     /**
-     * Opens the run window for a signed script: inputs in, exit code, output and return value
-     * out, no terminal. Scripts that take nothing run the moment the window appears. Resolves
-     * with the last run's result when the window closes, or null if nothing ran.
+     * Runs a signed script in its own temporary xterm window. Inputs are never remembered.
+     * Closing stops the run and resolves with its final status, if available.
      */
     async run(name) {
         if (!name) return null;
@@ -1050,15 +1046,24 @@ export class PythonScriptsController {
             this.app.showToast('Not signed', `Sign ${name} before running it.`, 'info');
             return null;
         }
-        // A run outlives its window — close it mid-run and the interpreter keeps going — so
-        // "is it running" lives here, not in the window's own flag. Without this, reopening
-        // the window for a script still in flight starts a second interpreter.
+        const existing = this.runWindows.get(name);
+        if (existing?.isOpen) { existing.show(); return null; }
+        // Share the running guard across the list, workbench and nav launcher.
         if (this.runningNames.has(name)) {
             this.app.showToast('Already running', `${this.displayName(name)} is still running.`, 'info', { compact: true });
             return null;
         }
-        return this.runWindow.open(name);
+        if (this.runWindow.isOpen) {
+            this.runWindow.minimize();
+            this.runWindow = new PythonRunWindow(this.app, this);
+        }
+        const view = this.runWindow;
+        this.runWindows.set(name, view);
+        try { return await view.open(name); }
+        finally { if (this.runWindows.get(name) === view) this.runWindows.delete(name); }
     }
+
+    getRunWindow(name) { return this.runWindows.get(name) || this.runWindow; }
 
     /** Collects a required run PIN without retaining it in controller or browser state. */
     requestRunPin(name, { isCurrent = () => true } = {}) {
@@ -1076,79 +1081,9 @@ export class PythonScriptsController {
         return this.state ? decide() : this.ensureState().then(decide);
     }
 
-    /**
-     * Starts a signed script in a backend-created interactive terminal tab — the escape hatch
-     * for scripts that ask questions, need Ctrl+C, or stream for a long time. `button`
-     * (optional, the workbench's own) shows a spinner until that tab is ready; section rows
-     * follow runningNames. Resolves with the launch response, or null when a launch is already
-     * in flight.
-     */
-    async runInTerminal(name, button = null) {
-        if (!name) return null;
-        // Silence here read as a dead button: the run window used to close itself first and
-        // then hit this line, leaving nothing on screen and nothing started.
-        if (this.runningNames.has(name)) {
-            this.app.showToast(
-                'Already running',
-                `${this.displayName(name)} is still running. Wait for it to finish before starting a terminal run.`,
-                'info', { compact: true });
-            return null;
-        }
-        const original = button?.innerHTML;
-        if (button) {
-            button.disabled = true;
-            button.innerHTML = RUNNING_BUTTON_HTML;
-        }
-        this.markRunning(name);
-        let result = null;
-        try {
-            const requestedPin = this.requestRunPin(name);
-            const pin = requestedPin?.then ? await requestedPin : requestedPin;
-            if (pin === null) return null;
-            const body = { name };
-            if (pin !== undefined) body.pin = pin;
-            result = await this.app.apiCall(`${API}/run/interactive`, 'POST', body,
-                { showLoading: false, preferErrorResponseMessage: true });
-            const tabId = String(result?.tabId || '').trim();
-            if (!tabId) throw new Error('The interactive terminal did not return a tab id.');
-
-            const runtime = scriptRuntimeFor(this.scriptByName(name)?.fileName || name);
-            this.app.terminalController?.rememberTabLaunch?.(tabId, {
-                selection: 'base:shell',
-                label: this.displayName(name),
-                title: `${this.displayName(name)} · ${runtime.label}`,
-                icon: runtime.tabIcon,
-                // Keep run tabs separate from the legacy `python-script:` agent tabs
-                // retained from the former Ask agent flow.
-                taskKey: `python-script-run:${name}`,
-                workingDirectory: this.scriptDirectory(name)
-            });
-            this.app.showToast(
-                'Script started',
-                `${this.displayName(name)} is running in an interactive terminal.`,
-                'success', { compact: true });
-            // A view that already shows a terminal panel (the workbench, the Terminals
-            // page, the Code quality page) hosts the run in place — being yanked to the
-            // Terminals page with no way back was the old behavior, and from the
-            // workbench it threw the editor away. Only when no panel is on screen does
-            // the run still navigate there.
-            if (!(await this.app.terminalController?.adoptLaunchedTab?.(tabId))) {
-                this.app.navigate?.('terminal-focus', {
-                    preferredSelection: 'base:shell',
-                    preferredTabId: tabId
-                });
-            }
-        } catch (error) {
-            this.app.showError(error?.message || `Could not run ${name}.`);
-        } finally {
-            this.clearRunning(name);
-            if (button) {
-                button.disabled = false;
-                button.innerHTML = original;
-            }
-            await this.refresh({ quiet: true });
-        }
-        return result;
+    /** Compatibility entry point: every script run now uses the private terminal window. */
+    runInTerminal(name) {
+        return this.run(name);
     }
 
     /** Remembers a run for the row's "Last run" drawer (opened, since it is news). */

@@ -11,6 +11,9 @@ public record Geometry(long Id, int Sequence, long At, int Cols, int Rows, long 
 public record Manifest(SessionInfo Session, List<BoardLink> Cards, List<Prompt> Prompts, List<Change> Changes, List<Geometry> Geometry, string FrameSource, long FrameMaxId, long ProxyMaxId, long FrameCount, long FrameBytes, long End, List<string> Notes, long? TokensSaved = null);
 public record Frame(long Id, long At, byte[] Data, int Cols, int Rows);
 public record FramePage(List<Frame> Items, long Next, bool Done);
+// The newest frames of a recording, oldest first. StartsOnAlternateScreen says whether the first
+// frame was captured inside a full-screen TUI whose entering sequence is older than the tail.
+public record SessionTail(List<Frame> Frames, bool StartsOnAlternateScreen);
 public record ToolCall(string Id, string Name, string Arguments);
 public record Exchange(long Cursor, string Id, long At, string Provider, string Method, string Path, int Status, int ElapsedMs, bool Truncated, string Model, string Effort, List<ToolCall> Tools, string? ParseNote);
 public record ExchangePage(List<Exchange> Items, long Next, bool Done);

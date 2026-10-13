@@ -120,6 +120,36 @@ public sealed class ReplayStore : IReplayStore
         var next=frames.Count>0?frames[^1].Id:after;
         return new(frames,next,frames.Count==0||next>=max);
     }
+    public SessionTail Tail(string id, int maxBytes)
+    {
+        using var db = Open(state);
+        // Newest first so the read stops at the byte budget; a long session never loads whole.
+        // Recordings older than the buffered table only have raw chunks, at the 120 x 30 grid
+        // Manifest already assumes for them.
+        foreach (var sql in new[]
+        {
+            "SELECT Id,Timestamp,Data,Cols,Rows,IsAlternateScreen FROM TerminalSessionLogs WHERE SessionId=$id ORDER BY Sequence DESC,Id DESC",
+            "SELECT Id,Timestamp,Content,120,30,0 FROM SessionLogs WHERE SessionId=$id ORDER BY Id DESC"
+        })
+        {
+            using var command = Query(db, sql, ("$id", id));
+            using var reader = command.ExecuteReader();
+            List<Frame> frames = [];
+            var alternate = false;
+            long size = 0;
+            while (size < maxBytes && reader.Read())
+            {
+                var data = (byte[])reader[2];
+                frames.Add(new(reader.GetInt64(0), Time(S(reader, 1)), data, reader.GetInt32(3), reader.GetInt32(4)));
+                alternate = reader.GetBoolean(5);
+                size += data.Length;
+            }
+            if (frames.Count == 0) continue;
+            frames.Reverse();
+            return new(frames, alternate);
+        }
+        return new([], false);
+    }
     public ExchangePage Exchanges(string id,long after,long max)
     {
         if(!File.Exists(proxy)) return new([],after,true);

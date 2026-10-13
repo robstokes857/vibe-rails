@@ -11,6 +11,15 @@ CREATE INDEX idx_compression_captures_created ON CompressionCaptures(CreatedUTC 
 -- index idx_compression_captures_hash
 CREATE UNIQUE INDEX idx_compression_captures_hash ON CompressionCaptures(ContentHash) WHERE ContentHash != '';
 
+-- index idx_conversation_titles_due
+CREATE INDEX idx_conversation_titles_due ON ConversationTitleRequests(RetryAfterUTC,UserInputId) WHERE Cancelled=0 AND GenerationCount<2 AND ((GenerationCount=0 AND (MessageCount>=2 OR CharacterCount>=300)) OR (GenerationCount=1 AND LatestInputId>LastInputId AND (MessageCount>=10 OR CharacterCount>=750)));
+
+-- index idx_conversation_titles_pending
+CREATE INDEX idx_conversation_titles_pending ON ConversationTitleRequests(RetryAfterUTC, UserInputId) WHERE CompletedUTC IS NULL;
+
+-- index idx_conversation_titles_updated
+CREATE INDEX idx_conversation_titles_updated ON ConversationTitleRequests(CompletedUTC DESC) WHERE LastTitle IS NOT NULL;
+
 -- index idx_environment_steps_env
 CREATE INDEX idx_environment_steps_env ON EnvironmentSteps(EnvironmentId, Phase, Position);
 
@@ -107,6 +116,12 @@ CREATE TABLE CodeAnalyzerIgnores ( RepositoryPath TEXT NOT NULL COLLATE NOCASE, 
 -- table CompressionCaptures
 CREATE TABLE CompressionCaptures ( Id TEXT PRIMARY KEY, CreatedUTC TEXT NOT NULL, Provider TEXT NOT NULL, ToolName TEXT NOT NULL, Command TEXT, RawText TEXT NOT NULL, CompressedText TEXT NOT NULL, CharsBefore INTEGER NOT NULL, CharsAfter INTEGER NOT NULL, Changed INTEGER NOT NULL, RewriteAccepted INTEGER NOT NULL DEFAULT 0, EnabledIds TEXT NOT NULL, Trace TEXT NOT NULL, ContentHash TEXT NOT NULL DEFAULT '', SeenCount INTEGER NOT NULL DEFAULT 1 );
 
+-- table ConversationTitleApiBackoff
+CREATE TABLE ConversationTitleApiBackoff ( Fingerprint TEXT PRIMARY KEY, RetryAfterUTC TEXT NOT NULL );
+
+-- table ConversationTitleRequests
+CREATE TABLE ConversationTitleRequests ( SessionId TEXT PRIMARY KEY REFERENCES Sessions(Id) ON DELETE CASCADE, UserInputId INTEGER NOT NULL REFERENCES UserInputs(Id) ON DELETE CASCADE, Attempts INTEGER NOT NULL DEFAULT 0, RetryAfterUTC TEXT NOT NULL, Lease TEXT NULL, LeaseUntilUTC TEXT NULL, CompletedUTC TEXT NULL , MessageCount INTEGER NOT NULL DEFAULT 0, CharacterCount INTEGER NOT NULL DEFAULT 0, LatestInputId INTEGER NOT NULL DEFAULT 0, GenerationCount INTEGER NOT NULL DEFAULT 0, LastInputId INTEGER NOT NULL DEFAULT 0, LastTitle TEXT NULL, Cancelled INTEGER NOT NULL DEFAULT 0, SettingsFingerprint TEXT NULL);
+
 -- table EnvironmentSteps
 CREATE TABLE EnvironmentSteps ( Id TEXT PRIMARY KEY, EnvironmentId INTEGER NOT NULL, Phase INTEGER NOT NULL, Position INTEGER NOT NULL, Name TEXT NOT NULL DEFAULT '', Command TEXT NOT NULL, StartMinimized INTEGER NOT NULL DEFAULT 0, TimeoutSeconds INTEGER NOT NULL DEFAULT 600, Enabled INTEGER NOT NULL DEFAULT 1, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, FOREIGN KEY (EnvironmentId) REFERENCES Environments(Id) ON DELETE CASCADE );
 
@@ -156,7 +171,7 @@ CREATE TABLE SessionLogs ( Id INTEGER PRIMARY KEY AUTOINCREMENT, SessionId TEXT 
 CREATE TABLE SessionShareUploads ( SessionId TEXT NOT NULL REFERENCES Sessions(Id) ON DELETE CASCADE, KeyFingerprint TEXT NOT NULL, RequestedUTC TEXT NOT NULL, CompletedUTC TEXT NULL, PRIMARY KEY (SessionId, KeyFingerprint) );
 
 -- table Sessions
-CREATE TABLE Sessions ( Id TEXT PRIMARY KEY, Cli TEXT NOT NULL, EnvironmentName TEXT, WorkingDirectory TEXT NOT NULL, ProjectDisplayName TEXT NOT NULL DEFAULT '', StartedUTC TEXT NOT NULL, EndedUTC TEXT, ExitCode INTEGER, Processed INTEGER NOT NULL DEFAULT 0, ParentSessionId TEXT DEFAULT '', SessionDisplayName TEXT DEFAULT '', OwnerPid INTEGER, OwnershipTracked INTEGER NOT NULL DEFAULT 1, JobRunId TEXT, ExportedUTC TEXT, ExportAttempts INTEGER NOT NULL DEFAULT 0, ExportNextAttemptUTC TEXT , AggregateEmbeddedUTC TEXT, AggregateEmbedFailureCount INTEGER NOT NULL DEFAULT 0, ExportedProxyCoverage TEXT NULL, ExportedProxyMaxRowId INTEGER NULL);
+CREATE TABLE Sessions ( Id TEXT PRIMARY KEY, Cli TEXT NOT NULL, EnvironmentName TEXT, WorkingDirectory TEXT NOT NULL, ProjectDisplayName TEXT NOT NULL DEFAULT '', StartedUTC TEXT NOT NULL, EndedUTC TEXT, ExitCode INTEGER, Processed INTEGER NOT NULL DEFAULT 0, ParentSessionId TEXT DEFAULT '', SessionDisplayName TEXT DEFAULT '', OwnerPid INTEGER, OwnershipTracked INTEGER NOT NULL DEFAULT 1, JobRunId TEXT, ExportedUTC TEXT, ExportAttempts INTEGER NOT NULL DEFAULT 0, ExportNextAttemptUTC TEXT , AggregateEmbeddedUTC TEXT, AggregateEmbedFailureCount INTEGER NOT NULL DEFAULT 0, ExportedProxyCoverage TEXT NULL, ExportedProxyMaxRowId INTEGER NULL, ConversationTitleEligible INTEGER NOT NULL DEFAULT 0);
 
 -- table TerminalSessionLogs
 CREATE TABLE TerminalSessionLogs ( Id INTEGER PRIMARY KEY AUTOINCREMENT, SessionId TEXT NOT NULL, Sequence INTEGER NOT NULL, IsAlternateScreen INTEGER NOT NULL DEFAULT 0, Data BLOB NOT NULL, Cols INTEGER NOT NULL DEFAULT 80, Rows INTEGER NOT NULL DEFAULT 24, Timestamp TEXT NOT NULL, FOREIGN KEY (SessionId) REFERENCES Sessions(Id) );

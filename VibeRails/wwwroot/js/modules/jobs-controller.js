@@ -767,16 +767,16 @@ export class JobController {
     // opened per automation and fetched on demand.
     renderSummaryRow(summary) {
         const statusCode = Number(summary.lastStatus);
-        const status = RUN_STATUS[statusCode] || { label: 'Unknown', tone: 'neutral' };
         const jobId = this.escape(summary.jobId);
         const safeName = this.escape(summary.jobName);
         const detail = this.runDetail({ errorMessage: summary.lastErrorMessage, exitCode: summary.lastExitCode });
         const total = Number(summary.totalRuns) || 0;
         const activeRuns = Number(summary.activeRuns) || 0;
         const openTitle = `View this automation's ${total} ${total === 1 ? 'run' : 'runs'}`;
+        const whyAction = summary.lastRunId ? `data-job-action="view-run" data-run-id="${this.escape(summary.lastRunId)}"` : '';
         return `<tr>
             <td><button class="job-run-link" type="button" data-job-action="view-history" data-job-id="${jobId}" title="${openTitle}">${safeName}</button><small>${this.escape(getLlmName(Number(summary.lastLlm)))}${summary.lastEnvironmentName ? ` · ${this.escape(summary.lastEnvironmentName)}` : ''}</small></td>
-            <td><span class="job-run-status" data-tone="${status.tone}">${status.label}</span>${detail ? `<small class="job-run-status-detail" title="${this.escape(detail)}">${this.escape(detail)}</small>` : ''}</td>
+            <td>${this.renderRunStatus(statusCode, detail, whyAction)}</td>
             <td title="${this.escape(summary.lastQueuedUtc)}">${this.escape(this.relativeTime(summary.lastQueuedUtc))}</td>
             <td><span class="jobs-run-count">${total}</span>${activeRuns > 0 ? `<small class="job-run-status-detail">${activeRuns} active</small>` : ''}</td>
             <td class="text-end jobs-run-actions">
@@ -1031,7 +1031,6 @@ export class JobController {
 
     renderHistoryRow(run) {
         const statusCode = Number(run.status);
-        const status = RUN_STATUS[statusCode] || { label: 'Unknown', tone: 'neutral' };
         const active = statusCode === RUN_STATUS_CODE.QUEUED || statusCode === RUN_STATUS_CODE.RUNNING;
         // Succeeded is terminal but it is not a failure, and offering a re-run on it invited
         // repeating work that had already landed. Running again starts at Failed.
@@ -1043,7 +1042,7 @@ export class JobController {
         const selected = this.historySelection.has(run.id);
         return `<tr>
             <td class="job-history-check"><input type="checkbox" class="form-check-input" data-run-select="${runId}"${selected ? ' checked' : ''}${active ? ' disabled title="A run that is still going cannot be removed"' : ''} aria-label="Select this run"></td>
-            <td><span class="job-run-status" data-tone="${status.tone}">${status.label}</span>${detail ? `<small class="job-run-status-detail" title="${this.escape(detail)}">${this.escape(detail)}</small>` : ''}</td>
+            <td>${this.renderRunStatus(statusCode, detail, `data-history-action="watch" data-run-id="${runId}"`)}</td>
             <td>${trigger}<small class="d-block mt-1">${run.terminalSessionId || run.sessionId
                 ? `<button class="btn btn-sm btn-link p-0 text-start" type="button" data-history-action="copy-session" data-session-id="${this.escape(run.terminalSessionId || run.sessionId)}" title="Copy session ID"><code>${this.escape(run.terminalSessionId || run.sessionId)}</code> <i class="fa-regular fa-copy" aria-hidden="true"></i></button>`
                 : '<span class="text-muted">No session recorded</span>'}</small></td>
@@ -1062,6 +1061,15 @@ export class JobController {
         if (!sessionId) return;
         const copied = await this.app.copyTextToClipboard(sessionId);
         this.app.showToast('Session', copied ? 'Session ID copied.' : 'Could not copy session ID.', copied ? 'success' : 'warning');
+    }
+
+    // A run that ended without succeeding opens its detail from the status itself. The reason
+    // line is cut to fit this column; the detail shows it whole, beside the CLI's last screen.
+    renderRunStatus(statusCode, detail, openAttributes) {
+        const status = RUN_STATUS[statusCode] || { label: 'Unknown', tone: 'neutral' };
+        const content = `<span class="job-run-status" data-tone="${status.tone}">${status.label}</span>${detail ? `<small class="job-run-status-detail" title="${this.escape(detail)}">${this.escape(detail)}</small>` : ''}`;
+        if (!openAttributes || statusCode < RUN_STATUS_CODE.FAILED) return content;
+        return `<button class="job-run-why" type="button" ${openAttributes} title="Show why this run stopped">${content}</button>`;
     }
 
     // Why a run ended, drawn from fields the row previously dropped on the floor.
@@ -1855,9 +1863,11 @@ export class JobController {
         }
 
         const actions = Array.isArray(run?.actions) ? run.actions : [];
+        const lastScreen = Array.isArray(run?.lastScreen) ? run.lastScreen : null;
         // Legacy Worker-only runs predate per-action snapshots. Preserve their direct replay path;
-        // workflow runs open a detail surface so script output and every action remain visible.
-        if (actions.length === 0 && run?.sessionId) {
+        // workflow runs open a detail surface so script output and every action remain visible,
+        // and so does any run that ended badly, so its last screen is the first thing shown.
+        if (actions.length === 0 && run?.sessionId && !lastScreen) {
             try {
                 await showReplayModal(run.sessionId);
                 return;
@@ -1870,6 +1880,7 @@ export class JobController {
         const status = RUN_STATUS[Number(run?.status)] || { label: 'Unknown', tone: 'neutral' };
         const active = Number(run?.status) <= 1;
         const kindTitle = this.kindTitle(this.jobs.find(job => Number(job.id) === Number(run?.jobId)) || null);
+        const replaySessionId = run?.terminalSessionId || (actions.length === 0 ? run?.sessionId : null);
         this.app.showModal(`${kindTitle} run`, `
             <div class="job-run-detail">
                 <div class="job-run-detail-summary">
@@ -1880,9 +1891,12 @@ export class JobController {
                         ? `${actions.length} ${actions.length === 1 ? 'action' : 'actions'} · ${this.escape(this.runDuration(run))}`
                         : active
                             ? 'This run is starting — its recorded terminal will be ready to watch here shortly.'
-                            : 'This run has no recorded terminal to watch.'}</p>
+                            : replaySessionId
+                                ? this.escape(this.runDuration(run))
+                                : 'This run has no recorded terminal to watch.'}</p>
                 </div>
-                ${run?.terminalSessionId ? `<p class="mt-2"><button class="btn btn-sm btn-outline-secondary" type="button" data-run-action-session="${this.escape(run.terminalSessionId)}"><i class="fa-solid fa-play me-1" aria-hidden="true"></i>Replay workflow terminal</button></p>` : ''}
+                ${this.renderLastScreen(lastScreen, status.tone)}
+                ${replaySessionId ? `<p class="mt-2"><button class="btn btn-sm btn-outline-secondary" type="button" data-run-action-session="${this.escape(replaySessionId)}"><i class="fa-solid fa-play me-1" aria-hidden="true"></i>${run?.terminalSessionId ? 'Replay workflow terminal' : 'Replay terminal'}</button></p>` : ''}
                 ${run?.terminalSessionId || run?.sessionId ? `<p class="small">Session: <code>${this.escape(run.terminalSessionId || run.sessionId)}</code> <button class="btn btn-sm btn-link p-0" type="button" data-copy-session="${this.escape(run.terminalSessionId || run.sessionId)}" aria-label="Copy session ID"><i class="fa-regular fa-copy" aria-hidden="true"></i></button></p>` : ''}
                 ${actions.length > 0 ? `<div class="job-run-actions-detail">${actions.map((action, index) => this.renderRunActionDetail(action, index)).join('')}</div>` : ''}
                 <div class="d-flex justify-content-end gap-2 mt-3">
@@ -1891,6 +1905,9 @@ export class JobController {
                 </div>
             </div>`);
         const detail = document.querySelector('.job-run-detail');
+        // The newest line is the one that explains the stop; open the screen scrolled to it.
+        const screen = detail?.querySelector('[data-run-last-screen] pre');
+        if (screen) screen.scrollTop = screen.scrollHeight;
         detail?.querySelector('[data-copy-session]')?.addEventListener('click', event => this.copySessionId(event.currentTarget.dataset.copySession));
         detail?.querySelector('[data-run-cancel]')?.addEventListener('click', async event => {
             await this.cancelRun(runId, event.currentTarget);
@@ -1907,6 +1924,20 @@ export class JobController {
                 }
             });
         });
+    }
+
+    // The server sends the bottom of the recorded screen only for a run that ended without
+    // succeeding (null otherwise). An empty screen is itself an answer: the process went before
+    // it printed anything, so there is nothing more to find in the recording.
+    renderLastScreen(lines, tone) {
+        if (!Array.isArray(lines)) return '';
+        if (lines.length === 0) {
+            return '<p class="text-muted small mb-2" data-run-last-screen>Its terminal recorded no output before the run stopped.</p>';
+        }
+        return `
+            <article class="job-run-action-detail mb-3" data-tone="${this.escape(tone)}" data-run-last-screen>
+                <details open><summary>Last screen before the run stopped</summary><pre>${this.escape(lines.join('\n'))}</pre></details>
+            </article>`;
     }
 
     renderRunActionDetail(action, index) {

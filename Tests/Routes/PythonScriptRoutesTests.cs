@@ -255,6 +255,19 @@ public sealed class PythonScriptRoutesTests : IDisposable
         });
     }
 
+    [Theory]
+    [InlineData(true, HttpStatusCode.BadRequest)]
+    [InlineData(false, HttpStatusCode.NotFound)]
+    public async Task PrivateTerminalRequiresRootBackendAndAWebSocketUpgrade(bool root, HttpStatusCode expected)
+    {
+        await WithHostAsync(async baseUri =>
+        {
+            using var response = await SharedClient.GetAsync(new Uri(baseUri, "/api/v1/python-scripts/run/terminal/ws"),
+                TestContext.Current.CancellationToken);
+            Assert.Equal(expected, response.StatusCode);
+        }, isActiveRootBackend: root);
+    }
+
     [Fact]
     public async Task InteractiveRunCreatesATerminalTabAndReturnsItsIdOnlyOnTheRootBackend()
     {

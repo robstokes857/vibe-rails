@@ -36,6 +36,8 @@ public interface IPythonScriptService
         CancellationToken cancellationToken = default);
     Task<string> ValidateRunnableAsync(string? name, CancellationToken cancellationToken = default);
     Task ValidateRunAuthorizationAsync(string? name, string? pin, CancellationToken cancellationToken = default);
+    /// <summary>Authorizes a run and prepares only verified script bytes for a private PTY.</summary>
+    Task<ProcessStartInfo> PrepareTerminalRunAsync(string? name, string? pin, CancellationToken cancellationToken = default);
     PythonScriptRunHistoryResponse GetRunHistory();
     string GetScriptsDirectory();
 
@@ -471,6 +473,35 @@ public sealed partial class PythonScriptService : IPythonScriptService
 
     public Task ValidateRunAuthorizationAsync(string? name, string? pin, CancellationToken cancellationToken = default) =>
         VerifyRunPinAsync(name, pin, cancellationToken);
+
+    /// <summary>Builds a direct interpreter launch for the temporary script terminal. No shell or recording.</summary>
+    public async Task<ProcessStartInfo> PrepareTerminalRunAsync(
+        string? name, string? pin, CancellationToken cancellationToken = default)
+    {
+        await VerifyRunPinAsync(name, pin, cancellationToken);
+        return await PrepareInteractiveStartAsync(name, cancellationToken);
+    }
+
+    private async Task<ProcessStartInfo> PrepareInteractiveStartAsync(string? name, CancellationToken cancellationToken)
+    {
+        var runtime = RuntimeFor(ResolveScriptPath(RegisteredName(name)));
+        var interpreter = ResolveInterpreterOrThrow(runtime);
+        var verified = await ReadVerifiedScriptAsync(name, cancellationToken);
+        var copy = await EnsureVerifiedCopyAsync(
+            verified.Path, verified.Hash, ExecutableBytes(runtime, verified.Content), cancellationToken);
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = interpreter.Options.PythonExecutable,
+            WorkingDirectory = Path.GetDirectoryName(verified.Path)!,
+            UseShellExecute = false
+        };
+        foreach (var argument in interpreter.PrefixArguments)
+            startInfo.ArgumentList.Add(argument);
+        foreach (var argument in ScriptLaunchArguments(runtime, copy, startInfo.WorkingDirectory, interactive: true))
+            startInfo.ArgumentList.Add(argument);
+        ApplyPythonEnvironment(startInfo, interpreter.Options);
+        return startInfo;
+    }
 
     /// <summary>
     /// Checks the same name/hash approval contract as a real run without launching anything. The

@@ -1093,12 +1093,27 @@ namespace VibeRails.DB
         public async Task SetSessionDisplayNameAsync(string sessionId, string displayName)
         {
             await using var connection = await OpenConnectionAsync();
+            await using var transaction = connection.BeginTransaction(deferred: false);
 
             await using var cmd = connection.CreateCommand();
+            cmd.Transaction = transaction;
             cmd.CommandText = SqlStrings.SetSessionDisplayName;
             cmd.Parameters.AddWithValue("$id", sessionId);
             cmd.Parameters.AddWithValue("$displayName", displayName);
             await cmd.ExecuteNonQueryAsync();
+            await CancelConversationTitleAsync(connection, transaction, sessionId);
+            await transaction.CommitAsync();
+        }
+
+        private static async Task CancelConversationTitleAsync(SqliteConnection connection,
+            SqliteTransaction transaction, string sessionId, CancellationToken cancellationToken = default)
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = ConversationTitleStore.CancelSql;
+            command.Parameters.AddWithValue("$sessionId", sessionId);
+            command.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("O"));
+            await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
         public async Task LogSessionOutputAsync(string sessionId, byte[] content, bool isError = false)
@@ -1846,13 +1861,17 @@ namespace VibeRails.DB
         public async Task<bool> UpdateChatHistorySessionNameAsync(string sessionId, string sessionDisplayName, CancellationToken cancellationToken)
         {
             await using var connection = await OpenConnectionAsync(cancellationToken);
+            await using var transaction = connection.BeginTransaction(deferred: false);
 
             await using var cmd = connection.CreateCommand();
+            cmd.Transaction = transaction;
             cmd.CommandText = SqlStrings.UpdateSessionDisplayName;
             cmd.Parameters.AddWithValue("$sessionId", sessionId);
             cmd.Parameters.AddWithValue("$sessionDisplayName", sessionDisplayName);
 
             var rowsAffected = await cmd.ExecuteNonQueryAsync(cancellationToken);
+            await CancelConversationTitleAsync(connection, transaction, sessionId, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
             return rowsAffected > 0;
         }
 
@@ -1922,7 +1941,7 @@ namespace VibeRails.DB
                 InputText: reader.IsDBNull(12) ? null : reader.GetString(12),
                 UserInputCount: reader.GetInt32(13),
                 DurationSeconds: reader.IsDBNull(14) ? null : reader.GetInt64(14)
-            );
+            ) { SessionTitleGenerated = reader.GetBoolean(15) };
         }
 
         private static string BuildChatHistoryPageQuery(string? preferredWorkingDirectory, string? sortBy, string? sortDirection)
@@ -2063,6 +2082,11 @@ namespace VibeRails.DB
                 command.Parameters.AddWithValue("$gitCommitHash", (object?)gitCommitHash ?? DBNull.Value);
                 command.Parameters.AddWithValue("$timestampUTC", DateTime.UtcNow.ToString("O"));
                 userInputId = (long)(await command.ExecuteScalarAsync())!;
+                command.CommandText = ConversationTitleStore.EnqueueSql;
+                command.Parameters.AddWithValue("$inputId", userInputId);
+                command.Parameters.AddWithValue("$characters", inputText.Trim().Length);
+                command.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("O"));
+                await command.ExecuteNonQueryAsync();
                 await transaction.CommitAsync();
             }
             return userInputId;

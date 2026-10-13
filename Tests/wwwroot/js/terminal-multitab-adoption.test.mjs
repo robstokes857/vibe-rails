@@ -142,6 +142,20 @@ test('adoptLaunchedTab falls back to the remembered selection when status is una
     assert.equal(added[0].tabInfo.hasActiveSession, true);
 });
 
+test('title updates refresh saved history without renaming or focusing live tabs', () => {
+    const { manager, added, focused } = createManager({ selection: 'base:codex', rememberedCli: 'codex' });
+    const controller = new TerminalController({});
+    controller.manager = manager;
+    const refreshes = [];
+    manager.historySidebar = { refresh: options => refreshes.push(options) };
+    const handlers = new Map();
+    controller.bindSessionEvents({ on: (type, callback) => handlers.set(type, callback) });
+    handlers.get('session_title_updated')({ sessionId: 'titled-session' });
+    assert.deepEqual(refreshes, [{ sessionId: 'titled-session' }]);
+    assert.deepEqual(added, []);
+    assert.deepEqual(focused, []);
+});
+
 test('Automation terminal events refresh the lazy list without adding viewers or moving focus', async () => {
     const { manager, added, focused } = createManager({ selection: 'base:shell', rememberedCli: 'shell' });
     const controller = new TerminalController({

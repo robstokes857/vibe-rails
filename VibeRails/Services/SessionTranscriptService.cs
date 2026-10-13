@@ -13,12 +13,18 @@ public class SessionTranscriptService(
         if (!forceRebuild && existing != null && !string.IsNullOrWhiteSpace(existing.Text))
             return existing.Text;
 
-        var chunks = await repository.GetSessionLogChunksAsync(sessionId, cancellationToken);
-        var userInputs = await repository.GetUserInputsForSessionAsync(sessionId, cancellationToken);
-        var text = await sessionOutputParser.ParseTranscriptAsync(chunks, userInputs, cancellationToken);
+        var text = await BuildCurrentAsync(sessionId, cancellationToken);
 
         await repository.SaveSessionOutputAndMarkProcessedAsync(sessionId, text, cancellationToken);
 
         return text;
+    }
+
+    /// <inheritdoc />
+    public async Task<string> BuildCurrentAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        var chunks = await repository.GetSessionLogChunksAsync(sessionId, cancellationToken);
+        var userInputs = await repository.GetUserInputsForSessionAsync(sessionId, cancellationToken);
+        return await sessionOutputParser.ParseTranscriptAsync(chunks, userInputs, cancellationToken);
     }
 }

@@ -54,6 +54,10 @@ public sealed class SummaryServiceTests : IDisposable
             Keep this normal context.
             The configured cloud credential is configured-api-key
             password=super_secret_value_here
+            {"password":"hunter2"}
+            Authorization: Basic dTpw
+            Server=db.example;User Id=sa;Pwd=synthetic-db-password;Database=app
+            client_secret: synthetic-client-secret
             Authorization: Bearer bearer-value-that-must-not-leak
             Visit https://admin:correct-horse-battery-staple@example.test/private
             eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature_value_here
@@ -76,11 +80,16 @@ public sealed class SummaryServiceTests : IDisposable
         using var payload = JsonDocument.Parse(Assert.IsType<string>(handler.RequestBody));
         var sentTranscript = payload.RootElement.GetProperty("sessionText").GetString();
         Assert.NotNull(sentTranscript);
+        // Best effort: values are masked in place and the rest of the transcript still goes.
         Assert.Contains("Keep this normal context.", sentTranscript, StringComparison.Ordinal);
         Assert.Contains("Keep this trailing context too.", sentTranscript, StringComparison.Ordinal);
-        Assert.Contains("[REDACTED: possible credential]", sentTranscript, StringComparison.Ordinal);
+        Assert.Contains("password=XXXXX", sentTranscript, StringComparison.Ordinal);
         Assert.DoesNotContain("configured-api-key", sentTranscript, StringComparison.Ordinal);
         Assert.DoesNotContain("super_secret_value_here", sentTranscript, StringComparison.Ordinal);
+        Assert.DoesNotContain("hunter2", sentTranscript, StringComparison.Ordinal);
+        Assert.DoesNotContain("dTpw", sentTranscript, StringComparison.Ordinal);
+        Assert.DoesNotContain("synthetic-db-password", sentTranscript, StringComparison.Ordinal);
+        Assert.DoesNotContain("synthetic-client-secret", sentTranscript, StringComparison.Ordinal);
         Assert.DoesNotContain("bearer-value-that-must-not-leak", sentTranscript, StringComparison.Ordinal);
         Assert.DoesNotContain("correct-horse-battery-staple", sentTranscript, StringComparison.Ordinal);
         Assert.DoesNotContain("eyJhbGciOiJIUzI1NiJ9", sentTranscript, StringComparison.Ordinal);

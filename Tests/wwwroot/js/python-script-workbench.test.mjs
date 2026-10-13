@@ -1354,7 +1354,7 @@ test('The identity render enables Run only when signed and the kebab adapts to h
     assert.equal(root.el('[data-workbench-approve-label]').textContent, 'Re-sign');
     assert.match(root.el('[data-workbench-menu]').innerHTML, /data-workbench-action="revoke"/);
     // Signed: the terminal escape hatch is offered in the kebab, never as a second big button.
-    assert.match(root.el('[data-workbench-menu]').innerHTML, /data-workbench-action="run-terminal"[\s\S]*Run in terminal/);
+    assert.doesNotMatch(root.el('[data-workbench-menu]').innerHTML, /data-workbench-action="run-terminal"/);
     assert.doesNotMatch(root.el('[data-workbench-menu]').innerHTML, /Open in VS Code/);
 
     workbench.editor.value = 'print("unsaved")\n';

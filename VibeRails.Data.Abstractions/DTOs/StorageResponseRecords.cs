@@ -90,6 +90,8 @@ public record ChatHistoryItem(
 {
     /// <summary>Current card labels, with the session's default attachment first.</summary>
     public IReadOnlyList<ChatHistoryCard> BoardCards { get; init; } = [];
+    /// <summary>A generated title yields to a Board label even when the card was attached later.</summary>
+    public bool SessionTitleGenerated { get; init; }
 }
 
 /// <summary>Current Board identity, display label and title shown in local chat history. Show <see cref="DisplayId"/>; <see cref="Key"/> is the identity.</summary>

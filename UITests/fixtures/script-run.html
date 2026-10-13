@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Script terminal test fixture</title>
+<link rel="stylesheet" href="/VibeRails/wwwroot/assets/bootstrap.min.css">
+<link rel="stylesheet" href="/VibeRails/wwwroot/style.css">
+<link rel="stylesheet" href="/VibeRails/wwwroot/assets/xterm/xterm.css">
+<link rel="stylesheet" href="/VibeRails/wwwroot/assets/fontawesome/all.min.css">
+</head><body>
+<main style="max-width:860px;margin:3rem auto;padding:1rem">
+    <h1>Scripts</h1><p>Try Minimize while the script waits for input, then click its button at the bottom to restore it.</p>
+    <button class="btn btn-primary" id="run-example">Run test_script.py</button>
+    <div style="margin-top:24px;max-width:440px">
+        <label for="demo-notes" class="form-label">Keep using the app</label>
+        <textarea id="demo-notes" class="form-control" rows="3" placeholder="Type here while the terminal is minimized"></textarea>
+        <small class="text-muted">UI preview with simulated script output. Nothing entered here is saved.</small>
+    </div>
+</main><div id="modal-container"></div>
+<script src="/VibeRails/wwwroot/assets/xterm/xterm.min.js"></script>
+<script src="/VibeRails/wwwroot/assets/xterm/addon-fit.js"></script>
+<script type="module" src="script-run.js"></script>
+</body></html>

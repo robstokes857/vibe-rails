@@ -751,8 +751,8 @@ namespace VibeRails.DB
 
         // Session CRUD
         public const string InsertSession = """
-            INSERT INTO Sessions (Id, Cli, EnvironmentName, WorkingDirectory, ProjectDisplayName, StartedUTC, OwnerPid, OwnershipTracked, JobRunId)
-            VALUES ($id, $cli, $envName, $workDir, $projectDisplayName, $startedUTC, $ownerPid, 1, $jobRunId);
+            INSERT INTO Sessions (Id, Cli, EnvironmentName, WorkingDirectory, ProjectDisplayName, StartedUTC, OwnerPid, OwnershipTracked, JobRunId, ConversationTitleEligible)
+            VALUES ($id, $cli, $envName, $workDir, $projectDisplayName, $startedUTC, $ownerPid, 1, $jobRunId, 1);
             """;
         public const string SelectLatestProjectDisplayNameByWorkingDirectory = """
             SELECT ProjectDisplayName
@@ -997,7 +997,9 @@ namespace VibeRails.DB
                    u.Sequence,
                    SUBSTR(u.InputText, 1, 120),
                    (SELECT COUNT(*) FROM UserInputs WHERE SessionId = s.Id),
-                   CASE WHEN s.EndedUTC IS NOT NULL THEN CAST((julianday(s.EndedUTC) - julianday(s.StartedUTC)) * 86400 AS INTEGER) ELSE NULL END
+                   CASE WHEN s.EndedUTC IS NOT NULL THEN CAST((julianday(s.EndedUTC) - julianday(s.StartedUTC)) * 86400 AS INTEGER) ELSE NULL END,
+                   EXISTS(SELECT 1 FROM ConversationTitleRequests q WHERE q.SessionId=s.Id
+                       AND q.LastTitle=s.SessionDisplayName AND s.ConversationTitleEligible=1)
             FROM Sessions s
             LEFT JOIN UserInputs u ON u.Id = (
                 SELECT Id FROM UserInputs WHERE SessionId = s.Id ORDER BY Sequence ASC LIMIT 1
@@ -1020,7 +1022,9 @@ namespace VibeRails.DB
                    u.Sequence,
                    SUBSTR(u.InputText, 1, 120),
                    (SELECT COUNT(*) FROM UserInputs WHERE SessionId = s.Id),
-                   CASE WHEN s.EndedUTC IS NOT NULL THEN CAST((julianday(s.EndedUTC) - julianday(s.StartedUTC)) * 86400 AS INTEGER) ELSE NULL END
+                   CASE WHEN s.EndedUTC IS NOT NULL THEN CAST((julianday(s.EndedUTC) - julianday(s.StartedUTC)) * 86400 AS INTEGER) ELSE NULL END,
+                   EXISTS(SELECT 1 FROM ConversationTitleRequests q WHERE q.SessionId=s.Id
+                       AND q.LastTitle=s.SessionDisplayName AND s.ConversationTitleEligible=1)
             FROM Sessions s
             LEFT JOIN UserInputs u ON u.Id = (
                 SELECT Id FROM UserInputs WHERE SessionId = s.Id ORDER BY Sequence ASC LIMIT 1

@@ -6,7 +6,7 @@
  * `isLauncherItemRunnable` in wwwroot/js/modules/automation-launcher.js — keep the two in
  * step). Clicking a row runs it, like a flyout row: automations are queued straight from the
  * extension host (`POST /api/v1/jobs/{id}/run`, no dashboard needed on screen), scripts are
- * handed to the dashboard because their run window collects arguments, stdin and a PIN.
+ * handed to the dashboard's private script terminal (and optional signing PIN prompt).
  *
  * Everything the tree needs from the extension host arrives through small dependency
  * objects so the behaviour is unit-testable without a backend or a webview.
@@ -26,6 +26,19 @@ export interface LauncherItem {
     status: string | null;
     scriptFileName?: string;
 }
+
+export interface LauncherGroup {
+    kind: 'group';
+    key: string;
+    label: string;
+    category: LauncherItem['kind'];
+}
+export type LauncherNode = LauncherItem | LauncherGroup;
+
+const LAUNCHER_GROUPS: LauncherGroup[] = [
+    { kind: 'group', key: 'automations', label: 'Agents & automations', category: 'automation' },
+    { kind: 'group', key: 'scripts', label: 'Scripts', category: 'script' }
+];
 
 export const LAUNCHER_LOAD_FAILED_MESSAGE = 'Could not load agents and automations.';
 export const LAUNCHER_ALL_HIDDEN_MESSAGE = 'Everything is hidden. Use "Customize list…" to show some.';
@@ -105,9 +118,9 @@ export function launcherItemDescription(item: LauncherItem): string | undefined 
         return undefined;
     }
     const fileName = (item.scriptFileName || item.label).toLowerCase();
-    if (fileName.endsWith('.py')) { return 'Python script'; }
-    if (fileName.endsWith('.ps1')) { return 'PowerShell script'; }
-    if (fileName.endsWith('.sh')) { return 'Bash script'; }
+    if (fileName.endsWith('.py')) { return 'Python'; }
+    if (fileName.endsWith('.ps1')) { return 'PowerShell'; }
+    if (fileName.endsWith('.sh')) { return 'Bash'; }
     return 'Script';
 }
 
@@ -118,7 +131,7 @@ export interface LauncherProviderDependencies {
     fetchItems(): Promise<unknown>;
 }
 
-export class LauncherTreeDataProvider implements vscode.TreeDataProvider<LauncherItem>, vscode.Disposable {
+export class LauncherTreeDataProvider implements vscode.TreeDataProvider<LauncherNode>, vscode.Disposable {
     private readonly _onDidChangeTreeData = new vscode.EventEmitter<void>();
     public readonly onDidChangeTreeData: vscode.Event<void> = this._onDidChangeTreeData.event;
     private readonly dependencies: LauncherProviderDependencies;
@@ -160,18 +173,38 @@ export class LauncherTreeDataProvider implements vscode.TreeDataProvider<Launche
         return this.next;
     }
 
-    public getTreeItem(item: LauncherItem): vscode.TreeItem {
+    public getTreeItem(item: LauncherNode): vscode.TreeItem {
+        if (item.kind === 'group') {
+            const node = new vscode.TreeItem(item.label, vscode.TreeItemCollapsibleState.Expanded);
+            node.id = `launcher-group:${item.key}`;
+            node.description = String(this.getChildren(item).length);
+            node.contextValue = 'launcherGroup';
+            node.iconPath = new vscode.ThemeIcon(item.category === 'script' ? 'code' : 'rocket');
+            return node;
+        }
         const node = new vscode.TreeItem(item.label, vscode.TreeItemCollapsibleState.None);
+        node.id = item.key;
         node.description = launcherItemDescription(item);
-        node.iconPath = new vscode.ThemeIcon(item.kind === 'script' ? 'terminal' : 'play');
-        node.tooltip = `Run ${item.label} now`;
+        const runtime = launcherItemDescription(item);
+        const icon = runtime === 'PowerShell' ? 'terminal-powershell' : runtime === 'Bash' ? 'terminal-bash'
+            : item.kind === 'script' ? 'file-code' : 'zap';
+        const color = runtime === 'Python' ? 'charts.yellow' : runtime === 'Bash' ? 'charts.green'
+            : item.kind === 'script' ? 'charts.blue' : 'charts.purple';
+        node.iconPath = new vscode.ThemeIcon(icon, new vscode.ThemeColor(color));
+        node.tooltip = item.kind === 'script'
+            ? `${item.label}\n${runtime} · Signed\nRun in a private script terminal. Input is not saved.`
+            : `Run ${item.label} now`;
         node.contextValue = LAUNCHER_ITEM_CONTEXT;
         node.command = { command: COMMAND_LAUNCHER_RUN, title: 'Run now', arguments: [item] };
         return node;
     }
 
-    public getChildren(element?: LauncherItem): LauncherItem[] {
-        return element ? [] : this.getItems();
+    public getChildren(element?: LauncherNode): LauncherNode[] {
+        const items = this.getItems();
+        if (element?.kind === 'group') return items.filter(item => item.kind === element.category);
+        if (element) return [];
+        // Keep the user's saved order within each section; omit empty headings.
+        return LAUNCHER_GROUPS.filter(group => items.some(item => item.kind === group.category));
     }
 
     public dispose(): void {

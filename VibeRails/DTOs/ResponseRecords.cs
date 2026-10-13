@@ -649,6 +649,8 @@ namespace VibeRails.DTOs
     // line: what the user sees there is exactly what is sent. They never reach a shell
     // (CliWrap passes argv straight to the interpreter), and the script itself is still
     // gated by the signed-hash check. StandardInput is piped to the process's stdin.
+    public record PythonScriptTerminalRequest(string? Name, string? Pin = null, int Cols = 80, int Rows = 24);
+
     public record PythonScriptRunRequest(
         string? Name,
         List<string>? Arguments = null,
@@ -1749,6 +1751,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(PythonScriptRunPinRequirementRequest))]
     [JsonSerializable(typeof(PythonScriptApprovalRequest))]
     [JsonSerializable(typeof(PythonScriptRunRequest))]
+    [JsonSerializable(typeof(PythonScriptTerminalRequest))]
     [JsonSerializable(typeof(PythonScriptContentResponse))]
     [JsonSerializable(typeof(PythonScriptSaveRequest))]
     [JsonSerializable(typeof(PythonScriptSaveResponse))]

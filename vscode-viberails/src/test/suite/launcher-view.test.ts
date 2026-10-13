@@ -80,9 +80,9 @@ suite('Launcher view catalog rules', () => {
         assert.equal(scriptNameFromItem(script('abc123', 'approved', 0, true, { label: 'Backup' })), 'abc123');
         assert.equal(scriptNameFromItem(automation(1, 'Nightly', 0)), 'Nightly');
         assert.equal(launcherItemDescription(automation(1, 'A', 0)), undefined);
-        assert.equal(launcherItemDescription(script('x', 'approved', 0, true, { label: 'Backup', scriptFileName: 'backup.PS1' })), 'PowerShell script');
-        assert.equal(launcherItemDescription(script('tidy.py', 'approved', 0)), 'Python script');
-        assert.equal(launcherItemDescription(script('run.sh', 'approved', 0)), 'Bash script');
+        assert.equal(launcherItemDescription(script('x', 'approved', 0, true, { label: 'Backup', scriptFileName: 'backup.PS1' })), 'PowerShell');
+        assert.equal(launcherItemDescription(script('tidy.py', 'approved', 0)), 'Python');
+        assert.equal(launcherItemDescription(script('run.sh', 'approved', 0)), 'Bash');
         assert.equal(launcherItemDescription(script('odd.txt', 'approved', 0)), 'Script');
     });
 });
@@ -99,12 +99,12 @@ suite('Launcher view provider', () => {
             assert.equal(node.tooltip, 'Run Nightly review now');
             assert.equal(node.command?.command, 'viberails.launcher.run');
             assert.equal(node.command?.arguments?.[0], item);
-            assert.equal((node.iconPath as vscode.ThemeIcon).id, 'play');
+            assert.equal((node.iconPath as vscode.ThemeIcon).id, 'zap');
             assert.equal(node.collapsibleState, vscode.TreeItemCollapsibleState.None);
 
             const scriptNode = provider.getTreeItem(script('b.ps1', 'approved', 1));
-            assert.equal((scriptNode.iconPath as vscode.ThemeIcon).id, 'terminal');
-            assert.equal(scriptNode.description, 'PowerShell script');
+            assert.equal((scriptNode.iconPath as vscode.ThemeIcon).id, 'terminal-powershell');
+            assert.equal(scriptNode.description, 'PowerShell');
         } finally {
             provider.dispose();
         }
@@ -145,8 +145,10 @@ suite('Launcher view provider', () => {
                 ]
             };
             await provider.refresh();
-            assert.deepEqual(provider.getChildren().map((item) => item.label), ['A', 'B']);
-            assert.deepEqual(provider.getChildren(provider.getChildren()[0]), []);
+            assert.deepEqual(provider.getChildren().map((item) => item.label), ['Agents & automations']);
+            assert.deepEqual(provider.getChildren(provider.getChildren()[0]).map(item => item.label), ['A', 'B']);
+            assert.equal(provider.getTreeItem(provider.getChildren()[0]).description, '2');
+            assert.equal(provider.getTreeItem(provider.getChildren()[0]).command, undefined);
             assert.equal(provider.getMessage(), undefined);
 
             fail = true;

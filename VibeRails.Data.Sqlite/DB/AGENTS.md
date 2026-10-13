@@ -124,6 +124,30 @@ This document describes the database layer: Environments, Sandboxes, AgentMetada
 
 ---
 
+## Conversation title request storage
+
+`conversation-titles/1` adds `ConversationTitleRequests` in `state.db`; `/2` adds milestone counters,
+the last generated title, cancellation state, a saved-key fingerprint and shared API backoff.
+It stores references and counts, never prompt copies or API keys. The additive
+`Sessions.ConversationTitleEligible` flag defaults to zero; only newly created sessions opt in.
+Setup never enrolls existing history. Input capture updates counts in its existing transaction.
+The first title is due at 300 trimmed user-input characters or two captured user messages; one
+refresh is due at 750 cumulative characters or ten messages, with new input after the first claim.
+After two successful generations no more work is scheduled.
+
+`IConversationTitleStore` claims one milestone for two minutes and commits before external work.
+Every root polls every few seconds, so the claim finds a candidate with a plain read and takes the
+writer lock only for a guarded UPDATE; an idle tick never blocks other `state.db` writers. Only a
+key-wide failure (rejected key, rate limit, unavailable endpoint, network) writes the shared API
+backoff; a conversation's own failures delay only that conversation, which gives up after five.
+Explicit naming cancels future/pending/claimed work in the same transaction, even when the text
+stays the same. Completion rechecks Automation/resume/shell eligibility and the claim, preserving
+changed names while allowing the transcript parser to set its automatic preview during a claim.
+Root-only `ConversationTitleJob` uses the full current Send-to transcript, credential redaction,
+fresh saved settings and bounded HTTP; no input-path network call is made. Board membership is
+checked before and after remote work; history gives Board labels precedence over generated titles,
+including late attachments. Resume summaries and explicit live-tab/Board session labels are separate.
+
 ## Shared search component (VIBE-55)
 
 Current search documents, FTS, sqlite-vec chunks, result metadata, reconciliation cursors,

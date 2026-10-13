@@ -3473,6 +3473,9 @@ export class TerminalController {
             tab.instance?.statusController?.onSessionBusy();
         });
 
+        // Refresh saved history/replay/share labels without replacing explicitly named live tabs.
+        appEventClient.on('session_title_updated', payload => touchHistory(payload));
+
         appEventClient.on('session_busy', (payload) => {
             const tab = findTab(payload);
             if (!tab) return;
@@ -3483,7 +3486,7 @@ export class TerminalController {
         appEventClient.on('session_input', (payload) => {
             const isSubmit = (payload?.kind || '').toLowerCase() === 'submit';
             if (isSubmit) {
-                // The first submit is what names a history row; later ones change nothing there.
+                // Show the first-prompt fallback; a later title event refreshes its saved name.
                 touchHistory(payload, { onlyIfUnnamed: true });
             }
             const tab = findTab(payload);

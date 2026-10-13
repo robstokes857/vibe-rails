@@ -310,17 +310,18 @@ public sealed class JiraPullService(
 
     public async Task<bool> PullDueAsync(CancellationToken cancellationToken)
     {
-        // Tokens whose connection is gone (its board was deleted) are removed here.
-        await secrets.PruneAsync(async ct =>
-            (await store.GetJiraConnectionsAsync(ct)).Select(connection => connection.Id).ToList(), cancellationToken);
-
         // A root backend that lost the scheduler lease mid-pull may still be pulling, or an
         // activity drain holds the lock: skip rather than run the same filter twice. The
         // scheduler tries again on its next tick rather than after a whole interval.
         using var held = pullLock.TryAcquire();
         if (held is null)
             return false;
-        foreach (var connection in await store.GetJiraConnectionsAsync(cancellationToken))
+        // Tokens whose connection is gone (its board was deleted) are removed here. This runs
+        // after the lock so a busy pull, retried every tick, does not repeat the reads.
+        var connections = await store.GetJiraConnectionsAsync(cancellationToken);
+        await secrets.PruneAsync(_ => Task.FromResult<IReadOnlyCollection<string>>(
+            connections.Select(connection => connection.Id).ToList()), cancellationToken);
+        foreach (var connection in connections)
         {
             // An expired token is refused until it is saved again, as RequireReady does for a
             // manual pull; retrying it every interval only hammers Jira with a dead credential.
@@ -573,12 +574,16 @@ public sealed class JiraPullService(
             ClearPoints: mapped.ClearPoints,
             Tags: mapped.Tags.ToList(),
             Type: mapped.Type), cancellationToken, JiraAuthor);
-        // The card keeps its lane and board: a Jira status change is noted, never applied.
-        if (!unchanged && applied.Status is not null && !string.Equals(applied.Status, mapped.StatusName, StringComparison.Ordinal))
-            await board.AddCommentAsync(connection.ProjectPath, existing.Id, JiraAuthor,
-                StatusChangeComment(issue.Key, applied.Status, mapped.StatusName), cancellationToken, syncToJira: false);
+        // The card keeps its lane and board: a Jira status change is noted, never applied. Record
+        // the new status first: a failed comment is then lost once, instead of being posted again
+        // by every later pull against a link that still holds the old status.
+        var statusChanged = !unchanged && applied.Status is not null
+            && !string.Equals(applied.Status, mapped.StatusName, StringComparison.Ordinal);
         await store.UpdateJiraLinkAsync(new BoardJiraLinkRecord(
             existing.Id, connection.Id, issue.Id, issue.Key, mapped.AssigneeDisplay, issue.Updated, DateTime.UtcNow, mapping), cancellationToken);
+        if (statusChanged)
+            await board.AddCommentAsync(connection.ProjectPath, existing.Id, JiraAuthor,
+                StatusChangeComment(issue.Key, applied.Status!, mapped.StatusName), cancellationToken, syncToJira: false);
         return ApplyAction.Updated;
     }
 

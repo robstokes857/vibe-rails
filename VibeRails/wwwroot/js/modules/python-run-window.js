@@ -1,34 +1,14 @@
 import { escapeHtml, isConfirmDialogOpen } from './utils.js';
 import { scriptRuntimeFor } from './script-runtimes.js';
+import { VibeTerminal } from './vibe-terminal.js';
 
-const API = '/api/v1/python-scripts';
-const STORAGE_PREFIX = 'viberails.pythonRun.';
-const MAX_EXTRAS = 24;
-
-/**
- * The little run window: a signed script's inputs go in, its exit code, output and return
- * value come back, and nothing spawns a terminal. This is the small-space surface — the
- * PTY tab ("Run in terminal") stays one click away for scripts that need typing or Ctrl+C.
- *
- * Inputs are argument rows (optional flag plus value) and standard input.
- * Whatever you typed is remembered per script, so re-running is one click.
- *
- * The command line under the inputs is not a decoration: it is literally the payload. The
- * tokens it prints are the argv array that gets posted, so a preview can never drift from
- * what runs.
- */
-
-/** A run "worked" only when it exited 0 without hitting the timeout. */
+// Retained for the existing captured-run API's row/workbench summaries.
 export function isPythonRunOk(run) {
     return Boolean(run) && run.exitCode === 0 && !run.timedOut && !run.cancelled;
 }
-
-/** A cancelled request has no exit code: never present one as a successful run. */
 export function pythonRunStatus(run) {
     return run?.cancelled ? 'Stop requested' : `exit ${run?.exitCode}${run?.timedOut ? ' (timed out)' : ''}`;
 }
-
-/** stdout then stderr of one run, as the row drawer and this window both show it. */
 export function formatPythonRunOutput(run) {
     const parts = [];
     if (run?.standardOutput?.trim()) parts.push(run.standardOutput.trimEnd());
@@ -36,129 +16,37 @@ export function formatPythonRunOutput(run) {
     return parts.join('\n\n') || '(no output)';
 }
 
-/** True for a JSON scalar the run window would rather call output than a return value. */
-function isStructuredJson(text) {
-    const trimmed = String(text || '').trim();
-    return trimmed.startsWith('{') || trimmed.startsWith('[');
-}
-
-/**
- * The script's return value, re-indented for reading. Mirrors the server's convention
- * (PythonScriptService.ExtractReturnJson) so a client that never saw `returnJson` — an
- * older backend — still shows the object a script printed on its last line.
- */
-export function prettyJson(text) {
-    if (!isStructuredJson(text)) return null;
-    try {
-        return JSON.stringify(JSON.parse(String(text).trim()), null, 2);
-    } catch {
-        return null;
-    }
-}
-
-/** The return value of a finished run, whether the backend extracted it or not. */
-export function returnValueOf(run) {
-    const fromServer = prettyJson(run?.returnJson);
-    if (fromServer) return fromServer;
-    const stdout = String(run?.standardOutput || '').trim();
-    if (!stdout) return null;
-    return prettyJson(stdout) || prettyJson(stdout.split(/\r?\n/).pop());
-}
-
-/** Builds the argv array from the run window's argument rows. */
-export function resolveArgv({ extras = [] } = {}) {
-    const free = [];
-    for (const extra of extras) {
-        const flag = String(extra?.flag || '').trim();
-        const value = String(extra?.value ?? '').trim();
-        if (flag) free.push(flag);
-        if (value) free.push(value);
-    }
-
-    return { argv: free, error: null };
-}
-
-/** Shell-style quoting, for display only: it shows where one argument ends. */
-export function quoteForDisplay(token) {
-    const text = String(token ?? '');
-    return /[\s"'\\]/.test(text) ? JSON.stringify(text) : text;
-}
-
-export function readRemembered(storage, name) {
-    try {
-        const raw = storage?.getItem?.(STORAGE_PREFIX + name);
-        const parsed = raw ? JSON.parse(raw) : null;
-        if (!parsed || typeof parsed !== 'object') return null;
-        return {
-            hadDeclaredInputs: Boolean(parsed.hadDeclaredInputs || Object.keys(parsed.values || {}).length),
-            extras: Array.isArray(parsed.extras) ? parsed.extras.slice(0, MAX_EXTRAS) : [],
-            stdin: typeof parsed.stdin === 'string' ? parsed.stdin : ''
-        };
-    } catch {
-        return null;
-    }
-}
-
+/** A private xterm window. Input goes straight to its PTY, with no remembered fields or recording. */
 export class PythonRunWindow {
     constructor(app, scripts) {
         this.app = app;
         this.scripts = scripts;
         this.layer = null;
         this.name = null;
-        this.hadDeclaredInputs = false;
-        this.extras = [];
-        this.stdin = '';
-        this.lastRun = null;
         this.running = false;
-        // Identity of the run that owns the window right now. A run that outlived its window
-        // (closed mid-run) still records its result, but must not paint over or re-enable a
-        // window that has since been reopened for something else.
+        this.lastRun = null;
+        this.terminal = null;
         this._runToken = null;
-        this._runs = new Map();
         this._resolve = null;
-        this._onKeydown = null;
     }
 
-    get isOpen() {
-        return Boolean(this.layer);
-    }
+    get isOpen() { return Boolean(this.layer); }
 
-    /**
-     * Opens the window for one script and resolves with the last run's result when it closes
-     * (null if nothing ran). A script that declares no inputs and remembers none runs straight
-     * away — "call the script in a little window" should not cost a second click.
-     */
     open(name) {
         if (!name) return Promise.resolve(null);
-        if (this.layer) this.close();
-
+        this.close();
         this.name = name;
-        const remembered = readRemembered(globalThis.localStorage, name);
-        // Legacy typed inputs no longer have an MCP mapping. Let the user review argv.
-        this.hadDeclaredInputs = remembered?.hadDeclaredInputs || false;
-        this.extras = remembered?.extras || [];
-        this.stdin = remembered?.stdin || '';
         this.lastRun = null;
-        this._runToken = this._runs.get(name) || null;
-        // NOT `false`. A run started from an earlier window can still be in flight, and
-        // clearing the flag here is what used to let a second interpreter start for the same
-        // script. The in-flight run still owns this window and will clear it when it lands.
-        this.running = this.scripts?.runningNames?.has(name) === true;
-
-        this._mount();
-        this._paintRunState();
-
-        const takesNothing = !this.running
-            && !this.hadDeclaredInputs && this.extras.length === 0 && !this.stdin;
-        if (takesNothing) {
+        this._previousFocus = document.activeElement;
+        const closed = new Promise(resolve => { this._resolve = resolve; });
+        try {
+            this._mount();
             void this.execute();
-        } else {
-            requestAnimationFrame(() => {
-                this.layer?.querySelector('[data-run-input]')?.focus();
-            });
+        } catch (error) {
+            this.app.showError(error?.message || 'Could not open the script terminal.');
+            this.close();
         }
-
-        return new Promise((resolve) => { this._resolve = resolve; });
+        return closed;
     }
 
     close() {
@@ -167,454 +55,245 @@ export class PythonRunWindow {
             this.scripts?._closeModal?.();
             if (!this.layer) return;
         }
-        this._remember();
-        if (this._onKeydown) document.removeEventListener('keydown', this._onKeydown, true);
-        this._onKeydown = null;
-        if (this.scripts?.modal?.layer === this.layer) this.scripts.modal = null;
+        const token = this._runToken;
+        this._runToken = null;
+        if (token) {
+            token.socket?.close();
+            this.scripts?.clearRunning?.(token.name);
+        }
+        this.running = false;
+        this._input?.();
+        this._input = null;
+        this.terminal?.dispose();
+        this.terminal = null;
+        document.removeEventListener('keydown', this._onKeydown, true);
+        window.removeEventListener('pagehide', this._onPageHide);
+        this._dockButton?.remove();
+        this._dockButton = null;
         this.layer.remove();
         this.layer = null;
+        this._previousFocus?.focus?.();
         const resolve = this._resolve;
         this._resolve = null;
         resolve?.(this.lastRun);
     }
 
-    // --- run ---
+    minimize() {
+        if (!this.layer) return;
+        this.layer.hidden = true;
+        let dock = document.getElementById('script-run-dock');
+        if (!dock) {
+            dock = document.createElement('div');
+            dock.id = 'script-run-dock';
+            dock.setAttribute('aria-label', 'Running scripts');
+            document.body.appendChild(dock);
+        }
+        if (!this._dockButton) {
+            this._dockButton = document.createElement('button');
+            this._dockButton.type = 'button';
+            this._dockButton.className = 'vb-run-dock-button';
+            this._dockButton.addEventListener('click', () => this.show());
+            dock.appendChild(this._dockButton);
+        }
+        this._updateDock();
+        this._previousFocus?.focus?.();
+    }
 
-    /** Posts the resolved argv and stdin, then paints the result. */
+    show() {
+        if (!this.layer) return;
+        for (const other of this.scripts?.runWindows?.values?.() || []) {
+            if (other !== this && other.layer && !other.layer.hidden) other.minimize();
+        }
+        this.layer.hidden = false;
+        this._dockButton?.remove();
+        this._dockButton = null;
+        this.terminal?.fit();
+        this.terminal?.focus();
+    }
+
+    _updateDock() {
+        if (this._dockButton) {
+            const label = this.scripts?.displayName?.(this.name) || this.name;
+            this._dockButton.textContent = `${label} · ${this._status || 'Running'}`;
+            this._dockButton.title = 'Restore script terminal';
+            this._dockButton.dataset.tone = this._tone || 'waiting';
+        }
+    }
+
     async execute() {
-        if (this.running || !this.name) return null;
-        if (this.scripts?.runningNames?.has(this.name)) {
-            this._showProblem(`${this.name} is already running.`);
-            return null;
-        }
-        const { argv, error } = resolveArgv(this);
-        if (error) {
-            this._showProblem(error);
-            return null;
-        }
-        this._showProblem('');
-        this._remember();
-
-        const name = this.name;
-        const token = { awaitingPin: true, controller: new AbortController(), startedUtc: new Date() };
-        const layer = this.layer;
-        const standardInput = this.stdin || null;
+        if (this.running || !this.layer || !this.name) return;
+        const token = { name: this.name, awaitingPin: true, socket: null, ready: false, started: Date.now() };
         this._runToken = token;
-        this._runs.set(name, token);
         this.running = true;
-        // The previous result goes now, not when the new one lands: a stale "exit 0" sitting
-        // under a failed re-run reads as if the failure were the old run's.
         this.lastRun = null;
-        this.scripts?.markRunning?.(name);
-        this._paintRunState();
-
-        let result = null;
+        this.scripts?.markRunning?.(token.name);
+        this.terminal?.reset();
+        this._paintState('Starting…', 'waiting');
         try {
-            const isCurrent = () => this._runToken === token && this.name === name && this.layer === layer;
-            const requestedPin = this.scripts?.requestRunPin?.(name, { isCurrent });
-            const pin = requestedPin?.then ? await requestedPin : requestedPin;
+            let pin = await this.scripts?.requestRunPin?.(token.name, { isCurrent: () => this._runToken === token });
             token.awaitingPin = false;
-            if (pin === null || !isCurrent() || token.controller.signal.aborted) return null;
-            this._paintRunState();
-            const body = { name, arguments: argv, standardInput };
-            if (pin !== undefined) body.pin = pin;
-            result = await this.app.apiCall(`${API}/run`, 'POST',
-                body,
-                { showLoading: false, preferErrorResponseMessage: true, signal: token.controller.signal });
-            // Unconditional: the row's "Last run" drawer and the workbench's output panel are
-            // where the result belongs even when nobody is looking at the window any more.
-            this.scripts?.recordRun?.(name, result);
-        } catch (problem) {
-            if (problem?.name === 'AbortError' && token.controller.signal.aborted) {
-                // Aborting the request cancels the server's run token and kills its process
-                // tree. The disconnected request cannot report an exit code or final output.
-                result = {
-                    name, cancelled: true, exitCode: null, timedOut: false,
-                    standardOutput: '', standardError: '',
-                    startedUtc: token.startedUtc.toISOString(),
-                    durationMs: Date.now() - token.startedUtc.getTime()
-                };
-                this.scripts?.recordRun?.(name, result);
-            } else if (this._runToken === token && this.name === name) {
-                this._showProblem(problem?.message || `Could not run ${name}.`);
-            }
-        } finally {
-            this._runs.delete(name);
-            this.scripts?.clearRunning?.(name);
-            // Window state is only ours to touch while we are still the current run. Reopening
-            // the window for the same script leaves the token alone, so a run that survived its
-            // window still lands in it; opening a different script replaces the token, and this
-            // run then finishes quietly.
-            if (this._runToken === token) {
-                this._runToken = null;
-                this.running = false;
-                if (this.name === name) this.lastRun = result;
-                this._paintRunState();
-                this._paintResult();
-            }
+            if (this._runToken !== token) return;
+            if (pin === null) return this._finish(token, 'Run cancelled', 'neutral');
+            const base = window.__viberails_API_BASE__ || window.location.origin;
+            const url = `${base.replace(/^http/, 'ws')}/api/v1/python-scripts/run/terminal/ws`;
+            const tab = sessionStorage.getItem('viberails_tab')?.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+            const socket = new WebSocket(url, tab ? [tab] : []);
+            token.socket = socket;
+            socket.binaryType = 'arraybuffer';
+            socket.onopen = () => {
+                if (this._runToken !== token) { pin = undefined; socket.close(); return; }
+                this.terminal?.fit();
+                socket.send(JSON.stringify({ name: token.name, pin, cols: this._cols(), rows: this._rows() }));
+                pin = undefined;
+                socket.onopen = null;
+            };
+            socket.onmessage = event => {
+                if (this._runToken !== token) return;
+                if (typeof event.data !== 'string') {
+                    this.terminal?.write(new Uint8Array(event.data));
+                } else if (event.data === 'ready') {
+                    token.ready = true;
+                    this._paintState('Running', 'waiting');
+                    this.terminal?.focus();
+                } else if (event.data.startsWith('exit:')) {
+                    const exitCode = Number(event.data.slice(5));
+                    if (!Number.isInteger(exitCode)) return;
+                    this.lastRun = { exitCode, durationMs: Date.now() - token.started };
+                    this._finish(token, exitCode === 0 ? 'Finished · exit 0' : `Failed · exit ${exitCode}`,
+                        exitCode === 0 ? 'success' : 'danger');
+                } else if (event.data === 'stopped') {
+                    this.lastRun = { cancelled: true, exitCode: null };
+                    this._finish(token, 'Stopped', 'neutral');
+                } else if (event.data.startsWith('error:')) {
+                    this._finish(token, event.data.slice(6), 'danger');
+                }
+            };
+            socket.onclose = () => {
+                pin = undefined;
+                socket.onopen = null;
+                if (this._runToken === token)
+                    this._finish(token, 'Connection closed. Run again to start a new script.', 'danger');
+            };
+            socket.onerror = () => {
+                pin = undefined;
+                this._finish(token, 'Could not connect to the script terminal.', 'danger');
+            };
+        } catch (error) {
+            this._finish(token, error?.message || 'Could not start the script.', 'danger');
         }
-        return result;
     }
 
-    /** Stops only this window's captured request for the named script, including after Close. */
+    _finish(token, message, tone) {
+        if (this._runToken !== token) return;
+        this._runToken = null;
+        this.running = false;
+        token.socket?.close();
+        this.scripts?.clearRunning?.(token.name);
+        this._paintState(message, tone);
+    }
+
+    canStop(name = this.name) { return name === this.name && this.running; }
+
     stop(name = this.name) {
-        const token = this._runs.get(name);
-        if (!token || token.controller.signal.aborted) return;
-        token.controller.abort();
-        if (token.awaitingPin && this._runToken === token && this.scripts?.modal?.layer !== this.layer) {
-            this.scripts?._closeModal?.();
+        if (!this.canStop(name)) return;
+        const token = this._runToken;
+        if (token?.ready && token.socket?.readyState === WebSocket.OPEN) {
+            token.ready = false;
+            this._paintState('Stopping…', 'waiting');
+            const stop = this.layer?.querySelector('[data-run-action="stop"]');
+            if (stop) stop.disabled = true;
+            token.socket.send('stop');
+        } else {
+            if (token?.awaitingPin) this.scripts?._closeModal?.();
+            this._finish(token, 'Run cancelled', 'neutral');
         }
-        if (this.name === name) this._paintRunState();
-        this.scripts?._render?.();
     }
 
-    canStop(name = this.name) {
-        const token = this._runs.get(name);
-        return Boolean(token && !token.controller.signal.aborted);
-    }
+    _cols() { return Math.min(400, Math.max(10, this.terminal?.cols || 80)); }
+    _rows() { return Math.min(150, Math.max(5, this.terminal?.rows || 24)); }
 
-    /**
-     * Hands this script to the PTY tab instead, for runs that need typing or Ctrl+C. The
-     * captured run has to be finished first — the controller refuses to launch over one, and
-     * closing before that refusal is what made this button look dead.
-     */
-    async runInTerminal() {
-        const name = this.name;
-        if (!name) return;
-        if (this.running || this.scripts?.runningNames?.has(name)) {
-            this._showProblem(`${name} is still running. Wait for it to finish first.`);
-            return;
-        }
-        this.close();
-        await this.scripts?.runInTerminal?.(name);
+    _sendInput(data) {
+        const token = this._runToken;
+        if (!token?.ready || token.socket?.readyState !== WebSocket.OPEN) return;
+        // Binary frames cannot be mistaken for control messages, even when a password
+        // or pasted line happens to begin with a reserved protocol prefix.
+        const bytes = new TextEncoder().encode(data);
+        for (let offset = 0; offset < bytes.length; offset += 64 * 1024)
+            token.socket.send(bytes.subarray(offset, offset + 64 * 1024));
     }
-
-    // --- markup ---
 
     _mount() {
-        const host = document.getElementById('modal-container') || document.body;
         const layer = document.createElement('div');
-        layer.className = 'llm-picker-modal-layer';
+        layer.className = 'vb-script-terminal-layer';
         layer.innerHTML = this._shell();
-        host.appendChild(layer);
+        document.body.appendChild(layer);
         this.layer = layer;
-
-        layer.addEventListener('click', (event) => this._onClick(event));
-        layer.addEventListener('input', (event) => this._onInput(event));
-        layer.addEventListener('change', (event) => this._onInput(event));
-        layer.querySelector('[data-run-form]')?.addEventListener('submit', (event) => {
-            event.preventDefault();
-            void this.execute();
+        layer.addEventListener('click', event => {
+            const action = event.target.closest('[data-run-action]')?.dataset.runAction;
+            if (action === 'close') this.close();
+            if (action === 'minimize') this.minimize();
+            if (action === 'stop') this.stop();
+            if (action === 'run') void this.execute();
         });
-
-        this._onKeydown = (event) => {
-            if (isConfirmDialogOpen() || !this.layer) return;
-            if (this.scripts?.modal?.layer && this.scripts.modal.layer !== this.layer) return;
-            if (event.key === 'Escape') {
-                event.preventDefault();
-                event.stopImmediatePropagation();
-                this.close();
-                return;
-            }
-            // Ctrl/⌘+Enter runs from anywhere in the window, including the stdin box
-            // where a bare Enter has to stay a newline.
-            if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
-                event.preventDefault();
-                void this.execute();
+        this.terminal = new VibeTerminal({ outputEl: layer.querySelector('[data-run-terminal]'),
+            cols: 80, rows: 24, scrollback: 2000, disableStdin: true });
+        this._input = this.terminal.onData(data => this._sendInput(data));
+        this.terminal.onFitChange = () => {
+            const token = this._runToken;
+            if (token?.ready && token.socket?.readyState === WebSocket.OPEN)
+                token.socket.send(`__resize__:${this._cols()},${this._rows()}`);
+        };
+        this.terminal.startResizeHandling();
+        this.terminal.fit();
+        this._onKeydown = event => {
+            if (isConfirmDialogOpen() || this.scripts?.modal || !layer.contains(event.target)) return;
+            // Escape remains available to the program; this floating window does not trap focus.
+            if (event.key === 'Escape' && !event.target.closest('.xterm')) {
+                event.preventDefault(); event.stopImmediatePropagation(); this.minimize();
             }
         };
+        this._onPageHide = () => this.close();
         document.addEventListener('keydown', this._onKeydown, true);
-
-        if (this.scripts) this.scripts.modal = { layer, close: () => this.close() };
-        this._paintFields();
+        window.addEventListener('pagehide', this._onPageHide);
+        this.show();
+        layer.querySelector('[data-run-action="close"]')?.focus();
     }
 
     _shell() {
-        const name = escapeHtml(this.scripts?.displayName?.(this.name) || this.name || '');
-        return `
-            <div class="modal fade show d-block vb-run-window" tabindex="-1" role="dialog"
-                 aria-modal="true" aria-labelledby="vb-run-window-title">
-                <div class="modal-dialog modal-dialog-centered">
-                    <form class="modal-content" data-run-form autocomplete="off">
-                        <div class="modal-header vb-run-header">
-                            <div class="vb-run-identity">
-                                <i class="${scriptRuntimeFor(this.scripts?.scriptByName?.(this.name)?.fileName || this.name).icon}" aria-hidden="true"></i>
-                                <h5 class="modal-title" id="vb-run-window-title">Run <span>${name}</span></h5>
-                            </div>
-                            <button type="button" class="btn-close" data-run-action="close" aria-label="Close"></button>
-                        </div>
-
-                        <div class="modal-body vb-run-body">
-                            <div class="alert alert-danger vb-run-problem d-none" role="alert" data-run-problem></div>
-
-                            <section class="vb-run-section" aria-label="Inputs">
-                                <div class="vb-run-section-head">
-                                    <h6>Inputs</h6>
-                                    <button class="btn btn-sm btn-outline-secondary" type="button" data-run-action="add-extra">
-                                        <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>Add argument
-                                    </button>
-                                </div>
-                                <div class="vb-run-fields" data-run-fields></div>
-                            </section>
-
-                            <details class="vb-run-stdin" data-run-stdin-wrap ${this.stdin ? 'open' : ''}>
-                                <summary>Standard input</summary>
-                                <textarea class="form-control" rows="3" data-run-stdin
-                                          placeholder="Text piped to the script's stdin"
-                                          spellcheck="false">${escapeHtml(this.stdin)}</textarea>
-                            </details>
-
-                            <section class="vb-run-result" data-run-result aria-live="polite"></section>
-                        </div>
-
-                        <!-- Pinned between the scrolling body and the footer: this is what the
-                             Run button beside it is about to execute, so it must never scroll
-                             away behind a long list of inputs. -->
-                        <section class="vb-run-command-strip" aria-label="Command">
-                            <div class="vb-run-section-head"><h6>Command</h6></div>
-                            <div class="vb-run-command" data-run-command role="status"></div>
-                        </section>
-
-                        <div class="modal-footer vb-run-footer">
-                            <button class="btn btn-sm btn-link vb-run-terminal-link" type="button" data-run-action="terminal"
-                                    data-run-terminal title="Run this script in a terminal tab instead — for scripts that ask questions or need Ctrl+C">
-                                <i class="fa-solid fa-terminal me-1" aria-hidden="true"></i>Run in terminal
-                            </button>
-                            <button type="button" class="btn btn-secondary" data-run-action="close">Close</button>
-                            <button type="button" class="btn btn-outline-danger" data-run-action="stop" hidden>
-                                <i class="fa-solid fa-stop me-1" aria-hidden="true"></i>Stop
-                            </button>
-                            <button type="submit" class="btn btn-primary" data-run-submit>
-                                <i class="fa-solid fa-play me-1" aria-hidden="true"></i>Run
-                            </button>
-                        </div>
-                    </form>
+        const script = this.scripts?.scriptByName?.(this.name);
+        const runtime = scriptRuntimeFor(script?.fileName || this.name);
+        const label = escapeHtml(this.scripts?.displayName?.(this.name) || this.name);
+        return `<section class="vb-run-window" role="dialog" aria-modal="false"
+                    aria-labelledby="vb-run-window-title-${escapeHtml(this.name)}" aria-describedby="vb-run-privacy-${escapeHtml(this.name)}">
+            <div class="vb-run-titlebar">
+                <i class="fa-solid fa-terminal" aria-hidden="true"></i>
+                <h5 id="vb-run-window-title-${escapeHtml(this.name)}">${label}</h5>
+                <span class="vb-run-runtime">${escapeHtml(runtime.label)}</span>
+                <div class="vb-run-window-controls">
+                    <button type="button" data-run-action="run" aria-label="Run again" title="Run again" hidden><i class="fa-solid fa-rotate-right" aria-hidden="true"></i></button>
+                    <button type="button" data-run-action="stop" aria-label="Stop" title="Stop script"><i class="fa-solid fa-stop" aria-hidden="true"></i></button>
+                    <button type="button" data-run-action="minimize" aria-label="Minimize" title="Minimize — keep running"><i class="fa-solid fa-minus" aria-hidden="true"></i></button>
+                    <button type="button" data-run-action="close" aria-label="Close" title="Close and stop script"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
                 </div>
             </div>
-            <div class="modal-backdrop fade show"></div>`;
+            <div class="vb-run-terminal" data-run-terminal></div>
+            <div class="vb-run-bottom-bar">
+                <span data-run-status role="status" aria-live="polite">Starting…</span>
+                <span id="vb-run-privacy-${escapeHtml(this.name)}">Input isn’t saved · Close stops the script</span>
+            </div>
+        </section>`;
     }
 
-    _renderFields() {
-        const extras = this.extras.map((extra, index) => this._renderExtraRow(extra, index)).join('');
-        if (!extras) {
-            return `<p class="vb-run-empty">No arguments configured for ${escapeHtml(this.name || 'this script')}. Add one to pass a value through <code>${escapeHtml(scriptRuntimeFor(this.scripts?.scriptByName?.(this.name)?.fileName || this.name).argumentsHint)}</code>.</p>`;
-        }
-        return extras;
-    }
-
-    _renderExtraRow(extra, index) {
-        return `
-            <div class="vb-run-field vb-run-field-extra" data-run-extra="${index}">
-                <div class="vb-run-field-label">
-                    <label>Argument</label>
-                    <button class="vb-run-remove" type="button" data-run-action="remove-extra" data-index="${index}"
-                            aria-label="Remove argument"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
-                </div>
-                <div class="vb-run-extra-inputs">
-                    <input class="form-control form-control-sm vb-run-extra-flag" data-run-input data-run-extra-flag="${index}"
-                           value="${escapeHtml(extra?.flag || '')}" placeholder="--flag" spellcheck="false"
-                           aria-label="Flag (optional)">
-                    <input class="form-control form-control-sm" data-run-input data-run-extra-value="${index}"
-                           value="${escapeHtml(extra?.value || '')}" placeholder="value" spellcheck="false"
-                           aria-label="Value">
-                </div>
-            </div>`;
-    }
-
-    // --- painting ---
-
-    /** Rebuilds the input rows. Structural only — it drops focus, so never call it on input. */
-    _paintFields() {
-        const fields = this.layer?.querySelector('[data-run-fields]');
-        if (fields) fields.innerHTML = this._renderFields();
-        this._paintCommandLine();
-    }
-
-    _paintCommandLine() {
-        const box = this.layer?.querySelector('[data-run-command]');
-        if (!box) return;
-        const { argv, error } = resolveArgv(this);
-        const tokens = argv.map((token) => {
-            const looksLikeFlag = /^-{1,2}[^\d\s]/.test(token);
-            return `<span class="${looksLikeFlag ? 'vb-run-flag' : 'vb-run-value'}">${escapeHtml(quoteForDisplay(token))}</span>`;
-        }).join(' ');
-        box.innerHTML = `<span class="vb-run-exec">${scriptRuntimeFor(this.scripts?.scriptByName?.(this.name)?.fileName || this.name).command}</span> <span class="vb-run-script">${escapeHtml(this.scripts?.scriptByName?.(this.name)?.path || this.name || '')}</span>${tokens ? ' ' + tokens : ''}`;
-        box.classList.toggle('is-incomplete', Boolean(error));
-        this._paintTerminalLink(argv.length > 0 || Boolean(this.stdin));
-    }
-
-    /**
-     * The PTY escape hatch posts a script name and optional run PIN. It accepts no command
-     * text from the browser, so it does NOT run the command line above.
-     * Say so on the button rather than letting the two disagree in silence.
-     */
-    _paintTerminalLink(hasInput) {
-        const link = this.layer?.querySelector('[data-run-terminal]');
-        if (!link) return;
-        const note = link.querySelector('[data-run-terminal-note]');
-        if (hasInput && !note) {
-            link.insertAdjacentHTML('beforeend',
-                '<span class="vb-run-terminal-note" data-run-terminal-note>· without these inputs</span>');
-        } else if (!hasInput && note) {
-            note.remove();
-        }
-        link.title = hasInput
-            ? 'Run this script in a terminal tab instead — for scripts that ask questions or need '
-                + 'Ctrl+C. The terminal run takes no arguments or stdin, so it ignores the inputs above.'
-            : 'Run this script in a terminal tab instead — for scripts that ask questions or need Ctrl+C';
-    }
-
-    _paintRunState() {
-        const submit = this.layer?.querySelector('[data-run-submit]');
-        if (!submit) return;
-        submit.disabled = this.running;
-        const stopping = this._runs.get(this.name)?.controller.signal.aborted === true;
+    _paintState(message, tone) {
+        this._status = message;
+        this._tone = tone;
+        this._updateDock();
+        const status = this.layer?.querySelector('[data-run-status]');
+        if (status) { status.textContent = message; status.dataset.tone = tone; }
         const stop = this.layer?.querySelector('[data-run-action="stop"]');
-        if (stop) {
-            stop.hidden = !this.running || !this._runs.has(this.name);
-            stop.disabled = stopping;
-            stop.innerHTML = stopping ? 'Stopping…' : '<i class="fa-solid fa-stop me-1" aria-hidden="true"></i>Stop';
-        }
-        submit.innerHTML = this.running
-            ? '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Running…'
-            : '<i class="fa-solid fa-play me-1" aria-hidden="true"></i>Run';
-        const result = this.layer?.querySelector('[data-run-result]');
-        if (this.running && result) {
-            result.innerHTML = `<div class="vb-run-status is-waiting"><span class="vb-run-dot"></span>${stopping ? 'Stopping…' : 'Running…'}</div>`;
-        }
-    }
-
-    _paintResult() {
-        const host = this.layer?.querySelector('[data-run-result]');
-        const run = this.lastRun;
-        if (!host) return;
-        if (!run) {
-            host.innerHTML = '';
-            return;
-        }
-
-        const ok = isPythonRunOk(run);
-        const returned = returnValueOf(run);
-        const output = formatPythonRunOutput(run);
-        const started = run.startedUtc ? new Date(run.startedUtc) : null;
-        const facts = [
-            pythonRunStatus(run),
-            `${Math.round(run.durationMs)} ms`,
-            started && !Number.isNaN(started.valueOf()) ? started.toLocaleTimeString() : ''
-        ].filter(Boolean).join(' · ');
-
-        host.innerHTML = `
-            <div class="vb-run-status ${ok ? 'is-ok' : 'is-bad'}" data-run-status>
-                <span class="vb-run-dot"></span>${escapeHtml(facts)}
-            </div>
-            ${returned ? `
-            <div class="vb-run-panel">
-                <div class="vb-run-panel-head">
-                    <h6>Returned</h6>
-                    <button class="btn btn-sm btn-outline-secondary" type="button" data-run-action="copy-return">
-                        <i class="fa-regular fa-copy me-1" aria-hidden="true"></i>Copy
-                    </button>
-                </div>
-                <pre class="vb-run-json" data-run-return>${this._tintJson(returned)}</pre>
-            </div>` : ''}
-            <div class="vb-run-panel">
-                <div class="vb-run-panel-head"><h6>Output</h6></div>
-                <pre class="vb-run-output">${escapeHtml(output)}</pre>
-                ${run.cancelled ? '<p class="vb-run-field-hint">The run request was cancelled. Final output and exit status are unavailable.</p>' : ''}
-                ${!run.cancelled && !returned && output === '(no output)' ? `
-                <p class="vb-run-field-hint">Print a JSON object on the last line to return a value.</p>` : ''}
-            </div>`;
-
-        // A window opened over a long input list is still scrolled to the inputs; the
-        // result is the news, so bring it into view rather than leaving it below the fold.
-        this.layer?.querySelector('[data-run-status]')?.scrollIntoView?.(
-            { block: 'nearest', behavior: 'smooth' });
-    }
-
-    /** Minimal JSON tinting: keys, strings, numbers and literals. Input is already escaped. */
-    _tintJson(json) {
-        return escapeHtml(json).replace(
-            /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g,
-            (match, string, colon, literal, number) => {
-                if (string) {
-                    return colon
-                        ? `<span class="vb-json-key">${string}</span>${colon}`
-                        : `<span class="vb-json-string">${string}</span>`;
-                }
-                if (literal) return `<span class="vb-json-literal">${literal}</span>`;
-                if (number) return `<span class="vb-json-number">${number}</span>`;
-                return match;
-            });
-    }
-
-    _showProblem(message) {
-        const box = this.layer?.querySelector('[data-run-problem]');
-        if (!box) return;
-        box.textContent = message || '';
-        box.classList.toggle('d-none', !message);
-    }
-
-    // --- events ---
-
-    _onClick(event) {
-        const button = event.target.closest('[data-run-action]');
-        if (!button) return;
-        const action = button.dataset.runAction;
-        if (action === 'close') return this.close();
-        if (action === 'stop') return this.stop();
-        if (action === 'terminal') return void this.runInTerminal();
-        if (action === 'copy-return') return void this._copyReturn(button);
-        if (action === 'add-extra') {
-            if (this.extras.length >= MAX_EXTRAS) return;
-            this.extras.push({ flag: '', value: '' });
-            this._paintFields();
-            const rows = this.layer?.querySelectorAll('[data-run-extra]');
-            rows?.[rows.length - 1]?.querySelector('input')?.focus();
-            return;
-        }
-        if (action === 'remove-extra') {
-            this.extras.splice(Number(button.dataset.index), 1);
-            this._paintFields();
-        }
-    }
-
-    _onInput(event) {
-        const target = event.target;
-        if (target?.dataset?.runExtraFlag !== undefined) {
-            const extra = this.extras[Number(target.dataset.runExtraFlag)];
-            if (extra) extra.flag = target.value;
-            return void this._paintCommandLine();
-        }
-        if (target?.dataset?.runExtraValue !== undefined) {
-            const extra = this.extras[Number(target.dataset.runExtraValue)];
-            if (extra) extra.value = target.value;
-            return void this._paintCommandLine();
-        }
-        if (target?.matches?.('[data-run-stdin]')) {
-            this.stdin = target.value;
-        }
-    }
-
-    async _copyReturn(button) {
-        const text = this.layer?.querySelector('[data-run-return]')?.textContent || '';
-        try {
-            await navigator.clipboard.writeText(text);
-            const original = button.innerHTML;
-            button.innerHTML = '<i class="fa-solid fa-check me-1" aria-hidden="true"></i>Copied';
-            setTimeout(() => { button.innerHTML = original; }, 1200);
-        } catch {
-            this.app?.showError?.('Could not copy the return value.');
-        }
-    }
-
-    _remember() {
-        if (!this.name) return;
-        try {
-            globalThis.localStorage?.setItem(STORAGE_PREFIX + this.name, JSON.stringify({
-                hadDeclaredInputs: this.hadDeclaredInputs,
-                extras: this.extras,
-                stdin: this.stdin
-            }));
-        } catch { /* private mode, quota — remembering inputs is a convenience */ }
+        if (stop) { stop.hidden = !this.running; stop.disabled = false; }
+        const run = this.layer?.querySelector('[data-run-action="run"]');
+        if (run) run.hidden = this.running;
+        if (this.terminal?.terminal) this.terminal.terminal.options.disableStdin = !this._runToken?.ready;
     }
 }

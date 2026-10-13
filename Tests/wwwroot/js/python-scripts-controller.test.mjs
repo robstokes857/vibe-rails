@@ -38,27 +38,6 @@ function controllerWith(scripts, app = createApp()) {
     return controller;
 }
 
-test('an active captured script has a Stop action on its row even after the run window closes', async () => {
-    const script = { name: 'report.py', status: 'approved' };
-    const app = createApp();
-    const controller = controllerWith([script], app);
-    app.apiCall = (url, method, body, options) => new Promise((resolve, reject) => {
-        options.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
-    });
-    controller.runWindow.name = script.name;
-    const pending = controller.runWindow.execute();
-    assert.match(controller._renderRow(script), /data-python-scripts-action="stop"/);
-    const button = { dataset: { pythonScriptsAction: 'stop', name: script.name } };
-    controller.root = { contains: value => value === button };
-    controller._closeMenus = () => {};
-    controller._render = () => {};
-    controller._onClick({ target: { closest: () => button } });
-    await pending;
-    const html = controller._renderRow(script);
-    assert.doesNotMatch(html, /data-python-scripts-action="stop"/);
-    assert.match(html, /Last run: Stop requested/);
-    assert.doesNotMatch(html, /exit null/);
-});
 
 for (const extension of ['ps1', 'sh', 'py', 'PS1']) {
     test(`Importing a selected .${extension} registers its path and opens its unsigned library ID`, async () => {
@@ -580,49 +559,21 @@ test('The VS Code bridge is a one-way postMessage the dashboard feature-detects'
 });
 
 for (const scope of ['global', 'script']) {
-    test(`Required ${scope} run PIN is collected and forwarded by both run paths`, async () => {
-        const app = createApp();
-        app.apiCall = async (url, method, body) => {
-            app.calls.push({ url, method, body });
-            if (url.endsWith('/run/interactive')) return { tabId: 'pin-tab' };
-            if (url.endsWith('/run')) return { name: SCRIPT.name, exitCode: 0 };
-            return controller.state;
-        };
-        const controller = controllerWith([{ ...SCRIPT, requirePinEachRun: scope === 'script' }], app);
+    test(`Required ${scope} run PIN uses the shared masked prompt`, async () => {
+        const controller = controllerWith([{ ...SCRIPT, requirePinEachRun: scope === 'script' }]);
         controller.state.requirePinEachRun = scope === 'global';
-        let prompts = 0;
         controller._promptPin = async options => {
             assert.equal(options.preserveModal, true);
-            prompts++;
             return '1234';
         };
-        const view = controller.runWindow;
-        view.name = SCRIPT.name;
-        assert.equal((await view.execute()).exitCode, 0);
-        assert.equal((await controller.runInTerminal(SCRIPT.name)).tabId, 'pin-tab');
-        assert.equal(prompts, 2);
-        const launches = app.calls.filter(call => call.method === 'POST');
-        assert.equal(launches.length, 2);
-        assert.ok(launches.every(call => call.body.pin === '1234'));
-        assert.equal(controller.runningNames.size, 0);
+        assert.equal(await controller.requestRunPin(SCRIPT.name), '1234');
+        controller._promptPin = async () => null;
+        assert.equal(await controller.requestRunPin(SCRIPT.name), null);
+        assert.equal(controller.app.calls.length, 0);
     });
 }
 
-test('Cancelling either required run PIN prompt starts nothing and clears busy state', async () => {
-    const app = createApp();
-    const controller = controllerWith([SCRIPT], app);
-    controller.state.requirePinEachRun = true;
-    controller._promptPin = async () => null;
-    controller.runWindow.name = SCRIPT.name;
-    assert.equal(await controller.runWindow.execute(), null);
-    const button = { disabled: false, innerHTML: 'Run' };
-    assert.equal(await controller.runInTerminal(SCRIPT.name, button), null);
-    assert.equal(app.calls.filter(call => call.method === 'POST').length, 0);
-    assert.equal(controller.runningNames.size, 0);
-    assert.deepEqual(button, { disabled: false, innerHTML: 'Run' });
-});
-
-for (const finishWith of ['submit', 'cancel', 'close-window']) {
+for (const finishWith of ['submit', 'cancel']) {
     test(`The nested run PIN prompt preserves its parent and clears fields on ${finishWith}`, async () => {
         const controller = controllerWith([SCRIPT]);
         let parentClosed = false;
@@ -680,71 +631,14 @@ for (const finishWith of ['submit', 'cancel', 'close-window']) {
     });
 }
 
-test('Run in terminal stays busy until its tab is ready, and cannot start twice', async () => {
-    const app = createApp();
-    let releaseRun;
-    const runResponse = new Promise((resolve) => { releaseRun = resolve; });
-    app.apiCall = async (url, method = 'GET', body = null) => {
-        app.calls.push({ url, method, body });
-        if (url === '/api/v1/python-scripts/run/interactive') return runResponse;
-        return { pinConfigured: true, scriptsDirectory: '/scripts', scripts: [SCRIPT] };
-    };
-    const controller = controllerWith([SCRIPT], app);
-    let listHtml = '';
-    controller.root = {
-        querySelector(selector) {
-            if (selector === '[data-python-scripts-list]') {
-                return { set innerHTML(value) { listHtml = value; } };
-            }
-            return null;
-        }
-    };
-
-    const first = controller.runInTerminal('nightly.py');
-    assert.ok(controller.runningNames.has('nightly.py'), 'registered before the request resolves');
-    // The rebuilt row (what any background refresh would draw) is the busy one.
-    assert.match(listHtml, /data-python-scripts-action="run"[^>]*disabled/);
-    assert.match(listHtml, /Running…/);
-    assert.match(controller._renderRow(SCRIPT), /nightly\.py is running/);
-    // A second click while in flight is a no-op, not a second POST.
-    assert.equal(await controller.runInTerminal('nightly.py'), null);
-    assert.equal(app.calls.filter((call) => call.url === '/api/v1/python-scripts/run/interactive').length, 1);
-
-    // Background refreshes stand down while a run is in flight.
-    const originalDocument = globalThis.document;
-    globalThis.document = { visibilityState: 'visible' };
-    try {
-        controller._lastRefreshAt = 0;
-        const callsBefore = app.calls.length;
-        controller._refreshIfIdle();
-        assert.equal(app.calls.length, callsBefore, 'no refresh while running');
-    } finally {
-        globalThis.document = originalDocument;
-    }
-
-    releaseRun({ name: 'nightly.py', tabId: 'python-tab', message: 'started' });
-    const result = await first;
-    assert.equal(result.tabId, 'python-tab');
-    assert.equal(controller.runningNames.size, 0);
-    assert.doesNotMatch(listHtml, /Running…/);
-    assert.deepEqual(app.toasts.at(-1), {
-        title: 'Script started',
-        message: 'nightly.py is running in an interactive terminal.',
-        tone: 'success'
-    });
-    assert.deepEqual(app.navigations.at(-1), {
-        view: 'terminal-focus',
-        data: { preferredSelection: 'base:shell', preferredTabId: 'python-tab' },
-        options: {}
-    });
-    // The workbench passes its own button; it is restored after the launch.
-    const button = { disabled: false, innerHTML: '<i></i>Run' };
-    app.apiCall = async (url) => (url === '/api/v1/python-scripts/run/interactive'
-        ? { name: 'nightly.py', tabId: 'second-tab', message: 'started' }
-        : { pinConfigured: true, scriptsDirectory: '/scripts', scripts: [SCRIPT] });
-    await controller.runInTerminal('nightly.py', button);
-    assert.deepEqual(button, { disabled: false, innerHTML: '<i></i>Run' });
-    assert.equal(app.navigations.at(-1).data.preferredTabId, 'second-tab');
+test('The legacy terminal entry point opens the same private window without adopting a main tab', async () => {
+    const controller = controllerWith([SCRIPT]);
+    let name;
+    controller.runWindow.open = async value => { name = value; return { exitCode: 0 }; };
+    assert.equal((await controller.runInTerminal(SCRIPT.name)).exitCode, 0);
+    assert.equal(name, SCRIPT.name);
+    assert.equal(controller.app.calls.length, 0);
+    assert.equal(controller.app.navigations.length, 0);
 });
 
 // Both run surfaces refuse over a run in flight. Silence here is what made the run window's
@@ -956,23 +850,4 @@ test('Script runtimes mirror the server: one name rule, extension picks the inte
     assert.equal(runtimes.scriptRuntimeFor('a.ps1').monacoLanguage, 'powershell');
     assert.match(service, /"\.ps1" => JobScriptRuntime\.PowerShell/);
     assert.match(service, /"\.sh" => JobScriptRuntime\.Bash/);
-});
-
-test('Run in terminal titles the tab with the script runtime', async () => {
-    const app = createApp();
-    const remembered = [];
-    app.apiCall = async (url, method = 'GET', body = null) => {
-        app.calls.push({ url, method, body });
-        return url.endsWith('/run/interactive') ? { tabId: 'tab-7' } : { pinConfigured: true, scriptsDirectory: '/scripts', scripts: [] };
-    };
-    app.terminalController = {
-        rememberTabLaunch: (tabId, options) => remembered.push({ tabId, options }),
-        adoptLaunchedTab: async () => true
-    };
-    const controller = controllerWith([{ ...SCRIPT, name: 'deploy.ps1' }], app);
-
-    await controller.runInTerminal('deploy.ps1');
-
-    assert.equal(remembered[0].options.title, 'deploy.ps1 · PowerShell');
-    assert.equal(remembered[0].options.taskKey, 'python-script-run:deploy.ps1');
 });

@@ -167,6 +167,7 @@ public sealed class CookieAuthMiddlewareTests
     [Theory]
     [InlineData("/api/v1/llm-picker/preferences")]
     [InlineData("/api/v1/filesystem/entries")]
+    [InlineData("/api/v1/python-scripts/run/terminal/ws")]
     [InlineData("/api/v1/settings/backups")]
     [InlineData("/api/v1/http-relay/test/posts")]
     [InlineData("/api/v1/http-relay/test/posts/7")]

@@ -1,3 +1,4 @@
+using VibeRails.Security;
 using System.IO.Compression;
 using Microsoft.Extensions.DependencyInjection;
 using VibeRails.Data.Sqlite;
@@ -161,7 +162,7 @@ public sealed class BackupFilesCredentialTests : IDisposable
     [InlineData("OPENAI_KEY")]
     [InlineData("GITHUB_PAT")]
     public void CommonCredentialPropertyNamesAreRedacted(string name) =>
-        Assert.True(BackupFiles.IsCredentialProperty(name.Replace("_", "").Replace("-", "").ToLowerInvariant()));
+        Assert.True(CredentialRedactor.IsCredentialProperty(name.Replace("_", "").Replace("-", "").ToLowerInvariant()));
 
     [Theory]
     [InlineData("RemoveCoAuthorTrailers")]
@@ -171,7 +172,7 @@ public sealed class BackupFilesCredentialTests : IDisposable
     [InlineData("command")]
     [InlineData("key")] // keybindings.json and similar use "key" for a keystroke
     public void OrdinaryPreferencesAreNotCredentialProperties(string name) =>
-        Assert.False(BackupFiles.IsCredentialProperty(name.Replace("_", "").Replace("-", "").ToLowerInvariant()));
+        Assert.False(CredentialRedactor.IsCredentialProperty(name.Replace("_", "").Replace("-", "").ToLowerInvariant()));
 
     [Fact]
     public async Task HeadersEnvBlocksAndCommonCredentialKeysNeverReachTheArchive()
@@ -313,30 +314,30 @@ public sealed class BackupFilesCredentialTests : IDisposable
     }
 
     [Theory]
-    [InlineData(new[] { "-y", "@modelcontextprotocol/server-github", "--api-key", "sk-leak" }, new[] { "-y", "@modelcontextprotocol/server-github", "--api-key", BackupFiles.RedactedValue })]
-    [InlineData(new[] { "--token=tok-leak", "--port=3000" }, new[] { "--token=" + BackupFiles.RedactedValue, "--port=3000" })]
-    [InlineData(new[] { "mcp-remote", "https://mcp.example/sse", "--header", "Authorization: Bearer leak" }, new[] { "mcp-remote", "https://mcp.example/sse", "--header", "Authorization:" + BackupFiles.RedactedValue })]
+    [InlineData(new[] { "-y", "@modelcontextprotocol/server-github", "--api-key", "sk-leak" }, new[] { "-y", "@modelcontextprotocol/server-github", "--api-key", CredentialRedactor.ConfigurationRedactionMarker })]
+    [InlineData(new[] { "--token=tok-leak", "--port=3000" }, new[] { "--token=" + CredentialRedactor.ConfigurationRedactionMarker, "--port=3000" })]
+    [InlineData(new[] { "mcp-remote", "https://mcp.example/sse", "--header", "Authorization: Bearer leak" }, new[] { "mcp-remote", "https://mcp.example/sse", "--header", "Authorization:" + CredentialRedactor.ConfigurationRedactionMarker })]
     // A credential-named switch followed by another flag has no value to hide.
     [InlineData(new[] { "--no-auth", "--verbose" }, new[] { "--no-auth", "--verbose" })]
     // Credentials nested inside an ordinary option's value (VIBE-35 re-review).
-    [InlineData(new[] { "--header=Authorization: Bearer leak" }, new[] { "--header=Authorization:" + BackupFiles.RedactedValue })]
-    [InlineData(new[] { "--env=API_KEY=leak" }, new[] { "--env=API_KEY=" + BackupFiles.RedactedValue })]
-    [InlineData(new[] { "run", "-e", "OPENAI_KEY=leak" }, new[] { "run", "-e", "OPENAI_KEY=" + BackupFiles.RedactedValue })]
+    [InlineData(new[] { "--header=Authorization: Bearer leak" }, new[] { "--header=Authorization:" + CredentialRedactor.ConfigurationRedactionMarker })]
+    [InlineData(new[] { "--env=API_KEY=leak" }, new[] { "--env=API_KEY=" + CredentialRedactor.ConfigurationRedactionMarker })]
+    [InlineData(new[] { "run", "-e", "OPENAI_KEY=leak" }, new[] { "run", "-e", "OPENAI_KEY=" + CredentialRedactor.ConfigurationRedactionMarker })]
     // Header and environment carriers (VIBE-37): the name inside is arbitrary, so the value goes whatever it is called,
     // as it does in the headers/env blocks; the name stays so a restore shows what to re-enter.
-    [InlineData(new[] { "https://mcp.example/sse", "--header", "X-Deployment: leak" }, new[] { "https://mcp.example/sse", "--header", "X-Deployment:" + BackupFiles.RedactedValue })]
-    [InlineData(new[] { "-H", "X-Deployment: leak", "--port", "3000" }, new[] { "-H", "X-Deployment:" + BackupFiles.RedactedValue, "--port", "3000" })]
-    [InlineData(new[] { "--header=X-Deployment: leak" }, new[] { "--header=X-Deployment:" + BackupFiles.RedactedValue })]
-    [InlineData(new[] { "--http-header", "X-Deployment:leak" }, new[] { "--http-header", "X-Deployment:" + BackupFiles.RedactedValue })]
-    [InlineData(new[] { "run", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN=ghp-leak", "-e", "LOG_LEVEL=leak" }, new[] { "run", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN=" + BackupFiles.RedactedValue, "-e", "LOG_LEVEL=" + BackupFiles.RedactedValue })]
-    [InlineData(new[] { "--env=REGION=leak", "--env", "DEPLOYMENT=leak" }, new[] { "--env=REGION=" + BackupFiles.RedactedValue, "--env", "DEPLOYMENT=" + BackupFiles.RedactedValue })]
+    [InlineData(new[] { "https://mcp.example/sse", "--header", "X-Deployment: leak" }, new[] { "https://mcp.example/sse", "--header", "X-Deployment:" + CredentialRedactor.ConfigurationRedactionMarker })]
+    [InlineData(new[] { "-H", "X-Deployment: leak", "--port", "3000" }, new[] { "-H", "X-Deployment:" + CredentialRedactor.ConfigurationRedactionMarker, "--port", "3000" })]
+    [InlineData(new[] { "--header=X-Deployment: leak" }, new[] { "--header=X-Deployment:" + CredentialRedactor.ConfigurationRedactionMarker })]
+    [InlineData(new[] { "--http-header", "X-Deployment:leak" }, new[] { "--http-header", "X-Deployment:" + CredentialRedactor.ConfigurationRedactionMarker })]
+    [InlineData(new[] { "run", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN=ghp-leak", "-e", "LOG_LEVEL=leak" }, new[] { "run", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN=" + CredentialRedactor.ConfigurationRedactionMarker, "-e", "LOG_LEVEL=" + CredentialRedactor.ConfigurationRedactionMarker })]
+    [InlineData(new[] { "--env=REGION=leak", "--env", "DEPLOYMENT=leak" }, new[] { "--env=REGION=" + CredentialRedactor.ConfigurationRedactionMarker, "--env", "DEPLOYMENT=" + CredentialRedactor.ConfigurationRedactionMarker })]
     // A header without a name is all value; an environment name without a value is passed through from the host.
-    [InlineData(new[] { "-H", "Authorization", "Bearer", "leak" }, new[] { "-H", BackupFiles.RedactedValue, "Bearer", BackupFiles.RedactedValue })]
+    [InlineData(new[] { "-H", "Authorization", "Bearer", "leak" }, new[] { "-H", CredentialRedactor.ConfigurationRedactionMarker, "Bearer", CredentialRedactor.ConfigurationRedactionMarker })]
     [InlineData(new[] { "run", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "ghcr.io/github/github-mcp-server" }, new[] { "run", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "ghcr.io/github/github-mcp-server" })]
     [InlineData(new[] { "--env-file", ".env.production", "--header-case", "lower" }, new[] { "--env-file", ".env.production", "--header-case", "lower" })]
     // Short options carry their value attached as well (curl -HName: value, docker -eNAME=value); found by the VIBE-37 review.
-    [InlineData(new[] { "-HX-Deployment: leak", "-eCUSTOM=leak", "-e", "KEEP", "-Hleak" }, new[] { "-HX-Deployment:" + BackupFiles.RedactedValue, "-eCUSTOM=" + BackupFiles.RedactedValue, "-e", "KEEP", "-H" + BackupFiles.RedactedValue })]
-    public void CredentialArgumentsAreReplacedInPlace(string[] args, string[] expected) => Assert.Equal(expected, BackupFiles.RedactArguments(args));
+    [InlineData(new[] { "-HX-Deployment: leak", "-eCUSTOM=leak", "-e", "KEEP", "-Hleak" }, new[] { "-HX-Deployment:" + CredentialRedactor.ConfigurationRedactionMarker, "-eCUSTOM=" + CredentialRedactor.ConfigurationRedactionMarker, "-e", "KEEP", "-H" + CredentialRedactor.ConfigurationRedactionMarker })]
+    public void CredentialArgumentsAreReplacedInPlace(string[] args, string[] expected) => Assert.Equal(expected, CredentialRedactor.RedactArguments(args));
 
     [Theory]
     [InlineData("https://mcp.example/sse?team=core&access_token=leak", "https://mcp.example/sse?team=core&access_token=[redacted]")]
@@ -373,7 +374,7 @@ public sealed class BackupFilesCredentialTests : IDisposable
     [InlineData(@"C:\Users\me\.claude\hooks\check_token.py --mode=strict", @"C:\Users\me\.claude\hooks\check_token.py --mode=strict")]
     [InlineData("gh auth token", "gh auth token")]
     [InlineData("Local workstation", "Local workstation")]
-    public void StringValuesLoseEmbeddedCredentials(string value, string expected) => Assert.Equal(expected, BackupFiles.RedactText(value));
+    public void StringValuesLoseEmbeddedCredentials(string value, string expected) => Assert.Equal(expected, CredentialRedactor.RedactConfigurationValue(value));
 
     [Fact]
     public void TomlRedactionKeepsConfigurationAndDropsEveryCredentialShape()
@@ -437,28 +438,28 @@ public sealed class BackupFilesCredentialTests : IDisposable
 
         Assert.DoesNotContain("leak", redacted);
         // Multi-line and literal strings join the argument sequence whatever their quoting, and header carriers lose their value (VIBE-37).
-        Assert.Contains($"args = [\"--api-key\", \"\"\"{BackupFiles.RedactedValue}\"\"\"]", redacted);
-        Assert.Contains($"flags = ['''--api-key''', \"{BackupFiles.RedactedValue}\"]", redacted);
-        Assert.Contains($"literal = [\"--token\", '''{BackupFiles.RedactedValue}''']", redacted);
-        Assert.Contains($"spread = [\"--token\", \"\"\"\n{BackupFiles.RedactedValue}\"\"\"]", redacted);
-        Assert.Contains($"proxy = [\"https://mcp.example/sse\", \"--header\", \"X-Deployment:{BackupFiles.RedactedValue}\"]", redacted);
-        Assert.Contains($"command = \"mcp-remote https://mcp.example/sse --header 'X-Deployment:{BackupFiles.RedactedValue}\"", redacted);
-        Assert.Contains($"compact = [\"-HX-Deployment:{BackupFiles.RedactedValue}\", \"-eCUSTOM={BackupFiles.RedactedValue}\"]", redacted);
-        Assert.Contains($"quoted = \"server --password {BackupFiles.RedactedValue}\"", redacted);
+        Assert.Contains($"args = [\"--api-key\", \"\"\"{CredentialRedactor.ConfigurationRedactionMarker}\"\"\"]", redacted);
+        Assert.Contains($"flags = ['''--api-key''', \"{CredentialRedactor.ConfigurationRedactionMarker}\"]", redacted);
+        Assert.Contains($"literal = [\"--token\", '''{CredentialRedactor.ConfigurationRedactionMarker}''']", redacted);
+        Assert.Contains($"spread = [\"--token\", \"\"\"\n{CredentialRedactor.ConfigurationRedactionMarker}\"\"\"]", redacted);
+        Assert.Contains($"proxy = [\"https://mcp.example/sse\", \"--header\", \"X-Deployment:{CredentialRedactor.ConfigurationRedactionMarker}\"]", redacted);
+        Assert.Contains($"command = \"mcp-remote https://mcp.example/sse --header 'X-Deployment:{CredentialRedactor.ConfigurationRedactionMarker}\"", redacted);
+        Assert.Contains($"compact = [\"-HX-Deployment:{CredentialRedactor.ConfigurationRedactionMarker}\", \"-eCUSTOM={CredentialRedactor.ConfigurationRedactionMarker}\"]", redacted);
+        Assert.Contains($"quoted = \"server --password {CredentialRedactor.ConfigurationRedactionMarker}\"", redacted);
         Assert.Contains("model = \"gpt-5\"", redacted);
         Assert.Contains("[mcp_servers.github]", redacted); Assert.Contains("command = \"npx\"", redacted);
-        Assert.Contains($"args = [\"-y\", \"@modelcontextprotocol/server-github\", \"--token\", \"{BackupFiles.RedactedValue}\"]", redacted);
+        Assert.Contains($"args = [\"-y\", \"@modelcontextprotocol/server-github\", \"--token\", \"{CredentialRedactor.ConfigurationRedactionMarker}\"]", redacted);
         Assert.Contains("env = {}", redacted);
         Assert.Contains("[mcp_servers.github.env]", redacted);
         Assert.Contains("url = \"https://mcp.example\"", redacted);
         Assert.Contains("http_headers = {}", redacted);
         Assert.Contains("options = { timeout = 30 }", redacted);
-        Assert.Contains($"args = [\"--header=Authorization:{BackupFiles.RedactedValue}\", \"--env=API_KEY={BackupFiles.RedactedValue}\"]", redacted);
-        Assert.Contains($"sse = \"https://mcp.example/sse?token={BackupFiles.RedactedValue}\"", redacted);
+        Assert.Contains($"args = [\"--header=Authorization:{CredentialRedactor.ConfigurationRedactionMarker}\", \"--env=API_KEY={CredentialRedactor.ConfigurationRedactionMarker}\"]", redacted);
+        Assert.Contains($"sse = \"https://mcp.example/sse?token={CredentialRedactor.ConfigurationRedactionMarker}\"", redacted);
         // Escaped spellings are decoded before classifying; unchanged items keep their original spelling.
         Assert.Contains("[mcp_servers.synthetic.\"http\\u005fheaders\"]", redacted);
-        Assert.Contains($"args = [\"--api\\u002dkey\", \"{BackupFiles.RedactedValue}\"]", redacted);
-        Assert.Contains($"url = \"https://mcp.example/sse?api_key={BackupFiles.RedactedValue}\"", redacted);
+        Assert.Contains($"args = [\"--api\\u002dkey\", \"{CredentialRedactor.ConfigurationRedactionMarker}\"]", redacted);
+        Assert.Contains($"url = \"https://mcp.example/sse?api_key={CredentialRedactor.ConfigurationRedactionMarker}\"", redacted);
         Assert.Contains("\"\\u0065nv\" = {}", redacted);
     }
 
@@ -497,16 +498,16 @@ public sealed class BackupFilesCredentialTests : IDisposable
             Assert.DoesNotContain("leak", await Read(zip, entry.FullName));
         Assert.Contains("deploy-mcp", await Read(zip, "native/.claude/plugins/marketplaces/acme/plugins/deploy/.mcp.json"));
         Assert.Contains("\"name\":\"deploy\"", await Read(zip, "native/.claude/plugins/marketplaces/acme/plugins/deploy/.claude-plugin/plugin.json"));
-        Assert.Contains("\"X-Deployment:" + BackupFiles.RedactedValue + "\"", await Read(zip, "native/.claude/plugins/marketplaces/acme/plugins/deploy/.mcp.json"));
+        Assert.Contains("\"X-Deployment:" + CredentialRedactor.ConfigurationRedactionMarker + "\"", await Read(zip, "native/.claude/plugins/marketplaces/acme/plugins/deploy/.mcp.json"));
         var codex = await Read(zip, "native/.codex/config.toml");
         Assert.Contains("model = \"gpt-5\"", codex);
-        Assert.Contains($"[mcp_servers.multi]\nargs = [\"--api-key\", \"\"\"{BackupFiles.RedactedValue}\"\"\"]", codex);
-        Assert.Contains($"[mcp_servers.literal]\nargs = ['''--token''', \"{BackupFiles.RedactedValue}\", \"--header\", \"X-Deployment:{BackupFiles.RedactedValue}\"]", codex);
-        Assert.Contains($"[mcp_servers.compact]\nargs = [\"-HX-Deployment:{BackupFiles.RedactedValue}\", \"-eCUSTOM={BackupFiles.RedactedValue}\"]", codex);
-        Assert.Contains($"[mcp_servers.shell]\ncommand = \"sh\"\nargs = [\"-c\", 'server --password {BackupFiles.RedactedValue}']", codex);
-        Assert.Contains($"[mcp_servers.escaped]\ncommand = \"sh\"\nargs = [\"-c\", 'server --password {BackupFiles.RedactedValue}']", codex);
-        Assert.Contains("\"server --password " + BackupFiles.RedactedValue + "\"", await Read(zip, "native/.claude/plugins/marketplaces/acme/plugins/deploy/.mcp.json"));
-        Assert.Contains("\"-HX-Deployment:" + BackupFiles.RedactedValue + "\"", await Read(zip, "native/.claude/plugins/marketplaces/acme/plugins/deploy/.mcp.json"));
+        Assert.Contains($"[mcp_servers.multi]\nargs = [\"--api-key\", \"\"\"{CredentialRedactor.ConfigurationRedactionMarker}\"\"\"]", codex);
+        Assert.Contains($"[mcp_servers.literal]\nargs = ['''--token''', \"{CredentialRedactor.ConfigurationRedactionMarker}\", \"--header\", \"X-Deployment:{CredentialRedactor.ConfigurationRedactionMarker}\"]", codex);
+        Assert.Contains($"[mcp_servers.compact]\nargs = [\"-HX-Deployment:{CredentialRedactor.ConfigurationRedactionMarker}\", \"-eCUSTOM={CredentialRedactor.ConfigurationRedactionMarker}\"]", codex);
+        Assert.Contains($"[mcp_servers.shell]\ncommand = \"sh\"\nargs = [\"-c\", 'server --password {CredentialRedactor.ConfigurationRedactionMarker}']", codex);
+        Assert.Contains($"[mcp_servers.escaped]\ncommand = \"sh\"\nargs = [\"-c\", 'server --password {CredentialRedactor.ConfigurationRedactionMarker}']", codex);
+        Assert.Contains("\"server --password " + CredentialRedactor.ConfigurationRedactionMarker + "\"", await Read(zip, "native/.claude/plugins/marketplaces/acme/plugins/deploy/.mcp.json"));
+        Assert.Contains("\"-HX-Deployment:" + CredentialRedactor.ConfigurationRedactionMarker + "\"", await Read(zip, "native/.claude/plugins/marketplaces/acme/plugins/deploy/.mcp.json"));
         Assert.Contains("command = \"search-mcp\"", await Read(zip, "native/.grok/config.toml"));
     }
 

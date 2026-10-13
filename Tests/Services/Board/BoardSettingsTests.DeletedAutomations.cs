@@ -46,7 +46,7 @@ public sealed partial class BoardSettingsTests
     }
 
     [Fact]
-    public async Task LaneSettingsRead_PrunesSelectionsDeletedWithoutThisBoard_AndKeepsOtherUnavailableEntries()
+    public async Task LaneSettingsRead_HidesSelectionsDeletedWithoutThisBoard_WithoutWriting()
     {
         var (_, a, _, _) = await Lanes();
         var first = await Job("First");
@@ -61,11 +61,14 @@ public sealed partial class BoardSettingsTests
 
         var settings = (await new BoardAutomationService(_boards, _jobs).GetAsync(_root, a, Ct))!;
         Assert.Equal(new[] { second.Id, foreign.Id, 99999 }, settings.JobIds);
-        Assert.Equal(2, settings.Revision);
+        Assert.Equal(second.Id, settings.JobId);
         Assert.DoesNotContain(settings.Jobs, option => option.Id == first.Id);
-        Assert.Equal(settings.JobIds, (await _boards.GetLaneAutomationAsync(_root, a, Ct))!.JobIds);
-        // Idempotent: a second read changes nothing.
-        Assert.Equal(2, (await new BoardAutomationService(_boards, _jobs).GetAsync(_root, a, Ct))!.Revision);
+        // Every board render reads lane settings, so the read never writes board.db.
+        Assert.Equal(1, settings.Revision);
+        Assert.Equal(new[] { first.Id, second.Id, foreign.Id, 99999 }, (await _boards.GetLaneAutomationAsync(_root, a, Ct))!.JobIds);
+        // Saving what the editor shows drops the hidden entry.
+        await _boards.SaveLaneAutomationAsync(_root, a, [second.Id], settings.Revision, Ct);
+        Assert.Equal(new[] { second.Id }, (await _boards.GetLaneAutomationAsync(_root, a, Ct))!.JobIds);
     }
 
     [Fact]
@@ -83,10 +86,11 @@ public sealed partial class BoardSettingsTests
 
         unavailable.Verify(store => store.RemoveJobFromLanesAsync(job.Id, It.IsAny<CancellationToken>()), Times.Once);
         Assert.NotNull((await _jobs.GetJobAsync(job.Id, Ct))!.DeletedUtc);
-        // The Board was never reached, so the selection survives until the lane settings read prunes it.
+        // The Board was never reached, so the selection survives; lane settings hide it until the next save.
         Assert.Equal(new[] { job.Id }, (await _boards.GetLaneAutomationAsync(_root, a, Ct))!.JobIds);
         var settings = (await new BoardAutomationService(_boards, _jobs).GetAsync(_root, a, Ct))!;
         Assert.Empty(settings.JobIds);
-        Assert.Equal(2, settings.Revision);
+        Assert.Null(settings.JobId);
+        Assert.Equal(1, settings.Revision);
     }
 }

@@ -16207,6 +16207,12 @@ body.vb-terminal-focus-active .app-subnav .nav-exit-btn-sm {
 .job-run-link:hover,
 .job-run-link:focus-visible { color: var(--color-accent); text-decoration-color: currentColor; }
 
+/* A run that ended badly opens from its status: the reason is cut to fit this column, and the
+   run detail shows the CLI's last screen in full. */
+.job-run-why { display: block; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; text-align: left; }
+.job-run-why:hover .job-run-status-detail,
+.job-run-why:focus-visible .job-run-status-detail { color: var(--color-accent, #0d6efd); text-decoration: underline; }
+
 .jobs-run-actions { white-space: nowrap; }
 .jobs-run-actions .job-icon-action + .job-icon-action { margin-left: 0.3rem; }
 
@@ -17886,379 +17892,44 @@ body.vb-terminal-focus-active .app-subnav .nav-exit-btn-sm {
     -webkit-text-security: disc;
 }
 
-/* ============================================================
-   The run window (python-run-window.js)
-   A signed script's inputs go in, its exit code, output and
-   return value come back — no terminal. Deliberately small: it
-   is the surface for the spaces where the full terminal panel
-   does not fit.
-
-   One idea carries the window: the COMMAND LINE. It is not a
-   picture of the run, it is the payload — .vb-run-command
-   prints the same argv array that gets posted, so what you read
-   is what runs. Cyan (--color-accent) appears there and nowhere
-   else in the window, so "the values I supplied" has exactly one
-   colour. Everything around it stays in the house greys.
-   ============================================================ */
-
-.vb-run-window .modal-dialog {
-    max-width: 640px;
-}
-
-.vb-run-window .modal-content {
-    max-height: min(88dvh, 900px);
-}
-
-.vb-run-header {
-    align-items: center;
-    padding: 0.7rem 1rem;
-}
-
-.vb-run-identity {
-    display: flex;
-    min-width: 0;
-    align-items: center;
-    gap: 0.55rem;
-}
-
-.vb-run-identity > i {
-    flex: 0 0 auto;
-    color: var(--color-text-muted, #94a3b8);
-}
-
-/* The title keeps the house treatment (uppercase mono label, see .modal-title): every
-   other dialog in the app announces itself that way, and a bespoke one here would only
-   make this window look like it came from somewhere else. */
-.vb-run-identity .modal-title {
-    overflow-wrap: anywhere;
-}
-
-.vb-run-body {
-    display: grid;
-    gap: 14px;
-    padding: 0.9rem 1rem 1rem;
-    overflow-y: auto;
-}
-
-.vb-run-problem {
-    margin: 0;
-    padding: 8px 12px;
-    font-size: 0.8rem;
-}
-
-.vb-run-section {
-    display: grid;
-    gap: 8px;
-}
-
-.vb-run-section-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-}
-
-.vb-run-section-head > h6 {
-    margin: 0;
-    color: var(--color-text-muted, #94a3b8);
-    font-size: 0.68rem;
-    font-weight: 600;
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-}
-
-.vb-run-empty {
-    margin: 0;
-    color: var(--color-text-muted, #94a3b8);
-    font-size: 0.8rem;
-}
-
-.vb-run-empty > code {
-    color: var(--color-text, #f8fafc);
-}
-
-/* ── Input rows ──────────────────────────────────────────────────────── */
-.vb-run-fields {
-    display: grid;
-    gap: 10px;
-}
-
-.vb-run-field {
-    display: grid;
-    gap: 4px;
-}
-
-.vb-run-field-label {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 10px;
-}
-
-.vb-run-field-label > label {
-    margin: 0;
-    min-width: 0;
-    color: var(--color-text, #f8fafc);
-    font-size: 0.8rem;
-    font-weight: 500;
-    overflow-wrap: anywhere;
-}
-
-.vb-run-required {
-    margin-left: 2px;
-    color: var(--color-warning, #f59e0b);
-}
-
-/* How this value reaches Python: its flag, or its place in the argv order. The
-   declaration is fixed (it came from the MCP tool), so it reads, it does not edit. */
-.vb-run-shape {
-    flex: 0 0 auto;
-    padding: 1px 6px;
-    border-radius: 4px;
-    background: var(--color-bg-base, #121212);
-    color: var(--color-text-muted, #94a3b8);
-    font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
-    font-size: 0.68rem;
-}
-
-.vb-run-field-hint {
-    margin: 0;
-    color: var(--color-text-muted, #94a3b8);
-    font-size: 0.72rem;
-    line-height: 1.35;
-}
-
-.vb-run-extra-inputs {
-    display: grid;
-    grid-template-columns: minmax(0, 8rem) minmax(0, 1fr);
-    gap: 6px;
-}
-
-.vb-run-extra-flag {
-    font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
-}
-
-.vb-run-remove {
-    flex: 0 0 auto;
-    padding: 0 4px;
-    border: 0;
-    background: none;
-    color: var(--color-text-muted, #94a3b8);
-    font-size: 0.8rem;
-    line-height: 1;
-}
-
-.vb-run-remove:hover,
-.vb-run-remove:focus-visible {
-    color: var(--color-danger, #ef4444);
-}
-
-.vb-run-stdin > summary {
-    color: var(--color-text-muted, #94a3b8);
-    cursor: pointer;
-    font-size: 0.72rem;
-    font-weight: 600;
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-}
-
-.vb-run-stdin > textarea {
-    margin-top: 6px;
-    font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
-    font-size: 0.78rem;
-}
-
-/* ── The command line ────────────────────────────────────────────────── */
-/* Pinned between the scrolling body and the footer, so the thing you are about to
-   run always sits directly above the button that runs it. */
-.vb-run-command-strip {
-    display: grid;
-    flex: 0 0 auto;
-    gap: 6px;
-    /* Opaque, with a rule above it: the body scrolls underneath, and without this the
-       last input row bleeds into the command line at the boundary. */
-    padding: 10px 1rem 2px;
-    border-top: 1px solid var(--color-border, #334155);
-    background: var(--color-bg-elevated, #232323);
-}
-
-.vb-run-command {
-    padding: 8px 10px 8px 12px;
-    border: 1px solid var(--color-border, #334155);
-    border-left: 2px solid var(--color-accent, #06b6d4);
-    border-radius: 6px;
-    background: var(--color-bg-base, #121212);
-    font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
-    font-size: 0.78rem;
-    line-height: 1.6;
-    overflow-wrap: anywhere;
-}
-
-/* A required value is still missing, so this is not yet a runnable command. */
-.vb-run-command.is-incomplete {
-    border-left-color: var(--color-warning, #f59e0b);
-    opacity: 0.72;
-}
-
-.vb-run-exec {
-    color: var(--color-text-muted, #94a3b8);
-}
-
-.vb-run-script {
-    color: var(--color-text, #f8fafc);
-}
-
-.vb-run-flag {
-    color: var(--color-text-muted, #94a3b8);
-}
-
-.vb-run-value {
-    color: var(--color-accent, #06b6d4);
-}
-
-/* ── Result ──────────────────────────────────────────────────────────── */
-.vb-run-result {
-    display: grid;
-    gap: 10px;
-}
-
-.vb-run-result:empty {
-    display: none;
-}
-
-.vb-run-status {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding-top: 12px;
-    border-top: 1px solid var(--color-border, #334155);
-    color: var(--color-text-muted, #94a3b8);
-    font-size: 0.76rem;
-}
-
-.vb-run-dot {
-    width: 7px;
-    height: 7px;
-    flex: 0 0 auto;
-    border-radius: 50%;
-    background: var(--color-text-muted, #94a3b8);
-}
-
-.vb-run-status.is-ok .vb-run-dot {
-    background: var(--color-success, #10b981);
-}
-
-.vb-run-status.is-bad .vb-run-dot {
-    background: var(--color-danger, #ef4444);
-}
-
-.vb-run-status.is-bad {
-    color: var(--color-danger, #ef4444);
-}
-
-.vb-run-status.is-waiting .vb-run-dot {
-    animation: vb-run-pulse 1.1s ease-in-out infinite;
-}
-
-@keyframes vb-run-pulse {
-    0%, 100% { opacity: 0.35; }
-    50% { opacity: 1; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .vb-run-status.is-waiting .vb-run-dot {
-        animation: none;
-    }
-}
-
-.vb-run-panel {
-    display: grid;
-    gap: 6px;
-}
-
-.vb-run-panel-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-}
-
-.vb-run-panel-head > h6 {
-    margin: 0;
-    color: var(--color-text-muted, #94a3b8);
-    font-size: 0.68rem;
-    font-weight: 600;
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-}
-
-.vb-run-json,
-.vb-run-output {
-    margin: 0;
-    max-height: 240px;
-    overflow: auto;
-    padding: 8px 10px;
-    border: 1px solid var(--color-border, #334155);
-    border-radius: 6px;
-    background: var(--color-bg-base, #121212);
-    font-size: 0.76rem;
-    line-height: 1.5;
-    white-space: pre-wrap;
-    word-break: break-word;
-}
-
-.vb-run-output {
-    color: var(--color-text-muted, #94a3b8);
-}
-
-.vb-json-key {
-    color: var(--color-primary, #3b82f6);
-}
-
-.vb-json-number,
-.vb-json-literal {
-    color: var(--color-warning, #f59e0b);
-}
-
-/* ── Footer ──────────────────────────────────────────────────────────── */
-.vb-run-footer {
-    gap: 8px;
-    padding: 0.6rem 1rem;
-}
-
-/* The escape hatch sits apart from the two decisions on the right. */
-.vb-run-terminal-link {
-    margin-right: auto;
-    padding-left: 0;
-    color: var(--color-text-muted, #94a3b8);
-    text-decoration: none;
-}
-
-.vb-run-terminal-link:hover,
-.vb-run-terminal-link:focus-visible {
-    color: var(--color-text, #f8fafc);
-}
-
-/* Only present when the form has arguments or stdin the PTY run cannot carry. Every colour
-   carries an explicit fallback (see the undefined-custom-property note at the top). */
-.vb-run-terminal-note {
-    margin-left: 0.35rem;
-    font-size: 0.78em;
-    font-style: italic;
-    color: var(--color-text-muted, #94a3b8);
-    opacity: 0.85;
-}
-
+/* The run window (python-run-window.js): a floating terminal, independent of app modals. */
+.vb-script-terminal-layer { position: fixed; inset: 0; pointer-events: none; z-index: 1040; }
+.vb-run-window { position: absolute; right: 18px; bottom: 18px; width: min(740px, calc(100vw - 36px));
+    height: min(440px, calc(100dvh - 80px)); min-height: 190px; display: flex; flex-direction: column;
+    pointer-events: auto; overflow: hidden; border: 1px solid #454545; border-radius: 6px;
+    box-shadow: 0 12px 45px #0008; background: #1e1e1e; color: #d4d4d4; }
+.vb-run-titlebar { height: 36px; flex-shrink: 0; display: flex; align-items: center; gap: 9px;
+    padding-left: 12px; background: #292929; border-bottom: 1px solid #343434; }
+.vb-run-titlebar > i { color: #aaa; font-size: 12px; }
+.vb-run-titlebar h5 { margin: 0; color: #ddd; font: 12px Consolas, 'Cascadia Mono', monospace;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vb-run-runtime { color: #858585; font-size: 11px; }
+.vb-run-window-controls { display: flex; margin-left: auto; align-self: stretch; }
+.vb-run-window-controls button { width: 34px; padding: 0; border: 0; border-radius: 0; background: transparent; color: #bbb; font-size: 12px; }
+.vb-run-window-controls button:hover, .vb-run-window-controls button:focus-visible { background: #454545; color: #fff; }
+.vb-run-window-controls [data-run-action="close"]:hover { background: #c42b1c; }
+.vb-run-window-controls button:disabled { opacity: .45; }
+.vb-run-terminal { flex: 1; min-height: 0; min-width: 0; padding: 10px 12px; background: #1e1e1e; overflow: hidden; }
+.vb-run-terminal .xterm { height: 100%; }
+.vb-run-bottom-bar { flex-shrink: 0; display: flex; justify-content: space-between; gap: 10px;
+    padding: 4px 10px; border-top: 1px solid #303030; background: #252525; color: #888; font-size: 10px; }
+.vb-run-bottom-bar [data-run-status] { overflow-wrap: anywhere; }
+.vb-run-bottom-bar [data-tone="waiting"] { color: #b6b6b6; }
+.vb-run-bottom-bar [data-tone="success"] { color: #89d185; }
+.vb-run-bottom-bar [data-tone="danger"] { color: #f48771; }
+#script-run-dock { position: fixed; bottom: 12px; right: 12px; display: flex; flex-wrap: wrap; gap: 6px;
+    max-width: calc(100vw - 24px); z-index: 1041; }
+.vb-run-dock-button { max-width: 280px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+    background: #252525; color: #ddd; border: 1px solid #555; border-radius: 5px; padding: 8px 12px;
+    box-shadow: 0 3px 12px #0005; font: 12px Consolas, monospace; }
+.vb-run-dock-button::before { content: '›_'; color: #89d185; margin-right: 8px; }
+.vb-run-dock-button:hover { background: #363636; }
 @media (max-width: 540px) {
-    .vb-run-extra-inputs {
-        grid-template-columns: minmax(0, 1fr);
-    }
-
-    .vb-run-terminal-link {
-        margin-right: 0;
-    }
+    .vb-run-window { right: 8px; bottom: 8px; width: calc(100vw - 16px); height: min(400px, calc(100dvh - 80px)); }
+    .vb-run-runtime { display: none; }
+    .vb-run-bottom-bar { flex-wrap: wrap; }
 }
-
+body:has(#script-run-dock:not(:empty)) .vb-run-window { bottom: 56px; max-height: calc(100dvh - 72px); }
 
 /* --- Script authoring: row identity, row menu, drop target ---
    Same rule as the rest of this section: nothing here may impose an unbreakable

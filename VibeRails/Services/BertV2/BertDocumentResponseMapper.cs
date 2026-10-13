@@ -1,5 +1,5 @@
 using VibeRails.DTOs;
-using VibeRails.Services.UserInOut;
+using VibeRails.Security;
 
 namespace VibeRails.Services.BertV2;
 
@@ -12,7 +12,7 @@ public sealed class BertDocumentResponseMapper : IBertDocumentResponseMapper
     internal const string RedactionMarker = "[redacted — text matches secret pattern]";
 
     private static string RedactIfSecret(string text)
-        => InputEtlFilter.ContainsSecret(text) ? RedactionMarker : text;
+        => CredentialRedactor.ContainsKnownSecret(text) ? RedactionMarker : text;
 
     public BertCaptureSummaryResponse ToCaptureSummary(BertStoredDocument document, BertInputMetadata? metadata)
     {
