@@ -1,0 +1,1106 @@
+{
+ "generated_for": "TokenSaver safe-savings paper draft 0.1",
+ "chars_per_token": 3.6,
+ "theta": 0.25,
+ "population": "one developer workstation; surviving exchange log Sep 1-16 and Oct 1-13 2026",
+ "agents": {
+  "codex": {
+   "periods": {
+    "sep_1_16": {
+     "requests": 7451,
+     "requests_with_usage": 7068,
+     "request_chars": 5070580963,
+     "input_tokens": 773938601,
+     "cache_read_tokens": 741216128,
+     "output_tokens": 3136250,
+     "spend_cost_eq": 131934086,
+     "safe_wire_chars": 17198621,
+     "truncation_wire_chars": 120007530,
+     "safe_est_tokens": 4777395,
+     "truncation_est_tokens": 33335425,
+     "safe_cost_eq": 986988,
+     "truncation_cost_eq": 5637921,
+     "safe_share_of_chars_pct": 0.3392,
+     "safe_share_of_input_tokens_pct": 0.6173,
+     "safe_share_of_cost_pct": 0.7481,
+     "truncation_share_of_chars_pct": 2.3667,
+     "truncation_share_of_input_tokens_pct": 4.3072,
+     "truncation_share_of_cost_pct": 4.2733,
+     "outputs_changed": {
+      "cleanup": 5228,
+      "dedupe": 16,
+      "passed-tests": 0,
+      "truncation": 149
+     },
+     "wire_chars_by_kind": {
+      "cleanup": 16651236,
+      "dedupe": 547385,
+      "passed-tests": 0,
+      "truncation": 120007530
+     }
+    },
+    "oct_1_13": {
+     "requests": 15338,
+     "requests_with_usage": 15183,
+     "request_chars": 7113921152,
+     "input_tokens": 1303090836,
+     "cache_read_tokens": 1245045760,
+     "output_tokens": 5111737,
+     "spend_cost_eq": 223443548,
+     "safe_wire_chars": 4195920,
+     "truncation_wire_chars": 16259264,
+     "safe_est_tokens": 1165533,
+     "truncation_est_tokens": 4516462,
+     "safe_cost_eq": 191027,
+     "truncation_cost_eq": 907532,
+     "safe_share_of_chars_pct": 0.059,
+     "safe_share_of_input_tokens_pct": 0.0894,
+     "safe_share_of_cost_pct": 0.0855,
+     "truncation_share_of_chars_pct": 0.2286,
+     "truncation_share_of_input_tokens_pct": 0.3466,
+     "truncation_share_of_cost_pct": 0.4062,
+     "outputs_changed": {
+      "cleanup": 9882,
+      "dedupe": 5,
+      "passed-tests": 0,
+      "truncation": 41
+     },
+     "wire_chars_by_kind": {
+      "cleanup": 4154557,
+      "dedupe": 41363,
+      "passed-tests": 0,
+      "truncation": 16259264
+     }
+    },
+    "both": {
+     "requests": 22789,
+     "requests_with_usage": 22251,
+     "request_chars": 12184502115,
+     "input_tokens": 2077029437,
+     "cache_read_tokens": 1986261888,
+     "output_tokens": 8247987,
+     "spend_cost_eq": 355377634,
+     "safe_wire_chars": 21394541,
+     "truncation_wire_chars": 136266794,
+     "safe_est_tokens": 5942928,
+     "truncation_est_tokens": 37851887,
+     "safe_cost_eq": 1178015,
+     "truncation_cost_eq": 6545452,
+     "safe_share_of_chars_pct": 0.1756,
+     "safe_share_of_input_tokens_pct": 0.2861,
+     "safe_share_of_cost_pct": 0.3315,
+     "truncation_share_of_chars_pct": 1.1184,
+     "truncation_share_of_input_tokens_pct": 1.8224,
+     "truncation_share_of_cost_pct": 1.8418,
+     "outputs_changed": {
+      "cleanup": 15110,
+      "dedupe": 21,
+      "passed-tests": 0,
+      "truncation": 190
+     },
+     "wire_chars_by_kind": {
+      "cleanup": 20805793,
+      "dedupe": 588748,
+      "passed-tests": 0,
+      "truncation": 136266794
+     }
+    }
+   },
+   "models": {
+    "sep_1_16": [
+     {
+      "model": "gpt-6-astra | effort=xhigh | tier=priority",
+      "requests": 2220,
+      "share_of_requests_pct": 29.79,
+      "safe_share_of_chars_pct": 0.0805,
+      "truncation_share_of_chars_pct": 0.0103,
+      "outputs_truncated": 1
+     },
+     {
+      "model": "gpt-5.6-sol | effort=max | tier=-",
+      "requests": 1727,
+      "share_of_requests_pct": 23.18,
+      "safe_share_of_chars_pct": 0.7242,
+      "truncation_share_of_chars_pct": 3.8128,
+      "outputs_truncated": 42
+     },
+     {
+      "model": "gpt-6-astra | effort=xhigh | tier=-",
+      "requests": 1631,
+      "share_of_requests_pct": 21.89,
+      "safe_share_of_chars_pct": 0.056,
+      "truncation_share_of_chars_pct": 0.0,
+      "outputs_truncated": 0
+     },
+     {
+      "model": "gpt-5.6-sol | effort=xhigh | tier=priority",
+      "requests": 807,
+      "share_of_requests_pct": 10.83,
+      "safe_share_of_chars_pct": 0.5752,
+      "truncation_share_of_chars_pct": 11.2383,
+      "outputs_truncated": 84
+     },
+     {
+      "model": "gpt-5.6-sol | effort=max | tier=priority",
+      "requests": 541,
+      "share_of_requests_pct": 7.26,
+      "safe_share_of_chars_pct": 0.9112,
+      "truncation_share_of_chars_pct": 2.6218,
+      "outputs_truncated": 19
+     },
+     {
+      "model": "gpt-5.6-luna | effort=max | tier=-",
+      "requests": 145,
+      "share_of_requests_pct": 1.95,
+      "safe_share_of_chars_pct": 0.161,
+      "truncation_share_of_chars_pct": 1.0593,
+      "outputs_truncated": 1
+     },
+     {
+      "model": "gpt-6-astra | effort=medium | tier=-",
+      "requests": 107,
+      "share_of_requests_pct": 1.44,
+      "safe_share_of_chars_pct": 0.002,
+      "truncation_share_of_chars_pct": 0.0,
+      "outputs_truncated": 0
+     },
+     {
+      "model": "gpt-5.6-sol | effort=low | tier=-",
+      "requests": 43,
+      "share_of_requests_pct": 0.58,
+      "safe_share_of_chars_pct": 0.5214,
+      "truncation_share_of_chars_pct": 1.0669,
+      "outputs_truncated": 1
+     },
+     {
+      "model": "gpt-6-astra | effort=medium | tier=priority",
+      "requests": 43,
+      "share_of_requests_pct": 0.58,
+      "safe_share_of_chars_pct": 0.0028,
+      "truncation_share_of_chars_pct": 0.0,
+      "outputs_truncated": 0
+     },
+     {
+      "model": "gpt-6-astra | effort=max | tier=-",
+      "requests": 40,
+      "share_of_requests_pct": 0.54,
+      "safe_share_of_chars_pct": 0.0019,
+      "truncation_share_of_chars_pct": 0.0,
+      "outputs_truncated": 0
+     },
+     {
+      "model": "gpt-5.6-luna | effort=medium | tier=priority",
+      "requests": 30,
+      "share_of_requests_pct": 0.4,
+      "safe_share_of_chars_pct": 0.2463,
+      "truncation_share_of_chars_pct": 0.0,
+      "outputs_truncated": 0
+     },
+     {
+      "model": "gpt-5.6-luna | effort=medium | tier=-",
+      "requests": 25,
+      "share_of_requests_pct": 0.34,
+      "safe_share_of_chars_pct": 0.0413,
+      "truncation_share_of_chars_pct": 0.7381,
+      "outputs_truncated": 1
+     },
+     {
+      "model": "gpt-5.6-sol | effort=medium | tier=-",
+      "requests": 24,
+      "share_of_requests_pct": 0.32,
+      "safe_share_of_chars_pct": 0.0198,
+      "truncation_share_of_chars_pct": 0.0,
+      "outputs_truncated": 0
+     },
+     {
+      "model": "gpt-5.6-luna | effort=low | tier=-",
+      "requests": 21,
+      "share_of_requests_pct": 0.28,
+      "safe_share_of_chars_pct": 0.0,
+      "truncation_share_of_chars_pct": 0.0,
+      "outputs_truncated": 0
+     },
+     {
+      "model": "gpt-6-astra | effort=max | tier=priority",
+      "requests": 19,
+      "share_of_requests_pct": 0.25,
+      "safe_share_of_chars_pct": 0.0025,
+      "truncation_share_of_chars_pct": 0.0,
+      "outputs_truncated": 0
+     },
+     {
+      "model": "gpt-5.6-luna | effort=high | tier=priority",
+      "requests": 16,
+      "share_of_requests_pct": 0.21,
+      "safe_share_of_chars_pct": 0.4351,
+      "truncation_share_of_chars_pct": 0.0,
+      "outputs_truncated": 0
+     },
+     {
+      "model": "codex-auto-review | effort=low | tier=priority",
+      "requests": 5,
+      "share_of_requests_pct": 0.07,
+      "safe_share_of_chars_pct": 0.0,
+      "truncation_share_of_chars_pct": 0.0,
+      "outputs_truncated": 0
+     },
+     {
+      "model": "gpt-5.6-luna | effort=low | tier=priority",
+      "requests": 4,
+      "share_of_requests_pct": 0.05,
+      "safe_share_of_chars_pct": 0.0,
+      "truncation_share_of_chars_pct": 0.0,
+      "outputs_truncated": 0
+     },
+     {
+      "model": "codex-auto-review | effort=low | tier=-",
+      "requests": 2,
+      "share_of_requests_pct": 0.03,
+      "safe_share_of_chars_pct": 0.0,
+      "truncation_share_of_chars_pct": 0.0,
+      "outputs_truncated": 0
+     },
+     {
+      "model": "gpt-5.6-sol | effort=medium | tier=priority",
+      "requests": 1,
+      "share_of_requests_pct": 0.01,
+      "safe_share_of_chars_pct": 0.0,
+      "truncation_share_of_chars_pct": 0.0,
+      "outputs_truncated": 0
+     }
+    ],
+    "oct_1_13": [
+     {
+      "model": "gpt-6-astra | effort=xhigh | tier=ultrafast",
+      "requests": 5772,
+      "share_of_requests_pct": 37.63,
+      "safe_share_of_chars_pct": 0.0397,
+      "truncation_share_of_chars_pct": 0.1905,
+      "outputs_truncated": 11
+     },
+     {
+      "model": "codex-auto-review | effort=low | tier=-",
+      "requests": 3008,
+      "share_of_requests_pct": 19.61,
+      "safe_share_of_chars_pct": 0.0,
+      "truncation_share_of_chars_pct": 0.0,
+      "outputs_truncated": 0
+     },
+     {
+      "model": "gpt-6.1-sol | effort=xhigh | tier=priority",
+      "requests": 1771,
+      "share_of_requests_pct": 11.55,
+      "safe_share_of_chars_pct": 0.0385,
+      "truncation_share_of_chars_pct": 0.1203,
+      "outputs_truncated": 3
+     },
+     {
+      "model": "gpt-6.1-sol | effort=xhigh | tier=-",
+      "requests": 1737,
+      "share_of_requests_pct": 11.32,
+      "safe_share_of_chars_pct": 0.0999,
+      "truncation_share_of_chars_pct": 0.4911,
+      "outputs_truncated": 10
+     },
+     {
+      "model": "codex-auto-review | effort=low | tier=priority",
+      "requests": 756,
+      "share_of_requests_pct": 4.93,
+      "safe_share_of_chars_pct": 0.0,
+      "truncation_share_of_chars_pct": 0.0,
+      "outputs_truncated": 0
+     },
+     {
+      "model": "gpt-6-astra | effort=xhigh | tier=priority",
+      "requests": 679,
+      "share_of_requests_pct": 4.43,
+      "safe_share_of_chars_pct": 0.1402,
+      "truncation_share_of_chars_pct": 0.0,
+      "outputs_truncated": 0
+     },
+     {
+      "model": "gpt-6-sol | effort=xhigh | tier=priority",
+      "requests": 451,
+      "share_of_requests_pct": 2.94,
+      "safe_share_of_chars_pct": 0.133,
+      "truncation_share_of_chars_pct": 0.1232,
+      "outputs_truncated": 1
+     },
+     {
+      "model": "gpt-6-astra | effort=xhigh | tier=-",
+      "requests": 444,
+      "share_of_requests_pct": 2.89,
+      "safe_share_of_chars_pct": 0.1104,
+      "truncation_share_of_chars_pct": 0.0,
+      "outputs_truncated": 0
+     },
+     {
+      "model": "gpt-6-luna | effort=medium | tier=priority",
+      "requests": 252,
+      "share_of_requests_pct": 1.64,
+      "safe_share_of_chars_pct": 0.135,
+      "truncation_share_of_chars_pct": 2.5928,
+      "outputs_truncated": 7
+     },
+     {
+      "model": "gpt-6-astra | effort=max | tier=priority",
+      "requests": 199,
+      "share_of_requests_pct": 1.3,
+      "safe_share_of_chars_pct": 0.0878,
+      "truncation_share_of_chars_pct": 0.0,
+      "outputs_truncated": 0
+     },
+     {
+      "model": "gpt-5.6-sol | effort=xhigh | tier=priority",
+      "requests": 154,
+      "share_of_requests_pct": 1.0,
+      "safe_share_of_chars_pct": 0.4281,
+      "truncation_share_of_chars_pct": 6.406,
+      "outputs_truncated": 9
+     },
+     {
+      "model": "gpt-5.6-terra | effort=max | tier=priority",
+      "requests": 37,
+      "share_of_requests_pct": 0.24,
+      "safe_share_of_chars_pct": 0.0128,
+      "truncation_share_of_chars_pct": 0.0,
+      "outputs_truncated": 0
+     },
+     {
+      "model": "gpt-6.1-sol | effort=low | tier=priority",
+      "requests": 35,
+      "share_of_requests_pct": 0.23,
+      "safe_share_of_chars_pct": 0.0056,
+      "truncation_share_of_chars_pct": 0.0,
+      "outputs_truncated": 0
+     },
+     {
+      "model": "gpt-6-astra | effort=medium | tier=ultrafast",
+      "requests": 18,
+      "share_of_requests_pct": 0.12,
+      "safe_share_of_chars_pct": 0.0038,
+      "truncation_share_of_chars_pct": 0.0,
+      "outputs_truncated": 0
+     },
+     {
+      "model": "gpt-6.1-sol | effort=medium | tier=-",
+      "requests": 15,
+      "share_of_requests_pct": 0.1,
+      "safe_share_of_chars_pct": 0.003,
+      "truncation_share_of_chars_pct": 0.0,
+      "outputs_truncated": 0
+     },
+     {
+      "model": "gpt-6-astra | effort=low | tier=ultrafast",
+      "requests": 8,
+      "share_of_requests_pct": 0.05,
+      "safe_share_of_chars_pct": 0.0023,
+      "truncation_share_of_chars_pct": 0.0,
+      "outputs_truncated": 0
+     },
+     {
+      "model": "gpt-6-sol | effort=high | tier=priority",
+      "requests": 2,
+      "share_of_requests_pct": 0.01,
+      "safe_share_of_chars_pct": 0.0,
+      "truncation_share_of_chars_pct": 0.0,
+      "outputs_truncated": 0
+     }
+    ]
+   },
+   "daily": [
+    {
+     "day": "2026-09-01",
+     "requests": 273,
+     "safe_share_of_chars_pct": 0.8183,
+     "safe_share_of_input_tokens_pct": 1.2955,
+     "safe_share_of_cost_pct": 0.9851,
+     "truncation_share_of_chars_pct": 6.6686
+    },
+    {
+     "day": "2026-09-02",
+     "requests": 32,
+     "safe_share_of_chars_pct": 0.5183,
+     "safe_share_of_input_tokens_pct": 1.1415,
+     "safe_share_of_cost_pct": 2.529,
+     "truncation_share_of_chars_pct": 2.1828
+    },
+    {
+     "day": "2026-09-03",
+     "requests": 1503,
+     "safe_share_of_chars_pct": 0.7334,
+     "safe_share_of_input_tokens_pct": 1.1876,
+     "safe_share_of_cost_pct": 1.7921,
+     "truncation_share_of_chars_pct": 3.1983
+    },
+    {
+     "day": "2026-09-04",
+     "requests": 195,
+     "safe_share_of_chars_pct": 0.4899,
+     "safe_share_of_input_tokens_pct": 0.6881,
+     "safe_share_of_cost_pct": 0.5754,
+     "truncation_share_of_chars_pct": 3.8101
+    },
+    {
+     "day": "2026-09-05",
+     "requests": 344,
+     "safe_share_of_chars_pct": 0.0289,
+     "safe_share_of_input_tokens_pct": 0.0826,
+     "safe_share_of_cost_pct": 0.1995,
+     "truncation_share_of_chars_pct": 0.0551
+    },
+    {
+     "day": "2026-09-06",
+     "requests": 395,
+     "safe_share_of_chars_pct": 0.1606,
+     "safe_share_of_input_tokens_pct": 0.3597,
+     "safe_share_of_cost_pct": 0.2712,
+     "truncation_share_of_chars_pct": 0.6732
+    },
+    {
+     "day": "2026-09-07",
+     "requests": 771,
+     "safe_share_of_chars_pct": 0.0856,
+     "safe_share_of_input_tokens_pct": 0.2381,
+     "safe_share_of_cost_pct": 0.4243,
+     "truncation_share_of_chars_pct": 0.0359
+    },
+    {
+     "day": "2026-09-08",
+     "requests": 168,
+     "safe_share_of_chars_pct": 0.4415,
+     "safe_share_of_input_tokens_pct": 0.685,
+     "safe_share_of_cost_pct": 0.5099,
+     "truncation_share_of_chars_pct": 10.9045
+    },
+    {
+     "day": "2026-09-09",
+     "requests": 216,
+     "safe_share_of_chars_pct": 0.0071,
+     "safe_share_of_input_tokens_pct": 0.0109,
+     "safe_share_of_cost_pct": 0.0195,
+     "truncation_share_of_chars_pct": 0.0
+    },
+    {
+     "day": "2026-09-10",
+     "requests": 334,
+     "safe_share_of_chars_pct": 0.5519,
+     "safe_share_of_input_tokens_pct": 0.7784,
+     "safe_share_of_cost_pct": 0.6842,
+     "truncation_share_of_chars_pct": 5.4394
+    },
+    {
+     "day": "2026-09-11",
+     "requests": 111,
+     "safe_share_of_chars_pct": 0.0398,
+     "safe_share_of_input_tokens_pct": 0.0553,
+     "safe_share_of_cost_pct": 0.0463,
+     "truncation_share_of_chars_pct": 0.0
+    },
+    {
+     "day": "2026-09-12",
+     "requests": 65,
+     "safe_share_of_chars_pct": 0.0018,
+     "safe_share_of_input_tokens_pct": 0.0023,
+     "safe_share_of_cost_pct": 0.0035,
+     "truncation_share_of_chars_pct": 0.0
+    },
+    {
+     "day": "2026-09-13",
+     "requests": 249,
+     "safe_share_of_chars_pct": 0.1904,
+     "safe_share_of_input_tokens_pct": 0.3018,
+     "safe_share_of_cost_pct": 0.373,
+     "truncation_share_of_chars_pct": 10.2034
+    },
+    {
+     "day": "2026-09-14",
+     "requests": 1228,
+     "safe_share_of_chars_pct": 0.0835,
+     "safe_share_of_input_tokens_pct": 0.1708,
+     "safe_share_of_cost_pct": 0.1937,
+     "truncation_share_of_chars_pct": 1.6249
+    },
+    {
+     "day": "2026-09-15",
+     "requests": 642,
+     "safe_share_of_chars_pct": 0.2724,
+     "safe_share_of_input_tokens_pct": 0.4081,
+     "safe_share_of_cost_pct": 0.3959,
+     "truncation_share_of_chars_pct": 2.4905
+    },
+    {
+     "day": "2026-09-16",
+     "requests": 925,
+     "safe_share_of_chars_pct": 0.4861,
+     "safe_share_of_input_tokens_pct": 0.7424,
+     "safe_share_of_cost_pct": 0.9495,
+     "truncation_share_of_chars_pct": 0.887
+    },
+    {
+     "day": "2026-10-01",
+     "requests": 566,
+     "safe_share_of_chars_pct": 0.2543,
+     "safe_share_of_input_tokens_pct": 0.3562,
+     "safe_share_of_cost_pct": 0.2696,
+     "truncation_share_of_chars_pct": 1.5254
+    },
+    {
+     "day": "2026-10-03",
+     "requests": 93,
+     "safe_share_of_chars_pct": 0.0081,
+     "safe_share_of_input_tokens_pct": 0.0131,
+     "safe_share_of_cost_pct": 0.0112,
+     "truncation_share_of_chars_pct": 0.0
+    },
+    {
+     "day": "2026-10-06",
+     "requests": 1710,
+     "safe_share_of_chars_pct": 0.0985,
+     "safe_share_of_input_tokens_pct": 0.1565,
+     "safe_share_of_cost_pct": 0.1183,
+     "truncation_share_of_chars_pct": 0.1177
+    },
+    {
+     "day": "2026-10-07",
+     "requests": 995,
+     "safe_share_of_chars_pct": 0.0384,
+     "safe_share_of_input_tokens_pct": 0.0659,
+     "safe_share_of_cost_pct": 0.048,
+     "truncation_share_of_chars_pct": 0.0198
+    },
+    {
+     "day": "2026-10-08",
+     "requests": 2529,
+     "safe_share_of_chars_pct": 0.0204,
+     "safe_share_of_input_tokens_pct": 0.0282,
+     "safe_share_of_cost_pct": 0.0238,
+     "truncation_share_of_chars_pct": 0.0605
+    },
+    {
+     "day": "2026-10-09",
+     "requests": 2050,
+     "safe_share_of_chars_pct": 0.0503,
+     "safe_share_of_input_tokens_pct": 0.07,
+     "safe_share_of_cost_pct": 0.0542,
+     "truncation_share_of_chars_pct": 0.6718
+    },
+    {
+     "day": "2026-10-10",
+     "requests": 2132,
+     "safe_share_of_chars_pct": 0.0457,
+     "safe_share_of_input_tokens_pct": 0.0752,
+     "safe_share_of_cost_pct": 0.0981,
+     "truncation_share_of_chars_pct": 0.0258
+    },
+    {
+     "day": "2026-10-11",
+     "requests": 1680,
+     "safe_share_of_chars_pct": 0.0656,
+     "safe_share_of_input_tokens_pct": 0.1066,
+     "safe_share_of_cost_pct": 0.1723,
+     "truncation_share_of_chars_pct": 0.1478
+    },
+    {
+     "day": "2026-10-12",
+     "requests": 2547,
+     "safe_share_of_chars_pct": 0.0535,
+     "safe_share_of_input_tokens_pct": 0.0802,
+     "safe_share_of_cost_pct": 0.0799,
+     "truncation_share_of_chars_pct": 0.2412
+    },
+    {
+     "day": "2026-10-13",
+     "requests": 1036,
+     "safe_share_of_chars_pct": 0.0094,
+     "safe_share_of_input_tokens_pct": 0.0138,
+     "safe_share_of_cost_pct": 0.0105,
+     "truncation_share_of_chars_pct": 0.0
+    }
+   ],
+   "recovery_new": {
+    "truncated": {
+     "n": 186,
+     "none": 142,
+     "targeted": 25,
+     "broad": 19
+    },
+    "truncated_next_turn": {
+     "n": 186,
+     "none": 155,
+     "targeted": 19,
+     "broad": 12
+    },
+    "control": {
+     "n": 875,
+     "none": 824,
+     "targeted": 24,
+     "broad": 27
+    },
+    "conversations": 59,
+    "noise_mean_frac": 0.0034,
+    "saved_cost_eq": 6545452,
+    "saved_per_truncation_median": 21920,
+    "content_targeted": 836739,
+    "content_broad": 450722,
+    "solo_turns_targeted": 512718,
+    "solo_turns_broad": 267098,
+    "net_upper": 5708713,
+    "net_lower": 4478175
+   },
+   "recovery_older": {
+    "truncated": {
+     "n": 47,
+     "none": 31,
+     "targeted": 14,
+     "broad": 2
+    },
+    "truncated_next_turn": {
+     "n": 47,
+     "none": 36,
+     "targeted": 11,
+     "broad": 0
+    },
+    "control": {
+     "n": 2,
+     "none": 2,
+     "targeted": 0,
+     "broad": 0
+    },
+    "economics": {
+     "events": 47,
+     "saved": 1282895,
+     "old_charge": 916388,
+     "content_targeted": 342979,
+     "content_broad": 90903,
+     "solo_turns": 21,
+     "turn_cost_mean": 373492,
+     "turn_cost_median": 372477
+    },
+    "net_upper": 939917,
+    "net_lower": 476536
+   }
+  },
+  "claude": {
+   "periods": {
+    "sep_1_16": {
+     "requests": 10894,
+     "requests_with_usage": 10882,
+     "request_chars": 4166740280,
+     "input_tokens": 1386218753,
+     "cache_read_tokens": 1335694064,
+     "output_tokens": 9014262,
+     "spend_cost_eq": 263919930,
+     "safe_wire_chars": 1934708,
+     "truncation_wire_chars": 4094999,
+     "safe_est_tokens": 537419,
+     "truncation_est_tokens": 1137500,
+     "safe_cost_eq": 98107,
+     "truncation_cost_eq": 199824,
+     "safe_share_of_chars_pct": 0.0464,
+     "safe_share_of_input_tokens_pct": 0.0388,
+     "safe_share_of_cost_pct": 0.0372,
+     "truncation_share_of_chars_pct": 0.0983,
+     "truncation_share_of_input_tokens_pct": 0.0821,
+     "truncation_share_of_cost_pct": 0.0757,
+     "outputs_changed": {
+      "cleanup": 1818,
+      "dedupe": 13,
+      "passed-tests": 0,
+      "truncation": 20
+     },
+     "wire_chars_by_kind": {
+      "cleanup": 1881082,
+      "dedupe": 53626,
+      "passed-tests": 0,
+      "truncation": 4094999
+     }
+    },
+    "oct_1_13": {
+     "requests": 4617,
+     "requests_with_usage": 4617,
+     "request_chars": 3362114869,
+     "input_tokens": 1028019938,
+     "cache_read_tokens": 1005886305,
+     "output_tokens": 5740744,
+     "spend_cost_eq": 169178382,
+     "safe_wire_chars": 2613497,
+     "truncation_wire_chars": 1632061,
+     "safe_est_tokens": 725971,
+     "truncation_est_tokens": 453350,
+     "safe_cost_eq": 99310,
+     "truncation_cost_eq": 76018,
+     "safe_share_of_chars_pct": 0.0777,
+     "safe_share_of_input_tokens_pct": 0.0706,
+     "safe_share_of_cost_pct": 0.0587,
+     "truncation_share_of_chars_pct": 0.0485,
+     "truncation_share_of_input_tokens_pct": 0.0441,
+     "truncation_share_of_cost_pct": 0.0449,
+     "outputs_changed": {
+      "cleanup": 876,
+      "dedupe": 13,
+      "passed-tests": 0,
+      "truncation": 6
+     },
+     "wire_chars_by_kind": {
+      "cleanup": 2420278,
+      "dedupe": 193219,
+      "passed-tests": 0,
+      "truncation": 1632061
+     }
+    },
+    "both": {
+     "requests": 15511,
+     "requests_with_usage": 15499,
+     "request_chars": 7528855149,
+     "input_tokens": 2414238691,
+     "cache_read_tokens": 2341580369,
+     "output_tokens": 14755006,
+     "spend_cost_eq": 433098312,
+     "safe_wire_chars": 4548205,
+     "truncation_wire_chars": 5727060,
+     "safe_est_tokens": 1263390,
+     "truncation_est_tokens": 1590850,
+     "safe_cost_eq": 197417,
+     "truncation_cost_eq": 275842,
+     "safe_share_of_chars_pct": 0.0604,
+     "safe_share_of_input_tokens_pct": 0.0523,
+     "safe_share_of_cost_pct": 0.0456,
+     "truncation_share_of_chars_pct": 0.0761,
+     "truncation_share_of_input_tokens_pct": 0.0659,
+     "truncation_share_of_cost_pct": 0.0637,
+     "outputs_changed": {
+      "cleanup": 2694,
+      "dedupe": 26,
+      "passed-tests": 0,
+      "truncation": 26
+     },
+     "wire_chars_by_kind": {
+      "cleanup": 4301360,
+      "dedupe": 246845,
+      "passed-tests": 0,
+      "truncation": 5727060
+     }
+    }
+   },
+   "models": {
+    "sep_1_16": [
+     {
+      "model": "claude-sonnet-5",
+      "requests": 4994,
+      "share_of_requests_pct": 45.84,
+      "safe_share_of_chars_pct": 0.0007,
+      "truncation_share_of_chars_pct": 0.0,
+      "outputs_truncated": 0
+     },
+     {
+      "model": "claude-opus-5",
+      "requests": 4120,
+      "share_of_requests_pct": 37.82,
+      "safe_share_of_chars_pct": 0.0445,
+      "truncation_share_of_chars_pct": 0.1399,
+      "outputs_truncated": 10
+     },
+     {
+      "model": "claude-fable-5-1",
+      "requests": 1780,
+      "share_of_requests_pct": 16.34,
+      "safe_share_of_chars_pct": 0.0813,
+      "truncation_share_of_chars_pct": 0.1107,
+      "outputs_truncated": 10
+     }
+    ],
+    "oct_1_13": [
+     {
+      "model": "claude-opus-5-5",
+      "requests": 2552,
+      "share_of_requests_pct": 55.27,
+      "safe_share_of_chars_pct": 0.0791,
+      "truncation_share_of_chars_pct": 0.0511,
+      "outputs_truncated": 2
+     },
+     {
+      "model": "claude-fable-5-1",
+      "requests": 2061,
+      "share_of_requests_pct": 44.64,
+      "safe_share_of_chars_pct": 0.0762,
+      "truncation_share_of_chars_pct": 0.0457,
+      "outputs_truncated": 4
+     },
+     {
+      "model": "claude-sonnet-5",
+      "requests": 3,
+      "share_of_requests_pct": 0.06,
+      "safe_share_of_chars_pct": 0.0,
+      "truncation_share_of_chars_pct": 0.0,
+      "outputs_truncated": 0
+     },
+     {
+      "model": "claude-sonnet-5-5",
+      "requests": 1,
+      "share_of_requests_pct": 0.02,
+      "safe_share_of_chars_pct": 0.0,
+      "truncation_share_of_chars_pct": 0.0,
+      "outputs_truncated": 0
+     }
+    ]
+   },
+   "daily": [
+    {
+     "day": "2026-09-01",
+     "requests": 14,
+     "safe_share_of_chars_pct": 0.0115,
+     "safe_share_of_input_tokens_pct": 0.0087,
+     "safe_share_of_cost_pct": 0.0065,
+     "truncation_share_of_chars_pct": 0.0
+    },
+    {
+     "day": "2026-09-02",
+     "requests": 58,
+     "safe_share_of_chars_pct": 0.1279,
+     "safe_share_of_input_tokens_pct": 0.0994,
+     "safe_share_of_cost_pct": 0.1107,
+     "truncation_share_of_chars_pct": 0.0
+    },
+    {
+     "day": "2026-09-03",
+     "requests": 367,
+     "safe_share_of_chars_pct": 0.1209,
+     "safe_share_of_input_tokens_pct": 0.0942,
+     "safe_share_of_cost_pct": 0.0881,
+     "truncation_share_of_chars_pct": 0.0
+    },
+    {
+     "day": "2026-09-04",
+     "requests": 5545,
+     "safe_share_of_chars_pct": 0.0433,
+     "safe_share_of_input_tokens_pct": 0.034,
+     "safe_share_of_cost_pct": 0.0346,
+     "truncation_share_of_chars_pct": 0.1595
+    },
+    {
+     "day": "2026-09-05",
+     "requests": 222,
+     "safe_share_of_chars_pct": 0.0773,
+     "safe_share_of_input_tokens_pct": 0.0914,
+     "safe_share_of_cost_pct": 0.0719,
+     "truncation_share_of_chars_pct": 0.0
+    },
+    {
+     "day": "2026-09-06",
+     "requests": 111,
+     "safe_share_of_chars_pct": 0.0221,
+     "safe_share_of_input_tokens_pct": 0.0189,
+     "safe_share_of_cost_pct": 0.0142,
+     "truncation_share_of_chars_pct": 0.7604
+    },
+    {
+     "day": "2026-09-07",
+     "requests": 53,
+     "safe_share_of_chars_pct": 0.0332,
+     "safe_share_of_input_tokens_pct": 0.0254,
+     "safe_share_of_cost_pct": 0.0215,
+     "truncation_share_of_chars_pct": 0.0
+    },
+    {
+     "day": "2026-09-08",
+     "requests": 485,
+     "safe_share_of_chars_pct": 0.0094,
+     "safe_share_of_input_tokens_pct": 0.0109,
+     "safe_share_of_cost_pct": 0.0101,
+     "truncation_share_of_chars_pct": 0.0
+    },
+    {
+     "day": "2026-09-09",
+     "requests": 539,
+     "safe_share_of_chars_pct": 0.0188,
+     "safe_share_of_input_tokens_pct": 0.0145,
+     "safe_share_of_cost_pct": 0.0137,
+     "truncation_share_of_chars_pct": 0.0
+    },
+    {
+     "day": "2026-09-10",
+     "requests": 341,
+     "safe_share_of_chars_pct": 0.05,
+     "safe_share_of_input_tokens_pct": 0.0411,
+     "safe_share_of_cost_pct": 0.0418,
+     "truncation_share_of_chars_pct": 0.2987
+    },
+    {
+     "day": "2026-09-11",
+     "requests": 114,
+     "safe_share_of_chars_pct": 0.0357,
+     "safe_share_of_input_tokens_pct": 0.03,
+     "safe_share_of_cost_pct": 0.0286,
+     "truncation_share_of_chars_pct": 0.0319
+    },
+    {
+     "day": "2026-09-12",
+     "requests": 853,
+     "safe_share_of_chars_pct": 0.1217,
+     "safe_share_of_input_tokens_pct": 0.0967,
+     "safe_share_of_cost_pct": 0.0736,
+     "truncation_share_of_chars_pct": 0.0981
+    },
+    {
+     "day": "2026-09-13",
+     "requests": 202,
+     "safe_share_of_chars_pct": 0.0436,
+     "safe_share_of_input_tokens_pct": 0.0336,
+     "safe_share_of_cost_pct": 0.0368,
+     "truncation_share_of_chars_pct": 0.2847
+    },
+    {
+     "day": "2026-09-14",
+     "requests": 425,
+     "safe_share_of_chars_pct": 0.0428,
+     "safe_share_of_input_tokens_pct": 0.0349,
+     "safe_share_of_cost_pct": 0.0299,
+     "truncation_share_of_chars_pct": 0.0
+    },
+    {
+     "day": "2026-09-15",
+     "requests": 1024,
+     "safe_share_of_chars_pct": 0.0407,
+     "safe_share_of_input_tokens_pct": 0.0309,
+     "safe_share_of_cost_pct": 0.0252,
+     "truncation_share_of_chars_pct": 0.1243
+    },
+    {
+     "day": "2026-09-16",
+     "requests": 541,
+     "safe_share_of_chars_pct": 0.0432,
+     "safe_share_of_input_tokens_pct": 0.0335,
+     "safe_share_of_cost_pct": 0.032,
+     "truncation_share_of_chars_pct": 0.0
+    },
+    {
+     "day": "2026-10-01",
+     "requests": 367,
+     "safe_share_of_chars_pct": 0.0378,
+     "safe_share_of_input_tokens_pct": 0.0301,
+     "safe_share_of_cost_pct": 0.028,
+     "truncation_share_of_chars_pct": 0.0
+    },
+    {
+     "day": "2026-10-06",
+     "requests": 373,
+     "safe_share_of_chars_pct": 0.0852,
+     "safe_share_of_input_tokens_pct": 0.092,
+     "safe_share_of_cost_pct": 0.0814,
+     "truncation_share_of_chars_pct": 0.0
+    },
+    {
+     "day": "2026-10-07",
+     "requests": 172,
+     "safe_share_of_chars_pct": 0.1446,
+     "safe_share_of_input_tokens_pct": 0.119,
+     "safe_share_of_cost_pct": 0.0799,
+     "truncation_share_of_chars_pct": 0.0
+    },
+    {
+     "day": "2026-10-09",
+     "requests": 330,
+     "safe_share_of_chars_pct": 0.0888,
+     "safe_share_of_input_tokens_pct": 0.0742,
+     "safe_share_of_cost_pct": 0.0587,
+     "truncation_share_of_chars_pct": 0.1769
+    },
+    {
+     "day": "2026-10-10",
+     "requests": 334,
+     "safe_share_of_chars_pct": 0.197,
+     "safe_share_of_input_tokens_pct": 0.1685,
+     "safe_share_of_cost_pct": 0.1194,
+     "truncation_share_of_chars_pct": 0.1879
+    },
+    {
+     "day": "2026-10-11",
+     "requests": 634,
+     "safe_share_of_chars_pct": 0.0521,
+     "safe_share_of_input_tokens_pct": 0.0441,
+     "safe_share_of_cost_pct": 0.041,
+     "truncation_share_of_chars_pct": 0.0
+    },
+    {
+     "day": "2026-10-12",
+     "requests": 1293,
+     "safe_share_of_chars_pct": 0.0637,
+     "safe_share_of_input_tokens_pct": 0.0661,
+     "safe_share_of_cost_pct": 0.0521,
+     "truncation_share_of_chars_pct": 0.0
+    },
+    {
+     "day": "2026-10-13",
+     "requests": 1114,
+     "safe_share_of_chars_pct": 0.0749,
+     "safe_share_of_input_tokens_pct": 0.0627,
+     "safe_share_of_cost_pct": 0.0558,
+     "truncation_share_of_chars_pct": 0.1459
+    }
+   ],
+   "recovery_new": {
+    "truncated": {
+     "n": 26,
+     "none": 8,
+     "targeted": 12,
+     "broad": 6
+    },
+    "truncated_next_turn": {
+     "n": 26,
+     "none": 13,
+     "targeted": 11,
+     "broad": 2
+    },
+    "control": {
+     "n": 439,
+     "none": 426,
+     "targeted": 1,
+     "broad": 12
+    },
+    "conversations": 20,
+    "noise_mean_frac": 0.0026,
+    "saved_cost_eq": 275843,
+    "saved_per_truncation_median": 8798,
+    "content_targeted": 130856,
+    "content_broad": 91438,
+    "solo_turns_targeted": 72595,
+    "solo_turns_broad": 16511,
+    "net_upper": 144987,
+    "net_lower": -35557
+   },
+   "recovery_older": {
+    "truncated": {
+     "n": 144,
+     "none": 38,
+     "targeted": 85,
+     "broad": 21
+    },
+    "truncated_next_turn": {
+     "n": 144,
+     "none": 63,
+     "targeted": 73,
+     "broad": 8
+    },
+    "control": {
+     "n": 883,
+     "none": 860,
+     "targeted": 3,
+     "broad": 20
+    },
+    "economics": {
+     "events": 144,
+     "saved": 1541112,
+     "old_charge": 6343544,
+     "content_targeted": 882934,
+     "content_broad": 211441,
+     "solo_turns": 49,
+     "turn_cost_mean": 4839906,
+     "turn_cost_median": 1201964
+    },
+    "net_upper": 658177,
+    "net_lower": -755227
+   }
+  }
+ }
+}
