@@ -525,14 +525,14 @@ public sealed class HostShellCommandService : IHostShellCommandService, IAsyncDi
 
         private static string BuildPowerShellCommand(ShellJob job, string marker)
         {
-            var wd = PowerShellSingleQuote(job.WorkingDirectory);
-            var markerValue = PowerShellSingleQuote(marker);
+            var wd = ShellArgSanitizer.DecodedPowerShellLiteral(job.WorkingDirectory);
+            var markerValue = ShellArgSanitizer.DecodedPowerShellLiteral(marker);
             return string.Join(Environment.NewLine, new[]
             {
                 "$global:LASTEXITCODE = $null",
                 "$__vbr_exit = 0",
-                $"$__vbr_marker = '{markerValue}'",
-                $"Push-Location -LiteralPath '{wd}'",
+                $"$__vbr_marker = {markerValue}",
+                $"Push-Location -LiteralPath {wd}",
                 job.Command,
                 // Capture $? for the LAST statement FIRST — any later evaluation resets it.
                 // A failed cmdlet (which never touches $LASTEXITCODE) must not be reported as
@@ -601,8 +601,6 @@ public sealed class HostShellCommandService : IHostShellCommandService, IAsyncDi
             prefix = idx > 0 ? line[..idx] : string.Empty;
             return true;
         }
-
-        private static string PowerShellSingleQuote(string value) => value.Replace("'", "''");
 
         public async Task ResetAsync()
         {

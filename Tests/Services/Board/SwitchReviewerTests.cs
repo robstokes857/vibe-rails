@@ -418,7 +418,8 @@ public sealed partial class SwitchReviewerTests : IAsyncLifetime
         var workspaces = new Mock<IRunWorkspaceService>(MockBehavior.Strict);
         Assert.True((await new JobTerminalTabLauncher(tabs.Object, repository, store.Object, workspaces.Object, boards, reviewRouting: routing).LaunchAsync(run, Ct)).Success);
         Assert.Equal(project, terminal!.WorkingDirectory); Assert.Equal("shell", terminal.Cli);
-        Assert.Contains("sonnet[1m]", input!.Text); Assert.Contains("--env-id", input.Text);
+        var text = PowerShellLiteralText.Decode(input!.Text);
+        Assert.Contains("sonnet[1m]", text); Assert.Contains("--env-id", text);
         workspaces.VerifyNoOtherCalls();
     }
 

@@ -1,5 +1,6 @@
 using VibeRails.Services.PythonScripts;
 using VibeRails.Services.Terminal;
+using VibeRails.Utils;
 using Xunit;
 
 namespace Tests.Services;
@@ -24,9 +25,12 @@ public sealed class PythonScriptRunProcessHostTests
             "ask me.py");
 
         Assert.Contains(PythonScriptRunProcessHost.Flag, command, StringComparison.Ordinal);
-        Assert.Contains("ask me.py", command, StringComparison.Ordinal);
+        // PowerShell receives both values as decoded data (real-pwsh coverage in
+        // PowerShellValueQuotingTests); POSIX single-quotes them.
         if (OperatingSystem.IsWindows())
-            Assert.Equal("& 'C:\\Program Files\\Vibe Rails\\vb.exe' --run-python-script 'ask me.py'", command);
+            Assert.Equal(
+                $"& {ShellArgSanitizer.DecodedPowerShellLiteral(@"C:\Program Files\Vibe Rails\vb.exe")} --run-python-script {ShellArgSanitizer.DecodedPowerShellLiteral("ask me.py")}",
+                command);
         else
             Assert.Equal("'/opt/vibe rails/vb' --run-python-script 'ask me.py'", command);
     }

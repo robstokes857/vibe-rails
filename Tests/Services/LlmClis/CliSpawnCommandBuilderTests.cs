@@ -25,7 +25,7 @@ public class CliSpawnCommandBuilderTests
             Assert.Equal(["-File", argv[1]], argv);
 
             Assert.Contains(
-                $"$exe = $utf8.GetString([System.Convert]::FromBase64String('{EncodeUtf8Base64("claude")}'))",
+                $"$exe = ([System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('{EncodeUtf8Base64("claude")}')))",
                 script);
             Assert.Contains(EncodeUtf8Base64("--model"), script);
             Assert.Contains(EncodeUtf8Base64("opus"), script);

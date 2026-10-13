@@ -65,16 +65,12 @@ internal static class CliSpawnCommandBuilder
         foreach (var setupCommand in setupCommands)
             script.AppendLine(RequireSingleStatement(setupCommand));
 
-        script.AppendLine("$utf8 = [System.Text.Encoding]::UTF8");
-        script.AppendLine(
-            $"$exe = $utf8.GetString([System.Convert]::FromBase64String('{EncodeUtf8Base64(cliExecutable)}'))");
+        script.AppendLine($"$exe = {ShellArgSanitizer.DecodedPowerShellLiteral(cliExecutable)}");
         script.Append("$argv = @(");
         for (var i = 0; i < argv.Count; i++)
         {
             if (i > 0) script.Append(", ");
-            script.Append("$utf8.GetString([System.Convert]::FromBase64String('");
-            script.Append(EncodeUtf8Base64(argv[i]));
-            script.Append("'))");
+            script.Append(ShellArgSanitizer.DecodedPowerShellLiteral(argv[i]));
         }
         script.AppendLine(")");
         script.AppendLine("& $exe @argv");
@@ -148,9 +144,6 @@ internal static class CliSpawnCommandBuilder
 
         return setupCommand;
     }
-
-    private static string EncodeUtf8Base64(string value) =>
-        Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
 
     private static string QuotePosixSingleQuoted(string value) =>
         ShellArgSanitizer.QuotePosixSingleQuoted(value);

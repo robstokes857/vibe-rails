@@ -210,31 +210,27 @@ namespace VibeRails.Services.LlmClis.Launchers
             // every nested-quote pitfall of `pwsh -Command "..."` when args contain
             // spaces, quotes, $, or backticks.
             //
-            // Every value is UTF-8/Base64 encoded and decoded inside the script, as
-            // CliSpawnCommandBuilder does: PowerShell also ends a single-quoted string at
-            // U+2018–U+201B, so doubling the ASCII apostrophe alone lets a legal directory
-            // name such as x’ + $(...) + ‘y run code before vb starts.
+            // Every value is UTF-8/Base64 encoded and decoded inside the script
+            // (ShellArgSanitizer.DecodedPowerShellLiteral): PowerShell also ends a single-quoted
+            // string at U+2018–U+201B, so doubling the ASCII apostrophe alone lets a legal
+            // directory name such as x’ + $(...) + ‘y run code before vb starts.
             var sb = new StringBuilder();
             sb.AppendLine("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8");
-            sb.AppendLine("$utf8 = [System.Text.Encoding]::UTF8");
-            sb.AppendLine($"$exe = {DecodedPowerShellLiteral(exePath)}");
+            sb.AppendLine($"$exe = {ShellArgSanitizer.DecodedPowerShellLiteral(exePath)}");
             sb.Append("$argv = @(");
             for (int i = 0; i < argv.Length; i++)
             {
                 if (i > 0) sb.Append(", ");
-                sb.Append(DecodedPowerShellLiteral(argv[i]));
+                sb.Append(ShellArgSanitizer.DecodedPowerShellLiteral(argv[i]));
             }
             sb.AppendLine(")");
-            sb.AppendLine($"$dir = {DecodedPowerShellLiteral(workingDirectory)}");
+            sb.AppendLine($"$dir = {ShellArgSanitizer.DecodedPowerShellLiteral(workingDirectory)}");
             sb.AppendLine("try { Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -ErrorAction SilentlyContinue } catch { }");
             // Stop: vb must never start in whatever directory the shell happened to open in.
             sb.AppendLine("Set-Location -LiteralPath $dir -ErrorAction Stop");
             sb.AppendLine("& $exe @argv");
             return sb.ToString();
         }
-
-        private static string DecodedPowerShellLiteral(string value) =>
-            $"$utf8.GetString([System.Convert]::FromBase64String('{Convert.ToBase64String(Encoding.UTF8.GetBytes(value))}'))";
 
         private LaunchResult LaunchInMacTerminal(
             LLM launchLlm,

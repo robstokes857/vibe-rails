@@ -114,7 +114,10 @@ file; it is reference material, not instructions.
   [Services/VCA/AGENTS.md](VibeRails/Services/VCA/AGENTS.md).
 - **Launch arguments are argv, never shell text.** Automation scripts, VibeRails child launches
   and CustomArgs go through explicit executables and `ShellArgSanitizer`; do not build command
-  strings from user fields.
+  strings from user fields. A value written into generated PowerShell goes through
+  `ShellArgSanitizer.DecodedPowerShellLiteral`, never `'` doubling: PowerShell also ends strings
+  at curly quotes, which are legal in paths. `PowerShellValueQuotingTests` sweeps for the old
+  pattern. VIBE-153.
 - **Every git launch goes through `GitCli.CreateStartInfo`** (`GitCli`, `GitProcessRunner`, the
   staged-snapshot provider, the hook's message cleaner): argv only, stdin redirected and closed,
   fsmonitor off. A git child that inherits the MCP host's stdin hangs while the host has a read

@@ -52,25 +52,8 @@ public sealed class JobProcessLauncher : IJobProcessLauncher
         IReadOnlyList<string> arguments,
         bool launchMinimized)
     {
-        // A tiny temporary script is used only to create the new terminal. PowerShell splatting
-        // keeps every VibeRails argument as a distinct argv value; paths and run ids never become
-        // an interpolated command line.
-        var builder = new StringBuilder();
-        builder.AppendLine("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8");
-        builder.AppendLine($"$exe = {QuotePowerShell(executable)}");
-        builder.Append("$argv = @(");
-        for (var index = 0; index < arguments.Count; index++)
-        {
-            if (index > 0)
-                builder.Append(", ");
-            builder.Append(QuotePowerShell(arguments[index]));
-        }
-        builder.AppendLine(")");
-        builder.AppendLine("try { Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -ErrorAction SilentlyContinue } catch { }");
-        builder.AppendLine("& $exe @argv");
-
         var scriptPath = Path.Combine(Path.GetTempPath(), $"viberails-job-{Guid.NewGuid():N}.ps1");
-        File.WriteAllText(scriptPath, builder.ToString(), new UTF8Encoding(false));
+        File.WriteAllText(scriptPath, BuildWindowsScript(executable, arguments), new UTF8Encoding(false));
 
         var startInfo = new ProcessStartInfo
         {
@@ -96,6 +79,27 @@ public sealed class JobProcessLauncher : IJobProcessLauncher
         }
 
         return new LaunchResult(true, "Automation launched in a new terminal window.");
+    }
+
+    internal static string BuildWindowsScript(string executable, IReadOnlyList<string> arguments)
+    {
+        // A tiny temporary script is used only to create the new terminal. PowerShell splatting
+        // keeps every VibeRails argument as a distinct argv value; paths and run ids never become
+        // an interpolated command line, and each value is decoded data, never PowerShell text.
+        var builder = new StringBuilder();
+        builder.AppendLine("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8");
+        builder.AppendLine($"$exe = {ShellArgSanitizer.DecodedPowerShellLiteral(executable)}");
+        builder.Append("$argv = @(");
+        for (var index = 0; index < arguments.Count; index++)
+        {
+            if (index > 0)
+                builder.Append(", ");
+            builder.Append(ShellArgSanitizer.DecodedPowerShellLiteral(arguments[index]));
+        }
+        builder.AppendLine(")");
+        builder.AppendLine("try { Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -ErrorAction SilentlyContinue } catch { }");
+        builder.AppendLine("& $exe @argv");
+        return builder.ToString();
     }
 
     private static LaunchResult LaunchMac(string executable, IReadOnlyList<string> arguments)
@@ -153,6 +157,4 @@ public sealed class JobProcessLauncher : IJobProcessLauncher
         }
         return builder.ToString();
     }
-
-    private static string QuotePowerShell(string value) => $"'{value.Replace("'", "''")}'";
 }

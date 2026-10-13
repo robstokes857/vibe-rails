@@ -6,6 +6,7 @@ using VibeRails.Services.Board;
 using VibeRails.Services.Jobs;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.LlmClis.Launchers;
+using VibeRails.Utils;
 using Xunit;
 
 namespace Tests.Services.Jobs;
@@ -224,7 +225,9 @@ public sealed class JobLaunchServiceTests
         var arguments = new[] { "--job-run", "quote' $(danger) `value` ; & |", "--", "a b" };
         // The UTF-8 switch must come first: the child inherits this console's output code page,
         // and on OEM 437 its Console.Write relay turns Codex's "•" into BEL (session dcc90020).
-        Assert.Equal("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; & 'C:/app''s/vb.exe' @('--job-run', 'quote'' $(danger) `value` ; & |', '--', 'a b'); exit $LASTEXITCODE",
+        // Every PowerShell value is decoded data; real-pwsh coverage is in PowerShellValueQuotingTests.
+        static string Ps(string value) => ShellArgSanitizer.DecodedPowerShellLiteral(value);
+        Assert.Equal($"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; & {Ps("C:/app's/vb.exe")} @({Ps("--job-run")}, {Ps("quote' $(danger) `value` ; & |")}, {Ps("--")}, {Ps("a b")}); exit $LASTEXITCODE",
             JobTerminalTabLauncher.BuildRunCommand("C:/app's/vb.exe", arguments, windows: true));
         Assert.Equal("exec '/app/vb' '--job-run' 'quote'\"'\"' $(danger) `value` ; & |' '--' 'a b'",
             JobTerminalTabLauncher.BuildRunCommand("/app/vb", arguments, windows: false));

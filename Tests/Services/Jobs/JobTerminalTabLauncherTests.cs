@@ -56,15 +56,17 @@ public sealed class JobTerminalTabLauncherTests
         Assert.Equal(withWorker ? workspace : directory, request.WorkingDirectory);
         Assert.Equal("outer-session", input!.ExpectedSessionId);
         Assert.True(input.Submit);
-        Assert.Contains("--job-run", input.Text);
+        // On Windows every value is a base64-decoded literal; read the values back first.
+        var text = PowerShellLiteralText.Decode(input.Text);
+        Assert.Contains("--job-run", text);
         if (withWorker)
         {
-            Assert.Contains("--env-id", input.Text);
-            Assert.Contains("--model", input.Text);
-            Assert.Contains("opus", input.Text);
-            Assert.Contains(workspace, input.Text);
+            Assert.Contains("--env-id", text);
+            Assert.Contains("--model", text);
+            Assert.Contains("opus", text);
+            Assert.Contains(workspace, text);
         }
-        else Assert.DoesNotContain("--env", input.Text);
+        else Assert.DoesNotContain("--env", text);
         tabs.VerifyAll();
         store.VerifyAll();
         repository.VerifyAll();

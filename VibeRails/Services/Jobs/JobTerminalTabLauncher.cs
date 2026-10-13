@@ -108,9 +108,11 @@ public sealed class JobTerminalTabLauncher(
 
     internal static string BuildRunCommand(string executable, IReadOnlyList<string> arguments, bool windows)
     {
-        static string PowerShellLiteral(string value) => $"'{value.Replace("'", "''", StringComparison.Ordinal)}'";
+        static string PowerShellLiteral(string value) => ShellArgSanitizer.DecodedPowerShellLiteral(value);
         static string PosixLiteral(string value) => $"'{value.Replace("'", "'\"'\"'", StringComparison.Ordinal)}'";
-        // Every value is a shell literal. End the wrapper when the workflow exits, so history
+        // Every value is a shell literal; on Windows, decoded data that PowerShell never parses,
+        // because a workspace path or CustomArgs value may hold a curly quote that would end a
+        // single-quoted string. End the wrapper when the workflow exits, so history
         // and tab status do not leave a completed Automation looking active indefinitely.
         // The child relays the CLI's PTY output to this console with Console.Write, which encodes
         // with the console output code page. On a default OEM console (437) that best-fits

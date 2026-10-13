@@ -276,7 +276,8 @@ internal static class TerminalScriptBuilder
         return true;
     }
 
-    private static string Ps(string value) => "'" + value.Replace("'", "''") + "'";
+    // Paths and environment values reach the script as decoded data, never PowerShell text.
+    private static string Ps(string value) => ShellArgSanitizer.DecodedPowerShellLiteral(value);
 
     private static string Posix(string value) => ShellArgSanitizer.QuotePosixSingleQuoted(value);
 }

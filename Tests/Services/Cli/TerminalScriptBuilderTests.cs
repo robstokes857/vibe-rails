@@ -1,4 +1,5 @@
 using VibeRails.Services.Cli;
+using VibeRails.Utils;
 using Xunit;
 
 namespace Tests.Services.Cli;
@@ -79,8 +80,10 @@ public class TerminalScriptBuilderTests
         // wrong directory instead of failing.
         Assert.Contains("-ErrorAction Stop", script);
         Assert.Contains($"exit {TerminalScriptBuilder.WorkingDirectoryUnavailableExitCode}", script);
-        // PowerShell single-quote escaping is doubling, so an apostrophe must not end the literal.
-        Assert.Contains(@"'C:\it''s here'", script);
+        // The directory is decoded data, so no quote character in it can end a PowerShell literal
+        // (real-pwsh coverage with curly quotes is in PowerShellValueQuotingTests).
+        Assert.Contains($"Set-Location -LiteralPath {ShellArgSanitizer.DecodedPowerShellLiteral(@"C:\it's here")} -ErrorAction Stop", script);
+        Assert.DoesNotContain("it's here", script);
     }
 
     [Fact]
@@ -123,7 +126,7 @@ public class TerminalScriptBuilderTests
             pauseOnFailure: false,
             selfDeletePath: null);
 
-        Assert.Contains("$env:NODE_ENV = 'prod'", windows);
+        Assert.Contains($"$env:NODE_ENV = {ShellArgSanitizer.DecodedPowerShellLiteral("prod")}", windows);
         Assert.Contains(@"Remove-Item -LiteralPath 'Env:\OLD'", windows);
 
         var posix = TerminalScriptBuilder.BuildPosixScript(
@@ -174,7 +177,7 @@ public class TerminalScriptBuilderTests
         // rather than relying on us to clean up after it.
         var windows = TerminalScriptBuilder.BuildPowerShellScript(
             "echo hi", WorkDir, null, Sentinel, pauseOnFailure: false, selfDeletePath: @"C:\Temp\step.ps1");
-        Assert.Contains(@"Remove-Item -LiteralPath 'C:\Temp\step.ps1'", windows);
+        Assert.Contains($"Remove-Item -LiteralPath {ShellArgSanitizer.DecodedPowerShellLiteral(@"C:\Temp\step.ps1")}", windows);
 
         var posix = TerminalScriptBuilder.BuildPosixScript(
             "echo hi", "/srv/app", null, "/tmp/step.exit", pauseOnFailure: false, selfDeletePath: "/tmp/step.sh");

@@ -177,6 +177,18 @@ public static partial class ShellArgSanitizer
         => "'" + value.Replace("'", "'\\''") + "'";
 
     /// <summary>
+    /// A PowerShell expression that evaluates to exactly <paramref name="value"/>. The value is
+    /// emitted as UTF-8/Base64 and decoded when the expression runs, so none of its characters
+    /// reaches PowerShell's parser. The canonical way to put a value into generated PowerShell
+    /// text. Do not double the apostrophe instead: PowerShell also ends a single-quoted string at
+    /// U+2018–U+201B, so a legal directory name such as <c>x’ + $(...) + ‘y</c> would run code.
+    /// Parenthesized, so it is one value both in an expression and as a command argument.
+    /// </summary>
+    public static string DecodedPowerShellLiteral(string value)
+        => "([System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('"
+           + Convert.ToBase64String(Encoding.UTF8.GetBytes(value)) + "')))";
+
+    /// <summary>
     /// Escapes a single argument for safe inclusion in a POSIX sh command string, or in a
     /// PowerShell command string on Windows. This output is not intended for cmd.exe.
     /// </summary>
@@ -193,9 +205,14 @@ public static partial class ShellArgSanitizer
 
         if (OperatingSystem.IsWindows())
         {
+            // PowerShell also ends a double-quoted string at U+201C–U+201E. A backtick makes any of
+            // them literal, as it does the ASCII quote.
             var escaped = arg
                 .Replace("`", "``")
                 .Replace("\"", "`\"")
+                .Replace("\u201C", "`\u201C")
+                .Replace("\u201D", "`\u201D")
+                .Replace("\u201E", "`\u201E")
                 .Replace("$", "`$");
             return "\"" + escaped + "\"";
         }

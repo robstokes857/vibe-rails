@@ -38,11 +38,12 @@ public class ShellService(ILogger<ShellService> logger) : IShellService
         return stdout;
     }
 
-    // Windows: open pwsh and pass the command via -EncodedCommand (UTF-16LE base64)
-    // so quoting is safe regardless of arg content.
+    // Windows: open pwsh and pass the command via -EncodedCommand (UTF-16LE base64). That only
+    // protects the outer command line; inside the command each arg is decoded data, never
+    // PowerShell text, so quoting is safe regardless of arg content.
     private static ProcessStartInfo BuildWindowsStartInfo(string[] args)
     {
-        var psArgs = string.Join(" ", args.Select(a => "'" + a.Replace("'", "''") + "'"));
+        var psArgs = string.Join(" ", args.Select(ShellArgSanitizer.DecodedPowerShellLiteral));
         var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes($"& {psArgs}"));
 
         var psi = new ProcessStartInfo

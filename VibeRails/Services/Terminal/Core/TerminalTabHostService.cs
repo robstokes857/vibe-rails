@@ -170,7 +170,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
     {
         if (OperatingSystem.IsWindows())
         {
-            static string QuotePowerShell(string value) => $"'{value.Replace("'", "''", StringComparison.Ordinal)}'";
+            static string QuotePowerShell(string value) => ShellArgSanitizer.DecodedPowerShellLiteral(value);
             return $"& {QuotePowerShell(executable)} {PythonScriptRunProcessHost.Flag} {QuotePowerShell(name)}";
         }
 
