@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 using VibeRails.Data.Replay;
+using VibeRails.Data.Sqlite;
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services.Board;
@@ -59,7 +60,23 @@ public static class JobRunner
 
         // Atomic claim. A second launcher of the same run during a stale lease handoff loses here
         // and exits quietly rather than opening a duplicate session.
-        if (!await store.StartRunAsync(runId, Environment.ProcessId))
+        bool claimed;
+        var claimClock = Stopwatch.StartNew();
+        try
+        {
+            claimed = await store.StartRunAsync(runId, Environment.ProcessId);
+        }
+        catch (Exception ex) when (SqliteTransientLock.IsTransientLock(ex))
+        {
+            // The store already retried. Exit cleanly and leave the real reason on the run; the
+            // stalled-launch watchdog would otherwise guess at it three minutes later.
+            var reason = $"Could not claim the run: state.db was locked for {claimClock.Elapsed.TotalSeconds:0} s.";
+            Log.Error(ex, "[Jobs] Run {RunId} not started: state.db stayed locked for {Seconds:0} s through every claim retry; exiting",
+                runId, claimClock.Elapsed.TotalSeconds);
+            await RecordUnclaimedRunAsync(store, runId, reason);
+            return CouldNotStartExitCode;
+        }
+        if (!claimed)
         {
             Log.Information("[Jobs] Run {RunId} was already claimed by another process; exiting", runId);
             return CouldNotStartExitCode;
@@ -723,6 +740,23 @@ public static class JobRunner
         {
             Log.Warning(ex, "[Jobs] Could not record idle completion for run {RunId} before killing it", runId);
             return JobRunStatus.Succeeded;
+        }
+    }
+
+    /// <summary>
+    /// Leaves the claim failure's real reason on a still-Queued run. Safe to lose, like
+    /// <see cref="RecordTerminalStatus"/>: it needs the same lock the claim could not get, and if
+    /// it fails too the stalled-launch watchdog fails the run later with its neutral text.
+    /// </summary>
+    private static async Task RecordUnclaimedRunAsync(IJobStore store, string runId, string reason)
+    {
+        try
+        {
+            await store.FailUnclaimedRunAsync(runId, reason, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "[Jobs] Could not record why run {RunId} was not started; the stalled-launch watchdog will fail it", runId);
         }
     }
 

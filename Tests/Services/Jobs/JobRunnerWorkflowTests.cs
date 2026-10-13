@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using VibeRails.DB;
@@ -37,6 +38,46 @@ public sealed class JobRunnerWorkflowTests
         Assert.Equal(1, await JobRunner.RunAsync(new ParsedArgs { JobRunId = run.Id, WorkDir = run.ProjectPath }, provider));
         Assert.Equal(new[] { ("check", JobRunActionStatus.Failed), ("after", JobRunActionStatus.Succeeded) }, completed);
         store.Verify(s => s.CompleteRunAsync(run.Id, JobRunStatus.Failed, 1, It.IsAny<string>(), CancellationToken.None), Times.Once);
+    }
+
+    [Fact]
+    public async Task ClaimThatStaysLocked_ExitsCleanlyAndRecordsTheRealReason()
+    {
+        // The store has already retried by the time the lock reaches the runner. The child used to
+        // die on the unhandled exception and the watchdog blamed the desktop three minutes later.
+        var run = Run([ScriptAction("only", 0, "inspect.py")]);
+        var store = StoreFor(run);
+        store.Setup(s => s.StartRunAsync(run.Id, It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new SqliteException("SQLite Error 5: 'database is locked'.", 5));
+        string? recorded = null;
+        store.Setup(s => s.FailUnclaimedRunAsync(run.Id, It.IsAny<string>(), CancellationToken.None))
+            .Callback<string, string, CancellationToken>((_, reason, _) => recorded = reason)
+            .ReturnsAsync(true);
+        using var provider = BuildServices(store, PreparedScripts(), new Mock<ICliWrapper>(MockBehavior.Strict));
+
+        var exitCode = await JobRunner.RunAsync(new ParsedArgs { JobRunId = run.Id, WorkDir = run.ProjectPath }, provider);
+
+        Assert.Equal(JobRunOutcome.CouldNotStartExitCode, exitCode);
+        Assert.StartsWith("Could not claim the run: state.db was locked for ", recorded);
+        store.Verify(s => s.CompleteRunAsync(It.IsAny<string>(), It.IsAny<JobRunStatus>(), It.IsAny<int?>(),
+            It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ClaimThatStaysLocked_StillExitsCleanlyWhenTheReasonCannotBeSaved()
+    {
+        // Recording the reason needs the same lock. Losing it leaves the run to the watchdog.
+        var run = Run([ScriptAction("only", 0, "inspect.py")]);
+        var store = StoreFor(run);
+        store.Setup(s => s.StartRunAsync(run.Id, It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new SqliteException("SQLite Error 5: 'database is locked'.", 5));
+        store.Setup(s => s.FailUnclaimedRunAsync(run.Id, It.IsAny<string>(), CancellationToken.None))
+            .ThrowsAsync(new SqliteException("SQLite Error 5: 'database is locked'.", 5));
+        using var provider = BuildServices(store, PreparedScripts(), new Mock<ICliWrapper>(MockBehavior.Strict));
+
+        var exitCode = await JobRunner.RunAsync(new ParsedArgs { JobRunId = run.Id, WorkDir = run.ProjectPath }, provider);
+
+        Assert.Equal(JobRunOutcome.CouldNotStartExitCode, exitCode);
     }
 
     [Fact]

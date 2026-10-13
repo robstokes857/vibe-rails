@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Globalization;
 using Microsoft.Data.Sqlite;
+using VibeRails.Data.Sqlite;
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services;
@@ -292,10 +294,97 @@ public sealed class JobStoreOverlapTests : IDisposable
         Assert.Equal(1, failed);
         var run = await store.GetRunAsync(runId!, cancellationToken);
         Assert.Equal(JobRunStatus.Failed, run!.Status);
-        Assert.Contains("interactive desktop", run.ErrorMessage!, StringComparison.OrdinalIgnoreCase);
+        // The watchdog cannot know why: a child that crashed on its claim used to be reported as a
+        // launcher without an interactive desktop (VIBE-5). Say what happened, then where to look.
+        const string expected = "The terminal was launched but never claimed the run within 0 min. Check logs/vb-*.log for the child's exit; if no child started at all, the native terminal launcher may lack an interactive desktop.";
+        Assert.Equal(expected, run.ErrorMessage);
         var action = Assert.Single(run.Actions!);
         Assert.Equal(JobRunActionStatus.Skipped, action.Status);
-        Assert.Contains("interactive desktop", action.ErrorMessage!, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(expected, action.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task ClaimAndSchedulerLease_OutlastAWriteLockHeldPastBusyTimeout()
+    {
+        // A retention tick held state.db's writer lock past the 5 s busy_timeout. The job-run child
+        // died on an unhandled SQLITE_BUSY from its claim and every root logged a failed scheduler
+        // cycle (VIBE-5). Both writes now retry the lock instead of failing on the first timeout.
+        var (store, jobId) = await SeedJobAsync();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var runId = await store.EnqueueManualRunAsync(jobId, cancellationToken);
+        await store.TryClaimLaunchAsync(runId!, 3, cancellationToken);
+
+        using (var writer = SqliteConnectionFactory.Open(_connectionString))
+        {
+            using var hold = writer.CreateCommand();
+            hold.CommandText = "BEGIN IMMEDIATE;";
+            hold.ExecuteNonQuery();
+            // Microsoft.Data.Sqlite's async calls block their thread, so give each its own.
+            var claim = Task.Run(() => store.StartRunAsync(runId!, 4242, cancellationToken), cancellationToken);
+            var lease = Task.Run(() => store.TryAcquireOrRenewSchedulerLeaseAsync(
+                "owner-a", DateTime.UtcNow, TimeSpan.FromMinutes(1), cancellationToken), cancellationToken);
+
+            await Task.Delay(SqliteConnectionFactory.BusyTimeoutMilliseconds + 1500, cancellationToken);
+            // Without a retry both would have failed by now, after one busy_timeout.
+            Assert.False(claim.IsCompleted);
+            Assert.False(lease.IsCompleted);
+
+            hold.CommandText = "COMMIT;";
+            hold.ExecuteNonQuery();
+            Assert.True(await claim);
+            Assert.True(await lease);
+        }
+
+        var run = await store.GetRunAsync(runId!, cancellationToken);
+        Assert.Equal(JobRunStatus.Running, run!.Status);
+        Assert.Equal(4242, run.OwnerProcessId);
+
+        // 0 rows is an answer, not a lock: a second claimant bows out at once.
+        var second = Stopwatch.StartNew();
+        Assert.False(await store.StartRunAsync(runId!, 5353, cancellationToken));
+        Assert.True(second.Elapsed < TimeSpan.FromSeconds(1), $"second claim took {second.Elapsed}");
+    }
+
+    [Fact]
+    public async Task FailUnclaimedRunAsync_RecordsTheChildsOwnReason()
+    {
+        var (store, jobId) = await SeedJobAsync();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var runId = await store.EnqueueManualRunAsync(jobId, cancellationToken);
+        await store.TryClaimLaunchAsync(runId!, 3, cancellationToken);
+        const string reason = "Could not claim the run: state.db was locked for 21 s.";
+
+        Assert.True(await store.FailUnclaimedRunAsync(runId!, reason, cancellationToken));
+
+        var run = await store.GetRunAsync(runId!, cancellationToken);
+        Assert.Equal(JobRunStatus.Failed, run!.Status);
+        Assert.Equal(JobRunOutcome.CouldNotStartExitCode, run.ExitCode);
+        Assert.Equal(reason, run.ErrorMessage);
+        Assert.NotNull(run.EndedUtc);
+        var action = Assert.Single(run.Actions!);
+        Assert.Equal(JobRunActionStatus.Skipped, action.Status);
+        Assert.Equal(reason, action.ErrorMessage);
+        // The watchdog's guess no longer applies to it.
+        Assert.Equal(0, await store.FailStalledLaunchesAsync(TimeSpan.Zero, cancellationToken));
+        Assert.Equal(reason, (await store.GetRunAsync(runId!, cancellationToken))!.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task FailUnclaimedRunAsync_NeverFinalizesARunAnotherProcessClaimed()
+    {
+        // CompleteRunAsync also finalizes Running rows; a loser of the claim must not use it.
+        var (store, jobId) = await SeedJobAsync();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var runId = await store.EnqueueManualRunAsync(jobId, cancellationToken);
+        await store.TryClaimLaunchAsync(runId!, 3, cancellationToken);
+        Assert.True(await store.StartRunAsync(runId!, 4242, cancellationToken));
+
+        Assert.False(await store.FailUnclaimedRunAsync(runId!, "too late", cancellationToken));
+
+        var run = await store.GetRunAsync(runId!, cancellationToken);
+        Assert.Equal(JobRunStatus.Running, run!.Status);
+        Assert.Null(run.ErrorMessage);
+        Assert.Equal(JobRunActionStatus.Pending, Assert.Single(run.Actions!).Status);
     }
 
     [Fact]

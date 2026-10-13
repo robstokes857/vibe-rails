@@ -65,6 +65,12 @@ public interface IJobStore
     Task<IReadOnlyList<string>> GetOpenProjectRootsAsync(DateTime nowUtc, CancellationToken cancellationToken = default);
     Task<int> FailStalledLaunchesAsync(TimeSpan grace, CancellationToken cancellationToken = default);
     Task<bool> StartRunAsync(string runId, int processId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Fails a still-Queued run with the reason its launched process could not claim it. Returns
+    /// false, changing nothing, when the run is no longer Queued.
+    /// </summary>
+    Task<bool> FailUnclaimedRunAsync(string runId, string errorMessage, CancellationToken cancellationToken = default);
     Task CompleteRunAsync(string runId, JobRunStatus status, int? exitCode, string? errorMessage, CancellationToken cancellationToken = default);
 
     /// <summary>

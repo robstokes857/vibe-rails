@@ -1,7 +1,6 @@
 using System.Threading.Channels;
-using Microsoft.Data.Sqlite;
 using Serilog;
-using VibeRails.Data.Abstractions;
+using VibeRails.Data.Sqlite;
 using VibeRails.DB;
 using VibeRails.DTOs;
 
@@ -29,12 +28,7 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
     internal static readonly TimeSpan CoalesceWindow = TimeSpan.FromMilliseconds(25);
 
     // Retry delays for a batch that lost the writer lock (busy_timeout already waited 5s each).
-    internal static readonly TimeSpan[] RetryDelays =
-    [
-        TimeSpan.FromMilliseconds(100),
-        TimeSpan.FromMilliseconds(250),
-        TimeSpan.FromMilliseconds(500),
-    ];
+    internal static IReadOnlyList<TimeSpan> RetryDelays => SqliteTransientLock.RetryDelays;
 
     // Max bytes a partial CSI private-mode sequence can span (e.g. ESC[?1049;2004;25
     // without the trailing h/l). Multi-mode sequences can be longer than standalone ones.
@@ -200,7 +194,7 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
                 await _repository.PersistTerminalOutputAsync(_sessionId!, batch).ConfigureAwait(false);
                 return;
             }
-            catch (Exception ex) when (attempt <= RetryDelays.Length && IsTransientLock(ex))
+            catch (Exception ex) when (attempt <= RetryDelays.Count && SqliteTransientLock.IsTransientLock(ex))
             {
                 await Task.Delay(RetryDelays[attempt - 1]).ConfigureAwait(false);
             }
@@ -215,13 +209,6 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
             }
         }
     }
-
-    private static bool IsTransientLock(Exception ex) => ex switch
-    {
-        SqliteException sqlite => sqlite.SqliteErrorCode is 5 or 6,
-        StorageException storage => storage.IsTransient,
-        _ => false,
-    };
 
     private void HandleData(byte[] payload, List<TerminalOutputWrite> batch)
     {

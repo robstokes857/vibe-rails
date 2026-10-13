@@ -229,6 +229,6 @@ public sealed class SessionOutputWriterTests
         Assert.Empty(Rows(batches));
         // One initial attempt per drain plus the retry budget. Two drains happen here: the chunk
         // and the shutdown flush of the replay frame -- both exhaust the same budget.
-        Assert.Equal(2 * (SessionOutputWriter.RetryDelays.Length + 1), attempts);
+        Assert.Equal(2 * (SessionOutputWriter.RetryDelays.Count + 1), attempts);
     }
 }

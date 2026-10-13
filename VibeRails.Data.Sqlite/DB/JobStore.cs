@@ -290,7 +290,9 @@ public sealed partial class JobStore : IJobStore
 
     /// <summary>
     /// Atomically acquires the single scheduler lease, or renews it when this instance already owns
-    /// it. A different owner may take over only after the stored UTC expiry has passed.
+    /// it. A different owner may take over only after the stored UTC expiry has passed. A transient
+    /// lock is retried: one lost busy_timeout used to fail the whole scheduler cycle, or drop the
+    /// lease in the middle of a launch batch.
     /// </summary>
     public async Task<bool> TryAcquireOrRenewSchedulerLeaseAsync(
         string ownerId,
@@ -308,22 +310,25 @@ public sealed partial class JobStore : IJobStore
             : nowUtc.ToUniversalTime();
         var expiresUtc = nowUtc.Add(leaseDuration);
 
-        await using var connection = await OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            INSERT INTO JobSchedulerLease (LeaseName, OwnerId, ExpiresUTC)
-            VALUES ($leaseName, $ownerId, $expiresUtc)
-            ON CONFLICT(LeaseName) DO UPDATE SET
-                OwnerId = excluded.OwnerId,
-                ExpiresUTC = excluded.ExpiresUTC
-            WHERE JobSchedulerLease.OwnerId = excluded.OwnerId
-               OR JobSchedulerLease.ExpiresUTC <= $nowUtc;
-            """;
-        command.Parameters.AddWithValue("$leaseName", SchedulerLeaseName);
-        command.Parameters.AddWithValue("$ownerId", ownerId);
-        command.Parameters.AddWithValue("$nowUtc", ToDb(nowUtc));
-        command.Parameters.AddWithValue("$expiresUtc", ToDb(expiresUtc));
-        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+        return await SqliteTransientLock.RetryAsync(async attemptToken =>
+        {
+            await using var connection = await OpenAsync(attemptToken);
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT INTO JobSchedulerLease (LeaseName, OwnerId, ExpiresUTC)
+                VALUES ($leaseName, $ownerId, $expiresUtc)
+                ON CONFLICT(LeaseName) DO UPDATE SET
+                    OwnerId = excluded.OwnerId,
+                    ExpiresUTC = excluded.ExpiresUTC
+                WHERE JobSchedulerLease.OwnerId = excluded.OwnerId
+                   OR JobSchedulerLease.ExpiresUTC <= $nowUtc;
+                """;
+            command.Parameters.AddWithValue("$leaseName", SchedulerLeaseName);
+            command.Parameters.AddWithValue("$ownerId", ownerId);
+            command.Parameters.AddWithValue("$nowUtc", ToDb(nowUtc));
+            command.Parameters.AddWithValue("$expiresUtc", ToDb(expiresUtc));
+            return await command.ExecuteNonQueryAsync(attemptToken) > 0;
+        }, cancellationToken);
     }
 
     /// <summary>
@@ -923,15 +928,18 @@ public sealed partial class JobStore : IJobStore
 
     /// <summary>
     /// Fails runs whose terminal was spawned but never claimed the run. This is the detector for a
-    /// launch that silently went nowhere — for example, when the native terminal launcher cannot
-    /// reach an interactive desktop. Surfacing it as a failed run with a message beats silence.
+    /// launch that silently went nowhere. The cause is not known here: the child may have crashed
+    /// before or during its claim, or never started at all (a native terminal launcher without an
+    /// interactive desktop). A child that gives up on its claim records its own reason first through
+    /// <see cref="FailUnclaimedRunAsync"/>, so this neutral text is what remains when it could not.
     /// </summary>
     public async Task<int> FailStalledLaunchesAsync(TimeSpan grace, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(deferred: false);
         var now = DateTime.UtcNow;
-        const string error = "The terminal was launched but never started the run. If this keeps happening, the native terminal launcher may not have access to an interactive desktop.";
+        var error = string.Create(CultureInfo.InvariantCulture,
+            $"The terminal was launched but never claimed the run within {grace.TotalMinutes:0.#} min. Check logs/vb-*.log for the child's exit; if no child started at all, the native terminal launcher may lack an interactive desktop.");
 
         await using (var actions = connection.CreateCommand())
         {
@@ -990,23 +998,73 @@ public sealed partial class JobStore : IJobStore
         return results;
     }
 
-    public async Task<bool> StartRunAsync(string runId, int processId, CancellationToken cancellationToken = default)
-    {
-        await using var connection = await OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        // Atomic claim: only a still-Queued, not-cancelled run flips to Running. Whoever wins this
-        // gets to execute; a second spawner of the same run sees 0 rows and bows out.
-        command.CommandText = """
-            UPDATE JobRuns SET Status = $running, StartedUTC = $now, OwnerProcessId = $pid
-            WHERE Id = $id AND Status = $queued AND CancelRequested = 0;
-            """;
-        command.Parameters.AddWithValue("$running", (int)JobRunStatus.Running);
-        command.Parameters.AddWithValue("$queued", (int)JobRunStatus.Queued);
-        command.Parameters.AddWithValue("$now", ToDb(DateTime.UtcNow));
-        command.Parameters.AddWithValue("$pid", processId);
-        command.Parameters.AddWithValue("$id", runId);
-        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
-    }
+    public Task<bool> StartRunAsync(string runId, int processId, CancellationToken cancellationToken = default) =>
+        // Only a transient lock is retried. 0 rows is an answer, not a failure: another process
+        // claimed the run (or it was cancelled), and this one must bow out.
+        SqliteTransientLock.RetryAsync(async attemptToken =>
+        {
+            await using var connection = await OpenAsync(attemptToken);
+            await using var command = connection.CreateCommand();
+            // Atomic claim: only a still-Queued, not-cancelled run flips to Running. Whoever wins this
+            // gets to execute; a second spawner of the same run sees 0 rows and bows out.
+            command.CommandText = """
+                UPDATE JobRuns SET Status = $running, StartedUTC = $now, OwnerProcessId = $pid
+                WHERE Id = $id AND Status = $queued AND CancelRequested = 0;
+                """;
+            command.Parameters.AddWithValue("$running", (int)JobRunStatus.Running);
+            command.Parameters.AddWithValue("$queued", (int)JobRunStatus.Queued);
+            command.Parameters.AddWithValue("$now", ToDb(DateTime.UtcNow));
+            command.Parameters.AddWithValue("$pid", processId);
+            command.Parameters.AddWithValue("$id", runId);
+            return await command.ExecuteNonQueryAsync(attemptToken) > 0;
+        }, cancellationToken);
+
+    /// <summary>
+    /// Fails a run its launched process could not claim, with that process's own reason, so the
+    /// user does not later read the stalled-launch watchdog's guess instead. Only a still-Queued run
+    /// changes: unlike <see cref="CompleteRunAsync"/>, this can never finalize a run another process
+    /// claimed meanwhile. Pending actions are skipped with the same reason. Retried like the claim.
+    /// </summary>
+    public Task<bool> FailUnclaimedRunAsync(string runId, string errorMessage, CancellationToken cancellationToken = default) =>
+        SqliteTransientLock.RetryAsync(async attemptToken =>
+        {
+            await using var connection = await OpenAsync(attemptToken);
+            await using var transaction = connection.BeginTransaction(deferred: false);
+            var now = ToDb(DateTime.UtcNow);
+            int changed;
+            await using (var command = connection.CreateCommand())
+            {
+                command.Transaction = transaction;
+                command.CommandText = """
+                    UPDATE JobRuns SET Status = $failed, EndedUTC = $now, ExitCode = $exitCode, ErrorMessage = $error
+                    WHERE Id = $id AND Status = $queued;
+                    """;
+                command.Parameters.AddWithValue("$failed", (int)JobRunStatus.Failed);
+                command.Parameters.AddWithValue("$queued", (int)JobRunStatus.Queued);
+                command.Parameters.AddWithValue("$exitCode", JobRunOutcome.CouldNotStartExitCode);
+                command.Parameters.AddWithValue("$now", now);
+                command.Parameters.AddWithValue("$error", errorMessage);
+                command.Parameters.AddWithValue("$id", runId);
+                changed = await command.ExecuteNonQueryAsync(attemptToken);
+            }
+            if (changed > 0)
+            {
+                await using var actions = connection.CreateCommand();
+                actions.Transaction = transaction;
+                actions.CommandText = """
+                    UPDATE JobRunActions SET Status = $skipped, EndedUTC = $now, ErrorMessage = $error
+                    WHERE RunId = $id AND Status = $pending;
+                    """;
+                actions.Parameters.AddWithValue("$skipped", (int)JobRunActionStatus.Skipped);
+                actions.Parameters.AddWithValue("$pending", (int)JobRunActionStatus.Pending);
+                actions.Parameters.AddWithValue("$now", now);
+                actions.Parameters.AddWithValue("$error", errorMessage);
+                actions.Parameters.AddWithValue("$id", runId);
+                await actions.ExecuteNonQueryAsync(attemptToken);
+            }
+            await transaction.CommitAsync(attemptToken);
+            return changed > 0;
+        }, cancellationToken);
 
     public async Task CompleteRunAsync(string runId, JobRunStatus status, int? exitCode, string? errorMessage, CancellationToken cancellationToken = default)
     {

@@ -836,6 +836,10 @@ remain in their existing shared modules.
   first failure, and retains the existing global timeout, cancellation, overlap guard, scheduler,
   and Worker terminal-session replay behavior. Native script-only workflows also record their timed stdout/stderr
   into normal session history; Board recordings link to the originating card's Automations rail.
+  The claim (`StartRunAsync`) retries a transient SQLite lock; if state.db stays locked through every
+  retry, the child records "Could not claim the run…" on the still-Queued run and exits with
+  `CouldNotStartExitCode`. The scheduler's stalled-launch watchdog only reports that the run was never
+  claimed and points at `logs/vb-*.log` (VIBE-5).
 - Finished Automation tabs retain their final screen and up to 20,000 terminal scrollback lines
   for direct read-only viewing (VB-60). The PTY exits and recording finalizes normally. The
   existing snapshot API serves retained output; live snapshots still contain only the screen.
