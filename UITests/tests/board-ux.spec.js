@@ -2147,6 +2147,79 @@ test('long new-card descriptions grow inside the composer instead of painting ov
     expect(layout.attachmentsTop).toBeGreaterThanOrEqual(layout.composerBottom);
 });
 
+for (const width of [1440, 390]) {
+    test(`Start work on the card face launches saved work and fits a narrow lane at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 900 });
+        let saved;
+        const requests = await openBoard(page, { assignee: 'base:codex',
+            columns: ['Ready', 'Build', 'Review', 'PR', 'Ship', 'Done'].map((name, position) => ({
+                id: position ? `col_${position}` : 'col_ready', name, position, boardId: 'brd_main', color: '#64748b'
+            })),
+            onCard: card => {
+                saved = card;
+                card.title = 'Linux forkpty child runs managed code: JIT test host segfaults / deadlocks';
+                card.type = 'bug';
+                card.baseLlmOptions = { model: 'gpt-6-astra', effort: 'high', speed: 'ultrafast', yolo: false };
+            }
+        });
+        await page.evaluate(() => {
+            window.__faceTabs = [];
+            window.__faceMetadata = [];
+            window.app.terminalController.rememberTabLaunch = (id, metadata) => window.__faceMetadata.push({ id, metadata });
+            window.app.terminalController.adoptLaunchedTab = async id => { window.__faceTabs.push(id); return true; };
+        });
+        const tile = page.locator('.board-card');
+        const start = tile.getByRole('button', { name: 'Start work on VB-1', exact: true });
+        await expect(start).toBeVisible();
+        const chipBounds = await tile.locator('.board-assignee-chip').boundingBox();
+        const buttonBounds = await start.boundingBox();
+        expect(chipBounds.x + chipBounds.width).toBeLessThanOrEqual(buttonBounds.x);
+        expect(Math.abs(chipBounds.y + chipBounds.height / 2 - buttonBounds.y - buttonBounds.height / 2)).toBeLessThan(1);
+        expect(await tile.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+        await page.screenshot({ path: testInfo.outputPath(`board-face-start-work-${width}.png`) });
+
+        let releaseLaunch;
+        const launching = new Promise(resolve => { releaseLaunch = resolve; });
+        const launches = [];
+        await page.route('**/api/v1/board/cards/card_test/launch', async route => {
+            launches.push(route.request().postDataJSON());
+            await launching;
+            saved.activeSessionId = 'session_work';
+            saved.activeTabId = 'tab_work';
+            saved.sessions.push({ id: 'session_work', tabId: 'tab_work', active: true, selection: 'base:codex' });
+            await route.fulfill({ json: { tabId: 'tab_work', selection: 'base:codex' } });
+        });
+        await start.focus();
+        await page.keyboard.press('Enter');
+        await expect(start).toBeDisabled();
+        await page.evaluate(() => window.app.boardController.renderLanes());
+        await expect(start).toBeDisabled();
+        await expect(page.locator('[data-board-card-editor]')).toHaveCount(0);
+        releaseLaunch();
+        const go = tile.getByRole('button', { name: 'Go to agent on VB-1', exact: true });
+        await expect(go).toBeEnabled();
+        await expect(page.locator('#app-content [data-view="board"]')).toBeVisible();
+        expect(launches).toEqual([{ selection: 'base:codex', intent: 'work' }]);
+        expect(requests.filter(request => request.method === 'PUT')).toHaveLength(0);
+        expect(await page.evaluate(() => window.__faceTabs)).toEqual([]);
+        expect(await page.evaluate(() => window.__faceMetadata[0].metadata.taskKey)).toBe('board-card:card_test');
+        expect(saved.baseLlmOptions.speed).toBe('ultrafast');
+        await go.click();
+        await expect.poll(() => page.evaluate(() => window.__faceTabs)).toEqual(['tab_work']);
+        expect(launches).toHaveLength(1);
+    });
+}
+
+test('Start work on an unassigned card face opens assignment without launching', async ({ page }) => {
+    const requests = await openBoard(page);
+    await page.locator('.board-card').getByRole('button', { name: 'Start work on VB-1', exact: true }).click();
+    const editor = page.locator('[data-board-card-editor]');
+    await expect(editor).toBeVisible();
+    await expect(editor.locator('[data-board-start-work]')).toBeEnabled();
+    await expect(editor.locator('#board-card-assignee')).toHaveValue('');
+    expect(requests.filter(request => request.method === 'PUT' || request.path.endsWith('/launch'))).toHaveLength(0);
+});
+
 test('a running agent exposes Go to agent while keeping Save and the session available', async ({ page }) => {
     const requests = await openBoard(page, { active: true });
     await page.evaluate(() => {

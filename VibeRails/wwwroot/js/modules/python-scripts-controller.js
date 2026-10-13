@@ -269,7 +269,7 @@ export class PythonScriptsController {
 
         const scripts = this.state.scripts || [];
         if (count) count.textContent = `${scripts.length} ${scripts.length === 1 ? 'script' : 'scripts'}`;
-        if (dir) dir.textContent = this.state.scriptsDirectory || '';
+        if (dir) dir.textContent = this._defaultScriptDirectory();
         if (pinLabel) pinLabel.textContent = this.state.pinConfigured ? 'Change PIN' : 'Set PIN';
 
         const unsigned = scripts.filter(script => script.status !== 'approved');
@@ -514,6 +514,16 @@ export class PythonScriptsController {
     displayName(name) { const script = this.scriptByName(name); return script?.displayName || script?.fileName || name; }
     scriptDirectory(name) { return this.scriptByName(name)?.path?.replace(/[\\/][^\\/]+$/, '') || this.state?.scriptsDirectory || null; }
 
+    /** New-script folder for this project's UI; the shared library root stays unchanged. */
+    _defaultScriptDirectory() {
+        const directory = this.state?.scriptsDirectory || '';
+        const projectPath = this.app.data?.configs?.rootPath || this.app.data?.configs?.launchDirectory || '';
+        const projectName = projectPath.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
+        if (!directory || !projectName || !this._canImportFromHost()) return directory;
+        const separator = directory.includes('\\') ? '\\' : '/';
+        return `${directory.replace(/[\\/]+$/, '')}${separator}${projectName}${separator}`;
+    }
+
     // --- authoring ---
 
     /** Opens the workbench view for a script — the same destination in every host. */
@@ -569,7 +579,7 @@ export class PythonScriptsController {
                 autofocus: true
             }, ...this._libraryFields(this._uniqueName('script.py')), {
                 key: 'directory', label: 'Save in folder', type: 'directory',
-                value: this.state?.scriptsDirectory || ''
+                value: this._defaultScriptDirectory()
             }],
             submitLabel: 'Create and edit',
             // The two fields describe one choice: picking bash renames script.py to

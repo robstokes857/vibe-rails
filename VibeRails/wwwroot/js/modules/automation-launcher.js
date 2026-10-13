@@ -98,16 +98,6 @@ export class AutomationNavLauncher {
                         title="Choose which agents and automations appear here and arrange their order">
                     <i class="fa-solid fa-sliders" aria-hidden="true"></i><span>Customize list…</span>
                 </button>
-                <button type="button" class="automation-launch-footer-btn" role="menuitem"
-                        data-automation-launch-action="agents"
-                        title="Open the Agents page">
-                    <i class="fa-solid fa-robot" aria-hidden="true"></i><span>Agents</span>
-                </button>
-                <button type="button" class="automation-launch-footer-btn" role="menuitem"
-                        data-automation-launch-action="automations"
-                        title="Open the Automations page">
-                    <i class="fa-solid fa-list-check" aria-hidden="true"></i><span>Automations</span>
-                </button>
             </div>`;
 
         document.body.appendChild(flyout);
@@ -124,17 +114,6 @@ export class AutomationNavLauncher {
                 this.closeFlyout();
                 this.openCustomizationModal({ triggerElement });
             });
-        flyout.querySelector('[data-automation-launch-action="agents"]')
-            ?.addEventListener('click', () => {
-                this.closeFlyout();
-                this.app.navigate('ai-agents');
-            });
-        flyout.querySelector('[data-automation-launch-action="automations"]')
-            ?.addEventListener('click', () => {
-                this.closeFlyout();
-                this.app.navigate('automations');
-            });
-
         const onDocumentClick = (event) => {
             if (!this.flyout) return;
             if (this.flyout.contains(event.target)) return;

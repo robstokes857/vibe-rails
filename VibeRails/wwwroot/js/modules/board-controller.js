@@ -122,6 +122,7 @@ export class BoardController {
         this.cardPage = null;
         this._activityDisposers = [];
         this._activityGeneration = 0;
+        this._startingCards = new Map();
         BoardApi.attach(app);
         this.laneAgents = new BoardLaneAgents(app, agent => this.goToCardAutomation(agent.cardId, agent.terminalSessionId || agent.sessionId));
         // The lane card's assignee menu (VIBE-145): rows wear the same brand marks as the chips.
@@ -218,6 +219,7 @@ export class BoardController {
         this._openCardGeneration += 1;
         this._openCardAbort?.abort();
         this._openCardAbort = null;
+        for (const request of this._startingCards.values()) request?.abort();
         this.destroySortables();
         this.closeDiffModal();
         this.closeSessionModal();
@@ -364,7 +366,7 @@ export class BoardController {
             for (const card of this.state.cards) {
                 const fresh = byId.get(card.id);
                 if (!fresh) continue;
-                const changed = card.activeTabId !== fresh.activeTabId || card.hasActiveAutomation !== fresh.hasActiveAutomation
+                const changed = card.activeSessionId !== fresh.activeSessionId || card.activeTabId !== fresh.activeTabId || card.hasActiveAutomation !== fresh.hasActiveAutomation
                     || card.hasWaitingAutomation !== fresh.hasWaitingAutomation
                     || card.hasActiveDesktopAgent !== fresh.hasActiveDesktopAgent;
                 card.activeSessionId = fresh.activeSessionId;
@@ -386,6 +388,7 @@ export class BoardController {
                 if (card.hasActiveAutomation) aside?.insertAdjacentHTML('afterbegin', this.automationIndicator());
                 if (card.activeTabId) aside?.insertAdjacentHTML('beforeend', '<span class="board-live-dot" title="A terminal session is working this card" aria-label="Session open"></span>');
                 if (card.hasActiveDesktopAgent) aside?.insertAdjacentHTML('beforeend', this.desktopAgentIndicator());
+                this.updateStartWorkButton(tile, card);
             }
             // Update only the rails and live controls. Never replace the user's draft fields.
             if (detail && editor.isConnected && editor === document.querySelector('[data-board-card-editor]') && editor.dataset.cardId === cardId
@@ -843,6 +846,13 @@ export class BoardController {
         // never filters the board, so a click meant to reassign cannot make cards vanish. The
         // toolbar's assignee filter is the way to filter.
         const id = escapeHtml(cardDisplayId(card));
+        const running = this.hasRunningSession(card);
+        const startLabel = running ? (card.workflowMode === 'agent' ? 'Go to manager' : 'Go to agent') : 'Start work';
+        const startWork = `<button type="button" class="btn btn-sm btn-outline-success board-card-start-work"
+                data-board-action="start-work" data-board-start-card-work
+                aria-label="${startLabel} on ${id}" ${this._startingCards.has(card.id) ? 'disabled' : ''}>
+                <i class="fa-solid ${running ? 'fa-terminal' : 'fa-play'}" aria-hidden="true"></i>
+                <span data-board-start-work-label>${startLabel}</span></button>`;
         const assignee = `<button type="button" class="board-assignee-chip${member ? '' : ' is-empty'}" data-board-action="${ASSIGN_ACTION}" tabindex="-1"
                 aria-haspopup="dialog" aria-expanded="false"
                 ${member
@@ -880,7 +890,7 @@ export class BoardController {
                             ${comments}
                         </div>
                     </div>
-                    <div class="board-card-foot">${manager ? `<span class="board-manager-chip" title="Manager: ${escapeHtml(manager.label)}">${this.avatarHtml(manager, 18)}<span class="board-assignee-name">Manager · ${escapeHtml(manager.label)}</span></span>` : ''}${assignee}</div>
+                    <div class="board-card-foot">${manager ? `<span class="board-manager-chip" title="Manager: ${escapeHtml(manager.label)}">${this.avatarHtml(manager, 18)}<span class="board-assignee-name">Manager · ${escapeHtml(manager.label)}</span></span>` : ''}${assignee}${startWork}</div>
                 </div>
             </article>`;
     }
@@ -1185,6 +1195,10 @@ export class BoardController {
         }
 
         switch (action) {
+            case 'start-work':
+                event.stopPropagation();
+                if (cardEl) void this.startWorkFromFace(cardEl.dataset.cardId);
+                break;
             case 'waiting-automation':
                 if (cardEl) void this.openCardEditor(cardEl.dataset.cardId);
                 break;
@@ -2537,29 +2551,93 @@ export class BoardController {
             && (workflowMode !== 'agent' || session.origin === 'agent_manager')));
     }
 
+    updateCardStartWorkButtons(card) {
+        for (const tile of this.root?.querySelectorAll('.board-card') || []) {
+            if (tile.dataset.cardId === card.id) this.updateStartWorkButton(tile, card);
+        }
+    }
+
+    // Fetch the saved card before launching: lane summaries and assignments may be stale.
+    async startWorkFromFace(cardId) {
+        if (this._startingCards.has(cardId)) return;
+        const root = this.root;
+        const boardId = this.state.boardId;
+        const current = () => root === this.root && root?.isConnected && boardId === this.state.boardId
+            && this.app.currentView === 'board';
+        const request = new AbortController();
+        this._startingCards.set(cardId, request);
+        const listed = this.state.cards.find(card => card.id === cardId);
+        if (listed) this.updateCardStartWorkButtons(listed);
+        try {
+            const card = await BoardApi.getBoardCardAsync(cardId, { signal: request.signal });
+            if (!current()) return;
+            if (this.hasRunningSession(card)) {
+                await this.goToAgent(null, card);
+                return;
+            }
+            const manager = card.workflowMode === 'agent';
+            const selection = manager ? card.managerSelection : card.assignee;
+            if (!selection) {
+                this._startingCards.delete(cardId);
+                await this.openCardEditor(cardId);
+                return;
+            }
+            const { info } = await this.launchCardAgent(card, selection, manager ? 'manager' : 'work');
+            if (!current()) return;
+            this.app.showToast('Board', `${cardDisplayId(card)} started with ${info?.label || 'the LLM'}. Open it from Sessions when ready.`, 'success');
+            await this.refreshBoardSnapshot();
+        } catch (error) {
+            if (current() && !request.signal.aborted)
+                this.app.showToast('Board', error?.message || 'Failed to start work on the card.', 'error');
+        } finally {
+            if (this._startingCards.get(cardId) === request) this._startingCards.delete(cardId);
+            const card = this.state.cards.find(item => item.id === cardId);
+            if (current() && card) this.updateCardStartWorkButtons(card);
+        }
+    }
+
+    async launchCardAgent(card, selection, intent, question) {
+        const result = await BoardApi.launchBoardCardAsync(card.id, { selection, intent, ...(question ? { question } : {}) });
+        const tabId = String(result?.tabId || '').trim();
+        if (!tabId) throw new Error('The launch did not return a terminal tab.');
+        const info = this.assigneeInfo(result.selection || selection);
+        this.app.terminalController?.rememberTabLaunch?.(tabId, {
+            selection: result.selection || selection,
+            label: cardLabel(card),
+            title: cardLabel(card),
+            taskKey: intent === 'chat' ? `${CARD_TASK_KEY(card.id)}:chat` : CARD_TASK_KEY(card.id),
+            accentColor: info?.color || null,
+            workingDirectory: result.workingDirectory || null
+        });
+        return { result, tabId, info };
+    }
+
     updateStartWorkButton(editor, card) {
         const chat = editor.querySelector('[data-board-chat]');
         if (chat) {
             chat.disabled = Boolean(editor._boardStarting);
             chat.title = 'Open a terminal to discuss this card with the selected LLM';
         }
-        const button = editor.querySelector('[data-board-start-work]');
+        const button = editor.querySelector('[data-board-start-work]') || editor.querySelector('[data-board-start-card-work]');
         if (!button) return;
         const agent = (editor.querySelector('#board-card-workflow')?.value || card?.workflowMode) === 'agent';
         const running = this.hasRunningSession(card, agent ? 'agent' : 'manual');
-        button.disabled = Boolean(editor._boardStarting);
+        button.disabled = Boolean(editor._boardStarting || this._startingCards.has(card?.id));
         button.title = running
             ? `Go to the ${agent ? 'manager' : 'agent'} terminal for this card`
             : agent ? 'Start the manager to coordinate this card through the pipeline'
                 : 'Start the assigned LLM in the background with this card as its first message';
         const label = button.querySelector?.('[data-board-start-work-label]');
-        if (label) label.textContent = running ? (agent ? 'Go to manager' : 'Go to agent') : (agent ? 'Start Agent workflow' : 'Start work');
+        const face = button.dataset?.boardAction === 'start-work';
+        const text = running ? (agent ? 'Go to manager' : 'Go to agent') : (agent && !face ? 'Start Agent workflow' : 'Start work');
+        if (label) label.textContent = text;
+        if (face) button.setAttribute('aria-label', `${text} on ${cardDisplayId(card)}`);
         const icon = button.querySelector?.('i');
         if (icon) icon.className = `fa-solid ${running ? 'fa-terminal' : 'fa-play'}`;
     }
 
     async goToAgent(editor, card) {
-        const manager = (editor.querySelector('#board-card-workflow')?.value || card.workflowMode) === 'agent';
+        const manager = (editor?.querySelector('#board-card-workflow')?.value || card.workflowMode) === 'agent';
         const workingSession = item => this.isWorkingSession(item) && item.tabId && (!manager || item.origin === 'agent_manager');
         const selection = manager ? card.managerSelection : card.assignee;
         let session = card.sessions?.find(workingSession);
@@ -2569,7 +2647,7 @@ export class BoardController {
         if (!session) {
             const fresh = await BoardApi.getBoardCardAsync(card.id);
             Object.assign(card, fresh);
-            this.renderSessionsPanel(editor, card);
+            if (editor) this.renderSessionsPanel(editor, card);
             session = card.sessions?.find(workingSession);
             if (!session && card.activeTabId)
                 session = { id: card.activeSessionId, tabId: card.activeTabId, selection, displayName: card.title };
@@ -2580,6 +2658,7 @@ export class BoardController {
 
     async startWork(editor, card, intent = 'work') {
         if (!card?.id) return;
+        if (this._startingCards.has(card.id)) return;
         if (editor._boardSaving || editor._boardUploading || editor._boardStarting || editor._boardOrganizing) return;
         const workflowMode = editor.querySelector('#board-card-workflow')?.value || card.workflowMode || 'manual';
         if (intent !== 'chat' && this.hasRunningSession(card, workflowMode)) {
@@ -2604,6 +2683,8 @@ export class BoardController {
         }
         if (button) button.disabled = true;
         editor._boardStarting = true;
+        this._startingCards.set(card.id, null);
+        this.updateCardStartWorkButtons(card);
         try {
             const saved = await BoardApi.updateBoardCardAsync(card.id, this.cardChanges(editor, payload));
             editor._boardFormBaseline = payload;
@@ -2615,19 +2696,7 @@ export class BoardController {
                 return;
             }
             const question = intent === 'chat' ? editor.querySelector('[data-board-chat-question]')?.value?.trim() : undefined;
-            const result = await BoardApi.launchBoardCardAsync(card.id, { selection, intent, ...(question ? { question } : {}) });
-            const tabId = String(result?.tabId || '').trim();
-            if (!tabId) throw new Error('The launch did not return a terminal tab.');
-
-            const info = this.assigneeInfo(result.selection || selection);
-            this.app.terminalController?.rememberTabLaunch?.(tabId, {
-                selection: result.selection || selection,
-                label: cardLabel({ ...card, ...saved }, payload.title || card.title),
-                title: cardLabel({ ...card, ...saved }, payload.title || card.title),
-                taskKey: intent === 'chat' ? `${CARD_TASK_KEY(card.id)}:chat` : CARD_TASK_KEY(card.id),
-                accentColor: info?.color || null,
-                workingDirectory: result.workingDirectory || null
-            });
+            const { result, tabId, info } = await this.launchCardAgent({ ...card, ...saved, title: payload.title || card.title }, selection, intent, question);
             if (intent === 'chat') {
                 if (editor.isConnected !== false) {
                     this.app.closeModal();
@@ -2645,6 +2714,9 @@ export class BoardController {
             if (button) button.disabled = false;
         } finally {
             editor._boardStarting = false;
+            this._startingCards.delete(card.id);
+            if (editor.isConnected !== false) this.updateStartWorkButton(editor, card);
+            this.updateCardStartWorkButtons(this.state.cards.find(item => item.id === card.id) || card);
         }
     }
 

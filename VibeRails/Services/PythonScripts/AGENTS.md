@@ -7,7 +7,8 @@ classes, `/api/v1/python-scripts`, `--run-python-script`), but since VIBE-56 a s
 ## User workflow
 
 1. Open **Automation → Scripts** and create or register a `.ps1`, `.sh` or `.py` file.
-   New script selects a runtime and a destination (default `~/.vibe_rails/scripts/UserScripts`,
+   New script selects a runtime and a destination (UI default `~/.vibe_rails/scripts/UserScripts/{project_name}/`,
+   using the current repository folder name,
    or a local folder selected with the shared file picker). Add from disk registers the original
    path without copying. Both forms offer a display name, Global/Repo scope and PIN on every run.
    In VS Code, right-click a local script and choose **Add to VibeRails Scripts…** to open this

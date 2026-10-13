@@ -67,8 +67,8 @@ test('nav Launch button opens and closes the automation flyout', async ({ page, 
         await expect(page.locator('.automation-launch-flyout-empty')).toBeVisible();
     }
     await expect(page.locator('[data-automation-launch-action="customize"]')).toBeVisible();
-    await expect(page.locator('[data-automation-launch-action="agents"]')).toBeVisible();
-    await expect(page.locator('[data-automation-launch-action="automations"]')).toBeVisible();
+    await expect(page.locator('[data-automation-launch-action="agents"]')).toHaveCount(0);
+    await expect(page.locator('[data-automation-launch-action="automations"]')).toHaveCount(0);
 
     // Toggling the trigger again closes the flyout.
     await page.locator('[data-action="automation-launcher"]:visible').click();

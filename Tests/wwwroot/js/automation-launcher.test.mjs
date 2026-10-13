@@ -246,7 +246,7 @@ test('arrow keys, Home and End cycle through the rows and footer buttons', (t) =
 
     const focused = [];
     const item = (name) => ({ name, focus() { focused.push(name); } });
-    const menuItems = [item('row-0'), item('row-1'), item('customize'), item('manage')];
+    const menuItems = [item('row-0'), item('row-1'), item('customize')];
     const flyout = {
         querySelector: () => null,
         querySelectorAll: (selector) => (selector === '[role="menuitem"]:not([disabled])' ? menuItems : []),
@@ -264,14 +264,14 @@ test('arrow keys, Home and End cycle through the rows and footer buttons', (t) =
     };
     assert.equal(press('ArrowDown'), true);
     assert.deepEqual(focused, ['row-0']);
-    globalThis.document.activeElement = menuItems[3];
+    globalThis.document.activeElement = menuItems[2];
     assert.equal(press('ArrowDown'), true);
     assert.deepEqual(focused.at(-1), 'row-0', 'wraps from the last footer button to the first row');
     globalThis.document.activeElement = menuItems[0];
     press('ArrowUp');
-    assert.equal(focused.at(-1), 'manage', 'wraps upward into the footer');
+    assert.equal(focused.at(-1), 'customize', 'wraps upward into the footer');
     press('End');
-    assert.equal(focused.at(-1), 'manage');
+    assert.equal(focused.at(-1), 'customize');
     press('Home');
     assert.equal(focused.at(-1), 'row-0');
     // Arrows typed elsewhere on the page keep their meaning.
@@ -285,8 +285,8 @@ test('arrow keys, Home and End cycle through the rows and footer buttons', (t) =
 test('flyout keyboard contract: menu roles, focus hand-off, Escape restores the trigger while the flyout owns focus', () => {
     const source = readFileSync(modulePath, 'utf8');
 
-    // Footer buttons (Customize, Agents, Automations) are part of the menu, so the arrow-key cycle reaches them.
-    assert.equal((source.match(/automation-launch-footer-btn" role="menuitem"/g) || []).length, 3);
+    // Customize is the only footer button and remains reachable in the arrow-key cycle.
+    assert.equal((source.match(/automation-launch-footer-btn" role="menuitem"/g) || []).length, 1);
     // Opening hands focus to the first reachable item; Escape hands it back.
     assert.match(source, /await this\._loadPreferences\(\);\s*this\._renderFlyoutItems\(\);\s*\/\/[^\n]*\n\s*this\._focusFlyoutItem\(\);/);
     // Escape restores the trigger only while the flyout owns focus; when a script

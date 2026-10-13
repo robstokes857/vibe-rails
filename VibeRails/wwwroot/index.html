@@ -3514,15 +3514,26 @@
                     font-size: 0.7rem;
                 }
 
-                /* Assignee row: avatar + name, the button that opens the assignee menu (VIBE-145). */
+                /* Card footer: assignment on the left, Start work on the right. */
                 .board-view .board-card-foot {
-                    display: flex;
-                    flex-wrap: wrap;
+                    display: grid;
+                    grid-template-columns: minmax(0, 1fr) auto;
                     align-items: center;
                     gap: 0.3rem;
                     margin-top: 0.45rem;
                     padding-top: 0.4rem;
                     border-top: 1px solid color-mix(in srgb, var(--color-border, #334155) 60%, transparent);
+                }
+
+                .board-view .board-card-foot .board-assignee-chip { justify-self: start; }
+                .board-view .board-card-foot .board-manager-chip { grid-column: 1 / -1; }
+                .board-view .board-card-start-work {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.3rem;
+                    padding: 0.2rem 0.45rem;
+                    font-size: 0.7rem;
+                    white-space: nowrap;
                 }
 
                 .board-assignee-chip {

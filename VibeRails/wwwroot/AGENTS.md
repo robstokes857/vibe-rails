@@ -18,6 +18,7 @@ navbar **Sign in** opens the device approval flow when signed out. The top navig
 only application navigation. Quality is third and Rules fourth; they are separate destinations.
 Automation follows Rules, then ENVs, Vibe AI and MCP. The standalone play button opens
 Quick actions for automations and signed scripts beside the accessible icon-only Settings cog.
+Its footer offers only **Customize list…**; open Agents and Automations through their top navigation links.
 Rules runs validation only; Quality restores or starts its own cached scan when opened.
 
 Comments includes agent checkpoints and legacy note rows. Attention entries appear first; the
@@ -392,6 +393,14 @@ the lane button disposes the panel, requests and document listeners; Escape rest
 current button. Theme-aware styling lives in `assets/board/board-lane-agents.css`.
 
 ### Assign from the card face (VIBE-145)
+
+The card footer also has **Start work** at the right. It reads the current saved card and uses
+the same launch route and terminal metadata as the editor, without saving fields or leaving
+the Board. Agent cards start their saved manager. A running card offers **Go to agent** or
+**Go to manager**; desktop activity and Automations do not turn it into terminal navigation.
+Without the required assignee/manager, it opens the editor for selection. Card-face and editor
+launches share a per-card in-flight guard, retained across lane repaints. Activity polling
+updates the button, and navigation discards unfinished card reads.
 
 `board-card-assign.js` is the lane card's assignee menu. The whole assignee chip, assigned or
 **Unassigned**, is one button that opens it; an assigned card's menu leads with an **Unassign** row.
@@ -1092,7 +1101,8 @@ See also: [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for back
 ## Python script workbench
 
 The Scripts section is an explicit user library. New script includes display name, Global/Repo
-scope, PIN on each run, and a destination folder (default `scripts/UserScripts`, with the shared
+scope, PIN on each run, and a destination folder (UI default `scripts/UserScripts/{project_name}/`,
+using the current repository folder name, with the shared
 folder picker). Add from disk registers the original file in place. The kebab's Script settings
 edits metadata; removing an entry retains its file. API IDs, not display names, key the workbench,
 run inputs and nav launcher. The controller retains `fileName` for runtime selection. Both the
