@@ -7,6 +7,7 @@ Routine audit results belong with the change, not in this document.
 
 - [Authentication and exceptions](#1-authentication)
 - [Frozen listener topology](#listener-topology-and-discovery-frozen--review-gate)
+- [Endpoint inventory](#endpoint-inventory)
 - [Capability and data boundaries](#capability-and-data-boundaries)
 - [Outbound services and credentials](#outbound-services-and-credentials)
 - [Significant incidents](#significant-incidents--do-not-repeat)
@@ -118,12 +119,317 @@ Account for any ignored source or excluded generated checkout copies. A producti
 outside the closed set invalidates the audit until removed or explicitly approved. A feature
 must never expand its own expected listener set just to make its audit pass.
 
+## Endpoint inventory
+
+Current explicit mappings are listed below, including grouped routes, partial Board routes,
+constant-based paths, the inherited event WebSocket, and the SDK HTTP MCP transport.
+Update this inventory whenever a mapping is added, removed, or renamed. Registration and
+feature gates can make a listed endpoint unavailable in a particular process; they do not
+replace authentication. `ANY` means the mapping does not restrict the HTTP method.
+
+All `/api/v1/**` operations require the session credential **and** tab credential.
+WebSocket upgrades require both through the middleware handshake check. All five `/llm/**`
+proxy trees require a session in middleware and both headers before enabled relay work;
+LLM controls require both headers. `/mcp` requires both credentials. `/git-guard` requires
+a session. These requirements exclude the global `OPTIONS *` exception documented above.
+`GET /health` and `GET /auth/bootstrap?code={one-time-code}&redirect={local-path}` are the
+only explicit mappings exempt from session authentication. Bootstrap still validates its code.
+
+Ordinary GET/HEAD pages and existing static assets are also session-protected; static-file
+middleware serves their paths rather than registering individual API endpoints.
+
+| Method | Path | Mapping source |
+| --- | --- | --- |
+| OPTIONS | `*` | [CookieAuthMiddleware.cs](VibeRails/Middleware/CookieAuthMiddleware.cs); global bypass, not a business mapping |
+| GET | `/api/v1/agent-tools/terminal` | [AgentToolRoutes.cs](VibeRails/Routes/AgentToolRoutes.cs) |
+| POST | `/api/v1/agent-tools/terminal/input` | [AgentToolRoutes.cs](VibeRails/Routes/AgentToolRoutes.cs) |
+| POST | `/api/v1/agent-tools/terminal/open` | [AgentToolRoutes.cs](VibeRails/Routes/AgentToolRoutes.cs) |
+| POST | `/api/v1/agent-tools/terminal/snapshot` | [AgentToolRoutes.cs](VibeRails/Routes/AgentToolRoutes.cs) |
+| POST | `/api/v1/agent-tools/terminal/{tabId}/input` | [AgentToolRoutes.cs](VibeRails/Routes/AgentToolRoutes.cs) |
+| GET | `/api/v1/agent-tools/terminal/{tabId}/snapshot` | [AgentToolRoutes.cs](VibeRails/Routes/AgentToolRoutes.cs) |
+| ANY (WebSocket) | `/api/v1/agent-tools/ws` | [AgentToolRoutes.cs](VibeRails/Routes/AgentToolRoutes.cs) |
+| GET | `/api/v1/agents` | [AgentRoutes.cs](VibeRails/Routes/AgentRoutes.cs) |
+| POST | `/api/v1/agents` | [AgentRoutes.cs](VibeRails/Routes/AgentRoutes.cs) |
+| GET | `/api/v1/agents/content` | [AgentRoutes.cs](VibeRails/Routes/AgentRoutes.cs) |
+| GET | `/api/v1/agents/files` | [AgentRoutes.cs](VibeRails/Routes/AgentRoutes.cs) |
+| PUT | `/api/v1/agents/name` | [AgentRoutes.cs](VibeRails/Routes/AgentRoutes.cs) |
+| DELETE | `/api/v1/agents/rules` | [AgentRoutes.cs](VibeRails/Routes/AgentRoutes.cs) |
+| GET | `/api/v1/agents/rules` | [AgentRoutes.cs](VibeRails/Routes/AgentRoutes.cs) |
+| POST | `/api/v1/agents/rules` | [AgentRoutes.cs](VibeRails/Routes/AgentRoutes.cs) |
+| PUT | `/api/v1/agents/rules/enforcement` | [AgentRoutes.cs](VibeRails/Routes/AgentRoutes.cs) |
+| POST | `/api/v1/agents/validate` | [AgentRoutes.cs](VibeRails/Routes/AgentRoutes.cs) |
+| DELETE | `/api/v1/automation-nav/preferences` | [AutomationNavRoutes.cs](VibeRails/Routes/AutomationNavRoutes.cs) |
+| GET | `/api/v1/automation-nav/preferences` | [AutomationNavRoutes.cs](VibeRails/Routes/AutomationNavRoutes.cs) |
+| PUT | `/api/v1/automation-nav/preferences` | [AutomationNavRoutes.cs](VibeRails/Routes/AutomationNavRoutes.cs) |
+| GET | `/api/v1/bert/captures` | [BertRoutes.cs](VibeRails/Routes/BertRoutes.cs) |
+| GET | `/api/v1/bert/captures/by-session/{sessionId}` | [BertRoutes.cs](VibeRails/Routes/BertRoutes.cs) |
+| GET | `/api/v1/bert/captures/{documentId}` | [BertRoutes.cs](VibeRails/Routes/BertRoutes.cs) |
+| POST | `/api/v1/bert/search` | [BertRoutes.cs](VibeRails/Routes/BertRoutes.cs) |
+| GET | `/api/v1/bert/session-captures` | [BertRoutes.cs](VibeRails/Routes/BertRoutes.cs) |
+| GET | `/api/v1/bert/status` | [BertRoutes.cs](VibeRails/Routes/BertRoutes.cs) |
+| GET | `/api/v1/board/boards` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/boards` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| PUT | `/api/v1/board/boards/order` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| DELETE | `/api/v1/board/boards/{boardId}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| PUT | `/api/v1/board/boards/{boardId}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/boards/{boardId}/context` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| PUT | `/api/v1/board/boards/{boardId}/context` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/boards/{boardId}/history` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| DELETE | `/api/v1/board/boards/{boardId}/jira` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/boards/{boardId}/jira` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| PUT | `/api/v1/board/boards/{boardId}/jira` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/boards/{boardId}/jira/pull` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/boards/{boardId}/jira/test` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/boards/{boardId}/sharing` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/boards/{boardId}/sharing` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| DELETE | `/api/v1/board/boards/{boardId}/sharing/{inviteId}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| PUT | `/api/v1/board/boards/{boardId}/sharing/{inviteId}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/boards/{boardId}/sync` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| PUT | `/api/v1/board/boards/{boardId}/sync` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/boards/{boardId}/sync/now` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/cards` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/cards` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/cards/activity` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/cards/link-candidates` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/cards/search` | [BoardRoutes.Search.cs](VibeRails/Routes/BoardRoutes.Search.cs) |
+| DELETE | `/api/v1/board/cards/{card}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/cards/{card}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| PUT | `/api/v1/board/cards/{card}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/cards/{card}/attachments` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| DELETE | `/api/v1/board/cards/{card}/attachments/{attachmentId}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/cards/{card}/attachments/{attachmentId}/content` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/cards/{card}/automations` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/cards/{card}/automations` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/cards/{card}/automations/rerun` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/cards/{card}/automations/skip` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/cards/{card}/checks` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/cards/{card}/checks/{checkId}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/cards/{card}/comments` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| DELETE | `/api/v1/board/cards/{card}/comments/{commentId}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/cards/{card}/commits` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/cards/{card}/commits` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| DELETE | `/api/v1/board/cards/{card}/commits/{sha}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/cards/{card}/commits/{sha}/diff` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/cards/{card}/context` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/cards/{card}/launch` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/cards/{card}/links` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/cards/{card}/links/candidates` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| DELETE | `/api/v1/board/cards/{card}/links/{linkedCard}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/cards/{card}/merge` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/cards/{card}/move` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/cards/{card}/notes` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/cards/{card}/notes` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/cards/{card}/reviews` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/cards/{card}/reviews/preview` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/cards/{card}/reviews/settings` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| PUT | `/api/v1/board/cards/{card}/reviews/settings` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/cards/{card}/reviews/{reviewId}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/cards/{card}/sessions` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/cards/{card}/sessions` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| DELETE | `/api/v1/board/cards/{card}/sessions/{sessionId}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| PUT | `/api/v1/board/cards/{card}/sessions/{sessionId}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/cards/{card}/sharing-links` | [BoardRoutes.CardSharing.cs](VibeRails/Routes/BoardRoutes.CardSharing.cs) |
+| POST | `/api/v1/board/cards/{card}/sharing-links` | [BoardRoutes.CardSharing.cs](VibeRails/Routes/BoardRoutes.CardSharing.cs) |
+| POST | `/api/v1/board/cards/{card}/sharing-links/refresh` | [BoardRoutes.CardSharing.cs](VibeRails/Routes/BoardRoutes.CardSharing.cs) |
+| DELETE | `/api/v1/board/cards/{card}/sharing-links/{id:int}` | [BoardRoutes.CardSharing.cs](VibeRails/Routes/BoardRoutes.CardSharing.cs) |
+| PATCH | `/api/v1/board/cards/{card}/sharing-links/{id:int}` | [BoardRoutes.CardSharing.cs](VibeRails/Routes/BoardRoutes.CardSharing.cs) |
+| PUT | `/api/v1/board/cards/{card}/sharing-links/{id:int}/access` | [BoardRoutes.CardSharing.cs](VibeRails/Routes/BoardRoutes.CardSharing.cs) |
+| GET | `/api/v1/board/columns` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/columns` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| PUT | `/api/v1/board/columns/order` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| DELETE | `/api/v1/board/columns/{columnId}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| PUT | `/api/v1/board/columns/{columnId}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/columns/{columnId}/automation` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| PUT | `/api/v1/board/columns/{columnId}/automation` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/columns/{columnId}/automation/running` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/files` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/local-cards/{card}` | [BoardRoutes.Search.cs](VibeRails/Routes/BoardRoutes.Search.cs) |
+| PUT | `/api/v1/board/local-cards/{card}` | [BoardRoutes.Search.cs](VibeRails/Routes/BoardRoutes.Search.cs) |
+| POST | `/api/v1/board/local-cards/{card}/comments` | [BoardRoutes.Search.cs](VibeRails/Routes/BoardRoutes.Search.cs) |
+| POST | `/api/v1/board/local-cards/{card}/links` | [BoardRoutes.Search.cs](VibeRails/Routes/BoardRoutes.Search.cs) |
+| GET | `/api/v1/board/local-cards/{card}/links/candidates` | [BoardRoutes.Search.cs](VibeRails/Routes/BoardRoutes.Search.cs) |
+| DELETE | `/api/v1/board/local-cards/{card}/links/{linkedCard}` | [BoardRoutes.Search.cs](VibeRails/Routes/BoardRoutes.Search.cs) |
+| POST | `/api/v1/board/local-cards/{card}/move` | [BoardRoutes.Search.cs](VibeRails/Routes/BoardRoutes.Search.cs) |
+| GET | `/api/v1/board/remote` | [BoardRoutes.Remote.cs](VibeRails/Routes/BoardRoutes.Remote.cs) |
+| POST | `/api/v1/board/remote` | [BoardRoutes.Remote.cs](VibeRails/Routes/BoardRoutes.Remote.cs) |
+| PUT | `/api/v1/board/remote/{id}` | [BoardRoutes.Remote.cs](VibeRails/Routes/BoardRoutes.Remote.cs) |
+| POST | `/api/v1/board/remote/{id}/delete` | [BoardRoutes.Remote.cs](VibeRails/Routes/BoardRoutes.Remote.cs) |
+| GET | `/api/v1/board/shared` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/shared/{remoteId}/import` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/chatHistory` | [ChatHistoryRoutes.cs](VibeRails/Routes/ChatHistoryRoutes.cs) |
+| DELETE | `/api/v1/chatHistory/{sessionId}` | [ChatHistoryRoutes.cs](VibeRails/Routes/ChatHistoryRoutes.cs) |
+| GET | `/api/v1/chatHistory/{sessionId}` | [ChatHistoryRoutes.cs](VibeRails/Routes/ChatHistoryRoutes.cs) |
+| PATCH | `/api/v1/chatHistory/{sessionId}` | [ChatHistoryRoutes.cs](VibeRails/Routes/ChatHistoryRoutes.cs) |
+| GET | `/api/v1/chatHistory/{sessionId}/raw-session` | [ChatHistoryRoutes.cs](VibeRails/Routes/ChatHistoryRoutes.cs) |
+| GET | `/api/v1/chatHistory/{sessionId}/replay` | [ChatHistoryRoutes.cs](VibeRails/Routes/ChatHistoryRoutes.cs) |
+| GET | `/api/v1/chatHistory/{sessionId}/summary` | [ChatHistoryRoutes.cs](VibeRails/Routes/ChatHistoryRoutes.cs) |
+| GET | `/api/v1/chatHistory/{sessionId}/terminal-replay` | [ChatHistoryRoutes.cs](VibeRails/Routes/ChatHistoryRoutes.cs) |
+| GET | `/api/v1/chatHistory/{sessionId}/transcript` | [ChatHistoryRoutes.cs](VibeRails/Routes/ChatHistoryRoutes.cs) |
+| GET | `/api/v1/claude/settings/{envName}` | [LlmSettingsRoutes.cs](VibeRails/Routes/LlmSettingsRoutes.cs) |
+| PUT | `/api/v1/claude/settings/{envName}` | [LlmSettingsRoutes.cs](VibeRails/Routes/LlmSettingsRoutes.cs) |
+| POST | `/api/v1/cli/launch/vscode` | [CliLaunchRoutes.cs](VibeRails/Routes/CliLaunchRoutes.cs) |
+| POST | `/api/v1/cli/launch/{cli}` | [CliLaunchRoutes.cs](VibeRails/Routes/CliLaunchRoutes.cs) |
+| POST | `/api/v1/code-analyzer` | [HookRoutes.cs](VibeRails/Routes/HookRoutes.cs) |
+| GET | `/api/v1/code-analyzer/changes` | [CodeGraphRoutes.cs](VibeRails/Routes/CodeGraphRoutes.cs) |
+| GET | `/api/v1/code-analyzer/changes/diff` | [CodeGraphRoutes.cs](VibeRails/Routes/CodeGraphRoutes.cs) |
+| POST | `/api/v1/code-analyzer/graph` | [CodeGraphRoutes.cs](VibeRails/Routes/CodeGraphRoutes.cs) |
+| DELETE | `/api/v1/code-analyzer/ignores` | [HookRoutes.cs](VibeRails/Routes/HookRoutes.cs) |
+| GET | `/api/v1/code-analyzer/ignores` | [HookRoutes.cs](VibeRails/Routes/HookRoutes.cs) |
+| POST | `/api/v1/code-analyzer/ignores` | [HookRoutes.cs](VibeRails/Routes/HookRoutes.cs) |
+| POST | `/api/v1/code-analyzer/ignores/bulk` | [HookRoutes.cs](VibeRails/Routes/HookRoutes.cs) |
+| GET | `/api/v1/code-analyzer/source` | [HookRoutes.cs](VibeRails/Routes/HookRoutes.cs) |
+| GET | `/api/v1/codex/settings/{envName}` | [LlmSettingsRoutes.cs](VibeRails/Routes/LlmSettingsRoutes.cs) |
+| PUT | `/api/v1/codex/settings/{envName}` | [LlmSettingsRoutes.cs](VibeRails/Routes/LlmSettingsRoutes.cs) |
+| GET | `/api/v1/compression/catalog` | [CompressionRoutes.cs](VibeRails/Routes/CompressionRoutes.cs) |
+| POST | `/api/v1/compression/preview` | [CompressionRoutes.cs](VibeRails/Routes/CompressionRoutes.cs) |
+| GET | `/api/v1/context` | [ProjectRoutes.cs](VibeRails/Routes/ProjectRoutes.cs) |
+| GET | `/api/v1/environments` | [EnvironmentRoutes.cs](VibeRails/Routes/EnvironmentRoutes.cs) |
+| POST | `/api/v1/environments` | [EnvironmentRoutes.cs](VibeRails/Routes/EnvironmentRoutes.cs) |
+| POST | `/api/v1/environments/steps/test` | [EnvironmentStepRoutes.cs](VibeRails/Routes/EnvironmentStepRoutes.cs) |
+| DELETE | `/api/v1/environments/{name}` | [EnvironmentRoutes.cs](VibeRails/Routes/EnvironmentRoutes.cs) |
+| GET | `/api/v1/environments/{name}` | [EnvironmentRoutes.cs](VibeRails/Routes/EnvironmentRoutes.cs) |
+| PUT | `/api/v1/environments/{name}` | [EnvironmentRoutes.cs](VibeRails/Routes/EnvironmentRoutes.cs) |
+| GET | `/api/v1/environments/{name}/launch` | [CliLaunchRoutes.cs](VibeRails/Routes/CliLaunchRoutes.cs) |
+| ANY (WebSocket) | `/api/v1/events/ws` | [AppNotificationRoutes.cs](VibeRails/Routes/AppNotificationRoutes.cs); [WebSocketHandler.cs](VibeRails/Routes/WebSocketHandler.cs) |
+| GET | `/api/v1/filesystem/entries` | [FileSystemRoutes.cs](VibeRails/Routes/FileSystemRoutes.cs) |
+| POST | `/api/v1/git/init` | [ProjectRoutes.cs](VibeRails/Routes/ProjectRoutes.cs) |
+| POST | `/api/v1/git/open-directory` | [ProjectRoutes.cs](VibeRails/Routes/ProjectRoutes.cs) |
+| POST | `/api/v1/git/preflight/console` | [HookRoutes.cs](VibeRails/Routes/HookRoutes.cs) |
+| POST | `/api/v1/git/preflight/stream` | [HookRoutes.cs](VibeRails/Routes/HookRoutes.cs) |
+| DELETE | `/api/v1/hooks` | [HookRoutes.cs](VibeRails/Routes/HookRoutes.cs) |
+| POST | `/api/v1/hooks/install` | [HookRoutes.cs](VibeRails/Routes/HookRoutes.cs) |
+| POST | `/api/v1/hooks/preview` | [HookRoutes.cs](VibeRails/Routes/HookRoutes.cs) |
+| GET | `/api/v1/hooks/status` | [HookRoutes.cs](VibeRails/Routes/HookRoutes.cs) |
+| POST | `/api/v1/hooks/validate` | [HookRoutes.cs](VibeRails/Routes/HookRoutes.cs) |
+| GET | `/api/v1/http-relay/test/posts` | [HttpRelayRoutes.cs](VibeRails/Routes/HttpRelayRoutes.cs) |
+| POST | `/api/v1/http-relay/test/posts` | [HttpRelayRoutes.cs](VibeRails/Routes/HttpRelayRoutes.cs) |
+| DELETE | `/api/v1/http-relay/test/posts/{id:int}` | [HttpRelayRoutes.cs](VibeRails/Routes/HttpRelayRoutes.cs) |
+| GET | `/api/v1/http-relay/test/posts/{id:int}` | [HttpRelayRoutes.cs](VibeRails/Routes/HttpRelayRoutes.cs) |
+| PUT | `/api/v1/http-relay/test/posts/{id:int}` | [HttpRelayRoutes.cs](VibeRails/Routes/HttpRelayRoutes.cs) |
+| GET | `/api/v1/internal/logs` | [InternalToolsRoutes.cs](VibeRails/Routes/InternalToolsRoutes.cs) |
+| GET | `/api/v1/internal/uploads` | [InternalToolsRoutes.cs](VibeRails/Routes/InternalToolsRoutes.cs) |
+| GET | `/api/v1/jobs` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
+| POST | `/api/v1/jobs` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
+| GET | `/api/v1/jobs/catalog` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
+| POST | `/api/v1/jobs/import` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
+| GET | `/api/v1/jobs/runs` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
+| POST | `/api/v1/jobs/runs/delete` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
+| GET | `/api/v1/jobs/runs/summary` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
+| DELETE | `/api/v1/jobs/runs/{runId}` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
+| GET | `/api/v1/jobs/runs/{runId}` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
+| POST | `/api/v1/jobs/runs/{runId}/cancel` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
+| POST | `/api/v1/jobs/runs/{runId}/retry` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
+| GET | `/api/v1/jobs/scripts` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
+| DELETE | `/api/v1/jobs/{id:long}` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
+| GET | `/api/v1/jobs/{id:long}` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
+| PUT | `/api/v1/jobs/{id:long}` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
+| POST | `/api/v1/jobs/{id:long}/run` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
+| POST | `/api/v1/lifecycle/disconnect` | [LifecycleRoutes.cs](VibeRails/Routes/LifecycleRoutes.cs) |
+| POST | `/api/v1/lifecycle/ping` | [LifecycleRoutes.cs](VibeRails/Routes/LifecycleRoutes.cs) |
+| DELETE | `/api/v1/llm-picker/preferences` | [LlmPickerRoutes.cs](VibeRails/Routes/LlmPickerRoutes.cs) |
+| GET | `/api/v1/llm-picker/preferences` | [LlmPickerRoutes.cs](VibeRails/Routes/LlmPickerRoutes.cs) |
+| PUT | `/api/v1/llm-picker/preferences` | [LlmPickerRoutes.cs](VibeRails/Routes/LlmPickerRoutes.cs) |
+| POST | `/api/v1/mcp/inspect` | [McpRoutes.cs](VibeRails/Routes/McpRoutes.cs) |
+| GET | `/api/v1/mcp/status` | [McpRoutes.cs](VibeRails/Routes/McpRoutes.cs) |
+| GET | `/api/v1/mcp/tools` | [McpRoutes.cs](VibeRails/Routes/McpRoutes.cs) |
+| POST | `/api/v1/mcp/tools/{name}` | [McpRoutes.cs](VibeRails/Routes/McpRoutes.cs) |
+| GET | `/api/v1/projects/name` | [ProjectRoutes.cs](VibeRails/Routes/ProjectRoutes.cs) |
+| PUT | `/api/v1/projects/name` | [ProjectRoutes.cs](VibeRails/Routes/ProjectRoutes.cs) |
+| POST | `/api/v1/push/send` | [PushRoutes.cs](VibeRails/Routes/PushRoutes.cs) |
+| DELETE | `/api/v1/python-scripts` | [PythonScriptRoutes.cs](VibeRails/Routes/PythonScriptRoutes.cs) |
+| GET | `/api/v1/python-scripts` | [PythonScriptRoutes.cs](VibeRails/Routes/PythonScriptRoutes.cs) |
+| POST | `/api/v1/python-scripts/approve` | [PythonScriptRoutes.cs](VibeRails/Routes/PythonScriptRoutes.cs) |
+| GET | `/api/v1/python-scripts/content` | [PythonScriptRoutes.cs](VibeRails/Routes/PythonScriptRoutes.cs) |
+| POST | `/api/v1/python-scripts/content` | [PythonScriptRoutes.cs](VibeRails/Routes/PythonScriptRoutes.cs) |
+| POST | `/api/v1/python-scripts/create` | [PythonScriptRoutes.cs](VibeRails/Routes/PythonScriptRoutes.cs) |
+| POST | `/api/v1/python-scripts/import` | [PythonScriptRoutes.cs](VibeRails/Routes/PythonScriptRoutes.cs) |
+| POST | `/api/v1/python-scripts/pin` | [PythonScriptRoutes.cs](VibeRails/Routes/PythonScriptRoutes.cs) |
+| POST | `/api/v1/python-scripts/rename` | [PythonScriptRoutes.cs](VibeRails/Routes/PythonScriptRoutes.cs) |
+| POST | `/api/v1/python-scripts/revoke` | [PythonScriptRoutes.cs](VibeRails/Routes/PythonScriptRoutes.cs) |
+| POST | `/api/v1/python-scripts/run` | [PythonScriptRoutes.cs](VibeRails/Routes/PythonScriptRoutes.cs) |
+| POST | `/api/v1/python-scripts/run-pin` | [PythonScriptRoutes.cs](VibeRails/Routes/PythonScriptRoutes.cs) |
+| POST | `/api/v1/python-scripts/run/interactive` | [PythonScriptRoutes.cs](VibeRails/Routes/PythonScriptRoutes.cs) |
+| GET | `/api/v1/python-scripts/run/terminal/ws` | [PythonScriptRoutes.cs](VibeRails/Routes/PythonScriptRoutes.cs) |
+| GET | `/api/v1/python-scripts/runs` | [PythonScriptRoutes.cs](VibeRails/Routes/PythonScriptRoutes.cs) |
+| POST | `/api/v1/python-scripts/settings` | [PythonScriptRoutes.cs](VibeRails/Routes/PythonScriptRoutes.cs) |
+| GET | `/api/v1/rules` | [RulesRoutes.cs](VibeRails/Routes/RulesRoutes.cs) |
+| GET | `/api/v1/rules/details` | [RulesRoutes.cs](VibeRails/Routes/RulesRoutes.cs) |
+| GET | `/api/v1/sandboxes` | [SandboxRoutes.cs](VibeRails/Routes/SandboxRoutes.cs) |
+| POST | `/api/v1/sandboxes` | [SandboxRoutes.cs](VibeRails/Routes/SandboxRoutes.cs) |
+| DELETE | `/api/v1/sandboxes/{id:int}` | [SandboxRoutes.cs](VibeRails/Routes/SandboxRoutes.cs) |
+| GET | `/api/v1/sandboxes/{id:int}/diff` | [SandboxRoutes.cs](VibeRails/Routes/SandboxRoutes.cs) |
+| POST | `/api/v1/sandboxes/{id:int}/launch/shell` | [SandboxRoutes.cs](VibeRails/Routes/SandboxRoutes.cs) |
+| POST | `/api/v1/sandboxes/{id:int}/launch/vscode` | [SandboxRoutes.cs](VibeRails/Routes/SandboxRoutes.cs) |
+| POST | `/api/v1/sandboxes/{id:int}/launch/{cli}` | [SandboxRoutes.cs](VibeRails/Routes/SandboxRoutes.cs) |
+| POST | `/api/v1/sandboxes/{id:int}/merge` | [SandboxRoutes.cs](VibeRails/Routes/SandboxRoutes.cs) |
+| POST | `/api/v1/sandboxes/{id:int}/push` | [SandboxRoutes.cs](VibeRails/Routes/SandboxRoutes.cs) |
+| POST | `/api/v1/search` | [SearchRoutes.cs](VibeRails/Routes/SearchRoutes.cs) |
+| GET | `/api/v1/session-replay/sessions` | [SessionReplayRoutes.cs](VibeRails/Routes/SessionReplayRoutes.cs) |
+| GET | `/api/v1/session-replay/sessions/{id}` | [SessionReplayRoutes.cs](VibeRails/Routes/SessionReplayRoutes.cs) |
+| GET | `/api/v1/session-replay/sessions/{id}/changes/{changeId:long}` | [SessionReplayRoutes.cs](VibeRails/Routes/SessionReplayRoutes.cs) |
+| GET | `/api/v1/session-replay/sessions/{id}/exchanges` | [SessionReplayRoutes.cs](VibeRails/Routes/SessionReplayRoutes.cs) |
+| GET | `/api/v1/session-replay/sessions/{id}/exchanges/{exchangeId}` | [SessionReplayRoutes.cs](VibeRails/Routes/SessionReplayRoutes.cs) |
+| GET | `/api/v1/session-replay/sessions/{id}/frames` | [SessionReplayRoutes.cs](VibeRails/Routes/SessionReplayRoutes.cs) |
+| GET | `/api/v1/session-replay/status` | [SessionReplayRoutes.cs](VibeRails/Routes/SessionReplayRoutes.cs) |
+| GET | `/api/v1/session-sharing/capabilities` | [SessionSharingRoutes.cs](VibeRails/Routes/SessionSharingRoutes.cs) |
+| GET | `/api/v1/sessions/recent` | [SessionRoutes.cs](VibeRails/Routes/SessionRoutes.cs) |
+| POST | `/api/v1/sessions/{sessionId:guid}/sharing-links` | [SessionSharingRoutes.cs](VibeRails/Routes/SessionSharingRoutes.cs) |
+| GET | `/api/v1/sessions/{sessionId}/inputs` | [SessionRoutes.cs](VibeRails/Routes/SessionRoutes.cs) |
+| GET | `/api/v1/sessions/{sessionId}/logs` | [SessionRoutes.cs](VibeRails/Routes/SessionRoutes.cs) |
+| GET | `/api/v1/sessions/{sessionId}/output` | [SessionRoutes.cs](VibeRails/Routes/SessionRoutes.cs) |
+| GET | `/api/v1/settings` | [AppSettingsRoutes.cs](VibeRails/Routes/AppSettingsRoutes.cs) |
+| POST | `/api/v1/settings` | [AppSettingsRoutes.cs](VibeRails/Routes/AppSettingsRoutes.cs) |
+| GET | `/api/v1/settings/backups` | [DataExportRoutes.cs](VibeRails/Routes/DataExportRoutes.cs) |
+| POST | `/api/v1/settings/computer-name` | [AppSettingsRoutes.cs](VibeRails/Routes/AppSettingsRoutes.cs) |
+| GET | `/api/v1/settings/keys` | [SigningKeyRoutes.cs](VibeRails/Routes/SigningKeyRoutes.cs) |
+| POST | `/api/v1/settings/keys` | [SigningKeyRoutes.cs](VibeRails/Routes/SigningKeyRoutes.cs) |
+| POST | `/api/v1/settings/keys/{id:guid}/export` | [SigningKeyRoutes.cs](VibeRails/Routes/SigningKeyRoutes.cs) |
+| POST | `/api/v1/settings/keys/{id:guid}/sign` | [SigningKeyRoutes.cs](VibeRails/Routes/SigningKeyRoutes.cs) |
+| POST | `/api/v1/settings/keys/{id:guid}/sync` | [SigningKeyRoutes.cs](VibeRails/Routes/SigningKeyRoutes.cs) |
+| DELETE | `/api/v1/settings/pin` | [PinRoutes.cs](VibeRails/Routes/PinRoutes.cs) |
+| POST | `/api/v1/settings/pin` | [PinRoutes.cs](VibeRails/Routes/PinRoutes.cs) |
+| GET | `/api/v1/settings/pin/status` | [PinRoutes.cs](VibeRails/Routes/PinRoutes.cs) |
+| DELETE | `/api/v1/settings/remote-link` | [RemoteAccountLinkRoutes.cs](VibeRails/Routes/RemoteAccountLinkRoutes.cs) |
+| GET | `/api/v1/settings/remote-link` | [RemoteAccountLinkRoutes.cs](VibeRails/Routes/RemoteAccountLinkRoutes.cs) |
+| POST | `/api/v1/settings/remote-link` | [RemoteAccountLinkRoutes.cs](VibeRails/Routes/RemoteAccountLinkRoutes.cs) |
+| POST | `/api/v1/shutdown` | [LifecycleRoutes.cs](VibeRails/Routes/LifecycleRoutes.cs) |
+| POST | `/api/v1/terminal/input` | [TerminalRoutes.cs](VibeRails/Routes/TerminalRoutes.cs) |
+| GET | `/api/v1/terminal/snapshot` | [TerminalRoutes.cs](VibeRails/Routes/TerminalRoutes.cs) |
+| POST | `/api/v1/terminal/start` | [TerminalRoutes.cs](VibeRails/Routes/TerminalRoutes.cs) |
+| GET | `/api/v1/terminal/status` | [TerminalRoutes.cs](VibeRails/Routes/TerminalRoutes.cs) |
+| POST | `/api/v1/terminal/stop` | [TerminalRoutes.cs](VibeRails/Routes/TerminalRoutes.cs) |
+| GET | `/api/v1/terminal/tabs` | [TerminalTabsRoutes.cs](VibeRails/Routes/TerminalTabsRoutes.cs) |
+| POST | `/api/v1/terminal/tabs` | [TerminalTabsRoutes.cs](VibeRails/Routes/TerminalTabsRoutes.cs) |
+| DELETE | `/api/v1/terminal/tabs/{tabId}` | [TerminalTabsRoutes.cs](VibeRails/Routes/TerminalTabsRoutes.cs) |
+| POST | `/api/v1/terminal/tabs/{tabId}/start` | [TerminalTabsRoutes.cs](VibeRails/Routes/TerminalTabsRoutes.cs) |
+| GET | `/api/v1/terminal/tabs/{tabId}/status` | [TerminalTabsRoutes.cs](VibeRails/Routes/TerminalTabsRoutes.cs) |
+| POST | `/api/v1/terminal/tabs/{tabId}/stop` | [TerminalTabsRoutes.cs](VibeRails/Routes/TerminalTabsRoutes.cs) |
+| ANY (WebSocket) | `/api/v1/terminal/tabs/{tabId}/ws` | [TerminalTabsRoutes.cs](VibeRails/Routes/TerminalTabsRoutes.cs) |
+| ANY (WebSocket) | `/api/v1/terminal/ws` | [TerminalRoutes.cs](VibeRails/Routes/TerminalRoutes.cs) |
+| GET | `/api/v1/token-savings` | [TokenSavingsRoutes.cs](VibeRails/Routes/TokenSavingsRoutes.cs) |
+| GET | `/api/v1/update/check` | [UpdateRoutes.cs](VibeRails/Routes/UpdateRoutes.cs) |
+| GET | `/api/v1/update/version` | [UpdateRoutes.cs](VibeRails/Routes/UpdateRoutes.cs) |
+| GET | `/api/v1/version` | [UpdateRoutes.cs](VibeRails/Routes/UpdateRoutes.cs) |
+| GET | `/auth/bootstrap` | [AuthRoutes.cs](VibeRails/Routes/AuthRoutes.cs) |
+| GET | `/git-guard` | [Program.cs](VibeRails/Program.cs) |
+| GET | `/health` | [ProjectRoutes.cs](VibeRails/Routes/ProjectRoutes.cs) |
+| ANY | `/llm/anthropic/{**rest}` | [LlmAnthropicProxyRoutes.cs](TokenSaver/LlmAnthropicProxyRoutes.cs) |
+| ANY | `/llm/cli-chat/{**rest}` | [LlmCliChatProxyRoutes.cs](TokenSaver/LlmCliChatProxyRoutes.cs) |
+| POST | `/llm/control/agent/end-session` | [AgentSessionControlRoutes.cs](VibeRails/Routes/AgentSessionControlRoutes.cs) |
+| POST | `/llm/control/token-saver/pause` | [TokenSaverPauseRoutes.cs](VibeRails/Routes/TokenSaverPauseRoutes.cs) |
+| POST | `/llm/control/token-saver/resume` | [TokenSaverPauseRoutes.cs](VibeRails/Routes/TokenSaverPauseRoutes.cs) |
+| GET | `/llm/control/token-saver/status` | [TokenSaverPauseRoutes.cs](VibeRails/Routes/TokenSaverPauseRoutes.cs) |
+| ANY | `/llm/openai/{**rest}` | [LlmProxyRoutes.cs](TokenSaver/LlmProxyRoutes.cs) |
+| ANY | `/llm/xai/{**rest}` | [LlmXaiProxyRoutes.cs](TokenSaver/LlmXaiProxyRoutes.cs) |
+| ANY | `/llm/zai/{**rest}` | [LlmZaiProxyRoutes.cs](TokenSaver/LlmZaiProxyRoutes.cs) |
+| GET / POST / DELETE | `/mcp` | [Program.cs](VibeRails/Program.cs) |
+
 ## Capability and data boundaries
 
 Exact method/path mappings live in [Routes](VibeRails/Routes/Routes.cs), its route classes,
 [Program.cs](VibeRails/Program.cs) and [TokenSaver](TokenSaver). Resolve grouped paths,
-constants, partial classes and the inherited event-WebSocket mapping during review. This
-contract intentionally avoids a duplicate route-by-route catalog and drifting route totals.
+constants, partial classes and the inherited event-WebSocket mapping during review. The
+[endpoint inventory](#endpoint-inventory) above lists the current mappings and their sources.
 
 ### Board, search and stored evidence
 
