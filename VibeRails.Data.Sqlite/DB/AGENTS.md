@@ -150,12 +150,15 @@ This document describes the database layer: Environments, Sandboxes, AgentMetada
 
 `conversation-titles/1` adds `ConversationTitleRequests` in `state.db`; `/2` adds milestone counters,
 the last generated title, cancellation state, a saved-key fingerprint and shared API backoff.
+`/3` adds nullable `LastExcerptHash`, the SHA-256 of the exact redacted request excerpt, saved
+atomically with a successfully applied title. A refresh with the same excerpt ends work without
+another API call or title-change event. Failed requests never save a hash; legacy NULLs still refresh.
 It stores references and counts, never prompt copies or API keys. The additive
 `Sessions.ConversationTitleEligible` flag defaults to zero; only newly created sessions opt in.
 Setup never enrolls existing history. Input capture updates counts in its existing transaction.
 The first title is due at 300 trimmed user-input characters or two captured user messages; one
 refresh is due at 750 cumulative characters or ten messages, with new input after the first claim.
-After two successful generations no more work is scheduled.
+After two successful generations, or an unchanged refresh, no more work is scheduled.
 
 `IConversationTitleStore` claims one milestone for two minutes and commits before external work.
 Every root polls every few seconds, so the claim finds a candidate with a plain read and takes the

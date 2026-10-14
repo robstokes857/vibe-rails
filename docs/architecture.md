@@ -80,6 +80,13 @@ and debug logging, security, performance, future enhancements, resources.
 
 ## Chat history metadata (2026-09-28)
 
+`ConversationTitleService` processes two leased title milestones through `IConversationTitleStore`
+in `state.db`. The client redacts the full transcript, then sends its first 1,000 characters.
+The additive `conversation-titles/3` migration adds `LastExcerptHash`: SHA-256 of that exact
+request excerpt, saved with an applied title. The refresh compares this durable hash before HTTP;
+an unchanged excerpt ends the remaining work while retaining the title and its change stamp.
+Changed excerpts and legacy rows with a NULL hash keep the refresh; failed calls remain retryable.
+
 The history API reads session pages from `state.db`. `ChatHistoryService` then obtains current
 card labels for those session IDs through `IBoardStore.GetSessionCardsAsync`, which batches reads
 from `board.db` and includes primary/additional attachments without deleted cards. The existing

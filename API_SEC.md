@@ -320,7 +320,10 @@ gives up after five tries. Explicit names cancel work; Board/Automation/resume l
 historical sessions are preserved. The whole transcript is redacted first and then only its first
 1,000 characters are sent (owner decision 2026-10-14, VIBE-157): the hosted API rejects more than
 2,000 characters, so sending the complete transcript was refused every time. The transcript opens
-with the first user prompt. This does not alter the cached resume summary.
+with the first user prompt. A refresh whose redacted excerpt matches the last successfully applied
+title's SHA-256 is skipped (VIBE-158); only the hash is persisted, never an excerpt copy. Failed
+requests remain retryable and legacy rows with no hash retain their refresh. This does not alter
+the cached resume summary.
 
 **Redaction is best effort, by owner decision (2026-10-13).** `RedactTranscript` masks the obvious
 credential shapes and replaces each value with `XXXXX`: key/value fields (`password=`,

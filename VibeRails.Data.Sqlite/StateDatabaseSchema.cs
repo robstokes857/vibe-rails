@@ -201,6 +201,9 @@ internal static class StateDatabaseSchema
                 CREATE INDEX idx_conversation_titles_updated ON ConversationTitleRequests(CompletedUTC DESC)
                     WHERE LastTitle IS NOT NULL;
                 """));
+        SqliteMigrationRunner.Apply(connection, "conversation-titles", 3, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction,
+                "ALTER TABLE ConversationTitleRequests ADD COLUMN LastExcerptHash TEXT NULL;"));
         JobStore.EnsureSessionLinkSchema(connection);
         // Every breaking step above has now been applied (or was already), so the file is at this
         // build's generation. Stamping after the fact also covers databases migrated before the

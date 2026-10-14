@@ -41,7 +41,8 @@ public sealed class ConversationTitleService(IConversationTitleStore store, ISes
                 await store.CompleteAsync(work, null, DateTime.UtcNow, ct);
                 return;
             }
-            var result = await client.GenerateAsync(transcript, settings, deadline.Token);
+            var result = await client.GenerateAsync(transcript, settings, deadline.Token,
+                work.Generation > 0 ? work.LastExcerptHash : null);
             if (await HasBoardAsync(work, ct))
             {
                 await store.CompleteAsync(work, null, DateTime.UtcNow, ct);
@@ -52,9 +53,15 @@ public sealed class ConversationTitleService(IConversationTitleStore store, ISes
                 await store.DeferAsync(work, DateTime.UtcNow.AddMinutes(1), ct);
                 return;
             }
-            if (result.Title is not null)
+            if (result.Unchanged)
             {
-                if (await store.CompleteAsync(work, result.Title, DateTime.UtcNow, ct))
+                // The one refresh cannot improve the title with the same opening. End its work
+                // durably without rewriting the name or publishing a title-change event.
+                await store.SkipUnchangedRefreshAsync(work, DateTime.UtcNow, ct);
+            }
+            else if (result.Title is not null)
+            {
+                if (await store.CompleteAsync(work, result.Title, DateTime.UtcNow, ct, result.ExcerptHash))
                     events.Publish("session_title_updated", new ConversationTitleChanged(work.SessionId),
                         ConversationTitleJsonContext.Default.ConversationTitleChanged);
             }

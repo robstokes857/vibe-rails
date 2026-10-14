@@ -53,6 +53,77 @@ public sealed class ConversationTitleServiceTests : IDisposable
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task UnchangedOpeningSkipsRefreshAcrossRestartAndEndsFutureWork(bool messageMilestone)
+    {
+        var repository = await Seed();
+        var transcript = "User: opening\nAgent: " + new string('a', 1500);
+        var transcripts = new Mock<ISessionTranscriptService>();
+        transcripts.Setup(x => x.BuildCurrentAsync("session", It.IsAny<CancellationToken>())).ReturnsAsync(() => transcript);
+        var handler = new Handler((_, _) => Task.FromResult(Reply("First title")));
+        var events = new Mock<IAppEventBus>();
+        await Service(transcripts.Object, EmptyBoard(), handler, events: events.Object).ProcessOneAsync(Ct);
+        var hash = Assert.IsType<string>(Scalar("SELECT LastExcerptHash FROM ConversationTitleRequests"));
+        var stamp = await new ConversationTitleStore(Connection).GetChangeStampAsync(Ct);
+        Assert.Equal(64, hash.Length);
+        events.Invocations.Clear();
+
+        transcript += "\nUser: follow-up\nAgent: new answer";
+        if (messageMilestone)
+        {
+            for (var message = 2; message <= 10; message++)
+                await repository.InsertUserInputAsync("session", message, "More", null);
+        }
+        else
+            await repository.InsertUserInputAsync("session", 2, new string('b', 450), null);
+        // Reconstruct both service and store, as another root/restarted process would.
+        await Service(transcripts.Object, EmptyBoard(), handler, events: events.Object).ProcessOneAsync(Ct);
+
+        Assert.Equal(1, handler.Count);
+        Assert.Equal("First title", (await repository.GetSessionDisplayInfoAsync("session")).DisplayName);
+        Assert.True((await repository.GetChatHistoryItemAsync("session", Ct))!.SessionTitleGenerated);
+        Assert.Equal(hash, Scalar("SELECT LastExcerptHash FROM ConversationTitleRequests"));
+        Assert.Equal(stamp, await new ConversationTitleStore(Connection).GetChangeStampAsync(Ct));
+        Assert.Empty(events.Invocations);
+        await repository.InsertUserInputAsync("session", 11, new string('c', 1000), null);
+        Assert.Null(await new ConversationTitleStore(Connection).ClaimAsync(DateTime.UtcNow.AddDays(1), Ct));
+    }
+
+    [Fact]
+    public async Task FailedOpeningIsRetriedAndOnlyAppliedTitleSavesHash()
+    {
+        await Seed();
+        var handler = new Handler((_, _) => Task.FromResult(Reply("password=hunter2")));
+        await Service(Transcript(), EmptyBoard(), handler).ProcessOneAsync(Ct);
+        Assert.Equal(DBNull.Value, Scalar("SELECT LastExcerptHash FROM ConversationTitleRequests"));
+        Scalar("UPDATE ConversationTitleRequests SET RetryAfterUTC='2000-01-01T00:00:00.0000000Z'");
+
+        var retry = new Handler((_, _) => Task.FromResult(Reply("Valid title")));
+        await Service(Transcript(), EmptyBoard(), retry).ProcessOneAsync(Ct);
+
+        Assert.Equal(1, retry.Count);
+        Assert.IsType<string>(Scalar("SELECT LastExcerptHash FROM ConversationTitleRequests"));
+    }
+
+    [Fact]
+    public async Task LegacyTitleWithoutHashStillRefreshes()
+    {
+        var repository = await Seed();
+        var store = new ConversationTitleStore(Connection);
+        var work = Assert.IsType<ConversationTitleWork>(await store.ClaimAsync(DateTime.UtcNow, Ct));
+        await store.CompleteAsync(work, "Legacy title", DateTime.UtcNow, Ct);
+        await repository.InsertUserInputAsync("session", 2, new string('b', 450), null);
+        var handler = new Handler((_, _) => Task.FromResult(Reply("Refreshed title")));
+
+        await Service(Transcript(), EmptyBoard(), handler).ProcessOneAsync(Ct);
+
+        Assert.Equal(1, handler.Count);
+        Assert.Equal("Refreshed title", (await repository.GetSessionDisplayInfoAsync("session")).DisplayName);
+        Assert.IsType<string>(Scalar("SELECT LastExcerptHash FROM ConversationTitleRequests"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task BoardAttachmentBeforeOrDuringRequestPreservesExistingLabel(bool duringRequest)
     {
         var repository = await Seed();
@@ -163,9 +234,9 @@ public sealed class ConversationTitleServiceTests : IDisposable
     }
 
     private ConversationTitleService Service(ISessionTranscriptService transcripts, IBoardStore board,
-        Handler handler, ConversationTitleSettings? settings = null) => new(new ConversationTitleStore(Connection),
+        Handler handler, ConversationTitleSettings? settings = null, IAppEventBus? events = null) => new(new ConversationTitleStore(Connection),
             transcripts, board, new ConversationTitleClient(new HttpClient(handler), () => settings ?? new(true, "synthetic-key")),
-            Mock.Of<IAppEventBus>());
+            events ?? Mock.Of<IAppEventBus>());
 
     private static ISessionTranscriptService Transcript() => Mock.Of<ISessionTranscriptService>(x =>
         x.BuildCurrentAsync("session", It.IsAny<CancellationToken>()) == Task.FromResult("User: task\nAgent: response"));

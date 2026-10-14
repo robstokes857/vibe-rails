@@ -1,4 +1,6 @@
 using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using VibeRails.Utils;
@@ -26,7 +28,8 @@ public sealed record ConversationTitleSettings(bool Enabled, string ApiKey)
 /// (rejected key, rate limit, unavailable endpoint, network) pauses every request for the API key;
 /// any other failure belongs to this conversation and only delays its own retry.
 /// </summary>
-public sealed record ConversationTitleResult(string? Title, TimeSpan RetryAfter, bool Permanent = false, bool KeyWide = false);
+public sealed record ConversationTitleResult(string? Title, TimeSpan RetryAfter, bool Permanent = false,
+    bool KeyWide = false, string? ExcerptHash = null, bool Unchanged = false);
 
 /// <summary>Sends the opening of the redacted transcript to the fixed VibeRails title API.</summary>
 public sealed class ConversationTitleClient
@@ -58,9 +61,12 @@ public sealed class ConversationTitleClient
     /// <summary>Reads current permission without loading or sending a transcript.</summary>
     public ConversationTitleSettings CurrentSettings => readSettings();
 
-    /// <summary>No remote response/error text, credentials or transcripts are logged.</summary>
+    /// <summary>
+    /// Skips a request matching the last successfully applied excerpt hash.
+    /// No remote response/error text, credentials or transcripts are logged.
+    /// </summary>
     public async Task<ConversationTitleResult> GenerateAsync(string transcript,
-        ConversationTitleSettings settings, CancellationToken ct)
+        ConversationTitleSettings settings, CancellationToken ct, string? previousExcerptHash = null)
     {
         if (!settings.CanSend || settings != readSettings())
             return new(null, TimeSpan.FromMinutes(1));
@@ -76,7 +82,10 @@ public sealed class ConversationTitleClient
             // Redact the entire transcript before taking the excerpt, so a secret is never cut
             // short of the context that lets the redactor recognize it.
             var text = Excerpt(CredentialRedactor.RedactTranscript(transcript, settings.ApiKey));
+            var excerptHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
             if (settings != readSettings()) return new(null, TimeSpan.FromMinutes(1));
+            if (excerptHash == previousExcerptHash)
+                return new(null, TimeSpan.Zero, Unchanged: true);
             using var request = new HttpRequestMessage(HttpMethod.Post, Endpoint)
             {
                 Content = JsonContent.Create(new ConversationTitleRequest(text),
@@ -121,7 +130,7 @@ public sealed class ConversationTitleClient
                 || CredentialRedactor.RedactTranscript(title, settings.ApiKey) != title
                 || settings != readSettings())
                 return new(null, TimeSpan.FromMinutes(5));
-            return new(title, TimeSpan.Zero);
+            return new(title, TimeSpan.Zero, ExcerptHash: excerptHash);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (HttpRequestException)

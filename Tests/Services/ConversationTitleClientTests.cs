@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using VibeRails.Services.Integrations.VibeCodeRemote;
@@ -31,6 +32,7 @@ public sealed class ConversationTitleClientTests
         Assert.Equal(transcript[..ConversationTitleClient.MaxExcerptChars], sentText);
         Assert.Equal(1_000, ConversationTitleClient.MaxExcerptChars);
         Assert.Equal("Fix login configuration", result.Title);
+        Assert.Equal(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sentText!))), result.ExcerptHash);
     }
 
     [Fact]
@@ -63,6 +65,33 @@ public sealed class ConversationTitleClientTests
 
         Assert.Equal(new string('a', ConversationTitleClient.MaxExcerptChars - 1), excerpt);
         Assert.Equal("short", ConversationTitleClient.Excerpt("short"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MatchingHashSkipsTheExactRedactedExcerpt(bool surrogateBoundary)
+    {
+        var opening = surrogateBoundary
+            ? new string('a', 999) + "\U0001F600"
+            : "User: " + new string('x', 979) + "\npassword=first-secret";
+        string? sent = null;
+        var handler = new Handler(async (request, ct) =>
+        {
+            using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
+            sent = json.RootElement.GetProperty("text").GetString();
+            return Reply("{\"title\":\"First title\"}");
+        });
+        var client = Create(handler);
+        var first = await client.GenerateAsync(opening + "\nAgent: first answer", Enabled, Ct);
+        Assert.Equal(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sent!))), first.ExcerptHash);
+
+        var refresh = await client.GenerateAsync(opening.Replace("first-secret", "changed-secret")
+            + "\nAgent: different answer", Enabled, Ct, first.ExcerptHash);
+
+        Assert.True(refresh.Unchanged);
+        Assert.Null(refresh.Title);
+        Assert.Equal(1, handler.Count);
     }
 
     [Theory]
@@ -152,6 +181,8 @@ public sealed class ConversationTitleClientTests
         });
         var result = await Create(handler).GenerateAsync("full transcript", Enabled, Ct);
         Assert.Null(result.Title);
+        Assert.Null(result.ExcerptHash);
+        Assert.False(result.Unchanged);
         Assert.Equal(TimeSpan.FromSeconds(seconds), result.RetryAfter);
         Assert.Equal(permanent, result.Permanent);
         Assert.Equal(keyWide, result.KeyWide);

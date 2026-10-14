@@ -45,7 +45,7 @@ public sealed class ConversationTitleStore : IConversationTitleStore
                 CASE WHEN $fingerprint IS NOT NULL AND q.SettingsFingerprint IS NOT $fingerprint THEN 0 ELSE q.Attempts END,
                 (s.JobRunId IS NULL AND COALESCE(s.ParentSessionId,'')='' AND lower(s.Cli)<>'shell' AND
                     (COALESCE(s.SessionDisplayName,'')='' OR s.SessionDisplayName=substr(u.InputText,1,120)
-                        OR COALESCE(s.SessionDisplayName=q.LastTitle,0))), q.LatestInputId, q.GenerationCount
+                        OR COALESCE(s.SessionDisplayName=q.LastTitle,0))), q.LatestInputId, q.GenerationCount, q.LastExcerptHash
             FROM ConversationTitleRequests q
             JOIN Sessions s ON s.Id=q.SessionId JOIN UserInputs u ON u.Id=q.UserInputId
             WHERE q.Cancelled=0 AND q.GenerationCount<2
@@ -65,7 +65,8 @@ public sealed class ConversationTitleStore : IConversationTitleStore
         {
             if (!await reader.ReadAsync(ct)) return null;
             work = new(reader.GetString(0), reader.GetString(1),
-                Guid.NewGuid().ToString("N"), reader.GetInt32(2) + 1, reader.GetBoolean(3), reader.GetInt64(4), reader.GetInt32(5));
+                Guid.NewGuid().ToString("N"), reader.GetInt32(2) + 1, reader.GetBoolean(3), reader.GetInt64(4), reader.GetInt32(5),
+                reader.IsDBNull(6) ? null : reader.GetString(6));
         }
         // The guard repeats the due/lease conditions, so a root that claimed, deferred or completed
         // the row since the read makes this match nothing; the next tick tries again.
@@ -87,7 +88,8 @@ public sealed class ConversationTitleStore : IConversationTitleStore
         return await claim.ExecuteNonQueryAsync(ct) == 1 ? work : null;
     }
 
-    public async Task<bool> CompleteAsync(ConversationTitleWork work, string? title, DateTime now, CancellationToken ct)
+    public async Task<bool> CompleteAsync(ConversationTitleWork work, string? title, DateTime now, CancellationToken ct,
+        string? excerptHash = null)
     {
         using var db = SqliteConnectionFactory.Open(_connectionString);
         using var tx = db.BeginTransaction(deferred: false);
@@ -115,14 +117,32 @@ public sealed class ConversationTitleStore : IConversationTitleStore
             UPDATE ConversationTitleRequests SET CompletedUTC=$now, Lease=NULL, LeaseUntilUTC=NULL,
                 GenerationCount=GenerationCount+$applied, LastInputId=$inputId,
                 LastTitle=CASE WHEN $applied=1 THEN $title ELSE LastTitle END,
+                LastExcerptHash=CASE WHEN $applied=1 THEN $excerptHash ELSE LastExcerptHash END,
                 Cancelled=CASE WHEN $applied=1 THEN 0 ELSE 1 END, Attempts=0, RetryAfterUTC=$now
             WHERE SessionId=$sessionId AND Lease=$lease AND LeaseUntilUTC>$now AND Cancelled=0 AND GenerationCount=$generation;
             """;
         cmd.Parameters.AddWithValue("$applied", applied ? 1 : 0);
         cmd.Parameters.AddWithValue("$inputId", work.InputId);
+        cmd.Parameters.AddWithValue("$excerptHash", (object?)excerptHash ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync(ct);
         await tx.CommitAsync(ct);
         return applied;
+    }
+
+    public async Task SkipUnchangedRefreshAsync(ConversationTitleWork work, DateTime now, CancellationToken ct)
+    {
+        using var db = SqliteConnectionFactory.Open(_connectionString);
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            UPDATE ConversationTitleRequests SET Cancelled=1, Lease=NULL, LeaseUntilUTC=NULL, Attempts=0
+            WHERE SessionId=$sessionId AND Lease=$lease AND LeaseUntilUTC>$now AND Cancelled=0
+                AND GenerationCount=1 AND LastExcerptHash=$hash;
+            """;
+        cmd.Parameters.AddWithValue("$sessionId", work.SessionId);
+        cmd.Parameters.AddWithValue("$lease", work.Lease);
+        cmd.Parameters.AddWithValue("$now", now.ToString("O"));
+        cmd.Parameters.AddWithValue("$hash", (object?)work.LastExcerptHash ?? DBNull.Value);
+        await cmd.ExecuteNonQueryAsync(ct);
     }
 
     public async Task DeferAsync(ConversationTitleWork work, DateTime retryAt, CancellationToken ct, string? settingsFingerprint = null)
