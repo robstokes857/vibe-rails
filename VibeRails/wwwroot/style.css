@@ -19481,3 +19481,59 @@ body.performance-mode .brand-text-sm {
 .board-card-share-link .board-side-sub { display: block; margin-top: .3rem; }
 [data-card-sharing] input { min-width: 0; max-width: 100%; }
 [data-card-sharing] [role="status"] { overflow-wrap: anywhere; }
+
+/* Settings → Setup (setup-panel.js). Every colour carries a fallback: the style tail tests scan
+   from earlier section markers to the end of this file. The app-load warning reuses .alert. */
+.vb-setup { display: flex; flex-direction: column; gap: 1.75rem; text-align: left; }
+.vb-setup-section { display: flex; flex-direction: column; gap: .5rem; }
+.vb-setup-section-title { margin: 0; font-size: .75rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--color-text, #f8fafc); }
+.vb-setup-subhead { display: flex; align-items: baseline; flex-wrap: wrap; gap: .25rem .6rem; margin-top: .5rem; }
+.vb-setup-subhead span:first-child { font-size: .85rem; font-weight: 600; color: var(--color-text, #f8fafc); }
+.vb-setup-subhead span + span { color: var(--color-text-muted, #94a3b8); font-size: .8rem; }
+.vb-setup-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--color-border, #334155); border-radius: 8px;
+    background: var(--color-bg-surface, #1e1e1e); overflow: hidden; }
+.vb-setup-row { padding: .8rem 1rem; }
+.vb-setup-row + .vb-setup-row { border-top: 1px solid var(--color-border, #334155); }
+.vb-setup-row[data-state="missing"] { background: color-mix(in srgb, var(--color-bg-elevated, #232323) 60%, transparent); }
+.vb-setup-row-main { display: flex; align-items: center; gap: .85rem; min-width: 0; }
+.vb-setup-icon { flex: 0 0 auto; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 8px;
+    background: var(--color-bg-surface-hover, #2c2c2c); color: var(--color-text-muted, #94a3b8); }
+.vb-setup-icon img { width: 20px; height: 20px; object-fit: contain; }
+.vb-setup-row-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: .15rem; }
+.vb-setup-row-title { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; color: var(--color-text, #f8fafc); }
+.vb-setup-row-title strong { font-weight: 600; }
+.vb-setup-why { color: var(--color-text-muted, #94a3b8); font-size: .85rem; }
+.vb-setup-row[data-state="restart"] .vb-setup-why { color: var(--color-warning, #f59e0b); }
+.vb-setup-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-muted, #94a3b8);
+    font: .76rem var(--vb-font-mono, Consolas, monospace); }
+.vb-setup-pill { display: inline-flex; align-items: center; gap: .3rem; padding: .05rem .5rem; border-radius: 999px;
+    font-size: .72rem; font-weight: 600; border: 1px solid transparent; }
+.vb-setup-pill[data-state="ready"] { color: var(--color-success, #10b981);
+    background: color-mix(in srgb, var(--color-success, #10b981) 12%, transparent); }
+.vb-setup-pill[data-state="restart"] { color: var(--color-warning, #f59e0b);
+    background: color-mix(in srgb, var(--color-warning, #f59e0b) 12%, transparent); }
+.vb-setup-pill[data-state="missing"] { color: var(--color-text-muted, #94a3b8); border-color: var(--color-border, #334155); }
+.vb-setup-installer { display: flex; flex-direction: column; gap: .6rem; min-width: 0; margin: .75rem 0 .2rem calc(34px + .85rem); }
+.vb-setup-methods { display: inline-flex; flex-wrap: wrap; align-self: flex-start; padding: 2px; gap: 2px;
+    border: 1px solid var(--color-border, #334155); border-radius: 7px; background: var(--color-bg-base, #121212); }
+.vb-setup-method { display: inline-flex; align-items: center; gap: .4rem; padding: .25rem .7rem; border: 0; border-radius: 5px;
+    background: transparent; color: var(--color-text-muted, #94a3b8); font-size: .8rem; }
+.vb-setup-method:hover { color: var(--color-text, #f8fafc); }
+.vb-setup-method[aria-checked="true"] { background: var(--color-bg-surface-hover, #2c2c2c); color: var(--color-text, #f8fafc); }
+.vb-setup-recommended { padding: 0 .35rem; border-radius: 4px; font-size: .65rem; font-weight: 700; letter-spacing: .03em;
+    color: var(--color-accent, #06b6d4); background: color-mix(in srgb, var(--color-accent, #06b6d4) 14%, transparent); }
+.vb-setup-installer-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem; min-width: 0; }
+.vb-setup-runs { flex: 1 1 14rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vb-setup-runs code { color: var(--color-text-muted, #94a3b8); font: .76rem var(--vb-font-mono, Consolas, monospace); }
+.vb-setup-installer-note { margin: 0; color: var(--color-text-muted, #94a3b8); font-size: .8rem; }
+.vb-setup-blocked { margin: 0; color: var(--color-warning, #f59e0b); font-size: .82rem; }
+.vb-setup-blocked .btn-link { vertical-align: baseline; font-size: inherit; }
+.vb-setup-install-command { flex-shrink: 0; display: flex; gap: .5rem; padding: 5px 12px; overflow-x: auto; white-space: nowrap;
+    border-bottom: 1px solid #303030; background: #222; color: #d4d4d4; font: 11.5px Consolas, 'Cascadia Mono', monospace; }
+.vb-setup-install-command span { color: #89d185; }
+.vb-setup-install-command code { color: inherit; font: inherit; }
+#setup-helper-bar[hidden] { display: none; }
+@media (max-width: 640px) {
+    .vb-setup-installer { margin-left: 0; }
+}

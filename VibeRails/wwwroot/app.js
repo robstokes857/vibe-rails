@@ -12,6 +12,7 @@ import { RuleController } from './js/modules/rule-controller.js';
 import { CliLauncher } from './js/modules/cli-launcher.js';
 import { TerminalController } from './js/modules/terminal-multitab.js';
 import { SettingsController } from './js/modules/settings-controller.js';
+import { SetupAlert } from './js/modules/setup-panel.js';
 import { RemoteAccountLinkPanel } from './js/modules/remote-account-link.js';
 import { VibeRailsAiController } from './js/modules/vibe-rails-ai-controller.js';
 import { McpController } from './js/modules/mcp-controller.js';
@@ -55,6 +56,7 @@ export class VibeControlApp {
         this.cliLauncher = new CliLauncher(this);
         this.terminalController = new TerminalController(this);
         this.settingsController = new SettingsController(this);
+        this.setupAlert = new SetupAlert(this);
         this.vibeRailsAiController = new VibeRailsAiController(this);
         this.mcpController = new McpController(this);
         this.jobController = new JobController(this);
@@ -112,6 +114,9 @@ export class VibeControlApp {
         if (!this.data.isInGit) {
             this.showNotInGitHelper();
         }
+        // Same moment, same kind of bar: warn while Git, PowerShell 7 (Windows) or every AI CLI
+        // is missing. A finished setup is answered from GlobalCache without probing.
+        void this.setupAlert.check();
         const initialView = this.consumeRequestedInitialView();
         this.navigationStack = [initialView];
         this.currentView = initialView;
@@ -828,6 +833,7 @@ export class VibeControlApp {
         this.boardController?.unload?.();
         this.environmentController?.unload?.();
         this.updateActiveSubNav(view);
+        this.setupAlert?.setView(view);
         this.terminalController?.resetLayoutStateForNavigation();
         // Tear down the MCP Explorer's global listener / xterm instances when navigating away
         // (and before re-entering, which rebuilds them). Idempotent.
@@ -847,7 +853,7 @@ export class VibeControlApp {
             'git-guard': () => this.ruleController.loadFocusedGitGuard(),
             'config': () => this.configController.loadConfiguration(),
             'sessions': () => this.sessionController.loadSessions(),
-            'settings': () => this.settingsController.loadSettings(),
+            'settings': () => this.settingsController.loadSettings(data),
             'terminal-focus': () => this.terminalController.loadTerminalFocusView(data),
             'vibe-rails-ai': () => this.vibeRailsAiController.loadView(),
             'mcp': () => this.mcpController.loadView(),

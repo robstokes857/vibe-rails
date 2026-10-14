@@ -1,5 +1,6 @@
 import { confirmDialog } from './utils.js';
 import { SettingsKeysPanel } from './settings-keys.js';
+import { SetupPanel } from './setup-panel.js';
 import { getToastTheme, setToastTheme } from './toast-service.js';
 
 export class SettingsController {
@@ -14,6 +15,8 @@ export class SettingsController {
         this._beforeUnloadHandler = null;
         this._settingsRoot = null;
         this._keysPanel = null;
+        this._setupPanel = null;
+        this._selectSettingsTab = null;
         this._linkedKeyVersion = 0;
         // In-app leave-confirm (window.confirm is a silent no-op in the VS Code
         // webview). A field so tests can substitute a resolved value.
@@ -22,7 +25,7 @@ export class SettingsController {
         this._leaveSettingsConfirmed = false;
     }
 
-    async loadSettings() {
+    async loadSettings(data = {}) {
         this.unload();
 
         const content = document.getElementById('app-content');
@@ -61,6 +64,7 @@ export class SettingsController {
             this._settingsRoot = root;
             this.app.bindAction(root, '[data-action="go-back"]', () => this.app.goBack());
             this._initSettingsTabs(root);
+            if (data.tab) this._selectSettingsTab?.(data.tab);
             const toastTheme = root.querySelector('#setting-toast-theme');
             if (toastTheme) {
                 toastTheme.value = getToastTheme();
@@ -299,6 +303,9 @@ export class SettingsController {
     unload() {
         this._keysPanel?.unload();
         this._keysPanel = null;
+        this._setupPanel?.unload();
+        this._setupPanel = null;
+        this._selectSettingsTab = null;
         if (this._removeNavigationGuard) {
             this._removeNavigationGuard();
             this._removeNavigationGuard = null;
@@ -583,7 +590,17 @@ export class SettingsController {
             } else {
                 this._keysPanel?.clearSecrets();
             }
+            if (id === 'setup') {
+                const container = root.querySelector('[data-settings-setup]');
+                if (container) {
+                    this._setupPanel ??= new SetupPanel(this.app, container, {
+                        onStatus: (status) => this.app.setupAlert?.update(status)
+                    });
+                    void this._setupPanel.activate();
+                }
+            }
         };
+        this._selectSettingsTab = selectTab;
 
         tablist.addEventListener('click', (event) => {
             const tab = event.target.closest('[data-settings-tab]');
