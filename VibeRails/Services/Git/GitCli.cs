@@ -120,13 +120,21 @@ public static class GitCli
     /// the fsmonitor daemon, which can inherit the redirected pipes and hold them past git's exit,
     /// so the output drain never sees EOF (VB-14).
     /// </para>
+    /// <para>
+    /// The directory reaches git as <c>-C &lt;dir&gt;</c>, not <see cref="ProcessStartInfo.WorkingDirectory"/>.
+    /// Git changes into it before reading config, the index or any relative path, so this runs git
+    /// exactly as if it had started there, and <c>-C</c> always consumes the next argv entry as a
+    /// path, so a directory that begins with <c>-</c> cannot become an option. CodeQL's
+    /// cs/command-line-injection treats <c>WorkingDirectory</c> as a command sink, and every route
+    /// that names a project path reaches this method, so setting it raised alert #52. A missing
+    /// directory now fails inside git (exit 128, "cannot change to") instead of at process start.
+    /// </para>
     /// </remarks>
     internal static ProcessStartInfo CreateStartInfo(string workingDirectory, IReadOnlyList<string> arguments)
     {
         var startInfo = new ProcessStartInfo
         {
             FileName = "git",
-            WorkingDirectory = workingDirectory,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -137,6 +145,12 @@ public static class GitCli
             CreateNoWindow = true
         };
 
+        // Empty keeps the host's current directory, as an empty WorkingDirectory did.
+        if (!string.IsNullOrEmpty(workingDirectory))
+        {
+            startInfo.ArgumentList.Add("-C");
+            startInfo.ArgumentList.Add(workingDirectory);
+        }
         startInfo.ArgumentList.Add("-c");
         startInfo.ArgumentList.Add("core.fsmonitor=false");
         foreach (var argument in arguments)

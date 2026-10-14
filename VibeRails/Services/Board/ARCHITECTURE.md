@@ -1165,8 +1165,9 @@ failed capture leave freshness unknown. Unknown scope forces an Incomplete repor
 `save_board_review` requires the same linked session and saves findings, validation and limitations
 with No findings reported, Findings or Incomplete. A successful exit without it is Report missing.
 
-Review snapshots and every other git launch share `GitCli.CreateStartInfo`: argv only, stdin
-redirected and closed after any explicit input, `core.fsmonitor=false`; repository settings stay
+Review snapshots and every other git launch share `GitCli.CreateStartInfo`: argv only, the
+directory passed as `-C <dir>`, stdin redirected and closed after any explicit input,
+`core.fsmonitor=false`; repository settings stay
 unchanged. The stdin rule is the one that matters for the MCP host. A git child that inherits the
 host's stdin pipe blocks at startup for as long as the host has a read pending on that pipe, and
 the stdio JSON-RPC reader always has one while a tool call runs. Reproduced on 2026-10-11 with

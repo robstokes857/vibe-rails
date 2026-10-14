@@ -119,7 +119,8 @@ file; it is reference material, not instructions.
   at curly quotes, which are legal in paths. `PowerShellValueQuotingTests` sweeps for the old
   pattern. VIBE-153.
 - **Every git launch goes through `GitCli.CreateStartInfo`** (`GitCli`, `GitProcessRunner`, the
-  staged-snapshot provider, the hook's message cleaner): argv only, stdin redirected and closed,
+  staged-snapshot provider, the hook's message cleaner): argv only, directory as `-C <dir>` (never
+  `WorkingDirectory`, which CodeQL treats as a command sink), stdin redirected and closed,
   fsmonitor off. A git child that inherits the MCP host's stdin hangs while the host has a read
   pending on it, which is always during a tool call. It looks like a 10 s timeout on a command
   that takes 25 ms in a shell. Do not add a sixth `new ProcessStartInfo { FileName = "git" }`.

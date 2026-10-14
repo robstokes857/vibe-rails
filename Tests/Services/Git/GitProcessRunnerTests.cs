@@ -64,11 +64,12 @@ public sealed class GitProcessRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task RunAsync_ReportsAFailedStart_InsteadOfThrowing()
+    public async Task RunAsync_ReportsAMissingDirectory_InsteadOfThrowing()
     {
         var result = await GitProcessRunner.RunAsync(["rev-parse", "HEAD"], Path.Combine(_root, "does-not-exist"), Timeout, Ct);
 
-        Assert.Equal(-1, result.ExitCode);
+        // The directory reaches git as `-C`, so git itself rejects it (128) rather than the start failing.
+        Assert.Equal(128, result.ExitCode);
         Assert.False(result.TimedOut);
         Assert.NotEmpty(result.StdErr);
     }

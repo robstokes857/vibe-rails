@@ -37,6 +37,48 @@ public sealed class GitCliTests : IDisposable
     }
 
     [Fact]
+    public async Task RunAsync_RunsGitInTheGivenDirectory_NotTheHostsCurrentDirectory()
+    {
+        Assert.True((await GitCli.RunAsync(_root, ["init"], Ct)).Succeeded, "git init");
+        var sub = Directory.CreateDirectory(Path.Combine(_root, "sub", "deeper")).FullName;
+        await File.WriteAllTextAsync(Path.Combine(sub, "file.txt"), "x", Ct);
+
+        // The directory travels as `git -C <dir>`. The prefix and the relative pathspec both
+        // resolve from <dir>, which is only true if git really started there.
+        var prefix = await GitCli.RunAsync(sub, ["rev-parse", "--show-prefix"], Ct);
+        Assert.True(prefix.Succeeded, prefix.StdErr);
+        Assert.Equal("sub/deeper/", prefix.StdOut.Trim());
+
+        var untracked = await GitCli.RunAsync(sub, ["ls-files", "--others", "--", "file.txt"], Ct);
+        Assert.True(untracked.Succeeded, untracked.StdErr);
+        Assert.Equal("file.txt", untracked.StdOut.Trim());
+    }
+
+    [Fact]
+    public void CreateStartInfo_PassesTheDirectoryAsArgv_NotWorkingDirectory()
+    {
+        // CodeQL cs/command-line-injection treats ProcessStartInfo.WorkingDirectory as a command
+        // sink, and every project-path route reaches this method (alert #52). `-C` must lead so it
+        // applies before git reads any config or path.
+        var startInfo = GitCli.CreateStartInfo("-dir-that-looks-like-an-option", ["status"]);
+        string[] expected = ["-C", "-dir-that-looks-like-an-option", "-c", "core.fsmonitor=false", "status"];
+
+        Assert.Equal(string.Empty, startInfo.WorkingDirectory);
+        Assert.Equal(expected, startInfo.ArgumentList);
+    }
+
+    [Fact]
+    public async Task RunAsync_MissingDirectory_FailsInsideGit_WithoutThrowing()
+    {
+        var result = await GitCli.RunAsync(Path.Combine(_root, "missing"), ["status"], Ct);
+
+        // git dies with 128 on `-C` to a missing directory; a failed process start would be -1.
+        Assert.Equal(128, result.ExitCode);
+        Assert.False(result.Succeeded);
+        Assert.False(result.TimedOut);
+    }
+
+    [Fact]
     public async Task RunAsync_ForcesFsmonitorOff_EvenWhenTheRepoEnablesIt()
     {
         Assert.True((await GitCli.RunAsync(_root, ["init"], Ct)).Succeeded, "git init");
