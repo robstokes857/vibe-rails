@@ -35,7 +35,10 @@ public sealed class LlmExchangeLogStore : ILlmExchangeLogStore, IDisposable
             CharsAfter        INTEGER NOT NULL,
             ResponseChars     INTEGER NOT NULL,
             ElapsedMs         INTEGER NOT NULL,
-            SessionId         TEXT    NULL
+            SessionId         TEXT    NULL,
+            Model             TEXT    NULL,
+            ReasoningEffort   TEXT    NULL,
+            ServiceTier       TEXT    NULL
         )
         """;
 
@@ -46,6 +49,20 @@ public sealed class LlmExchangeLogStore : ILlmExchangeLogStore, IDisposable
     // added on first write.
     private const string AddSessionIdColumn =
         "ALTER TABLE ProxyExchanges ADD COLUMN SessionId TEXT";
+
+    // What each request asked for (VIBE-155), nullable for the same reasons as SessionId: rows
+    // from before the columns existed, and bodies that are not JSON or lack the field, have no
+    // value and never get one. Deliberately unindexed: building an index reads every existing
+    // row, and these columns sit behind ~1 MB of text in each one, so CREATE INDEX on a large
+    // file would hold the writer lock for minutes during startup.
+    private const string AddModelColumn =
+        "ALTER TABLE ProxyExchanges ADD COLUMN Model TEXT";
+
+    private const string AddReasoningEffortColumn =
+        "ALTER TABLE ProxyExchanges ADD COLUMN ReasoningEffort TEXT";
+
+    private const string AddServiceTierColumn =
+        "ALTER TABLE ProxyExchanges ADD COLUMN ServiceTier TEXT";
 
     private const string CreateCreatedIndex =
         "CREATE INDEX IF NOT EXISTS IX_ProxyExchanges_CreatedUTC ON ProxyExchanges(CreatedUTC DESC)";
@@ -59,11 +76,13 @@ public sealed class LlmExchangeLogStore : ILlmExchangeLogStore, IDisposable
         INSERT INTO ProxyExchanges (
             Id, CreatedUTC, Provider, Method, Path, StatusCode,
             RequestBefore, RequestAfter, ResponseBody, ResponseTruncated,
-            CharsBefore, CharsAfter, ResponseChars, ElapsedMs, SessionId)
+            CharsBefore, CharsAfter, ResponseChars, ElapsedMs, SessionId,
+            Model, ReasoningEffort, ServiceTier)
         VALUES (
             $id, $createdUTC, $provider, $method, $path, $statusCode,
             $requestBefore, $requestAfter, $responseBody, $responseTruncated,
-            $charsBefore, $charsAfter, $responseChars, $elapsedMs, $sessionId)
+            $charsBefore, $charsAfter, $responseChars, $elapsedMs, $sessionId,
+            $model, $reasoningEffort, $serviceTier)
         """;
 
     private readonly string _connectionString;
@@ -204,6 +223,9 @@ public sealed class LlmExchangeLogStore : ILlmExchangeLogStore, IDisposable
         insert.Parameters.AddWithValue("$responseChars", exchange.Response.Length);
         insert.Parameters.AddWithValue("$elapsedMs", exchange.ElapsedMs);
         insert.Parameters.AddWithValue("$sessionId", (object?)exchange.SessionId ?? DBNull.Value);
+        insert.Parameters.AddWithValue("$model", (object?)exchange.Model ?? DBNull.Value);
+        insert.Parameters.AddWithValue("$reasoningEffort", (object?)exchange.ReasoningEffort ?? DBNull.Value);
+        insert.Parameters.AddWithValue("$serviceTier", (object?)exchange.ServiceTier ?? DBNull.Value);
         await insert.ExecuteNonQueryAsync();
     }
 
@@ -219,6 +241,15 @@ public sealed class LlmExchangeLogStore : ILlmExchangeLogStore, IDisposable
             SqliteSchema.AdoptStatement(db, transaction, AddSessionIdColumn);
             SqliteSchema.Execute(db, transaction, CreateCreatedIndex);
             SqliteSchema.Execute(db, transaction, CreateSessionIdIndex);
+        });
+        // proxy-exchanges/2: the requested model, reasoning effort and service tier. A fresh file
+        // already has the columns from CreateTable; adoption is guarded either way. Additive: an
+        // older binary's INSERT never names them and leaves them NULL.
+        SqliteMigrationRunner.Apply(connection, "proxy-exchanges", 2, MigrationKind.Additive, (db, transaction) =>
+        {
+            SqliteSchema.AdoptStatement(db, transaction, AddModelColumn);
+            SqliteSchema.AdoptStatement(db, transaction, AddReasoningEffortColumn);
+            SqliteSchema.AdoptStatement(db, transaction, AddServiceTierColumn);
         });
         SqliteMigrationRunner.StampGeneration(connection, Generation);
     }

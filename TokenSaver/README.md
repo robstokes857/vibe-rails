@@ -476,7 +476,9 @@ Host-side implementations live in `VibeRails/`:
   after the stages change. Rows carry a nullable `SessionId` (the terminal `Sessions.Id` from the
   `viberails_terminal_session` header): NULL for everything written before attribution existed
   and for session-less launches — old rows are never backfilled. The column is added to existing
-  files by an idempotent `ALTER TABLE` on first write after the upgrade.
+  files by an idempotent `ALTER TABLE` on first write after the upgrade. Nullable `Model`,
+  `ReasoningEffort` and `ServiceTier` (VIBE-155) record what each request body asked for, read by
+  `LlmRequestedModel` after the response is relayed; see `VibeRails.Data.Sqlite/DB/AGENTS.md`.
 - `VibeRails/DB/TokenSavingsStore.cs` — the byte tally.
 - `VibeRails/Routes/CompressionRoutes.cs` — catalog, preview.
 - `VibeRails/Routes/TokenSaverPauseRoutes.cs` — the pause/resume/status control surface (see [Pausing](#pausing--the-agents-escape-hatch)).

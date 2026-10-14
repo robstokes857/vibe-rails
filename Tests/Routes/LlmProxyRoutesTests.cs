@@ -77,6 +77,10 @@ public class LlmProxyRoutesTests
         Assert.Equal("/llm/openai/v1/responses", exchange.Path);
         Assert.Equal(200, exchange.StatusCode);
         Assert.Equal("relay-ok", exchange.Response);
+        // The body names no model, effort or tier, so none is recorded.
+        Assert.Null(exchange.Model);
+        Assert.Null(exchange.ReasoningEffort);
+        Assert.Null(exchange.ServiceTier);
 
         var appEvent = Assert.Single(result.Events);
         Assert.Equal("proxy_activity", appEvent.Type);
@@ -182,6 +186,36 @@ public class LlmProxyRoutesTests
         var ping = Assert.Single(result.Events);
         Assert.Equal(record.BytesBefore - record.BytesAfter,
             ping.Payload.GetProperty("bytesSaved").GetInt64());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OpenAiProxy_RecordsRequestedModelEffortAndServiceTier(bool tokenSaverEnabled)
+    {
+        // Codex fast mode adds service_tier "priority". Both relay paths record it: the passthrough
+        // buffer when the saver is off, and the transform's original body when it is on.
+        const string body = """
+            {"model":"gpt-6.1-sol","stream":true,"service_tier":"priority","input":[
+              {"type":"function_call","name":"shell_command","call_id":"c1","arguments":"{}"},
+              {"type":"function_call_output","call_id":"c1","output":"ok"}
+            ],"reasoning":{"effort":"xhigh","context":"all_turns"},"store":false}
+            """;
+
+        var result = await SendThroughProxyAsync(
+            enabled: true,
+            authenticated: true,
+            TestContext.Current.CancellationToken,
+            requestBody: body,
+            tokenSaverEnabled: tokenSaverEnabled,
+            tokenSaverFlags: MinifyFlags.Default);
+
+        Assert.Equal(HttpStatusCode.OK, result.StatusCode);
+        Assert.Equal(tokenSaverEnabled, result.SavingsRecords.Count == 1);
+        var exchange = Assert.Single(result.Exchanges);
+        Assert.Equal("gpt-6.1-sol", exchange.Model);
+        Assert.Equal("xhigh", exchange.ReasoningEffort);
+        Assert.Equal("priority", exchange.ServiceTier);
     }
 
     private static HttpRequest CreateRequest(string path, string query)

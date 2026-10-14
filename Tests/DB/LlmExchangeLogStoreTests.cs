@@ -22,7 +22,10 @@ public sealed class LlmExchangeLogStoreTests : IDisposable
         string requestAfter = "{\"after\":1}",
         string response = "data: {}\n\n",
         bool truncated = false,
-        string? sessionId = null) =>
+        string? sessionId = null,
+        string? model = null,
+        string? reasoningEffort = null,
+        string? serviceTier = null) =>
         new(
             Guid.NewGuid(),
             "anthropic",
@@ -34,7 +37,10 @@ public sealed class LlmExchangeLogStoreTests : IDisposable
             response,
             truncated,
             ElapsedMs: 1234,
-            SessionId: sessionId);
+            SessionId: sessionId,
+            Model: model,
+            ReasoningEffort: reasoningEffort,
+            ServiceTier: serviceTier);
 
     [Fact]
     public async Task Record_WritesTheWholeExchange()
@@ -154,6 +160,117 @@ public sealed class LlmExchangeLogStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Record_PersistsRequestedModelFields()
+    {
+        using var store = new LlmExchangeLogStore(ConnectionString);
+
+        store.Record(Exchange(model: "gpt-6.1-sol", reasoningEffort: "xhigh", serviceTier: "priority"));
+        await store.WaitForDrainAsync();
+
+        var row = ReadSingle();
+        Assert.Equal("gpt-6.1-sol", row.Model);
+        Assert.Equal("xhigh", row.ReasoningEffort);
+        Assert.Equal("priority", row.ServiceTier);
+    }
+
+    [Fact]
+    public async Task Record_LeavesRequestedModelFieldsNullWhenAbsent()
+    {
+        // A body that is not JSON, was not buffered, or lacks a field records NULL, never a guess.
+        using var store = new LlmExchangeLogStore(ConnectionString);
+
+        store.Record(Exchange(model: "claude-opus-5-5"));
+        await store.WaitForDrainAsync();
+
+        var row = ReadSingle();
+        Assert.Equal("claude-opus-5-5", row.Model);
+        Assert.Null(row.ReasoningEffort);
+        Assert.Null(row.ServiceTier);
+    }
+
+    [Fact]
+    public async Task Record_UpgradesVersionOneDatabase_AndOlderInsertsStillWork()
+    {
+        // The on-disk shape every current proxy_exchanges.db has: proxy-exchanges/1 already applied,
+        // so CreateTable never runs again and the new columns can only arrive through version 2.
+        using (var connection = new SqliteConnection(ConnectionString))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = $$"""
+                CREATE TABLE ProxyExchanges (
+                    Id                TEXT    NOT NULL PRIMARY KEY,
+                    CreatedUTC        TEXT    NOT NULL,
+                    Provider          TEXT    NOT NULL,
+                    Method            TEXT    NOT NULL,
+                    Path              TEXT    NOT NULL,
+                    StatusCode        INTEGER NOT NULL,
+                    RequestBefore     TEXT    NOT NULL,
+                    RequestAfter      TEXT    NOT NULL,
+                    ResponseBody      TEXT    NOT NULL,
+                    ResponseTruncated INTEGER NOT NULL,
+                    CharsBefore       INTEGER NOT NULL,
+                    CharsAfter        INTEGER NOT NULL,
+                    ResponseChars     INTEGER NOT NULL,
+                    ElapsedMs         INTEGER NOT NULL,
+                    SessionId         TEXT    NULL
+                );
+                CREATE INDEX IX_ProxyExchanges_CreatedUTC ON ProxyExchanges(CreatedUTC DESC);
+                CREATE INDEX IX_ProxyExchanges_SessionId ON ProxyExchanges(SessionId);
+                CREATE TABLE SchemaMigrations (
+                    Component TEXT NOT NULL,
+                    Version INTEGER NOT NULL CHECK (Version > 0),
+                    AppliedUTC TEXT NOT NULL,
+                    AppliedBy TEXT,
+                    PRIMARY KEY (Component, Version)
+                );
+                INSERT INTO SchemaMigrations VALUES ('proxy-exchanges', 1, '2026-10-01T00:00:00Z', 'test');
+                PRAGMA user_version={{LlmExchangeLogStore.Generation}};
+                {{OlderBinaryInsert("pre-upgrade")}}
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        using (var store = new LlmExchangeLogStore(ConnectionString))
+        {
+            store.Record(Exchange(sessionId: "sess-after-upgrade", model: "gpt-6.1-sol",
+                reasoningEffort: "low", serviceTier: "priority"));
+            await store.WaitForDrainAsync();
+            Assert.Equal(0, store.DroppedWrites);
+        }
+
+        // A binary from before VIBE-155 can run beside this one: its INSERT never names the new
+        // columns, and nullable is what lets it keep writing to the upgraded file.
+        using (var connection = new SqliteConnection(ConnectionString))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = OlderBinaryInsert("post-upgrade");
+            command.ExecuteNonQuery();
+        }
+
+        var rows = ReadAll().ToDictionary(row => row.SessionId ?? "");
+        Assert.Equal(3, rows.Count);
+        Assert.Equal(("gpt-6.1-sol", "low", "priority"), Fields(rows["sess-after-upgrade"]));
+        // Rows written before the columns existed are never backfilled.
+        Assert.Equal((null, null, null), Fields(rows["pre-upgrade"]));
+        Assert.Equal((null, null, null), Fields(rows["post-upgrade"]));
+
+        static (string?, string?, string?) Fields(ExchangeRow row) => (row.Model, row.ReasoningEffort, row.ServiceTier);
+    }
+
+    // The INSERT the store issued before VIBE-155, verbatim apart from literal values.
+    private static string OlderBinaryInsert(string sessionId) => $"""
+        INSERT INTO ProxyExchanges (
+            Id, CreatedUTC, Provider, Method, Path, StatusCode,
+            RequestBefore, RequestAfter, ResponseBody, ResponseTruncated,
+            CharsBefore, CharsAfter, ResponseChars, ElapsedMs, SessionId)
+        VALUES (
+            '{Guid.NewGuid():D}', '2026-10-13T00:00:00.0000000Z', 'openai', 'POST', '/llm/openai/v1/responses', 200,
+            'body', 'body', 'ok', 0, 4, 4, 2, 5, '{sessionId}');
+        """;
+
+    [Fact]
     public void Record_OversizeExchange_IsDroppedNotQueued()
     {
         using var store = new LlmExchangeLogStore(ConnectionString, queueCapacity: 4, maxQueuedChars: 64);
@@ -191,29 +308,44 @@ public sealed class LlmExchangeLogStoreTests : IDisposable
 
     private ExchangeRow ReadSingle()
     {
+        var rows = ReadAll();
+        Assert.True(rows.Count == 1, "Expected exactly one exchange row.");
+        return rows[0];
+    }
+
+    private List<ExchangeRow> ReadAll()
+    {
         using var connection = new SqliteConnection(ConnectionString);
         connection.Open();
         using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT Id, Provider, Method, Path, StatusCode, RequestBefore, RequestAfter,
-                   ResponseBody, ResponseTruncated, CharsBefore, CharsAfter, ElapsedMs, SessionId
-            FROM ProxyExchanges
+                   ResponseBody, ResponseTruncated, CharsBefore, CharsAfter, ElapsedMs, SessionId,
+                   Model, ReasoningEffort, ServiceTier
+            FROM ProxyExchanges ORDER BY rowid
             """;
         using var reader = command.ExecuteReader();
-        Assert.True(reader.Read(), "Expected exactly one exchange row.");
-        var row = new ExchangeRow(
-            reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
-            reader.GetInt32(4), reader.GetString(5), reader.GetString(6), reader.GetString(7),
-            reader.GetBoolean(8), reader.GetInt32(9), reader.GetInt32(10), reader.GetInt32(11),
-            reader.IsDBNull(12) ? null : reader.GetString(12));
-        Assert.False(reader.Read(), "Expected exactly one exchange row.");
-        return row;
+        var rows = new List<ExchangeRow>();
+        while (reader.Read())
+        {
+            rows.Add(new ExchangeRow(
+                reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
+                reader.GetInt32(4), reader.GetString(5), reader.GetString(6), reader.GetString(7),
+                reader.GetBoolean(8), reader.GetInt32(9), reader.GetInt32(10), reader.GetInt32(11),
+                NullableString(reader, 12), NullableString(reader, 13), NullableString(reader, 14),
+                NullableString(reader, 15)));
+        }
+        return rows;
     }
+
+    private static string? NullableString(SqliteDataReader reader, int ordinal) =>
+        reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
 
     private sealed record ExchangeRow(
         string Id, string Provider, string Method, string Path, int StatusCode,
         string RequestBefore, string RequestAfter, string ResponseBody, bool ResponseTruncated,
-        int CharsBefore, int CharsAfter, int ElapsedMs, string? SessionId);
+        int CharsBefore, int CharsAfter, int ElapsedMs, string? SessionId,
+        string? Model, string? ReasoningEffort, string? ServiceTier);
 
     public void Dispose()
     {

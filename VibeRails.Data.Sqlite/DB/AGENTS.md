@@ -116,6 +116,18 @@ read `SessionId` (the last column of ~1 MB rows) out of every old row, and `Data
 defers the pass for up to 8 hours (`ProxyRetentionSchedule`, global cache key
 `retention.proxy.nextCheckUtc`) once a completed pass finds nothing.
 
+`proxy-exchanges/2` (VIBE-155) adds nullable `Model`, `ReasoningEffort` and `ServiceTier`: what
+the request body as the CLI sent it asked for (`TokenSaver/LlmRequestedModel.cs`). `Model` is the
+top-level `model`. `ReasoningEffort` is `reasoning.effort` (Responses), `reasoning_effort` (Chat
+Completions) or `output_config.effort` (Claude Code). `ServiceTier` is `service_tier`, which Codex
+sets to `priority` for its fast speeds. Each is NULL when the body is not valid JSON, was not
+buffered (transform cap overflow) or lacks the field. Rows from before the migration are never
+backfilled, and retention deletes these values with their rows. The columns are deliberately
+unindexed. Like `SessionId`, they sit behind about 1 MB of text in each row. Reading them walks
+every overflow page (3,000 rows: 0.14 s for `StatusCode`, 10.9 s cold for a trailing column), and
+`CREATE INDEX` on an existing file would do that for every row under the writer lock at startup.
+Bound per-model queries by session or by `CreatedUTC`, not a whole-table scan.
+
 
 This document describes the database layer: Environments, Sandboxes, AgentMetadata, Sessions, UserInputs, and supporting tables.
 

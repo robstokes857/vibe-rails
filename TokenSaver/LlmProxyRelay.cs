@@ -325,6 +325,11 @@ internal static class LlmProxyRelay
         {
             var responseBytes = _response.GetBuffer();
             var responseLength = (int)_response.Length;
+            var elapsedMs = (int)Stopwatch.GetElapsedTime(_startedTicks).TotalMilliseconds;
+            // Read here, after the response has been relayed, so scanning a large body never delays
+            // the upstream send, and after the clock stops, so the scan is not billed to the
+            // exchange. The body as the CLI sent it: that is what the request asked for.
+            var requested = LlmRequestedModel.Read(_requestBefore);
             return new LlmProxyExchange(
                 Guid.NewGuid(),
                 provider,
@@ -336,8 +341,11 @@ internal static class LlmProxyRelay
                 Encoding.UTF8.GetString(
                     responseBytes, 0, CompleteUtf8Length(responseBytes, responseLength)),
                 _responseTruncated,
-                (int)Stopwatch.GetElapsedTime(_startedTicks).TotalMilliseconds,
-                _sessionId);
+                elapsedMs,
+                _sessionId,
+                requested.Model,
+                requested.ReasoningEffort,
+                requested.ServiceTier);
         }
 
         private static string? EmptyToNull(string? value) =>

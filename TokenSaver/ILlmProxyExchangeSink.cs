@@ -50,6 +50,11 @@ public interface ILlmProxyExchangeSink
 /// the <c>viberails_terminal_session</c> correlation header. It is NULL for rows written before the
 /// header existed and for requests launched without a session — deliberately nullable, never
 /// backfilled, and never a join guarantee.
+///
+/// <paramref name="Model"/>, <paramref name="ReasoningEffort"/> and <paramref name="ServiceTier"/>
+/// are what the request body asked for (see <see cref="LlmRequestedModel"/>), read from
+/// <paramref name="RequestBefore"/>. Each is null when the body is not JSON, was not buffered, or
+/// lacks the field; like <paramref name="SessionId"/>, they are never backfilled.
 /// </summary>
 public sealed record LlmProxyExchange(
     Guid Id,
@@ -62,7 +67,10 @@ public sealed record LlmProxyExchange(
     string Response,
     bool ResponseTruncated,
     int ElapsedMs,
-    string? SessionId = null)
+    string? SessionId = null,
+    string? Model = null,
+    string? ReasoningEffort = null,
+    string? ServiceTier = null)
 {
     public int RequestBytesBefore => RequestBefore.Length;
 

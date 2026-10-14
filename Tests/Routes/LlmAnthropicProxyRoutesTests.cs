@@ -120,6 +120,29 @@ public class LlmAnthropicProxyRoutesTests
         Assert.Null(result.UpstreamTerminalSessionHeader);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RequestedModelAndEffort_AreRecordedOnTheExchange(bool tokenSaverEnabled)
+    {
+        // Claude Code sends its effort level as output_config.effort. Both relay paths record what
+        // the CLI asked for: the passthrough buffer, and the transform's original body.
+        const string body = """
+            {"model":"claude-opus-5-5","messages":[{"role":"user","content":"hi"}],
+             "thinking":{"type":"adaptive"},"output_config":{"effort":"xhigh"},"stream":true}
+            """;
+
+        var result = await SendAsync(
+            "/llm/anthropic/v1/messages", body, tokenSaverEnabled,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(tokenSaverEnabled, result.Savings.Records.Count == 1);
+        var exchange = Assert.Single(result.Exchanges);
+        Assert.Equal("claude-opus-5-5", exchange.Model);
+        Assert.Equal("xhigh", exchange.ReasoningEffort);
+        Assert.Null(exchange.ServiceTier);
+    }
+
     [Fact]
     public async Task InvalidJsonBody_FailsOpenByteIdentical()
     {
