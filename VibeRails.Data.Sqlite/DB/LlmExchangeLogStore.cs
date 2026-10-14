@@ -38,7 +38,8 @@ public sealed class LlmExchangeLogStore : ILlmExchangeLogStore, IDisposable
             SessionId         TEXT    NULL,
             Model             TEXT    NULL,
             ReasoningEffort   TEXT    NULL,
-            ServiceTier       TEXT    NULL
+            ServiceTier       TEXT    NULL,
+            ServedModel       TEXT    NULL
         )
         """;
 
@@ -64,6 +65,10 @@ public sealed class LlmExchangeLogStore : ILlmExchangeLogStore, IDisposable
     private const string AddServiceTierColumn =
         "ALTER TABLE ProxyExchanges ADD COLUMN ServiceTier TEXT";
 
+    // The response's actual model (VIBE-156), with the same nullable/no-backfill/no-index contract.
+    private const string AddServedModelColumn =
+        "ALTER TABLE ProxyExchanges ADD COLUMN ServedModel TEXT";
+
     private const string CreateCreatedIndex =
         "CREATE INDEX IF NOT EXISTS IX_ProxyExchanges_CreatedUTC ON ProxyExchanges(CreatedUTC DESC)";
 
@@ -77,12 +82,12 @@ public sealed class LlmExchangeLogStore : ILlmExchangeLogStore, IDisposable
             Id, CreatedUTC, Provider, Method, Path, StatusCode,
             RequestBefore, RequestAfter, ResponseBody, ResponseTruncated,
             CharsBefore, CharsAfter, ResponseChars, ElapsedMs, SessionId,
-            Model, ReasoningEffort, ServiceTier)
+            Model, ReasoningEffort, ServiceTier, ServedModel)
         VALUES (
             $id, $createdUTC, $provider, $method, $path, $statusCode,
             $requestBefore, $requestAfter, $responseBody, $responseTruncated,
             $charsBefore, $charsAfter, $responseChars, $elapsedMs, $sessionId,
-            $model, $reasoningEffort, $serviceTier)
+            $model, $reasoningEffort, $serviceTier, $servedModel)
         """;
 
     private readonly string _connectionString;
@@ -226,6 +231,7 @@ public sealed class LlmExchangeLogStore : ILlmExchangeLogStore, IDisposable
         insert.Parameters.AddWithValue("$model", (object?)exchange.Model ?? DBNull.Value);
         insert.Parameters.AddWithValue("$reasoningEffort", (object?)exchange.ReasoningEffort ?? DBNull.Value);
         insert.Parameters.AddWithValue("$serviceTier", (object?)exchange.ServiceTier ?? DBNull.Value);
+        insert.Parameters.AddWithValue("$servedModel", (object?)exchange.ServedModel ?? DBNull.Value);
         await insert.ExecuteNonQueryAsync();
     }
 
@@ -250,6 +256,11 @@ public sealed class LlmExchangeLogStore : ILlmExchangeLogStore, IDisposable
             SqliteSchema.AdoptStatement(db, transaction, AddModelColumn);
             SqliteSchema.AdoptStatement(db, transaction, AddReasoningEffortColumn);
             SqliteSchema.AdoptStatement(db, transaction, AddServiceTierColumn);
+        });
+        // proxy-exchanges/3: only new captures report the served model. Older writers omit it.
+        SqliteMigrationRunner.Apply(connection, "proxy-exchanges", 3, MigrationKind.Additive, (db, transaction) =>
+        {
+            SqliteSchema.AdoptStatement(db, transaction, AddServedModelColumn);
         });
         SqliteMigrationRunner.StampGeneration(connection, Generation);
     }

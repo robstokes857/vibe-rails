@@ -478,7 +478,14 @@ Host-side implementations live in `VibeRails/`:
   and for session-less launches — old rows are never backfilled. The column is added to existing
   files by an idempotent `ALTER TABLE` on first write after the upgrade. Nullable `Model`,
   `ReasoningEffort` and `ServiceTier` (VIBE-155) record what each request body asked for, read by
-  `LlmRequestedModel` after the response is relayed; see `VibeRails.Data.Sqlite/DB/AGENTS.md`.
+  `LlmRequestedModel` after the response is relayed. Nullable `ServedModel` (VIBE-156) records the
+  model the upstream response reports, which can differ from that requested alias. `LlmServedModel`
+  reads the captured response after relay completion: Anthropic `message_start.message.model`,
+  Responses `response.created` / `response.completed` → `response.model`, Chat Completions SSE
+  chunks' `model`, or non-streaming JSON's top-level `model`. Error, malformed, unsupported and
+  model-less responses leave it NULL. A complete first SSE event survives a later 32 MiB capture
+  truncation. No value is inferred from the request or backfilled; see
+  `VibeRails.Data.Sqlite/DB/AGENTS.md`.
 - `VibeRails/DB/TokenSavingsStore.cs` — the byte tally.
 - `VibeRails/Routes/CompressionRoutes.cs` — catalog, preview.
 - `VibeRails/Routes/TokenSaverPauseRoutes.cs` — the pause/resume/status control surface (see [Pausing](#pausing--the-agents-escape-hatch)).

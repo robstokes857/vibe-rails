@@ -25,7 +25,8 @@ public sealed class LlmExchangeLogStoreTests : IDisposable
         string? sessionId = null,
         string? model = null,
         string? reasoningEffort = null,
-        string? serviceTier = null) =>
+        string? serviceTier = null,
+        string? servedModel = null) =>
         new(
             Guid.NewGuid(),
             "anthropic",
@@ -40,7 +41,8 @@ public sealed class LlmExchangeLogStoreTests : IDisposable
             SessionId: sessionId,
             Model: model,
             ReasoningEffort: reasoningEffort,
-            ServiceTier: serviceTier);
+            ServiceTier: serviceTier,
+            ServedModel: servedModel);
 
     [Fact]
     public async Task Record_WritesTheWholeExchange()
@@ -65,6 +67,7 @@ public sealed class LlmExchangeLogStoreTests : IDisposable
         // Sizes are derived at write time so a query can rank by payload without reading the text.
         Assert.Equal(12, row.CharsBefore);
         Assert.Equal(11, row.CharsAfter);
+        Assert.Null(row.ServedModel);
     }
 
     [Fact]
@@ -187,6 +190,104 @@ public sealed class LlmExchangeLogStoreTests : IDisposable
         Assert.Null(row.ReasoningEffort);
         Assert.Null(row.ServiceTier);
     }
+
+    [Fact]
+    public async Task Record_PersistsServedModelSeparatelyFromRequestedModel()
+    {
+        using var store = new LlmExchangeLogStore(ConnectionString);
+
+        store.Record(Exchange(model: "codex-auto-review", servedModel: "gpt-served-snapshot"));
+        await store.WaitForDrainAsync();
+
+        var row = ReadSingle();
+        Assert.Equal("codex-auto-review", row.Model);
+        Assert.Equal("gpt-served-snapshot", row.ServedModel);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Record_UpgradesVersionTwoDatabase_AdoptsExistingColumnAndPreservesOlderWrites(bool columnAlreadyPresent)
+    {
+        using (var connection = new SqliteConnection(ConnectionString))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = $$"""
+                CREATE TABLE ProxyExchanges (
+                    Id TEXT NOT NULL PRIMARY KEY, CreatedUTC TEXT NOT NULL, Provider TEXT NOT NULL,
+                    Method TEXT NOT NULL, Path TEXT NOT NULL, StatusCode INTEGER NOT NULL,
+                    RequestBefore TEXT NOT NULL, RequestAfter TEXT NOT NULL, ResponseBody TEXT NOT NULL,
+                    ResponseTruncated INTEGER NOT NULL, CharsBefore INTEGER NOT NULL, CharsAfter INTEGER NOT NULL,
+                    ResponseChars INTEGER NOT NULL, ElapsedMs INTEGER NOT NULL, SessionId TEXT NULL,
+                    Model TEXT NULL, ReasoningEffort TEXT NULL, ServiceTier TEXT NULL
+                );
+                CREATE INDEX IX_ProxyExchanges_CreatedUTC ON ProxyExchanges(CreatedUTC DESC);
+                CREATE INDEX IX_ProxyExchanges_SessionId ON ProxyExchanges(SessionId);
+                CREATE TABLE SchemaMigrations (
+                    Component TEXT NOT NULL, Version INTEGER NOT NULL CHECK (Version > 0),
+                    AppliedUTC TEXT NOT NULL, AppliedBy TEXT, PRIMARY KEY (Component, Version)
+                );
+                INSERT INTO SchemaMigrations VALUES ('proxy-exchanges', 1, '2026-10-01T00:00:00Z', 'test');
+                INSERT INTO SchemaMigrations VALUES ('proxy-exchanges', 2, '2026-10-13T00:00:00Z', 'test');
+                PRAGMA user_version={{LlmExchangeLogStore.Generation}};
+                {{(columnAlreadyPresent ? "ALTER TABLE ProxyExchanges ADD COLUMN ServedModel TEXT;" : "")}}
+                {{RequestedModelBinaryInsert("pre-upgrade")}}
+                """;
+            command.ExecuteNonQuery();
+            if (columnAlreadyPresent)
+            {
+                command.CommandText = "UPDATE ProxyExchanges SET ServedModel='already-captured';";
+                command.ExecuteNonQuery();
+            }
+        }
+
+        using (var store = new LlmExchangeLogStore(ConnectionString))
+        {
+            store.Record(Exchange(sessionId: "new-writer", model: "requested-alias", servedModel: "served-snapshot"));
+            await store.WaitForDrainAsync();
+            Assert.Equal(0, store.DroppedWrites);
+        }
+
+        using (var connection = new SqliteConnection(ConnectionString))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = RequestedModelBinaryInsert("old-writer");
+            command.ExecuteNonQuery();
+            // Repeated schema setup is safe, including adoption when the column predates its receipt.
+            LlmExchangeLogStore.EnsureSchema(connection);
+            command.CommandText = "SELECT COUNT(*) FROM SchemaMigrations WHERE Component='proxy-exchanges' AND Version=3;";
+            Assert.Equal(1L, command.ExecuteScalar());
+            command.CommandText = "PRAGMA user_version;";
+            Assert.Equal((long)LlmExchangeLogStore.Generation, command.ExecuteScalar());
+            command.CommandText = "SELECT COUNT(*) FROM sqlite_schema WHERE type='index' AND tbl_name='ProxyExchanges';";
+            Assert.Equal(3L, command.ExecuteScalar()); // PK plus the two existing indexes, no model index.
+        }
+
+        var rows = ReadAll().ToDictionary(row => row.SessionId ?? "");
+        Assert.Equal(3, rows.Count);
+        Assert.Equal("served-snapshot", rows["new-writer"].ServedModel);
+        Assert.Equal("requested-alias", rows["new-writer"].Model);
+        Assert.Equal(columnAlreadyPresent ? "already-captured" : null, rows["pre-upgrade"].ServedModel);
+        Assert.Null(rows["old-writer"].ServedModel);
+        Assert.Equal("legacy-alias", rows["pre-upgrade"].Model);
+        Assert.Equal("legacy-alias", rows["old-writer"].Model);
+        Assert.Equal("low", rows["pre-upgrade"].ReasoningEffort);
+        Assert.Equal("priority", rows["pre-upgrade"].ServiceTier);
+    }
+
+    // The VIBE-155 writer names its request metadata but knows nothing about ServedModel.
+    private static string RequestedModelBinaryInsert(string sessionId) => $$"""
+        INSERT INTO ProxyExchanges (
+            Id, CreatedUTC, Provider, Method, Path, StatusCode,
+            RequestBefore, RequestAfter, ResponseBody, ResponseTruncated,
+            CharsBefore, CharsAfter, ResponseChars, ElapsedMs, SessionId, Model, ReasoningEffort, ServiceTier)
+        VALUES (
+            '{{Guid.NewGuid():D}}', '2026-10-13T00:00:00.0000000Z', 'openai', 'POST', '/llm/openai/v1/responses', 200,
+            '{"model":"legacy-alias"}', 'body', '{"model":"historical-served"}', 0, 24, 4, 29, 5,
+            '{{sessionId}}', 'legacy-alias', 'low', 'priority');
+        """;
 
     [Fact]
     public async Task Record_UpgradesVersionOneDatabase_AndOlderInsertsStillWork()
@@ -321,7 +422,7 @@ public sealed class LlmExchangeLogStoreTests : IDisposable
         command.CommandText = """
             SELECT Id, Provider, Method, Path, StatusCode, RequestBefore, RequestAfter,
                    ResponseBody, ResponseTruncated, CharsBefore, CharsAfter, ElapsedMs, SessionId,
-                   Model, ReasoningEffort, ServiceTier
+                   Model, ReasoningEffort, ServiceTier, ServedModel
             FROM ProxyExchanges ORDER BY rowid
             """;
         using var reader = command.ExecuteReader();
@@ -333,7 +434,7 @@ public sealed class LlmExchangeLogStoreTests : IDisposable
                 reader.GetInt32(4), reader.GetString(5), reader.GetString(6), reader.GetString(7),
                 reader.GetBoolean(8), reader.GetInt32(9), reader.GetInt32(10), reader.GetInt32(11),
                 NullableString(reader, 12), NullableString(reader, 13), NullableString(reader, 14),
-                NullableString(reader, 15)));
+                NullableString(reader, 15), NullableString(reader, 16)));
         }
         return rows;
     }
@@ -345,7 +446,7 @@ public sealed class LlmExchangeLogStoreTests : IDisposable
         string Id, string Provider, string Method, string Path, int StatusCode,
         string RequestBefore, string RequestAfter, string ResponseBody, bool ResponseTruncated,
         int CharsBefore, int CharsAfter, int ElapsedMs, string? SessionId,
-        string? Model, string? ReasoningEffort, string? ServiceTier);
+        string? Model, string? ReasoningEffort, string? ServiceTier, string? ServedModel);
 
     public void Dispose()
     {

@@ -128,6 +128,16 @@ every overflow page (3,000 rows: 0.14 s for `StatusCode`, 10.9 s cold for a trai
 `CREATE INDEX` on an existing file would do that for every row under the writer lock at startup.
 Bound per-model queries by session or by `CreatedUTC`, not a whole-table scan.
 
+`proxy-exchanges/3` (VIBE-156) adds nullable, unindexed `ServedModel`: the actual model reported
+by the captured upstream response, read in `ExchangeRecorder.Build` after relay completion by
+`TokenSaver/LlmServedModel.cs`. It reads Anthropic SSE `message_start` → `message.model`, OpenAI
+Responses SSE `response.created` / `response.completed` → `response.model`, Chat Completions SSE
+chunks' top-level `model`, and non-streaming JSON's top-level `model`. The first complete SSE event
+remains readable when later response bytes exceed the 32 MiB capture cap. Non-success HTTP statuses,
+error bodies, unsupported formats, malformed JSON/events and missing fields leave it NULL. Older
+rows are never backfilled, older writers can omit the column, and schema generation stays at 1.
+The same trailing-column read cost and no-index rule apply as for the requested model fields.
+
 
 This document describes the database layer: Environments, Sandboxes, AgentMetadata, Sessions, UserInputs, and supporting tables.
 

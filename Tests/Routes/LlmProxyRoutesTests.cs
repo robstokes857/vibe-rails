@@ -81,6 +81,7 @@ public class LlmProxyRoutesTests
         Assert.Null(exchange.Model);
         Assert.Null(exchange.ReasoningEffort);
         Assert.Null(exchange.ServiceTier);
+        Assert.Null(exchange.ServedModel);
 
         var appEvent = Assert.Single(result.Events);
         Assert.Equal("proxy_activity", appEvent.Type);
@@ -191,7 +192,7 @@ public class LlmProxyRoutesTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task OpenAiProxy_RecordsRequestedModelEffortAndServiceTier(bool tokenSaverEnabled)
+    public async Task OpenAiProxy_RecordsRequestedModelEffortTierAndServedModel(bool tokenSaverEnabled)
     {
         // Codex fast mode adds service_tier "priority". Both relay paths record it: the passthrough
         // buffer when the saver is off, and the transform's original body when it is on.
@@ -201,6 +202,7 @@ public class LlmProxyRoutesTests
               {"type":"function_call_output","call_id":"c1","output":"ok"}
             ],"reasoning":{"effort":"xhigh","context":"all_turns"},"store":false}
             """;
+        const string responseBody = "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"model\":\"gpt-6.1-sol-20261013\"}}\n\n";
 
         var result = await SendThroughProxyAsync(
             enabled: true,
@@ -208,7 +210,9 @@ public class LlmProxyRoutesTests
             TestContext.Current.CancellationToken,
             requestBody: body,
             tokenSaverEnabled: tokenSaverEnabled,
-            tokenSaverFlags: MinifyFlags.Default);
+            tokenSaverFlags: MinifyFlags.Default,
+            upstreamBody: responseBody,
+            upstreamMediaType: "text/event-stream");
 
         Assert.Equal(HttpStatusCode.OK, result.StatusCode);
         Assert.Equal(tokenSaverEnabled, result.SavingsRecords.Count == 1);
@@ -216,6 +220,26 @@ public class LlmProxyRoutesTests
         Assert.Equal("gpt-6.1-sol", exchange.Model);
         Assert.Equal("xhigh", exchange.ReasoningEffort);
         Assert.Equal("priority", exchange.ServiceTier);
+        Assert.Equal("gpt-6.1-sol-20261013", exchange.ServedModel);
+        Assert.Equal(responseBody, exchange.Response);
+        Assert.Equal(responseBody, result.ResponseBody);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.OK, "gpt-served")]
+    [InlineData(HttpStatusCode.BadRequest, null)]
+    public async Task OpenAiProxy_JsonResponseRecordsServedModelOnlyOnSuccess(HttpStatusCode status, string? expectedServed)
+    {
+        var result = await SendThroughProxyAsync(
+            enabled: true, authenticated: true, TestContext.Current.CancellationToken,
+            requestBody: "{\"model\":\"codex-auto-review\"}",
+            upstreamBody: "{\"model\":\"gpt-served\"}", upstreamMediaType: "application/json",
+            upstreamStatus: status);
+
+        Assert.Equal(status, result.StatusCode);
+        var exchange = Assert.Single(result.Exchanges);
+        Assert.Equal("codex-auto-review", exchange.Model);
+        Assert.Equal(expectedServed, exchange.ServedModel);
     }
 
     private static HttpRequest CreateRequest(string path, string query)
@@ -235,7 +259,10 @@ public class LlmProxyRoutesTests
         string requestBody = "{\"input\":\"body-secret\"}",
         bool tokenSaverEnabled = false,
         MinifyFlags tokenSaverFlags = default,
-        CondenseOptions tokenSaverCondense = default)
+        CondenseOptions tokenSaverCondense = default,
+        string upstreamBody = "relay-ok",
+        string upstreamMediaType = "text/plain",
+        HttpStatusCode upstreamStatus = HttpStatusCode.OK)
     {
         // Port 0 = kernel-assigned: two Kestrel-hosted test classes running in parallel can race a
         // find-then-rebind port picker, so bind ephemeral and read the real address after start.
@@ -250,7 +277,8 @@ public class LlmProxyRoutesTests
         var eventBus = new AppEventBus();
         var events = new List<AppEvent>();
         using var subscription = eventBus.Subscribe(events.Add);
-        var upstreamHandler = new RecordingUpstreamHandler(faultResponseBody, failSendWithTransportError);
+        var upstreamHandler = new RecordingUpstreamHandler(
+            faultResponseBody, failSendWithTransportError, upstreamBody, upstreamMediaType, upstreamStatus);
         using var clientFactory = new StubHttpClientFactory(upstreamHandler);
 
         // The proxy resolves the library's seam interfaces; register the REAL host adapters over
@@ -372,7 +400,10 @@ public class LlmProxyRoutesTests
 
     private sealed class RecordingUpstreamHandler(
         bool faultResponseBody = false,
-        bool failSendWithTransportError = false) : HttpMessageHandler
+        bool failSendWithTransportError = false,
+        string responseBody = "relay-ok",
+        string mediaType = "text/plain",
+        HttpStatusCode status = HttpStatusCode.OK) : HttpMessageHandler
     {
         public int CallCount { get; private set; }
         public Uri? RequestUri { get; private set; }
@@ -393,11 +424,11 @@ public class LlmProxyRoutesTests
                 throw new HttpRequestException(
                     "simulated upstream reset", new IOException("connection reset by peer"));
 
-            return new HttpResponseMessage(HttpStatusCode.OK)
+            return new HttpResponseMessage(status)
             {
                 Content = faultResponseBody
                     ? new ThrowingContent()
-                    : new StringContent("relay-ok")
+                    : new StringContent(responseBody, Encoding.UTF8, mediaType)
             };
         }
     }

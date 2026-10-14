@@ -9,7 +9,7 @@ CREATE INDEX IX_ProxyExchanges_CreatedUTC ON ProxyExchanges(CreatedUTC DESC);
 CREATE INDEX IX_ProxyExchanges_SessionId ON ProxyExchanges(SessionId);
 
 -- table ProxyExchanges
-CREATE TABLE ProxyExchanges ( Id TEXT NOT NULL PRIMARY KEY, CreatedUTC TEXT NOT NULL, Provider TEXT NOT NULL, Method TEXT NOT NULL, Path TEXT NOT NULL, StatusCode INTEGER NOT NULL, RequestBefore TEXT NOT NULL, RequestAfter TEXT NOT NULL, ResponseBody TEXT NOT NULL, ResponseTruncated INTEGER NOT NULL, CharsBefore INTEGER NOT NULL, CharsAfter INTEGER NOT NULL, ResponseChars INTEGER NOT NULL, ElapsedMs INTEGER NOT NULL, SessionId TEXT NULL, Model TEXT NULL, ReasoningEffort TEXT NULL, ServiceTier TEXT NULL );
+CREATE TABLE ProxyExchanges ( Id TEXT NOT NULL PRIMARY KEY, CreatedUTC TEXT NOT NULL, Provider TEXT NOT NULL, Method TEXT NOT NULL, Path TEXT NOT NULL, StatusCode INTEGER NOT NULL, RequestBefore TEXT NOT NULL, RequestAfter TEXT NOT NULL, ResponseBody TEXT NOT NULL, ResponseTruncated INTEGER NOT NULL, CharsBefore INTEGER NOT NULL, CharsAfter INTEGER NOT NULL, ResponseChars INTEGER NOT NULL, ElapsedMs INTEGER NOT NULL, SessionId TEXT NULL, Model TEXT NULL, ReasoningEffort TEXT NULL, ServiceTier TEXT NULL, ServedModel TEXT NULL );
 
 -- table SchemaMigrations
 CREATE TABLE SchemaMigrations ( Component TEXT NOT NULL, Version INTEGER NOT NULL CHECK (Version > 0), AppliedUTC TEXT NOT NULL, AppliedBy TEXT, PRIMARY KEY (Component, Version) );

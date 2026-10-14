@@ -123,7 +123,7 @@ public class LlmAnthropicProxyRoutesTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task RequestedModelAndEffort_AreRecordedOnTheExchange(bool tokenSaverEnabled)
+    public async Task RequestedModelEffortAndServedModel_AreRecordedOnTheExchange(bool tokenSaverEnabled)
     {
         // Claude Code sends its effort level as output_config.effort. Both relay paths record what
         // the CLI asked for: the passthrough buffer, and the transform's original body.
@@ -131,16 +131,20 @@ public class LlmAnthropicProxyRoutesTests
             {"model":"claude-opus-5-5","messages":[{"role":"user","content":"hi"}],
              "thinking":{"type":"adaptive"},"output_config":{"effort":"xhigh"},"stream":true}
             """;
+        const string responseBody = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-opus-5-5-20261013\"}}\n\n";
 
         var result = await SendAsync(
             "/llm/anthropic/v1/messages", body, tokenSaverEnabled,
-            TestContext.Current.CancellationToken);
+            TestContext.Current.CancellationToken, responseBody: responseBody,
+            responseMediaType: "text/event-stream");
 
         Assert.Equal(tokenSaverEnabled, result.Savings.Records.Count == 1);
         var exchange = Assert.Single(result.Exchanges);
         Assert.Equal("claude-opus-5-5", exchange.Model);
         Assert.Equal("xhigh", exchange.ReasoningEffort);
         Assert.Null(exchange.ServiceTier);
+        Assert.Equal("claude-opus-5-5-20261013", exchange.ServedModel);
+        Assert.Equal(responseBody, exchange.Response);
     }
 
     [Fact]
@@ -236,7 +240,8 @@ public class LlmAnthropicProxyRoutesTests
     private static async Task<ProxyResult> SendAsync(
         string path, string body, bool tokenSaverEnabled, CancellationToken cancellationToken,
         MinifyFlags? flags = null, CondenseOptions condense = default,
-        IReadOnlyList<string>? allowlist = null, string? terminalSessionId = null)
+        IReadOnlyList<string>? allowlist = null, string? terminalSessionId = null,
+        string responseBody = "{\"type\":\"message\"}", string responseMediaType = "application/json")
     {
         // Port 0 = kernel-assigned: parallel Kestrel-hosted test classes can race a find-then-rebind
         // port picker, so bind ephemeral and read the real address after start.
@@ -253,7 +258,7 @@ public class LlmAnthropicProxyRoutesTests
         using var subscription = eventBus.Subscribe(events.Add);
         var savingsStore = new StubTokenSavingsStore();
         var exchanges = new RecordingExchangeSink();
-        var upstreamHandler = new RecordingUpstreamHandler();
+        var upstreamHandler = new RecordingUpstreamHandler(responseBody, responseMediaType);
         using var clientFactory = new StubHttpClientFactory(upstreamHandler);
 
         builder.Services.AddSingleton<ILlmProxyAuthGate>(new LlmProxyAuthGateAdapter(authService.Object));
@@ -353,7 +358,8 @@ public class LlmAnthropicProxyRoutesTests
         public void Dispose() => _client.Dispose();
     }
 
-    private sealed class RecordingUpstreamHandler : HttpMessageHandler
+    private sealed class RecordingUpstreamHandler(
+        string responseBody, string responseMediaType) : HttpMessageHandler
     {
         public byte[] RequestBody { get; private set; } = [];
         public long? RequestContentLength { get; private set; }
@@ -374,7 +380,7 @@ public class LlmAnthropicProxyRoutesTests
                 : await request.Content.ReadAsByteArrayAsync(cancellationToken);
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent("{\"type\":\"message\"}", Encoding.UTF8, "application/json")
+                Content = new StringContent(responseBody, Encoding.UTF8, responseMediaType)
             };
         }
     }

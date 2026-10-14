@@ -173,6 +173,7 @@ internal static class LlmProxyRelay
             // then stream it back chunk-by-chunk, untouched.
             context.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
             recorder.StatusCode = (int)upstreamResponse.StatusCode;
+            recorder.ResponseMediaType = upstreamResponse.Content.Headers.ContentType?.MediaType;
             await TeeAsync(upstreamResponse, context.Response.Body, recorder, cancellationToken);
         }
         catch (Exception ex) when (ex is OperationCanceledException
@@ -293,6 +294,7 @@ internal static class LlmProxyRelay
         private bool _responseTruncated;
 
         internal int StatusCode { get; set; }
+        internal string? ResponseMediaType { get; set; }
 
         /// <summary>
         /// Takes ownership of the exact bytes sent upstream. Both arrays are private copies made
@@ -330,6 +332,8 @@ internal static class LlmProxyRelay
             // the upstream send, and after the clock stops, so the scan is not billed to the
             // exchange. The body as the CLI sent it: that is what the request asked for.
             var requested = LlmRequestedModel.Read(_requestBefore);
+            var servedModel = LlmServedModel.Read(
+                responseBytes.AsSpan(0, responseLength), ResponseMediaType, StatusCode);
             return new LlmProxyExchange(
                 Guid.NewGuid(),
                 provider,
@@ -345,7 +349,8 @@ internal static class LlmProxyRelay
                 _sessionId,
                 requested.Model,
                 requested.ReasoningEffort,
-                requested.ServiceTier);
+                requested.ServiceTier,
+                servedModel);
         }
 
         private static string? EmptyToNull(string? value) =>

@@ -55,6 +55,9 @@ public interface ILlmProxyExchangeSink
 /// are what the request body asked for (see <see cref="LlmRequestedModel"/>), read from
 /// <paramref name="RequestBefore"/>. Each is null when the body is not JSON, was not buffered, or
 /// lacks the field; like <paramref name="SessionId"/>, they are never backfilled.
+/// <paramref name="ServedModel"/> is the model reported by the captured upstream response, read
+/// after the relay ends (see <see cref="LlmServedModel"/>). It is null for unsupported, malformed
+/// or error responses and responses without a model; it is never inferred or backfilled.
 /// </summary>
 public sealed record LlmProxyExchange(
     Guid Id,
@@ -70,7 +73,8 @@ public sealed record LlmProxyExchange(
     string? SessionId = null,
     string? Model = null,
     string? ReasoningEffort = null,
-    string? ServiceTier = null)
+    string? ServiceTier = null,
+    string? ServedModel = null)
 {
     public int RequestBytesBefore => RequestBefore.Length;
 
