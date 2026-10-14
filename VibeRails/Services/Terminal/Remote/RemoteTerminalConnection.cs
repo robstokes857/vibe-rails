@@ -96,7 +96,7 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
         // It does not wait on the host-wide backoff (one attempt per new terminal),
         // but its outcome still updates it.
         var result = await ConnectOnceAsync(ct);
-        ReportToHostBackoff(result);
+        ReportToHostBackoff(result, claimedTurn: false);
         if (result.Outcome != HandshakeOutcome.Connected)
             return;
 
@@ -148,12 +148,12 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
         return await TryConnectSocketAsync(ct);
     }
 
-    private void ReportToHostBackoff(HandshakeResult result)
+    private void ReportToHostBackoff(HandshakeResult result, bool claimedTurn)
     {
         switch (result.Outcome)
         {
             case HandshakeOutcome.HostUnavailable:
-                _hostBackoff.ReportHostFailure(result.RetryAfter);
+                _hostBackoff.ReportHostFailure(result.RetryAfter, claimedTurn);
                 break;
             case HandshakeOutcome.Connected or HandshakeOutcome.SessionMissing:
             case HandshakeOutcome.Rejected when result.StatusCode != 0:
@@ -307,7 +307,7 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
             catch (OperationCanceledException) { return false; }
 
             var result = await ConnectOnceAsync(lifetime);
-            ReportToHostBackoff(result);
+            ReportToHostBackoff(result, claimedTurn: true);
             switch (result.Outcome)
             {
                 case HandshakeOutcome.Connected:

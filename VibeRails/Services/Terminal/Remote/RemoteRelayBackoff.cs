@@ -17,8 +17,9 @@ namespace VibeRails.Services.Terminal;
 /// without counting how many processes reported the same failure. A success, or any HTTP answer
 /// that proves the host is up, clears the outage and every waiter proceeds on its next poll.
 ///
-/// The state is two timestamps in a small file beside state.db. Every file problem fails open:
-/// this gate may slow a reconnect but must never stop one.
+/// The state is two timestamps in a small file beside state.db. This gate may slow a reconnect
+/// but must never stop one: a file that cannot be used falls back to pacing this process alone,
+/// and a time further out than <see cref="MaxRetryAfter"/> (clock moved back, bad file) is ignored.
 /// </summary>
 public sealed class RemoteRelayBackoff
 {
@@ -37,6 +38,8 @@ public sealed class RemoteRelayBackoff
     /// </summary>
     internal static readonly TimeSpan ProbeLease = TimeSpan.FromSeconds(45);
     private static readonly TimeSpan LockWait = TimeSpan.FromSeconds(2);
+    /// <summary>After the file fails, this process paces itself from memory for this long before trying it again.</summary>
+    private static readonly TimeSpan FileRetryInterval = TimeSpan.FromMinutes(1);
 
     private static readonly Lazy<RemoteRelayBackoff> s_shared = new(() =>
         new RemoteRelayBackoff(CrossProcessFileLock.BesideStateDatabase(ParserConfigs.GetStatePath(), FileName)));
@@ -46,8 +49,10 @@ public sealed class RemoteRelayBackoff
     private readonly string? _lockPath;
     private readonly Func<DateTime> _clock;
     private readonly Func<double> _random;
-    // Used when there is no file (tests, or a file that cannot be written).
+    // The last state this process saw. The only state without a file (tests), and the fallback
+    // while the file cannot be used.
     private State _memory = State.Healthy;
+    private DateTime _fileRetryUtc = DateTime.MinValue;
 
     /// <summary>The machine-wide gate beside the state database.</summary>
     public static RemoteRelayBackoff Shared => s_shared.Value;
@@ -84,64 +89,77 @@ public sealed class RemoteRelayBackoff
         if (state.OutageStartedUtc is null)
             return (state, TimeSpan.Zero);
         var now = _clock();
-        if (now < state.NotBeforeUtc)
-        {
-            // A clock change or a bad file can put the next probe absurdly far out; never wait past the cap.
-            var wait = state.NotBeforeUtc - now;
-            return (state, wait > MaxRetryAfter ? MaxRetryAfter : wait);
-        }
+        var wait = state.NotBeforeUtc - now;
+        // Nothing this class writes is further out than MaxRetryAfter. A later time means the
+        // clock moved backward or the file is bad: treat the probe as due rather than wait it out.
+        if (wait > TimeSpan.Zero && wait <= MaxRetryAfter)
+            return (state, wait);
         return (state with { NotBeforeUtc = now + ProbeLease }, TimeSpan.Zero);
-    }, failOpen: TimeSpan.Zero);
+    });
 
     /// <summary>
     /// The relay did not answer, or answered 429/5xx. Schedules the next probe for every process.
     /// <paramref name="retryAfter"/> is the server's Retry-After, when it sent one.
+    /// <paramref name="claimedTurn"/> is true when the attempt went through
+    /// <see cref="WaitForTurnAsync"/>: its outcome replaces the schedule, including its own
+    /// probe claim. An attempt that skipped the gate (a new terminal's first connect) only ever
+    /// pushes the next probe later, so it cannot shorten a server's Retry-After or let a second
+    /// process probe while another's claim is still out.
     /// </summary>
-    public void ReportHostFailure(TimeSpan? retryAfter = null) => Update(state =>
+    public void ReportHostFailure(TimeSpan? retryAfter = null, bool claimedTurn = true) => Update(state =>
     {
         var now = _clock();
-        var started = state.OutageStartedUtc ?? now;
+        // An outage "started" in the future means the clock moved backward; restart its age.
+        var started = state.OutageStartedUtc is { } recorded && recorded <= now ? recorded : now;
         var age = now - started;
         var delay = age < FirstDelay ? FirstDelay : age > MaxDelay ? MaxDelay : age;
         // ±20% so many desktops returning from the same server recycle do not arrive in step.
         delay = TimeSpan.FromSeconds(delay.TotalSeconds * (0.8 + _random() * 0.4));
         if (retryAfter is { } requested && requested > delay)
             delay = requested > MaxRetryAfter ? MaxRetryAfter : requested;
-        return (new State(started, now + delay), true);
-    }, failOpen: false);
+        var notBefore = now + delay;
+        if (!claimedTurn && state.OutageStartedUtc is not null
+            && state.NotBeforeUtc > notBefore && state.NotBeforeUtc - now <= MaxRetryAfter)
+            notBefore = state.NotBeforeUtc;
+        return (new State(started, notBefore), true);
+    });
 
     /// <summary>The relay answered (connected, or a per-session status such as 404): the outage is over.</summary>
     public void ReportHostAvailable() => Update(state =>
-        state.OutageStartedUtc is null ? (state, false) : (State.Healthy, true), failOpen: false);
+        state.OutageStartedUtc is null ? (state, false) : (State.Healthy, true));
 
     /// <summary>True while an outage is recorded; for tests and diagnostics.</summary>
-    internal bool IsInOutage => Update(state => (state, state.OutageStartedUtc is not null), failOpen: false);
+    internal bool IsInOutage => Update(state => (state, state.OutageStartedUtc is not null));
 
-    private T Update<T>(Func<State, (State Next, T Result)> change, T failOpen)
+    private T Update<T>(Func<State, (State Next, T Result)> change)
     {
         lock (_gate)
         {
-            if (_path is null || _lockPath is null)
+            if (_path is not null && _lockPath is not null && _clock() >= _fileRetryUtc)
             {
-                var (next, result) = change(_memory);
-                _memory = next;
-                return result;
+                try
+                {
+                    using var held = CrossProcessFileLock.Acquire(_lockPath, LockWait);
+                    var current = Read(_path);
+                    var (next, result) = change(current);
+                    if (next != current)
+                        AtomicFile.WriteAllText(_path, next.Serialize());
+                    _memory = next;
+                    return result;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or TimeoutException)
+                {
+                    // Pace this process on its own rather than not at all: without the file, every
+                    // terminal would otherwise retry a down host about once a second. Stay on memory
+                    // for a while, so a file that reads but cannot be written does not lose the outage.
+                    _fileRetryUtc = _clock() + FileRetryInterval;
+                    Log.Debug(ex, "[Remote] Relay backoff state file unavailable; pacing this process only");
+                }
             }
 
-            try
-            {
-                using var held = CrossProcessFileLock.Acquire(_lockPath, LockWait);
-                var current = Read(_path);
-                var (next, result) = change(current);
-                if (next != current)
-                    AtomicFile.WriteAllText(_path, next.Serialize());
-                return result;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or TimeoutException)
-            {
-                Log.Debug(ex, "[Remote] Relay backoff state unavailable; not pacing this attempt");
-                return failOpen;
-            }
+            var (memoryNext, memoryResult) = change(_memory);
+            _memory = memoryNext;
+            return memoryResult;
         }
     }
 

@@ -94,10 +94,62 @@ public sealed class RemoteRelayBackoffTests : IDisposable
     }
 
     [Fact]
-    public void FarFutureStateNeverWaitsPastTheCap()
+    public void FarFutureStateIsTreatedAsDue()
     {
+        // Review L1: capping each poll at an hour still waited out the whole gap, poll by poll.
         File.WriteAllText(StatePath, $"{_now.Ticks} {_now.AddYears(5).Ticks}");
-        Assert.Equal(RemoteRelayBackoff.MaxRetryAfter, Create().TryClaimProbe());
+        var gate = Create();
+
+        Assert.Equal(TimeSpan.Zero, gate.TryClaimProbe());
+        Assert.Equal(RemoteRelayBackoff.ProbeLease, gate.TryClaimProbe());
+    }
+
+    [Fact]
+    public void ClockMovingBackwardDoesNotStallReconnects()
+    {
+        var gate = Create();
+        gate.ReportHostFailure(TimeSpan.FromMinutes(30));
+        _now -= TimeSpan.FromHours(3); // NTP correcting a clock that ran ahead.
+
+        Assert.Equal(TimeSpan.Zero, gate.TryClaimProbe());
+        gate.ReportHostFailure();
+        // The outage's age restarts instead of going negative.
+        Assert.Equal(RemoteRelayBackoff.FirstDelay, gate.TryClaimProbe());
+    }
+
+    [Fact]
+    public void UnusableStateFile_StillPacesThisProcess()
+    {
+        // Review L2: failing open on a locked or unwritable file let every terminal retry about once a second.
+        Directory.CreateDirectory(StatePath); // A directory where the file belongs: every write fails.
+        var gate = Create();
+
+        gate.ReportHostFailure();
+
+        Assert.True(gate.IsInOutage);
+        Assert.Equal(RemoteRelayBackoff.FirstDelay, gate.TryClaimProbe());
+    }
+
+    [Fact]
+    public void AnUngatedFailureNeverShortensTheSchedule()
+    {
+        // Review L3: a new terminal's first connect skips the gate; its failure must not cut a
+        // server's Retry-After short or open a second probe while another process holds one.
+        var retryAfter = Create(Path.Combine(_directory, "retry-after"));
+        retryAfter.ReportHostFailure(TimeSpan.FromMinutes(10));
+        retryAfter.ReportHostFailure(claimedTurn: false);
+        Assert.Equal(TimeSpan.FromMinutes(10), retryAfter.TryClaimProbe());
+
+        var gate = Create();
+        gate.ReportHostFailure();
+        _now += RemoteRelayBackoff.FirstDelay;
+        Assert.Equal(TimeSpan.Zero, gate.TryClaimProbe()); // Claimed: the lease runs.
+        gate.ReportHostFailure(claimedTurn: false);
+        Assert.Equal(RemoteRelayBackoff.ProbeLease, gate.TryClaimProbe());
+
+        // The claimant's own outcome replaces its lease.
+        gate.ReportHostFailure();
+        Assert.Equal(RemoteRelayBackoff.FirstDelay, gate.TryClaimProbe());
     }
 
     [Fact]
