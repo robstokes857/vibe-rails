@@ -22,12 +22,10 @@ public sealed class ConversationTitleStoreTests : IDisposable
         Assert.Null(await secondStore.ClaimAsync(Now.AddSeconds(30), Ct));
         var second = Assert.IsType<ConversationTitleWork>(await secondStore.ClaimAsync(Now.AddMinutes(3), Ct));
         Assert.NotEqual(first.Lease, second.Lease);
-        await firstStore.CompleteAsync(first, "Stale title", Now.AddMinutes(3), Ct, "stale-hash");
+        await firstStore.CompleteAsync(first, "Stale title", Now.AddMinutes(3), Ct);
         Assert.Equal("", Scalar("SELECT SessionDisplayName FROM Sessions"));
-        Assert.Equal(DBNull.Value, Scalar("SELECT LastExcerptHash FROM ConversationTitleRequests"));
-        await secondStore.CompleteAsync(second, "Fix login after refresh", Now.AddMinutes(3), Ct, "current-hash");
+        await secondStore.CompleteAsync(second, "Fix login after refresh", Now.AddMinutes(3), Ct);
         Assert.Equal("Fix login after refresh", Scalar("SELECT SessionDisplayName FROM Sessions"));
-        Assert.Equal("current-hash", Scalar("SELECT LastExcerptHash FROM ConversationTitleRequests"));
         Assert.Null(await firstStore.ClaimAsync(Now.AddDays(1), Ct));
     }
 
@@ -38,9 +36,8 @@ public sealed class ConversationTitleStoreTests : IDisposable
         Seed();
         var work = Assert.IsType<ConversationTitleWork>(await store.ClaimAsync(Now, Ct));
         Execute("UPDATE Sessions SET SessionDisplayName='My chosen name' WHERE Id='session'");
-        await store.CompleteAsync(work, "Generated name", Now.AddSeconds(1), Ct, "unapplied-hash");
+        await store.CompleteAsync(work, "Generated name", Now.AddSeconds(1), Ct);
         Assert.Equal("My chosen name", Scalar("SELECT SessionDisplayName FROM Sessions"));
-        Assert.Equal(DBNull.Value, Scalar("SELECT LastExcerptHash FROM ConversationTitleRequests"));
     }
 
     [Fact]
@@ -92,19 +89,19 @@ public sealed class ConversationTitleStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task ExcerptHashUpgradePreservesRowsAndLegacyWriterWhileOpen()
+    public async Task OpenRequestIndexUpgradePreservesRowsAndLegacyWriterWhileOpen()
     {
         StateDatabaseSchema.Ensure(ConnectionString);
         Seed();
-        // Recreate the shipped v2 shape in this disposable fixture only.
+        // Recreate the shipped v3 shape in this disposable fixture only.
         Execute("""
-            ALTER TABLE ConversationTitleRequests DROP COLUMN LastExcerptHash;
-            DELETE FROM SchemaMigrations WHERE Component='conversation-titles' AND Version=3;
+            DROP INDEX idx_conversation_titles_open;
+            DELETE FROM SchemaMigrations WHERE Component='conversation-titles' AND Version=4;
             """);
         using var legacy = SqliteConnectionFactory.Open(ConnectionString);
         var store = new ConversationTitleStore(ConnectionString);
         Assert.Equal(1L, Scalar("SELECT count(*) FROM ConversationTitleRequests"));
-        Assert.Equal(DBNull.Value, Scalar("SELECT LastExcerptHash FROM ConversationTitleRequests"));
+        Assert.Equal(1L, Scalar("SELECT count(*) FROM sqlite_master WHERE name='idx_conversation_titles_open'"));
         Assert.Equal((long)StateDatabaseSchema.Generation, Scalar("PRAGMA user_version"));
         var schemaVersion = Scalar("PRAGMA schema_version");
         _ = new ConversationTitleStore(ConnectionString);
@@ -114,31 +111,48 @@ public sealed class ConversationTitleStoreTests : IDisposable
         using var update = legacy.CreateCommand();
         update.CommandText = "UPDATE ConversationTitleRequests SET CharacterCount=750, LatestInputId=LatestInputId+1";
         Assert.Equal(1, await update.ExecuteNonQueryAsync(Ct));
-        var first = Assert.IsType<ConversationTitleWork>(await store.ClaimAsync(Now, Ct));
-        Assert.Null(first.LastExcerptHash);
-        Assert.True(await store.CompleteAsync(first, "First title", Now, Ct, "saved-hash"));
-        Execute("UPDATE ConversationTitleRequests SET LatestInputId=LatestInputId+1");
-        var refresh = Assert.IsType<ConversationTitleWork>(await new ConversationTitleStore(ConnectionString).ClaimAsync(Now, Ct));
-        Assert.Equal("saved-hash", refresh.LastExcerptHash);
+        var work = Assert.IsType<ConversationTitleWork>(await store.ClaimAsync(Now, Ct));
+        Assert.True(await store.CompleteAsync(work, "First title", Now, Ct));
     }
 
     [Fact]
-    public async Task ExpiredUnchangedRefreshCannotEndReplacementLease()
+    public async Task OneTitlePerConversation_EvenUnderAnOlderRootsRefreshRule()
     {
         var store = new ConversationTitleStore(ConnectionString);
         Seed();
-        var first = Assert.IsType<ConversationTitleWork>(await store.ClaimAsync(Now, Ct));
-        await store.CompleteAsync(first, "First title", Now, Ct, "saved-hash");
-        Execute("UPDATE ConversationTitleRequests SET CharacterCount=750, LatestInputId=LatestInputId+1");
-        var refresh = Assert.IsType<ConversationTitleWork>(await store.ClaimAsync(Now, Ct));
-        var replacement = Assert.IsType<ConversationTitleWork>(await store.ClaimAsync(Now.AddMinutes(3), Ct));
+        var work = Assert.IsType<ConversationTitleWork>(await store.ClaimAsync(Now, Ct));
+        Assert.True(await store.CompleteAsync(work, "First title", Now, Ct));
+        Execute("UPDATE ConversationTitleRequests SET MessageCount=50, CharacterCount=5000, LatestInputId=LatestInputId+1");
+        Execute("UPDATE Sessions SET EndedUTC='2026-10-12T13:00:00.0000000Z'");
 
-        await store.SkipUnchangedRefreshAsync(refresh, Now.AddMinutes(3), Ct);
+        Assert.Null(await store.ClaimAsync(Now.AddDays(1), Ct));
+        Assert.Equal(1L, Scalar("SELECT Cancelled FROM ConversationTitleRequests"));
+        Assert.Equal(1L, Scalar("SELECT GenerationCount FROM ConversationTitleRequests"));
+        // The refresh rule a VIBE-158 root still runs (conversation-titles/2's due index) finds nothing.
+        Assert.Equal(0L, Scalar("""
+            SELECT count(*) FROM ConversationTitleRequests WHERE Cancelled=0 AND GenerationCount<2
+                AND ((GenerationCount=0 AND (MessageCount>=2 OR CharacterCount>=300))
+                    OR (GenerationCount=1 AND LatestInputId>LastInputId AND (MessageCount>=10 OR CharacterCount>=750)))
+            """));
+    }
 
-        Assert.Equal(0L, Scalar("SELECT Cancelled FROM ConversationTitleRequests"));
-        Assert.Equal(replacement.Lease, Scalar("SELECT Lease FROM ConversationTitleRequests"));
-        Assert.True(await store.CompleteAsync(replacement, "Changed title", Now.AddMinutes(3), Ct, "new-hash"));
-        Assert.Equal("new-hash", Scalar("SELECT LastExcerptHash FROM ConversationTitleRequests"));
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public async Task ShortConversationIsDueOnlyOnceItsSessionEnds(bool ended, bool due)
+    {
+        var repository = new Repository(ConnectionString);
+        var store = new ConversationTitleStore(ConnectionString);
+        await repository.CreateSessionAsync("short", "codex", null, ".", 1);
+        await repository.InsertUserInputAsync("short", 1, "Fix login", null);
+        if (ended) Execute("UPDATE Sessions SET EndedUTC='2026-10-12T13:00:00.0000000Z' WHERE Id='short'");
+
+        var work = await store.ClaimAsync(DateTime.UtcNow.AddSeconds(1), Ct);
+
+        Assert.Equal(due, work is not null);
+        if (work is null) return;
+        Assert.True(await store.CompleteAsync(work, "Fix login", DateTime.UtcNow.AddSeconds(2), Ct));
+        Assert.Null(await store.ClaimAsync(DateTime.UtcNow.AddDays(1), Ct));
     }
 
     [Fact]
@@ -247,7 +261,7 @@ public sealed class ConversationTitleStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task TwoMessagesTriggerFirstTitle_ThenTenMessagesTriggerOnlyOneRefresh()
+    public async Task TwoMessagesTriggerTheOnlyTitle_AndLaterInputNeverAsksAgain()
     {
         var repository = new Repository(ConnectionString);
         var store = new ConversationTitleStore(ConnectionString);
@@ -257,31 +271,10 @@ public sealed class ConversationTitleStoreTests : IDisposable
         await repository.InsertUserInputAsync("new", 2, "Help with login", null);
         var first = Assert.IsType<ConversationTitleWork>(await store.ClaimAsync(DateTime.UtcNow.AddSeconds(1), Ct));
         Assert.True(await store.CompleteAsync(first, "Fix login", DateTime.UtcNow.AddSeconds(2), Ct));
-        for (var message = 3; message <= 9; message++)
-            await repository.InsertUserInputAsync("new", message, "More", null);
-        Assert.Null(await store.ClaimAsync(DateTime.UtcNow.AddSeconds(3), Ct));
-        await repository.InsertUserInputAsync("new", 10, "Refresh fails", null);
-        var refresh = Assert.IsType<ConversationTitleWork>(await store.ClaimAsync(DateTime.UtcNow.AddSeconds(3), Ct));
-        Assert.Equal(1, refresh.Generation);
-        Assert.True(await store.CompleteAsync(refresh, "Fix login after refresh", DateTime.UtcNow.AddSeconds(4), Ct));
-        await repository.InsertUserInputAsync("new", 11, new string('z', 2000), null);
+        for (var message = 3; message <= 12; message++)
+            await repository.InsertUserInputAsync("new", message, new string('z', 500), null);
         Assert.Null(await store.ClaimAsync(DateTime.UtcNow.AddDays(1), Ct));
-        Assert.Equal(2L, Scalar("SELECT GenerationCount FROM ConversationTitleRequests"));
-    }
-
-    [Theory]
-    [InlineData(749, false)]
-    [InlineData(750, true)]
-    public async Task RefreshUsesCumulative750Characters(int characters, bool due)
-    {
-        var repository = new Repository(ConnectionString);
-        var store = new ConversationTitleStore(ConnectionString);
-        await repository.CreateSessionAsync("new", "codex", null, ".", 1);
-        await repository.InsertUserInputAsync("new", 1, new string('a', 300), null);
-        var first = Assert.IsType<ConversationTitleWork>(await store.ClaimAsync(DateTime.UtcNow.AddSeconds(1), Ct));
-        await store.CompleteAsync(first, "First title", DateTime.UtcNow.AddSeconds(2), Ct);
-        await repository.InsertUserInputAsync("new", 2, new string('b', characters - 300), null);
-        Assert.Equal(due, await store.ClaimAsync(DateTime.UtcNow.AddSeconds(3), Ct) is not null);
+        Assert.Equal(1L, Scalar("SELECT GenerationCount FROM ConversationTitleRequests"));
     }
 
     [Fact]

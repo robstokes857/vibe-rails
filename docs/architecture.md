@@ -80,12 +80,14 @@ and debug logging, security, performance, future enhancements, resources.
 
 ## Chat history metadata (2026-09-28)
 
-`ConversationTitleService` processes two leased title milestones through `IConversationTitleStore`
-in `state.db`. The client redacts the full transcript, then sends its first 1,000 characters.
-The additive `conversation-titles/3` migration adds `LastExcerptHash`: SHA-256 of that exact
-request excerpt, saved with an applied title. The refresh compares this durable hash before HTTP;
-an unchanged excerpt ends the remaining work while retaining the title and its change stamp.
-Changed excerpts and legacy rows with a NULL hash keep the refresh; failed calls remain retryable.
+`ConversationTitleService` makes one leased title request per conversation through
+`IConversationTitleStore` in `state.db`: when the user has written enough, or when the session ends.
+It sends the user's captured messages (`IUserInputStore`), not the Send-to transcript, so launch
+prompts such as the story-tracking nudge never reach the title API. A Board-linked conversation is
+titled too; its primary card's display ID, title and description go first, labeled as background.
+`ConversationTitleClient.ComposeRequest` redacts each part whole, then bounds it. The VIBE-158
+refresh and its `LastExcerptHash` are retired; the column stays, unused. The sidebar shows a
+generated title ahead of the card label, and the card keeps its own row.
 
 The history API reads session pages from `state.db`. `ChatHistoryService` then obtains current
 card labels for those session IDs through `IBoardStore.GetSessionCardsAsync`, which batches reads

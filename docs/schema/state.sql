@@ -14,6 +14,9 @@ CREATE UNIQUE INDEX idx_compression_captures_hash ON CompressionCaptures(Content
 -- index idx_conversation_titles_due
 CREATE INDEX idx_conversation_titles_due ON ConversationTitleRequests(RetryAfterUTC,UserInputId) WHERE Cancelled=0 AND GenerationCount<2 AND ((GenerationCount=0 AND (MessageCount>=2 OR CharacterCount>=300)) OR (GenerationCount=1 AND LatestInputId>LastInputId AND (MessageCount>=10 OR CharacterCount>=750)));
 
+-- index idx_conversation_titles_open
+CREATE INDEX idx_conversation_titles_open ON ConversationTitleRequests(RetryAfterUTC,UserInputId) WHERE Cancelled=0 AND GenerationCount=0;
+
 -- index idx_conversation_titles_pending
 CREATE INDEX idx_conversation_titles_pending ON ConversationTitleRequests(RetryAfterUTC, UserInputId) WHERE CompletedUTC IS NULL;
 

@@ -1,6 +1,5 @@
 using System.Net;
 using System.Net.Http.Headers;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using VibeRails.Services.Integrations.VibeCodeRemote;
@@ -14,11 +13,9 @@ public sealed class ConversationTitleClientTests
     private static readonly ConversationTitleSettings Enabled = new(true, "synthetic-api-key");
 
     [Fact]
-    public async Task OnlyTheOpeningThousandCharactersAreSent()
+    public async Task SendsBoundedUserTextUnderItsHeading()
     {
-        // VIBE-157: the title API rejects more than 2,000 characters, so a full transcript was
-        // refused every time. The owner chose the first 1,000 characters.
-        var transcript = "User: fix the login redirect " + new string('x', 8000) + "\nAgent: complete trailing response";
+        var userText = "fix the login redirect " + new string('x', 30_000);
         string? sentText = null;
         var handler = new Handler(async (request, ct) =>
         {
@@ -27,19 +24,16 @@ public sealed class ConversationTitleClientTests
             return Reply("{\"title\":\"Fix login configuration\"}");
         });
 
-        var result = await Create(handler).GenerateAsync(transcript, Enabled, Ct);
+        var result = await Create(handler).GenerateAsync(userText, Enabled, Ct);
 
-        Assert.Equal(transcript[..ConversationTitleClient.MaxExcerptChars], sentText);
-        Assert.Equal(1_000, ConversationTitleClient.MaxExcerptChars);
+        // The word break is in the first half, so the cut falls inside the run of x.
+        Assert.Equal($"{ConversationTitleClient.UserTextHeading}\n{userText[..(ConversationTitleClient.MaxUserTextChars - 1)]}…", sentText);
         Assert.Equal("Fix login configuration", result.Title);
-        Assert.Equal(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sentText!))), result.ExcerptHash);
     }
 
     [Fact]
-    public async Task RedactsBeforeTakingTheExcerptAndSendsTheHeaderCredential()
+    public async Task RedactsTheUserTextAndSendsTheHeaderCredential()
     {
-        // "password=" ends at character 995, so cutting first would send the start of the value.
-        var transcript = "User: " + new string('x', 979) + "\npassword=do-not-send-this\nAgent: trailing response";
         var handler = new Handler(async (request, ct) =>
         {
             Assert.Equal(HttpMethod.Post, request.Method);
@@ -47,51 +41,57 @@ public sealed class ConversationTitleClientTests
             Assert.Equal(Enabled.ApiKey, Assert.Single(request.Headers.GetValues("X-Api-Key")));
             using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
             var sent = json.RootElement.GetProperty("text").GetString();
-            Assert.Equal("User: " + new string('x', 979) + "\npassword=XXXXX", sent);
-            Assert.DoesNotContain("do-no", sent);
+            Assert.Equal($"{ConversationTitleClient.UserTextHeading}\nFix login after refresh\npassword=XXXXX", sent);
             return Reply("""{"title":"Fix login after refresh"}""");
         });
         var client = Create(handler);
-        Assert.Equal("Fix login after refresh", (await client.GenerateAsync(transcript, Enabled, Ct)).Title);
+        Assert.Equal("Fix login after refresh",
+            (await client.GenerateAsync("Fix login after refresh\npassword=do-not-send-this", Enabled, Ct)).Title);
         Assert.Equal(1, handler.Count);
     }
 
     [Fact]
-    public void ExcerptNeverEndsInsideASurrogatePair()
+    public void StoryIsFramedAsBackgroundRedactedAndBounded()
     {
-        var text = new string('a', ConversationTitleClient.MaxExcerptChars - 1) + "\U0001F600" + "tail";
+        var story = new ConversationTitleStory("VIBE-7", new string('t', 300),
+            "Filter history. password=hunter2 " + new string('d', 3000));
 
-        var excerpt = ConversationTitleClient.Excerpt(text);
+        var text = ConversationTitleClient.ComposeRequest("Add the provider filter", story, Enabled.ApiKey);
 
-        Assert.Equal(new string('a', ConversationTitleClient.MaxExcerptChars - 1), excerpt);
-        Assert.Equal("short", ConversationTitleClient.Excerpt("short"));
+        var parts = text.Split("\n\n");
+        Assert.Equal(2, parts.Length);
+        var lines = parts[0].Split('\n');
+        Assert.Equal(ConversationTitleClient.StoryHeading, lines[0]);
+        Assert.Equal($"VIBE-7: {new string('t', ConversationTitleClient.MaxStoryTitleChars - 1)}…", lines[1]);
+        Assert.StartsWith("Filter history. password=XXXXX ddd", lines[2]);
+        Assert.DoesNotContain("hunter2", text);
+        Assert.Equal(ConversationTitleClient.MaxStoryDescriptionChars, lines[2].Length);
+        Assert.EndsWith("d…", lines[2]);
+        Assert.Equal($"{ConversationTitleClient.UserTextHeading}\nAdd the provider filter", parts[1]);
+
+        var bare = ConversationTitleClient.ComposeRequest("Add the provider filter", new("VIBE-7", "Better filters", "  "), Enabled.ApiKey);
+        Assert.Equal($"{ConversationTitleClient.StoryHeading}\nVIBE-7: Better filters\n\n{ConversationTitleClient.UserTextHeading}\nAdd the provider filter", bare);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task MatchingHashSkipsTheExactRedactedExcerpt(bool surrogateBoundary)
+    [Fact]
+    public void BoundPrefersWordBreaksAndNeverEndsInsideASurrogatePair()
     {
-        var opening = surrogateBoundary
-            ? new string('a', 999) + "\U0001F600"
-            : "User: " + new string('x', 979) + "\npassword=first-secret";
-        string? sent = null;
-        var handler = new Handler(async (request, ct) =>
-        {
-            using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
-            sent = json.RootElement.GetProperty("text").GetString();
-            return Reply("{\"title\":\"First title\"}");
-        });
-        var client = Create(handler);
-        var first = await client.GenerateAsync(opening + "\nAgent: first answer", Enabled, Ct);
-        Assert.Equal(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sent!))), first.ExcerptHash);
+        const int max = ConversationTitleClient.MaxUserTextChars;
+        var text = new string('a', max - 2) + "\U0001F600" + "tail";
+        Assert.Equal(new string('a', max - 2) + "…", ConversationTitleClient.Bound(text, max));
+        Assert.Equal("hello world…", ConversationTitleClient.Bound("hello world again", 12));
+        Assert.Equal("alpha beta…", ConversationTitleClient.Bound("alpha beta gamma delta", 15));
+        Assert.Equal("short", ConversationTitleClient.Bound("short", 10));
+    }
 
-        var refresh = await client.GenerateAsync(opening.Replace("first-secret", "changed-secret")
-            + "\nAgent: different answer", Enabled, Ct, first.ExcerptHash);
-
-        Assert.True(refresh.Unchanged);
-        Assert.Null(refresh.Title);
-        Assert.Equal(1, handler.Count);
+    [Fact]
+    public async Task FallbackTitleIsPermanentAndNeverReturned()
+    {
+        var result = await Create(new Handler((_, _) => Task.FromResult(Reply("{\"title\":\"New conversation\"}"))))
+            .GenerateAsync("hi", Enabled, Ct);
+        Assert.Null(result.Title);
+        Assert.True(result.Permanent);
+        Assert.False(result.KeyWide);
     }
 
     [Theory]
@@ -119,7 +119,7 @@ public sealed class ConversationTitleClientTests
         Assert.DoesNotContain("hunter2", sentText);
         Assert.DoesNotContain(Enabled.ApiKey, sentText);
         Assert.Contains("XXXXX", sentText);
-        Assert.StartsWith("User: keep this context\n", sentText);
+        Assert.StartsWith($"{ConversationTitleClient.UserTextHeading}\nUser: keep this context\n", sentText);
         Assert.EndsWith("\nAgent: keep the answer", sentText);
         Assert.Null(result.Title);
         Assert.False(result.KeyWide);
@@ -140,7 +140,7 @@ public sealed class ConversationTitleClientTests
         var handler = new Handler(async (request, ct) =>
         {
             using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
-            Assert.Equal(text, json.RootElement.GetProperty("text").GetString());
+            Assert.Equal($"{ConversationTitleClient.UserTextHeading}\n{text}", json.RootElement.GetProperty("text").GetString());
             return Reply(JsonSerializer.Serialize(new { title = text }));
         });
 
@@ -181,8 +181,6 @@ public sealed class ConversationTitleClientTests
         });
         var result = await Create(handler).GenerateAsync("full transcript", Enabled, Ct);
         Assert.Null(result.Title);
-        Assert.Null(result.ExcerptHash);
-        Assert.False(result.Unchanged);
         Assert.Equal(TimeSpan.FromSeconds(seconds), result.RetryAfter);
         Assert.Equal(permanent, result.Permanent);
         Assert.Equal(keyWide, result.KeyWide);

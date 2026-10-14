@@ -40,18 +40,18 @@ public sealed class ConversationTitleStore : IConversationTitleStore
         // Every root runs this every few seconds, so find a candidate with a plain WAL read and
         // take the writer lock only to claim one. Idle ticks must not touch the write lock.
         using var select = db.CreateCommand();
+        // One title per conversation: due once the user has written enough, or when the session
+        // ends with whatever it has. Its open rows are covered by idx_conversation_titles_open.
         select.CommandText = """
             SELECT q.SessionId, COALESCE(s.SessionDisplayName,''),
                 CASE WHEN $fingerprint IS NOT NULL AND q.SettingsFingerprint IS NOT $fingerprint THEN 0 ELSE q.Attempts END,
                 (s.JobRunId IS NULL AND COALESCE(s.ParentSessionId,'')='' AND lower(s.Cli)<>'shell' AND
                     (COALESCE(s.SessionDisplayName,'')='' OR s.SessionDisplayName=substr(u.InputText,1,120)
-                        OR COALESCE(s.SessionDisplayName=q.LastTitle,0))), q.LatestInputId, q.GenerationCount, q.LastExcerptHash
+                        OR COALESCE(s.SessionDisplayName=q.LastTitle,0))), q.LatestInputId, q.GenerationCount
             FROM ConversationTitleRequests q
             JOIN Sessions s ON s.Id=q.SessionId JOIN UserInputs u ON u.Id=q.UserInputId
-            WHERE q.Cancelled=0 AND q.GenerationCount<2
-                AND ((q.GenerationCount=0 AND (q.MessageCount>=2 OR q.CharacterCount>=300))
-                    OR (q.GenerationCount=1 AND q.LatestInputId>q.LastInputId
-                        AND (q.MessageCount>=10 OR q.CharacterCount>=750)))
+            WHERE q.Cancelled=0 AND q.GenerationCount=0
+                AND (q.MessageCount>=2 OR q.CharacterCount>=300 OR s.EndedUTC IS NOT NULL)
                 AND (q.RetryAfterUTC<=$now OR ($fingerprint IS NOT NULL AND q.SettingsFingerprint IS NOT $fingerprint))
                 AND NOT EXISTS(SELECT 1 FROM ConversationTitleApiBackoff b
                     WHERE b.Fingerprint=$fingerprint AND b.RetryAfterUTC>$now)
@@ -65,8 +65,7 @@ public sealed class ConversationTitleStore : IConversationTitleStore
         {
             if (!await reader.ReadAsync(ct)) return null;
             work = new(reader.GetString(0), reader.GetString(1),
-                Guid.NewGuid().ToString("N"), reader.GetInt32(2) + 1, reader.GetBoolean(3), reader.GetInt64(4), reader.GetInt32(5),
-                reader.IsDBNull(6) ? null : reader.GetString(6));
+                Guid.NewGuid().ToString("N"), reader.GetInt32(2) + 1, reader.GetBoolean(3), reader.GetInt64(4), reader.GetInt32(5));
         }
         // The guard repeats the due/lease conditions, so a root that claimed, deferred or completed
         // the row since the read makes this match nothing; the next tick tries again.
@@ -88,8 +87,7 @@ public sealed class ConversationTitleStore : IConversationTitleStore
         return await claim.ExecuteNonQueryAsync(ct) == 1 ? work : null;
     }
 
-    public async Task<bool> CompleteAsync(ConversationTitleWork work, string? title, DateTime now, CancellationToken ct,
-        string? excerptHash = null)
+    public async Task<bool> CompleteAsync(ConversationTitleWork work, string? title, DateTime now, CancellationToken ct)
     {
         using var db = SqliteConnectionFactory.Open(_connectionString);
         using var tx = db.BeginTransaction(deferred: false);
@@ -113,36 +111,20 @@ public sealed class ConversationTitleStore : IConversationTitleStore
         cmd.Parameters.AddWithValue("$now", now.ToString("O"));
         cmd.Parameters.AddWithValue("$generation", work.Generation);
         var applied = await cmd.ExecuteScalarAsync(ct) is not null;
+        // Cancelled=1 closes the request for good, applied or not. Older roots still carry a refresh
+        // step that only claims open rows, so this also keeps them from making a second call.
         cmd.CommandText = """
             UPDATE ConversationTitleRequests SET CompletedUTC=$now, Lease=NULL, LeaseUntilUTC=NULL,
                 GenerationCount=GenerationCount+$applied, LastInputId=$inputId,
                 LastTitle=CASE WHEN $applied=1 THEN $title ELSE LastTitle END,
-                LastExcerptHash=CASE WHEN $applied=1 THEN $excerptHash ELSE LastExcerptHash END,
-                Cancelled=CASE WHEN $applied=1 THEN 0 ELSE 1 END, Attempts=0, RetryAfterUTC=$now
+                Cancelled=1, Attempts=0, RetryAfterUTC=$now
             WHERE SessionId=$sessionId AND Lease=$lease AND LeaseUntilUTC>$now AND Cancelled=0 AND GenerationCount=$generation;
             """;
         cmd.Parameters.AddWithValue("$applied", applied ? 1 : 0);
         cmd.Parameters.AddWithValue("$inputId", work.InputId);
-        cmd.Parameters.AddWithValue("$excerptHash", (object?)excerptHash ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync(ct);
         await tx.CommitAsync(ct);
         return applied;
-    }
-
-    public async Task SkipUnchangedRefreshAsync(ConversationTitleWork work, DateTime now, CancellationToken ct)
-    {
-        using var db = SqliteConnectionFactory.Open(_connectionString);
-        using var cmd = db.CreateCommand();
-        cmd.CommandText = """
-            UPDATE ConversationTitleRequests SET Cancelled=1, Lease=NULL, LeaseUntilUTC=NULL, Attempts=0
-            WHERE SessionId=$sessionId AND Lease=$lease AND LeaseUntilUTC>$now AND Cancelled=0
-                AND GenerationCount=1 AND LastExcerptHash=$hash;
-            """;
-        cmd.Parameters.AddWithValue("$sessionId", work.SessionId);
-        cmd.Parameters.AddWithValue("$lease", work.Lease);
-        cmd.Parameters.AddWithValue("$now", now.ToString("O"));
-        cmd.Parameters.AddWithValue("$hash", (object?)work.LastExcerptHash ?? DBNull.Value);
-        await cmd.ExecuteNonQueryAsync(ct);
     }
 
     public async Task DeferAsync(ConversationTitleWork work, DateTime retryAt, CancellationToken ct, string? settingsFingerprint = null)

@@ -1,5 +1,4 @@
 using System.Net;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -29,20 +28,30 @@ public sealed record ConversationTitleSettings(bool Enabled, string ApiKey)
 /// any other failure belongs to this conversation and only delays its own retry.
 /// </summary>
 public sealed record ConversationTitleResult(string? Title, TimeSpan RetryAfter, bool Permanent = false,
-    bool KeyWide = false, string? ExcerptHash = null, bool Unchanged = false);
+    bool KeyWide = false);
 
-/// <summary>Sends the opening of the redacted transcript to the fixed VibeRails title API.</summary>
+/// <summary>The Vibe Story (Board card) a conversation is attached to, sent as background for its title.</summary>
+public sealed record ConversationTitleStory(string Id, string Title, string Description);
+
+/// <summary>Sends the user's redacted messages, with any story as background, to the fixed VibeRails title API.</summary>
 public sealed class ConversationTitleClient
 {
     internal const string HttpClientName = "conversation-titles";
     internal const string Endpoint = "https://viberails.ai/api/v1/conversation-title";
     internal const int MaxResponseBytes = 8192;
     /// <summary>
-    /// The title API rejects more than 2,000 characters, so every full transcript was refused as
-    /// permanent (VIBE-157). The owner chose to send the first 1,000 characters: the transcript opens
-    /// with the first user prompt, which is what a title names.
+    /// The user's own messages, not the screen transcript: launch prompts such as the story-tracking
+    /// nudge are never captured as input, and agent output cannot crowd out what the user asked.
+    /// With the story, the request stays under the API's 25,000-character limit.
     /// </summary>
-    internal const int MaxExcerptChars = 1_000;
+    internal const int MaxUserTextChars = 20_000;
+    internal const int MaxStoryTitleChars = 200;
+    internal const int MaxStoryDescriptionChars = 1_500;
+    internal const string StoryHeading =
+        "Story information you might find useful (the Vibe Story this chat is attached to; other chats may share it):";
+    internal const string UserTextHeading = "User text to make the title from:";
+    /// <summary>The API's answer when nothing meaningful remains; never saved as a name.</summary>
+    internal const string FallbackTitle = "New conversation";
     private readonly HttpClient http;
     private readonly Func<ConversationTitleSettings> readSettings;
     private readonly TimeSpan timeout;
@@ -58,19 +67,19 @@ public sealed class ConversationTitleClient
         this.timeout = timeout ?? TimeSpan.FromSeconds(20);
     }
 
-    /// <summary>Reads current permission without loading or sending a transcript.</summary>
+    /// <summary>Reads current permission without loading or sending any conversation text.</summary>
     public ConversationTitleSettings CurrentSettings => readSettings();
 
     /// <summary>
-    /// Skips a request matching the last successfully applied excerpt hash.
-    /// No remote response/error text, credentials or transcripts are logged.
+    /// Requests the conversation's one title. No remote response/error text, credentials or user
+    /// text are logged.
     /// </summary>
-    public async Task<ConversationTitleResult> GenerateAsync(string transcript,
-        ConversationTitleSettings settings, CancellationToken ct, string? previousExcerptHash = null)
+    public async Task<ConversationTitleResult> GenerateAsync(string userText,
+        ConversationTitleSettings settings, CancellationToken ct, ConversationTitleStory? story = null)
     {
         if (!settings.CanSend || settings != readSettings())
             return new(null, TimeSpan.FromMinutes(1));
-        if (string.IsNullOrWhiteSpace(transcript))
+        if (string.IsNullOrWhiteSpace(userText))
             return new(null, TimeSpan.FromMinutes(1));
 
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -79,13 +88,8 @@ public sealed class ConversationTitleClient
         var monitor = WatchSettingsAsync(settings, deadline, monitorStop.Token);
         try
         {
-            // Redact the entire transcript before taking the excerpt, so a secret is never cut
-            // short of the context that lets the redactor recognize it.
-            var text = Excerpt(CredentialRedactor.RedactTranscript(transcript, settings.ApiKey));
-            var excerptHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+            var text = ComposeRequest(userText, story, settings.ApiKey);
             if (settings != readSettings()) return new(null, TimeSpan.FromMinutes(1));
-            if (excerptHash == previousExcerptHash)
-                return new(null, TimeSpan.Zero, Unchanged: true);
             using var request = new HttpRequestMessage(HttpMethod.Post, Endpoint)
             {
                 Content = JsonContent.Create(new ConversationTitleRequest(text),
@@ -130,7 +134,10 @@ public sealed class ConversationTitleClient
                 || CredentialRedactor.RedactTranscript(title, settings.ApiKey) != title
                 || settings != readSettings())
                 return new(null, TimeSpan.FromMinutes(5));
-            return new(title, TimeSpan.Zero, ExcerptHash: excerptHash);
+            // The API found no meaningful topic. The conversation's one request is spent either way.
+            if (string.Equals(title, FallbackTitle, StringComparison.OrdinalIgnoreCase))
+                return new(null, TimeSpan.Zero, Permanent: true);
+            return new(title, TimeSpan.Zero);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (HttpRequestException)
@@ -151,13 +158,38 @@ public sealed class ConversationTitleClient
         }
     }
 
-    /// <summary>The first <see cref="MaxExcerptChars"/> characters, never ending inside a surrogate pair.</summary>
-    internal static string Excerpt(string redacted)
+    /// <summary>
+    /// Frames the story as optional background and the user's messages as what the title names, so
+    /// conversations sharing a story do not all receive its title. Each part is redacted whole before
+    /// it is bounded, so a secret is never cut short of the context that lets the redactor see it.
+    /// </summary>
+    internal static string ComposeRequest(string userText, ConversationTitleStory? story, string apiKey)
     {
-        if (redacted.Length <= MaxExcerptChars)
-            return redacted;
-        var end = char.IsHighSurrogate(redacted[MaxExcerptChars - 1]) ? MaxExcerptChars - 1 : MaxExcerptChars;
-        return redacted[..end];
+        var user = Bound(CredentialRedactor.RedactTranscript(userText.Trim(), apiKey), MaxUserTextChars);
+        if (story is null)
+            return $"{UserTextHeading}\n{user}";
+
+        var title = Bound(CredentialRedactor.RedactTranscript(story.Title.Trim(), apiKey), MaxStoryTitleChars);
+        var description = Bound(CredentialRedactor.RedactTranscript(story.Description.Trim(), apiKey), MaxStoryDescriptionChars);
+        var builder = new StringBuilder(StoryHeading).Append('\n').Append(story.Id).Append(": ").Append(title);
+        if (description.Length > 0)
+            builder.Append('\n').Append(description);
+        return builder.Append("\n\n").Append(UserTextHeading).Append('\n').Append(user).ToString();
+    }
+
+    /// <summary>
+    /// At most <paramref name="max"/> characters, ending in "…" when cut: at the last word break in the
+    /// second half if there is one, and never inside a surrogate pair.
+    /// </summary>
+    internal static string Bound(string text, int max)
+    {
+        if (text.Length <= max)
+            return text;
+        var end = max - 1;
+        if (char.IsHighSurrogate(text[end - 1])) end--;
+        var space = text.LastIndexOfAny([' ', '\n', '\t'], end - 1, end - max / 2);
+        if (space > 0) end = space;
+        return text[..end].TrimEnd() + "…";
     }
 
     private async Task WatchSettingsAsync(ConversationTitleSettings expected,

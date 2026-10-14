@@ -889,7 +889,9 @@ export class ChatHistorySidebar {
         const sessionName = item.sessionDisplayName?.trim();
         // The parser stores the first 120 prompt characters as an automatic name.
         // Board prompts start with boilerplate; prefer the actual card in that case.
-        if (sessionName && !item.sessionTitleGenerated && sessionName !== item.inputText?.trim()) {
+        // A generated title names this chat rather than its story, so it outranks the card,
+        // which stays visible in the item's Card row.
+        if (sessionName && (item.sessionTitleGenerated || sessionName !== item.inputText?.trim())) {
             return sessionName;
         }
 

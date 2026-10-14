@@ -150,15 +150,17 @@ This document describes the database layer: Environments, Sandboxes, AgentMetada
 
 `conversation-titles/1` adds `ConversationTitleRequests` in `state.db`; `/2` adds milestone counters,
 the last generated title, cancellation state, a saved-key fingerprint and shared API backoff.
-`/3` adds nullable `LastExcerptHash`, the SHA-256 of the exact redacted request excerpt, saved
-atomically with a successfully applied title. A refresh with the same excerpt ends work without
-another API call or title-change event. Failed requests never save a hash; legacy NULLs still refresh.
+`/3` added nullable `LastExcerptHash` for the VIBE-158 refresh. One request per conversation retired
+that refresh (2026-10-14); the column stays, and current code neither reads nor writes it.
+`/4` adds `idx_conversation_titles_open` (open requests: `Cancelled=0 AND GenerationCount=0`), because
+the session-end half of the due rule joins `Sessions` and the `/2` milestone index cannot serve it.
+The `/2` index stays for older binaries.
 It stores references and counts, never prompt copies or API keys. The additive
 `Sessions.ConversationTitleEligible` flag defaults to zero; only newly created sessions opt in.
 Setup never enrolls existing history. Input capture updates counts in its existing transaction.
-The first title is due at 300 trimmed user-input characters or two captured user messages; one
-refresh is due at 750 cumulative characters or ten messages, with new input after the first claim.
-After two successful generations, or an unchanged refresh, no more work is scheduled.
+A conversation is due once: at 300 trimmed user-input characters or two captured user messages,
+or when its session ends (`Sessions.EndedUTC`), with whatever it has. Completing work, applied
+or not, sets `Cancelled=1`, which also keeps an older root's refresh rule from claiming it again.
 
 `IConversationTitleStore` claims one milestone for two minutes and commits before external work.
 Every root polls every few seconds, so the claim finds a candidate with a plain read and takes the

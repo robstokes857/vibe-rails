@@ -204,6 +204,14 @@ internal static class StateDatabaseSchema
         SqliteMigrationRunner.Apply(connection, "conversation-titles", 3, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction,
                 "ALTER TABLE ConversationTitleRequests ADD COLUMN LastExcerptHash TEXT NULL;"));
+        // One title per conversation, due at the input milestone or when the session ends. The
+        // session-end half joins Sessions, so the /2 milestone index cannot serve it; this one keeps
+        // every root's idle claim tick to the open rows. The /2 index stays for older binaries.
+        SqliteMigrationRunner.Apply(connection, "conversation-titles", 4, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, """
+                CREATE INDEX idx_conversation_titles_open ON ConversationTitleRequests(RetryAfterUTC,UserInputId)
+                    WHERE Cancelled=0 AND GenerationCount=0;
+                """));
         JobStore.EnsureSessionLinkSchema(connection);
         // Every breaking step above has now been applied (or was already), so the file is at this
         // build's generation. Stamping after the fact also covers databases migrated before the

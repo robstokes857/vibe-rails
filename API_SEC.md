@@ -304,11 +304,17 @@ an owner-approved behavior explained by the KEYS UI. See [SigningKeyRoutes](Vibe
 ### Automatic conversation titles (VIBE-149)
 
 The owner authorized automatic title requests on 2026-10-12. Only newly created,
-eligible conversations enroll: first at 300 cumulative user-input characters or two messages,
-then one refresh at 750 characters or ten messages after new input. Root-only background work
-sends the current user/agent transcript through the Send-to transcript builder and credential
-redactor to fixed `https://viberails.ai/api/v1/conversation-title`. It requires the saved API key
-and Remote Access; hosted Integrations permission failures preserve existing labels.
+eligible conversations enroll, and each makes **one** request (owner decision 2026-10-14): once it
+has 300 cumulative user-input characters or two messages, or else when its session ends, with
+whatever it has. There is no refresh. Root-only background work sends the user's own captured
+messages (bare slash commands omitted unless they are all there is; at most 20,000 characters)
+through the credential redactor to fixed `https://viberails.ai/api/v1/conversation-title`. It does
+not send the screen transcript or agent output, so launch prompts such as the story-tracking nudge,
+which are never captured as user input, cannot reach the API. Conversations linked to a Board card
+are titled too: the request adds the primary card's display ID, title (at most 200 characters) and
+description (at most 1,500), labeled as background other conversations may share, so the title
+names the conversation rather than its story. It requires the saved API key and Remote Access;
+hosted Integrations permission failures preserve existing labels.
 
 Keys use only `X-Api-Key`. No redirects, cookies, HTTP body/error logging or new listener is added.
 Requests have a 20-second deadline and 8-KiB response bound; titles are validated before saving.
@@ -316,14 +322,14 @@ Fresh settings are checked before sending and applying, with cancellation when t
 Durable two-minute claims coordinate open roots. Rejected keys, rate limits, unavailable
 endpoints and network failures back off every request for the key; a failure that belongs to one
 conversation (a rejected title, a server error, a timeout) backs off only that conversation and
-gives up after five tries. Explicit names cancel work; Board/Automation/resume labels and
-historical sessions are preserved. The whole transcript is redacted first and then only its first
-1,000 characters are sent (owner decision 2026-10-14, VIBE-157): the hosted API rejects more than
-2,000 characters, so sending the complete transcript was refused every time. The transcript opens
-with the first user prompt. A refresh whose redacted excerpt matches the last successfully applied
-title's SHA-256 is skipped (VIBE-158); only the hash is persisted, never an excerpt copy. Failed
-requests remain retryable and legacy rows with no hash retain their refresh. This does not alter
-the cached resume summary.
+gives up after five tries. Explicit names cancel work; Automation/resume labels and historical
+sessions are preserved. The user text and each story field are redacted whole before being bounded,
+so a secret is never cut short of the context that lets the redactor recognize it. The whole
+request stays under the hosted API's 25,000-character limit. The API's `New conversation` fallback
+is never saved as a name; the request is spent either way. A finished request is closed for every
+version, so a root still carrying the VIBE-158 refresh cannot make a second call; its
+`LastExcerptHash` column is retained but no longer read or written. Only references and counts
+are persisted locally, never a copy of the request. This does not alter the cached resume summary.
 
 **Redaction is best effort, by owner decision (2026-10-13).** `RedactTranscript` masks the obvious
 credential shapes and replaces each value with `XXXXX`: key/value fields (`password=`,
