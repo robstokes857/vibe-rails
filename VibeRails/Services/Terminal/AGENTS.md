@@ -502,6 +502,20 @@ Client WebSocket from CLI app -> relay server `/ws/v1/terminal`.
 Behavior:
 - Sends binary PTY output and text control messages using queued send loop.
 - Receives text/binary with fragmentation support and size guard.
+- Reconnects after a drop, classifying each failed handshake by HTTP status (VIBE-157):
+  - **404**: the relay has no row for this session. It reaps rows whose CLI has been gone a while,
+    and a server restart used to reap live ones. Retrying can never succeed, so the session is
+    registered again through `ITerminalStateService.ReregisterRemoteSessionAsync` and one more
+    handshake is made. That method answers false, without contacting the relay, for any session
+    that was not registered at creation: Job sessions stay off the relay.
+  - **400/401/403**: refused. Reconnecting stops for this terminal; a new terminal tries again.
+  - **No response, 429, 5xx**: the host is down. `RemoteRelayBackoff` (a small file beside
+    state.db shared by every VibeRails process) lets one process at a time probe while the outage
+    lasts, waiting 5 s to 5 min according to the outage's age and honoring Retry-After up to an hour.
+    Any HTTP answer clears it, and waiters re-read it every 10 s. Before this, every tab child
+    retried on its own 30 s cap: four terminals reached attempts 32 to 65 against a 404.
+  - Only failures that belong to the session (404 even after re-registering) grow its own
+    backoff, which is capped at 5 min.
 - Raises events:
   - `OnInputReceived`
   - `OnReplayRequested`

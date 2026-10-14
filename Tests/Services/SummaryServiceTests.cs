@@ -21,10 +21,11 @@ public sealed class SummaryServiceTests : IDisposable
         var handler = new CapturingHandler();
         var service = CreateService(handler);
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var exception = await Assert.ThrowsAsync<RemoteSummaryException>(() =>
             service.GetSummaryAsync("local transcript", TestContext.Current.CancellationToken));
 
         Assert.Contains("Remote Access", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(400, exception.StatusCode);
         Assert.Equal(0, handler.RequestCount);
     }
 
@@ -36,10 +37,11 @@ public sealed class SummaryServiceTests : IDisposable
         var handler = new CapturingHandler();
         var service = CreateService(handler);
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var exception = await Assert.ThrowsAsync<RemoteSummaryException>(() =>
             service.GetSummaryAsync("local transcript", TestContext.Current.CancellationToken));
 
         Assert.Contains("API key", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(400, exception.StatusCode);
         Assert.Equal(0, handler.RequestCount);
     }
 
@@ -96,6 +98,67 @@ public sealed class SummaryServiceTests : IDisposable
         Assert.DoesNotContain("cHJpdmF0ZSBrZXkgYnl0ZXM", sentTranscript, StringComparison.Ordinal);
     }
 
+    // VIBE-157: an upstream 500 escaped as HttpRequestException, the local route answered with a
+    // header-stripped 500, and Send To blamed the local host. Each failure is now fixed local text
+    // with a gateway status (never 401, which would send the browser to sign in again).
+    [Theory]
+    [InlineData(500, 502, "HTTP 500")]
+    [InlineData(503, 502, "HTTP 503")]
+    [InlineData(401, 502, "API key")]
+    [InlineData(403, 502, "Integrations permission")]
+    [InlineData(413, 502, "too large")]
+    [InlineData(429, 502, "limiting")]
+    public async Task GetSummaryAsync_UpstreamFailure_ThrowsSafeGatewayError(int upstream, int local, string expected)
+    {
+        ParserConfigs.SetRemoteAccess(true);
+        ParserConfigs.SetApiKey("configured-api-key");
+        var service = CreateService(new StatusHandler(() => new HttpResponseMessage((HttpStatusCode)upstream)
+        {
+            Content = new StringContent("provider detail with configured-api-key", Encoding.UTF8, "text/plain")
+        }));
+
+        var exception = await Assert.ThrowsAsync<RemoteSummaryException>(() =>
+            service.GetSummaryAsync("transcript", TestContext.Current.CancellationToken));
+
+        Assert.Equal(local, exception.StatusCode);
+        Assert.Equal(upstream, exception.UpstreamStatus);
+        Assert.Contains(expected, exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("provider detail", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("configured-api-key", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSummaryAsync_Unreachable_ThrowsSafeGatewayError()
+    {
+        ParserConfigs.SetRemoteAccess(true);
+        ParserConfigs.SetApiKey("configured-api-key");
+        var service = CreateService(new StatusHandler(() => throw new HttpRequestException("No such host is known.")));
+
+        var exception = await Assert.ThrowsAsync<RemoteSummaryException>(() =>
+            service.GetSummaryAsync("transcript", TestContext.Current.CancellationToken));
+
+        Assert.Equal(502, exception.StatusCode);
+        Assert.Null(exception.UpstreamStatus);
+        Assert.Contains("Could not reach viberails.ai", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSummaryAsync_Timeout_IsGatewayTimeout_ButCallerCancellationPropagates()
+    {
+        ParserConfigs.SetRemoteAccess(true);
+        ParserConfigs.SetApiKey("configured-api-key");
+        var timedOut = CreateService(new StatusHandler(() => throw new TaskCanceledException("timeout")));
+
+        var exception = await Assert.ThrowsAsync<RemoteSummaryException>(() =>
+            timedOut.GetSummaryAsync("transcript", TestContext.Current.CancellationToken));
+        Assert.Equal(504, exception.StatusCode);
+
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+        var service = CreateService(new StatusHandler(() => new HttpResponseMessage(HttpStatusCode.OK)));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.GetSummaryAsync("transcript", cancelled.Token));
+    }
+
     public void Dispose()
     {
         ParserConfigs.SetRemoteAccess(_originalRemoteAccess);
@@ -107,6 +170,15 @@ public sealed class SummaryServiceTests : IDisposable
         {
             BaseAddress = new Uri("https://viberails.ai")
         });
+
+    private sealed class StatusHandler(Func<HttpResponseMessage> respond) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(respond());
+        }
+    }
 
     private sealed class CapturingHandler : HttpMessageHandler
     {

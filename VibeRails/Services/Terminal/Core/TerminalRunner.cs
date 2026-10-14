@@ -227,7 +227,8 @@ public class TerminalRunner
             // Keep makeRemote in the signature so explicit per-session controls can be reintroduced later.
             if (shouldEnableRemote)
             {
-                var remoteConn = new RemoteTerminalConnection();
+                var remoteConn = new RemoteTerminalConnection(
+                    reregisterCt => _stateService.ReregisterRemoteSessionAsync(sessionId, reregisterCt));
                 await remoteConn.ConnectAsync(sessionId, ct);
 
                 if (remoteConn.IsConnected)

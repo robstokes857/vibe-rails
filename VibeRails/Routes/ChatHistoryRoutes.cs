@@ -4,6 +4,8 @@ using System.Text.Json;
 using VibeRails.DB;
 using VibeRails.Interfaces;
 using VibeRails.DTOs;
+using Serilog;
+using VibeRails.Services.Integrations.VibeCodeRemote;
 using Microsoft.AspNetCore.Http.HttpResults;
 
 namespace VibeRails.Routes;
@@ -251,6 +253,14 @@ public static class ChatHistoryRoutes
            catch (KeyNotFoundException)
            {
                return Results.NotFound(new ErrorResponse("Chat history entry not found."));
+           }
+           catch (RemoteSummaryException ex)
+           {
+               // A JSON answer keeps the CORS headers, so Send To shows this text instead of
+               // reporting that the local host cannot be reached (VIBE-157).
+               Log.Warning("[ChatHistory] Summary failed: local {Status}, viberails.ai {UpstreamStatus}",
+                   ex.StatusCode, ex.UpstreamStatus);
+               return Results.Json(new ErrorResponse(ex.Message), statusCode: ex.StatusCode);
            }
        }).WithName("GetChatHistorySummary");
     }

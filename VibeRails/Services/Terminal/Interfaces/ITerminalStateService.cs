@@ -18,6 +18,12 @@ public interface ITerminalStateService
     void RecordResize(string sessionId, int cols, int rows, TerminalIoSource source);
     void RecordRemoteCommand(string sessionId, string command, string? payload, TerminalIoSource source = TerminalIoSource.RemoteWebUi);
     void TrackRemoteConnection(string sessionId, IRemoteTerminalConnection connection);
+    /// <summary>
+    /// Registers a session with the relay again after the relay lost it (a 404 on reconnect).
+    /// False, without contacting the relay, for a session that was never registered remotely
+    /// (Job sessions included) or once remote access is no longer fully configured.
+    /// </summary>
+    Task<bool> ReregisterRemoteSessionAsync(string sessionId, CancellationToken ct = default);
     Task<bool> SendRemoteCommandAsync(string sessionId, string command, string? payload = null, CancellationToken ct = default);
     Task RequestRemoteViewerDisconnectAsync(string sessionId, string reason);
     Task CompleteSessionAsync(string sessionId, int exitCode);

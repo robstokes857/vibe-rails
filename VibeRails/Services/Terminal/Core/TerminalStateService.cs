@@ -20,6 +20,9 @@ public class TerminalStateService : ITerminalStateService, IDisposable
     private static readonly Dictionary<string, ISessionOutputWriter> s_outputWriters = new();
     private static readonly Dictionary<string, IRemoteTerminalConnection> s_remoteConnections = new();
     private static readonly Dictionary<string, SessionActivityState> s_sessionActivity = new();
+    // What each remotely registered session was registered with, so a reconnect can register it
+    // again after the relay loses it. Only sessions that passed ShouldRegisterRemoteSession appear.
+    private static readonly Dictionary<string, RemoteRegistration> s_remoteRegistrations = new();
     private static readonly Lock s_stateLock = new();
     private static readonly TimeSpan s_idleThreshold = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan s_idleCheckInterval = TimeSpan.FromSeconds(2);
@@ -87,6 +90,10 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         // regardless of RemoteConfig — an unattended job must not be remotely attachable.
         if (ShouldRegisterRemoteSession(makeRemote, jobRunId))
         {
+            lock (s_stateLock)
+            {
+                s_remoteRegistrations[sessionId] = new RemoteRegistration(cli, workDir, envName);
+            }
             _ = _remoteStateService.RegisterTerminalAsync(sessionId, cli, workDir, envName);
         }
 
@@ -224,6 +231,24 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         }
     }
 
+    /// <inheritdoc />
+    public async Task<bool> ReregisterRemoteSessionAsync(string sessionId, CancellationToken ct = default)
+    {
+        RemoteRegistration? registration;
+        lock (s_stateLock)
+        {
+            s_remoteRegistrations.TryGetValue(sessionId, out registration);
+        }
+
+        // Never registers anything that was not registered at creation (Job sessions, sessions
+        // started without remote), and stops once remote access or its PIN has been turned off.
+        if (registration is null || !RemoteConfig.IsEnabled)
+            return false;
+
+        return await _remoteStateService.RegisterTerminalAsync(
+            sessionId, registration.Cli, registration.WorkDir, registration.EnvName, ct: ct);
+    }
+
     public async Task<bool> SendRemoteCommandAsync(string sessionId, string command, string? payload = null, CancellationToken ct = default)
     {
         IRemoteTerminalConnection? remoteConn;
@@ -298,8 +323,11 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         {
             s_remoteConnections.TryGetValue(sessionId, out remoteConn);
             s_remoteConnections.Remove(sessionId);
+            s_remoteRegistrations.Remove(sessionId);
         }
 
+        // Disposal waits for the reconnect loop, including an in-flight re-registration, so the
+        // deregistration below cannot be overtaken by it.
         if (remoteConn != null)
         {
             await remoteConn.DisposeAsync();
@@ -322,6 +350,8 @@ public class TerminalStateService : ITerminalStateService, IDisposable
     {
         // Shared state is session-managed via CompleteSessionAsync.
     }
+
+    private sealed record RemoteRegistration(string Cli, string WorkDir, string? EnvName);
 
     private static bool ShouldRegisterRemoteSession(bool makeRemoteRequested, string? jobRunId = null)
     {

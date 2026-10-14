@@ -97,4 +97,57 @@ public sealed class ChatHistoryRoutesTests
         }
         finally { await app.StopAsync(CancellationToken.None); }
     }
+
+    // VIBE-157: a viberails.ai failure escaped this route as an unhandled exception. That 500 lost
+    // its CORS headers, so Send To reported "Cannot reach the VibeRails host" while the host was fine.
+    [Fact]
+    public async Task Summary_RemoteFailure_AnswersJsonWithTheSafeMessage()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var repository = new Mock<IRepository>(MockBehavior.Strict);
+        repository.Setup(r => r.GetSessionOutputAsync("session", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SessionOutputDetailResponse("session", "codex", null, "C:/project", DateTime.UtcNow, null, true, "transcript"));
+        var transcripts = new Mock<ISessionTranscriptService>();
+        transcripts.Setup(t => t.GetOrBuildAsync("session", It.IsAny<CancellationToken>(), true)).ReturnsAsync("transcript");
+        var board = new Mock<IBoardStore>();
+        board.Setup(s => s.GetSessionCardsAsync(It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        var summaries = new Mock<ISummaryService>();
+        summaries.Setup(s => s.GetSummaryAsync("transcript", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new RemoteSummaryException(502, "viberails.ai could not generate the summary (HTTP 500). Try again later.", 500));
+
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.Logging.ClearProviders();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Services.AddSingleton(repository.Object);
+        builder.Services.AddSingleton(board.Object);
+        builder.Services.AddSingleton(transcripts.Object);
+        builder.Services.AddSingleton(summaries.Object);
+        builder.Services.AddSingleton(Mock.Of<ISessionDataExportService>());
+        builder.Services.AddSingleton<IChatHistoryService, ChatHistoryService>();
+        var auth = new Mock<IAuthService>();
+        auth.Setup(a => a.ValidateToken(It.IsAny<string?>())).Returns((string? token) => token == "session-token");
+        auth.Setup(a => a.ValidateTabToken(It.IsAny<string?>())).Returns((string? token) => token == "tab-token");
+        builder.Services.AddSingleton(auth.Object);
+        builder.Services.ConfigureHttpJsonOptions(options =>
+            options.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonSerializerContext.Default));
+        await using var app = builder.Build();
+        app.UseMiddleware<CookieAuthMiddleware>();
+        ChatHistoryRoutes.Map(app);
+        await app.StartAsync(ct);
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get,
+                new Uri(new Uri(app.Urls.First()), "/api/v1/chatHistory/session/summary?regenerate=true"));
+            request.Headers.Add("viberails_session", "session-token");
+            request.Headers.Add("viberails_tab", "tab-token");
+            using var response = await Client.SendAsync(request, ct);
+
+            Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+            Assert.Contains("json", response.Content.Headers.ContentType?.MediaType, StringComparison.OrdinalIgnoreCase);
+            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+            Assert.Equal("viberails.ai could not generate the summary (HTTP 500). Try again later.",
+                json.RootElement.GetProperty("error").GetString());
+        }
+        finally { await app.StopAsync(CancellationToken.None); }
+    }
 }

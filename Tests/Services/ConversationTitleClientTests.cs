@@ -13,9 +13,11 @@ public sealed class ConversationTitleClientTests
     private static readonly ConversationTitleSettings Enabled = new(true, "synthetic-api-key");
 
     [Fact]
-    public async Task CleanTranscriptIsSentInFullWithoutCharacterLimit()
+    public async Task OnlyTheOpeningThousandCharactersAreSent()
     {
-        var transcript = "User: " + new string('x', 8000) + "\nAgent: complete trailing response";
+        // VIBE-157: the title API rejects more than 2,000 characters, so a full transcript was
+        // refused every time. The owner chose the first 1,000 characters.
+        var transcript = "User: fix the login redirect " + new string('x', 8000) + "\nAgent: complete trailing response";
         string? sentText = null;
         var handler = new Handler(async (request, ct) =>
         {
@@ -26,27 +28,41 @@ public sealed class ConversationTitleClientTests
 
         var result = await Create(handler).GenerateAsync(transcript, Enabled, Ct);
 
-        Assert.Equal(transcript, sentText);
+        Assert.Equal(transcript[..ConversationTitleClient.MaxExcerptChars], sentText);
+        Assert.Equal(1_000, ConversationTitleClient.MaxExcerptChars);
         Assert.Equal("Fix login configuration", result.Title);
     }
 
     [Fact]
-    public async Task SendsFullRedactedTranscriptWithHeaderCredential()
+    public async Task RedactsBeforeTakingTheExcerptAndSendsTheHeaderCredential()
     {
-        var transcript = "User: " + new string('x', 6000) + "\npassword=do-not-send-this\nAgent: trailing response";
+        // "password=" ends at character 995, so cutting first would send the start of the value.
+        var transcript = "User: " + new string('x', 979) + "\npassword=do-not-send-this\nAgent: trailing response";
         var handler = new Handler(async (request, ct) =>
         {
             Assert.Equal(HttpMethod.Post, request.Method);
             Assert.Equal(ConversationTitleClient.Endpoint, request.RequestUri!.AbsoluteUri);
             Assert.Equal(Enabled.ApiKey, Assert.Single(request.Headers.GetValues("X-Api-Key")));
             using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
-            Assert.Equal("User: " + new string('x', 6000) + "\npassword=XXXXX\nAgent: trailing response",
-                json.RootElement.GetProperty("text").GetString());
+            var sent = json.RootElement.GetProperty("text").GetString();
+            Assert.Equal("User: " + new string('x', 979) + "\npassword=XXXXX", sent);
+            Assert.DoesNotContain("do-no", sent);
             return Reply("""{"title":"Fix login after refresh"}""");
         });
         var client = Create(handler);
         Assert.Equal("Fix login after refresh", (await client.GenerateAsync(transcript, Enabled, Ct)).Title);
         Assert.Equal(1, handler.Count);
+    }
+
+    [Fact]
+    public void ExcerptNeverEndsInsideASurrogatePair()
+    {
+        var text = new string('a', ConversationTitleClient.MaxExcerptChars - 1) + "\U0001F600" + "tail";
+
+        var excerpt = ConversationTitleClient.Excerpt(text);
+
+        Assert.Equal(new string('a', ConversationTitleClient.MaxExcerptChars - 1), excerpt);
+        Assert.Equal("short", ConversationTitleClient.Excerpt("short"));
     }
 
     [Theory]

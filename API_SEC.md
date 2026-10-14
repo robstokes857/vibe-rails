@@ -303,7 +303,7 @@ an owner-approved behavior explained by the KEYS UI. See [SigningKeyRoutes](Vibe
 
 ### Automatic conversation titles (VIBE-149)
 
-The owner authorized automatic full-transcript title requests on 2026-10-12. Only newly created,
+The owner authorized automatic title requests on 2026-10-12. Only newly created,
 eligible conversations enroll: first at 300 cumulative user-input characters or two messages,
 then one refresh at 750 characters or ten messages after new input. Root-only background work
 sends the current user/agent transcript through the Send-to transcript builder and credential
@@ -317,8 +317,10 @@ Durable two-minute claims coordinate open roots. Rejected keys, rate limits, una
 endpoints and network failures back off every request for the key; a failure that belongs to one
 conversation (a rejected title, a server error, a timeout) backs off only that conversation and
 gives up after five tries. Explicit names cancel work; Board/Automation/resume labels and
-historical sessions are preserved. The complete transcript is sent, with no opening-prompt
-truncation; this does not alter the cached resume summary.
+historical sessions are preserved. The whole transcript is redacted first and then only its first
+1,000 characters are sent (owner decision 2026-10-14, VIBE-157): the hosted API rejects more than
+2,000 characters, so sending the complete transcript was refused every time. The transcript opens
+with the first user prompt. This does not alter the cached resume summary.
 
 **Redaction is best effort, by owner decision (2026-10-13).** `RedactTranscript` masks the obvious
 credential shapes and replaces each value with `XXXXX`: key/value fields (`password=`,

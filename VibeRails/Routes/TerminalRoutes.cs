@@ -2,6 +2,7 @@ using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services;
 using VibeRails.Services.Environments;
+using VibeRails.Services.Integrations.VibeCodeRemote;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.Terminal;
 using VibeRails.Utils;
@@ -98,7 +99,16 @@ public static class TerminalRoutes
                 return Results.BadRequest(new ErrorResponse("Resume summary exceeds 6000 character limit."));
 
             if (string.IsNullOrEmpty(summary) && !string.IsNullOrEmpty(request.ResumeSessionId))
-                summary = await sessionResumeService.GetResumeSummaryAsync(request.ResumeSessionId, cancellationToken);
+            {
+                try
+                {
+                    summary = await sessionResumeService.GetResumeSummaryAsync(request.ResumeSessionId, cancellationToken);
+                }
+                catch (RemoteSummaryException ex)
+                {
+                    return Results.Json(new ErrorResponse(ex.Message), statusCode: ex.StatusCode);
+                }
+            }
 
             var requestedPrompt = request.InitialPrompt;
             if (string.IsNullOrWhiteSpace(requestedPrompt) && !string.IsNullOrWhiteSpace(environmentPrompt))

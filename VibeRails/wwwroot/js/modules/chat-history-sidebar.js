@@ -1308,7 +1308,9 @@ export class ChatHistorySidebar {
 
             try {
                 const url = `/api/v1/chatHistory/${encodeURIComponent(sessionId)}/summary${regenerate ? '?regenerate=true' : ''}`;
-                const result = await this.app.apiCall(url, 'GET', null, { showLoading: false, signal: abort.signal });
+                // The backend answers a viberails.ai failure with JSON naming what went wrong; show it.
+                const result = await this.app.apiCall(url, 'GET', null,
+                    { showLoading: false, signal: abort.signal, preferErrorResponseMessage: true });
                 if (!isCurrent() || generation !== loadGeneration) return;
 
                 const summary = result?.summary ?? '';

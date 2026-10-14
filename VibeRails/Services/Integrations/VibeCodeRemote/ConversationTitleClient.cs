@@ -28,12 +28,18 @@ public sealed record ConversationTitleSettings(bool Enabled, string ApiKey)
 /// </summary>
 public sealed record ConversationTitleResult(string? Title, TimeSpan RetryAfter, bool Permanent = false, bool KeyWide = false);
 
-/// <summary>Sends the complete redacted transcript to the fixed VibeRails title API.</summary>
+/// <summary>Sends the opening of the redacted transcript to the fixed VibeRails title API.</summary>
 public sealed class ConversationTitleClient
 {
     internal const string HttpClientName = "conversation-titles";
     internal const string Endpoint = "https://viberails.ai/api/v1/conversation-title";
     internal const int MaxResponseBytes = 8192;
+    /// <summary>
+    /// The title API rejects more than 2,000 characters, so every full transcript was refused as
+    /// permanent (VIBE-157). The owner chose to send the first 1,000 characters: the transcript opens
+    /// with the first user prompt, which is what a title names.
+    /// </summary>
+    internal const int MaxExcerptChars = 1_000;
     private readonly HttpClient http;
     private readonly Func<ConversationTitleSettings> readSettings;
     private readonly TimeSpan timeout;
@@ -67,8 +73,9 @@ public sealed class ConversationTitleClient
         var monitor = WatchSettingsAsync(settings, deadline, monitorStop.Token);
         try
         {
-            // Redact the entire transcript. Never truncate a secret before trying to recognize it.
-            var text = CredentialRedactor.RedactTranscript(transcript, settings.ApiKey);
+            // Redact the entire transcript before taking the excerpt, so a secret is never cut
+            // short of the context that lets the redactor recognize it.
+            var text = Excerpt(CredentialRedactor.RedactTranscript(transcript, settings.ApiKey));
             if (settings != readSettings()) return new(null, TimeSpan.FromMinutes(1));
             using var request = new HttpRequestMessage(HttpMethod.Post, Endpoint)
             {
@@ -133,6 +140,15 @@ public sealed class ConversationTitleClient
             await monitorStop.CancelAsync();
             await monitor;
         }
+    }
+
+    /// <summary>The first <see cref="MaxExcerptChars"/> characters, never ending inside a surrogate pair.</summary>
+    internal static string Excerpt(string redacted)
+    {
+        if (redacted.Length <= MaxExcerptChars)
+            return redacted;
+        var end = char.IsHighSurrogate(redacted[MaxExcerptChars - 1]) ? MaxExcerptChars - 1 : MaxExcerptChars;
+        return redacted[..end];
     }
 
     private async Task WatchSettingsAsync(ConversationTitleSettings expected,

@@ -12,7 +12,12 @@ namespace VibeRails.Services.Integrations.VibeCodeRemote;
 /// </summary>
 public interface IRemoteStateService
 {
-    Task RegisterTerminalAsync(string sessionId, string cli, string workingDirectory, string? environmentName, string? title = null);
+    /// <summary>
+    /// Registers (or re-registers: the server upserts by session id) a terminal with the relay.
+    /// Never throws for transport or HTTP failures; returns true only when the relay accepted it.
+    /// </summary>
+    Task<bool> RegisterTerminalAsync(string sessionId, string cli, string workingDirectory, string? environmentName,
+        string? title = null, CancellationToken ct = default);
     Task DeregisterTerminalAsync(string sessionId);
 }
 
@@ -36,6 +41,9 @@ public record DeregisterTerminalRequest(string SessionId);
 
 public class RemoteStateService : IRemoteStateService
 {
+    // A registration is one small POST; bound it so a stalled host cannot hold a reconnect attempt.
+    private static readonly TimeSpan RegisterTimeout = TimeSpan.FromSeconds(15);
+
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
 
@@ -45,13 +53,14 @@ public class RemoteStateService : IRemoteStateService
         _configuration = configuration;
     }
 
-    public async Task RegisterTerminalAsync(string sessionId, string cli, string workingDirectory, string? environmentName, string? title = null)
+    public async Task<bool> RegisterTerminalAsync(string sessionId, string cli, string workingDirectory, string? environmentName,
+        string? title = null, CancellationToken ct = default)
     {
         var apiKey = ParserConfigs.GetApiKey();
         var frontendUrl = ParserConfigs.GetFrontendUrl();
 
         if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(frontendUrl))
-            return;
+            return false;
 
 
         var request = new HttpRequestMessage(HttpMethod.Post, $"{frontendUrl.TrimEnd('/')}/api/v1/terminal");
@@ -73,11 +82,26 @@ public class RemoteStateService : IRemoteStateService
 
         try
         {
-            await _httpClient.SendAsync(request);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(RegisterTimeout);
+            using var response = await _httpClient.SendAsync(request, timeout.Token);
+            if (response.IsSuccessStatusCode)
+                return true;
+            Log.Warning("[Remote] Terminal registration was refused with HTTP {Status}", (int)response.StatusCode);
+            return false;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return false;
         }
         catch (Exception ex)
         {
             Log.Error(ex, "[Remote] Failed to register terminal");
+            return false;
+        }
+        finally
+        {
+            request.Dispose();
         }
     }
 
