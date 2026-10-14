@@ -78,6 +78,9 @@ export class TabStatusController {
         // "waiting for user input" event can't flip the tab mid-keystroke.
         // Cleared on submit (→ THINKING). See onTerminalData.
         this._userComposing = false;
+        // Selecting a waiting tab acknowledges its current prompt. Ignore
+        // repeated detector events until a new turn or socket begins.
+        this._waitingAcknowledged = false;
 
         // DOM refs (populated by render())
         this._statusTextEl = null;
@@ -200,6 +203,7 @@ export class TabStatusController {
     }
 
     onSocketOpen() {
+        this._waitingAcknowledged = false;
         if (this._startAsThinking) {
             this._startAsThinking = false;
             this._transitionTo(TAB_STATUS.THINKING);
@@ -221,6 +225,14 @@ export class TabStatusController {
 
     onSocketClose() {
         this._transitionTo(TAB_STATUS.DISCONNECTED);
+    }
+
+    onTabActivated() {
+        if (this._status !== TAB_STATUS.WAITING) return;
+
+        this._waitingAcknowledged = true;
+        this._ui.item?.classList.remove('tab-status-waiting-flash');
+        this._transitionTo(TAB_STATUS.CONNECTED);
     }
 
     onTerminalData(data) {
@@ -328,11 +340,12 @@ export class TabStatusController {
         if (this._awaitingFirstIdle) {
             this._transitionTo(TAB_STATUS.READY);
         }
-        // A tab parked in WAITING stays WAITING until the user presses Enter.
+        // A tab parked in WAITING stays WAITING until the user selects it or
+        // provides input.
         // The backend fires session_idle after only 5s of no PTY output — which
         // is the *normal* state of a menu waiting for user input — so we
         // previously popped WAITING → READY almost immediately after entering
-        // it. Trust Enter as the sole signal that waiting is over.
+        // it. An idle ping does not acknowledge the prompt.
     }
 
     onSessionBusy() {
@@ -362,7 +375,8 @@ export class TabStatusController {
         // _userComposing is set on a resting-state keystroke and cleared on
         // submit (→ THINKING), so a genuine prompt — which only appears after a
         // submit — is never suppressed.
-        if (this._status !== TAB_STATUS.DISCONNECTED && !this._userComposing) {
+        if (this._status !== TAB_STATUS.DISCONNECTED &&
+            !this._userComposing && !this._waitingAcknowledged) {
             this._transitionTo(TAB_STATUS.WAITING);
         }
     }
@@ -431,6 +445,7 @@ export class TabStatusController {
             // Submitting (the path into THINKING) ends a compose session, so a
             // prompt during the upcoming turn is a genuine wait, not stale.
             this._userComposing = false;
+            this._waitingAcknowledged = false;
         } else if (newStatus === TAB_STATUS.READY) {
             this._awaitingFirstIdle = false;
         } else if (newStatus === TAB_STATUS.CONNECTED) {

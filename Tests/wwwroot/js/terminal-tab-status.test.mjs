@@ -135,6 +135,80 @@ test('onWaitingForUserSelection from THINKING → WAITING (first prompt)', () =>
     assert.equal(flashes.waiting, 1, 'background tab should flash on entering WAITING');
 });
 
+test('activating a waiting tab clears its badge and flash, preserving card attention', () => {
+    const { controller, ui, tabState } = makeController({ isActiveTab: () => false });
+    controller.render();
+    controller.onSocketOpen();
+    controller.onWaitingForUserSelection();
+    ui.item.classList.add('tab-status-waiting-flash');
+    tabState.needsAttention = true;
+
+    controller.onTabActivated();
+
+    assert.equal(controller._status, TAB_STATUS.CONNECTED);
+    assert.equal(controller._statusTextEl.textContent, 'Connected');
+    assert.equal(ui.item.classList.contains('tab-status-waiting'), false);
+    assert.equal(ui.item.classList.contains('tab-status-waiting-flash'), false);
+    assert.equal(ui.item.classList.contains('tab-needs-attention'), true);
+    assert.doesNotMatch(ui.button.title, /Waiting for user input/);
+});
+
+test('acknowledged waiting events stay cleared until the next local or backend submit', () => {
+    for (const submit of [c => c.onTerminalData('\r'), c => c.onSessionInput('submit')]) {
+        let active = false;
+        const { controller, flashes, pushes } = makeController({
+            isActiveTab: () => active, pushEnabled: true
+        });
+        controller.onSocketOpen();
+        controller.onWaitingForUserSelection();
+        active = true;
+        controller.onTabActivated();
+
+        controller.onWaitingForUserSelection();
+        active = false;
+        controller.onWaitingForUserSelection();
+        assert.equal(controller._status, TAB_STATUS.CONNECTED);
+        assert.equal(flashes.waiting, 1, 'acknowledged repeats must not flash again');
+        assert.deepEqual(pushes, ['waiting'], 'acknowledged repeats must not push again');
+
+        submit(controller);
+        controller.onWaitingForUserSelection();
+        assert.equal(controller._status, TAB_STATUS.WAITING, 'a new turn can ask for input again');
+        assert.equal(flashes.waiting, 2);
+        assert.deepEqual(pushes, ['waiting', 'waiting']);
+    }
+});
+
+test('activation preserves every other status and composing or turn tracking', () => {
+    for (const status of [TAB_STATUS.CONNECTED, TAB_STATUS.THINKING, TAB_STATUS.READY, TAB_STATUS.DISCONNECTED]) {
+        const { controller } = makeController();
+        controller.onSocketOpen();
+        if (status === TAB_STATUS.THINKING || status === TAB_STATUS.READY) controller.onTerminalData('\r');
+        if (status === TAB_STATUS.READY) controller.onSessionIdle();
+        if (status === TAB_STATUS.DISCONNECTED) controller.onSocketClose();
+        if (status === TAB_STATUS.CONNECTED || status === TAB_STATUS.READY) controller.onTerminalData('h');
+        const composing = controller._userComposing;
+        const awaitingIdle = controller._awaitingFirstIdle;
+
+        controller.onTabActivated();
+
+        assert.equal(controller._status, status);
+        assert.equal(controller._userComposing, composing);
+        assert.equal(controller._awaitingFirstIdle, awaitingIdle);
+    }
+});
+
+test('socket open resets waiting acknowledgement for a new session', () => {
+    const { controller } = makeController();
+    controller.onSocketOpen();
+    controller.onWaitingForUserSelection();
+    controller.onTabActivated();
+    controller.onSocketClose();
+    controller.onSocketOpen();
+    controller.onWaitingForUserSelection();
+    assert.equal(controller._status, TAB_STATUS.WAITING);
+});
+
 test('user answers first prompt, then second waiting event still transitions', () => {
     // This is the reported bug scenario.
     //

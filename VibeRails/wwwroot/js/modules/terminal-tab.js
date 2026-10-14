@@ -565,6 +565,10 @@ export class TerminalTab {
     setActive(active) {
         this.isActive = active;
 
+        if (active) {
+            this.statusController?.onTabActivated();
+        }
+
         if (!this.vibeTerminal) {
             return;
         }

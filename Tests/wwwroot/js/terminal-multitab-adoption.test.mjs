@@ -2,9 +2,44 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { TerminalTab } from '../../../VibeRails/wwwroot/js/modules/terminal-tab.js';
+import { TabStatusController, TAB_STATUS } from '../../../VibeRails/wwwroot/js/modules/terminal-tab-status.js';
 
 const modulePath = path.resolve('VibeRails/wwwroot/js/modules/terminal-multitab.js');
 const { TerminalController, TerminalManager, shouldCreateFreshTab, selectBlankPlaceholderTabIds } = await import(pathToFileURL(modulePath).href);
+
+test('tab selection acknowledges only the selected tab even before xterm is mounted', async () => {
+    const manager = {
+        tabs: new Map(), activeTabId: 'previous',
+        getActiveTab() { return this.tabs.get(this.activeTabId); },
+        saveActiveTabId() {}, applyPanelState() {}, updateUi() {}, _scrollActiveTabIntoView() {}
+    };
+    for (const id of ['previous', 'selected']) {
+        const classes = new Set();
+        const state = { id, hasActiveSession: true, ui: {
+            item: { classList: {
+                add: c => classes.add(c), remove: (...cs) => cs.forEach(c => classes.delete(c)),
+                toggle: (c, on) => on ? classes.add(c) : classes.delete(c)
+            }, addEventListener() {} },
+            panel: { style: {} }, button: {}
+        } };
+        const statusController = new TabStatusController(state, state.ui, {
+            getCliKey: () => 'codex', isActiveTab: () => manager.activeTabId === id
+        });
+        statusController.onSocketOpen();
+        statusController.onWaitingForUserSelection();
+        manager.tabs.set(id, { state, instance: {
+            vibeTerminal: null, statusController,
+            setActive: TerminalTab.prototype.setActive, hasOpenSocket: () => true
+        } });
+    }
+
+    await TerminalManager.prototype.activateTab.call(manager, 'selected');
+
+    assert.equal(manager.activeTabId, 'selected');
+    assert.equal(manager.tabs.get('selected').instance.statusController._status, TAB_STATUS.CONNECTED);
+    assert.equal(manager.tabs.get('previous').instance.statusController._status, TAB_STATUS.WAITING);
+});
 
 test('undo countdown treats quotes and backslashes in tab IDs as literal data', () => {
     const tabId = 'tab\\"], [data-other="x';

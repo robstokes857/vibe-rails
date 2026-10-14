@@ -1029,6 +1029,13 @@ The flyout shows visible automations and currently approved scripts; unsigned or
 
 ### Frontend Layer
 
+Selecting a terminal tab acknowledges its current **Waiting for user input** badge and
+returns the tab to **Connected**, including before xterm is mounted. `TerminalTab.setActive`
+calls `TabStatusController.onTabActivated`; repeated waiting events stay suppressed until
+the next local/backend submit or socket open. Other statuses and Board attention flags retain
+their existing behavior. Regressions cover the state machine and the manager's activation path
+in `terminal-tab-status.test.mjs` and `terminal-multitab-adoption.test.mjs`.
+
 #### app.js ([wwwroot/app.js](../VibeRails/wwwroot/app.js))
 **Purpose**: Single-page application logic
 
