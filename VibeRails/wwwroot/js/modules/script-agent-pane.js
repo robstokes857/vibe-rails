@@ -61,6 +61,9 @@ export class ScriptAgentPane {
         this.tab = null;
         this._destroyed = false;
         this._busy = false;
+        // The first look for this script's running agent; Start waits for it (never a second agent).
+        this._discovery = null;
+        this._discovering = false;
         this._statusCheck = null;
         this._disconnectChecked = false;
         this._disposePicker = null;
@@ -86,7 +89,7 @@ export class ScriptAgentPane {
                 button.disabled = disabled;
             }
         };
-        toggle('start', !live);
+        toggle('start', !live, this._busy || this._discovering);
         toggle('restart', live);
         toggle('stop', live);
         toggle('connect', live && !connected && state.status !== 'connecting');
@@ -96,7 +99,7 @@ export class ScriptAgentPane {
         const lifecycle = this.root.querySelector('[data-script-agent-lifecycle]');
         if (lifecycle) lifecycle.textContent = this._lifecycleText(state);
         const select = this.root.querySelector('[data-script-agent-select]');
-        if (select) select.disabled = live || this._busy;
+        if (select) select.disabled = live || this._busy || this._discovering;
 
         // A socket closing on its own may mean the CLI exited. Ask the server once per drop
         // rather than retry; a session that is still running offers Connect instead.
@@ -147,8 +150,12 @@ export class ScriptAgentPane {
                 selectedValue: readStoredSelection()
             });
         }
+        this._discovering = true;
         this.updateUi();
-        await this._attachExistingTab();
+        this._discovery = this._discover();
+        await this._discovery;
+        this._discovering = false;
+        this.updateUi();
     }
 
     /** Leaves a running agent running for the next visit; a finished one releases its host. */
@@ -192,6 +199,15 @@ export class ScriptAgentPane {
         }
         this._setBusy(true);
         try {
+            // Never start a second agent beside one this pane has not found yet: wait for the first
+            // look, and look again when it failed.
+            await this._discovery;
+            if (this._destroyed) return false;
+            if (!this.tab && !(await this._discover())) {
+                this.app.showError('Could not check whether this script\'s agent is already running. Try Start again.');
+                return false;
+            }
+            if (this._destroyed || this.tab?.state.hasActiveSession) return false;
             const promptResolution = await resolvePromptTemplateForLaunch(this.app, {
                 cli: meta.cli,
                 environmentName: meta.environmentName,
@@ -211,6 +227,11 @@ export class ScriptAgentPane {
 
             const tab = await this._ensureTab(selection, meta);
             if (!tab || this._destroyed) return false;
+            // The server hands an owner its existing host; an agent running there is attached, not replaced.
+            if (tab.state.hasActiveSession) {
+                await tab.instance.connect();
+                return false;
+            }
             const title = meta.cli === 'shell' ? meta.displayName : `${meta.displayName} · ${this.label || 'script'}`;
             const body = { cli: meta.cli, workingDirectory: context.workingDirectory || null, title };
             if (meta.environmentName) body.environmentName = meta.environmentName;
@@ -250,18 +271,22 @@ export class ScriptAgentPane {
 
     // --- internals ---
 
-    async _attachExistingTab() {
-        let response = null;
+    /** Adopts this script's host from the tab list. False only when the list could not be read. */
+    async _discover() {
+        let response;
         try {
             response = await this.app.apiCall(TABS_API, 'GET', null, { showLoading: false });
-        } catch { /* No list: the user can still Start. */ }
-        if (this._destroyed || this.tab) return;
+        } catch {
+            return false;
+        }
+        if (this._destroyed || this.tab) return true;
         const mine = (response?.tabs || []).filter(tab => tab?.owner === this.owner);
         const info = mine.find(tab => tab.hasActiveSession) || mine[0];
-        if (!info) return;
+        if (!info) return true;
         const tab = this._adopt(info, { selection: readStoredSelection() });
         if (info.hasActiveSession) await tab.instance.connect();
         else this.updateUi();
+        return true;
     }
 
     async _ensureTab(selection, meta) {
@@ -395,6 +420,7 @@ export class ScriptAgentPane {
     }
 
     _lifecycleText(state) {
+        if (this._discovering && !state) return 'Looking for this script\'s agent…';
         if (this._busy) return 'Starting…';
         if (!state) return 'Not started';
         if (state.status === 'finished') return 'Finished. Start runs a new session.';

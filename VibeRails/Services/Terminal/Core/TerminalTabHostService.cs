@@ -210,6 +210,15 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         TerminalChildProcess? child = null;
         try
         {
+            // One host per owner: a view that asks again (a second window, a Start that raced its
+            // own discovery) gets the host it already has, running agent included.
+            if (owner is not null && FindLiveOwnedChild(owner) is { } existing)
+            {
+                _createGate.Release();
+                gateHeld = false;
+                return await BuildTabStatusAsync(existing, cancellationToken);
+            }
+
             await ReclaimCompletedAutomationTabIfFullAsync(cancellationToken);
             lock (_lock)
             {
@@ -256,6 +265,23 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             if (gateHeld)
                 _createGate.Release();
         }
+    }
+
+    private TerminalChildProcess? FindLiveOwnedChild(string owner)
+    {
+        TerminalChildProcess[] owned;
+        lock (_lock)
+        {
+            owned = _tabs.Values.Where(child => string.Equals(child.Owner, owner, StringComparison.Ordinal))
+                .OrderByDescending(child => child.CreatedUtc).ToArray();
+        }
+
+        return owned.FirstOrDefault(child =>
+        {
+            // An exited host is replaced; one whose state cannot be read is kept, as it is everywhere else.
+            try { return !child.Process.HasExited; }
+            catch (InvalidOperationException) { return true; }
+        });
     }
 
     /// <inheritdoc />

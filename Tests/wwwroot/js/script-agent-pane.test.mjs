@@ -252,6 +252,82 @@ test('A host that disappeared is dropped, and Start opens a new one', async (t) 
     assert.deepEqual(log.starts.map(start => start.tabId), ['new-tab']);
 });
 
+// Review F1 (VIBE-159): a slow or failed look for the running agent must never start a second one.
+test('Start waits for a slow discovery and attaches to the running agent instead of creating a host', async (t) => {
+    withStorage(t);
+    const app = fakeApp();
+    let release;
+    const pendingList = new Promise(resolve => { release = resolve; });
+    const listCall = app.apiCall;
+    app.apiCall = async (url, method = 'GET', body = null) => {
+        if (url === '/api/v1/terminal/tabs' && method === 'GET') {
+            app.calls.push({ url, method, body });
+            return pendingList;
+        }
+        return listCall(url, method, body);
+    };
+    const { pane, log } = createPane(app);
+    const { host, buttons, elements } = fakeHost();
+    const mounted = pane.mount(host);
+    assert.ok(buttons.start.every(button => button.disabled), 'Start waits for the lookup');
+    assert.equal(elements['[data-script-agent-lifecycle]'].textContent, 'Looking for this script\'s agent…');
+    assert.equal(elements['[data-script-agent-select]'].disabled, true);
+
+    const started = pane.start();
+    release({ tabs: [{ tabId: 'already-running', owner: OWNER, hasActiveSession: true, cli: 'claude' }] });
+    assert.equal(await started, false);
+    await mounted;
+    assert.equal(pane.tab.state.id, 'already-running');
+    assert.deepEqual(log.connects, ['already-running']);
+    assert.equal(log.starts.length, 0);
+    assert.equal(app.calls.some(call => call.method === 'POST'), false, 'no second host');
+});
+
+test('A failed discovery blocks Start until the list can be read', async (t) => {
+    withStorage(t);
+    const app = fakeApp();
+    let listFails = true;
+    const listCall = app.apiCall;
+    app.apiCall = async (url, method = 'GET', body = null) => {
+        if (url === '/api/v1/terminal/tabs' && method === 'GET' && listFails) {
+            app.calls.push({ url, method, body });
+            throw new Error('Host unreachable');
+        }
+        return listCall(url, method, body);
+    };
+    const { pane, log } = createPane(app);
+    const { host, buttons } = fakeHost();
+    await pane.mount(host);
+    assert.equal(buttons.start[0].disabled, false, 'Start is offered once the lookup has finished');
+
+    assert.equal(await pane.start(), false);
+    assert.match(app.errors[0], /Could not check whether this script's agent is already running/);
+    assert.equal(app.calls.some(call => call.method === 'POST'), false);
+
+    listFails = false;
+    assert.equal(await pane.start(), true);
+    assert.deepEqual(log.starts.map(start => start.tabId), ['new-tab']);
+});
+
+test('When the server hands back this owner\'s running host, Start attaches instead of launching', async (t) => {
+    withStorage(t);
+    const app = fakeApp();
+    const listCall = app.apiCall;
+    app.apiCall = async (url, method = 'GET', body = null) => {
+        if (url.startsWith('/api/v1/terminal/tabs?owner=') && method === 'POST') {
+            app.calls.push({ url, method, body });
+            return { tabId: 'other-window', owner: OWNER, hasActiveSession: true, cli: 'codex' };
+        }
+        return listCall(url, method, body);
+    };
+    const { pane, log } = createPane(app);
+    await pane.mount(fakeHost().host);
+    assert.equal(await pane.start(), false);
+    assert.equal(pane.tab.state.id, 'other-window');
+    assert.deepEqual(log.connects, ['other-window']);
+    assert.equal(log.starts.length, 0, 'the running agent is not replaced');
+});
+
 test('The Terminals page restores ordinary and Automation tabs but never a view\'s own tab', async () => {
     const added = [];
     const automation = new Map();

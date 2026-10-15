@@ -654,7 +654,10 @@ leaves the shell usable after completion. The Scripts UI no longer selects this 
 `POST /api/v1/terminal/tabs?owner=<label>` creates an ordinary tab host that one view draws
 itself. `TerminalTabHostService.CreateTabAsync(owner, …)` keeps the label on the child record
 (`NormalizeOwner`: trimmed, at most 200 characters, no control characters; a bad label is a 400)
-and `ListTabsAsync` reports it as `owner`. The server never interprets it. The session is a normal
+and `ListTabsAsync` reports it as `owner`. **One host per owner:** asking again for an owner that
+has a live host returns that host (running session included) instead of spawning a second one,
+so two windows or a Start that races its own discovery cannot start a second agent. An exited
+host is replaced. Otherwise the server never interprets the label. The session is a normal
 one in every other way: same launch, TokenSaver proxy, MCP registration, recording, Board links
 and 100-host capacity. The browser's Terminals page skips owned tabs in restore and adoption, and
 `TerminalController.registerOwnedTab` routes their session events to the owning view. The script

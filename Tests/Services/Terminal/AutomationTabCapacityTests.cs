@@ -543,6 +543,47 @@ public sealed class AutomationTabCapacityTests
         }
     }
 
+    // VIBE-159 review F1: a view asking again for its owned tab gets the host it has, running agent
+    // included, never a second one (two windows, or a Start racing its own discovery).
+    [Fact]
+    public async Task AnOwnerGetsItsExistingHostInsteadOfASecondOne()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var services = new ServiceCollection().BuildServiceProvider();
+        using var http = new StatusHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("{\"hasActiveSession\":true,\"sessionId\":\"agent-session\",\"cli\":\"claude\"}")
+        });
+        var host = Host(services, http);
+        var registry = Registry(host);
+        using var placeholder = new Process();
+        using var running = StartHarmlessProcess();
+        try
+        {
+            AddChild(registry, "plain", placeholder, 1, null);
+            AddChild(registry, "agent", running, 2, null, owner: "script-agent:a");
+            // Full, so any attempt to spawn would throw instead of returning the existing host.
+            for (var i = 0; i < 98; i++) AddChild(registry, $"fill-{i}", placeholder, 10 + i, null);
+
+            var tab = await host.CreateTabAsync("script-agent:a", ct);
+            Assert.Equal("agent", tab.TabId);
+            Assert.Equal("script-agent:a", tab.Owner);
+            Assert.True(tab.HasActiveSession);
+            Assert.Equal("agent-session", tab.SessionId);
+            Assert.Equal(100, registry.Count);
+
+            var other = await Assert.ThrowsAsync<InvalidOperationException>(() => host.CreateTabAsync("script-agent:b", ct));
+            Assert.Equal("Maximum of 100 terminal tabs reached.", other.Message);
+            Assert.Equal("script-agent:a", (await host.ListTabsAsync(ct)).Single(t => t.TabId == "agent").Owner);
+        }
+        finally
+        {
+            registry.Clear();
+            await host.DisposeAsync();
+            if (!running.HasExited) { running.Kill(entireProcessTree: true); await running.WaitForExitAsync(ct); }
+        }
+    }
+
     private static TerminalTabHostService Host(ServiceProvider services, HttpMessageHandler http, IAppEventBus? events = null)
     {
         var factory = new Mock<IHttpClientFactory>();
@@ -554,12 +595,14 @@ public sealed class AutomationTabCapacityTests
     private static IDictionary Registry(TerminalTabHostService host) => (IDictionary)typeof(TerminalTabHostService)
         .GetField("_tabs", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)!;
 
-    private static void AddChild(IDictionary registry, string id, Process process, int order, AutomationTabState? automation)
+    private static void AddChild(IDictionary registry, string id, Process process, int order, AutomationTabState? automation, string? owner = null)
     {
         var childType = typeof(TerminalTabHostService).GetNestedType("TerminalChildProcess", BindingFlags.NonPublic)!;
-        registry.Add(id, Activator.CreateInstance(childType,
+        var child = Activator.CreateInstance(childType,
             BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public, null,
-            [id, process, 10000 + order, "", "session-token", "tab-token", DateTime.UnixEpoch.AddSeconds(order), automation], null)!);
+            [id, process, 10000 + order, "", "session-token", "tab-token", DateTime.UnixEpoch.AddSeconds(order), automation], null)!;
+        if (owner is not null) childType.GetProperty("Owner")!.SetValue(child, owner);
+        registry.Add(id, child);
     }
 
     private static Task ReclaimIfFullAsync(TerminalTabHostService host) => (Task)typeof(TerminalTabHostService)

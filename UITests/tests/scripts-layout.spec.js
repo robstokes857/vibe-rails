@@ -136,6 +136,24 @@ test('terminal prompt stays in the viewport under the top navigation', async ({ 
         expect(await page.evaluate(() => document.body.classList.contains('vb-python-workbench-active'))).toBe(false);
 });
 
+// VIBE-159 review F2: the merged list must not clip the menus that open below its last rows.
+test('the last row\'s menu opens below the list and every item can be clicked', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openScripts(page);
+    const last = page.locator('.python-script-row').last();
+    await last.scrollIntoViewIfNeeded();
+    await last.locator('[data-python-scripts-action="menu"]').click();
+    const items = last.locator('.python-script-menu-item');
+    await expect(items.last()).toBeVisible();
+    for (const item of await items.all()) {
+        await item.scrollIntoViewIfNeeded();
+        expect(await item.evaluate(node => {
+            const rect = node.getBoundingClientRect();
+            return node.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
+        })).toBe(true);
+    }
+});
+
 test('script actions align and language guidance stays readable on narrow screens', async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     const scripts = await openScripts(page, { expandSigned: false });

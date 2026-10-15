@@ -1135,7 +1135,9 @@ backend tab with `POST /api/v1/terminal/tabs?owner=script-agent:{id}`, and the T
 skips every tab whose list entry has an `owner` (restore, adoption). `TerminalController`'s
 `registerOwnedTab` routes that tab's session events to the pane instead of the Terminals toasts.
 Opening the workbench reattaches to the script's running agent; leaving keeps it running and
-releases a finished host. A dropped socket asks the tab's status once: an exited CLI reads
+releases a finished host. Start stays disabled until that first look at the tab list finishes,
+waits for it, and refuses (with a retry message) when the list cannot be read; the server also
+returns an owner's existing host, which the pane attaches to instead of starting another agent. A dropped socket asks the tab's status once: an exited CLI reads
 Finished with its last screen, a live one offers Connect. **Start** appends the selected script's
 absolute-path/read-and-wait brief and signing constraint to any resolved environment prompt and
 uses the file's current directory, read through `getLaunchContext` at each Start so switches and

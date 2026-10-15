@@ -14828,7 +14828,7 @@ body.git-guard-focus-active #app-content {
     background-color: var(--color-bg-surface-hover, #2c2c2c);
     color: var(--color-text, #f8fafc);
 }
-.automations-list { overflow: hidden; }
+/* No overflow clipping here: row menus open below their toggles, past the last row. */
 .automations-list .python-script-row {
     padding: 0.85rem 1rem;
     border: 0;
