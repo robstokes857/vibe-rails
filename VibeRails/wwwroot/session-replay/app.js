@@ -234,7 +234,7 @@ async function loadSession(id) {
 function renderMetadata() {
     const { session, cards } = manifest;
     text('project', (session.project || basename(session.directory) || 'SESSION RECORDING').toUpperCase());
-    text('session-title', cards[0]?.title || session.title || `${session.cli} session`);
+    text('session-title', session.title || cards[0]?.title || `${session.cli} session`);
     text('session-id', session.id); $('copy-id').hidden = false;
     text('session-state', session.ended ? 'Completed' : 'Open · snapshot'); $('session-state').hidden = false;
     text('started', new Date(session.started).toLocaleString(undefined, { month:'short',day:'numeric',hour:'numeric',minute:'2-digit' }));

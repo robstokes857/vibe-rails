@@ -95,6 +95,10 @@ session page. It shows prompts and saved patches, plus proxy/model/tool details 
 includes them. Older uploads have no proxy captures. Board context is not included in envelopes.
 Missing metadata/patches/output have explicit empty states.
 
+The library searches and displays the saved Chat History title (`SessionDisplayName`).
+The replay heading prefers that title too; a linked Board card supplies the fallback
+when the recording has no title and remains visible in the Board card metadata.
+
 The manifest's nullable `tokensSaved` is the estimated net request reduction for this
 recording: sum the attributed proxy captures' `charsBefore - charsAfter`, clamp the
 total at zero, then divide by four (rounding down once). The header labels it as an

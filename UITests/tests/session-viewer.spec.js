@@ -58,6 +58,34 @@ test('independent instances, patch/events, playback, rewind and complete disposa
     await expect(page.frameLocator('#host iframe').locator('#play')).toBeEnabled();
     expect(errors).toEqual([]);
 });
+test('recording library and replay use the chat title ahead of a linked Board card', async ({page}) => {
+    await shell(page);
+    await page.evaluate(async envelope => {
+        const {mountSessionViewer}=await import('/session-replay/viewer.mjs');
+        const {createEnvelopeSource}=await import('/session-replay/envelope.mjs');
+        const source=createEnvelopeSource(envelope);
+        window.chatTitle=envelope.session.sessionDisplayName;
+        window.viewer=mountSessionViewer(document.getElementById('host'),{
+            sessionId:'fixture',library:true,request:async (path,options)=>{
+                const result=await source(path,options);
+                if(path==='/api/sessions/fixture') return {...result,
+                    session:{...result.session,title:window.chatTitle},
+                    cards:[{key:'VIBE-123',title:'The broader Board story',selection:''}]};
+                return result;
+            }});
+        await viewer.ready;
+    },envelope);
+    const frame=page.frameLocator('#host iframe');
+    await frame.locator('#browse').click();
+    await expect(frame.locator('.session-option strong')).toHaveText('Replay fixture');
+    await frame.locator('.session-option').click();
+    await expect(frame.locator('#session-title')).toHaveText('Replay fixture');
+    await expect(frame.locator('#board')).toHaveText('VIBE-123');
+    await expect(frame.locator('#board')).toHaveAttribute('title','VIBE-123: The broader Board story');
+    await page.evaluate(async()=>{window.chatTitle='';await viewer.reload();});
+    await expect(frame.locator('#session-title')).toHaveText('The broader Board story');
+});
+
 test('token savings display full and compact captures, zero, reloads and missing measurements', async ({page}) => {
     await shell(page);
     await page.evaluate(async envelope => {
