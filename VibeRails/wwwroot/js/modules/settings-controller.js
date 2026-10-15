@@ -1,6 +1,7 @@
 import { confirmDialog } from './utils.js';
 import { SettingsKeysPanel } from './settings-keys.js';
-import { SetupPanel } from './setup-panel.js';
+import { SetupPanel, refreshSetupStatus } from './setup-panel.js';
+import { SetupInstallWindow } from './setup-install-window.js';
 import { getToastTheme, setToastTheme } from './toast-service.js';
 
 export class SettingsController {
@@ -16,6 +17,8 @@ export class SettingsController {
         this._settingsRoot = null;
         this._keysPanel = null;
         this._setupPanel = null;
+        // Outlives the Setup panel (see _mountSetupPanel), so it is never cleared on unload.
+        this._setupInstallWindow = null;
         this._selectSettingsTab = null;
         this._linkedKeyVersion = 0;
         // In-app leave-confirm (window.confirm is a silent no-op in the VS Code
@@ -593,9 +596,7 @@ export class SettingsController {
             if (id === 'setup') {
                 const container = root.querySelector('[data-settings-setup]');
                 if (container) {
-                    this._setupPanel ??= new SetupPanel(this.app, container, {
-                        onStatus: (status) => this.app.setupAlert?.update(status)
-                    });
+                    this._setupPanel ??= this._mountSetupPanel(container);
                     void this._setupPanel.activate();
                 }
             }
@@ -618,6 +619,24 @@ export class SettingsController {
             if (next === -1) return;
             event.preventDefault();
             selectTab(tabs[next].dataset.settingsTab, true);
+        });
+    }
+
+    // Leaving Settings drops the panel but not an install in progress: every panel shares one
+    // install window, so a second install cannot start beside it, and the re-check it runs when
+    // it finishes goes to whichever panel is mounted by then (or only to the warning bar).
+    _mountSetupPanel(container) {
+        this._setupInstallWindow ??= new SetupInstallWindow(this.app, {
+            onFinished: async () => {
+                if (this._setupPanel) return this._setupPanel.refresh();
+                const status = await refreshSetupStatus(this.app);
+                if (status) this.app.setupAlert?.update(status);
+                return status;
+            }
+        });
+        return new SetupPanel(this.app, container, {
+            installWindow: this._setupInstallWindow,
+            onStatus: (status) => this.app.setupAlert?.update(status)
         });
     }
 

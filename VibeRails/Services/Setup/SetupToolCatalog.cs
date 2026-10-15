@@ -34,6 +34,8 @@ public sealed record SetupInstallMethod(
 /// not be on PATH yet. Install methods are in preference order; the first is the recommended one.
 /// <see cref="WindowsAppsStubs"/> are command names whose Microsoft\WindowsApps alias is a Store
 /// redirect rather than the tool, so finding one there does not count.
+/// <see cref="AppleDeveloperShims"/> are command names whose macOS <c>/usr/bin</c> copy is Apple's
+/// shim, which counts only once the Command Line Tools or Xcode provide the real tool.
 /// </summary>
 public sealed record SetupTool(
     string Id,
@@ -45,7 +47,8 @@ public sealed record SetupTool(
     IReadOnlyList<string> KnownPaths,
     IReadOnlyList<SetupInstallMethod> Methods,
     string? Brand = null,
-    IReadOnlyList<string>? WindowsAppsStubs = null);
+    IReadOnlyList<string>? WindowsAppsStubs = null,
+    IReadOnlyList<string>? AppleDeveloperShims = null);
 
 /// <summary>
 /// The fixed list of things VibeRails can check for and install. Commands are the vendors' own
@@ -95,7 +98,9 @@ public static class SetupToolCatalog
                     ? [new("xcode", "Apple Command Line Tools", "xcode-select --install",
                             Note: "Opens Apple's installer dialog."),
                        BrewFormula("git")]
-                    : []));
+                    : [],
+            // A fresh Mac has /usr/bin/git before it has Git: running it offers the installer.
+            AppleDeveloperShims: [Git]));
 
         if (windows)
         {
@@ -198,7 +203,9 @@ public static class SetupToolCatalog
             windows ? [WingetPackage("Python.Python.3.14")] : mac ? [BrewFormula("python")] : [],
             // The WindowsApps python.exe / python3.exe aliases open the Microsoft Store when
             // Python is absent. The Python install manager's py.exe alias there is real.
-            WindowsAppsStubs: ["python", "python3"]));
+            WindowsAppsStubs: ["python", "python3"],
+            // macOS /usr/bin/python3 is the same developer-tools shim as /usr/bin/git.
+            AppleDeveloperShims: ["python3"]));
 
         if (!windows)
         {

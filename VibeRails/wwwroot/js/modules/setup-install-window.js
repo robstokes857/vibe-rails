@@ -14,6 +14,8 @@ export class SetupInstallWindow {
         this.terminal = null;
         this.running = false;
         this._token = null;
+        // The latest run, kept after it finishes: its re-check may only paint while it still owns the window.
+        this._run = null;
         this._input = null;
         this._dockButton = null;
     }
@@ -38,6 +40,7 @@ export class SetupInstallWindow {
         if (!this.layer) return;
         const token = this._token;
         this._token = null;
+        this._run = null;
         token?.socket?.close();
         this.running = false;
         this._input?.();
@@ -99,6 +102,7 @@ export class SetupInstallWindow {
     _execute() {
         const token = { socket: null, ready: false };
         this._token = token;
+        this._run = token;
         this.running = true;
         this._paintState('Starting…', 'waiting');
         const base = window.__viberails_API_BASE__ || window.location.origin;
@@ -147,12 +151,14 @@ export class SetupInstallWindow {
         if (exitCode === null) return;
         // Installers report "already installed" and reboot-pending as non-zero, so the
         // re-check, not the exit code, decides what the page shows.
-        const status = await this.onFinished?.(this.tool, exitCode);
-        const state = status?.tools?.find(item => item.id === this.tool.id)?.state;
-        if (!this.layer) return;
-        if (state === 'ready') this._paintState(`${this.tool.name} is installed and ready.`, 'success');
-        else if (state === 'restart') this._paintState(`${this.tool.name} is installed. Restart VibeRails so new terminals can find it.`, 'success');
-        else this._paintState(`${message.replace(' · checking…', '')} · ${this.tool.name} still isn’t found.`, 'danger');
+        const tool = this.tool;
+        const status = await this.onFinished?.(tool, exitCode);
+        // The window is free while the re-check runs; a newer install there owns the status line.
+        if (!this.layer || this._run !== token) return;
+        const state = status?.tools?.find(item => item.id === tool.id)?.state;
+        if (state === 'ready') this._paintState(`${tool.name} is installed and ready.`, 'success');
+        else if (state === 'restart') this._paintState(`${tool.name} is installed. Restart VibeRails so new terminals can find it.`, 'success');
+        else this._paintState(`${message.replace(' · checking…', '')} · ${tool.name} still isn’t found.`, 'danger');
     }
 
     _cols() { return Math.min(400, Math.max(10, this.terminal?.cols || 80)); }

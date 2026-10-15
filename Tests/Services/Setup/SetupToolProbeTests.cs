@@ -79,6 +79,51 @@ public sealed class SetupToolProbeTests
     }
 
     [Fact]
+    public void AppleGitShimCountsOnlyOnceTheDeveloperToolsHaveGit()
+    {
+        var shims = Dir("usr-bin");
+        var commandLineTools = Dir("CommandLineTools");
+        var git = SetupToolCatalog.For(SetupPlatform.MacOS).Single(tool => tool.Id == "git");
+        SetupProbeEnvironment Mac(params string[] files) =>
+            Machine(files, launch: [shims], isWindows: false) with
+            {
+                AppleShimDirectory = shims,
+                AppleDeveloperDirectories = [Dir("xcode_select_link"), commandLineTools]
+            };
+
+        // A fresh Mac: running /usr/bin/git would only open Apple's installer.
+        Assert.Equal(SetupToolState.Missing, SetupToolProbe.Probe(git, Mac(Path.Combine(shims, "git"))).State);
+
+        var installed = SetupToolProbe.Probe(git,
+            Mac(Path.Combine(shims, "git"), Path.Combine(commandLineTools, "usr", "bin", "git")));
+        Assert.Equal(SetupToolState.Ready, installed.State);
+        Assert.Equal(Path.Combine(shims, "git"), installed.Path);
+
+        // Linux has no shims: /usr/bin/git is Git.
+        var linux = SetupToolProbe.Probe(SetupToolCatalog.For(SetupPlatform.Linux).Single(tool => tool.Id == "git"),
+            Machine([Path.Combine(shims, "git")], launch: [shims], isWindows: false));
+        Assert.Equal(SetupToolState.Ready, linux.State);
+    }
+
+    [Fact]
+    public void GitInstalledBesideTheAppleShimIsFoundWithoutTheDeveloperTools()
+    {
+        var shims = Dir("usr-bin");
+        var homebrew = Dir("homebrew-bin");
+        var environment = Machine([Path.Combine(shims, "git"), Path.Combine(homebrew, "git")],
+            launch: [shims, homebrew], isWindows: false) with
+        {
+            AppleShimDirectory = shims,
+            AppleDeveloperDirectories = [Dir("CommandLineTools")]
+        };
+
+        var result = SetupToolProbe.Probe(SetupToolCatalog.For(SetupPlatform.MacOS).Single(tool => tool.Id == "git"), environment);
+
+        Assert.Equal(SetupToolState.Ready, result.State);
+        Assert.Equal(Path.Combine(homebrew, "git"), result.Path);
+    }
+
+    [Fact]
     public void RelativePathEntriesAreNeverSearched()
     {
         var result = SetupToolProbe.Probe(Tool("git"), Machine([Path.Combine("relative", "git.exe")], launch: ["relative"]));

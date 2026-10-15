@@ -82,3 +82,92 @@ test('package managers sit under Optional and only while missing', () => {
     assert.deepEqual(rows(absent, 'optional', 'optional').map(item => item.id), ['winget']);
     assert.equal(rows(absent, 'optional', 'optional')[0].expandedByDefault, true);
 });
+
+// ---- Installer ownership (PR #84 review) ------------------------------------------------
+
+const { SetupInstallWindow } = await import('../../../VibeRails/wwwroot/js/modules/setup-install-window.js');
+const { SettingsController } = await import('../../../VibeRails/wwwroot/js/modules/settings-controller.js');
+
+/** Just enough browser for SetupInstallWindow.open() without xterm or a real socket. */
+function fakeBrowser() {
+    globalThis.window = { location: { origin: 'http://127.0.0.1:5000' }, addEventListener() {}, removeEventListener() {} };
+    globalThis.document = { activeElement: null, addEventListener() {}, removeEventListener() {} };
+    globalThis.sessionStorage = { getItem: () => null };
+    globalThis.WebSocket = class { static OPEN = 1; close() {} send() {} };
+}
+
+/** Replaces the xterm window with a status line the test can read. */
+function headlessWindow(installWindow) {
+    installWindow._mount = function () {
+        const status = { textContent: '', dataset: {} };
+        this.layer = { status, remove() {}, querySelector: selector => selector === '[data-run-status]' ? status : null };
+    };
+    return installWindow;
+}
+
+test('a finished install re-checks without repainting a newer install opened meanwhile', async () => {
+    fakeBrowser();
+    let resolveRefresh;
+    const installWindow = headlessWindow(new SetupInstallWindow({ showError() {} }, {
+        onFinished: () => new Promise(resolve => { resolveRefresh = resolve; })
+    }));
+    const claude = { id: 'claude', name: 'Claude Code' };
+    const codex = { id: 'codex', name: 'Codex' };
+
+    installWindow.open(claude, { id: 'native', label: 'Official installer', command: 'install claude' });
+    const finishing = installWindow._finish(installWindow._token, 'Finished · checking…', 'success', 0);
+    assert.equal(installWindow.running, false);
+    // Codex starts while Claude Code's re-check is still in flight.
+    installWindow.open(codex, { id: 'native', label: 'Official installer', command: 'install codex' });
+    const codexStatus = installWindow.layer.status;
+    installWindow._paintState('Installing…', 'waiting');
+
+    resolveRefresh({ tools: [{ id: 'claude', state: 'ready' }, { id: 'codex', state: 'missing' }] });
+    await finishing;
+
+    assert.equal(codexStatus.textContent, 'Installing…');
+    assert.equal(installWindow.tool, codex);
+    assert.equal(installWindow.running, true);
+});
+
+test('an install keeps its owner when Settings is left and reopened', async () => {
+    fakeBrowser();
+    const toasts = [];
+    const alerts = [];
+    const refreshed = { platform: 'windows', checkedUtc: '2026-10-14T12:00:00Z', tools: [] };
+    const app = {
+        showToast: (...args) => toasts.push(args),
+        showError() {},
+        apiCall: async () => refreshed,
+        setupAlert: { update: status => alerts.push(status) }
+    };
+    const controller = new SettingsController(app);
+    const container = () => ({ innerHTML: '', addEventListener() {}, contains: () => true, querySelector: () => null });
+
+    const first = controller._setupPanel = controller._mountSetupPanel(container());
+    first.installWindow.running = true;
+    first.installWindow.show = () => {};
+    controller.unload();
+    const second = controller._setupPanel = controller._mountSetupPanel(container());
+
+    // The panel built on return sees the running install and refuses a second one.
+    assert.equal(second.installWindow, first.installWindow);
+    let opened = 0;
+    second.installWindow.open = () => { opened++; };
+    second.status = { tools: [tool('claude', 'agent', 'missing', { methods: [method('native')] })] };
+    const install = { dataset: { setupAction: 'install', tool: 'claude', method: 'native' } };
+    second._onClick({ target: { closest: () => install } });
+    assert.equal(opened, 0);
+    assert.equal(toasts.length, 1);
+
+    // Its re-check lands on the mounted panel, not the one left behind.
+    await second.installWindow.onFinished();
+    assert.equal(second.status, refreshed);
+    assert.equal(first.status, null);
+
+    // With Settings closed, only the warning bar is left to update.
+    controller.unload();
+    alerts.length = 0;
+    await first.installWindow.onFinished();
+    assert.deepEqual(alerts, [refreshed]);
+});

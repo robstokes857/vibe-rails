@@ -15,7 +15,12 @@ public enum SetupToolState
 /// <summary>One probe result. <see cref="Version"/> is read from file metadata, never by running the tool.</summary>
 public sealed record SetupToolProbeResult(string Id, SetupToolState State, string? Path, string? Version);
 
-/// <summary>Where the probe looks, split out so tests can describe a machine without touching it.</summary>
+/// <summary>
+/// Where the probe looks, split out so tests can describe a machine without touching it.
+/// <see cref="AppleShimDirectory"/> (macOS only) holds Apple's developer-tool shims, such as
+/// <c>/usr/bin/git</c>, which work only once one of <see cref="AppleDeveloperDirectories"/> has the
+/// real tool; until then running one opens the Command Line Tools installer.
+/// </summary>
 public sealed record SetupProbeEnvironment(
     bool IsWindows,
     IReadOnlyList<string> LaunchPath,
@@ -23,7 +28,9 @@ public sealed record SetupProbeEnvironment(
     IReadOnlyList<string> ExtraDirectories,
     Func<string, bool> FileExists,
     Func<string, string> ExpandPath,
-    Func<string, string?> ReadVersion)
+    Func<string, string?> ReadVersion,
+    string? AppleShimDirectory = null,
+    IReadOnlyList<string>? AppleDeveloperDirectories = null)
 {
     /// <summary>
     /// This machine. <see cref="LaunchPath"/> is the PATH new terminals inherit from this process.
@@ -48,9 +55,22 @@ public sealed record SetupProbeEnvironment(
                Path.Combine(home, ".local", "bin")]
             : ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin",
                Path.Combine(home, ".local", "bin"), Path.Combine(home, ".npm-global", "bin")];
+        var mac = OperatingSystem.IsMacOS();
         return new SetupProbeEnvironment(isWindows, launch, current, extras, File.Exists,
-            path => ExpandHomePath(path, home), path => ReadFileVersion(path, isWindows));
+            path => ExpandHomePath(path, home), path => ReadFileVersion(path, isWindows),
+            mac ? "/usr/bin" : null,
+            mac ? AppleDeveloperDirectoriesForCurrentMachine() : null);
     }
+
+    // Where xcrun finds the real tools behind the shims: DEVELOPER_DIR, the xcode-select choice
+    // (a symlink File.Exists follows), then its two defaults.
+    private static List<string> AppleDeveloperDirectoriesForCurrentMachine() =>
+    [
+        .. Environment.GetEnvironmentVariable("DEVELOPER_DIR") is { Length: > 0 } developerDir ? [developerDir] : Array.Empty<string>(),
+        "/var/db/xcode_select_link",
+        "/Applications/Xcode.app/Contents/Developer",
+        "/Library/Developer/CommandLineTools"
+    ];
 
     /// <summary>Splits a PATH value, dropping blanks, quotes and relative entries.</summary>
     public static List<string> SplitPath(string? value) =>
@@ -118,9 +138,13 @@ public static class SetupToolProbe
         {
             if (!Path.IsPathFullyQualified(directory)) continue;
             var windowsApps = environment.IsWindows && IsWindowsAppsDirectory(directory);
+            var appleShims = environment.AppleShimDirectory is { } shimDirectory && SameDirectory(directory, shimDirectory);
             foreach (var command in tool.Commands)
             {
                 if (windowsApps && tool.WindowsAppsStubs?.Contains(command, StringComparer.OrdinalIgnoreCase) == true)
+                    continue;
+                if (appleShims && tool.AppleDeveloperShims?.Contains(command, StringComparer.Ordinal) == true
+                    && !HasAppleDeveloperTool(command, environment))
                     continue;
                 foreach (var name in CandidateNames(command, environment.IsWindows))
                 {
@@ -133,6 +157,13 @@ public static class SetupToolProbe
         }
         return null;
     }
+
+    private static bool HasAppleDeveloperTool(string command, SetupProbeEnvironment environment) =>
+        environment.AppleDeveloperDirectories?.Any(directory =>
+            environment.FileExists(Path.Combine(directory, "usr", "bin", command))) == true;
+
+    private static bool SameDirectory(string left, string right) =>
+        string.Equals(left.TrimEnd('/', '\\'), right.TrimEnd('/', '\\'), StringComparison.Ordinal);
 
     // Detection, unlike launching, counts npm's .cmd shim: a shell finds it just the same.
     private static IEnumerable<string> CandidateNames(string command, bool isWindows) =>

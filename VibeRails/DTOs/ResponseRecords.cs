@@ -672,8 +672,16 @@ namespace VibeRails.DTOs
 
     public record SetupStatusResponse(string Platform, DateTimeOffset CheckedUtc, List<SetupToolResponse> Tools);
 
-    /// <summary>The probe result kept in GlobalCache (<c>setup.tool-status.v1</c>).</summary>
-    public record SetupStatusDocument(int Version, string Platform, DateTimeOffset CheckedUtc, List<SetupToolStatusEntry> Tools)
+    /// <summary>
+    /// The probe result kept in GlobalCache (<c>setup.tool-status.v1</c>). Ready and Restart needed
+    /// are relative to the PATH of the process that probed, so <see cref="LaunchPathHash"/> records it.
+    /// </summary>
+    public record SetupStatusDocument(
+        int Version,
+        string Platform,
+        DateTimeOffset CheckedUtc,
+        List<SetupToolStatusEntry> Tools,
+        string? LaunchPathHash = null)
     {
         public const int CurrentVersion = 1;
     }

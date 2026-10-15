@@ -10,10 +10,15 @@ public sealed class SetupStatusServiceTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 14, 12, 0, 0, TimeSpan.Zero);
     private static readonly string Launch = Path.Combine(Path.GetTempPath(), "vb-setup-status", "launch");
+    private static readonly string Stored = Path.Combine(Path.GetTempPath(), "vb-setup-status", "stored");
 
     private sealed class Machine
     {
         public readonly HashSet<string> Files = new(StringComparer.OrdinalIgnoreCase);
+        /// <summary>The PATH this VibeRails process started with.</summary>
+        public readonly List<string> LaunchPath = [Launch];
+        /// <summary>The user/machine PATH Windows has stored now.</summary>
+        public readonly List<string> StoredPath = [];
         public int Probes;
 
         /// <summary>Git, PowerShell 7 and one AI CLI: everything Windows setup requires.</summary>
@@ -23,15 +28,23 @@ public sealed class SetupStatusServiceTests
             return this;
         }
 
+        public string PathValue() => string.Join(Path.PathSeparator, LaunchPath);
+
         public SetupProbeEnvironment Environment()
         {
             Probes++;
-            return new SetupProbeEnvironment(true, [Launch], [], [], Files.Contains, path => path, _ => null);
+            return new SetupProbeEnvironment(true, [.. LaunchPath], [.. StoredPath], [], Files.Contains, path => path, _ => null);
         }
     }
 
     private static SetupStatusService Service(FakeGlobalCache cache, Machine machine) =>
-        new(cache) { ProbeEnvironment = machine.Environment, Platform = SetupPlatform.Windows, Clock = () => Now };
+        new(cache)
+        {
+            ProbeEnvironment = machine.Environment,
+            LaunchPathValue = machine.PathValue,
+            Platform = SetupPlatform.Windows,
+            Clock = () => Now
+        };
 
     [Fact]
     public async Task ACompleteSetupIsProbedOnceAndThenReadFromTheCache()
@@ -64,6 +77,45 @@ public sealed class SetupStatusServiceTests
         await Service(cache, machine).GetAsync();
 
         Assert.Equal("ready", after.Tools.Single(tool => tool.Id == "pwsh").State);
+        Assert.Equal(2, machine.Probes);
+    }
+
+    [Fact]
+    public async Task ARestartNeededCheckIsProbedAgainOnceVibeRailsStartsWithTheNewPath()
+    {
+        // Claude Code installed while VibeRails ran: setup is complete, but only the stored PATH has it.
+        var cache = new FakeGlobalCache();
+        var machine = new Machine();
+        foreach (var exe in new[] { "git.exe", "pwsh.exe" }) machine.Files.Add(Path.Combine(Launch, exe));
+        machine.Files.Add(Path.Combine(Stored, "claude.exe"));
+        machine.StoredPath.Add(Stored);
+
+        var before = await Service(cache, machine).GetAsync();
+        // The same process, or one started with the same PATH, still needs the restart.
+        await Service(cache, machine).GetAsync();
+        Assert.Equal("restart", before.Tools.Single(tool => tool.Id == "claude").State);
+        Assert.Equal(1, machine.Probes);
+
+        // Restarted: the new process inherits the stored PATH.
+        machine.LaunchPath.Add(Stored);
+        var after = await Service(cache, machine).GetAsync();
+        await Service(cache, machine).GetAsync();
+
+        Assert.Equal("ready", after.Tools.Single(tool => tool.Id == "claude").State);
+        Assert.Equal(2, machine.Probes);
+    }
+
+    [Fact]
+    public async Task ACompleteCheckMadeWithAnotherPathIsProbedAgain()
+    {
+        // Launched from VS Code after the desktop app: a tool Ready there may not be on this PATH.
+        var cache = new FakeGlobalCache();
+        var machine = new Machine().SetUp();
+        await Service(cache, machine).GetAsync();
+
+        machine.LaunchPath.Insert(0, Stored);
+        await Service(cache, machine).GetAsync();
+
         Assert.Equal(2, machine.Probes);
     }
 

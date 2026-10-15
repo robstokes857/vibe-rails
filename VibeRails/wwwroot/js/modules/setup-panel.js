@@ -1,5 +1,4 @@
 import { escapeHtml, getCliBrand } from './utils.js';
-import { SetupInstallWindow } from './setup-install-window.js';
 
 const isInstalled = tool => tool.state === 'ready' || tool.state === 'restart';
 
@@ -57,16 +56,30 @@ export function buildSetupModel(status) {
     };
 }
 
-/** Settings → Setup. Reads the saved check; the server probes again only while setup is incomplete. */
+/** Probes again on the server, whatever the installer's exit code was. Null when the request fails. */
+export async function refreshSetupStatus(app) {
+    try {
+        return await app.apiCall('/api/v1/setup/status/refresh', 'POST', {}, { showLoading: false });
+    } catch (error) {
+        app.showError(`Could not check this machine again: ${error?.message || 'unknown error'}`);
+        return null;
+    }
+}
+
+/**
+ * Settings → Setup. Reads the saved check; the server probes again only while setup is
+ * incomplete. `installWindow` belongs to the caller: an install keeps running after Settings
+ * is left, and the panel built on return must see it.
+ */
 export class SetupPanel {
-    constructor(app, container, { onStatus } = {}) {
+    constructor(app, container, { installWindow, onStatus } = {}) {
         this.app = app;
         this.container = container;
         this.onStatus = onStatus;
         this.status = null;
         this.expanded = new Map();
         this.selectedMethod = new Map();
-        this.installWindow = new SetupInstallWindow(app, { onFinished: () => this.refresh() });
+        this.installWindow = installWindow;
         container.addEventListener('click', event => this._onClick(event));
     }
 
@@ -80,20 +93,15 @@ export class SetupPanel {
         }
     }
 
-    /** Probes again after an install finishes, whatever the installer's exit code was. */
+    /** Probes again after an install finishes and shows the result. */
     async refresh() {
-        try {
-            const status = await this.app.apiCall('/api/v1/setup/status/refresh', 'POST', {}, { showLoading: false });
-            this._apply(status);
-            return status;
-        } catch (error) {
-            this.app.showError(`Could not check this machine again: ${error?.message || 'unknown error'}`);
-            return null;
-        }
+        const status = await refreshSetupStatus(this.app);
+        if (status) this._apply(status);
+        return status;
     }
 
     unload() {
-        // A running install keeps its window; closing that window is what stops it.
+        // A running install keeps its window (owned by the caller); closing that window is what stops it.
     }
 
     _apply(status) {

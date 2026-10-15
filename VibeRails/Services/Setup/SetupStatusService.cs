@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Serilog;
 using VibeRails.DTOs;
@@ -7,8 +9,9 @@ namespace VibeRails.Services.Setup;
 public interface ISetupStatusService
 {
     /// <summary>
-    /// The saved check while it says setup is complete. A machine never checked, or one still
-    /// missing something, is probed again, so a CLI installed outside VibeRails clears the alert.
+    /// The saved check while it says setup is complete and was made with this process's PATH.
+    /// A machine never checked, or one still missing something, is probed again, so a CLI
+    /// installed outside VibeRails clears the alert.
     /// </summary>
     Task<SetupStatusResponse> GetAsync(CancellationToken cancellationToken = default);
 
@@ -20,7 +23,9 @@ public interface ISetupStatusService
 /// The Setup page's tool check, also read on every app load. One probe result is kept in
 /// <see cref="IGlobalCache"/> per machine. Once it says every required tool and one AI CLI are
 /// installed it is returned as-is until an install finishes, so a set-up machine does no
-/// filesystem work on load. Until then each read probes again (a few ms of stat calls).
+/// filesystem work on load. Until then each read probes again (a few ms of stat calls). Ready
+/// and Restart needed depend on the PATH VibeRails started with, so a process launched with a
+/// different PATH (after a restart, or from VS Code instead of the desktop) probes again too.
 /// </summary>
 public sealed class SetupStatusService(IGlobalCache cache) : ISetupStatusService
 {
@@ -33,20 +38,23 @@ public sealed class SetupStatusService(IGlobalCache cache) : ISetupStatusService
 
     /// <summary>Replaceable so tests can describe a machine; production probes this one.</summary>
     internal Func<SetupProbeEnvironment> ProbeEnvironment { get; init; } = SetupProbeEnvironment.ForCurrentMachine;
+    /// <summary>The PATH new terminals inherit, the one <see cref="SetupProbeEnvironment.LaunchPath"/> splits.</summary>
+    internal Func<string?> LaunchPathValue { get; init; } = () => Environment.GetEnvironmentVariable("PATH");
     internal SetupPlatform Platform { get; init; } = SetupToolCatalog.Current;
     internal Func<DateTimeOffset> Clock { get; init; } = () => DateTimeOffset.UtcNow;
 
     public async Task<SetupStatusResponse> GetAsync(CancellationToken cancellationToken = default)
     {
+        var launchPathHash = HashPath(LaunchPathValue());
         var saved = await ReadAsync();
-        if (saved is not null && IsComplete(saved)) return BuildResponse(saved);
+        if (saved is not null && CanReuse(saved, launchPathHash)) return BuildResponse(saved);
 
         await ProbeGate.WaitAsync(cancellationToken);
         try
         {
             // Another request may have finished a probe while this one waited.
             saved = await ReadAsync();
-            if (saved is null || !IsComplete(saved)) saved = await ProbeAndSaveAsync();
+            if (saved is null || !CanReuse(saved, launchPathHash)) saved = await ProbeAndSaveAsync();
         }
         finally { ProbeGate.Release(); }
         return BuildResponse(saved);
@@ -73,15 +81,25 @@ public sealed class SetupStatusService(IGlobalCache cache) : ISetupStatusService
             && catalog.Any(tool => tool.Group == SetupToolGroup.AgentCli && installed.Contains(tool.Id));
     }
 
+    /// <summary>
+    /// A complete check made with the same launch PATH. "Restart needed" clears only in a process
+    /// started with the new PATH, which is exactly when the hash stops matching.
+    /// </summary>
+    private bool CanReuse(SetupStatusDocument document, string launchPathHash) =>
+        IsComplete(document) && document.LaunchPathHash == launchPathHash;
+
     private async Task<SetupStatusDocument> ProbeAndSaveAsync()
     {
+        // Read before probing, so a hash never describes a newer PATH than the result does.
+        var launchPathHash = HashPath(LaunchPathValue());
         var results = SetupToolProbe.Probe(SetupToolCatalog.For(Platform), ProbeEnvironment());
         var document = new SetupStatusDocument(
             SetupStatusDocument.CurrentVersion,
             Platform.ToString(),
             Clock(),
             results.Select(result => new SetupToolStatusEntry(
-                result.Id, ToWire(result.State), result.Path, result.Version)).ToList());
+                result.Id, ToWire(result.State), result.Path, result.Version)).ToList(),
+            launchPathHash);
         await _cache.SetAsync(StatusCacheKey,
             JsonSerializer.Serialize(document, AppJsonSerializerContext.Default.SetupStatusDocument));
         return document;
@@ -129,6 +147,10 @@ public sealed class SetupStatusService(IGlobalCache cache) : ISetupStatusService
         }).ToList();
         return new SetupStatusResponse(ToWire(Platform), document.CheckedUtc, tools);
     }
+
+    // Hashed rather than stored: the cache only needs to know whether the PATH changed.
+    private static string HashPath(string? path) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(path ?? string.Empty)));
 
     internal static string ToWire(SetupToolState state) => state switch
     {
