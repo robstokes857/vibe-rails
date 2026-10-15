@@ -20,7 +20,7 @@ function pathKey(value) {
 async function openJobsPage(page) {
     await page.goto('/?view=terminal-focus', { waitUntil: 'domcontentloaded' });
     await page.locator('.app-subnav-link[data-view="automations"]:visible').click();
-    await expect(page.locator('[data-python-scripts-root]')).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('[data-automations-list]')).toBeVisible({ timeout: 15_000 });
 }
 
 /** The dialog is loaded when its grid stops being busy and the status line has settled. */
@@ -48,7 +48,8 @@ async function projectRoot(context) {
 
 test('the Add-file dialog is a navigable, sortable, keyboard-friendly Open dialog', async ({ page, context }) => {
     await openJobsPage(page);
-    const trigger = page.locator(`${IMPORT_BUTTON}:visible`).first();
+    // Script from disk lives in the page's Import menu (VIBE-159).
+    const trigger = page.locator(`.jobs-page-menu ${IMPORT_BUTTON}`).first();
     if (await trigger.count() === 0) {
         // Host-path import only exists on the active root backend; a child/relay backend has no button.
         test.skip(true, 'import button absent (not the active root backend)');
@@ -57,6 +58,7 @@ test('the Add-file dialog is a navigable, sortable, keyboard-friendly Open dialo
     const root = await projectRoot(context);
     expect(root.length).toBeGreaterThan(0);
 
+    await page.locator('.jobs-page-menu > summary', { hasText: 'Import' }).click();
     await trigger.click();
     const dialog = await waitForFolder(page);
     await expect(dialog.locator('#vb-file-explorer-title')).toHaveText('Add a script');

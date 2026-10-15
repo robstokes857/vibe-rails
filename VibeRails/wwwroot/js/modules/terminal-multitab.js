@@ -25,6 +25,7 @@ import { TerminalToast } from './terminal-toast.js';
 import { TerminalNotifications } from './terminal-notifications.js';
 import { findEnvironmentForPrompt, resolvePromptTemplateForLaunch } from './prompt-template-modal.js';
 import { cardDisplayId, cardLabel } from './board-card-label.js';
+import { isOwnedTab } from './script-agent-pane.js';
 
 // Pending-close grace window: how long a closed tab is held in the undo
 // dropdown before the backend DELETE actually fires. Keep PENDING_CLOSE_MS
@@ -591,6 +592,8 @@ export class TerminalManager {
         const tabs = Array.isArray(response?.tabs) ? response.tabs : [];
         tabs.forEach((tabInfo) => {
             if (this.closedAutomationTabs.has(tabInfo.tabId)) return;
+            // A view's own tab (the script workbench's agent) is drawn by that view only.
+            if (isOwnedTab(tabInfo)) return;
             if (isAutomationTab(tabInfo)) {
                 this.automationTabs.set(tabInfo.tabId, tabInfo);
                 return;
@@ -3195,6 +3198,19 @@ export class TerminalController {
         this.manager = null;
         this.managerInitPromise = null;
         this.managerGeneration = 0;
+        // Tabs a view draws itself (script-agent-pane.js), by tab id. Session events reach them
+        // here, because the Terminals page's manager never holds them.
+        this.ownedTabs = new Map();
+    }
+
+    registerOwnedTab(tabId, tab) {
+        const id = cleanString(tabId);
+        if (id && tab) this.ownedTabs.set(id, tab);
+    }
+
+    unregisterOwnedTab(tabId, tab) {
+        const id = cleanString(tabId);
+        if (id && this.ownedTabs.get(id) === tab) this.ownedTabs.delete(id);
     }
 
     rememberTabLaunch(tabId, metadata = {}) {
@@ -3276,6 +3292,7 @@ export class TerminalController {
             // identity and retained finished recording IDs belong to the tab list.
             const authoritative = Array.isArray(status?.tabs)
                 ? status.tabs.find(info => cleanString(info.tabId) === id) || null : null;
+            if (isOwnedTab(authoritative)) return false;
             if (isAutomationTab(authoritative)) {
                 manager.automationTabs.set(id, authoritative);
                 manager.automationMenu.refresh();
@@ -3429,6 +3446,13 @@ export class TerminalController {
             });
         });
         const findTab = (payload) => {
+            const owned = payload?.tabId ? this.ownedTabs.get(payload.tabId) : null;
+            if (owned) return owned;
+            if (payload?.sessionId) {
+                for (const tab of this.ownedTabs.values()) {
+                    if (tab.state.sessionId === payload.sessionId) return tab;
+                }
+            }
             if (!this.manager) return null;
             // Fast path: use tabId injected by parent relay
             if (payload?.tabId) {

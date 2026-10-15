@@ -31,6 +31,7 @@ const {
     readStoredTerminalHeight,
     isStaleSaveError
 } = await import(pathToFileURL(modulePath).href);
+const { scriptAgentOwner } = await import(pathToFileURL(path.resolve('VibeRails/wwwroot/js/modules/script-agent-pane.js')).href);
 
 // --- minimal stand-ins (no jsdom: the view code only touches a handful of element APIs) ---
 
@@ -160,7 +161,7 @@ function createApp() {
         errors: [],
         navigations: [],
         viewData: [],
-        navigationStack: [{ view: 'jobs', data: {} }, { view: 'python-script', data: { name: 'nightly.py' } }],
+        navigationStack: [{ view: 'automations', data: {} }, { view: 'python-script', data: { name: 'nightly.py' } }],
         async apiCall(url, method = 'GET', body = null) {
             app.calls.push({ url, method, body });
             return { name: 'nightly.py', content: 'print(1)\n', status: 'approved', version: 'v1' };
@@ -1258,7 +1259,7 @@ test('Dragging the splitter resizes live and persists only on release; the separ
     });
     const { workbench, app } = mountedWorkbench({ root });
     let layouts = 0;
-    app.terminalController = { refreshLayout() { layouts += 1; } };
+    workbench.agentPane = { refreshLayout() { layouts += 1; } };
     workbench._bindSplitter();
 
     // After mount the separator knows where it is even without a stored height.
@@ -1422,47 +1423,62 @@ test('The hint line, dirty mark and Save button follow the editor state', () => 
     assert.equal(run.disabled, false);
 });
 
-test('The terminal supplies the current script context for Start, including after a switch or rename', async () => {
-    const { workbench, app, root } = mountedWorkbench();
-    const rendered = [];
-    const bound = [];
-    app.terminalController = {
-        renderTerminalPanel(options) { rendered.push(options); return '<div id="vb-terminal-panel"></div>'; },
-        async bindTerminalActions(host, preselected, options) { bound.push({ host, preselected, options }); }
+test('The agent pane belongs to the open script and reads its context at each Start, including after a switch or rename', async () => {
+    const { workbench, root } = mountedWorkbench();
+    const panes = [];
+    workbench._createAgentPane = (options) => {
+        const pane = {
+            options, host: null, disposed: false, labels: [],
+            async mount(host) { this.host = host; },
+            dispose() { this.disposed = true; },
+            setLabel(label) { this.labels.push(label); },
+            refreshLayout() {}
+        };
+        panes.push(pane);
+        return pane;
     };
+    const app = workbench.app;
 
     await workbench._mountTerminal();
 
     const host = root.el('[data-terminal-content]');
-    assert.deepEqual(rendered, [{ workingDirectory: '/scripts' }]);
-    assert.equal(host.innerHTML, '<div id="vb-terminal-panel"></div>');
-    assert.equal(bound.length, 1);
-    assert.equal(bound[0].host, host);
-    assert.equal(bound[0].preselected, null);
-    assert.equal(bound[0].options.defaultWorkingDirectory, '/scripts');
-    const { getLaunchContext } = bound[0].options;
-    assert.deepEqual(getLaunchContext(), {
+    assert.equal(panes.length, 1);
+    assert.equal(panes[0].host, host, 'its own xterm pane, not the Terminals panel');
+    assert.equal(panes[0].options.owner, scriptAgentOwner('nightly.py'));
+    assert.equal(panes[0].options.owner, 'script-agent:nightly.py');
+    const first = panes[0].options.getLaunchContext;
+    assert.deepEqual(first(), {
         workingDirectory: '/scripts',
         initialPrompt: buildScriptAgentInitialPrompt({ name: 'nightly.py', path: '/scripts/nightly.py' })
     });
 
-    // Registered IDs stay stable when a script's filename changes. The callback
-    // must follow the live record, including its directory, without remounting.
+    // A switch gives the other script its own agent; the first pane lets go of its tab
+    // (a running agent keeps running for that script's next visit) and can no longer launch.
     const next = { name: 'registration-2', fileName: 'deploy.ps1', path: 'C:\\My Scripts\\deploy.ps1' };
     app.jobController.pythonScripts.state.scripts.push(next);
     workbench._loadContent = async () => true;
     await workbench.switchTo(next.name);
+    assert.equal(panes.length, 2);
+    assert.equal(panes[0].disposed, true);
+    assert.equal(first(), null, 'the previous pane cannot start an agent on the new file');
+    assert.equal(panes[1].options.owner, 'script-agent:registration-2');
+    const getLaunchContext = panes[1].options.getLaunchContext;
     assert.equal(getLaunchContext().workingDirectory, 'C:\\My Scripts');
     assert.match(getLaunchContext().initialPrompt, /C:\\My Scripts\\deploy\.ps1/);
     assert.doesNotMatch(getLaunchContext().initialPrompt, /nightly/);
 
+    // Registered IDs stay stable when a script's filename changes: same pane, new label,
+    // and the callback follows the live record.
     next.fileName = 'release.sh';
     next.path = 'C:\\My Scripts\\release.sh';
     app.jobController.pythonScripts.rename = async () => next.name;
     await workbench.rename();
+    assert.equal(panes.length, 2, 'a rename keeps the running agent');
+    assert.equal(panes[1].labels.at(-1), 'release.sh');
     assert.match(getLaunchContext().initialPrompt, /C:\\My Scripts\\release\.sh/);
     assert.doesNotMatch(getLaunchContext().initialPrompt, /deploy/);
     workbench.unload();
+    assert.equal(panes[1].disposed, true);
     assert.equal(getLaunchContext(), null, 'a detached workbench no longer supplies context');
 
     // And the manager honours it (source pins for the two tiny terminal-multitab changes).
@@ -1644,7 +1660,7 @@ test('Side by side, the splitter moves the terminal WIDTH: dragging right shrink
     });
     const { workbench, app } = mountedWorkbench({ root });
     let layouts = 0;
-    app.terminalController = { refreshLayout() { layouts += 1; } };
+    workbench.agentPane = { refreshLayout() { layouts += 1; } };
     workbench._bindSplitter();
 
     const down = { pointerType: 'mouse', button: 0, pointerId: 7, clientX: 1000, clientY: 500, preventDefault() {} };
@@ -1683,7 +1699,7 @@ test('A stored terminal width is applied on mount and the media list is watched 
     const root = fakeRoot({ '[data-workbench-splitter]': splitter });
     const { workbench, app } = mountedWorkbench({ root });
     let layouts = 0;
-    app.terminalController = { refreshLayout() { layouts += 1; } };
+    workbench.agentPane = { refreshLayout() { layouts += 1; } };
 
     workbench._applyStoredTerminalWidth();
     assert.equal(root.style.props['--python-workbench-terminal-width'], '520px');

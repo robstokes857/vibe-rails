@@ -150,9 +150,9 @@ test('A row offers the whole file lifecycle, not just run and sign', () => {
     assert.match(html, /<button class="btn btn-sm btn-outline-primary python-script-edit" type="button" data-python-scripts-action="edit"\s+data-name="nightly\.py" title="Open nightly\.py in the editor with an agent terminal beside it">\s*<i class="fa-solid fa-pen-to-square me-1" aria-hidden="true"><\/i>Edit\s*<\/button>/);
     assert.doesNotMatch(html, /Edit script/);
     assert.equal(html.match(/data-python-scripts-action="edit"/g).length, 1, 'one Edit affordance besides the name');
-    // The section copy says what opening does.
-    const source = readFileSync(modulePath, 'utf8');
-    assert.match(source, /Edit single-file pwsh, bash, or python scripts with an agent terminal beside the editor\./);
+    // The Automations page's New › Script item says what opening does (VIBE-159: no separate section).
+    const page = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/jobs-controller.js'), 'utf8');
+    assert.match(page, /A pwsh, bash or python file, written with an agent beside the editor\. Sign it, then run it\./);
     // Every row says which interpreter runs it (VIBE-56: "say pwsh, bash, or python").
     assert.match(html, /<span class="python-script-runtime" data-runtime="python"[^>]*>python<\/span>/);
     // Size and edit time are on the row so "did my edit land?" needs no round trip.

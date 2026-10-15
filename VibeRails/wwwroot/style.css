@@ -14812,6 +14812,48 @@ body.git-guard-focus-active #app-content {
 .python-scripts-list > .jobs-collapsible-list:not(:first-child) { margin-top: 0.75rem; }
 .python-scripts-list > .jobs-collapsible-list[open] > summary { margin-bottom: 0.5rem; }
 
+/* The Automations page's one list (VIBE-159): one New, one Import, and workflows and scripts in
+   the same rows. The header menus are the card More menu (.job-more) on page buttons. */
+.jobs-page-menu > summary { display: inline-flex; align-items: center; white-space: nowrap; }
+.jobs-page-menu > .job-more-menu { z-index: 30; }
+.jobs-page-menu > .jobs-new-menu { width: min(340px, calc(100vw - 32px)); }
+.jobs-new-menu button { align-items: flex-start; white-space: normal; }
+.jobs-new-menu button > i { width: 1rem; margin-top: 0.2rem; text-align: center; }
+.jobs-new-menu button > span { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.jobs-new-menu small { color: var(--color-text-muted, #94a3b8); font-size: 0.76rem; line-height: 1.4; }
+.automations-panel .jobs-section-heading { flex-wrap: wrap; }
+.automations-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-left: auto; }
+.automations-filter .btn[aria-pressed="true"] {
+    border-color: var(--color-primary, #6366f1);
+    background-color: var(--color-bg-surface-hover, #2c2c2c);
+    color: var(--color-text, #f8fafc);
+}
+.automations-list { overflow: hidden; }
+.automations-list .python-script-row {
+    padding: 0.85rem 1rem;
+    border: 0;
+    border-bottom: 1px solid var(--color-border, #334155);
+    border-radius: 0;
+    background-color: var(--color-bg-base, #121212);
+}
+.automations-list > .python-script-row:last-child,
+.automations-list .python-scripts-list > .python-script-row:last-child { border-bottom: 0; }
+.automations-list > .jobs-collapsible-list + .jobs-collapsible-list { border-top: 1px solid var(--color-border, #334155); }
+.automations-list[data-filter="scripts"] > .job-card,
+.automations-list[data-filter="scripts"] > [data-entry-kind="workflow"],
+.automations-list[data-filter="workflows"] > .python-script-row,
+.automations-list[data-filter="workflows"] > [data-entry-kind="script"] { display: none; }
+.automations-panel .python-scripts-runtime-help { margin: 0.75rem 0 0; }
+.automations-panel .python-scripts-runtime-help code { overflow-wrap: anywhere; }
+@media (max-width: 720px) {
+    .automations-toolbar { margin-left: 0; }
+    /* The stacked header buttons do not reach the right edge: span the menus across their row. */
+    .jobs-page-actions { position: relative; }
+    .jobs-page-actions > .jobs-page-menu { position: static; }
+    .jobs-page-menu > .job-more-menu,
+    .jobs-page-menu > .jobs-new-menu { left: 0; right: 0; width: auto; }
+}
+
 .job-inline-editor {
     margin: 0;
     scroll-margin-top: 5rem;
@@ -15099,6 +15141,10 @@ body.git-guard-focus-active #app-content {
 .job-script-fields > * { min-width: 0; }
 .job-script-path-field,
 .job-script-arguments { grid-column: 1 / -1; }
+/* Which script? (VIBE-159): your scripts and the repository's, then New script… and Browse. */
+.job-script-picker { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.job-script-picker > select { flex: 1 1 260px; min-width: 0; }
+.job-script-picker > .btn { flex: 0 0 auto; white-space: nowrap; }
 
 .job-script-fields small {
     display: block;
@@ -17931,6 +17977,41 @@ body.vb-terminal-focus-active .app-subnav .nav-exit-btn-sm {
 }
 body:has(#script-run-dock:not(:empty)) .vb-run-window { bottom: 56px; max-height: calc(100dvh - 72px); }
 
+/* The script workbench's agent pane (script-agent-pane.js, VIBE-159): the run window's
+   title bar, xterm well and status strip, docked beside the editor instead of floating. */
+.vb-script-agent { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: hidden;
+    border: 1px solid #454545; border-radius: 6px; background: #1e1e1e; color: #d4d4d4; }
+.vb-script-agent-titlebar { min-width: 0; }
+.vb-script-agent-titlebar h5 { flex-shrink: 0; }
+.vb-script-agent-titlebar .vb-run-runtime { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vb-script-agent-picker { flex: 0 1 220px; min-width: 120px; margin-left: auto; }
+.vb-script-agent-picker .ts-wrapper .ts-control { min-height: 24px; padding: 0.1rem 0.45rem; background: #1e1e1e;
+    border-color: #454545; font-size: 0.78rem; }
+.vb-script-agent-titlebar .vb-run-window-controls { margin-left: 4px; }
+.vb-script-agent-titlebar .vb-run-window-controls [data-script-agent-action="stop"]:hover { background: #c42b1c; }
+.vb-script-agent-terminal[hidden], .vb-script-agent-placeholder[hidden] { display: none; }
+.vb-script-agent-placeholder { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 12px; padding: 24px 16px; text-align: center; color: #9a9a9a; font-size: 13px; }
+.vb-script-agent-placeholder p { margin: 0; max-width: 32ch; }
+.vb-script-agent-bottom-bar { align-items: center; font-size: 11px; }
+.vb-script-agent-bottom-bar > span:last-child { flex-shrink: 0; }
+.vb-script-agent-state { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+.vb-script-agent-status { display: inline-flex; align-items: center; gap: 8px; min-width: 0; color: #cfcfcf; }
+.vb-script-agent-status[hidden] { display: none; }
+.vb-script-agent-status .vb-tab-identity, .vb-script-agent-status .vb-tab-status-section {
+    display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.vb-script-agent-status .vb-tab-brand-logo { width: 14px; height: 14px; flex: 0 0 14px; }
+.vb-script-agent-status .vb-tab-brand-fallback { width: auto; font: 11px Consolas, monospace; color: #89d185; }
+.vb-script-agent-status .vb-tab-pin-badge, .vb-script-agent-status .vb-tab-attention { display: none; }
+.vb-script-agent-status .vb-terminal-tab-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vb-script-agent-status.tab-status-ready .vb-tab-status-section { color: #89d185; }
+.vb-script-agent-status.tab-status-waiting .vb-tab-status-section { color: #e2c08d; }
+.vb-script-agent-status.tab-status-disconnected .vb-tab-status-section { color: #f48771; }
+@media (max-width: 540px) {
+    .vb-script-agent-bottom-bar > span:last-child { display: none; }
+    .vb-script-agent-picker { flex-basis: 140px; }
+}
+
 /* --- Script authoring: row identity, row menu, drop target ---
    Same rule as the rest of this section: nothing here may impose an unbreakable
    minimum width, and every color carries an explicit fallback. */
@@ -18052,7 +18133,7 @@ button.python-script-name:focus-visible > i {
     color: var(--color-danger, #ef4444);
 }
 
-.python-scripts-list.python-scripts-list-dropping {
+.python-scripts-list-dropping {
     outline: 2px dashed var(--color-primary, #3b82f6);
     outline-offset: 4px;
     border-radius: 10px;

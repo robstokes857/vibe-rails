@@ -1035,7 +1035,10 @@ namespace VibeRails.DTOs
         bool StatusAvailable = true,
         TerminalTabBoardCard? BoardCard = null,
         bool? NeedsAttention = null,
-        bool AutomationCompleted = false
+        bool AutomationCompleted = false,
+        // The view that owns this tab (VIBE-159: "script-agent:{id}" for the script workbench's
+        // agent pane). Owned tabs never appear in the Terminals page's strip.
+        string? Owner = null
     );
 
     /// <summary>The Board card a tab's session is linked to (VIBE-36); only the tab list fills it.</summary>

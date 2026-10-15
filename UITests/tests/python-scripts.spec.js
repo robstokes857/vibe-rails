@@ -43,14 +43,15 @@ test('approve without a valid PIN is always refused', async ({ context }) => {
     expect(status.pinConfigured === true || status.pinConfigured === false).toBeTruthy();
 });
 
-test('Automations page shows the Scripts section (pwsh, bash and python)', async ({ page, context }) => {
+test('Automations page lists scripts with workflows (pwsh, bash and python)', async ({ page, context }) => {
     const status = await (await context.request.get(API)).json();
     await page.goto('/?view=terminal-focus', { waitUntil: 'domcontentloaded' });
     await page.locator('.app-subnav-link[data-view="automations"]:visible').click();
 
-    const section = page.locator('[data-python-scripts-root]');
+    // VIBE-159: one list for scripts and workflows, no separate Scripts section.
+    const section = page.locator('.automations-panel');
     await expect(section).toBeVisible({ timeout: 15_000 });
-    await expect(section.locator('#python-scripts-title')).toContainText('Scripts');
+    await expect(page.locator('#python-scripts-title')).toHaveCount(0);
     await expect(section.locator('.python-scripts-runtime-help')).toContainText('pwsh');
     await expect(section.locator('[data-python-scripts-dir]')).toContainText('.vibe_rails', { timeout: 10_000 });
     await expect(section.locator('[data-python-scripts-pin-label]'))
@@ -59,7 +60,7 @@ test('Automations page shows the Scripts section (pwsh, bash and python)', async
     if (status.scripts.length > 0) {
         await expect(section.locator('.python-script-row')).toHaveCount(status.scripts.length);
     } else {
-        await expect(section.locator('.jobs-empty')).toContainText('No scripts yet');
+        await expect(section.locator('[data-python-scripts-count]')).toHaveText('0 scripts');
     }
 
     // Every script surfaces in the nav Launch flyout catalog, carrying its signing status
@@ -81,7 +82,7 @@ test('Opening a script lands in the workbench: editor over an agent terminal in 
     // Same way in as the section test: the Automations page, then the first row's name.
     await page.goto('/?view=terminal-focus', { waitUntil: 'domcontentloaded' });
     await page.locator('.app-subnav-link[data-view="automations"]:visible').click();
-    const section = page.locator('[data-python-scripts-root]');
+    const section = page.locator('[data-automations-list]');
     await expect(section).toBeVisible({ timeout: 15_000 });
     const firstRow = section.locator('.python-script-row').first();
     await expect(firstRow).toBeAttached({ timeout: 10_000 });
@@ -99,9 +100,9 @@ test('Opening a script lands in the workbench: editor over an agent terminal in 
     await expect(workbench.locator('[data-workbench-editor-state]')).toBeHidden({ timeout: 20_000 });
     // Monaco paints its lines a frame after the text lands, so wait rather than count.
     await expect(editor.locator('.view-line').first()).toBeAttached({ timeout: 10_000 });
-    // The terminal panel is pinned to the scripts directory (the header chip names the folder).
-    const folder = String(status.scriptsDirectory).split(/[\\/]/).filter(Boolean).pop();
-    await expect(workbench.locator('.vb-terminal-project-path')).toContainText(folder, { timeout: 10_000 });
+    // The agent pane is the script's own xterm, not the Terminals page's strip (VIBE-159).
+    await expect(workbench.locator('[data-script-agent]')).toBeVisible({ timeout: 10_000 });
+    await expect(workbench.locator('#vb-terminal-panel')).toHaveCount(0);
 
     // Escape inside Monaco belongs to Monaco (suggest widget etc.), never "Back".
     await editor.locator('textarea').first().focus();
@@ -111,5 +112,5 @@ test('Opening a script lands in the workbench: editor over an agent terminal in 
 
     // Back returns to the Automation page (nothing was edited, so no confirm).
     await page.locator('[data-view="python-script"] [data-action="go-back"]').click();
-    await expect(page.locator('[data-python-scripts-root]')).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('[data-automations-list]')).toBeVisible({ timeout: 15_000 });
 });

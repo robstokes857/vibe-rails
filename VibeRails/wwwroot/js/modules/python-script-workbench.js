@@ -3,6 +3,7 @@ import { confirmDialog, escapeHtml, formatRelativeTime } from './utils.js';
 import { formatFileExplorerSize } from './file-explorer.js';
 import { PYTHON_SCRIPT_STATUS_META, formatPythonRunOutput, pythonRunStatus } from './python-scripts-controller.js';
 import { scriptRuntimeFor } from './script-runtimes.js';
+import { ScriptAgentPane, scriptAgentOwner } from './script-agent-pane.js';
 
 const API = '/api/v1/python-scripts';
 const VIEW_NAME = 'python-script';
@@ -152,8 +153,10 @@ export class PythonScriptWorkbench {
         this._layoutMedia = null;
         this._onLayoutMediaChange = () => {
             this._syncSplitterAria();
-            this.app.terminalController?.refreshLayout?.();
+            this.agentPane?.refreshLayout();
         };
+        // The agent terminal beside the editor (script-agent-pane.js), one per open script.
+        this.agentPane = null;
         this._removeNavigationGuard = null;
         this._unsubscribeState = null;
         this._leaveConfirmed = false;
@@ -276,6 +279,9 @@ export class PythonScriptWorkbench {
         }
         try { this.editor?.dispose(); } catch { /* already gone */ }
         this.editor = null;
+        // A running agent keeps running; the next visit to this script reattaches to it.
+        this.agentPane?.dispose();
+        this.agentPane = null;
         this.root = null;
         this.name = null;
         this.script = null;
@@ -482,7 +488,9 @@ export class PythonScriptWorkbench {
 
         const runtime = scriptRuntimeFor(this.script?.fileName || this.name);
         const nameEl = root.querySelector('[data-workbench-name]');
-        if (nameEl) nameEl.textContent = script?.displayName || script?.fileName || this.name || '';
+        const displayName = script?.displayName || script?.fileName || this.name || '';
+        if (nameEl) nameEl.textContent = displayName;
+        this.agentPane?.setLabel(displayName);
         // Rail clicks and renames can change the runtime without rebuilding the shell.
         const runtimeIcon = root.querySelector('[data-workbench-runtime-icon]');
         if (runtimeIcon) runtimeIcon.className = runtime.icon;
@@ -799,7 +807,7 @@ export class PythonScriptWorkbench {
         await this._loadContent(this._generation);
     }
 
-    /** Switches the editor to a duplicate in place without remounting the terminal. */
+    /** Switches the editor to a duplicate in place; the agent pane follows the script. */
     async switchTo(name) {
         if (!name || name === this.name || !this.root) return false;
         if (this.isDirty) {
@@ -832,6 +840,8 @@ export class PythonScriptWorkbench {
         this.app.updateCurrentViewData?.({ name });
         this._renderIdentity();
         this._renderOutput();
+        // Each script has its own agent; the previous one keeps running for its own workbench.
+        void this._mountTerminal();
         return this._loadContent(this._generation);
     }
 
@@ -1210,17 +1220,17 @@ export class PythonScriptWorkbench {
 
     async _mountTerminal() {
         const host = this.root?.querySelector('[data-terminal-content]');
-        const controller = this.app.terminalController;
-        if (!host || !controller?.renderTerminalPanel) return;
-        const workingDirectory = this.scriptsDirectory || null;
-        host.innerHTML = controller.renderTerminalPanel({ workingDirectory });
-        // Existing tabs reconnect when the panel mounts, exactly like the Code quality page;
-        // Start opens new sessions in the current script's directory with its file context.
+        if (!host) return;
+        this.agentPane?.dispose();
+        // Its own xterm, like the run window: never the Terminals page's tab strip (VIBE-159).
         const generation = this._generation;
-        await controller.bindTerminalActions(host, null, {
-            defaultWorkingDirectory: workingDirectory,
+        const name = this.name;
+        const pane = this._createAgentPane({
+            owner: scriptAgentOwner(name),
+            label: this.script?.displayName || this.script?.fileName || name || '',
+            // Read at each Start so a rename or a switch can never launch on an old path.
             getLaunchContext: () => {
-                if (generation !== this._generation || !this.root || !this.script?.path) return null;
+                if (generation !== this._generation || !this.root || this.name !== name || !this.script?.path) return null;
                 return {
                     workingDirectory: this.scriptsDirectory,
                     initialPrompt: buildScriptAgentInitialPrompt({
@@ -1229,6 +1239,13 @@ export class PythonScriptWorkbench {
                 };
             }
         });
+        this.agentPane = pane;
+        await pane.mount(host);
+    }
+
+    /** Seam for tests: the real pane draws an xterm. */
+    _createAgentPane(options) {
+        return new ScriptAgentPane(this.app, options);
     }
 
     // --- splitter ---
@@ -1268,7 +1285,7 @@ export class PythonScriptWorkbench {
                 this.root?.classList.remove('python-workbench-resizing');
                 if (sideBySide) this._persistTerminalWidth();
                 else this._persistTerminalHeight();
-                this.app.terminalController?.refreshLayout?.();
+                this.agentPane?.refreshLayout();
             };
             splitter.addEventListener('pointermove', onMove);
             splitter.addEventListener('pointerup', finish);
@@ -1287,7 +1304,7 @@ export class PythonScriptWorkbench {
                 event.preventDefault();
                 this.setTerminalHeight(this._currentTerminalHeight() + delta);
             }
-            this.app.terminalController?.refreshLayout?.();
+            this.agentPane?.refreshLayout();
         });
     }
 
@@ -1408,14 +1425,14 @@ export class PythonScriptWorkbench {
         const now = Date.now();
         if (now - this._lastLayoutRefreshAt >= LAYOUT_REFRESH_THROTTLE_MS) {
             this._lastLayoutRefreshAt = now;
-            this.app.terminalController?.refreshLayout?.();
+            this.agentPane?.refreshLayout();
             return;
         }
         if (this._layoutRefreshTimer) return;
         this._layoutRefreshTimer = setTimeout(() => {
             this._layoutRefreshTimer = null;
             this._lastLayoutRefreshAt = Date.now();
-            this.app.terminalController?.refreshLayout?.();
+            this.agentPane?.refreshLayout();
         }, LAYOUT_REFRESH_THROTTLE_MS);
     }
 
@@ -1466,7 +1483,7 @@ export class PythonScriptWorkbench {
         const stack = this.app.navigationStack || [];
         const previous = stack.length > 1 ? stack[stack.length - 2] : null;
         const previousView = previous ? (previous.view || previous) : null;
-        if (previousView === 'jobs' && this.app.goBack?.()) return;
-        this.app.navigate?.('jobs', {}, { resetStack: true });
+        if (previousView === 'automations' && this.app.goBack?.()) return;
+        this.app.navigate?.('automations', {}, { resetStack: true });
     }
 }

@@ -65,9 +65,10 @@ so the map fills the viewport beneath the nav; the bar keeps the shared classes 
 | [js/modules/code-report/viewer.js](js/modules/code-report/viewer.js) | Code Atlas / Quality Lab report in the dedicated Quality workspace: real repository graph, inline saved-details panel and explicit teardown; see [integration contract](js/modules/code-report/README.md) |
 | [js/modules/project-health-fix-launcher.js](js/modules/project-health-fix-launcher.js) | Inline shared agent/environment pickers beside Rules and Quality Fix actions; synchronizes and remembers the target for direct launch |
 | [js/modules/jobs-controller.js](js/modules/jobs-controller.js) | Agents and Automations pages (one controller, `mode`): cards, the editor (an Agent step plus scripts/checks, or scripts/checks only), per-action run details, recipes, and "Run now" (queues a native-terminal run; `launchFromNav` for the nav launcher); owns the shared `PythonScriptsController` |
-| [js/modules/python-scripts-controller.js](js/modules/python-scripts-controller.js) | "Scripts" section of the Automations page (pwsh, bash and python) + shared lifecycle and signing flows |
+| [js/modules/python-scripts-controller.js](js/modules/python-scripts-controller.js) | The script library's rows in the Automations list (pwsh, bash and python; `listParts()` for the page) + shared lifecycle and signing flows |
 | [js/modules/script-runtimes.js](js/modules/script-runtimes.js) | The `.ps1`/`.sh`/`.py` → pwsh/bash/python table (labels, icons, Monaco language, starter templates, name rule) every script surface reads |
-| [js/modules/python-script-workbench.js](js/modules/python-script-workbench.js) | `python-script` view: Monaco editor beside a docked agent terminal for one script (see "Python script workbench" below) |
+| [js/modules/python-script-workbench.js](js/modules/python-script-workbench.js) | `python-script` view: Monaco editor beside the script's agent pane (see "Python script workbench" below) |
+| [js/modules/script-agent-pane.js](js/modules/script-agent-pane.js) | The workbench's agent pane: one xterm (`TerminalTab`) for one script's agent in an owned backend tab, never listed on the Terminals page (VIBE-159) |
 | [js/modules/python-run-window.js](js/modules/python-run-window.js) | The little run window: argument rows + stdin in, exit code / output / return value out, no terminal (see "Python script run window" below) |
 | [js/modules/automation-launcher.js](js/modules/automation-launcher.js) | Nav "Launch" flyout (agents, automations and signed scripts; unsigned or modified scripts omitted) and its order/show-hide customize modal over `/api/v1/automation-nav/preferences`; `openCustomizationFromHost()` serves the VS Code launcher view, and a saved/reset list calls `__viberails_launcherChanged__` |
 | [js/modules/vscode-launcher-bridge.js](js/modules/vscode-launcher-bridge.js) | VS Code Activity Bar launcher view → dashboard commands (`runScript`, `openLauncherCustomize`, `manageAutomations`, `automationQueued`), each routed to the exact call the nav flyout makes; installed before the script-import bridge posts the ready signal that releases queued host messages. Also relays `PythonScriptsController.onStateChange` to `__viberails_launcherChanged__` when a script's id, display name, file name or approval changed (signed, revoked, renamed, edited, imported, deleted), so the view re-sorts; an identical refresh stays quiet |
@@ -810,10 +811,18 @@ Saved setups belong to exactly one project. Legacy setups with a null
 or blank `projectPath` stay stored but are excluded from project lists and launch pickers; there
 is no shared group. `classifyCatalog` also omits explicitly unscoped setups from stale responses.
 Project Jobs with an unavailable Worker remain manageable as missing-worker entries.
-The Automations page lists the rest, with the Scripts
-section beneath.
-Both keep disabled entries behind a collapsed **Disabled agents / automations** caret and count,
-and the Scripts list keeps unsigned or changed scripts behind **Unsigned scripts**; the native
+The Automations page lists the rest **and the signed script library in one list** (VIBE-159):
+there is no separate Scripts section. `renderAutomationsListHtml` composes enabled workflows,
+signed scripts (`PythonScriptsController.listParts()`), then the collapsed **Unsigned scripts**
+and **Disabled automations** groups; with neither kind present it shows one empty state offering
+both. The Scripts controller mounts on the page root with `onListChanged`, keeps its own row
+actions there and calls back to `renderJobs`, which owns the one render cache and skips a
+repaint while a row menu is open. The header has one **Import** menu (From repository…, Recipe
+file…, Script from disk…) and one **New** menu (Script, Workflow); both are `<details
+class="job-more jobs-page-menu">` and close on a pick, an outside click or Escape. The list
+toolbar holds an All / Workflows / Scripts filter (`data-filter` on the list, CSS only), the
+signing PIN and refresh; the count reads `N workflows · M scripts`, and the list is the drop target
+for script files. The Agents page keeps its own header and **Disabled agents** group. The native
 `details` groups start closed and preserve their open state across list refreshes.
 
 An Automation is an ordered workflow of repository Script actions and checks. Script actions
@@ -821,6 +830,12 @@ select `.py`, `.ps1`, or `.sh`, an explicit matching runtime, optional repositor
 directory, optional per-action timeout, and zero or more argument rows. Each row is one argv
 value; never replace the rows with a command-line textbox or join them into shell text. The
 backend remains authoritative for containment, links, runtime availability, and SHA-256 approval.
+A script step's **Which script?** picker (VIBE-159) lists your library scripts that live in this
+repository, then the repository's other scripts from `GET /api/v1/jobs/scripts`; library scripts
+outside the repository are listed disabled with that reason, because the server only runs files
+inside it. **New script…** opens the library's New script form with the folder set to
+`<repo>/scripts` and puts the created file in the step; **Browse repository…** keeps the file
+picker. A file chosen by browsing stays selected even when no list reaches it.
 
 The editor opens through `app.showModal`, with focus trapping, inert background, scrollable
 content and one submit action. In Agents mode it always carries one required **Agent** step that
@@ -1100,7 +1115,8 @@ See also: [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for back
 
 ## Python script workbench
 
-The Scripts section is an explicit user library. New script includes display name, Global/Repo
+The script library is an explicit user library, listed with workflows on the Automations page
+(New › Script, Import › Script from disk). New script includes display name, Global/Repo
 scope, PIN on each run, and a destination folder (UI default `scripts/UserScripts/{project_name}/`,
 using the current repository folder name, with the shared
 folder picker). Add from disk registers the original file in place. The kebab's Script settings
@@ -1108,38 +1124,48 @@ edits metadata; removing an entry retains its file. API IDs, not display names, 
 run inputs and nav launcher. The controller retains `fileName` for runtime selection. Both the
 workbench agent and script execution use the registered file's own directory. The old scripts
 folder is never scanned and no legacy entries are backfilled.
-The workbench supplies a live `getLaunchContext` callback to the terminal manager. **Start**
-appends the selected script's absolute-path/read-and-wait brief and signing constraint to any
-resolved environment prompt, and uses the file's current directory. Read the current record at
-launch so switches and stable-ID renames cannot reuse an old path. Shell starts omit the brief;
-reconnects and explicit launches do not consume this callback. **Start** is the sole agent launch
-action; the redundant **Ask agent** button and brief-paste flow were removed. Covered by
-`terminal-launch-context.test.mjs` and the workbench suite.
+**The agent pane** (`script-agent-pane.js`, VIBE-159) is the script's own xterm, built like the
+run window: a title bar with the script's name, a CLI picker (the `terminal` picker context) and
+Start / Connect / Restart / Stop, the xterm, and a status strip whose chip is the ordinary
+`TabStatusController` (Thinking / Ready / Waiting for user input). There is no tab strip, and it
+never mounts the Terminals page's panel. It hosts one `TerminalTab` with the pane standing in as
+its manager, so every CLI's input handling and the snapshot reconnect are the Terminals page's.
+The agent stays an ordinary recorded session (TokenSaver proxy, MCP, history): Start creates a
+backend tab with `POST /api/v1/terminal/tabs?owner=script-agent:{id}`, and the Terminals page
+skips every tab whose list entry has an `owner` (restore, adoption). `TerminalController`'s
+`registerOwnedTab` routes that tab's session events to the pane instead of the Terminals toasts.
+Opening the workbench reattaches to the script's running agent; leaving keeps it running and
+releases a finished host. A dropped socket asks the tab's status once: an exited CLI reads
+Finished with its last screen, a live one offers Connect. **Start** appends the selected script's
+absolute-path/read-and-wait brief and signing constraint to any resolved environment prompt and
+uses the file's current directory, read through `getLaunchContext` at each Start so switches and
+stable-ID renames cannot reuse an old path; shell starts omit the brief. A switch to another
+script (Duplicate) mounts that script's pane; a rename relabels the same one. Covered by
+`script-agent-pane.test.mjs` and the workbench suite.
 Creation resolves the returned registration ID even when the server canonicalizes the destination.
 A rename keeps that ID but must refresh the editor language and clear prior run output. Missing-file
 recovery rechecks content after a library refresh: retained registrations do not prove a file exists.
 
 - **View** `python-script` (data `{ name }`), module `js/modules/python-script-workbench.js`
   (`PythonScriptWorkbench`, constructed in `app.js`; Automation stays the highlighted nav
-  entry and a duplicated tab lands on `jobs`). Opened from the Automation page's Python
-  scripts section: the row's **Edit** button (outline-primary, first in the row) and the
+  entry and a duplicated tab lands on `automations`). Opened from a script row in the
+  Automations list: the row's **Edit** button (outline-primary, first in the row) and the
   script name navigate here in every host; "Open in VS Code" is a secondary menu item
-  when the extension bridge exists.
-- **Scripts section**: authoring/import actions and PIN/refresh controls have a separate
-  wrapping toolbar. Since VIBE-56 the signed library holds pwsh (`.ps1`), bash (`.sh`) and
+  when the extension bridge exists. Leaving without a stack entry returns to `automations`.
+- **Script rows** live in the Automations list (see "Agents and Automations pages"); New,
+  Import, the PIN and refresh sit on the page. Since VIBE-56 the signed library holds pwsh (`.ps1`), bash (`.sh`) and
   python (`.py`) scripts; the extension picks the interpreter, and every surface says which
   one through `script-runtimes.js` (row chip, workbench icon + "runs with", run-window title, launcher icon). New script has a **Runs with**
   picker kept in step with the file name (picking bash renames `script.py` to `script.sh`;
-  typing `deploy.ps1` moves the picker; a bare name takes the picked extension). Repository
-  scripts still go through **New automation → Add script**. The API, view and class names
-  keep their historical `python` spelling.
+  typing `deploy.ps1` moves the picker; a bare name takes the picked extension). A workflow's
+  script step picks from the same library (in-repository files) or the repository's own
+  scripts. The API, view and class names keep their historical `python` spelling.
 - **Layout**: Back bar (`data-action="go-back"`, bound globally) + identity/status pill +
   Run / Sign / kebab; a `.rules-section` card with Monaco for the selected script
   (`viberails-dark`, Ctrl/⌘+S saves in place; the shared model's language follows the
   loaded file: python, powershell or shell); an optional last-run drawer; a draggable
-  splitter (`role="separator"`, Arrow keys ±24px); and the agent terminal
-  (`renderTerminalPanel({ workingDirectory })` + `bindTerminalActions(host, null,
-  { defaultWorkingDirectory: scriptsDirectory })`, so sessions start in the **selected script's directory**). **Side by side is the layout**: from 880px up
+  splitter (`role="separator"`, Arrow keys ±24px); and the agent pane above, whose sessions
+  start in the **selected script's directory**. **Side by side is the layout**: from 880px up
   (`isSideBySideLayout()` = the CSS `@media (min-width: 880px)`) the terminal is a grid
   column BESIDE the editor, full working height, and the (vertical) splitter sets its
   width — `--python-workbench-terminal-width`, persisted in localStorage
@@ -1153,8 +1179,8 @@ recovery rechecks content after a library refresh: retained registrations do not
   docked VS Code webview still gets columns; **only below it do the panes stack**
   (horizontal splitter, `--python-workbench-terminal-height`, localStorage
   `viberails.pythonWorkbench.terminalHeight`, ArrowUp/Down; the floor drops to 180px on
-  viewports ≤ 720px tall). The editor has no file rail or chip strip; use **Back** to
-  **Automation → Scripts** to select another script or create one. The shell class
+  viewports ≤ 720px tall). The editor has no file rail or chip strip; use **Back** to the
+  Automations list to select another script or create one. The shell class
   `vb-rules-workspace-active` is applied to this view too.
 - **Shared flows**: signing (PIN prompt), revoke, rename, delete, duplicate, copy path,
   run and `saveContent` are public methods on `PythonScriptsController`

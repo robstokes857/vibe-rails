@@ -649,6 +649,20 @@ The legacy `POST /api/v1/python-scripts/run/interactive` still creates a normal 
 `TerminalTabHostService.CreatePythonScriptTabAsync`. Its helper runs the verified cache copy and
 leaves the shell usable after completion. The Scripts UI no longer selects this recorded path.
 
+### 5) Owned tabs: the script workbench's agent (VIBE-159)
+
+`POST /api/v1/terminal/tabs?owner=<label>` creates an ordinary tab host that one view draws
+itself. `TerminalTabHostService.CreateTabAsync(owner, …)` keeps the label on the child record
+(`NormalizeOwner`: trimmed, at most 200 characters, no control characters; a bad label is a 400)
+and `ListTabsAsync` reports it as `owner`. The server never interprets it. The session is a normal
+one in every other way: same launch, TokenSaver proxy, MCP registration, recording, Board links
+and 100-host capacity. The browser's Terminals page skips owned tabs in restore and adoption, and
+`TerminalController.registerOwnedTab` routes their session events to the owning view. The script
+workbench uses `script-agent:{script id}` (`wwwroot/js/modules/script-agent-pane.js`): it
+reattaches to a running agent on its next visit and deletes a finished host when it leaves.
+`ITerminalTabHostService.CreateTabAsync(string?, …)` has a default implementation that ignores
+the owner, so test fakes need no change. Tests: `TerminalTabsRoutesTests`, `script-agent-pane.test.mjs`.
+
 ## Local API Surface
 From `Routes/TerminalRoutes.cs`:
 - `GET /api/v1/terminal/status`

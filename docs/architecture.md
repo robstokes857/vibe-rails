@@ -988,15 +988,21 @@ available to existing callers.
 - `POST /api/v1/python-scripts/import` - Register a regular UTF-8 file at its existing local path (root-dashboard backend only, like the filesystem picker; network/device
   paths and links are rejected)
 
-The script workbench edits one selected file beside the agent terminal. Its editor has no file
-rail; **Back → Automation → Scripts** is where users select another file or create one.
-Starting an agent from this workbench adds the current script's absolute path, an instruction to
+Scripts are listed with workflows in the Automations page's one list (VIBE-159), created from
+its **New › Script** and registered from **Import › Script from disk**; a workflow's script step
+picks from the library scripts inside the repository or the repository's own scripts.
+The script workbench edits one selected file beside its agent pane. Its editor has no file
+rail; **Back** to the Automations list is where users select another file or create one.
+The agent pane (`script-agent-pane.js`) is one xterm for that script's agent, built like the run
+window, with no tab strip. The agent remains an ordinary recorded session in a backend terminal
+tab created with `POST /api/v1/terminal/tabs?owner=script-agent:{id}`; the tab list reports the
+owner, the Terminals page never lists owned tabs, and reopening the workbench reattaches to it.
+Starting an agent adds the current script's absolute path, an instruction to
 read it and wait for a change request, and the signing constraint to the environment's startup
-prompt. The terminal manager reads the workbench's `getLaunchContext` callback on each fresh
+prompt. The pane reads the workbench's `getLaunchContext` callback on each fresh
 Start so file switches and renames update both the brief and working directory. Shell launches
-omit the brief, and reconnecting an existing session does not resend it. The former **Ask agent**
-button and paste flow are removed; users launch agents through the terminal's **Start** action.
-Installed git-hook helpers and BERT download scripts remain internal. They never appear in the user library. Signed entries are visible; unsigned and modified entries are behind a collapsed **Unsigned scripts** section.
+omit the brief, and reconnecting an existing session does not resend it.
+Installed git-hook helpers and BERT download scripts remain internal. They never appear in the user library. Signed entries are visible; unsigned and modified entries are behind a collapsed **Unsigned scripts** group.
 
 **Nav Automation launcher** (the nav "Launch" flyout; preferences persist per install in GlobalCache):
 

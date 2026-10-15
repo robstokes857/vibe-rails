@@ -83,6 +83,94 @@ public sealed class TerminalTabsRoutesTests
         finally { await app.StopAsync(CancellationToken.None); }
     }
 
+    // VIBE-159: the script workbench's agent pane owns its tab, so the Terminals page can leave it
+    // out of the strip and the pane can find it again.
+    [Fact]
+    public async Task CreateTab_WithOwner_CreatesAnOwnedTab_AndAnOrdinaryTabWithoutOne()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var tabHost = new Mock<ITerminalTabHostService>(MockBehavior.Strict);
+        tabHost.Setup(h => h.CreateTabAsync("script-agent:reg-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TerminalTabStatusResponse("owned", Created, false, Owner: "script-agent:reg-1"));
+        tabHost.Setup(h => h.CreateTabAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TerminalTabStatusResponse("plain", Created, false));
+        tabHost.Setup(h => h.CreateTabAsync("bad\u0007owner", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ArgumentException("A terminal tab owner cannot contain control characters."));
+
+        await using var app = await StartAsync(tabHost.Object, new Mock<IBoardStore>(MockBehavior.Strict).Object, ct);
+
+        using (var response = await SendAsync(app, HttpMethod.Post, "/api/v1/terminal/tabs?owner=script-agent%3Areg-1", ct))
+        {
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+            Assert.Equal("owned", json.RootElement.GetProperty("tabId").GetString());
+            Assert.Equal("script-agent:reg-1", json.RootElement.GetProperty("owner").GetString());
+        }
+        using (var response = await SendAsync(app, HttpMethod.Post, "/api/v1/terminal/tabs", ct))
+        {
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+            Assert.Equal("plain", json.RootElement.GetProperty("tabId").GetString());
+            Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("owner").ValueKind);
+        }
+        using (var response = await SendAsync(app, HttpMethod.Post, "/api/v1/terminal/tabs?owner=bad%07owner", ct))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+        tabHost.Verify(h => h.CreateTabAsync(It.IsAny<CancellationToken>()), Times.Once);
+        tabHost.Verify(h => h.CreateTabAsync("script-agent:reg-1", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("   ", null)]
+    [InlineData("  script-agent:reg-1 ", "script-agent:reg-1")]
+    public void NormalizeOwner_TrimsAndTreatsBlankAsNoOwner(string? owner, string? expected)
+        => Assert.Equal(expected, TerminalTabHostService.NormalizeOwner(owner));
+
+    [Theory]
+    [InlineData("script-agent:\nreg-1")]
+    [InlineData("a\u001bb")]
+    public void NormalizeOwner_RefusesControlCharacters(string owner)
+        => Assert.Throws<ArgumentException>(() => TerminalTabHostService.NormalizeOwner(owner));
+
+    [Fact]
+    public void NormalizeOwner_RefusesAnOverlongLabel()
+    {
+        Assert.Equal(new string('a', TerminalTabHostService.MaxOwnerLength),
+            TerminalTabHostService.NormalizeOwner(new string('a', TerminalTabHostService.MaxOwnerLength)));
+        Assert.Throws<ArgumentException>(() =>
+            TerminalTabHostService.NormalizeOwner(new string('a', TerminalTabHostService.MaxOwnerLength + 1)));
+    }
+
+    private static async Task<WebApplication> StartAsync(ITerminalTabHostService tabHost, IBoardStore board, CancellationToken ct)
+    {
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.Logging.ClearProviders();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Services.AddSingleton(tabHost);
+        builder.Services.AddSingleton(board);
+        var auth = new Mock<IAuthService>();
+        auth.Setup(a => a.ValidateToken(It.IsAny<string?>())).Returns((string? token) => token == "session-token");
+        auth.Setup(a => a.ValidateTabToken(It.IsAny<string?>())).Returns((string? token) => token == "tab-token");
+        builder.Services.AddSingleton(auth.Object);
+        builder.Services.ConfigureHttpJsonOptions(options =>
+            options.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonSerializerContext.Default));
+        var app = builder.Build();
+        app.UseMiddleware<CookieAuthMiddleware>();
+        TerminalTabsRoutes.Map(app);
+        await app.StartAsync(ct);
+        return app;
+    }
+
+    private static async Task<HttpResponseMessage> SendAsync(WebApplication app, HttpMethod method, string path, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(method, new Uri(new Uri(app.Urls.First()), path));
+        request.Headers.Add("viberails_session", "session-token");
+        request.Headers.Add("viberails_tab", "tab-token");
+        return await Client.SendAsync(request, ct);
+    }
+
     [Fact]
     public async Task WithBoardCards_BoardStoreFailure_KeepsEveryTab()
     {

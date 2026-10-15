@@ -118,8 +118,139 @@ test('One controller renders the Agents page and the Automations page', () => {
     assert.match(automations, /data-view="automations" data-mode="automations"/);
     assert.match(automations, /<h1 class="jobs-page-title">Automations<\/h1>/);
     assert.match(automations, /id="jobs-list-title">Your automations/);
-    assert.match(automations, /New automation\s*<\/button>/);
-    assert.match(automations, /data-python-scripts-root/);
+    // VIBE-159: one list and one New for scripts and workflows; no separate Scripts section.
+    assert.doesNotMatch(automations, /data-python-scripts-root|python-scripts-section|id="python-scripts-title"/);
+    assert.equal(automations.match(/data-jobs-list/g).length, 1);
+    assert.match(automations, /class="jobs-grid automations-list" data-jobs-list data-automations-list data-filter="all" data-python-scripts-drop/);
+    const newMenu = automations.slice(automations.indexOf('data-automations-new'), automations.indexOf('</details>', automations.indexOf('data-automations-new')));
+    assert.match(newMenu, /data-python-scripts-action="new"[\s\S]*<strong>Script<\/strong>[\s\S]*data-job-action="new"[\s\S]*<strong>Workflow<\/strong>/);
+    const header = automations.slice(automations.indexOf('jobs-page-actions'), automations.indexOf('</header>'));
+    assert.match(header, /data-job-action="import-from-repository"[\s\S]*From repository…[\s\S]*data-job-action="import-recipe"[\s\S]*Recipe file…[\s\S]*data-python-scripts-action="import"[\s\S]*Script from disk…/);
+    assert.equal(header.match(/class="btn /g).length, 2, 'two header buttons: Import and New');
+    // The list toolbar holds the script library's PIN and refresh.
+    const heading = automations.slice(automations.indexOf('jobs-section-heading'), automations.indexOf('data-automations-list'));
+    assert.match(heading, /data-automations-filter="all" aria-pressed="true"[\s\S]*data-automations-filter="workflows"[\s\S]*data-automations-filter="scripts"/);
+    assert.match(heading, /data-python-scripts-action="pin"[\s\S]*data-python-scripts-pin-label[\s\S]*data-python-scripts-action="refresh"/);
+    assert.match(heading, /<span data-jobs-count>0 workflows<\/span> · <span data-python-scripts-count>0 scripts<\/span>/);
+});
+
+test('A workflow script step picks one of your scripts in this repository, then the repository\'s other scripts', () => {
+    const app = createApp();
+    app.data = { configs: { rootPath: 'C:\\src\\repo' } };
+    const controller = new JobController(app);
+    controller.editorScriptChoices = {
+        loading: false,
+        hasMore: true,
+        library: [
+            { name: 'id-1', fileName: 'lint.ps1', displayName: 'Lint', path: 'C:\\src\\repo\\scripts\\lint.ps1' },
+            { name: 'id-2', fileName: 'deploy.sh', displayName: 'deploy.sh', path: 'C:\\Users\\me\\.vibe_rails\\scripts\\UserScripts\\repo\\deploy.sh' }
+        ],
+        repository: [
+            { path: 'scripts/lint.ps1', runtime: 1, approved: false, unavailableReason: null },
+            { path: 'tools/check.py', runtime: 0, approved: true, unavailableReason: null },
+            { path: 'tools/link.sh', runtime: 2, approved: false, unavailableReason: 'Links are not allowed' }
+        ]
+    };
+    const action = { id: 'a1', kind: 1, scriptPath: 'scripts/lint.ps1', scriptRuntime: 1, arguments: [] };
+
+    const html = controller.renderScriptStepPicker(action, 'a1');
+    const yours = html.slice(html.indexOf('label="Your scripts"'), html.indexOf('label="Other scripts in this repository"'));
+    assert.match(yours, /<option value="scripts\/lint\.ps1" selected>Lint — scripts\/lint\.ps1<\/option>/);
+    assert.match(yours, /<option value="" disabled>deploy\.sh — outside this repository<\/option>/);
+    const others = html.slice(html.indexOf('label="Other scripts in this repository"'));
+    assert.doesNotMatch(others, /scripts\/lint\.ps1/, 'a library script is listed once');
+    assert.match(others, /<option value="tools\/check\.py">tools\/check\.py<\/option>/);
+    assert.match(others, /<option value="tools\/link\.sh" disabled>tools\/link\.sh — Links are not allowed<\/option>/);
+    assert.match(html, /data-workflow-action="new-script"[\s\S]*New script…[\s\S]*data-workflow-action="browse-script"[\s\S]*Browse repository…/);
+    assert.match(html, /Not every repository script is listed/);
+
+    // A file chosen with Browse… (absolute, inside the repository) stays selected even when unlisted.
+    action.scriptPath = 'C:\\src\\repo\\build\\gen.py';
+    assert.match(controller.renderScriptStepPicker(action, 'a1'), /<option value="C:\\src\\repo\\build\\gen\.py" selected>/);
+    assert.equal(controller.repositoryRelativePath('C:\\SRC\\repo\\build\\gen.py'), 'build/gen.py');
+    assert.equal(controller.repositoryRelativePath('D:\\elsewhere\\x.py'), null);
+    assert.equal(controller.repositoryRelativePath('./scripts/x.py'), 'scripts/x.py');
+
+    // Choosing sets the path and the matching runtime.
+    controller.editorActions = [action];
+    controller.renderEditorActions = () => {};
+    const select = { value: 'tools/check.py', dataset: { actionField: 'scriptChoice' } };
+    const row = { dataset: { jobActionId: 'a1' } };
+    controller.updateEditorActionField({ type: 'input', target: { ...select, closest: () => row } });
+    assert.equal(action.scriptPath, 'C:\\src\\repo\\build\\gen.py', 'input alone does not commit the choice');
+    controller.updateEditorActionField({ type: 'change', target: { ...select, closest: () => row } });
+    assert.equal(action.scriptPath, 'tools/check.py');
+    assert.equal(action.scriptRuntime, 0);
+});
+
+test('New script… in a workflow step creates the script inside this repository and puts it in the step', async () => {
+    const app = createApp();
+    app.data = { configs: { rootPath: 'C:\\src\\repo' } };
+    const controller = new JobController(app);
+    const action = { id: 'a1', kind: 1, scriptPath: '', scriptRuntime: 0, arguments: [] };
+    controller.editorActions = [action];
+    controller.editorRoot = {};
+    let renders = 0;
+    controller.renderEditorActions = () => { renders += 1; };
+    const requested = [];
+    controller.pythonScripts.newScript = async (options) => { requested.push(options); return 'new-id'; };
+    controller.pythonScripts.scriptByName = () => ({ name: 'new-id', displayName: 'Check', path: 'C:\\src\\repo\\scripts\\check.sh' });
+
+    await controller.newScriptForStep(action);
+    assert.deepEqual(requested, [{ directory: 'C:\\src\\repo\\scripts' }]);
+    assert.equal(action.scriptPath, 'scripts/check.sh');
+    assert.equal(action.scriptRuntime, 2);
+    assert.equal(controller.editorScriptChoices, null, 'the lists reload with the new script');
+    assert.equal(renders, 1);
+
+    // Saved outside the repository (the user changed the folder): the step is left alone.
+    controller.pythonScripts.scriptByName = () => ({ name: 'new-id', displayName: 'Elsewhere', path: 'D:\\tmp\\x.py' });
+    const errors = [];
+    app.showError = message => errors.push(message);
+    await controller.newScriptForStep(action);
+    assert.equal(action.scriptPath, 'scripts/check.sh');
+    assert.match(errors[0], /Elsewhere was saved outside this repository/);
+
+    // Cancelling or closing the editor meanwhile changes nothing.
+    controller.pythonScripts.newScript = async () => { controller.editorRoot = null; return 'new-id'; };
+    controller.pythonScripts.scriptByName = () => ({ name: 'new-id', path: 'C:\\src\\repo\\scripts\\other.py' });
+    await controller.newScriptForStep(action);
+    assert.equal(action.scriptPath, 'scripts/check.sh');
+});
+
+test('The Automations list puts workflows and scripts in one list, with both collapsed groups last', () => {
+    const controller = new JobController(createApp());
+    controller.mode = 'automations';
+    controller.jobs = [
+        { id: 1, name: 'Lint', enabled: true, actions: [{ kind: 3, arguments: ['unpushed'] }], triggers: [] },
+        { id: 2, name: 'Paused', enabled: false, actions: [{ kind: 2, arguments: ['unpushed'] }], triggers: [] }
+    ];
+    controller.pythonScripts.state = { pinConfigured: true, scriptsDirectory: '/scripts', scripts: [
+        { id: 'a.py', name: 'a.py', fileName: 'a.py', status: 'approved', scope: 'repo' },
+        { id: 'b.sh', name: 'b.sh', fileName: 'b.sh', status: 'modified', scope: 'global' }
+    ] };
+
+    const html = controller.renderJobsListHtml();
+    const at = marker => { const index = html.indexOf(marker); assert.ok(index >= 0, `missing ${marker}`); return index; };
+    assert.ok(at('<h3>Lint</h3>') < at('data-python-script="a.py"'), 'enabled workflows, then signed scripts');
+    assert.ok(at('data-python-script="a.py"') < at('data-unsigned-scripts'), 'then the unsigned scripts group');
+    assert.ok(at('data-unsigned-scripts') < at('data-disabled-jobs'), 'then the disabled workflows group');
+    assert.ok(at('data-disabled-jobs') < at('<h3>Paused</h3>'));
+    assert.match(html, /data-unsigned-scripts data-entry-kind="script"/);
+    assert.match(html, /data-disabled-jobs data-entry-kind="workflow"/);
+
+    // Nothing at all: one empty state offering both kinds, not two.
+    controller.jobs = [];
+    controller.pythonScripts.state.scripts = [];
+    const empty = controller.renderJobsListHtml();
+    assert.equal(empty.match(/class="jobs-empty/g).length, 1);
+    assert.match(empty, /data-python-scripts-action="new"[\s\S]*New script[\s\S]*data-job-action="new"[\s\S]*New workflow/);
+
+    // Scripts still loading never claim the page is empty, and a failed load says so.
+    controller.pythonScripts.state = null;
+    assert.match(controller.renderJobsListHtml(), /Loading scripts…/);
+    controller.pythonScripts._loadFailed = true;
+    assert.match(controller.renderJobsListHtml(), /Could not load scripts\. Refresh to try again\./);
 });
 
 test('Navigation offers Agents and Automations, and the Rules page stays out of it', () => {

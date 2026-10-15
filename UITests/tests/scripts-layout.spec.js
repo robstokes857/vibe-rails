@@ -16,7 +16,8 @@ async function openScripts(page, { expandSigned = true } = {}) {
     const script = { name: 'example.py', path: 'C:/fixture/scripts/example.py',
         status: 'approved', sizeBytes: 123, modifiedUtc: '2026-10-03T01:00:00Z' };
     const scripts = Array.from({ length: 40 }, (_, i) => i ? { ...script, name: `script-${i}.py` } : script);
-    const agent = { tabId: 'agent', sessionId: 'agent-session', cli: 'codex',
+    // The script's own agent tab: the workbench pane reattaches to it (VIBE-159).
+    const agent = { tabId: 'agent', sessionId: 'agent-session', cli: 'codex', owner: 'script-agent:example.py',
         hasActiveSession: true, workingDirectory: 'C:/fixture/scripts' };
     await page.route('**/api/v1/**', route => {
         const path = new URL(route.request().url()).pathname;
@@ -40,7 +41,7 @@ async function openScripts(page, { expandSigned = true } = {}) {
         };
         return route.fulfill({ json: responses[path] || {} });
     });
-    await page.goto('/?view=jobs');
+    await page.goto('/?view=automations');
     await expect(page.locator('.python-script-row')).toHaveCount(40);
     return scripts;
 }
@@ -117,10 +118,10 @@ test('terminal prompt stays in the viewport under the top navigation', async ({ 
         await page.locator('.python-script-name').first().click();
         await expect(page.locator('.monaco-editor')).toBeVisible();
         await expect.poll(() => page.evaluate(() =>
-            window.app.terminalController.manager.getActiveTab()?.instance?.hasOpenSocket())).toBe(true);
+            window.app.pythonScriptWorkbench.agentPane?.tab?.instance?.hasOpenSocket())).toBe(true);
         // Put a CLI-style prompt on the last row of the real xterm, then resize the window.
         await page.evaluate(() => {
-            const terminal = window.app.terminalController.manager.getActiveTab().instance.terminal;
+            const terminal = window.app.pythonScriptWorkbench.agentPane.tab.instance.terminal;
             terminal.write(`\x1b[${terminal.rows};1H> Enter a request`);
         });
         await expectTerminalFits(page);
@@ -131,7 +132,7 @@ test('terminal prompt stays in the viewport under the top navigation', async ({ 
         await expectTerminalFits(page);
         await page.screenshot({ path: testInfo.outputPath('workbench-top.png') });
         await page.locator('[data-action="go-back"]').click();
-        await expect(page.locator('[data-python-scripts-root]')).toBeVisible();
+        await expect(page.locator('[data-automations-list]')).toBeVisible();
         expect(await page.evaluate(() => document.body.classList.contains('vb-python-workbench-active'))).toBe(false);
 });
 
@@ -152,7 +153,7 @@ test('script actions align and language guidance stays readable on narrow screen
     await group.locator(':scope > summary').click();
     await expect(page.locator('[data-python-script="example.py"]')).toBeHidden();
     await expect(page.locator('[data-python-script="script-1.py"]')).toBeVisible();
-    const actions = page.locator('.python-scripts-heading-actions');
+    const actions = page.locator('.automations-toolbar');
     const buttons = actions.locator('button');
     const boxes = await buttons.evaluateAll(nodes => nodes.map(node => {
         const rect = node.getBoundingClientRect();
@@ -160,8 +161,8 @@ test('script actions align and language guidance stays readable on narrow screen
     }));
     expect(new Set(boxes.map(box => Math.round(box.top))).size).toBe(1);
     expect(new Set(boxes.map(box => Math.round(box.height))).size).toBe(1);
-    await expect(page.locator('.python-scripts-section')).toContainText('PowerShell');
-    await expect(page.locator('.python-scripts-section')).toContainText('Bash');
+    await expect(page.locator('.automations-panel')).toContainText('PowerShell');
+    await expect(page.locator('.automations-panel')).toContainText('Git Bash');
     await page.screenshot({ path: testInfo.outputPath('scripts-desktop.png') });
     await page.setViewportSize({ width: 375, height: 812 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
@@ -187,7 +188,8 @@ test('New script says pwsh, bash or python, keeps the extension in step and open
     await page.route('**/api/v1/python-scripts/content*', route =>
         route.fulfill({ json: { ...deploy, version: 'one', content: created[0]?.content || '' } }));
 
-    await page.locator('[data-python-scripts-action="new"]').first().click();
+    await page.locator('[data-automations-new]').click();
+    await page.locator('.jobs-new-menu [data-python-scripts-action="new"]').click();
     const modal = page.locator('.python-scripts-pin-modal');
     await expect(modal.locator('.modal-title')).toHaveText('New script');
     await expect(modal).toContainText('Choose pwsh, bash, or python');
@@ -263,7 +265,8 @@ test('Add from disk keeps the selected path and exposes display, scope and run P
     await page.evaluate(() => {
         window.app.pickFileSystemEntry = async () => ({ path: 'C:/fixture/repo/launch.ps1', name: 'launch.ps1' });
     });
-    await page.getByRole('button', { name: 'Add from disk' }).first().click();
+    await page.locator('.jobs-page-menu > summary', { hasText: 'Import' }).click();
+    await page.getByRole('menuitem', { name: 'Script from disk…' }).click();
     const modal = page.locator('.python-scripts-pin-modal');
     await expect(modal.locator('[data-pin-field="displayName"]')).toHaveValue('launch.ps1');
     await modal.locator('[data-pin-field="displayName"]').fill('Launch Front');

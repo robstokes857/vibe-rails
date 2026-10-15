@@ -21,14 +21,23 @@ public static class TerminalTabsRoutes
             return Results.Ok(new TerminalTabListResponse(withCards, tabHost.MaxTabs));
         }).WithName("ListTerminalTabs");
 
+        // ?owner= marks a tab that belongs to one view (the script workbench's agent pane); the
+        // Terminals page leaves owned tabs out of its strip. Without it this is an ordinary tab.
         app.MapPost("/api/v1/terminal/tabs", async (
             ITerminalTabHostService tabHost,
+            string? owner,
             CancellationToken cancellationToken) =>
         {
             try
             {
-                var tab = await tabHost.CreateTabAsync(cancellationToken);
+                var tab = string.IsNullOrWhiteSpace(owner)
+                    ? await tabHost.CreateTabAsync(cancellationToken)
+                    : await tabHost.CreateTabAsync(owner, cancellationToken);
                 return Results.Ok(tab);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new ErrorResponse(ex.Message));
             }
             catch (InvalidOperationException ex)
             {

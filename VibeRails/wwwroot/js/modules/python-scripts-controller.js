@@ -46,7 +46,7 @@ const STATUS_META = PYTHON_SCRIPT_STATUS_META;
 export { isPythonRunOk, formatPythonRunOutput, pythonRunStatus };
 
 /**
- * "Scripts" section of the Automation page: single-file pwsh (.ps1), bash (.sh) or
+ * The scripts in the Automations page's one list (VIBE-159): single-file pwsh (.ps1), bash (.sh) or
  * python (.py) scripts from ~/.vibe_rails/scripts — the extension picks the interpreter
  * (script-runtimes.js) — gated by hash pinning. Approving ("signing") always prompts
  * for the PIN — deliberately no unlocked session — and Run is only offered while the
@@ -91,44 +91,17 @@ export class PythonScriptsController {
         };
     }
 
-    async mount(root) {
+    /**
+     * Binds the Scripts actions to markup the page already drew in `root` (the toolbar's PIN
+     * label, the count, the default folder and a drop target). With `onListChanged` (the
+     * Automations page, VIBE-159) the page renders the rows from `listParts()` in its one list,
+     * and this calls back whenever they change; without it the rows go into
+     * `[data-python-scripts-list]`.
+     */
+    async mount(root, { onListChanged = null } = {}) {
         this.root = root;
+        this._onListChanged = typeof onListChanged === 'function' ? onListChanged : null;
         if (!root) return;
-        root.innerHTML = `
-            <div class="jobs-section-heading">
-                <div class="python-scripts-heading-copy">
-                    <div class="jobs-section-title-row">
-                        <h2 id="python-scripts-title"><i class="fa-solid fa-file-code me-2" aria-hidden="true"></i>Scripts</h2>
-                        <span class="jobs-count" data-python-scripts-count>0 scripts</span>
-                    </div>
-                    <p>Edit single-file pwsh, bash, or python scripts with an agent terminal beside the editor. Sign with your PIN to run.</p>
-                    <p class="python-scripts-directory">Default folder: <code data-python-scripts-dir></code></p>
-                </div>
-                <div class="python-scripts-heading-actions">
-                    <button class="btn btn-sm btn-primary" type="button" data-python-scripts-action="new">
-                        <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>New script
-                    </button>
-                    ${this._canImportFromHost() ? `<button class="btn btn-sm btn-outline-secondary" type="button" data-python-scripts-action="import">
-                        <i class="fa-solid fa-file-import me-1" aria-hidden="true"></i>Add from disk
-                    </button>` : ''}
-                    <div class="python-scripts-settings-actions">
-                        <button class="btn btn-sm btn-outline-secondary" type="button" data-python-scripts-action="pin">
-                            <i class="fa-solid fa-key me-1" aria-hidden="true"></i><span data-python-scripts-pin-label>Set PIN</span>
-                        </button>
-                        <button class="btn btn-sm btn-outline-secondary" type="button" data-python-scripts-action="refresh"
-                                title="Refresh" aria-label="Refresh the script list">
-                            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
-                        </button>
-                    </div>
-                </div>
-            </div>
-            <p class="python-scripts-runtime-help">The extension picks the interpreter: <strong>pwsh</strong> (PowerShell 7)
-                runs <code>.ps1</code>, <strong>bash</strong> runs <code>.sh</code> (Git Bash on Windows), and
-                <strong>python</strong> runs <code>.py</code>. Add a file from disk to run it where it lives. Choose Repo to show it only here, or Global for every repository.</p>
-            <div class="python-scripts-list" data-python-scripts-list>
-                <div class="jobs-empty" role="status"><span class="spinner-border spinner-border-sm"></span> Loading scripts…</div>
-            </div>`;
-
         root.addEventListener('click', (event) => this._onClick(event));
         root.addEventListener('keydown', (event) => this._onKeydown(event));
         // Tabbing out of an open row menu closes it (a click elsewhere is handled below).
@@ -138,7 +111,7 @@ export class PythonScriptsController {
         root.addEventListener('toggle', (event) => this._onOutputToggle(event), true);
         // A row menu is a popup: a click anywhere else on the page dismisses it.
         document.addEventListener('click', this._onDocumentClick, true);
-        this._bindDropTarget(root.querySelector('[data-python-scripts-list]'));
+        this._bindDropTarget(root.querySelector('[data-python-scripts-drop]') || root.querySelector('[data-python-scripts-list]'));
         // A script edited in VS Code (or any other editor) changes on disk behind our back;
         // coming back to this window is the natural moment to notice.
         window.addEventListener('focus', this._onWindowFocus);
@@ -153,6 +126,7 @@ export class PythonScriptsController {
         window.removeEventListener('focus', this._onWindowFocus);
         document.removeEventListener('visibilitychange', this._onWindowFocus);
         this.root = null;
+        this._onListChanged = null;
         this.state = null;
         this._lastListHtml = null;
     }
@@ -160,8 +134,10 @@ export class PythonScriptsController {
     async refresh({ quiet = false } = {}) {
         try {
             const state = await this.app.apiCall(API, 'GET', null, { showLoading: false });
+            this._loadFailed = false;
             this._applyState(state);
         } catch (error) {
+            this._loadFailed = true;
             this._applyState(null);
             if (!quiet) this.app.showError(error?.message || 'Could not load scripts.');
         }
@@ -252,13 +228,50 @@ export class PythonScriptsController {
     }
 
 
+    /**
+     * The rows as the Automations list places them: signed scripts among the entries, the rest
+     * behind the collapsed Unsigned scripts group (closed until opened, kept open across rebuilds
+     * by the page).
+     */
+    listParts() {
+        const scripts = this.state?.scripts || [];
+        const unsigned = scripts.filter(script => script.status !== 'approved');
+        const signed = scripts.filter(script => script.status === 'approved');
+        return {
+            loaded: Boolean(this.state),
+            failed: !this.state && this._loadFailed === true,
+            count: scripts.length,
+            signedHtml: signed.map(script => this._renderRow(script)).join(''),
+            unsignedHtml: unsigned.length ? `
+                    <details class="jobs-collapsible-list" data-unsigned-scripts data-entry-kind="script">
+                        <summary><i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+                            <span>Unsigned scripts</span><span class="jobs-count">${unsigned.length}</span>
+                        </summary>
+                        <div class="python-scripts-list">${unsigned.map(script => this._renderRow(script)).join('')}</div>
+                    </details>` : ''
+        };
+    }
+
     _render() {
         const root = this.root;
         if (!root) return;
-        const list = root.querySelector('[data-python-scripts-list]');
         const count = root.querySelector('[data-python-scripts-count]');
         const dir = root.querySelector('[data-python-scripts-dir]');
         const pinLabel = root.querySelector('[data-python-scripts-pin-label]');
+        if (this.state) {
+            const total = this.state.scripts?.length || 0;
+            if (count) count.textContent = `${total} ${total === 1 ? 'script' : 'scripts'}`;
+            if (dir) dir.textContent = this._defaultScriptDirectory();
+            if (pinLabel) pinLabel.textContent = this.state.pinConfigured ? 'Change PIN' : 'Set PIN';
+        }
+        // The Automations page owns the list and its render cache.
+        if (this._onListChanged) {
+            if (!this.state && count) count.textContent = 'scripts unavailable';
+            this._onListChanged();
+            return;
+        }
+
+        const list = root.querySelector('[data-python-scripts-list]');
         if (!list) return;
 
         if (!this.state) {
@@ -268,12 +281,7 @@ export class PythonScriptsController {
         }
 
         const scripts = this.state.scripts || [];
-        if (count) count.textContent = `${scripts.length} ${scripts.length === 1 ? 'script' : 'scripts'}`;
-        if (dir) dir.textContent = this._defaultScriptDirectory();
-        if (pinLabel) pinLabel.textContent = this.state.pinConfigured ? 'Change PIN' : 'Set PIN';
-
-        const unsigned = scripts.filter(script => script.status !== 'approved');
-        const signed = scripts.filter(script => script.status === 'approved');
+        const parts = this.listParts();
         const html = scripts.length === 0
             ? `<div class="jobs-empty python-scripts-empty">
                     <strong>No scripts yet</strong>
@@ -288,14 +296,7 @@ export class PythonScriptsController {
                         </button>` : ''}
                     </div>
                 </div>`
-            : (signed.length ? `<div class="python-scripts-list">${signed.map(script => this._renderRow(script)).join('')}</div>` : '')
-                + (unsigned.length ? `
-                    <details class="jobs-collapsible-list" data-unsigned-scripts>
-                        <summary><i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
-                            <span>Unsigned scripts</span><span class="jobs-count">${unsigned.length}</span>
-                        </summary>
-                        <div class="python-scripts-list">${unsigned.map(script => this._renderRow(script)).join('')}</div>
-                    </details>` : '');
+            : (parts.signedHtml ? `<div class="python-scripts-list">${parts.signedHtml}</div>` : '') + parts.unsignedHtml;
 
         // Re-assigning identical markup would close an open row menu (and restart the
         // spinner) on every background refresh.
@@ -555,7 +556,7 @@ export class PythonScriptsController {
      * Prompts for a name and creates the file from the template. Resolves with the new
      * script's registration ID, or null when cancelled/failed. Callers decide where to go next.
      */
-    async newScript() {
+    async newScript({ directory = null } = {}) {
         await this.ensureState();
         let displayEdited = false;
         const values = await this._promptForm({
@@ -578,8 +579,9 @@ export class PythonScriptsController {
                 placeholder: 'script.py',
                 autofocus: true
             }, ...this._libraryFields(this._uniqueName('script.py')), {
+                // A workflow step passes a folder inside its repository: it can only run files there.
                 key: 'directory', label: 'Save in folder', type: 'directory',
-                value: this._defaultScriptDirectory()
+                value: directory || this._defaultScriptDirectory()
             }],
             submitLabel: 'Create and edit',
             // The two fields describe one choice: picking bash renames script.py to

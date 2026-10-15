@@ -70,11 +70,13 @@ const PAGES = Object.freeze({
     automations: {
         viewId: 'automations',
         noun: 'automation',
+        // Scripts share this page's one list (VIBE-159); the Jobs in it are its workflows.
+        countNoun: 'workflow',
         title: 'Automations',
-        description: 'Scripts and checks that run without an LLM — on demand, on a schedule, around commits or from a Board lane.',
+        description: 'Scripts you write and sign, and workflows that run them with checks, without an LLM — on demand, on a schedule, around commits or from a Board lane.',
         newLabel: 'New automation',
         listTitle: 'Your automations',
-        listHint: 'Run, edit, pause or remove an automation from one place.',
+        listHint: 'Run, edit, sign, pause or remove a script or workflow from one place.',
         emptyTitle: 'No automations yet',
         emptyText: 'Run a repository script, VCA or a Code quality check on a timer, around commits or on demand.',
         emptyAction: 'Create your first automation',
@@ -188,7 +190,9 @@ export class JobController {
         this._lastJobsListHtml = null;
         this._lastRunsHtml = null;
         if (this.mode === 'automations') {
-            void this.pythonScripts.mount(this.root?.querySelector('[data-python-scripts-root]'));
+            // Scripts and workflows are one list: the Scripts controller keeps its actions on the
+            // page root and hands its rows to renderJobs instead of drawing a section of its own.
+            void this.pythonScripts.mount(this.root, { onListChanged: () => this.renderJobs() });
         }
         const root = this.root;
         await this.refreshAll();
@@ -247,6 +251,7 @@ export class JobController {
     renderPage() {
         const page = this.page;
         const plural = `${page.noun}s`;
+        const automations = this.mode === 'automations';
         return `
             <div class="view jobs-view" data-view="${page.viewId}" data-mode="${this.mode}">
                 <header class="jobs-page-header">
@@ -254,7 +259,7 @@ export class JobController {
                         <h1 class="jobs-page-title">${page.title}</h1>
                         <p>${page.description}</p>
                     </div>
-                    <div class="jobs-page-actions" role="group" aria-label="Add an ${page.noun}">
+                    ${automations ? this.renderAutomationsHeaderActions() : `<div class="jobs-page-actions" role="group" aria-label="Add an ${page.noun}">
                         <button class="btn btn-outline-secondary" type="button" data-job-action="import-from-repository"
                                 title="Copy an ${page.noun} from another repository on this machine">
                             <i class="fa-solid fa-code-branch me-1" aria-hidden="true"></i>Import from repository
@@ -266,26 +271,33 @@ export class JobController {
                         <button class="btn btn-primary" type="button" data-job-action="new">
                             <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>${page.newLabel}
                         </button>
-                    </div>
+                    </div>`}
                 </header>
 
-                <section class="jobs-section jobs-panel" aria-labelledby="jobs-list-title">
+                <section class="jobs-section jobs-panel${automations ? ' automations-panel' : ''}" aria-labelledby="jobs-list-title">
                     <div class="jobs-section-heading">
                         <div>
                             <div class="jobs-section-title-row">
                                 <h2 id="jobs-list-title">${page.listTitle}</h2>
-                                <span class="jobs-count" data-jobs-count>0 ${plural}</span>
+                                ${automations
+                                    ? '<span class="jobs-count"><span data-jobs-count>0 workflows</span> · <span data-python-scripts-count>0 scripts</span></span>'
+                                    : `<span class="jobs-count" data-jobs-count>0 ${plural}</span>`}
                             </div>
                             <p>${page.listHint}</p>
                         </div>
+                        ${automations ? this.renderAutomationsListToolbar() : ''}
                     </div>
-                    <div class="jobs-grid" data-jobs-list>
+                    ${automations ? `<div class="jobs-grid automations-list" data-jobs-list data-automations-list data-filter="all" data-python-scripts-drop>
                         <div class="jobs-empty" role="status"><span class="spinner-border spinner-border-sm"></span> Loading ${plural}…</div>
                     </div>
+                    <p class="python-scripts-runtime-help">Scripts run with the interpreter their extension names:
+                        <strong>pwsh</strong> (PowerShell 7) runs <code>.ps1</code>, <strong>bash</strong> runs <code>.sh</code>
+                        (Git Bash on Windows) and <strong>python</strong> runs <code>.py</code>. Sign one with your PIN to run it.
+                        New scripts go to <code data-python-scripts-dir></code> unless you choose a folder; drop a file
+                        on the list to add it.</p>` : `<div class="jobs-grid" data-jobs-list>
+                        <div class="jobs-empty" role="status"><span class="spinner-border spinner-border-sm"></span> Loading ${plural}…</div>
+                    </div>`}
                 </section>
-
-                ${this.mode === 'automations' ? `<section class="jobs-section jobs-panel python-scripts-section" aria-labelledby="python-scripts-title"
-                         data-python-scripts-root></section>` : ''}
 
                 <details class="jobs-history-panel">
                     <summary>
@@ -308,7 +320,110 @@ export class JobController {
             </div>`;
     }
 
+    /**
+     * One New and one Import for everything on the Automations page (VIBE-159). Script items carry
+     * the Scripts controller's own actions, which it handles from the page root; workflow items
+     * are this controller's. Both menus are native <details>, like a card's More menu.
+     */
+    renderAutomationsHeaderActions() {
+        const fromDisk = this.pythonScripts._canImportFromHost()
+            ? `<button type="button" role="menuitem" data-python-scripts-action="import" title="Register a .ps1, .sh or .py file where it already lives">
+                    <i class="fa-solid fa-file-code" aria-hidden="true"></i>Script from disk…
+                </button>`
+            : '';
+        return `<div class="jobs-page-actions" role="group" aria-label="Add an automation">
+                <details class="job-more jobs-page-menu">
+                    <summary class="btn btn-outline-secondary" aria-haspopup="menu">
+                        <i class="fa-solid fa-file-import me-1" aria-hidden="true"></i>Import<i class="fa-solid fa-chevron-down ms-1" aria-hidden="true"></i>
+                    </summary>
+                    <div class="job-more-menu" role="menu" aria-label="Import">
+                        <button type="button" role="menuitem" data-job-action="import-from-repository" title="Copy an automation from another repository on this machine">
+                            <i class="fa-solid fa-code-branch" aria-hidden="true"></i>From repository…
+                        </button>
+                        <button type="button" role="menuitem" data-job-action="import-recipe" title="Import a .recipe.md file exported from VibeRails">
+                            <i class="fa-solid fa-file-lines" aria-hidden="true"></i>Recipe file…
+                        </button>
+                        ${fromDisk}
+                    </div>
+                </details>
+                <details class="job-more jobs-page-menu">
+                    <summary class="btn btn-primary" aria-haspopup="menu" data-automations-new>
+                        <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>New<i class="fa-solid fa-chevron-down ms-1" aria-hidden="true"></i>
+                    </summary>
+                    <div class="job-more-menu jobs-new-menu" role="menu" aria-label="New">
+                        <button type="button" role="menuitem" data-python-scripts-action="new">
+                            <i class="fa-solid fa-file-code" aria-hidden="true"></i>
+                            <span><strong>Script</strong><small>A pwsh, bash or python file, written with an agent beside the editor. Sign it, then run it.</small></span>
+                        </button>
+                        <button type="button" role="menuitem" data-job-action="new">
+                            <i class="fa-solid fa-list-check" aria-hidden="true"></i>
+                            <span><strong>Workflow</strong><small>Scripts and checks (VCA, Code quality) in order: on demand, on a schedule, around commits or from a Board lane.</small></span>
+                        </button>
+                    </div>
+                </details>
+            </div>`;
+    }
+
+    renderAutomationsListToolbar() {
+        const filter = (value, label) =>
+            `<button class="btn btn-sm btn-outline-secondary" type="button" data-automations-filter="${value}" aria-pressed="${value === 'all'}">${label}</button>`;
+        return `<div class="automations-toolbar">
+                <div class="btn-group automations-filter" role="group" aria-label="Show">
+                    ${filter('all', 'All')}${filter('workflows', 'Workflows')}${filter('scripts', 'Scripts')}
+                </div>
+                <button class="btn btn-sm btn-outline-secondary" type="button" data-python-scripts-action="pin"
+                        title="The signing PIN approves scripts to run">
+                    <i class="fa-solid fa-key me-1" aria-hidden="true"></i><span data-python-scripts-pin-label>Set PIN</span>
+                </button>
+                <button class="btn btn-sm btn-outline-secondary" type="button" data-python-scripts-action="refresh"
+                        title="Refresh" aria-label="Refresh the script list">
+                    <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+                </button>
+            </div>`;
+    }
+
+    setAutomationsFilter(value) {
+        const list = this.root?.querySelector('[data-automations-list]');
+        if (!list || !['all', 'workflows', 'scripts'].includes(value)) return;
+        list.dataset.filter = value;
+        this.root.querySelectorAll('[data-automations-filter]').forEach(button =>
+            button.setAttribute('aria-pressed', String(button.dataset.automationsFilter === value)));
+    }
+
+    closePageMenus(except = null) {
+        this.root?.querySelectorAll('.jobs-page-menu[open]').forEach(menu => {
+            if (menu !== except) menu.removeAttribute('open');
+        });
+    }
+
     bindPageActions() {
+        // A pick, a click elsewhere or Escape closes the New / Import menus.
+        this.root?.addEventListener('click', event => {
+            const menu = event.target.closest?.('.jobs-page-menu');
+            if (menu && event.target.closest('[role="menuitem"]')) menu.removeAttribute('open');
+            this.closePageMenus(menu);
+            const filter = event.target.closest?.('[data-automations-filter]');
+            if (filter) this.setAutomationsFilter(filter.dataset.automationsFilter);
+        });
+        this.root?.addEventListener('keydown', event => {
+            const menu = event.target.closest?.('.jobs-page-menu[open]');
+            if (!menu) return;
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                menu.removeAttribute('open');
+                menu.querySelector('summary')?.focus();
+                return;
+            }
+            // Arrow keys move through the items, from the toggle too.
+            if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+            const items = [...menu.querySelectorAll('[role="menuitem"]')];
+            if (items.length === 0) return;
+            event.preventDefault();
+            const current = items.indexOf(event.target.closest('[role="menuitem"]'));
+            const step = event.key === 'ArrowDown' ? 1 : -1;
+            const next = current < 0 ? (step > 0 ? 0 : items.length - 1) : (current + step + items.length) % items.length;
+            items[next].focus();
+        });
         this.root?.addEventListener('click', async event => {
             const actionElement = event.target.closest('[data-job-action]');
             if (!actionElement) return;
@@ -449,15 +564,18 @@ export class JobController {
         const target = this.root?.querySelector('[data-jobs-list]');
         const count = this.root?.querySelector('[data-jobs-count]');
         const total = this.pageEntries().length;
-        if (count) count.textContent = `${total} ${total === 1 ? this.page.noun : `${this.page.noun}s`}`;
+        const noun = this.page.countNoun || this.page.noun;
+        if (count) count.textContent = `${total} ${total === 1 ? noun : `${noun}s`}`;
         if (!target) return;
         const html = this.renderJobsListHtml();
         // The 5s poll calls this constantly. Only touch the DOM when the markup actually
         // changed (data or a countdown label), so hover/focus and a busy "Run now" button
         // aren't wiped by an identical re-render.
         if (html === this._lastJobsListHtml) return;
+        // Nor while a row menu is open: the next poll repaints once it closes.
+        if (this.root.querySelector('.python-script-menu:not([hidden]), [data-jobs-list] .job-more[open]')) return;
         this._lastJobsListHtml = html;
-        const openGroups = ['[data-disabled-jobs]']
+        const openGroups = ['[data-disabled-jobs]', '[data-unsigned-scripts]']
             .filter(selector => this.root.querySelector(selector)?.open === true);
         target.innerHTML = html;
         for (const selector of openGroups) {
@@ -469,6 +587,7 @@ export class JobController {
     renderJobsListHtml() {
         const page = this.page;
         const entries = this.pageEntries();
+        if (this.mode === 'automations') return this.renderAutomationsListHtml(entries);
         if (entries.length === 0) {
             return `
                 <div class="jobs-empty jobs-empty-large">
@@ -491,6 +610,53 @@ export class JobController {
                     <span>${page.disabledTitle}</span><span class="jobs-count">${disabled.length}</span>
                 </summary>
                 <div>${disabled.map(render).join('')}</div>
+            </details>` : '');
+    }
+
+    /**
+     * The Automations page's one list (VIBE-159): enabled workflows and signed scripts, then
+     * the unsigned scripts and the disabled workflows behind their collapsed groups.
+     */
+    renderAutomationsListHtml(workflows) {
+        const scripts = this.pythonScripts.listParts();
+        if (workflows.length === 0 && scripts.loaded && scripts.count === 0) {
+            const fromDisk = this.pythonScripts._canImportFromHost()
+                ? `<button class="btn btn-sm btn-outline-secondary" type="button" data-python-scripts-action="import">
+                        <i class="fa-solid fa-file-import me-1" aria-hidden="true"></i>Script from disk
+                    </button>`
+                : '';
+            return `
+                <div class="jobs-empty jobs-empty-large automations-empty">
+                    <i class="fa-solid fa-list-check" aria-hidden="true"></i>
+                    <strong>No automations yet</strong>
+                    <span>Write a pwsh, bash or python script, or build a workflow that runs repository scripts and checks
+                        (VCA, Code quality). You can also drop a <code>.ps1</code>, <code>.sh</code> or <code>.py</code> file here.</span>
+                    <div class="python-scripts-empty-actions">
+                        <button class="btn btn-sm btn-primary" type="button" data-python-scripts-action="new">
+                            <i class="fa-solid fa-file-code me-1" aria-hidden="true"></i>New script
+                        </button>
+                        <button class="btn btn-sm btn-outline-primary" type="button" data-job-action="new">
+                            <i class="fa-solid fa-list-check me-1" aria-hidden="true"></i>New workflow
+                        </button>
+                        ${fromDisk}
+                    </div>
+                </div>`;
+        }
+        const enabled = workflows.filter(job => job.enabled === true);
+        const disabled = workflows.filter(job => job.enabled !== true);
+        return enabled.map(job => this.renderAutomationCard(job)).join('')
+            + scripts.signedHtml
+            + (scripts.loaded ? '' : scripts.failed
+                ? '<div class="jobs-empty" role="status" data-entry-kind="script">Could not load scripts. Refresh to try again.</div>'
+                : '<div class="jobs-empty" role="status" data-entry-kind="script"><span class="spinner-border spinner-border-sm"></span> Loading scripts…</div>')
+            + scripts.unsignedHtml
+            + (disabled.length ? `
+            <details class="jobs-collapsible-list" data-disabled-jobs data-entry-kind="workflow">
+                <summary>
+                    <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+                    <span>${this.page.disabledTitle}</span><span class="jobs-count">${disabled.length}</span>
+                </summary>
+                <div>${disabled.map(job => this.renderAutomationCard(job)).join('')}</div>
             </details>` : '');
     }
 
@@ -1131,6 +1297,7 @@ export class JobController {
         this.activeEditorPreferredTrigger = preferredTrigger;
         this.editorEnvironment = environment;
         this.editorCliSettings = cliSettings;
+        this.editorScriptChoices = null;
 
         const triggers = source.triggers || [];
         const scheduled = triggers.find(trigger => Number(trigger.kind) === TRIGGER.SCHEDULE);
@@ -1316,6 +1483,127 @@ export class JobController {
         target.onclick = event => { void this.handleEditorActionClick(event); };
 
         this.mountWorkerEditor();
+        if (this.editorActions.some(action => action.kind === JOB_ACTION.SCRIPT)) this.loadEditorScriptChoices();
+    }
+
+    /**
+     * What a script step can pick (VIBE-159): the script library and the repository's own script
+     * files, read once per open editor. A failed read leaves Browse repository… working.
+     */
+    loadEditorScriptChoices() {
+        if (this.editorScriptChoices) return;
+        const generation = this.editorRequestGeneration;
+        this.editorScriptChoices = { loading: true, library: [], repository: [], hasMore: false };
+        void (async () => {
+            const [catalog, library] = await Promise.all([
+                this.app.apiCall('/api/v1/jobs/scripts', 'GET', null, { showLoading: false }).catch(() => null),
+                this.pythonScripts.ensureState().catch(() => null)
+            ]);
+            if (generation !== this.editorRequestGeneration || !this.editorRoot) return;
+            this.editorScriptChoices = {
+                loading: false,
+                library: library?.scripts || [],
+                repository: catalog?.scripts || [],
+                hasMore: catalog?.hasMore === true
+            };
+            this.renderEditorActions();
+        })();
+    }
+
+    /** `path` relative to the open repository with forward slashes, or null when it lies outside. */
+    repositoryRelativePath(path) {
+        const file = String(path || '').replaceAll('\\', '/');
+        const root = String(this.currentProjectPath() || '').replaceAll('\\', '/').replace(/\/+$/, '');
+        if (!file || !root) return null;
+        if (!/^([a-z]:)?\//i.test(file)) return file.replace(/^\.\//, '');
+        return file.toLowerCase().startsWith(`${root.toLowerCase()}/`) ? file.slice(root.length + 1) : null;
+    }
+
+    /** The options a script step's picker offers, with the step's current file always among them. */
+    scriptStepChoices(action) {
+        const choices = this.editorScriptChoices || { loading: true, library: [], repository: [] };
+        const key = value => String(value || '').replaceAll('\\', '/').replace(/^\.\//, '').toLowerCase();
+        const current = key(this.repositoryRelativePath(action.scriptPath) ?? action.scriptPath);
+        const listed = new Set();
+        const yours = [];
+        const outside = [];
+        for (const script of choices.library) {
+            const label = script.displayName || script.fileName || script.name;
+            const relative = this.repositoryRelativePath(script.path);
+            if (!relative) {
+                outside.push({ value: '', label: `${label} — outside this repository`, disabled: true });
+                continue;
+            }
+            listed.add(key(relative));
+            yours.push({ value: relative, label: label === relative.split('/').pop() ? relative : `${label} — ${relative}` });
+        }
+        const repository = choices.repository
+            .filter(entry => !listed.has(key(entry.path)))
+            .map(entry => ({
+                value: entry.path,
+                label: entry.unavailableReason ? `${entry.path} — ${entry.unavailableReason}` : entry.path,
+                disabled: Boolean(entry.unavailableReason)
+            }));
+        repository.forEach(entry => listed.add(key(entry.value)));
+        const mark = item => ({ ...item, selected: Boolean(current) && !item.disabled && key(item.value) === current });
+        return {
+            loading: choices.loading,
+            hasMore: choices.hasMore === true,
+            current,
+            // A file chosen with Browse…, or one the lists do not reach, stays selectable.
+            unlisted: current && !listed.has(current) ? [{ value: action.scriptPath, label: action.scriptPath, selected: true }] : [],
+            groups: [['Your scripts', [...yours, ...outside].map(mark)], ['Other scripts in this repository', repository.map(mark)]]
+        };
+    }
+
+    renderScriptStepPicker(action, actionId) {
+        const choices = this.scriptStepChoices(action);
+        const option = item =>
+            `<option value="${this.escape(item.value)}"${item.selected ? ' selected' : ''}${item.disabled ? ' disabled' : ''}>${this.escape(item.label)}</option>`;
+        const groups = choices.groups.filter(([, items]) => items.length)
+            .map(([label, items]) => `<optgroup label="${this.escape(label)}">${items.map(option).join('')}</optgroup>`).join('');
+        return `
+            <div class="job-script-path-field">
+                <label class="form-label" for="job-script-${actionId}">Which script?</label>
+                <div class="job-script-picker">
+                    <select class="form-select" id="job-script-${actionId}" data-action-field="scriptChoice">
+                        <option value=""${choices.current ? '' : ' selected'} disabled>${choices.loading ? 'Loading scripts…' : 'Choose a script…'}</option>
+                        ${choices.unlisted.map(option).join('')}${groups}
+                    </select>
+                    <button class="btn btn-outline-secondary" type="button" data-workflow-action="new-script"><i class="fa-solid fa-plus me-1" aria-hidden="true"></i>New script…</button>
+                    <button class="btn btn-outline-secondary" type="button" data-workflow-action="browse-script">Browse repository…</button>
+                </div>
+                <small>A workflow runs a file inside this repository, as it was when you saved the workflow: save again after changing the script.${choices.hasMore ? ' Not every repository script is listed; use Browse repository… for the rest.' : ''}</small>
+            </div>`;
+    }
+
+    /** New script… creates a library script inside this repository and puts it in the step. */
+    async newScriptForStep(action) {
+        const project = this.currentProjectPath();
+        if (!action || !project) {
+            this.app.showError('Open VibeRails in a Git repository to add a script to a workflow.');
+            return;
+        }
+        const generation = this.editorRequestGeneration;
+        const separator = project.includes('\\') ? '\\' : '/';
+        const id = await this.pythonScripts.newScript({ directory: `${project.replace(/[\\/]+$/, '')}${separator}scripts` });
+        if (!id || generation !== this.editorRequestGeneration || !this.editorRoot) return;
+        const script = this.pythonScripts.scriptByName(id);
+        const path = this.repositoryRelativePath(script?.path);
+        if (!path) {
+            this.app.showError(`${script?.displayName || 'The new script'} was saved outside this repository, so a workflow cannot run it. Create it in a folder inside ${project}.`);
+            return;
+        }
+        this.setScriptStepPath(action, path);
+        this.editorScriptChoices = null;
+        this.renderEditorActions();
+    }
+
+    setScriptStepPath(action, path) {
+        action.scriptPath = path;
+        const extension = String(path).toLowerCase().match(/\.[^.\\/]+$/)?.[0];
+        const runtime = Object.entries(SCRIPT_RUNTIME_META).find(([, meta]) => meta.extension === extension)?.[0];
+        if (runtime !== undefined) action.scriptRuntime = Number(runtime);
     }
 
     renderEditorAction(action, index) {
@@ -1345,13 +1633,9 @@ export class JobController {
 
         return `
             <article class="job-action-card" data-job-action-id="${actionId}" data-kind="script">
-                <header><span class="job-action-number">${index + 1}</span><div><strong><i class="fa-solid fa-code" aria-hidden="true"></i>Repository script</strong><small>Runs with an explicit interpreter—never as a concatenated shell command.</small></div>${controls}</header>
+                <header><span class="job-action-number">${index + 1}</span><div><strong><i class="fa-solid fa-code" aria-hidden="true"></i>Script</strong><small>Runs with an explicit interpreter—never as a concatenated shell command.</small></div>${controls}</header>
                 <div class="job-action-body job-script-fields">
-                    <div class="job-script-path-field">
-                        <label class="form-label">Script file</label>
-                        <div class="input-group"><input class="form-control" data-action-field="scriptPath" value="${this.escape(action.scriptPath)}" placeholder="scripts/check.ps1"><button class="btn btn-outline-secondary" type="button" data-workflow-action="browse-script">Browse…</button></div>
-                        <small>Must be a regular <code>.py</code>, <code>.ps1</code>, or <code>.sh</code> file inside this repository.</small>
-                    </div>
+                    ${this.renderScriptStepPicker(action, actionId)}
                     <div>
                         <label class="form-label">Runtime</label>
                         <select class="form-select" data-action-field="scriptRuntime">
@@ -1397,6 +1681,13 @@ export class JobController {
             }
             return;
         }
+        if (field === 'scriptChoice') {
+            // A select fires both input and change; the change re-renders the matching runtime.
+            if (event.type !== 'change' || !event.target.value) return;
+            this.setScriptStepPath(action, event.target.value);
+            this.renderEditorActions();
+            return;
+        }
         if (field === 'scriptRuntime') action.scriptRuntime = Number(event.target.value);
         else if (field === 'timeoutSeconds') action.timeoutSeconds = event.target.value ? Number(event.target.value) : null;
         else action[field] = event.target.value;
@@ -1430,6 +1721,8 @@ export class JobController {
             }
             case 'browse-script':
                 return this.pickEditorScript(action, button);
+            case 'new-script':
+                return this.newScriptForStep(action);
             case 'browse-working-directory':
                 return this.pickEditorWorkingDirectory(action, button);
             default:
@@ -1450,10 +1743,7 @@ export class JobController {
             triggerElement: trigger instanceof HTMLElement ? trigger : undefined
         });
         if (!picked || picked.canceled || !picked.path) return;
-        action.scriptPath = picked.path;
-        const extension = String(picked.path).toLowerCase().match(/\.[^.\\/]+$/)?.[0];
-        const runtime = Object.entries(SCRIPT_RUNTIME_META).find(([, meta]) => meta.extension === extension)?.[0];
-        if (runtime !== undefined) action.scriptRuntime = Number(runtime);
+        this.setScriptStepPath(action, this.repositoryRelativePath(picked.path) ?? picked.path);
         this.renderEditorActions();
     }
 
@@ -1513,6 +1803,7 @@ export class JobController {
         this.activeEditorPreferredTrigger = null;
         this.editorActions = [];
         this.editorWorkerOptional = false;
+        this.editorScriptChoices = null;
     }
 
     closeEditor() {

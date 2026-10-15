@@ -703,7 +703,9 @@ test.describe('Agents editor', () => {
         expect(writes.jobs[0].body.actions).toEqual(checks);
 
         // A new Automation starts with scripts and checks only; a new Agent always includes its step.
-        await page.locator('[data-job-action="new"]').click();
+        // The Automations page has one New menu (VIBE-159): its Workflow item opens the editor.
+        await page.locator('[data-automations-new]').click();
+        await page.locator('.jobs-new-menu [data-job-action="new"]').click();
         await expect(page.locator('[data-job-form]')).toBeVisible();
         await expect(page.locator('[data-kind="worker"]')).toHaveCount(0);
         await expect(page.locator('[data-job-action="add-script-action"]')).toBeVisible();

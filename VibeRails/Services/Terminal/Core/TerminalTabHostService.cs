@@ -36,6 +36,8 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         DateTime CreatedUtc,
         AutomationTabState? Automation = null)
     {
+        /// <summary>The view that draws this tab itself (VIBE-159); null for an ordinary tab.</summary>
+        public string? Owner { get; init; }
         public SemaphoreSlim SessionGate { get; } = new(1, 1);
         public string? LastStartedSessionId { get; set; }
         public HashSet<string> PendingAgentClosures { get; } = new(StringComparer.Ordinal);
@@ -96,6 +98,27 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
 
     public async Task<TerminalTabStatusResponse> CreateTabAsync(CancellationToken cancellationToken = default)
         => await CreateTabCoreAsync(cancellationToken);
+
+    public async Task<TerminalTabStatusResponse> CreateTabAsync(string? owner, CancellationToken cancellationToken = default)
+        => await CreateTabCoreAsync(cancellationToken, owner: NormalizeOwner(owner));
+
+    /// <summary>The longest owner label a view may attach to its tab.</summary>
+    internal const int MaxOwnerLength = 200;
+
+    /// <summary>
+    /// An owner is a label the browser chose, echoed back in the tab list and never interpreted
+    /// by the server. Bound it and refuse control characters so it cannot carry anything else.
+    /// </summary>
+    internal static string? NormalizeOwner(string? owner)
+    {
+        if (string.IsNullOrWhiteSpace(owner)) return null;
+        var trimmed = owner.Trim();
+        if (trimmed.Length > MaxOwnerLength)
+            throw new ArgumentException($"A terminal tab owner is at most {MaxOwnerLength} characters.", nameof(owner));
+        if (trimmed.Any(char.IsControl))
+            throw new ArgumentException("A terminal tab owner cannot contain control characters.", nameof(owner));
+        return trimmed;
+    }
 
     public Task<TerminalTabStatusResponse> CreateAutomationTabAsync(
         string runId, string automationName, CancellationToken cancellationToken = default)
@@ -179,7 +202,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
     }
 
     private async Task<TerminalTabStatusResponse> CreateTabCoreAsync(
-        CancellationToken cancellationToken, AutomationTabState? automation = null)
+        CancellationToken cancellationToken, AutomationTabState? automation = null, string? owner = null)
     {
         await _createGate.WaitAsync(cancellationToken);
         var gateHeld = true;
@@ -196,7 +219,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                 }
             }
 
-            child = (await SpawnChildAsync(cancellationToken)) with { Automation = automation };
+            child = (await SpawnChildAsync(cancellationToken)) with { Automation = automation, Owner = owner };
 
             CancellationToken relayToken;
             lock (_lock)
@@ -848,7 +871,8 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             child.Automation?.RunId,
             child.Automation?.Name,
             StatusAvailable: status is not null,
-            AutomationCompleted: automationCompleted);
+            AutomationCompleted: automationCompleted,
+            Owner: child.Owner);
     }
 
     private async Task<TerminalChildProcess> SpawnChildAsync(CancellationToken cancellationToken)
