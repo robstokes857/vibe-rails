@@ -1052,6 +1052,8 @@
                             aria-controls="settings-panel-llm" aria-selected="false" tabindex="-1" data-settings-tab="llm">LLMs</button>
                         <button type="button" class="settings-tab" role="tab" id="settings-tab-keys"
                             aria-controls="settings-panel-keys" aria-selected="false" tabindex="-1" data-settings-tab="keys">KEYS</button>
+                        <button type="button" class="settings-tab" role="tab" id="settings-tab-setup"
+                            aria-controls="settings-panel-setup" aria-selected="false" tabindex="-1" data-settings-tab="setup">Setup</button>
                     </div>
                 </div>
             </div>
@@ -1370,6 +1372,14 @@
                 <div class="row justify-content-center">
                     <div class="col-md-8 col-lg-6 mb-4" data-settings-keys>
                         <p class="text-muted" role="status">Open KEYS to manage your signing keys.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="settings-panel" id="settings-panel-setup" role="tabpanel" aria-labelledby="settings-tab-setup"
+                tabindex="0" hidden>
+                <div class="row justify-content-center">
+                    <div class="col-lg-10 col-xl-8 mb-4" data-settings-setup>
+                        <p class="text-muted" role="status">Open Setup to check what this machine has installed.</p>
                     </div>
                 </div>
             </div>

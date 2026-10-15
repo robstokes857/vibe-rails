@@ -389,6 +389,9 @@ middleware serves their paths rather than registering individual API endpoints.
 | DELETE | `/api/v1/settings/pin` | [PinRoutes.cs](VibeRails/Routes/PinRoutes.cs) |
 | POST | `/api/v1/settings/pin` | [PinRoutes.cs](VibeRails/Routes/PinRoutes.cs) |
 | GET | `/api/v1/settings/pin/status` | [PinRoutes.cs](VibeRails/Routes/PinRoutes.cs) |
+| GET | `/api/v1/setup/install/ws` | [SetupRoutes.cs](VibeRails/Routes/SetupRoutes.cs) |
+| GET | `/api/v1/setup/status` | [SetupRoutes.cs](VibeRails/Routes/SetupRoutes.cs) |
+| POST | `/api/v1/setup/status/refresh` | [SetupRoutes.cs](VibeRails/Routes/SetupRoutes.cs) |
 | DELETE | `/api/v1/settings/remote-link` | [RemoteAccountLinkRoutes.cs](VibeRails/Routes/RemoteAccountLinkRoutes.cs) |
 | GET | `/api/v1/settings/remote-link` | [RemoteAccountLinkRoutes.cs](VibeRails/Routes/RemoteAccountLinkRoutes.cs) |
 | POST | `/api/v1/settings/remote-link` | [RemoteAccountLinkRoutes.cs](VibeRails/Routes/RemoteAccountLinkRoutes.cs) |
@@ -545,6 +548,17 @@ Its bounded first message carries a registered script ID, dimensions and optiona
 verified bytes and discrete interpreter argv are resolved server-side before launch. Binary input
 is never routed to session recording, observers or remote sharing. Stop/disconnect kills the
 process tree; no input/output or PIN is persisted by this private runner.
+
+**Setup installer (prototype, awaiting owner review).** The root-only `/api/v1/setup/install/ws`
+shares that private PTY lifetime (`PrivatePtySession`). Its bounded first message carries only a
+tool ID, a method ID and dimensions. The command is a compile-time constant from
+`SetupToolCatalog`, looked up by ordinal ID for the current OS; unknown pairs are refused before
+any process starts. This is a deliberate exception to argv-only launching: vendor installers are
+pipelines (`irm … | iex`, `curl … | bash`), so the constant runs as one `-Command`/`-c` argument
+of a fixed shell (pwsh, else `%SystemRoot%` Windows PowerShell 5.1, else the Unix login shell).
+No request field reaches that text. The capability is "download and run a fixed vendor installer
+as the local user", the same as the user pasting the shown command. Status/refresh probe only
+file existence and file version metadata, and start no processes. Results live in GlobalCache.
 
 - Root-only filesystem browsing returns bounded single-level metadata, never contents. Reject
   relative, UNC/device, mapped/unknown Windows-drive and symlink/junction/reparse-component

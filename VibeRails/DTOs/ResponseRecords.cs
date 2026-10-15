@@ -651,6 +651,43 @@ namespace VibeRails.DTOs
     // gated by the signed-hash check. StandardInput is piped to the process's stdin.
     public record PythonScriptTerminalRequest(string? Name, string? Pin = null, int Cols = 80, int Rows = 24);
 
+    // Setup page. The install request carries catalog IDs only; the command text is resolved
+    // server-side from SetupToolCatalog and is never read from the request.
+    public record SetupInstallTerminalRequest(string? Tool, string? Method, int Cols = 80, int Rows = 24);
+
+    public record SetupInstallMethodResponse(
+        string Id, string Label, string Command, string? Requires, string? Note, bool Recommended);
+
+    public record SetupToolResponse(
+        string Id,
+        string Name,
+        string Group,
+        string Why,
+        string DocsUrl,
+        string? Brand,
+        string State,
+        string? Path,
+        string? Version,
+        List<SetupInstallMethodResponse> Methods);
+
+    public record SetupStatusResponse(string Platform, DateTimeOffset CheckedUtc, List<SetupToolResponse> Tools);
+
+    /// <summary>
+    /// The probe result kept in GlobalCache (<c>setup.tool-status.v1</c>). Ready and Restart needed
+    /// are relative to the PATH of the process that probed, so <see cref="LaunchPathHash"/> records it.
+    /// </summary>
+    public record SetupStatusDocument(
+        int Version,
+        string Platform,
+        DateTimeOffset CheckedUtc,
+        List<SetupToolStatusEntry> Tools,
+        string? LaunchPathHash = null)
+    {
+        public const int CurrentVersion = 1;
+    }
+
+    public record SetupToolStatusEntry(string Id, string State, string? Path, string? Version);
+
     public record PythonScriptRunRequest(
         string? Name,
         List<string>? Arguments = null,
@@ -1751,6 +1788,9 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(PythonScriptApprovalRequest))]
     [JsonSerializable(typeof(PythonScriptRunRequest))]
     [JsonSerializable(typeof(PythonScriptTerminalRequest))]
+    [JsonSerializable(typeof(SetupInstallTerminalRequest))]
+    [JsonSerializable(typeof(SetupStatusResponse))]
+    [JsonSerializable(typeof(SetupStatusDocument))]
     [JsonSerializable(typeof(PythonScriptContentResponse))]
     [JsonSerializable(typeof(PythonScriptSaveRequest))]
     [JsonSerializable(typeof(PythonScriptSaveResponse))]

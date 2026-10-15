@@ -56,6 +56,9 @@ public static class RouteExtensions
             RemoteAccountLinkRoutes.Map(app);
         if (isActiveRootBackend)
             SigningKeyRoutes.Map(app);
+        // Tool checks and installers run from the dashboard only, never a tab child.
+        if (isActiveRootBackend)
+            SetupRoutes.Map(app);
         HttpRelayRoutes.Map(app);
         // Smaller complete backups (coverage endpoint). The one-shot full-database export
         // and its Settings button are gone; session uploads stay on SessionDataExportService.
