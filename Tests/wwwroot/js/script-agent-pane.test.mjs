@@ -402,6 +402,25 @@ test('When the server hands back this owner\'s running host, Start attaches inst
     assert.equal(log.starts.length, 0, 'the running agent is not replaced');
 });
 
+// Review F4: two windows share an idle host; the other one started an agent in it meanwhile.
+test('Start in a window whose shared host is now running attaches to that agent', async (t) => {
+    withStorage(t);
+    const app = fakeApp({ tabs: [{ tabId: 'shared', owner: OWNER, hasActiveSession: false }] });
+    const { pane, log } = createPane(app);
+    const { host, buttons } = fakeHost();
+    await pane.mount(host);
+    assert.equal(pane.tab.state.hasActiveSession, false);
+
+    app.status = { hasActiveSession: true, sessionId: 'other-window-session', cli: 'codex' };
+    assert.equal(await pane.start(), false);
+    assert.equal(log.starts.length, 0, 'no /start into a host that already runs an agent');
+    assert.deepEqual(log.connects, ['shared']);
+    assert.equal(pane.tab.state.sessionId, 'other-window-session');
+    assert.equal(pane.tab.state.cli, 'codex');
+    assert.equal(buttons.stop[0].hidden, false, 'Stop and Restart are offered for the running agent');
+    assert.ok(buttons.start.every(button => button.hidden));
+});
+
 test('The Terminals page restores ordinary and Automation tabs but never a view\'s own tab', async () => {
     const added = [];
     const automation = new Map();

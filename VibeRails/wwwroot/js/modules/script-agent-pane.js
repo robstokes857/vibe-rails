@@ -300,10 +300,18 @@ export class ScriptAgentPane {
 
     async _ensureTab(selection, meta) {
         if (this.tab) {
-            // The root may have restarted or reclaimed the host since this pane adopted it.
+            // The root may have restarted or reclaimed the host since this pane adopted it, and
+            // another window sharing the host may have started an agent in it (review F4).
+            const tab = this.tab;
             try {
-                await this.app.apiCall(`${TABS_API}/${encodeURIComponent(this.tab.state.id)}/status`,
+                const status = await this.app.apiCall(`${TABS_API}/${encodeURIComponent(tab.state.id)}/status`,
                     'GET', null, { showLoading: false });
+                if (status?.hasActiveSession === true && this.tab === tab) {
+                    tab.state.hasActiveSession = true;
+                    tab.state.sessionId = status.sessionId || tab.state.sessionId;
+                    tab.state.cli = status.cli || tab.state.cli;
+                    tab.state.status = 'disconnected';
+                }
                 return this.tab;
             } catch {
                 this._dropTab();
