@@ -1134,8 +1134,11 @@ The agent stays an ordinary recorded session (TokenSaver proxy, MCP, history): S
 backend tab with `POST /api/v1/terminal/tabs?owner=script-agent:{id}`, and the Terminals page
 skips every tab whose list entry has an `owner` (restore, adoption). `TerminalController`'s
 `registerOwnedTab` routes that tab's session events to the pane instead of the Terminals toasts.
-Opening the workbench reattaches to the script's running agent; leaving keeps it running and
-releases a finished host. Start stays disabled until that first look at the tab list finishes,
+Opening the workbench reattaches to the script's running agent. Leaving only drops the xterm and
+socket: the pane never deletes its host (review F3: its view can be stale, a Start may still be
+landing, and windows share the owner's host), so a script keeps at most one idle host, reused by
+its next Start, until the root exits. A host whose status is unavailable counts as live, and a
+failed status read forgets the tab only when the root says it is gone. Start stays disabled until that first look at the tab list finishes,
 waits for it, and refuses (with a retry message) when the list cannot be read; the server also
 returns an owner's existing host, which the pane attaches to instead of starting another agent. A dropped socket asks the tab's status once: an exited CLI reads
 Finished with its last screen, a live one offers Connect. **Start** appends the selected script's

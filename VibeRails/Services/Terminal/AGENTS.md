@@ -662,7 +662,10 @@ one in every other way: same launch, TokenSaver proxy, MCP registration, recordi
 and 100-host capacity. The browser's Terminals page skips owned tabs in restore and adoption, and
 `TerminalController.registerOwnedTab` routes their session events to the owning view. The script
 workbench uses `script-agent:{script id}` (`wwwroot/js/modules/script-agent-pane.js`): it
-reattaches to a running agent on its next visit and deletes a finished host when it leaves.
+reattaches to a running agent on its next visit. It never deletes its host: a browser-side delete
+could rest on a stale or unavailable status, race a Start still landing, or hit a host another
+window is using, and `DeleteTabAsync` stops the session and kills the tree. A script therefore
+keeps at most one idle host, reused by its next Start, until the root exits.
 `ITerminalTabHostService.CreateTabAsync(string?, …)` has a default implementation that ignores
 the owner, so test fakes need no change. Tests: `TerminalTabsRoutesTests`, `script-agent-pane.test.mjs`.
 

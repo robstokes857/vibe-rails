@@ -158,17 +158,19 @@ export class ScriptAgentPane {
         this.updateUi();
     }
 
-    /** Leaves a running agent running for the next visit; a finished one releases its host. */
+    /**
+     * Lets go of the xterm and socket only. The host is never closed from here (VIBE-159 review F3):
+     * what this pane last saw can be stale, a Start may still be landing, and the server gives every
+     * window the same host per owner, so a delete could stop a live agent. The next visit, or the
+     * next Start in it, reuses the host; it ends with the root.
+     */
     dispose() {
         if (this._destroyed) return;
         this._destroyed = true;
         this._unregisterTab();
         const tab = this.tab;
         this.tab = null;
-        if (tab) {
-            tab.instance.dispose();
-            if (!tab.state.hasActiveSession) void this._deleteTab(tab.state.id);
-        }
+        tab?.instance.dispose();
         this._disposePicker?.();
         this._disposePicker = null;
         this.root?.removeEventListener('click', this._onClick);
@@ -230,6 +232,7 @@ export class ScriptAgentPane {
             // The server hands an owner its existing host; an agent running there is attached, not replaced.
             if (tab.state.hasActiveSession) {
                 await tab.instance.connect();
+                if (this._destroyed) tab.instance.dispose();
                 return false;
             }
             const title = meta.cli === 'shell' ? meta.displayName : `${meta.displayName} · ${this.label || 'script'}`;
@@ -241,6 +244,8 @@ export class ScriptAgentPane {
             tab.instance.statusController?.render();
             storeSelection(selection);
             const started = await tab.instance.startSession(body);
+            // Left while the launch was landing: the agent keeps running; drop the socket it opened.
+            if (this._destroyed) tab.instance.dispose();
             return Boolean(started);
         } finally {
             this._setBusy(false);
@@ -281,11 +286,15 @@ export class ScriptAgentPane {
         }
         if (this._destroyed || this.tab) return true;
         const mine = (response?.tabs || []).filter(tab => tab?.owner === this.owner);
-        const info = mine.find(tab => tab.hasActiveSession) || mine[0];
+        const info = mine.find(tab => tab.hasActiveSession) || mine.find(tab => tab.statusAvailable === false) || mine[0];
         if (!info) return true;
         const tab = this._adopt(info, { selection: readStoredSelection() });
-        if (info.hasActiveSession) await tab.instance.connect();
-        else this.updateUi();
+        if (tab.state.hasActiveSession) {
+            await tab.instance.connect();
+            if (this._destroyed) tab.instance.dispose();
+        } else {
+            this.updateUi();
+        }
         return true;
     }
 
@@ -308,10 +317,8 @@ export class ScriptAgentPane {
             this.app.showError(`Could not open the script agent: ${error?.message || error}`);
             return null;
         }
-        if (this._destroyed) {
-            void this._deleteTab(info?.tabId);
-            return null;
-        }
+        // Left meanwhile: the host stays for the next visit (it may be one another window runs).
+        if (this._destroyed) return null;
         return this._adopt(info, { selection, label: meta.displayName });
     }
 
@@ -319,6 +326,9 @@ export class ScriptAgentPane {
         const terminalElement = this.root.querySelector('[data-script-agent-terminal]');
         const statusElement = this.root.querySelector('[data-script-agent-status]');
         const meta = parseLlmSelection(selection, this.app.data?.environments || []);
+        // A host whose status could not be read may be running an agent: treat it as live, so
+        // Start never launches over it (Connect and Stop stay offered).
+        const live = info.hasActiveSession === true || info.statusAvailable === false;
         const state = {
             id: info.tabId,
             selection,
@@ -326,14 +336,14 @@ export class ScriptAgentPane {
             title: null,
             taskKey: null,
             workingDirectory: info.workingDirectory || null,
-            hasActiveSession: info.hasActiveSession === true,
+            hasActiveSession: live,
             sessionId: info.sessionId || null,
             boardCard: null,
             needsAttention: false,
             notifyEnabled: false,
             pinned: false,
             cli: info.cli || meta.cli || null,
-            status: info.hasActiveSession ? 'disconnected' : 'not-started',
+            status: live ? 'disconnected' : 'not-started',
             ui: { item: statusElement, button: statusElement, terminalElement }
         };
         const instance = this._createTab(state);
@@ -373,13 +383,6 @@ export class ScriptAgentPane {
         if (this.tab) this.app.terminalController?.unregisterOwnedTab?.(this.tab.state.id, this.tab);
     }
 
-    async _deleteTab(tabId) {
-        if (!tabId) return;
-        try {
-            await this.app.apiCall(`${TABS_API}/${encodeURIComponent(tabId)}`, 'DELETE', null, { showLoading: false });
-        } catch { /* Already gone, or the root is shutting down. */ }
-    }
-
     async _checkStatus() {
         const tab = this.tab;
         if (!tab || this._statusCheck) return;
@@ -387,9 +390,11 @@ export class ScriptAgentPane {
             let status = null;
             try {
                 status = await this.app.apiCall(`${TABS_API}/${encodeURIComponent(tab.state.id)}/status`,
-                    'GET', null, { showLoading: false });
-            } catch {
-                if (this.tab === tab) this._dropTab();
+                    'GET', null, { showLoading: false, preferErrorResponseMessage: true });
+            } catch (error) {
+                // Only a host the root no longer has is forgotten; an unanswered one may still run.
+                if (this.tab === tab && /not found/i.test(error?.message || '')) this._dropTab();
+                else if (this.tab === tab) this.updateUi();
                 return;
             }
             // A Stop or a new Start that landed meanwhile already decided the state.

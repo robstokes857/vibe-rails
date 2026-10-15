@@ -74,6 +74,7 @@ function fakeTabFactory(log, manager) {
         state,
         socketOpen: false,
         disposed: false,
+        disposals: 0,
         terminal: { options: {} },
         autoReconnect: { isPending: () => false, cancel() {} },
         setActive() {},
@@ -82,13 +83,15 @@ function fakeTabFactory(log, manager) {
         async connect() { log.connects.push(state.id); this.socketOpen = true; state.status = 'connected'; manager().updateUi(); return true; },
         async startSession(body) {
             log.starts.push({ tabId: state.id, body });
+            // A test can hold /start open to leave the workbench while the launch lands.
+            if (log.startGate) await log.startGate;
             state.hasActiveSession = true;
             state.status = 'connected';
             this.socketOpen = true;
             return { hasActiveSession: true };
         },
         async stopSession() { state.hasActiveSession = false; state.status = 'not-started'; this.socketOpen = false; return true; },
-        dispose() { this.disposed = true; this.socketOpen = false; },
+        dispose() { this.disposed = true; this.disposals += 1; this.socketOpen = false; },
         scheduleFitPasses() {},
         focusInput() {}
     });
@@ -193,7 +196,9 @@ test('Opening the workbench reattaches to this script\'s running agent and to no
     assert.equal(app.calls.some(call => call.method === 'DELETE'), false);
 });
 
-test('Leaving after the agent finished releases its host', async (t) => {
+// Review F3: leaving never closes the host. What the pane last saw may be stale, a launch may still
+// be landing, and every window shares the owner's host, so a delete could stop a live agent.
+test('Leaving never deletes the host, even after its agent finished', async (t) => {
     withStorage(t);
     const app = fakeApp({ tabs: [{ tabId: 'mine-finished', owner: OWNER, hasActiveSession: false }] });
     const { pane, log } = createPane(app);
@@ -202,8 +207,77 @@ test('Leaving after the agent finished releases its host', async (t) => {
     assert.deepEqual(log.connects, [], 'nothing to connect to');
     pane.dispose();
     await new Promise(resolve => setImmediate(resolve));
-    assert.deepEqual(app.calls.filter(call => call.method === 'DELETE').map(call => call.url),
-        ['/api/v1/terminal/tabs/mine-finished']);
+    assert.equal(app.calls.some(call => call.method === 'DELETE'), false);
+    assert.equal(app.registered.size, 0);
+});
+
+test('A host whose status is unavailable counts as live: Start never launches over it and leaving keeps it', async (t) => {
+    withStorage(t);
+    const app = fakeApp({ tabs: [{ tabId: 'mine', owner: OWNER, hasActiveSession: false, statusAvailable: false }] });
+    const { pane, log } = createPane(app);
+    const { host, buttons } = fakeHost();
+    await pane.mount(host);
+    assert.equal(pane.tab.state.hasActiveSession, true);
+    assert.deepEqual(log.connects, ['mine']);
+    assert.ok(buttons.start.every(button => button.hidden));
+    assert.equal(await pane.start(), false);
+    assert.equal(log.starts.length, 0);
+    assert.equal(app.calls.some(call => call.method === 'POST'), false);
+
+    // A status read that fails without "not found" keeps the tab and offers Connect.
+    pane.tab.instance.socketOpen = false;
+    pane.tab.state.status = 'disconnected';
+    app.status = new Error('API call failed: Service Unavailable');
+    pane.updateUi();
+    await pane._statusCheck;
+    assert.equal(pane.tab?.state.id, 'mine');
+    assert.equal(buttons.connect[0].hidden, false);
+    pane.dispose();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(app.calls.some(call => call.method === 'DELETE'), false);
+});
+
+test('Leaving while Start is waiting on /start keeps the launch and drops only the socket it opens', async (t) => {
+    withStorage(t);
+    const app = fakeApp();
+    const { pane, log } = createPane(app);
+    let release;
+    log.startGate = new Promise(resolve => { release = resolve; });
+    await pane.mount(fakeHost().host);
+    const started = pane.start();
+    while (log.starts.length === 0) await new Promise(resolve => setImmediate(resolve));
+    const instance = pane.tab.instance;
+    pane.dispose();
+    release();
+    assert.equal(await started, true);
+    assert.equal(instance.socketOpen, false, 'no socket left behind by a pane that is gone');
+    assert.equal(instance.disposals, 2);
+    assert.equal(app.calls.some(call => call.method === 'DELETE'), false);
+});
+
+test('A create that answers after leaving leaves the host alone, even a running one', async (t) => {
+    withStorage(t);
+    const app = fakeApp();
+    let answer;
+    const listCall = app.apiCall;
+    app.apiCall = async (url, method = 'GET', body = null) => {
+        if (url.startsWith('/api/v1/terminal/tabs?owner=') && method === 'POST') {
+            app.calls.push({ url, method, body });
+            return new Promise(resolve => { answer = resolve; });
+        }
+        return listCall(url, method, body);
+    };
+    const { pane, log } = createPane(app);
+    await pane.mount(fakeHost().host);
+    const started = pane.start();
+    while (!answer) await new Promise(resolve => setImmediate(resolve));
+    pane.dispose();
+    answer({ tabId: 'other-window', owner: OWNER, hasActiveSession: true });
+    assert.equal(await started, false);
+    assert.equal(pane.tab, null);
+    assert.deepEqual(log.connects, []);
+    assert.equal(log.starts.length, 0);
+    assert.equal(app.calls.some(call => call.method === 'DELETE'), false);
 });
 
 test('A dropped socket asks the server once: an exited CLI reads Finished, a live one offers Connect', async (t) => {
