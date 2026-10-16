@@ -220,6 +220,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             }
 
             await ReclaimCompletedAutomationTabIfFullAsync(cancellationToken);
+            await ReclaimIdleOwnedTabIfFullAsync(cancellationToken);
             lock (_lock)
             {
                 if (_tabs.Count >= MaxTabs)
@@ -363,6 +364,52 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                 Log.Warning(ex, "[TerminalTabs] Keeping Automation tab {TabId}; completion could not be confirmed", child.TabId);
                 return null;
             }
+        }
+    }
+
+    private async Task ReclaimIdleOwnedTabIfFullAsync(CancellationToken cancellationToken)
+    {
+        TerminalChildProcess[] candidates;
+        lock (_lock)
+        {
+            if (_tabs.Count < MaxTabs) return;
+            candidates = _tabs.Values.Where(child => child.Owner is not null && child.Automation is null).ToArray();
+        }
+
+        var selected = false;
+        await Task.WhenAll(candidates.Select(TryCloseAsync));
+
+        async Task TryCloseAsync(TerminalChildProcess child)
+        {
+            // A Start already holding the gate is not idle. Probe in parallel so an unavailable
+            // host cannot starve reclaimable ones, or multiply the deadline by the tab count.
+            if (!await child.SessionGate.WaitAsync(0, cancellationToken)) return;
+            try
+            {
+                if (!ReferenceEquals(GetChildOrNull(child.TabId), child)) return;
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(TimeSpan.FromSeconds(1));
+                TerminalStatusResponse? status;
+                try { status = await GetTerminalStatusFromChildAsync(child, timeout.Token); }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { return; }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    Log.Warning(ex, "[TerminalTabs] Keeping owned tab {TabId}; idle status could not be confirmed", child.TabId);
+                    return;
+                }
+                if (status is not { HasActiveSession: false }) return;
+                cancellationToken.ThrowIfCancellationRequested();
+                lock (_lock)
+                {
+                    if (selected || _tabs.Count < MaxTabs ||
+                        !ReferenceEquals(GetChildOrNull(child.TabId), child)) return;
+                    selected = true;
+                }
+                // Keep the gate through removal: a waiting Start rechecks registry identity and
+                // fails without launching into the host that we have just confirmed idle.
+                await DeleteTabAsync(child.TabId, CancellationToken.None);
+            }
+            finally { child.SessionGate.Release(); }
         }
     }
 

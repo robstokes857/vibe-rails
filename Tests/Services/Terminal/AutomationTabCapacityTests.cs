@@ -584,6 +584,100 @@ public sealed class AutomationTabCapacityTests
         }
     }
 
+    [Theory]
+    [InlineData("idle", true)]
+    [InlineData("active", false)]
+    [InlineData("503", false)]
+    [InlineData("json", false)]
+    [InlineData("transport", false)]
+    [InlineData("timeout", false)]
+    public async Task OwnedCapacityReclaimsOnlyConfirmedIdleHosts(string status, bool removed)
+    {
+        using var services = new ServiceCollection().BuildServiceProvider();
+        using var http = new StatusHandler(async (request, ct) =>
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith("/status"))
+            {
+                if (status == "transport") throw new HttpRequestException("unavailable");
+                if (status == "timeout") await Task.Delay(Timeout.Infinite, ct);
+                return new HttpResponseMessage(status == "503" ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.OK)
+                {
+                    Content = new StringContent(status == "json" ? "invalid" :
+                        status == "active" ? "{\"hasActiveSession\":true}" : "{\"hasActiveSession\":false}")
+                };
+            }
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+        var host = Host(services, http);
+        var registry = Registry(host);
+        using var process = StartHarmlessProcess();
+        using var placeholder = new Process();
+        try
+        {
+            AddChild(registry, "owned", process, 1, null, "script-agent:a");
+            for (var i = 0; i < 98; i++) AddChild(registry, $"ordinary-{i}", placeholder, i + 2, null);
+            await ReclaimOwnedAsync(host);
+            Assert.True(registry.Contains("owned")); // No pressure, no eviction.
+            AddChild(registry, "last", placeholder, 100, null);
+            await ReclaimOwnedAsync(host);
+            Assert.Equal(!removed, registry.Contains("owned"));
+            Assert.Equal(removed, process.HasExited);
+            Assert.Equal(removed ? 99 : 100, registry.Count);
+        }
+        finally
+        {
+            registry.Clear();
+            await host.DisposeAsync();
+            if (!process.HasExited) { process.Kill(true); await process.WaitForExitAsync(TestContext.Current.CancellationToken); }
+        }
+    }
+
+    [Fact]
+    public async Task OwnedReclamationHoldsSessionGateUntilRemoval()
+    {
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var checking = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var http = new StatusHandler(async (request, ct) =>
+        {
+            Assert.DoesNotContain("/start", request.RequestUri!.AbsolutePath);
+            if (request.RequestUri.AbsolutePath.EndsWith("/status"))
+            {
+                checking.TrySetResult();
+                await release.Task.WaitAsync(ct);
+            }
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"hasActiveSession\":false}") };
+        });
+        var host = Host(services, http);
+        var registry = Registry(host);
+        using var process = StartHarmlessProcess();
+        using var placeholder = new Process();
+        try
+        {
+            AddChild(registry, "owned", process, 1, null, "script-agent:a");
+            for (var i = 0; i < 99; i++) AddChild(registry, $"ordinary-{i}", placeholder, i + 2, null);
+            var reclaim = ReclaimOwnedAsync(host);
+            await checking.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+            var start = host.StartSessionAsync("owned", new(Cli: "codex"), TestContext.Current.CancellationToken);
+            Assert.False(start.IsCompleted);
+            release.TrySetResult();
+            await reclaim;
+            await Assert.ThrowsAsync<InvalidOperationException>(() => start);
+            Assert.True(process.HasExited);
+        }
+        finally
+        {
+            release.TrySetResult();
+            registry.Clear();
+            await host.DisposeAsync();
+            if (!process.HasExited) { process.Kill(true); await process.WaitForExitAsync(TestContext.Current.CancellationToken); }
+        }
+    }
+
+    private static Task ReclaimOwnedAsync(TerminalTabHostService host) => (Task)typeof(TerminalTabHostService)
+        .GetMethod("ReclaimIdleOwnedTabIfFullAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+        .Invoke(host, [TestContext.Current.CancellationToken])!;
+
     private static TerminalTabHostService Host(ServiceProvider services, HttpMessageHandler http, IAppEventBus? events = null)
     {
         var factory = new Mock<IHttpClientFactory>();

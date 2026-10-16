@@ -665,7 +665,11 @@ workbench uses `script-agent:{script id}` (`wwwroot/js/modules/script-agent-pane
 reattaches to a running agent on its next visit. It never deletes its host: a browser-side delete
 could rest on a stale or unavailable status, race a Start still landing, or hit a host another
 window is using, and `DeleteTabAsync` stops the session and kills the tree. A script therefore
-keeps at most one idle host, reused by its next Start, until the root exits.
+keeps at most one idle host, reused by its next Start, until the root exits or tab capacity is
+needed (VIBE-161). After checking completed Automations, creation at capacity probes owned hosts
+concurrently with a one-second deadline per host and reclaims at most one confirmed inactive host.
+The child's SessionGate covers status validation through removal; busy gates, active sessions and
+unavailable status are retained. Scheduler cleanup remains Automation-only. No recordings are deleted.
 `ITerminalTabHostService.CreateTabAsync(string?, …)` has a default implementation that ignores
 the owner, so test fakes need no change. Tests: `TerminalTabsRoutesTests`, `script-agent-pane.test.mjs`.
 
