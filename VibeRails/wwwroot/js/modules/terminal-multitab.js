@@ -3420,7 +3420,7 @@ export class TerminalController {
             this.manager?._touchHistory(sessionId);
             this.app?.showToast('Terminal closed',
                 'Terminal closed because the agent called end_agent_session. Recording remains available in Replay and linked Board cards.',
-                'info', { requireDismiss: true });
+                'info');
         });
         appEventClient.on('automation_terminal_closed', payload => {
             const tabId = cleanString(payload?.tabId);

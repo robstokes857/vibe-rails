@@ -5,7 +5,7 @@ export function mountSessionViewer(container, options = {}) {
     const frame = document.createElement('iframe');
     frame.dataset.sessionReplay = 'true';
     frame.title = 'Session replay';
-    frame.style.cssText = 'display:block;width:100%;height:100%;min-height:540px;border:0;color-scheme:dark';
+    frame.style.cssText = 'display:block;width:100%;height:100%;min-height:0;border:0;color-scheme:dark';
     const loading = document.createElement('p');
     loading.setAttribute('role', 'status');
     loading.textContent = 'Loading session viewer…';

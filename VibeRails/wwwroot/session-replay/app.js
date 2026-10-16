@@ -236,6 +236,7 @@ function renderMetadata() {
     text('project', (session.project || basename(session.directory) || 'SESSION RECORDING').toUpperCase());
     text('session-title', session.title || cards[0]?.title || `${session.cli} session`);
     text('session-id', session.id); $('copy-id').hidden = false;
+    for (const id of ['project', 'session-title', 'session-id']) $(id).title = $(id).textContent;
     text('session-state', session.ended ? 'Completed' : 'Open · snapshot'); $('session-state').hidden = false;
     text('started', new Date(session.started).toLocaleString(undefined, { month:'short',day:'numeric',hour:'numeric',minute:'2-digit' }));
     text('duration', durationLabel(manifest.end - session.started)); text('total', durationLabel(manifest.end - session.started));

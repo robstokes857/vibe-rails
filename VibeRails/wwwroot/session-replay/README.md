@@ -22,7 +22,7 @@ await viewer.seek(viewer.getState().started + 10000);
 viewer.dispose();
 ```
 
-Give the host an explicit height (at least 540px). The component appends its own
+Give the host an explicit height (540px or more is recommended). The component appends its own
 iframe and loading status; it leaves other host children alone. Browser embeds use
 a trusted static `srcdoc` template and inherit the host origin. Each document owns
 all DOM IDs, styles, library globals, keyboard handlers, terminal and editor state.
@@ -30,6 +30,13 @@ Multiple instances can coexist. The data adapter runs in the host, so existing
 cookie/header authentication stays there. No recording text is inserted into the template.
 Serve the bundle and `../assets/{xterm,monaco,tom-select}` locally. No npm package,
 framework, remote CDN, new server or production build-time sibling dependency is required.
+
+The desktop layout fills that height: identity and session facts share a compact header,
+playback controls and recent tool calls sit above the terminal/inspector workspace, and
+the terminal, captured-file/event lists and event details scroll inside their panels.
+Short hosts can scroll the workspace area; narrow screens retain the stacked readable
+snapshot and inspector. Session IDs, project names and long titles remain available as
+text and hover titles. All playback, library, code, event and capture-detail controls remain.
 
 VS Code desktop webviews first load their own same-origin `fake.html?id=…` shell,
 then write the trusted template into it. VS Code's resource service worker requires

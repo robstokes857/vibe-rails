@@ -86,6 +86,49 @@ test('recording library and replay use the chat title ahead of a linked Board ca
     await expect(frame.locator('#session-title')).toHaveText('The broader Board story');
 });
 
+test('compact replay fits desktop hosts and keeps both inspector tabs and their footers reachable', async ({page}) => {
+    await shell(page);
+    await page.evaluate(() => {
+        document.getElementById('host').style.height = '100dvh';
+        document.getElementById('second').remove();
+    });
+    const frame = await mount(page);
+    const inner = page.frames().find(f => f.url() === 'about:srcdoc');
+    for (const size of [{width:1477,height:800},{width:1280,height:600},{width:900,height:740},{width:1920,height:1080}]) {
+        await page.setViewportSize(size);
+        await expect.poll(() => inner.evaluate(() => {
+            const main = document.querySelector('main'), workspace = document.querySelector('.workspace');
+            const bounds = workspace.getBoundingClientRect();
+            return document.documentElement.scrollHeight <= innerHeight + 1
+                && document.documentElement.scrollWidth <= innerWidth
+                && main.scrollHeight <= main.clientHeight + 1
+                && bounds.bottom <= innerHeight && bounds.height >= innerHeight * .5;
+        })).toBe(true);
+        for (const selector of ['#copy-id','#reload','#browse','#skip-idle','.legend','.tool-strip','#capture-notes','.terminal-footer']) {
+            await expect(frame.locator(selector)).toBeInViewport();
+        }
+        for (const tab of ['code','events']) {
+            await frame.locator(`#${tab}-tab`).click();
+            await expect(frame.locator(`#${tab}-panel .list-heading`)).toBeInViewport();
+            await expect(frame.locator(`#${tab}-panel .list-footer`)).toBeInViewport();
+            expect(await frame.locator(`#${tab}-panel`).evaluate(panel => panel.scrollHeight <= panel.clientHeight + 1)).toBe(true);
+        }
+    }
+    await frame.locator('#code-tab').click();
+    await frame.locator('.file-row').click();
+    await expect(frame.locator('#editor .view-lines')).toContainText('const works = true;');
+    await frame.locator('#file-search').fill('missing');
+    await expect(frame.locator('#file-list')).toHaveText('No files match this filter.');
+    await frame.locator('#file-search').clear();
+    await frame.locator('#expand-panel').click();
+    await expect(frame.locator('#expand-panel')).toHaveAttribute('aria-expanded','true');
+    await page.keyboard.press('Escape');
+    await expect(frame.locator('#expand-panel')).toHaveAttribute('aria-expanded','false');
+    await frame.locator('#capture-notes').click();
+    await expect(frame.locator('#detail-dialog')).toBeVisible();
+    await expect(frame.locator('#detail-body')).toContainText('Session: fixture');
+});
+
 test('token savings display full and compact captures, zero, reloads and missing measurements', async ({page}) => {
     await shell(page);
     await page.evaluate(async envelope => {

@@ -1297,7 +1297,8 @@ and are sent as `linkedCardIds` only on Create; link search and disposal retain 
 ### Agent completion and Automation navigation (VIBE-9)
 
 VIBE-78: `agent_terminal_closed` removes the agent's exact tab/session after the backend has
-finalized its recording. A persistent notification explains that the agent called
+finalized its recording. A standard informational alert dismisses automatically after five
+seconds and explains that the agent called
 `end_agent_session` and points to Replay/linked Board cards. The same closed-tab guards reject
 late restore/adoption responses, and pending close/undo timers are cancelled. Session completion
 or socket disconnection alone never closes an ordinary tab. No status line is written to xterm.

@@ -182,7 +182,7 @@ for (const failedRead of [false, true]) {
     });
 }
 
-test('agent closure removes only the calling tab, cancels undo, and leaves a clear replay notice', () => {
+test('agent closure removes only the calling tab, cancels undo, and uses a normal replay notice', () => {
     const handlers = new Map();
     const { manager } = managerWithSnapshot({});
     let disposed = 0;
@@ -223,7 +223,7 @@ test('agent closure removes only the calling tab, cancels undo, and leaves a cle
     assert.equal(notices.length, 1);
     assert.match(notices[0][1], /Terminal closed because the agent called end_agent_session/);
     assert.match(notices[0][1], /Replay.*Board/);
-    assert.equal(notices[0][3].requireDismiss, true);
+    assert.deepEqual(notices[0].slice(2), ['info']);
 });
 
 test('an agent closure for an older session leaves a replacement tab intact', () => {
