@@ -674,6 +674,95 @@ public sealed class AutomationTabCapacityTests
         }
     }
 
+    [Theory]
+    [InlineData("flushing")]
+    [InlineData("missing")]
+    [InlineData("unavailable")]
+    public async Task OwnedReclamationWaitsForRecordingFinalization(string recordingState)
+    {
+        var finalized = false;
+        var sessions = new Mock<ISessionStore>();
+        sessions.Setup(s => s.GetSessionByIdAsync("owned-session", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                if (!finalized && recordingState == "unavailable") throw new InvalidOperationException("store unavailable");
+                if (!finalized && recordingState == "missing") return null;
+                return new SessionResponse("owned-session", "codex", null, "/project", DateTime.UtcNow,
+                    finalized ? DateTime.UtcNow : null, 0);
+            });
+        using var services = new ServiceCollection().AddSingleton(sessions.Object).BuildServiceProvider();
+        using var http = new StatusHandler(request => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(request.RequestUri!.AbsolutePath.EndsWith("/start")
+                ? "{\"hasActiveSession\":true,\"sessionId\":\"owned-session\"}" : "{\"hasActiveSession\":false}")
+        });
+        var host = Host(services, http);
+        var registry = Registry(host);
+        using var process = StartHarmlessProcess();
+        using var placeholder = new Process();
+        try
+        {
+            AddChild(registry, "owned", process, 1, null, "script-agent:a");
+            for (var i = 0; i < 99; i++) AddChild(registry, $"ordinary-{i}", placeholder, i + 2, null);
+            await host.StartSessionAsync("owned", new(Cli: "codex"), TestContext.Current.CancellationToken);
+            await ReclaimOwnedAsync(host);
+            Assert.True(registry.Contains("owned"));
+            Assert.False(process.HasExited);
+            finalized = true;
+            await ReclaimOwnedAsync(host);
+            Assert.False(registry.Contains("owned"));
+            Assert.True(process.HasExited);
+        }
+        finally
+        {
+            registry.Clear();
+            await host.DisposeAsync();
+            if (!process.HasExited) { process.Kill(true); await process.WaitForExitAsync(TestContext.Current.CancellationToken); }
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OwnedReclamationRetainsUnconfirmedStartEvenAfterLaterSuccess(bool cancelled)
+    {
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var starts = 0;
+        using var http = new StatusHandler(request =>
+        {
+            Assert.EndsWith("/start", request.RequestUri!.AbsolutePath); // No status probe or stop is safe.
+            if (++starts == 1)
+            {
+                if (cancelled) throw new TaskCanceledException("caller disconnected during child startup");
+                throw new HttpRequestException("start response lost");
+            }
+            return new HttpResponseMessage(HttpStatusCode.OK)
+                { Content = new StringContent("{\"hasActiveSession\":true,\"sessionId\":\"later\"}") };
+        });
+        var host = Host(services, http);
+        var registry = Registry(host);
+        using var process = StartHarmlessProcess();
+        using var placeholder = new Process();
+        try
+        {
+            AddChild(registry, "owned", process, 1, null, "script-agent:a");
+            for (var i = 0; i < 99; i++) AddChild(registry, $"ordinary-{i}", placeholder, i + 2, null);
+            await Assert.ThrowsAnyAsync<Exception>(() => host.StartSessionAsync("owned", new(Cli: "codex"), TestContext.Current.CancellationToken));
+            await ReclaimOwnedAsync(host);
+            Assert.True(registry.Contains("owned"));
+            await host.StartSessionAsync("owned", new(Cli: "codex"), TestContext.Current.CancellationToken);
+            await ReclaimOwnedAsync(host);
+            Assert.True(registry.Contains("owned"));
+            Assert.False(process.HasExited);
+        }
+        finally
+        {
+            registry.Clear();
+            await host.DisposeAsync();
+            if (!process.HasExited) { process.Kill(true); await process.WaitForExitAsync(TestContext.Current.CancellationToken); }
+        }
+    }
+
     private static Task ReclaimOwnedAsync(TerminalTabHostService host) => (Task)typeof(TerminalTabHostService)
         .GetMethod("ReclaimIdleOwnedTabIfFullAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
         .Invoke(host, [TestContext.Current.CancellationToken])!;

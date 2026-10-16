@@ -669,7 +669,10 @@ keeps at most one idle host, reused by its next Start, until the root exits or t
 needed (VIBE-161). After checking completed Automations, creation at capacity probes owned hosts
 concurrently with a one-second deadline per host and reclaims at most one confirmed inactive host.
 The child's SessionGate covers status validation through removal; busy gates, active sessions and
-unavailable status are retained. Scheduler cleanup remains Automation-only. No recordings are deleted.
+unavailable status are retained. Hosts with any unconfirmed Start are retained because child startup
+can outlive the parent's cancelled HTTP request. A previously started session also requires its
+ended recording row, which is written after final output flush. Scheduler cleanup remains
+Automation-only. No recordings are deleted.
 `ITerminalTabHostService.CreateTabAsync(string?, …)` has a default implementation that ignores
 the owner, so test fakes need no change. Tests: `TerminalTabsRoutesTests`, `script-agent-pane.test.mjs`.
 

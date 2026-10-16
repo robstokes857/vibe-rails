@@ -40,6 +40,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         public string? Owner { get; init; }
         public SemaphoreSlim SessionGate { get; } = new(1, 1);
         public string? LastStartedSessionId { get; set; }
+        public bool HasUnconfirmedStart { get; set; }
         public HashSet<string> PendingAgentClosures { get; } = new(StringComparer.Ordinal);
     }
 
@@ -386,18 +387,30 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             if (!await child.SessionGate.WaitAsync(0, cancellationToken)) return;
             try
             {
-                if (!ReferenceEquals(GetChildOrNull(child.TabId), child)) return;
+                if (!ReferenceEquals(GetChildOrNull(child.TabId), child) || child.HasUnconfirmedStart) return;
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeout.CancelAfter(TimeSpan.FromSeconds(1));
-                TerminalStatusResponse? status;
-                try { status = await GetTerminalStatusFromChildAsync(child, timeout.Token); }
+                try
+                {
+                    var status = await GetTerminalStatusFromChildAsync(child, timeout.Token);
+                    if (status is not { HasActiveSession: false }) return;
+                    if (status.SessionId is not null && status.SessionId != child.LastStartedSessionId) return;
+                    if (child.LastStartedSessionId is { } sessionId)
+                    {
+                        // The child clears its active slot before draining the output writer.
+                        // The ended row is published only after recording finalization finishes.
+                        await using var scope = _scopeFactory.CreateAsyncScope();
+                        var sessions = scope.ServiceProvider.GetRequiredService<ISessionStore>();
+                        var recording = await sessions.GetSessionByIdAsync(sessionId, timeout.Token);
+                        if (recording?.EndedUTC is null) return;
+                    }
+                }
                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { return; }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     Log.Warning(ex, "[TerminalTabs] Keeping owned tab {TabId}; idle status could not be confirmed", child.TabId);
                     return;
                 }
-                if (status is not { HasActiveSession: false }) return;
                 cancellationToken.ThrowIfCancellationRequested();
                 lock (_lock)
                 {
@@ -495,6 +508,9 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         }
         finally
         {
+            // A failed HTTP request does not cancel startup in the child. Even a later successful
+            // request cannot prove that earlier work is gone, so retain this host conservatively.
+            if (startBegan && string.IsNullOrWhiteSpace(session?.SessionId)) child.HasUnconfirmedStart = true;
             if (startBegan) child.Automation?.EndSessionStart(session);
             child.SessionGate.Release();
         }
