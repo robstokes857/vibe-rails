@@ -1607,6 +1607,31 @@ for (const width of [1440, 390]) {
 }
 
 for (const width of [1440, 390]) {
+    test(`lane agent captions stay on one line above the lane cards at ${width}px`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 900 });
+        await openLaneAgentsBoard(page);
+        await expect(page.locator('.board-lane-agents-count').first()).toHaveText('0');
+        const layout = await page.evaluate(() => ({
+            captions: [...document.querySelectorAll('.board-lane-agents-caption')].map(caption => {
+                const bounds = caption.getBoundingClientRect();
+                const style = getComputedStyle(caption);
+                return { text: caption.textContent, height: bounds.height, bottom: bounds.bottom,
+                    textLeft: bounds.left + parseFloat(style.paddingLeft), lineHeight: parseFloat(style.lineHeight) };
+            }),
+            canvasLeft: document.querySelector('.board-canvas').getBoundingClientRect().left,
+            contentTop: Math.min(...[...document.querySelectorAll('.board-lane-list > :first-child')]
+                .map(element => element.getBoundingClientRect().top))
+        }));
+        expect(layout.captions).toHaveLength(4);
+        for (const caption of layout.captions) {
+            expect(caption.text).toBe('On entry');
+            // Wrapped to "On" / "entry", the second line covered the top of the first card.
+            expect(caption.height).toBeLessThanOrEqual(caption.lineHeight + 1);
+            expect(caption.bottom).toBeLessThanOrEqual(layout.contentTop);
+            expect(caption.textLeft).toBeGreaterThanOrEqual(layout.canvasLeft);
+        }
+    });
+
     test(`compact lane agents use existing controls and fit at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 900 });
         const { jobs, settings, writes } = await openLaneAgentsBoard(page);
@@ -2148,6 +2173,36 @@ test('long new-card descriptions grow inside the composer instead of painting ov
 });
 
 for (const width of [1440, 390]) {
+    test(`the card face never squeezes the assignee name for Start work at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 900 });
+        // Four lanes: roomy at 1440px, the 232px lane floor at 390px.
+        const columns = ['Backlog', 'Build', 'Review', 'Done'].map((name, position) => ({
+            id: position ? `col_${position}` : 'col_ready', name, position, boardId: 'brd_main', color: '#64748b'
+        }));
+        await openBoard(page, { assignee: 'env:7:claude', columns, onCard: card => {
+            card.jiraIssueKey = 'SCRUM-5';
+            card.flagged = true;
+        } });
+        const tile = page.locator('.board-card');
+        const chip = tile.locator('.board-assignee-chip');
+        const start = tile.getByRole('button', { name: 'Start work on VB-1', exact: true });
+        await expect(chip).toContainText('Card review (claude)');
+        await page.screenshot({ path: testInfo.outputPath(`board-face-long-assignee-${width}.png`) });
+        const name = chip.locator('.board-assignee-name');
+        expect(await name.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+        const [chipBounds, startBounds, tileBounds] = await Promise.all([chip.boundingBox(), start.boundingBox(), tile.boundingBox()]);
+        if (width > 720) {
+            // Room for both: one row, nothing moves.
+            expect(chipBounds.x + chipBounds.width).toBeLessThanOrEqual(startBounds.x);
+            expect(Math.abs(chipBounds.y + chipBounds.height / 2 - startBounds.y - startBounds.height / 2)).toBeLessThan(1);
+        } else {
+            // A narrow lane: Start work takes its own row at the right rather than truncating the name.
+            expect(startBounds.y).toBeGreaterThanOrEqual(chipBounds.y + chipBounds.height);
+        }
+        expect(startBounds.x + startBounds.width).toBeLessThanOrEqual(tileBounds.x + tileBounds.width);
+        expect(await tile.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    });
+
     test(`Start work on the card face launches saved work and fits a narrow lane at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 900 });
         let saved;

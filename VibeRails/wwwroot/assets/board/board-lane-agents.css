@@ -76,9 +76,14 @@
     font: 10px/16px system-ui, sans-serif;
 }
 
+/* One line, centred under the robot. Left to wrap inside the 34px button it became two lines
+   ("On" / "entry") and the second hung over the first card in the lane. */
 .board-lane-agents-caption {
     position: absolute;
     top: 36px;
+    left: 50%;
+    transform: translateX(-50%);
+    white-space: nowrap;
     padding: 0 2px;
     border-radius: 2px;
     background: var(--color-bg-surface, #1e1e1e);
