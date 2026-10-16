@@ -20,7 +20,8 @@ public static class TerminalRoutes
                 terminalService.HasActiveSession,
                 terminalService.ActiveSessionId,
                 terminalService.ActiveCli,
-                terminalService.ActiveWorkingDirectory));
+                terminalService.ActiveWorkingDirectory,
+                CanReclaim: terminalService.CanReclaim));
         }).WithName("GetTerminalStatus");
 
         // POST /api/v1/terminal/start - Start a terminal session with LLM CLI

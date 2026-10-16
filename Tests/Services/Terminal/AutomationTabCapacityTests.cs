@@ -591,6 +591,8 @@ public sealed class AutomationTabCapacityTests
     [InlineData("json", false)]
     [InlineData("transport", false)]
     [InlineData("timeout", false)]
+    [InlineData("missing-readiness", false)]
+    [InlineData("cleanup", false)]
     public async Task OwnedCapacityReclaimsOnlyConfirmedIdleHosts(string status, bool removed)
     {
         using var services = new ServiceCollection().BuildServiceProvider();
@@ -603,7 +605,9 @@ public sealed class AutomationTabCapacityTests
                 return new HttpResponseMessage(status == "503" ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.OK)
                 {
                     Content = new StringContent(status == "json" ? "invalid" :
-                        status == "active" ? "{\"hasActiveSession\":true}" : "{\"hasActiveSession\":false}")
+                        status == "missing-readiness" ? "{\"hasActiveSession\":false}" :
+                        status == "cleanup" ? "{\"hasActiveSession\":false,\"canReclaim\":false}" :
+                        status == "active" ? "{\"hasActiveSession\":true,\"canReclaim\":true}" : "{\"hasActiveSession\":false,\"canReclaim\":true}")
                 };
             }
             return new HttpResponseMessage(HttpStatusCode.OK);
@@ -646,7 +650,7 @@ public sealed class AutomationTabCapacityTests
                 checking.TrySetResult();
                 await release.Task.WaitAsync(ct);
             }
-            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"hasActiveSession\":false}") };
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"hasActiveSession\":false,\"canReclaim\":true}") };
         });
         var host = Host(services, http);
         var registry = Registry(host);
@@ -694,7 +698,7 @@ public sealed class AutomationTabCapacityTests
         using var http = new StatusHandler(request => new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(request.RequestUri!.AbsolutePath.EndsWith("/start")
-                ? "{\"hasActiveSession\":true,\"sessionId\":\"owned-session\"}" : "{\"hasActiveSession\":false}")
+                ? "{\"hasActiveSession\":true,\"sessionId\":\"owned-session\"}" : "{\"hasActiveSession\":false,\"canReclaim\":true}")
         });
         var host = Host(services, http);
         var registry = Registry(host);

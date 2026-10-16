@@ -672,7 +672,9 @@ The child's SessionGate covers status validation through removal; busy gates, ac
 unavailable status are retained. Hosts with any unconfirmed Start are retained because child startup
 can outlive the parent's cancelled HTTP request. A previously started session also requires its
 ended recording row, which is written after final output flush. Scheduler cleanup remains
-Automation-only. No recordings are deleted.
+Automation-only. The child's status must explicitly report `canReclaim`: its lifecycle gate is
+idle, it has no active terminal, and the registered/in-flight environment post-exit step queues
+are empty. Missing readiness is retained. No recordings are deleted.
 `ITerminalTabHostService.CreateTabAsync(string?, …)` has a default implementation that ignores
 the owner, so test fakes need no change. Tests: `TerminalTabsRoutesTests`, `script-agent-pane.test.mjs`.
 

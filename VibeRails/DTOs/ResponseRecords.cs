@@ -1057,7 +1057,8 @@ namespace VibeRails.DTOs
         bool HasActiveSession,
         string? SessionId = null,
         string? Cli = null,
-        string? WorkingDirectory = null
+        string? WorkingDirectory = null,
+        bool CanReclaim = false
     );
 
     public record TerminalTabStatusResponse(

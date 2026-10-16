@@ -72,12 +72,20 @@ public sealed class CompletedTerminalOutputTests
         var writes = new List<TerminalOutputWrite>();
         var completed = false;
         var disposed = false;
+        TerminalSessionService? service = null;
         var repository = new Mock<IRepository>();
         repository.Setup(r => r.PersistTerminalOutputAsync(It.IsAny<string>(), It.IsAny<IReadOnlyList<TerminalOutputWrite>>(), It.IsAny<CancellationToken>()))
             .Callback<string, IReadOnlyList<TerminalOutputWrite>, CancellationToken>((_, rows, _) => { lock (writes) writes.AddRange(rows); })
             .Returns(Task.CompletedTask);
         repository.Setup(r => r.CompleteSessionAsync(It.IsAny<string>(), It.IsAny<int>()))
-            .Callback(() => { Assert.True(disposed); completed = true; }).Returns(Task.CompletedTask);
+            .Callback(() =>
+            {
+                Assert.True(disposed);
+                Assert.NotNull(service);
+                Assert.False(service.HasActiveSession);
+                Assert.False(service.CanReclaim); // Recording finalization still owns the lifecycle gate.
+                completed = true;
+            }).Returns(Task.CompletedTask);
         using var state = new TerminalStateService(repository.Object, Mock.Of<IGitService>(),
             Mock.Of<IRemoteStateService>(), Mock.Of<ITerminalIoObserverService>());
         var sessionId = await state.CreateSessionAsync("shell", "/project", null,
@@ -93,7 +101,7 @@ public sealed class CompletedTerminalOutputTests
         var runner = new TerminalRunner(state, Mock.Of<ICommandService>(), Mock.Of<ILocalToolApiContext>(),
             Mock.Of<ILlmProxySessionState>(), Mock.Of<IAutomationConsumer>(), repository.Object,
             Mock.Of<IEnvironmentStepRunner>(), bus);
-        var service = new TerminalSessionService(state, runner, Mock.Of<ILocalClientTracker>());
+        service = new TerminalSessionService(state, runner, Mock.Of<ILocalClientTracker>());
         // This stream ignores cancellation and releases its final bytes only when the PTY
         // closes, reproducing the last-dispatch/disposal race without a real CLI or database.
         using var output = new DisposalOutputStream();
@@ -119,6 +127,7 @@ public sealed class CompletedTerminalOutputTests
             // A provider that ignores cancellation AND disposal must not hold the lifecycle gate.
             await service.StopSessionAsync().WaitAsync(TimeSpan.FromSeconds(8), TestContext.Current.CancellationToken);
             await service.StopSessionAsync();
+            Assert.True(service.CanReclaim);
             Assert.False(await service.CompleteAgentSessionAsync(sessionId));
             output.Release();
             var readLoop = (Task)typeof(TerminalPty).GetField("_readLoop", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(terminal)!;
@@ -162,6 +171,7 @@ public sealed class CompletedTerminalOutputTests
         // The launch path registers this context only for an environment with post-exit steps.
         var contexts = (IDictionary)typeof(TerminalRunner).GetField("s_postStepContexts", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
         contexts[id] = Activator.CreateInstance(typeof(TerminalRunner).GetNestedType("PostStepContext", BindingFlags.NonPublic)!, 17, "env", "/project")!;
+        Assert.False(service.CanReclaim); // Registered steps also prevent eviction before they start.
         service.RegisterExternalTerminal(terminal, id, "/project");
         typeof(TerminalSessionService).GetField("s_externallyOwned", BindingFlags.NonPublic | BindingFlags.Static)!.SetValue(null, false);
         try
@@ -175,10 +185,13 @@ public sealed class CompletedTerminalOutputTests
             await Task.Delay(100, ct);
             Assert.False(stop.IsCompleted, "the stop must wait for the post-exit run already in flight");
             Assert.Equal(0, Volatile.Read(ref closed));
+            Assert.False(service.HasActiveSession);
+            Assert.False(service.CanReclaim); // Gate is free, but post-exit work is still running.
 
             stepRelease.SetResult(StepRunSummary.Empty);
             await Task.WhenAll(stop, exitCleanup).WaitAsync(TimeSpan.FromSeconds(5), ct);
             Assert.Equal(1, Volatile.Read(ref closed));
+            Assert.True(service.CanReclaim);
             steps.Verify(s => s.RunPhaseAsync(17, EnvironmentStepPhase.PostExit, "/project", null, It.IsAny<CancellationToken>()), Times.Once);
         }
         finally { stepRelease.TrySetResult(StepRunSummary.Empty); await service.UnregisterTerminalAsync(); }

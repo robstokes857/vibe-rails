@@ -393,7 +393,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                 try
                 {
                     var status = await GetTerminalStatusFromChildAsync(child, timeout.Token);
-                    if (status is not { HasActiveSession: false }) return;
+                    if (status is not { HasActiveSession: false, CanReclaim: true }) return;
                     if (status.SessionId is not null && status.SessionId != child.LastStartedSessionId) return;
                     if (child.LastStartedSessionId is { } sessionId)
                     {

@@ -6,6 +6,8 @@ namespace VibeRails.Services.Terminal;
 public interface ITerminalSessionService
 {
     bool HasActiveSession { get; }
+    /// <summary>Whether lifecycle work and environment post-exit steps have finished.</summary>
+    bool CanReclaim => false;
     string? ActiveSessionId { get; }
     string? ActiveCli { get; }
     string? ActiveWorkingDirectory { get; }

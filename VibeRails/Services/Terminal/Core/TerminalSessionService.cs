@@ -46,6 +46,23 @@ public class TerminalSessionService : ITerminalSessionService
         }
     }
 
+    /// <summary>
+    /// True only between lifecycle operations, with no live terminal or pending post-exit work.
+    /// The parent must still serialize this observation with its session starts before removal.
+    /// </summary>
+    public bool CanReclaim
+    {
+        get
+        {
+            if (!s_lifecycleGate.Wait(0)) return false;
+            try
+            {
+                lock (s_lock) return s_terminal is null && !TerminalRunner.HasPendingPostSteps;
+            }
+            finally { s_lifecycleGate.Release(); }
+        }
+    }
+
     public string? ActiveSessionId
     {
         get

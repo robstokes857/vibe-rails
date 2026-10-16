@@ -32,6 +32,11 @@ public class TerminalRunner
     private static readonly Lock s_postStepLock = new();
     private static readonly Dictionary<string, Task> s_postStepRuns = new(StringComparer.Ordinal);
 
+    internal static bool HasPendingPostSteps
+    {
+        get { lock (s_postStepLock) return !s_postStepContexts.IsEmpty || s_postStepRuns.Count != 0; }
+    }
+
     private sealed record PostStepContext(int EnvironmentId, string? EnvironmentName, string WorkingDirectory);
 
     /// <summary>
