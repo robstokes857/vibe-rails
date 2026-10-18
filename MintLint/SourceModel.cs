@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace MintLint;
@@ -37,6 +38,55 @@ internal sealed class ParsedSource
     public List<ClassSpan> Classes { get; } = [];
 
     public List<string> ImportSources { get; } = [];
+
+    // Functions grouped by start token, built on first lookup once parsing has filled Functions.
+    // Metric passes ask about every token, so a scan of Functions per token is quadratic.
+    private int[]? _firstFunctionAtToken;
+    private int[]? _nextFunctionAtSameToken;
+
+    /// <summary>
+    /// Returns the lowest-index function starting at <paramref name="tokenIndex"/>, or -1.
+    /// Continue with <see cref="NextFunctionAtSameStart"/> to visit the rest in ascending order.
+    /// </summary>
+    public int FirstFunctionStartingAt(int tokenIndex)
+    {
+        if (_nextFunctionAtSameToken is null || _nextFunctionAtSameToken.Length != Functions.Count)
+        {
+            BuildFunctionStartIndex();
+        }
+
+        return (uint)tokenIndex < (uint)_firstFunctionAtToken!.Length ? _firstFunctionAtToken[tokenIndex] : -1;
+    }
+
+    /// <summary>
+    /// Returns the next higher-index function with the same start token as
+    /// <paramref name="functionIndex"/>, or -1.
+    /// </summary>
+    public int NextFunctionAtSameStart(int functionIndex) => _nextFunctionAtSameToken![functionIndex];
+
+    private void BuildFunctionStartIndex()
+    {
+        int[] first = new int[Tokens.Count];
+        Array.Fill(first, -1);
+        int[] next = new int[Functions.Count];
+
+        // Prepending in descending order leaves each chain in ascending order.
+        for (int i = Functions.Count - 1; i >= 0; i--)
+        {
+            int start = Functions[i].StartIndex;
+            if ((uint)start >= (uint)first.Length)
+            {
+                next[i] = -1;
+                continue;
+            }
+
+            next[i] = first[start];
+            first[start] = i;
+        }
+
+        _firstFunctionAtToken = first;
+        _nextFunctionAtSameToken = next;
+    }
 
     private static int[] BuildPartnerMap(List<Token> tokens, string open, string close)
     {

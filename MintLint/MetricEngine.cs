@@ -909,22 +909,17 @@ internal static class MetricEngine
 
     private static bool TryGetNestedFunctionSkip(ParsedSource parsed, int currentFunctionIndex, int tokenIndex, out int endIndex)
     {
-        for (int i = 0; i < parsed.Functions.Count; i++)
+        // Only functions starting at this token can match; the lowest qualifying index wins.
+        for (int i = parsed.FirstFunctionStartingAt(tokenIndex); i >= 0; i = parsed.NextFunctionAtSameStart(i))
         {
             if (i == currentFunctionIndex)
             {
                 continue;
             }
 
-            FunctionSpan candidate = parsed.Functions[i];
-            if (candidate.StartIndex != tokenIndex)
-            {
-                continue;
-            }
-
             if (currentFunctionIndex < 0 || IsDescendantOf(parsed, i, currentFunctionIndex))
             {
-                endIndex = candidate.EndIndex;
+                endIndex = parsed.Functions[i].EndIndex;
                 return true;
             }
         }

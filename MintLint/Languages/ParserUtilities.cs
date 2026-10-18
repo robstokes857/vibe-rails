@@ -105,33 +105,93 @@ internal static class ParserUtilities
 
     public static void AssignFunctionParents(ParsedSource parsed)
     {
-        for (int i = 0; i < parsed.Functions.Count; i++)
+        // A function's parent is the narrowest function that starts strictly before it and ends
+        // at or after it; on a width tie the lowest index wins. Spans need not nest cleanly, so
+        // rather than a stack this sweeps by start and keeps the best candidate per end position
+        // in a suffix-min Fenwick tree: O(F log F) instead of the all-pairs O(F²).
+        List<FunctionSpan> functions = parsed.Functions;
+        int count = functions.Count;
+        if (count == 0)
         {
-            FunctionSpan child = parsed.Functions[i];
-            int parentIndex = -1;
-            int parentWidth = int.MaxValue;
+            return;
+        }
 
-            for (int j = 0; j < parsed.Functions.Count; j++)
+        int[] ends = new int[count];
+        int[] starts = new int[count];
+        int[] byStart = new int[count];
+        for (int i = 0; i < count; i++)
+        {
+            ends[i] = functions[i].EndIndex;
+            starts[i] = functions[i].StartIndex;
+            byStart[i] = i;
+        }
+
+        Array.Sort(ends);
+        int distinctEnds = 0;
+        for (int i = 0; i < count; i++)
+        {
+            if (distinctEnds == 0 || ends[distinctEnds - 1] != ends[i])
             {
-                if (i == j)
+                ends[distinctEnds++] = ends[i];
+            }
+        }
+
+        Array.Sort(starts, byStart);
+
+        // Slot p covers ends ranked >= distinctEnds - p, so a prefix query reads a suffix of ends.
+        int[] tree = new int[distinctEnds + 1];
+        Array.Fill(tree, -1);
+
+        int group = 0;
+        while (group < count)
+        {
+            int groupEnd = group;
+            while (groupEnd < count && starts[groupEnd] == starts[group])
+            {
+                groupEnd++;
+            }
+
+            // Same-start functions cannot parent each other, so query the group before inserting it.
+            for (int k = group; k < groupEnd; k++)
+            {
+                FunctionSpan child = functions[byStart[k]];
+                int best = -1;
+                for (int p = distinctEnds - Array.BinarySearch(ends, 0, distinctEnds, child.EndIndex); p > 0; p -= p & -p)
                 {
-                    continue;
+                    best = NarrowerParent(functions, best, tree[p]);
                 }
 
-                FunctionSpan candidate = parsed.Functions[j];
-                if (child.StartIndex > candidate.StartIndex && child.EndIndex <= candidate.EndIndex)
+                child.ParentIndex = best;
+            }
+
+            for (int k = group; k < groupEnd; k++)
+            {
+                int index = byStart[k];
+                for (int p = distinctEnds - Array.BinarySearch(ends, 0, distinctEnds, functions[index].EndIndex); p <= distinctEnds; p += p & -p)
                 {
-                    int width = candidate.EndIndex - candidate.StartIndex;
-                    if (width < parentWidth)
-                    {
-                        parentIndex = j;
-                        parentWidth = width;
-                    }
+                    tree[p] = NarrowerParent(functions, tree[p], index);
                 }
             }
 
-            child.ParentIndex = parentIndex;
+            group = groupEnd;
         }
+    }
+
+    private static int NarrowerParent(List<FunctionSpan> functions, int left, int right)
+    {
+        if (left < 0 || right < 0)
+        {
+            return left < 0 ? right : left;
+        }
+
+        int leftWidth = functions[left].EndIndex - functions[left].StartIndex;
+        int rightWidth = functions[right].EndIndex - functions[right].StartIndex;
+        if (leftWidth != rightWidth)
+        {
+            return leftWidth < rightWidth ? left : right;
+        }
+
+        return Math.Min(left, right);
     }
 
     public static void AddUnique(List<string> values, string value)
