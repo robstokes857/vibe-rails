@@ -11,12 +11,7 @@ public sealed class BaseLlmOptionsTests
     [InlineData("gpt-6-astra", "fast")]
     [InlineData("gpt-6-astra", "ultrafast")]
     [InlineData("gpt-6.1-sol", "fast")]
-    [InlineData("gpt-6-sol", "fast")]
-    [InlineData("gpt-6-luna", "fast")]
-    [InlineData("gpt-5.6-sol", "fast")]
-    [InlineData("gpt-5.6-terra", "fast")]
-    [InlineData("gpt-5.6-luna", "fast")]
-    [InlineData("gpt-5.5", "fast")]
+    [InlineData("gpt-6.1-sol", "ultrafast")]
     public void CodexSpeedBecomesSessionArguments(string model, string speed) =>
         Assert.Equal(["--model", model, "-c", "model_reasoning_effort=high", "-c", $"service_tier={speed}", "-c", "features.fast_mode=true"],
             BaseLlmOptionsBuilder.BuildArguments(LLM.Codex, new(model, "high", Speed: speed)));
@@ -24,7 +19,12 @@ public sealed class BaseLlmOptionsTests
     [Theory]
     [InlineData(LLM.Codex, "", "fast")]
     [InlineData(LLM.Codex, "custom-model", "fast")]
-    [InlineData(LLM.Codex, "gpt-6.1-sol", "ultrafast")]
+    [InlineData(LLM.Codex, "gpt-6-sol", "fast")]
+    [InlineData(LLM.Codex, "gpt-6-luna", "fast")]
+    [InlineData(LLM.Codex, "gpt-5.6-sol", "fast")]
+    [InlineData(LLM.Codex, "gpt-5.6-terra", "fast")]
+    [InlineData(LLM.Codex, "gpt-5.6-luna", "fast")]
+    [InlineData(LLM.Codex, "gpt-5.5", "fast")]
     [InlineData(LLM.Codex, "gpt-5.6-sol", "ultrafast")]
     [InlineData(LLM.Codex, "gpt-6-astra", "turbo")]
     [InlineData(LLM.Codex, "gpt-6-astra", "fast --yolo")]

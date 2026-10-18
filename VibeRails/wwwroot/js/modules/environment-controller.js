@@ -1237,7 +1237,7 @@ export class EnvironmentController {
                         <option value="fast" ${codexSpeed === 'fast' ? 'selected' : ''}>Fast (/fast)</option>
                         <option value="ultrafast" ${codexSpeed === 'ultrafast' ? 'selected' : ''} ${this.codexModelSupportsUltrafast(codexModel) ? '' : 'disabled'}>Ultrafast (/ultrafast)</option>
                     </select>
-                    <small id="codex-speed-help" class="form-text text-muted">Faster modes use more of your usage allowance. Ultrafast requires gpt-6-astra and an eligible account.</small>
+                    <small id="codex-speed-help" class="form-text text-muted">Faster modes use more of your usage allowance. Ultrafast requires GPT-6 Astra or GPT-6.1 Sol and an eligible account.</small>
                 </div>
                 <div class="mb-3">
                     <div class="form-check form-switch">

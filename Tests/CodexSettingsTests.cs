@@ -477,10 +477,12 @@ model = ""gpt-5.6-terra""
     [Theory]
     [InlineData("gpt-6-astra", false, "ultrafast")]
     [InlineData("gpt-6-astra", true, "ultrafast")]
-    [InlineData("gpt-6.1-sol", false, "")]
+    [InlineData("gpt-6.1-sol", false, "ultrafast")]
+    [InlineData("gpt-6.1-sol", true, "ultrafast")]
+    [InlineData("gpt-6-sol", false, "")]
+    [InlineData("gpt-6-sol", true, "fast")]
     [InlineData("", false, "")]
-    [InlineData("gpt-6.1-sol", true, "fast")]
-    public async Task SaveSettings_RestrictsUltrafastToAstra_AndRoundTrips(string model, bool fast, string expectedTier)
+    public async Task SaveSettings_RestrictsUltrafastToSupportedModels_AndRoundTrips(string model, bool fast, string expectedTier)
     {
         _mockFileService.SetFileExists(true);
         _mockFileService.SetFileContent("features.fast_mode = false\n[features]\nunrelated = true\n");

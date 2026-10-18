@@ -62,16 +62,18 @@ test('Codex flags that have controls are not duplicated into Additional Argument
 
 test('Codex Ultrafast round-trips every supported config argument spelling without duplicate tiers', () => {
     const controller = createController();
-    for (const flag of ['-c service_tier=ultrafast', '--config service_tier=ultrafast',
-        '--config=service_tier=ultrafast', '-c=service_tier=ultrafast', '-c \'service_tier="ultrafast"\'']) {
-        const settings = controller.mergeCodexSettingsFromCustomArgs({ fastMode: true },
-            `--model gpt-6-astra ${flag} --enable fast_mode --sandbox read-only`);
-        assert.equal(settings.ultrafastMode, true);
-        assert.equal(settings.fastMode, false);
-        assert.equal(settings.additionalArgs, '--sandbox read-only');
-        assert.equal(controller.buildCodexCustomArgs(settings),
-            '--model gpt-6-astra -c service_tier=ultrafast -c features.fast_mode=true --sandbox read-only');
-        assert.match(controller.buildCliSettingsHtml('codex', settings), /value="ultrafast" selected/);
+    for (const model of ['gpt-6-astra', 'gpt-6.1-sol']) {
+        for (const flag of ['-c service_tier=ultrafast', '--config service_tier=ultrafast',
+            '--config=service_tier=ultrafast', '-c=service_tier=ultrafast', '-c \'service_tier="ultrafast"\'']) {
+            const settings = controller.mergeCodexSettingsFromCustomArgs({ fastMode: true },
+                `--model ${model} ${flag} --enable fast_mode --sandbox read-only`);
+            assert.equal(settings.ultrafastMode, true);
+            assert.equal(settings.fastMode, false);
+            assert.equal(settings.additionalArgs, '--sandbox read-only');
+            assert.equal(controller.buildCodexCustomArgs(settings),
+                `--model ${model} -c service_tier=ultrafast -c features.fast_mode=true --sandbox read-only`);
+            assert.match(controller.buildCliSettingsHtml('codex', settings), /value="ultrafast" selected/);
+        }
     }
 });
 
@@ -86,9 +88,9 @@ test('Codex speed overrides replace copied settings and the last tier wins', () 
     }
 });
 
-test('Codex refuses to emit Ultrafast for non-Astra models and preserves unmanaged tiers', () => {
+test('Codex refuses to emit Ultrafast for unsupported models and preserves unmanaged tiers', () => {
     const controller = createController();
-    for (const model of ['', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-5.6-sol']) {
+    for (const model of ['', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'custom-model']) {
         assert.doesNotMatch(controller.buildCodexCustomArgs({ model, ultrafastMode: true }), /service_tier|fast_mode/);
         assert.match(controller.buildCliSettingsHtml('codex', { model, ultrafastMode: true }), /value="ultrafast"\s+disabled/);
     }

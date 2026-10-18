@@ -452,12 +452,14 @@ test.describe('Agents editor', () => {
     });
 
 
-    test('Codex Speed saves and reopens Ultrafast, Fast and Default, restricted to Astra', async ({ page }) => {
+    test('Codex Speed saves and reopens Ultrafast, Fast and Default for Astra and GPT-6.1 Sol', async ({ page }) => {
         const { writes } = await installStatefulApi(page);
         await openApp(page);
         await page.evaluate(() => window.app.environmentController.createEnvironment({ variant: 'agent' }));
         await expect(page.locator('#env-form')).toBeVisible();
-        await page.locator('#env-name').fill('Astra speed');
+        await page.locator('#env-name').fill('Sol speed');
+        expect(await page.locator('#codex-model option').evaluateAll(options => options.map(option => option.value)))
+            .toEqual(['', 'gpt-6-astra', 'gpt-6.1-sol']);
         const speed = page.getByLabel('Speed', { exact: true });
         const model = page.locator('#codex-model');
         const ultrafast = speed.locator('option[value="ultrafast"]');
@@ -466,21 +468,25 @@ test.describe('Agents editor', () => {
         await expect(ultrafast).toBeEnabled();
         await speed.selectOption('ultrafast');
         await model.selectOption('gpt-6.1-sol');
+        await expect(speed).toHaveValue('ultrafast');
+        await expect(ultrafast).toBeEnabled();
+        await model.selectOption('');
         await expect(speed).toHaveValue('');
         await expect(ultrafast).toBeDisabled();
-        await model.selectOption('gpt-6-astra');
+        await model.selectOption('gpt-6.1-sol');
 
         for (const tier of ['ultrafast', 'fast', '']) {
             await speed.selectOption(tier);
             await page.locator('#env-form button[type="submit"]').click();
             await expect(page.locator('#env-form')).toHaveCount(0);
             const write = tier === 'ultrafast' ? writes.environmentCreates.at(-1) : writes.environments.at(-1);
-            expect(write.body.customArgs).toBe('--model gpt-6-astra'
+            expect(write.body.customArgs).toBe('--model gpt-6.1-sol'
                 + (tier ? ` -c service_tier=${tier} -c features.fast_mode=true` : ''));
             expect(writes.settings.at(-1).body).toMatchObject({
-                model: 'gpt-6-astra', fastMode: tier === 'fast', ultrafastMode: tier === 'ultrafast'
+                model: 'gpt-6.1-sol', fastMode: tier === 'fast', ultrafastMode: tier === 'ultrafast'
             });
-            await openSetupForm(page, 'Astra speed');
+            await openSetupForm(page, 'Sol speed');
+            await expect(model).toHaveValue('gpt-6.1-sol');
             await expect(speed).toHaveValue(tier);
         }
     });
@@ -602,14 +608,14 @@ test.describe('Agents editor', () => {
         await expect(page.locator('#env-form')).toHaveCount(0);
         await expect(page.locator('#codex-model')).toHaveValue('gpt-5.6-sol');
         await page.locator('#env-initial-message').fill('Security review configured from Automation.');
-        await page.locator('#codex-model').selectOption('gpt-5.6-luna');
+        await page.locator('#codex-model').selectOption('gpt-6.1-sol');
         await page.locator('[data-job-form] button[type="submit"]').click();
         await expect(page.locator('[data-job-form]')).toHaveCount(0);
         expect(writes.jobs[0].body.prompt).toBe('Security review configured from Automation.');
         expect(writes.environmentCreates).toHaveLength(0);
         await openSetupForm(page, 'Nightly Codex');
         await expect(page.locator('#env-initial-message')).toHaveValue('Security review configured from Automation.');
-        await expect(page.locator('#codex-model')).toHaveValue('gpt-5.6-luna');
+        await expect(page.locator('#codex-model')).toHaveValue('gpt-6.1-sol');
         await page.locator('#env-initial-message').fill('Updated from Environments.');
         await page.locator('#env-form button[type="submit"]').click();
         await expect(page.locator('#env-form')).toHaveCount(0);
@@ -642,12 +648,12 @@ test.describe('Agents editor', () => {
 
         await openAutomationEditorForExistingJob(page);
         await expect(page.locator('#codex-additional-args')).toHaveValue('--sandbox read-only --search');
-        await page.locator('#codex-model').selectOption('gpt-5.6-luna');
+        await page.locator('#codex-model').selectOption('gpt-6.1-sol');
         await submit.click();
         await expect(page.locator('[data-job-form]')).toHaveCount(0);
         expect(writes.environments).toHaveLength(1);
-        expect(writes.environments[0].body.customArgs).toBe('--model gpt-5.6-luna -c model_reasoning_effort=high --sandbox read-only --search');
-        expect(state.environments[0].customArgs).toBe('--model gpt-5.6-luna -c model_reasoning_effort=high --sandbox read-only --search');
+        expect(writes.environments[0].body.customArgs).toBe('--model gpt-6.1-sol -c model_reasoning_effort=high --sandbox read-only --search');
+        expect(state.environments[0].customArgs).toBe('--model gpt-6.1-sol -c model_reasoning_effort=high --sandbox read-only --search');
 
         // The setup form mounts the same editor: saving it unchanged writes nothing.
         await openSetupForm(page, 'Nightly Codex');

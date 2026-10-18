@@ -42,7 +42,7 @@ test('model lists come from the exact same catalog as the environment editor', (
         assert.equal(controller[method](''), renderLlmModelOptions(cli));
         for (const [model] of LLM_MODEL_OPTIONS[cli]) assert.ok(renderBoardLaunchOptions(`base:${cli}`).includes(`value="${model}"`), `${cli}: ${model}`);
     }
-    assert.deepEqual(LLM_MODEL_OPTIONS.codex.map(([model]) => model), ['', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5']);
+    assert.deepEqual(LLM_MODEL_OPTIONS.codex.map(([model]) => model), ['', 'gpt-6-astra', 'gpt-6.1-sol']);
 });
 
 test('OpenCode-backed providers display fixed models and omit unsupported effort', () => {
@@ -90,12 +90,11 @@ test('saved/custom model text is escaped before becoming dropdown markup', () =>
 });
 
 test('Codex speeds follow model capabilities and round-trip through the form', () => {
-    for (const model of ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5']) {
+    for (const model of ['gpt-6-astra', 'gpt-6.1-sol']) {
         assert.equal(normalizeBoardLaunchOptions('base:codex', { model, speed: 'fast' }).speed, 'fast');
-        assert.equal(normalizeBoardLaunchOptions('base:codex', { model, speed: 'ultrafast' }).speed,
-            model === 'gpt-6-astra' ? 'ultrafast' : '');
+        assert.equal(normalizeBoardLaunchOptions('base:codex', { model, speed: 'ultrafast' }).speed, 'ultrafast');
     }
-    for (const model of ['', 'unknown-model', 'constructor', '__proto__']) {
+    for (const model of ['', 'unknown-model', 'constructor', '__proto__', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5']) {
         for (const speed of ['fast', 'ultrafast', 'turbo']) {
             assert.equal(normalizeBoardLaunchOptions('base:codex', { model, speed }).speed, '');
         }
@@ -120,9 +119,14 @@ test('changing the Codex model clears unsupported speeds and disposes the listen
     assert.equal(speed.value, 'ultrafast');
     model.value = 'gpt-6.1-sol';
     listener();
+    assert.equal(speed.value, 'ultrafast');
+    assert.equal(ultrafast.disabled, false);
+    assert.equal(fast.disabled, false);
+    model.value = 'gpt-6-sol';
+    listener();
     assert.equal(speed.value, '');
     assert.equal(ultrafast.disabled, true);
-    assert.equal(fast.disabled, false);
+    assert.equal(fast.disabled, true);
     speed.value = 'fast';
     model.value = '';
     listener();

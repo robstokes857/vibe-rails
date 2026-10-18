@@ -3,7 +3,8 @@ using System.Text.Json;
 namespace VibeRails.Services.LlmClis;
 
 // The browser imports the same JSON that is embedded here for AOT and stdio launches.
-// Verified against Codex's model metadata and speed guide, 2026-10-08.
+// Speed tiers verified against Codex's model metadata and speed guide, 2026-10-17.
+// Only Astra and GPT-6.1 Sol are pinned (owner request, 2026-10-17).
 internal static class CodexModelCapabilities
 {
     private static readonly IReadOnlyDictionary<string, string[]> Speeds = LoadSpeeds();

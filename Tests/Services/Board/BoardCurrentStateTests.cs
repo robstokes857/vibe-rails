@@ -28,11 +28,13 @@ public sealed class BoardCurrentStateTests : IDisposable
         _service = new BoardService(_store, Mock.Of<IBoardCommitService>(), _live);
     }
 
-    [Fact]
-    public async Task LaunchUsesTheReadCardSnapshot_WithoutRewritingLaterEdits()
+    [Theory]
+    [InlineData("gpt-6-astra")]
+    [InlineData("gpt-6.1-sol")]
+    public async Task LaunchUsesTheReadCardSnapshot_WithoutRewritingLaterEdits(string model)
     {
         var card = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "Ship", Description: "original", Assignee: "base:codex",
-            BaseLlmOptions: new BaseLlmOptions("gpt-6-astra", "high", "plan", Yolo: true, Speed: "ultrafast")), Ct);
+            BaseLlmOptions: new BaseLlmOptions(model, "high", "plan", Yolo: true, Speed: "ultrafast")), Ct);
         var session = Guid.NewGuid().ToString();
         _tabs.SetupGet(t => t.MaxTabs).Returns(8);
         _tabs.Setup(t => t.ListTabsAsync(It.IsAny<CancellationToken>())).ReturnsAsync([]);
@@ -62,8 +64,8 @@ public sealed class BoardCurrentStateTests : IDisposable
     public async Task BaseOptions_RoundTrip_AndClearWhenAssigneeChanges()
     {
         var card = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "Model", Assignee: "base:codex",
-            BaseLlmOptions: new BaseLlmOptions("gpt-5.5", "max", "plan", Yolo: true, Speed: "fast")), Ct);
-        Assert.Equal("xhigh", card.BaseLlmOptions!.Effort);
+            BaseLlmOptions: new BaseLlmOptions("gpt-6.1-sol", "max", "plan", Yolo: true, Speed: "fast")), Ct);
+        Assert.Equal("max", card.BaseLlmOptions!.Effort);
         var stored = (await new BoardStore(_connectionString, _connectionString).FindCardAsync(_project, card.Id, Ct))!.BaseLlmOptions!;
         Assert.Equal("", stored.Mode);
         Assert.True(stored.Yolo);

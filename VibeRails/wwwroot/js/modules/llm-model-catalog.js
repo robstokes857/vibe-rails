@@ -1,7 +1,8 @@
 import { escapeHtml } from './utils.js';
 import codexSpeeds from './codex-model-capabilities.json' with { type: 'json' };
 
-// Verified against Codex's model metadata and speed guide, 2026-10-08.
+// Speed tiers verified against Codex's model metadata and speed guide, 2026-10-17.
+// Only Astra and GPT-6.1 Sol are pinned (owner request, 2026-10-17).
 // CodexModelCapabilities embeds this same data for backend validation.
 Object.values(codexSpeeds).forEach(Object.freeze);
 Object.freeze(codexSpeeds);
@@ -16,13 +17,7 @@ export const LLM_MODEL_OPTIONS = Object.freeze({
     'codex': [
         ['', 'Default (Codex recommended)'],
         ['gpt-6-astra', 'gpt-6-astra'],
-        ['gpt-6.1-sol', 'gpt-6.1-sol'],
-        ['gpt-6-sol', 'gpt-6-sol'],
-        ['gpt-6-luna', 'gpt-6-luna'],
-        ['gpt-5.6-sol', 'gpt-5.6-sol'],
-        ['gpt-5.6-terra', 'gpt-5.6-terra'],
-        ['gpt-5.6-luna', 'gpt-5.6-luna'],
-        ['gpt-5.5', 'gpt-5.5']
+        ['gpt-6.1-sol', 'gpt-6.1-sol']
     ],
     // "[1m]" is Claude Code's 1M-context marker on a full model ID. Behind the VibeRails LLM
     // proxy (a custom ANTHROPIC_BASE_URL) Claude Code budgeted a 200K window for the bare ID
