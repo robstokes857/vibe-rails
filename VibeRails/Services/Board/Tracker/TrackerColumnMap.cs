@@ -1,29 +1,28 @@
 using System.Buffers;
 using System.Text;
 using System.Text.Json;
-using VibeRails.Services.Board;
 
-namespace VibeRails.Services.Jira;
+namespace VibeRails.Services.Board.Tracker;
 
-/// <summary>One Jira board column as saved: <see cref="LaneId"/> is the user's choice, null for automatic.</summary>
-public sealed record JiraColumnChoice(string Name, string? LaneId);
+/// <summary>One tracker board column as saved: <see cref="LaneId"/> is the user's choice, null for automatic.</summary>
+public sealed record TrackerColumnChoice(string Name, string? LaneId);
 
-/// <summary>Where one Jira column's issues go. A null lane is the "Jira" overflow lane.</summary>
-public sealed record JiraColumnLane(string Name, string? LaneId, string? LaneName, bool Automatic);
+/// <summary>Where one tracker column's items go. A null lane is the tracker's overflow lane.</summary>
+public sealed record TrackerColumnLane(string Name, string? LaneId, string? LaneName, bool Automatic);
 
 /// <summary>
-/// Jira board column to VibeRails lane (VIBE-102). An issue's status id names its Jira column (the
-/// board configuration lists each column's statuses), and the column names a lane. The saved map
-/// (<c>BoardJiraConnections.ColumnMap</c>) keeps the board's column names in order plus any lane the
-/// user picked; every other column is matched automatically on each pull, so lanes added or
-/// renamed later are picked up.
+/// Tracker board column to VibeRails lane (VIBE-102), shared by Jira and Azure DevOps. A remote
+/// status names its board column, and the column names a lane. The saved map (the connection's
+/// <c>ColumnMap</c>, JSON <c>[{name, lane}]</c>) keeps the board's column names in order plus any
+/// lane the user picked; every other column is matched automatically on each pull, so lanes added
+/// or renamed later are picked up.
 /// </summary>
-public static class JiraColumnMap
+public static class TrackerColumnMap
 {
     public const int MaxColumns = 50;
     public const int MaxNameLength = 200;
 
-    public static IReadOnlyList<JiraColumnChoice> Parse(string? json)
+    public static IReadOnlyList<TrackerColumnChoice> Parse(string? json)
     {
         if (string.IsNullOrWhiteSpace(json))
             return [];
@@ -32,7 +31,7 @@ public static class JiraColumnMap
             using var document = JsonDocument.Parse(json);
             if (document.RootElement.ValueKind != JsonValueKind.Array)
                 return [];
-            var columns = new List<JiraColumnChoice>();
+            var columns = new List<TrackerColumnChoice>();
             foreach (var element in document.RootElement.EnumerateArray())
             {
                 if (element.ValueKind != JsonValueKind.Object
@@ -43,7 +42,7 @@ public static class JiraColumnMap
                 var lane = element.TryGetProperty("lane", out var laneElement) && laneElement.ValueKind == JsonValueKind.String
                     ? laneElement.GetString()
                     : null;
-                columns.Add(new JiraColumnChoice(text, string.IsNullOrEmpty(lane) ? null : lane));
+                columns.Add(new TrackerColumnChoice(text, string.IsNullOrEmpty(lane) ? null : lane));
             }
             return columns;
         }
@@ -54,7 +53,7 @@ public static class JiraColumnMap
         }
     }
 
-    public static string? Serialize(IReadOnlyList<JiraColumnChoice> columns)
+    public static string? Serialize(IReadOnlyList<TrackerColumnChoice> columns)
     {
         if (columns.Count == 0)
             return null;
@@ -78,20 +77,20 @@ public static class JiraColumnMap
     }
 
     /// <summary>The board's current columns in order, keeping a lane picked for a column of the same name.</summary>
-    public static IReadOnlyList<JiraColumnChoice> WithColumns(IReadOnlyList<JiraColumnChoice> saved, IEnumerable<string> names) =>
+    public static IReadOnlyList<TrackerColumnChoice> WithColumns(IReadOnlyList<TrackerColumnChoice> saved, IEnumerable<string> names) =>
         names.Select(Clip)
             .Where(name => name.Length > 0)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(MaxColumns)
-            .Select(name => new JiraColumnChoice(name, Find(saved, name)?.LaneId))
+            .Select(name => new TrackerColumnChoice(name, Find(saved, name)?.LaneId))
             .ToList();
 
     /// <summary>
     /// Applies the user's picks: a lane id, or blank for automatic. A name the saved map doesn't
     /// have yet is appended, so a pick made before the first Connect is kept.
     /// </summary>
-    public static IReadOnlyList<JiraColumnChoice> WithChoices(
-        IReadOnlyList<JiraColumnChoice> saved, IReadOnlyDictionary<string, string?> choices)
+    public static IReadOnlyList<TrackerColumnChoice> WithChoices(
+        IReadOnlyList<TrackerColumnChoice> saved, IReadOnlyDictionary<string, string?> choices)
     {
         var picks = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         foreach (var (name, lane) in choices)
@@ -101,7 +100,7 @@ public static class JiraColumnMap
         {
             if (name.Length == 0 || columns.Count >= MaxColumns || Find(columns, name) is not null)
                 continue;
-            columns.Add(new JiraColumnChoice(name, lane));
+            columns.Add(new TrackerColumnChoice(name, lane));
         }
         return columns;
     }
@@ -115,22 +114,23 @@ public static class JiraColumnMap
 
     /// <summary>
     /// Each column's lane: the saved pick while that lane still exists on the board, otherwise
-    /// <see cref="Automatic"/>. The overflow lane is never an automatic target.
+    /// <see cref="Automatic"/>. The overflow lane (by id, or named <paramref name="overflowLaneName"/>)
+    /// is never an automatic target.
     /// </summary>
-    public static IReadOnlyList<JiraColumnLane> Resolve(
-        IReadOnlyList<string> names, IReadOnlyList<JiraColumnChoice> saved,
-        IReadOnlyList<BoardColumnRecord> lanes, string? overflowColumnId)
+    public static IReadOnlyList<TrackerColumnLane> Resolve(
+        IReadOnlyList<string> names, IReadOnlyList<TrackerColumnChoice> saved,
+        IReadOnlyList<BoardColumnRecord> lanes, string? overflowColumnId, string overflowLaneName)
     {
         var candidates = lanes
             .Where(lane => lane.Id != overflowColumnId
-                && !string.Equals(lane.Name, JiraFieldMapping.OverflowLaneName, StringComparison.OrdinalIgnoreCase))
+                && !string.Equals(lane.Name, overflowLaneName, StringComparison.OrdinalIgnoreCase))
             .ToList();
-        var resolved = new List<JiraColumnLane>(names.Count);
+        var resolved = new List<TrackerColumnLane>(names.Count);
         for (var i = 0; i < names.Count; i++)
         {
             var picked = Find(saved, names[i])?.LaneId is { } laneId ? lanes.FirstOrDefault(lane => lane.Id == laneId) : null;
             var lane = picked ?? Automatic(i, names, candidates);
-            resolved.Add(new JiraColumnLane(names[i], lane?.Id, lane?.Name, picked is null));
+            resolved.Add(new TrackerColumnLane(names[i], lane?.Id, lane?.Name, picked is null));
         }
         return resolved;
     }
@@ -139,7 +139,7 @@ public static class JiraColumnMap
     /// The automatic lane for column <paramref name="index"/>: the lane with the same name; else
     /// the one lane whose name is a whole word of the column's ("In Review" goes to Review); else
     /// the first lane for the first column; else the Done lane (or the last lane) for the last
-    /// column, which Jira treats as done. A middle column with no match goes to overflow (null).
+    /// column, which trackers treat as done. A middle column with no match goes to overflow (null).
     /// </summary>
     public static BoardColumnRecord? Automatic(int index, IReadOnlyList<string> names, IReadOnlyList<BoardColumnRecord> candidates)
     {
@@ -168,7 +168,7 @@ public static class JiraColumnMap
         return null;
     }
 
-    private static JiraColumnChoice? Find(IReadOnlyList<JiraColumnChoice> columns, string name) =>
+    private static TrackerColumnChoice? Find(IReadOnlyList<TrackerColumnChoice> columns, string name) =>
         columns.FirstOrDefault(column => string.Equals(column.Name, name, StringComparison.OrdinalIgnoreCase));
 
     private static string Clip(string? name)

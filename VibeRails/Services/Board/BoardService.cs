@@ -836,15 +836,16 @@ public sealed partial class BoardService(
 
     /// <summary>
     /// The board filter for who created the card. Blank means every card; <c>agent</c> and
-    /// <c>human</c> are the only stored origins. Anything else is a bad request rather than a
-    /// silent empty board.
+    /// <c>human</c> are the stored origins, and <c>jira</c> and <c>ado</c> are the cards linked to
+    /// that tracker (human excludes both). Anything else is a bad request rather than a silent
+    /// empty board.
     /// </summary>
     internal static string? NormalizeCardOrigin(string? value)
     {
         var origin = value?.Trim().ToLowerInvariant();
         return string.IsNullOrEmpty(origin) ? null
-            : origin is "agent" or "human" or "jira" ? origin
-            : throw new BoardValidationException("Origin must be agent, human or jira.");
+            : origin is "agent" or "human" or "jira" or "ado" ? origin
+            : throw new BoardValidationException("Origin must be agent, human, jira or ado.");
     }
 
     internal static bool IsClearValue(System.Text.Json.JsonElement element) =>

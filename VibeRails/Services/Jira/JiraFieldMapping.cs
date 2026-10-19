@@ -1,4 +1,5 @@
 using VibeRails.Services.Board;
+using VibeRails.Services.Board.Tracker;
 
 namespace VibeRails.Services.Jira;
 
@@ -14,23 +15,16 @@ public sealed record JiraMappedFields(
     string StatusName,
     string? AssigneeDisplay);
 
-public enum JiraLaneMatch { Matched, AlreadyThere, Overflow, Unresolved }
-
-public sealed record JiraLaneDecision(JiraLaneMatch Match, string? ColumnId, string? ColumnName, bool Comment);
-
 /// <summary>
 /// Pure mapping from one Jira issue onto the card fields a pull is allowed to change.
 /// Jira wins on those fields. Story points are read only when the connection names the field id.
+/// Points snapping, labels and lane decisions are the shared <see cref="TrackerFieldMapping"/> rules.
 /// </summary>
 public static class JiraFieldMapping
 {
     public const int MaxTitleLength = 300;
     public const int MaxDescriptionLength = BoardCardLimits.MaxDescriptionLength;
-    public const int MaxTags = 20;
-    public const int MaxTagLength = 40;
     public const string OverflowLaneName = "Jira";
-
-    public static readonly int[] PointScale = [1, 2, 3, 5, 8, 13];
 
     public static JiraMappedFields Map(JiraIssue issue, string? storyPointsFieldId, string? existingType)
     {
@@ -49,7 +43,7 @@ public static class JiraFieldMapping
             MapPriority(issue.PriorityName),
             MapPoints(issue, storyPointsFieldId, out var clearPoints),
             clearPoints,
-            MapLabels(issue.Labels),
+            TrackerFieldMapping.MapLabels(issue.Labels),
             issue.StatusName.Trim(),
             string.IsNullOrWhiteSpace(issue.AssigneeDisplay) ? null : issue.AssigneeDisplay.Trim());
     }
@@ -86,71 +80,8 @@ public static class JiraFieldMapping
         clearPoints = false;
         if (string.IsNullOrWhiteSpace(storyPointsFieldId))
             return null;
-        int? points = null;
-        if (issue.StoryPoints is double raw && !double.IsNaN(raw) && raw > 0)
-        {
-            var whole = (int)Math.Round(raw, MidpointRounding.AwayFromZero);
-            points = PointScale.Contains(whole) ? whole : null;
-        }
+        var points = TrackerFieldMapping.SnapPoints(issue.StoryPoints);
         clearPoints = points is null;
         return points;
-    }
-
-    public static IReadOnlyList<string> MapLabels(IReadOnlyList<string>? labels)
-    {
-        if (labels is null || labels.Count == 0)
-            return [];
-        var tags = new List<string>(Math.Min(labels.Count, MaxTags));
-        foreach (var label in labels)
-        {
-            if (tags.Count == MaxTags)
-                break;
-            var tag = label.Trim();
-            if (tag.Length == 0)
-                continue;
-            if (tag.Length > MaxTagLength)
-                tag = tag[..MaxTagLength];
-            tags.Add(tag);
-        }
-        return tags;
-    }
-
-    /// <summary>
-    /// Case-insensitive lane name. Two lanes with the same name are unresolved (no guess).
-    /// An unknown status uses the single overflow lane when one exists.
-    /// </summary>
-    public static JiraLaneDecision MatchLane(
-        string statusName, string? currentColumnId, IReadOnlyList<BoardColumnRecord> lanes, string? overflowColumnId)
-    {
-        var name = statusName.Trim();
-        var matches = lanes.Where(lane => string.Equals(lane.Name, name, StringComparison.OrdinalIgnoreCase)).ToList();
-        BoardColumnRecord? chosen = matches.Count == 1 ? matches[0] : null;
-        if (chosen is null && matches.Count == 0 && overflowColumnId is not null)
-            chosen = lanes.FirstOrDefault(lane => string.Equals(lane.Id, overflowColumnId, StringComparison.Ordinal));
-
-        if (chosen is null)
-            return new JiraLaneDecision(matches.Count > 1 ? JiraLaneMatch.Unresolved : JiraLaneMatch.Unresolved, null, null, false);
-        if (string.Equals(chosen.Id, currentColumnId, StringComparison.Ordinal))
-            return new JiraLaneDecision(JiraLaneMatch.AlreadyThere, chosen.Id, chosen.Name, false);
-        var overflow = matches.Count == 0;
-        return new JiraLaneDecision(overflow ? JiraLaneMatch.Overflow : JiraLaneMatch.Matched, chosen.Id, chosen.Name, true);
-    }
-
-    /// <summary>
-    /// The same decision for a lane already chosen through the Jira board's columns (VIBE-102).
-    /// A null or vanished lane means overflow: the overflow lane when it exists, else unresolved.
-    /// </summary>
-    public static JiraLaneDecision DecideLane(
-        string? laneId, string? currentColumnId, IReadOnlyList<BoardColumnRecord> lanes, string? overflowColumnId)
-    {
-        var chosen = laneId is null ? null : lanes.FirstOrDefault(lane => string.Equals(lane.Id, laneId, StringComparison.Ordinal));
-        var overflow = chosen is null;
-        if (chosen is null && overflowColumnId is not null)
-            chosen = lanes.FirstOrDefault(lane => string.Equals(lane.Id, overflowColumnId, StringComparison.Ordinal));
-        if (chosen is null)
-            return new JiraLaneDecision(JiraLaneMatch.Unresolved, null, null, false);
-        if (string.Equals(chosen.Id, currentColumnId, StringComparison.Ordinal))
-            return new JiraLaneDecision(JiraLaneMatch.AlreadyThere, chosen.Id, chosen.Name, false);
-        return new JiraLaneDecision(overflow ? JiraLaneMatch.Overflow : JiraLaneMatch.Matched, chosen.Id, chosen.Name, true);
     }
 }

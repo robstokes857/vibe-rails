@@ -5,7 +5,9 @@ The card editor links to the issue and offers **Post this comment to Jira**; unc
 an internal note. REST comment/note requests and both MCP tools `add_board_comment` and
 `append_board_note` accept `syncToJira=false`. The flag is retained in comment metadata and
 shown as **Not sent to Jira** only when the card's owning board is currently connected to Jira,
-including cards opened from another project. It affects Jira only, not the board's separate hosted sync.
+including cards opened from another project. It affects tracker delivery only, not the board's
+separate hosted sync. The stored `syncToJira.to` key is the generic tracker flag, so Azure DevOps
+delivery honours the same `false` (see `board-ado-delivery/1` in the Board persistence guide).
 Launch prompts and `get_board_card` explain this behavior and ask agents to avoid progress spam.
 
 New local session attachments, including Start work and Automation recordings, queue creation

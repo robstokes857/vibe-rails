@@ -12,7 +12,7 @@ namespace VibeRails.Services.Board;
 /// <param name="JiraBoardId">The Jira board the link names; a pull then reads that board's issues.</param>
 /// <param name="JiraBoardName">The board's name in Jira, from the last Connect.</param>
 /// <param name="ColumnMap">JSON array of the board's columns in order, each with the lane the user
-/// picked or null for automatic. Read by <c>JiraColumnMap</c>.</param>
+/// picked or null for automatic. Read by <c>TrackerColumnMap</c>.</param>
 /// <param name="NarrowJql">Extra JQL ANDed onto the board or query. Never has ORDER BY.</param>
 /// <param name="SkipOldDone">Leave out Done issues not updated in 30 days. Null on a VB-40
 /// connection, which pulled its JQL as written.</param>

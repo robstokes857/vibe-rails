@@ -1075,6 +1075,7 @@ public sealed partial class BoardStore : IBoardStore
         }
         await TouchCardAsync(connection, transaction, card.Id, cancellationToken);
         await QueueJiraSessionAsync(connection, transaction, record, cancellationToken);
+        await QueueAdoSessionAsync(connection, transaction, record, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return record;
     }
@@ -1315,7 +1316,8 @@ public sealed partial class BoardStore : IBoardStore
                (SELECT k.BoardId FROM BoardColumns k WHERE k.Id = c.ColumnId), c.Flagged,
                {CardPrefixSql}, c.CardKey, c.DisplayId, c.AgentMade, c.AgentMadeBy, c.AgentMadeSessionId,
                (SELECT j.IssueKey FROM BoardJiraLinks j WHERE j.CardId = c.Id ORDER BY j.LastPulledUTC DESC LIMIT 1),
-               COALESCE(c.WorkflowMode, 'manual'), c.ManagerSelection, c.ManagerOptionsJson
+               COALESCE(c.WorkflowMode, 'manual'), c.ManagerSelection, c.ManagerOptionsJson,
+               (SELECT a.WorkItemId FROM BoardAdoLinks a WHERE a.CardId = c.Id ORDER BY a.LastPulledUTC DESC LIMIT 1)
         FROM BoardCards c
         {CardPrefixJoinSql}
         """;
@@ -1511,7 +1513,8 @@ public sealed partial class BoardStore : IBoardStore
         JiraIssueKey: reader.IsDBNull(25) ? null : reader.GetString(25),
         WorkflowMode: reader.GetString(26),
         ManagerSelection: reader.IsDBNull(27) ? null : reader.GetString(27),
-        ManagerBaseLlmOptions: reader.IsDBNull(28) ? null : JsonSerializer.Deserialize(reader.GetString(28), StorageJsonSerializerContext.Default.BaseLlmOptions));
+        ManagerBaseLlmOptions: reader.IsDBNull(28) ? null : JsonSerializer.Deserialize(reader.GetString(28), StorageJsonSerializerContext.Default.BaseLlmOptions),
+        AdoWorkItemId: reader.IsDBNull(29) ? null : reader.GetInt32(29));
 
     private static async Task<IReadOnlyList<BoardCommentRecord>> ReadCommentsAsync(SqliteConnection connection, string cardId, CancellationToken cancellationToken)
     {
@@ -1970,6 +1973,14 @@ public sealed partial class BoardStore : IBoardStore
             SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardCards ADD COLUMN ManagerSelection TEXT");
             SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardCards ADD COLUMN ManagerOptionsJson TEXT");
         });
+        // board-ado/1: Azure DevOps connections and work item links in their own tables (BoardStore.Ado.cs),
+        // never Jira's, so an older binary never reads one as Jira. Additive; older binaries ignore them.
+        SqliteMigrationRunner.Apply(connection, "board-ado", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, AdoSchemaSql));
+        // board-ado-delivery/1: the outbound Azure DevOps ledger and its comment trigger, which writes
+        // only to the new table (BoardStore.AdoDelivery.cs). No backfill of earlier discussion.
+        SqliteMigrationRunner.Apply(connection, "board-ado-delivery", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, AdoDeliverySchemaSql));
         ReconcileDerivedRows(connection);
     }
 

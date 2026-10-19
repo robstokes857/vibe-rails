@@ -70,7 +70,8 @@ public sealed record BoardCardRecord(
     string? JiraIssueKey = null,
     string WorkflowMode = BoardWorkflowModes.Manual,
     string? ManagerSelection = null,
-    BaseLlmOptions? ManagerBaseLlmOptions = null)
+    BaseLlmOptions? ManagerBaseLlmOptions = null,
+    int? AdoWorkItemId = null)
 {
     /// <summary>The stored <c>PREFIX-RRRRR-n</c> key (cards created since board/14), else the
     /// computed legacy <c>PREFIX-n</c>.</summary>

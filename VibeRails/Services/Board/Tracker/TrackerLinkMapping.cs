@@ -1,14 +1,14 @@
-namespace VibeRails.Services.Jira;
+namespace VibeRails.Services.Board.Tracker;
 
 /// <summary>
-/// What the last pull applied to a linked issue, stored on <see cref="BoardJiraLinkRecord.Mapping"/>
-/// as <c>points:{field};status:{name}</c>: the story points field it read (a new field re-reads an
-/// unchanged issue) and the Jira status it saw (a change is noted in a comment; the card is never
-/// moved). Links written before 1.12 hold <c>lane:{target};points:{field}</c> or null; the lane
-/// part is ignored and the status is unknown, so the first status seen after the upgrade is
-/// recorded silently.
+/// What the last pull applied to a linked remote item, stored on the link row's <c>Mapping</c>
+/// as <c>points:{field};status:{name}</c>: the points field it read (a new field re-reads an
+/// unchanged item) and the remote status it saw (a change is noted in a comment; the card is never
+/// moved). Shared by Jira and Azure DevOps. Jira links written before 1.12 hold
+/// <c>lane:{target};points:{field}</c> or null; the lane part is ignored and the status is unknown,
+/// so the first status seen after the upgrade is recorded silently.
 /// </summary>
-public static class JiraLinkMapping
+public static class TrackerLinkMapping
 {
     private const string PointsPrefix = "points:";
     private const string StatusPrefix = "status:";

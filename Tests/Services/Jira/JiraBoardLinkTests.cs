@@ -1,4 +1,5 @@
 using VibeRails.Services.Board;
+using VibeRails.Services.Board.Tracker;
 using VibeRails.Services.Jira;
 using Xunit;
 
@@ -139,7 +140,7 @@ public sealed class JiraColumnMapTests
     [Fact]
     public void ScrumColumns_MatchByName_FirstToFirstLane_LastToDone()
     {
-        var resolved = JiraColumnMap.Resolve(["To Do", "In Progress", "Done"], [], RobsLanes, null);
+        var resolved = TrackerColumnMap.Resolve(["To Do", "In Progress", "Done"], [], RobsLanes, null, JiraFieldMapping.OverflowLaneName);
         Assert.Equal(["col_backlog", "col_progress", "col_done"], resolved.Select(column => column.LaneId));
         Assert.All(resolved, column => Assert.True(column.Automatic));
     }
@@ -148,8 +149,8 @@ public sealed class JiraColumnMapTests
     public void KanbanColumns_MatchWholeWords_AndAnUnmatchedMiddleColumnGoesToOverflow()
     {
         var lanes = RobsLanes.Append(Lane("col_jira", "Jira")).ToList();
-        var resolved = JiraColumnMap.Resolve(
-            ["Backlog", "Selected for Development", "In Progress", "In Review", "Closed"], [], lanes, "col_jira");
+        var resolved = TrackerColumnMap.Resolve(
+            ["Backlog", "Selected for Development", "In Progress", "In Review", "Closed"], [], lanes, "col_jira", JiraFieldMapping.OverflowLaneName);
         Assert.Equal(["col_backlog", null, "col_progress", "col_review", "col_done"], resolved.Select(column => column.LaneId));
     }
 
@@ -157,19 +158,19 @@ public sealed class JiraColumnMapTests
     public void WithoutADoneLane_TheLastColumnGoesToTheLastLane_AndTheOverflowLaneIsNeverAutomatic()
     {
         var lanes = new List<BoardColumnRecord> { Lane("a", "Todo"), Lane("b", "Doing"), Lane("jira", "Jira") };
-        var resolved = JiraColumnMap.Resolve(["To Do", "Finished"], [], lanes, null);
+        var resolved = TrackerColumnMap.Resolve(["To Do", "Finished"], [], lanes, null, JiraFieldMapping.OverflowLaneName);
         Assert.Equal(["a", "b"], resolved.Select(column => column.LaneId));
     }
 
     [Fact]
     public void APickWinsWhileItsLaneExists_ThenFallsBackToAutomatic()
     {
-        var picks = JiraColumnMap.WithChoices(
-            JiraColumnMap.WithColumns([], ["To Do", "In Progress", "Done"]),
+        var picks = TrackerColumnMap.WithChoices(
+            TrackerColumnMap.WithColumns([], ["To Do", "In Progress", "Done"]),
             new Dictionary<string, string?> { ["in progress"] = "col_review", ["Done"] = "", ["Later"] = "col_gone" });
         Assert.Equal(["To Do", "In Progress", "Done", "Later"], picks.Select(column => column.Name));
 
-        var resolved = JiraColumnMap.Resolve(["To Do", "In Progress", "Done", "Later"], picks, RobsLanes, null);
+        var resolved = TrackerColumnMap.Resolve(["To Do", "In Progress", "Done", "Later"], picks, RobsLanes, null, JiraFieldMapping.OverflowLaneName);
         Assert.Equal("col_review", resolved[1].LaneId);
         Assert.False(resolved[1].Automatic);
         Assert.Equal("col_done", resolved[2].LaneId);
@@ -179,14 +180,14 @@ public sealed class JiraColumnMapTests
     [Fact]
     public void TheSavedMapRoundTrips_AndKeepsPicksWhenTheBoardsColumnsAreReadAgain()
     {
-        var saved = JiraColumnMap.Serialize([new JiraColumnChoice("To Do", null), new JiraColumnChoice("In \"QA\"", "col_review")]);
-        var parsed = JiraColumnMap.Parse(saved);
-        Assert.Equal([new JiraColumnChoice("To Do", null), new JiraColumnChoice("In \"QA\"", "col_review")], parsed);
+        var saved = TrackerColumnMap.Serialize([new TrackerColumnChoice("To Do", null), new TrackerColumnChoice("In \"QA\"", "col_review")]);
+        var parsed = TrackerColumnMap.Parse(saved);
+        Assert.Equal([new TrackerColumnChoice("To Do", null), new TrackerColumnChoice("In \"QA\"", "col_review")], parsed);
 
-        var refreshed = JiraColumnMap.WithColumns(parsed, ["Backlog", "in \"qa\"", "Backlog"]);
-        Assert.Equal([new JiraColumnChoice("Backlog", null), new JiraColumnChoice("in \"qa\"", "col_review")], refreshed);
+        var refreshed = TrackerColumnMap.WithColumns(parsed, ["Backlog", "in \"qa\"", "Backlog"]);
+        Assert.Equal([new TrackerColumnChoice("Backlog", null), new TrackerColumnChoice("in \"qa\"", "col_review")], refreshed);
 
-        Assert.Empty(JiraColumnMap.Parse("{not json"));
-        Assert.Null(JiraColumnMap.Serialize([]));
+        Assert.Empty(TrackerColumnMap.Parse("{not json"));
+        Assert.Null(TrackerColumnMap.Serialize([]));
     }
 }

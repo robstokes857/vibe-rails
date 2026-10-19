@@ -2,6 +2,7 @@ using System.Globalization;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 using VibeRails.Services.Board;
+using VibeRails.Services.Board.Tracker;
 using VibeRails.Services.Git;
 using VibeRails.Utils;
 
@@ -27,7 +28,7 @@ public sealed record JiraBoardSummary(
     string? StoryPointsFieldId,
     string? StoryPointsFieldName,
     string? Jql,
-    IReadOnlyList<JiraColumnLane> Columns,
+    IReadOnlyList<TrackerColumnLane> Columns,
     IReadOnlyList<string> Warnings);
 
 /// <summary>Test, or Connect for a board link: the account, and the board when the link names one.</summary>
@@ -36,7 +37,7 @@ public sealed record JiraTestReport(bool Ok, string? Account, string? Error, Jir
 /// <summary>What the board settings form shows: the saved column map resolved against this board's lanes.</summary>
 public sealed record JiraConnectionDetails(
     BoardJiraConnectionRecord? Connection,
-    IReadOnlyList<JiraColumnLane> Columns,
+    IReadOnlyList<TrackerColumnLane> Columns,
     IReadOnlyList<BoardColumnRecord> Lanes,
     string? SuggestedEmail);
 
@@ -88,10 +89,10 @@ public sealed class JiraPullService(
     {
         var connection = await GetAsync(projectPath, boardId, cancellationToken);
         var lanes = await store.GetColumnsAsync(projectPath, cancellationToken, boardId);
-        var saved = JiraColumnMap.Parse(connection?.ColumnMap);
+        var saved = TrackerColumnMap.Parse(connection?.ColumnMap);
         var columns = saved.Count == 0
             ? []
-            : JiraColumnMap.Resolve(saved.Select(column => column.Name).ToList(), saved, lanes, connection?.OverflowColumnId);
+            : TrackerColumnMap.Resolve(saved.Select(column => column.Name).ToList(), saved, lanes, connection?.OverflowColumnId, OverflowLaneName);
         var suggested = string.IsNullOrWhiteSpace(connection?.Email) ? await GitEmailAsync(projectPath, cancellationToken) : null;
         return new JiraConnectionDetails(connection, columns, lanes, suggested);
     }
@@ -116,7 +117,7 @@ public sealed class JiraPullService(
         // sent with its link were made for the previous board's columns, so they are ignored.
         var columnMap = !source.SameBoard ? null
             : save.ColumnMap is null ? existing!.ColumnMap
-            : JiraColumnMap.Serialize(JiraColumnMap.WithChoices(JiraColumnMap.Parse(existing!.ColumnMap), save.ColumnMap));
+            : TrackerColumnMap.Serialize(TrackerColumnMap.WithChoices(TrackerColumnMap.Parse(existing!.ColumnMap), save.ColumnMap));
 
         var token = apiToken?.Trim();
         // Links are keyed by connection id plus Jira's numeric issue id, and that id is only unique
@@ -277,8 +278,8 @@ public sealed class JiraPullService(
             warnings.Add("Jira did not return an issue count for this board. Pull now still works.");
 
         var lanes = await store.GetColumnsAsync(connection.ProjectPath, cancellationToken, connection.BoardId);
-        var choices = JiraColumnMap.WithColumns(JiraColumnMap.Parse(connection.ColumnMap), ColumnNames(configuration));
-        var columns = JiraColumnMap.Resolve(choices.Select(choice => choice.Name).ToList(), choices, lanes, connection.OverflowColumnId);
+        var choices = TrackerColumnMap.WithColumns(TrackerColumnMap.Parse(connection.ColumnMap), ColumnNames(configuration));
+        var columns = TrackerColumnMap.Resolve(choices.Select(choice => choice.Name).ToList(), choices, lanes, connection.OverflowColumnId, OverflowLaneName);
         var overridden = connection.StoryPointsFieldId is not null;
         var summary = new JiraBoardSummary(
             jiraBoardId, board.Value.Name, board.Value.Type, board.Value.ProjectKey,
@@ -287,7 +288,7 @@ public sealed class JiraPullService(
             overridden ? null : configuration?.EstimationFieldName,
             jql ?? connection.Jql, columns, warnings);
         return new BoardResolution(jiraBoardId, summary, null, false, board.Value.Name, jql,
-            configuration is null ? null : JiraColumnMap.Serialize(choices));
+            configuration is null ? null : TrackerColumnMap.Serialize(choices));
     }
 
     public async Task<JiraPullReport> PullAsync(string projectPath, string boardId, bool dryRun, CancellationToken cancellationToken)
@@ -476,8 +477,8 @@ public sealed class JiraPullService(
         if (configuration is not null)
         {
             var columns = configuration.Columns.Where(column => column.StatusIds.Count > 0).ToList();
-            var resolved = JiraColumnMap.Resolve(columns.Select(column => column.Name).ToList(),
-                JiraColumnMap.Parse(connection.ColumnMap), lanes, connection.OverflowColumnId);
+            var resolved = TrackerColumnMap.Resolve(columns.Select(column => column.Name).ToList(),
+                TrackerColumnMap.Parse(connection.ColumnMap), lanes, connection.OverflowColumnId, OverflowLaneName);
             statusLanes = new Dictionary<string, (string Column, string? LaneId)>(StringComparer.Ordinal);
             for (var i = 0; i < columns.Count; i++)
             {
@@ -517,8 +518,8 @@ public sealed class JiraPullService(
             return ApplyAction.SkippedDeleted;
 
         var mapped = JiraFieldMapping.Map(issue, plan.PointsField, existing?.Type);
-        var mapping = JiraLinkMapping.Serialize(plan.PointsField, mapped.StatusName);
-        var applied = JiraLinkMapping.Parse(link?.Mapping);
+        var mapping = TrackerLinkMapping.Serialize(plan.PointsField, mapped.StatusName);
+        var applied = TrackerLinkMapping.Parse(link?.Mapping);
 
         // An unchanged issue is skipped while the same story points field is read; a new field
         // re-reads it without anyone editing the issue in Jira. Where the card sits, lane or
@@ -561,7 +562,7 @@ public sealed class JiraPullService(
                 cancellationToken);
             if (card is null)
                 return ApplyAction.Skipped;
-            if (placement.Lane.Match != JiraLaneMatch.Matched)
+            if (placement.Lane.Match != TrackerLaneMatch.Matched)
                 await board.AddCommentAsync(connection.ProjectPath, card.Id, JiraAuthor, placement.OverflowComment, cancellationToken, syncToJira: false);
             return madeLane ? ApplyAction.CreatedOverflow : ApplyAction.Created;
         }
@@ -587,7 +588,7 @@ public sealed class JiraPullService(
         return ApplyAction.Updated;
     }
 
-    private sealed record Placement(JiraLaneDecision Lane, string OverflowComment);
+    private sealed record Placement(TrackerLaneDecision Lane, string OverflowComment);
 
     /// <summary>
     /// Where a new card goes. A board connection places it by its Jira column; a status the board's
@@ -599,9 +600,9 @@ public sealed class JiraPullService(
     {
         if (plan.StatusLanes is not null && issue.StatusId is not null
             && plan.StatusLanes.TryGetValue(issue.StatusId, out var target))
-            return new Placement(JiraFieldMapping.DecideLane(target.LaneId, null, lanes, overflowId),
+            return new Placement(TrackerFieldMapping.DecideLane(target.LaneId, null, lanes, overflowId),
                 ColumnOverflowComment(issue.Key, target.Column));
-        return new Placement(JiraFieldMapping.MatchLane(statusName, null, lanes, overflowId),
+        return new Placement(TrackerFieldMapping.MatchLane(statusName, null, lanes, overflowId),
             OverflowComment(issue.Key, statusName));
     }
 
@@ -798,19 +799,12 @@ public sealed class JiraPullScheduler(IServiceScopeFactory scopeFactory) : IJira
     }
 }
 
-/// <summary>
-/// The OS file lock that lets one writing pull run at a time across every VibeRails process on
-/// this machine (browser app and VS Code can both be root backends). Released by the OS if the
-/// process dies mid-pull.
-/// </summary>
-public sealed class JiraPullLock(string path)
+/// <summary>The Jira <see cref="TrackerPullLock"/>: <c>.jira-pull.lock</c> beside the state database.</summary>
+public sealed class JiraPullLock(string path) : TrackerPullLock(path)
 {
     public const string FileName = ".jira-pull.lock";
 
-    public static JiraPullLock BesideStateDatabase() =>
-        new(CrossProcessFileLock.BesideStateDatabase(ParserConfigs.GetStatePath(), FileName));
-
-    internal CrossProcessFileLock? TryAcquire() => CrossProcessFileLock.TryAcquire(path);
+    public static JiraPullLock BesideStateDatabase() => new(PathBesideStateDatabase(FileName));
 }
 
 internal static class JiraReportFormat

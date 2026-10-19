@@ -582,6 +582,13 @@ independent assignment, save-before-launch and active-session guard remain uncha
 
 ## Dedicated Jira boards (VIBE-103)
 
+Rules every tracker pull must share live in `Tracker/` (VIBE-166): the token file store
+(`TrackerTokenStore`, one file per tracker), the cross-process pull lock (`TrackerPullLock`, one
+file per tracker), the column map with `DecideLane`/`MatchLane`, points snapping and labels
+(`TrackerColumnMap`, `TrackerFieldMapping`), and the link `Mapping` codec (`TrackerLinkMapping`).
+Jira and Azure DevOps are parallel stacks over them; keep tracker-specific mapping in each stack.
+Azure DevOps storage is described in the Board persistence guide (`board-ado/1`).
+
 Board settings can unlink Jira through the root/project-scoped DELETE connection route. This
 removes only that connection and its local token; preserve the board, cards, discussion and
 historical issue links. Unlink and connection tests share the cross-process save/pull lock so a
@@ -610,14 +617,16 @@ recreate them to populate an empty board.
 workflow for doing the work, and Jira has no say in them. The column map and the "Jira" overflow
 lane place a card once, when it is created. A later Jira status change updates the fields and
 adds a Jira-authored comment that the card was not moved; a card moved to another lane or
-another local board stays there. `BoardJiraLinks.Mapping` (read through `JiraLinkMapping`) holds
+another local board stays there. `BoardJiraLinks.Mapping` (read through `TrackerLinkMapping`) holds
 the points field the last pull read and the status it saw; only a new points field re-applies
 unchanged issues. Do not reintroduce lane moves, drag-backs or "lane mapping changed" moves.
 
 ## Jira activity delivery
 
 New linked-card comments default to Jira delivery; `syncToJira=false` retains a note without
-posting it to Jira. New local session links queue public replay sharing. Keep the UI, MCP
+posting it to Jira. The stored `Changes.syncToJira.to` key is the generic per-comment tracker
+flag: the Azure DevOps ledger (`board-ado-delivery/1`) honours it too, so a `false` written by
+any binary keeps the note off both trackers. New local session links queue public replay sharing. Keep the UI, MCP
 parameters and launch guidance aligned. Read [the delivery contract](../Jira/Comments.md) before
 changing comment copying, session linking or Jira scheduling. Copied/imported discussion and
 Jira receipts must not echo; Board moves rebind existing delivery IDs. Uncertain sends never

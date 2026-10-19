@@ -5,6 +5,15 @@
 -- index IX_BoardAdditionalCardSessions_Card
 CREATE INDEX IX_BoardAdditionalCardSessions_Card ON BoardAdditionalCardSessions(CardId);
 
+-- index IX_BoardAdoDeliveries_Card
+CREATE INDEX IX_BoardAdoDeliveries_Card ON BoardAdoDeliveries(CardId, CreatedUTC);
+
+-- index IX_BoardAdoDeliveries_Pending
+CREATE INDEX IX_BoardAdoDeliveries_Pending ON BoardAdoDeliveries(Status, CreatedUTC);
+
+-- index IX_BoardAdoLinks_Card
+CREATE INDEX IX_BoardAdoLinks_Card ON BoardAdoLinks(CardId);
+
 -- index IX_BoardAttachments_Card
 CREATE INDEX IX_BoardAttachments_Card ON BoardAttachments(CardId);
 
@@ -106,6 +115,15 @@ CREATE UNIQUE INDEX UX_BoardCards_DisplayId ON BoardCards(ProjectPath, DisplayId
 
 -- table BoardAdditionalCardSessions
 CREATE TABLE BoardAdditionalCardSessions ( SessionId TEXT NOT NULL, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, TabId TEXT NULL, Selection TEXT NOT NULL, Cli TEXT NOT NULL, DisplayName TEXT NOT NULL, Origin TEXT NOT NULL, CreatedUTC TEXT NOT NULL, PRIMARY KEY (SessionId, CardId) );
+
+-- table BoardAdoConnections
+CREATE TABLE BoardAdoConnections ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, BoardId TEXT NOT NULL, Organization TEXT NOT NULL, Project TEXT NOT NULL, Team TEXT NULL, BacklogLevel TEXT NULL, QueryId TEXT NULL, BoardLink TEXT NOT NULL, AdoBoardName TEXT NULL, ColumnMap TEXT NULL, PointsField TEXT NULL, NarrowWiql TEXT NULL, SkipOldDone INTEGER NULL, HasToken INTEGER NOT NULL DEFAULT 0, AuthStatus TEXT NOT NULL DEFAULT 'none', Enabled INTEGER NOT NULL DEFAULT 0, DisabledReason TEXT NULL, OverflowColumnId TEXT NULL, DedicatedBoard INTEGER NULL, LastTestedUTC TEXT NULL, LastPullUTC TEXT NULL, LastReport TEXT NULL, UNIQUE(ProjectPath, BoardId) );
+
+-- table BoardAdoDeliveries
+CREATE TABLE BoardAdoDeliveries ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, ConnectionId TEXT NOT NULL, WorkItemId INTEGER NOT NULL, Kind TEXT NOT NULL, SourceId TEXT NOT NULL, Body TEXT NOT NULL, Status TEXT NOT NULL DEFAULT 'pending', Message TEXT, Url TEXT, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, UNIQUE(ConnectionId, WorkItemId, Kind, SourceId) );
+
+-- table BoardAdoLinks
+CREATE TABLE BoardAdoLinks ( CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, ConnectionId TEXT NOT NULL, WorkItemId INTEGER NOT NULL, Rev INTEGER NOT NULL, ChangedDate TEXT NOT NULL, AssigneeDisplay TEXT NULL, Mapping TEXT NULL, LastPulledUTC TEXT NOT NULL, UNIQUE(ConnectionId, WorkItemId) );
 
 -- table BoardAgentCompletions
 CREATE TABLE BoardAgentCompletions ( ProjectPath TEXT NOT NULL, SessionId TEXT NOT NULL, Outcome TEXT NOT NULL, Summary TEXT NOT NULL, CompletedUTC TEXT NOT NULL, PRIMARY KEY (SessionId) );
@@ -281,6 +299,9 @@ CREATE TRIGGER BoardColumns_HistoryCreated AFTER INSERT ON BoardColumns BEGIN IN
 -- trigger BoardColumns_HistoryDeleted
 CREATE TRIGGER BoardColumns_HistoryDeleted AFTER DELETE ON BoardColumns BEGIN INSERT INTO BoardHistory VALUES ('bh_' || lower(hex(randomblob(16))), COALESCE(OLD.BoardId, ''), OLD.ProjectPath, 'deleted', 'Deleted lane: ' || OLD.Name, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')); END;
 
+-- trigger BoardComments_QueueAdo
+CREATE TRIGGER BoardComments_QueueAdo AFTER INSERT ON BoardComments WHEN NEW.Kind IN ('comment', 'note') AND NEW.RemoteSeq IS NULL AND NEW.SyncBoardId IS NULL AND NOT (NEW.AuthorKind = 'agent' AND NEW.AuthorLabel = 'Azure DevOps' AND NEW.AuthorCli IS NULL AND NEW.SessionId IS NULL) AND COALESCE(NEW.DiscussionHidden, 0) = 0 AND CASE WHEN json_valid(NEW.Changes) THEN COALESCE(json_extract(NEW.Changes, '$.jiraCopy'), 0) ELSE 0 END = 0 AND CASE WHEN json_valid(NEW.Changes) THEN COALESCE(json_extract(NEW.Changes, '$.syncToJira.to'), 1) ELSE 1 END != 0 BEGIN INSERT OR IGNORE INTO BoardAdoDeliveries (Id, CardId, ConnectionId, WorkItemId, Kind, SourceId, Body, CreatedUTC, UpdatedUTC) SELECT lower(hex(randomblob(16))), c.Id, a.ConnectionId, a.WorkItemId, 'comment', NEW.Id, NEW.AuthorLabel || ': ' || NEW.Body, NEW.CreatedUTC, NEW.CreatedUTC FROM BoardCards c JOIN BoardAdoLinks a ON a.CardId = c.Id JOIN BoardAdoConnections conn ON conn.Id = a.ConnectionId AND conn.ProjectPath = c.ProjectPath WHERE c.Id = NEW.CardId AND c.DeletedUTC IS NULL; END;
+
 -- trigger BoardComments_QueueJira
 CREATE TRIGGER BoardComments_QueueJira AFTER INSERT ON BoardComments WHEN NEW.Kind IN ('comment', 'note') AND NEW.RemoteSeq IS NULL AND NEW.SyncBoardId IS NULL AND NOT (NEW.AuthorKind = 'agent' AND NEW.AuthorLabel = 'Jira' AND NEW.AuthorCli IS NULL AND NEW.SessionId IS NULL) AND COALESCE(NEW.DiscussionHidden, 0) = 0 AND CASE WHEN json_valid(NEW.Changes) THEN COALESCE(json_extract(NEW.Changes, '$.jiraCopy'), 0) ELSE 0 END = 0 AND CASE WHEN json_valid(NEW.Changes) THEN COALESCE(json_extract(NEW.Changes, '$.syncToJira.to'), 1) ELSE 1 END != 0 BEGIN INSERT OR IGNORE INTO BoardJiraDeliveries (Id, CardId, ConnectionId, IssueId, Kind, SourceId, Body, CreatedUTC, UpdatedUTC) SELECT lower(hex(randomblob(16))), c.Id, j.SiteId, j.IssueId, 'comment', NEW.Id, NEW.AuthorLabel || ': ' || NEW.Body, NEW.CreatedUTC, NEW.CreatedUTC FROM BoardCards c JOIN BoardJiraLinks j ON j.CardId = c.Id JOIN BoardJiraConnections conn ON conn.Id = j.SiteId AND conn.ProjectPath = c.ProjectPath WHERE c.Id = NEW.CardId AND c.DeletedUTC IS NULL; END;
 
@@ -304,6 +325,9 @@ CREATE TRIGGER BoardStarterWorkflows_SettingsInsert AFTER INSERT ON BoardLaneAut
 
 -- trigger BoardStarterWorkflows_SettingsUpdate
 CREATE TRIGGER BoardStarterWorkflows_SettingsUpdate AFTER UPDATE ON BoardLaneAutomations BEGIN UPDATE BoardStarterWorkflows SET Completed = 1 WHERE ColumnId = NEW.ColumnId; END;
+
+-- trigger Boards_DeleteAdoConnection
+CREATE TRIGGER Boards_DeleteAdoConnection AFTER DELETE ON Boards BEGIN DELETE FROM BoardAdoConnections WHERE BoardId = OLD.Id; END;
 
 -- trigger Boards_DeleteJiraConnection
 CREATE TRIGGER Boards_DeleteJiraConnection AFTER DELETE ON Boards BEGIN DELETE FROM BoardJiraConnections WHERE BoardId = OLD.Id; END;

@@ -1,4 +1,4 @@
-using VibeRails.Services.Jira;
+using VibeRails.Services.Board.Tracker;
 using Xunit;
 
 namespace Tests.Services.Jira;
@@ -15,14 +15,14 @@ public sealed class JiraLinkMappingTests
     [InlineData("points:customfield_10020;status:In Review; really", "customfield_10020", "In Review; really")]
     public void ParseReadsCurrentAndPreUpgradeMappings(string? mapping, string? points, string? status)
     {
-        Assert.Equal((points, status), JiraLinkMapping.Parse(mapping));
+        Assert.Equal((points, status), TrackerLinkMapping.Parse(mapping));
     }
 
     [Fact]
     public void SerializeRoundTrips()
     {
-        Assert.Equal("status:Done", JiraLinkMapping.Serialize(null, "Done"));
-        Assert.Equal("points:customfield_10016;status:Done", JiraLinkMapping.Serialize("customfield_10016", "Done"));
-        Assert.Equal(("customfield_10016", "Done"), JiraLinkMapping.Parse(JiraLinkMapping.Serialize("customfield_10016", "Done")));
+        Assert.Equal("status:Done", TrackerLinkMapping.Serialize(null, "Done"));
+        Assert.Equal("points:customfield_10016;status:Done", TrackerLinkMapping.Serialize("customfield_10016", "Done"));
+        Assert.Equal(("customfield_10016", "Done"), TrackerLinkMapping.Parse(TrackerLinkMapping.Serialize("customfield_10016", "Done")));
     }
 }

@@ -6,7 +6,12 @@ namespace VibeRails.Services.Board;
 public sealed record BoardJiraDelivery(string Id, string CardId, string ProjectPath, string ConnectionId,
     string IssueId, string Kind, string SourceId, string Body, string Status, string? Message, string? Url);
 
-/// <summary>Per-comment Jira policy, separate from hosted Board synchronization.</summary>
+/// <summary>
+/// Per-comment tracker policy, separate from hosted Board synchronization. Despite its name,
+/// <c>Changes.syncToJira.to=false</c> is the generic "do not send this to the card's tracker" flag:
+/// both the Jira and the Azure DevOps delivery triggers honour it. The key keeps its name because
+/// an older binary writes it, and its <c>false</c> must suppress Azure DevOps delivery too.
+/// </summary>
 public static class BoardJiraCommentPolicy
 {
     public static string? Changes(BoardAuthor author, bool syncToJira)

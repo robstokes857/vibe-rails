@@ -317,3 +317,33 @@ linking records a deduplicated intent in its transaction. Copied discussion carr
 and never requeues; same-card Board moves rebind existing source IDs. Preserve these rules
 when changing discussion copy/merge/sync. Public capability URLs in this local ledger must
 never enter logs or hosted Board projections.
+
+## Azure DevOps boards (VIBE-166)
+
+`board-ado/1` (additive) adds `BoardAdoConnections` (one row per board, `UNIQUE(ProjectPath,
+BoardId)`, id `ado_` plus 12 hex), `BoardAdoLinks` (one row per mirrored work item, unique on
+connection and integer work item id, cascading with the card, indexed on `CardId`) and the
+`Boards_DeleteAdoConnection` trigger, a copy of `Boards_DeleteJiraConnection`. These are new
+tables on purpose, never Jira's with a provider column: an older binary reads every
+`BoardJiraConnections` row as Jira, and its `BoardComments_QueueJira` trigger and drain would
+post Azure DevOps comments to Jira. The PAT is not a column; it stays in `ado-tokens.json`.
+A link's `ConnectionId` is the connection id, and work item ids are unique only within one
+organization, so a new organization or project mints a new connection id (the upsert updates
+`Id`), exactly as a Jira site change does. `CreateAdoCardAsync` writes the card and its link in
+one transaction; saving a connection checks the board exists in the same statement.
+`EnsureDedicatedAdoBoardAsync` shares its lane-clone and card-move core with the Jira version
+(`BoardStore.TrackerBoards.cs`); the board is named "Azure DevOps · {team or query name}" and,
+like every new board, starts with `SyncEnabled=0`, so no binary uploads it until the owner
+publishes it. Card reads project the newest linked work item id as `AdoWorkItemId` beside
+`JiraIssueKey`; the paging origin filter accepts `ado`, and `human` excludes both trackers.
+
+`board-ado-delivery/1` (additive) adds `BoardAdoDeliveries`, the same shape as
+`BoardJiraDeliveries` with an integer `WorkItemId`, and the `BoardComments_QueueAdo` trigger,
+which writes only to that table. Comment `Changes.syncToJira.to` is the generic "send to this
+card's tracker" flag despite its name: `false` suppresses Azure DevOps delivery too, so an older
+binary's internal note is never posted. The trigger also skips `jiraCopy` discussion copies,
+comments by the `Azure DevOps` agent (the pull's own notes), hidden discussion and rows pulled
+from viberails.ai, and uses `INSERT OR IGNORE`, so an older binary's comment write never fails.
+`QueueAdoSessionAsync` runs beside `QueueJiraSessionAsync` in the session-link transaction, and
+same-card Board moves rebind ADO delivery source ids with the Jira ones. No backfill of earlier
+discussion or sessions; the Jira tables, triggers and ledger are unchanged.

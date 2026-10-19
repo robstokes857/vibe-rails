@@ -83,6 +83,13 @@ public sealed class BoardSimplificationMigrationTests : IDisposable
             DROP TRIGGER BoardColumns_EndDesktopActivity;
             DROP TABLE BoardDesktopActivity;
             DELETE FROM SchemaMigrations WHERE Component = 'board-desktop-activity';
+            DROP TRIGGER BoardComments_QueueAdo;
+            DROP TABLE BoardAdoDeliveries;
+            DELETE FROM SchemaMigrations WHERE Component = 'board-ado-delivery';
+            DROP TRIGGER Boards_DeleteAdoConnection;
+            DROP TABLE BoardAdoLinks;
+            DROP TABLE BoardAdoConnections;
+            DELETE FROM SchemaMigrations WHERE Component = 'board-ado';
             DROP TRIGGER BoardComments_QueueJira;
             DROP TABLE BoardJiraDeliveries;
             DELETE FROM SchemaMigrations WHERE Component = 'board-jira-delivery';

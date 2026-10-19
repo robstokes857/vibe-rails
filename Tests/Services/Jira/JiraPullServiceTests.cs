@@ -5,6 +5,7 @@ using System.Text;
 using Microsoft.Data.Sqlite;
 using Moq;
 using VibeRails.Services.Board;
+using VibeRails.Services.Board.Tracker;
 using VibeRails.Services.Jira;
 using VibeRails.Utils;
 using Xunit;
@@ -67,7 +68,7 @@ public sealed class JiraPullServiceTests : IDisposable
         await _store.SaveJiraConnectionAsync(new BoardJiraConnectionRecord("jira_old", _project, source.Id,
             "https://acme.atlassian.net", "ada@example.com", true, "saved", null, "project = PROJ", true,
             null, lane.Id, null, null, null,
-            ColumnMap: JiraColumnMap.Serialize([new JiraColumnChoice("To Do", lane.Id)])), Ct);
+            ColumnMap: TrackerColumnMap.Serialize([new TrackerColumnChoice("To Do", lane.Id)])), Ct);
 
         Assert.False((await _board.GetBoardsAsync(_project, Ct)).Boards.Single(board => board.Id == source.Id).IsJiraBoard);
         var destination = await _store.EnsureDedicatedJiraBoardAsync(_project, "jira_old", Ct);
@@ -81,7 +82,7 @@ public sealed class JiraPullServiceTests : IDisposable
         Assert.Equal(imported.DisplayId, moved.DisplayId);
         Assert.Equal("PROJ-1", moved.JiraIssueKey);
         Assert.Equal(moved.ColumnId, destination.OverflowColumnId);
-        Assert.Equal(moved.ColumnId, Assert.Single(JiraColumnMap.Parse(destination.ColumnMap)).LaneId);
+        Assert.Equal(moved.ColumnId, Assert.Single(TrackerColumnMap.Parse(destination.ColumnMap)).LaneId);
         Assert.Contains((await _store.GetCardDetailAsync(_project, moved.Id, Ct))!.Comments,
             comment => comment.Body == "Keep this discussion");
         Assert.Equal(destination.BoardId, (await _store.EnsureDedicatedJiraBoardAsync(_project, "jira_old", Ct)).BoardId);
@@ -662,7 +663,7 @@ public sealed class JiraPullServiceTests : IDisposable
         var stored = (await _store.GetJiraConnectionAsync(_project, board.Id, Ct))!;
         Assert.Equal("project = SCRUM ORDER BY Rank ASC", stored.Jql);
         Assert.Equal("SCRUM board", stored.JiraBoardName);
-        Assert.Equal(["To Do", "In Progress", "Done"], JiraColumnMap.Parse(stored.ColumnMap).Select(c => c.Name));
+        Assert.Equal(["To Do", "In Progress", "Done"], TrackerColumnMap.Parse(stored.ColumnMap).Select(c => c.Name));
         Assert.NotNull(stored.LastTestedUtc);
     }
 

@@ -16,8 +16,11 @@ public sealed partial class BoardStore
         AND ($type = '' OR c.Type = $type)
         AND ($priority = '' OR c.Priority = $priority)
         AND ($tag = '' OR EXISTS (SELECT 1 FROM json_each(c.Tags) WHERE value = $tag))
-        AND ($origin = '' OR ($origin = 'agent' AND c.AgentMade <> 0) OR ($origin = 'human' AND c.AgentMade = 0 AND NOT EXISTS (SELECT 1 FROM BoardJiraLinks j WHERE j.CardId = c.Id))
-            OR ($origin = 'jira' AND EXISTS (SELECT 1 FROM BoardJiraLinks j WHERE j.CardId = c.Id)))
+        AND ($origin = '' OR ($origin = 'agent' AND c.AgentMade <> 0)
+            OR ($origin = 'human' AND c.AgentMade = 0 AND NOT EXISTS (SELECT 1 FROM BoardJiraLinks j WHERE j.CardId = c.Id)
+                AND NOT EXISTS (SELECT 1 FROM BoardAdoLinks a WHERE a.CardId = c.Id))
+            OR ($origin = 'jira' AND EXISTS (SELECT 1 FROM BoardJiraLinks j WHERE j.CardId = c.Id))
+            OR ($origin = 'ado' AND EXISTS (SELECT 1 FROM BoardAdoLinks a WHERE a.CardId = c.Id)))
         """;
 
     public async Task<BoardCardPage> GetCardsPageAsync(string projectPath, BoardCardPageQuery query,

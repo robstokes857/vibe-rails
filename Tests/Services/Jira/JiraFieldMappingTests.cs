@@ -1,4 +1,5 @@
 using VibeRails.Services.Board;
+using VibeRails.Services.Board.Tracker;
 using VibeRails.Services.Jira;
 using Xunit;
 
@@ -81,22 +82,22 @@ public sealed class JiraFieldMappingTests
             Lane("overflow", "Jira")
         };
 
-        var matched = JiraFieldMapping.MatchLane("review", "backlog", lanes, "overflow");
-        Assert.Equal(JiraLaneMatch.Matched, matched.Match);
+        var matched = TrackerFieldMapping.MatchLane("review", "backlog", lanes, "overflow");
+        Assert.Equal(TrackerLaneMatch.Matched, matched.Match);
         Assert.Equal("review", matched.ColumnId);
         Assert.True(matched.Comment);
 
-        var same = JiraFieldMapping.MatchLane("BACKLOG", "backlog", lanes, "overflow");
-        Assert.Equal(JiraLaneMatch.AlreadyThere, same.Match);
+        var same = TrackerFieldMapping.MatchLane("BACKLOG", "backlog", lanes, "overflow");
+        Assert.Equal(TrackerLaneMatch.AlreadyThere, same.Match);
         Assert.False(same.Comment);
 
-        var parked = JiraFieldMapping.MatchLane("In QA", "backlog", lanes, "overflow");
-        Assert.Equal(JiraLaneMatch.Overflow, parked.Match);
+        var parked = TrackerFieldMapping.MatchLane("In QA", "backlog", lanes, "overflow");
+        Assert.Equal(TrackerLaneMatch.Overflow, parked.Match);
         Assert.Equal("overflow", parked.ColumnId);
 
-        var ambiguous = JiraFieldMapping.MatchLane("Review", "backlog",
+        var ambiguous = TrackerFieldMapping.MatchLane("Review", "backlog",
             [Lane("a", "Review"), Lane("b", "Review")], null);
-        Assert.Equal(JiraLaneMatch.Unresolved, ambiguous.Match);
+        Assert.Equal(TrackerLaneMatch.Unresolved, ambiguous.Match);
         Assert.Null(ambiguous.ColumnId);
     }
 

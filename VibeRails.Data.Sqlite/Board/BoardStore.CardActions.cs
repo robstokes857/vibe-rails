@@ -230,7 +230,10 @@ public sealed partial class BoardStore
                 // A Board move republishes discussion with new IDs, not new Jira activity.
                 await using var rebind = connection.CreateCommand();
                 rebind.Transaction = transaction;
-                rebind.CommandText = "UPDATE BoardJiraDeliveries SET SourceId = $copy WHERE CardId = $card AND Kind = 'comment' AND SourceId = $original;";
+                rebind.CommandText = """
+                    UPDATE BoardJiraDeliveries SET SourceId = $copy WHERE CardId = $card AND Kind = 'comment' AND SourceId = $original;
+                    UPDATE BoardAdoDeliveries SET SourceId = $copy WHERE CardId = $card AND Kind = 'comment' AND SourceId = $original;
+                    """;
                 rebind.Parameters.AddWithValue("$copy", copyId);
                 rebind.Parameters.AddWithValue("$card", target);
                 rebind.Parameters.AddWithValue("$original", row.Id);

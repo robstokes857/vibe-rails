@@ -569,13 +569,13 @@ issue or issue-search link becomes a JQL source. **Connect** saves, then `POST â
 the token and reads the board, its configuration (columns, kanban sub-query, estimation field),
 its filter's JQL and an approximate issue count. A board pull uses the enhanced
 `GET /rest/software/1.0/board/{id}/issue` and re-reads the configuration every pull: an issue's
-status id names its Jira column, and `JiraColumnMap` puts the column in a lane (same name, a
+status id names its Jira column, and the shared `TrackerColumnMap` puts the column in a lane (same name, a
 whole-word match, first column to first lane, last column to Done, otherwise the "Jira" overflow
 lane), with per-column picks under Advanced. Placement happens once, when the card is created:
 a pull never moves a card, so its lane and board are the local workflow, and a manual move to
 another lane or board always stays. A later Jira status change updates the fields and adds a
 Jira comment saying the card was not moved. Each issue link records the points field the last
-pull read and the status it saw (`BoardJiraLinks.Mapping`, read through `JiraLinkMapping`), so
+pull read and the status it saw (`BoardJiraLinks.Mapping`, read through `TrackerLinkMapping`), so
 a new points field re-applies unchanged issues. Old Done issues are left out by default
 (`statusCategory != Done OR updated >= -30d`). The board filter's JQL is still written to
 `BoardJiraConnections.Jql`, so an older VibeRails keeps pulling the same issues. Without the

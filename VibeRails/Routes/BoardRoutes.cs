@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http.Features;
 using VibeRails.DTOs;
 using VibeRails.Services.Board;
 using VibeRails.Services.Board.Sync;
+using VibeRails.Services.Board.Tracker;
 using VibeRails.Services.Jira;
 using VibeRails.Utils;
 
@@ -438,7 +439,7 @@ public static partial class BoardRoutes
             SuggestedEmail = details.SuggestedEmail
         };
 
-    private static JiraColumnLaneResponse ToResponse(JiraColumnLane column) =>
+    private static JiraColumnLaneResponse ToResponse(TrackerColumnLane column) =>
         new(column.Name, column.LaneId, column.LaneName, column.Automatic);
 
     private static JiraBoardSummaryResponse ToResponse(JiraBoardSummary board) =>
