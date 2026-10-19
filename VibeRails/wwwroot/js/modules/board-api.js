@@ -21,7 +21,7 @@
 //   commit     { sha, shortSha, author, message, committedAt, linkedAt }
 //   files      { files: ['repo/relative/path', …], truncated }   (searchFilesAsync, for `@path` refs)
 //
-//   board      { id, name, position, createdAt, cardCount, columns[], isJiraBoard }
+//   board      { id, name, position, createdAt, cardCount, columns[], isJiraBoard, remoteProvider 'jira'|'ado'|null }
 //
 // `assignee` is an LLM picker key ('base:claude' / 'env:7:codex'), never a person.
 // Boards are per project: the server scopes every call to the open workspace, and a project can
@@ -84,6 +84,29 @@ async function unlinkJiraConnectionAsync(boardId) {
 
 async function pullJiraAsync(boardId, dryRun = false) {
     return call(`/boards/${enc(boardId)}/jira/pull${dryRun ? '?dryRun=true' : ''}`, 'POST');
+}
+
+// Azure DevOps (VIBE-165) mirrors Jira. The personal access token is write-only: a save sends
+// personalAccessToken and every response carries only hasToken. A save moves the connection to its
+// dedicated board, so follow the response's boardId; the test response names that board too.
+async function getAdoConnectionAsync(boardId, { settings = false } = {}) {
+    return call(`/boards/${enc(boardId)}/ado${settings ? '?settings=true' : ''}`);
+}
+
+async function saveAdoConnectionAsync(boardId, payload) {
+    return call(`/boards/${enc(boardId)}/ado`, 'PUT', payload);
+}
+
+async function testAdoConnectionAsync(boardId) {
+    return call(`/boards/${enc(boardId)}/ado/test`, 'POST');
+}
+
+async function unlinkAdoConnectionAsync(boardId) {
+    return call(`/boards/${enc(boardId)}/ado`, 'DELETE');
+}
+
+async function pullAdoAsync(boardId, dryRun = false) {
+    return call(`/boards/${enc(boardId)}/ado/pull${dryRun ? '?dryRun=true' : ''}`, 'POST');
 }
 
 // ---------------------------------------------- viberails.ai sync (VB-51)
@@ -228,8 +251,8 @@ async function updateLocalBoardCardAsync(cardId, patch) {
     return call(`/local-cards/${enc(cardId)}`, 'PUT', patch);
 }
 
-async function addLocalBoardCommentAsync(cardId, { body, syncToJira = true }) {
-    return call(`/local-cards/${enc(cardId)}/comments`, 'POST', { body, syncToJira });
+async function addLocalBoardCommentAsync(cardId, { body, syncToRemote = true }) {
+    return call(`/local-cards/${enc(cardId)}/comments`, 'POST', { body, syncToRemote });
 }
 
 async function getLocalCardLinkCandidatesAsync(cardId, query = '', extra = {}) {
@@ -301,8 +324,9 @@ async function unlinkCardAsync(cardId, linkedCardId) {
 
 // ---------------------------------------------- comments
 
-async function addBoardCommentAsync(cardId, { body, syncToJira = true }) {
-    return call(`/cards/${enc(cardId)}/comments`, 'POST', { body, syncToJira });
+// syncToRemote=false keeps the comment off the card's linked Jira issue or Azure DevOps work item.
+async function addBoardCommentAsync(cardId, { body, syncToRemote = true }) {
+    return call(`/cards/${enc(cardId)}/comments`, 'POST', { body, syncToRemote });
 }
 
 // ---------------------------------------------- agent notes
@@ -413,6 +437,11 @@ export const BoardApi = {
     testJiraConnectionAsync,
     unlinkJiraConnectionAsync,
     pullJiraAsync,
+    getAdoConnectionAsync,
+    saveAdoConnectionAsync,
+    testAdoConnectionAsync,
+    unlinkAdoConnectionAsync,
+    pullAdoAsync,
     getBoardSyncAsync,
     setBoardSyncAsync,
     syncBoardNowAsync,

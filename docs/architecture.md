@@ -603,6 +603,20 @@ posts explicitly on both MCP transports, outside the Board auto-grants. Root/pro
 form; the PAT is write-only. Dedicated Azure DevOps boards never sync with viberails.ai. See the
 [Azure DevOps comment contract](../VibeRails/Services/AzureDevOps/Comments.md) and API_SEC.md.
 
+VIBE-169 adds the web UI. Board settings gain an **Azure DevOps** tab (`board-ado.js`,
+`BoardAdoPanel`) beside Jira Cloud: a dev.azure.com board or query link, a write-only PAT with a
+per-organization "Create a token" link and the Work Items: Read & write scope note, the pull and
+skip-old-done switches, and Advanced narrowing WIQL, points field and lane picks. Connect saves,
+tests and follows the dedicated board id both calls return, and selects that board. The sync
+status's `remoteProvider` drives the layout: an Azure DevOps board shows its connection under
+General with the Azure DevOps logo, a Jira board shows Jira's, and neither shows the other
+tracker's tab (`mountBoardSettingsNavigation(...).followProvider`). `board-brand.js` maps a
+provider to its label and artwork (`assets/img/azure-devops.svg`) for the picker, the modal title
+and card badges ("Azure DevOps · #123", linked only to an https URL without credentials). Comments
+post with `syncToRemote`, entries kept off the work item show "Not sent to Azure DevOps", delivery
+status reads `remoteDeliveries`, and the origin filter offers Azure DevOps (Human-made excludes both
+trackers).
+
 VIBE-40 makes agent attention flags require `flagReason` on `update_board_card`. The store saves
 the flag, red comment marker and originating-session request atomically. Additive
 `board-attention/1` retains requests and resolves them when any writer clears the card flag.
@@ -1691,3 +1705,8 @@ their Board transactions. The root Jira scheduler drains the ledger independentl
 using `JiraDeliveryService` and the shared cross-process Jira lock. Session delivery composes
 with the existing public sharing/upload service. UI and MCP support per-comment
 `syncToJira=false`; see [the Jira delivery contract](../VibeRails/Services/Jira/Comments.md).
+
+Azure DevOps work items get the same treatment through `BoardAdoDeliveries` and
+`AdoDeliveryService` (VIBE-168). The web UI sends the provider-neutral `syncToRemote`, which both
+comment routes accept; storage keeps the `syncToJira` key, so a note kept off one tracker stays
+off the other. See [the Azure DevOps delivery contract](../VibeRails/Services/AzureDevOps/Comments.md).

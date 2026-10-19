@@ -5,11 +5,13 @@ import { escapeHtml, confirmDialog } from './utils.js';
 import { mountLlmPicker } from './pickers/llm-picker.js';
 import { renderCommentHtml } from './board-text.js';
 import { previousWorkHtml } from './board-previous-work.js';
+import { boardTracker, cardTracker, trackerLabel } from './board-brand.js';
 
 const TYPES = [['task', 'Task'], ['bug', 'Bug'], ['feature', 'Feature'], ['research-spike', 'Research spike'], ['chore', 'Chore / tech debt']];
 const options = (items, selected) => items.map(([id, name]) => `<option value="${escapeHtml(id)}"${id === selected ? ' selected' : ''}>${escapeHtml(name)}</option>`).join('');
 
 export function localCardEditorHtml({ card, projectPath, boardName, columns }) {
+    const tracker = trackerLabel(cardTracker(card)?.provider);
     return `<div class="board-local-card" data-local-board-card-editor>
         <div class="alert alert-warning" role="note"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
             This card belongs to another project's board: <strong>${escapeHtml(boardName)}</strong>.
@@ -40,7 +42,7 @@ export function localCardEditorHtml({ card, projectPath, boardName, columns }) {
         <form data-local-comment-form class="mt-3">
             <label class="form-label" for="local-card-comment">Add a comment</label>
             <textarea id="local-card-comment" class="form-control" name="body" rows="3" required spellcheck="true"></textarea>
-            ${card.jiraIssueKey ? '<label class="form-check mt-2"><input class="form-check-input" type="checkbox" name="syncToJira" checked> Post this comment to Jira</label>' : ''}
+            ${tracker ? `<label class="form-check mt-2"><input class="form-check-input" type="checkbox" name="syncToRemote" checked> Post this comment to ${tracker}</label>` : ''}
             <button type="submit" class="btn btn-outline-primary btn-sm mt-2">Post comment</button>
         </form>
     </div>`;
@@ -60,13 +62,15 @@ export function localCardChanges(baseline, values) {
     return Object.fromEntries(Object.entries(values).filter(([name, value]) => JSON.stringify(value) !== JSON.stringify(baseline[name])));
 }
 
-function commentsHtml(card, isJiraBoard) {
+// tracker: the provider of the card's dedicated board ('jira' or 'ado'), or null.
+function commentsHtml(card, tracker) {
+    const notSent = trackerLabel(tracker);
     const entries = [...(card.comments || []), ...(card.notes || [])].sort((a, b) =>
         Number(b.isAttention === true) - Number(a.isAttention === true) || String(a.createdAt).localeCompare(String(b.createdAt)));
     return entries.map(entry => `<article class="board-comment${entry.isAttention ? ' is-attention' : ''}">
         <div class="board-comment-content"><div class="board-comment-meta">
             <strong>${escapeHtml(entry.author?.label || 'Someone')}</strong>
-            ${isJiraBoard === true && entry.syncToJira === false ? '<span class="badge text-bg-secondary">Not sent to Jira</span>' : ''}
+            ${notSent && entry.syncToJira === false ? `<span class="badge text-bg-secondary">Not sent to ${notSent}</span>` : ''}
             <time>${escapeHtml(new Date(entry.createdAt).toLocaleString())}</time></div>
             ${entry.isAttention ? '<div class="board-comment-attention">Needs your attention</div>' : ''}
             <div class="board-comment-body board-local-comment-body">${renderCommentHtml(entry.body, { interactiveReferences: false })}</div></div></article>`).join('') || '<p class="text-muted small">No comments yet.</p>';
@@ -108,7 +112,7 @@ export function openLocalCardEditor(app, detail, { openCard, onChanged }) {
         if (alive()) onChanged?.();
     };
     const showError = message => { if (alive()) app.showToast('Board', message, 'error'); };
-    comments.innerHTML = commentsHtml(card, detail.isJiraBoard);
+    comments.innerHTML = commentsHtml(card, boardTracker(detail));
     linksDispose = bindCardLinks(editor, card, {
         api: {
             getCardLinkCandidatesAsync: BoardApi.getLocalCardLinkCandidatesAsync,
@@ -152,10 +156,10 @@ export function openLocalCardEditor(app, detail, { openCard, onChanged }) {
         if (!body.value.trim()) return;
         lock(true);
         try {
-            const entry = await BoardApi.addLocalBoardCommentAsync(card.id, { body: body.value.trim(), syncToJira: commentForm.elements.namedItem('syncToJira')?.checked !== false });
+            const entry = await BoardApi.addLocalBoardCommentAsync(card.id, { body: body.value.trim(), syncToRemote: commentForm.elements.namedItem('syncToRemote')?.checked !== false });
             if (!alive()) return;
             card.comments = [...(card.comments || []), entry];
-            comments.innerHTML = commentsHtml(card, detail.isJiraBoard);
+            comments.innerHTML = commentsHtml(card, boardTracker(detail));
             body.value = '';
             changed();
         } catch (error) { showError(error?.message || 'Could not post the comment.'); }

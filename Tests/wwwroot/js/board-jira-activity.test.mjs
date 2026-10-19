@@ -6,19 +6,20 @@ import { BoardApi } from '../../../VibeRails/wwwroot/js/modules/board-api.js';
 test('Jira badge opens the issue safely and rejects executable URLs', () => {
     const controller = new BoardController({ apiCall: async () => ({}) });
     const card = { jiraIssueKey: 'APP-1', jiraIssueUrl: 'https://jira.example/browse/APP-1' };
-    assert.match(controller.jiraBadge(card), /href="https:\/\/jira.example\/browse\/APP-1"/);
-    assert.match(controller.jiraBadge(card), /rel="noopener noreferrer"/);
+    assert.match(controller.remoteBadge(card), /href="https:\/\/jira.example\/browse\/APP-1"/);
+    assert.match(controller.remoteBadge(card), /rel="noopener noreferrer"/);
     for (const jiraIssueUrl of ['javascript:alert(1)', 'https://user:password@jira.example/', 'data:text/html,hello'])
-        assert.doesNotMatch(controller.jiraBadge({ ...card, jiraIssueUrl }), /href=/);
+        assert.doesNotMatch(controller.remoteBadge({ ...card, jiraIssueUrl }), /href=/);
 });
 
-test('comment API defaults to Jira delivery and preserves an explicit opt-out on both routes', async () => {
+test('comment API defaults to tracker delivery and preserves an explicit opt-out on both routes', async () => {
     const calls = [];
     BoardApi.attach({ apiCall: async (...args) => { calls.push(args); return {}; } });
     await BoardApi.addBoardCommentAsync('card', { body: 'Shared' });
-    await BoardApi.addBoardCommentAsync('card', { body: 'Internal', syncToJira: false });
-    await BoardApi.addLocalBoardCommentAsync('card', { body: 'Internal elsewhere', syncToJira: false });
-    assert.deepEqual(calls.map(c => c[2].syncToJira), [true, false, false]);
+    await BoardApi.addBoardCommentAsync('card', { body: 'Internal', syncToRemote: false });
+    await BoardApi.addLocalBoardCommentAsync('card', { body: 'Internal elsewhere', syncToRemote: false });
+    assert.deepEqual(calls.map(c => c[2].syncToRemote), [true, false, false]);
+    assert.ok(calls.every(c => !('syncToJira' in c[2])), 'the provider-neutral name replaces the Jira alias');
 });
 
 test('posting reads the current editor sync choice and labels unsynced comments only on Jira boards', async t => {
@@ -27,14 +28,14 @@ test('posting reads the current editor sync choice and labels unsynced comments 
     const controller = new BoardController({ apiCall: async (...args) => { calls.push(args); return {}; } });
     controller.cardIdFromEditor = () => 'card';
     controller.reloadEditingCard = async () => null;
-    const editor = { querySelector: selector => selector === '[data-board-jira-sync]' ? { checked: false } : null };
+    const editor = { querySelector: selector => selector === '[data-board-remote-sync]' ? { checked: false } : null };
     await controller.postComment(editor, 'Keep here');
-    assert.equal(calls[0][2].syncToJira, false);
+    assert.equal(calls[0][2].syncToRemote, false);
     const comment = { id: 'comment', body: 'Note', author: {}, syncToJira: false };
-    assert.match(controller.cardLogCommentHtml(comment, {}, true), /Not sent to Jira/);
-    assert.doesNotMatch(controller.cardLogCommentHtml(comment, {}, false), /Not sent to Jira/);
+    assert.match(controller.cardLogCommentHtml(comment, {}, 'jira'), /Not sent to Jira/);
+    assert.doesNotMatch(controller.cardLogCommentHtml(comment, {}, null), /Not sent to Jira/);
     assert.doesNotMatch(controller.cardLogCommentHtml(comment, {}), /Not sent to Jira/);
-    assert.doesNotMatch(controller.cardLogCommentHtml({ ...comment, syncToJira: true }, {}, true), /Not sent to Jira/);
+    assert.doesNotMatch(controller.cardLogCommentHtml({ ...comment, syncToJira: true }, {}, 'jira'), /Not sent to Jira/);
 
     const savedFrame = globalThis.requestAnimationFrame;
     globalThis.requestAnimationFrame = () => 0;

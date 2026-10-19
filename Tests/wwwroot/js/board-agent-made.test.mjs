@@ -56,6 +56,34 @@ test('Jira origins have an escaped logo badge and are excluded from the human fi
     assert.doesNotMatch(html, /<svg>/);
 });
 
+test('Azure DevOps origins have their own filter and badge, and Human-made excludes both trackers', () => {
+    const board = controller();
+    const ado = card({ id: 'ado', remoteProvider: 'ado', remoteIssueKey: '#42<svg>' });
+    const jira = card({ id: 'jira', remoteProvider: 'jira', remoteIssueKey: 'PROJ-1', jiraIssueKey: 'PROJ-1' });
+    board.state.cards = [ado, jira, card({ id: 'human' }), card({ id: 'agent', agentMade: true })];
+    board.state.filters.origin = 'ado';
+    assert.deepEqual(board.filteredCards().map(item => item.id), ['ado']);
+    board.state.filters.origin = 'jira';
+    assert.deepEqual(board.filteredCards().map(item => item.id), ['jira']);
+    board.state.filters.origin = 'human';
+    assert.deepEqual(board.filteredCards().map(item => item.id), ['human']);
+    board.state.filters.origin = 'agent';
+    assert.deepEqual(board.filteredCards().map(item => item.id), ['agent']);
+    const html = board.renderCard(ado);
+    assert.match(html, /class="board-card-origin"/);
+    assert.match(html, /class="board-brand-logo" src="assets\/img\/azure-devops.svg"/);
+    assert.match(html, /Azure DevOps · #42&lt;svg&gt;/);
+    assert.doesNotMatch(html, /<svg>/);
+    assert.doesNotMatch(board.renderCard(card({ id: 'local' })), /board-card-origin/);
+});
+
+test('the toolbar offers an Azure DevOps origin beside Jira', async () => {
+    const { readFileSync } = await import('node:fs');
+    const html = readFileSync(new URL('../../../VibeRails/wwwroot/index.html', import.meta.url), 'utf8');
+    const filter = html.slice(html.indexOf('data-board-filter-origin'), html.indexOf('</select>', html.indexOf('data-board-filter-origin')));
+    assert.match(filter, /<option value="jira">Jira<\/option>\s*<option value="ado">Azure DevOps<\/option>/);
+});
+
 test('legacy and current Grok selections produce one filter option in paged and fallback boards', () => {
     globalThis.window = {};
     const board = controller();

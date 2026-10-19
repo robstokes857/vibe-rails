@@ -122,6 +122,7 @@ function api(path, method) {
         ] },
         '/api/v1/lifecycle/ping': { success: true }, '/api/v1/lifecycle/disconnect': { success: true },
         '/api/v1/token-savings': {}, '/api/v1/board/boards/demo_board/jira': { enabled: false },
+        '/api/v1/board/boards/demo_board/ado': { enabled: false },
         '/api/v1/codex/settings/Careful%20refactor': {},
         '/api/v1/chatHistory': { sessions: [], totalCount: 0, hasMore: false },
         '/api/v1/board/cards/demo_card_7/checks': { latest: [] },

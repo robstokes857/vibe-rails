@@ -6228,7 +6228,8 @@ h6 {
     white-space: nowrap;
 }
 
-.board-settings-jira-combined {
+/* A dedicated Jira or Azure DevOps board shows its connection under General. */
+.board-settings-tracker-combined {
     margin-top: 1.5rem;
     padding-top: 1.5rem;
     border-top: 1px solid var(--color-border);
@@ -6262,7 +6263,8 @@ h6 {
     overflow-wrap: anywhere;
 }
 
-.board-settings-header [data-jira-heading] {
+.board-settings-header [data-jira-heading],
+.board-settings-header [data-ado-heading] {
     white-space: nowrap;
 }
 

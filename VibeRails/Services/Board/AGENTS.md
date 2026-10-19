@@ -659,6 +659,13 @@ Rules specific to Azure DevOps:
 - A new organization or project mints a new connection id. An organization change needs the PAT
   again; a project change in the same organization carries the saved PAT over.
 
+The entry point is the **Azure DevOps** tab in Board Settings (`wwwroot/js/modules/board-ado.js`,
+VIBE-169), a copy of the Jira tab. Connect saves (PUT, which moves the connection to its dedicated
+board), tests on the board id that PUT returned, and follows the id the test returns as well.
+Settings follow the board's `RemoteProvider`: a dedicated Azure DevOps board shows its connection
+under General and hides both tracker tabs, a Jira board hides the Azure DevOps tab, and a local
+board offers both. The settings form says it too: a pull updates fields and never moves a card.
+
 ## Jira activity delivery
 
 New linked-card comments default to Jira delivery; `syncToJira=false` retains a note without
@@ -680,3 +687,10 @@ the `syncToJira` key. Card DTOs carry `RemoteProvider` (`jira`, `ado` or null), 
 dedicated tracker's `RemoteProvider` beside `IsJiraBoard`. Decide "is this a dedicated tracker
 board" only through `TrackerBoards.DedicatedProviderAsync`/`DedicatedProvidersAsync`. Read
 [the delivery contract](../AzureDevOps/Comments.md) before changing it.
+
+The web UI reads only the provider-neutral fields, falling back to the Jira ones for older
+responses (`cardTracker`/`boardTracker` in `board-brand.js`). The card editor's **Post this
+comment to Azure DevOps** checkbox and the cross-project editor send `syncToRemote`; "Not sent to
+Azure DevOps" marks a `syncToJira=false` entry on a dedicated Azure DevOps board only; failed,
+uncertain and waiting `RemoteDeliveries` show above the discussion and refresh with the ten-second
+card poll.

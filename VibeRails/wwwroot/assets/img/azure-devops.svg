@@ -1,0 +1,7 @@
+<!-- Azure DevOps glyph from simple-icons 9.21.0 (CC0-1.0; later releases dropped Microsoft logos).
+     Source: https://unpkg.com/simple-icons@9.21.0/icons/azuredevops.svg
+     Set on a rounded brand-blue tile, like jira.svg, so it stays visible on a blue badge. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <path fill="#0078d4" d="M0 6a6 6 0 0 1 6-6h12a6 6 0 0 1 6 6v12a6 6 0 0 1-6 6H6a6 6 0 0 1-6-6z"/>
+  <path fill="#fff" transform="translate(4.2 4.2) scale(0.65)" d="M0 8.877L2.247 5.91l8.405-3.416V.022l7.37 5.393L2.966 8.338v8.225L0 15.707zm24-4.45v14.651l-5.753 4.9-9.303-3.057v3.056l-5.978-7.416 15.057 1.798V5.415z"/>
+</svg>

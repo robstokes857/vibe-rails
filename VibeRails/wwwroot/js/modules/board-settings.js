@@ -1,26 +1,36 @@
 import { escapeHtml } from './utils.js';
 import { BoardApi } from './board-api.js';
+import { boardTracker } from './board-brand.js';
 import { jobLaunchKind } from './launch-kind.js';
+
+// A dedicated board's tracker connection sits under General; a local board offers each as a tab.
+const TRACKER_TABS = [['jira', 'Jira Cloud'], ['ado', 'Azure DevOps']];
+const SECTION_ORDER = ['general', ...TRACKER_TABS.map(([id]) => id), 'context', 'history'];
 
 export const boardSettingsNavigation = () => `
     <nav class="nav nav-pills board-settings-nav gap-2 mb-3" aria-label="Board settings" role="tablist">
-        ${[['general', 'General'], ['jira', 'Jira Cloud'], ['context', 'Agent context'], ['history', 'History']].map(([id, label]) => `
+        ${[['general', 'General'], ...TRACKER_TABS, ['context', 'Agent context'], ['history', 'History']].map(([id, label]) => `
             <button type="button" class="nav-link${id === 'general' ? ' active' : ''}" role="tab"
                 id="board-settings-tab-${id}" aria-controls="board-settings-${id}" aria-selected="${id === 'general'}"
                 tabindex="${id === 'general' ? 0 : -1}" data-board-settings-tab="${id}">${label}</button>`).join('')}
     </nav>`;
 
-/** Switch sections without replacing their DOM, so connection and context drafts survive. */
+/**
+ * Switch sections without replacing their DOM, so connection and context drafts survive.
+ * onSelect(tab, tracker) names the tracker whose connection is now visible ('jira', 'ado' or null).
+ */
 export function mountBoardSettingsNavigation(editor, onSelect = () => {}) {
     const abort = new AbortController();
-    let tabs = [...editor.querySelectorAll('[data-board-settings-tab]')];
-    const jiraTab = tabs.find(tab => tab.dataset.boardSettingsTab === 'jira');
-    const generalTab = tabs.find(tab => tab.dataset.boardSettingsTab === 'general');
-    const jiraPanel = editor.querySelector('[data-board-settings-panel="jira"]');
+    const allTabs = [...editor.querySelectorAll('[data-board-settings-tab]')];
+    let tabs = allTabs;
+    const tabFor = id => allTabs.find(tab => tab.dataset.boardSettingsTab === id);
+    const generalTab = tabFor('general');
     const generalPanel = editor.querySelector('[data-board-settings-panel="general"]');
-    let combinedJira = false;
+    const trackers = new Map(TRACKER_TABS.map(([id, label]) =>
+        [id, { tab: tabFor(id), panel: editor.querySelector(`[data-board-settings-panel="${id}"]`), label }]));
+    let combined = null;
     const select = tab => {
-        for (const item of tabs) {
+        for (const item of allTabs) {
             const active = item === tab;
             item.classList.toggle('active', active);
             item.setAttribute('aria-selected', String(active));
@@ -30,9 +40,9 @@ export function mountBoardSettingsNavigation(editor, onSelect = () => {}) {
         for (const panel of editor.querySelectorAll('[data-board-settings-panel]')) {
             panel.hidden = panel.dataset.boardSettingsPanel !== id;
         }
-        onSelect(id, id === 'jira' || (combinedJira && id === 'general'));
+        onSelect(id, trackers.has(id) ? id : combined && id === 'general' ? combined : null);
     };
-    for (const tab of tabs) {
+    for (const tab of allTabs) {
         tab.addEventListener('click', () => select(tab), { signal: abort.signal });
         tab.addEventListener('keydown', event => {
             const index = tabs.indexOf(tab);
@@ -45,41 +55,59 @@ export function mountBoardSettingsNavigation(editor, onSelect = () => {}) {
             target.focus();
         }, { signal: abort.signal });
     }
+    // A separated panel goes back before the next section in tab order.
+    const place = (id, panel) => {
+        const next = SECTION_ORDER.slice(SECTION_ORDER.indexOf(id) + 1)
+            .map(item => editor.querySelector(`[data-board-settings-panel="${item}"]`)).find(Boolean);
+        if (next) next.before(panel);
+        else generalPanel.after(panel);
+    };
     return {
         dispose: () => abort.abort(),
-        combineJira() {
-            if (combinedJira || abort.signal.aborted || editor.isConnected === false) return;
-            combinedJira = true;
+        /**
+         * Follow the board's provider ('jira', 'ado' or null). A dedicated tracker board shows its
+         * connection under General and no tracker tabs; a local board offers each tracker as a tab.
+         * The existing controls move, so a delayed status response cannot erase any draft.
+         */
+        followProvider(provider) {
+            const next = trackers.has(provider) ? provider : null;
+            if (next === combined || abort.signal.aborted || editor.isConnected === false) return;
             const activeTab = tabs.find(tab => tab.classList.contains('active')) || generalTab;
-            const focused = document.activeElement;
-            const restoreFocus = focused === jiraTab ? generalTab : jiraPanel.contains(focused) ? focused : null;
-            // Move the existing controls so a delayed status response cannot erase either draft.
-            jiraPanel.removeAttribute('data-board-settings-panel');
-            jiraPanel.removeAttribute('role');
-            jiraPanel.removeAttribute('aria-labelledby');
-            jiraPanel.setAttribute('aria-label', 'Jira Cloud');
-            jiraPanel.hidden = false;
-            jiraPanel.classList.add('board-settings-jira-combined');
-            generalPanel.append(jiraPanel);
-            jiraTab.remove();
-            tabs = tabs.filter(tab => tab !== jiraTab);
-            select(activeTab === jiraTab ? generalTab : activeTab);
+            const focused = globalThis.document?.activeElement;
+            let target = activeTab;
+            let restoreFocus = null;
+            if (combined) {
+                const { tab, panel } = trackers.get(combined);
+                if (panel.contains(focused)) restoreFocus = focused;
+                panel.dataset.boardSettingsPanel = combined;
+                panel.setAttribute('role', 'tabpanel');
+                panel.setAttribute('aria-labelledby', tab.id);
+                panel.removeAttribute('aria-label');
+                panel.classList.remove('board-settings-tracker-combined');
+                place(combined, panel);
+                // Keep the unlink result visible while retaining every other settings draft.
+                if (activeTab === generalTab) target = tab;
+            }
+            combined = next;
+            if (next) {
+                const { panel, label } = trackers.get(next);
+                if (panel.contains(focused)) restoreFocus = focused;
+                panel.removeAttribute('data-board-settings-panel');
+                panel.removeAttribute('role');
+                panel.removeAttribute('aria-labelledby');
+                panel.setAttribute('aria-label', label);
+                panel.hidden = false;
+                panel.classList.add('board-settings-tracker-combined');
+                generalPanel.append(panel);
+                if (trackers.has(target.dataset.boardSettingsTab)) target = generalTab;
+            }
+            for (const { tab } of trackers.values()) {
+                tab.hidden = Boolean(next);
+                if (next && focused === tab) restoreFocus = generalTab;
+            }
+            tabs = allTabs.filter(tab => !tab.hidden);
+            select(target);
             restoreFocus?.focus({ preventScroll: true });
-        },
-        separateJira() {
-            if (!combinedJira || abort.signal.aborted || editor.isConnected === false) return;
-            combinedJira = false;
-            const activeTab = tabs.find(tab => tab.classList.contains('active')) || generalTab;
-            jiraPanel.dataset.boardSettingsPanel = 'jira';
-            jiraPanel.setAttribute('role', 'tabpanel');
-            jiraPanel.setAttribute('aria-labelledby', jiraTab.id);
-            jiraPanel.removeAttribute('aria-label');
-            jiraPanel.classList.remove('board-settings-jira-combined');
-            generalPanel.after(jiraPanel);
-            generalTab.after(jiraTab);
-            tabs = [...editor.querySelectorAll('[data-board-settings-tab]')];
-            // Keep the unlink result visible while retaining every other settings draft.
-            select(activeTab === generalTab ? jiraTab : activeTab);
         }
     };
 }
@@ -120,8 +148,10 @@ export function mountBoardSync(app, element, boardId, onStatus = () => {}) {
     const alive = () => !disposed && element.isConnected !== false;
     const render = status => {
         onStatus(status);
-        element.hidden = Boolean(status.isJiraBoard);
-        if (status.isJiraBoard) {
+        // A dedicated Jira or Azure DevOps board syncs with its tracker, never with viberails.ai.
+        const tracker = boardTracker(status);
+        element.hidden = Boolean(tracker);
+        if (tracker) {
             content.innerHTML = '';
             return;
         }

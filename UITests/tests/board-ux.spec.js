@@ -68,12 +68,12 @@ for (const width of [1440, 390]) {
         await page.getByRole('button', { name: 'Board settings', exact: true }).click();
         await expect(page.getByLabel('Sync this board with viberails.ai')).toBeChecked();
         await expect(page.getByRole('button', { name: 'Sync now', exact: true })).toBeVisible();
-        await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Agent context', 'History']);
+        await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Azure DevOps', 'Agent context', 'History']);
         // A saved legacy connection and retained imported cards do not override the board type.
         await page.getByRole('tab', { name: 'Jira Cloud', exact: true }).click();
         await expect(page.getByLabel('Jira board link')).toHaveValue('https://example.atlassian.net/jira/software/projects/TEST/boards/1');
         await expect(page.locator('.modal-title img')).toHaveCount(0);
-        await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Agent context', 'History']);
+        await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Azure DevOps', 'Agent context', 'History']);
         await page.getByRole('tab', { name: 'General', exact: true }).click();
         await expect(page.getByLabel('Sync this board with viberails.ai')).toBeVisible();
     });
@@ -126,7 +126,7 @@ for (const width of [1440, 390]) {
         await page.getByRole('alertdialog').getByRole('button', { name: 'Unlink Jira', exact: true }).click();
         await expect(panel.locator('[data-jira-report]')).toContainText('Jira unlinked');
         await expect(icon).toHaveCount(0);
-        await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Agent context', 'History']);
+        await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Azure DevOps', 'Agent context', 'History']);
         await expect(unlink).toBeHidden();
         await expect(panel.getByRole('button', { name: 'Pull now', exact: true })).toBeDisabled();
         await expect(panel.getByLabel('API token', { exact: true })).toHaveValue('');
@@ -223,7 +223,7 @@ test('Connect selects its dedicated Jira board and preserves other settings draf
     await expect(panel.locator('[data-jira-report]')).toHaveText('Connected as Ada.');
     await expect.poll(() => calls.filter(call => call === 'GET /api/v1/board/boards/brd_main/sync').length).toBe(2);
     await expect(page.locator('.modal-title img')).toHaveCount(0);
-    await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Agent context', 'History']);
+    await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Azure DevOps', 'Agent context', 'History']);
     await expect(page.locator('.board-picker-control .ts-control img')).toHaveAttribute('src', 'assets/img/jira.svg');
     await panel.getByRole('button', { name: 'Pull now' }).click();
     await expect(panel.locator('[data-jira-report]')).toHaveText('Pull complete');
@@ -334,6 +334,269 @@ for (const width of [1440, 390]) {
         await expect(panel).toHaveCount(0);
     });
 }
+
+// Azure DevOps (VIBE-165) mirrors the Jira settings UX: a provider-aware badge, its own tab on a
+// local board, and its connection under General on its dedicated board.
+const ADO_LINK = 'https://dev.azure.com/contoso/Fabrikam%20Web/_boards/board/t/Fabrikam%20Team/Stories';
+const adoConnection = overrides => ({
+    boardId: 'brd_main', organization: 'contoso', project: 'Fabrikam Web', team: 'Fabrikam Team', backlogLevel: 'Stories',
+    boardLink: ADO_LINK, adoBoardName: 'Stories', hasToken: true, authStatus: 'saved', enabled: true, skipOldDone: true,
+    dedicatedBoard: true, lastWriteWins: true, columns: [], lanes: [], ...overrides
+});
+
+for (const width of [1440, 390]) {
+    test(`Azure DevOps boards combine General and Azure DevOps settings at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        await openBoard(page, { onCard: card => {
+            card.remoteProvider = 'ado';
+            card.remoteIssueKey = '#4821';
+            card.remoteIssueUrl = 'https://dev.azure.com/contoso/Fabrikam%20Web/_workitems/edit/4821';
+        } });
+        const badge = page.locator('.board-card-origin');
+        await expect(badge).toContainText('Azure DevOps · #4821');
+        await expect(badge.locator('img')).toHaveAttribute('src', 'assets/img/azure-devops.svg');
+        await expect.poll(() => badge.locator('img').evaluate(image => image.complete && image.naturalWidth > 0)).toBe(true);
+        await expect(badge.getByRole('link')).toHaveAttribute('href', 'https://dev.azure.com/contoso/Fabrikam%20Web/_workitems/edit/4821');
+        expect(await badge.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+        await page.screenshot({ path: testInfo.outputPath(`board-ado-badge-${width}.png`) });
+        let provider = 'ado';
+        await page.route('**/api/v1/board/boards/brd_main/sync', route => route.fulfill({ json: {
+            isJiraBoard: false, remoteProvider: provider, enabled: !provider, configured: true
+        } }));
+        await page.route('**/api/v1/board/boards/brd_main/ado?settings=true', route => route.fulfill({ json: adoConnection() }));
+        await page.getByRole('button', { name: 'Board settings', exact: true }).click();
+        await expect(page.locator('.modal-title img')).toHaveAttribute('src', 'assets/img/azure-devops.svg');
+        await expect(page.locator('.modal-title').getByRole('img', { name: 'Azure DevOps board', exact: true })).toBeVisible();
+        await expect(page.locator('[data-board-sync]')).toBeHidden();
+        await expect(page.getByLabel('Sync this board with viberails.ai')).toHaveCount(0);
+        await expect(page.getByRole('tab')).toHaveText(['General', 'Agent context', 'History']);
+        await expect(page.getByRole('tab', { name: 'General', exact: true })).toHaveAttribute('aria-selected', 'true');
+        await expect(page.getByLabel('Azure DevOps board or query link')).toHaveValue(ADO_LINK);
+        await expect(page.getByLabel('Jira board link')).toBeHidden();
+        const token = page.getByLabel('Personal access token', { exact: true });
+        await expect(token).toHaveAttribute('placeholder', '•'.repeat(32));
+        await expect(token).toHaveValue('');
+        await expect(page.getByRole('link', { name: 'Create a token' })).toHaveAttribute('href', 'https://dev.azure.com/contoso/_usersSettings/tokens');
+        await expect(page.getByRole('link', { name: 'Create a token' })).toHaveAttribute('target', '_blank');
+        await expect(page.locator('[data-ado-panel]')).toContainText('Work Items: Read & write');
+        await expect(page.getByLabel('Atlassian account email')).toBeHidden();
+        await expect(page.locator('.modal-header [data-ado-status]')).toHaveText('Connected');
+        await expect(page.locator('.modal-header [data-jira-heading]')).toBeHidden();
+        await page.getByLabel('Board name', { exact: true }).fill('Keep this draft');
+        await token.fill('unsaved-test-token');
+        await page.getByRole('tab', { name: 'General', exact: true }).focus();
+        await page.keyboard.press('ArrowRight');
+        await expect(page.getByRole('tab', { name: 'Agent context', exact: true })).toBeFocused();
+        await expect(page.locator('.modal-header [data-ado-heading]')).toBeHidden();
+        await page.keyboard.press('Home');
+        await expect(page.getByLabel('Board name', { exact: true })).toHaveValue('Keep this draft');
+        await expect(token).toHaveValue('unsaved-test-token');
+        await expect(page.locator('.modal-header [data-ado-heading]')).toBeVisible();
+        await token.fill('');
+        const panel = page.locator('[data-ado-panel]');
+        expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+        await page.screenshot({ path: testInfo.outputPath(`board-ado-combined-${width}.png`) });
+        await page.evaluate(() => window.app.closeModal());
+
+        // A local board offers both trackers as tabs, and the viberails.ai choice again.
+        provider = null;
+        await page.getByRole('button', { name: 'Board settings', exact: true }).click();
+        await expect(page.getByLabel('Sync this board with viberails.ai')).toBeChecked();
+        await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Azure DevOps', 'Agent context', 'History']);
+        await page.getByRole('tab', { name: 'Azure DevOps', exact: true }).click();
+        await expect(page.getByLabel('Azure DevOps board or query link')).toHaveValue(ADO_LINK);
+        await expect(page.locator('.modal-header [data-ado-heading]')).toBeVisible();
+        await expect(page.locator('.modal-title img')).toHaveCount(0);
+        await page.getByRole('tab', { name: 'Azure DevOps', exact: true }).scrollIntoViewIfNeeded();
+        await page.screenshot({ path: testInfo.outputPath(`board-ado-tab-${width}.png`) });
+    });
+}
+
+test('Connect selects its dedicated Azure DevOps board and preserves other settings drafts', async ({ page }) => {
+    await openBoard(page);
+    let connected = false;
+    const calls = [];
+    const saves = [];
+    await page.route('**/api/v1/board/**', route => {
+        const path = new URL(route.request().url()).pathname;
+        const method = route.request().method();
+        calls.push(`${method} ${path}`);
+        const connection = connected ? adoConnection({ boardId: 'brd_ado' })
+            : { boardId: 'brd_main', hasToken: false, authStatus: 'none', enabled: false, columns: [], lanes: [] };
+        if (path.endsWith('/ado') && method === 'PUT') {
+            saves.push(route.request().postDataJSON());
+            connected = true;
+            return route.fulfill({ json: { ...adoConnection({ boardId: 'brd_ado', adoBoardName: null }), columns: null, lanes: null } });
+        }
+        if (path.endsWith('/ado')) return route.fulfill({ json: connection });
+        if (path.endsWith('/ado/test')) return route.fulfill({ json: { ok: true, project: 'Fabrikam Web', boardId: 'brd_ado', board: {
+            name: 'Stories', team: 'Fabrikam Team', backlogLevel: 'Stories', workItemCount: 7, countCapped: false,
+            pointsField: 'Microsoft.VSTS.Scheduling.StoryPoints', columns: [{ name: 'New', laneId: 'l1', laneName: 'Ready', automatic: true }], warnings: [] } } });
+        if (path.endsWith('/ado/pull')) return route.fulfill({ json: { outcome: 'ok', boardId: 'brd_ado', message: 'Pull complete' } });
+        if (path.endsWith('/sync')) return route.fulfill({ json: {
+            isJiraBoard: false, remoteProvider: path.includes('/brd_ado/') ? 'ado' : null, enabled: false, configured: true
+        } });
+        if (path.endsWith('/context')) return route.fulfill({ json: { revision: 1, context: { defaultMessage: '', typeOverrides: [] } } });
+        if (path.endsWith('/boards')) return route.fulfill({ json: { boards: [
+            { id: 'brd_main', name: 'Main', position: 0, isJiraBoard: false, remoteProvider: null },
+            ...(connected ? [{ id: 'brd_ado', name: 'Azure DevOps · Fabrikam Team', position: 1, isJiraBoard: false, remoteProvider: 'ado' }] : [])
+        ] } });
+        if (path.endsWith('/columns')) return route.fulfill({ json: { columns: [] } });
+        return route.fulfill({ json: { cards: [] } });
+    });
+    await page.getByRole('button', { name: 'Board settings', exact: true }).click();
+    await page.locator('#board-board-name').fill('Keep this name draft');
+    await page.getByRole('tab', { name: 'Azure DevOps', exact: true }).click();
+    const panel = page.locator('[data-ado-panel]');
+    await expect(panel.getByRole('link', { name: 'Create a token' })).toBeHidden();
+    await panel.getByLabel('Azure DevOps board or query link').fill(ADO_LINK);
+    await expect(panel.getByRole('link', { name: 'Create a token' })).toHaveAttribute('href', 'https://dev.azure.com/contoso/_usersSettings/tokens');
+    await panel.getByLabel('Personal access token').fill('test-only');
+    await panel.getByRole('button', { name: 'Connect', exact: true }).click();
+    await expect(panel.locator('[data-ado-report]')).toHaveText('Connected to Fabrikam Web.');
+    await expect(panel.locator('[data-ado-board]')).toHaveText('Azure DevOps · Fabrikam Team');
+    await expect(page.locator('[data-board-select]')).toHaveValue('brd_ado');
+    await expect(panel.locator('[data-ado-summary]')).toContainText('Stories (Fabrikam Team) · about 7 work items');
+    await expect(panel.getByLabel('Personal access token')).toHaveValue('');
+    expect(saves).toEqual([{ boardLink: ADO_LINK, personalAccessToken: 'test-only', narrowWiql: '', pointsField: '', enabled: true, skipOldDone: true }]);
+    expect(calls).toContain('POST /api/v1/board/boards/brd_ado/ado/test');
+    expect(calls).not.toContain('POST /api/v1/board/boards/brd_main/ado/test');
+    await expect(page.locator('.modal-title img')).toHaveCount(0);
+    await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Azure DevOps', 'Agent context', 'History']);
+    await expect(page.locator('.board-picker-control .ts-control img')).toHaveAttribute('src', 'assets/img/azure-devops.svg');
+    await panel.getByRole('button', { name: 'Pull now' }).click();
+    await expect(panel.locator('[data-ado-report]')).toHaveText('Pull complete');
+    expect(calls).toContain('POST /api/v1/board/boards/brd_ado/ado/pull');
+    await page.getByRole('tab', { name: 'General', exact: true }).click();
+    await expect(page.locator('#board-board-name')).toHaveValue('Keep this name draft');
+    await expect(page.getByLabel('Sync this board with viberails.ai')).toBeVisible();
+});
+
+test('Azure DevOps unlink confirms, handles failure and keeps settings drafts', async ({ page }, testInfo) => {
+    await openBoard(page);
+    let linked = true;
+    let attempts = 0;
+    await page.route('**/api/v1/board/boards/brd_main/sync', route => route.fulfill({ json: {
+        isJiraBoard: false, remoteProvider: linked ? 'ado' : null, enabled: false, configured: true
+    } }));
+    await page.route(url => url.pathname === '/api/v1/board/boards/brd_main/ado', route => {
+        if (route.request().method() === 'DELETE') {
+            attempts++;
+            if (attempts === 1) return route.fulfill({ status: 400, json: { error: 'Another Azure DevOps operation is running. Try again when it finishes.' } });
+            linked = false;
+            return route.fulfill({ json: { message: 'Azure DevOps unlinked. Board and cards kept.' } });
+        }
+        return route.fulfill({ json: linked ? adoConnection()
+            : { boardId: 'brd_main', hasToken: false, authStatus: 'none', columns: [], lanes: [] } });
+    });
+    await page.getByRole('button', { name: 'Board settings', exact: true }).click();
+    const icon = page.locator('.modal-title').getByRole('img', { name: 'Azure DevOps board', exact: true });
+    await expect(icon).toBeVisible();
+    await page.getByLabel('Board name', { exact: true }).fill('Keep my name draft');
+    const panel = page.locator('[data-ado-panel]');
+    const unlink = panel.getByRole('button', { name: 'Unlink Azure DevOps', exact: true });
+    await unlink.click();
+    await expect(page.getByRole('alertdialog')).toContainText('imported cards, comments, files and sessions stay in VibeRails');
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel', exact: true }).click();
+    expect(attempts).toBe(0);
+
+    await unlink.click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Unlink Azure DevOps', exact: true }).click();
+    await expect(panel.locator('[data-ado-report]')).toContainText('Another Azure DevOps operation is running');
+    await expect(icon).toBeVisible();
+    await expect(unlink).toBeEnabled();
+
+    await unlink.click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Unlink Azure DevOps', exact: true }).click();
+    await expect(panel.locator('[data-ado-report]')).toHaveText('Azure DevOps unlinked. The board and its cards have been kept.');
+    await expect(icon).toHaveCount(0);
+    await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Azure DevOps', 'Agent context', 'History']);
+    await expect(page.getByRole('tab', { name: 'Azure DevOps', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await expect(unlink).toBeHidden();
+    await expect(panel.getByRole('button', { name: 'Pull now', exact: true })).toBeDisabled();
+    await expect(panel.getByLabel('Personal access token', { exact: true })).toHaveAttribute('placeholder', 'Paste a personal access token');
+    await expect(panel.getByLabel('Azure DevOps board or query link')).toHaveValue('');
+    await page.screenshot({ path: testInfo.outputPath('board-ado-unlinked.png') });
+    await page.getByRole('tab', { name: 'General', exact: true }).click();
+    await expect(page.getByLabel('Board name', { exact: true })).toHaveValue('Keep my name draft');
+    await expect(page.getByLabel('Sync this board with viberails.ai')).toBeVisible();
+    expect(attempts).toBe(2);
+});
+
+for (const selected of ['Azure DevOps', 'Agent context', 'Azure DevOps input']) {
+    test(`delayed Azure DevOps board status preserves drafts and the selected ${selected} section`, async ({ page }) => {
+        await openBoard(page);
+        let releaseStatus;
+        const statusReady = new Promise(resolve => { releaseStatus = resolve; });
+        await page.route('**/api/v1/board/boards/brd_main/sync', async route => {
+            await statusReady;
+            await route.fulfill({ json: { isJiraBoard: false, remoteProvider: 'ado' } });
+        });
+        await page.route('**/api/v1/board/boards/brd_main/ado?settings=true', route => route.fulfill({ json: {
+            boardId: 'brd_main', authStatus: 'none', columns: [], lanes: []
+        } }));
+        await page.getByRole('button', { name: 'Board settings', exact: true }).click();
+        await page.getByLabel('Board name', { exact: true }).fill('Draft before status');
+        await page.getByRole('tab', { name: 'Azure DevOps', exact: true }).click();
+        await page.getByLabel('Azure DevOps board or query link').fill(ADO_LINK);
+        const token = page.getByLabel('Personal access token', { exact: true });
+        await token.fill('draft-token');
+        if (selected === 'Azure DevOps input') {
+            await token.focus();
+            await token.evaluate(input => input.setSelectionRange(2, 5));
+        } else {
+            await page.getByRole('tab', { name: selected, exact: true }).click();
+        }
+        releaseStatus();
+        await expect(page.getByRole('tab', { name: 'Azure DevOps', exact: true })).toHaveCount(0);
+        await expect(page.getByRole('tab', { name: 'Jira Cloud', exact: true })).toHaveCount(0);
+        const active = selected === 'Agent context' ? selected : 'General';
+        await expect(page.getByRole('tab', { name: active, exact: true })).toHaveAttribute('aria-selected', 'true');
+        if (selected === 'Azure DevOps input') {
+            await expect(token).toBeFocused();
+            expect(await token.evaluate(input => [input.selectionStart, input.selectionEnd])).toEqual([2, 5]);
+        } else {
+            await expect(page.getByRole('tab', { name: active, exact: true })).toBeFocused();
+        }
+        await page.getByRole('tab', { name: 'General', exact: true }).click();
+        await expect(page.getByLabel('Board name', { exact: true })).toHaveValue('Draft before status');
+        await expect(page.getByLabel('Azure DevOps board or query link')).toHaveValue(ADO_LINK);
+        await expect(token).toHaveValue('draft-token');
+    });
+}
+
+test('an Azure DevOps card posts comments to its work item unless unchecked', async ({ page }) => {
+    let current;
+    const posted = [];
+    await openBoard(page, { onCard: card => {
+        current = card;
+        Object.assign(card, { remoteProvider: 'ado', remoteIssueKey: '#4821', remoteDeliveries: [
+            { id: 'd1', kind: 'session', status: 'failed', message: 'Sign in to your VibeRails account before sharing.' }] });
+    } });
+    await page.route('**/api/v1/board/cards/card_test/comments', route => {
+        const body = route.request().postDataJSON();
+        posted.push(body);
+        const comment = { id: `posted_${posted.length}`, body: body.body, syncToJira: body.syncToRemote,
+            author: { kind: 'human', label: 'You' }, createdAt: current.createdAt };
+        current.comments.push(comment);
+        return route.fulfill({ json: comment });
+    });
+    await page.getByText('Description images', { exact: true }).click();
+    const editor = page.locator('[data-board-card-editor]');
+    await expect(editor.locator('[data-board-remote-delivery-status]')).toContainText('Azure DevOps session link: Sign in to your VibeRails account before sharing.');
+    const sync = editor.getByLabel('Post this comment to Azure DevOps');
+    await expect(sync).toBeChecked();
+    const composer = page.locator('[data-board-composer="comment"]');
+    await composer.locator('textarea').fill('Shared with the work item');
+    await composer.locator('textarea').press('Control+Enter');
+    await expect(composer.locator('textarea')).toHaveValue('');
+    await sync.uncheck();
+    await composer.locator('textarea').fill('Internal only');
+    await composer.locator('textarea').press('Control+Enter');
+    await expect.poll(() => posted.length).toBe(2);
+    expect(posted.map(body => body.syncToRemote)).toEqual([true, false]);
+    expect(posted.every(body => !('syncToJira' in body))).toBe(true);
+});
 
 for (const width of [1440, 390]) {
     test(`attention comments stay red and readable at ${width}px`, async ({ page }, testInfo) => {

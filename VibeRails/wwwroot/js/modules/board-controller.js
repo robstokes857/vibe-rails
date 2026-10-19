@@ -35,12 +35,13 @@ import { mountLlmPicker, setLlmPickerValue, getEnabledLlmItems, getAllLlmItems }
 import { launchKind } from './launch-kind.js';
 import { BoardApi } from './board-api.js';
 import { BoardPicker, openBoardOrderManager } from './board-picker.js';
-import { boardBrandLogo } from './board-brand.js';
+import { boardBrandLogo, boardTracker, cardTracker, trackerLabel } from './board-brand.js';
 import { BoardLaneAgents } from './board-lane-agents.js';
 import { BoardCardAssign, ASSIGN_ACTION } from './board-card-assign.js';
 import { BOARD_SELECTION_STORAGE_KEY } from './board-selection.js';
 import { boardContextSection, laneAutomationSection, mountBoardContext, mountLaneAutomation, boardSettingsNavigation, mountBoardSettingsNavigation, boardSyncSection, mountBoardSync } from './board-settings.js';
 import { boardJiraSection, BoardJiraPanel } from './board-jira.js';
+import { boardAdoSection, BoardAdoPanel } from './board-ado.js';
 import { cardOrganizeSection, bindCardOrganization } from './board-card-organize.js';
 import { openBoardSharing, openSharedBoards } from './board-sharing.js';
 import { openRemoteBoards } from './board-remote.js';
@@ -91,6 +92,13 @@ function cardType(value) {
 
 function cardActivitySnapshot(card) {
     return JSON.stringify([card?.comments, card?.notes, card?.sessions, card?.attachments, card?.commits]);
+}
+
+// Outbound activity to the card's tracker. Older responses carry only the Jira list.
+function remoteDeliveries(card, tracker = cardTracker(card)) {
+    if (!tracker) return [];
+    if (card.remoteDeliveries?.length) return card.remoteDeliveries;
+    return tracker.provider === 'jira' ? card.jiraDeliveries || [] : [];
 }
 
 export class BoardController {
@@ -408,12 +416,14 @@ export class BoardController {
                 const attachmentsChanged = JSON.stringify(card.attachments) !== JSON.stringify(detail.attachments);
                 const commitsChanged = JSON.stringify(card.commits) !== JSON.stringify(detail.commits);
                 const discussionChanged = cardActivitySnapshot(card) !== cardActivitySnapshot(detail)
-                    || JSON.stringify(card.jiraDeliveries) !== JSON.stringify(detail.jiraDeliveries);
+                    || JSON.stringify(card.jiraDeliveries) !== JSON.stringify(detail.jiraDeliveries)
+                    || JSON.stringify(card.remoteDeliveries) !== JSON.stringify(detail.remoteDeliveries);
                 Object.assign(card, { sessions: detail.sessions, activeSessionId: detail.activeSessionId,
                     activeTabId: detail.activeTabId, hasActiveAutomation: detail.hasActiveAutomation,
                     hasActiveDesktopAgent: detail.hasActiveDesktopAgent,
                     comments: detail.comments, notes: detail.notes, attachments: detail.attachments, commits: detail.commits,
-                    jiraDeliveries: detail.jiraDeliveries, jiraIssueUrl: detail.jiraIssueUrl });
+                    jiraDeliveries: detail.jiraDeliveries, jiraIssueUrl: detail.jiraIssueUrl,
+                    remoteDeliveries: detail.remoteDeliveries, remoteIssueUrl: detail.remoteIssueUrl });
                 if (changed) this.renderSessionsPanel(editor, card);
                 if (attachmentsChanged) this.renderAttachmentsPanel(editor, card);
                 if (commitsChanged) this.renderCommitsPanel(editor, card);
@@ -621,8 +631,9 @@ export class BoardController {
         if (filters.type && cardType(card.type).value !== filters.type) return false;
         if (filters.priority && card.priority !== filters.priority) return false;
         if (filters.origin === 'agent' && !card.agentMade) return false;
-        if (filters.origin === 'human' && (card.agentMade || card.jiraIssueKey)) return false;
-        if (filters.origin === 'jira' && !card.jiraIssueKey) return false;
+        // Human-made excludes cards imported from either tracker.
+        if (filters.origin === 'human' && (card.agentMade || cardTracker(card))) return false;
+        if ((filters.origin === 'jira' || filters.origin === 'ado') && cardTracker(card)?.provider !== filters.origin) return false;
         return true;
     }
 
@@ -824,15 +835,26 @@ export class BoardController {
             >${face}</span>`;
     }
 
-    jiraBadge(card) {
-        if (!card?.jiraIssueKey) return '';
-        const badge = `<span class="badge text-bg-primary" title="Imported from Jira: ${escapeHtml(card.jiraIssueKey)}">${boardBrandLogo(true, '')} Jira · ${escapeHtml(card.jiraIssueKey)}</span>`;
+    // "Jira · APP-7" or "Azure DevOps · #123". Links only to an https page without credentials.
+    remoteBadge(card) {
+        const tracker = cardTracker(card);
+        if (!tracker) return '';
+        const label = trackerLabel(tracker.provider);
+        const badge = `<span class="badge text-bg-primary" title="Imported from ${label}: ${escapeHtml(tracker.key)}">${boardBrandLogo(tracker.provider, '')} ${label} · ${escapeHtml(tracker.key)}</span>`;
         try {
-            const url = new URL(card.jiraIssueUrl);
+            const url = new URL(tracker.url);
             if (url.protocol === 'https:' && !url.username && !url.password)
-                return `<a href="${escapeHtml(url.href)}" target="_blank" rel="noopener noreferrer" aria-label="Open ${escapeHtml(card.jiraIssueKey)} in Jira">${badge}</a>`;
+                return `<a href="${escapeHtml(url.href)}" target="_blank" rel="noopener noreferrer" aria-label="Open ${escapeHtml(tracker.key)} in ${label}">${badge}</a>`;
         } catch { /* Unlinked or older card response. */ }
         return badge;
+    }
+
+    // Comments post to the card's linked issue unless unchecked (syncToRemote=false).
+    remoteSyncChoice(card) {
+        const label = trackerLabel(cardTracker(card)?.provider);
+        if (!label) return '';
+        return `<label class="form-check mb-2"><input class="form-check-input" type="checkbox" data-board-remote-sync checked> Post this comment to ${label}</label>`
+            + `<p class="board-editor-muted">Uncheck for an internal note. Linked sessions get a public replay link posted to ${label}.</p>`;
     }
 
     renderCard(card) {
@@ -883,7 +905,7 @@ export class BoardController {
                             <span class="board-priority-chip" data-priority="${escapeHtml(card.priority)}">${escapeHtml(card.priority)}</span>
                         </span>
                     </div>
-                    ${card.jiraIssueKey ? `<div class="board-card-origin">${this.jiraBadge(card)}</div>` : ''}
+                    ${cardTracker(card) ? `<div class="board-card-origin">${this.remoteBadge(card)}</div>` : ''}
                     <h3 class="board-card-title">${escapeHtml(card.title)}</h3>
                     ${card.hasWaitingAutomation ? this.waitingAutomationIndicator() : ''}
                     ${excerpt ? `<p class="board-card-excerpt">${escapeHtml(excerpt)}</p>` : ''}
@@ -1364,7 +1386,7 @@ export class BoardController {
             <div class="board-card-editor" data-board-card-editor data-card-id="${escapeHtml(card?.id || '')}">
                 <div class="board-editor-scroll">
                 <div class="board-editor-main">
-                    ${this.jiraBadge(card)}
+                    ${this.remoteBadge(card)}
                     ${card && card.boardId !== this.state.boardId ? `<div class="alert alert-info" role="note">This card is on another board: <strong>${escapeHtml(this.boardById(card.boardId)?.name || '')}</strong>. Changes are saved to that board.</div>` : ''}
                     <input type="text" class="form-control board-editor-title" id="board-card-title"
                         placeholder="What needs to happen" value="${escapeHtml(card?.title || '')}"
@@ -1399,9 +1421,9 @@ export class BoardController {
                             ${AGENT_PURPOSES.map(([value, label]) => `<option value="${value}">${escapeHtml(label)} agent comments</option>`).join('')}
                         </select>
                         <p class="board-editor-muted">Attention comments always appear first.</p>` : ''}
-                        <div data-board-jira-delivery-status></div>
+                        <div data-board-remote-delivery-status></div>
                         <div class="board-comments" data-board-comments></div>
-                        ${card?.jiraIssueKey ? '<label class="form-check mb-2"><input class="form-check-input" type="checkbox" data-board-jira-sync checked> Post this comment to Jira</label><p class="board-editor-muted">Uncheck for an internal note. Linked sessions get a public replay link posted to Jira.</p>' : ''}
+                        ${this.remoteSyncChoice(card)}
                         ${card ? this.composerMarkup({
                             name: 'comment',
                             value: '',
@@ -2070,12 +2092,15 @@ export class BoardController {
         if (!host) return;
         // Markdown, attachments, session and commit labels are shared with the comment composer.
         const textOptions = boardTextOptions(card);
-        const deliveryStatus = editor.querySelector('[data-board-jira-delivery-status]');
+        const deliveryStatus = editor.querySelector('[data-board-remote-delivery-status]');
         if (deliveryStatus) {
-            const issues = (card?.jiraDeliveries || []).filter(d => ['failed', 'uncertain'].includes(d.status));
-            const pending = (card?.jiraDeliveries || []).filter(d => ['pending', 'sending'].includes(d.status)).length;
-            deliveryStatus.innerHTML = issues.map(d => `<p class="text-warning">Jira ${d.kind === 'session' ? 'session link' : 'comment'}: ${escapeHtml(d.message || d.status)}</p>`).join('')
-                + (pending ? `<p class="board-editor-muted">${pending} Jira update${pending === 1 ? '' : 's'} waiting for delivery.</p>` : '');
+            const tracker = cardTracker(card);
+            const label = trackerLabel(tracker?.provider);
+            const deliveries = remoteDeliveries(card, tracker);
+            const issues = deliveries.filter(d => ['failed', 'uncertain'].includes(d.status));
+            const pending = deliveries.filter(d => ['pending', 'sending'].includes(d.status)).length;
+            deliveryStatus.innerHTML = issues.map(d => `<p class="text-warning">${label} ${d.kind === 'session' ? 'session link' : 'comment'}: ${escapeHtml(d.message || d.status)}</p>`).join('')
+                + (pending ? `<p class="board-editor-muted">${pending} ${label} update${pending === 1 ? '' : 's'} waiting for delivery.</p>` : '');
         }
         const comments = [...new Map([...(card?.comments || []), ...(card?.notes || [])].map(entry => [entry.id, entry])).values()]
             .sort((a, b) => Number(b.isAttention === true) - Number(a.isAttention === true)
@@ -2083,9 +2108,10 @@ export class BoardController {
         this.updateSectionCount(editor, 'comments', comments.length);
         const filter = editor.querySelector('[data-board-comment-filter]')?.value || 'all';
         const visible = comments.filter(entry => matchesCommentFilter(entry, filter));
-        const isJiraBoard = Boolean(card?.boardId && this.boardById(card.boardId)?.isJiraBoard);
+        // The card's own board decides the label, never a retained issue key or the selected board.
+        const tracker = card?.boardId ? boardTracker(this.boardById(card.boardId)) : null;
         host.innerHTML = visible.length
-            ? visible.map(entry => this.cardLogCommentHtml(entry, textOptions, isJiraBoard)).join('')
+            ? visible.map(entry => this.cardLogCommentHtml(entry, textOptions, tracker)).join('')
             : `<p class="board-editor-muted">${comments.length ? 'No comments match this filter.' : 'No comments yet.'}</p>`;
         editor._boardDiscussionImages?.hydrate(host);
         host.querySelectorAll('[data-board-delete-comment]').forEach(button => {
@@ -2111,7 +2137,8 @@ export class BoardController {
     }
 
     // Human and agent entries share the same discussion.
-    cardLogCommentHtml(entry, textOptions, isJiraBoard = false) {
+    // tracker: the provider of the card's dedicated board ('jira' or 'ado'), or null.
+    cardLogCommentHtml(entry, textOptions, tracker = null) {
         const author = this.authorInfo(entry.author);
         // An agent entry knows the terminal session that wrote it and when: the link replays
         // that session seeked to this moment (session-viewer.js seekToUtc).
@@ -2128,7 +2155,7 @@ export class BoardController {
                 <div class="board-comment-content">
                     <div class="board-comment-meta">
                         <span class="board-comment-author">${escapeHtml(author?.label || 'Someone')}</span>
-                        ${isJiraBoard && entry.syncToJira === false ? '<span class="badge text-bg-secondary">Not sent to Jira</span>' : ''}
+                        ${trackerLabel(tracker) && entry.syncToJira === false ? `<span class="badge text-bg-secondary">Not sent to ${trackerLabel(tracker)}</span>` : ''}
                         ${entry.purpose && entry.purpose !== 'work' ? `<span class="badge text-bg-secondary">${escapeHtml(agentPurposeLabel(entry.purpose))}</span>` : ''}
                         <span class="board-comment-when">${jump}${escapeHtml(this.formatDateTime(entry.createdAt))}<button type="button" class="btn btn-link btn-sm text-danger" data-board-delete-comment="${escapeHtml(entry.id)}" aria-label="Delete comment" title="Delete comment"><i class="fa-solid fa-trash" aria-hidden="true"></i></button></span>
                     </div>
@@ -2184,7 +2211,7 @@ export class BoardController {
         if (!cardId) return;
         const composerInput = editor.querySelector('[data-board-composer="comment"] [data-board-composer-input]');
         try {
-            await BoardApi.addBoardCommentAsync(cardId, { body, syncToJira: editor.querySelector('[data-board-jira-sync]')?.checked !== false });
+            await BoardApi.addBoardCommentAsync(cardId, { body, syncToRemote: editor.querySelector('[data-board-remote-sync]')?.checked !== false });
             const card = await this.reloadEditingCard(editor);
             if (!card) return;
             if (composerInput) {
@@ -2819,9 +2846,10 @@ export class BoardController {
                 </section>
                 ${board ? `
                     <section id="board-settings-jira" role="tabpanel" aria-labelledby="board-settings-tab-jira" data-board-settings-panel="jira" hidden>${boardJiraSection()}</section>
+                    <section id="board-settings-ado" role="tabpanel" aria-labelledby="board-settings-tab-ado" data-board-settings-panel="ado" hidden>${boardAdoSection()}</section>
                     <section id="board-settings-context" role="tabpanel" aria-labelledby="board-settings-tab-context" data-board-settings-panel="context" hidden>${boardContextSection()}</section>
                     <section id="board-settings-history" role="tabpanel" aria-labelledby="board-settings-tab-history" data-board-settings-panel="history" hidden>${historySection()}</section>
-                ` : '<p class="board-editor-muted">Save the board to configure Jira and agent context.</p>'}
+                ` : '<p class="board-editor-muted">Save the board to configure Jira, Azure DevOps and agent context.</p>'}
             </div>
         `, { onClose: () => { this.boardSettingsDispose?.(); this.boardSettingsDispose = null; } });
 
@@ -2831,33 +2859,41 @@ export class BoardController {
         if (board) {
             const disposeContext = mountBoardContext(this.app, editor.querySelector('[data-board-context]'), board.id);
             const disposeHistory = mountHistory(editor.querySelector('[data-board-history-view]'), board.id);
-            const jira = new BoardJiraPanel(this.app, editor.querySelector('[data-jira-panel]'), board, (action, destination) => {
-                if (this.state.boardId !== board.id && this.state.boardId !== destination) return;
-                if (destination && destination !== this.state.boardId) {
-                    this.state.boardId = destination;
-                    this.persistBoardSelection();
-                }
-                // Keep the modal and its other sections' unsaved drafts. Only the Jira panel
-                // follows the connection; General and Agent context still edit the opened board.
-                // A moved connection no longer determines the opened board's branding or sync
-                // controls. Refresh that board's status without replacing its settings drafts.
-                if ((action === 'unlink' && destination === board.id)
-                    || (destination && destination !== board.id)) reloadSync();
-                if (action === 'pull' || action === 'unlink' || destination !== board.id) void this.refresh().then(() => {
-                    if (editor.isConnected && destination) {
-                        const label = editor.querySelector('[data-jira-board]');
-                        if (label) label.textContent = this.boardById(destination)?.name || 'Jira board';
-                    }
-                });
-            });
-            const jiraHeading = editor.querySelector('[data-jira-heading]');
             const header = container.querySelector('.modal-header');
             header.classList.add('board-settings-header');
-            header.insertBefore(jiraHeading, header.querySelector('[data-action="close-modal"]'));
-            jiraHeading.hidden = true;
-            const navigation = mountBoardSettingsNavigation(editor, (tab, jiraVisible) => {
-                jiraHeading.hidden = !jiraVisible;
-                if (jiraVisible) void jira.activate();
+            const close = header.querySelector('[data-action="close-modal"]');
+            const trackers = [['jira', BoardJiraPanel], ['ado', BoardAdoPanel]].map(([provider, Panel]) => {
+                const root = editor.querySelector(`[data-${provider}-panel]`);
+                const panel = new Panel(this.app, root, board, (action, destination) => {
+                    if (this.state.boardId !== board.id && this.state.boardId !== destination) return;
+                    if (destination && destination !== this.state.boardId) {
+                        this.state.boardId = destination;
+                        this.persistBoardSelection();
+                    }
+                    // Keep the modal and its other sections' unsaved drafts. Only the tracker panel
+                    // follows the connection; General and Agent context still edit the opened board.
+                    // A moved connection no longer determines the opened board's branding or sync
+                    // controls. Refresh that board's status without replacing its settings drafts.
+                    if ((action === 'unlink' && destination === board.id)
+                        || (destination && destination !== board.id)) reloadSync();
+                    if (action === 'pull' || action === 'unlink' || destination !== board.id) void this.refresh().then(() => {
+                        if (editor.isConnected && destination) {
+                            const label = root.querySelector(`[data-${provider}-board]`);
+                            if (label) label.textContent = this.boardById(destination)?.name || `${trackerLabel(provider)} board`;
+                        }
+                    });
+                });
+                // The connection status sits in the dialog header while its panel is visible.
+                const heading = root.querySelector(`[data-${provider}-heading]`);
+                header.insertBefore(heading, close);
+                heading.hidden = true;
+                return { provider, panel, heading };
+            });
+            const navigation = mountBoardSettingsNavigation(editor, (tab, visibleTracker) => {
+                for (const { provider, panel, heading } of trackers) {
+                    heading.hidden = provider !== visibleTracker;
+                    if (provider === visibleTracker) void panel.activate();
+                }
                 if (tab === 'history') editor.querySelector('[data-board-history-view]').open = true;
             });
             let disposeSync = () => {};
@@ -2865,17 +2901,20 @@ export class BoardController {
                 disposeSync();
                 disposeSync = mountBoardSync(this.app, editor.querySelector('[data-board-sync]'), board.id, status => {
                     const title = header.querySelector('.modal-title');
-                    if (status.isJiraBoard) {
-                        title.innerHTML = `Board · <span class="d-inline-block">${boardBrandLogo(true)} ${escapeHtml(board.name)}</span>`;
-                        navigation.combineJira();
-                    } else {
-                        title.textContent = `Board · ${board.name}`;
-                        navigation.separateJira();
-                    }
+                    const provider = boardTracker(status);
+                    if (provider) title.innerHTML = `Board · <span class="d-inline-block">${boardBrandLogo(provider)} ${escapeHtml(board.name)}</span>`;
+                    else title.textContent = `Board · ${board.name}`;
+                    navigation.followProvider(provider);
                 });
             };
             reloadSync();
-            this.boardSettingsDispose = () => { navigation.dispose(); disposeSync(); jira.dispose(); disposeContext(); disposeHistory(); };
+            this.boardSettingsDispose = () => {
+                navigation.dispose();
+                disposeSync();
+                trackers.forEach(({ panel }) => panel.dispose());
+                disposeContext();
+                disposeHistory();
+            };
         }
         editor.querySelector('[data-board-save-board]')?.addEventListener('click', () => this.saveBoard(editor, board));
         editor.querySelector('[data-board-delete-board]')?.addEventListener('click', () => this.deleteBoard(board));

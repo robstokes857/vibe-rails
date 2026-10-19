@@ -210,11 +210,15 @@ rewrites it when a card is flagged or unflagged. Stored story points stay on the
 not shown. Search and filters share a second
 row on the same surface. Lane headers retain their card counts. There are no lane-bottom entry
 fields: **New card** opens the editor, whose Lane selector chooses the destination.
-The settings modal has General, Jira Cloud, Agent context and History tabs (VIBE-103) for local
-boards. Jira boards combine the board settings and Jira controls in **General**, followed by
-Agent context and History, with a Jira logo beside the board name in the modal header.
-The sync status's `isJiraBoard` determines this layout and logo from the current dedicated
-connection, never past links or imported-card badges. Moving a legacy connection to its dedicated
+The settings modal has General, Jira Cloud, Azure DevOps, Agent context and History tabs
+(VIBE-103, VIBE-165) for local boards. A dedicated tracker board combines the board settings and
+its own tracker's controls in **General**, followed by Agent context and History, with that
+tracker's logo beside the board name in the modal header; the other tracker's tab is hidden, so a
+Jira board shows no Azure DevOps tab and an Azure DevOps board no Jira tab.
+The sync status's `remoteProvider` (`isJiraBoard` for older responses) determines this layout and
+logo from the current dedicated connection, never past links or imported-card badges.
+`mountBoardSettingsNavigation(...).followProvider(provider)` moves the panels; its `onSelect`
+callback names the tracker whose controls are visible, so the matching heading sits in the header. Moving a legacy connection to its dedicated
 board refreshes the source settings status while preserving General/Agent context drafts. Move
 existing controls without replacing drafts or interrupting the selected section when status arrives.
 Each tab has a thin button border, with a filled active tab. Jira controls (`board-jira.js`) target
@@ -232,13 +236,35 @@ follows the returned dedicated Jira board ID, and a pull refreshes cards. There 
 Imported cards derive a Jira logo/key badge from `jiraIssueKey`; the origin filter includes Jira and
 Human-made excludes imports. Assignee filter choices deduplicate canonical CLI identities. New boards must be saved first.
 On lane cards the Jira badge has its own row, with long issue keys wrapping inside the card.
-Board settings hide viberails.ai sync for boards whose sync status reports `isJiraBoard`;
-the section stays hidden until status loads. Jira connection and pull controls remain available.
+Board settings hide viberails.ai sync for boards whose sync status names a tracker
+(`remoteProvider`, or `isJiraBoard`); the section stays hidden until status loads. Tracker
+connection and pull controls remain available.
 Saved Jira tokens show a fixed 32-dot placeholder; the input value stays empty until a replacement is typed.
 **Unlink Jira** confirms before removing the connection and its saved token; the board, imported
 cards and discussion stay. A successful unlink clears the Jira form and logo, restores the separate
 Jira tab and local sync controls, and preserves drafts in other settings sections. Failed unlink
 requests leave the connected form available for retry.
+Azure DevOps (`board-ado.js`, `BoardAdoPanel`, VIBE-165) mirrors those controls: a dev.azure.com
+team board, backlog or saved query link and a personal access token, with no email field. The
+"Create a token" link points at `https://dev.azure.com/{org}/_usersSettings/tokens` once the
+organization is known from the typed or saved link (only an https dev.azure.com link with a
+valid organization name counts), and the scope note asks for **Work Items: Read & write**. Narrowing
+WIQL (board links only), a points field reference and per-column lane picks sit under Advanced.
+**Connect** sends PUT then POST `…/ado/test`, following the `boardId` each returns (the save moves
+the connection to its dedicated board) and dropping source-board lane picks when it moves. The
+status badge reads Connected, Token saved, Expired or Not connected; the result card shows the
+board or query name, team or query type, an approximate work item count (`2000+` when capped),
+the column map, the points field and escaped warnings. Errors go to the panel's `role="status"`
+report. **Unlink Azure DevOps** asks with `confirmDialog` and keeps the board and cards. The saved
+token shows the same 32-dot placeholder and is cleared when the modal closes.
+Card badges, the comment checkbox and the "Not sent to …" label follow the tracker:
+`board-brand.js` exports `cardTracker(card)` (`remoteProvider`/`remoteIssueKey`/`remoteIssueUrl`,
+falling back to the Jira fields of older responses), `boardTracker(board)` and `trackerLabel`.
+`remoteBadge` renders "Jira · KEY" or "Azure DevOps · #123" and links only to an https URL without
+credentials. The editor's **Post this comment to …** checkbox (`data-board-remote-sync`) and the
+local-card editor's `syncToRemote` field send `syncToRemote`; "Not sent to …" follows the card's
+own board. Delivery status reads `remoteDeliveries` and the ten-second poll re-renders the
+discussion when they change. The origin filter offers Jira and Azure DevOps; Human-made excludes both.
 Token entry uses a text input with autocomplete, spellcheck, autocapitalization and autocorrection off.
 The header wraps whole labels so the display ID, work type and priority stay readable in narrow lanes.
 Lane cards have a 10rem minimum height and keep activity and assignment at the bottom; longer content grows the card.
@@ -251,11 +277,14 @@ complete project-scoped order through `PUT /api/v1/board/boards/order`; the firs
 on each Board view load, regardless of the last selection. Explicit card navigation still opens
 that card's board, and refreshes keep the current selection. `board-picker.js` owns the Tom Select
 lifecycle and order dialog; unchanged polling snapshots preserve open searches. The current
-board summary's `isJiraBoard` selects Jira or VibeRails artwork in both picker options and the
-selected item; connection changes refresh that artwork while retaining the open search.
-`board-brand.js` shares local image markup with the Jira card badges and settings heading.
+board summary's `remoteProvider` (`isJiraBoard` for older responses) selects Jira, Azure DevOps or
+VibeRails artwork in both picker options and the selected item; connection changes refresh that
+artwork while retaining the open search. `boardBrandLogo(provider)` in `board-brand.js` shares
+local image markup with the tracker card badges and settings heading.
 `assets/img/jira.svg` is the Jira brand icon from `@atlaskit/logo` 23.3.1, with its source and
-adaptation noted in the SVG and license in `jira-LICENSE.txt`; local boards reuse `logo.png`.
+adaptation noted in the SVG and license in `jira-LICENSE.txt`. `assets/img/azure-devops.svg` is the
+Azure DevOps glyph from simple-icons 9.21.0 (CC0; later releases dropped Microsoft logos) on a
+brand-blue tile like the Jira icon; local boards reuse `logo.png`.
 The current selection is still recorded in `localStorage` (`viberails.board.selected.v1`) for compatibility,
 and every list call carries the board id. Refresh generations discard stale catalog, lane, card, and error
 responses; switching boards clears the previous lanes/cards until the new board loads. The card
