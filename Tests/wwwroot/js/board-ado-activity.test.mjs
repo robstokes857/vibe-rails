@@ -12,7 +12,7 @@ test('the Azure DevOps badge opens the work item safely and rejects unsafe URLs'
     const html = controller.remoteBadge(adoCard());
     assert.match(html, /Azure DevOps · #123/);
     assert.match(html, /src="assets\/img\/azure-devops.svg"/);
-    assert.match(html, new RegExp(`href="${ADO_URL.replace(/[.?]/g, '\\$&')}"`));
+    assert.ok(html.includes(`href="${ADO_URL}"`), html);
     assert.match(html, /rel="noopener noreferrer"/);
     assert.match(html, /aria-label="Open #123 in Azure DevOps"/);
     for (const remoteIssueUrl of ['javascript:alert(1)', 'https://user:pat@dev.azure.com/contoso/_workitems/edit/1',
