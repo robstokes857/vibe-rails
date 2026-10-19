@@ -863,6 +863,8 @@ The five root/project-scoped `/api/v1/board/boards/{boardId}/ado` GET/PUT/DELETE
 stored in plain text in the private `~/.vibe_rails/ado-tokens.json`, never in Board storage,
 responses or logs. A blank save keeps the token only within the same organization; a changed
 organization requires the token again, mints a new connection id and deletes the old token.
+The PAT needs **Work Items: Read & write** plus **Project and Team: Read** for Connect's
+initial project-access check; Board Settings lists both scopes.
 
 - **Host:** exactly `https://dev.azure.com`, default port, no user info. Links on
   `*.visualstudio.com`, Azure DevOps Server or any other host are refused before any request.

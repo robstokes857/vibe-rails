@@ -649,6 +649,9 @@ Rules specific to Azure DevOps:
 - A refused board configuration (403/404) matches lanes by state name and limits WIQL to the
   backlog level's category (`IN GROUP`), so a pull never fills the board with tasks or test cases.
 - A saved query is pulled as written: no narrowing, no skip-old-done.
+- Connect needs both PAT scopes: **Work Items: Read & write** and **Project and Team: Read**
+  (the initial project-access check). Once Connect discovers a saved query's name, it replaces
+  the dedicated board's provisional project label, preserving any custom board name.
 - Points: a field named under Advanced wins (`BoardAdoConnections.PointsField` holds only that
   override). Without one, a board's types name the process field (User Story: Story Points;
   Product Backlog Item or Issue: Effort; Requirement: Size). Where they don't, as on a saved query

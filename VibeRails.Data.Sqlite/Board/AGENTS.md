@@ -336,6 +336,9 @@ one transaction; saving a connection checks the board exists in the same stateme
 like every new board, starts with `SyncEnabled=0`, so no binary uploads it until the owner
 publishes it. Card reads project the newest linked work item id as `AdoWorkItemId` beside
 `JiraIssueKey`; the paging origin filter accepts `ado`, and `human` excludes both trackers.
+Connect discovers a query's name after board creation and calls the same store operation again.
+It conditionally replaces only the provisional project label, with the normal 60-character
+limit; the name check and rename are atomic, so custom board names are preserved.
 
 `board-ado-delivery/1` (additive) adds `BoardAdoDeliveries`, the same shape as
 `BoardJiraDeliveries` with an integer `WorkItemId`, and the `BoardComments_QueueAdo` trigger,

@@ -247,6 +247,32 @@ public sealed class BoardAdoStoreTests : IDisposable
         await Assert.ThrowsAsync<BoardValidationException>(() => _store.EnsureDedicatedAdoBoardAsync(_root, "ado_cccccccccccc", Ct));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DiscoveringAQueryNameReplacesOnlyItsProvisionalLabel_WithTheBoardNameLimit(bool customName)
+    {
+        var source = await _store.CreateBoardAsync(_root, "Main", Ct);
+        await _store.SaveAdoConnectionAsync(Connection("ado_aaaaaaaaaaaa", source.Id) with
+        {
+            Project = new string('p', 80), Team = null, BacklogLevel = null,
+            QueryId = "0b7a8a3e-5d5b-4f0a-9a43-5a8a2c1e6f10", AdoBoardName = null
+        }, Ct);
+        var destination = await _store.EnsureDedicatedAdoBoardAsync(_root, "ado_aaaaaaaaaaaa", Ct);
+        var provisional = (await _store.GetBoardAsync(_root, destination.BoardId, Ct))!;
+        Assert.Equal(60, provisional.Name.Length);
+        if (customName)
+            await _store.RenameBoardAsync(_root, destination.BoardId, "My triage", "TRIAGE", Ct);
+
+        await _store.SaveAdoConnectionAsync(destination with { AdoBoardName = new string('q', 80) }, Ct);
+        var resolved = await _store.EnsureDedicatedAdoBoardAsync(_root, destination.Id, Ct);
+        var named = (await _store.GetBoardAsync(_root, resolved.BoardId, Ct))!;
+        Assert.Equal(destination.BoardId, resolved.BoardId);
+        Assert.Equal(customName ? "My triage" : ("Azure DevOps · " + new string('q', 80))[..60], named.Name);
+        Assert.Equal(customName ? "TRIAGE" : provisional.DisplayPrefix, named.DisplayPrefix);
+        Assert.Equal(2, (await _store.GetBoardsAsync(_root, Ct)).Count);
+    }
+
     [Fact]
     public async Task DeletingABoardDeletesItsAzureDevOpsConnection_AndKeepsOtherBoards()
     {

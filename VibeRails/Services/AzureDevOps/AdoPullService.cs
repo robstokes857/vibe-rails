@@ -241,6 +241,8 @@ public sealed class AdoPullService(
                 AdoBoardName = same && source!.Name is { } name ? name : current.AdoBoardName,
                 ColumnMap = same && source!.ColumnMap is { } map ? map : current.ColumnMap
             }, cancellationToken);
+            if (same && current.QueryId is not null && !string.IsNullOrWhiteSpace(source!.Name))
+                await store.EnsureDedicatedAdoBoardAsync(projectPath, current.Id, cancellationToken);
         }
         return new AdoTestReport(error is null, result.Value?.Name, error, source?.Summary);
     }

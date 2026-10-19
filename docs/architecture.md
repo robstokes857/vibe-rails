@@ -605,9 +605,12 @@ form; the PAT is write-only. Dedicated Azure DevOps boards never sync with viber
 
 VIBE-169 adds the web UI. Board settings gain an **Azure DevOps** tab (`board-ado.js`,
 `BoardAdoPanel`) beside Jira Cloud: a dev.azure.com board or query link, a write-only PAT with a
-per-organization "Create a token" link and the Work Items: Read & write scope note, the pull and
+per-organization "Create a token" link and both required PAT scopes (Work Items: Read & write and
+Project and Team: Read for the initial project-access check), the pull and
 skip-old-done switches, and Advanced narrowing WIQL, points field and lane picks. Connect saves,
-tests and follows the dedicated board id both calls return, and selects that board. The sync
+tests and follows the dedicated board id both calls return, and selects that board. The board
+name for a saved query replaces its provisional project label once Connect discovers the
+query name, only while that generated label is unchanged; custom names stay intact. The sync
 status's `remoteProvider` drives the layout: an Azure DevOps board shows its connection under
 General with the Azure DevOps logo, a Jira board shows Jira's, and neither shows the other
 tracker's tab (`mountBoardSettingsNavigation(...).followProvider`). `board-brand.js` maps a

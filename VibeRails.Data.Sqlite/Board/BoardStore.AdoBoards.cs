@@ -23,10 +23,33 @@ public sealed partial class BoardStore
                 throw new BoardValidationException("The Azure DevOps connection changed. Reopen Board settings and retry.");
             current = ReadAdoConnection(reader);
         }
-        if (current.DedicatedBoard) return current;
-
         // A team board is named for its team, a saved query (no team) for the query.
-        var name = "Azure DevOps · " + (current.Team ?? current.AdoBoardName ?? current.Project);
+        var name = DedicatedAdoBoardName(current);
+        if (current.DedicatedBoard)
+        {
+            // Save creates the board before Connect discovers the query's name. Replace only
+            // that provisional project label, in the same transaction as the name check, so a
+            // concurrent user rename wins. No startup backfill or custom-name rewrite.
+            var provisional = DedicatedAdoBoardName(current with { AdoBoardName = null });
+            if (current.QueryId is not null && !string.IsNullOrWhiteSpace(current.AdoBoardName) && name != provisional)
+            {
+                await using var rename = db.CreateCommand();
+                rename.Transaction = transaction;
+                rename.CommandText = $"""
+                    UPDATE Boards SET Name = $name, UpdatedUTC = $now
+                    WHERE Id = $board AND ProjectPath = $project{ProjectPathCollation} AND Name = $provisional;
+                    """;
+                rename.Parameters.AddWithValue("$name", name);
+                rename.Parameters.AddWithValue("$now", ToDb(DateTime.UtcNow));
+                rename.Parameters.AddWithValue("$board", current.BoardId);
+                rename.Parameters.AddWithValue("$project", project);
+                rename.Parameters.AddWithValue("$provisional", provisional);
+                await rename.ExecuteNonQueryAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+            }
+            return current;
+        }
+
         var clone = await CloneToDedicatedBoardAsync(db, transaction, project, current.BoardId, name,
             current.ColumnMap, current.OverflowColumnId,
             "EXISTS (SELECT 1 FROM BoardAdoLinks a WHERE a.CardId = c.Id AND a.ConnectionId = $connection)", current.Id,
@@ -50,5 +73,11 @@ public sealed partial class BoardStore
         {
             BoardId = clone.BoardId, DedicatedBoard = true, ColumnMap = clone.ColumnMap, OverflowColumnId = clone.OverflowColumnId
         };
+    }
+
+    private static string DedicatedAdoBoardName(BoardAdoConnectionRecord connection)
+    {
+        var name = "Azure DevOps · " + (connection.Team ?? connection.AdoBoardName ?? connection.Project);
+        return name.Length <= MaxDedicatedBoardNameLength ? name : name[..MaxDedicatedBoardNameLength];
     }
 }

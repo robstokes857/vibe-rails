@@ -526,11 +526,34 @@ public sealed class AdoPullServiceTests : IDisposable
         Assert.Equal(("My bugs", "flat", 1), (report.Board!.Name, report.Board.QueryType, report.Board.WorkItemCount));
         Assert.Empty(report.Board.Columns);
         Assert.Equal("My bugs", (await service.GetAsync(_project, saved.BoardId, Ct))!.AdoBoardName);
+        Assert.Equal("Azure DevOps · My bugs", (await _store.GetBoardAsync(_project, saved.BoardId, Ct))!.Name);
 
         _ado.Query = _ado.Query with { IsFolder = true };
         var folder = await service.TestAsync(_project, saved.BoardId, Ct);
         Assert.False(folder.Ok);
         Assert.Contains("query folder", folder.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ConnectingSavedQueriesUsesDistinctNames_AndRetestingPreservesACustomBoardName()
+    {
+        var service = Service();
+        var source = await BoardWithLanes();
+        var first = await service.SaveAsync(_project, source.Id, new AdoConnectionSave(QueryLink, true), Pat, Ct);
+        await service.TestAsync(_project, first.BoardId, Ct);
+
+        const string otherQueryId = "0b7a8a3e-5d5b-4f0a-9a43-5a8a2c1e6f10";
+        _ado.Query = _ado.Query with { Id = otherQueryId, Name = "Open features" };
+        var otherLink = QueryLink.Replace(QueryId, otherQueryId, StringComparison.Ordinal);
+        var second = await service.SaveAsync(_project, source.Id, new AdoConnectionSave(otherLink, true), Pat, Ct);
+        await service.TestAsync(_project, second.BoardId, Ct);
+
+        Assert.Equal("Azure DevOps · My bugs", (await _store.GetBoardAsync(_project, first.BoardId, Ct))!.Name);
+        Assert.Equal("Azure DevOps · Open features", (await _store.GetBoardAsync(_project, second.BoardId, Ct))!.Name);
+        await _store.RenameBoardAsync(_project, first.BoardId, "My triage", null, Ct);
+        _ado.Query = _ado.Query with { Id = QueryId, Name = "Renamed remote query" };
+        await service.TestAsync(_project, first.BoardId, Ct);
+        Assert.Equal("My triage", (await _store.GetBoardAsync(_project, first.BoardId, Ct))!.Name);
     }
 
     private string LockPath => Path.Combine(_root, AdoPullLock.FileName);
@@ -671,7 +694,7 @@ public sealed class AdoPullServiceTests : IDisposable
             string organization, string project, string queryId, string token, CancellationToken cancellationToken)
         {
             SavedQueryRuns++;
-            Assert.Equal(QueryId, queryId);
+            Assert.Equal(Query.Id, queryId);
             Tokens.Add(token);
             return Task.FromResult(Ids(project));
         }

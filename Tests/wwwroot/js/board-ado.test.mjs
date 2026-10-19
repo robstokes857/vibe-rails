@@ -103,6 +103,7 @@ test('the form asks for a dev.azure.com link and a token, with the scope note an
     assert.match(html, /data-ado-link type="url"/);
     assert.match(html, /Personal access token/);
     assert.match(html, /Work Items: Read &amp; write/);
+    assert.match(html, /Project and Team: Read/);
     assert.match(html, /data-ado-token-link hidden/);
     assert.match(html, /rel="noopener noreferrer"/);
     assert.match(html, /data-ado-report role="status"/);

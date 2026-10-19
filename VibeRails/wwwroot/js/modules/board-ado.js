@@ -39,7 +39,7 @@ export const boardAdoSection = () => `
                 <label class="form-label" for="ado-token">Personal access token</label>
                 <input class="form-control" id="ado-token" data-ado-token type="text" autocomplete="off"
                     spellcheck="false" autocapitalize="none" autocorrect="off" placeholder="Paste a personal access token">
-                <small class="form-text text-muted"><span data-ado-token-hint>Create one under User settings › Personal access tokens in Azure DevOps</span><a target="_blank" rel="noopener noreferrer" data-ado-token-link hidden>Create a token <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a> with the scope <strong>Work Items: Read &amp; write</strong>. Saved on this machine with your other API keys. It is never written to the board and never shown again.</small>
+                <small class="form-text text-muted"><span data-ado-token-hint>Create one under User settings › Personal access tokens in Azure DevOps</span><a target="_blank" rel="noopener noreferrer" data-ado-token-link hidden>Create a token <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a> with both scopes: <strong>Work Items: Read &amp; write</strong> and <strong>Project and Team: Read</strong>. Connect reads the project to check access. Saved on this machine with your other API keys. It is never written to the board and never shown again.</small>
             </div>
             <div class="form-check form-switch mb-2">
                 <input class="form-check-input" type="checkbox" id="ado-enabled" data-ado-enabled>
