@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Serilog;
 using Serilog.Events;
 using VibeRails.DB;
+using VibeRails.Services.AzureDevOps;
 using VibeRails.Services.Board;
 using VibeRails.Services.Board.Sync;
 using VibeRails.Services.Jira;
@@ -46,6 +47,7 @@ public sealed class JobSchedulerHostedService : BackgroundService, IJobScheduler
     private readonly IJobStore _store;
     private readonly JobSchedulerHealth _health;
     private readonly IJiraPullScheduler? _jira;
+    private readonly IAdoPullScheduler? _ado;
     private readonly IBoardSyncScheduler? _boardSync;
     private readonly IBoardProjectResolver? _projectResolver;
     private readonly string _ownerId = $"{Environment.ProcessId}:{Guid.NewGuid():N}";
@@ -74,12 +76,14 @@ public sealed class JobSchedulerHostedService : BackgroundService, IJobScheduler
         JobSchedulerHealth? health = null,
         IJiraPullScheduler? jira = null,
         IBoardSyncScheduler? boardSync = null,
-        IBoardProjectResolver? projectResolver = null)
+        IBoardProjectResolver? projectResolver = null,
+        IAdoPullScheduler? ado = null)
     {
         _scopeFactory = scopeFactory;
         _store = store;
         _health = health ?? new JobSchedulerHealth();
         _jira = jira;
+        _ado = ado;
         _boardSync = boardSync;
         _projectResolver = projectResolver;
     }
@@ -144,6 +148,8 @@ public sealed class JobSchedulerHostedService : BackgroundService, IJobScheduler
             // disposes the services it is using. It never throws.
             if (_jira is not null)
                 await _jira.WhenIdleAsync();
+            if (_ado is not null)
+                await _ado.WhenIdleAsync();
             if (_boardSync is not null)
                 await _boardSync.WhenIdleAsync();
             await ReleasePresenceAsync();
@@ -233,6 +239,8 @@ public sealed class JobSchedulerHostedService : BackgroundService, IJobScheduler
             // enqueueing or reaping. Its own OS lock stops a second process (one that picked up
             // the lease meanwhile) from pulling at the same time. Failures stay inside the pull.
             _jira?.Tick(nowUtc, cancellationToken);
+            // Azure DevOps on the same terms, with its own lock (VIBE-167).
+            _ado?.Tick(nowUtc, cancellationToken);
             // Every 60 s, same rules: lease holder only, never awaited here, its own OS lock,
             // failures recorded on the board's link rather than thrown (VB-51).
             _boardSync?.Tick(nowUtc, cancellationToken);

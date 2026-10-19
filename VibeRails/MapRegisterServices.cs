@@ -19,6 +19,7 @@ using VibeRails.Services.Environments.Steps;
 using VibeRails.Services.FileSystem;
 using VibeRails.Services.LlmProxy;
 using VibeRails.Services.Mcp;
+using VibeRails.Services.AzureDevOps;
 using VibeRails.Services.Jira;
 using VibeRails.Services.Mcp.HostShell;
 using VibeRails.Services.Mcp.Tools;
@@ -177,6 +178,11 @@ namespace VibeRails
             serviceCollection.AddSingleton<Services.Jira.IJiraPullScheduler, Services.Jira.JiraPullScheduler>();
             serviceCollection.AddScoped<Services.Jira.IJiraSessionSharing, Services.Jira.JiraSessionSharing>();
             serviceCollection.AddScoped<Services.Jira.JiraDeliveryService>();
+            // Azure DevOps pull, mirroring Jira: same client rules, its own lock and token file,
+            // ticked beside the Jira pull by the leased root job scheduler.
+            serviceCollection.AddAdoClients();
+            serviceCollection.AddScoped<Services.AzureDevOps.IAdoPullService, Services.AzureDevOps.AdoPullService>();
+            serviceCollection.AddSingleton<Services.AzureDevOps.IAdoPullScheduler, Services.AzureDevOps.AdoPullScheduler>();
             // Board sync with viberails.ai (VB-51). Outbound only, HTTPS, X-Api-Key, redirects off;
             // the API key is re-read from settings on every call. Ticked every 60 s by the leased
             // root job scheduler beside the Jira pull, and one OS lock across root backends.

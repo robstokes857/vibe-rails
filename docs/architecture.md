@@ -582,6 +582,19 @@ a new points field re-applies unchanged issues. Old Done issues are left out by 
 configuration (a 403), lanes fall back to status-name matching and story points stay off unless
 a field is set. VB-40 site-plus-JQL connections keep working unchanged.
 
+VIBE-167 adds the Azure DevOps pull beside it (`Services/AzureDevOps`, Jira parity over the
+shared `Services/Board/Tracker` helpers). `AdoBoardLink.Parse` accepts only `https://dev.azure.com`
+team board, backlog and saved-query links. `AzureDevOpsClient` (named HttpClient `azure-devops`,
+api-version 7.1, PAT over Basic, redirects and cookies off) reads the board's columns and
+state mappings, the team's area paths and the organization's fields every pull, then runs WIQL
+(the board's types, the team scope, never Removed, newest change first) or the saved query, and
+reads at most 10 `workitemsbatch` calls of 200. A 203, a 302 or a non-JSON answer means the token
+was refused. `AdoPullService` places a new card once (board column, then state mapping, then state
+name, then the "Azure DevOps" lane) and never moves it afterwards. `AdoPullScheduler` runs every
+15 minutes, ticked beside Jira by the leased root job scheduler, under `.ado-pull.lock`; tokens
+live in `ado-tokens.json`. Storage is `board-ado/1`. The Board guide's "Dedicated Azure DevOps
+boards" section has the rules.
+
 VIBE-40 makes agent attention flags require `flagReason` on `update_board_card`. The store saves
 the flag, red comment marker and originating-session request atomically. Additive
 `board-attention/1` retains requests and resolves them when any writer clears the card flag.

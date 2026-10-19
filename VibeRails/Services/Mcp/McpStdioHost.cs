@@ -7,6 +7,7 @@ using VibeRails.Services.BertBaseClasses;
 using VibeRails.Services.BertV2;
 using VibeRails.Services.Mcp.HostShell;
 using VibeRails.Services.Mcp.Tools;
+using VibeRails.Services.AzureDevOps;
 using VibeRails.Services.Jira;
 using VibeRails.Services.Mcp.WebResearch;
 
@@ -136,6 +137,7 @@ public static class McpStdioHost
         services.AddBoardAgentLaunchMcp();
         services.AddDesktopMcpActivity(stdio: true);
         services.AddJiraClients();
+        services.AddAdoClients();
         // Kanban board tools. Backed by the board's own SQLite store (it owns its schema, so no
         // Repository migration pass runs in this short-lived child) and scoped to the project by
         // the CLI's inherited cwd / the launching session — see BoardProjectResolver. This is what

@@ -15,7 +15,8 @@ namespace VibeRails.Services.Board;
 /// <param name="AdoBoardName">The board or query name in Azure DevOps, from the last Connect.</param>
 /// <param name="ColumnMap">JSON array of the board's columns in order, each with the lane the user
 /// picked or null for automatic. Read by <c>TrackerColumnMap</c>.</param>
-/// <param name="PointsField">The work item field read as story points, when one was found or set.</param>
+/// <param name="PointsField">The work item field set under Advanced as story points. Null detects
+/// the process's field (Story Points, Effort or Size) on each pull.</param>
 /// <param name="NarrowWiql">Extra WIQL ANDed onto the board or query. Never has ORDER BY.</param>
 /// <param name="SkipOldDone">Leave out done work items not changed in 30 days.</param>
 /// <param name="AuthStatus">One of <see cref="BoardAdoAuthStatus"/>.</param>

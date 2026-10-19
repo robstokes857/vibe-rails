@@ -225,6 +225,35 @@ public sealed class JobSchedulerHostedServiceTests
         launcher.VerifyAll();
     }
 
+    [Fact]
+    public async Task RunCycleAsync_TicksTheAzureDevOpsPullBesideJira_OnlyWhileHoldingTheLease()
+    {
+        var nowUtc = new DateTime(2026, 10, 19, 12, 0, 0, DateTimeKind.Utc);
+        var held = true;
+        var store = new Mock<IJobStore>();
+        store.Setup(candidate => candidate.TryAcquireOrRenewSchedulerLeaseAsync(
+                It.IsAny<string>(), It.IsAny<DateTime>(), JobSchedulerHostedService.SchedulerLeaseDuration, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => held);
+        store.Setup(candidate => candidate.GetActiveRunsAsync(It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<JobRunRecord>());
+        store.Setup(candidate => candidate.EnqueueDueSchedulesAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        var launcher = new Mock<IJobLaunchService>();
+        var tabs = new Mock<ITerminalTabHostService>();
+        var ado = new Mock<VibeRails.Services.AzureDevOps.IAdoPullScheduler>();
+        await using var services = new ServiceCollection()
+            .AddSingleton(tabs.Object)
+            .AddSingleton(launcher.Object)
+            .BuildServiceProvider();
+        var scheduler = new JobSchedulerHostedService(
+            services.GetRequiredService<IServiceScopeFactory>(), store.Object, ado: ado.Object);
+
+        Assert.True(await scheduler.RunCycleAsync(nowUtc, TestContext.Current.CancellationToken));
+        ado.Verify(candidate => candidate.Tick(nowUtc, It.IsAny<CancellationToken>()), Times.Once);
+
+        held = false;
+        Assert.False(await scheduler.RunCycleAsync(nowUtc.AddSeconds(5), TestContext.Current.CancellationToken));
+        ado.Verify(candidate => candidate.Tick(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     [Theory]
     [InlineData(0, 0, 0, 0, LogEventLevel.Debug)]
     [InlineData(1, 0, 0, 0, LogEventLevel.Information)]

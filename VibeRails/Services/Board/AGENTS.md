@@ -621,6 +621,41 @@ another local board stays there. `BoardJiraLinks.Mapping` (read through `Tracker
 the points field the last pull read and the status it saw; only a new points field re-applies
 unchanged issues. Do not reintroduce lane moves, drag-backs or "lane mapping changed" moves.
 
+## Dedicated Azure DevOps boards (VIBE-167)
+
+`Services/AzureDevOps/` mirrors the Jira pull class for class (client, pull service, scheduler,
+field mapping), over the shared `Tracker/` helpers, with its own `.ado-pull.lock` and
+`ado-tokens.json`. Only `https://dev.azure.com` is accepted (`AdoBoardLink`): a team board or
+backlog link, or a saved query. Everything above under "Dedicated Jira boards" holds here too,
+including **a pull never moves a card** (the comment names the work item `#id` and the Azure
+DevOps state), the skipped breakdown and deleted imports staying deleted.
+
+Rules specific to Azure DevOps:
+- The client sends Basic auth with an empty user plus `X-TFS-FedAuthRedirect: Suppress`, with
+  redirects and cookies off. A refused token can come back as 203, 302 or a non-JSON 2xx sign-in
+  page; all of them are `Unauthorized`. Keep it that way, or an expired token reads as a parse failure.
+- A board pull re-reads the board configuration and the team's field values every time. Its WIQL
+  builds literals only from server values, with `'` doubled. The user's narrowing goes in
+  parentheses after `AdoWiql.ValidateNarrowing`, which refuses ORDER BY and unbalanced
+  parentheses. A 400 from WIQL is `BadQuery` and disables the connection; a 400 from
+  `workitemsbatch` does not.
+- Field discovery is required before every batch, and only fields the organization has are
+  requested: an unknown field fails the whole batch. A field discovery failure stops the pull
+  rather than dropping fields, so descriptions and points never flap.
+- A new card is placed by `System.BoardColumn` only when the linked board has that column and it
+  maps the item's type to its current state; otherwise by the first column mapping that (type,
+  state), then by state name, then the "Azure DevOps" lane. A team sharing an area path may see
+  another team's column value, and this check is what keeps it out.
+- A refused board configuration (403/404) matches lanes by state name and limits WIQL to the
+  backlog level's category (`IN GROUP`), so a pull never fills the board with tasks or test cases.
+- A saved query is pulled as written: no narrowing, no skip-old-done. Points are detected from the
+  item types (User Story: Story Points; Product Backlog Item or Issue: Effort; Requirement: Size)
+  unless Advanced names a field. `BoardAdoConnections.PointsField` is only that override.
+- Every batch (at most 10 × 200) is read before anything is applied. A pull that stops part way
+  writes nothing.
+- A new organization or project mints a new connection id. An organization change needs the PAT
+  again; a project change in the same organization carries the saved PAT over.
+
 ## Jira activity delivery
 
 New linked-card comments default to Jira delivery; `syncToJira=false` retains a note without
