@@ -1219,7 +1219,8 @@ export class BoardController {
         }
 
         if (cardEl && !trigger) {
-            this.openCardEditor(cardEl.dataset.cardId);
+            // A link on the tile (the tracker badge) opens its own page, not the editor too.
+            if (!event.target.closest('a[href]')) this.openCardEditor(cardEl.dataset.cardId);
             return;
         }
 

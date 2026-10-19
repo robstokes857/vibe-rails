@@ -570,6 +570,26 @@ for (const selected of ['Azure DevOps', 'Agent context', 'Azure DevOps input']) 
     });
 }
 
+test('a tile tracker badge opens its issue without opening the card editor', async ({ page }) => {
+    const url = 'https://dev.azure.com/contoso/Fabrikam%20Web/_workitems/edit/4821';
+    const opened = [];
+    await page.context().route('https://dev.azure.com/**', route => {
+        opened.push(route.request().url());
+        return route.abort();
+    });
+    const requests = await openBoard(page, { onCard: card => Object.assign(card, {
+        remoteProvider: 'ado', remoteIssueKey: '#4821', remoteIssueUrl: url }) });
+    const detailReads = () => requests.filter(request => request.method === 'GET' && request.path === '/api/v1/board/cards/card_test').length;
+    const popup = page.waitForEvent('popup');
+    await page.locator('.board-card-origin').getByRole('link').click();
+    await popup;
+    await expect.poll(() => opened).toEqual([url]);
+    // A badge click that also opened the editor would read the card twice, or cover the title.
+    await page.getByText('Description images', { exact: true }).click();
+    await expect(page.locator('[data-board-card-editor]')).toBeVisible();
+    expect(detailReads()).toBe(1);
+});
+
 test('an Azure DevOps card posts comments to its work item unless unchecked', async ({ page }) => {
     let current;
     const posted = [];
