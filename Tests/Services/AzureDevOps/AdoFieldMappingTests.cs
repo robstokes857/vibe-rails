@@ -101,6 +101,19 @@ public sealed class AdoFieldMappingTests
         Assert.Null(AdoFieldMapping.DetectPointsField(["User Story"], null));
     }
 
+    /// <summary>Review R2: one item's process never decides another's points field.</summary>
+    [Fact]
+    public void EachItemCanNameItsOwnPointsField_ByTypeElseByTheEstimateItCarries()
+    {
+        var all = new AdoFieldSet(new HashSet<string>([AdoFields.StoryPoints, AdoFields.Effort, AdoFields.Size], StringComparer.OrdinalIgnoreCase));
+        Assert.Equal(AdoFields.StoryPoints, AdoFieldMapping.DetectPointsField(Item("User Story", null), all));
+        Assert.Equal(AdoFields.Effort, AdoFieldMapping.DetectPointsField(Item("Product Backlog Item", null), all));
+        var scrumBug = Item("Bug", null) with { Estimates = new Dictionary<string, double> { [AdoFields.Effort] = 5 } };
+        Assert.Equal(AdoFields.Effort, AdoFieldMapping.DetectPointsField(scrumBug, all));
+        Assert.Null(AdoFieldMapping.DetectPointsField(Item("Bug", null), all));
+        Assert.Null(AdoFieldMapping.DetectPointsField(scrumBug, new AdoFieldSet(new HashSet<string>())));
+    }
+
     [Fact]
     public void SystemBoardColumn_PlacesACardOnlyWhenTheLinkedBoardAgrees()
     {

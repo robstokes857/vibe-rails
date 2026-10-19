@@ -45,4 +45,20 @@ public sealed class AdoHtmlReaderTests
 
     [Fact]
     public void AnUnclosedTagIsText() => Assert.Equal("a <b", AdoHtmlReader.ToText("a <b"));
+
+    /// <summary>
+    /// Review R3: each '&lt;' used to search the rest of the body for a '&gt;', so a long run of
+    /// unclosed tags was quadratic. A million characters now take one pass.
+    /// </summary>
+    [Fact]
+    public void ARunOfUnclosedTagsIsReadInOnePass()
+    {
+        var html = string.Concat(Enumerable.Repeat("<a", 500_000));
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        var text = AdoHtmlReader.ToText(html);
+
+        Assert.Equal(html, text);
+        Assert.InRange(watch.Elapsed, TimeSpan.Zero, TimeSpan.FromSeconds(2));
+    }
 }

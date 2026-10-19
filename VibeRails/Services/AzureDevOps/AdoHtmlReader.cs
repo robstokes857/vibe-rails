@@ -24,6 +24,9 @@ public static class AdoHtmlReader
             return string.Empty;
         var builder = new StringBuilder(html.Length);
         var preformatted = 0;
+        // The first '>' at or after the scan position, or -1 for none. Reused until the scan
+        // passes it, so a run of '<' with no '>' after them is not a search per '<'.
+        var nextClose = 0;
         var i = 0;
         while (i < html.Length)
         {
@@ -38,7 +41,9 @@ public static class AdoHtmlReader
                 continue;
             }
 
-            var close = html.IndexOf('>', i + 1);
+            if (nextClose >= 0 && nextClose <= i)
+                nextClose = html.IndexOf('>', i + 1);
+            var close = nextClose;
             if (close < 0 || i + 1 >= html.Length || !(char.IsAsciiLetter(html[i + 1]) || html[i + 1] is '/' or '!' or '?'))
             {
                 // A stray '<' that starts no tag is text.

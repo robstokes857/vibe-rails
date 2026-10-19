@@ -200,6 +200,47 @@ public sealed class AdoClientHttpTests
         Assert.Equal(8, handler.Paths.Count);
     }
 
+    /// <summary>
+    /// Review R1: HttpClient.Timeout stops at the headers when the body is streamed, so a body that
+    /// stalls after them must still end the call, as a failure, or it holds the pull lock forever.
+    /// </summary>
+    [Theory]
+    [InlineData(HttpStatusCode.OK)]
+    [InlineData(HttpStatusCode.BadRequest)]
+    public async Task ABodyThatStallsAfterItsHeaders_FailsAtTheDeadline(HttpStatusCode status)
+    {
+        var handler = new StallingHandler(status);
+        using var http = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        var client = new AzureDevOpsClient(http, TimeSpan.FromMilliseconds(200));
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        var result = await client.QueryIdsAsync(Org, Project, Team, "SELECT [System.Id] FROM WorkItems", "pat", Ct);
+
+        Assert.Equal(AdoCallOutcome.Failed, result.Outcome);
+        Assert.Contains("did not answer within", result.Detail, StringComparison.Ordinal);
+        Assert.InRange(watch.Elapsed, TimeSpan.Zero, TimeSpan.FromSeconds(10));
+        Assert.True(handler.BodyStarted);
+    }
+
+    [Fact]
+    public async Task TheCallersCancellationIsNotAFailure()
+    {
+        using var http = new HttpClient(new StallingHandler(HttpStatusCode.OK)) { Timeout = Timeout.InfiniteTimeSpan };
+        var client = new AzureDevOpsClient(http, TimeSpan.FromMinutes(5));
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+        stop.CancelAfter(TimeSpan.FromMilliseconds(100));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.GetFieldsAsync(Org, "pat", stop.Token));
+    }
+
+    [Fact]
+    public async Task AnUnreachableHostIsAFailedCall()
+    {
+        using var http = new HttpClient(new ThrowingHandler());
+        var result = await new AzureDevOpsClient(http).TestAsync(Org, Project, "pat", Ct);
+        Assert.Equal(AdoCallOutcome.Failed, result.Outcome);
+    }
+
     [Fact]
     public async Task InvalidSegmentsNeverReachTheNetwork()
     {
@@ -212,6 +253,51 @@ public sealed class AdoClientHttpTests
         await Assert.ThrowsAsync<AdoConfigException>(() => client.GetTeamFieldValuesAsync(Org, Project, "a/b", "pat", Ct));
         await Assert.ThrowsAsync<AdoConfigException>(() => client.GetQueryAsync(Org, Project, "../../_apis/projects", "pat", Ct));
         Assert.Empty(handler.Paths);
+    }
+
+    /// <summary>Answers at once with JSON headers, then never sends the body.</summary>
+    private sealed class StallingHandler(HttpStatusCode status) : HttpMessageHandler
+    {
+        public bool BodyStarted => _body.Started;
+        private readonly StallingStream _body = new();
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var content = new StreamContent(_body);
+            content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+            return Task.FromResult(new HttpResponseMessage(status) { Content = content });
+        }
+    }
+
+    private sealed class StallingStream : Stream
+    {
+        public bool Started { get; private set; }
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => 0; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            Started = true;
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return 0;
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+    }
+
+    private sealed class ThrowingHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            throw new HttpRequestException("No such host is known.");
     }
 
     private sealed class QueueHandler : HttpMessageHandler

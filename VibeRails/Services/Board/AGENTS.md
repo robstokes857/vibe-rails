@@ -648,9 +648,12 @@ Rules specific to Azure DevOps:
   another team's column value, and this check is what keeps it out.
 - A refused board configuration (403/404) matches lanes by state name and limits WIQL to the
   backlog level's category (`IN GROUP`), so a pull never fills the board with tasks or test cases.
-- A saved query is pulled as written: no narrowing, no skip-old-done. Points are detected from the
-  item types (User Story: Story Points; Product Backlog Item or Issue: Effort; Requirement: Size)
-  unless Advanced names a field. `BoardAdoConnections.PointsField` is only that override.
+- A saved query is pulled as written: no narrowing, no skip-old-done.
+- Points: a field named under Advanced wins (`BoardAdoConnections.PointsField` holds only that
+  override). Without one, a board's types name the process field (User Story: Story Points;
+  Product Backlog Item or Issue: Effort; Requirement: Size). Where they don't, as on a saved query
+  that can span processes, each work item gets its own: its type's field, else the estimate field
+  it has a value in. An item with neither keeps its card's points.
 - Every batch (at most 10 × 200) is read before anything is applied. A pull that stops part way
   writes nothing.
 - A new organization or project mints a new connection id. An organization change needs the PAT

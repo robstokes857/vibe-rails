@@ -109,12 +109,16 @@ public interface IAzureDevOpsClient
         CancellationToken cancellationToken);
 }
 
-public sealed class AzureDevOpsClient(HttpClient http) : IAzureDevOpsClient
+/// <param name="requestTimeout">One deadline for each request, its headers and its whole body;
+/// 30 seconds unless a test sets it.</param>
+public sealed class AzureDevOpsClient(HttpClient http, TimeSpan? requestTimeout = null) : IAzureDevOpsClient
 {
     public const string HttpClientName = "azure-devops";
     public const string ApiVersion = "7.1";
     public const int BatchSize = 200;
     public const int MaxBatches = 10;
+    public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
+    private readonly TimeSpan _timeout = requestTimeout ?? RequestTimeout;
 
     /// <summary>The most work items one pull reads: 10 batches of 200, the same as Jira's 40 pages of 50.</summary>
     public const int MaxItems = BatchSize * MaxBatches;
@@ -195,6 +199,9 @@ public sealed class AzureDevOpsClient(HttpClient http) : IAzureDevOpsClient
     /// One request and its JSON answer. Redirects are off in the registered handler, so the token
     /// never reaches another host. A bad token is not always a 401: Azure DevOps may answer 203 or
     /// 302 with its HTML sign-in page, so those, and any 2xx that isn't JSON, are Unauthorized too.
+    /// One deadline covers the send and every body read: <see cref="HttpClient.Timeout"/> stops at
+    /// the headers here, and a body that stalls after them would otherwise hold the pull lock
+    /// until the host stops. A missed deadline is a failed call, so the next connection still runs.
     /// </summary>
     private async Task<AdoCallResult<T>> SendAsync<T>(
         HttpRequestMessage request, string what, Func<JsonElement, T?> read, bool badRequestIsQuery,
@@ -202,45 +209,66 @@ public sealed class AzureDevOpsClient(HttpClient http) : IAzureDevOpsClient
     {
         using (request)
         {
-            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            switch (response.StatusCode)
-            {
-                case HttpStatusCode.Unauthorized or HttpStatusCode.NonAuthoritativeInformation or HttpStatusCode.Redirect:
-                    return new(AdoCallOutcome.Unauthorized, null, Refused, null);
-                case HttpStatusCode.Forbidden:
-                    return new(AdoCallOutcome.Forbidden, null, $"Azure DevOps did not let this token read the {what}.", null);
-                case HttpStatusCode.NotFound:
-                    return new(AdoCallOutcome.NotFound, null, $"Azure DevOps has no {what} that this token can see.", null);
-                case HttpStatusCode.TooManyRequests:
-                    return new(AdoCallOutcome.RateLimited, null, "Azure DevOps rate limited the request.", ReadRetryAfter(response));
-                case HttpStatusCode.BadRequest:
-                    var message = await ReadErrorAsync(response, cancellationToken);
-                    return badRequestIsQuery
-                        ? new(AdoCallOutcome.BadQuery, null, message ?? "Azure DevOps rejected the query.", null)
-                        : new(AdoCallOutcome.Failed, null, message ?? $"Azure DevOps rejected the request for the {what}.", null);
-            }
-            if (!response.IsSuccessStatusCode)
-                return new(AdoCallOutcome.Failed, null, $"Azure DevOps returned {(int)response.StatusCode} for the {what}.", null);
-            if (!IsJson(response))
-                return new(AdoCallOutcome.Unauthorized, null, Refused, null);
-
-            JsonDocument document;
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            deadline.CancelAfter(_timeout);
             try
             {
-                await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-                document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+                return await ReceiveAsync(request, what, read, badRequestIsQuery, deadline.Token);
             }
-            catch (JsonException)
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
-                return new(AdoCallOutcome.Failed, null, $"Azure DevOps's answer for the {what} could not be read.", null);
+                return new(AdoCallOutcome.Failed, null,
+                    $"Azure DevOps did not answer within {_timeout.TotalSeconds:0} seconds for the {what}.", null);
             }
-            using (document)
+            catch (HttpRequestException)
             {
-                var value = read(document.RootElement);
-                return value is null
-                    ? new(AdoCallOutcome.Failed, null, $"Azure DevOps's answer for the {what} could not be read.", null)
-                    : new(AdoCallOutcome.Ok, value, null, null);
+                return new(AdoCallOutcome.Failed, null, $"Azure DevOps could not be reached for the {what}.", null);
             }
+        }
+    }
+
+    private async Task<AdoCallResult<T>> ReceiveAsync<T>(
+        HttpRequestMessage request, string what, Func<JsonElement, T?> read, bool badRequestIsQuery,
+        CancellationToken cancellationToken) where T : class
+    {
+        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        switch (response.StatusCode)
+        {
+            case HttpStatusCode.Unauthorized or HttpStatusCode.NonAuthoritativeInformation or HttpStatusCode.Redirect:
+                return new(AdoCallOutcome.Unauthorized, null, Refused, null);
+            case HttpStatusCode.Forbidden:
+                return new(AdoCallOutcome.Forbidden, null, $"Azure DevOps did not let this token read the {what}.", null);
+            case HttpStatusCode.NotFound:
+                return new(AdoCallOutcome.NotFound, null, $"Azure DevOps has no {what} that this token can see.", null);
+            case HttpStatusCode.TooManyRequests:
+                return new(AdoCallOutcome.RateLimited, null, "Azure DevOps rate limited the request.", ReadRetryAfter(response));
+            case HttpStatusCode.BadRequest:
+                var message = await ReadErrorAsync(response, cancellationToken);
+                return badRequestIsQuery
+                    ? new(AdoCallOutcome.BadQuery, null, message ?? "Azure DevOps rejected the query.", null)
+                    : new(AdoCallOutcome.Failed, null, message ?? $"Azure DevOps rejected the request for the {what}.", null);
+        }
+        if (!response.IsSuccessStatusCode)
+            return new(AdoCallOutcome.Failed, null, $"Azure DevOps returned {(int)response.StatusCode} for the {what}.", null);
+        if (!IsJson(response))
+            return new(AdoCallOutcome.Unauthorized, null, Refused, null);
+
+        JsonDocument document;
+        try
+        {
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        }
+        catch (JsonException)
+        {
+            return new(AdoCallOutcome.Failed, null, $"Azure DevOps's answer for the {what} could not be read.", null);
+        }
+        using (document)
+        {
+            var value = read(document.RootElement);
+            return value is null
+                ? new(AdoCallOutcome.Failed, null, $"Azure DevOps's answer for the {what} could not be read.", null)
+                : new(AdoCallOutcome.Ok, value, null, null);
         }
     }
 

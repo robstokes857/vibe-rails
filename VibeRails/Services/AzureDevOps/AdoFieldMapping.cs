@@ -151,6 +151,16 @@ public static class AdoFieldMapping
         return field is not null && fields?.Has(field) == true ? field : null;
     }
 
+    /// <summary>
+    /// The points field for one work item when nothing names one for the whole pull: a saved query
+    /// can span projects with different processes, and a board's types may not say. Its type's
+    /// process field, else the first estimate field it has a value in (a bug carries its process's
+    /// estimate). Null leaves the card's points alone.
+    /// </summary>
+    public static string? DetectPointsField(AdoWorkItem item, AdoFieldSet? fields) =>
+        DetectPointsField([item.WorkItemType], fields)
+        ?? AdoFields.Estimates.FirstOrDefault(field => item.Estimates.ContainsKey(field) && fields?.Has(field) == true);
+
     /// <summary>The key a card shows for a work item.</summary>
     public static string Key(int workItemId) => "#" + workItemId;
 }

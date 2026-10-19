@@ -273,6 +273,30 @@ public sealed class AdoPullServiceTests : IDisposable
         Assert.Equal("points:" + AdoFields.Effort + ";status:Done", (await _store.FindAdoLinkAsync(saved.Id, 1, Ct))!.Mapping);
     }
 
+    /// <summary>
+    /// Review R2: a saved query spanning an Agile and a Scrum project reads each item's own
+    /// estimate, a bug-only result still gets points, and an item with no estimate keeps its card's.
+    /// </summary>
+    [Fact]
+    public async Task ASavedQueryAcrossProcesses_ReadsEachItemsOwnEstimate()
+    {
+        var service = Service();
+        var saved = await service.SaveAsync(_project, (await BoardWithLanes()).Id, new AdoConnectionSave(QueryLink, true), Pat, Ct);
+        var unestimated = Item(4, "Unestimated bug", "Bug", "New", points: 3);
+        _ado.Serve(
+            Item(1, "Agile story", "User Story", "New", points: 3),
+            Item(2, "Scrum item", "Product Backlog Item", "New", effort: 8),
+            Item(3, "Scrum bug", "Bug", "New", effort: 5),
+            unestimated);
+        await service.PullAsync(_project, saved.BoardId, false, Ct);
+        var cards = (await _store.GetCardsAsync(_project, Ct, saved.BoardId)).ToDictionary(card => card.Title);
+        Assert.Equal((3, 8, 5, 3), (cards["Agile story"].Points, cards["Scrum item"].Points, cards["Scrum bug"].Points, cards["Unestimated bug"].Points));
+
+        _ado.Serve(unestimated with { Rev = 2, Estimates = new Dictionary<string, double>() });
+        await service.PullAsync(_project, saved.BoardId, false, Ct);
+        Assert.Equal(3, (await _store.FindCardAsync(_project, cards["Unestimated bug"].Id, Ct))!.Points);
+    }
+
     [Fact]
     public async Task BatchesHoldAtMost200Ids_AndAPullReadsAtMost2000WorkItems()
     {

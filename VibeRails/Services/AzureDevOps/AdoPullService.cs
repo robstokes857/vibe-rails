@@ -371,8 +371,7 @@ public sealed class AdoPullService(
         if (ids.Outcome != AdoCallOutcome.Ok || ids.Value is null)
             return Stopped(ids.Outcome, ids.Detail);
 
-        // Every batch is read before anything is applied: a saved query's points field is detected
-        // from the types it returned, and a pull that stops part way writes nothing.
+        // Every batch is read before anything is applied, so a pull that stops part way writes nothing.
         var items = new List<AdoWorkItem>();
         foreach (var batch in ids.Value.Ids.Take(AzureDevOpsClient.MaxItems).Chunk(AzureDevOpsClient.BatchSize).Take(AzureDevOpsClient.MaxBatches))
         {
@@ -381,13 +380,12 @@ public sealed class AdoPullService(
                 return Stopped(page.Outcome, page.Detail);
             items.AddRange(page.Value);
         }
-        var pointsField = plan.PointsField
-            ?? (plan.DetectPoints ? AdoFieldMapping.DetectPointsField(items.Select(item => item.WorkItemType), plan.FieldSet) : null);
-
         foreach (var item in items)
         {
             try
             {
+                var pointsField = plan.PointsField
+                    ?? (plan.DetectPoints ? AdoFieldMapping.DetectPointsField(item, plan.FieldSet) : null);
                 var action = await ApplyWorkItemAsync(connection, plan, pointsField, item, lanes, overflowId, dryRun, cancellationToken);
                 if (action is ApplyAction.Created or ApplyAction.CreatedOverflow) created++;
                 else if (action == ApplyAction.Updated) updated++;
@@ -448,7 +446,7 @@ public sealed class AdoPullService(
     /// <param name="Columns">The board's columns that map at least one state, index-aligned with <paramref name="ColumnLanes"/>.</param>
     /// <param name="Choices">The column map to save: the board's current column names with the saved picks.</param>
     /// <param name="PointsField">The points field, when the override or the board's types name one.</param>
-    /// <param name="DetectPoints">Types were not known ahead of the pull; detect the field from the items.</param>
+    /// <param name="DetectPoints">No override and no field from the board's types: detect each item's own.</param>
     private sealed record PullPlan(
         AdoCallOutcome Outcome, string? Detail,
         AdoBoardConfiguration? Board, string? Wiql, AdoFieldSet? FieldSet, IReadOnlyList<string> Fields,
@@ -519,8 +517,8 @@ public sealed class AdoPullService(
             return PullPlan.Stop(AdoCallOutcome.Failed, ex.Message);
         }
 
-        var detectFromItems = boardConfig is null && connection.PointsField is null;
         var pointsField = pointsOverride ?? (connection.PointsField is null ? AdoFieldMapping.DetectPointsField(types, fieldSet) : null);
+        var detectFromItems = pointsField is null && connection.PointsField is null;
         IReadOnlyList<TrackerColumnChoice> choices = [];
         IReadOnlyList<TrackerColumnLane>? resolved = null;
         if (columns is not null)
