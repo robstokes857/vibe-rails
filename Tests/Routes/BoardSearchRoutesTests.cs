@@ -73,6 +73,46 @@ public sealed partial class BoardRoutesTests
         Assert.Equal(JsonValueKind.Null, unlinked.RootElement.GetProperty("card").GetProperty("remoteIssueUrl").ValueKind);
     }
 
+    /// <summary>Lane tiles link their issue: list and page summaries carry the URL the detail builds (VIBE-171).</summary>
+    [Fact]
+    public async Task CardListsAndPagesLinkEachTrackerIssueFromItsSavedConnection()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var store = _app.Services.GetRequiredService<IBoardStore>();
+        await store.EnsureDefaultColumnsAsync(_project, ct);
+        var jira = await store.CreateCardAsync(_project, new(null, "Jira card", "", null, "medium", null, [], false), ct);
+        var ado = await store.CreateCardAsync(_project, new(null, "Azure DevOps card", "", null, "medium", null, [], false), ct);
+        var local = await store.CreateCardAsync(_project, new(null, "Local card", "", null, "medium", null, [], false), ct);
+        await store.SaveJiraConnectionAsync(new("jira_tile_links", _project, jira.BoardId,
+            "https://example.atlassian.net", "user@example.com", false, BoardJiraAuthStatus.Expired,
+            null, "project = APP", false, null, null, null, null, null), ct);
+        await store.AddJiraLinkAsync(new(jira.Id, "jira_tile_links", "10007", "APP-7", null, DateTime.UtcNow, DateTime.UtcNow), ct);
+        await store.SaveAdoConnectionAsync(new("ado_tilelinks000", _project, ado.BoardId, "contoso", "Web App", "Web Team", "Stories", null,
+            "https://dev.azure.com/contoso/Web%20App/_boards/board/t/Web%20Team/Stories", "Stories", null, null, null, null,
+            false, BoardAdoAuthStatus.Expired, false, null, null, DedicatedBoard: false, null, null, null), ct);
+        await store.AddAdoLinkAsync(new(ado.Id, "ado_tilelinks000", 42, 1, DateTime.UtcNow, null, DateTime.UtcNow), ct);
+
+        foreach (var path in new[] { "/api/v1/board/cards", "/api/v1/board/cards?pageSize=10" })
+        {
+            using var list = await GetJsonAsync(path);
+            var cards = list.RootElement.GetProperty("cards").EnumerateArray().ToDictionary(card => card.GetProperty("id").GetString()!);
+            Assert.Equal("jira", cards[jira.Id].GetProperty("remoteProvider").GetString());
+            Assert.Equal("https://example.atlassian.net/browse/APP-7", cards[jira.Id].GetProperty("remoteIssueUrl").GetString());
+            Assert.Equal("#42", cards[ado.Id].GetProperty("remoteIssueKey").GetString());
+            Assert.Equal("https://dev.azure.com/contoso/Web%20App/_workitems/edit/42", cards[ado.Id].GetProperty("remoteIssueUrl").GetString());
+            Assert.Equal(JsonValueKind.Null, cards[local.Id].GetProperty("remoteIssueUrl").ValueKind);
+        }
+        using var detail = await GetJsonAsync($"/api/v1/board/cards/{ado.Id}");
+        Assert.Equal("https://dev.azure.com/contoso/Web%20App/_workitems/edit/42", detail.RootElement.GetProperty("remoteIssueUrl").GetString());
+
+        // As on the detail, the retained link keeps the badge but the page needs a live connection.
+        Assert.True(await store.DeleteAdoConnectionAsync(_project, ado.BoardId, "ado_tilelinks000", ct));
+        using var unlinked = await GetJsonAsync("/api/v1/board/cards?pageSize=10");
+        var tile = unlinked.RootElement.GetProperty("cards").EnumerateArray().Single(card => card.GetProperty("id").GetString() == ado.Id);
+        Assert.Equal("#42", tile.GetProperty("remoteIssueKey").GetString());
+        Assert.Equal(JsonValueKind.Null, tile.GetProperty("remoteIssueUrl").ValueKind);
+    }
+
     [Fact]
     public async Task ProjectOnlyMergeCandidatesApplyScopeBeforeLimitAndKeepLinkedDestinations()
     {

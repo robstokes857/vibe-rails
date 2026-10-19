@@ -292,13 +292,51 @@ public sealed partial class BoardService(
             }
         }
 
+        var issueUrls = await GetRemoteIssueUrlsAsync(projectPath, cards, cancellationToken);
         return new BoardCardListResponse(cards.Select(card =>
         {
             activeByCard.TryGetValue(card.Id, out var active);
             return ToSummary(card, active.SessionId, active.TabId) with {
                 HasActiveAutomation = automationCards.Contains(card.Id), HasWaitingAutomation = waiting.Contains(card.Id),
-                HasActiveDesktopAgent = desktopCards?.Contains(card.Id) == true };
+                HasActiveDesktopAgent = desktopCards?.Contains(card.Id) == true,
+                RemoteIssueUrl = issueUrls.GetValueOrDefault(card.Id) };
         }).ToList());
+    }
+
+    /// <summary>
+    /// Lane tile links for one list or page, keyed by card id. Each tracker's connections are read
+    /// once per response, and only when a card links to it, never per card.
+    /// </summary>
+    private async Task<Dictionary<string, string>> GetRemoteIssueUrlsAsync(string projectPath, IReadOnlyList<BoardCardRecord> cards, CancellationToken cancellationToken)
+    {
+        var urls = new Dictionary<string, string>(StringComparer.Ordinal);
+        // Jira first, matching ToSummary's RemoteProvider.
+        var jiraCards = cards.Where(card => card.JiraIssueKey is not null && card.JiraConnectionId is not null).ToList();
+        var adoCards = cards.Where(card => card.JiraIssueKey is null && card.AdoWorkItemId is not null && card.AdoConnectionId is not null).ToList();
+        if (jiraCards.Count > 0)
+        {
+            var connections = ProjectConnections(await store.GetJiraConnectionsAsync(cancellationToken), projectPath, c => c.Id, c => c.ProjectPath);
+            foreach (var card in jiraCards)
+                if (connections.TryGetValue(card.JiraConnectionId!, out var connection) && JiraIssueUrl(connection, card.JiraIssueKey!) is { } url)
+                    urls[card.Id] = url;
+        }
+        if (adoCards.Count > 0)
+        {
+            var connections = ProjectConnections(await store.GetAdoConnectionsAsync(cancellationToken), projectPath, c => c.Id, c => c.ProjectPath);
+            foreach (var card in adoCards)
+                if (connections.TryGetValue(card.AdoConnectionId!, out var connection) && AdoWorkItemUrl(connection, card.AdoWorkItemId!.Value) is { } url)
+                    urls[card.Id] = url;
+        }
+        return urls;
+    }
+
+    private static Dictionary<string, T> ProjectConnections<T>(IReadOnlyList<T> connections, string projectPath, Func<T, string> id, Func<T, string> project)
+    {
+        var result = new Dictionary<string, T>(StringComparer.Ordinal);
+        foreach (var connection in connections)
+            if (IsProject(project(connection), projectPath))
+                result.TryAdd(id(connection), connection);
+        return result;
     }
 
     public async Task<BoardCardResponse?> GetCardAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default)
@@ -664,11 +702,8 @@ public sealed partial class BoardService(
         var connections = await store.GetJiraConnectionsAsync(ct);
         foreach (var link in links)
         {
-            var connection = connections.FirstOrDefault(c => c.Id == link.SiteId
-                && string.Equals(BoardPaths.NormalizeProjectPath(c.ProjectPath), BoardPaths.NormalizeProjectPath(project), BoardPaths.ProjectPathComparison));
-            if (connection is null) continue;
-            try { return Jira.JiraSite.Parse(connection.SiteUrl).Origin + "/browse/" + Uri.EscapeDataString(link.IssueKey); }
-            catch (Jira.JiraConfigException) { }
+            var connection = connections.FirstOrDefault(c => c.Id == link.SiteId && IsProject(c.ProjectPath, project));
+            if (connection is not null && JiraIssueUrl(connection, link.IssueKey) is { } url) return url;
         }
         return null;
     }
@@ -681,14 +716,25 @@ public sealed partial class BoardService(
         var connections = await store.GetAdoConnectionsAsync(ct);
         foreach (var link in links)
         {
-            var connection = connections.FirstOrDefault(c => c.Id == link.ConnectionId
-                && string.Equals(BoardPaths.NormalizeProjectPath(c.ProjectPath), BoardPaths.NormalizeProjectPath(project), BoardPaths.ProjectPathComparison));
-            if (connection is null || !AzureDevOps.AdoBoardLink.IsOrganization(connection.Organization)
-                || !AzureDevOps.AdoBoardLink.IsName(connection.Project)) continue;
-            return AzureDevOps.AdoBoardLink.WorkItemUrl(connection.Organization, connection.Project, link.WorkItemId);
+            var connection = connections.FirstOrDefault(c => c.Id == link.ConnectionId && IsProject(c.ProjectPath, project));
+            if (connection is not null && AdoWorkItemUrl(connection, link.WorkItemId) is { } url) return url;
         }
         return null;
     }
+
+    private static bool IsProject(string connectionProject, string project) =>
+        string.Equals(BoardPaths.NormalizeProjectPath(connectionProject), BoardPaths.NormalizeProjectPath(project), BoardPaths.ProjectPathComparison);
+
+    private static string? JiraIssueUrl(BoardJiraConnectionRecord connection, string issueKey)
+    {
+        try { return Jira.JiraSite.Parse(connection.SiteUrl).Origin + "/browse/" + Uri.EscapeDataString(issueKey); }
+        catch (Jira.JiraConfigException) { return null; }
+    }
+
+    private static string? AdoWorkItemUrl(BoardAdoConnectionRecord connection, int workItemId) =>
+        AzureDevOps.AdoBoardLink.IsOrganization(connection.Organization) && AzureDevOps.AdoBoardLink.IsName(connection.Project)
+            ? AzureDevOps.AdoBoardLink.WorkItemUrl(connection.Organization, connection.Project, workItemId)
+            : null;
 
     private async Task<List<BoardCommentDto>> ResolveAuthorsAsync(IReadOnlyList<BoardCommentRecord> rows, Dictionary<string, BoardAuthor?> authors, CancellationToken cancellationToken)
     {

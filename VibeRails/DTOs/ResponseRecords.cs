@@ -363,6 +363,9 @@ namespace VibeRails.DTOs
         public string? RemoteProvider { get; init; }
         /// <summary>The linked issue's key: <c>APP-7</c> for Jira, <c>#123</c> for an Azure DevOps work item.</summary>
         public string? RemoteIssueKey { get; init; }
+        /// <summary>The linked issue's page, built from the saved connection; null when it can't be.
+        /// Filled for list and page responses, so a lane tile's badge links (VIBE-171).</summary>
+        public string? RemoteIssueUrl { get; init; }
     }
     public record BoardCardListResponse(List<BoardCardSummaryResponse> Cards)
     {

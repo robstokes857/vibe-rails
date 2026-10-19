@@ -1315,9 +1315,11 @@ public sealed partial class BoardStore : IBoardStore
                c.Type,
                (SELECT k.BoardId FROM BoardColumns k WHERE k.Id = c.ColumnId), c.Flagged,
                {CardPrefixSql}, c.CardKey, c.DisplayId, c.AgentMade, c.AgentMadeBy, c.AgentMadeSessionId,
-               (SELECT j.IssueKey FROM BoardJiraLinks j WHERE j.CardId = c.Id ORDER BY j.LastPulledUTC DESC LIMIT 1),
+               (SELECT j.IssueKey FROM BoardJiraLinks j WHERE j.CardId = c.Id ORDER BY j.LastPulledUTC DESC, j.rowid DESC LIMIT 1),
                COALESCE(c.WorkflowMode, 'manual'), c.ManagerSelection, c.ManagerOptionsJson,
-               (SELECT a.WorkItemId FROM BoardAdoLinks a WHERE a.CardId = c.Id ORDER BY a.LastPulledUTC DESC LIMIT 1)
+               (SELECT a.WorkItemId FROM BoardAdoLinks a WHERE a.CardId = c.Id ORDER BY a.LastPulledUTC DESC, a.rowid DESC LIMIT 1),
+               (SELECT j.SiteId FROM BoardJiraLinks j WHERE j.CardId = c.Id ORDER BY j.LastPulledUTC DESC, j.rowid DESC LIMIT 1),
+               (SELECT a.ConnectionId FROM BoardAdoLinks a WHERE a.CardId = c.Id ORDER BY a.LastPulledUTC DESC, a.rowid DESC LIMIT 1)
         FROM BoardCards c
         {CardPrefixJoinSql}
         """;
@@ -1514,7 +1516,9 @@ public sealed partial class BoardStore : IBoardStore
         WorkflowMode: reader.GetString(26),
         ManagerSelection: reader.IsDBNull(27) ? null : reader.GetString(27),
         ManagerBaseLlmOptions: reader.IsDBNull(28) ? null : JsonSerializer.Deserialize(reader.GetString(28), StorageJsonSerializerContext.Default.BaseLlmOptions),
-        AdoWorkItemId: reader.IsDBNull(29) ? null : reader.GetInt32(29));
+        AdoWorkItemId: reader.IsDBNull(29) ? null : reader.GetInt32(29),
+        JiraConnectionId: reader.IsDBNull(30) ? null : reader.GetString(30),
+        AdoConnectionId: reader.IsDBNull(31) ? null : reader.GetString(31));
 
     private static async Task<IReadOnlyList<BoardCommentRecord>> ReadCommentsAsync(SqliteConnection connection, string cardId, CancellationToken cancellationToken)
     {

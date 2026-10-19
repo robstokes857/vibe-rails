@@ -684,7 +684,10 @@ from `AdoPullScheduler`, under `.ado-pull.lock`, and `add_ado_comment` posts exp
 comment tools take `syncToRemote` (resolved `syncToRemote ?? syncToJira ?? true`); storage keeps
 the `syncToJira` key. Card DTOs carry `RemoteProvider` (`jira`, `ado` or null), `RemoteIssueKey`,
 `RemoteIssueUrl` and `RemoteDeliveries` beside the unchanged Jira fields, and board DTOs carry the
-dedicated tracker's `RemoteProvider` beside `IsJiraBoard`. Decide "is this a dedicated tracker
+dedicated tracker's `RemoteProvider` beside `IsJiraBoard`. List and page summaries carry
+`RemoteIssueUrl` too (VIBE-171), so lane tile badges link; only the detail has `JiraIssueUrl` and
+the deliveries. The URL always comes from the saved connection of the link the key came from,
+with each tracker's connections read once per response, never per card. Decide "is this a dedicated tracker
 board" only through `TrackerBoards.DedicatedProviderAsync`/`DedicatedProvidersAsync`. Read
 [the delivery contract](../AzureDevOps/Comments.md) before changing it.
 

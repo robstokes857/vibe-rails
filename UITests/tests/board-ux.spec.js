@@ -16,10 +16,15 @@ for (const width of [1440, 390]) {
         await page.setViewportSize({ width, height: 950 });
         await openBoard(page, { onCard: card => {
             card.jiraIssueKey = 'PROJECT-WITH-A-LONG-KEY-123';
-            card.jiraIssueUrl = 'https://example.atlassian.net/browse/PROJECT-WITH-A-LONG-KEY-123';
+            card.remoteProvider = 'jira';
+            card.remoteIssueKey = 'PROJECT-WITH-A-LONG-KEY-123';
+            card.remoteIssueUrl = 'https://example.atlassian.net/browse/PROJECT-WITH-A-LONG-KEY-123';
+            card.jiraIssueUrl = card.remoteIssueUrl;
         } });
         const badge = page.locator('.board-card-origin');
         await expect(badge.locator('img')).toHaveAttribute('src', 'assets/img/jira.svg');
+        // The tile reads the list's summary, which has no jiraIssueUrl (VIBE-171).
+        await expect(badge.getByRole('link')).toHaveAttribute('href', 'https://example.atlassian.net/browse/PROJECT-WITH-A-LONG-KEY-123');
         await expect.poll(() => badge.locator('img').evaluate(image => image.complete && image.naturalWidth > 0)).toBe(true);
         expect(await badge.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
         await page.screenshot({ path: testInfo.outputPath(`board-jira-badge-${width}.png`) });
@@ -1250,6 +1255,15 @@ test('display IDs are visible and editable while permanent IDs remain available'
     await expect(page.locator('.board-key')).toContainText('VIBE-88');
 });
 
+// BoardCardSummaryResponse: the lane list never carries detail-only fields such as jiraIssueUrl,
+// comments or attachments, so a tile that needs one fails here as it would against the server.
+const SUMMARY_FIELDS = ['id', 'key', 'columnId', 'position', 'title', 'description', 'assignee', 'priority', 'points',
+    'tags', 'blocked', 'commentCount', 'activeSessionId', 'activeTabId', 'createdAt', 'updatedAt', 'baseLlmOptions',
+    'type', 'boardId', 'flagged', 'hasActiveAutomation', 'displayId', 'agentMade', 'hasWaitingAutomation', 'agentMadeBy',
+    'agentMadeSessionId', 'jiraIssueKey', 'workflowMode', 'managerSelection', 'managerBaseLlmOptions',
+    'hasActiveDesktopAgent', 'remoteProvider', 'remoteIssueKey', 'remoteIssueUrl'];
+const cardSummary = card => Object.fromEntries(SUMMARY_FIELDS.filter(field => field in card).map(field => [field, card[field]]));
+
 async function openBoard(page, { active = false, assignee = null, relatedCards = false, empty = false,
     onCard = () => {}, extraPickerItems = [],
     columns = [{ id: 'col_ready', name: 'Ready', position: 0, color: '#3b82f6', boardId: 'brd_main' }] } = {}) {
@@ -1381,7 +1395,7 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
                 ...(relatedCards ? [{ id: 'brd_sprint', name: 'Sprint 2', position: 1, cardCount: 2,
                     columns: [{ id: 'col_build', name: 'Build', position: 0, color: '#06b6d4', boardId: 'brd_sprint' }] }] : [])] },
             '/api/v1/board/columns': { columns },
-            '/api/v1/board/cards': { cards: empty ? [] : [card] }
+            '/api/v1/board/cards': { cards: empty ? [] : [cardSummary(card)] }
         };
         return route.fulfill({ json: payloads[path] || {} });
     });

@@ -71,8 +71,13 @@ public sealed record BoardCardRecord(
     string WorkflowMode = BoardWorkflowModes.Manual,
     string? ManagerSelection = null,
     BaseLlmOptions? ManagerBaseLlmOptions = null,
-    int? AdoWorkItemId = null)
+    int? AdoWorkItemId = null,
+    string? JiraConnectionId = null,
+    string? AdoConnectionId = null)
 {
+    // JiraConnectionId and AdoConnectionId belong to the same link rows as JiraIssueKey and
+    // AdoWorkItemId, so a lane tile can build the issue link without a per-card lookup (VIBE-171).
+
     /// <summary>The stored <c>PREFIX-RRRRR-n</c> key (cards created since board/14), else the
     /// computed legacy <c>PREFIX-n</c>.</summary>
     public string Key => StoredKey ?? BoardKeys.Format(KeyPrefix, Number);
