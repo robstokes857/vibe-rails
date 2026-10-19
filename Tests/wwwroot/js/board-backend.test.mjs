@@ -53,7 +53,7 @@ test('the assignee is the app-wide LLM picker, not a list of people', () => {
     assert.match(source, /getCliBrand\(cli\)/, 'avatars come from the CLI brand');
     assert.match(source, /BoardApi\.attach\(app\)/, 'the controller hands the data layer its app');
     // Every mutation the LLM can make is visible on reopen: the editor always re-reads the card.
-    assert.match(source, /card = await BoardApi\.getBoardCardAsync\(cardId, \{ signal: abort\.signal \}\);/);
+    assert.match(source, /BoardApi\.getBoardCardAsync\(cardId, \{ signal: abort\.signal \}\)/);
     assert.doesNotMatch(source, /this\.state\.cards\.find\(c => c\.id === cardId\) \|\| null/);
 });
 

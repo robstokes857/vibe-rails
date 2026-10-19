@@ -122,10 +122,78 @@ async function openHistory(page) {
         const element = root.querySelector('.ch-sidebar');
         element.style.cssText = 'width:min(360px,calc(100vw - 24px));height:calc(100vh - 24px);';
         window.historySidebar = new ChatHistorySidebar(app);
-        window.historySidebar.mount(root, { onToggle: open => element.classList.toggle('ch-sidebar-collapsed', !open) });
+        window.historySidebar.mount(root, { onToggle: open => {
+            element.classList.toggle('ch-sidebar-collapsed', !open);
+            root.classList.toggle('vb-history-under', !open);
+        } });
     });
     await expect(page.locator('.ch-item').first()).toBeVisible();
 }
+
+test('titles fill the card width without blank rows and collapse to icons only', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 900 });
+    await openHistory(page);
+    await page.evaluate(() => {
+        const root = document.querySelector('#fixture');
+        root.classList.add('vb-terminal-focus-layout');
+        root.style.height = 'calc(100vh - 24px)';
+        document.querySelector('.ch-sidebar').style.width = '';
+        const base = historySidebar.allItems[0];
+        historySidebar.allItems = [
+            { ...base, id: 'short', sessionDisplayName: 'Discuss deployment card', boardCards: [
+                { id: 'card', key: 'VB-ABCDE-56', displayId: 'VIBE-56', title: 'Deployment' }
+            ] },
+            { ...base, id: 'long', endedUTC: base.startedUTC,
+                sessionDisplayName: 'Diagnose DigitalOcean deployment and implement Azure DevOps Board integration with shared storage helpers and tests' },
+            { ...base, id: 'resumed', sessionDisplayName: 'Implement Azure DevOps Board Pull Integration',
+                parentSessionId: 'short', parentSessionCli: 'codex', environmentName: 'Review', boardCards: [
+                    { id: 'card-a', key: 'VIBE-166', title: 'Storage' },
+                    { id: 'card-b', key: 'VIBE-167', title: 'Integration' }
+                ] }
+        ];
+        historySidebar.hasMore = false;
+        historySidebar._renderItems();
+    });
+    for (const width of [268, 360]) {
+        await page.locator('#fixture').evaluate((root, width) => root.style.setProperty('--ch-sidebar-width', `${width}px`), width);
+        await expect.poll(async () => Math.round((await page.locator('.ch-sidebar').boundingBox()).width)).toBe(width);
+        const rows = await page.locator('.ch-item').evaluateAll(items => items.map(item => {
+            const title = item.querySelector('.ch-item-name');
+            const details = item.querySelector('.ch-item-body');
+            const rect = title.getBoundingClientRect();
+            return { titleWidth: rect.width, detailsWidth: details.getBoundingClientRect().width,
+                titleHeight: rect.height, lineHeight: parseFloat(getComputedStyle(title).lineHeight),
+                titleBottom: rect.bottom, detailsTop: details.getBoundingClientRect().top };
+        }));
+        for (const row of rows) {
+            expect(Math.abs(row.titleWidth - row.detailsWidth)).toBeLessThan(1);
+            expect(row.detailsTop - row.titleBottom).toBeGreaterThanOrEqual(7);
+            expect(row.detailsTop - row.titleBottom).toBeLessThanOrEqual(9);
+            expect(row.titleHeight).toBeLessThanOrEqual(row.lineHeight * 4 + 1);
+        }
+        expect(rows[0].titleHeight).toBeLessThanOrEqual(rows[0].lineHeight + 1);
+        expect(rows[1].titleHeight).toBeGreaterThan(rows[1].lineHeight * 2);
+        await expect(page.locator('[data-id="long"] .ch-item-name')).toHaveText(/shared storage helpers and tests$/);
+        await page.locator('.ch-sidebar').screenshot({ path: testInfo.outputPath(`history-titles-${width}.png`) });
+    }
+    await page.getByRole('button', { name: 'Collapse chat history' }).click();
+    await expect.poll(async () => Math.round((await page.locator('.ch-sidebar').boundingBox()).width)).toBe(44);
+    for (const item of await page.locator('.ch-item').all()) {
+        await expect(item.locator('.ch-item-name')).toBeHidden();
+        await expect(item.locator('.ch-item-meta')).toBeHidden();
+        await expect(item.locator('.ch-item-actions')).toBeHidden();
+        await expect(item.locator('.ch-item-icon')).toBeVisible();
+        expect((await item.boundingBox()).height).toBeLessThanOrEqual(36);
+    }
+    await page.locator('.ch-sidebar').screenshot({ path: testInfo.outputPath('history-collapsed-icons.png') });
+    await page.getByRole('button', { name: 'Expand chat history' }).click();
+    await expect.poll(async () => Math.round((await page.locator('.ch-sidebar').boundingBox()).width)).toBe(360);
+    await expect(page.locator('[data-id="resumed"] .ch-item-name')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Jump to parent chat' })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await page.locator('[data-id="resumed"] .ch-item-menu-btn').click();
+    await expect(page.locator('[data-action="get-session"]')).toBeVisible();
+});
 
 test('history card links open each associated card with mouse or keyboard after refresh', async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 390, height: 680 });

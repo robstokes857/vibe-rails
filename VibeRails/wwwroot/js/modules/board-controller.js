@@ -327,19 +327,24 @@ export class BoardController {
 
     async refreshSessionActivity() {
         const root = this.root;
-        if (!root?.isConnected || this.app.currentView !== 'board' || !this.state.boardId || this._activityPending) return;
+        const editor = document.querySelector('[data-board-card-editor]');
+        const onBoard = root?.isConnected && this.app.currentView === 'board' && this.state.boardId;
+        if ((!onBoard && !editor?.isConnected) || this._activityPending) return;
         const generation = this._activityGeneration;
         const refreshGeneration = this._refreshGeneration;
         const boardId = this.state.boardId;
-        const editor = document.querySelector('[data-board-card-editor]');
+        const view = this.app.currentView;
         const cardId = editor?.dataset.cardId;
         const editorActivity = cardActivitySnapshot(editor?._boardCard);
-        const current = () => root === this.root && root.isConnected && generation === this._activityGeneration
-            && refreshGeneration === this._refreshGeneration && boardId === this.state.boardId;
+        const current = () => generation === this._activityGeneration && refreshGeneration === this._refreshGeneration
+            && boardId === this.state.boardId && view === this.app.currentView
+            && (onBoard ? root === this.root && root.isConnected
+                : editor.isConnected && editor === document.querySelector('[data-board-card-editor]'));
         const abort = this._activityAbort = new AbortController();
         this._activityPending = true;
         const loadedIds = [...new Set(this.state.cards.map(card => card.id))];
         const readActivity = async () => {
+            if (!onBoard) return { cards: [], columnIds: [] };
             const cards = [];
             let columnIds = [];
             // Bound every request and never fetch the unloaded remainder of a completed lane.
@@ -359,11 +364,13 @@ export class BoardController {
             ]);
             if (!current()) return;
             const { cards, columnIds } = activity;
-            this._activeAutomationColumnIds = columnIds;
-            this.laneAgents.updateActivity(columnIds);
+            if (onBoard) {
+                this._activeAutomationColumnIds = columnIds;
+                this.laneAgents.updateActivity(columnIds);
+            }
             const byId = new Map(cards.map(card => [card.id, card]));
-            const tiles = new Map([...root.querySelectorAll('[data-card-id]')].map(tile => [tile.dataset.cardId, tile]));
-            for (const card of this.state.cards) {
+            const tiles = new Map([...(root?.querySelectorAll('[data-card-id]') || [])].map(tile => [tile.dataset.cardId, tile]));
+            for (const card of onBoard ? this.state.cards : []) {
                 const fresh = byId.get(card.id);
                 if (!fresh) continue;
                 const changed = card.activeSessionId !== fresh.activeSessionId || card.activeTabId !== fresh.activeTabId || card.hasActiveAutomation !== fresh.hasActiveAutomation
@@ -1314,7 +1321,7 @@ export class BoardController {
         }
     }
 
-    async openCardEditor(cardId) {
+    async openCardEditor(cardId, { overlay = false } = {}) {
         const generation = ++this._openCardGeneration;
         this._openCardAbort?.abort();
         const abort = new AbortController();
@@ -1325,7 +1332,19 @@ export class BoardController {
             // Always the server's copy: the lane list carries summaries only, and an
             // LLM may have commented on or moved this card since the board loaded.
             try {
-                card = await BoardApi.getBoardCardAsync(cardId, { signal: abort.signal });
+                const [detail, boards] = await Promise.all([
+                    BoardApi.getBoardCardAsync(cardId, { signal: abort.signal }),
+                    overlay ? BoardApi.getBoardsAsync({ signal: abort.signal }) : null
+                ]);
+                if (abort.signal.aborted || generation !== this._openCardGeneration) return;
+                card = detail;
+                // The terminal stays mounted. Load the editor's lane/board context without
+                // mounting the Board page or changing its persisted selection.
+                if (boards) {
+                    this.state.boards = boards;
+                    this.state.boardId = card.boardId;
+                    this.state.columns = boards.find(board => board.id === card.boardId)?.columns || [];
+                }
             } catch (error) {
                 if (abort.signal.aborted || error?.name === 'AbortError' || generation !== this._openCardGeneration)
                     return;
@@ -1337,6 +1356,9 @@ export class BoardController {
         if (generation !== this._openCardGeneration) return;
 
         const columnId = card?.columnId || this.state.columns[0]?.id || '';
+        const outsideBoard = this.app.currentView !== 'board';
+        // cloneTemplate hoists the shared styles once; the Board page itself is not mounted.
+        if (outsideBoard) this.app.cloneTemplate('board-template');
 
         this.app.showModal(card ? cardLabel(card) : 'New card', `
             <div class="board-card-editor" data-board-card-editor data-card-id="${escapeHtml(card?.id || '')}">
@@ -1523,6 +1545,7 @@ export class BoardController {
                         ${card ? `<button type="button" class="btn btn-sm btn-outline-danger" data-board-delete-card>
                             <i class="fa-solid fa-trash" aria-hidden="true"></i> Delete
                         </button>` : '<span></span>'}
+                        <span class="board-editor-open-terminals" data-board-open-terminals role="group" aria-label="Open terminals" hidden></span>
                         <span class="board-editor-actions-main">
                             ${card ? `<button type="button" class="btn btn-sm btn-outline-success" data-board-start-work
                                 title="Start the assigned LLM in the background with this card as its first message">
@@ -1533,6 +1556,7 @@ export class BoardController {
                     </div>
             </div>
         `, { onClose: () => {
+            if (outsideBoard) this.disposeSessionActivity();
             this.disposeCardPickers();
             this.disposeComposers();
             this.cardLinksDispose?.();
@@ -1555,6 +1579,7 @@ export class BoardController {
         const editor = container?.querySelector('[data-board-card-editor]');
         if (!editor) return;
         this.bindCardEditor(editor, card);
+        if (outsideBoard) this.bindSessionActivity();
     }
 
     // Cards stay on their board. A different board starts with a new card.
@@ -2280,9 +2305,32 @@ export class BoardController {
 
     renderSessionsPanel(editor, card) {
         this.updateStartWorkButton(editor, card);
+        this.renderOpenTerminals(editor, card);
         const sessions = card?.sessions || [];
         this.renderSessionList(editor, card, sessions.filter(session => !session.isAutomation && !session.isReview && session.origin !== 'code_review'), 'sessions');
         this.renderSessionList(editor, card, sessions.filter(session => session.isAutomation || session.isReview || session.origin === 'code_review'), 'automations');
+    }
+
+    renderOpenTerminals(editor, card) {
+        const host = editor.querySelector('[data-board-open-terminals]');
+        if (!host) return;
+        const sessions = [...new Map((card?.sessions || [])
+            .filter(session => session.active && session.tabId && !session.isAutomation)
+            .map(session => [session.tabId, session])).values()];
+        host.hidden = sessions.length === 0;
+        host.innerHTML = sessions.length ? `<span class="board-editor-terminals-label">Open terminals</span>${sessions.map(session => `
+            <button type="button" class="btn btn-sm btn-link" data-board-focus-terminal="${escapeHtml(session.id)}"
+                title="${escapeHtml(session.displayName || 'Terminal')}" aria-label="${escapeHtml(`Open terminal ${session.displayName || session.id}`)}">
+                <i class="fa-solid fa-terminal" aria-hidden="true"></i>
+                ${escapeHtml(getCliBrand(session.cli)?.label || 'Terminal')}
+            </button>`).join('')}` : '';
+        host.querySelectorAll('[data-board-focus-terminal]').forEach(button => {
+            button.addEventListener('click', async () => {
+                const session = sessions.find(item => item.id === button.dataset.boardFocusTerminal);
+                try { await this.focusSessionTab(card, session); }
+                catch (error) { this.app.showToast('Board', error?.message || 'Failed to open the terminal.', 'error'); }
+            });
+        });
     }
 
     renderSessionList(editor, card, sessions, section) {
@@ -2343,7 +2391,7 @@ export class BoardController {
             selection: session.selection || null,
             label: card?.key ? cardLabel(card, card.title || session.displayName) : session.displayName,
             title: cardLabel(card, card?.title || session.displayName),
-            taskKey: CARD_TASK_KEY(card?.id || session.id),
+            taskKey: `${CARD_TASK_KEY(card?.id || session.id)}${session.origin === 'chat' ? ':chat' : ''}`,
             workingDirectory: null
         });
         this.app.closeModal();

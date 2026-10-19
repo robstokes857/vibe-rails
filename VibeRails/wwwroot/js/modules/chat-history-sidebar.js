@@ -1127,7 +1127,6 @@ export class ChatHistorySidebar {
             const namedRaw = this._getDisplayName(item);
             const isPlaceholder = namedRaw.length === 0;
             const rawName = isPlaceholder ? this._getPlaceholderName(brand) : namedRaw;
-            const name = rawName.length > 80 ? rawName.slice(0, 80) + '…' : rawName;
             const nameClass = isPlaceholder ? 'ch-item-name ch-item-name-placeholder' : 'ch-item-name';
             const time = formatRelativeTime(item.startedUTC);
             const isActive = !item.endedUTC;
@@ -1166,20 +1165,22 @@ export class ChatHistorySidebar {
                 : '';
             return `
                 <div class="ch-item${isActive ? ' ch-item-active' : ''}" data-id="${escapeHtml(item.id)}"${itemStyle}>
-                    <div class="ch-item-icon">${logoHtml}</div>
-                    <div class="ch-item-content">
-                        <div class="ch-item-header">
-                            <div class="${nameClass}" title="${escapeHtml(rawName)}">${escapeHtml(name)}</div>
-                            <span class="ch-project-badge" title="${escapeHtml(item.workingDirectory || '')}"><i class="fa-solid fa-folder-open"></i> ${escapeHtml(projectDisplayName)}</span>
+                    <div class="${nameClass}" title="${escapeHtml(rawName)}">${escapeHtml(rawName)}</div>
+                    <div class="ch-item-body">
+                        <div class="ch-item-icon">${logoHtml}</div>
+                        <div class="ch-item-content">
+                            <div class="ch-item-header">
+                                <span class="ch-project-badge" title="${escapeHtml(item.workingDirectory || '')}"><i class="fa-solid fa-folder-open"></i> ${escapeHtml(projectDisplayName)}</span>
+                            </div>
+                            ${relationshipHtml}
+                            <div class="ch-item-meta">${metaHtml}</div>
                         </div>
-                        ${relationshipHtml}
-                        <div class="ch-item-meta">${metaHtml}</div>
-                    </div>
-                    <div class="ch-item-actions">
-                        ${parentJumpButton}
-                        <button class="ch-item-menu-btn" title="Actions" aria-label="Actions">
-                            <i class="fa-solid fa-ellipsis-vertical"></i>
-                        </button>
+                        <div class="ch-item-actions">
+                            ${parentJumpButton}
+                            <button class="ch-item-menu-btn" title="Actions" aria-label="Actions">
+                                <i class="fa-solid fa-ellipsis-vertical"></i>
+                            </button>
+                        </div>
                     </div>
                 </div>`;
         }).join('')}${this._renderFooter()}`;

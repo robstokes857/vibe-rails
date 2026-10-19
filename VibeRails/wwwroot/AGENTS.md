@@ -329,6 +329,11 @@ leaves the card on Start work once the launched agent's tab is gone. Go to agent
 terminal without saving the form or launching another agent. The save response is checked again before launching, and the backend refuses a launch
 when its live tab list already contains one of the card's linked sessions.
 
+Discussion (`chat`) sessions do not replace Start work with Go to agent. The editor footer's
+**Open terminals** links include every active linked non-Automation session with a live tab,
+including chats, independently of working-agent status. They focus the existing terminal without
+saving or launching. The links update with the Sessions rail and disappear as sessions end.
+
 `TODO(board)`: an **Auto Launch** option (per card and/or per lane) so dropping an assigned card
 into a lane starts work by itself — noted in the controller header and `BoardLaunchService`;
 not built.
@@ -623,6 +628,11 @@ which is why those two controls stop propagation before the card's own open hand
 
 ## Chat history sidebar
 
+Session titles span the full card width above the icon, project, metadata and actions.
+They wrap to at most four lines with no reserved minimum height; short titles leave no
+blank title rows. Collapsed history shows only the session icons, including for linked,
+resumed and live sessions.
+
 Each associated card's metadata label is a keyboard-accessible link (VIBE-72), using its display
 ID with the permanent key and title in the tooltip. It navigates to `board` with `openCardId`
 set to the immutable row ID; the existing Board navigation handles local and cross-project cards.
@@ -779,9 +789,13 @@ after the hidden Reconnect button. VIBE-82 styles it as a compact `btn-link` wit
 theme accent, hover/focus underline and keyboard focus outline; it hides once an ordinary tab has
 no session. Restore, adoption
 and `refreshAutomationTabs` (same session only) set `state.boardCard`; starting or stopping a
-session in the tab clears it. Clicking navigates to `board` with one-shot `openCardId`, which
-`BoardController.loadView` deletes, then `openCardFromNavigation` selects the card's board and opens
-its editor. Tests: `Tests/wwwroot/js/terminal-board-card-link.test.mjs`, `TerminalTabsRoutesTests`.
+session in the tab clears it. Clicking opens the full card editor over the mounted terminal via
+`openCardEditor(id, { overlay: true })`, loading board/lane context and shared editor styles without
+navigation. Closing returns to the same terminal. Overlay activity uses the existing session poll,
+preserves drafts and disposes its listeners/requests on close or navigation. Other callers can
+still navigate to `board` with one-shot `openCardId`. Tests:
+`Tests/wwwroot/js/terminal-board-card-link.test.mjs`, `TerminalTabsRoutesTests`, and the focused
+`UITests/tests/terminal-board-card.spec.js` overlay/footer cases.
 
 ## Agents and Automations pages (2026-10-11)
 

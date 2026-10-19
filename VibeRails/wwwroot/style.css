@@ -8414,9 +8414,14 @@ input.form-control:disabled {
     display: none;
 }
 
+.vb-terminal-focus-layout.vb-history-under .ch-item-name,
 .vb-terminal-focus-layout.vb-history-under .ch-item-content,
 .vb-terminal-focus-layout.vb-history-under .ch-item-actions {
     display: none;
+}
+
+.vb-terminal-focus-layout.vb-history-under .ch-item-body {
+    display: contents;
 }
 
 /* Live session: green cue moves onto the icon tile itself. */
@@ -8503,8 +8508,9 @@ input.form-control:disabled {
 
 .ch-item {
     display: flex;
-    align-items: center;
-    gap: 12px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
     padding: 12px 14px;
     cursor: default;
     border-radius: 8px;
@@ -8514,6 +8520,14 @@ input.form-control:disabled {
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     overflow: hidden;
+}
+
+/* The title gets the full card width above this compact details row. */
+.ch-item-body {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
 }
 
 .ch-item:hover {
@@ -8740,10 +8754,10 @@ input.form-control:disabled {
     overflow: hidden;
     text-overflow: ellipsis;
     font-weight: 600;
-    line-height: 1.3;
+    line-height: 1.4;
     min-width: 0;
     display: -webkit-box;
-    -webkit-line-clamp: 2;
+    -webkit-line-clamp: 4;
     -webkit-box-orient: vertical;
     white-space: normal;
     word-break: break-word;
@@ -10008,12 +10022,12 @@ input.form-control:disabled {
 }
 
 .ch-item-name {
-    font-size: 0.8rem;
+    font-size: 0.86rem;
     font-weight: 600;
     color: var(--color-text, #f8fafc);
     letter-spacing: 0.005em;
-    line-height: 1.32;
-    -webkit-line-clamp: 2;
+    line-height: 1.4;
+    -webkit-line-clamp: 4;
 }
 
 .ch-item:hover .ch-item-name {

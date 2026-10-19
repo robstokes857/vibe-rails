@@ -4585,6 +4585,29 @@
                     min-width: 0;
                 }
 
+                .board-editor-open-terminals {
+                    display: flex;
+                    flex: 1;
+                    flex-wrap: wrap;
+                    align-items: center;
+                    gap: 0.25rem;
+                    min-width: 0;
+                }
+
+                .board-editor-open-terminals[hidden] {
+                    display: none;
+                }
+
+                .board-editor-terminals-label {
+                    font-size: 0.72rem;
+                    color: var(--color-text-muted);
+                    margin-right: 0.25rem;
+                }
+
+                .board-editor-open-terminals .btn {
+                    padding: 0.2rem 0.35rem;
+                }
+
                 .board-chat-controls {
                     flex: 0 1 auto;
                     flex-wrap: nowrap;
@@ -4607,6 +4630,11 @@
 
                     .board-card-editor .board-editor-actions-main {
                         display: contents;
+                    }
+
+                    .board-editor-open-terminals {
+                        grid-column: 1 / -1;
+                        grid-row: 1;
                     }
 
                     .board-chat-controls {

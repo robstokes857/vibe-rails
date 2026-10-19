@@ -2496,7 +2496,7 @@ export class TerminalManager {
 
     openBoardCard(card) {
         if (!card?.id) return false;
-        return this.app.navigate('board', { openCardId: card.id });
+        return this.app.boardController.openCardEditor(card.id, { overlay: true });
     }
 
     updateWindowTitleBar(state) {

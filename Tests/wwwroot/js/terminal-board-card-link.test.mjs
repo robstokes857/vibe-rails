@@ -5,7 +5,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 // VIBE-36: a terminal tab whose session is linked to a Board card links back to that card from the
-// controls bar, and the Board view opens the card it was sent.
+// controls bar, opening the card over the existing terminal.
 
 const multitabPath = path.resolve('VibeRails/wwwroot/js/modules/terminal-multitab.js');
 const { TerminalManager, readTabBoardCard } = await import(pathToFileURL(multitabPath).href);
@@ -25,11 +25,14 @@ function fakeButton() {
     };
 }
 
-function managerWithLink(navigations = []) {
+function managerWithLink(openings = []) {
     const manager = Object.create(TerminalManager.prototype);
     manager.cardLinkBtn = fakeButton();
     manager.cardLinkLabel = { textContent: '' };
-    manager.app = { navigate: (view, data) => { navigations.push({ view, data }); return true; } };
+    manager.app = {
+        navigate() { assert.fail('Opening a terminal card must preserve the terminal view'); },
+        boardController: { openCardEditor: (id, options) => { openings.push({ id, options }); return true; } }
+    };
     return manager;
 }
 
@@ -68,13 +71,13 @@ test('the controls bar names the card of a live tab and hides without a session 
     assert.equal(manager.cardLinkBtn.classList.contains('d-none'), false);
 });
 
-test('clicking the link navigates to the Board with a one-shot card to open', () => {
-    const navigations = [];
-    const manager = managerWithLink(navigations);
+test('clicking the link opens the card over the terminal without navigating', () => {
+    const openings = [];
+    const manager = managerWithLink(openings);
     assert.equal(manager.openBoardCard(card), true);
-    assert.deepEqual(navigations, [{ view: 'board', data: { openCardId: 'card-1' } }]);
+    assert.deepEqual(openings, [{ id: 'card-1', options: { overlay: true } }]);
     assert.equal(manager.openBoardCard(null), false);
-    assert.equal(navigations.length, 1);
+    assert.equal(openings.length, 1);
 });
 
 test('the link sits in the controls bar actions beside the retired Reconnect button', () => {

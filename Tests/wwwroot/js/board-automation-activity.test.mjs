@@ -26,6 +26,38 @@ function openEditor(t) {
     return editor;
 }
 
+test('a card over the terminal refreshes linked sessions without loading Board activity', async t => {
+    const editor = openEditor(t);
+    const { controller, requests } = harness();
+    controller.root = null;
+    controller.app.currentView = 'terminal-focus';
+    const rendered = [];
+    controller.renderSessionsPanel = (_, card) => rendered.push(card.sessions.map(session => session.id));
+    const poll = controller.refreshSessionActivity();
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, '/api/v1/board/cards/card');
+    requests[0].resolve({ ...editor._boardCard,
+        sessions: [{ id: 'discussion', tabId: 'tab', active: true, origin: 'chat' }] });
+    await poll;
+    assert.deepEqual(rendered, [['discussion']]);
+    assert.equal(controller.hasRunningSession(editor._boardCard), false, 'a discussion does not become a work launch');
+});
+
+test('closing a card overlay aborts activity reads and ignores late sessions', async t => {
+    const editor = openEditor(t);
+    const { controller, requests } = harness();
+    controller.root = null;
+    controller.app.currentView = 'terminal-focus';
+    controller.renderSessionsPanel = () => assert.fail('a closed overlay must not update');
+    const poll = controller.refreshSessionActivity();
+    controller.disposeSessionActivity();
+    editor.isConnected = false;
+    assert.equal(requests[0].options.signal.aborted, true);
+    requests[0].resolve({ ...editor._boardCard, sessions: [{ id: 'late', active: true }] });
+    await poll;
+    assert.deepEqual(editor._boardCard.sessions, []);
+});
+
 test('a delayed activity read cannot hide a successfully posted comment', async t => {
     const editor = openEditor(t);
     const { controller, requests } = harness();
