@@ -183,6 +183,8 @@ namespace VibeRails
             serviceCollection.AddAdoClients();
             serviceCollection.AddScoped<Services.AzureDevOps.IAdoPullService, Services.AzureDevOps.AdoPullService>();
             serviceCollection.AddSingleton<Services.AzureDevOps.IAdoPullScheduler, Services.AzureDevOps.AdoPullScheduler>();
+            serviceCollection.AddScoped<Services.AzureDevOps.IAdoSessionSharing, Services.AzureDevOps.AdoSessionSharing>();
+            serviceCollection.AddScoped<Services.AzureDevOps.AdoDeliveryService>();
             // Board sync with viberails.ai (VB-51). Outbound only, HTTPS, X-Api-Key, redirects off;
             // the API key is re-read from settings on every call. Ticked every 60 s by the leased
             // root job scheduler beside the Jira pull, and one OS lock across root backends.

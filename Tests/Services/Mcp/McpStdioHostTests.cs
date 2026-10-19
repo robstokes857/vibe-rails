@@ -31,6 +31,10 @@ public class McpStdioHostTests
 
         Assert.NotNull(scope.ServiceProvider.GetRequiredService<BoardWorkflowService>());
         Assert.NotNull(scope.ServiceProvider.GetRequiredService<RulesTool>());
+        // add_ado_comment works from any terminal: the stdio host resolves its comment service and client.
+        Assert.NotNull(scope.ServiceProvider.GetRequiredService<VibeRails.Services.AzureDevOps.AdoCommentService>());
+        Assert.IsType<VibeRails.Services.AzureDevOps.AzureDevOpsClient>(
+            provider.GetRequiredService<VibeRails.Services.AzureDevOps.IAdoCommentClient>());
         Assert.Same(provider.GetRequiredService<IGitStagedSnapshotProvider>(),
             provider.GetRequiredService<IGitWorkingTreeSnapshotProvider>());
     }
@@ -93,6 +97,8 @@ public class McpStdioHostTests
         Assert.Contains(services, d => d.ServiceType == typeof(BoardTool));
         Assert.Contains(services, d => d.ServiceType == typeof(VibeRails.Services.Jira.JiraCommentService));
         Assert.Contains(services, d => d.ServiceType == typeof(VibeRails.Services.Jira.IJiraCommentClient));
+        Assert.Contains(services, d => d.ServiceType == typeof(VibeRails.Services.AzureDevOps.AdoCommentService));
+        Assert.Contains(services, d => d.ServiceType == typeof(VibeRails.Services.AzureDevOps.IAdoCommentClient));
         Assert.Contains(services, d => d.ServiceType == typeof(VibeRails.Services.Board.IBoardStore));
         Assert.Contains(services, d => d.ServiceType == typeof(VibeRails.Services.Board.IBoardService));
         Assert.Contains(services, d => d.ServiceType == typeof(VibeRails.Services.Board.IBoardProjectResolver));

@@ -8,6 +8,13 @@ separates that connection and its imports into a dedicated board. Unlink makes t
 local again. Existing sync settings, ledgers and hosted copies are retained; no history or schema
 is rewritten. Jira pulls remain available.
 
+Dedicated Azure DevOps boards (an Azure DevOps connection with `DedicatedBoard=true`) are excluded
+the same way (VIBE-168): `SetPublishedAsync(enabled: true)` and `SyncNowAsync` refuse them, and
+`SyncDueAsync` skips them even when their sync flag is set, so they never upload to viberails.ai.
+They are also created unpublished (`SyncEnabled=0`), so an older binary that does not know the
+Azure DevOps tables never uploads one. `TrackerBoards.DedicatedProviderAsync` is the one check:
+the status reports `RemoteProvider` (`jira`, `ado` or null) beside the retained `IsJiraBoard`.
+
 ## Remote board manager
 
 The Board toolbar's **Remote boards** screen lists owned and accepted shared boards, including

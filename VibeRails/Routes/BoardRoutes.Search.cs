@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using VibeRails.DTOs;
 using VibeRails.Services.Board;
+using VibeRails.Services.Board.Tracker;
 
 namespace VibeRails.Routes;
 
@@ -30,9 +31,10 @@ public static partial class BoardRoutes
                 if (detail is null) return NotFound("Card", card);
                 var owner = await board.FindBoardAsync(target.ProjectPath, detail.BoardId, ct);
                 var columns = await board.GetColumnsAsync(target.ProjectPath, ct, detail.BoardId);
-                var isJiraBoard = await store.GetJiraConnectionAsync(target.ProjectPath, detail.BoardId, ct) is { DedicatedBoard: true };
+                var provider = await store.DedicatedProviderAsync(target.ProjectPath, detail.BoardId, ct);
                 return Results.Ok(new LocalBoardCardResponse(ForCurrentProject(detail)!, target.ProjectPath,
-                    owner?.Name ?? detail.BoardId, columns.Columns, IsCurrentProject(target.ProjectPath), isJiraBoard));
+                    owner?.Name ?? detail.BoardId, columns.Columns, IsCurrentProject(target.ProjectPath),
+                    provider == TrackerProviders.Jira, provider));
             }, ct)).WithName("GetLocalBoardCard");
         local.MapPut("", ([FromServices] IBoardStore store, [FromServices] IBoardService board,
             string card, UpdateBoardCardRequest request, CancellationToken ct) =>
@@ -48,7 +50,7 @@ public static partial class BoardRoutes
         local.MapPost("/comments", ([FromServices] IBoardStore store, [FromServices] IBoardService board,
             string card, AddBoardCommentRequest request, CancellationToken ct) =>
             WithLocalCardAsync(store, card, async target =>
-                OkOrNotFound(await board.AddCommentAsync(target.ProjectPath, target.Id, BoardAuthor.User(), request.Body ?? "", ct, request.SyncToJira), "Card"), ct))
+                OkOrNotFound(await board.AddCommentAsync(target.ProjectPath, target.Id, BoardAuthor.User(), request.Body ?? "", ct, request.Sync), "Card"), ct))
             .WithName("CommentLocalBoardCard");
         local.MapGet("/links/candidates", ([FromServices] IBoardStore store, [FromServices] IBoardService board,
             string card, string? q, CancellationToken ct) =>

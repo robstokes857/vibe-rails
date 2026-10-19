@@ -110,6 +110,50 @@ public sealed partial class BoardSyncServiceTests : IDisposable
         Assert.Equal(0, client.Calls);
     }
 
+    /// <summary>
+    /// A dedicated Azure DevOps board never uploads to viberails.ai (VIBE-168): it cannot be
+    /// published or synced, and a board already published before it was linked stops syncing
+    /// without its saved state being deleted.
+    /// </summary>
+    [Fact]
+    public async Task DedicatedAzureDevOpsBoardsCannotEnableOrRunHostedSync()
+    {
+        var card = await Card();
+        await service.SetPublishedAsync(root, card.BoardId, true, Ct);
+        var link = await store.GetSyncLinkAsync(root, card.BoardId, Ct);
+        await store.SaveAdoConnectionAsync(new("ado_synctest0000", root, card.BoardId, "contoso", "Web", "Web Team", "Stories", null,
+            "https://dev.azure.com/contoso/Web/_boards/board/t/Web%20Team/Stories", "Stories", null, null, null, null,
+            true, BoardAdoAuthStatus.Saved, true, null, null, DedicatedBoard: true, null, null, null), Ct);
+        await store.UpdateCardAsync(root, card.Id, new(Title: "Retained local change"), Ct);
+        var calls = client.Calls;
+
+        var refused = await Assert.ThrowsAsync<BoardValidationException>(() => service.SetPublishedAsync(root, card.BoardId, true, Ct));
+        Assert.Contains("Azure DevOps boards use Azure DevOps", refused.Message);
+        await Assert.ThrowsAsync<BoardValidationException>(() => service.SyncNowAsync(root, card.BoardId, Ct));
+        await service.SyncDueAsync(Ct);
+
+        var status = (await service.GetStatusAsync(root, card.BoardId, Ct))!;
+        Assert.Equal("ado", status.RemoteProvider);
+        Assert.False(status.IsJiraBoard);
+        Assert.False(status.Enabled);
+        Assert.False(status.ActivityEnabled);
+        Assert.Equal(calls, client.Calls);
+        Assert.Equal(link, await store.GetSyncLinkAsync(root, card.BoardId, Ct));
+        Assert.True((await store.GetBoardAsync(root, card.BoardId, Ct))!.SyncEnabled);
+    }
+
+    [Fact]
+    public async Task ANotYetDedicatedAzureDevOpsConnectionLeavesItsSourceBoardLocal()
+    {
+        var card = await Card();
+        await store.SaveAdoConnectionAsync(new("ado_synctest0001", root, card.BoardId, "contoso", "Web", "Web Team", "Stories", null,
+            "https://dev.azure.com/contoso/Web/_boards/board/t/Web%20Team/Stories", "Stories", null, null, null, null,
+            true, BoardAdoAuthStatus.Saved, true, null, null, false, null, null, null), Ct);
+        var status = (await service.GetStatusAsync(root, card.BoardId, Ct))!;
+        Assert.Null(status.RemoteProvider);
+        Assert.True((await service.SetPublishedAsync(root, card.BoardId, true, Ct))!.Enabled);
+    }
+
     [Fact]
     public async Task LegacyJiraConnectionKeepsSourceLocalAndSyncingBeforeAndAfterSeparation()
     {

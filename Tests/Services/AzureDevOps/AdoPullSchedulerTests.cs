@@ -29,6 +29,34 @@ public sealed class AdoPullSchedulerTests
         // The scoped graph holds a service that only disposes asynchronously.
         await using var scope = provider.CreateAsyncScope();
         Assert.IsType<AdoPullService>(scope.ServiceProvider.GetRequiredService<IAdoPullService>());
+        // The 5-second activity drain the scheduler starts between pulls (VIBE-168).
+        Assert.NotNull(scope.ServiceProvider.GetRequiredService<AdoDeliveryService>());
+        Assert.IsType<AdoSessionSharing>(scope.ServiceProvider.GetRequiredService<IAdoSessionSharing>());
+        Assert.NotNull(scope.ServiceProvider.GetRequiredService<AdoCommentService>());
+        Assert.Same(provider.GetRequiredService<AzureDevOpsClient>(), provider.GetRequiredService<IAdoCommentClient>());
+    }
+
+    /// <summary>Between pulls a tick starts the activity drain without returning it; a due pull still goes first.</summary>
+    [Fact]
+    public async Task ADeliveryTickNeverDelaysADuePull()
+    {
+        var pulls = 0;
+        using var provider = Provider(() =>
+        {
+            Interlocked.Increment(ref pulls);
+            return Task.FromResult(true);
+        });
+        var scheduler = new AdoPullScheduler(provider.GetRequiredService<IServiceScopeFactory>());
+
+        await scheduler.Tick(Start, Ct)!;
+        Assert.Null(scheduler.Tick(Start.AddSeconds(1), Ct));
+        Assert.Null(scheduler.Tick(Start.Add(AdoPullScheduler.DeliveryInterval).AddSeconds(1), Ct));
+        await scheduler.WhenIdleAsync();
+        var next = scheduler.Tick(Start.Add(AdoPullScheduler.Interval), Ct);
+        Assert.NotNull(next);
+        await next;
+        await scheduler.WhenIdleAsync();
+        Assert.Equal(2, pulls);
     }
 
     [Fact]

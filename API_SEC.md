@@ -172,6 +172,11 @@ middleware serves their paths rather than registering individual API endpoints.
 | PUT | `/api/v1/board/boards/order` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | DELETE | `/api/v1/board/boards/{boardId}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | PUT | `/api/v1/board/boards/{boardId}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| DELETE | `/api/v1/board/boards/{boardId}/ado` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/boards/{boardId}/ado` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| PUT | `/api/v1/board/boards/{boardId}/ado` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/boards/{boardId}/ado/pull` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/boards/{boardId}/ado/test` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | GET | `/api/v1/board/boards/{boardId}/context` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | PUT | `/api/v1/board/boards/{boardId}/context` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | GET | `/api/v1/board/boards/{boardId}/history` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
@@ -832,6 +837,58 @@ runs fixed `git config --get user.email` argv in the server-derived root, with a
 timeout and bounded output; no request value reaches the command. See
 [JiraCloudClient](VibeRails/Services/Jira/JiraCloudClient.cs) and
 [JiraBoardLink](VibeRails/Services/Jira/JiraBoardLink.cs).
+
+### Azure DevOps (VIBE-165..168)
+
+Azure DevOps Services mirrors the Jira contract above with its own client, lock, token file,
+tables and delivery ledger; nothing here widens Jira's. New Board comments on a card linked to a
+work item queue an outbound comment by default; `syncToRemote=false` (alias `syncToJira=false`,
+stored as the same `syncToJira.to` key) keeps an internal note, and an older binary's `false`
+suppresses Azure DevOps delivery too. New local session attachments create public replay links
+through the existing sharing service and post them to the work item. The ledger pins the
+connection and numeric work item id, deduplicates, excludes the pull's own notes, imports and
+copied discussion, and never automatically retries an uncertain POST. Connection changes, pulls
+and delivery share `.ado-pull.lock`. Dedicated Azure DevOps boards never upload to viberails.ai:
+publication and manual sync are refused and the hosted-sync pass skips them.
+
+`add_ado_comment` is an explicit outbound MCP write on both transports, outside the local Board
+auto-grants (`BoardMcpAuthorization.ToolNames`). It resolves the live card's retained work item
+link and saved connection within the owning project through `IBoardStore`, never a
+caller-supplied organization, project, work item id or token, and posts no shares. Unconfirmed
+delivery is never retried automatically; a Board receipt failure does not turn a confirmed post
+into a failed one. See [Azure DevOps comments](VibeRails/Services/AzureDevOps/Comments.md).
+
+The five root/project-scoped `/api/v1/board/boards/{boardId}/ado` GET/PUT/DELETE and `/test`,
+`/pull` POST routes use both credentials. Personal access tokens are write-only: accepted on save,
+stored in plain text in the private `~/.vibe_rails/ado-tokens.json`, never in Board storage,
+responses or logs. A blank save keeps the token only within the same organization; a changed
+organization requires the token again, mints a new connection id and deletes the old token.
+
+- **Host:** exactly `https://dev.azure.com`, default port, no user info. Links on
+  `*.visualstudio.com`, Azure DevOps Server or any other host are refused before any request.
+- **Paths:** the organization is 1 to 50 letters, digits and hyphens, starting and ending with a
+  letter or digit; project, team and backlog level are validated segments (at most 128
+  characters; no `/`, `\`, controls, `%`, `?`, `#`, leading/trailing dot or space) that are then
+  percent-escaped. A saved query id must be a GUID.
+  The work item id in a comment path is the stored positive integer.
+- **Transport:** HTTP basic with an empty user and the token, `X-TFS-FedAuthRedirect: Suppress`,
+  redirects and cookies disabled, one 30-second deadline covering headers and body. A 302, 203
+  or non-JSON 2xx (the sign-in page) is a refused token. The token is never sent to another host.
+- **WIQL:** literals come only from server-returned values with `'` doubled; the user's narrowing
+  clause is wrapped in parentheses and may not contain `ORDER BY` or unbalanced parentheses.
+- **Comments:** text is HTML-encoded; the only markup added is paragraphs, line breaks and one
+  `<a>` per vetted public replay URL. 20,000 characters and 20 links per comment; 256-KiB
+  responses; only a fixed message or a validated numeric comment id is returned.
+
+The complete outbound endpoint list (api-version 7.1, comments 7.1-preview.4):
+`GET {org}/_apis/projects/{project}`, `GET {org}/{project}/{team}/_apis/work/boards/{backlogLevel}`,
+`GET {org}/{project}/{team}/_apis/work/teamsettings/teamfieldvalues`, `GET {org}/_apis/wit/fields`,
+`POST {org}/{project}/{team}/_apis/wit/wiql`, `GET {org}/{project}/_apis/wit/wiql/{queryId}`,
+`GET {org}/{project}/_apis/wit/queries/{queryId}` (the saved query's name, at Connect),
+`POST {org}/{project}/_apis/wit/workitemsbatch` and
+`POST {org}/{project}/_apis/wit/workItems/{id}/comments?format=html`. See
+[AzureDevOpsClient](VibeRails/Services/AzureDevOps/AzureDevOpsClient.cs) and
+[AdoBoardLink](VibeRails/Services/AzureDevOps/AdoBoardLink.cs).
 
 ### Complete backups
 

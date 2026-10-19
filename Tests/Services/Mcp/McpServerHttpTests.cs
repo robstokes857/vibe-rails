@@ -45,6 +45,7 @@ public class McpServerHttpTests : IAsyncLifetime
         "get_token_saver_status",
         "create_session_share_link",
         "add_jira_comment",
+        "add_ado_comment",
     };
 
     public async ValueTask InitializeAsync()
@@ -247,6 +248,40 @@ public class McpServerHttpTests : IAsyncLifetime
         Assert.DoesNotContain("add_jira_comment", BoardMcpAuthorization.ToolNames);
     }
 
+    /// <summary>An explicit outbound write like add_jira_comment: no token or organization argument, and never auto-granted.</summary>
+    [Fact]
+    public async Task AdoCommentToolBindsTextAndSessionLinksWithoutCredentialArguments()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var client = await ConnectAsync(ct);
+        var tool = Assert.Single(await client.GetAvailableToolsAsync(ct), t => t.Name == "add_ado_comment");
+        var properties = tool.JsonSchema.GetProperty("properties");
+        Assert.Equal(new[] { "body", "card", "sessionLinks" }, properties.EnumerateObject().Select(p => p.Name).OrderBy(n => n).ToArray());
+        var result = await client.CallToolAsync("add_ado_comment", new Dictionary<string, object?>
+        {
+            ["body"] = "Completed and tested",
+            ["sessionLinks"] = new[] { "https://viberails.ai/shared/session?key=" + new string('a', 64) },
+            ["card"] = "missing-card"
+        }, ct);
+        Assert.Contains("FAIL: card not found", result.Text);
+        Assert.DoesNotContain("add_ado_comment", BoardMcpAuthorization.ToolNames);
+    }
+
+    [Fact]
+    public async Task CommentToolsBindSyncToRemoteAndTheSyncToJiraAlias()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var client = await ConnectAsync(ct);
+        var tools = await client.GetAvailableToolsAsync(ct);
+        foreach (var name in new[] { "add_board_comment", "append_board_note" })
+        {
+            var properties = Assert.Single(tools, t => t.Name == name).JsonSchema.GetProperty("properties");
+            Assert.True(properties.TryGetProperty("syncToRemote", out var remote));
+            Assert.True(properties.TryGetProperty("syncToJira", out _));
+            Assert.Contains("Azure DevOps work item", remote.GetProperty("description").GetString());
+        }
+    }
+
     [Fact]
     public async Task SessionSharingToolResolvesAndExposesOnlyTheLinkNameAndAudience()
     {
@@ -426,6 +461,13 @@ public class McpServerHttpTests : IAsyncLifetime
         await client.CallToolAsync("add_board_comment", new Dictionary<string, object?>
             { ["body"] = "Started", ["card"] = "author-card", ["syncToJira"] = false }, cancellationToken: ct);
         Assert.False(syncToJira);
+        await client.CallToolAsync("add_board_comment", new Dictionary<string, object?>
+            { ["body"] = "Started", ["card"] = "author-card", ["syncToRemote"] = true }, cancellationToken: ct);
+        Assert.True(syncToJira);
+        var reply = await client.CallToolAsync("add_board_comment", new Dictionary<string, object?>
+            { ["body"] = "Started", ["card"] = "author-card", ["syncToRemote"] = false, ["syncToJira"] = true }, cancellationToken: ct);
+        Assert.False(syncToJira);
+        Assert.EndsWith("Not sent to Jira or Azure DevOps.", Assert.Single(reply.Content.OfType<TextContentBlock>()).Text);
     }
 
     [Fact]

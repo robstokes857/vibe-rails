@@ -269,6 +269,41 @@ public sealed class AppJsonSerializerContextTests
             json);
     }
 
+    [Theory]
+    [InlineData("""{"body":"x"}""", true)]
+    [InlineData("""{"body":"x","syncToJira":false}""", false)]
+    [InlineData("""{"body":"x","syncToRemote":false}""", false)]
+    [InlineData("""{"body":"x","syncToRemote":true,"syncToJira":false}""", true)]
+    [InlineData("""{"body":"x","syncToRemote":false,"syncToJira":true}""", false)]
+    public void BoardCommentRequests_ReadSyncToRemoteWithSyncToJiraAsTheAlias(string json, bool sync)
+    {
+        Assert.Equal(sync, JsonSerializer.Deserialize(json, AppJsonSerializerContext.Default.AddBoardCommentRequest)!.Sync);
+        Assert.Equal(sync, JsonSerializer.Deserialize(json, AppJsonSerializerContext.Default.AddBoardNoteRequest)!.Sync);
+        // The resolved value is never written back as a separate property.
+        Assert.DoesNotContain("\"sync\"", JsonSerializer.Serialize(new AddBoardCommentRequest("x"), AppJsonSerializerContext.Default.AddBoardCommentRequest));
+    }
+
+    [Fact]
+    public void AdoConnectionDtos_ReadTheWriteOnlyTokenAndNeverWriteOne()
+    {
+        var request = JsonSerializer.Deserialize(
+            """{"boardLink":"https://dev.azure.com/contoso/Web/_boards/board/t/Web%20Team/Stories","personalAccessToken":"pat","enabled":true,"columnMap":{"Doing":"col_1"}}""",
+            AppJsonSerializerContext.Default.SaveAdoConnectionRequest)!;
+        Assert.Equal("pat", request.PersonalAccessToken);
+        Assert.True(request.Enabled);
+        Assert.Equal("col_1", request.ColumnMap!["Doing"]);
+
+        var json = JsonSerializer.Serialize(new AdoConnectionResponse("brd_1", "contoso", "Web", "Web Team", "Stories", null,
+            "https://dev.azure.com/contoso/Web/_boards/board/t/Web%20Team/Stories", "Stories", true, "saved", null, null, true, true,
+            null, true, null, null, null, true), AppJsonSerializerContext.Default.AdoConnectionResponse);
+        Assert.Contains("\"hasToken\":true", json);
+        Assert.Contains("\"dedicatedBoard\":true", json);
+        Assert.DoesNotContain("personalAccessToken", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("pat\"", json);
+        Assert.Contains("\"boardId\":\"brd_2\"", JsonSerializer.Serialize(
+            new AdoTestResponse(true, "Web", null, null, "brd_2"), AppJsonSerializerContext.Default.AdoTestResponse));
+    }
+
     [Fact]
     public void UpdateBoardCardRequest_TellsOmittedFromNullFromEmpty()
     {

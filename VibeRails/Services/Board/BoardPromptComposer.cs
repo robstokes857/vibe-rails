@@ -51,6 +51,8 @@ public static class BoardPromptComposer
         + "The manager will read your handoff, request fixes or reviews, and choose the next lane. ";
     internal const string JiraGuidance =
         "For Jira-linked cards, Board comments sync to Jira by default. Keep shared updates concise and meaningful; do not spam progress. Use add_board_comment or append_board_note with syncToJira=false for internal notes. Linking a session automatically creates a public replay link and posts it to Jira; do not duplicate that post. ";
+    internal const string AdoGuidance =
+        "For Azure DevOps-linked cards, Board comments post to the work item by default. Keep shared updates concise and meaningful; do not spam progress. Use add_board_comment or append_board_note with syncToRemote=false for internal notes. Linking a session automatically creates a public replay link and posts it to the work item; do not duplicate that post. ";
     internal const string AttentionGuidance =
         "Set flagged=true with update_board_card only for an unresolved major bug, security/data-loss issue, or missing information blocking work that requires the user's intervention. Include flagReason explaining the issue and needed action; it saves a red comment and alerts this terminal. Routine progress, completion and review do not warrant a flag. Clear flagged once all reasons are resolved. ";
     internal const string WorkflowStepGuidance =
@@ -95,7 +97,7 @@ public static class BoardPromptComposer
         + "This is an Automation-launched agent. Keep your progress logs, decisions, validation results and final handoff in Comments using add_board_comment on every card this Automation is working against. Attach any additional cards with attach_board_session and name each target explicitly when commenting. Do not leave the only copy in terminal output: the Automation terminal closes after completion; its recording remains available. "
         + (managedWorkflow ? "Read the user's Board context from get_board_card. The manager owns lane movement and closure. "
             : "Before moving, save your handoff, check destination Automations with list_board_columns, then report the move. Read the user's Board context from get_board_card. ")
-        + JiraGuidance + (managedWorkflow ? ManagedWorkflowGuidance : WorkflowGuidance) + AttentionGuidance + (managedWorkflow ? "" : AgentCompletionGuidance)
+        + JiraGuidance + AdoGuidance + (managedWorkflow ? ManagedWorkflowGuidance : WorkflowGuidance) + AttentionGuidance + (managedWorkflow ? "" : AgentCompletionGuidance)
         + "\n\n" + (workerPrompt ?? "")
         + (managedWorkflow ? "\n\nAgent workflow Automation role: complete only your assigned step. Save required review evidence, report_automation_step with passed or failed and its summary, then save your handoff, complete_board_agent and end_agent_session LAST. Leave movement and closure to the manager; do not wait for later lane steps." : "");
     public const int MinDescriptionChars = 1_500;
@@ -146,6 +148,7 @@ public static class BoardPromptComposer
         if (isManager) builder.Append(ManagerGuidance).Append("\n\n");
         else if (isManagedWorker) builder.Append(ManagedWorkerGuidance).Append("\n\n");
         if (!string.IsNullOrWhiteSpace(card.JiraIssueKey)) builder.Append(JiraGuidance).Append("\n\n");
+        if (card.AdoWorkItemId is not null) builder.Append(AdoGuidance).Append("\n\n");
         if (intent == "code_review") builder.Append(isManagedWorker ? ReviewEvidenceGuidance : ReviewGuidance).Append("\n\n");
         var key = card.Key;
         builder.Append(isManager ? "You are managing kanban card " : "You are working on kanban card ").Append(key)
@@ -319,7 +322,7 @@ public static class BoardPromptComposer
     {
         if (question?.Length > 1000) throw new BoardValidationException("A card discussion question is limited to 1000 characters.");
         if (environmentPrompt?.Length > 2000) throw new BoardValidationException("For card discussion, use an environment initial message of at most 2000 characters, or choose a base agent.");
-        return (string.IsNullOrWhiteSpace(card.JiraIssueKey) ? "" : JiraGuidance) + $"The user wants to talk with you about kanban card {card.Key}. Purpose: discussion. " +
+        return (string.IsNullOrWhiteSpace(card.JiraIssueKey) ? "" : JiraGuidance) + (card.AdoWorkItemId is null ? "" : AdoGuidance) + $"The user wants to talk with you about kanban card {card.Key}. Purpose: discussion. " +
             $"Read get_board_card {card.Key} first for previous work, relevant file references, comments, commits, linked sessions and Board workflow context. Use read_board_session for captured discussion from its linked sessions. " +
             (card.Flagged ? $"FLAGGED: needs attention. This card was flagged by an agent. Read get_board_card {card.Key} and its comments before any project work, including any code review findings, and check later comments for decisions or fixes. " : "Flagged: no. ") +
             "Use its continuation cursors for more detail and read only relevant code. This is a fresh session; recover context from the card. " +

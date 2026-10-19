@@ -307,6 +307,12 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         builder.Services.AddSingleton(new JiraPullLock(Path.Combine(_root, JiraPullLock.FileName)));
         builder.Services.AddSingleton(new Mock<IJiraCloudClient>(MockBehavior.Strict).Object);
         builder.Services.AddScoped<IJiraPullService, JiraPullService>();
+        // Azure DevOps routes: real service over this fixture's board.db and a scripted client.
+        builder.Services.AddSingleton<VibeRails.Services.AzureDevOps.IAdoSecretStore>(
+            new VibeRails.Services.AzureDevOps.AdoSecretStore(Path.Combine(_root, VibeRails.Services.AzureDevOps.AdoSecretStore.FileName)));
+        builder.Services.AddSingleton(new VibeRails.Services.AzureDevOps.AdoPullLock(Path.Combine(_root, VibeRails.Services.AzureDevOps.AdoPullLock.FileName)));
+        builder.Services.AddSingleton<VibeRails.Services.AzureDevOps.IAzureDevOpsClient>(_ado);
+        builder.Services.AddScoped<VibeRails.Services.AzureDevOps.IAdoPullService, VibeRails.Services.AzureDevOps.AdoPullService>();
         builder.Services.AddSingleton(new BoardSyncLock(Path.Combine(_root, "sync.lock")));
         builder.Services.AddSingleton<BoardSyncActivityCache>();
         builder.Services.AddSingleton(new Mock<IBoardSyncClient>(MockBehavior.Loose).Object);

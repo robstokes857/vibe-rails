@@ -31,7 +31,7 @@ public sealed class AdoPullLock(string path) : TrackerPullLock(path)
 /// <summary>Shared outbound Azure DevOps composition for the root and the local stdio MCP host.</summary>
 public static class AdoServiceRegistration
 {
-    /// <summary>Registers the Azure DevOps client, token store and lock without starting a scheduler or listener.</summary>
+    /// <summary>Registers the Azure DevOps client, token store, lock and commenting without starting a scheduler or listener.</summary>
     public static IServiceCollection AddAdoClients(this IServiceCollection services)
     {
         services.AddHttpClient(AzureDevOpsClient.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(30))
@@ -39,7 +39,9 @@ public static class AdoServiceRegistration
         services.AddSingleton<IAdoSecretStore, AdoSecretStore>();
         services.AddSingleton(sp => new AzureDevOpsClient(sp.GetRequiredService<IHttpClientFactory>().CreateClient(AzureDevOpsClient.HttpClientName)));
         services.AddSingleton<IAzureDevOpsClient>(sp => sp.GetRequiredService<AzureDevOpsClient>());
+        services.AddSingleton<IAdoCommentClient>(sp => sp.GetRequiredService<AzureDevOpsClient>());
         services.AddSingleton(_ => AdoPullLock.BesideStateDatabase());
+        services.AddScoped<AdoCommentService>();
         return services;
     }
 }

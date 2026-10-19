@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using VibeRails.DTOs;
+using VibeRails.Services.Board.Tracker;
 using VibeRails.Services.LlmClis;
 
 namespace VibeRails.Services.Board;
@@ -113,10 +114,13 @@ public sealed partial class BoardService(
     {
         var columns = await store.GetAllColumnsAsync(projectPath, cancellationToken);
         var counts = await store.CountCardsByBoardAsync(projectPath, cancellationToken);
-        var jiraBoardIds = (await store.GetJiraConnectionsAsync(cancellationToken))
-            .Where(connection => connection.DedicatedBoard).Select(connection => connection.BoardId).ToHashSet(StringComparer.Ordinal);
-        return new BoardListResponse(boards.Select(board => ToDto(board, columns, counts) with { IsJiraBoard = jiraBoardIds.Contains(board.Id) }).ToList());
+        var providers = await store.DedicatedProvidersAsync(cancellationToken);
+        return new BoardListResponse(boards.Select(board => WithProvider(ToDto(board, columns, counts), providers.GetValueOrDefault(board.Id))).ToList());
     }
+
+    /// <summary>A dedicated tracker board names its provider; IsJiraBoard stays for older clients.</summary>
+    private static BoardSummaryResponse WithProvider(BoardSummaryResponse board, string? provider) =>
+        board with { IsJiraBoard = provider == TrackerProviders.Jira, RemoteProvider = provider };
 
     public async Task<BoardSummaryResponse> CreateBoardAsync(string projectPath, CreateBoardRequest request, CancellationToken cancellationToken = default)
     {
@@ -148,8 +152,7 @@ public sealed partial class BoardService(
             return null;
         var columns = await store.GetColumnsAsync(projectPath, cancellationToken, board.Id);
         var counts = await store.CountCardsByBoardAsync(projectPath, cancellationToken);
-        var isJiraBoard = await store.GetJiraConnectionAsync(projectPath, board.Id, cancellationToken) is { DedicatedBoard: true };
-        return ToDto(board, columns, counts) with { IsJiraBoard = isJiraBoard };
+        return WithProvider(ToDto(board, columns, counts), await store.DedicatedProviderAsync(projectPath, board.Id, cancellationToken));
     }
 
     public async Task<DeleteBoardResponse?> DeleteBoardAsync(string projectPath, string boardId, CancellationToken cancellationToken = default)
@@ -612,6 +615,9 @@ public sealed partial class BoardService(
         var authors = new Dictionary<string, BoardAuthor?>();
         var comments = await ResolveAuthorsAsync(detail.Comments, authors, cancellationToken);
         var notes = await ResolveAuthorsAsync(detail.Notes, authors, cancellationToken);
+        var jiraUrl = summary.JiraIssueKey is null ? null : await GetJiraIssueUrlAsync(detail.Card.ProjectPath, detail.Card.Id, cancellationToken);
+        IReadOnlyList<BoardJiraDeliveryDto> jiraDeliveries = summary.JiraIssueKey is null ? [] : (await store.GetJiraDeliveriesAsync(detail.Card.ProjectPath, detail.Card.Id, cancellationToken))
+            .Select(d => new BoardJiraDeliveryDto(d.SourceId, d.Kind, d.Status, d.Message)).ToList();
         return new BoardCardResponse(
             summary.Id, summary.Key, summary.ColumnId, summary.Position, summary.Title, summary.Description,
             summary.Assignee, summary.Priority, summary.Points, summary.Tags, summary.Blocked, summary.CommentCount,
@@ -627,9 +633,23 @@ public sealed partial class BoardService(
             summary.WorkflowMode, summary.ManagerSelection, summary.ManagerBaseLlmOptions)
         {
             HasActiveDesktopAgent = desktopCards?.Contains(detail.Card.Id) == true,
-            JiraIssueUrl = summary.JiraIssueKey is null ? null : await GetJiraIssueUrlAsync(detail.Card.ProjectPath, detail.Card.Id, cancellationToken),
-            JiraDeliveries = summary.JiraIssueKey is null ? [] : (await store.GetJiraDeliveriesAsync(detail.Card.ProjectPath, detail.Card.Id, cancellationToken))
-                .Select(d => new BoardJiraDeliveryDto(d.SourceId, d.Kind, d.Status, d.Message)).ToList(),
+            JiraIssueUrl = jiraUrl,
+            JiraDeliveries = jiraDeliveries,
+            RemoteProvider = summary.RemoteProvider,
+            RemoteIssueKey = summary.RemoteIssueKey,
+            RemoteIssueUrl = summary.RemoteProvider switch
+            {
+                TrackerProviders.Jira => jiraUrl,
+                TrackerProviders.Ado => await GetAdoWorkItemUrlAsync(detail.Card.ProjectPath, detail.Card.Id, cancellationToken),
+                _ => null
+            },
+            RemoteDeliveries = summary.RemoteProvider switch
+            {
+                TrackerProviders.Jira => jiraDeliveries,
+                TrackerProviders.Ado => (await store.GetAdoDeliveriesAsync(detail.Card.ProjectPath, detail.Card.Id, cancellationToken))
+                    .Select(d => new BoardJiraDeliveryDto(d.SourceId, d.Kind, d.Status, d.Message)).ToList(),
+                _ => []
+            },
             LinkedCards = detail.LinkedCards.Select(card => ToDto(card, detail.Card.ProjectPath)).ToList(),
             PreviousWork = BoardHandoffService.WithFileStatus(detail.PreviousWork, detail.Card.ProjectPath),
             FileCandidates = detail.PreviousWork is null && detail.Commits.Count > 0
@@ -649,6 +669,23 @@ public sealed partial class BoardService(
             if (connection is null) continue;
             try { return Jira.JiraSite.Parse(connection.SiteUrl).Origin + "/browse/" + Uri.EscapeDataString(link.IssueKey); }
             catch (Jira.JiraConfigException) { }
+        }
+        return null;
+    }
+
+    /// <summary>The work item page from the saved organization and project, never from a pulled value.</summary>
+    private async Task<string?> GetAdoWorkItemUrlAsync(string project, string cardId, CancellationToken ct)
+    {
+        var links = await store.GetAdoLinksForCardAsync(project, cardId, ct);
+        if (links.Count == 0) return null;
+        var connections = await store.GetAdoConnectionsAsync(ct);
+        foreach (var link in links)
+        {
+            var connection = connections.FirstOrDefault(c => c.Id == link.ConnectionId
+                && string.Equals(BoardPaths.NormalizeProjectPath(c.ProjectPath), BoardPaths.NormalizeProjectPath(project), BoardPaths.ProjectPathComparison));
+            if (connection is null || !AzureDevOps.AdoBoardLink.IsOrganization(connection.Organization)
+                || !AzureDevOps.AdoBoardLink.IsName(connection.Project)) continue;
+            return AzureDevOps.AdoBoardLink.WorkItemUrl(connection.Organization, connection.Project, link.WorkItemId);
         }
         return null;
     }
@@ -679,7 +716,12 @@ public sealed partial class BoardService(
         card.Points, card.Tags.ToList(), card.Blocked, card.CommentCount, activeSessionId, activeTabId, card.CreatedUtc, card.UpdatedUtc,
         card.BaseLlmOptions, card.Type, card.BoardId, card.Flagged, DisplayId: card.DisplayId, AgentMade: card.AgentMade,
         AgentMadeBy: card.AgentMadeBy, AgentMadeSessionId: card.AgentMadeSessionId, JiraIssueKey: card.JiraIssueKey,
-        WorkflowMode: card.WorkflowMode, ManagerSelection: PresentAssignee(card.ManagerSelection), ManagerBaseLlmOptions: card.ManagerBaseLlmOptions);
+        WorkflowMode: card.WorkflowMode, ManagerSelection: PresentAssignee(card.ManagerSelection), ManagerBaseLlmOptions: card.ManagerBaseLlmOptions)
+    {
+        // Jira first, as the Jira fields always have been; a card is linked to one tracker in practice.
+        RemoteProvider = card.JiraIssueKey is not null ? TrackerProviders.Jira : card.AdoWorkItemId is not null ? TrackerProviders.Ado : null,
+        RemoteIssueKey = card.JiraIssueKey ?? (card.AdoWorkItemId is int id ? AzureDevOps.AdoFieldMapping.Key(id) : null)
+    };
 
     private static bool IsWorkflowAgent(string origin, bool agentWorkflow) => agentWorkflow
         ? origin == "agent_manager"

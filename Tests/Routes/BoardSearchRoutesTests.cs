@@ -36,6 +36,43 @@ public sealed partial class BoardRoutesTests
         Assert.False(unlinked.RootElement.GetProperty("isJiraBoard").GetBoolean());
     }
 
+    /// <summary>The owning board's dedicated Azure DevOps connection names the provider; the card's work item link names the card's.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LocalCardDetailReportsItsOwningBoardsDedicatedAzureDevOpsConnection(bool dedicated)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var store = _app.Services.GetRequiredService<IBoardStore>();
+        var elsewhere = _project + "-foreign";
+        await store.EnsureDefaultColumnsAsync(elsewhere, ct);
+        var card = await store.CreateCardAsync(elsewhere, new(null, "Foreign card", "", null, "medium", null, [], false), ct);
+        var path = $"/api/v1/board/local-cards/{card.Id}";
+
+        using var local = await GetJsonAsync(path);
+        Assert.Equal(JsonValueKind.Null, local.RootElement.GetProperty("remoteProvider").ValueKind);
+        Assert.Equal(JsonValueKind.Null, local.RootElement.GetProperty("card").GetProperty("remoteProvider").ValueKind);
+
+        await store.SaveAdoConnectionAsync(new("ado_localdetail0", elsewhere, card.BoardId, "contoso", "Web", "Web Team", "Stories", null,
+            "https://dev.azure.com/contoso/Web/_boards/board/t/Web%20Team/Stories", "Stories", null, null, null, null,
+            false, BoardAdoAuthStatus.Expired, false, null, null, DedicatedBoard: dedicated, null, null, null), ct);
+        await store.AddAdoLinkAsync(new(card.Id, "ado_localdetail0", 9, 1, DateTime.UtcNow, null, DateTime.UtcNow), ct);
+        using var connected = await GetJsonAsync(path);
+        Assert.Equal(dedicated ? "ado" : null, connected.RootElement.GetProperty("remoteProvider").GetString());
+        Assert.False(connected.RootElement.GetProperty("isJiraBoard").GetBoolean());
+        var linked = connected.RootElement.GetProperty("card");
+        Assert.Equal("ado", linked.GetProperty("remoteProvider").GetString());
+        Assert.Equal("#9", linked.GetProperty("remoteIssueKey").GetString());
+        Assert.Equal("https://dev.azure.com/contoso/Web/_workitems/edit/9", linked.GetProperty("remoteIssueUrl").GetString());
+        Assert.Equal(JsonValueKind.Null, linked.GetProperty("jiraIssueKey").ValueKind);
+
+        Assert.True(await store.DeleteAdoConnectionAsync(elsewhere, card.BoardId, "ado_localdetail0", ct));
+        using var unlinked = await GetJsonAsync(path);
+        Assert.Equal(JsonValueKind.Null, unlinked.RootElement.GetProperty("remoteProvider").ValueKind);
+        // The retained work item link keeps the card's identity; the page needs a live connection.
+        Assert.Equal(JsonValueKind.Null, unlinked.RootElement.GetProperty("card").GetProperty("remoteIssueUrl").ValueKind);
+    }
+
     [Fact]
     public async Task ProjectOnlyMergeCandidatesApplyScopeBeforeLimitAndKeepLinkedDestinations()
     {

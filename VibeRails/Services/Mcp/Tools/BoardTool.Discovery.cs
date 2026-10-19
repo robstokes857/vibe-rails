@@ -1,5 +1,6 @@
 using System.Text;
 using VibeRails.Services.Board;
+using VibeRails.Services.Board.Tracker;
 
 namespace VibeRails.Services.Mcp.Tools;
 
@@ -9,7 +10,7 @@ public sealed partial class BoardTool
         string.Equals(left, right, BoardPaths.ProjectPathComparison);
 
     private async Task AppendBoardsAsync(StringBuilder builder, string project, IReadOnlyList<BoardRecord> boards,
-        string? currentBoardId, bool currentProject, CancellationToken cancellationToken)
+        string? currentBoardId, bool currentProject, IReadOnlyDictionary<string, string> providers, CancellationToken cancellationToken)
     {
         var columns = await store.GetAllColumnsAsync(project, cancellationToken);
         var counts = await store.CountCardsByBoardAsync(project, cancellationToken);
@@ -25,6 +26,9 @@ public sealed partial class BoardTool
             var lanes = columns.Where(c => c.BoardId == board.Id).OrderBy(c => c.Position).ToList();
             if (lanes.Count > 0)
                 builder.Append("; lanes: ").Append(string.Join(" → ", lanes.Select(c => LaneLabel(c.Name, automations[c.Id]))));
+            // A dedicated tracker board names its provider; a board without one is local.
+            if (providers.TryGetValue(board.Id, out var provider))
+                builder.Append("; provider: ").Append(TrackerBoards.DisplayName(provider));
             if (currentProject && board.Id == currentBoardId) builder.Append("; current");
             builder.Append(")\n");
         }

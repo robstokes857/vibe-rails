@@ -788,33 +788,58 @@ public interface IAdoPullScheduler
 }
 
 /// <summary>
-/// Singleton so the interval survives between scheduler cycles, with Jira's cadence. The pull
+/// Singleton so the intervals survive between scheduler cycles, with Jira's cadence. The pull
 /// service is scoped (it needs the scoped <see cref="IBoardService"/>), so each pull resolves it
-/// from a fresh scope. A pull that found the cross-process lock held (another process) is due
-/// again on the next tick instead of after a whole interval.
+/// from a fresh scope. The pull and the activity drain share the cross-process Azure DevOps lock,
+/// so a due pull is started ahead of the drain and the drain waits out a running pull; a pull
+/// that still found the lock held (another process) is due again on the next tick instead of
+/// after a whole interval.
 /// </summary>
 public sealed class AdoPullScheduler(IServiceScopeFactory scopeFactory) : IAdoPullScheduler
 {
     public static readonly TimeSpan Interval = TimeSpan.FromMinutes(15);
+    public static readonly TimeSpan DeliveryInterval = TimeSpan.FromSeconds(5);
     private readonly Lock _gate = new();
     private DateTime _nextUtc = DateTime.MinValue;
     private Task _running = Task.CompletedTask;
+    private Task _delivering = Task.CompletedTask;
+    private DateTime _nextDeliveryUtc = DateTime.MinValue;
 
     public Task? Tick(DateTime nowUtc, CancellationToken stoppingToken)
     {
         lock (_gate)
         {
-            if (!_running.IsCompleted || nowUtc < _nextUtc)
-                return null;
-            _nextUtc = nowUtc.Add(Interval);
-            return _running = Task.Run(() => PullAsync(nowUtc, stoppingToken), CancellationToken.None);
+            if (_running.IsCompleted && nowUtc >= _nextUtc)
+            {
+                _nextUtc = nowUtc.Add(Interval);
+                return _running = Task.Run(() => PullAsync(nowUtc, stoppingToken), CancellationToken.None);
+            }
+            if (_running.IsCompleted && _delivering.IsCompleted && nowUtc >= _nextDeliveryUtc)
+            {
+                _nextDeliveryUtc = nowUtc.Add(DeliveryInterval);
+                _delivering = Task.Run(() => DeliverAsync(stoppingToken), CancellationToken.None);
+            }
+            return null;
         }
     }
 
     public Task WhenIdleAsync()
     {
         lock (_gate)
-            return _running;
+            return Task.WhenAll(_running, _delivering);
+    }
+
+    // Never throws. Delivery detail stays on the card: no token, body or sharing URL is logged.
+    private async Task DeliverAsync(CancellationToken ct)
+    {
+        try
+        {
+            await using var scope = scopeFactory.CreateAsyncScope();
+            if (scope.ServiceProvider.GetService<AdoDeliveryService>() is { } delivery)
+                await delivery.DrainAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        catch (Exception) { Log.Warning("[AzureDevOps] Activity delivery could not complete; inspect card delivery status."); }
     }
 
     // Never throws: the task is observed only by WhenIdleAsync at shutdown.

@@ -111,7 +111,7 @@ public interface IAzureDevOpsClient
 
 /// <param name="requestTimeout">One deadline for each request, its headers and its whole body;
 /// 30 seconds unless a test sets it.</param>
-public sealed class AzureDevOpsClient(HttpClient http, TimeSpan? requestTimeout = null) : IAzureDevOpsClient
+public sealed partial class AzureDevOpsClient(HttpClient http, TimeSpan? requestTimeout = null) : IAzureDevOpsClient, IAdoCommentClient
 {
     public const string HttpClientName = "azure-devops";
     public const string ApiVersion = "7.1";
@@ -281,9 +281,9 @@ public sealed class AzureDevOpsClient(HttpClient http, TimeSpan? requestTimeout 
 
     private static HttpRequestMessage Get(string url, string token) => Request(HttpMethod.Get, url, token);
 
-    private static HttpRequestMessage Request(HttpMethod method, string url, string token, string? query = null)
+    private static HttpRequestMessage Request(HttpMethod method, string url, string token, string? query = null, string apiVersion = ApiVersion)
     {
-        var request = new HttpRequestMessage(method, url + "?" + (query is null ? "" : query + "&") + "api-version=" + ApiVersion);
+        var request = new HttpRequestMessage(method, url + "?" + (query is null ? "" : query + "&") + "api-version=" + apiVersion);
         var raw = Encoding.UTF8.GetBytes(":" + token);
         request.Headers.Authorization = new AuthenticationHeaderValue("Basic", Convert.ToBase64String(raw));
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));

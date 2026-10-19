@@ -8,6 +8,7 @@ using VibeRails.DTOs;
 using VibeRails.Services.AgentTools;
 using VibeRails.Services.Board;
 using VibeRails.Services.Board.Sync;
+using VibeRails.Services.Board.Tracker;
 
 namespace VibeRails.Services.Mcp.Tools;
 
@@ -34,7 +35,8 @@ public sealed partial class BoardTool(
     VibeRails.Services.BertV2.IBertSearchDbService? history = null,
     BoardSearchService? search = null,
     VibeRails.Services.Jira.JiraCommentService? jiraComments = null,
-    DesktopMcpActivityTracker? desktopActivity = null)
+    DesktopMcpActivityTracker? desktopActivity = null,
+    VibeRails.Services.AzureDevOps.AdoCommentService? adoComments = null)
 {
     /// <summary>
     /// MCP image payloads are base64 encoded and copied by the protocol stack. Keep this transfer
@@ -51,6 +53,17 @@ public sealed partial class BoardTool(
     private const string CardArgumentHelp =
         "Full permanent card key or row ID from any local board. Short keys and display IDs resolve only in the current project. Omit for this terminal's original card.";
 
+    private const string SyncToRemoteHelp =
+        "Default true: post this comment to the linked Jira issue or Azure DevOps work item. Set false for internal notes that must not leave VibeRails. Keep synced updates concise; avoid progress spam.";
+
+    private const string SyncToJiraHelp =
+        "Older name for syncToRemote; it applies to Jira and Azure DevOps alike. syncToRemote wins when both are given.";
+
+    private const string NotSentToRemote = " Not sent to Jira or Azure DevOps.";
+
+    /// <summary><c>syncToRemote ?? syncToJira ?? true</c>. Storage keeps the <c>syncToJira</c> key for both trackers.</summary>
+    internal static bool ResolveRemoteSync(bool? syncToRemote, bool? syncToJira) => syncToRemote ?? syncToJira ?? true;
+
     [McpServerTool, Description("List all local kanban boards with IDs, project paths, lanes and card counts: current-project boards first, then a separate list of other local projects. Use a board ID to list lanes/cards or create a card on another board. Full permanent card keys and row IDs work across local projects; short keys and display IDs stay current-project scoped.")]
     public async Task<string> ListBoards(CancellationToken cancellationToken = default)
     {
@@ -61,16 +74,17 @@ public sealed partial class BoardTool(
             await service.GetBoardsAsync(project, cancellationToken);
             var current = await ResolveBoardAsync(project, null, cancellationToken);
             var boards = await store.GetLocalBoardsAsync(cancellationToken);
+            var providers = await store.DedicatedProvidersAsync(cancellationToken);
             var builder = new StringBuilder();
             builder.Append("Current project boards for ").Append(project).Append(":\n");
-            await AppendBoardsAsync(builder, project, boards.Where(b => SameProject(b.ProjectPath, project)).ToList(), current.BoardId, true, cancellationToken);
+            await AppendBoardsAsync(builder, project, boards.Where(b => SameProject(b.ProjectPath, project)).ToList(), current.BoardId, true, providers, cancellationToken);
             builder.Append("\nOther local boards (outside the current project):\n");
             var others = boards.Where(b => !SameProject(b.ProjectPath, project)).ToList();
             if (others.Count == 0) builder.Append("None.\n");
             foreach (var group in others.GroupBy(b => b.ProjectPath))
             {
                 builder.Append("Project: ").Append(group.Key).Append('\n');
-                await AppendBoardsAsync(builder, group.Key, group.ToList(), null, false, cancellationToken);
+                await AppendBoardsAsync(builder, group.Key, group.ToList(), null, false, providers, cancellationToken);
             }
             builder.Append("\nUse board=<id> for an explicit destination. Omitted board stays in the current project. ")
                 .Append("For cards on other projects, use the full permanent key or row ID from list_board_cards; short keys and display IDs are current-project only.");
@@ -568,14 +582,16 @@ public sealed partial class BoardTool(
         }
     }
 
-    [McpServerTool, Description("Add a comment to a kanban card; linked Jira issues receive it by default. Use syncToJira=false for internal notes. Avoid repetitive progress updates. Use it to record progress, decisions, blockers and hand-off notes so the next session can resume. Omit the card to comment on the card this terminal was launched for.")]
+    [McpServerTool, Description("Add a comment to a kanban card; a linked Jira issue or Azure DevOps work item receives it by default. Use syncToRemote=false for internal notes. Avoid repetitive progress updates. Use it to record progress, decisions, blockers and hand-off notes so the next session can resume. Omit the card to comment on the card this terminal was launched for.")]
     public async Task<string> AddBoardComment(
         [Description("Comment text.")] string body,
         [Description(CardArgumentHelp)] string? card = null,
         CancellationToken cancellationToken = default,
         McpServer? server = null,
-        [Description("Default true: post this comment to linked Jira issues. Set false for internal notes that must not be sent to Jira. Keep synced updates concise; avoid progress spam.")] bool syncToJira = true)
+        [Description(SyncToJiraHelp)] bool? syncToJira = null,
+        [Description(SyncToRemoteHelp)] bool? syncToRemote = null)
     {
+        var sync = ResolveRemoteSync(syncToRemote, syncToJira);
         try
         {
             var target = await ResolveCardAsync(card, cancellationToken);
@@ -583,12 +599,12 @@ public sealed partial class BoardTool(
                 return target.Error;
             if (await ResolveAuthorAsync(server, cancellationToken) is not { } author)
                 return UnnamedClientHint;
-            var comment = await service.AddCommentAsync(target.Project, target.CardId!, author, body, cancellationToken, syncToJira);
+            var comment = await service.AddCommentAsync(target.Project, target.CardId!, author, body, cancellationToken, sync);
             if (comment is null)
                 return $"FAIL: card not found: {card}";
             await AutoLinkSessionAsync(target.Project, target.CardId!, cancellationToken);
             await TrackDesktopActivityAsync(server, target.Project, target.CardId!, author.Label, cancellationToken);
-            return $"Comment {comment.Id} added to {target.CardKey} as {author.Label} at {comment.CreatedAt:HH:mm:ss}Z." + (syncToJira ? "" : " Not sent to Jira.");
+            return $"Comment {comment.Id} added to {target.CardKey} as {author.Label} at {comment.CreatedAt:HH:mm:ss}Z." + (sync ? "" : NotSentToRemote);
         }
         catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
         catch (BoardConflictException ex) { return "FAIL: " + ex.Message; }
@@ -604,8 +620,10 @@ public sealed partial class BoardTool(
         [Description(CardArgumentHelp)] string? card = null,
         CancellationToken cancellationToken = default,
         McpServer? server = null,
-        [Description("Default true: post this comment to linked Jira issues. Set false for internal notes that must not be sent to Jira. Keep synced updates concise; avoid progress spam.")] bool syncToJira = true)
+        [Description(SyncToJiraHelp)] bool? syncToJira = null,
+        [Description(SyncToRemoteHelp)] bool? syncToRemote = null)
     {
+        var sync = ResolveRemoteSync(syncToRemote, syncToJira);
         try
         {
             var target = await ResolveCardAsync(card, cancellationToken);
@@ -613,12 +631,12 @@ public sealed partial class BoardTool(
                 return target.Error;
             if (await ResolveAuthorAsync(server, cancellationToken) is not { } author)
                 return UnnamedClientHint;
-            var note = await service.AddNoteAsync(target.Project, target.CardId!, author, body, cancellationToken, syncToJira);
+            var note = await service.AddNoteAsync(target.Project, target.CardId!, author, body, cancellationToken, sync);
             if (note is null)
                 return $"FAIL: card not found: {card}";
             await AutoLinkSessionAsync(target.Project, target.CardId!, cancellationToken);
             await TrackDesktopActivityAsync(server, target.Project, target.CardId!, author.Label, cancellationToken);
-            return $"Comment {note.Id} added to {target.CardKey} as {author.Label} at {note.CreatedAt:HH:mm:ss}Z." + (syncToJira ? "" : " Not sent to Jira.");
+            return $"Comment {note.Id} added to {target.CardKey} as {author.Label} at {note.CreatedAt:HH:mm:ss}Z." + (sync ? "" : NotSentToRemote);
         }
         catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
         catch (BoardConflictException ex) { return "FAIL: " + ex.Message; }
@@ -1027,6 +1045,12 @@ public sealed partial class BoardTool(
         if (!string.IsNullOrWhiteSpace(card.JiraIssueKey))
             builder.Append("Jira issue: ").Append(card.JiraIssueKey)
                 .Append(". Comments sync to Jira by default. Keep updates concise; do not spam progress. Use add_board_comment or append_board_note with syncToJira=false for internal notes. Linked sessions automatically get public replay links posted to Jira. Do not duplicate those posts with add_jira_comment.\n");
+        if (card.RemoteProvider == TrackerProviders.Ado && !string.IsNullOrWhiteSpace(card.RemoteIssueKey))
+        {
+            builder.Append("Azure DevOps work item: ").Append(card.RemoteIssueKey);
+            if (!string.IsNullOrWhiteSpace(card.RemoteIssueUrl)) builder.Append(' ').Append(card.RemoteIssueUrl);
+            builder.Append(". Comments post to the work item by default. Keep updates concise; do not spam progress. Use add_board_comment or append_board_note with syncToRemote=false for internal notes. Linked sessions automatically get public replay links posted to the work item. Do not duplicate those posts with add_ado_comment.\n");
+        }
         if (!string.IsNullOrWhiteSpace(boardName))
             builder.Append("Board: ").Append(boardName).Append('\n');
         if (laneNames is { Count: > 0 })

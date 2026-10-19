@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging;
+using VibeRails.Services.Board.Tracker;
 using VibeRails.Services.Diagnostics;
 using VibeRails.Utils;
 
@@ -25,7 +26,8 @@ public sealed record BoardSyncStatus(
     int Skipped = 0,
     IReadOnlyList<BoardSyncSkippedEntry>? SkippedEntries = null,
     bool ActivityEnabled = false,
-    bool IsJiraBoard = false);
+    bool IsJiraBoard = false,
+    string? RemoteProvider = null);
 
 public interface IBoardSyncService
 {
@@ -85,8 +87,8 @@ public sealed class BoardSyncService(
         var board = await store.GetBoardAsync(projectPath, boardId, cancellationToken);
         if (board is null)
             return null;
-        if (enabled && await IsJiraBoardAsync(projectPath, boardId, cancellationToken))
-            throw new BoardValidationException("Jira boards use Jira for remote access and cannot sync with viberails.ai.");
+        if (enabled && await store.DedicatedProviderAsync(projectPath, boardId, cancellationToken) is { } tracker)
+            throw TrackerBoardRefused(tracker);
         var wasEnabled = board.SyncEnabled;
         board = await store.SetBoardSyncEnabledAsync(projectPath, boardId, enabled, cancellationToken);
         if (board is null) return null;
@@ -167,8 +169,8 @@ public sealed class BoardSyncService(
         var board = await store.GetBoardAsync(projectPath, boardId, cancellationToken);
         if (board is null)
             return null;
-        if (await IsJiraBoardAsync(projectPath, boardId, cancellationToken))
-            throw new BoardValidationException("Jira boards use Jira for remote access and cannot sync with viberails.ai.");
+        if (await store.DedicatedProviderAsync(projectPath, boardId, cancellationToken) is { } tracker)
+            throw TrackerBoardRefused(tracker);
         if (!board.SyncEnabled)
             throw new BoardValidationException("Enable viberails.ai sync for this board first.");
         var link = await EnsurePublishedAsync(board, cancellationToken);
@@ -192,7 +194,8 @@ public sealed class BoardSyncService(
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                if (await IsJiraBoardAsync(board.ProjectPath, board.Id, cancellationToken)) continue;
+                // A dedicated Jira or Azure DevOps board never uploads, even if its sync flag is set.
+                if (await store.DedicatedProviderAsync(board.ProjectPath, board.Id, cancellationToken) is not null) continue;
                 var link = await EnsurePublishedAsync(board, cancellationToken);
                 if (link is not null) await SyncLinkAsync(link, cancellationToken);
             }
@@ -765,7 +768,8 @@ public sealed class BoardSyncService(
     private async Task<BoardSyncStatus> StatusAsync(BoardRecord board, BoardSyncLinkRecord? link, CancellationToken cancellationToken)
     {
         var boardId = board.Id;
-        var isJiraBoard = await IsJiraBoardAsync(board.ProjectPath, boardId, cancellationToken);
+        var tracker = await store.DedicatedProviderAsync(board.ProjectPath, boardId, cancellationToken);
+        var isTrackerBoard = tracker is not null;
         var unsent = link is null ? 0 : await store.CountUnsentLogEntriesAsync(boardId, cancellationToken);
         var rejected = link is null ? 0 : await store.CountRejectedLogEntriesAsync(boardId, cancellationToken);
         var rejectedEntries = rejected == 0 ? [] : await store.GetRejectedLogEntriesAsync(boardId, 50, cancellationToken);
@@ -774,7 +778,7 @@ public sealed class BoardSyncService(
         return new BoardSyncStatus(
             boardId,
             Published: link is not null,
-            Enabled: board.SyncEnabled && !isJiraBoard,
+            Enabled: board.SyncEnabled && !isTrackerBoard,
             link?.RemoteBoardId,
             BoardSyncEndpoint.BoardPage(ParserConfigs.GetFrontendUrl(), link?.RemoteBoardId),
             link?.Cursor ?? 0,
@@ -786,12 +790,13 @@ public sealed class BoardSyncService(
             rejectedEntries,
             skipped,
             skippedEntries,
-            ActivityEnabled: board.SyncEnabled && !isJiraBoard && client.IsConfigured,
-            IsJiraBoard: isJiraBoard);
+            ActivityEnabled: board.SyncEnabled && !isTrackerBoard && client.IsConfigured,
+            IsJiraBoard: tracker == TrackerProviders.Jira,
+            RemoteProvider: tracker);
     }
 
-    private async Task<bool> IsJiraBoardAsync(string projectPath, string boardId, CancellationToken cancellationToken) =>
-        await store.GetJiraConnectionAsync(projectPath, boardId, cancellationToken) is { DedicatedBoard: true };
+    private static BoardValidationException TrackerBoardRefused(string tracker) =>
+        new($"{TrackerBoards.DisplayName(tracker)} boards use {TrackerBoards.DisplayName(tracker)} for remote access and cannot sync with viberails.ai.");
 
     private static string Trim(string value) => value.Length <= MaxErrorLength ? value : value[..MaxErrorLength];
 

@@ -162,6 +162,22 @@ public sealed class BoardPromptComposerTests
     }
 
     [Fact]
+    public void AzureDevOpsLaunchesExplainAutomaticSyncAndInternalNotes()
+    {
+        var card = Card() with { AdoWorkItemId = 42 };
+        foreach (var intent in new[] { "work", "chat", "code_review" })
+        {
+            var prompt = BoardPromptComposer.Compose(card, "Backlog", "Codex", null, intent: intent);
+            Assert.Contains(BoardPromptComposer.AdoGuidance, prompt);
+            Assert.Contains("syncToRemote=false", prompt);
+            Assert.DoesNotContain(BoardPromptComposer.JiraGuidance, prompt);
+        }
+        foreach (var intent in new[] { "work", "chat" })
+            Assert.DoesNotContain(BoardPromptComposer.AdoGuidance, BoardPromptComposer.Compose(Card(), "Backlog", "Codex", null, intent: intent));
+        Assert.Contains("syncToRemote=false", BoardPromptComposer.ComposeAutomationPrompt(card.Key, "Work"));
+    }
+
+    [Fact]
     public void AutomationCompletionIsExplicitForBoardAndStandaloneWorkers()
     {
         foreach (var purpose in new[] { "code_review", "testing", "building", "deploying" })

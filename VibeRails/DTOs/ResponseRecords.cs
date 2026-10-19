@@ -143,7 +143,9 @@ namespace VibeRails.DTOs
     // A project has one or more boards (sprints, sub-projects); every lane belongs to one. Card
     // keys stay per project. Lane and card list calls take an optional board id and default to
     // the project's first board, so a single-board client keeps working unchanged.
-    public record BoardSummaryResponse(string Id, string Name, int Position, DateTime CreatedAt, int CardCount, List<BoardColumnResponse> Columns, string? DisplayPrefix = null, bool IsJiraBoard = false);
+    // RemoteProvider is the tracker whose dedicated board this is ("jira" or "ado"), or null for a
+    // local board. IsJiraBoard stays for older clients and is RemoteProvider == "jira".
+    public record BoardSummaryResponse(string Id, string Name, int Position, DateTime CreatedAt, int CardCount, List<BoardColumnResponse> Columns, string? DisplayPrefix = null, bool IsJiraBoard = false, string? RemoteProvider = null);
     public record BoardListResponse(List<BoardSummaryResponse> Boards);
     public record CreateBoardRequest(string? Name = null, string? DisplayPrefix = null);
 
@@ -210,6 +212,65 @@ namespace VibeRails.DTOs
     public record JiraPullResponse(
         bool DryRun, string Outcome, int Created, int Updated, int Skipped, int Failed, string? Message, string? BoardId = null);
 
+    // Azure DevOps Services pull (VIBE-165), mirroring Jira. The personal access token is write-only:
+    // a response never carries it, only HasToken. Azure DevOps wins on the mapped fields
+    // (LastWriteWins). Columns and Lanes are filled only for GET …/ado?settings=true; a column lane
+    // has the Jira column lane's shape.
+    public record AdoConnectionResponse(
+        string BoardId,
+        string? Organization,
+        string? Project,
+        string? Team,
+        string? BacklogLevel,
+        string? QueryId,
+        string? BoardLink,
+        string? AdoBoardName,
+        bool HasToken,
+        string AuthStatus,
+        string? PointsField,
+        string? NarrowWiql,
+        bool? SkipOldDone,
+        bool Enabled,
+        string? DisabledReason,
+        bool DedicatedBoard,
+        DateTime? LastTestedUtc,
+        DateTime? LastPullUtc,
+        string? LastReport,
+        bool LastWriteWins,
+        List<JiraColumnLaneResponse>? Columns = null,
+        List<JiraLaneOptionResponse>? Lanes = null);
+
+    // A blank BoardLink keeps the saved board or query, so changing only the token or options never
+    // needs the link again. A blank PersonalAccessToken keeps the saved one. A null NarrowWiql,
+    // SkipOldDone or ColumnMap keeps the saved value; a blank PointsField detects it from the
+    // process. ColumnMap maps an Azure DevOps column name to a lane id, or "" for automatic.
+    public record SaveAdoConnectionRequest(
+        string? BoardLink = null,
+        string? PersonalAccessToken = null,
+        bool Enabled = false,
+        string? PointsField = null,
+        string? NarrowWiql = null,
+        bool? SkipOldDone = null,
+        Dictionary<string, string>? ColumnMap = null);
+
+    // BoardId is the connection's (dedicated) board, for the settings form to follow.
+    public record AdoTestResponse(bool Ok, string? Project, string? Error, AdoBoardSummaryResponse? Board = null, string? BoardId = null);
+
+    public record AdoBoardSummaryResponse(
+        string? Name,
+        string? Team,
+        string? BacklogLevel,
+        string? QueryId,
+        string? QueryType,
+        int? WorkItemCount,
+        bool CountCapped,
+        string? PointsField,
+        List<JiraColumnLaneResponse> Columns,
+        List<string> Warnings);
+
+    public record AdoPullResponse(
+        bool DryRun, string Outcome, int Created, int Updated, int Skipped, int Failed, string? Message, string? BoardId = null);
+
     // Board sync with viberails.ai (VB-51). Published = a link exists; Enabled = it syncs every
     // 60 s. Configured = an HTTPS endpoint and an API key are both present. The API key itself
     // never appears here.
@@ -229,7 +290,8 @@ namespace VibeRails.DTOs
         int Skipped = 0,
         IReadOnlyList<BoardSyncSkippedEntry>? SkippedEntries = null,
         bool ActivityEnabled = false,
-        bool IsJiraBoard = false);
+        bool IsJiraBoard = false,
+        string? RemoteProvider = null);
 
     public record SetBoardSyncRequest(bool Enabled = false, bool IncludeActivity = false);
     public record UpdateBoardRequest(string? Name = null, string? DisplayPrefix = null);
@@ -297,6 +359,10 @@ namespace VibeRails.DTOs
     {
         /// <summary>A desktop MCP client has a current activity lease; this does not identify a terminal tab.</summary>
         public bool HasActiveDesktopAgent { get; init; }
+        /// <summary>The tracker this card is linked to ("jira" or "ado"), or null. JiraIssueKey stays for older clients.</summary>
+        public string? RemoteProvider { get; init; }
+        /// <summary>The linked issue's key: <c>APP-7</c> for Jira, <c>#123</c> for an Azure DevOps work item.</summary>
+        public string? RemoteIssueKey { get; init; }
     }
     public record BoardCardListResponse(List<BoardCardSummaryResponse> Cards)
     {
@@ -322,8 +388,9 @@ namespace VibeRails.DTOs
     /// <summary>Repo-relative paths (forward slashes) for the composer's `@path` typeahead; <c>Truncated</c> when more matched than the cap.</summary>
     public record BoardFileSearchResponse(List<string> Files, bool Truncated);
     public record BoardSearchResponse(IReadOnlyList<BoardSearchHit> Cards);
+    // RemoteProvider is the owning board's dedicated tracker, as on BoardSummaryResponse.
     public record LocalBoardCardResponse(BoardCardResponse Card, string ProjectPath, string BoardName,
-        List<BoardColumnResponse> Columns, bool IsCurrentProject, bool IsJiraBoard = false);
+        List<BoardColumnResponse> Columns, bool IsCurrentProject, bool IsJiraBoard = false, string? RemoteProvider = null);
     public record LinkBoardCardRequest(string? Card = null);
     public record BoardCardResponse(
         string Id,
@@ -360,6 +427,14 @@ namespace VibeRails.DTOs
         public bool HasActiveDesktopAgent { get; init; }
         public string? JiraIssueUrl { get; init; }
         public IReadOnlyList<BoardJiraDeliveryDto> JiraDeliveries { get; init; } = [];
+        /// <summary>The tracker this card is linked to ("jira" or "ado"), or null. The Jira fields stay for older clients.</summary>
+        public string? RemoteProvider { get; init; }
+        /// <summary>The linked issue's key: <c>APP-7</c> for Jira, <c>#123</c> for an Azure DevOps work item.</summary>
+        public string? RemoteIssueKey { get; init; }
+        /// <summary>The linked issue's page, built from the saved connection; null when it can't be.</summary>
+        public string? RemoteIssueUrl { get; init; }
+        /// <summary>Outbound activity to <see cref="RemoteProvider"/>, newest first (the Jira delivery shape).</summary>
+        public IReadOnlyList<BoardJiraDeliveryDto> RemoteDeliveries { get; init; } = [];
         public List<BoardLinkedCardDto> LinkedCards { get; init; } = [];
         public BoardHandoff? PreviousWork { get; init; }
         public IReadOnlyList<BoardFileReference> FileCandidates { get; init; } = [];
@@ -404,8 +479,16 @@ namespace VibeRails.DTOs
     // Automations. Per request, never sticky; the skip is recorded as a comment by the user.
     public record MoveBoardCardRequest(string? ColumnId = null, int? Position = null, bool SkipAutomations = false);
     public record MergeBoardCardsRequest(string? TargetCard = null);
-    public record AddBoardCommentRequest(string? Body = null, bool SyncToJira = true);
-    public record AddBoardNoteRequest(string? Body = null, bool SyncToJira = true);
+    // SyncToRemote is the provider-neutral name: false keeps the comment off a linked Jira issue or
+    // Azure DevOps work item. SyncToJira stays as an alias; SyncToRemote wins when both are sent.
+    public record AddBoardCommentRequest(string? Body = null, bool SyncToJira = true, bool? SyncToRemote = null)
+    {
+        [JsonIgnore] public bool Sync => SyncToRemote ?? SyncToJira;
+    }
+    public record AddBoardNoteRequest(string? Body = null, bool SyncToJira = true, bool? SyncToRemote = null)
+    {
+        [JsonIgnore] public bool Sync => SyncToRemote ?? SyncToJira;
+    }
     public record BoardNoteListResponse(List<BoardCommentDto> Notes);
     public record AddBoardAttachmentRequest(string? Name = null, string? DataUrl = null, long? Bytes = null, string? MimeType = null);
     public record LinkBoardCommitRequest(string? Sha = null);
@@ -1981,6 +2064,11 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(JiraColumnLaneResponse))]
     [JsonSerializable(typeof(JiraLaneOptionResponse))]
     [JsonSerializable(typeof(JiraPullResponse))]
+    [JsonSerializable(typeof(AdoConnectionResponse))]
+    [JsonSerializable(typeof(SaveAdoConnectionRequest))]
+    [JsonSerializable(typeof(AdoTestResponse))]
+    [JsonSerializable(typeof(AdoBoardSummaryResponse))]
+    [JsonSerializable(typeof(AdoPullResponse))]
     [JsonSerializable(typeof(BoardSyncStatusResponse))]
     [JsonSerializable(typeof(VibeRails.Services.Board.Sync.RemoteBoardPage))]
     [JsonSerializable(typeof(VibeRails.Services.Board.Sync.RemoteBoardWriteRequest))]

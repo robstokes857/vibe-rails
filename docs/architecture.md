@@ -595,6 +595,14 @@ name, then the "Azure DevOps" lane) and never moves it afterwards. `AdoPullSched
 live in `ado-tokens.json`. Storage is `board-ado/1`. The Board guide's "Dedicated Azure DevOps
 boards" section has the rules.
 
+VIBE-168 adds the delivery side. New comments and session links on a work-item card post to the
+work item (HTML paragraphs plus vetted replay links) through `AdoDeliveryService`, drained every
+5 seconds by `AdoPullScheduler`; `syncToRemote=false` keeps an internal note. `add_ado_comment`
+posts explicitly on both MCP transports, outside the Board auto-grants. Root/project-scoped
+`/api/v1/board/boards/{boardId}/ado` GET/PUT/DELETE, `/ado/test` and `/ado/pull` back the settings
+form; the PAT is write-only. Dedicated Azure DevOps boards never sync with viberails.ai. See the
+[Azure DevOps comment contract](../VibeRails/Services/AzureDevOps/Comments.md) and API_SEC.md.
+
 VIBE-40 makes agent attention flags require `flagReason` on `update_board_card`. The store saves
 the flag, red comment marker and originating-session request atomically. Additive
 `board-attention/1` retains requests and resolves them when any writer clears the card flag.

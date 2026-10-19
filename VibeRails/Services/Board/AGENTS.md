@@ -669,3 +669,14 @@ parameters and launch guidance aligned. Read [the delivery contract](../Jira/Com
 changing comment copying, session linking or Jira scheduling. Copied/imported discussion and
 Jira receipts must not echo; Board moves rebind existing delivery IDs. Uncertain sends never
 retry automatically. The additive ledger stays behind `IBoardStore` in board.db.
+
+## Azure DevOps activity delivery (VIBE-168)
+
+The same contract for work items: `AdoDeliveryService` drains `BoardAdoDeliveries` every 5 seconds
+from `AdoPullScheduler`, under `.ado-pull.lock`, and `add_ado_comment` posts explicitly. The MCP
+comment tools take `syncToRemote` (resolved `syncToRemote ?? syncToJira ?? true`); storage keeps
+the `syncToJira` key. Card DTOs carry `RemoteProvider` (`jira`, `ado` or null), `RemoteIssueKey`,
+`RemoteIssueUrl` and `RemoteDeliveries` beside the unchanged Jira fields, and board DTOs carry the
+dedicated tracker's `RemoteProvider` beside `IsJiraBoard`. Decide "is this a dedicated tracker
+board" only through `TrackerBoards.DedicatedProviderAsync`/`DedicatedProvidersAsync`. Read
+[the delivery contract](../AzureDevOps/Comments.md) before changing it.

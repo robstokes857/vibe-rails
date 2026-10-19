@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Http.Features;
 using VibeRails.DTOs;
+using VibeRails.Services.AzureDevOps;
 using VibeRails.Services.Board;
 using VibeRails.Services.Board.Sync;
 using VibeRails.Services.Board.Tracker;
@@ -280,7 +281,7 @@ public static partial class BoardRoutes
             .WithName("UnlinkBoardCard");
 
         app.MapPost("/api/v1/board/cards/{card}/comments", (IBoardService board, string card, AddBoardCommentRequest request, CancellationToken cancellationToken) =>
-            RunAsync(async () => OkOrNotFound(await board.AddCommentAsync(Project(), card, BoardAuthor.User(), request.Body ?? string.Empty, cancellationToken, request.SyncToJira), "Card")))
+            RunAsync(async () => OkOrNotFound(await board.AddCommentAsync(Project(), card, BoardAuthor.User(), request.Body ?? string.Empty, cancellationToken, request.Sync), "Card")))
             .WithName("AddBoardComment");
 
         // Agent notes: the scratchpad agents append over MCP. The dashboard reads it and may add
@@ -294,7 +295,7 @@ public static partial class BoardRoutes
             .WithName("GetBoardCardNotes");
 
         app.MapPost("/api/v1/board/cards/{card}/notes", (IBoardService board, string card, AddBoardNoteRequest request, CancellationToken cancellationToken) =>
-            RunAsync(async () => OkOrNotFound(await board.AddNoteAsync(Project(), card, BoardAuthor.User(), request.Body ?? string.Empty, cancellationToken, request.SyncToJira), "Card")))
+            RunAsync(async () => OkOrNotFound(await board.AddNoteAsync(Project(), card, BoardAuthor.User(), request.Body ?? string.Empty, cancellationToken, request.Sync), "Card")))
             .WithName("AddBoardCardNote");
 
         app.MapPost("/api/v1/board/cards/{card}/attachments", (IBoardService board, string card, AddBoardAttachmentRequest request, CancellationToken cancellationToken) =>
@@ -399,6 +400,49 @@ public static partial class BoardRoutes
             }))
             .WithName("PullJiraFilter");
 
+        // Azure DevOps Services (https://dev.azure.com only), one team board or saved query per
+        // board, mirroring Jira. The personal access token is accepted on save and never returned.
+        // Pull is one-way: Azure DevOps wins on the mapped fields and a pull never moves a card.
+        // ?settings=true adds the column map and this board's lanes for the settings form.
+        app.MapGet("/api/v1/board/boards/{boardId}/ado", (IAdoPullService ado, string boardId, bool? settings, CancellationToken cancellationToken) =>
+            RunAsync(async () => settings == true
+                ? Results.Ok(ToResponse(await ado.GetDetailsAsync(Project(), boardId, cancellationToken), boardId))
+                : Results.Ok(ToResponse(await ado.GetAsync(Project(), boardId, cancellationToken), boardId))))
+            .WithName("GetAdoConnection");
+
+        // Save also gives the connection its dedicated board; the response's boardId is that board.
+        app.MapPut("/api/v1/board/boards/{boardId}/ado", (IAdoPullService ado, string boardId, SaveAdoConnectionRequest request, CancellationToken cancellationToken) =>
+            RunAsync(async () => Results.Ok(ToResponse(await ado.SaveAsync(Project(), boardId, new AdoConnectionSave(
+                request.BoardLink, request.Enabled, request.PointsField, request.NarrowWiql, request.SkipOldDone,
+                request.ColumnMap?.ToDictionary(pair => pair.Key, pair => (string?)pair.Value)),
+                request.PersonalAccessToken, cancellationToken), boardId))))
+            .WithName("SaveAdoConnection");
+
+        app.MapDelete("/api/v1/board/boards/{boardId}/ado", (IAdoPullService ado, string boardId, CancellationToken cancellationToken) =>
+            RunAsync(async () => await ado.UnlinkAsync(Project(), boardId, cancellationToken)
+                ? Results.Ok(new OK("Azure DevOps unlinked. Board and cards kept."))
+                : NotFound("Board", boardId)))
+            .WithName("UnlinkAdoConnection");
+
+        // Connect: checks the token and reads the board (columns, team scope, a work item count) or the saved query.
+        app.MapPost("/api/v1/board/boards/{boardId}/ado/test", (IAdoPullService ado, string boardId, CancellationToken cancellationToken) =>
+            RunAsync(async () =>
+            {
+                var result = await ado.TestAsync(Project(), boardId, cancellationToken);
+                var connection = await ado.GetAsync(Project(), boardId, cancellationToken);
+                return Results.Ok(new AdoTestResponse(result.Ok, result.Project, result.Error,
+                    result.Board is { } board ? ToResponse(board) : null, connection?.BoardId ?? boardId));
+            }))
+            .WithName("TestAdoConnection");
+
+        app.MapPost("/api/v1/board/boards/{boardId}/ado/pull", (IAdoPullService ado, string boardId, bool? dryRun, CancellationToken cancellationToken) =>
+            RunAsync(async () =>
+            {
+                var report = await ado.PullAsync(Project(), boardId, dryRun == true, cancellationToken);
+                return Results.Ok(new AdoPullResponse(report.DryRun, report.Outcome, report.Created, report.Updated, report.Skipped, report.Failed, report.Message, report.BoardId));
+            }))
+            .WithName("PullAdoBoard");
+
         // ---------------------------------------------------------------- viberails.ai sync (VB-51)
         //
         // Status, the per-board Publish switch, and a manual sync. Outbound only: the desktop talks
@@ -421,7 +465,7 @@ public static partial class BoardRoutes
             ? null
             : new BoardSyncStatusResponse(status.BoardId, status.Published, status.Enabled, status.RemoteBoardId, status.RemoteUrl,
                 status.Cursor, status.Unsent, status.LastSyncUtc, status.LastError, status.Configured, status.Rejected, status.RejectedEntries,
-                status.Skipped, status.SkippedEntries, status.ActivityEnabled, status.IsJiraBoard);
+                status.Skipped, status.SkippedEntries, status.ActivityEnabled, status.IsJiraBoard, status.RemoteProvider);
 
     private static JiraConnectionResponse ToResponse(BoardJiraConnectionRecord? connection, string boardId) =>
         connection is null
@@ -446,6 +490,27 @@ public static partial class BoardRoutes
         new(board.Id, board.Name, board.Type, board.ProjectKey, board.IssueCount, board.StoryPointsFieldId,
             board.StoryPointsFieldName, board.Jql, board.Columns.Select(ToResponse).ToList(), board.Warnings.ToList());
 
+    private static AdoConnectionResponse ToResponse(BoardAdoConnectionRecord? connection, string boardId) =>
+        connection is null
+            ? new AdoConnectionResponse(boardId, null, null, null, null, null, null, null, false, BoardAdoAuthStatus.None,
+                null, null, null, false, null, false, null, null, null, true)
+            : new AdoConnectionResponse(connection.BoardId, connection.Organization, connection.Project, connection.Team,
+                connection.BacklogLevel, connection.QueryId, connection.BoardLink, connection.AdoBoardName, connection.HasToken,
+                connection.AuthStatus, connection.PointsField, connection.NarrowWiql, connection.SkipOldDone, connection.Enabled,
+                connection.DisabledReason, connection.DedicatedBoard, connection.LastTestedUtc, connection.LastPullUtc,
+                connection.LastReport, true);
+
+    private static AdoConnectionResponse ToResponse(AdoConnectionDetails details, string boardId) =>
+        ToResponse(details.Connection, boardId) with
+        {
+            Columns = details.Columns.Select(ToResponse).ToList(),
+            Lanes = details.Lanes.Select(lane => new JiraLaneOptionResponse(lane.Id, lane.Name)).ToList()
+        };
+
+    private static AdoBoardSummaryResponse ToResponse(AdoBoardSummary board) =>
+        new(board.Name, board.Team, board.BacklogLevel, board.QueryId, board.QueryType, board.WorkItemCount, board.CountCapped,
+            board.PointsField, board.Columns.Select(ToResponse).ToList(), board.Warnings.ToList());
+
     private static string Project() => ParserConfigs.GetRootPath();
 
     private static IResult OkOrNotFound<T>(T? value, string kind) where T : class =>
@@ -468,6 +533,11 @@ public static partial class BoardRoutes
         catch (JiraConfigException ex)
         {
             // Bad site/email/JQL/field, no token, or an expired connection: the message says which.
+            return Results.BadRequest(new ErrorResponse(ex.Message));
+        }
+        catch (AdoConfigException ex)
+        {
+            // Bad link/WIQL/field, no token, a busy lock or an expired connection: the message says which.
             return Results.BadRequest(new ErrorResponse(ex.Message));
         }
         catch (BoardConflictException ex)
