@@ -2746,7 +2746,8 @@ code {
     --vb-terminal-tab-basis: 280px;
     --vb-terminal-tab-min-width: 148px;
     --vb-terminal-tab-bg: #1e1e1e;
-    --vb-terminal-tab-active-bg: #252525;
+    --vb-terminal-tab-active-bg: #203b55;
+    --vb-terminal-tab-active-accent: #7dc4ff;
     --vb-terminal-tab-hover-bg: #2a2a2a;
     --terminal-border: rgba(255, 255, 255, 0.05);
     --terminal-accent: var(--color-primary);
@@ -3224,27 +3225,22 @@ code {
 
 #vb-terminal-panel .vb-terminal-tab-item.active {
     background: var(--vb-terminal-tab-active-bg);
-    color: #cdd6f4;
+    color: #f4f9ff;
+    outline: 1px solid #4f85ad;
+    outline-offset: -1px;
 }
 
+/* Selection uses the same blue across CLIs. Keep it above the tab so brand
+   underlines and session progress at the bottom cannot look like focus. */
 #vb-terminal-panel .vb-terminal-tab-item.active::after {
     content: '';
     position: absolute;
-    bottom: 0;
+    top: 0;
     left: 0;
     right: 0;
-    height: 2px;
-    background: var(--terminal-accent);
-}
-
-#vb-terminal-panel .vb-terminal-tab-item.active.has-custom-accent::after {
-    content: '';
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 2px;
-    background: var(--vb-terminal-tab-accent);
+    height: 3px;
+    background: var(--vb-terminal-tab-active-accent);
+    pointer-events: none;
 }
 
 #vb-terminal-panel .vb-terminal-tab-item.has-custom-accent:not(.active)::after {
@@ -3253,9 +3249,9 @@ code {
     bottom: 0;
     left: 0;
     right: 0;
-    height: 2px;
+    height: 1px;
     background: var(--vb-terminal-tab-accent);
-    opacity: 0.5;
+    opacity: 0.35;
 }
 
 #vb-terminal-panel .vb-terminal-tab-item:hover:not(.active) {
@@ -3385,7 +3381,7 @@ code {
 }
 
 /* Completed — entire tab background flashes then transitions to idle */
-#vb-terminal-panel .vb-terminal-tab-item.tab-completed {
+#vb-terminal-panel .vb-terminal-tab-item.tab-completed:not(.active) {
     animation: tab-complete-flash 0.5s ease 10;
 }
 
@@ -3845,7 +3841,7 @@ code {
 }
 
 /* Ready gradient flash — background tab notification */
-#vb-terminal-panel .vb-terminal-tab-item.tab-status-ready-flash {
+#vb-terminal-panel .vb-terminal-tab-item.tab-status-ready-flash:not(.active) {
     animation: tab-ready-gradient-flash 1.2s ease 5;
 }
 
@@ -3857,7 +3853,7 @@ code {
 /* Waiting-for-user gradient flash — background tab notification.
    Uses a neutral yellow (not the brand accent) so "waiting for you"
    reads the same across every CLI. */
-#vb-terminal-panel .vb-terminal-tab-item.tab-status-waiting-flash {
+#vb-terminal-panel .vb-terminal-tab-item.tab-status-waiting-flash:not(.active) {
     animation: tab-waiting-gradient-flash 1.2s ease 5;
 }
 
@@ -8388,10 +8384,15 @@ input.form-control:disabled {
    body doesn't scroll; the bottom fade hints there's more inside. Keeping the
    body rendered also keeps its dimensions real for _shouldLoadNextPage()
    (a 0x0 body would read as "not full" and auto-paginate all history). */
+.vb-terminal-focus-layout.vb-history-under .ch-sidebar-main {
+    /* Reserve the wordmark's space outside the scrolling list, so a retained
+       scroll position cannot move session icons behind the fixed label. */
+    padding-top: 84px;
+}
+
 .vb-terminal-focus-layout.vb-history-under .ch-sidebar-body {
     pointer-events: none;
     overflow: hidden;
-    padding-top: 84px; /* clear the absolutely-positioned HISTORY wordmark */
     -webkit-mask-image: linear-gradient(180deg, #000 0, #000 78%, transparent 98%);
     mask-image: linear-gradient(180deg, #000 0, #000 78%, transparent 98%);
 }

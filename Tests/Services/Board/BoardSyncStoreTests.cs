@@ -103,11 +103,11 @@ public sealed class BoardSyncStoreTests : IDisposable
         await store.AddCommentAsync(root, card.Id, BoardAuthor.User(), "Two", Ct);
         var entries = await store.GetUnsentLogEntriesAsync(card.BoardId, 20, Ct);
         await store.MarkLogEntriesSentAsync([new(entries[0].Entry.Id, 1)], Ct);
-        await Assert.ThrowsAsync<BoardValidationException>(() => store.MarkLogEntriesSentAsync(
+        await Assert.ThrowsAsync<BoardSyncHistoryConflictException>(() => store.MarkLogEntriesSentAsync(
             [new(entries[1].Entry.Id, 2), new(entries[2].Entry.Id, 1)], Ct));
         Assert.Equal(2, await store.CountUnsentLogEntriesAsync(card.BoardId, Ct));
         Assert.Equal(1, await store.GetMaxAcknowledgedSequenceAsync(card.BoardId, Ct));
-        await Assert.ThrowsAsync<BoardValidationException>(() => store.MarkLogEntriesSentAsync([new(entries[0].Entry.Id, 3)], Ct));
+        await Assert.ThrowsAsync<BoardSyncHistoryConflictException>(() => store.MarkLogEntriesSentAsync([new(entries[0].Entry.Id, 3)], Ct));
         var board = await store.CreateBoardAsync(root, "Separate sequence", Ct);
         var lane = (await store.GetColumnsAsync(root, Ct, board.Id))[0];
         await store.CreateCardAsync(root, new(lane.Id, "Other", "", null, "medium", null, [], false, BoardId: board.Id), Ct);

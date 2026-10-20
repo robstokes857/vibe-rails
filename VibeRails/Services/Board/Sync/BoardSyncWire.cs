@@ -119,6 +119,8 @@ public sealed record BoardSyncPullResponse(List<BoardSyncPulledEntryWire> Entrie
 [JsonSerializable(typeof(BoardSyncPullResponse))]
 [JsonSerializable(typeof(BoardSyncActivityWire))]
 [JsonSerializable(typeof(BoardSyncActivityAck))]
+[JsonSerializable(typeof(BoardSyncContentPartWire))]
+[JsonSerializable(typeof(VibeRails.DTOs.SandboxDiffResponse))]
 [JsonSerializable(typeof(JsonElement))]
 [JsonSerializable(typeof(BoardRemoteDescriptor))]
 [JsonSerializable(typeof(List<BoardRemoteDescriptor>))]
@@ -138,11 +140,13 @@ public sealed partial class BoardSyncJsonContext : JsonSerializerContext;
 /// <c>unauthorized</c>, <c>network</c>, <c>response_too_large</c>, <c>invalid_response</c>,
 /// <c>http_NNN</c>. <see cref="EntryId"/> names the rejected entry of an <c>invalid_entry</c>.
 /// </summary>
-public sealed class BoardSyncClientException(string message, string code, int status = 0, string? entryId = null) : Exception(message)
+public sealed class BoardSyncClientException(string message, string code, int status = 0, string? entryId = null, TimeSpan? retryAfter = null) : Exception(message)
 {
     public string Code { get; } = code;
     public int Status { get; } = status;
     public string? EntryId { get; } = entryId;
+    /// <summary>A bounded standard Retry-After delay for HTTP 429, without remote body text.</summary>
+    public TimeSpan? RetryAfter { get; } = retryAfter;
 }
 
 /// <summary>

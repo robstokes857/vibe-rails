@@ -1532,10 +1532,12 @@ export class EnvironmentController {
                                 ['{{datetime}}', 'Current date and time'], ['{{date}}', 'Current date'],
                                 ['{{time}}', 'Current time'], ['{{git_branch}}', 'Current Git branch'],
                                 ['{{env_name}}', 'Saved configuration name'],
+                                ['{{worktree}}', 'Create a Git worktree and start here; removed after 7 days'],
                                 ['{{board_card}}', 'Triggering Board card number; empty for other launches']
                             ].map(([token, hint]) => `<button type="button" class="env-prompt-variable" data-prompt-variable="${this.app.escapeHtml(token)}" title="${hint}" aria-label="Insert ${this.app.escapeHtml(token)}: ${hint}"><code>${this.app.escapeHtml(token)}</code></button>`).join('')}
                         </div>
                         <p>Name variables ask for a value at launch; a default pre-fills it. Other values fill in automatically. The Board card number is available for Board lane Automations (empty for other launches).</p>
+                        <p><code>{{worktree}}</code> creates a new checkout from HEAD in your home folder and starts the agent there. Optional: <code>{{worktree path="../my-task" delete_after_days=14}}</code>. Paths must be new directories outside the source checkout. Retention defaults to 7 days; use 7 or more, or <code>never</code>. Expired worktrees are removed, including uncommitted files, while VibeRails is open; active sessions postpone removal. Git branches are kept.</p>
                     </div>
                 </div>`;
     }

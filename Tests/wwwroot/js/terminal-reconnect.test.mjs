@@ -349,7 +349,7 @@ test('a hidden tab reconnect pins geometry instead of fitting a 0x0 host', () =>
     assert.ok(body.includes('this.vibeTerminal.resize(pinned.cols, pinned.rows)'), 'pinned tabs resize xterm');
     assert.ok(body.includes('this.autoReconnect?.handleOpen()'), 'onopen cancels the armed retry');
     assert.ok(body.includes('this.autoReconnect?.handleHealthy()'), 'the first data restores the retry budget');
-    assert.ok(body.includes('this.autoReconnect?.handleClose({'), 'onclose consults the policy');
+    assert.ok(body.includes('this.autoReconnect?.handleClose('), 'onclose consults the policy');
 });
 
 test('the restored manager schedules the background pass right after the active tab connects', () => {

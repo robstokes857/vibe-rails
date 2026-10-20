@@ -172,6 +172,9 @@ public sealed partial class BoardStore
 
         public bool IsEmpty => _fields == 0;
 
+        // Local delivery bookkeeping only; the portable change allowlist excludes this marker.
+        public void SyncRecovery() => WriteTo("syncRecovery", w => w.WriteBooleanValue(true));
+
         public string Summary => string.Join(LogSummarySeparator, _summary);
 
         public string ToJson()

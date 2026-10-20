@@ -37,6 +37,20 @@ public sealed record BoardSyncLinkRecord(
 /// <summary>An unsent Card Log entry together with the card identity the wire needs.</summary>
 public sealed record BoardSyncOutboundEntry(BoardCommentRecord Entry, string CardKey);
 
+/// <summary>Validated hosted history identity used to rebuild an owned board's sync receipts.</summary>
+public sealed record BoardSyncHistoryEntry(string EntryId, string CardId, string Kind, long Seq);
+
+/// <summary>A server sequence disagrees with a previously recorded sync receipt.</summary>
+public sealed class BoardSyncHistoryConflictException(string? entryId, long sequence) : BoardValidationException(
+    "The server returned an invalid sync acknowledgement; entries remain queued. " +
+    $"Server sequence {sequence} conflicts with this device's recorded sync history. The hosted history may have been restored or reset.")
+{
+    /// <summary>The newly acknowledged entry, or null when the server's high-water mark regressed.</summary>
+    public string? EntryId { get; } = entryId;
+    /// <summary>The conflicting sequence or regressed high-water mark.</summary>
+    public long Sequence { get; } = sequence;
+}
+
 /// <summary>A rejected entry remains in the local log; status identifies it without copying remote error text.</summary>
 public sealed record BoardSyncRejectedEntry(string EntryId, string CardKey, string Kind);
 

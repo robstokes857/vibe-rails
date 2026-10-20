@@ -45,14 +45,14 @@ internal static class BoardSyncActivity
                 var metadata = await store.GetSyncActivityAsync(link.ProjectPath, link.BoardId, id, ct);
                 if (metadata is not null)
                 {
-                    var activity = await CaptureAsync(store, link.ProjectPath, id, metadata, ct);
+                    var activity = await BoardSyncContent.CaptureAsync(store, client, cache, identity, link, id, metadata, ct);
                     var json = JsonSerializer.SerializeToUtf8Bytes(activity, BoardSyncJsonContext.Default.BoardSyncActivityWire);
                     var hash = Convert.ToHexString(SHA256.HashData(json));
                     var uploaded = previous?.UploadedUtc;
                     if (previous is null || previous.Hash != hash || previous.UploadedUtc < now.AddHours(-1))
                     {
                         var ack = await client.PutActivityAsync(link.RemoteBoardId, id, activity, ct, link.DestinationKey);
-                        if (ack.Schema != 1 || ack.CardId != id)
+                        if (ack.Schema != activity.Schema || ack.CardId != id)
                             throw new BoardSyncClientException("The server did not acknowledge this card's activity; the upload will retry.", "invalid_response");
                         uploaded = now;
                     }

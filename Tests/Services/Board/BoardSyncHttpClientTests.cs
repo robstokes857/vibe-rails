@@ -9,6 +9,23 @@ public sealed class BoardSyncHttpClientTests
 {
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 
+    [Theory]
+    [InlineData(2, 2)]
+    [InlineData(3600, 60)]
+    public async Task RateLimitRetryAfterIsBoundedWithoutReadingRemoteProse(int seconds, int expected)
+    {
+        var client = Client(new Handler(_ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests) { Content = new StringContent("PRIVATE server error") };
+            response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(seconds));
+            return response;
+        }));
+        var error = await Assert.ThrowsAsync<BoardSyncClientException>(() => client.PullAsync("id", 0, 200, Ct));
+        Assert.Equal(429, error.Status);
+        Assert.Equal(TimeSpan.FromSeconds(expected), error.RetryAfter);
+        Assert.DoesNotContain("PRIVATE", error.Message);
+    }
+
     [Fact]
     public async Task RemoteManagementPagesAndDeletesUsingPinnedCredentials()
     {
@@ -260,6 +277,24 @@ public sealed class BoardSyncHttpClientTests
         }));
         var error = await Assert.ThrowsAsync<BoardSyncClientException>(() => client.PullAsync("id", 0, 200, Ct));
         Assert.Equal("response_too_large", error.Code);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ContentPartsRequireAnIdentityMatchingVerifiedAcknowledgement(bool verified)
+    {
+        var bytes = new byte[] { 1, 2, 3 };
+        var sha = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes));
+        var part = new BoardSyncContentPartWire(sha, bytes.Length);
+        var client = Client(new Handler(request =>
+        {
+            Assert.Equal("https://example.com/api/v1/board-content/parts/" + sha, request.RequestUri!.AbsoluteUri);
+            Assert.Equal("test-key", Assert.Single(request.Headers.GetValues("X-Api-Key")));
+            return new(HttpStatusCode.OK) { Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(new { sha256 = sha, bytes = bytes.Length, checksumsVerified = verified })) };
+        }));
+        if (verified) await client.PutContentPartAsync(part, bytes, Ct, client.DestinationKey);
+        else await Assert.ThrowsAsync<BoardSyncClientException>(() => client.PutContentPartAsync(part, bytes, Ct, client.DestinationKey));
     }
 
     private static BoardSyncHttpClient Client(Handler handler) => new(new Factory(handler), new Uri("https://example.com/api/v1/boards"), () => "test-key");

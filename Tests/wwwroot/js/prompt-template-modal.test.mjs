@@ -12,6 +12,14 @@ const {
     findEnvironmentForPrompt
 } = await import(pathToFileURL(sourceModule).href);
 
+test('worktree options stay server-owned and never become fill-in fields', () => {
+    for (const token of ['{{worktree}}', '{{worktree delete_after_days=7}}', '{{WORKTREE path="../task one" delete_after_days=never}}']) {
+        assert.deepEqual(extractPromptTemplateVariables(token), []);
+        assert.equal(hasPromptTemplateVariables(token), false);
+        assert.equal(renderPromptTemplate(token, { worktree: 'must not substitute' }), token);
+    }
+});
+
 test('extractPromptTemplateVariables finds names and defaults', () => {
     const variables = extractPromptTemplateVariables(
         'Create {{branch_name}} and read {{path default="docs/runbook.md"}}.'

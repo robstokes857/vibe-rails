@@ -177,7 +177,7 @@ test('adoptLaunchedTab falls back to the remembered selection when status is una
     assert.equal(added[0].tabInfo.hasActiveSession, true);
 });
 
-test('title updates refresh saved history without renaming or focusing live tabs', () => {
+test('title events request refreshed history without focusing or creating tabs', () => {
     const { manager, added, focused } = createManager({ selection: 'base:codex', rememberedCli: 'codex' });
     const controller = new TerminalController({});
     controller.manager = manager;

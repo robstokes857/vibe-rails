@@ -235,6 +235,7 @@ namespace VibeRails
             // Resolves {{datetime}}-style built-ins and {{step:<id>}} output injection in an
             // environment's Initial Message. Scoped for the same IRepository reason as above.
             serviceCollection.AddScoped<IPromptPlaceholderService, PromptPlaceholderService>();
+            serviceCollection.AddSingleton<Services.Workspaces.IManagedWorktreeService, Services.Workspaces.ManagedWorktreeService>();
             // Playwright's real backend uses a fake CLI but shares the developer account's state
             // directory. Never let that test host dispatch persisted Automation work.
             if (isActiveRootBackendProcess && isFakeCliTestProcess)
@@ -396,6 +397,7 @@ namespace VibeRails
                 // LMBootstrap (--env) processes, which have no global background-job role.
                 if (isActiveRootBackendProcess)
                 {
+                    if (!isFakeCliTestProcess) serviceCollection.AddHostedService<WorktreeCleanupJob>();
                     serviceCollection.AddHttpClient(ConversationTitleClient.HttpClientName,
                             client => client.Timeout = TimeSpan.FromSeconds(20))
                         .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
@@ -423,7 +425,7 @@ namespace VibeRails
                         .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
                     serviceCollection.AddHostedService<TokenSavingsPublishJob>();
                     serviceCollection.AddHostedService<SessionDataDrainJob>();
-                    serviceCollection.AddHostedService<CompleteBackupJob>();
+                    // Full snapshot scheduling retired; session drain and Board content sync remain active.
                     serviceCollection.AddHostedService<DataRetentionJob>();
                     serviceCollection.AddHostedService<SearchIndexMaintenanceJob>();
                 }

@@ -2242,6 +2242,22 @@ export class TerminalManager {
         this.renderTabButton(tab);
     }
 
+    syncSessionTitles(items) {
+        if (this._destroyed) return;
+        const titles = new Map(items
+            .filter(item => item.sessionTitleGenerated === true && cleanString(item.sessionDisplayName))
+            .map(item => [item.id, cleanString(item.sessionDisplayName)]));
+        for (const tab of this.tabs.values()) {
+            const state = tab.state;
+            const title = titles.get(state.sessionId);
+            // Check the current session after the history request finishes. Explicit tab
+            // names (including Board launch labels) and an in-progress rename win.
+            if (!title || !state.hasActiveSession || state.customLabel || state.renaming) continue;
+            if (state.label === title && state.title === title) continue;
+            this.updateTabMetadata(tab, { label: title, title });
+        }
+    }
+
     // ── Tab rename ────────────────────────────────────────────────────────
 
     // Swap the tab button for an inline <input> in place. The button (and its
@@ -3497,7 +3513,7 @@ export class TerminalController {
             tab.instance?.statusController?.onSessionBusy();
         });
 
-        // Refresh saved history/replay/share labels without replacing explicitly named live tabs.
+        // The refreshed history also synchronizes generated titles to matching live tabs.
         appEventClient.on('session_title_updated', payload => touchHistory(payload));
 
         appEventClient.on('session_busy', (payload) => {
@@ -3672,9 +3688,11 @@ export class TerminalController {
     }
 
     _initChatHistorySidebar(root) {
+        const manager = this.manager;
         const historySidebar = new ChatHistorySidebar(this.app);
         historySidebar.mount(root, {
-            onToggle: (open) => this.manager?.syncHistoryPanelState(open)
+            onToggle: (open) => this.manager?.syncHistoryPanelState(open),
+            onItemsUpdated: (items) => manager?.syncSessionTitles(items)
         });
         if (this.manager) {
             this.manager.historySidebar?.destroy();

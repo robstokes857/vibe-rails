@@ -125,9 +125,9 @@ public static class TerminalRoutes
             // above is a courtesy, not a reservation, so resolving at this point would let two
             // simultaneous requests both execute the referenced step commands even though only
             // one of them can end up owning a terminal.
-            Func<Task<string?>>? resolveInitialPrompt = string.IsNullOrWhiteSpace(requestedPrompt)
+            Func<Task<ResolvedPrompt>>? resolveInitialPrompt = string.IsNullOrWhiteSpace(requestedPrompt)
                 ? null
-                : () => promptPlaceholders.ResolveAsync(
+                : () => promptPlaceholders.ResolveLaunchAsync(
                     requestedPrompt,
                     new PromptPlaceholderContext(workDir, environmentId, request.EnvironmentName),
                     cancellationToken);

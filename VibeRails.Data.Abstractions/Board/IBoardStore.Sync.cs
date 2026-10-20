@@ -102,6 +102,18 @@ public partial interface IBoardStore
     /// </summary>
     Task<int> ResetSentMarksAsync(string boardId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Repairs a proven history fork on an owned board. Atomically remaps ordinary receipts by
+    /// immutable entry identity, requeues missing entries, and appends current local card snapshots.
+    /// Local-only and rejected rows retain their delivery policy. No card content is rewritten.
+    /// Returns null when the link changed, is imported, or its recorded history already agrees.
+    /// </summary>
+    Task<BoardSyncLinkRecord?> ReconcileOwnedSyncHistoryAsync(BoardSyncLinkRecord expected,
+        IReadOnlyList<BoardSyncHistoryEntry> history, long lastSeq, CancellationToken cancellationToken = default);
+
+    /// <summary>True while durable local recovery snapshots are still queued, across ticks and restarts.</summary>
+    Task<bool> HasPendingSyncRecoveryAsync(string boardId, CancellationToken cancellationToken = default);
+
     /// <summary>True when a Card Log row with this id exists, whatever its kind or card.</summary>
     Task<bool> HasLogEntryAsync(string entryId, CancellationToken cancellationToken = default);
 

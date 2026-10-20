@@ -58,7 +58,7 @@ public sealed class CliLoopEnvironmentScopeTests
                 cancellationToken: TestContext.Current.CancellationToken));
 
         placeholders.Verify(
-            item => item.ResolveAsync(
+            item => item.ResolveLaunchAsync(
                 It.IsAny<string>(), It.IsAny<PromptPlaceholderContext>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
@@ -138,7 +138,7 @@ public sealed class CliLoopEnvironmentScopeTests
         var (services, placeholders) = BuildServices(Environment("board-worker", here));
         PromptPlaceholderContext? captured = null;
         placeholders
-            .Setup(item => item.ResolveAsync(
+            .Setup(item => item.ResolveLaunchAsync(
                 It.IsAny<string>(), It.IsAny<PromptPlaceholderContext>(), It.IsAny<CancellationToken>()))
             .Callback<string?, PromptPlaceholderContext, CancellationToken>((_, context, _) => captured = context)
             .ThrowsAsync(new ReachedThePromptStage());
@@ -163,7 +163,7 @@ public sealed class CliLoopEnvironmentScopeTests
                 DateTime.UtcNow, DateTime.UtcNow, WorkflowMode: "agent", ManagerSelection: "base:codex"));
         var (services, placeholders) = BuildServices(Environment("board-worker", here), boardStore: boardStore.Object);
         string? template = null;
-        placeholders.Setup(p => p.ResolveAsync(It.IsAny<string>(), It.IsAny<PromptPlaceholderContext>(), It.IsAny<CancellationToken>()))
+        placeholders.Setup(p => p.ResolveLaunchAsync(It.IsAny<string>(), It.IsAny<PromptPlaceholderContext>(), It.IsAny<CancellationToken>()))
             .Callback<string?, PromptPlaceholderContext, CancellationToken>((value, _, _) => template = value)
             .ThrowsAsync(new ReachedThePromptStage());
 
@@ -174,6 +174,25 @@ public sealed class CliLoopEnvironmentScopeTests
         Assert.Contains("report_automation_step with passed or failed", template);
         Assert.DoesNotContain("Before moving, save your handoff", template);
         boardStore.Verify(s => s.FindCardAsync(here, "VB-23", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task NativeLaunchRecordsTheResolvedWorktreeAsItsWorkingDirectory()
+    {
+        var here = Path.Combine(Path.GetTempPath(), "cliloop-here");
+        var checkout = Path.Combine(Path.GetTempPath(), "cliloop-worktree");
+        var (services, placeholders) = BuildServices(Environment("my-env", here));
+        placeholders.Setup(p => p.ResolveLaunchAsync(It.IsAny<string>(), It.IsAny<PromptPlaceholderContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ResolvedPrompt("work in " + checkout, checkout));
+        var state = Mock.Get(services.GetRequiredService<ITerminalStateService>());
+        state.Setup(s => s.CreateSessionAsync(LlmParser.ToWireName(LLM.Claude), checkout, "my-env", It.IsAny<bool>(),
+                It.IsAny<CancellationToken>(), "work in " + checkout, null, It.IsAny<int>(), It.IsAny<int>()))
+            .ThrowsAsync(new ReachedThePromptStage());
+
+        await Assert.ThrowsAsync<ReachedThePromptStage>(() => CliLoop.RunTerminalWithWebAsync(
+            Args("my-env", here), services, cancellationToken: TestContext.Current.CancellationToken));
+        state.VerifyAll();
+        placeholders.Verify(p => p.ResolveLaunchAsync(It.IsAny<string>(), It.IsAny<PromptPlaceholderContext>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private static ParsedArgs Args(string environmentName, string workDir) => new()
@@ -214,7 +233,7 @@ public sealed class CliLoopEnvironmentScopeTests
         if (throwAtPromptStage)
         {
             placeholders
-                .Setup(item => item.ResolveAsync(
+                .Setup(item => item.ResolveLaunchAsync(
                     It.IsAny<string>(), It.IsAny<PromptPlaceholderContext>(), It.IsAny<CancellationToken>()))
                 .ThrowsAsync(new ReachedThePromptStage());
         }

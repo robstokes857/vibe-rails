@@ -206,6 +206,12 @@ CRUD. This does not enable ordinary Board sync or create collaborator/terminal-c
 
 ## Board sharing (VB-52)
 
+For locally owned viberails.ai boards, local state wins a hosted-history fork (owner direction,
+2026-10-20). Recovery must prove the fork from validated hosted history, preserve content and
+local-only/rejected delivery policy, and queue current local snapshots after missing events.
+Keep reconciliation atomic behind `IBoardStore`; imported collaborator boards are never
+authoritative over their owner's copy. See [the recovery contract](SYNC.md#ordering-retry-and-identity).
+
 See [SYNC.md](SYNC.md#vb-52-shared-boards) for the POC contract. Persistence stays behind
 `IBoardStore`. Imported boards retain their remote/destination identity and never fall back to
 owner publication after access ends. The hosted API enforces owner-only collaborator management.
@@ -468,6 +474,15 @@ Protect drafts across all close/navigation paths (F8); guard only linked-card na
 insufficient. Do not let background rail mutations overwrite the surrounding form. Account for
 hidden cards when converting a drag target to a full-lane position (F4). Lanes have no WIP limits;
 the header displays the full card count. Tests should use realistic asynchronous races, not only markup assertions.
+
+## Complete activity content (VB-ZXF0B-18)
+
+Schema-2 Board sync stores full attachment bytes and complete saved commit snapshots in verified
+account-owned parts, separately from bounded display metadata. Do not restore the 1 MiB attachment
+or 256 Ki-character code preview limit as a backup omission. Reads stay behind `IBoardStore`;
+missing/corrupt original attachment content must not become a successful incomplete ACK. Front
+must support schema 2 before desktop rollout. Existing archives and retired full-backup staging
+remain stored; automatic full-snapshot scheduling is removed. See [SYNC.md](SYNC.md).
 
 ## Storage changes
 

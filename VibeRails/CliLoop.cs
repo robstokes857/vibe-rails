@@ -172,7 +172,7 @@ public static class CliLoop
         if (!string.IsNullOrWhiteSpace(promptTemplate))
         {
             var promptPlaceholders = scopedServices.GetRequiredService<IPromptPlaceholderService>();
-            initialPrompt = await promptPlaceholders.ResolveAsync(
+            var resolvedPrompt = await promptPlaceholders.ResolveLaunchAsync(
                 promptTemplate,
                 new PromptPlaceholderContext(
                     workingDirectory,
@@ -180,6 +180,8 @@ public static class CliLoop
                     environment?.CustomName,
                     boardCardKey),
                 cancellationToken);
+            initialPrompt = resolvedPrompt.Prompt;
+            workingDirectory = resolvedPrompt.WorkingDirectory;
         }
 
         var exitCode = await runner.RunCliWithWebAsync(

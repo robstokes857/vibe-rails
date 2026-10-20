@@ -797,6 +797,18 @@ public sealed partial class BoardStore : IBoardStore
         {
             RequireSyncBoard(existing, stamp);
             if (await HasSyncStampAsync(connection, transaction, stamp, cancellationToken)) return true;
+            // Owner recovery records today's local liveness after restored hosted history.
+            // An older deletion is retained as history without undoing that later restoration.
+            if (await ScalarLongAsync(connection, transaction, """
+                SELECT COUNT(*) FROM BoardSyncLog m WHERE m.CardId = $card AND m.Kind = 'restored'
+                  AND (m.RemoteSeq IS NULL OR m.RemoteSeq > $seq)
+                  AND (m.SyncBoardId IS NULL OR m.SyncBoardId = $board);
+                """, ("$card", existing.Id), cancellationToken, ("$seq", stamp.RemoteSeq), ("$board", existing.BoardId)) > 0)
+            {
+                await LogCardDeletedAsync(connection, transaction, existing.Id, author, stamp.CreatedUtc, cancellationToken, stamp);
+                await transaction.CommitAsync(cancellationToken);
+                return true;
+            }
         }
 
         var now = stamp?.CreatedUtc ?? DateTime.UtcNow;

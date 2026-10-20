@@ -4,7 +4,7 @@ const port = Number(process.env.VIBERAILS_AUTOMATION_TEST_PORT) || 18766;
 // Real frontend and xterm, intercepted APIs/sockets; no application state or CLI launch.
 module.exports = defineConfig({
     testDir: './tests',
-    testMatch: ['terminal-automations.spec.js', 'terminal-board-card.spec.js'],
+    testMatch: ['terminal-automations.spec.js', 'terminal-board-card.spec.js', 'terminal-takeover.spec.js'],
     workers: 1,
     reporter: 'list',
     use: {

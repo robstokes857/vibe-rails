@@ -8,6 +8,7 @@ using VibeRails.Services.AgentTools;
 using VibeRails.Services.Environments.Steps;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.LlmProxy;
+using VibeRails.Services.Workspaces;
 
 using VibeRails.Utils;
 
@@ -27,6 +28,7 @@ public class TerminalRunner
     /// session adds nothing to it.
     /// </summary>
     private static readonly ConcurrentDictionary<string, PostStepContext> s_postStepContexts = new();
+    private static readonly ConcurrentDictionary<string, IDisposable> s_worktreeLeases = new();
     // Guards the hand-off from a registered context to its single in-flight run, so a caller that
     // arrives while another owns the run waits for it instead of finding nothing to do.
     private static readonly Lock s_postStepLock = new();
@@ -55,6 +57,7 @@ public class TerminalRunner
     private readonly IEnvironmentStepRunner _stepRunner;
     private readonly IAppEventBus _appEventBus;
     private readonly IHostApplicationLifetime? _appLifetime;
+    private readonly IManagedWorktreeService? _worktrees;
 
     public TerminalRunner(
         ITerminalStateService stateService,
@@ -65,7 +68,8 @@ public class TerminalRunner
         IRepository repository,
         IEnvironmentStepRunner stepRunner,
         IAppEventBus appEventBus,
-        IHostApplicationLifetime? appLifetime = null)
+        IHostApplicationLifetime? appLifetime = null,
+        IManagedWorktreeService? worktrees = null)
     {
         _stateService = stateService;
         _commandService = commandService;
@@ -76,6 +80,7 @@ public class TerminalRunner
         _stepRunner = stepRunner;
         _appEventBus = appEventBus;
         _appLifetime = appLifetime;
+        _worktrees = worktrees;
     }
 
     /// <summary>
@@ -129,6 +134,11 @@ public class TerminalRunner
 
         try
         {
+            if (_worktrees is not null)
+            {
+                var lease = await _worktrees.AcquireUsageAsync(workDir, ct);
+                if (lease is not null) s_worktreeLeases[sessionId] = lease;
+            }
             if (isNativeCli)
             {
                 Log.Information(
@@ -662,6 +672,7 @@ public class TerminalRunner
             }
 
             openCodeProxyLease?.Dispose();
+            ReleaseWorktreeLease(sessionId);
 
             await _stateService.CompleteSessionAsync(sessionId, -1);
             throw;
@@ -721,6 +732,7 @@ public class TerminalRunner
         if (owned is null)
         {
             if (inFlight is not null) await inFlight;
+            ReleaseWorktreeLease(sessionId);
             return;
         }
 
@@ -730,9 +742,15 @@ public class TerminalRunner
         }
         finally
         {
+            ReleaseWorktreeLease(sessionId);
             lock (s_postStepLock) s_postStepRuns.Remove(sessionId);
             owned.SetResult();
         }
+    }
+
+    private static void ReleaseWorktreeLease(string sessionId)
+    {
+        if (s_worktreeLeases.TryRemove(sessionId, out var lease)) lease.Dispose();
     }
 
     private async Task RunPostStepsCoreAsync(string sessionId, int exitCode, PostStepContext context, CancellationToken ct)

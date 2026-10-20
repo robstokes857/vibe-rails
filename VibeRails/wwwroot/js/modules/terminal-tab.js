@@ -1,7 +1,7 @@
 import { VibeTerminal } from './vibe-terminal.js';
 import { translateOpenCodeMouseWheel } from './terminal-opencode-wheel.js';
 import { createGrokPastePayload, isNativeGrokCli } from './terminal-grok-paste.js';
-import { TerminalAutoReconnect, isAutoReconnectEnabled } from './terminal-reconnect.js';
+import { CLOSE_KIND, classifySocketClose, TerminalAutoReconnect, isAutoReconnectEnabled } from './terminal-reconnect.js';
 
 const RESIZE_PREFIX = '__resize__:';
 const ESCAPE_KEY_COMMAND = '__cmd__:escape';
@@ -961,6 +961,18 @@ export class TerminalTab {
                 this.lastResizeSignature = null;
 
                 this.state.status = this.state.hasActiveSession ? 'disconnected' : 'not-started';
+                const close = {
+                    code: event.code,
+                    reason: event.reason,
+                    hasActiveSession: this.state.hasActiveSession
+                };
+                if (classifySocketClose(close) === CLOSE_KIND.TAKEOVER) {
+                    const viewer = /remote/i.test(event.reason) ? 'a remote host' : 'another viewer';
+                    const title = this.state.label ? `Terminal taken over: ${this.state.label}` : 'Terminal taken over';
+                    this.manager.app.showToast(title,
+                        `This terminal was taken over by ${viewer}. Select Connect to take it back.`,
+                        'warning', { requireDismiss: true });
+                }
                 this._resolveFirstReplay();
                 if (this.state.hasActiveSession) {
                     this.statusController?.onSocketClose();
@@ -969,11 +981,7 @@ export class TerminalTab {
                     // session from each other forever) and never for a session
                     // the server says is gone. Our own closes null `this.socket`
                     // first and never reach this handler.
-                    this.autoReconnect?.handleClose({
-                        code: event.code,
-                        reason: event.reason,
-                        hasActiveSession: true
-                    });
+                    this.autoReconnect?.handleClose(close);
                 }
                 // NOTHING is written into the terminal here, deliberately. This used to print
                 // "[reason] (reconnecting in 2s)" into the buffer. A TUI owns the whole screen

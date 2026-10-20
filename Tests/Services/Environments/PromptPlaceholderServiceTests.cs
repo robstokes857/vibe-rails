@@ -3,6 +3,7 @@ using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services.Cli;
 using VibeRails.Services.Environments;
+using VibeRails.Services.Workspaces;
 using Xunit;
 
 namespace Tests.Services.Environments;
@@ -383,6 +384,57 @@ public class PromptPlaceholderServiceTests
         await service.ResolveAsync($"{{{{step:{step.Id}}}}}", Context(), TestContext.Current.CancellationToken);
 
         Assert.Equal(TimeSpan.FromSeconds(45), Assert.Single(cli.Requests).Timeout);
+    }
+
+    [Theory]
+    [InlineData("{{worktree}}", null, 7)]
+    [InlineData("{{worktree path=\"../task one\"}}", "../task one", 7)]
+    [InlineData("{{WORKTREE delete_after_days=never}}", null, null)]
+    public async Task WorktreeCreatesOnceAndReturnsItsWorkingDirectory(string template, string? path, int? days)
+    {
+        var worktrees = new Mock<IManagedWorktreeService>(MockBehavior.Strict);
+        var worktree = new ManagedWorktree("id", Path.Combine(WorkDir, "literal-{{date}}"), "common", "git", "branch", DateTime.UtcNow, null);
+        worktrees.Setup(w => w.CreateAsync(WorkDir, new WorktreeOptions(path, days), It.IsAny<CancellationToken>())).ReturnsAsync(worktree);
+        var service = new PromptPlaceholderService(Mock.Of<IRepository>(), new FakeCapturingCliWrapper(), new FixedTimeProvider(Now), worktrees.Object);
+
+        var result = await service.ResolveLaunchAsync(template + " then " + template, Context(), TestContext.Current.CancellationToken);
+
+        Assert.Equal(worktree.Path + " then " + worktree.Path, result.Prompt);
+        Assert.Equal(worktree.Path, result.WorkingDirectory);
+        worktrees.Verify(w => w.CreateAsync(WorkDir, new WorktreeOptions(path, days), It.IsAny<CancellationToken>()), Times.Once);
+        worktrees.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task WorktreeIsReadyBeforePromptStepCommandsRun()
+    {
+        var (_, repository, cli) = BuildService();
+        var step = NewStep("Info", "pwd");
+        repository.Setup(r => r.GetStepByIdAsync(EnvironmentId, step.Id, It.IsAny<CancellationToken>())).ReturnsAsync(step);
+        var directory = Path.Combine(WorkDir, "worktree-prompt-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var worktree = new ManagedWorktree("id", directory, "common", "git", "branch", DateTime.UtcNow, null);
+            var worktrees = new Mock<IManagedWorktreeService>();
+            worktrees.Setup(w => w.CreateAsync(WorkDir, new WorktreeOptions(), It.IsAny<CancellationToken>())).ReturnsAsync(worktree);
+            cli.NextStandardOutput = "worktree output";
+            var service = new PromptPlaceholderService(repository.Object, cli, new FixedTimeProvider(Now), worktrees.Object);
+            var result = await service.ResolveLaunchAsync($"{{{{step:{step.Id}}}}} {{{{worktree}}}}", Context(), TestContext.Current.CancellationToken);
+            Assert.Equal(directory, Assert.Single(cli.Requests).WorkingDirectory);
+            Assert.Equal("worktree output " + directory, result.Prompt);
+        }
+        finally { Directory.Delete(directory); }
+    }
+
+    [Fact]
+    public async Task ConflictingWorktreeOptionsAreRejectedWithoutCreatingAnything()
+    {
+        var worktrees = new Mock<IManagedWorktreeService>(MockBehavior.Strict);
+        var service = new PromptPlaceholderService(Mock.Of<IRepository>(), new FakeCapturingCliWrapper(), worktrees: worktrees.Object);
+        await Assert.ThrowsAsync<ArgumentException>(() => service.ResolveLaunchAsync(
+            "{{worktree}} {{worktree delete_after_days=never}}", Context(), TestContext.Current.CancellationToken));
+        worktrees.VerifyNoOtherCalls();
     }
 
     // ---------------------------------------------------------------------------------------

@@ -6,12 +6,12 @@ const DEFAULT_PATTERN = /\bdefault\s*=\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])
 
 // Reserved names that never become fill-in fields. Mirrors PromptPlaceholderService in the
 // backend, which owns the authoritative resolution pass at launch. datetime/date/time/env_name
-// resolve here too (for the preview and the submitted text); git_branch, board_card and step need
-// the server (a git call / run context / a shell run), so their tokens are deliberately left
+// resolve here too (for the preview and the submitted text); git_branch, board_card, worktree and step need
+// the server (a git call / run context / workspace creation / a shell run), so their tokens are deliberately left
 // literal for it.
 // "step" is on this list because {{step:<id>}} parses under TOKEN_PATTERN as name "step" with
 // ":<id>" falling into the argument capture.
-const BUILTIN_TOKEN_NAMES = Object.freeze(['datetime', 'date', 'time', 'git_branch', 'env_name', 'board_card']);
+const BUILTIN_TOKEN_NAMES = Object.freeze(['datetime', 'date', 'time', 'git_branch', 'env_name', 'board_card', 'worktree']);
 const STEP_ID_PATTERN = /step\s*:\s*([0-9a-fA-F-]+)/i;
 
 function lower(value) {

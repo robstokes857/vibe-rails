@@ -5,6 +5,7 @@ using Serilog;
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services.Cli;
+using VibeRails.Services.Workspaces;
 using VibeRails.Utils;
 
 namespace VibeRails.Services.Environments;
@@ -20,6 +21,9 @@ public sealed record PromptPlaceholderContext(
     int? EnvironmentId = null,
     string? EnvironmentName = null,
     string? BoardCardKey = null);
+
+/// <summary>The once-resolved message and the directory the CLI and its steps must use.</summary>
+public sealed record ResolvedPrompt(string? Prompt, string WorkingDirectory);
 
 /// <summary>
 /// Thrown when a prompt is too long to hand to a CLI. Callers turn this into a user-facing error
@@ -65,6 +69,11 @@ public sealed class PromptTooLongException(string message, int actualChars, int 
 /// </summary>
 public interface IPromptPlaceholderService
 {
+    Task<ResolvedPrompt> ResolveLaunchAsync(
+        string? prompt,
+        PromptPlaceholderContext context,
+        CancellationToken cancellationToken = default);
+
     Task<string?> ResolveAsync(
         string? prompt,
         PromptPlaceholderContext context,
@@ -72,7 +81,7 @@ public interface IPromptPlaceholderService
 }
 
 /// <summary>
-/// Two token families, matched in a single pass over the template so no substituted text is ever
+/// Three token families, matched in a single pass over the template so no substituted text is ever
 /// re-scanned — an environment named <c>{{date}}</c>, a branch named <c>{{step:&lt;id&gt;}}</c>, or a
 /// step that prints a token all reach the CLI literally:
 ///
@@ -86,6 +95,9 @@ public interface IPromptPlaceholderService
 ///      by design: a deleted step, a disabled step, a non-zero exit, or a timeout substitutes
 ///      explanatory text and the launch continues — unlike lifecycle pre-steps, a broken prompt
 ///      step must not strand the session.
+///   3. {{worktree path="..." delete_after_days=7}} — both arguments optional; provisions one
+///      managed worktree before branch/step resolution, substitutes its absolute path, and
+///      selects it as the launch directory. Invalid options or creation failures abort launch.
 /// </summary>
 public sealed partial class PromptPlaceholderService : IPromptPlaceholderService
 {
@@ -112,45 +124,69 @@ public sealed partial class PromptPlaceholderService : IPromptPlaceholderService
     private readonly IEnvironmentStore _repository;
     private readonly ICliWrapper _cli;
     private readonly TimeProvider _timeProvider;
+    private readonly IManagedWorktreeService? _worktrees;
 
     public PromptPlaceholderService(
         IEnvironmentStore repository,
         ICliWrapper cli,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IManagedWorktreeService? worktrees = null)
     {
         _repository = repository;
         _cli = cli;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _worktrees = worktrees;
     }
 
     public async Task<string?> ResolveAsync(
         string? prompt,
         PromptPlaceholderContext context,
+        CancellationToken cancellationToken = default) =>
+        (await ResolveLaunchAsync(prompt, context, cancellationToken)).Prompt;
+
+    public async Task<ResolvedPrompt> ResolveLaunchAsync(
+        string? prompt,
+        PromptPlaceholderContext context,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(prompt))
-            return prompt;
+            return new ResolvedPrompt(prompt, context.WorkingDirectory);
 
         var resolved = prompt.Contains("{{", StringComparison.Ordinal)
             ? await ResolveTokensAsync(prompt, context, cancellationToken)
-            : prompt;
+            : new ResolvedPrompt(prompt, context.WorkingDirectory);
 
         // Checked even when nothing was substituted: this is the one chokepoint every launched
         // prompt passes through, so it is the only place a length guarantee can be made.
-        if (resolved.Length > MaxResolvedPromptChars)
-            throw PromptTooLongException.ForResolvedPrompt(resolved.Length, MaxResolvedPromptChars);
+        if (resolved.Prompt!.Length > MaxResolvedPromptChars)
+            throw PromptTooLongException.ForResolvedPrompt(resolved.Prompt.Length, MaxResolvedPromptChars);
 
         return resolved;
     }
 
-    private async Task<string> ResolveTokensAsync(
+    private async Task<ResolvedPrompt> ResolveTokensAsync(
         string prompt,
         PromptPlaceholderContext context,
         CancellationToken cancellationToken)
     {
         var matches = TokenRegex().Matches(prompt);
         if (matches.Count == 0)
-            return prompt;
+            return new ResolvedPrompt(prompt, context.WorkingDirectory);
+
+        // Validate every worktree reference before creating anything. Repeated references share
+        // one checkout; conflicting options cannot select two working directories for one CLI.
+        var options = matches.Cast<Match>()
+            .Where(match => match.Groups[1].Value.Equals("worktree", StringComparison.OrdinalIgnoreCase))
+            .Select(match => WorktreeOptions.Parse(match.Groups[2].Value)).Distinct().ToArray();
+        if (options.Length > 1) throw new ArgumentException("An Initial Message can select only one set of {{worktree}} options.");
+        string? worktreePath = null;
+        if (options.Length == 1)
+        {
+            var service = _worktrees ?? throw new InvalidOperationException("Worktree support is unavailable in this host.");
+            var worktree = await service.CreateAsync(context.WorkingDirectory, options[0], cancellationToken);
+            worktreePath = worktree.Path;
+            context = context with { WorkingDirectory = worktree.Path };
+        }
 
         // Everything that needs I/O is resolved up front, against the original template, so the
         // Replace pass below is pure — a value spliced in cannot become a token to resolve.
@@ -187,7 +223,7 @@ public sealed partial class PromptPlaceholderService : IPromptPlaceholderService
         }
 
         var now = _timeProvider.GetLocalNow();
-        return TokenRegex().Replace(prompt, match =>
+        var resolved = TokenRegex().Replace(prompt, match =>
         {
             if (TryReadStepId(match, out var stepId))
                 return stepOutputs[stepId];
@@ -200,11 +236,13 @@ public sealed partial class PromptPlaceholderService : IPromptPlaceholderService
                 "env_name" => context.EnvironmentName ?? "",
                 "git_branch" => gitBranch ?? "(no git branch)",
                 "board_card" => context.BoardCardKey ?? "",
+                "worktree" => worktreePath!,
                 // User-prompted variables are someone else's to handle — and so is {{step}} with
                 // an argument that is not an id. Leave the token exactly as written.
                 _ => match.Value
             };
         });
+        return new ResolvedPrompt(resolved, context.WorkingDirectory);
     }
 
     /// <summary>

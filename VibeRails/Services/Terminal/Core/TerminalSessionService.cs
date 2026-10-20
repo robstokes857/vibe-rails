@@ -1,6 +1,7 @@
 using System.Net.WebSockets;
 using Serilog;
 using VibeRails.DTOs;
+using VibeRails.Services.Environments;
 using VibeRails.Services.Terminal.Consumers;
 
 
@@ -106,7 +107,7 @@ public class TerminalSessionService : ITerminalSessionService
         _localClientTracker = localClientTracker;
     }
 
-    public async Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false, Func<Task<string?>>? resolveInitialPrompt = null, string summary = "", bool authorizeBoardTools = false)
+    public async Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false, Func<Task<ResolvedPrompt>>? resolveInitialPrompt = null, string summary = "", bool authorizeBoardTools = false)
     {
         await s_lifecycleGate.WaitAsync();
 
@@ -123,7 +124,9 @@ public class TerminalSessionService : ITerminalSessionService
             // concurrent start can also reach here. That is what makes it safe to run the
             // Initial Message's {{step:<id>}} commands: a loser blocks on the gate above, sees
             // the winner's terminal, and returns false without executing anything.
-            var initialPrompt = resolveInitialPrompt is null ? null : await resolveInitialPrompt();
+            var resolved = resolveInitialPrompt is null ? null : await resolveInitialPrompt();
+            var initialPrompt = resolved?.Prompt;
+            workingDirectory = resolved?.WorkingDirectory ?? workingDirectory;
 
             var (terminal, sessionId, _) = await _runner.CreateSessionAsync(
                 llm,

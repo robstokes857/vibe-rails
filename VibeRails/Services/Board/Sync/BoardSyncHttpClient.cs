@@ -23,6 +23,7 @@ public interface IBoardSyncClient
     Task<BoardSyncPublishResponse> PublishAsync(BoardSyncPublishRequest request, CancellationToken cancellationToken, string? expectedDestination = null);
     Task<BoardSyncPushResponse> PushAsync(string remoteBoardId, BoardSyncPushRequest request, CancellationToken cancellationToken, string? expectedDestination = null);
     Task<BoardSyncPullResponse> PullAsync(string remoteBoardId, long after, int limit, CancellationToken cancellationToken, string? expectedDestination = null);
+    Task PutContentPartAsync(BoardSyncContentPartWire part, ReadOnlyMemory<byte> bytes, CancellationToken ct, string? destination = null) => throw new NotSupportedException();
     Task<BoardSyncActivityAck> PutActivityAsync(string remoteBoardId, string cardId, BoardSyncActivityWire activity, CancellationToken cancellationToken, string? expectedDestination = null);
     Task<BoardRemoteDescriptor?> DescribeAsync(string remoteBoardId, CancellationToken ct, string? destination = null) => Task.FromResult<BoardRemoteDescriptor?>(null);
     Task<List<BoardRemoteDescriptor>> DiscoverAsync(CancellationToken ct, string? destination = null) => throw new NotSupportedException();
@@ -109,9 +110,35 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Fu
             Uri.EscapeDataString(remoteBoardId) + "/cards/" + Uri.EscapeDataString(cardId) + "/activity",
             activity, BoardSyncJsonContext.Default.BoardSyncActivityWire, BoardSyncJsonContext.Default.BoardSyncActivityAck,
             cancellationToken, expectedDestination);
-        if (ack.Schema != 1 || !string.Equals(ack.CardId, cardId, StringComparison.Ordinal))
+        if (ack.Schema != activity.Schema || !string.Equals(ack.CardId, cardId, StringComparison.Ordinal))
             throw new BoardSyncClientException("The server did not acknowledge this card's activity; the upload will retry.", "invalid_response");
         return ack;
+    }
+
+    public async Task PutContentPartAsync(BoardSyncContentPartWire part, ReadOnlyMemory<byte> bytes, CancellationToken ct, string? destination = null)
+    {
+        if (bytes.Length is <= 0 or > 4 * 1024 * 1024 || bytes.Length != part.Bytes
+            || Convert.ToHexStringLower(SHA256.HashData(bytes.Span)) != part.Sha256)
+            throw new InvalidDataException("Card content part failed its local checksum.");
+        var target = endpoint() ?? throw new BoardSyncClientException("Board sync has no endpoint.", "no_endpoint");
+        var credential = apiKey();
+        if (string.IsNullOrWhiteSpace(credential)) throw new BoardSyncClientException("Board sync has no API key.", "no_api_key");
+        if (destination is not null && destination != Identity(target, credential))
+            throw new BoardSyncClientException("The destination changed during content upload.", "destination_changed");
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(TimeSpan.FromSeconds(30));
+        // Same configured origin and credential as Board sync; never a request-selected host.
+        using var request = new HttpRequestMessage(HttpMethod.Put, new Uri(target, "/api/v1/board-content/parts/" + part.Sha256));
+        request.Headers.Add("X-Api-Key", credential);
+        request.Content = new ByteArrayContent(bytes.ToArray());
+        request.Content.Headers.ContentType = new("application/octet-stream");
+        using var client = httpClientFactory.CreateClient(HttpClientName);
+        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
+        if (!response.IsSuccessStatusCode)
+            throw new BoardSyncClientException($"Card content upload returned HTTP {(int)response.StatusCode}; local content is retained.", "content_upload_failed", (int)response.StatusCode);
+        var ack = await ReadJsonAsync(response, BoardSyncJsonContext.Default.BoardSyncContentPartWire, deadline.Token);
+        if (ack is null || ack.Sha256 != part.Sha256 || ack.Bytes != part.Bytes || !ack.ChecksumsVerified)
+            throw new BoardSyncClientException("The server did not verify this content part.", "invalid_response");
     }
 
     public Task<BoardSyncPublishResponse> PublishAsync(BoardSyncPublishRequest request, CancellationToken cancellationToken, string? expectedDestination = null) =>
@@ -159,6 +186,13 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Fu
             var status = (int)response.StatusCode;
             if (!response.IsSuccessStatusCode)
             {
+                if (response.StatusCode == HttpStatusCode.TooManyRequests)
+                {
+                    var retry = response.Headers.RetryAfter;
+                    var delay = retry?.Delta ?? (retry?.Date is { } date ? date - DateTimeOffset.UtcNow : TimeSpan.FromSeconds(15));
+                    throw new BoardSyncClientException("Board sync returned HTTP 429; entries remain queued.", "http_429", status,
+                        retryAfter: TimeSpan.FromSeconds(Math.Clamp(delay.TotalSeconds, 1, 60)));
+                }
                 if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
                     throw new BoardSyncClientException("viberails.ai rejected the API key. Check it in Settings.", "unauthorized", status);
                 // Only a bounded, recognised code changes what the desktop does; the message is

@@ -657,10 +657,17 @@ which is why those two controls stop propagation before the card's own open hand
 
 ## Chat history sidebar
 
+History loads and soft refreshes synchronize generated session titles to matching live terminal
+tabs through `TerminalManager.syncSessionTitles`. Match the current session ID after the request
+finishes, preserve explicit tab labels and in-progress renames, and never activate or reconnect a
+tab to rename it. Generated names remain automatic; starting another session restores its launch label.
+
 Session titles span the full card width above the icon, project, metadata and actions.
 They wrap to at most four lines with no reserved minimum height; short titles leave no
 blank title rows. Collapsed history shows only the session icons, including for linked,
 resumed and live sessions.
+Reserve space for the collapsed rail's fixed History label outside the scrolling session
+list, so retained scroll positions cannot move icons behind the label.
 
 Each associated card's metadata label is a keyboard-accessible link (VIBE-72), using its display
 ID with the permanent key and title in the tooltip. It navigates to `board` with `openCardId`
@@ -790,7 +797,18 @@ The terminal dropdown shows two groups:
 - **Base CLIs**: Claude, Codex, GLM 5.2, GLM 5.3, DeepSeek V4 Pro, Kimi K3, Grok, OpenCode, Copilot, Antigravity (each shown as "(default)") — resolved to its executable server-side (Antigravity → `agy`, Grok → `grok`). Grok's model (`grok-4.7` or `grok-4.6`) is chosen on the environment or Board launch, not by a separate CLI entry.
 - **Custom Environments**: User-created environments — spawned directly via the tab start endpoint
 
+Terminal tab selection uses a shared blue fill, bright top edge and inset outline across all
+CLIs. Brand accents stay as muted bottom underlines on inactive tabs; progress also stays at
+the bottom, separate from selection. Attention tabs retain their red alert treatment while the
+selected tab keeps its blue top edge and outline, including minimized tabs.
+Completion and status flashes animate inactive tabs only, keeping the selected fill stable.
+
 ## Terminal auto-reconnect
+
+Takeover closes show the shared application warning toast, identifying the terminal and remote
+host (or another viewer) and explaining that Connect takes the terminal back. Pass
+`requireDismiss: true`: the toast stays until the user clicks its close button, including through
+reconnect or tab changes. This also applies to the script workbench's agent pane.
 
 Navigation destroys the `TerminalManager` (every xterm + WebSocket). On re-entry the restored
 manager reconnects the active tab at once and then `scheduleBackgroundReconnect()` brings the

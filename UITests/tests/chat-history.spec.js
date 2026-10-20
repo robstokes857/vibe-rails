@@ -130,6 +130,57 @@ async function openHistory(page) {
     await expect(page.locator('.ch-item').first()).toBeVisible();
 }
 
+test('a server title refresh also renames its live terminal tab and preserves its status', async ({ page }) => {
+    await openHistory(page);
+    await page.evaluate(async () => {
+        const { TerminalController, TerminalManager } = await import('/js/modules/terminal-multitab.js');
+        const { TabStatusController } = await import('/js/modules/terminal-tab-status.js');
+        const app = historySidebar.app;
+        historySidebar.destroy();
+        const manager = new TerminalManager(app, document.querySelector('#fixture'));
+        manager.syncHistoryPanelState = () => {};
+        manager.activeTabId = 'selected';
+        for (const [id, sessionId] of [['selected', 'session-1'], ['background', 'session-0']]) {
+            const item = document.createElement('div');
+            const button = document.createElement('button');
+            button.id = `title-tab-${id}`;
+            item.append(button);
+            document.querySelector('#fixture').append(item);
+            const state = { id, sessionId, hasActiveSession: true, label: 'Codex', title: 'Codex Terminal',
+                ui: { item, button } };
+            const statusController = new TabStatusController(state, state.ui, {
+                getCliKey: () => 'codex', isActiveTab: () => id === manager.activeTabId
+            });
+            const tab = { state, instance: { statusController } };
+            manager.tabs.set(id, tab);
+            manager.renderTabButton(tab);
+            statusController.onSocketOpen();
+            statusController.onTerminalData('\r');
+        }
+        const controller = new TerminalController(app);
+        controller.manager = manager;
+        controller._initChatHistorySidebar(document.querySelector('#fixture'));
+        window.historySidebar = manager.historySidebar;
+        const handlers = new Map();
+        controller.bindSessionEvents({ on: (type, handler) => handlers.set(type, handler) });
+        const originalApiCall = app.apiCall;
+        const named = item => item.id === 'session-0' ? { ...item, sessionDisplayName: 'Diagnose backup failures',
+            sessionTitleGenerated: true } : item;
+        app.apiCall = async url => url === '/api/v1/chatHistory/session-0'
+            ? named({ id: 'session-0', cli: 'codex', startedUTC: new Date().toISOString() })
+            : { items: (await originalApiCall(url)).items.map(named) };
+        handlers.get('session_title_updated')({ sessionId: 'session-0' });
+        window.titleManager = manager;
+    });
+    const background = page.locator('#title-tab-background');
+    await expect(background.locator('.vb-terminal-tab-label')).toHaveText('Diagnose backup failures');
+    await expect(background).toHaveAttribute('title', /Diagnose backup failures/);
+    await expect(background.locator('.vb-spinner')).toHaveCount(1);
+    await expect(page.locator('#title-tab-selected .vb-terminal-tab-label')).toHaveText('Codex');
+    await expect(page.locator('.ch-item-name').filter({ hasText: 'Diagnose backup failures' })).toBeVisible();
+    expect(await page.evaluate(() => titleManager.activeTabId)).toBe('selected');
+});
+
 test('titles fill the card width without blank rows and collapse to icons only', async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 390, height: 900 });
     await openHistory(page);
@@ -193,6 +244,31 @@ test('titles fill the card width without blank rows and collapse to icons only',
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     await page.locator('[data-id="resumed"] .ch-item-menu-btn').click();
     await expect(page.locator('[data-action="get-session"]')).toBeVisible();
+});
+
+test('collapsed history keeps scrolled session icons below its fixed label', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1280, height: 600 });
+    await openHistory(page);
+    await page.evaluate(() => {
+        const root = document.querySelector('#fixture');
+        root.classList.add('vb-terminal-focus-layout');
+        root.style.height = 'calc(100vh - 24px)';
+        document.querySelector('.ch-sidebar').style.width = '';
+        historySidebar.body.scrollTop = 600;
+    });
+    expect(await page.locator('.ch-sidebar-body').evaluate(body => body.scrollTop)).toBeGreaterThan(0);
+    await page.getByRole('button', { name: 'Collapse chat history' }).click();
+    await expect.poll(async () => Math.round((await page.locator('.ch-sidebar').boundingBox()).width)).toBe(44);
+    for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 600 });
+        const label = await page.locator('.ch-sidebar-rail-label').boundingBox();
+        const body = await page.locator('.ch-sidebar-body').boundingBox();
+        expect(body.y).toBeGreaterThan(label.y + label.height);
+        await expect(page.locator('.ch-item-icon').first()).toBeVisible();
+        await page.locator('.ch-sidebar').screenshot({ path: testInfo.outputPath(`history-scrolled-rail-${width}.png`) });
+    }
+    await page.getByRole('button', { name: 'Expand chat history' }).click();
+    await expect(page.locator('.ch-item-name').first()).toBeVisible();
 });
 
 test('history card links open each associated card with mouse or keyboard after refresh', async ({ page }, testInfo) => {

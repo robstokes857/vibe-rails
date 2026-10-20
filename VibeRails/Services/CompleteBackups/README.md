@@ -1,5 +1,13 @@
 # Automatic complete backups
 
+> **Retired October 20, 2026 (VB-ZXF0B-18):** automatic full-snapshot scheduling is
+> removed from `MapRegisterServices`. `CompleteBackupJob` is no longer hosted. Existing
+> archives, staging/checkpoints and read-only coverage remain; coverage explicitly returns
+> `automaticBackupsEnabled=false`. No stored data is deleted. Session drain and Board sync
+> continue, with complete attachment/commit content uploaded independently by schema-2
+> Board activity. The implementation below documents the retained legacy capture service,
+> not an active automatic job. Install the updated desktop for this scheduling change.
+
 `CompleteBackupJob` joins the existing resource-aware `JobBase` lifecycle beside session
 data drain. Only active root backends register it. There is no daemon, startup prompt or
 opt-in. A configured account starts initial captures. A separate cross-process file lock

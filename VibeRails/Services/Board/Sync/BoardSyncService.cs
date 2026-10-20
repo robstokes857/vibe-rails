@@ -61,7 +61,8 @@ public sealed class BoardSyncService(
     IBoardSyncClient client,
     BoardSyncLock syncLock,
     IFeatureLog featureLog,
-    BoardSyncActivityCache activityCache) : IBoardSyncService
+    BoardSyncActivityCache activityCache,
+    TimeProvider? timeProvider = null) : IBoardSyncService
 {
     public const string FeatureName = "board-sync";
 
@@ -254,7 +255,21 @@ public sealed class BoardSyncService(
 
     private async Task<BoardSyncLinkRecord> SyncOnceAsync(BoardSyncLinkRecord link, CancellationToken cancellationToken, bool forceActivity)
     {
-        link = await PushAsync(link, cancellationToken);
+        try
+        {
+            link = await PushAsync(link, cancellationToken);
+        }
+        catch (BoardSyncHistoryConflictException conflict) when (!link.Imported)
+        {
+            // A malformed ACK alone must never reset receipts. First read and validate the
+            // hosted history, then let the store prove that recorded entry identities diverged.
+            link = await RecoverOwnedHistoryAsync(link, conflict, cancellationToken);
+            link = await PushAsync(link, cancellationToken);
+        }
+        // Recovery snapshots can span several bounded ticks. Finish the local outbox before
+        // reading the hosted projection, including after a restart or a lost acknowledgement.
+        if (!link.Imported && await store.HasPendingSyncRecoveryAsync(link.BoardId, cancellationToken))
+            return link;
         link = await RefreshLayoutAsync(link, cancellationToken);
         link = await PullAsync(link, cancellationToken);
         link = await RefreshLayoutAsync(link, cancellationToken);
@@ -345,7 +360,7 @@ public sealed class BoardSyncService(
     private static void ValidateAcknowledgement(BoardSyncPushResponse response, IReadOnlyList<BoardSyncOutboundEntry> sent, long cursor)
     {
         const string message = "The server returned an invalid sync acknowledgement; entries remain queued.";
-        if (response.Accepted is null || response.Accepted.Count != sent.Count || response.LastSeq < cursor || response.LastSeq < 0)
+        if (response.Accepted is null || response.Accepted.Count != sent.Count || response.LastSeq < 0)
             throw new BoardValidationException(message);
         var sequences = new HashSet<long>();
         long lastCreated = 0, lastOther = 0;
@@ -367,6 +382,67 @@ public sealed class BoardSyncService(
             {
                 if (accepted.Seq <= lastOther) throw new BoardValidationException(message);
                 lastOther = accepted.Seq;
+            }
+        }
+        if (response.LastSeq < cursor)
+            throw new BoardSyncHistoryConflictException(null, response.LastSeq);
+    }
+
+    private async Task<BoardSyncLinkRecord> RecoverOwnedHistoryAsync(BoardSyncLinkRecord link,
+        BoardSyncHistoryConflictException conflict, CancellationToken ct)
+    {
+        const int pageSize = 200;
+        const int maxPages = 1000;
+        var history = new List<BoardSyncHistoryEntry>();
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        long cursor = 0;
+        long? boundary = null;
+        for (var page = 0; page < maxPages; page++)
+        {
+            var response = await ReadRecoveryPageAsync(link, cursor, pageSize, ct);
+            ValidatePullPage(response, cursor, pageSize);
+            boundary ??= response.LastSeq;
+            if (response.LastSeq < boundary)
+                throw new BoardValidationException("Hosted history changed during recovery; entries remain queued for retry.");
+            var reachedBoundary = false;
+            foreach (var entry in response.Entries)
+            {
+                if (entry.Seq > boundary) { reachedBoundary = true; break; }
+                if (!ids.Add(entry.Id))
+                    throw new BoardValidationException("The server returned duplicate recovery identities; entries remain queued.");
+                history.Add(new(entry.Id, entry.CardId, entry.Kind, entry.Seq));
+                cursor = entry.Seq;
+            }
+            if (!response.HasMore || reachedBoundary || cursor >= boundary)
+            {
+                // A forged ACK which reused another entry's number is still invalid. The
+                // server's actual history must corroborate this specific receipt before repair.
+                if (conflict.EntryId is not null && !history.Any(e => e.EntryId == conflict.EntryId && e.Seq == conflict.Sequence))
+                    throw conflict;
+                if (client.DestinationKey != link.DestinationKey)
+                    throw new BoardValidationException("The account changed during recovery; entries remain queued.");
+                var current = await store.GetSyncLinkAsync(link.ProjectPath, link.BoardId, ct) ?? throw conflict;
+                var repaired = await store.ReconcileOwnedSyncHistoryAsync(current, history, boundary.Value, ct)
+                    ?? throw conflict;
+                featureLog.Write(FeatureName, "recover", "Reconciled restored hosted history; queued current local values as authoritative.",
+                    link.BoardId, link.RemoteBoardId, "ok", LogLevel.Warning);
+                return repaired;
+            }
+        }
+        throw new BoardValidationException("Hosted history exceeds the automatic recovery limit; entries remain queued.");
+    }
+
+    private async Task<BoardSyncPullResponse> ReadRecoveryPageAsync(BoardSyncLinkRecord link, long cursor, int pageSize, CancellationToken ct)
+    {
+        for (var retry = 0; ; retry++)
+        {
+            try { return await client.PullAsync(link.RemoteBoardId, cursor, pageSize, ct, link.DestinationKey); }
+            catch (BoardSyncClientException ex) when (ex.Status == 429 && retry < 4)
+            {
+                var seconds = Math.Clamp((ex.RetryAfter ?? TimeSpan.FromSeconds(15)).TotalSeconds, 1, 60);
+                featureLog.Write(FeatureName, "recover-wait", "Hosted history read is rate limited; waiting before retrying the same page.",
+                    link.BoardId, link.RemoteBoardId, "retry");
+                await Task.Delay(TimeSpan.FromSeconds(seconds), timeProvider ?? TimeProvider.System, ct);
             }
         }
     }
@@ -428,10 +504,10 @@ public sealed class BoardSyncService(
         return link;
     }
 
-    private static void ValidatePullPage(BoardSyncPullResponse response, long cursor)
+    private static void ValidatePullPage(BoardSyncPullResponse response, long cursor, int pageSize = PullPageSize)
     {
         const string message = "The server returned an invalid sync page.";
-        if (response.Entries is null || response.Entries.Count > PullPageSize || response.LastSeq < cursor
+        if (response.Entries is null || response.Entries.Count > pageSize || response.LastSeq < cursor
             || (response.HasMore && response.Entries.Count == 0))
             throw new BoardValidationException(message);
         // Check the entire page before applying any of it, including entries already held locally.
@@ -532,7 +608,7 @@ public sealed class BoardSyncService(
     internal static BoardSyncEntryWire ToWire(BoardSyncOutboundEntry outbound)
     {
         var entry = outbound.Entry;
-        var changes = PortableChanges(entry.Changes);
+        var changes = entry.Kind is BoardSyncWire.KindDeleted or BoardSyncWire.KindRestored ? null : PortableChanges(entry.Changes);
         // Generated summaries may contain machine-local environment ids. The portable fields
         // provide the full values; comments/notes remain the user's verbatim text.
         var body = entry.Kind is BoardSyncWire.KindCreated or BoardSyncWire.KindChange

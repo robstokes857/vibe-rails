@@ -465,7 +465,7 @@ public sealed partial class BoardStore
                            JOIN BoardCards sourceCard ON sourceCard.Id = source.CardId
                            JOIN BoardColumns sourceColumn ON sourceColumn.Id = sourceCard.ColumnId WHERE source.Id = $id));
                     """, ("$id", entryId), cancellationToken, ("$seq", remoteSeq)) > 0)
-                    throw new BoardValidationException("The server returned an invalid sync acknowledgement; entries remain queued.");
+                    throw new BoardSyncHistoryConflictException(entryId, remoteSeq);
                 // Only an ACK of a later local outbox row releases rejected field protection.
                 // Pull writes never use this path, so a web change cannot erase that protection.
                 await using var resolved = connection.CreateCommand();

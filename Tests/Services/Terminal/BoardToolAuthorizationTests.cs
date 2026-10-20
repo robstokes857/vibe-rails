@@ -6,8 +6,10 @@ using VibeRails.Interfaces;
 using VibeRails.Services;
 using VibeRails.Services.AgentTools;
 using VibeRails.Services.Environments.Steps;
+using VibeRails.Services.Environments;
 using VibeRails.Services.LlmProxy;
 using VibeRails.Services.Terminal;
+using VibeRails.Services.Workspaces;
 using Xunit;
 
 namespace Tests.Services.Terminal;
@@ -33,8 +35,9 @@ public sealed class BoardToolAuthorizationTests
     [InlineData(true, true)]
     public async Task SessionAndRunner_ForwardAuthorizationIntoCommandPreparation(bool authorized, bool nativeWorker)
     {
+        var checkout = nativeWorker ? Path.GetTempPath() : Path.Combine(Path.GetTempPath(), "resolved-worktree");
         var state = new Mock<ITerminalStateService>();
-        state.Setup(s => s.CreateSessionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(),
+        state.Setup(s => s.CreateSessionAsync(It.IsAny<string>(), checkout, It.IsAny<string>(), It.IsAny<bool>(),
                 It.IsAny<CancellationToken>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>()))
             .ReturnsAsync("board-authorization-session");
         var command = new Mock<ICommandService>(MockBehavior.Strict);
@@ -42,9 +45,12 @@ public sealed class BoardToolAuthorizationTests
         command.Setup(c => c.PrepareSessionAsync(LLM.Claude, "saved-environment", It.IsAny<string[]>(), "card prompt", "",
                 "board-authorization-session", authorized))
             .ThrowsAsync(reachedPreparation);
+        var lease = new Mock<IDisposable>();
+        var worktrees = new Mock<IManagedWorktreeService>(MockBehavior.Strict);
+        worktrees.Setup(w => w.AcquireUsageAsync(checkout, It.IsAny<CancellationToken>())).ReturnsAsync(lease.Object);
         var runner = new TerminalRunner(state.Object, command.Object, Mock.Of<ILocalToolApiContext>(),
             Mock.Of<ILlmProxySessionState>(), Mock.Of<IAutomationConsumer>(), Mock.Of<IRepository>(),
-            Mock.Of<IEnvironmentStepRunner>(), Mock.Of<IAppEventBus>());
+            Mock.Of<IEnvironmentStepRunner>(), Mock.Of<IAppEventBus>(), worktrees: worktrees.Object);
         var session = new TerminalSessionService(state.Object, runner, Mock.Of<ILocalClientTracker>());
 
         // Stop at command preparation: this exercises both concrete forwarding layers without
@@ -53,10 +59,12 @@ public sealed class BoardToolAuthorizationTests
             ? runner.RunCliWithWebAsync(LLM.Claude, Path.GetTempPath(), "saved-environment", [], session,
                 ct: TestContext.Current.CancellationToken, initialPrompt: "card prompt", authorizeBoardTools: authorized)
             : (Task)session.StartSessionAsync(LLM.Claude, Path.GetTempPath(),
-                environmentName: "saved-environment", resolveInitialPrompt: () => Task.FromResult<string?>("card prompt"), authorizeBoardTools: authorized));
+                environmentName: "saved-environment", resolveInitialPrompt: () => Task.FromResult(new ResolvedPrompt("card prompt", checkout)), authorizeBoardTools: authorized));
         Assert.Same(reachedPreparation, thrown);
         command.VerifyAll();
         state.Verify(s => s.CompleteSessionAsync("board-authorization-session", -1), Times.Once);
+        worktrees.VerifyAll();
+        lease.Verify(l => l.Dispose(), Times.Once);
     }
 
     private sealed class ReachedPreparation : Exception;

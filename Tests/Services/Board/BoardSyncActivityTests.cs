@@ -85,7 +85,7 @@ public sealed class BoardSyncActivityTests
         var client = Client();
         client.SetupSequence(c => c.PutActivityAsync("remote", "card", It.IsAny<BoardSyncActivityWire>(), Ct, "account"))
             .ReturnsAsync(new BoardSyncActivityAck(0, "card"))
-            .ReturnsAsync(new BoardSyncActivityAck(1, "card"));
+            .ReturnsAsync(new BoardSyncActivityAck(2, "card"));
         await Assert.ThrowsAsync<BoardSyncClientException>(() => BoardSyncActivity.RefreshAsync(store.Object, client.Object, cache, Link(), Ct));
         await BoardSyncActivity.RefreshAsync(store.Object, client.Object, cache, Link(), Ct);
         store.Verify(s => s.GetSyncActivityAsync("project", "board", "card", Ct), Times.Exactly(2));
@@ -98,7 +98,7 @@ public sealed class BoardSyncActivityTests
     {
         var client = new Mock<IBoardSyncClient>(MockBehavior.Strict);
         client.Setup(c => c.PutActivityAsync("remote", "card", It.IsAny<BoardSyncActivityWire>(), Ct, It.IsAny<string>()))
-            .ReturnsAsync(new BoardSyncActivityAck(1, "card"));
+            .ReturnsAsync(new BoardSyncActivityAck(2, "card"));
         return client;
     }
 

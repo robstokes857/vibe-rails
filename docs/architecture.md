@@ -839,6 +839,35 @@ Environments page *and* every Job/Worker run) and `TerminalTabHostService.StartS
 **Retention**: `MaxRetainedPerRunWorkspaces` (3). Every run is a full working copy, so this is the
 only thing between a nightly automation and a full disk.
 
+#### Prompt-created Git worktrees ([Services/Workspaces/ManagedWorktreeService.cs](../VibeRails/Services/Workspaces/ManagedWorktreeService.cs))
+
+An Initial Message may contain `{{worktree}}`. Both arguments are optional:
+`{{worktree path="../my-task" delete_after_days=14}}`. Without a path, VibeRails creates
+`~/.vibe_rails/worktrees/<repo>-<unique-id>`; custom paths are repository-root-relative or
+absolute (`~` is supported), must be new, and must be outside the source checkout. Each launch
+creates a unique `viberails/worktree-<id>` branch from committed HEAD. Dirty source files are
+not copied. Repeated identical tokens share one worktree; conflicting options fail the launch.
+
+`PromptPlaceholderService.ResolveLaunchAsync` returns the resolved message and working directory.
+Web starts defer this pass until the terminal lifecycle gate is held; native launches resolve
+in `CliLoop`. The token expands to the absolute worktree path. Branch tokens, prompt-output
+steps, environment lifecycle steps, session recording and the CLI use the resulting directory.
+Substituted values are never scanned again for tokens.
+
+`ManagedWorktrees` in normal `state.db` records ownership, Git directories, branch, creation and
+absolute expiry. The additive `managed-worktrees/1` migration runs automatically. Retention
+defaults to 7 days; accepted overrides are 7–36500 days or `never`. The root-only
+`WorktreeCleanupJob` checks every ten minutes while VibeRails is open; there is no separate host.
+Overdue work is picked up after reopening. Expiry is age-based, independent of merges, and
+removes uncommitted, untracked and ignored files too. Branches are retained.
+
+Cleanup uses Git's own `worktree remove --force` for a verified owned directory. Ownership
+markers, Git-directory pointers and link/junction checks prevent adoption of unrelated paths.
+Shared OS file leases protect launches, PTYs and post-exit steps across root processes;
+exclusive cleanup leases serialize removals. Open session rows also protect older clients.
+Active sessions and user Git locks postpone removal until a later sweep. Failed removal keeps
+the ownership record for retry.
+
 #### Automation workflows ([Services/Jobs](../VibeRails/Services/Jobs))
 
 An Automation is an ordered, fail-fast list of actions. An action is either a repository script

@@ -74,7 +74,7 @@ public sealed partial class BoardStore
         var attachments = new List<BoardAttachmentMetadata>();
         await using (var command = connection.CreateCommand())
         {
-            command.CommandText = "SELECT Id, CardId, Name, MimeType, Bytes, CreatedUTC FROM BoardAttachments WHERE CardId = $card ORDER BY CreatedUTC, Id LIMIT 41;";
+            command.CommandText = "SELECT Id, CardId, Name, MimeType, Bytes, CreatedUTC FROM BoardAttachments WHERE CardId = $card ORDER BY CreatedUTC, Id LIMIT 2001;";
             command.Parameters.AddWithValue("$card", card.Id);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
@@ -82,14 +82,14 @@ public sealed partial class BoardStore
                     reader.GetString(3), reader.GetInt64(4), ParseDb(reader.GetString(5))));
         }
         return new(await ReadSessionsAsync(connection, card.Id, cancellationToken, limit: 201, newestFirst: true),
-            await ReadCommitsAsync(connection, card.Id, cancellationToken, limit: 201), attachments,
+            await ReadCommitsAsync(connection, card.Id, cancellationToken, limit: 2001), attachments,
             await ReadLinkedCardsAsync(connection, project, card.Id, cancellationToken, limit: 101));
     }
 
     public async Task<byte[]?> GetSyncAttachmentContentAsync(string projectPath, string cardId,
         string attachmentId, int maxBytes, CancellationToken cancellationToken = default)
     {
-        maxBytes = Math.Clamp(maxBytes, 0, 1024 * 1024);
+        maxBytes = Math.Clamp(maxBytes, 0, 128 * 1024 * 1024);
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
@@ -118,16 +118,26 @@ public sealed partial class BoardStore
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
-            SELECT s.SnapshotJson FROM BoardCommitSnapshots s
-            WHERE s.CardId = $card AND s.Sha = $sha AND length(s.SnapshotJson) <= $max
+            SELECT CASE WHEN length(CAST(s.SnapshotJson AS BLOB)) <= $max THEN s.SnapshotJson ELSE NULL END
+            FROM BoardCommitSnapshots s
+            WHERE s.CardId = $card AND s.Sha = $sha
               AND EXISTS (SELECT 1 FROM BoardCards b WHERE b.Id = s.CardId
                 AND b.ProjectPath = $project{ProjectPathCollation} AND b.DeletedUTC IS NULL);
             """;
         command.Parameters.AddWithValue("$project", NormalizeProjectPath(projectPath));
         command.Parameters.AddWithValue("$card", cardId);
         command.Parameters.AddWithValue("$sha", sha);
-        command.Parameters.AddWithValue("$max", Math.Clamp(maxChars, 0, 8 * 1024 * 1024));
-        var json = await command.ExecuteScalarAsync(cancellationToken) as string;
-        return json is null ? null : JsonSerializer.Deserialize(json, StorageJsonSerializerContext.Default.SandboxDiffResponse);
+        command.Parameters.AddWithValue("$max", Math.Clamp(maxChars, 0, 128 * 1024 * 1024));
+        // Apply the actual UTF-8 storage bound before loading JSON. Distinguish an absent
+        // original from an oversized one so full-content backup cannot silently omit it.
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken)) return null;
+        if (reader.IsDBNull(0))
+        {
+            if (maxChars > 8 * 1024 * 1024)
+                throw new InvalidDataException("Complete saved commit content exceeds its transfer limit; no backup was acknowledged.");
+            return null;
+        }
+        return JsonSerializer.Deserialize(reader.GetString(0), StorageJsonSerializerContext.Default.SandboxDiffResponse);
     }
 }

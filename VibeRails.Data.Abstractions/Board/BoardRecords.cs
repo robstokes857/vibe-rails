@@ -3,7 +3,7 @@ using VibeRails.DTOs;
 namespace VibeRails.Services.Board;
 
 /// <summary>A user-facing board rule violation (empty title, last column, bad sha). Maps to 400.</summary>
-public sealed class BoardValidationException(string message) : Exception(message);
+public class BoardValidationException(string message) : Exception(message);
 
 /// <summary>A conflicting board operation (deleting the last lane, duplicate link). Maps to 409.</summary>
 public sealed class BoardConflictException(string message) : Exception(message);

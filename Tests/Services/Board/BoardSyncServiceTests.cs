@@ -237,8 +237,11 @@ public sealed partial class BoardSyncServiceTests : IDisposable
         Assert.Null((await service.SetPublishedAsync(root, card.BoardId, true, Ct, includeActivity: true))!.LastError);
         var snapshot = Assert.Single(client.Activity, a => a.CardId == card.Id).Snapshot;
         Assert.Equal(sessionId, Assert.Single(snapshot.Sessions).Id);
-        Assert.Equal("before", Assert.Single(Assert.Single(snapshot.Commits).Files).Before);
-        Assert.Equal("saved bytes", System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(Assert.Single(snapshot.Attachments).ContentBase64!)));
+        var commitContent = Assert.Single(snapshot.Commits).Content!;
+        var savedCommit = JsonSerializer.Deserialize(commitContent.Parts.SelectMany(p => client.ContentParts[p.Sha256]).ToArray(), BoardSyncJsonContext.Default.SandboxDiffResponse)!;
+        Assert.Equal("before", Assert.Single(savedCommit.Files).OriginalContent);
+        var attachmentContent = Assert.Single(snapshot.Attachments).Content!;
+        Assert.Equal("saved bytes", System.Text.Encoding.UTF8.GetString(attachmentContent.Parts.SelectMany(p => client.ContentParts[p.Sha256]).ToArray()));
         Assert.Equal(other.Key, Assert.Single(snapshot.LinkedCards).Key);
         var wire = JsonSerializer.Serialize(snapshot, BoardSyncJsonContext.Default.BoardSyncActivityWire);
         Assert.DoesNotContain("env:7", wire);
@@ -275,7 +278,7 @@ public sealed partial class BoardSyncServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ActivityRefreshRotatesAcrossScopedServiceInstances_AndOmitsOversizedAttachmentContent()
+    public async Task ActivityRefreshRotatesAcrossScopedServiceInstances_AndPreservesOversizedAttachmentContent()
     {
         var cards = new List<BoardCardRecord>();
         for (var i = 0; i < 12; i++) cards.Add(await Card());
@@ -288,7 +291,9 @@ public sealed partial class BoardSyncServiceTests : IDisposable
         var file = Assert.Single(client.Activity.First(a => a.CardId == cards[0].Id).Snapshot.Attachments);
         Assert.Equal(oversized.Bytes, file.Bytes);
         Assert.Null(file.ContentBase64);
-        Assert.Contains("1 MiB", file.UnavailableReason);
+        Assert.Null(file.UnavailableReason);
+        Assert.NotNull(file.Content);
+        Assert.Equal(oversized.Bytes, file.Content.Bytes);
         Assert.Null(await store.GetSyncActivityAsync(root + "-other", cards[0].BoardId, cards[0].Id, Ct));
         Assert.Null(await store.GetSyncActivityAsync(root, "other-board", cards[0].Id, Ct));
     }
@@ -333,7 +338,7 @@ public sealed partial class BoardSyncServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ContentReadsEnforceActualStoredSize_AndTruncatedCodeIsLabeled()
+    public async Task ContentReadsRejectCorruptAttachments_AndPreserveCompleteCode()
     {
         var card = await Card();
         var file = (await store.AddAttachmentContentAsync(root, card.Id, "big.txt", "text/plain", new byte[1024 * 1024 + 1], Ct))!;
@@ -345,14 +350,17 @@ public sealed partial class BoardSyncServiceTests : IDisposable
             new([new("large.cs", "csharp", large, large)], 1), Ct);
         Assert.Null(await store.GetSyncCommitSnapshotAsync(root, card.Id, sha, 100, Ct));
         Assert.Null(await store.GetSyncCommitSnapshotAsync(root + "-other", card.Id, sha, 8 * 1024 * 1024, Ct));
-        Assert.Null((await service.SetPublishedAsync(root, card.BoardId, true, Ct, includeActivity: true))!.LastError);
+        Assert.NotNull((await service.SetPublishedAsync(root, card.BoardId, true, Ct, includeActivity: true))!.LastError);
+        Assert.Empty(client.Activity); // Corrupt bytes must never become a successful backup receipt.
+        await ExecuteAsync("UPDATE BoardAttachments SET Bytes=" + file.Bytes + ";");
+        Assert.Null((await service.SyncNowAsync(root, card.BoardId, Ct))!.LastError);
         var snapshot = Assert.Single(client.Activity).Snapshot;
-        var code = Assert.Single(Assert.Single(snapshot.Commits).Files);
-        Assert.Equal("truncated", code.Status);
-        Assert.Contains("truncated", code.Before);
-        Assert.Contains("truncated", code.After);
-        Assert.Null(Assert.Single(snapshot.Attachments).ContentBase64);
-        Assert.NotEmpty(snapshot.Warnings);
+        var content = Assert.Single(snapshot.Commits).Content!;
+        var recovered = JsonSerializer.Deserialize(content.Parts.SelectMany(p => client.ContentParts[p.Sha256]).ToArray(), BoardSyncJsonContext.Default.SandboxDiffResponse)!;
+        var code = Assert.Single(recovered.Files);
+        Assert.Equal(large, code.OriginalContent);
+        Assert.Equal(large, code.ModifiedContent);
+        Assert.NotNull(Assert.Single(snapshot.Attachments).Content);
         Assert.Equal(large, Assert.Single((await store.GetCommitSnapshotAsync(root, card.Id, sha, Ct))!.Files).OriginalContent);
     }
 
@@ -552,6 +560,33 @@ public sealed partial class BoardSyncServiceTests : IDisposable
         Assert.Equal(1, status.Cursor);
         client.TransformAck = null;
         Assert.Null((await service.SyncNowAsync(root, card.BoardId, Ct))!.LastError);
+    }
+
+    [Fact]
+    public async Task RestoredRemoteHistoryRecoversWithLocalValuesAndPreservesEntries()
+    {
+        var card = await Card();
+        await service.SetPublishedAsync(root, card.BoardId, true, Ct);
+        await store.UpdateCardAsync(root, card.Id, new(Title: "Acknowledged local edit"), Ct);
+        await service.SyncNowAsync(root, card.BoardId, Ct);
+        var acknowledged = client.Entries[1];
+
+        // A restored server loses an acknowledged entry and reuses its sequence for the next push.
+        client.Entries.RemoveAt(1);
+        await store.AddCommentAsync(root, card.Id, BoardAuthor.User(), "Queued after the restore", Ct);
+        var queued = Assert.Single(await store.GetUnsentLogEntriesAsync(card.BoardId, 20, Ct));
+        var status = await service.SyncNowAsync(root, card.BoardId, Ct);
+
+        Assert.Null(status!.LastError);
+        Assert.Equal(0, status.Unsent);
+        Assert.Equal(client.Entries.Count, status.Cursor);
+        Assert.True(await store.HasLogEntryAsync(acknowledged.Id, Ct));
+        Assert.Single(client.Entries, e => e.Id == queued.Entry.Id);
+        Assert.Single(client.Entries, e => e.Id == acknowledged.Id);
+        Assert.Equal("Acknowledged local edit", client.Entries.Last(e => e.Kind == "change").Changes!.Value.GetProperty("title").GetProperty("to").GetString());
+        var detail = (await store.GetCardDetailAsync(root, card.Id, Ct))!;
+        Assert.Equal("Acknowledged local edit", detail.Card.Title);
+        Assert.Equal("Queued after the restore", Assert.Single(detail.Comments).Body);
     }
 
     [Fact]
@@ -1139,6 +1174,7 @@ public sealed partial class BoardSyncServiceTests : IDisposable
         public Func<BoardSyncPullResponse, BoardSyncPullResponse>? TransformPull;
         public long? AdvertisedLastSeq;
         public Func<Task>? BeforePull;
+        public int RateLimitedRecoveryPulls;
         public List<long> PullAfters { get; } = [];
         public List<BoardSyncPulledEntryWire> Entries { get; } = [];
         public List<(string CardId, BoardSyncActivityWire Snapshot)> Activity { get; } = [];
@@ -1151,7 +1187,16 @@ public sealed partial class BoardSyncServiceTests : IDisposable
             Assert.Equal(DestinationKey, expectedDestination);
             if (FailActivity || FailActivityCardId == cardId) throw new BoardSyncClientException("Activity upload failed", "network");
             Activity.Add((cardId, activity));
-            return Task.FromResult(new BoardSyncActivityAck(WrongActivityAck ? 0 : 1, cardId));
+            return Task.FromResult(new BoardSyncActivityAck(WrongActivityAck ? 0 : activity.Schema, cardId));
+        }
+        public Dictionary<string, byte[]> ContentParts { get; } = [];
+        public Task PutContentPartAsync(BoardSyncContentPartWire part, ReadOnlyMemory<byte> bytes, CancellationToken ct, string? destination = null)
+        {
+            Assert.Equal(DestinationKey, destination);
+            Assert.Equal(part.Bytes, bytes.Length);
+            ContentParts[part.Sha256] = bytes.ToArray();
+            Assert.Equal(part.Sha256, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes.Span)));
+            return Task.CompletedTask;
         }
         public Guid RemoteId = Guid.NewGuid();
         public int Publications;
@@ -1191,6 +1236,11 @@ public sealed partial class BoardSyncServiceTests : IDisposable
         public async Task<BoardSyncPullResponse> PullAsync(string boardId, long after, int limit, CancellationToken ct, string? expectedDestination = null)
         {
             Calls++;
+            if (limit == 200 && RateLimitedRecoveryPulls > 0)
+            {
+                RateLimitedRecoveryPulls--;
+                throw new BoardSyncClientException("Rate limited", "http_429", 429, retryAfter: TimeSpan.FromSeconds(2));
+            }
             PullAfters.Add(after);
             if (BeforePull is { } action) { BeforePull = null; await action(); }
             var response = new BoardSyncPullResponse(Entries.Where(e => e.Seq > after).Take(limit).ToList(), AdvertisedLastSeq ?? Entries.Count, Entries.Count - after > limit);

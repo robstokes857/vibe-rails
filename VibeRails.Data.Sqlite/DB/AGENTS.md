@@ -146,6 +146,16 @@ This document describes the database layer: Environments, Sandboxes, AgentMetada
 
 ---
 
+## Prompt worktree storage
+
+`managed-worktrees/1` automatically adds `ManagedWorktrees` to normal `state.db`, behind
+`IManagedWorktreeStore`. It stores the unique ownership id, absolute worktree path, Git common
+and per-worktree directories, branch, creation time and nullable absolute expiry (`NULL` means
+never). It is independent of environments and Board cards; deleting either does not forget a
+worktree's retention. Older versions ignore the new table. Cleanup removes a record only after
+Git removes its verified owned worktree. Runtime shared file leases and open session directories
+postpone removal while a checkout is in use. See the architecture's prompt worktree section.
+
 ## Conversation title request storage
 
 `conversation-titles/1` adds `ConversationTitleRequests` in `state.db`; `/2` adds milestone counters,

@@ -66,7 +66,7 @@ public sealed class TerminalRoutesPromptDeferralTests
         {
             terminal.Setup(item => item.StartSessionAsync(
                     LLM.Claude, It.IsAny<string>(), environmentName, It.IsAny<string[]>(),
-                    It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<string?>>>(), It.IsAny<string>(), authorizeBoardTools))
+                    It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<ResolvedPrompt>>>(), It.IsAny<string>(), authorizeBoardTools))
                 .ReturnsAsync(true);
             var client = SharedClient;
             using var response = await client.PostAsJsonAsync(new Uri(new Uri(app.Urls.First()), "/api/v1/terminal/start"),
@@ -89,7 +89,7 @@ public sealed class TerminalRoutesPromptDeferralTests
             terminal.Setup(item => item.StartSessionAsync(
                     LLM.Codex, It.IsAny<string>(), null,
                     It.Is<string[]>(args => args.SequenceEqual(new[] { "--model", "gpt-5.5", "-c", "model_reasoning_effort=xhigh" })),
-                    It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<string?>>>(), It.IsAny<string>(), false))
+                    It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<ResolvedPrompt>>>(), It.IsAny<string>(), false))
                 .ReturnsAsync(true);
             var client = SharedClient;
             using var response = await client.PostAsJsonAsync(new Uri(new Uri(app.Urls.First()), "/api/v1/terminal/start"),
@@ -123,13 +123,13 @@ public sealed class TerminalRoutesPromptDeferralTests
         var (app, terminal, placeholders) = await StartAppAsync();
         try
         {
-            Func<Task<string?>>? captured = null;
+            Func<Task<ResolvedPrompt>>? captured = null;
             var resolvedBeforeTheCall = true;
             terminal
                 .Setup(item => item.StartSessionAsync(
                     It.IsAny<LLM>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string[]>(),
-                    It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<string?>>>(), It.IsAny<string>(), It.IsAny<bool>()))
-                .Callback((LLM _, string _, string? _, string[]? _, string? _, bool _, Func<Task<string?>>? resolve, string _, bool _) =>
+                    It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<ResolvedPrompt>>>(), It.IsAny<string>(), It.IsAny<bool>()))
+                .Callback((LLM _, string _, string? _, string[]? _, string? _, bool _, Func<Task<ResolvedPrompt>>? resolve, string _, bool _) =>
                 {
                     // Sampled at the moment the slot is claimed, not after the response: this is
                     // the window a losing concurrent request would have had to run the command in.
@@ -145,9 +145,9 @@ public sealed class TerminalRoutesPromptDeferralTests
             Assert.NotNull(captured);
 
             // Deferred, not dropped — the delegate still produces the prompt when the winner runs it.
-            Assert.Equal("Deploy notes: ok", await captured());
+            Assert.Equal("Deploy notes: ok", (await captured()).Prompt);
             placeholders.Verify(
-                item => item.ResolveAsync(Prompt, It.IsAny<PromptPlaceholderContext>(), It.IsAny<CancellationToken>()),
+                item => item.ResolveLaunchAsync(Prompt, It.IsAny<PromptPlaceholderContext>(), It.IsAny<CancellationToken>()),
                 Times.Once);
         }
         finally
@@ -167,14 +167,14 @@ public sealed class TerminalRoutesPromptDeferralTests
             terminal
                 .Setup(item => item.StartSessionAsync(
                     It.IsAny<LLM>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string[]>(),
-                    It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<string?>>>(), It.IsAny<string>(), It.IsAny<bool>()))
+                    It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<ResolvedPrompt>>>(), It.IsAny<string>(), It.IsAny<bool>()))
                 .ReturnsAsync(false);
 
             using var response = await PostStartAsync(app);
 
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
             placeholders.Verify(
-                item => item.ResolveAsync(
+                item => item.ResolveLaunchAsync(
                     It.IsAny<string>(), It.IsAny<PromptPlaceholderContext>(), It.IsAny<CancellationToken>()),
                 Times.Never);
         }
@@ -196,7 +196,7 @@ public sealed class TerminalRoutesPromptDeferralTests
 
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
             placeholders.Verify(
-                item => item.ResolveAsync(
+                item => item.ResolveLaunchAsync(
                     It.IsAny<string>(), It.IsAny<PromptPlaceholderContext>(), It.IsAny<CancellationToken>()),
                 Times.Never);
         }
@@ -214,12 +214,12 @@ public sealed class TerminalRoutesPromptDeferralTests
         var (app, terminal, _) = await StartAppAsync();
         try
         {
-            Func<Task<string?>>? captured = () => Task.FromResult<string?>(null);
+            Func<Task<ResolvedPrompt>>? captured = () => Task.FromResult(new ResolvedPrompt(null, Path.GetTempPath()));
             terminal
                 .Setup(item => item.StartSessionAsync(
                     It.IsAny<LLM>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string[]>(),
-                    It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<string?>>>(), It.IsAny<string>(), It.IsAny<bool>()))
-                .Callback((LLM _, string _, string? _, string[]? _, string? _, bool _, Func<Task<string?>>? resolve, string _, bool _) =>
+                    It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<ResolvedPrompt>>>(), It.IsAny<string>(), It.IsAny<bool>()))
+                .Callback((LLM _, string _, string? _, string[]? _, string? _, bool _, Func<Task<ResolvedPrompt>>? resolve, string _, bool _) =>
                     captured = resolve)
                 .ReturnsAsync(true);
 
@@ -248,14 +248,14 @@ public sealed class TerminalRoutesPromptDeferralTests
         try
         {
             placeholders
-                .Setup(item => item.ResolveAsync(
+                .Setup(item => item.ResolveLaunchAsync(
                     It.IsAny<string>(), It.IsAny<PromptPlaceholderContext>(), It.IsAny<CancellationToken>()))
                 .ThrowsAsync(PromptTooLongException.ForResolvedPrompt(41_000, 30_000));
             terminal
                 .Setup(item => item.StartSessionAsync(
                     It.IsAny<LLM>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string[]>(),
-                    It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<string?>>>(), It.IsAny<string>(), It.IsAny<bool>()))
-                .Returns(async (LLM _, string _, string? _, string[]? _, string? _, bool _, Func<Task<string?>>? resolve, string _, bool _) =>
+                    It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<ResolvedPrompt>>>(), It.IsAny<string>(), It.IsAny<bool>()))
+                .Returns(async (LLM _, string _, string? _, string[]? _, string? _, bool _, Func<Task<ResolvedPrompt>>? resolve, string _, bool _) =>
                 {
                     // Awaited, not observed: the real service lets the throw escape the gate so
                     // the route can answer with the message instead of starting a session.
@@ -297,9 +297,9 @@ public sealed class TerminalRoutesPromptDeferralTests
         var terminal = new Mock<ITerminalSessionService>();
         var placeholders = new Mock<IPromptPlaceholderService>();
         placeholders
-            .Setup(item => item.ResolveAsync(
+            .Setup(item => item.ResolveLaunchAsync(
                 It.IsAny<string>(), It.IsAny<PromptPlaceholderContext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync("Deploy notes: ok");
+            .ReturnsAsync(new ResolvedPrompt("Deploy notes: ok", Path.GetTempPath()));
 
         var builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();

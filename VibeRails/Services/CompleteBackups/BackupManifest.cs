@@ -73,4 +73,4 @@ public sealed record BackupCheckpoint
 
 /// <summary>Local coverage never infers completeness from session or Board sync receipts.</summary>
 public sealed record BackupDatasetCoverage(string Dataset, BackupCheckpoint State);
-public sealed record BackupCoverage(bool Configured, List<BackupDatasetCoverage> Datasets, List<string> Exclusions);
+public sealed record BackupCoverage(bool Configured, List<BackupDatasetCoverage> Datasets, List<string> Exclusions, bool AutomaticBackupsEnabled = false);

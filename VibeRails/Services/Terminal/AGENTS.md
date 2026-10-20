@@ -728,7 +728,8 @@ they render/capture the xterm canvas.
 - WebSocket binary mode (`arraybuffer`)
 - sends resize control `__resize__:{cols},{rows}` after fit and on resize
 - de-dupes identical resize frames to reduce redraw churn/cursor jitter
-- displays close reason in terminal
+- displays takeover notices through the shared application toast with `requireDismiss: true`,
+  outside the xterm byte stream; remote takeover identifies the host and offers manual Connect
 
 ## Known Constraints
 1. Single active terminal session (`TerminalSessionService` static state).

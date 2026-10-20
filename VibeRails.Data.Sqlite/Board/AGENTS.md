@@ -85,6 +85,12 @@ its fields have been corrected and acknowledged. Keep this check behind `IBoardS
 
 ## Shared origins (board/26, VB-52)
 
+`BoardStore.SyncRecovery.cs` reconciles proven hosted-history forks for locally owned boards.
+Local content is authoritative (2026-10-20 owner direction): remap ordinary delivery receipts,
+requeue missing events and append current local field/liveness snapshots atomically. Preserve
+content, local-only rows and rejected delivery policy. Never apply this recovery to an imported
+board. No schema change or startup rewrite is needed; see the [sync contract](../../VibeRails/Services/Board/SYNC.md#ordering-retry-and-identity).
+
 `BoardStore.Sharing.cs` imports accepted shared boards and applies remote layouts atomically.
 `BoardSharedOrigins` pins remote identity, destination/key fingerprint and prefix separately from
 legacy sync fields. Setup adds the table without converting old rows. Keep imports project-scoped,

@@ -212,6 +212,18 @@ internal static class StateDatabaseSchema
                 CREATE INDEX idx_conversation_titles_open ON ConversationTitleRequests(RetryAfterUTC,UserInputId)
                     WHERE Cancelled=0 AND GenerationCount=0;
                 """));
+        SqliteMigrationRunner.Apply(connection, "managed-worktrees", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, """
+                CREATE TABLE ManagedWorktrees (
+                    Id TEXT PRIMARY KEY,
+                    Path TEXT NOT NULL UNIQUE,
+                    GitCommonDirectory TEXT NOT NULL,
+                    GitDirectory TEXT NOT NULL,
+                    Branch TEXT NOT NULL,
+                    CreatedUTC TEXT NOT NULL,
+                    DeleteAfterUTC TEXT NULL
+                );
+                """));
         JobStore.EnsureSessionLinkSchema(connection);
         // Every breaking step above has now been applied (or was already), so the file is at this
         // build's generation. Stamping after the fact also covers databases migrated before the

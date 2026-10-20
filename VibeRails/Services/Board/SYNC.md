@@ -292,6 +292,20 @@ and other entries must each retain their insertion order. A retried change may h
 sequence than a newly queued creation sent ahead of it, so those two groups may interleave.
 An exact replay can return an old sequence, and `LastSeq` can include unrelated web writes.
 Invalid acknowledgements leave the whole batch queued; they never advance the pull cursor.
+For a locally owned board, **local state is authoritative when hosted history conflicts**.
+A conflicting receipt or regressed high-water mark triggers a bounded, validated history read.
+Recovery retries a rate-limited page after the bounded standard `Retry-After` delay, preserving
+the history already read; cancellation and repeated refusal leave local receipts untouched.
+The actual hosted history must corroborate a conflicting receipt; a malformed acknowledgement
+alone never resets the ledger. `IBoardStore.ReconcileOwnedSyncHistoryAsync` proves the fork and
+atomically remaps ordinary receipts by immutable entry identity, requeues missing local events,
+and appends fresh current-state baselines plus final local field/liveness corrections. Existing
+content, rejected entries, protected fields and local-only metadata remain stored. No schema
+change or startup backfill is involved. The repaired cursor skips the restored historical
+projection, and the local layout is republished. Normal pull waits until the outbox drains, so
+recovery resumes safely over bounded ticks or after interruption. Subsequent new web events
+retain the ordinary push/pull contract. Imported collaborator boards never use owner recovery.
+If validation fails, status identifies the conflict and leaves entries queued.
 Progress is persisted as it is made (the layout hash after a batch, the cursor after each pull
 page), and a failure records its error on the stored link, so a bad page never rewinds the
 cursor past pages that were already applied.
@@ -412,3 +426,37 @@ atomically. Immutable legacy keys are reserved; an import colliding with one get
 When either card is on an imported shared board, nothing is renamed or queued; see the VIBE-85
 boundary rules above. The hosted LastSeq concurrency token serializes label allocation with all
 other card writes.
+
+
+## Complete attachment and commit content — October 20, 2026 (VB-ZXF0B-18)
+
+Activity schema 2 preserves original attachment bytes and the complete stored
+`SandboxDiffResponse` for every linked saved commit independently of display budgets.
+`BoardSyncContent` reads all commit/attachment metadata (bounded at 2,001 to detect overflow),
+uses `IBoardStore` for original content, and sends verified 4 MiB SHA-256 parts through
+`PUT /api/v1/board-content/parts/{sha256}` on the configured Front origin, with the same
+account/destination fingerprint and no redirects. Identical parts are reused. Successful
+part ACKs are cached for an hour; failures are never acknowledged and retry on later ticks.
+
+The small activity JSON holds full-content digest, length and ordered part references.
+A schema-2 ACK is required, including for empty replacements. An older server cannot silently
+accept omitted references; deploy Front before installing the desktop. Front rejects a
+publisher's schema-1 downgrade once schema 2 has been stored. Portable Card Log delivery
+continues independently. Rotating activity refresh upgrades existing published cards without
+rewriting stored local data; unavailable/corrupt originals fail that card's publication rather
+than acknowledging a shortened backup. Existing metadata-only links without saved code cannot
+invent a missing original snapshot.
+
+Each full asset has a 128 MiB transfer ceiling and at most 32 parts; a card can carry 2,000
+commits and 2,000 attachments within the existing 8 MiB reference/metadata envelope. Oversized
+content remains local and surfaces a retryable sync error; it is not silently truncated.
+The ordinary session/summary/link display limits remain. Full code loads on demand in the
+hosted viewer; attachment downloads recover original bytes. Browser reads retain current
+card/membership authorization and verify every part and the complete content hash before
+serving a private temporary file. No content hash alone grants access.
+
+Parts use the existing owner quotas/reservations and orphan lifecycle. Activity publication
+marks account-owned verified parts referenced in the same save as the activity row, while
+holding the existing owner backup lock. Referenced parts and all older complete archives
+are retained. Account quota still applies; removing automatic full capture does not delete
+or reclaim previous versions. No schema migration or historical data conversion is required.

@@ -146,8 +146,9 @@ export class ChatHistorySidebar {
             </div>`;
     }
 
-    mount(root, { onToggle } = {}) {
+    mount(root, { onToggle, onItemsUpdated } = {}) {
         this.destroy();
+        this.onItemsUpdated = onItemsUpdated;
         const sidebar = root.querySelector('#ch-sidebar');
         const search = root.querySelector('.ch-sidebar-search');
         const body = root.querySelector('#ch-sidebar-body');
@@ -417,6 +418,7 @@ export class ChatHistorySidebar {
             this._softRefreshTimer = null;
         }
         this._softRefreshSessionIds.clear();
+        this.onItemsUpdated = null;
         this.sidebar = null;
         this.search = null;
         this.body = null;
@@ -1635,6 +1637,7 @@ export class ChatHistorySidebar {
         this.allItems = Array.from(merged.values());
         this._sortItemsInMemory();
         this._syncLlmFilterControls();
+        this.onItemsUpdated?.(this.allItems);
     }
 
     _sortItemsInMemory() {
