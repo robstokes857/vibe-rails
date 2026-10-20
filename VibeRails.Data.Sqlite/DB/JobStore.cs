@@ -606,7 +606,9 @@ public sealed partial class JobStore : IJobStore
     /// <summary>
     /// Returns one stable, bounded page for a single Automation together with the visible total.
     /// The count and page read share a transaction so a concurrently queued run cannot make the
-    /// metadata disagree with the rows in the same response.
+    /// metadata disagree with the rows in the same response. It is a deferred (read) transaction:
+    /// a WAL read snapshot is enough for that, and this polls every few seconds while the Jobs
+    /// page is open, so it must not take the write lock.
     /// </summary>
     public async Task<JobRunPageRecord> GetRunsPageAsync(
         long jobId,
@@ -618,7 +620,7 @@ public sealed partial class JobStore : IJobStore
         var normalizedPageSize = Math.Clamp(pageSize, 1, 100);
 
         await using var connection = await OpenAsync(cancellationToken);
-        await using var transaction = connection.BeginTransaction();
+        await using var transaction = connection.BeginTransaction(deferred: true);
 
         int totalRuns;
         await using (var countCommand = connection.CreateCommand())
