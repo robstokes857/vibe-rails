@@ -188,7 +188,7 @@ public sealed class MintLintPreflightStep(ICodeAnalyzerIgnoreStore? ignoreStore 
         // Reach across the repository: bad code that many files reference outranks bad
         // code nothing uses. Discover declared names from each complete current file, while
         // retaining change-only metrics for the score itself. Tracked files only by default;
-        // a full-repo scan also walks untracked source. Failure here must never block the report.
+        // a full-repo scan adds untracked source. Failure here must never block the report.
         IReadOnlyDictionary<string, int> referencedBy;
         try
         {
@@ -206,7 +206,7 @@ public sealed class MintLintPreflightStep(ICodeAnalyzerIgnoreStore? ignoreStore 
                 : ImpactAnalyzer.CountReferencingFiles(
                     context.Snapshot.RepositoryPath,
                     impactTargets,
-                    context.Request.FullImpactScan ? null : context.Snapshot.TrackedFiles);
+                    ImpactCandidateFiles(context));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -238,6 +238,16 @@ public sealed class MintLintPreflightStep(ICodeAnalyzerIgnoreStore? ignoreStore 
             referencedBy,
             sourceLineNumbersByFile: sourceLineNumbersByFile);
     }
+
+    /// <summary>
+    /// The files the impact scan reads. Both lists come from git, so ignored paths such as
+    /// build output or the .claude/worktrees checkouts never count as referencers. A full scan
+    /// without an untracked list keeps to the tracked files rather than walking the directory.
+    /// </summary>
+    internal static IReadOnlyList<string>? ImpactCandidateFiles(GitPreflightStepContext context) =>
+        context.Request.FullImpactScan && context.Snapshot is { TrackedFiles: { } tracked, UntrackedFiles: { } untracked }
+            ? tracked.Concat(untracked).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList()
+            : context.Snapshot.TrackedFiles;
 
     private sealed record MintLintChangeCandidate(
         GitStagedFileSnapshot File,

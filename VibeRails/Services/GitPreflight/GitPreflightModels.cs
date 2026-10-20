@@ -71,7 +71,10 @@ public sealed record GitStagedSnapshot(
     // Present only for the staged-index scope. These object ids bind validation and any queued VCA
     // job to one immutable base/tree pair even if the live index changes later in the preflight.
     GitStagedSnapshotIdentity? StagedIdentity = null,
-    GitCheckSnapshotIdentity? CheckIdentity = null)
+    GitCheckSnapshotIdentity? CheckIdentity = null,
+    // Untracked files git does not ignore (ls-files --others --exclude-standard). Only the
+    // working-tree scope captures them; a full impact scan adds them to TrackedFiles.
+    IReadOnlyList<string>? UntrackedFiles = null)
 {
     public static GitStagedSnapshot Preview(string repositoryPath) => new(
         Path.GetFullPath(repositoryPath),

@@ -505,7 +505,7 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
             untrackedPaths,
             pathGuard,
             cancellationToken);
-        return new GitStagedSnapshot(repositoryPath, files, agentFiles, trackedFiles);
+        return new GitStagedSnapshot(repositoryPath, files, agentFiles, trackedFiles, UntrackedFiles: untrackedPaths);
     }
 
     /// <summary>

@@ -421,6 +421,44 @@ public sealed class GitStagedSnapshotProviderTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task FullImpactScan_CountsUntrackedReferencersButNeverIgnoredCopies()
+    {
+        // VIBE-170 B2: ?fullScan=true walked the directory, so ignored checkouts such as
+        // .claude/worktrees counted as referencers. It now reads git's tracked + untracked lists.
+        var ct = TestContext.Current.CancellationToken;
+        await File.WriteAllTextAsync(Path.Combine(_repository, ".gitignore"), "copies/\n", ct);
+        await File.WriteAllTextAsync(Path.Combine(_repository, "alpha.cs"), "public class AlphaService { }\n", ct);
+        await File.WriteAllTextAsync(Path.Combine(_repository, "caller.cs"), "public class Caller { AlphaService service; }\n", ct);
+        await GitAsync("add", ".");
+        await GitAsync("commit", "-m", "alpha");
+        await File.WriteAllTextAsync(Path.Combine(_repository, "alpha.cs"), "public class AlphaService { public void Run() { } }\n", ct);
+        await File.WriteAllTextAsync(Path.Combine(_repository, "draft.cs"), "public class Draft { AlphaService service; }\n", ct);
+        Directory.CreateDirectory(Path.Combine(_repository, "copies"));
+        await File.WriteAllTextAsync(Path.Combine(_repository, "copies", "caller.cs"), "public class Caller { AlphaService service; }\n", ct);
+
+        var snapshot = await new GitStagedSnapshotProvider().CaptureWorkingTreeAsync(_repository, ct);
+
+        Assert.Equal(["draft.cs"], snapshot.UntrackedFiles!);
+        Assert.Equal(1, await AlphaReferencedByAsync(snapshot, fullScan: false)); // caller.cs
+        Assert.Equal(2, await AlphaReferencedByAsync(snapshot, fullScan: true)); // and draft.cs, never copies/
+
+        async Task<int> AlphaReferencedByAsync(GitStagedSnapshot captured, bool fullScan)
+        {
+            var invocation = new VibeRails.Services.VCA.Hooks.VcaHookInvocation(
+                VibeRails.Services.VCA.Hooks.VcaHookKind.PreCommit, null, _repository, false, TimeSpan.Zero, false);
+            var result = await new MintLintPreflightStep().ExecuteAsync(
+                new GitPreflightStepContext(
+                    "run",
+                    new GitPreflightRequest(_repository, invocation, FullImpactScan: fullScan, WorkingTreeChanges: true),
+                    captured,
+                    (_, _, _) => ValueTask.CompletedTask),
+                ct);
+            var report = MintLintReportFactory.FromJson(result.Details![MintLintReportFactory.DetailsKey]);
+            return Assert.Single(report!.Files, file => file.File == "alpha.cs").ReferencedByCount;
+        }
+    }
+
+    [Fact]
     public async Task CaptureWorkingTreeAsync_UsesLatestContentWhenIndexAlsoHasChanges()
     {
         await File.WriteAllTextAsync(
