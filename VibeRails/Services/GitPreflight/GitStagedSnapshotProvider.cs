@@ -1578,11 +1578,9 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         using var process = new Process { StartInfo = GitCli.CreateStartInfo(workingDirectory, arguments) };
 
         process.Start();
-        if (standardInput is { IsEmpty: false } input)
-            await process.StandardInput.BaseStream.WriteAsync(input, cancellationToken);
-        // Always send EOF. Inheriting the MCP server's live JSON-RPC stdin can wedge Git even
-        // when this particular command is not intended to read input.
-        process.StandardInput.Close();
+        // Drain stdout and stderr before writing stdin. Git can answer while it is still reading
+        // (cat-file --batch does), and once its output pipe fills it stops reading, so a write
+        // made before anyone reads would never finish.
         await using var output = new MemoryStream();
         var copyTask = CopyStandardOutputAsync(
             process.StandardOutput.BaseStream,
@@ -1596,6 +1594,7 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         var outputLimitExceeded = false;
         try
         {
+            await WriteStandardInputAsync(process, standardInput, timeoutCts.Token);
             var waitTask = process.WaitForExitAsync(timeoutCts.Token);
             var completed = await Task.WhenAny(waitTask, copyTask);
             if (completed == copyTask)
@@ -1630,6 +1629,41 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
             stdErr,
             timedOut,
             outputLimitExceeded);
+    }
+
+    /// <summary>
+    /// Writes any explicit input and then always sends EOF. Call only after the output drains
+    /// have started. A git that closes its end early (it exited, or the deadline killed it) ends
+    /// the write instead of failing the run; its exit code, stderr or the deadline say why.
+    /// </summary>
+    private static async Task WriteStandardInputAsync(
+        Process process,
+        ReadOnlyMemory<byte>? standardInput,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (standardInput is { IsEmpty: false } input)
+            {
+                // A pipe write need not observe cancellation once it has started, so the deadline
+                // kills git instead and the broken pipe ends the write.
+                using var killOnDeadline = cancellationToken.Register(
+                    static state => TryKill((Process)state!),
+                    process);
+                await process.StandardInput.BaseStream.WriteAsync(input, cancellationToken);
+            }
+        }
+        catch (IOException)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+        finally
+        {
+            // Always send EOF. Inheriting the MCP server's live JSON-RPC stdin can wedge Git even
+            // when this particular command is not intended to read input.
+            try { process.StandardInput.Close(); }
+            catch (IOException) { /* the pipe is already broken, so git has its EOF */ }
+        }
     }
 
     private static async Task<bool> CopyStandardOutputAsync(

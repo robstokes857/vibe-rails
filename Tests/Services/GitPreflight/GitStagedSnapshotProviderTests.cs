@@ -728,6 +728,28 @@ public sealed class GitStagedSnapshotProviderTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RunBinaryGitAsync_DrainsOutputWhileWritingLargeInput()
+    {
+        // cat-file --batch answers each request as it reads it, so its output fills the stdout
+        // pipe long before this much input is written. Writing all of stdin before anyone read
+        // stdout deadlocked here: git blocked on stdout and the write blocked on git (VIBE-170 B5).
+        var blob = new string('x', 4096) + "\n";
+        await File.WriteAllTextAsync(Path.Combine(_repository, "blob.txt"), blob, TestContext.Current.CancellationToken);
+        await GitAsync("add", "blob.txt");
+        await GitAsync("commit", "-m", "blob");
+        const int requests = 2_000;
+        var input = Encoding.ASCII.GetBytes(string.Concat(Enumerable.Repeat("HEAD:blob.txt\n", requests)));
+
+        var result = await GitStagedSnapshotProvider.RunBinaryGitForTestAsync(
+                _repository, ["cat-file", "--batch"],
+                TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken, input)
+            .WaitAsync(TimeSpan.FromSeconds(90), TestContext.Current.CancellationToken);
+
+        Assert.False(result.TimedOut);
+        Assert.True(result.Bytes.Length > requests * blob.Length, $"only {result.Bytes.Length} bytes came back");
+    }
+
+    [Fact]
     public async Task RunBinaryGitAsync_TimeoutDrainsStdoutCopyBeforeReturningBytes()
     {
         // Allow Git and its shell to start under full-suite load before timing out the sleep.
