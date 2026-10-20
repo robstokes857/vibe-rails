@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using MintLint;
 using VibeRails.DTOs;
+using VibeRails.Services.Git;
 using VibeRails.Services.GitPreflight;
 
 namespace VibeRails.Services.CodeReports;
@@ -521,17 +522,15 @@ public sealed class RepositoryCodeGraph
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(CatalogTimeout);
-        using var process = new Process { StartInfo = new ProcessStartInfo("git")
-        {
-            WorkingDirectory = root, UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = Encoding.UTF8
-        }};
-        foreach (var arg in new[] { "ls-files", "-z", "--cached", "--others", "--exclude-standard" })
-            process.StartInfo.ArgumentList.Add(arg);
+        using var process = new Process { StartInfo = GitCli.CreateStartInfo(
+            root, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]) };
         process.Start();
         Task<string>? error = null;
         try
         {
+            // EOF on stdin at once: an inherited stdin hangs git inside the stdio MCP host (VB-14).
+            try { process.StandardInput.Close(); }
+            catch { /* the write end still closes when the process is disposed, so git still gets EOF */ }
             // Drain stderr so a chatty git cannot fill its pipe and stall the catalog read.
             error = process.StandardError.ReadToEndAsync(timeout.Token);
             var buffer = new char[MaxCatalogChars + 1];

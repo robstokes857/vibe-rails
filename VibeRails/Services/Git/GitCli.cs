@@ -101,7 +101,8 @@ public static class GitCli
 
     /// <summary>
     /// The one launch contract for every git child in the process: <see cref="GitCli"/>,
-    /// <see cref="GitProcessRunner"/>, the staged-snapshot provider and the hook's message cleaner.
+    /// <see cref="GitProcessRunner"/>, the staged-snapshot provider, the hook's message cleaner and
+    /// the code map's file catalog. <c>GitCliTests</c> sweeps the source for any other git launch.
     /// Callers must close the redirected stdin after writing any explicit input, including when
     /// there is no input to write.
     /// </summary>

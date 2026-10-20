@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 using VibeRails.Services.Git;
 using Xunit;
 
@@ -111,6 +112,37 @@ public sealed class GitCliTests : IDisposable
         // The well-known SHA-1 of an empty blob: git saw EOF on empty stdin, not an inherited stream.
         Assert.Equal("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391", result.StdOut.Trim());
         Assert.True(sw.Elapsed < TimeSpan.FromSeconds(4), $"hash-object hung for {sw.Elapsed}");
+    }
+
+    [Fact]
+    public void NoSourceLaunchesGitOutsideCreateStartInfo()
+    {
+        // A git child built by hand skips both guards above: it inherits stdin (the VB-14 hang in
+        // the MCP host) and usually sets WorkingDirectory (the CodeQL sink). The code map's file
+        // catalog was one until VIBE-170.
+        var source = Path.Combine(FindRepositoryRoot(), "VibeRails");
+        var separator = Path.DirectorySeparatorChar;
+        var offenders = Directory.EnumerateFiles(source, "*.cs", SearchOption.AllDirectories)
+            .Where(path => !path.Contains($"{separator}bin{separator}")
+                && !path.Contains($"{separator}obj{separator}")
+                && !path.EndsWith($"{separator}Git{separator}GitCli.cs", StringComparison.Ordinal))
+            .Where(path => Regex.IsMatch(
+                File.ReadAllText(path),
+                """ProcessStartInfo\(\s*"git(\.exe)?"|FileName\s*=\s*"git(\.exe)?"\s*[,}\r\n]"""))
+            .Select(path => Path.GetRelativePath(source, path))
+            .ToArray();
+
+        Assert.Empty(offenders);
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "VibeRails.slnx")))
+                return directory.FullName;
+        }
+        throw new InvalidOperationException("Repository root not found.");
     }
 
     public void Dispose()
