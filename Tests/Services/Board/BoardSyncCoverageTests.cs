@@ -188,7 +188,7 @@ public sealed class BoardSyncCoverageTests : IDisposable
         public Task<BoardSyncActivityAck> PutActivityAsync(string boardId, string cardId, BoardSyncActivityWire activity, CancellationToken ct, string? expectedDestination = null)
         {
             Calls++;
-            return Task.FromResult(new BoardSyncActivityAck(1, cardId));
+            return Task.FromResult(new BoardSyncActivityAck(activity.Schema, cardId));
         }
 
         public Task<BoardSyncPublishResponse> PublishAsync(BoardSyncPublishRequest request, CancellationToken ct, string? expectedDestination = null)

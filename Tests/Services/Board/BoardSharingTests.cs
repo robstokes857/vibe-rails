@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using VibeRails.Services.Board;
@@ -62,9 +63,20 @@ public sealed class BoardSharingTests : IDisposable
         Assert.Null(status!.LastError);
         Assert.Equal(0, server.Publications);
         var activity = server.Activity[^1];
+        Assert.Equal(2, activity.Schema);
         Assert.Equal(sessionId, Assert.Single(activity.Sessions).Id);
-        Assert.Equal("Saved member change", Assert.Single(activity.Commits).Message);
-        Assert.Equal("after", Assert.Single(activity.Commits[0].Files).After);
+        var commit = Assert.Single(activity.Commits);
+        Assert.Equal("Saved member change", commit.Message);
+        Assert.Empty(commit.Files);
+        var content = Assert.IsType<BoardSyncContentWire>(commit.Content);
+        var bytes = content.Parts.SelectMany(part => server.ContentParts[part.Sha256]).ToArray();
+        Assert.Equal(content.Bytes, bytes.LongLength);
+        Assert.Equal(content.Sha256, Convert.ToHexStringLower(SHA256.HashData(bytes)));
+        var snapshot = JsonSerializer.Deserialize(bytes, BoardSyncJsonContext.Default.SandboxDiffResponse)!;
+        var file = Assert.Single(snapshot.Files);
+        Assert.Equal("member.cs", file.FileName);
+        Assert.Equal("before", file.OriginalContent);
+        Assert.Equal("after", file.ModifiedContent);
     }
 
     [Fact]
@@ -168,6 +180,7 @@ public sealed class BoardSharingTests : IDisposable
         public List<BoardSyncPulledEntryWire> Events = [];
         public int Publications, ActivityWrites, Calls;
         public List<BoardSyncActivityWire> Activity = [];
+        public Dictionary<string, byte[]> ContentParts = [];
         public bool Revoked;
         private void Check(string? destination)
         { Calls++; Assert.Equal(DestinationKey, destination); if (Revoked) throw new BoardSyncClientException("Access no longer available", "board_not_found", 404); }
@@ -178,7 +191,15 @@ public sealed class BoardSharingTests : IDisposable
         public Task<BoardSyncPublishResponse> PublishAsync(BoardSyncPublishRequest body, CancellationToken ct, string? expectedDestination = null)
         { Publications++; throw new InvalidOperationException("Imported boards must never publish"); }
         public Task<BoardSyncActivityAck> PutActivityAsync(string board, string card, BoardSyncActivityWire body, CancellationToken ct, string? expectedDestination = null)
-        { Check(expectedDestination); Assert.Equal(Remote.RemoteBoardId, board); ActivityWrites++; Activity.Add(body); return Task.FromResult(new BoardSyncActivityAck(1, card)); }
+        { Check(expectedDestination); Assert.Equal(Remote.RemoteBoardId, board); ActivityWrites++; Activity.Add(body); return Task.FromResult(new BoardSyncActivityAck(body.Schema, card)); }
+        public Task PutContentPartAsync(BoardSyncContentPartWire part, ReadOnlyMemory<byte> bytes, CancellationToken ct, string? destination = null)
+        {
+            Check(destination);
+            Assert.Equal(part.Bytes, bytes.Length);
+            Assert.Equal(part.Sha256, Convert.ToHexStringLower(SHA256.HashData(bytes.Span)));
+            ContentParts[part.Sha256] = bytes.ToArray();
+            return Task.CompletedTask;
+        }
         public Task<BoardSyncPullResponse> PullAsync(string board, long after, int limit, CancellationToken ct, string? expectedDestination = null)
         { Check(expectedDestination); return Task.FromResult(new BoardSyncPullResponse(Events.Where(e => e.Seq > after).Take(limit).ToList(), Events.Count, Events.Count > after + limit)); }
         public Task<BoardSyncPushResponse> PushAsync(string board, BoardSyncPushRequest body, CancellationToken ct, string? expectedDestination = null)
