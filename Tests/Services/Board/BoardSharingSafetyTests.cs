@@ -250,7 +250,7 @@ public sealed class BoardSharingSafetyTests : IDisposable
         public Task<BoardSyncPublishResponse> PublishAsync(BoardSyncPublishRequest body, CancellationToken ct, string? expectedDestination = null)
         { Publications++; throw new InvalidOperationException("Imported boards must never publish"); }
         public Task<BoardSyncActivityAck> PutActivityAsync(string board, string card, BoardSyncActivityWire body, CancellationToken ct, string? expectedDestination = null)
-            => Task.FromResult(new BoardSyncActivityAck(1, card));
+            => Task.FromResult(new BoardSyncActivityAck(body.Schema, card));
         public Task<BoardSyncPullResponse> PullAsync(string board, long after, int limit, CancellationToken ct, string? expectedDestination = null)
             => Task.FromResult(new BoardSyncPullResponse(Events.Where(e => e.Seq > after).Take(limit).ToList(), Events.Count, Events.Count > after + limit));
         public Task<BoardSyncPushResponse> PushAsync(string board, BoardSyncPushRequest body, CancellationToken ct, string? expectedDestination = null)
