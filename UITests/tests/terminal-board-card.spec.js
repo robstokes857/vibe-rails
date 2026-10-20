@@ -61,8 +61,11 @@ for (const width of [1280, 390]) {
         await page.route('**/api/v1/board/**', route => {
             const path = new URL(route.request().url()).pathname;
             if (path === '/api/v1/board/boards') return route.fulfill({ json: { boards: [
-                { id: 'board', name: 'VibeRails', columns: [column] }
+                { id: 'default-board', name: 'Default board', position: 0, columns: [] },
+                { id: 'board', name: 'VibeRails', position: 1, columns: [column] }
             ] } });
+            if (path === '/api/v1/board/columns') return route.fulfill({ json: { columns: [column] } });
+            if (path === '/api/v1/board/cards') return route.fulfill({ json: { cards: [card] } });
             if (path === '/api/v1/board/cards/story') {
                 if (route.request().method() === 'PUT') {
                     const patch = route.request().postDataJSON();
@@ -83,6 +86,8 @@ for (const width of [1280, 390]) {
         const editor = page.locator('[data-board-card-editor]');
         await expect(editor).toBeVisible();
         await expect(editor).toHaveCSS('display', 'flex');
+        const boardLink = page.getByRole('button', { name: 'Open on Board', exact: true });
+        await expect(boardLink).toBeVisible();
         await expect(editor.locator('#board-card-lane')).toHaveValue('ready');
         await expect(page.locator('#app-content [data-view="board"]')).toHaveCount(0);
         await expect(editor.locator('[data-board-start-work]')).toHaveText('Start work');
@@ -101,6 +106,22 @@ for (const width of [1280, 390]) {
         await page.evaluate(() => window.app.boardController.refreshSessionActivity());
         await expect(footer.locator('button')).toHaveCount(1);
         await expect(editor.locator('#board-card-title')).toHaveValue('My draft title');
+        await boardLink.click();
+        await expect(editor.locator('#board-card-title')).toHaveValue('My draft title');
+        await expect(page.getByText('Save your changes and post or clear any draft comment before opening the Board.', { exact: true })).toBeVisible();
+        await page.locator('.notAToastclsBtn').click();
+        await expect(page.locator('.notAToastclsBtn')).toHaveCount(0);
+        expect(await page.evaluate(() => window.app.currentView)).toBe('terminal-focus');
+        expect(writes).toEqual([]);
+        await editor.locator('[data-board-composer="comment"] [data-board-composer-input]').fill('Unposted comment');
+        await editor.locator('#board-card-title').fill(card.title);
+        await boardLink.click();
+        await expect(editor.locator('[data-board-composer="comment"] [data-board-composer-input]')).toHaveValue('Unposted comment');
+        expect(await page.evaluate(() => window.app.currentView)).toBe('terminal-focus');
+        await page.locator('.notAToastclsBtn').click();
+        await expect(page.locator('.notAToastclsBtn')).toHaveCount(0);
+        await editor.locator('[data-board-composer="comment"] [data-board-composer-input]').fill('');
+        await editor.locator('#board-card-title').fill('My draft title');
         const actions = await editor.locator('.board-editor-actions').boundingBox();
         expect(actions.y + actions.height).toBeLessThanOrEqual(850);
         expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
@@ -117,6 +138,18 @@ for (const width of [1280, 390]) {
             listeners: window.app.boardController._activityDisposers.length })))
             .toEqual({ same: true, view: 'terminal-focus', tab: 'ordinary', listeners: 0 });
         expect(fixture.connections).toEqual(['ordinary']);
+
+        await storyLink.click();
+        await boardLink.focus();
+        await page.keyboard.press('Enter');
+        await expect(editor).toHaveCount(0);
+        await expect(page.locator('#app-content [data-view="board"]')).toBeVisible();
+        await expect(page.locator('[data-board-select]')).toHaveValue('board');
+        await expect(page.locator('.board-card[data-card-id="story"]')).toBeVisible();
+        expect(await page.evaluate(() => window.app.navigationStack.at(-1).data)).toEqual({});
+        await page.locator('.board-card[data-card-id="story"]').click();
+        await expect(editor).toBeVisible();
+        await expect(boardLink).toHaveCount(0);
     });
 }
 

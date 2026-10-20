@@ -862,7 +862,9 @@ no session. Restore, adoption
 and `refreshAutomationTabs` (same session only) set `state.boardCard`; starting or stopping a
 session in the tab clears it. Clicking opens the full card editor over the mounted terminal via
 `openCardEditor(id, { overlay: true })`, loading board/lane context and shared editor styles without
-navigation. Closing returns to the same terminal. Overlay activity uses the existing session poll,
+navigation. Closing returns to the same terminal. The overlay header's **Open on Board** link
+closes the editor and navigates directly to the card's board; unsaved edits, pending work and draft
+comments keep the editor open with a save-first reminder. Overlay activity uses the existing session poll,
 preserves drafts and disposes its listeners/requests on close or navigation. Other callers can
 still navigate to `board` with one-shot `openCardId`. Tests:
 `Tests/wwwroot/js/terminal-board-card-link.test.mjs`, `TerminalTabsRoutesTests`, and the focused

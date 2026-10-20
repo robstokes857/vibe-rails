@@ -158,6 +158,8 @@ export class BoardController {
         // navigation entry so Back or a remount of this view does not open it again.
         const openCardId = typeof data?.openCardId === 'string' ? data.openCardId.trim() : '';
         if (data && Object.prototype.hasOwnProperty.call(data, 'openCardId')) delete data.openCardId;
+        const boardId = typeof data?.boardId === 'string' ? data.boardId.trim() : '';
+        if (data && Object.prototype.hasOwnProperty.call(data, 'boardId')) delete data.boardId;
         const content = document.getElementById('app-content');
         if (!content) return;
 
@@ -177,7 +179,10 @@ export class BoardController {
         this.state.columns = [];
         this.state.cards = [];
         if (openCardId) await this.openCardFromNavigation(openCardId);
-        else await this.refresh({ restoreSelection: true });
+        else {
+            if (boardId) this.state.boardId = boardId;
+            await this.refresh({ restoreSelection: !boardId });
+        }
         if (this.root?.isConnected && this.app.currentView === 'board') this.bindSessionActivity();
     }
 
@@ -1599,8 +1604,27 @@ export class BoardController {
 
         const editor = container?.querySelector('[data-board-card-editor]');
         if (!editor) return;
+        if (outsideBoard && card) {
+            const link = document.createElement('button');
+            link.type = 'button';
+            link.className = 'btn btn-sm btn-link ms-auto me-2';
+            link.dataset.boardOpenBoard = '';
+            link.textContent = 'Open on Board';
+            link.addEventListener('click', () => this.openCardBoard(editor));
+            container.querySelector('.modal-header .btn-close')?.before(link);
+        }
         this.bindCardEditor(editor, card);
         if (outsideBoard) this.bindSessionActivity();
+    }
+
+    openCardBoard(editor) {
+        const boardId = editor?._boardCard?.boardId;
+        if (!boardId || !editor.isConnected) return;
+        if (this.cardHasDraft(editor)) {
+            this.app.showToast('Board', 'Save your changes and post or clear any draft comment before opening the Board.', 'warning');
+            return;
+        }
+        this.app.navigate('board', { boardId });
     }
 
     // Cards stay on their board. A different board starts with a new card.

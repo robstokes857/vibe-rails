@@ -1,6 +1,6 @@
 # VibeRails
 
-**VibeRails** is an opinionated framework that helps keep AI coding assistants from going off the rails.
+**VibeRails** is A developer and enterprise friendly framework that helps keep vibe coding from going off the rails.
 
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-7.0-3178C6)](https://www.typescriptlang.org/)
