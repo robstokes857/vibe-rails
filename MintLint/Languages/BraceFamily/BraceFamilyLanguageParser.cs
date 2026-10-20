@@ -716,7 +716,7 @@ internal abstract class BraceFamilyLanguageParser : ILanguageParser
         return false;
     }
 
-    private static int ResolveNameBeforeParameters(ParsedSource parsed, int parameterStart)
+    private int ResolveNameBeforeParameters(ParsedSource parsed, int parameterStart)
     {
         List<Token> tokens = parsed.Tokens;
         int nameIndex = ParserUtilities.PreviousSignificant(tokens, parameterStart - 1);
@@ -726,6 +726,15 @@ internal abstract class BraceFamilyLanguageParser : ILanguageParser
             if (openAngle >= 0)
             {
                 nameIndex = ParserUtilities.PreviousSignificant(tokens, openAngle - 1);
+            }
+        }
+        else if (Kind == BraceFamilyKind.Go && nameIndex >= 0 && tokens[nameIndex].Text == "]")
+        {
+            // Go writes type parameters in brackets: `func Keys[K comparable, V any](m map[K]V)`.
+            int openBracket = parsed.BracketPartner[nameIndex];
+            if (openBracket > 0)
+            {
+                nameIndex = ParserUtilities.PreviousSignificant(tokens, openBracket - 1);
             }
         }
 
@@ -864,7 +873,7 @@ internal abstract class BraceFamilyLanguageParser : ILanguageParser
         }
     }
 
-    private static void ExtractCStyleTypeMembers(
+    private void ExtractCStyleTypeMembers(
         ParsedSource parsed,
         ClassSpan classSpan,
         Dictionary<int, string> methodOwners)
@@ -906,12 +915,12 @@ internal abstract class BraceFamilyLanguageParser : ILanguageParser
                 continue;
             }
 
-            AddFieldNamesFromDeclaration(tokens, classSpan, i, boundary - 1);
+            AddFieldNamesFromDeclaration(parsed, classSpan, i, boundary - 1);
             i = boundary + 1;
         }
     }
 
-    private static bool TryAddMethodDeclaration(
+    private bool TryAddMethodDeclaration(
         ParsedSource parsed,
         ClassSpan classSpan,
         int start,
@@ -919,7 +928,11 @@ internal abstract class BraceFamilyLanguageParser : ILanguageParser
         Dictionary<int, string> methodOwners)
     {
         List<Token> tokens = parsed.Tokens;
-        int openParen = FindLastTopLevelToken(parsed, "(", start, semicolon - 1);
+
+        // The parameters come before any top-level `=`: `virtual double area() const = 0;` keeps
+        // its method, while the call in `List<String> items = new ArrayList<>();` initializes a field.
+        int assignment = FindFirstTopLevelToken(parsed, "=", start, semicolon - 1);
+        int openParen = FindLastTopLevelToken(parsed, "(", start, assignment >= 0 ? assignment - 1 : semicolon - 1);
         if (openParen < 0)
         {
             return false;
@@ -949,32 +962,61 @@ internal abstract class BraceFamilyLanguageParser : ILanguageParser
         return true;
     }
 
-    private static void AddFieldNamesFromDeclaration(List<Token> tokens, ClassSpan classSpan, int start, int end)
+    private static void AddFieldNamesFromDeclaration(ParsedSource parsed, ClassSpan classSpan, int start, int end)
     {
+        // Declarators split only at top-level commas: not those inside `Map<String, List<Integer>>`
+        // or `Math.max(a, b)`.
+        List<Token> tokens = parsed.Tokens;
         int segmentStart = start;
         for (int i = start; i <= end + 1; i++)
         {
-            if (i == end + 1 || tokens[i].Text == ",")
+            if (i <= end)
             {
-                int limit = i - 1;
-                for (int j = segmentStart; j <= limit; j++)
+                string text = tokens[i].Text;
+                if (text is "(" or "[")
                 {
-                    if (tokens[j].Text == "=")
-                    {
-                        limit = j - 1;
-                        break;
-                    }
+                    i = ParserUtilities.SkipPaired(parsed, i);
+                    continue;
                 }
 
-                int nameIndex = FindLastFieldName(tokens, segmentStart, limit);
-                if (nameIndex >= 0)
+                if (text == "<")
                 {
-                    ParserUtilities.AddUnique(classSpan.FieldNames, tokens[nameIndex].Text);
+                    i = SkipGenericArguments(tokens, i, end);
+                    continue;
                 }
 
-                segmentStart = i + 1;
+                if (text != ",")
+                {
+                    continue;
+                }
             }
+
+            int assignment = FindFirstTopLevelToken(parsed, "=", segmentStart, i - 1);
+            int nameIndex = FindLastFieldName(tokens, segmentStart, assignment >= 0 ? assignment - 1 : i - 1);
+            if (nameIndex >= 0)
+            {
+                ParserUtilities.AddUnique(classSpan.FieldNames, tokens[nameIndex].Text);
+            }
+
+            segmentStart = i + 1;
         }
+    }
+
+    /// <summary>
+    /// The close of the generic argument list opened at <paramref name="openAngle"/>, or the
+    /// <c>&lt;</c> itself when it is a comparison. In <c>empty = lo &lt; hi, full = hi &gt; lo</c> the
+    /// <c>&gt;</c> comes after the next <c>=</c>; argument lists hold no <c>=</c>, so that pair is not one.
+    /// </summary>
+    private static int SkipGenericArguments(List<Token> tokens, int openAngle, int end)
+    {
+        int closeAngle = FindMatchingCloseAngle(tokens, openAngle, end);
+        if (closeAngle < 0)
+        {
+            return openAngle;
+        }
+
+        int assignment = FindFirstToken(tokens, "=", openAngle + 1, closeAngle - 1);
+        return assignment < 0 ? closeAngle : openAngle;
     }
 
     private static void AssignMethodsToTypes(ParsedSource parsed, Dictionary<int, string> methodOwners)
@@ -1099,6 +1141,36 @@ internal abstract class BraceFamilyLanguageParser : ILanguageParser
             if (text is "{" or ";")
             {
                 return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private static int FindFirstTopLevelToken(ParsedSource parsed, string text, int start, int end)
+    {
+        List<Token> tokens = parsed.Tokens;
+        for (int i = Math.Max(0, start); i <= end && i < tokens.Count; i++)
+        {
+            string current = tokens[i].Text;
+            if (current == text)
+            {
+                return i;
+            }
+
+            if (current is "(" or "[")
+            {
+                i = ParserUtilities.SkipPaired(parsed, i);
+            }
+            else if (current == "<")
+            {
+                // Only a declaration's type comes before its `=`, so this `<` opens an argument list,
+                // and the `=` in `template <typename T = int>` is not the declaration's.
+                int closeAngle = FindMatchingCloseAngle(tokens, i, end);
+                if (closeAngle > i)
+                {
+                    i = closeAngle;
+                }
             }
         }
 

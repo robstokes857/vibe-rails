@@ -223,10 +223,15 @@ internal sealed class CSharpLanguageParser : ILanguageParser
                 break;
             }
 
+            // Whatever follows a top-level `=` initializes a field or property, so the calls in
+            // `Index _byName = new();` or `int _seed = Compute(3);` are not member declarations.
+            int assignment = FindFirstTopLevelToken(parsed, "=", declarationStart, boundary - 1);
+            int signatureEnd = assignment >= 0 ? assignment - 1 : boundary - 1;
+
             if (tokens[boundary].Text == "{")
             {
                 int bodyEnd = parsed.BracePartner[boundary];
-                int openParen = FindLastTopLevelToken(parsed, "(", declarationStart, boundary - 1);
+                int openParen = FindLastTopLevelToken(parsed, "(", declarationStart, signatureEnd);
                 if (openParen >= 0)
                 {
                     int nameIndex = ParserUtilities.PreviousSignificant(tokens, openParen - 1);
@@ -240,7 +245,7 @@ internal sealed class CSharpLanguageParser : ILanguageParser
                     }
                 }
 
-                int propertyName = FindLastNameToken(tokens, declarationStart, boundary - 1);
+                int propertyName = FindLastNameToken(tokens, declarationStart, signatureEnd);
                 if (propertyName >= 0)
                 {
                     ParserUtilities.AddUnique(classSpan.FieldNames, tokens[propertyName].Text);
@@ -251,7 +256,7 @@ internal sealed class CSharpLanguageParser : ILanguageParser
             }
 
             // An expression-bodied member: `ReturnType Name(params) => expression;`.
-            int arrow = FindFirstTopLevelToken(parsed, "=>", declarationStart, boundary - 1);
+            int arrow = FindFirstTopLevelToken(parsed, "=>", declarationStart, signatureEnd);
             if (arrow >= 0)
             {
                 int arrowOpenParen = FindLastTopLevelToken(parsed, "(", declarationStart, arrow - 1);
@@ -271,7 +276,7 @@ internal sealed class CSharpLanguageParser : ILanguageParser
 
             // A `;`-terminated member shaped like `ReturnType Name(params);` is an
             // abstract or interface method declaration with no body.
-            int abstractOpenParen = FindLastTopLevelToken(parsed, "(", declarationStart, boundary - 1);
+            int abstractOpenParen = FindLastTopLevelToken(parsed, "(", declarationStart, signatureEnd);
             if (abstractOpenParen >= 0 && parsed.ParenPartner[abstractOpenParen] == boundary - 1)
             {
                 int methodName = ParserUtilities.PreviousSignificant(tokens, abstractOpenParen - 1);
@@ -285,7 +290,7 @@ internal sealed class CSharpLanguageParser : ILanguageParser
                 }
             }
 
-            int fieldName = FindFieldName(tokens, declarationStart, boundary - 1);
+            int fieldName = FindLastNameToken(tokens, declarationStart, signatureEnd);
             if (fieldName >= 0)
             {
                 ParserUtilities.AddUnique(classSpan.FieldNames, tokens[fieldName].Text);
@@ -358,21 +363,6 @@ internal sealed class CSharpLanguageParser : ILanguageParser
         }
 
         return found;
-    }
-
-    private static int FindFieldName(List<Token> tokens, int startIndex, int endIndex)
-    {
-        int limit = endIndex;
-        for (int i = startIndex; i <= endIndex; i++)
-        {
-            if (tokens[i].Text == "=")
-            {
-                limit = i - 1;
-                break;
-            }
-        }
-
-        return FindLastNameToken(tokens, startIndex, limit);
     }
 
     private static int FindLastNameToken(List<Token> tokens, int startIndex, int endIndex)
