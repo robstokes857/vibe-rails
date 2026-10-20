@@ -64,6 +64,15 @@ internal sealed class VcaRegressionRepository : IAsyncDisposable
     public string Enforcement { get; }
     public string RepositoryPath { get; }
 
+    /// <summary>
+    /// Extra service replacements for the hook host, applied after the per-repository job store.
+    /// The signature rules use it to swap the viberails.ai verifier and the popup for fakes.
+    /// </summary>
+    public Action<IServiceCollection>? ConfigureServices { get; set; }
+
+    /// <summary>Where <see cref="RunCommitMessageAsync"/> writes the message; the hook may append to it.</summary>
+    public string CommitMessagePath => Path.Combine(RepositoryPath, ".git", "COMMIT_EDITMSG");
+
     public string ScenarioDirectory => Path.Combine(
         FixturesRoot,
         Scenario.Replace('/', Path.DirectorySeparatorChar));
@@ -118,12 +127,12 @@ internal sealed class VcaRegressionRepository : IAsyncDisposable
     }
 
     /// <summary>Runs the real commit-msg hook host with <paramref name="message"/> as the commit message.</summary>
-    public async Task<HookRun> RunCommitMessageAsync(string message)
+    public async Task<HookRun> RunCommitMessageAsync(string message, params string[] extraArguments)
     {
-        var messagePath = Path.Combine(RepositoryPath, ".git", "COMMIT_EDITMSG");
+        var messagePath = CommitMessagePath;
         await File.WriteAllTextAsync(messagePath, message, Utf8NoBom, Ct);
         return await RunHookAsync(
-            ["--vca-hook", "commit-msg", "--workdir", RepositoryPath, "--commit-message", messagePath]);
+            ["--vca-hook", "commit-msg", "--workdir", RepositoryPath, "--commit-message", messagePath, .. extraArguments]);
     }
 
     /// <summary>The MCP <c>validate_vca</c> tool's reader: git commands over the live index, no snapshot.</summary>
@@ -296,7 +305,11 @@ internal sealed class VcaRegressionRepository : IAsyncDisposable
 
         var exitCode = await VcaHookProcessHost.RunCoreAsync(
             args,
-            services => services.Replace(ServiceDescriptor.Singleton<IJobStore>(_ => new JobStore(connectionString))),
+            services =>
+            {
+                services.Replace(ServiceDescriptor.Singleton<IJobStore>(_ => new JobStore(connectionString)));
+                ConfigureServices?.Invoke(services);
+            },
             transcript,
             transcript,
             input: null,

@@ -95,6 +95,12 @@ namespace VibeRails.Services
                         rule,
                         Path.Combine(rootPath, "vc.rules.md"),
                         rootPath),
+                    Rule.HumanVerified => new ValidationResult(rule.RuleText, rule.Enforcement, true, HumanSignatureRule.HumanVerifiedDeferredMessage),
+                    Rule.SignedApproval => ValidateSignedApproval(
+                        files,
+                        rule,
+                        Path.Combine(rootPath, "vc.rules.md"),
+                        rootPath),
                     _ => new ValidationResult(rule.RuleText, rule.Enforcement, true, "Rule not implemented for pre-commit")
                 };
 
@@ -161,6 +167,12 @@ namespace VibeRails.Services
                     Rule.PackageChangeDetected => ValidatePackageChanges(scopedFiles, rule),
                     Rule.RequireVibeRailsSessionLink => new ValidationResult(rule.RuleText, rule.Enforcement, true, SessionShareCommitRule.DeferredMessage),
                     Rule.FileLock or Rule.DirectoryLock => ValidatePathLock(
+                        scopedFiles,
+                        rule,
+                        sourceFile,
+                        rootPath),
+                    Rule.HumanVerified => new ValidationResult(rule.RuleText, rule.Enforcement, true, HumanSignatureRule.HumanVerifiedDeferredMessage),
+                    Rule.SignedApproval => ValidateSignedApproval(
                         scopedFiles,
                         rule,
                         sourceFile,
@@ -327,6 +339,36 @@ namespace VibeRails.Services
             path = path.Replace('\\', '/');
 
             return path;
+        }
+
+        /// <summary>
+        /// Working-tree preview of a signed approval. A signature can only be checked against the final
+        /// commit message, so a changed path reports the deferred requirement rather than a violation;
+        /// an unchanged path passes. Unparsable text is inert here for the same reason as a broken lock.
+        /// </summary>
+        private static ValidationResult ValidateSignedApproval(
+            List<string> files,
+            RuleWithEnforcement rule,
+            string sourceFile,
+            string rootPath)
+        {
+            if (!HumanSignatureRule.TryParseSignedApproval(rule.RuleText, out var approval))
+                return new ValidationResult(rule.RuleText, rule.Enforcement, true,
+                    $"Signed approval ignored - invalid syntax. {HumanSignatureRule.SignedApprovalSyntaxHelp}");
+
+            var specification = new PathLockSpecification(PathLockKind.Directory, approval.RelativePath);
+            if (!PathLockRule.TryResolveRepositoryPath(specification, sourceFile, rootPath,
+                    out var approvalPath, out var error, "approval path"))
+                return new ValidationResult(rule.RuleText, rule.Enforcement, true, $"Signed approval ignored - {error}");
+
+            var comparison = OperatingSystem.IsWindows()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
+            var changed = files.Any(file => PathLockRule.Matches(specification, approvalPath, file,
+                previousRepositoryPath: null, sourceAgentRepositoryPath: string.Empty, comparison));
+            return new ValidationResult(rule.RuleText, rule.Enforcement, true, changed
+                ? HumanSignatureRule.SignedApprovalDeferredMessage(approvalPath, approval.Approvers)
+                : $"'{approvalPath}' was not changed");
         }
 
         private static ValidationResult ValidatePathLock(

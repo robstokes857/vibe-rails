@@ -197,6 +197,20 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
                 }
             }
 
+            // A deleted vc.rules.md keeps its committed text, so signature rules it declared still
+            // apply to the commit that deletes it (RulesTool.AddCommittedSignatureRules). Other
+            // deleted files stay without content, as before.
+            if (entry.Kind == GitStagedChangeKind.Deleted
+                && IsAgentFile(entry.RelativePath)
+                && baseByPath.TryGetValue(entry.RelativePath, out var deletedTreeEntry)
+                && deletedTreeEntry.Type == "blob"
+                && deletedTreeEntry.Mode != GitLinkMode)
+            {
+                var deletedBlob = await ReadTreeTextAsync(deletedTreeEntry);
+                if (!deletedBlob.IsBinary)
+                    previousContent = deletedBlob.Content;
+            }
+
             changedLines.TryGetValue(entry.RelativePath, out var lineCount);
             var addedCode = ResolveAddedCode(entry, content, addedCodeByPath);
             files.Add(new GitStagedFileSnapshot(

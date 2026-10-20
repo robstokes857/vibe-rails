@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using VibeRails.DB;
+using VibeRails.Services.VCA;
 using VibeRails.Services.VCA.Hooks;
 
 namespace VibeRails.Services.GitPreflight;
@@ -21,6 +22,9 @@ public static class GitPreflightServiceCollectionExtensions
     public static IServiceCollection AddGitPreflight(this IServiceCollection services)
     {
         services.AddSingleton<IVcaHookValidationService, VcaRulesHookValidationService>();
+        // Human verified / Signed Approval ask viberails.ai who signed. Tests replace this.
+        // A container-owned instance: the container disposes it, so it must not be the static Shared one.
+        services.TryAddSingleton<ICommitSignatureVerifier, ViberailsCommitSignatureVerifier>();
         services.AddGitSnapshots();
         services.AddSingleton<VibeRails.Services.Board.BoardCheckService>();
         services.AddSingleton<IGitPreflightStep, VcaPreflightStep>();

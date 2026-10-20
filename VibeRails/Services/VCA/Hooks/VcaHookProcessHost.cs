@@ -109,6 +109,18 @@ public static class VcaHookProcessHost
             error = Console.Error;
         }
 
+        // The signing popup needs no automation store and no preflight pipeline: it signs the tree
+        // the commit-msg hook already validated, and that hook re-validates once this window closes.
+        if (invocation.Kind == VcaHookKind.SignCommitMessage)
+        {
+            var signExitCode = await HumanSignaturePopup.RunInConsoleAsync(invocation, output, style, cancellationToken);
+            if (invocation.ConsoleWindowAttached && signExitCode != 0)
+            {
+                await PauseForEnterAsync(output, input, signExitCode, ConsolePauseTimeout, cancellationToken, style);
+            }
+            return signExitCode;
+        }
+
         var services = new ServiceCollection();
         ConfigureServices(
             services,
@@ -328,6 +340,7 @@ public static class VcaHookProcessHost
     {
         VcaHookKind.CommitMessage => "Commit Message",
         VcaHookKind.AcknowledgeCommitMessage => "Commit Acknowledgment",
+        VcaHookKind.SignCommitMessage => "Human Verification",
         VcaHookKind.Preview => "Preview",
         _ => "Pre-Commit"
     };
@@ -354,5 +367,6 @@ public static class VcaHookProcessHost
         services.AddGitPreflight();
         services.AddSingleton<IVcaHookPresenter>(_ =>
             new VcaConsoleHookPresenter(new VcaHookConsoleOptions(output, error, input, enableSpinner, style)));
+        services.AddSingleton<IHumanSignaturePrompt>(_ => new HumanSignaturePromptLauncher(output, error, style));
     }
 }

@@ -188,6 +188,63 @@ Rules-page validation reports the same configuration error or a clear deferred r
 `COMMIT` is deliberately non-blocking at pre-commit: the acknowledgment lives in a commit message
 that does not exist yet. The commit-msg hook is where it is enforced.
 
+## Signed commits: `Human verified` and `Signed Approval` (2026-10-20)
+
+Two rules a person satisfies by signing the commit with a Settings > KEYS signing key
+(`HumanSignatureRule`, `CommitSignatureFormat`):
+
+- `Human verified` needs, for every commit in scope, a signature from a key registered on
+  viberails.ai to an account with a verified email. It is also a commit-message rule, so a
+  message-only commit (`--amend` with nothing staged) needs one too.
+- `Signed Approval('db.cs', 'owner@example.com, other@example.com')` applies only when the path
+  changes. The path is a file or directory relative to the declaring vc.rules.md and may not escape
+  it (the path-lock resolver, with "approval path" wording). The signer's verified email must be
+  listed, compared without case. Text that does not parse is Unrecognized (warns, never blocks), for
+  the path-lock reason. Unlike locks, the declaring vc.rules.md is not exempt, so `'.'` also covers
+  edits to the policy file.
+
+**What is signed.** Not the commit id: it hashes the message, and the message carries the
+signature. The signature (RSA-PSS-SHA256) covers `VibeRails human-verified commit v1\ntree <id>\n`,
+where the id is the staged tree from the snapshot (`StagedIdentity.StagedTree`, i.e. `git
+write-tree`). That is exactly the content being committed, so any staged change after signing
+invalidates it, while amending only the message keeps it valid.
+
+**Where it lives.** One trailer per signature, after Git comments are stripped, at most five read:
+`vibe-signature: v1 key=<viberails.ai key id> fp=<fingerprint> tree=<tree> sig=<base64>`.
+
+**Verification.** Deferred at pre-commit, on the Rules page and in MCP `validate_vca`. At commit-msg,
+a signature over another tree fails locally ("the staged content changed after signing"); the rest
+go to `POST https://viberails.ai/public/api/v1/signatures/verify` (`ViberailsCommitSignatureVerifier`),
+which checks the server's registered key and returns the account email only for a valid signature
+with a verified email. It fails closed: offline, rate-limited or a server error is a violation at the
+declared level, never a pass. Definitive answers are cached for the process; failures are not.
+
+**The popup.** When commit-msg is blocked only by signature findings (COMMIT or STOP) and a person
+can answer (the hook script's `--prompt-acknowledgment`), `VcaHookRunner` offers the signing UI up
+to three times, re-running the preflight after each signature. `HumanSignaturePromptLauncher` runs
+it inside the Git Guard popup console when the hook is already there; otherwise it opens one with
+`--vca-hook sign-commit-msg` through `VcaHookConsoleRespawn` (CREATE_NEW_CONSOLE). It never prompts
+in the terminal that ran `git commit`, which may be an agent's pseudo-terminal. No popup opens in
+CI, without a desktop or off Windows; the commit is blocked with the rule's guidance. It is not
+offered while an unrelated STOP violation, or an unreachable viberails.ai, would block anyway.
+`HumanSignaturePopup` shows the repository, subject, tree and changed files, lists keys synced for
+the current API key, reads the password key by key with echo off (redirected input refused,
+10-minute idle timeout, three attempts), signs with `SigningKeyService.SignCommitTreeAsync`,
+confirms with viberails.ai and appends the trailer above any scissors line.
+
+**Policy from HEAD.** Rules normally come from the staged vc.rules.md. For these two rules only,
+`RulesTool.AddCommittedSignatureRules` also reads the committed text of every modified, renamed or
+deleted vc.rules.md: a rule the commit removes or weakens is enforced at its committed level, and
+removing an approval counts as touching its path. Taking a gate away therefore needs the signature
+the gate asks for. The snapshot provider keeps `PreviousContent` for a deleted vc.rules.md for this.
+
+**Threat model.** It stops an agent from producing an approval: the key password is never stored,
+the dashboard's Sign message route refuses the commit-approval prefix, no MCP tool signs, and the
+popup is a separate window. It does not stop `git commit --no-verify` (which skips every hook), a
+process running as the user that knows the password (it can decrypt the key file itself), or UI
+automation of the popup window. A signature proves the key holder approved the tree, not who was at
+the keyboard. Use STOP: at COMMIT an acknowledgment token replaces the signature.
+
 ## When a rule cannot be evaluated
 
 Three different failures, deliberately treated differently:
@@ -266,6 +323,9 @@ author junk. Reads no longer filter, so hand-edited junk is shown rather than hi
 | `../Mcp/Tools/RulesTool.cs` | `ValidateVcaReportAsync` — the validation the hooks actually run. |
 | `../AgentFileService.cs` | Rules-page CRUD over `vc.rules.md` files. |
 | `PathLockRule.cs` | Shared File Lock / Directory Lock syntax, safe path resolution, and matching. |
+| `HumanSignatureRule.cs` | Human verified / Signed Approval syntax, the `vibe-signature:` trailer and the signed payload. |
+| `CommitSignatureVerifier.cs` | Commit-signature verification through viberails.ai's public verify endpoint. |
+| `Hooks/HumanSignaturePopup.cs`, `Hooks/HumanSignaturePrompt.cs` | The signing popup and the launcher that decides where it may run. |
 | `../GitPreflight/` | Step pipeline (VCA → MintLint → automated workflows) and its event stream. |
 
 ## Testing
@@ -284,6 +344,7 @@ boundary, including rejection with valid API credentials.
 | Real hooks, real repos | `Tests/Services/VCA/VcaHookEndToEndTests.cs` |
 | Every catalog rule × every level, real repos | `Tests/VcaRegression/` (fixture scenarios under `Fixtures/`; see its README) |
 | Rules-page CRUD | `Tests/AgentFileServiceTests.cs` |
+| Signed commits | `Tests/VcaRegression/HumanSignatureRuleTests.cs` (real hook, fake verifier and popup), `Tests/Services/VCA/HumanSignature*Tests.cs`, `CommitSignatureVerifierTests.cs` |
 
 `VcaHookEndToEndTests` builds throwaway Git repositories and runs the real hook host against them.
 Prefer adding cases there for anything that touches what blocks a commit — it is the only layer

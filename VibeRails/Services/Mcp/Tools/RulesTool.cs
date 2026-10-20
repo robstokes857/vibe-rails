@@ -32,7 +32,10 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
         bool ExistsInIndex,
         GitStagedChangeKind ChangeKind,
         string? PreviousRelativePath = null,
-        string? Content = null);
+        string? Content = null,
+        // The committed (HEAD) text. Only the staged-snapshot path fills it, and only signature
+        // rules read it: see AddCommittedSignatureRules.
+        string? PreviousContent = null);
 
     private sealed record AgentFileSnapshot(
         string RelativePath,
@@ -42,7 +45,9 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
     private sealed record VcaRuleSnapshot(
         string RuleText,
         string Enforcement,
-        AgentFileSnapshot Source);
+        AgentFileSnapshot Source,
+        // A signature rule the committed vc.rules.md declares and this commit removes or weakens.
+        bool RemovedFromPolicy = false);
 
     private enum RuleValidationState
     {
@@ -57,13 +62,20 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
         Unrecognized
     }
 
-    private sealed record RuleValidationResult(RuleValidationState State, string Message)
+    private sealed record RuleValidationResult(
+        RuleValidationState State,
+        string Message,
+        // Set when a person can resolve the violation by signing in the Git Guard popup.
+        HumanSignatureRequest? SignatureRequest = null)
     {
         public static RuleValidationResult Pass(string message) =>
             new(RuleValidationState.Passed, message);
 
         public static RuleValidationResult Violation(string message) =>
             new(RuleValidationState.Violated, message);
+
+        public static RuleValidationResult SignatureNeeded(string message, HumanSignatureRequest request) =>
+            new(RuleValidationState.Violated, message, request);
 
         public static RuleValidationResult Deferred(string message) =>
             new(RuleValidationState.Deferred, message);
@@ -88,7 +100,8 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
         bool validateCommitMessage = false,
         CancellationToken cancellationToken = default,
         GitStagedSnapshot? stagedSnapshot = null,
-        bool workingTreeScope = false)
+        bool workingTreeScope = false,
+        ICommitSignatureVerifier? signatureVerifier = null)
     {
         // "changed" when validating a working-tree snapshot, "staged" when validating the
         // index — the transcript must name what was actually looked at.
@@ -120,7 +133,8 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
                     file.ExistsInIndex,
                     file.ChangeKind,
                     file.PreviousRelativePath,
-                    file.Content)).ToList();
+                    file.Content,
+                    file.PreviousContent)).ToList();
             if (stagedFiles.Count == 0 && !validateCommitMessage)
             {
                 return VcaToolValidationReport.Pass(
@@ -135,19 +149,23 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
                     file.RelativePath,
                     ToFullPath(gitRoot, file.RelativePath),
                     file.Content)).ToList();
-            if (agentFiles.Count == 0)
-            {
-                return VcaToolValidationReport.Pass(
-                    "PASS: No vc.rules.md files found. No VCA rules to check.",
-                    stagedFiles.Count);
-            }
-
             // Parse rules from vc.rules.md files
             var allRules = new List<VcaRuleSnapshot>();
             foreach (var agentFile in agentFiles)
             {
                 allRules.AddRange(ParseRules(agentFile.Content, agentFile.FullPath)
                     .Select(rule => new VcaRuleSnapshot(rule.RuleText, rule.Enforcement, agentFile)));
+            }
+
+            // Before the "no rule files" answer: a commit that deletes the last vc.rules.md still
+            // owes the signatures that file demanded.
+            AddCommittedSignatureRules(allRules, stagedFiles, gitRoot);
+
+            if (agentFiles.Count == 0 && allRules.Count == 0)
+            {
+                return VcaToolValidationReport.Pass(
+                    "PASS: No vc.rules.md files found. No VCA rules to check.",
+                    stagedFiles.Count);
             }
 
             if (allRules.Count == 0)
@@ -166,7 +184,7 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
             {
                 var qualitySnapshot = await snapshotProvider.CaptureAsync(gitRoot, cancellationToken);
                 return await ValidateVcaReportAsync(snapshotProvider, gitRoot, commitMessage, validateCommitMessage,
-                    cancellationToken, qualitySnapshot, workingTreeScope);
+                    cancellationToken, qualitySnapshot, workingTreeScope, signatureVerifier);
             }
 
             // Validate against rules
@@ -209,7 +227,9 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
                     commitMessage,
                     validateCommitMessage,
                     cancellationToken,
-                    stagedSnapshot);
+                    stagedSnapshot,
+                    signatureVerifier,
+                    rule.RemovedFromPolicy);
 
                 if (validation.State == RuleValidationState.Passed && CodeQualityRule.LooksLike(ruleText))
                     qualityChecks.Add($"{ruleText}: {validation.Message}");
@@ -269,7 +289,8 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
                             BuildFindingGuidance(
                                 VcaRuleFindingKind.Warning,
                                 message,
-                                sourcePath)));
+                                sourcePath),
+                            SignatureRequest: validation.SignatureRequest));
                     }
                     else if (enforcement == "COMMIT")
                     {
@@ -287,7 +308,8 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
                                 VcaRuleFindingKind.AcknowledgmentRequired,
                                 message,
                                 sourcePath),
-                            token));
+                            token,
+                            validation.SignatureRequest));
                     }
                     else if (enforcement == "STOP")
                     {
@@ -302,7 +324,8 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
                             BuildFindingGuidance(
                                 VcaRuleFindingKind.Blocked,
                                 message,
-                                sourcePath)));
+                                sourcePath),
+                            SignatureRequest: validation.SignatureRequest));
                     }
                 }
             }
@@ -590,9 +613,56 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
         string? commitMessage,
         bool validateCommitMessage,
         CancellationToken cancellationToken,
-        GitStagedSnapshot? snapshot)
+        GitStagedSnapshot? snapshot,
+        ICommitSignatureVerifier? signatureVerifier,
+        bool removedFromPolicy = false)
     {
         var ruleLower = ruleText.ToLowerInvariant();
+
+        // First, before the substring checks below: an approval path such as 'docs/test coverage.md'
+        // must never be read as some other rule.
+        if (HumanSignatureRule.IsHumanVerified(ruleText))
+        {
+            if (!validateCommitMessage)
+                return RuleValidationResult.Deferred(HumanSignatureRule.HumanVerifiedDeferredMessage);
+            return await ValidateHumanSignatureAsync(commitMessage, snapshot, [], null, signatureVerifier, cancellationToken);
+        }
+
+        if (HumanSignatureRule.LooksLikeSignedApproval(ruleText))
+        {
+            // Unrecognized for the same reason as a lock that will not parse: with no path there is
+            // nothing to compare the staged files against, so at STOP it would block every commit.
+            if (!HumanSignatureRule.TryParseSignedApproval(ruleText, out var approval))
+                return RuleValidationResult.Unrecognized($"UNSUPPORTED: invalid signed approval. {HumanSignatureRule.SignedApprovalSyntaxHelp}");
+
+            var approvalSpec = new PathLockSpecification(PathLockKind.Directory, approval.RelativePath);
+            if (!PathLockRule.TryResolveRepositoryPath(approvalSpec, sourceAgent.FullPath, gitRoot,
+                    out var approvalPath, out var approvalError, "approval path"))
+                return RuleValidationResult.Unrecognized($"UNSUPPORTED: {approvalError}.");
+
+            // The declaring vc.rules.md is ordinary content here, unlike for locks: an approval that
+            // covers it ('.') must also cover edits that would remove the approval itself.
+            var touched = stagedFiles
+                .Where(file => PathLockRule.Matches(approvalSpec, approvalPath, file.RelativePath,
+                    file.PreviousRelativePath, sourceAgentRepositoryPath: string.Empty, GitPathComparison))
+                .Select(file => file.RelativePath)
+                .Distinct(GitPathComparer)
+                .ToList();
+            // Dropping the approval is itself a change to what protects the path. Without this, one
+            // commit removes the rule without touching the path and the next changes the path freely.
+            if (removedFromPolicy)
+                touched.Insert(0, sourceAgent.RelativePath);
+            if (touched.Count == 0)
+                return RuleValidationResult.Pass($"'{approvalPath}' was not changed");
+            if (!validateCommitMessage)
+                return RuleValidationResult.Deferred(
+                    HumanSignatureRule.SignedApprovalDeferredMessage(approvalPath, approval.Approvers));
+            var subject = removedFromPolicy
+                ? $"Removing or weakening the signed approval for '{approvalPath}' in {sourceAgent.RelativePath} would"
+                : $"Changes to '{approvalPath}' ({string.Join(", ", touched.Take(3))}{(touched.Count > 3 ? ", ..." : string.Empty)})";
+            return await ValidateHumanSignatureAsync(commitMessage, snapshot, approval.Approvers, subject,
+                signatureVerifier, cancellationToken);
+        }
 
         if (CodeQualityRule.LooksLike(ruleText))
         {
@@ -818,8 +888,132 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
                 + "checked. Fix the wording or remove the rule.");
     }
 
+    // Human verified is included: a message-only commit (git commit --amend with nothing staged)
+    // still records a commit, so it still needs a person's signature over its tree.
     private static bool IsCommitMessageRule(string ruleText) =>
-        CommitMessageWordRule.LooksLike(ruleText) || SessionShareCommitRule.IsRule(ruleText);
+        CommitMessageWordRule.LooksLike(ruleText)
+        || SessionShareCommitRule.IsRule(ruleText)
+        || HumanSignatureRule.IsHumanVerified(ruleText);
+
+    /// <summary>
+    /// Checks the <c>vibe-signature:</c> lines of the final message against the staged tree.
+    /// <paramref name="approvers"/> empty means any registered key with a verified account email;
+    /// otherwise the signer's verified email must be one of them. Fails closed: if viberails.ai cannot
+    /// answer, the rule is violated at its declared level, because a gate that passes whenever the
+    /// network is down is not a gate.
+    /// </summary>
+    private static async Task<RuleValidationResult> ValidateHumanSignatureAsync(
+        string? commitMessage,
+        GitStagedSnapshot? snapshot,
+        IReadOnlyList<string> approvers,
+        string? subject,
+        ICommitSignatureVerifier? verifier,
+        CancellationToken cancellationToken)
+    {
+        var treeId = snapshot?.StagedIdentity?.StagedTree;
+        if (!CommitSignatureFormat.IsObjectId(treeId))
+            return RuleValidationResult.Violation(
+                "UNSUPPORTED: Git Guard could not determine the staged tree, so it cannot check a commit signature.");
+
+        var request = new HumanSignatureRequest(treeId!, snapshot!.StagedIdentity!.BaseTree, approvers, subject);
+        var needed = subject is null
+            ? "This commit needs a person's signature"
+            : $"{subject} need a signed approval from {HumanSignatureRule.DescribeApprovers(approvers)}";
+        var signatures = CommitSignatureFormat.Parse(commitMessage);
+        if (signatures.Count == 0)
+            return RuleValidationResult.SignatureNeeded($"{needed}, and the commit message has no vibe-signature: line. {HumanSignatureRule.Guidance}", request);
+
+        var current = signatures.Where(signature => signature.TreeId == treeId).ToList();
+        if (current.Count == 0)
+            return RuleValidationResult.SignatureNeeded(
+                $"{needed}. The vibe-signature: line was made for tree {signatures[0].TreeId[..12]}, but the staged tree is "
+                + $"{treeId![..12]}: the staged content changed after signing. Sign again in the Git Guard popup.", request);
+
+        verifier ??= ViberailsCommitSignatureVerifier.Shared;
+        var signers = new List<string>();
+        var rejected = new List<string>();
+        string? unavailable = null;
+        foreach (var signature in current)
+        {
+            var result = await verifier.VerifyAsync(signature, cancellationToken);
+            switch (result.Status)
+            {
+                case CommitSignatureStatus.Valid when result.SignerEmail is not null:
+                    if (!signers.Contains(result.SignerEmail, StringComparer.OrdinalIgnoreCase)) signers.Add(result.SignerEmail);
+                    break;
+                case CommitSignatureStatus.Unavailable:
+                    unavailable ??= result.Detail;
+                    break;
+                default:
+                    rejected.Add($"key {signature.Fingerprint[..12]}: {result.Detail}");
+                    break;
+            }
+        }
+
+        var approvedBy = approvers.Count == 0
+            ? signers.FirstOrDefault()
+            : signers.FirstOrDefault(email => approvers.Contains(email, StringComparer.OrdinalIgnoreCase));
+        if (approvedBy is not null)
+            return RuleValidationResult.Pass(subject is null ? $"Human verified by {approvedBy}" : $"Approved by {approvedBy}");
+
+        if (unavailable is not null)
+            return RuleValidationResult.Violation(
+                $"{needed}. Git Guard could not verify the signature: {unavailable}. Signatures are checked with "
+                + "viberails.ai, so retry when it is reachable.");
+
+        if (signers.Count > 0)
+            return RuleValidationResult.SignatureNeeded(
+                $"{needed}, but the message is signed only by {string.Join(", ", signers)}. "
+                + $"Have {HumanSignatureRule.DescribeApprovers(approvers)} sign in the Git Guard popup.", request);
+
+        return RuleValidationResult.SignatureNeeded(
+            $"{needed}, and no signature in the message is valid ({string.Join("; ", rejected)}). Sign again in the Git Guard popup.",
+            request);
+    }
+
+    /// <summary>
+    /// Policy is read from the staged vc.rules.md, so without this an agent could delete or weaken a
+    /// signature rule in the very commit it wants to land. When a rule file changes, any signature
+    /// rule its committed (HEAD) text declared is enforced at the stronger of the two levels, so
+    /// removing or downgrading one needs the same signature it asks for. Other rules keep the
+    /// staged-policy behavior. Only the staged-snapshot path carries the committed text; the direct
+    /// MCP reader defers these rules anyway, so it loses nothing.
+    /// </summary>
+    private static void AddCommittedSignatureRules(
+        List<VcaRuleSnapshot> rules,
+        List<StagedFileSnapshot> stagedFiles,
+        string gitRoot)
+    {
+        foreach (var file in stagedFiles)
+        {
+            if (file.PreviousContent is null
+                || file.ChangeKind is not (GitStagedChangeKind.Modified or GitStagedChangeKind.Renamed or GitStagedChangeKind.Deleted))
+                continue;
+            var committedPath = file.PreviousRelativePath ?? file.RelativePath;
+            if (!IsAgentFilePath(committedPath)) continue;
+
+            var source = new AgentFileSnapshot(committedPath, ToFullPath(gitRoot, committedPath), file.PreviousContent);
+            foreach (var committed in ParseRules(file.PreviousContent, source.FullPath))
+            {
+                if (!HumanSignatureRule.IsSignatureRule(committed.RuleText)) continue;
+                var index = rules.FindIndex(rule =>
+                    string.Equals(rule.Source.RelativePath, committedPath, GitPathComparison)
+                    && string.Equals(rule.RuleText.Trim(), committed.RuleText.Trim(), StringComparison.OrdinalIgnoreCase));
+                if (index < 0)
+                    rules.Add(new VcaRuleSnapshot(committed.RuleText, committed.Enforcement, source, RemovedFromPolicy: true));
+                else if (EnforcementRank(committed.Enforcement) > EnforcementRank(rules[index].Enforcement))
+                    rules[index] = rules[index] with { Enforcement = committed.Enforcement, RemovedFromPolicy = true };
+            }
+        }
+    }
+
+    private static int EnforcementRank(string enforcement) => enforcement switch
+    {
+        "STOP" => 3,
+        "COMMIT" => 2,
+        "WARN" => 1,
+        _ => 0
+    };
 
     private static string DescribePathLockChange(StagedFileSnapshot file)
     {

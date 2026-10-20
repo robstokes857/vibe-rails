@@ -2003,6 +2003,8 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(SigningKeyChallengeRequest))]
     [JsonSerializable(typeof(SigningKeyChallengeResponse))]
     [JsonSerializable(typeof(RegisteredSigningKeyResponse))]
+    [JsonSerializable(typeof(VerifySignatureRequest))]
+    [JsonSerializable(typeof(PublicSignatureVerificationResponse))]
     [JsonSerializable(typeof(SetPinRequest))]
     [JsonSerializable(typeof(PinStatusResponse))]
     // Kanban board DTOs

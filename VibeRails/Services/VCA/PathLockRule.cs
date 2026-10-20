@@ -42,7 +42,8 @@ public static class PathLockRule
         string sourceAgentFile,
         string repositoryRoot,
         out string repositoryRelativePath,
-        out string error)
+        out string error,
+        string pathLabel = "lock path")
     {
         repositoryRelativePath = string.Empty;
         error = string.Empty;
@@ -50,13 +51,13 @@ public static class PathLockRule
         var requestedPath = specification.RelativePath.Trim();
         if (requestedPath.Length == 0)
         {
-            error = "the lock path is empty";
+            error = $"the {pathLabel} is empty";
             return false;
         }
 
         if (IsAbsoluteOnAnySupportedPlatform(requestedPath))
         {
-            error = "the lock path must be relative to the declaring vc.rules.md";
+            error = $"the {pathLabel} must be relative to the declaring vc.rules.md";
             return false;
         }
 
@@ -73,14 +74,14 @@ public static class PathLockRule
             var relativeToSource = Path.GetRelativePath(sourceDirectory, target);
             if (EscapesBase(relativeToSource))
             {
-                error = "the lock path may not escape the declaring vc.rules.md directory";
+                error = $"the {pathLabel} may not escape the declaring vc.rules.md directory";
                 return false;
             }
 
             var relativeToRoot = Path.GetRelativePath(root, target);
             if (EscapesBase(relativeToRoot))
             {
-                error = "the resolved lock path is outside the repository";
+                error = $"the resolved {pathLabel} is outside the repository";
                 return false;
             }
 
@@ -99,7 +100,7 @@ public static class PathLockRule
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
         {
-            error = $"the lock path is invalid: {exception.Message}";
+            error = $"the {pathLabel} is invalid: {exception.Message}";
             return false;
         }
     }

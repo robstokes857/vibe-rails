@@ -368,6 +368,8 @@ echo "## Vibe Rails Rules\n- WARN: log_files_changed" > vc.rules.md
 | Skip test coverage | Disable coverage checking |
 | Package file changes | Detect changes to dependency files |
 | Check commit message for | Check commit message for forbidden words (CSV list) |
+| Human verified | A person signs every commit in the Git Guard popup with a Settings > KEYS key, verified with viberails.ai |
+| Signed Approval('db.cs', 'owner@example.com') | Changes to the path need a signature from a listed approver's key |
 
 **Enforcement Levels:**
 - `WARN` - Log warning, allow continuation

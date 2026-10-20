@@ -15,17 +15,23 @@ public sealed class VcaHookRunner : IVcaHookRunner
     private readonly IVcaHookValidationAnalyzer _analyzer;
     private readonly IVcaHookPresenter _presenter;
     private readonly ICommitMessageCoAuthorCleaner _coAuthorCleaner;
+    private readonly IHumanSignaturePrompt? _signaturePrompt;
+
+    /// <summary>How many times one commit-msg run offers the signing popup.</summary>
+    internal const int MaxSignatureRounds = 3;
 
     public VcaHookRunner(
         IGitPreflightPipeline preflightPipeline,
         IVcaHookValidationAnalyzer analyzer,
         IVcaHookPresenter presenter,
-        ICommitMessageCoAuthorCleaner coAuthorCleaner)
+        ICommitMessageCoAuthorCleaner coAuthorCleaner,
+        IHumanSignaturePrompt? signaturePrompt = null)
     {
         _preflightPipeline = preflightPipeline;
         _analyzer = analyzer;
         _presenter = presenter;
         _coAuthorCleaner = coAuthorCleaner;
+        _signaturePrompt = signaturePrompt;
     }
 
     public async Task<int> RunAsync(VcaHookInvocation invocation, CancellationToken cancellationToken)
@@ -51,17 +57,14 @@ public sealed class VcaHookRunner : IVcaHookRunner
                 }
             }
 
-            var preflightResult = await _preflightPipeline.RunAsync(
-                new GitPreflightRequest(
-                    workingDirectory,
-                    invocation,
-                    EnqueueAutomatedJobs: invocation.Kind == VcaHookKind.PreCommit
-                        && !invocation.DemoUi
-                        && invocation.EnqueueAutomatedJobs,
-                    IncludeReport: false),
-                async (preflightEvent, ct) =>
-                    await _presenter.WritePreflightEventAsync(preflightEvent, ct),
-                cancellationToken);
+            var preflightRequest = new GitPreflightRequest(
+                workingDirectory,
+                invocation,
+                EnqueueAutomatedJobs: invocation.Kind == VcaHookKind.PreCommit
+                    && !invocation.DemoUi
+                    && invocation.EnqueueAutomatedJobs,
+                IncludeReport: false);
+            var preflightResult = await RunPreflightAsync(preflightRequest, cancellationToken);
             var summary = preflightResult.VcaSummary;
             if (summary == null)
             {
@@ -74,11 +77,18 @@ public sealed class VcaHookRunner : IVcaHookRunner
                 return 1;
             }
 
-            var validationOutput = string.Join(
-                Environment.NewLine,
-                preflightResult.Steps
-                    .First(step => step.StepId == VcaPreflightStep.Id)
-                    .Output);
+            var validationOutput = VcaOutput(preflightResult);
+
+            if (invocation.Kind == VcaHookKind.CommitMessage)
+            {
+                (summary, validationOutput) = await CollectHumanSignaturesAsync(
+                    invocation,
+                    workingDirectory,
+                    preflightRequest,
+                    summary,
+                    validationOutput,
+                    cancellationToken);
+            }
 
             return invocation.Kind switch
             {
@@ -107,6 +117,76 @@ public sealed class VcaHookRunner : IVcaHookRunner
             await _presenter.WriteErrorAsync($"VCA git hook validation failed: {ex.Message}");
             return 1;
         }
+    }
+
+    private Task<GitPreflightRunResult> RunPreflightAsync(GitPreflightRequest request, CancellationToken cancellationToken) =>
+        _preflightPipeline.RunAsync(
+            request,
+            async (preflightEvent, ct) =>
+                await _presenter.WritePreflightEventAsync(preflightEvent, ct),
+            cancellationToken);
+
+    private static string VcaOutput(GitPreflightRunResult result) =>
+        string.Join(
+            Environment.NewLine,
+            result.Steps.First(step => step.StepId == VcaPreflightStep.Id).Output);
+
+    /// <summary>
+    /// Findings a person can resolve by signing: Human verified / Signed Approval violations at a
+    /// blocking level. WARN findings never open the popup; nothing about them stops the commit.
+    /// </summary>
+    internal static IReadOnlyList<VcaRuleFinding> PendingSignatures(VcaHookValidationSummary summary) =>
+        (summary.Findings ?? [])
+            .Where(finding => finding.SignatureRequest is not null
+                && finding.Kind is VcaRuleFindingKind.Blocked or VcaRuleFindingKind.AcknowledgmentRequired)
+            .ToList();
+
+    /// <summary>
+    /// Offers the Git Guard signing popup while the commit is missing a person's signature, then
+    /// re-validates the message. Skipped when nobody can answer (the hook script passes no prompt
+    /// flag in CI or for a redirected commit without a popup) and when something unrelated would
+    /// block the commit anyway: nobody should type a key password for a commit that cannot land.
+    /// </summary>
+    private async Task<(VcaHookValidationSummary Summary, string Output)> CollectHumanSignaturesAsync(
+        VcaHookInvocation invocation,
+        string workingDirectory,
+        GitPreflightRequest preflightRequest,
+        VcaHookValidationSummary summary,
+        string validationOutput,
+        CancellationToken cancellationToken)
+    {
+        for (var round = 0; round < MaxSignatureRounds; round++)
+        {
+            var pending = PendingSignatures(summary);
+            if (pending.Count == 0 || _signaturePrompt is null || !invocation.PromptForAcknowledgment)
+                break;
+
+            var otherBlockers = summary.HasError
+                || (summary.Findings ?? []).Any(finding =>
+                    finding.Kind == VcaRuleFindingKind.Blocked && finding.SignatureRequest is null);
+            if (otherBlockers)
+            {
+                await _presenter.WriteWarningAsync(
+                    "This commit needs a person's signature, but other blocking violations must be fixed first.");
+                break;
+            }
+
+            await _presenter.WriteWarningAsync("This commit needs a person's signature. Opening the Git Guard signing prompt...");
+            if (!await _signaturePrompt.RequestAsync(invocation, workingDirectory, pending, cancellationToken))
+            {
+                await _presenter.WriteFailureAsync("No signature was added to the commit message.");
+                break;
+            }
+
+            await _presenter.WriteSuccessAsync("Signature added. Checking the commit again...");
+            var recheck = await RunPreflightAsync(preflightRequest, cancellationToken);
+            if (recheck.VcaSummary is null)
+                break;
+            summary = recheck.VcaSummary;
+            validationOutput = VcaOutput(recheck);
+        }
+
+        return (summary, validationOutput);
     }
 
     // Commit-level (acknowledgment-required) violations are surfaced in the transcript but

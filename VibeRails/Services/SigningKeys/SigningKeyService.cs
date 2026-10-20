@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using VibeRails.DTOs;
+using VibeRails.Services.VCA;
 using VibeRails.Utils;
 
 namespace VibeRails.Services.SigningKeys;
@@ -73,12 +74,36 @@ public sealed class SigningKeyService(HttpClient cloudClient, SigningKeyStore st
         // Only the dedicated sync flow may sign it using this installation's API credential.
         if (payload.AsSpan().StartsWith(Encoding.UTF8.GetBytes(ChallengePrefix)))
             throw new ArgumentException("This content is reserved for public-key registration. Use Sync public key instead.");
+        // A commit approval is a claim that a person reviewed a commit. Only the Git Guard signing
+        // popup may make one (SignCommitTreeAsync), so this general route cannot be used to mint a
+        // human-verified signature for a tree an agent picked.
+        if (payload.AsSpan().StartsWith(Encoding.UTF8.GetBytes(CommitSignatureFormat.PayloadPrefix)))
+            throw new ArgumentException("This content is reserved for commit approval. Sign commits in the Git Guard popup instead.");
         using var lease = await store.LockAsync(ct);
         var key = store.Read(id);
         using var rsa = Unlock(key, request.Password);
         var signature = rsa.SignData(payload, HashAlgorithmName.SHA256, RSASignaturePadding.Pss);
         return new(PublicInfo(key, apiKey()).CloudKeyId, key.Fingerprint, key.PublicKeyPem, Algorithm,
             Convert.ToBase64String(payload), Convert.ToBase64String(signature));
+    }
+
+    /// <summary>
+    /// Signs a human-verified commit statement for <paramref name="treeId"/>. Called only by the Git
+    /// Guard signing popup, which reads the password from its own console. The key must be synced
+    /// to viberails.ai for the current API key, because Git Guard verifies commit signatures there
+    /// and learns the signer's email from the registered key.
+    /// </summary>
+    public async Task<CommitSignature> SignCommitTreeAsync(Guid id, string? password, string treeId, CancellationToken ct = default)
+    {
+        if (!CommitSignatureFormat.IsObjectId(treeId))
+            throw new ArgumentException("The commit tree id is not a full lowercase git object id.");
+        using var lease = await store.LockAsync(ct);
+        var key = store.Read(id);
+        var cloudKeyId = PublicInfo(key, apiKey()).CloudKeyId
+            ?? throw new ArgumentException("Sync this key to viberails.ai in Settings > KEYS before signing commits with it.");
+        using var rsa = Unlock(key, password);
+        var signature = rsa.SignData(CommitSignatureFormat.BuildPayload(treeId), HashAlgorithmName.SHA256, RSASignaturePadding.Pss);
+        return new CommitSignature(cloudKeyId, key.Fingerprint, treeId, Convert.ToBase64String(signature));
     }
 
     /// <summary>

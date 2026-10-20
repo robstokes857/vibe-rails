@@ -61,6 +61,10 @@ can only surface once a message exists.
    hook and the MCP tool agree on block/acknowledge.
 4. Do not add a `.cs` fixture without checking `Tests.csproj` still removes
    `VcaRegression\Fixtures\**` from compilation.
+5. A rule that reaches outside the repository gets a fake through
+   `VcaRegressionRepository.ConfigureServices`. The signed-commit rules replace
+   `ICommitSignatureVerifier` (viberails.ai) and `IHumanSignaturePrompt` (the popup) this way, so no
+   test contacts the service or opens a window.
 
 ## Running
 
