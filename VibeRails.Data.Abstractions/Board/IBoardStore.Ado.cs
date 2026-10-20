@@ -23,10 +23,12 @@ public partial interface IBoardStore
 
     /// <summary>Atomically gives a connection its own board ("Azure DevOps · {team or query}"),
     /// cloning lanes and moving only its imported cards from the source board. Preserves identities
-    /// and skips lane Automations. The board starts unpublished. Repeated calls for the same
-    /// connection return the same destination. Once a query's name is known, replaces its
+    /// and skips lane Automations. The board starts unpublished. A source board that would be
+    /// left empty and unused becomes that board itself, keeping its name, unless
+    /// <paramref name="newBoard"/> asks for a new one (see the Jira version). Repeated calls for
+    /// the same connection return the same destination. Once a query's name is known, replaces its
     /// provisional project label only while the board still has that generated label.</summary>
-    Task<BoardAdoConnectionRecord> EnsureDedicatedAdoBoardAsync(string projectPath, string connectionId, CancellationToken cancellationToken = default);
+    Task<BoardAdoConnectionRecord> EnsureDedicatedAdoBoardAsync(string projectPath, string connectionId, CancellationToken cancellationToken = default, bool newBoard = false);
 
     Task<BoardAdoLinkRecord?> FindAdoLinkAsync(string connectionId, int workItemId, CancellationToken cancellationToken = default);
 

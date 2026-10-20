@@ -23,8 +23,11 @@ public partial interface IBoardStore
 
     /// <summary>Atomically gives a connection its own board, cloning lanes and moving only its
     /// imported cards from the source board. Preserves identities and skips lane Automations.
-    /// Repeated calls for the same connection return the same destination.</summary>
-    Task<BoardJiraConnectionRecord> EnsureDedicatedJiraBoardAsync(string projectPath, string connectionId, CancellationToken cancellationToken = default);
+    /// A source board that would be left empty and unused (no other cards, lane Automations,
+    /// tracker or viberails.ai sync, and another local board remains) becomes that board itself,
+    /// unless <paramref name="newBoard"/> asks for a new one. Repeated calls for the same
+    /// connection return the same destination.</summary>
+    Task<BoardJiraConnectionRecord> EnsureDedicatedJiraBoardAsync(string projectPath, string connectionId, CancellationToken cancellationToken = default, bool newBoard = false);
 
     Task<BoardJiraLinkRecord?> FindJiraLinkAsync(string siteId, string issueId, CancellationToken cancellationToken = default);
 

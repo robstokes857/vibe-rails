@@ -372,7 +372,7 @@ public static partial class BoardRoutes
             RunAsync(async () => Results.Ok(ToResponse(await jira.SaveAsync(Project(), boardId, new BoardJiraConnectionSave(
                 request.SiteUrl ?? string.Empty, request.Email ?? string.Empty, request.StoryPointsFieldId,
                 request.Jql ?? string.Empty, request.Enabled, request.BoardLink, request.NarrowJql, request.SkipOldDone,
-                request.ColumnMap?.ToDictionary(pair => pair.Key, pair => (string?)pair.Value)),
+                request.ColumnMap?.ToDictionary(pair => pair.Key, pair => (string?)pair.Value), request.NewBoard),
                 request.ApiToken, cancellationToken), boardId))))
             .WithName("SaveJiraConnection");
 
@@ -410,11 +410,12 @@ public static partial class BoardRoutes
                 : Results.Ok(ToResponse(await ado.GetAsync(Project(), boardId, cancellationToken), boardId))))
             .WithName("GetAdoConnection");
 
-        // Save also gives the connection its dedicated board; the response's boardId is that board.
+        // Save also gives the connection its dedicated board, which is this board when nothing else
+        // uses it (unless newBoard); the response's boardId is that board.
         app.MapPut("/api/v1/board/boards/{boardId}/ado", (IAdoPullService ado, string boardId, SaveAdoConnectionRequest request, CancellationToken cancellationToken) =>
             RunAsync(async () => Results.Ok(ToResponse(await ado.SaveAsync(Project(), boardId, new AdoConnectionSave(
                 request.BoardLink, request.Enabled, request.PointsField, request.NarrowWiql, request.SkipOldDone,
-                request.ColumnMap?.ToDictionary(pair => pair.Key, pair => (string?)pair.Value)),
+                request.ColumnMap?.ToDictionary(pair => pair.Key, pair => (string?)pair.Value), request.NewBoard),
                 request.PersonalAccessToken, cancellationToken), boardId))))
             .WithName("SaveAdoConnection");
 

@@ -316,6 +316,13 @@ connection's live imports still on the source board using the ordinary log-trans
 moves the connection. IDs, comments, attachments, sessions and commits survive; local cards stay.
 Repeated calls use the existing dedicated board. Old writers preserve the new column. Card reads
 project the Jira issue key from retained `BoardJiraLinks`; no card-origin backfill is required.
+`CanTakeOverBoardAsync` checks, in the same transaction, whether the source board is unused (no
+live card but the connection's imports, no lane Automation selections, no other tracker
+connection, `SyncEnabled=0`, no `BoardSyncLinks` or `BoardSharedOrigins` row, and another board
+without a dedicated connection remains). Such a board only gets `DedicatedBoard=1`: no clone, no
+rename, no card move. `newBoard: true` skips the check. No schema change; nothing is backfilled.
+`CreateColumnAsync(first: true)` inserts a lane at position 0 and renumbers the rest densely in
+the same transaction; trackers use it for their on-demand overflow lane.
 
 `board-jira-delivery/1` adds the outbound Jira ledger and a future-comment trigger without
 backfilling history. Comment `Changes.syncToJira.to=false` suppresses delivery. Local session
@@ -337,7 +344,7 @@ A link's `ConnectionId` is the connection id, and work item ids are unique only 
 organization, so a new organization or project mints a new connection id (the upsert updates
 `Id`), exactly as a Jira site change does. `CreateAdoCardAsync` writes the card and its link in
 one transaction; saving a connection checks the board exists in the same statement.
-`EnsureDedicatedAdoBoardAsync` shares its lane-clone and card-move core with the Jira version
+`EnsureDedicatedAdoBoardAsync` shares its takeover check, lane-clone and card-move core with the Jira version
 (`BoardStore.TrackerBoards.cs`); the board is named "Azure DevOps · {team or query name}" and,
 like every new board, starts with `SyncEnabled=0`, so no binary uploads it until the owner
 publishes it. Card reads project the newest linked work item id as `AdoWorkItemId` beside

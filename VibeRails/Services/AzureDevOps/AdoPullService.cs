@@ -47,13 +47,16 @@ public sealed record AdoConnectionDetails(
 /// saved value; a blank <see cref="PointsField"/> detects the points field from the process.
 /// </summary>
 /// <param name="ColumnMap">Azure DevOps column name to lane id, or blank for automatic.</param>
+/// <param name="NewBoard">The New board dialog: always make the Azure DevOps board from this
+/// board's lanes, even when this board could become it.</param>
 public sealed record AdoConnectionSave(
     string? BoardLink,
     bool Enabled,
     string? PointsField = null,
     string? NarrowWiql = null,
     bool? SkipOldDone = null,
-    IReadOnlyDictionary<string, string?>? ColumnMap = null);
+    IReadOnlyDictionary<string, string?>? ColumnMap = null,
+    bool NewBoard = false);
 
 public interface IAdoPullService
 {
@@ -174,7 +177,7 @@ public sealed class AdoPullService(
             secrets.SaveToken(id, secret);
         if (scopeChanged)
             secrets.DeleteToken(existing!.Id);
-        saved = await store.EnsureDedicatedAdoBoardAsync(projectPath, saved.Id, cancellationToken);
+        saved = await store.EnsureDedicatedAdoBoardAsync(projectPath, saved.Id, cancellationToken, save.NewBoard);
         return WithTokenFlag(saved);
     }
 
@@ -697,7 +700,7 @@ public sealed class AdoPullService(
         var existing = lanes.FirstOrDefault(lane => string.Equals(lane.Name, OverflowLaneName, StringComparison.OrdinalIgnoreCase))
             ?? (connection.OverflowColumnId is null ? null
                 : lanes.FirstOrDefault(lane => lane.Id == connection.OverflowColumnId));
-        var column = existing ?? await store.CreateColumnAsync(connection.ProjectPath, OverflowLaneName, "#0078d4", cancellationToken, connection.BoardId);
+        var column = existing ?? await store.CreateColumnAsync(connection.ProjectPath, OverflowLaneName, "#0078d4", cancellationToken, connection.BoardId, first: true);
         if (connection.OverflowColumnId != column.Id)
         {
             // Re-read so a save or Connect made while this pull ran is not written back over.

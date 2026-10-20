@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BoardApi } from '../../../VibeRails/wwwroot/js/modules/board-api.js';
-import { mountBoardContext, mountBoardSettingsNavigation, mountBoardSync, mountLaneAutomation } from '../../../VibeRails/wwwroot/js/modules/board-settings.js';
+import { boardSettingsNavigation, mountBoardContext, mountBoardSettingsNavigation, mountBoardSync, mountLaneAutomation, newBoardNavigation } from '../../../VibeRails/wwwroot/js/modules/board-settings.js';
 
 test('failed publication reloads the saved sync choice', async () => {
     const listeners = new Map();
@@ -196,4 +196,14 @@ test('settings navigation follows the board provider without replacing any panel
     navigation.dispose();
     navigation.followProvider('ado');
     assert.equal(ado.parent, null, 'a closed dialog is never rearranged');
+});
+
+test('the New board dialog offers a local board or one connected to Jira or Azure DevOps, with the settings tab ids', () => {
+    const tabs = html => [...html.matchAll(/data-board-settings-tab="([^"]+)">([^<]+)</g)].map(match => [match[1], match[2]]);
+    assert.deepEqual(tabs(newBoardNavigation()), [['general', 'Local'], ['jira', 'Jira Cloud'], ['ado', 'Azure DevOps']]);
+    assert.match(newBoardNavigation(), /aria-label="Board type" role="tablist"/);
+    assert.match(newBoardNavigation(), /id="board-settings-tab-ado" aria-controls="board-settings-ado" aria-selected="false"/);
+    assert.deepEqual(tabs(boardSettingsNavigation()), [['general', 'General'], ['jira', 'Jira Cloud'], ['ado', 'Azure DevOps'],
+        ['context', 'Agent context'], ['history', 'History']]);
+    assert.match(boardSettingsNavigation(), /aria-label="Board settings" role="tablist"/);
 });

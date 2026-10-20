@@ -538,7 +538,9 @@ accessible settings tabs. Pull and its report stay in Jira settings. Card summar
 and excludes imports from Human-made. Assignee choices deduplicate canonical CLI identities.
 
 Connect creates a dedicated `Jira · …` local board; existing connections do the same on the next
-writing pull. `IBoardStore.EnsureDedicatedJiraBoardAsync` atomically clones the source lanes,
+writing pull. A source board nothing else uses (no other cards, lane Automations, tracker or
+viberails.ai sync, and another local board remains) becomes the Jira board itself instead, unless
+the New board dialog asked for a new one. Otherwise `IBoardStore.EnsureDedicatedJiraBoardAsync` atomically clones the source lanes,
 remaps explicit column choices and overflow, moves that connection's live imported cards still
 on the source board through the normal card-log transfer, then rehomes the connection. Native
 cards and existing card identities/discussion/files/session/commit links survive. Destination lanes

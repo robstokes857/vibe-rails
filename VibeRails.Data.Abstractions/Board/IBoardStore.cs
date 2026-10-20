@@ -41,7 +41,8 @@ public partial interface IBoardStore
     /// <summary>Live card count per lane id of one board; lanes without cards are absent.</summary>
     Task<IReadOnlyDictionary<string, int>> CountCardsByColumnAsync(string projectPath, CancellationToken cancellationToken = default, string? boardId = null);
     Task<BoardColumnRecord?> GetColumnAsync(string projectPath, string columnId, CancellationToken cancellationToken = default);
-    Task<BoardColumnRecord> CreateColumnAsync(string projectPath, string name, string color, CancellationToken cancellationToken = default, string? boardId = null);
+    /// <summary>Adds a lane at the end of the board, or with <paramref name="first"/> before every other lane.</summary>
+    Task<BoardColumnRecord> CreateColumnAsync(string projectPath, string name, string color, CancellationToken cancellationToken = default, string? boardId = null, bool first = false);
     Task<BoardColumnRecord?> UpdateColumnAsync(string projectPath, string columnId, string? name, string? color, CancellationToken cancellationToken = default);
     Task<BoardColumnDeleteResult?> DeleteColumnAsync(string projectPath, string columnId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<BoardColumnRecord>> ReorderColumnsAsync(string projectPath, IReadOnlyList<string> orderedIds, CancellationToken cancellationToken = default, string? boardId = null);

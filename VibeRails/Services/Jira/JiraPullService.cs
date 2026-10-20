@@ -149,7 +149,7 @@ public sealed class JiraPullService(
             secrets.SaveToken(id, token);
         if (siteChanged)
             secrets.DeleteToken(existing!.Id);
-        saved = await store.EnsureDedicatedJiraBoardAsync(projectPath, saved.Id, cancellationToken);
+        saved = await store.EnsureDedicatedJiraBoardAsync(projectPath, saved.Id, cancellationToken, save.NewBoard);
         return WithTokenFlag(saved);
     }
 
@@ -612,7 +612,7 @@ public sealed class JiraPullService(
         var existing = lanes.FirstOrDefault(lane => string.Equals(lane.Name, OverflowLaneName, StringComparison.OrdinalIgnoreCase))
             ?? (connection.OverflowColumnId is null ? null
                 : lanes.FirstOrDefault(lane => lane.Id == connection.OverflowColumnId));
-        var column = existing ?? await store.CreateColumnAsync(connection.ProjectPath, OverflowLaneName, "#7c3aed", cancellationToken, connection.BoardId);
+        var column = existing ?? await store.CreateColumnAsync(connection.ProjectPath, OverflowLaneName, "#7c3aed", cancellationToken, connection.BoardId, first: true);
         if (connection.OverflowColumnId != column.Id)
         {
             // Re-read so a save or Connect made while this pull ran is not written back over.

@@ -230,6 +230,24 @@ public sealed class JiraPullServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ConnectingABoardNothingElseUses_MakesItTheJiraBoard_UnlessTheNewBoardDialogAsks()
+    {
+        var service = Service();
+        await BoardWithLanes();
+        var empty = await _store.CreateBoardAsync(_project, "Jira work", Ct);
+        var kept = await service.SaveAsync(_project, empty.Id, Save("secret-token"), "secret-token", Ct);
+        Assert.Equal((empty.Id, true), (kept.BoardId, kept.DedicatedBoard));
+        Assert.Equal("Jira work", (await _store.GetBoardAsync(_project, empty.Id, Ct))!.Name);
+
+        var template = await _store.CreateBoardAsync(_project, "Template", Ct);
+        var copied = await service.SaveAsync(_project, template.Id, Save("secret-token") with { NewBoard = true }, "secret-token", Ct);
+        Assert.NotEqual(template.Id, copied.BoardId);
+        Assert.True(copied.DedicatedBoard);
+        Assert.Null(await _store.GetJiraConnectionAsync(_project, template.Id, Ct));
+        Assert.Equal(4, (await _store.GetBoardsAsync(_project, Ct)).Count);
+    }
+
+    [Fact]
     public async Task UnknownStatusParksInOneOverflowLaneAndCommentsOnce()
     {
         var service = Service();
@@ -241,6 +259,9 @@ public sealed class JiraPullServiceTests : IDisposable
 
         var lanes = await _store.GetColumnsAsync(_project, Ct, board.Id);
         var overflow = Assert.Single(lanes, lane => lane.Name == "Jira");
+        // The overflow lane is made first, before the lanes the board already had.
+        Assert.Equal(overflow.Id, lanes[0].Id);
+        Assert.Equal(Enumerable.Range(0, lanes.Count), lanes.Select(lane => lane.Position));
         var card = Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id));
         Assert.Equal(overflow.Id, card.ColumnId);
         var first = (await _store.GetCardDetailAsync(_project, card.Id, Ct))!;

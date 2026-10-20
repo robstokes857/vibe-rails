@@ -6,7 +6,7 @@ public sealed partial class BoardStore
 {
     /// <inheritdoc />
     public async Task<BoardAdoConnectionRecord> EnsureDedicatedAdoBoardAsync(
-        string projectPath, string connectionId, CancellationToken cancellationToken = default)
+        string projectPath, string connectionId, CancellationToken cancellationToken = default, bool newBoard = false)
     {
         var project = NormalizeProjectPath(projectPath);
         await using var db = await OpenAsync(cancellationToken);
@@ -50,10 +50,10 @@ public sealed partial class BoardStore
             return current;
         }
 
-        var clone = await CloneToDedicatedBoardAsync(db, transaction, project, current.BoardId, name,
+        var target = await DedicateBoardAsync(db, transaction, project, current.BoardId, name,
             current.ColumnMap, current.OverflowColumnId,
             "EXISTS (SELECT 1 FROM BoardAdoLinks a WHERE a.CardId = c.Id AND a.ConnectionId = $connection)", current.Id,
-            BoardAuthor.System(AdoAuthorLabel), "The Azure DevOps source board no longer exists.", cancellationToken);
+            BoardAuthor.System(AdoAuthorLabel), "The Azure DevOps source board no longer exists.", newBoard, cancellationToken);
 
         await using (var move = db.CreateCommand())
         {
@@ -62,16 +62,16 @@ public sealed partial class BoardStore
                 UPDATE BoardAdoConnections SET BoardId = $board, DedicatedBoard = 1,
                     ColumnMap = $map, OverflowColumnId = $overflow WHERE Id = $id;
                 """;
-            move.Parameters.AddWithValue("$board", clone.BoardId);
-            move.Parameters.AddWithValue("$map", (object?)clone.ColumnMap ?? DBNull.Value);
-            move.Parameters.AddWithValue("$overflow", (object?)clone.OverflowColumnId ?? DBNull.Value);
+            move.Parameters.AddWithValue("$board", target.BoardId);
+            move.Parameters.AddWithValue("$map", (object?)target.ColumnMap ?? DBNull.Value);
+            move.Parameters.AddWithValue("$overflow", (object?)target.OverflowColumnId ?? DBNull.Value);
             move.Parameters.AddWithValue("$id", current.Id);
             await move.ExecuteNonQueryAsync(cancellationToken);
         }
         await transaction.CommitAsync(cancellationToken);
         return current with
         {
-            BoardId = clone.BoardId, DedicatedBoard = true, ColumnMap = clone.ColumnMap, OverflowColumnId = clone.OverflowColumnId
+            BoardId = target.BoardId, DedicatedBoard = true, ColumnMap = target.ColumnMap, OverflowColumnId = target.OverflowColumnId
         };
     }
 

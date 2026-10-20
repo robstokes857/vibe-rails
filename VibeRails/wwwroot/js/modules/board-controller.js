@@ -39,7 +39,7 @@ import { boardBrandLogo, boardTracker, cardTracker, trackerLabel } from './board
 import { BoardLaneAgents } from './board-lane-agents.js';
 import { BoardCardAssign, ASSIGN_ACTION } from './board-card-assign.js';
 import { BOARD_SELECTION_STORAGE_KEY } from './board-selection.js';
-import { boardContextSection, laneAutomationSection, mountBoardContext, mountLaneAutomation, boardSettingsNavigation, mountBoardSettingsNavigation, boardSyncSection, mountBoardSync } from './board-settings.js';
+import { boardContextSection, laneAutomationSection, mountBoardContext, mountLaneAutomation, boardSettingsNavigation, newBoardNavigation, mountBoardSettingsNavigation, boardSyncSection, mountBoardSync } from './board-settings.js';
 import { boardJiraSection, BoardJiraPanel } from './board-jira.js';
 import { boardAdoSection, BoardAdoPanel } from './board-ado.js';
 import { cardOrganizeSection, bindCardOrganization } from './board-card-organize.js';
@@ -2824,10 +2824,12 @@ export class BoardController {
 
     openBoardEditor(boardId) {
         const board = boardId ? this.boardById(boardId) : null;
+        // A new Jira or Azure DevOps board is made by connecting a local board, as its settings do.
+        const source = board ? null : this.trackerSourceBoard();
         this.app.showModal(board ? `Board · ${board.name}` : 'New board', `
             <div class="board-lane-editor" data-board-board-editor>
-                ${board ? boardSettingsNavigation() : ''}
-                <section id="board-settings-general" data-board-settings-panel="general" ${board ? 'role="tabpanel" aria-labelledby="board-settings-tab-general"' : ''}>
+                ${board ? boardSettingsNavigation() : source ? newBoardNavigation() : ''}
+                <section id="board-settings-general" data-board-settings-panel="general" ${board || source ? 'role="tabpanel" aria-labelledby="board-settings-tab-general"' : ''}>
                 <label class="board-editor-label" for="board-board-name">Board name</label>
                 <input type="text" class="form-control form-control-sm mb-3" id="board-board-name" maxlength="60"
                     placeholder="Sprint 12, Website, Q4 bugs…" value="${escapeHtml(board?.name || '')}">
@@ -2837,7 +2839,7 @@ export class BoardController {
                 <p class="board-editor-muted mb-3">${board
                     ? 'Create a new card to work on another board. Cards can move between lanes on this board.'
                     : 'A new board starts with the default lanes. Card keys stay unique across the whole project.'}</p>
-                ${board ? boardSyncSection() : '<p class="board-editor-muted">New boards stay local until you enable viberails.ai sync in Board settings.</p>'}
+                ${board ? boardSyncSection() : '<p class="board-editor-muted">New boards stay local until you enable viberails.ai sync in Board settings. Save the board to configure its agent context.</p>'}
                 <div class="board-editor-actions mt-4">
                     ${board ? `<button type="button" class="btn btn-sm btn-outline-danger" data-board-delete-board>
                         <i class="fa-solid fa-trash" aria-hidden="true"></i> Delete board
@@ -2850,7 +2852,10 @@ export class BoardController {
                     <section id="board-settings-ado" role="tabpanel" aria-labelledby="board-settings-tab-ado" data-board-settings-panel="ado" hidden>${boardAdoSection()}</section>
                     <section id="board-settings-context" role="tabpanel" aria-labelledby="board-settings-tab-context" data-board-settings-panel="context" hidden>${boardContextSection()}</section>
                     <section id="board-settings-history" role="tabpanel" aria-labelledby="board-settings-tab-history" data-board-settings-panel="history" hidden>${historySection()}</section>
-                ` : '<p class="board-editor-muted">Save the board to configure Jira, Azure DevOps and agent context.</p>'}
+                ` : source ? `
+                    <section id="board-settings-jira" role="tabpanel" aria-labelledby="board-settings-tab-jira" data-board-settings-panel="jira" hidden>${boardJiraSection({ lanesFrom: source.name })}</section>
+                    <section id="board-settings-ado" role="tabpanel" aria-labelledby="board-settings-tab-ado" data-board-settings-panel="ado" hidden>${boardAdoSection({ lanesFrom: source.name })}</section>
+                ` : '<p class="board-editor-muted">A Jira or Azure DevOps board copies a local board\'s lanes. Create a local board first, then connect it from its Board settings.</p>'}
             </div>
         `, { onClose: () => { this.boardSettingsDispose?.(); this.boardSettingsDispose = null; } });
 
@@ -2875,9 +2880,12 @@ export class BoardController {
                     // follows the connection; General and Agent context still edit the opened board.
                     // A moved connection no longer determines the opened board's branding or sync
                     // controls. Refresh that board's status without replacing its settings drafts.
-                    if ((action === 'unlink' && destination === board.id)
+                    // A local board that kept the connection became the tracker board itself
+                    // (nothing else used it), so its settings, title and picker logo follow.
+                    const tookOver = action === 'test' && destination === board.id && !boardTracker(this.boardById(board.id));
+                    if ((action === 'unlink' && destination === board.id) || tookOver
                         || (destination && destination !== board.id)) reloadSync();
-                    if (action === 'pull' || action === 'unlink' || destination !== board.id) void this.refresh().then(() => {
+                    if (action === 'pull' || action === 'unlink' || tookOver || destination !== board.id) void this.refresh().then(() => {
                         if (editor.isConnected && destination) {
                             const label = root.querySelector(`[data-${provider}-board]`);
                             if (label) label.textContent = this.boardById(destination)?.name || `${trackerLabel(provider)} board`;
@@ -2916,6 +2924,8 @@ export class BoardController {
                 disposeContext();
                 disposeHistory();
             };
+        } else if (source) {
+            this.mountNewTrackerBoards(editor, container, source);
         }
         editor.querySelector('[data-board-save-board]')?.addEventListener('click', () => this.saveBoard(editor, board));
         editor.querySelector('[data-board-delete-board]')?.addEventListener('click', () => this.deleteBoard(board));
@@ -2925,6 +2935,53 @@ export class BoardController {
             this.saveBoard(editor, board);
         });
         editor.querySelector('#board-board-name')?.focus();
+    }
+
+    /** The local board a new tracker board copies its lanes from: the open board, else the first local one. */
+    trackerSourceBoard() {
+        return [this.currentBoard(), ...this.state.boards].find(board => board && !boardTracker(board)) || null;
+    }
+
+    // The New board dialog's Jira and Azure DevOps tabs. Connect saves the connection on the
+    // source board with newBoard, so the server always copies that board's lanes into a new
+    // dedicated board and moves the connection there (EnsureDedicated…BoardAsync), never turning
+    // the source board itself into it; the panel follows. The dialog stays open on the result and
+    // the first pull, with the new board selected behind it.
+    mountNewTrackerBoards(editor, container, source) {
+        const header = container.querySelector('.modal-header');
+        header.classList.add('board-settings-header');
+        const close = header.querySelector('[data-action="close-modal"]');
+        const trackers = [['jira', BoardJiraPanel], ['ado', BoardAdoPanel]].map(([provider, Panel]) => {
+            const root = editor.querySelector(`[data-${provider}-panel]`);
+            const panel = new Panel(this.app, root, source, (action, destination) => {
+                if (!destination || destination === source.id) return;
+                this.state.boardId = destination;
+                this.persistBoardSelection();
+                void this.refresh().then(() => {
+                    const created = this.boardById(destination);
+                    const title = header.querySelector('.modal-title');
+                    if (!editor.isConnected || !created || !title) return;
+                    // Unlinking from this dialog leaves the new board local again.
+                    const tracker = boardTracker(created);
+                    if (tracker) title.innerHTML = `Board · <span class="d-inline-block">${boardBrandLogo(tracker)} ${escapeHtml(created.name)}</span>`;
+                    else title.textContent = `Board · ${created.name}`;
+                });
+            }, { newBoard: true });
+            const heading = root.querySelector(`[data-${provider}-heading]`);
+            header.insertBefore(heading, close);
+            heading.hidden = true;
+            return { provider, panel, heading };
+        });
+        const navigation = mountBoardSettingsNavigation(editor, (tab, visibleTracker) => {
+            for (const { provider, panel, heading } of trackers) {
+                heading.hidden = provider !== visibleTracker;
+                if (provider === visibleTracker) void panel.activate();
+            }
+        });
+        this.boardSettingsDispose = () => {
+            navigation.dispose();
+            trackers.forEach(({ panel }) => panel.dispose());
+        };
     }
 
     async saveBoard(editor, board) {

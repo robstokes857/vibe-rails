@@ -315,19 +315,23 @@ public sealed partial class BoardStore : IBoardStore
         return await ReadColumnAsync(connection, null, project, columnId, cancellationToken);
     }
 
-    public async Task<BoardColumnRecord> CreateColumnAsync(string projectPath, string name, string color, CancellationToken cancellationToken = default, string? boardId = null)
+    public async Task<BoardColumnRecord> CreateColumnAsync(string projectPath, string name, string color, CancellationToken cancellationToken = default, string? boardId = null, bool first = false)
     {
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
         var board = await ResolveBoardIdAsync(connection, transaction, project, boardId, cancellationToken)
             ?? throw new BoardValidationException("No board available. Create a board first.");
-        var position = (int)await ScalarLongAsync(connection, transaction,
+        var position = first ? 0 : (int)await ScalarLongAsync(connection, transaction,
             "SELECT COUNT(*) FROM BoardColumns WHERE BoardId = $board",
             ("$board", board), cancellationToken);
+        var others = first ? await ReadColumnsAsync(connection, transaction, project, board, cancellationToken) : [];
         var id = NewId("col");
         var now = DateTime.UtcNow;
         await InsertColumnAsync(connection, transaction, id, project, board, name, position, color, now, cancellationToken);
+        if (first)
+            await WriteColumnPositionsAsync(connection, transaction,
+                [id, .. others.Select(column => column.Id)], cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new BoardColumnRecord(id, project, name, position, color, now, now, board);
     }

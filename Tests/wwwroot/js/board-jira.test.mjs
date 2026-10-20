@@ -26,7 +26,7 @@ function savedConnection(overrides = {}) {
     };
 }
 
-function createHarness({ connection = savedConnection(), appSettings = {} } = {}) {
+function createHarness({ connection = savedConnection(), appSettings = {}, newBoard = false, test = null } = {}) {
     const fields = new Map([
         ['[data-jira-fields]', field()],
         ['[data-jira-action="connect"]', field()],
@@ -64,7 +64,7 @@ function createHarness({ connection = savedConnection(), appSettings = {} } = {}
                 return { ...current, columns: null, lanes: null };
             }
             if (path.endsWith('/jira/test')) {
-                return { ok: true, account: 'Rob Stokes', board: { id: '1', name: 'SCRUM board', type: 'scrum', issueCount: 12,
+                return test || { ok: true, account: 'Rob Stokes', board: { id: '1', name: 'SCRUM board', type: 'scrum', issueCount: 12,
                     storyPointsFieldId: 'customfield_10016', storyPointsFieldName: 'Story point estimate', columns: COLUMNS, warnings: [] } };
             }
             if (path.includes('/jira/pull')) return { outcome: 'ok', message: '0 created, 0 updated, 1 unchanged, 0 skipped.' };
@@ -76,7 +76,7 @@ function createHarness({ connection = savedConnection(), appSettings = {} } = {}
         querySelector: selector => fields.get(selector) || null,
         querySelectorAll: selector => (selector === '[data-jira-lane]' ? laneSelects : [])
     };
-    return { panel: new BoardJiraPanel(app, root, { id: 'brd_sprint', name: 'Sprint 4' }), fields, calls, toasts, laneSelects };
+    return { panel: new BoardJiraPanel(app, root, { id: 'brd_sprint', name: 'Sprint 4' }, undefined, { newBoard }), fields, calls, toasts, laneSelects };
 }
 
 test('the form asks for a board link and a token, links to token creation, and has no site, JQL-filter or dry-run inputs', () => {
@@ -399,3 +399,51 @@ for (const failure of ['test', 'settings-before-test', 'settings-after-test']) {
         else assert.deepEqual(saves[1].columnMap, { QA: 'destination_done' });
     });
 }
+
+test('the New board form names the board whose lanes it copies instead of the board being edited', () => {
+    const html = boardJiraSection({ lanesFrom: 'Sprint <4>' });
+    assert.match(html, /Lanes copied from <strong>Sprint &lt;4&gt;<\/strong>/);
+    assert.match(html, /Connect creates the board, named after the Jira board, and pulls its issues\./);
+    assert.ok(!html.includes('data-jira-board'));
+    assert.ok(!html.includes('An empty board becomes'));
+    const settings = boardJiraSection();
+    assert.match(settings, /Board: <strong data-jira-board><\/strong>/);
+    assert.match(settings, /An empty board becomes the Jira board itself\. Your only local board, or one with cards, lane Automations or viberails\.ai sync, stays as it is/);
+});
+
+test('a panel made by the New board dialog asks for a new board and pulls after a Connect succeeds, never after a refused one', async () => {
+    const empty = { boardId: 'brd_sprint', hasToken: false, authStatus: 'none', enabled: false, columns: [], lanes: LANES };
+    const { panel, fields, calls } = createHarness({ connection: empty, newBoard: true });
+    const changes = [];
+    panel._onChanged = (action, board) => changes.push([action, board]);
+    await panel.activate();
+    fields.get('[data-jira-link]').value = SAVED_LINK;
+    fields.get('[data-jira-token]').value = 'test-only';
+    await panel._connect();
+    const order = calls.map(([path, method]) => `${method} ${path.replace(/\?.*$/, '')}`).filter(call => !call.startsWith('GET'));
+    assert.deepEqual(order, ['PUT /api/v1/board/boards/brd_sprint/jira', 'POST /api/v1/board/boards/brd_sprint/jira/test',
+        'POST /api/v1/board/boards/brd_sprint/jira/pull']);
+    assert.deepEqual(changes, [['test', 'brd_sprint'], ['pull', 'brd_sprint']]);
+    assert.equal(fields.get('[data-jira-report]').textContent, '0 created, 0 updated, 1 unchanged, 0 skipped.');
+    const put = calls.find(([path, method]) => path.endsWith('/jira') && method === 'PUT');
+    assert.equal(put[2].newBoard, true);
+    // Once the connection has its own board, a save edits it rather than asking for another.
+    panel._board = 'brd_jira';
+    assert.equal('newBoard' in panel._body(), false);
+
+    const refused = createHarness({ connection: empty, newBoard: true, test: { ok: false, error: 'Jira refused the token.' } });
+    await refused.panel.activate();
+    refused.fields.get('[data-jira-link]').value = SAVED_LINK;
+    await refused.panel._connect();
+    assert.ok(!refused.calls.some(([path]) => path.includes('/jira/pull')));
+    assert.equal(refused.fields.get('[data-jira-report]').textContent, 'Jira refused the token.');
+
+    // Board settings keep Connect and Pull now separate.
+    const settings = createHarness({ connection: empty });
+    await settings.panel.activate();
+    settings.fields.get('[data-jira-link]').value = SAVED_LINK;
+    await settings.panel._connect();
+    assert.ok(!settings.calls.some(([path]) => path.includes('/jira/pull')));
+    // Board settings let the server decide: an unused board becomes the Jira board itself.
+    assert.equal('newBoard' in settings.calls.find(([path, method]) => path.endsWith('/jira') && method === 'PUT')[2], false);
+});

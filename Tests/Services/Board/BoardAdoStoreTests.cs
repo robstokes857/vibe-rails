@@ -234,6 +234,84 @@ public sealed class BoardAdoStoreTests : IDisposable
         Assert.Equal(2, (await _store.GetBoardsAsync(_root, Ct)).Count);
     }
 
+    /// <summary>
+    /// Connecting a board made only for the connection must not leave it behind empty: the board
+    /// itself becomes the Azure DevOps board, keeping its name, lanes and lane choices.
+    /// </summary>
+    [Fact]
+    public async Task ABoardNothingElseUsesBecomesTheAzureDevOpsBoardItself()
+    {
+        await _store.CreateBoardAsync(_root, "Main", Ct);
+        var board = await _store.CreateBoardAsync(_root, "Our work items", Ct);
+        var lanes = await _store.GetColumnsAsync(_root, Ct, board.Id);
+        var map = $$"""[{"name":"Active","lane":"{{lanes[1].Id}}"}]""";
+        await _store.SaveAdoConnectionAsync(Connection("ado_aaaaaaaaaaaa", board.Id) with { OverflowColumnId = lanes[1].Id, ColumnMap = map }, Ct);
+        // The connection's own imports and deleted cards leave the board unused.
+        var imported = (await _store.CreateAdoCardAsync(_root, NewCard(lanes[1].Id, "Azure DevOps work"), Link(42), Ct))!;
+        var deleted = await _store.CreateCardAsync(_root, NewCard(lanes[0].Id, "Deleted work"), Ct);
+        Assert.True(await _store.DeleteCardAsync(_root, deleted.Id, Ct));
+
+        var dedicated = await _store.EnsureDedicatedAdoBoardAsync(_root, "ado_aaaaaaaaaaaa", Ct);
+
+        Assert.Equal(board.Id, dedicated.BoardId);
+        Assert.True(dedicated.DedicatedBoard);
+        Assert.Equal((map, lanes[1].Id), (dedicated.ColumnMap, dedicated.OverflowColumnId));
+        Assert.Equal(dedicated, await _store.GetAdoConnectionAsync(_root, board.Id, Ct));
+        Assert.Equal("Our work items", (await _store.GetBoardAsync(_root, board.Id, Ct))!.Name);
+        Assert.Equal(lanes.Select(lane => lane.Id), (await _store.GetColumnsAsync(_root, Ct, board.Id)).Select(lane => lane.Id));
+        Assert.Equal(imported.Id, Assert.Single(await _store.GetCardsAsync(_root, Ct, board.Id)).Id);
+        Assert.Equal(2, (await _store.GetBoardsAsync(_root, Ct)).Count);
+        Assert.Equal(board.Id, (await _store.EnsureDedicatedAdoBoardAsync(_root, "ado_aaaaaaaaaaaa", Ct)).BoardId);
+    }
+
+    /// <summary>
+    /// The board is copied, as before, when the New board dialog asks for a new one, when taking
+    /// it over would hand local work or lane Automations to the tracker or stop viberails.ai sync,
+    /// or when it is the project's last local board.
+    /// </summary>
+    [Theory]
+    [InlineData("newBoard")]
+    [InlineData("localCard")]
+    [InlineData("laneAutomation")]
+    [InlineData("syncEnabled")]
+    [InlineData("onlyLocalBoard")]
+    [InlineData("otherBoardIsTracker")]
+    public async Task ABoardInUse_OrTheLastLocalOne_IsCopiedInstead(string use)
+    {
+        if (use != "onlyLocalBoard")
+        {
+            var main = await _store.CreateBoardAsync(_root, "Main", Ct);
+            if (use == "otherBoardIsTracker")
+                await _store.SaveAdoConnectionAsync(Connection("ado_bbbbbbbbbbbb", main.Id) with { DedicatedBoard = true }, Ct);
+        }
+        var board = await _store.CreateBoardAsync(_root, "Sprint", Ct);
+        var lanes = await _store.GetColumnsAsync(_root, Ct, board.Id);
+        await _store.SaveAdoConnectionAsync(Connection("ado_aaaaaaaaaaaa", board.Id), Ct);
+        switch (use)
+        {
+            case "localCard":
+                await _store.CreateCardAsync(_root, NewCard(lanes[0].Id, "Local work"), Ct);
+                break;
+            case "laneAutomation":
+                await ExecuteStateAsync(SqlStrings.CreateEnvironmentsTable);
+                var job = await new JobStore(_stateConnectionString, _store).CreateJobAsync(new("Review", _root, LLM.NotSet, null, "", null, true, [], Actions:
+                    [new(null, JobActionKind.Script, ScriptPath: "check.py", ScriptRuntime: JobScriptRuntime.Python, ApprovedHash: "pinned")]), Ct);
+                await _store.SaveLaneAutomationAsync(_root, lanes[1].Id, [job.Id], 0, Ct);
+                break;
+            case "syncEnabled":
+                await _store.SetBoardSyncEnabledAsync(_root, board.Id, true, Ct);
+                break;
+        }
+
+        var dedicated = await _store.EnsureDedicatedAdoBoardAsync(_root, "ado_aaaaaaaaaaaa", Ct, newBoard: use == "newBoard");
+
+        Assert.NotEqual(board.Id, dedicated.BoardId);
+        Assert.True(dedicated.DedicatedBoard);
+        Assert.Null(await _store.GetAdoConnectionAsync(_root, board.Id, Ct));
+        Assert.Equal("Sprint", (await _store.GetBoardAsync(_root, board.Id, Ct))!.Name);
+        Assert.Equal(use == "onlyLocalBoard" ? 2 : 3, (await _store.GetBoardsAsync(_root, Ct)).Count);
+    }
+
     [Fact]
     public async Task AQueryConnectionNamesItsBoardForTheQuery()
     {

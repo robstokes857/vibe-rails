@@ -7,13 +7,19 @@ import { jobLaunchKind } from './launch-kind.js';
 const TRACKER_TABS = [['jira', 'Jira Cloud'], ['ado', 'Azure DevOps']];
 const SECTION_ORDER = ['general', ...TRACKER_TABS.map(([id]) => id), 'context', 'history'];
 
-export const boardSettingsNavigation = () => `
-    <nav class="nav nav-pills board-settings-nav gap-2 mb-3" aria-label="Board settings" role="tablist">
-        ${[['general', 'General'], ...TRACKER_TABS, ['context', 'Agent context'], ['history', 'History']].map(([id, label]) => `
+const navigation = (name, sections) => `
+    <nav class="nav nav-pills board-settings-nav gap-2 mb-3" aria-label="${name}" role="tablist">
+        ${sections.map(([id, label]) => `
             <button type="button" class="nav-link${id === 'general' ? ' active' : ''}" role="tab"
                 id="board-settings-tab-${id}" aria-controls="board-settings-${id}" aria-selected="${id === 'general'}"
                 tabindex="${id === 'general' ? 0 : -1}" data-board-settings-tab="${id}">${label}</button>`).join('')}
     </nav>`;
+
+export const boardSettingsNavigation = () =>
+    navigation('Board settings', [['general', 'General'], ...TRACKER_TABS, ['context', 'Agent context'], ['history', 'History']]);
+
+/** The New board dialog: a local board (the General section), or one connected to a tracker. */
+export const newBoardNavigation = () => navigation('Board type', [['general', 'Local'], ...TRACKER_TABS]);
 
 /**
  * Switch sections without replacing their DOM, so connection and context drafts survive.

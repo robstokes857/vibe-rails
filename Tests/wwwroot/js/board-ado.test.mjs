@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BoardApi } from '../../../VibeRails/wwwroot/js/modules/board-api.js';
-import { BoardAdoPanel, adoColumnSummary, adoLaneRows, adoOrganization, adoTokenUrl, boardAdoSection } from '../../../VibeRails/wwwroot/js/modules/board-ado.js';
+import { BoardAdoPanel, adoColumnSummary, adoLaneRows, adoLinkHelp, adoOrganization, adoTokenUrl, boardAdoSection, readAdoLink } from '../../../VibeRails/wwwroot/js/modules/board-ado.js';
 
 const BOARD_LINK = 'https://dev.azure.com/contoso/Fabrikam%20Web/_boards/board/t/Fabrikam%20Team/Stories';
 const QUERY_LINK = 'https://dev.azure.com/contoso/Fabrikam%20Web/_queries/query/8a8c8212-15ca-41ed-97aa-1d6fbfbcd581/';
@@ -32,10 +32,10 @@ const TEST_RESULT = {
         countCapped: false, pointsField: 'Microsoft.VSTS.Scheduling.StoryPoints', columns: COLUMNS, warnings: [] }
 };
 
-function createHarness({ connection = savedConnection() } = {}) {
+function createHarness({ connection = savedConnection(), newBoard = false, test = null } = {}) {
     const fields = new Map([
         '[data-ado-fields]', '[data-ado-action="connect"]', '[data-ado-action="pull"]', '[data-ado-action="unlink"]',
-        '[data-ado-link]', '[data-ado-token]', '[data-ado-token-link]', '[data-ado-token-hint]', '[data-ado-narrow]',
+        '[data-ado-link]', '[data-ado-link-help]', '[data-ado-token]', '[data-ado-token-link]', '[data-ado-token-org]', '[data-ado-token-hint]', '[data-ado-narrow]',
         '[data-ado-points]', '[data-ado-enabled]', '[data-ado-skip-done]', '[data-ado-status]', '[data-ado-summary]',
         '[data-ado-lanes]', '[data-ado-report]', '[data-ado-board]'
     ].map(selector => [selector, field()]));
@@ -54,7 +54,7 @@ function createHarness({ connection = savedConnection() } = {}) {
                 return { ...current, columns: null, lanes: null };
             }
             if (path.endsWith('/ado') && method === 'DELETE') return { message: 'Azure DevOps unlinked. Board and cards kept.' };
-            if (path.endsWith('/ado/test')) return { ...TEST_RESULT, boardId: current.boardId || 'brd_sprint' };
+            if (path.endsWith('/ado/test')) return test || { ...TEST_RESULT, boardId: current.boardId || 'brd_sprint' };
             if (path.includes('/ado/pull')) return { outcome: 'ok', message: '0 created, 0 updated, 1 unchanged, 0 skipped.' };
             throw new Error('unexpected ' + method + ' ' + path);
         },
@@ -64,7 +64,7 @@ function createHarness({ connection = savedConnection() } = {}) {
         querySelector: selector => fields.get(selector) || null,
         querySelectorAll: selector => (selector === '[data-ado-lane]' ? laneSelects : [])
     };
-    return { panel: new BoardAdoPanel(app, root, { id: 'brd_sprint', name: 'Sprint 4' }), fields, calls, laneSelects };
+    return { panel: new BoardAdoPanel(app, root, { id: 'brd_sprint', name: 'Sprint 4' }, undefined, { newBoard }), fields, calls, laneSelects };
 }
 
 // confirmDialog renders into document.body; this stands in for it and answers when told to.
@@ -178,13 +178,109 @@ test('a new connection starts with both switches on, no token link until an orga
     assert.equal(fields.get('[data-ado-token-link]').hidden, true);
     assert.equal(fields.get('[data-ado-token-hint]').hidden, false);
 
+    assert.match(fields.get('[data-ado-link-help]').innerHTML, /copy the address bar/);
+
     fields.get('[data-ado-link]').value = BOARD_LINK.replace('contoso', 'fabrikam-labs');
     panel._tokenLink();
     assert.equal(fields.get('[data-ado-token-link]').hidden, false);
     assert.equal(fields.get('[data-ado-token-link]').href, 'https://dev.azure.com/fabrikam-labs/_usersSettings/tokens');
+    assert.equal(fields.get('[data-ado-token-org]').textContent, 'fabrikam-labs');
+    assert.equal(fields.get('[data-ado-token-hint]').hidden, true);
+    assert.match(fields.get('[data-ado-link-help]').innerHTML, /Team <strong>Fabrikam Team<\/strong>, <strong>Stories<\/strong> in Fabrikam Web \(fabrikam-labs\)/);
+    assert.match(fields.get('[data-ado-link-help]').className, /text-muted/);
+    // The old address is the same organization, so the token link still goes to dev.azure.com.
     fields.get('[data-ado-link]').value = 'https://contoso.visualstudio.com/Fabrikam';
     panel._tokenLink();
+    assert.equal(fields.get('[data-ado-token-link]').hidden, false);
+    assert.equal(fields.get('[data-ado-token-link]').href, 'https://dev.azure.com/contoso/_usersSettings/tokens');
+    assert.match(fields.get('[data-ado-link-help]').innerHTML, /older visualstudio\.com address.*https:\/\/dev\.azure\.com\/contoso\//);
+    assert.match(fields.get('[data-ado-link-help]').className, /text-warning-emphasis/);
+    fields.get('[data-ado-link]').value = 'https://example.com/contoso/Fabrikam';
+    panel._tokenLink();
     assert.equal(fields.get('[data-ado-token-link]').hidden, true);
+    assert.equal(fields.get('[data-ado-token-org]').textContent, '');
+    assert.equal(fields.get('[data-ado-token-hint]').hidden, false);
+    assert.match(fields.get('[data-ado-link-help]').innerHTML, /Only https:\/\/dev\.azure\.com links work/);
+});
+
+test('a typed link is read back as a board, backlog, query, organization, old address or something else', () => {
+    assert.deepEqual(readAdoLink(BOARD_LINK),
+        { kind: 'board', organization: 'contoso', project: 'Fabrikam Web', team: 'Fabrikam Team', level: 'Stories' });
+    assert.deepEqual(readAdoLink('https://dev.azure.com/contoso/Fabrikam%20Web/_backlogs/backlog/Fabrikam%20Team/Backlog%20items'),
+        { kind: 'board', organization: 'contoso', project: 'Fabrikam Web', team: 'Fabrikam Team', level: 'Backlog items' });
+    assert.deepEqual(readAdoLink(`  ${QUERY_LINK}  `), { kind: 'query', organization: 'contoso', project: 'Fabrikam Web' });
+    assert.deepEqual(readAdoLink('https://dev.azure.com/contoso/Fabrikam%20Web/_queries/query-edit/8a8c8212-15ca-41ed-97aa-1d6fbfbcd581'),
+        { kind: 'query', organization: 'contoso', project: 'Fabrikam Web' });
+    // Pages that name the organization but are not a board, backlog or saved query.
+    for (const link of ['https://dev.azure.com/contoso', 'https://dev.azure.com/contoso/Fabrikam%20Web',
+        'https://dev.azure.com/contoso/Fabrikam%20Web/_workitems/edit/4821', 'https://dev.azure.com/contoso/Fabrikam%20Web/_queries/query/not-a-guid/',
+        'https://dev.azure.com/contoso/Fabrikam%20Web/_boards/board/t/Fabrikam%20Team', 'https://dev.azure.com/contoso/bad%E0%A4%A/_boards']) {
+        assert.deepEqual(readAdoLink(link), { kind: 'organization', organization: 'contoso' }, link);
+    }
+    assert.deepEqual(readAdoLink('https://Contoso.VisualStudio.com/Fabrikam/_boards'), { kind: 'legacy', organization: 'contoso' });
+    assert.deepEqual(readAdoLink('https://a.b.visualstudio.com/'), { kind: 'legacy', organization: '' });
+    assert.deepEqual(readAdoLink('   '), { kind: 'empty', organization: '' });
+    for (const link of ['not a url', 'http://dev.azure.com/contoso/P', 'http://contoso.visualstudio.com/P', 'https://user:pat@dev.azure.com/contoso/P',
+        'https://user:pat@contoso.visualstudio.com/P', 'https://dev.azure.com.evil.example/contoso', 'https://dev.azure.com/', 'javascript:alert(1)']) {
+        assert.deepEqual(readAdoLink(link), { kind: 'other', organization: '' }, link);
+    }
+});
+
+test('the link help escapes every name it repeats', () => {
+    const html = adoLinkHelp({ kind: 'board', organization: 'contoso', project: '<img src=x>', team: '<b>T</b>', level: '"L"' });
+    assert.ok(!html.includes('<img') && !html.includes('<b>'), html);
+    assert.match(html, /&lt;b&gt;T&lt;\/b&gt;/);
+    assert.match(adoLinkHelp({ kind: 'query', organization: 'contoso', project: '<script>' }), /&lt;script&gt;/);
+    assert.match(adoLinkHelp({ kind: 'organization', organization: 'contoso' }), /Organization <strong>contoso<\/strong>/);
+    assert.match(adoLinkHelp({ kind: 'legacy', organization: '' }), /paste that address instead\.$/);
+});
+
+test('the New board form names the board whose lanes it copies instead of the board being edited', () => {
+    const html = boardAdoSection({ lanesFrom: 'Sprint <4>' });
+    assert.match(html, /Lanes copied from <strong>Sprint &lt;4&gt;<\/strong>/);
+    assert.match(html, /Connect creates the board, named after the Azure DevOps team or query, and pulls its work items\./);
+    assert.ok(!html.includes('data-ado-board'));
+    assert.ok(!html.includes('An empty board becomes'));
+    const settings = boardAdoSection();
+    assert.match(settings, /Board: <strong data-ado-board><\/strong>/);
+    assert.match(settings, /An empty board becomes the Azure DevOps board itself\. Your only local board, or one with cards, lane Automations or viberails\.ai sync, stays as it is/);
+});
+
+test('a panel made by the New board dialog asks for a new board and pulls after a Connect succeeds, never after a refused one', async () => {
+    const empty = { boardId: 'brd_sprint', hasToken: false, authStatus: 'none', enabled: false, columns: [], lanes: LANES };
+    const { panel, fields, calls } = createHarness({ connection: empty, newBoard: true });
+    const changes = [];
+    panel._onChanged = (action, board) => changes.push([action, board]);
+    await panel.activate();
+    fields.get('[data-ado-link]').value = BOARD_LINK;
+    fields.get('[data-ado-token]').value = 'test-only';
+    await panel._connect();
+    const order = calls.map(([path, method]) => `${method} ${path.replace(/\?.*$/, '')}`).filter(call => !call.startsWith('GET'));
+    assert.deepEqual(order, ['PUT /api/v1/board/boards/brd_sprint/ado', 'POST /api/v1/board/boards/brd_sprint/ado/test',
+        'POST /api/v1/board/boards/brd_sprint/ado/pull']);
+    assert.deepEqual(changes, [['test', 'brd_sprint'], ['pull', 'brd_sprint']]);
+    assert.equal(fields.get('[data-ado-report]').textContent, '0 created, 0 updated, 1 unchanged, 0 skipped.');
+    const put = calls.find(([path, method]) => path.endsWith('/ado') && method === 'PUT');
+    assert.equal(put[2].newBoard, true);
+    // Once the connection has its own board, a save edits it rather than asking for another.
+    panel._board = 'brd_ado';
+    assert.equal('newBoard' in panel._body(), false);
+
+    const refused = createHarness({ connection: empty, newBoard: true, test: { ok: false, error: 'Azure DevOps refused the token.' } });
+    await refused.panel.activate();
+    refused.fields.get('[data-ado-link]').value = BOARD_LINK;
+    await refused.panel._connect();
+    assert.ok(!refused.calls.some(([path]) => path.includes('/ado/pull')));
+    assert.equal(refused.fields.get('[data-ado-report]').textContent, 'Azure DevOps refused the token.');
+
+    // Board settings keep Connect and Pull now separate.
+    const settings = createHarness({ connection: empty });
+    await settings.panel.activate();
+    settings.fields.get('[data-ado-link]').value = BOARD_LINK;
+    await settings.panel._connect();
+    assert.ok(!settings.calls.some(([path]) => path.includes('/ado/pull')));
+    // Board settings let the server decide: an unused board becomes the Azure DevOps board itself.
+    assert.equal('newBoard' in settings.calls.find(([path, method]) => path.endsWith('/ado') && method === 'PUT')[2], false);
 });
 
 test('a typed link listener is registered and removed with the panel', async () => {

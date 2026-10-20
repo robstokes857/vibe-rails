@@ -6,12 +6,19 @@ import { escapeHtml, confirmDialog } from './utils.js';
 
 export const JIRA_TOKEN_URL = 'https://id.atlassian.com/manage-profile/security/api-tokens';
 
-export const boardJiraSection = () => `
+/**
+ * The connection form. lanesFrom names the local board that the New board dialog connects: Connect
+ * copies its lanes into the new board, so the form says that instead of naming the board it edits.
+ */
+export const boardJiraSection = ({ lanesFrom = null } = {}) => `
     <section data-jira-panel>
         <h6 class="mb-0" data-jira-heading>Jira Cloud <span class="badge text-bg-secondary ms-2" data-jira-status>Not connected</span></h6>
         <fieldset class="mt-3" data-jira-fields disabled>
-            <p class="small mb-2">Board: <strong data-jira-board></strong></p>
-            <p class="text-muted small">Connect creates a separate Jira board for imported issues. Existing Jira cards move there with their comments, files and sessions. Use the board picker to switch between Jira and your local work. Jira wins on title, description, type, priority, tags and story points. A local edit to those fields is replaced on the next pull. A new card is placed by its Jira column; after that its lane and board are yours, and a Jira status change is only noted in a comment. Assignee, flagged, blocked, comments, sessions and commits stay here.</p>
+            ${lanesFrom === null ? '<p class="small mb-2">Board: <strong data-jira-board></strong></p>'
+                : `<p class="small mb-2">Lanes copied from <strong>${escapeHtml(lanesFrom)}</strong></p>`}
+            <p class="text-muted small">${lanesFrom === null
+                ? 'An empty board becomes the Jira board itself. Your only local board, or one with cards, lane Automations or viberails.ai sync, stays as it is: Connect creates a separate Jira board and moves existing Jira cards there with their comments, files and sessions.'
+                : 'Connect creates the board, named after the Jira board, and pulls its issues.'} Use the board picker to switch between Jira and your local work. Jira wins on title, description, type, priority, tags and story points. A local edit to those fields is replaced on the next pull. A new card is placed by its Jira column; after that its lane and board are yours, and a Jira status change is only noted in a comment. Assignee, flagged, blocked, comments, sessions and commits stay here.</p>
             <div class="mb-3">
                 <label class="form-label" for="jira-link">Jira board link</label>
                 <input class="form-control" id="jira-link" data-jira-link type="url" autocomplete="off" spellcheck="false"
@@ -95,14 +102,21 @@ export function jiraLaneRows(columns, lanes) {
 }
 
 export class BoardJiraPanel {
-    constructor(app, root, board, onChanged) {
+    /**
+     * newBoard: the New board dialog. Connect asks for a new board made from this board's lanes,
+     * even when this board could become the Jira board, and pulls once it succeeds rather than
+     * leave the new board empty until the interval.
+     */
+    constructor(app, root, board, onChanged, { newBoard = false } = {}) {
         this.app = app;
         this.root = root;
         // The settings dialog moves the heading into its header after mounting the panel.
         this._status = root.querySelector('[data-jira-status]');
         this._board = board.id;
+        this._source = board.id;
         this._boardName = board.name;
         this._onChanged = onChanged;
+        this._newBoard = newBoard;
         this._events = new AbortController();
         this._loaded = false;
         this._ready = false;
@@ -237,6 +251,8 @@ export class BoardJiraPanel {
             enabled: !!this.root.querySelector('[data-jira-enabled]')?.checked,
             skipOldDone: !!this.root.querySelector('[data-jira-skip-done]')?.checked
         };
+        // Until the connection has its board; after that the save edits it.
+        if (this._newBoard && this._board === this._source) body.newBoard = true;
         // Lane picks belong to the board they were read from; a different link starts automatic.
         if (this._columns.length && body.boardLink === (this._savedLink || '')) {
             const columnMap = {};
@@ -253,6 +269,7 @@ export class BoardJiraPanel {
     async _connect() {
         if (!this._ready) return;
         let savedBoard = false;
+        let connected = false;
         await this._run(async () => {
             this._report('Connecting…');
             const saved = await BoardApi.saveJiraConnectionAsync(this._board, this._body());
@@ -280,9 +297,11 @@ export class BoardJiraPanel {
             await this._load();
             if (!this._alive()) return;
             this._showResult(result);
+            connected = !!result?.ok;
         });
         // Saving may have moved the connection even if the provider test failed afterward.
         if (savedBoard && this._alive()) this._onChanged?.('test', this._board);
+        if (connected && this._newBoard && this._alive()) await this._pull(false);
     }
 
     async _unlink() {

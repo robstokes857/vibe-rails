@@ -616,6 +616,12 @@ connection's live imports still on the source board using the ordinary log-trans
 moves the connection. IDs, comments, attachments, sessions and commits survive; local cards stay.
 Repeated calls use the existing dedicated board. Old writers preserve the new column. Card reads
 project the Jira issue key from retained `BoardJiraLinks`; no card-origin backfill is required.
+A source board nothing else uses becomes the dedicated board itself instead, keeping its name,
+lanes and lane choices (`CanTakeOverBoardAsync` in `BoardStore.TrackerBoards.cs`, shared with Azure
+DevOps): no live card but the connection's own imports, no lane Automation, no other tracker
+connection, never published, shared or opted in to viberails.ai sync, and another local board
+remains. Otherwise a board made only to connect a tracker was left behind empty. The save's
+`NewBoard` flag (the New board dialog) always clones.
 
 Board identity follows the current connection's `DedicatedBoard=true`, not connection history,
 board names or retained issue links. Legacy non-dedicated connections leave their source Vibe
@@ -630,7 +636,9 @@ recreate them to populate an empty board.
 
 **A pull never moves a card.** Jira wins on the mapped fields; the lane and board are the local
 workflow for doing the work, and Jira has no say in them. The column map and the "Jira" overflow
-lane place a card once, when it is created. A later Jira status change updates the fields and
+lane place a card once, when it is created. The overflow lane is made on demand as the board's
+first lane (`CreateColumnAsync(first: true)`); one that already exists stays where the user put it.
+A later Jira status change updates the fields and
 adds a Jira-authored comment that the card was not moved; a card moved to another lane or
 another local board stays there. `BoardJiraLinks.Mapping` (read through `TrackerLinkMapping`) holds
 the points field the last pull read and the status it saw; only a new points field re-applies
@@ -683,6 +691,10 @@ board), tests on the board id that PUT returned, and follows the id the test ret
 Settings follow the board's `RemoteProvider`: a dedicated Azure DevOps board shows its connection
 under General and hides both tracker tabs, a Jira board hides the Azure DevOps tab, and a local
 board offers both. The settings form says it too: a pull updates fields and never moves a card.
+**New board** offers the same Jira and Azure DevOps forms beside a local board. They connect the
+open (or first) local board with `newBoard: true`, so the save always creates the dedicated board
+from that board's lanes, even when that board could have become it. From that dialog only, a
+successful Connect also pulls once.
 
 ## Jira activity delivery
 

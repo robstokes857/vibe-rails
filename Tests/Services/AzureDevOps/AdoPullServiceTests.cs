@@ -100,6 +100,10 @@ public sealed class AdoPullServiceTests : IDisposable
         Assert.Equal("Azure DevOps", lanes[cards["Disagreeing column"].ColumnId]);
         Assert.Single(lanes.Values, name => name == "Azure DevOps");
         Assert.Equal(cards["Nowhere"].ColumnId, (await service.GetAsync(_project, saved.BoardId, Ct))!.OverflowColumnId);
+        // The overflow lane is made first, before the lanes the board already had.
+        var ordered = await _store.GetColumnsAsync(_project, Ct, saved.BoardId);
+        Assert.Equal("Azure DevOps", ordered[0].Name);
+        Assert.Equal(Enumerable.Range(0, ordered.Count), ordered.Select(lane => lane.Position));
 
         Assert.Empty((await _store.GetCardDetailAsync(_project, cards["Mapped by state"].Id, Ct))!.Comments);
         Assert.Empty((await _store.GetCardDetailAsync(_project, cards["Named lane"].Id, Ct))!.Comments);

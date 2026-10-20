@@ -234,7 +234,18 @@ and keeps pulling it until a board link is pasted. Both actions are independent 
 Save board. Closing/replacing the modal clears the token and ignores late responses; saving
 follows the returned dedicated Jira board ID, and a pull refreshes cards. There are no Jira toolbar actions.
 Imported cards derive a Jira logo/key badge from `jiraIssueKey`; the origin filter includes Jira and
-Human-made excludes imports. Assignee filter choices deduplicate canonical CLI identities. New boards must be saved first.
+Human-made excludes imports. Assignee filter choices deduplicate canonical CLI identities. A new
+local board must be saved before its Agent context can be edited.
+**New board** has Local, Jira Cloud and Azure DevOps tabs (`newBoardNavigation`, same tab ids and
+`mountBoardSettingsNavigation` as settings). The tracker tabs mount the ordinary panels on the open
+local board, else the first local one (`trackerSourceBoard`), with `lanesFrom` naming it: Connect's
+save sends `newBoard: true`, so the server always copies that board's lanes into a new dedicated
+board, and the dialog selects the new board, titles itself with it and stays open. Panels made with
+`newBoard` send it until the connection has moved and pull once after a successful Connect;
+settings keep Connect and Pull now separate and never send it. From settings, a board nothing else
+uses becomes the tracker board itself: Connect returns the same board id, and the settings dialog
+reloads its sync status (title logo, connection under General) and the board list (picker logo).
+With no local board left, the dialog offers Local only.
 On lane cards the Jira badge has its own row, with long issue keys wrapping inside the card.
 Board settings hide viberails.ai sync for boards whose sync status names a tracker
 (`remoteProvider`, or `isJiraBoard`); the section stays hidden until status loads. Tracker
@@ -245,10 +256,14 @@ cards and discussion stay. A successful unlink clears the Jira form and logo, re
 Jira tab and local sync controls, and preserves drafts in other settings sections. Failed unlink
 requests leave the connected form available for retry.
 Azure DevOps (`board-ado.js`, `BoardAdoPanel`, VIBE-165) mirrors those controls: a dev.azure.com
-team board, backlog or saved query link and a personal access token, with no email field. The
-"Create a token" link points at `https://dev.azure.com/{org}/_usersSettings/tokens` once the
-organization is known from the typed or saved link (only an https dev.azure.com link with a
-valid organization name counts), and the scope note asks for **Work Items: Read & write**. Narrowing
+team board, backlog or saved query link and a personal access token, with no email field. Under
+the link, `readAdoLink`/`adoLinkHelp` say what the typed link is (team board or backlog, saved
+query, an organization page, an old `{org}.visualstudio.com` address, or not dev.azure.com); only
+Connect's server parse decides. The "Create a token in {org}" button points at
+`https://dev.azure.com/{org}/_usersSettings/tokens` once the organization is known from the typed
+link (an https dev.azure.com link with a valid organization name, or a visualstudio.com host, which
+is the same organization) or the saved one; until then a hint says to paste the link first. The
+scope note asks for **Work Items: Read & write** and **Project and Team: Read**. Narrowing
 WIQL (board links only), a points field reference and per-column lane picks sit under Advanced.
 **Connect** sends PUT then POST `…/ado/test`, following the `boardId` each returns (the save moves
 the connection to its dedicated board) and dropping source-board lane picks when it moves. The

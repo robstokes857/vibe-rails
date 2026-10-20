@@ -23,23 +23,98 @@ export function adoOrganization(link) {
 /** Personal access tokens are created per organization. */
 export const adoTokenUrl = organization => `https://dev.azure.com/${encodeURIComponent(organization)}/_usersSettings/tokens`;
 
-export const boardAdoSection = () => `
+const QUERY_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const LEGACY_HOST = '.visualstudio.com';
+
+/**
+ * What a typed link points at, close enough to AdoBoardLink.Parse to say so while typing; Connect
+ * still decides. kind is 'empty', 'board' (a team board or backlog), 'query', 'organization' (a
+ * dev.azure.com page that is neither), 'legacy' ({org}.visualstudio.com) or 'other'. The
+ * organization is filled in whenever it is known, because it is all the token page needs.
+ */
+export function readAdoLink(link) {
+    const text = String(link || '').trim();
+    if (!text) return { kind: 'empty', organization: '' };
+    let url;
+    try {
+        url = new URL(text);
+    } catch {
+        return { kind: 'other', organization: '' };
+    }
+    const host = url.hostname.toLowerCase();
+    if (url.protocol === 'https:' && host.endsWith(LEGACY_HOST) && !url.username && !url.password) {
+        const organization = host.slice(0, -LEGACY_HOST.length);
+        return { kind: 'legacy', organization: ORGANIZATION.test(organization) ? organization : '' };
+    }
+    const organization = adoOrganization(text);
+    if (!organization) return { kind: 'other', organization: '' };
+    let segments;
+    try {
+        segments = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+    } catch {
+        return { kind: 'organization', organization };
+    }
+    const [, project = '', area, page, ...rest] = segments;
+    const is = (segment, expected) => String(segment || '').toLowerCase() === expected;
+    if (segments.length === 7 && is(area, '_boards') && is(page, 'board') && is(rest[0], 't'))
+        return { kind: 'board', organization, project, team: rest[1], level: rest[2] };
+    if (segments.length === 6 && is(area, '_backlogs') && is(page, 'backlog'))
+        return { kind: 'board', organization, project, team: rest[0], level: rest[1] };
+    if (segments.length === 5 && is(area, '_queries') && (is(page, 'query') || is(page, 'query-edit')) && QUERY_ID.test(rest[0]))
+        return { kind: 'query', organization, project };
+    return { kind: 'organization', organization };
+}
+
+/** The line under the link field for readAdoLink's result. Escaped. */
+export function adoLinkHelp(read) {
+    const organization = escapeHtml(read?.organization || '');
+    switch (read?.kind) {
+        case 'board':
+            return `<i class="fa-solid fa-circle-check text-success" aria-hidden="true"></i> Team <strong>${escapeHtml(read.team)}</strong>, `
+                + `<strong>${escapeHtml(read.level)}</strong> in ${escapeHtml(read.project)} (${organization}).`;
+        case 'query':
+            return `<i class="fa-solid fa-circle-check text-success" aria-hidden="true"></i> Saved query in ${escapeHtml(read.project)} (${organization}).`;
+        case 'organization':
+            return `Organization <strong>${organization}</strong>. To connect, open its team board, backlog or saved query and paste that address instead.`;
+        case 'legacy':
+            return 'This is an older visualstudio.com address. Open the same board on dev.azure.com and paste that address instead'
+                + (organization ? `: it starts with https://dev.azure.com/${organization}/.` : '.');
+        case 'other':
+            return 'Only https://dev.azure.com links work. Open the board in Azure DevOps and copy the address bar.';
+        default:
+            return 'Open the team board, backlog or saved query in Azure DevOps and copy the address bar. Only dev.azure.com links work.';
+    }
+}
+
+/**
+ * The connection form. lanesFrom names the local board that the New board dialog connects: Connect
+ * copies its lanes into the new board, so the form says that instead of naming the board it edits.
+ */
+export const boardAdoSection = ({ lanesFrom = null } = {}) => `
     <section data-ado-panel>
         <h6 class="mb-0" data-ado-heading>Azure DevOps <span class="badge text-bg-secondary ms-2" data-ado-status>Not connected</span></h6>
         <fieldset class="mt-3" data-ado-fields disabled>
-            <p class="small mb-2">Board: <strong data-ado-board></strong></p>
-            <p class="text-muted small">Connect creates a separate Azure DevOps board for imported work items. Existing Azure DevOps cards move there with their comments, files and sessions. Use the board picker to switch between Azure DevOps and your local work. Azure DevOps wins on title, description, type, priority, tags and points. A local edit to those fields is replaced on the next pull. A new card is placed by its board column; after that its lane and board are yours, and a state change is only noted in a comment. Assignee, flagged, blocked, comments, sessions and commits stay here.</p>
+            ${lanesFrom === null ? '<p class="small mb-2">Board: <strong data-ado-board></strong></p>'
+                : `<p class="small mb-2">Lanes copied from <strong>${escapeHtml(lanesFrom)}</strong></p>`}
+            <p class="text-muted small">${lanesFrom === null
+                ? 'An empty board becomes the Azure DevOps board itself. Your only local board, or one with cards, lane Automations or viberails.ai sync, stays as it is: Connect creates a separate Azure DevOps board and moves existing Azure DevOps cards there with their comments, files and sessions.'
+                : 'Connect creates the board, named after the Azure DevOps team or query, and pulls its work items.'} Use the board picker to switch between Azure DevOps and your local work. Azure DevOps wins on title, description, type, priority, tags and points. A local edit to those fields is replaced on the next pull. A new card is placed by its board column; after that its lane and board are yours, and a state change is only noted in a comment. Assignee, flagged, blocked, comments, sessions and commits stay here.</p>
             <div class="mb-3">
                 <label class="form-label" for="ado-link">Azure DevOps board or query link</label>
                 <input class="form-control" id="ado-link" data-ado-link type="url" autocomplete="off" spellcheck="false"
                     placeholder="https://dev.azure.com/your-org/Project/_boards/board/t/Team/Stories">
-                <small class="form-text text-muted">Open the team board, backlog or saved query in Azure DevOps and copy the address bar. Only dev.azure.com links work.</small>
+                <small class="form-text text-muted d-block" data-ado-link-help role="status">${adoLinkHelp({ kind: 'empty' })}</small>
             </div>
             <div class="mb-3">
                 <label class="form-label" for="ado-token">Personal access token</label>
+                <p class="small mb-2">
+                    <a class="btn btn-sm btn-outline-primary me-1" target="_blank" rel="noopener noreferrer" data-ado-token-link hidden>Create a token in <span data-ado-token-org></span> <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a>
+                    <span class="text-muted" data-ado-token-hint>Paste the board link above to get a link to your organization's token page.</span>
+                    <span class="text-muted">Give the token both scopes: <strong>Work Items: Read &amp; write</strong> and <strong>Project and Team: Read</strong>.</span>
+                </p>
                 <input class="form-control" id="ado-token" data-ado-token type="text" autocomplete="off"
                     spellcheck="false" autocapitalize="none" autocorrect="off" placeholder="Paste a personal access token">
-                <small class="form-text text-muted"><span data-ado-token-hint>Create one under User settings › Personal access tokens in Azure DevOps</span><a target="_blank" rel="noopener noreferrer" data-ado-token-link hidden>Create a token <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a> with both scopes: <strong>Work Items: Read &amp; write</strong> and <strong>Project and Team: Read</strong>. Connect reads the project to check access. Saved on this machine with your other API keys. It is never written to the board and never shown again.</small>
+                <small class="form-text text-muted">Connect reads the project to check access. Saved on this machine with your other API keys. It is never written to the board and never shown again.</small>
             </div>
             <div class="form-check form-switch mb-2">
                 <input class="form-check-input" type="checkbox" id="ado-enabled" data-ado-enabled>
@@ -109,14 +184,21 @@ export function adoLaneRows(columns, lanes, { query = false } = {}) {
 }
 
 export class BoardAdoPanel {
-    constructor(app, root, board, onChanged) {
+    /**
+     * newBoard: the New board dialog. Connect asks for a new board made from this board's lanes,
+     * even when this board could become the Azure DevOps board, and pulls once it succeeds rather
+     * than leave the new board empty until the interval.
+     */
+    constructor(app, root, board, onChanged, { newBoard = false } = {}) {
         this.app = app;
         this.root = root;
         // The settings dialog moves the heading into its header after mounting the panel.
         this._status = root.querySelector('[data-ado-status]');
         this._board = board.id;
+        this._source = board.id;
         this._boardName = board.name;
         this._onChanged = onChanged;
+        this._newBoard = newBoard;
         this._events = new AbortController();
         this._loaded = false;
         this._ready = false;
@@ -226,14 +308,26 @@ export class BoardAdoPanel {
         this._report(connection.disabledReason || connection.lastReport || '');
     }
 
-    // The typed link's organization first, then the saved one; no link until either is known.
+    // Says what the typed link points at, and points the token link at the typed link's
+    // organization first, then the saved one; no token link until either is known.
     _tokenLink() {
+        const read = readAdoLink(this.root.querySelector('[data-ado-link]')?.value);
+        const help = this.root.querySelector('[data-ado-link-help]');
+        if (help) {
+            const html = adoLinkHelp(read);
+            // Rewriting identical text would make a screen reader repeat it on every keystroke.
+            if (help.innerHTML !== html) help.innerHTML = html;
+            const warn = read.kind === 'organization' || read.kind === 'legacy' || read.kind === 'other';
+            help.className = `form-text d-block ${warn ? 'text-warning-emphasis' : 'text-muted'}`;
+        }
         const link = this.root.querySelector('[data-ado-token-link]');
         if (!link) return;
-        const organization = adoOrganization(this.root.querySelector('[data-ado-link]')?.value) || this._savedOrganization;
+        const organization = read.organization || this._savedOrganization;
         const known = ORGANIZATION.test(organization);
         if (known) link.href = adoTokenUrl(organization);
         link.hidden = !known;
+        const name = this.root.querySelector('[data-ado-token-org]');
+        if (name) name.textContent = known ? organization : '';
         const hint = this.root.querySelector('[data-ado-token-hint]');
         if (hint) hint.hidden = known;
     }
@@ -247,6 +341,8 @@ export class BoardAdoPanel {
             enabled: !!this.root.querySelector('[data-ado-enabled]')?.checked,
             skipOldDone: !!this.root.querySelector('[data-ado-skip-done]')?.checked
         };
+        // Until the connection has its board; after that the save edits it.
+        if (this._newBoard && this._board === this._source) body.newBoard = true;
         // Lane picks belong to the board they were read from; a different link starts automatic.
         if (this._columns.length && body.boardLink === (this._savedLink || '')) {
             const columnMap = {};
@@ -271,11 +367,12 @@ export class BoardAdoPanel {
         return true;
     }
 
-    // Connect = save (which moves the connection to its dedicated board), then check the token and
+    // Connect = save (which gives the connection its dedicated board), then check the token and
     // read the board or saved query (its columns and a work item count).
     async _connect() {
         if (!this._ready) return;
         let savedBoard = false;
+        let connected = false;
         await this._run(async () => {
             this._report('Connecting…');
             const saved = await BoardApi.saveAdoConnectionAsync(this._board, this._body());
@@ -294,9 +391,11 @@ export class BoardAdoPanel {
             await this._load();
             if (!this._alive()) return;
             this._showResult(result);
+            connected = !!result?.ok;
         });
         // Saving may have moved the connection even if the provider test failed afterward.
         if (savedBoard && this._alive()) this._onChanged?.('test', this._board);
+        if (connected && this._newBoard && this._alive()) await this._pull(false);
     }
 
     async _unlink() {

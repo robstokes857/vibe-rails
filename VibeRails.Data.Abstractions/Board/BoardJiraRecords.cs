@@ -71,6 +71,8 @@ public sealed record BoardJiraLinkRecord(
 /// neither, the saved source is kept. A null optional field keeps its saved value.
 /// </summary>
 /// <param name="ColumnMap">Jira column name to lane id, or blank for automatic.</param>
+/// <param name="NewBoard">The New board dialog: always make the Jira board from this board's
+/// lanes, even when this board could become it.</param>
 public sealed record BoardJiraConnectionSave(
     string SiteUrl,
     string Email,
@@ -80,4 +82,5 @@ public sealed record BoardJiraConnectionSave(
     string? BoardLink = null,
     string? NarrowJql = null,
     bool? SkipOldDone = null,
-    IReadOnlyDictionary<string, string?>? ColumnMap = null);
+    IReadOnlyDictionary<string, string?>? ColumnMap = null,
+    bool NewBoard = false);

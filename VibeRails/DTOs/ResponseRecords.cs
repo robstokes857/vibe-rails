@@ -182,7 +182,8 @@ namespace VibeRails.DTOs
 
     // BoardLink, when present, supplies the site and the issues, and SiteUrl/Jql are ignored. A null
     // NarrowJql, SkipOldDone or ColumnMap keeps the saved value; ColumnMap maps a Jira column name to
-    // a lane id, or "" for automatic.
+    // a lane id, or "" for automatic. NewBoard (the New board dialog) always makes a new Jira board
+    // from this board's lanes instead of letting an unused board become it.
     public record SaveJiraConnectionRequest(
         string? SiteUrl = null,
         string? Email = null,
@@ -193,7 +194,8 @@ namespace VibeRails.DTOs
         string? BoardLink = null,
         string? NarrowJql = null,
         bool? SkipOldDone = null,
-        Dictionary<string, string>? ColumnMap = null);
+        Dictionary<string, string>? ColumnMap = null,
+        bool NewBoard = false);
 
     public record JiraTestResponse(bool Ok, string? Account, string? Error, JiraBoardSummaryResponse? Board = null);
 
@@ -244,6 +246,7 @@ namespace VibeRails.DTOs
     // needs the link again. A blank PersonalAccessToken keeps the saved one. A null NarrowWiql,
     // SkipOldDone or ColumnMap keeps the saved value; a blank PointsField detects it from the
     // process. ColumnMap maps an Azure DevOps column name to a lane id, or "" for automatic.
+    // NewBoard as for Jira.
     public record SaveAdoConnectionRequest(
         string? BoardLink = null,
         string? PersonalAccessToken = null,
@@ -251,7 +254,8 @@ namespace VibeRails.DTOs
         string? PointsField = null,
         string? NarrowWiql = null,
         bool? SkipOldDone = null,
-        Dictionary<string, string>? ColumnMap = null);
+        Dictionary<string, string>? ColumnMap = null,
+        bool NewBoard = false);
 
     // BoardId is the connection's (dedicated) board, for the settings form to follow.
     public record AdoTestResponse(bool Ok, string? Project, string? Error, AdoBoardSummaryResponse? Board = null, string? BoardId = null);
