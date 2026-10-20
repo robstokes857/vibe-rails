@@ -224,13 +224,27 @@ export class JobController {
         if (data?.importFromRepository) {
             void this.openImportFromRepository();
         }
-        this.pollTimer = window.setInterval(() => {
-            if (this.app.currentView !== this.page.viewId && this.app.currentView !== 'jobs') return;
-            this.refreshRuns({ quiet: true });
+        this.pollTimer = window.setInterval(() => void this.pollTick(), 5000);
+    }
+
+    /** One 5 s poll. Returns the round it started, or null when it skipped. */
+    pollTick() {
+        if (this.app.currentView !== this.page.viewId && this.app.currentView !== 'jobs') return null;
+        // Like the Board's poll: nothing while the page is hidden, and a slow server never
+        // has a second round queued behind the first.
+        if (document.hidden || this.pollPending) return null;
+        return this.pollRunsAndJobs();
+    }
+
+    async pollRunsAndJobs() {
+        this.pollPending = true;
+        try {
             // Jobs too, not just run history: the scheduler advances nextRunUtc server-side,
             // so a "Next run" rendered once at load drifts into "Due now" and stays there.
-            this.refreshJobs({ quiet: true });
-        }, 5000);
+            await Promise.allSettled([this.refreshRuns({ quiet: true }), this.refreshJobs({ quiet: true })]);
+        } finally {
+            this.pollPending = false;
+        }
     }
 
     unload() {

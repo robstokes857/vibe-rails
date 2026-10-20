@@ -2633,3 +2633,34 @@ test('closing the Automation modal disposes its shared form and pending editor r
     assert.deepEqual(controller.editorActions, []);
     assert.ok(controller.editorRequestGeneration > generation);
 });
+
+// VIBE-170 #7: the 5 s poll was the only one without a hidden-page check or an overlap guard.
+test('The 5 s poll skips a hidden page and never stacks a round behind a slow one', async (t) => {
+    const originalDocument = globalThis.document;
+    t.after(() => { globalThis.document = originalDocument; });
+    globalThis.document = { hidden: false, querySelector: () => null };
+
+    const app = createApp();
+    app.currentView = 'ai-agents';
+    app.data.configs.rootPath = '/repo';
+    const pending = [];
+    app.apiCall = url => new Promise(resolve => pending.push({ url, resolve }));
+    const controller = new JobController(app);
+
+    const round = controller.pollTick();
+    assert.ok(round, 'a visible page polls');
+    assert.deepEqual(pending.map(request => request.url.split('?')[0]), ['/api/v1/jobs/runs/summary', '/api/v1/jobs']);
+    assert.equal(controller.pollTick(), null, 'a second tick while the first is out adds nothing');
+    assert.equal(pending.length, 2);
+
+    pending.splice(0).forEach(request => request.resolve({ summaries: [], jobs: [] }));
+    await round;
+    globalThis.document.hidden = true;
+    assert.equal(controller.pollTick(), null, 'a hidden page does not poll');
+    assert.equal(pending.length, 0);
+
+    globalThis.document.hidden = false;
+    assert.ok(controller.pollTick(), 'it resumes once visible');
+    assert.equal(pending.length, 2);
+    pending.splice(0).forEach(request => request.resolve({ summaries: [], jobs: [] }));
+});
