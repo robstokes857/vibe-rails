@@ -628,7 +628,7 @@ internal abstract class BraceFamilyLanguageParser : ILanguageParser
         }
 
         int ownerIndex = ParserUtilities.PreviousSignificant(tokens, previous - 1);
-        if (ownerIndex >= 0 && tokens[ownerIndex].Text == ">")
+        if (ownerIndex >= 0 && CloseAngleCount(tokens[ownerIndex].Text) > 0)
         {
             int openAngle = FindMatchingOpenAngleBack(tokens, ownerIndex);
             ownerIndex = openAngle > 0 ? ParserUtilities.PreviousSignificant(tokens, openAngle - 1) : -1;
@@ -720,7 +720,7 @@ internal abstract class BraceFamilyLanguageParser : ILanguageParser
     {
         List<Token> tokens = parsed.Tokens;
         int nameIndex = ParserUtilities.PreviousSignificant(tokens, parameterStart - 1);
-        if (nameIndex >= 0 && tokens[nameIndex].Text == ">")
+        if (nameIndex >= 0 && CloseAngleCount(tokens[nameIndex].Text) > 0)
         {
             int openAngle = FindMatchingOpenAngleBack(tokens, nameIndex);
             if (openAngle >= 0)
@@ -1188,6 +1188,19 @@ internal abstract class BraceFamilyLanguageParser : ILanguageParser
         return -1;
     }
 
+    /// <summary>
+    /// How many generic argument lists a token closes. The tokenizer reads <c>&gt;&gt;</c> and
+    /// <c>&gt;&gt;&gt;</c> as single shift operators, so <c>List&lt;List&lt;int&gt;&gt;</c> ends in one
+    /// token that closes two lists.
+    /// </summary>
+    private static int CloseAngleCount(string text) => text switch
+    {
+        ">" => 1,
+        ">>" => 2,
+        ">>>" => 3,
+        _ => 0
+    };
+
     private static int FindMatchingCloseAngle(List<Token> tokens, int openAngle, int end)
     {
         int depth = 0;
@@ -1196,11 +1209,15 @@ internal abstract class BraceFamilyLanguageParser : ILanguageParser
             if (tokens[i].Text == "<")
             {
                 depth++;
+                continue;
             }
-            else if (tokens[i].Text == ">")
+
+            // A shift token that closes this list and an enclosing one still ends this list.
+            int closes = CloseAngleCount(tokens[i].Text);
+            if (closes > 0)
             {
-                depth--;
-                if (depth == 0)
+                depth -= closes;
+                if (depth <= 0)
                 {
                     return i;
                 }
@@ -1215,11 +1232,8 @@ internal abstract class BraceFamilyLanguageParser : ILanguageParser
         int depth = 0;
         for (int i = closeAngle; i >= 0; i--)
         {
-            if (tokens[i].Text == ">")
-            {
-                depth++;
-            }
-            else if (tokens[i].Text == "<")
+            depth += CloseAngleCount(tokens[i].Text);
+            if (tokens[i].Text == "<")
             {
                 depth--;
                 if (depth == 0)
