@@ -142,6 +142,7 @@ export class WebviewPanelManager {
         this.panel.webview.onDidReceiveMessage(message => {
             if (!message || typeof message !== 'object') return;
             if (message.command === 'scriptImportReady') {
+                void this.deliver({ command: 'hostVisibility', visible: this.panel?.visible === true });
                 if (!this.dashboardReady) {
                     this.dashboardReady = true;
                     this.sendPendingImport();
@@ -171,6 +172,12 @@ export class WebviewPanelManager {
                 if (trimmed.length > 0) {
                     this.panel.title = trimmed;
                 }
+            }
+        });
+
+        this.panel.onDidChangeViewState(event => {
+            if (this.dashboardReady) {
+                void this.deliver({ command: 'hostVisibility', visible: event.webviewPanel.visible });
             }
         });
 

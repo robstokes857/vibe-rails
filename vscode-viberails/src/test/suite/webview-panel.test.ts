@@ -66,16 +66,56 @@ async function waitFor(condition: () => boolean, timeoutMs: number, message: str
 }
 
 suite('Webview bridge messages', () => {
+    test('reports current visibility at readiness and every later hide/reveal', async function () {
+        this.timeout(60000);
+        const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'viberails-visibility-'));
+        fs.writeFileSync(path.join(directory, 'index.html'), `<!doctype html><html><head></head><body><script>
+const states = [];
+window.addEventListener('message', ({ data }) => {
+    if (data.command === 'releaseReady') window.__viberails_scriptImportReady__();
+    if (data.command === 'hostVisibility') {
+        states.push(data.visible);
+        window.__viberails_setTitle__('visibility:' + states.join(','));
+    }
+});
+window.__viberails_setTitle__('visibility-listening');
+</script></body></html>`, 'utf8');
+        const manager = new WebviewPanelManager(directory);
+        let document: vscode.TextDocument | undefined;
+        try {
+            const panel = await manager.create(5000);
+            await waitFor(() => panel.title === 'visibility-listening', 30000, 'Visibility test page did not load.');
+            document = await vscode.workspace.openTextDocument({ content: 'Hide the retained dashboard behind this editor.' });
+            await vscode.window.showTextDocument(document, vscode.ViewColumn.One);
+            await waitFor(() => !panel.visible, 10000, 'Dashboard did not hide.');
+            await panel.webview.postMessage({ command: 'releaseReady' });
+            await waitFor(() => panel.title === 'visibility:false', 10000, 'Readiness did not send the current hidden state.');
+            panel.reveal();
+            await waitFor(() => panel.title === 'visibility:false,true', 10000, 'Reveal was not forwarded.');
+            await vscode.window.showTextDocument(document, vscode.ViewColumn.One);
+            await waitFor(() => panel.title === 'visibility:false,true,false', 10000, 'Hide was not forwarded.');
+            panel.reveal();
+            await waitFor(() => panel.title === 'visibility:false,true,false,true', 10000, 'Second reveal was not forwarded.');
+        } finally {
+            manager.dispose();
+            const tab = vscode.window.tabGroups.all.flatMap(group => group.tabs).find(tab =>
+                tab.input instanceof vscode.TabInputText && tab.input.uri.toString() === document?.uri.toString());
+            if (tab) await vscode.window.tabGroups.close(tab);
+            fs.rmSync(directory, { recursive: true, force: true });
+        }
+    });
+
     test('host messages wait for the dashboard bridge, then arrive in order', async function () {
         this.timeout(60000);
         const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'viberails-bridge-'));
         fs.writeFileSync(path.join(directory, 'index.html'), `<!doctype html><html><head></head><body><script>
 const received = [];
 window.addEventListener('message', (event) => {
+    if (event.data.command === 'hostVisibility') return;
     received.push(event.data.command);
     window.__viberails_setTitle__('bridge-test:' + received.join(','));
 });
-setTimeout(() => window.__viberails_scriptImportReady__(), 300);
+Promise.resolve().then(() => window.__viberails_scriptImportReady__());
 </script></body></html>`, 'utf8');
         const manager = new WebviewPanelManager(directory);
         let subscription: vscode.Disposable | undefined;

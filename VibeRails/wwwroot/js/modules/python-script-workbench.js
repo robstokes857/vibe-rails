@@ -224,8 +224,7 @@ export class PythonScriptWorkbench {
         window.addEventListener('beforeunload', this._onBeforeUnload);
         // An agent or VS Code edits the file behind our back; coming back to this window
         // is the natural moment to notice, on top of the background poll.
-        window.addEventListener('focus', this._onWindowFocus);
-        document.addEventListener('visibilitychange', this._onWindowFocus);
+        this._unsubscribeUiVisible = this.app.onUiVisible(this._onWindowFocus);
         document.addEventListener('click', this._onDocumentClick, true);
 
         const state = scripts ? await scripts.ensureState() : null;
@@ -268,13 +267,13 @@ export class PythonScriptWorkbench {
         this._unsubscribeState = null;
         this._unsubscribeRun?.();
         this._unsubscribeRun = null;
+        this._unsubscribeUiVisible?.();
+        this._unsubscribeUiVisible = null;
         this._unwatchLayoutMedia();
         if (typeof window !== 'undefined') {
             window.removeEventListener('beforeunload', this._onBeforeUnload);
-            window.removeEventListener('focus', this._onWindowFocus);
         }
         if (typeof document !== 'undefined') {
-            document.removeEventListener('visibilitychange', this._onWindowFocus);
             document.removeEventListener('click', this._onDocumentClick, true);
         }
         try { this.editor?.dispose(); } catch { /* already gone */ }
@@ -861,7 +860,7 @@ export class PythonScriptWorkbench {
     async checkDisk() {
         if (!this.root || !this.name || !this.editor || this.saving || this._pollInFlight || this._loadToken) return;
         if (this._mutating) return;
-        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+        if (this.app.isUiHidden()) return;
         const generation = this._generation;
         const name = this.name;
         const saveSerial = this._saveSerial;

@@ -22,6 +22,12 @@ card sidebar. Description is always editable without previews; rendered Comments
 Markdown and offer agent filtering with attention entries first. See the
 [Board contract](../VibeRails/Services/Board/ARCHITECTURE.md#card-editor-and-local-refresh-vibe-44).
 
+In VS Code, `WebviewPanelManager` forwards panel visibility on `onDidChangeViewState` and
+dashboard readiness. `UiVisibility` combines that state with `document.hidden` behind
+`app.isUiHidden()` / `app.onUiVisible()`: Board, Jobs, card checks, lanes and the script
+workbench pause background reads and refresh on return. Browser focus refresh still works;
+terminal transport and lifecycle continue independently.
+
 ## Card recall (VB-13)
 
 Board recall adds structured handoffs, curated file references, exact project-scoped card lookup,

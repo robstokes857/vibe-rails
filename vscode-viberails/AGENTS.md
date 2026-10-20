@@ -81,6 +81,12 @@ or reset the launcher list, reloaded its Automation catalog, or saw a script's i
 file name or approval change (the bridge follows `PythonScriptsController.onStateChange`), and the
 view re-reads the catalog.
 
+The host sends `{ command: 'hostVisibility', visible }` on panel visibility changes and
+when `scriptImportReady` arrives. A retained webview behind an editor still reports
+`document.hidden === false`, so the dashboard combines both states through `app.isUiHidden()`.
+Board, Jobs, card-check, lane and script-workbench pollers subscribe to `app.onUiVisible`
+for a refresh on return. This does not change terminal transport or lifecycle behavior.
+
 A tree row's command is delivered once for a click and again for a double-click, up to the OS
 double-click time later. `runLauncherItem` keeps the row in its guard set for
 `LAUNCHER_CLICK_COOLDOWN_MS` (1 s) after the run settles, not only while it is in flight, so a

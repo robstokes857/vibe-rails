@@ -241,30 +241,27 @@ export class BoardController {
 
     bindSessionActivity() {
         this.disposeSessionActivity();
+        let queued = false, disposed = false;
         const refresh = () => {
-            clearTimeout(this._activityTimer);
-            this._activityTimer = setTimeout(() => void this.refreshSessionActivity(), 500);
+            if (queued || disposed) return;
+            queued = true;
+            queueMicrotask(() => {
+                queued = false;
+                if (!disposed && !this.app.isUiHidden()) void this.refreshSessionActivity();
+            });
         };
+        this._activityDisposers.push(() => { disposed = true; });
         for (const event of ['automation_terminal_started', 'session_started', 'session_completed']) {
             const dispose = this.app.appEventClient?.on(event, refresh);
             if (dispose) this._activityDisposers.push(dispose);
         }
         refresh();
         // Also catches launches in another root and a final event missed during a reconnect.
-        this._activityPoll = setInterval(() => {
-            if (!document.hidden) void this.refreshVisibleBoard();
-        }, 10000);
-        const resume = () => { if (!document.hidden) void this.refreshVisibleBoard(); };
-        document.addEventListener('visibilitychange', resume);
-        window.addEventListener('focus', resume);
-        this._activityDisposers.push(() => {
-            document.removeEventListener('visibilitychange', resume);
-            window.removeEventListener('focus', resume);
-        });
+        this._activityPoll = setInterval(() => void this.refreshVisibleBoard(), 10000);
+        this._activityDisposers.push(this.app.onUiVisible(() => void this.refreshVisibleBoard()));
     }
 
     disposeSessionActivity() {
-        clearTimeout(this._activityTimer);
         clearInterval(this._activityPoll);
         this._activityAbort?.abort();
         this._boardPollAbort?.abort();
@@ -274,11 +271,11 @@ export class BoardController {
     }
 
     async refreshVisibleBoard() {
-        if (this._boardPollPending) return;
+        if (this.app.isUiHidden() || this._boardPollPending) return;
         this._boardPollPending = true;
         try {
             await this.refreshBoardSnapshot();
-            if (!document.hidden) await this.refreshSessionActivity();
+            if (!this.app.isUiHidden()) await this.refreshSessionActivity();
         } finally { this._boardPollPending = false; }
     }
 
@@ -334,6 +331,7 @@ export class BoardController {
     }
 
     async refreshSessionActivity() {
+        if (this.app.isUiHidden()) return;
         const root = this.root;
         const editor = document.querySelector('[data-board-card-editor]');
         const onBoard = root?.isConnected && this.app.currentView === 'board' && this.state.boardId;

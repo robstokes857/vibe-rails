@@ -54,6 +54,7 @@ test('activity polling adds and removes desktop styling while preserving CLI act
         querySelector: selector => selector === '.board-card-aside' ? aside : null
     };
     const controller = new BoardController({ currentView: 'board',
+        isUiHidden: () => false,
         apiCall: () => new Promise(resolve => requests.push(resolve)) });
     controller.root = { isConnected: true, querySelectorAll: () => [tile] };
     controller.state.boardId = 'board';

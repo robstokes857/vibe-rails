@@ -8,6 +8,7 @@ function harness() {
     const requests = [];
     const controller = new BoardController({
         currentView: 'board',
+        isUiHidden: () => false,
         apiCall(url, method, body, options) { return new Promise(resolve => requests.push({ url, method, body, options, resolve })); }
     });
     controller.root = { isConnected: true, querySelectorAll: () => [] };

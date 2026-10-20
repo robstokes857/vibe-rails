@@ -150,6 +150,7 @@ test('the 10 s activity poll re-renders the discussion when Azure DevOps deliver
     const requests = [];
     const controller = new BoardController({
         currentView: 'terminal-focus',
+        isUiHidden: () => false,
         apiCall(url, method, body, options) { return new Promise(resolve => requests.push({ url, resolve })); }
     });
     controller.cardAutomations = null;

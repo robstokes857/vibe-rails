@@ -36,6 +36,8 @@ function createApp() {
     const calls = [];
     return {
         calls,
+        isUiHidden: () => Boolean(globalThis.document?.hidden),
+        onUiVisible: () => () => {},
         data: { configs: {} },
         escapeHtml(value) {
             return String(value)

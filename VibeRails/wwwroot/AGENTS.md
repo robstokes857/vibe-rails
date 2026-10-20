@@ -45,6 +45,15 @@ so the map fills the viewport beneath the nav; the bar keeps the shared classes 
 
 **Terminology:** "Web UI Chat" refers to the xterm.js-based terminal, NOT a separate chat UI.
 
+## UI visibility (VIBE-173)
+
+`ui-visibility.js` combines `document.hidden` with VS Code's `hostVisibility` bridge message.
+Use `app.isUiHidden()` and disposable `app.onUiVisible` subscriptions for Board, Jobs,
+card-check, lane and script-workbench polling. The latter fires on visibility return and
+visible-window focus; repeated host states do not trigger another refresh. Ordinary browsers
+use document visibility alone. Keep terminal transport and lifecycle independent of this helper.
+Use microtasks, not short-delay `setTimeout` batching, for webview activity events.
+
 ## Architecture
 
 | File | Purpose |

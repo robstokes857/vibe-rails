@@ -26,11 +26,14 @@ import { TerminalTokenCompressionMeter, getTokenSaverEnabledSources } from './js
 import { openFileExplorer } from './js/modules/file-explorer.js';
 import { setupVSCodeScriptImport } from './js/modules/vscode-script-import.js';
 import { setupVSCodeLauncherBridge } from './js/modules/vscode-launcher-bridge.js';
+import { UiVisibility } from './js/modules/ui-visibility.js';
 import { showAppToast } from './js/modules/toast-service.js';
 import { getLlmName, getProjectNameFromPath, formatRelativeTime, getCliBrand, escapeHtml } from './js/modules/utils.js';
 
 export class VibeControlApp {
     constructor() {
+        // Install before any controller mounts or the dashboard posts its ready signal.
+        this.uiVisibility = new UiVisibility();
         this.currentView = 'terminal-focus';
         this.navigationStack = ['terminal-focus'];
         this.appSettings = this._normalizeAppSettings();
@@ -77,6 +80,14 @@ export class VibeControlApp {
         this.modalSequence = 0;
 
         this.init();
+    }
+
+    isUiHidden() {
+        return this.uiVisibility.isHidden();
+    }
+
+    onUiVisible(listener) {
+        return this.uiVisibility.onVisible(listener);
     }
 
     async init() {

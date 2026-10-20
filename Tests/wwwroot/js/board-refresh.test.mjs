@@ -9,6 +9,7 @@ function harness() {
     const requests = [], toasts = [];
     const controller = new BoardController({
         currentView: 'board',
+        isUiHidden: () => false,
         apiCall(url) {
             return new Promise((resolve, reject) => requests.push({ url, resolve, reject }));
         },

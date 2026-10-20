@@ -200,8 +200,8 @@ export function mountLaneAgentBody({ app, panel, column, signal, position, updat
             else adding = false;
         }, () => !adding && id ? `[data-agent-id="${id}"] [data-agent-action="edit"]` : '#board-lane-agent-choice');
     }, { signal });
-    const timer = setInterval(async () => {
-        if (!alive() || document.hidden || polling || busy || adding) return;
+    const poll = async () => {
+        if (!alive() || app.isUiHidden() || polling || busy || adding) return;
         polling = true;
         const generation = activityGeneration;
         try {
@@ -209,7 +209,9 @@ export function mountLaneAgentBody({ app, panel, column, signal, position, updat
             if (alive() && settings && !busy && !adding && generation === activityGeneration) { settings.runningAgents = fresh.runningAgents; settings.workflows = fresh.workflows; renderRunning(); refreshLaneSteps(content, fresh.workflows); position(); }
         } catch { /* Preserve the last known running list. */ }
         finally { polling = false; }
-    }, 10000);
+    };
+    const timer = setInterval(() => void poll(), 10000);
+    const unsubscribeVisible = app.onUiVisible(() => void poll());
     void reload();
-    return () => { clearInterval(timer); scriptRequest++; };
+    return () => { clearInterval(timer); unsubscribeVisible(); scriptRequest++; };
 }

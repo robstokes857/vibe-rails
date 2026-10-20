@@ -157,6 +157,12 @@ function deferred() {
 function createApp() {
     const app = {
         calls: [],
+        visibleListeners: new Set(),
+        isUiHidden: () => Boolean(globalThis.document?.hidden || globalThis.document?.visibilityState === 'hidden'),
+        onUiVisible(listener) {
+            app.visibleListeners.add(listener);
+            return () => app.visibleListeners.delete(listener);
+        },
         toasts: [],
         errors: [],
         navigations: [],
@@ -440,12 +446,31 @@ test('loadView mounts the shell, fetches the content and starts polling; unload 
     assert.equal(root.el('[data-workbench-splitter]').getAttribute('aria-valuemin'), String(TERMINAL_MIN_HEIGHT));
     // Live reload is polling, and disk/visibility listeners are installed.
     assert.ok(workbench._pollTimer, 'the disk poll is running');
-    assert.deepEqual(documentListeners.map((entry) => entry.type).sort(), ['click', 'visibilitychange']);
+    assert.deepEqual(documentListeners.map((entry) => entry.type), ['click']);
+    assert.equal(app.visibleListeners.size, 1);
 
     workbench.unload();
     assert.equal(workbench._pollTimer, null);
     assert.equal(editor.disposed, true);
     assert.equal(documentListeners.length, 0, 'document listeners are removed');
+    assert.equal(app.visibleListeners.size, 0, 'the visibility subscription is removed');
+});
+
+test('the script workbench skips a host-hidden tab and probes immediately on reveal', async t => {
+    const app = createApp();
+    let hidden = false;
+    app.isUiHidden = () => hidden;
+    const { workbench } = await loadedWorkbench(t, { app });
+    const initialReads = app.calls.length;
+    hidden = true;
+    await workbench.checkDisk();
+    assert.equal(app.calls.length, initialReads);
+    hidden = false;
+    for (const listener of app.visibleListeners) listener();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(app.calls.length, initialReads + 1);
+    workbench.unload();
+    assert.equal(app.visibleListeners.size, 0);
 });
 
 test('loadView without a name, or for a script that is not in the folder, says so and leaves', async (t) => {

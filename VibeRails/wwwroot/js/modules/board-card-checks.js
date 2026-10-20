@@ -110,10 +110,13 @@ export function bindCardChecks(editor, card, app) {
         }
     }
     host.addEventListener('click', onClick);
-    const timer = setInterval(() => { if (!host.ownerDocument.hidden) void refresh(); }, 10000);
+    const poll = () => { if (!app.isUiHidden()) void refresh(); };
+    const timer = setInterval(poll, 10000);
+    const unsubscribeVisible = app.onUiVisible(poll);
     void refresh();
     return { refresh, dispose() {
         disposed = true; ++generation; ++reportGeneration; clearInterval(timer);
+        unsubscribeVisible();
         request?.abort(); reportRequest?.abort(); viewer?.destroy();
         host.removeEventListener('click', onClick);
     } };

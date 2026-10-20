@@ -225,6 +225,7 @@ export class JobController {
             void this.openImportFromRepository();
         }
         this.pollTimer = window.setInterval(() => void this.pollTick(), 5000);
+        this.unsubscribeUiVisible = this.app.onUiVisible(() => void this.pollTick());
     }
 
     /** One 5 s poll. Returns the round it started, or null when it skipped. */
@@ -232,7 +233,7 @@ export class JobController {
         if (this.app.currentView !== this.page.viewId && this.app.currentView !== 'jobs') return null;
         // Like the Board's poll: nothing while the page is hidden, and a slow server never
         // has a second round queued behind the first.
-        if (document.hidden || this.pollPending) return null;
+        if (this.app.isUiHidden() || this.pollPending) return null;
         return this.pollRunsAndJobs();
     }
 
@@ -248,6 +249,8 @@ export class JobController {
     }
 
     unload() {
+        this.unsubscribeUiVisible?.();
+        this.unsubscribeUiVisible = null;
         this.closeEditor();
         this.pythonScripts.unmount();
         this.runModalGeneration += 1;
