@@ -132,6 +132,30 @@ public sealed class BoardStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task EnsureDefaultColumns_ExistingBoard_AnswersWhileAnotherWriterHoldsTheLock()
+    {
+        // Its own unshared-cache files: shared-cache table locks would hide the file write lock.
+        var boardDb = $"Data Source={Path.Combine(_root, "probe-board.db")};Pooling=False";
+        var stateDb = $"Data Source={Path.Combine(_root, "probe-state.db")};Pooling=False";
+        var store = new BoardStore(boardDb, stateDb);
+        Assert.True(await store.EnsureDefaultColumnsAsync(_project, Ct));
+
+        await using var writer = new SqliteConnection(boardDb);
+        await writer.OpenAsync(Ct);
+        await using var transaction = writer.BeginTransaction(deferred: false);
+
+        // Every Board read calls this. With the board present it is a plain WAL read, so a
+        // writer holding board.db's lock no longer makes it wait out the 5 s busy timeout.
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        Assert.False(await store.EnsureDefaultColumnsAsync(_project, Ct));
+        Assert.True(timer.Elapsed < TimeSpan.FromSeconds(3), $"waited {timer.Elapsed} for the write lock");
+
+        await transaction.RollbackAsync(Ct);
+        Assert.True(await store.EnsureDefaultColumnsAsync(_otherProject, Ct));
+        Assert.Single(await store.GetBoardsAsync(_otherProject, Ct));
+    }
+
+    [Fact]
     public async Task HistorySessionCards_ReturnOnlyRequestedActiveCards_DefaultFirst_AcrossBatches()
     {
         await _store.EnsureDefaultColumnsAsync(_project, Ct);

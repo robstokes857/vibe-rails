@@ -181,10 +181,17 @@ public sealed partial class BoardStore : IBoardStore
     public async Task<bool> EnsureDefaultColumnsAsync(string projectPath, CancellationToken cancellationToken = default)
     {
         var project = NormalizeProjectPath(projectPath);
+        await using var connection = await OpenAsync(cancellationToken);
+        // Nearly every Board read calls this and the board almost always exists, so answer that
+        // with a plain read: no write lock and no state.db lookup. The recheck below decides.
+        if (await ScalarLongAsync(connection, null,
+                $"SELECT EXISTS (SELECT 1 FROM Boards WHERE ProjectPath = $project{ProjectPathCollation});",
+                ("$project", project), cancellationToken) != 0)
+            return false;
+
         // Read before the board transaction: this opens state.db, and holding board.db's write
         // lock across that open is how the two files deadlock each other.
         var name = await ResolveDefaultBoardNameAsync(project, cancellationToken);
-        await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
         var count = await ScalarLongAsync(connection, transaction,
             $"SELECT COUNT(*) FROM Boards WHERE ProjectPath = $project{ProjectPathCollation}",

@@ -23,11 +23,27 @@ public class BertV2BgeEmbedder : IBertV2BgeEmbedder
             "[BertEmbedder] Constructing. modelPath={ModelPath} vocabPath={VocabPath} pid={Pid}",
             modelPath, vocabPath, Environment.ProcessId);
 
+        // This session lives in every root and in any `vb mcp` that has searched, and runs one
+        // query or one backfill chunk at a time. ORT's defaults give it an intra-op pool the size
+        // of the machine that spin-waits between operators, and a CPU arena that keeps peak buffers.
+        // Measured on 32 logical cores (VIBE-170): the defaults spent 108 s of CPU on a 4.5 s run;
+        // two non-spinning threads spent about 20 s, with 75 MB less private memory. A query
+        // embed went from about 3 ms to 4 ms, a 512-token chunk from 32 ms to 132 ms. Backfill pace
+        // is set by the job's batch cap and follow-up delay, so a full re-embed should take an
+        // estimated 20% longer.
+        // The memory pattern stays on: without the arena it holds no buffers between runs
+        // (8 MB over 400 distinct lengths), and turning it off made long chunks 1.5x slower again.
         using var options = new Microsoft.ML.OnnxRuntime.SessionOptions
         {
-            GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL
+            GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
+            ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
+            IntraOpNumThreads = 2,
+            InterOpNumThreads = 1,
+            EnableCpuMemArena = false,
+            EnableMemoryPattern = true
         };
-        options.AppendExecutionProvider_CPU(1);
+        options.AddSessionConfigEntry("session.intra_op.allow_spinning", "0");
+        options.AppendExecutionProvider_CPU(0);
 
         var loadSw = System.Diagnostics.Stopwatch.StartNew();
         try
