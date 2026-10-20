@@ -11,7 +11,8 @@ public sealed partial class BoardRecallService(IBoardProjectResolver projects, I
     public static BoardRecallService Create(IServiceProvider services) => new(
         services.GetRequiredService<IBoardProjectResolver>(), services.GetRequiredService<ISearchIndexStore>(),
         services.GetRequiredService<BoardSearchService>(), services.GetRequiredService<IBertSearchDbService>());
-    public sealed record Result(string Text, IReadOnlySet<string> SessionIds, bool Exact);
+    /// <param name="QueryEmbedding">The query's embedding when card discovery computed one, for the history search to reuse.</param>
+    public sealed record Result(string Text, IReadOnlySet<string> SessionIds, bool Exact, float[]? QueryEmbedding = null);
 
     public async Task<Result> SearchAsync(string query, int count, CancellationToken cancellationToken = default)
     {
@@ -23,6 +24,7 @@ public sealed partial class BoardRecallService(IBoardProjectResolver projects, I
         if (keys.Count > 10) throw new BoardValidationException("Search at most 10 explicit card references at a time.");
         var text = new StringBuilder();
         var sessions = new HashSet<string>(StringComparer.Ordinal);
+        float[]? embedding = null;
         if (keys.Count > 0)
         {
             foreach (var key in keys.Distinct(StringComparer.OrdinalIgnoreCase))
@@ -33,9 +35,13 @@ public sealed partial class BoardRecallService(IBoardProjectResolver projects, I
             }
         }
         else
-            foreach (var hit in await search.SearchAsync(project, query, Math.Min(count, 5), ct: cancellationToken))
+        {
+            // search_history embeds the same query for its history groups; one model run serves both.
+            embedding = await search.EmbedQueryAsync(query, cancellationToken);
+            foreach (var hit in await search.SearchAsync(project, query, Math.Min(count, 5), ct: cancellationToken, queryEmbedding: embedding))
                 Append(text, hit, "card - BGE/keyword ranking", sessions);
-        return new(text.ToString(), sessions, keys.Count > 0);
+        }
+        return new(text.ToString(), sessions, keys.Count > 0, embedding);
     }
 
     private void Append(StringBuilder output, BoardSearchHit hit, string source, HashSet<string> sessions)

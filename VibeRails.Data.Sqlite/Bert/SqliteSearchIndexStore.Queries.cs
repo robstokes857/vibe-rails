@@ -130,13 +130,19 @@ public sealed partial class SqliteSearchIndexStore
                 using var vectors = BertVectorDatabase.Open(databasePath, readOnly: true);
                 // Native sqlite-vec distance evaluation and SQL grouping avoid materializing vectors
                 // or letting a long document consume the hit budget. Project filtering happens first.
+                // One sequential pass over vec_search_chunks: joining it per chunk is a vec0 primary-key
+                // lookup per row, about four times slower (VIBE-170). The unary + keeps the eligible-chunk
+                // filter out of vec0's planner, so the scan stays sequential and only eligible rows are
+                // scored; the primary-key joins after it touch only those rows.
                 using var semantic = Command(vectors, $"""
-                    WITH distances AS MATERIALIZED (
-                        SELECT d.Id,c.Id AS ChunkId,c.Position,
-                            1-vec_distance_cosine(v.Embedding,$vector) AS score
-                        FROM SearchDocuments d JOIN SearchSources s ON s.DocumentId=d.Id
-                        JOIN SearchChunks c ON c.SourceId=s.Id JOIN vec_search_chunks v ON v.Id=c.Id
-                        WHERE {Eligibility} AND c.ModelVersion=$model AND s.ChunkVersion=$chunks
+                    WITH scores AS MATERIALIZED (
+                        SELECT v.Id,1-vec_distance_cosine(v.Embedding,$vector) AS score FROM vec_search_chunks v
+                        WHERE +v.Id IN (SELECT c.Id FROM SearchDocuments d JOIN SearchSources s ON s.DocumentId=d.Id
+                            JOIN SearchChunks c ON c.SourceId=s.Id
+                            WHERE {Eligibility} AND c.ModelVersion=$model AND s.ChunkVersion=$chunks)
+                    ), distances AS MATERIALIZED (
+                        SELECT d.Id,c.Id AS ChunkId,c.Position,x.score FROM scores x JOIN SearchChunks c ON c.Id=x.Id
+                        JOIN SearchSources s ON s.Id=c.SourceId JOIN SearchDocuments d ON d.Id=s.DocumentId
                     ), ranked AS (
                         SELECT *,row_number() OVER(PARTITION BY Id ORDER BY score DESC,Position) AS rank FROM distances
                     ) SELECT d.Metadata,c.Text,score,ranked.Position FROM ranked

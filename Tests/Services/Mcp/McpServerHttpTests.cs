@@ -584,7 +584,7 @@ public class McpServerHttpTests : IAsyncLifetime
     /// <summary>Deterministic stand-in for the BGE/sqlite-vec unified search.</summary>
     private sealed class FakeUnifiedSearchService : IUnifiedSearchService
     {
-        public UnifiedSearchResponse Search(string query, int topK)
+        public UnifiedSearchResponse Search(string query, int topK, float[]? queryEmbedding = null)
         {
             var hit = new BertSearchHitResponse(
                 DocumentId: "doc-1",

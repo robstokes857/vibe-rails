@@ -15,10 +15,25 @@ public sealed partial class BoardSearchService(ISearchIndexStore store, Func<IBe
         services.GetRequiredService<ISearchIndexStore>(), () => services.GetRequiredService<IBertV2BgeEmbedder>(),
         services.GetRequiredService<ILogger<BoardSearchService>>());
 
+    /// <summary>Embeds a search query, or returns null (logged) when the model is unavailable.</summary>
+    public async Task<float[]?> EmbedQueryAsync(string query, CancellationToken ct = default)
+    {
+        await QueryModel.WaitAsync(ct);
+        try { return embedder().GenerateEmbedding(query); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Board search model unavailable; using keywords");
+            return null;
+        }
+        finally { QueryModel.Release(); }
+    }
+
     /// <summary>Searches indexed local cards, filtering project eligibility before ranking and limits.</summary>
+    /// <param name="queryEmbedding">An embedding of this query the caller already computed, so the model runs once.</param>
     public async Task<IReadOnlyList<BoardSearchHit>> SearchAsync(string currentProjectPath, string query,
         int count = 50, string? excludeCardId = null, CancellationToken ct = default,
-        IReadOnlyCollection<string>? excludedCardIds = null, string? projectScope = null, bool exactOnly = false)
+        IReadOnlyCollection<string>? excludedCardIds = null, string? projectScope = null, bool exactOnly = false,
+        float[]? queryEmbedding = null)
     {
         query = (query ?? "").Trim();
         if (query.Length > 1000) throw new BoardValidationException("Card search must be at most 1000 characters.");
@@ -30,13 +45,7 @@ public sealed partial class BoardSearchService(ISearchIndexStore store, Func<IBe
         float[]? vector = null;
         ct.ThrowIfCancellationRequested();
         if (!exactOnly && query.Length > 0 && !BoardKeys.TryParseStored(query, out _) && !query.StartsWith("card_", StringComparison.Ordinal))
-        {
-            await QueryModel.WaitAsync(ct);
-            try { vector = embedder().GenerateEmbedding(query); }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            { logger.LogWarning(ex, "Board search model unavailable; using keywords"); }
-            finally { QueryModel.Release(); }
-        }
+            vector = queryEmbedding ?? await EmbedQueryAsync(query, ct);
         var candidates = new List<Candidate>();
         // Card-level grouping happens in SQL, so a long card cannot consume multiple result slots.
         foreach (var match in store.Search("board", query, vector, int.MaxValue, projectScope, excluded))

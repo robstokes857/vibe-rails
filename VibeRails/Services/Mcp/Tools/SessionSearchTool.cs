@@ -66,7 +66,7 @@ public class SessionSearchTool
         UnifiedSearchResponse response;
         try
         {
-            response = _search().Search(query, maxResults);
+            response = _search().Search(query, maxResults, cards?.QueryEmbedding);
         }
         catch (ArgumentException ex) when (string.IsNullOrEmpty(cards?.Text))
         {

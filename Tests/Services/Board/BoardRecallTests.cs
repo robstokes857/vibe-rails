@@ -55,7 +55,7 @@ public sealed class BoardRecallTests : IDisposable
         var local = await Card();
         var foreign = await Card("FOREIGN SECRET", root + "-other");
         var history = new Mock<IUnifiedSearchService>();
-        history.Setup(s => s.Search(It.IsAny<string>(), It.IsAny<int>())).Returns(new UnifiedSearchResponse("VB-1", 1, 0, []));
+        history.Setup(s => s.Search(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<float[]?>())).Returns(new UnifiedSearchResponse("VB-1", 1, 0, []));
         var tool = new SessionSearchTool(history.Object, Recall());
         var result = await tool.SearchHistory($"VB-1, VB-999, {foreign.Key}", 1, Ct);
         Assert.Contains(local.Title, result);

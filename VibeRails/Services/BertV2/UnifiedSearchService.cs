@@ -37,7 +37,7 @@ public sealed class UnifiedSearchService : IUnifiedSearchService
         () => services.GetRequiredService<IBertV2BgeEmbedder>(), services.GetRequiredService<IBertSearchDbService>(),
         services.GetRequiredService<IBertDocumentResponseMapper>(), services.GetService<ILogger<UnifiedSearchService>>());
 
-    public UnifiedSearchResponse Search(string query, int topK)
+    public UnifiedSearchResponse Search(string query, int topK, float[]? queryEmbedding = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(query);
         var normalizedTopK = Math.Clamp(topK <= 0 ? BertSearchDefaults.DefaultTopK : topK, 1, BertSearchDefaults.MaxTopK);
@@ -48,10 +48,10 @@ public sealed class UnifiedSearchService : IUnifiedSearchService
         // doesn't need it. If the embedder is broken (missing ONNX runtime,
         // missing model file, etc.) we still want lexical to return results
         // instead of failing the whole endpoint.
-        float[]? embedding = null;
+        float[]? embedding = queryEmbedding;
         try
         {
-            embedding = _embedder().GenerateEmbedding(query);
+            embedding ??= _embedder().GenerateEmbedding(query);
         }
         catch (Exception ex)
         {
