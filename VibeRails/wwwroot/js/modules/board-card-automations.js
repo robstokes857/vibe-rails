@@ -45,8 +45,23 @@ export function bindCardAutomations(editor, card, { app, onQueued }) {
     let hasEnabledJobs = false;
     let generation = 0;
     let request;
+    let catalog;
+    let renderedOptions = '';
+    const catalogRequest = new AbortController();
     const current = () => !disposed && host.isConnected;
     const updateButton = () => { button.disabled = running || !loaded || !select.value; };
+
+    // The project catalog only says which jobs are Agents, so it is fetched once per editor
+    // open rather than on every 10 s refresh. Its failure only loses the grouping, never the
+    // list, and the next refresh asks again.
+    function loadCatalog() {
+        const projectPath = app.data?.configs?.rootPath || '';
+        if (!projectPath) return Promise.resolve(null);
+        catalog ??= app.apiCall(`/api/v1/jobs?projectPath=${encodeURIComponent(projectPath)}`, 'GET', null,
+            { showLoading: false, signal: catalogRequest.signal })
+            .catch(() => { catalog = undefined; return null; });
+        return catalog;
+    }
 
     async function refresh() {
         if (!current() || running) return;
@@ -55,22 +70,23 @@ export function bindCardAutomations(editor, card, { app, onQueued }) {
         const abort = request = new AbortController();
         try {
             // The card endpoint lists id/name/enabled; the project catalog says which are Agents.
-            // Its failure only loses the grouping, never the list.
-            const projectPath = app.data?.configs?.rootPath || '';
-            const [result, catalog] = await Promise.all([
+            const [result, jobCatalog] = await Promise.all([
                 BoardApi.getCardAutomationsAsync(card.id, { signal: abort.signal }),
-                projectPath
-                    ? app.apiCall(`/api/v1/jobs?projectPath=${encodeURIComponent(projectPath)}`, 'GET', null, { showLoading: false, signal: abort.signal }).catch(() => null)
-                    : Promise.resolve(null)
+                loadCatalog()
             ]);
             if (!current() || generation !== version) return;
             const selected = select.value;
             const jobs = result?.jobs || [];
-            const kinds = new Map((catalog?.jobs || []).map(job => [job.id, jobLaunchKind(job)]));
+            const kinds = new Map((jobCatalog?.jobs || []).map(job => [job.id, jobLaunchKind(job)]));
             hasEnabledJobs = jobs.some(job => job.enabled);
-            select.innerHTML = `<option value="">${hasEnabledJobs ? 'Choose…' : 'Nothing enabled yet'}</option>`
+            const options = `<option value="">${hasEnabledJobs ? 'Choose…' : 'Nothing enabled yet'}</option>`
                 + groupedJobOptions(jobs, kinds);
-            if (jobs.some(job => String(job.id) === selected && job.enabled)) select.value = selected;
+            // Rewriting the options closes an open dropdown, so a periodic refresh with the
+            // same list leaves the element and its selection alone.
+            if (options !== renderedOptions) {
+                select.innerHTML = renderedOptions = options;
+                if (jobs.some(job => String(job.id) === selected && job.enabled)) select.value = selected;
+            }
             select.disabled = !hasEnabledJobs;
             const entries = result?.laneEntries || [];
             runs.innerHTML = entries.map(entry => `<div class="board-automation-run">
@@ -176,6 +192,7 @@ export function bindCardAutomations(editor, card, { app, onQueued }) {
         disposed = true;
         ++generation;
         request?.abort();
+        catalogRequest.abort();
         select.removeEventListener('change', updateButton);
         button.removeEventListener('click', run);
         retry.removeEventListener('click', refresh);
