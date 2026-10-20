@@ -75,7 +75,9 @@ public class SessionResumeService(
 
     public async Task<string> GetResumeSummaryAsync(string sessionId, CancellationToken cancellationToken)
     {
-        var session = await repository.GetSessionWithLogsAsync(sessionId, cancellationToken);
+        // Existence check only: the transcript below reads the logs itself, so loading every
+        // log BLOB here (as GetSessionWithLogsAsync does) would be wasted work.
+        var session = await repository.GetSessionByIdAsync(sessionId, cancellationToken);
         if (session is null)
             throw new KeyNotFoundException($"Session '{sessionId}' not found.");
 

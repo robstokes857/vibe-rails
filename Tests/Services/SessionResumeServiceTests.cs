@@ -75,6 +75,21 @@ public class SessionResumeServiceTests
         Assert.DoesNotContain("other-project", prompt);
     }
 
+    [Fact]
+    public async Task ResumeSummaryChecksTheSessionWithoutLoadingItsLogs()
+    {
+        var repository = new Mock<IRepository>();
+        repository.Setup(r => r.GetSessionByIdAsync("source", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SessionResponse("source", "codex", null, "project", DateTime.UtcNow, null, null));
+        repository.Setup(r => r.GetChatSummariesBySessionAsync("source", It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new ChatSummary { SessionId = "source", SummaryText = "cached recap", Date = DateTime.UtcNow }]);
+        var service = new SessionResumeService(repository.Object, Mock.Of<ISessionTranscriptService>(), Mock.Of<ISummaryService>(), Mock.Of<IBoardStore>(), Resolver());
+
+        Assert.Equal("cached recap", await service.GetResumeSummaryAsync("source", TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => service.GetResumeSummaryAsync("missing", TestContext.Current.CancellationToken));
+        repository.Verify(r => r.GetSessionWithLogsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never());
+    }
+
     [Theory]
     [InlineData(false, "transcript", "cached recap")]
     [InlineData(true, "transcript", "new recap")]
