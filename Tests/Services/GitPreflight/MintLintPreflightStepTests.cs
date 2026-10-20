@@ -90,6 +90,50 @@ public sealed class MintLintPreflightStepTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_WithoutReport_PrintsTheSameLinesAndVerdict()
+    {
+        var snapshot = new GitStagedSnapshot(
+            Directory.GetCurrentDirectory(),
+            [
+                File("src/demo.cs", "public class Demo { public void Run() { if (true) { } } }"),
+                File("src/other.cs", "public class Other { Demo demo; }"),
+                File("README.md", "not supported")
+            ],
+            []);
+
+        async Task<(GitPreflightStepResult Result, List<string> Messages)> RunAsync(bool includeReport)
+        {
+            var messages = new List<string>();
+            var result = await new MintLintPreflightStep().ExecuteAsync(
+                new GitPreflightStepContext(
+                    "run",
+                    Request() with { IncludeReport = includeReport },
+                    snapshot,
+                    (message, _, _) =>
+                    {
+                        messages.Add(message);
+                        return ValueTask.CompletedTask;
+                    }),
+                TestContext.Current.CancellationToken);
+            return (result, messages);
+        }
+
+        var full = await RunAsync(includeReport: true);
+        var hook = await RunAsync(includeReport: false);
+
+        Assert.Equal(full.Messages, hook.Messages);
+        Assert.Equal(full.Result.Output, hook.Result.Output);
+        Assert.Equal(full.Result.Status, hook.Result.Status);
+        Assert.Equal(full.Result.Summary, hook.Result.Summary);
+        Assert.Equal(full.Result.Blocking, hook.Result.Blocking);
+        Assert.True(full.Result.Details!.ContainsKey(MintLintReportFactory.DetailsKey));
+        Assert.False(hook.Result.Details!.ContainsKey(MintLintReportFactory.DetailsKey));
+        Assert.Equal(
+            full.Result.Details.Where(pair => pair.Key != MintLintReportFactory.DetailsKey),
+            hook.Result.Details);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_ScoresOnlyAddedContent_ForModifiedFiles()
     {
         var messy = """

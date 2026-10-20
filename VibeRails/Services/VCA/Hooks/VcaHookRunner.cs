@@ -57,7 +57,8 @@ public sealed class VcaHookRunner : IVcaHookRunner
                     invocation,
                     EnqueueAutomatedJobs: invocation.Kind == VcaHookKind.PreCommit
                         && !invocation.DemoUi
-                        && invocation.EnqueueAutomatedJobs),
+                        && invocation.EnqueueAutomatedJobs,
+                    IncludeReport: false),
                 async (preflightEvent, ct) =>
                     await _presenter.WritePreflightEventAsync(preflightEvent, ct),
                 cancellationToken);

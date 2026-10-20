@@ -2,6 +2,7 @@ using System.Globalization;
 using MintLint;
 using Serilog;
 using VibeRails.DB;
+using VibeRails.DTOs;
 using VibeRails.Services.VCA.Hooks;
 
 namespace VibeRails.Services.GitPreflight;
@@ -120,6 +121,70 @@ public sealed class MintLintPreflightStep(ICodeAnalyzerIgnoreStore? ignoreStore 
         var analyzed = MintLintAnalyzer.AnalyzeSources(changedInputs);
         var scan = MintLintScorer.Score(analyzed);
 
+        var output = new List<string>
+        {
+            ignoredCount > 0
+                ? $"Scanned added code in {scan.Files.Count} supported {sourceScope} source file(s); skipped {skippedCount}, ignored {ignoredCount} by user preference."
+                : $"Scanned added code in {scan.Files.Count} supported {sourceScope} source file(s); skipped {skippedCount}.",
+            $"Overall risk: {scan.Overall.Score:0.0}/100 · {scan.Overall.Rating}"
+        };
+
+        foreach (var file in scan.Files.Take(5))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var concerns = file.Categories
+                .Where(category => category.Score > 0)
+                .OrderByDescending(category => category.Score)
+                .ThenBy(category => category.Name, StringComparer.Ordinal)
+                .Take(2)
+                .Select(category => $"{category.Name} {category.Score:0.0}")
+                .ToList();
+            var concernText = concerns.Count == 0 ? "no notable concerns" : string.Join(", ", concerns);
+            output.Add($"{file.File}: {file.Overall.Score:0.0} {file.Overall.Rating} · {concernText}");
+        }
+
+        foreach (var line in output)
+        {
+            await context.WriteOutputAsync(line, null, cancellationToken);
+        }
+
+        var warning = scan.Overall.Rating is "NeedsWork" or "AtRisk"
+            || scan.Files.Any(file => file.Overall.Rating is "NeedsWork" or "AtRisk");
+        var details = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["supportedFileCount"] = scan.Files.Count.ToString(CultureInfo.InvariantCulture),
+            ["skippedFileCount"] = skippedCount.ToString(CultureInfo.InvariantCulture),
+            ["ignoredFileCount"] = ignoredCount.ToString(CultureInfo.InvariantCulture),
+            ["noAddedCodeFileCount"] = noAddedCodeCount.ToString(CultureInfo.InvariantCulture),
+            ["overallScore"] = scan.Overall.Score.ToString("0.0", CultureInfo.InvariantCulture),
+            ["overallRating"] = scan.Overall.Rating,
+            ["worstFiles"] = string.Join("\n", output.Skip(2))
+        };
+        if (context.Request.IncludeReport)
+        {
+            details[MintLintReportFactory.DetailsKey] = MintLintReportFactory.ToJson(
+                BuildReport(context, candidates, scan, skippedCount));
+        }
+
+        return new GitPreflightStepResult(
+            Id,
+            DisplayName,
+            warning ? GitPreflightStepStatus.Warning : GitPreflightStepStatus.Passed,
+            warning
+                ? $"MintLint found code-health concerns ({scan.Overall.Rating}); commit remains allowed."
+                : $"MintLint finished added-code analysis with a {scan.Overall.Rating} rating.",
+            output,
+            DurationMs: 0,
+            Blocking: false,
+            details);
+    }
+
+    private static MintLintReportResponse BuildReport(
+        GitPreflightStepContext context,
+        IReadOnlyList<MintLintChangeCandidate> candidates,
+        ScanResult scan,
+        int skippedCount)
+    {
         // Reach across the repository: bad code that many files reference outranks bad
         // code nothing uses. Discover declared names from each complete current file, while
         // retaining change-only metrics for the score itself. Tracked files only by default;
@@ -166,64 +231,12 @@ public sealed class MintLintPreflightStep(ICodeAnalyzerIgnoreStore? ignoreStore 
             }
         }
 
-        var output = new List<string>
-        {
-            ignoredCount > 0
-                ? $"Scanned added code in {scan.Files.Count} supported {sourceScope} source file(s); skipped {skippedCount}, ignored {ignoredCount} by user preference."
-                : $"Scanned added code in {scan.Files.Count} supported {sourceScope} source file(s); skipped {skippedCount}.",
-            $"Overall risk: {scan.Overall.Score:0.0}/100 · {scan.Overall.Rating}"
-        };
-
-        foreach (var file in scan.Files.Take(5))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var concerns = file.Categories
-                .Where(category => category.Score > 0)
-                .OrderByDescending(category => category.Score)
-                .ThenBy(category => category.Name, StringComparer.Ordinal)
-                .Take(2)
-                .Select(category => $"{category.Name} {category.Score:0.0}")
-                .ToList();
-            var concernText = concerns.Count == 0 ? "no notable concerns" : string.Join(", ", concerns);
-            output.Add($"{file.File}: {file.Overall.Score:0.0} {file.Overall.Rating} · {concernText}");
-        }
-
-        foreach (var line in output)
-        {
-            await context.WriteOutputAsync(line, null, cancellationToken);
-        }
-
-        var warning = scan.Overall.Rating is "NeedsWork" or "AtRisk"
-            || scan.Files.Any(file => file.Overall.Rating is "NeedsWork" or "AtRisk");
-        var report = MintLintReportFactory.Build(
+        return MintLintReportFactory.Build(
             scan,
             skippedCount,
             contentByFile,
             referencedBy,
             sourceLineNumbersByFile: sourceLineNumbersByFile);
-        var details = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["supportedFileCount"] = scan.Files.Count.ToString(CultureInfo.InvariantCulture),
-            ["skippedFileCount"] = skippedCount.ToString(CultureInfo.InvariantCulture),
-            ["ignoredFileCount"] = ignoredCount.ToString(CultureInfo.InvariantCulture),
-            ["noAddedCodeFileCount"] = noAddedCodeCount.ToString(CultureInfo.InvariantCulture),
-            ["overallScore"] = scan.Overall.Score.ToString("0.0", CultureInfo.InvariantCulture),
-            ["overallRating"] = scan.Overall.Rating,
-            ["worstFiles"] = string.Join("\n", output.Skip(2)),
-            [MintLintReportFactory.DetailsKey] = MintLintReportFactory.ToJson(report)
-        };
-
-        return new GitPreflightStepResult(
-            Id,
-            DisplayName,
-            warning ? GitPreflightStepStatus.Warning : GitPreflightStepStatus.Passed,
-            warning
-                ? $"MintLint found code-health concerns ({scan.Overall.Rating}); commit remains allowed."
-                : $"MintLint finished added-code analysis with a {scan.Overall.Rating} rating.",
-            output,
-            DurationMs: 0,
-            Blocking: false,
-            details);
     }
 
     private sealed record MintLintChangeCandidate(

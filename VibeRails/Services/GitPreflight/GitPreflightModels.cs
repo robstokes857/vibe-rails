@@ -99,7 +99,11 @@ public sealed record GitPreflightRequest(
     // the same pipeline and may report matching before-commit Automations, but must never
     // enqueue real runs.
     bool EnqueueAutomatedJobs = false,
-    string? ScopeLabel = null);
+    string? ScopeLabel = null,
+    // False only from the native git hook, which prints step output and keeps nothing else.
+    // Skips MintLint's whole-file impact scan and report JSON; the printed lines and the
+    // commit verdict do not depend on either.
+    bool IncludeReport = true);
 
 public sealed record GitPreflightEvent(
     string RunId,

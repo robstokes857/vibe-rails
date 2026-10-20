@@ -32,6 +32,8 @@ public sealed class VcaHookRunnerAutomationTests
 
         Assert.Equal(0, exitCode);
         Assert.Equal(authorized, pipeline.Request?.EnqueueAutomatedJobs);
+        // The hook prints step output and keeps nothing, so it never asks for the MintLint report.
+        Assert.False(pipeline.Request?.IncludeReport);
     }
 
     private sealed class CapturingPipeline : IGitPreflightPipeline
