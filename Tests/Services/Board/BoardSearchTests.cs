@@ -49,6 +49,54 @@ public sealed class BoardSearchTests : IDisposable
     }
 
     [Fact]
+    public async Task CombinedFiltersFindDeepForeignMatchesBeforeTheResultLimit()
+    {
+        for (var i = 0; i < 51; i++) await Card("needle matching title " + i);
+        var foreign = root + "-other";
+        await store.EnsureDefaultColumnsAsync(foreign, Ct);
+        var target = await store.CreateCardAsync(foreign,
+            new(null, "Repair retry handling", new string('x', 8000) + " needle", "base:grok-4.6", "high", null, [], false,
+                Type: "bug", AgentMade: true), Ct);
+        await store.AddCommentAsync(foreign, target.Id, BoardAuthor.User(), "Comment-only cobalt evidence", Ct);
+        await store.SaveHandoffAsync(foreign, target.Id, new("Finished", "", "Emerald validation", "", []), BoardAuthor.User(), Ct);
+        var search = Search();
+        var filters = new BoardSearchFilters("base:grok", "bug", "high", "agent");
+        foreach (var query in new[] { "needle", "cobalt", "emerald" })
+        {
+            var hit = Assert.Single(await search.SearchAsync(root, query, 1, ct: Ct, filters: filters));
+            Assert.Equal(target.Id, hit.Id);
+            Assert.False(hit.IsCurrentProject);
+            Assert.Contains(query, hit.Snippet, StringComparison.OrdinalIgnoreCase);
+        }
+        Assert.Empty(await search.SearchAsync(root, "cobalt", ct: Ct, filters: filters with { Type = "feature" }));
+        Assert.Empty(await search.SearchAsync(root, "cobalt", ct: Ct, filters: filters with { Priority = "low" }));
+        Assert.Empty(await search.SearchAsync(root, "cobalt", ct: Ct, filters: filters with { Assignee = "base:codex" }));
+        Assert.Empty(await search.SearchAsync(root, "cobalt", ct: Ct, filters: filters with { Origin = "human" }));
+    }
+
+    [Fact]
+    public async Task OriginFiltersUseStoredCreationAndTrackerLinks()
+    {
+        var human = await Card("needle human");
+        var agent = await store.CreateCardAsync(root,
+            new(null, "needle agent", "", null, "medium", null, [], false, AgentMade: true), Ct);
+        var jira = await Card("needle jira");
+        var ado = await Card("needle ado");
+        await store.SaveJiraConnectionAsync(new("jira_search", root, jira.BoardId,
+            "https://example.atlassian.net", "user@example.com", false, BoardJiraAuthStatus.Expired,
+            null, "project = TEST", false, null, null, null, null, null), Ct);
+        await store.AddJiraLinkAsync(new(jira.Id, "jira_search", "10001", "TEST-1", null, DateTime.UtcNow, DateTime.UtcNow), Ct);
+        await store.SaveAdoConnectionAsync(new("ado_search", root, ado.BoardId, "contoso", "Web", "Team", "Stories", null,
+            "https://dev.azure.com/contoso/Web/_boards", "Stories", null, null, null, null,
+            false, BoardAdoAuthStatus.Expired, false, null, null, false, null, null, null), Ct);
+        await store.AddAdoLinkAsync(new(ado.Id, "ado_search", 42, 1, DateTime.UtcNow, null, DateTime.UtcNow), Ct);
+        var search = Search();
+        foreach (var (origin, expected) in new[] { ("human", human.Id), ("agent", agent.Id), ("jira", jira.Id), ("ado", ado.Id) })
+            Assert.Equal(expected, Assert.Single(await search.SearchAsync(root, "needle", ct: Ct,
+                filters: new(Origin: origin))).Id);
+    }
+
+    [Fact]
     public async Task ExactForeignPermanentKeysWinAndCurrentShortAliasesKeepTheirMeaning()
     {
         var local = await Card();

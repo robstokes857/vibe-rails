@@ -3469,6 +3469,62 @@ for (const width of [1440, 390]) {
 }
 
 for (const width of [1440, 390]) {
+    test(`full-text board search combines every filter at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        await openBoard(page, { assignee: 'base:codex' });
+        const cards = [
+            { id: 'local-feature', key: 'VB-10', title: 'Local work', type: 'feature', assignee: 'base:codex', priority: 'high',
+                origin: 'human', boardId: 'brd_main', boardName: 'Main', columnName: 'Ready', isCurrentProject: true,
+                snippet: 'cobalt found inside a comment' },
+            { id: 'foreign-bug', key: 'OTHER-11', title: 'Foreign repair', type: 'bug', assignee: 'base:claude', priority: 'high',
+                origin: 'agent', boardId: 'outside', boardName: 'Other board', columnName: 'Build', isCurrentProject: false,
+                projectPath: 'C:/other-project', snippet: 'cobalt found deep inside the description' },
+            { id: 'local-bug', key: 'VB-12', title: 'Local repair', type: 'bug', assignee: 'base:codex', priority: 'low',
+                origin: 'human', boardId: 'brd_main', boardName: 'Main', columnName: 'Ready', isCurrentProject: true,
+                snippet: 'cobalt found in previous work' }
+        ];
+        const requests = [];
+        await page.route('**/api/v1/board/cards/search?*', route => {
+            const params = new URL(route.request().url()).searchParams;
+            requests.push(Object.fromEntries(params));
+            const matches = cards.filter(card => ['type', 'assignee', 'priority', 'origin']
+                .every(key => !params.get(key) || params.get(key) === card[key]));
+            return route.fulfill({ json: { cards: matches } });
+        });
+        const search = page.locator('[data-board-search]');
+        const results = page.locator('[data-board-search-card]');
+        await search.fill('cobalt');
+        await expect(results).toHaveCount(3);
+        await expect(page.getByRole('heading', { name: 'Search results', exact: true })).toBeVisible();
+        await expect(results.first().locator('mark')).toHaveText('cobalt');
+        await expect(results.first()).toContainText('inside a comment');
+        for (const [key, value, count] of [
+            ['type', 'bug', 2], ['assignee', 'base:claude', 1], ['priority', 'high', 1], ['origin', 'agent', 1]
+        ]) {
+            const control = page.locator(`[data-board-filter-${key}]`);
+            await expect(control).toBeEnabled();
+            await control.selectOption(value);
+            await expect.poll(() => requests.at(-1)?.[key]).toBe(value);
+            await expect(results).toHaveCount(count);
+            await expect(search).toHaveValue('cobalt');
+        }
+        expect(requests.at(-1)).toEqual({ q: 'cobalt', type: 'bug', assignee: 'base:claude', priority: 'high', origin: 'agent' });
+        await expect(results).toContainText('Foreign repair');
+        await expect(results).toContainText('deep inside the description');
+        expect(await results.evaluateAll(elements => elements.every(element => element.scrollWidth <= element.clientWidth + 1))).toBe(true);
+        await page.screenshot({ path: testInfo.outputPath('filtered-search.png') });
+        await page.locator('[data-board-filter-priority]').selectOption('low');
+        await expect(results).toHaveCount(0);
+        await expect(page.locator('[data-board-search-status]')).toContainText('selected filters');
+        await page.locator('[data-board-clear-filters]').click();
+        await expect(search).toHaveValue('');
+        await expect(page.locator('[data-board-canvas]')).toBeVisible();
+        for (const key of ['type', 'assignee', 'priority', 'origin']) {
+            await expect(page.locator(`[data-board-filter-${key}]`)).toHaveValue('');
+            await expect(page.locator(`[data-board-filter-${key}]`)).toBeEnabled();
+        }
+    });
+
     test(`all-board search edits and links foreign cards with visible ownership at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 950 });
         let current;
@@ -3509,7 +3565,7 @@ for (const width of [1440, 390]) {
         await expect(results.first()).toContainText('Description images');
         await expect(results.last()).toContainText('Another project');
         await expect(results.last()).toContainText('C:/other/<project>');
-        await expect(page.locator('[data-board-filter-type]')).toBeDisabled();
+        await expect(page.locator('[data-board-filter-type]')).toBeEnabled();
         await expect(page.locator('[data-board-canvas]')).toBeHidden();
         expect(await page.evaluate(() => window.__searchXss)).toBeUndefined();
         await results.last().click();

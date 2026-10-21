@@ -236,8 +236,10 @@ async function getBoardCardAsync(cardId, extra = {}) {
 }
 
 /** Search every local board. Ownership labels and ordering come from the server. */
-async function searchBoardCardsAsync(query, extra = {}) {
-    const response = await call(`/cards/search?q=${enc(query)}`, 'GET', null, extra);
+async function searchBoardCardsAsync(query, { filters = {}, ...extra } = {}) {
+    const params = ['assignee', 'type', 'priority', 'origin']
+        .filter(key => filters[key]).map(key => `${key}=${enc(filters[key])}`);
+    const response = await call(`/cards/search?q=${enc(query)}${params.length ? '&' + params.join('&') : ''}`, 'GET', null, extra);
     return response?.cards || [];
 }
 

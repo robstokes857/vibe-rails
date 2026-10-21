@@ -645,10 +645,10 @@ through the ordinary card patch without opening the editor; the server clears ol
 Waiting cards show a badge backed by the durable lane queue; the card's Automations rail can skip
 one exact pending entry with **Continue without this Automation**. Cards stay in their chosen lane
 while entries wait for an available Automation.
-New local boards offer Code quality → VCA → Switch reviewer in the picker, with no lane Automation
-selected by default. Durable recipe receipts recover across the separate Board/state commits
-without assigning the recipe, restoring removed selections or changing old
-boards. See the [starter workflow contract](../VibeRails/Services/Board/ARCHITECTURE.md#new-board-review-defaults-vibe-23).
+New local boards create lanes only; the special Switch reviewer is no longer automatically
+installed or offered as an Agent editor preset. Existing Agents, review routing, card controls
+and lane selections remain intact. Old pending starter intents are retained without recovery.
+See the [starter workflow contract](../VibeRails/Services/Board/ARCHITECTURE.md#new-board-review-defaults-vibe-23).
 
 VB-52 adds owner invitation controls, website recipient inbox/block screens and desktop shared-board
 import. The website enforces the three-collaborator cap and Board membership. Additive `board/26`

@@ -33,11 +33,15 @@ public sealed partial class BoardSearchService(ISearchIndexStore store, Func<IBe
     public async Task<IReadOnlyList<BoardSearchHit>> SearchAsync(string currentProjectPath, string query,
         int count = 50, string? excludeCardId = null, CancellationToken ct = default,
         IReadOnlyCollection<string>? excludedCardIds = null, string? projectScope = null, bool exactOnly = false,
-        float[]? queryEmbedding = null)
+        float[]? queryEmbedding = null, BoardSearchFilters? filters = null)
     {
         query = (query ?? "").Trim();
         if (query.Length > 1000) throw new BoardValidationException("Card search must be at most 1000 characters.");
         count = Math.Clamp(count, 1, 50);
+        var assignee = BoardService.NormalizeAssignee(filters?.Assignee);
+        var type = BoardService.NormalizeCardType(filters?.Type);
+        var priority = BoardService.NormalizePriority(filters?.Priority);
+        var origin = BoardService.NormalizeCardOrigin(filters?.Origin);
         var excluded = excludedCardIds?.ToHashSet(StringComparer.Ordinal) ?? [];
         if (excludeCardId is not null) excluded.Add(excludeCardId);
         var words = Words().Matches(query).Select(match => match.Value).Where(word => word.Length > 1 && !StopWords.Contains(word))
@@ -52,6 +56,18 @@ public sealed partial class BoardSearchService(ISearchIndexStore store, Func<IBe
         {
             ct.ThrowIfCancellationRequested();
             var document = match.Document.Board!;
+            if (assignee is not null && (!BoardSelection.TryParse(document.Assignee, out var assigned)
+                    || !string.Equals(assigned!.Key, assignee, StringComparison.OrdinalIgnoreCase))
+                || type is not null && document.Type != type
+                || priority is not null && document.Priority != priority
+                || origin is not null && !(origin switch
+                {
+                    "agent" => document.AgentMade,
+                    "human" => !document.AgentMade && !document.HasJiraLink && !document.HasAdoLink,
+                    "jira" => document.HasJiraLink,
+                    "ado" => document.HasAdoLink,
+                    _ => false
+                })) continue;
             var current = SameProject(document.ProjectPath, currentProjectPath);
             var exact = Exact(document, query, current);
             if (exactOnly && (exact == 0 || !current && !BoardKeys.TryParseStored(query, out _))) continue;

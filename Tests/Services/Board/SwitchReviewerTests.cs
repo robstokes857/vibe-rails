@@ -41,6 +41,16 @@ public sealed partial class SwitchReviewerTests : IAsyncLifetime
         routing = new(boards, repository, executables.Object);
         jobs = new JobStore(state, boards, new SnapshotFactory(routing));
         await boards.EnsureDefaultColumnsAsync(project, Ct);
+        // Preserve coverage for recipes installed by older releases; new boards no longer seed them.
+        await using (var db = new SqliteConnection($"Data Source={Path.Combine(root, "board.db")};Pooling=False"))
+        {
+            await db.OpenAsync(Ct);
+            await using var command = db.CreateCommand();
+            command.CommandText = "INSERT INTO BoardStarterWorkflows (ColumnId, RecipeId) VALUES ($column, $recipe);";
+            command.Parameters.AddWithValue("$column", (await boards.GetColumnsAsync(project, Ct))[3].Id);
+            command.Parameters.AddWithValue("$recipe", BoardReviewDefaults.RecipeId);
+            await command.ExecuteNonQueryAsync(Ct);
+        }
         card = await boards.CreateCardAsync(project, new(null, "Work", "", "base:opencode", "medium", null, [], false), Ct);
     }
 

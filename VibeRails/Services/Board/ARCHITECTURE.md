@@ -90,6 +90,10 @@ descriptions, Comments, legacy notes and handoffs participate in keyword and BGE
 fusion, weighted by lexical evidence and semantic similarity. Current-project matches receive a
 bounded 10% boost; a strong foreign match can outrank weak local matches. Exact immutable identities
 win, while ambiguous short/display aliases prefer their current-project meaning.
+Dashboard type, assignee, priority and origin filters combine with this full-content search before
+ranking and limiting results. Indexed creation and tracker-link metadata keeps filtering read-only
+in `search.db`. The UI retains usable filters and separates IDs, titles, location and highlighted
+two-line previews so matching cards can be scanned without opening each one.
 Project-only consumers (merge and session/commit reference pickers) constrain eligibility before
 ranking and the 50-result limit, using `currentProjectOnly=true` on the draft candidate route.
 The filter uses the server's project, and unbound searches retain already-linked destinations.
@@ -140,54 +144,28 @@ VIBE-6 adds the derived search cache and explicit search tool/grant described ab
 
 ## New-board review defaults (VIBE-23)
 
-There is one supported local lane template: Backlog / Ready / Build / Review / Done. Both first
-board initialization and additional-board creation use `InsertBoardWithDefaultLanesAsync`.
-The template's Review definition carries recipe `viberails.board.switch-reviewer.v1`; creation
-records its newly allocated lane ID in `BoardStarterWorkflows`, in the same Board transaction.
-Shared imports and adoption of legacy lanes do not seed local workflows.
+First and additional local boards use `InsertBoardWithDefaultLanesAsync` to create the
+Backlog / Ready / Build / Review / Done lanes. No Agent, Automation or starter installation
+intent is created. The former built-in Switch reviewer and its Agent editor preset/routing
+controls have been removed. Board reads and the root scheduler no longer recover pending
+starter installations. The ordinary Code review preset remains available when creating an Agent.
 
-`BoardStarterWorkflowService` finishes untouched intents on root Board access and each root
-scheduler cycle. Lean stdio creation records the intent for that root recovery without running
-full state-schema setup. `IJobStore.EnsureBoardReviewRecipeAsync` creates a dedicated editable
-Worker, enabled Job and `BoardAutomationRecipes` receipt in one state.db transaction. The receipt
-is keyed by project, lane ID and stable recipe ID, independent of display names. Separate Board
-completion retires the intent without assigning the Job. New boards have no lane Automations
-selected; the recipe stays available in the picker until a user explicitly selects it. Existing
-lane selections are preserved, including those installed by older versions. A failed state write
-rolls back the Worker too; an interruption between commits reuses the receipt. The UI reports
-pending setup while the normal recovery retries.
+Existing Agents, Automations, lane selections, card review controls and routing behavior remain
+unchanged. The Agent editor omits reviewer routing on save so retained settings are not rewritten.
+The `board-starter-workflows/1` and `jobs-board-recipes/1` schemas, stored intents, receipts and
+compatibility store methods remain for older versions; removal performs no migration or cleanup.
 
-Both schemas are additive (`board-starter-workflows/1`, `jobs-board-recipes/1`), with no historical
-backfill. Lane-settings insert/update triggers only touch the new intent table, cancelling an
-unfinished install even when an older writer saves an empty selection. Completed intents and
-state receipts survive assignment removal; neither opening nor upgrading refreshes installed
-defaults. Lane deletion cancels its intent but keeps its Worker/Automation. Deleted or disabled
-Automations encountered during recovery are not recreated or assigned. No transaction spans files.
+Previously installed review recipes retain their Code quality → VCA → review Worker actions.
+Their stable receipt still supplies the `unpushed` review scope when a card has no saved review
+settings; saved scopes take precedence, and retries retain their captured routing and scope.
+Nothing converts existing recipes or substitutes providers.
 
-The workflow is Code quality → VCA (editable unpushed scopes from `ReviewCheckDefaults.Create()`)
-→ one explicitly classified Code review Worker. Switch reviewer starts with Claude → Codex,
-Codex → Claude and a visible Codex fallback for unknown/mixed/human/unmapped coding sources.
-Existing attribution, scope snapshots, prerequisite checks and the root scheduler apply. Missing
-providers remain setup problems; no substitute provider or permission bypass is introduced.
-When a card has no saved review settings, the receipt's Job and Worker use `unpushed` for the
-review snapshot, matching the starter checks and capturing a clean committed handoff. Saved
-card scopes take precedence; unrelated Automations retain `working-tree`. This fallback never
-writes settings or changes an existing run snapshot.
-
-Every lane, including the first, has a Lane agents button. The panel shows purpose, report/check
-output, live reviewer mappings and provider setup guidance. Its shared reviewer editor supports
-editable provider/environment targets and a Code review — Codex choice (no source mappings, an
-explicit Codex target for every source). It saves the Worker's routing through the existing
-Environment update; other Worker fields and Automation actions stay intact. The ordinary
-Automation editor owns checks, descriptions, prompts and other workflow edits.
-
-Creation and settings saves never queue runs. Once an Automation is explicitly selected, future
-card entries from any direction, including creation in that lane, retain the existing 60-second
-delay. Renaming/reordering never changes the binding. Saved settings cancel pending entries.
-Humans and agents choose card movement; output
-does not trigger deterministic application moves and Done remains user-defined. Local defaults
-do not publish hosted recipes (VIBE-25). Tests: `BoardStarterWorkflowTests`, schema/compatibility
-tests, and desktop/mobile Lane agents cases in `board-ux.spec.js`.
+Explicit lane Automation selections retain normal lane-entry execution and the 60-second delay.
+Humans and agents choose card movement; no review result moves cards deterministically.
+`BoardStarterWorkflowTests` covers absence of new defaults, inert old installation intents,
+and preservation of installed reviewers and lane selections. `SwitchReviewerTests` retains
+coverage of existing routing and legacy recipes; Agent editor browser tests cover ordinary
+controls and preservation of saved routing on desktop and narrow screens.
 
 ## VIBE-26: remote Start work (2026-10-01)
 
@@ -1330,7 +1308,7 @@ scoped to its project and board even after a card moves. The open panel polls on
 `GET /api/v1/board/columns/{columnId}/automation/running` every 10 seconds: it reads
 `IBoardStore.GetRunningAutomationsAsync` (cards matched by stored trigger key, so a legacy short
 key cannot fail alias resolution) and the lane's running cards by row ID, without the catalog,
-starter recovery or reviewer setup probes. Each root scheduler closes confirmed
+reviewer setup probes. Each root scheduler closes confirmed
 completed Automation hosts after their recording flush; saved recordings remain replayable.
 
 ## Ordered lane workflows

@@ -10,10 +10,12 @@ public static partial class BoardRoutes
     private static void MapLocalSearch(WebApplication app)
     {
         app.MapGet("/api/v1/board/cards/search", ([FromServices] BoardSearchService search,
-            HttpContext context, string? q, int? count, CancellationToken ct) => RunAsync(async () =>
+            HttpContext context, string? q, int? count, string? assignee, string? type,
+            string? priority, string? origin, CancellationToken ct) => RunAsync(async () =>
         {
             context.Response.Headers.CacheControl = "no-store";
-            return Results.Ok(new BoardSearchResponse(await search.SearchAsync(Project(), q ?? "", count ?? 50, ct: ct)));
+            return Results.Ok(new BoardSearchResponse(await search.SearchAsync(Project(), q ?? "", count ?? 50,
+                ct: ct, filters: new(assignee, type, priority, origin))));
         })).WithName("SearchLocalBoardCards");
 
         // Explicit local-user navigation, separate from the existing repository-scoped routes.

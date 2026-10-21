@@ -29,7 +29,9 @@ public sealed partial class BoardStore
                 SELECT c.Id, {CardKeySql}, COALESCE(c.DisplayId, {CardKeySql}), c.Title,
                     b.Id, b.Name, col.Id, col.Name, c.ProjectPath, c.Number,
                     COALESCE(pk.Prefix, $legacyPrefix), c.UpdatedUTC, c.Type, c.Priority, c.Assignee,
-                    c.Blocked, c.Flagged, CASE WHEN $content THEN c.Description ELSE substr(c.Description,1,260) END
+                    c.Blocked, c.Flagged, CASE WHEN $content THEN c.Description ELSE substr(c.Description,1,260) END,
+                    c.AgentMade, EXISTS (SELECT 1 FROM BoardJiraLinks j WHERE j.CardId=c.Id),
+                    EXISTS (SELECT 1 FROM BoardAdoLinks a WHERE a.CardId=c.Id)
                 FROM BoardCards c JOIN BoardColumns col ON col.Id=c.ColumnId
                 JOIN Boards b ON b.Id=col.BoardId
                 {CardPrefixJoinSql}
@@ -51,7 +53,8 @@ public sealed partial class BoardStore
                     reader.GetString(4), reader.GetString(5), reader.GetString(6), reader.GetString(7), reader.GetString(8),
                     reader.GetInt32(9), reader.GetString(10), ParseDb(reader.GetString(11)), reader.GetString(12), reader.GetString(13),
                     reader.IsDBNull(14) ? null : reader.GetString(14), reader.GetBoolean(15), reader.GetBoolean(16), passages)
-                { KeywordSources = new List<string> { title, description },
+                { AgentMade = reader.GetBoolean(18), HasJiraLink = reader.GetBoolean(19), HasAdoLink = reader.GetBoolean(20),
+                    KeywordSources = new List<string> { title, description },
                     Sources = new List<SearchSource> { new("title", title), new("description", description, title) } });
             }
         }

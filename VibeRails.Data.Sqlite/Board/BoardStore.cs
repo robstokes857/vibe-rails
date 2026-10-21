@@ -1653,18 +1653,10 @@ public sealed partial class BoardStore : IBoardStore
         }
         if (!createDefaultLanes) return board;
         var lanePosition = 0;
-        foreach (var (laneName, color, recipeId) in DefaultLaneTemplate)
+        foreach (var (laneName, color) in DefaultLanes)
         {
             var columnId = NewId("col");
             await InsertColumnAsync(connection, transaction, columnId, project, board.Id, laneName, lanePosition++, color, now, cancellationToken);
-            // This is a template role, captured once at creation, never a runtime lane-name lookup.
-            if (recipeId is null) continue;
-            await using var seed = connection.CreateCommand();
-            seed.Transaction = transaction;
-            seed.CommandText = "INSERT INTO BoardStarterWorkflows (ColumnId, RecipeId) VALUES ($column, $recipe);";
-            seed.Parameters.AddWithValue("$column", columnId);
-            seed.Parameters.AddWithValue("$recipe", recipeId);
-            await seed.ExecuteNonQueryAsync(cancellationToken);
         }
         return board;
     }
@@ -2155,18 +2147,15 @@ public sealed partial class BoardStore : IBoardStore
     private static string ToDb(DateTime value) => value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
     private static DateTime ParseDb(string value) => DateTime.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind).ToUniversalTime();
 
-    private static readonly IReadOnlyList<(string Name, string Color, string? RecipeId)> DefaultLaneTemplate =
-    [
-        ("Backlog", "#64748b", null),
-        ("Ready", "#3b82f6", null),
-        ("Build", "#06b6d4", null),
-        ("Review", "#f59e0b", VibeRails.DTOs.BoardReviewDefaults.RecipeId),
-        ("Done", "#10b981", null)
-    ];
-
-    /// <summary>The lanes offered for first and additional local boards.</summary>
+    /// <summary>The lanes offered for first and additional local boards, without seeded Automations.</summary>
     public static readonly IReadOnlyList<(string Name, string Color)> DefaultLanes =
-        DefaultLaneTemplate.Select(lane => (lane.Name, lane.Color)).ToArray();
+    [
+        ("Backlog", "#64748b"),
+        ("Ready", "#3b82f6"),
+        ("Build", "#06b6d4"),
+        ("Review", "#f59e0b"),
+        ("Done", "#10b981")
+    ];
 
     internal const string BoardsTableSql = """
         CREATE TABLE IF NOT EXISTS Boards (

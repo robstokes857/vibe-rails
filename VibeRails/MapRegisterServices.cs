@@ -168,7 +168,6 @@ namespace VibeRails
             serviceCollection.AddSingleton<Services.Board.IBoardProjectResolver, Services.Board.BoardProjectResolver>();
             serviceCollection.AddSingleton<Services.Board.IBoardCommitService, Services.Board.BoardCommitService>();
             serviceCollection.AddScoped<Services.Board.IBoardService, Services.Board.BoardService>();
-            serviceCollection.AddScoped<Services.Board.BoardStarterWorkflowService>();
             serviceCollection.AddScoped<Services.Board.BoardReviewService>();
             serviceCollection.AddScoped<Services.Board.BoardWorkflowService>();
             // Jira Cloud pull (VB-40). The client follows redirects off and never logs the token.

@@ -1,5 +1,4 @@
 import { agentPurposeOptions } from './agent-purpose.js';
-import { switchReviewerDefaults, routingEditorMarkup, mountRoutingEditor } from './reviewer-routing.js';
 import { getEnabledLlmItems, mountLlmPicker, setLlmPickerValue } from './pickers/llm-picker.js';
 import { normalizeSteps, openStepsEditor, renderStepsSummaryButton, serializeSteps, summarizeSteps } from './environment-steps.js';
 import { hasStartingMessage } from './launch-kind.js';
@@ -37,7 +36,7 @@ export function automationWorkerName(name, environments = []) {
  * Nothing is written until save(); dispose() only tears down UI resources.
  *
  * `variant` is what the user is editing. An 'agent' carries a starting message (required when
- * the form belongs to an Automation), work type, reviewer choice, workspace and steps. A
+ * the form belongs to an Automation), work type, workspace and steps. A
  * 'quick-launch' is the same record with settings only: no message field, and the record is
  * saved with an empty message — exactly what submitting the old form with the message blank
  * wrote. `automationWorker` keeps the Automation editor's create flag as it always was.
@@ -72,7 +71,6 @@ export function mountEnvironmentEditor(controller, host, {
         ${!isEdit && !getName ? `<div class="mb-3"><label class="form-label" for="env-name">${isQuickLaunch ? 'Quick Launch name' : 'Name'}</label><input class="form-control" id="env-name" required maxlength="64" value="${escape(initialName)}"></div>` : ''}
         ${isQuickLaunch ? '' : `<div class="env-editor-presets" ${isEdit || getName ? 'hidden' : ''}><span>Start with</span><div class="env-preset-actions">
             <button type="button" class="btn btn-sm btn-outline-secondary" data-code-review-preset>Code review</button>
-            <button type="button" class="btn btn-sm btn-outline-secondary" data-switch-reviewer-preset>Switch reviewer</button>
         </div></div>`}
         <div class="env-primary-options" data-primary-options>
             <div class="env-provider-field"><label class="form-label" for="env-cli">LLM</label>${isEdit
@@ -87,12 +85,6 @@ export function mountEnvironmentEditor(controller, host, {
                 ${isQuickLaunch ? '' : `<div class="mb-3 env-purpose-group"><label class="form-label" for="env-purpose">Work type <span class="text-muted">(optional)</span></label>
                     <select id="env-purpose" class="form-select">${agentPurposeOptions(env?.purpose)}</select>
                     <small class="form-text text-muted">Code review also saves a report on the originating card.</small>
-                </div>
-                <div data-reviewer-policy ${env?.purpose === 'code_review' ? '' : 'hidden'}>
-                    <label class="form-label" for="env-reviewer-mode">Reviewer selection</label>
-                    <select id="env-reviewer-mode" class="form-select mb-2"><option value="fixed">Fixed provider</option><option value="switch" ${env?.reviewerRouting?.mode === 'switch' ? 'selected' : ''}>Switch reviewer</option></select>
-                    <div data-reviewer-routing ${env?.reviewerRouting?.mode === 'switch' ? '' : 'hidden'}>
-                        <p class="text-muted small">Saved for this review agent and reused for every card it reviews in the repository.</p>${routingEditorMarkup()}</div>
                 </div>
                 ${app.data.isInGit ? `<div class="mb-3 env-workspace-group"><label class="form-label" for="env-workspace-mode">Workspace</label><select class="form-select" id="env-workspace-mode">
                     <option value="0" ${workspaceMode === 0 ? 'selected' : ''}>Project directory</option>
@@ -111,7 +103,7 @@ export function mountEnvironmentEditor(controller, host, {
         message.rows = 3;
         const context = document.createElement('div');
         context.className = 'env-context-options';
-        for (const selector of ['.env-purpose-group', '.env-workspace-group', '[data-reviewer-policy]']) {
+        for (const selector of ['.env-purpose-group', '.env-workspace-group']) {
             const field = host.querySelector(selector);
             if (field) context.append(field);
         }
@@ -119,8 +111,6 @@ export function mountEnvironmentEditor(controller, host, {
     }
     const slot = host.querySelector('[data-cli-settings-slot]');
     const primary = host.querySelector('[data-primary-options]');
-    const routingHost = host.querySelector('[data-reviewer-routing]');
-    const routingEditor = mountRoutingEditor(app, routingHost, env?.reviewerRouting || switchReviewerDefaults());
     const cliSelect = get('env-cli');
     const renderSettings = (cli, settings) => {
         primary.querySelectorAll('[data-primary-cli-field]').forEach(field => field.remove());
@@ -160,38 +150,21 @@ export function mountEnvironmentEditor(controller, host, {
         currentCli = cliSelect.value;
         renderSettings(currentCli, drafts.get(currentCli) || {});
     });
-    const reviewerMode = get('env-reviewer-mode');
     const purposeField = get('env-purpose');
-    const updateReviewerControls = () => {
-        if (!reviewerMode || !purposeField) return;
-        const switching = purposeField.value === 'code_review' && reviewerMode.value === 'switch';
-        routingHost.hidden = !switching;
-        primary.hidden = switching;
-        slot.hidden = switching;
-        host.querySelector('[data-custom-args-group]').hidden = switching || controller.usesManagedCustomArgs(currentCli);
-    };
-    reviewerMode?.addEventListener('change', updateReviewerControls);
     purposeField?.addEventListener('change', event => {
-        host.querySelector('[data-reviewer-policy]').hidden = event.target.value !== 'code_review';
-        updateReviewerControls();
         if (!savedEnvironment && event.target.value === 'code_review') {
             if (!get('env-initial-message').value.trim()) get('env-initial-message').value = 'Review the intended changes for correctness, regressions and missing validation. Establish scope from the card handoff and actual checkout. Save the review on the originating card, then follow its workflow instructions.';
         }
     });
-    updateReviewerControls();
-    for (const [selector, mode, name] of [['[data-code-review-preset]', 'fixed', 'Code review'], ['[data-switch-reviewer-preset]', 'switch', 'Switch reviewer']]) {
-        host.querySelector(selector)?.addEventListener('click', event => {
-            if (!savedEnvironment) {
-                setLlmPickerValue(app, cliSelect, 'codex');
-                cliSelect.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-            purposeField.value = 'code_review';
-            purposeField.dispatchEvent(new Event('change', { bubbles: true }));
-            reviewerMode.value = mode;
-            reviewerMode.dispatchEvent(new Event('change'));
-            if (get('env-name') && !get('env-name').value.trim()) get('env-name').value = name;
-        });
-    }
+    host.querySelector('[data-code-review-preset]')?.addEventListener('click', () => {
+        if (!savedEnvironment) {
+            setLlmPickerValue(app, cliSelect, 'codex');
+            cliSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        purposeField.value = 'code_review';
+        purposeField.dispatchEvent(new Event('change', { bubbles: true }));
+        if (get('env-name') && !get('env-name').value.trim()) get('env-name').value = 'Code review';
+    });
     const refreshRefs = message ? controller.bindInitialMessageField(() => editedSteps ?? initialSteps, host) : () => {};
     host.querySelector('[data-env-steps-open]')?.addEventListener('click', event => {
         stepsEditor = openStepsEditor(app, {
@@ -221,8 +194,6 @@ export function mountEnvironmentEditor(controller, host, {
         const purpose = purposeField.value;
         const payload = {
             ...controller.buildEnvironmentSavePayload(cli, settings, host), purpose,
-            reviewerRouting: purpose === 'code_review' && reviewerMode.value === 'switch'
-                ? routingEditor.read() : { ...switchReviewerDefaults(), mode: 'fixed' },
             ...(get('env-hidden') ? { hidden: get('env-hidden').checked } : {}),
             ...(get('env-workspace-mode') ? { workspaceMode: Number(get('env-workspace-mode').value) } : {}),
             ...(editedSteps !== null ? { steps: serializeSteps(editedSteps) } : {})
@@ -269,7 +240,6 @@ export function mountEnvironmentEditor(controller, host, {
             if (disposed) return;
             disposed = true;
             pickerDisposer?.();
-            routingEditor.dispose();
             stepsEditor?.close({ restoreFocus: false });
             host.querySelector('.env-step-output-menu')?._vbCloseMenu?.();
         }

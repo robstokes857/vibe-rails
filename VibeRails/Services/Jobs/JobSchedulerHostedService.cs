@@ -201,7 +201,6 @@ public sealed class JobSchedulerHostedService : BackgroundService, IJobScheduler
             cancellationToken);
         _health.LeaseChanged(_ownsLease);
         await RecordPresenceAsync(nowUtc, cancellationToken);
-        await RecoverThisProjectsStartersAsync(cancellationToken);
         await CloseThisRootsFinishedAutomationTabsAsync(cancellationToken);
         if (!_ownsLease)
         {
@@ -297,24 +296,6 @@ public sealed class JobSchedulerHostedService : BackgroundService, IJobScheduler
         catch (Exception ex)
         {
             Log.Warning(ex, "[Jobs] Could not record this window's presence for {OwnerId}; another window may open this project's Board runs after the grace period", _ownerId);
-        }
-    }
-
-    private async Task RecoverThisProjectsStartersAsync(CancellationToken cancellationToken)
-    {
-        if (_projectResolver is null) return;
-        try
-        {
-            using var scope = _scopeFactory.CreateScope();
-            var starters = scope.ServiceProvider.GetService<BoardStarterWorkflowService>();
-            if (starters is null) return;
-            var project = await _projectResolver.ResolveAsync(cancellationToken);
-            if (!string.IsNullOrWhiteSpace(project)) await starters.RecoverAsync(project, cancellationToken);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-        catch (Exception ex)
-        {
-            Log.Warning(ex, "[Jobs] Starter review setup will retry on the next cycle");
         }
     }
 

@@ -83,7 +83,6 @@ public sealed partial class BoardService(
     IBoardStore store,
     IBoardCommitService commits,
     IBoardLiveSessionProbe liveSessions,
-    BoardStarterWorkflowService? starterWorkflows = null,
     BoardSearchService? searchService = null) : IBoardService
 {
     // Raised 2026-09-17 (description 20k→100k, comment 10k→50k, attachments 12→40 per card): the
@@ -104,7 +103,6 @@ public sealed partial class BoardService(
     private async Task EnsureDefaultBoardAsync(string projectPath, CancellationToken cancellationToken)
     {
         await store.EnsureDefaultColumnsAsync(projectPath, cancellationToken);
-        if (starterWorkflows is not null) await starterWorkflows.RecoverAsync(projectPath, cancellationToken);
     }
 
     public async Task<BoardListResponse> GetBoardsAsync(string projectPath, CancellationToken cancellationToken = default)
@@ -132,7 +130,6 @@ public sealed partial class BoardService(
         // Board and prefix are one write: a failure cannot leave the board without the prefix it was created with.
         var prefix = string.IsNullOrWhiteSpace(request.DisplayPrefix) ? null : BoardDisplayIds.NormalizePrefix(request.DisplayPrefix);
         var board = await store.CreateBoardAsync(projectPath, name, prefix, cancellationToken);
-        if (starterWorkflows is not null) await starterWorkflows.RecoverAsync(projectPath, cancellationToken);
         var columns = await store.GetColumnsAsync(projectPath, cancellationToken, board.Id);
         return ToDto(board, columns, new Dictionary<string, int>());
     }

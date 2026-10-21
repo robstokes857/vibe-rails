@@ -7,11 +7,10 @@ namespace VibeRails.Services.Board;
 
 /// <summary>Project-scoped lane settings and existing Automation choices for the dashboard.</summary>
 public sealed class BoardAutomationService(IBoardStore boards, IJobStore jobs,
-    BoardStarterWorkflowService? starters = null, IRepository? repository = null, IJobExecutableResolver? executables = null)
+    IRepository? repository = null, IJobExecutableResolver? executables = null)
 {
     public async Task<BoardLaneAutomationResponse?> GetAsync(string projectPath, string columnId, CancellationToken cancellationToken)
     {
-        if (starters is not null) await starters.RecoverAsync(projectPath, cancellationToken);
         var setting = await boards.GetLaneAutomationAsync(projectPath, columnId, cancellationToken);
         if (setting is null) return null;
         var catalog = await jobs.GetJobsAsync(projectPath, cancellationToken: cancellationToken);
@@ -20,9 +19,8 @@ public sealed class BoardAutomationService(IBoardStore boards, IJobStore jobs,
         foreach (var job in catalog)
             choices.Add(new(job.Id, job.Name, job.Enabled, selected.Contains(job.Id)
                 ? await ReviewSetupAsync(projectPath, job, cancellationToken) : null));
-        var pending = (await boards.GetPendingStarterWorkflowsAsync(projectPath, cancellationToken)).Any(seed => seed.ColumnId == columnId);
         return new(selected.Count == 0 ? null : selected[0], setting.Revision, choices, selected,
-            pending, await ReadRunningAgentsAsync(projectPath, columnId, cancellationToken),
+            false, await ReadRunningAgentsAsync(projectPath, columnId, cancellationToken),
             await boards.GetLaneWorkflowsAsync(projectPath, columnId, cancellationToken));
     }
 
@@ -48,7 +46,7 @@ public sealed class BoardAutomationService(IBoardStore boards, IJobStore jobs,
 
     /// <summary>
     /// The lane panel's poll: Automations running for cards that entered this lane and are still on its board.
-    /// No catalog, starter recovery or reviewer setup probes, which only the full settings read needs.
+    /// No catalog or reviewer setup probes, which only the full settings read needs.
     /// </summary>
     public async Task<BoardLaneRunningAgentsResponse?> GetRunningAgentsAsync(string projectPath, string columnId, CancellationToken cancellationToken) =>
         await boards.GetColumnAsync(projectPath, columnId, cancellationToken) is null ? null

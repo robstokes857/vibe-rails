@@ -62,12 +62,10 @@ values atomically. The first position is the default board; reordering does not 
 never by display ID or short-key alias. These support explicit MCP targeting (VIBE-28); writes
 still use the resolved owning project and existing transactional checks. No schema change.
 
-`board-starter-workflows/1` adds new-board recipe intents, bound to lane IDs at creation only.
-Settings insert/update triggers retire an intent without changing existing settings or history.
-Current recovery completes the intent through `IBoardStore` without assigning the Automation;
-it stays available for explicit lane selection. The older completion/assignment contract and
-existing selections remain supported. State recipe installation commits independently through
-`IJobStore`. Never backfill old boards or reset completion after removal.
+`board-starter-workflows/1` retains historical recipe intents and its settings triggers for
+older versions. New boards no longer insert intents and current Board reads/scheduling never
+recover them. Keep the schema, old intents, installed recipes and existing lane selections
+intact. Compatibility store methods remain; do not backfill, reset, convert or clean up old rows.
 
 `board-lane-dispatch/1` adds a dispatch ledger and cancellation triggers that write only to that
 new table. Existing queue/schema writers remain compatible. Busy events stay pending; the drain

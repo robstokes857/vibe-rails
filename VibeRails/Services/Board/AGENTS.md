@@ -53,6 +53,9 @@ no-key `search_history` discovery. Search all local boards, prefer the current r
 return explicit board/lane/project metadata. Full permanent keys and row IDs identify foreign
 cards; short aliases keep their project meaning. Search includes current descriptions, titles,
 Comments, retained notes and handoffs, excluding change history and deleted/hidden discussion.
+Dashboard type, assignee, priority and origin filters remain available during search and apply
+before ranking and the result limit. Creation/tracker provenance travels with the indexed card
+metadata; searches do not fetch canonical cards to apply these filters.
 VIBE-55 derives complete sources through `IBoardStore` into the shared `search.db` component.
 The existing root indexing jobs build token-aware BGE chunks and sqlite-vec vectors; searches
 never index content or enrich results from state.db. Legacy JSON caches remain stored but unused.
@@ -105,16 +108,11 @@ auto-attach a session, and explicit session attachments remain within the curren
 
 ## New-board review defaults (VIBE-23)
 
-The single local lane template records a `BoardStarterWorkflows` intent with the new Review
-lane's ID in the board-creation transaction. `BoardStarterWorkflowService` recovers it through
-`IJobStore.EnsureBoardReviewRecipeAsync`, then completes the intent through `IBoardStore` without
-assigning it. New boards have no lane Automations selected; Switch reviewer stays available in
-the picker for explicit selection. Preserve existing selections. Workers, Jobs
-and the stable recipe receipt commit together in state.db. Root Board access and the existing
-scheduler recover incomplete installs; a lean stdio first-board creation only records intent.
-Never seed by runtime lane name, retrofit existing boards, refresh installed recipes, or restore
-a removed assignment. A settings write, even an empty selection from an older writer, cancels
-pending installation. Removing a lane or assignment keeps the shared Automation and Worker.
+New local boards create only the Backlog / Ready / Build / Review / Done lanes. They do not
+seed a Switch reviewer Agent, Automation or pending installation intent. Board access and the
+scheduler never recover old pending starter installations. Keep existing Agents, Automations,
+lane selections, intents and recipe receipts intact; this removal does not authorize cleanup
+or historical conversion. Existing reviewer routing and card review controls remain supported.
 See [the starter contract](ARCHITECTURE.md#new-board-review-defaults-vibe-23).
 
 ## Ordered and waiting lane Automations
@@ -184,9 +182,9 @@ surface unavailable targets, and never substitute providers or permission flags.
 
 ## Card checks (VIBE-24)
 
-Read [CHECKS.md](CHECKS.md) for scope, immutable evidence, UI lifecycle and starter review defaults.
+Read [CHECKS.md](CHECKS.md) for scope, immutable evidence and UI lifecycle.
 Keep deterministic checks outside the Git preflight pipeline and all evidence behind IBoardStore.
-Results never move cards. VIBE-23 consumes `ReviewCheckDefaults.Create()` when seeding new templates.
+Results never move cards. Existing review recipes retain their ordered check actions.
 
 ## Workflow intent (VIBE-17)
 
@@ -195,8 +193,8 @@ decide card movement through the UI or Board MCP tools. Give agents the lane con
 expected output and workflow instructions so they can choose the appropriate next action.
 Do not add deterministic application rules that move cards based on review or Automation outcomes,
 or impose a stay-in-lane default. Lane names, order and the meaning of Done remain user-defined.
-The optional new-board review recipe uses Switch reviewer (Claude to Codex, Codex to Claude), with editable
-mappings and a fixed Codex review alternative; the implementation scope is tracked on VIBE-20–25.
+The former built-in Switch reviewer is no longer seeded. Existing user-selected workflows keep
+their saved behavior; new Agents use the ordinary editor without a special switching preset.
 
 ## Public card sharing
 

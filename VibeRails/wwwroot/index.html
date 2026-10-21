@@ -3101,27 +3101,149 @@
                     flex: 1 1 auto;
                     min-height: 0;
                     overflow-y: auto;
-                    padding: 1rem 0;
+                    padding: 1.25rem 0.25rem 2rem;
                 }
 
                 .board-search-results[hidden] { display: none; }
 
+                .board-search-summary, [data-board-search-list] {
+                    width: 100%;
+                    max-width: 76rem;
+                    margin-inline: auto;
+                }
+
+                .board-search-summary {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    gap: 0.75rem 1.5rem;
+                    margin-bottom: 1rem;
+                }
+
+                .board-search-summary h2 {
+                    margin: 0 0 0.3rem;
+                    font-size: max(1.1rem, 18px);
+                    font-weight: 650;
+                    color: var(--color-text, #f8fafc);
+                }
+
+                .board-search-summary p {
+                    margin: 0;
+                    font-size: max(0.8rem, 13px);
+                    line-height: 1.5;
+                    color: var(--color-text-muted, #94a3b8);
+                }
+
+                .board-search-summary [data-board-search-status] {
+                    max-width: 25rem;
+                    text-align: right;
+                }
+
                 .board-search-result {
                     display: flex;
                     flex-direction: column;
-                    gap: 0.3rem;
+                    gap: 0.5rem;
                     width: 100%;
                     text-align: left;
-                    padding: 0.9rem 1rem;
-                    margin-bottom: 0.6rem;
+                    padding: 1rem 1.15rem;
+                    margin-bottom: 0.65rem;
                     background: var(--color-bg-surface, #1e1e1e);
                     border: 1px solid var(--color-border, #334155);
-                    border-radius: 8px;
+                    border-radius: 10px;
                     color: var(--color-text, #f8fafc);
                 }
 
                 .board-search-result:hover, .board-search-result:focus-visible {
                     border-color: var(--color-primary, #3b82f6);
+                    background: color-mix(in srgb, var(--color-primary, #3b82f6) 5%, var(--color-bg-surface, #1e1e1e));
+                }
+
+                .board-search-result:focus-visible {
+                    outline: 2px solid var(--color-primary, #3b82f6);
+                    outline-offset: 2px;
+                }
+
+                .board-search-result-heading {
+                    display: flex;
+                    align-items: baseline;
+                    gap: 0.65rem;
+                    width: 100%;
+                    min-width: 0;
+                }
+
+                .board-search-result-key {
+                    flex: 0 0 auto;
+                    font-family: 'JetBrains Mono', monospace;
+                    font-size: max(0.8rem, 12px);
+                    font-weight: 500;
+                    padding: 0.15rem 0.4rem;
+                    border: 1px solid var(--color-border, #334155);
+                    border-radius: 5px;
+                    color: var(--color-text-muted, #94a3b8);
+                }
+
+                .board-search-result-title {
+                    flex: 1;
+                    min-width: 0;
+                    font-size: max(1.05rem, 16px);
+                    font-weight: 600;
+                    line-height: 1.5;
+                    overflow-wrap: anywhere;
+                }
+
+                .board-search-result-type, .board-search-result-arrow {
+                    flex: 0 0 auto;
+                    font-size: max(0.8rem, 12px);
+                    color: var(--color-text-muted, #94a3b8);
+                }
+
+                .board-search-result-type { text-transform: capitalize; }
+
+                .board-search-result-location {
+                    display: flex;
+                    flex-wrap: wrap;
+                    align-items: baseline;
+                    gap: 0.25rem 0.85rem;
+                    font-size: max(0.85rem, 13px);
+                    line-height: 1.5;
+                    color: var(--color-text-muted, #94a3b8);
+                }
+
+                .board-search-result-location :is(.board-side-sub, .board-search-warning) {
+                    font-size: inherit;
+                    color: inherit;
+                }
+
+                .board-search-result-location .board-search-warning {
+                    color: var(--color-warning, #fbbf24);
+                }
+
+                .board-search-result .board-search-snippet {
+                    max-width: 100ch;
+                    display: -webkit-box;
+                    -webkit-line-clamp: 2;
+                    -webkit-box-orient: vertical;
+                    overflow: hidden;
+                    font-size: max(0.95rem, 14px);
+                    line-height: 1.65;
+                    color: color-mix(in srgb, var(--color-text, #f8fafc) 82%, var(--color-text-muted, #94a3b8));
+                }
+
+                .board-search-result mark {
+                    padding: 0.05em 0.1em;
+                    border-radius: 3px;
+                    background: color-mix(in srgb, var(--color-primary, #3b82f6) 20%, transparent);
+                    color: var(--color-text, #f8fafc);
+                    font-weight: 600;
+                }
+
+                @media (max-width: 600px) {
+                    .board-search-summary { align-items: flex-start; flex-direction: column; }
+                    .board-search-summary [data-board-search-status] { text-align: left; }
+                    .board-search-result { padding: 0.85rem; }
+                    .board-search-result-heading { flex-wrap: wrap; gap: 0.35rem 0.5rem; }
+                    .board-search-result-title { flex-basis: 100%; order: 1; }
+                    .board-search-result-type { margin-left: auto; }
                 }
 
                 .board-search-snippet, .board-search-warning, .board-local-project {
@@ -4918,7 +5040,7 @@
                     <div class="board-search">
                         <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
                         <input type="search" class="board-control board-search-input" data-board-search
-                            placeholder="Search all local boards" maxlength="300" autocomplete="off" spellcheck="false" aria-label="Search all local boards">
+                            placeholder="Search card titles and contents" maxlength="300" autocomplete="off" spellcheck="false" aria-label="Search all local boards">
                     </div>
                     <select class="board-control" data-board-filter-type aria-label="Filter by type">
                         <option value="">Any type</option>
@@ -4952,8 +5074,13 @@
             </div>
 
             <section class="board-search-results" data-board-search-results hidden aria-label="Card search results">
-                <p class="text-muted small mb-2">Search titles, descriptions, comments and previous work across all local boards. Clear search to return to lanes and filters.</p>
-                <p class="small" data-board-search-status role="status" aria-live="polite"></p>
+                <header class="board-search-summary">
+                    <div>
+                        <h2>Search results</h2>
+                        <p>Titles, descriptions, comments and saved work · All local boards</p>
+                    </div>
+                    <p data-board-search-status role="status" aria-live="polite"></p>
+                </header>
                 <div data-board-search-list></div>
             </section>
             <div class="board-canvas" data-board-canvas>

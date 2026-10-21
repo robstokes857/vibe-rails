@@ -176,7 +176,11 @@ navigation, manufacture a tab, or alter Automation status.
 **Local search (VIBE-6).** Typing in Board search switches from lanes to ranked results across
 every local board, including other projects; clearing it restores lanes and their filters.
 `board-search.js` owns debouncing, cancellation, escaped snippets and ownership labels.
-Lane filters are disabled during global search. The linked-card picker uses the same local scope,
+Type, assignee, priority and origin filters stay enabled during global search and apply before
+the result limit. Search includes full descriptions, visible comments/notes and saved handoffs;
+assignee choices also include agents on search results. Search cards separate IDs, titles and
+locations, highlight literal matches and show two-line previews. Header counts reflect search
+matches while the results list is active. The linked-card picker uses the same local scope,
 while Move or merge and `!`/`#` card reference pickers request `currentProjectOnly=true` before
 the server's search limit; already-linked local cards stay eligible. `@` is file-only.
 Search and links visibly label the
@@ -915,6 +919,9 @@ toolbar holds an All / Workflows / Scripts filter (`data-filter` on the list, CS
 signing PIN and refresh; the count reads `N workflows · M scripts`, and the list is the drop target
 for script files. The Agents page keeps its own header and **Disabled agents** group. The native
 `details` groups start closed and preserve their open state across list refreshes.
+The Agent editor has no Switch reviewer preset or reviewer-routing controls. It retains the
+ordinary Code review preset and omits `reviewerRouting` on save, preserving any existing routing
+configuration. Card review controls and saved reviewer behavior are unchanged.
 
 An Automation is an ordered workflow of repository Script actions and checks. Script actions
 select `.py`, `.ps1`, or `.sh`, an explicit matching runtime, optional repository-relative working

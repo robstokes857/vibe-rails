@@ -9,6 +9,30 @@ namespace Tests.Routes;
 
 public sealed partial class BoardRoutesTests
 {
+    [Fact]
+    public async Task LocalSearchCombinesFiltersWithFullTextAcrossProjects()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var store = _app.Services.GetRequiredService<IBoardStore>();
+        await store.EnsureDefaultColumnsAsync(_project, ct);
+        await store.CreateCardAsync(_project, new(null, "cobalt title", "", null, "medium", null, [], false), ct);
+        var foreign = _project + "-foreign";
+        await store.EnsureDefaultColumnsAsync(foreign, ct);
+        var target = await store.CreateCardAsync(foreign,
+            new(null, "Retry fix", "Deep cobalt detail", "base:codex", "high", null, [], false, Type: "bug", AgentMade: true), ct);
+        await store.AddCommentAsync(foreign, target.Id, BoardAuthor.User(), "ultraviolet discussion", ct);
+        IndexBoard();
+        foreach (var query in new[] { "cobalt", "ultraviolet" })
+        {
+            using var response = await GetJsonAsync($"/api/v1/board/cards/search?q={query}&count=1&assignee=base%3Acodex&type=bug&priority=high&origin=agent");
+            var card = Assert.Single(response.RootElement.GetProperty("cards").EnumerateArray());
+            Assert.Equal(target.Id, card.GetProperty("id").GetString());
+            Assert.False(card.GetProperty("isCurrentProject").GetBoolean());
+        }
+        using var noMatch = await GetJsonAsync("/api/v1/board/cards/search?q=cobalt&type=feature");
+        Assert.Empty(noMatch.RootElement.GetProperty("cards").EnumerateArray());
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -159,6 +183,7 @@ public sealed partial class BoardRoutesTests
         foreach (var (method, url, body) in new (HttpMethod, string, object?)[]
         {
             (HttpMethod.Get, "/api/v1/board/cards/search?q=indexed", null),
+            (HttpMethod.Get, "/api/v1/board/cards/search?q=indexed&type=bug&origin=human", null),
             (HttpMethod.Get, path, null),
             (HttpMethod.Put, path, new UpdateBoardCardRequest(Title: "Denied", Points: JsonSerializer.SerializeToElement((int?)null))),
             (HttpMethod.Post, path + "/comments", new AddBoardCommentRequest("Denied")),

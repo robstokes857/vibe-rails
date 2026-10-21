@@ -70,8 +70,8 @@ instructed to inspect scope, coverage and failures before choosing the next lane
 `ReviewCheckDefaults.Create()` supplies **Code quality → VCA**, both in unpushed scope, before the
 single review Worker. This avoids an empty working-tree result after a commit. Missing upstream
 must be addressed or the user can select an explicit range/repository scope. Actions stay editable,
-reorderable and removable. VIBE-23 owns consuming this factory in new-board template creation and
-recoverable cross-database seeding; existing boards/workflows are not retrofitted. VIBE-25 owns
+reorderable and removable. New boards no longer install this special review recipe; existing
+recipes and their check actions remain unchanged. VIBE-25 owns
 hosted recipe/evidence distribution. Local evidence currently remains local and is not added to
 the Board sync wire contract by this change.
 

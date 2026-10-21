@@ -650,10 +650,11 @@ export class BoardController {
         return this.state.cards.filter(card => this.cardMatches(card));
     }
 
-    // Distinct assignees present on the board, for the toolbar filter.
+    // Keep current-board, search-result and selected assignees available in the filter.
     allAssignees() {
         const seen = new Map();
-        const selections = this.cardPage?.assignees || this.state.cards.map(card => card.assignee);
+        const selections = [...(this.cardPage?.assignees || this.state.cards.map(card => card.assignee)),
+            ...(this.boardSearch?.cards || []).map(card => card.assignee), this.state.filters.assignee];
         for (const selection of selections) {
             const key = canonicalLlmSelection(selection);
             if (!key || seen.has(key)) continue;
@@ -669,6 +670,14 @@ export class BoardController {
     }
 
     stats() {
+        if (this.state.filters.q.trim() && this.boardSearch) {
+            const matches = this.boardSearch.cards;
+            return {
+                cards: matches.length,
+                flagged: matches.filter(card => card.flagged && !this.isDoneLane({ name: card.columnName })).length,
+                blocked: matches.filter(card => card.blocked).length
+            };
+        }
         // The flagged count replaced the remaining-points total and keeps its scope: active
         // filters, cards that paging has not loaded yet, and open lanes only. A flag left on a
         // completed card is not a call for attention. The server page applies the same lane rule.
@@ -719,6 +728,8 @@ export class BoardController {
         this.boardSearch?.dispose();
         this.boardSearch = new BoardSearch(this.root, {
             currentBoardId: () => this.state.boardId,
+            filters: () => this.state.filters,
+            onResults: () => this.renderToolbar(),
             openCard: card => card.isCurrentProject === true
                 ? this.openCardEditor(card.id) : this.openLocalCard(card.id)
         });
@@ -793,9 +804,10 @@ export class BoardController {
 
         const assignee = this.query('[data-board-filter-assignee]');
         if (assignee) {
-            assignee.innerHTML = '<option value="">Anyone</option>'
+            const options = '<option value="">Anyone</option>'
                 + this.allAssignees().map(info =>
                     `<option value="${escapeHtml(info.key)}">${escapeHtml(info.label)}</option>`).join('');
+            if (assignee.innerHTML !== options) assignee.innerHTML = options;
             assignee.value = this.state.filters.assignee;
             assignee.title = assignee.selectedOptions[0]?.textContent || '';
         }

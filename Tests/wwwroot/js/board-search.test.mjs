@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BoardApi } from '../../../VibeRails/wwwroot/js/modules/board-api.js';
-import { BoardSearch, searchResultsHtml, cardLocationHtml } from '../../../VibeRails/wwwroot/js/modules/board-search.js';
+import { BoardSearch, searchResultsHtml, cardLocationHtml, highlightSearchText } from '../../../VibeRails/wwwroot/js/modules/board-search.js';
 import { BoardController } from '../../../VibeRails/wwwroot/js/modules/board-controller.js';
 import { localCardEditorHtml, readLocalCardForm, localCardChanges, openLocalCardEditor } from '../../../VibeRails/wwwroot/js/modules/board-local-card.js';
 
@@ -21,17 +21,19 @@ function searchHarness() {
         classList: { toggle(name, on) { if (on) classes.add(name); else classes.delete(name); } }
     };
     const calls = [];
+    const filters = { assignee: '', type: '', priority: '', origin: '' };
     const search = new BoardSearch(root, { currentBoardId: () => 'board-current', openCard() {},
-        search(query, { signal }) { const request = deferred(); calls.push({ query, signal, ...request }); return request.promise; } });
-    return { search, calls, status, results, host, controls, classes };
+        filters: () => filters,
+        search(query, { signal, filters }) { const request = deferred(); calls.push({ query, signal, filters, ...request }); return request.promise; } });
+    return { search, calls, status, results, host, controls, classes, filters };
 }
 
-test('new search invalidates old results and failures immediately, and clearing restores lane filters', async () => {
+test('new search invalidates old results and failures immediately, and keeps filters enabled', async () => {
     const h = searchHarness();
     const old = h.search.setQuery('old query', { immediate: true });
     const current = h.search.setQuery('semantic query', { immediate: true });
     assert.equal(h.calls[0].signal.aborted, true);
-    assert.equal(h.controls[0].disabled, true);
+    assert.equal(h.controls[0].disabled, false);
     assert.equal(h.host.hidden, false);
     h.calls[1].resolve([{ id: 'new-card', title: 'New result', key: 'V-2', isCurrentProject: true }]);
     await current;
@@ -48,6 +50,45 @@ test('new search invalidates old results and failures immediately, and clearing 
     assert.equal(h.controls[0].disabled, false);
     assert.equal(h.classes.has('is-searching'), false);
     h.search.dispose();
+});
+
+test('changing filters reruns the same full-text query and ignores unfiltered responses', async () => {
+    const h = searchHarness();
+    const old = h.search.setQuery('deep comment', { immediate: true });
+    Object.assign(h.filters, { type: 'bug', assignee: 'base:codex', priority: 'high', origin: 'agent' });
+    const filtered = h.search.setQuery('deep comment', { immediate: true });
+    assert.equal(h.calls[0].signal.aborted, true);
+    assert.deepEqual(h.calls[0].filters, { type: '', assignee: '', priority: '', origin: '' });
+    assert.deepEqual(h.calls[1].filters, h.filters);
+    h.calls[1].resolve([{ id: 'matched', title: 'Matched description' }]);
+    await filtered;
+    h.calls[0].resolve([{ id: 'other', title: 'Unfiltered result' }]);
+    await old;
+    assert.match(h.results.innerHTML, /Matched description/);
+    assert.doesNotMatch(h.results.innerHTML, /Unfiltered result/);
+    h.search.setQuery('deep comment', { immediate: true });
+    assert.equal(h.calls.length, 2, 'unchanged filters must not refetch');
+    h.filters.type = 'feature';
+    const empty = h.search.setQuery('deep comment', { immediate: true });
+    h.calls[2].resolve([]);
+    await empty;
+    assert.match(h.status.textContent, /selected filters/);
+    assert.equal(h.controls[0].disabled, false);
+    h.search.dispose();
+});
+
+test('search client sends combined card filters through the protected search route', async () => {
+    const calls = [];
+    const signal = new AbortController().signal;
+    BoardApi.attach({ async apiCall(...args) { calls.push(args); return { cards: [] }; } });
+    await BoardApi.searchBoardCardsAsync('inside & outside', { signal,
+        filters: { assignee: 'base:codex', type: 'bug', priority: 'high', origin: 'agent', q: 'ignored', projectPath: 'ignored' } });
+    const [path, method, body, options] = calls[0];
+    assert.equal(path, '/api/v1/board/cards/search?q=inside%20%26%20outside&assignee=base%3Acodex&type=bug&priority=high&origin=agent');
+    assert.equal(method, 'GET');
+    assert.equal(body, null);
+    assert.equal(options.signal, signal);
+    assert.equal(Object.hasOwn(options, 'filters'), false);
 });
 
 test('unloading search aborts pending work and ignores its result', async () => {
@@ -71,6 +112,28 @@ test('search and linked-card context keep server order and escape foreign names,
     assert.match(html, /&lt;svg onload=alert\(1\)&gt; comment/);
     assert.doesNotMatch(html, /<img|<script|<svg/i);
     assert.match(cardLocationHtml({ ...current, boardId: 'second' }, 'own'), /Another board in this project/);
+});
+
+test('search highlights literal matches and keeps both query and card markup inert', () => {
+    assert.equal(highlightSearchText('GitHub fixes from github', 'github'), '<mark>GitHub</mark> fixes from <mark>github</mark>');
+    assert.equal(highlightSearchText('C++ [regex] .* end', 'C++ [regex] .*'), '<mark>C++</mark> <mark>[regex]</mark> <mark>.*</mark> end');
+    const html = searchResultsHtml([{ id: 'one', key: 'V-1', title: 'GitHub <img src=x>',
+        snippet: '<script>github</script>', type: 'bug' }], 'current', 'github <script>');
+    assert.match(html, /board-search-result-key">V-1/);
+    assert.match(html, /board-search-result-title"><mark>GitHub<\/mark>/);
+    assert.match(html, /<mark>&lt;script&gt;<\/mark><mark>github<\/mark>&lt;\/script&gt;/);
+    assert.doesNotMatch(html, /<img|<script/i);
+});
+
+test('toolbar counts reflect full-content search matches instead of the current boards title filter', () => {
+    const controller = new BoardController({});
+    controller.state.filters.q = 'deep comment';
+    controller.cardPage = { filteredCount: 0, flaggedCount: 0, blockedCount: 0 };
+    controller.boardSearch = { cards: [
+        { columnName: 'Ready', flagged: true, blocked: true },
+        { columnName: 'Done', flagged: true, blocked: false }
+    ] };
+    assert.deepEqual(controller.stats(), { cards: 2, flagged: 1, blocked: 1 });
 });
 
 test('local discovery, edit, discussion and link clients use explicit credential-bearing routes', async () => {
