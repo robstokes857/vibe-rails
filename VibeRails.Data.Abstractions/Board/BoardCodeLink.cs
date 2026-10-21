@@ -16,7 +16,8 @@ public static partial class BoardCodeLinks
     {
         var text = value?.Trim() ?? "";
         var match = text.Length <= 500 ? GitHubUrl().Match(text) : Match.Empty;
-        if (!match.Success)
+        // Browsers resolve dot path segments before navigation; neither names a repository.
+        if (!match.Success || match.Groups[2].Value is "." or "..")
             throw new BoardValidationException("Enter a GitHub pull request or commit URL: https://github.com/owner/repo/pull/123 or /commit/<sha>.");
         var repo = match.Groups[1].Value.ToLowerInvariant() + "/" + match.Groups[2].Value.ToLowerInvariant();
         var kind = match.Groups[3].Value.ToLowerInvariant();

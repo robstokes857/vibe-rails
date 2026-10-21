@@ -5,7 +5,10 @@ import { codeLinksSection, renderCodeLinks, safeCodeLinkUrl } from '../../../Vib
 test('only GitHub PR and commit URLs become links', () => {
     assert.equal(safeCodeLinkUrl('https://github.com/org/repo/pull/42'), 'https://github.com/org/repo/pull/42');
     assert.equal(safeCodeLinkUrl('https://github.com/org/repo/commit/abc1234'), 'https://github.com/org/repo/commit/abc1234');
-    for (const url of ['javascript:alert(1)', 'https://github.com.evil/org/repo/pull/42', 'https://github.com@evil.org/org/repo/pull/42', 'https://github.com/org/repo/issues/42', null])
+    assert.equal(safeCodeLinkUrl('https://github.com/o/.github/pull/1'), 'https://github.com/o/.github/pull/1');
+    for (const url of ['javascript:alert(1)', 'https://github.com.evil/org/repo/pull/42', 'https://github.com@evil.org/org/repo/pull/42', 'https://github.com/org/repo/issues/42',
+        'https://github.com/org/./pull/42', 'https://github.com/org/../commit/abc1234',
+        'https://github.com/org/%2e%2e/pull/42', 'https://github.com/org-/repo/pull/42', null])
         assert.equal(safeCodeLinkUrl(url), null);
 });
 

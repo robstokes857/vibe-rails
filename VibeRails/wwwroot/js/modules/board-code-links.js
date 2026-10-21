@@ -20,7 +20,7 @@ export function codeLinksSection(card) {
 /** Defense in depth for stored or remote data before creating an external anchor. */
 export function safeCodeLinkUrl(value) {
     if (typeof value !== 'string' || value.length > 500) return null;
-    return /^https:\/\/github\.com\/[a-z0-9][a-z0-9-]*\/[a-z0-9_.-]+\/(?:pull\/[1-9][0-9]*|commit\/[a-f0-9]{7,40})$/i.test(value) ? value : null;
+    return /^https:\/\/github\.com\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\/(?!\.{1,2}\/)[a-z0-9_.-]+\/(?:pull\/[1-9][0-9]*|commit\/[a-f0-9]{7,40})$/i.test(value) ? value : null;
 }
 
 export function renderCodeLinks(editor, card) {
