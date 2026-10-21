@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { BoardController } from '../../../VibeRails/wwwroot/js/modules/board-controller.js';
 import { boardTextOptions } from '../../../VibeRails/wwwroot/js/modules/board-composer-preview.js';
 import { renderCommentHtml } from '../../../VibeRails/wwwroot/js/modules/board-text.js';
+import { renderCodeLinks } from '../../../VibeRails/wwwroot/js/modules/board-code-links.js';
 
 function harness() {
     const requests = [];
@@ -129,6 +130,58 @@ test('activity does not replace GitHub link controls while a link write is pendi
     requests[1].resolve({ ...editor._boardCard, codeLinks: [{ id: 'old-link' }] });
     await poll;
     assert.deepEqual(editor._boardCard.codeLinks, []);
+});
+
+for (const removing of [false, true]) {
+    test(`comment reload renders remotely ${removing ? 'removed' : 'added'} GitHub links before later polls`, async t => {
+        const editor = openEditor(t);
+        const list = {}, count = {};
+        editor.querySelector = selector => selector === '[data-board-code-link-list]' ? list
+            : selector === '[data-board-count="code-links"]' ? count : null;
+        const link = { id: 'github-link', url: 'https://github.com/org/repo/pull/42', label: 'org/repo PR #42' };
+        editor._boardCard.codeLinks = removing ? [link] : [];
+        editor._boardCard.description = 'Unsaved description';
+        renderCodeLinks(editor, editor._boardCard);
+        const { controller, requests } = harness();
+        controller.renderCardDiscussion = () => {};
+        const post = controller.postComment(editor, 'Posted comment');
+        requests[0].resolve({});
+        await new Promise(resolve => setImmediate(resolve));
+        const fresh = { ...editor._boardCard, description: 'Saved description',
+            comments: [{ id: 'posted', body: 'Posted comment' }], codeLinks: removing ? [] : [link] };
+        requests[1].resolve(fresh);
+        await post;
+        assert.deepEqual(editor._boardCard.codeLinks, fresh.codeLinks);
+        for (let pollNumber = 0; pollNumber < 2; pollNumber++) {
+            const offset = requests.length;
+            const poll = controller.refreshSessionActivity();
+            requests[offset].resolve({ cards: [] });
+            requests[offset + 1].resolve(fresh);
+            await poll;
+        }
+        assert.equal(count.textContent, removing ? '0' : '1');
+        assert.equal(list.innerHTML.includes('data-board-remove-code-link="github-link"'), !removing);
+        assert.equal(editor._boardCard.description, 'Unsaved description');
+    });
+}
+
+test('card reload preserves pending or newer GitHub link writes', async t => {
+    const editor = openEditor(t);
+    for (const pendingWrite of [true, false]) {
+        editor._boardCodeLinkBusy = false;
+        const link = { id: 'new-link', url: 'https://github.com/org/repo/pull/42' };
+        editor._boardCard.codeLinks = [];
+        const older = structuredClone(editor._boardCard);
+        const { controller, requests } = harness();
+        const reload = controller.reloadEditingCard(editor);
+        if (pendingWrite) editor._boardCodeLinkBusy = true;
+        else editor._boardCard.codeLinks.push(link);
+        requests[0].resolve({ ...older, codeLinks: pendingWrite ? [link] : [] });
+        await reload;
+        const expected = pendingWrite ? [] : [link];
+        assert.deepEqual(editor._boardCard.codeLinks, expected);
+        assert.deepEqual(controller.state.cards[0].codeLinks, expected);
+    }
 });
 
 test('the running robot opens its Automation, and never opens the card or the working agent', async () => {

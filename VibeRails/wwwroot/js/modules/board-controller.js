@@ -2578,14 +2578,25 @@ export class BoardController {
     async reloadEditingCard(editor) {
         const cardId = this.cardIdFromEditor(editor);
         if (!cardId) return null;
+        const codeLinksSnapshot = JSON.stringify(editor._boardCard?.codeLinks);
         const card = await BoardApi.getBoardCardAsync(cardId);
+        // A link write can finish while this GET is in flight. Keep its newer result,
+        // and let the next activity poll reconcile any other remote link changes.
+        if (editor._boardCard && (editor._boardCodeLinkBusy
+            || JSON.stringify(editor._boardCard.codeLinks) !== codeLinksSnapshot)) {
+            card.codeLinks = editor._boardCard.codeLinks;
+        }
         const index = this.state.cards.findIndex(c => c.id === card.id);
         if (index >= 0) this.state.cards[index] = card;
         // Every rail mutation that reloads the card (comment, commit, session) changed what an
         // agent would read; the Agent context section re-measures rather than going stale.
-        if (editor._boardCard) Object.assign(editor._boardCard, {
-            comments: card.comments, notes: card.notes, sessions: card.sessions, commits: card.commits, codeLinks: card.codeLinks, attachments: card.attachments
-        });
+        if (editor._boardCard) {
+            const codeLinksChanged = JSON.stringify(editor._boardCard.codeLinks) !== JSON.stringify(card.codeLinks);
+            Object.assign(editor._boardCard, {
+                comments: card.comments, notes: card.notes, sessions: card.sessions, commits: card.commits, codeLinks: card.codeLinks, attachments: card.attachments
+            });
+            if (codeLinksChanged) renderCodeLinks(editor, editor._boardCard);
+        }
         editor._boardContext?.refresh();
         return card;
     }
