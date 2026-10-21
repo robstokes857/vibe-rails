@@ -109,16 +109,17 @@ public sealed class HumanSignatureRuleSyntaxTests
     }
 
     [Fact]
-    public void Trailer_DeduplicatesAndBoundsTheWorkOneMessageCanCause()
+    public void Trailer_DeduplicatesAndKeepsMessageOrderWithoutACap()
     {
-        var lines = Enumerable.Range(0, 8)
-            .Select(i => CommitSignatureFormat.Format(new CommitSignature(KeyId, Fingerprint, Tree,
-                Convert.ToBase64String(Enumerable.Repeat((byte)i, 256).ToArray()))))
+        // The verification budget is applied after the tree filter (RulesTool), so parsing must not
+        // drop a fresh signature that follows stale ones.
+        var signatures = Enumerable.Range(0, 8)
+            .Select(i => new CommitSignature(KeyId, Fingerprint, Tree,
+                Convert.ToBase64String(Enumerable.Repeat((byte)i, 256).ToArray())))
             .ToList();
+        var lines = signatures.Select(CommitSignatureFormat.Format).ToList();
         lines.Insert(1, lines[0]);
-        var parsed = CommitSignatureFormat.Parse(string.Join("\n", lines));
-        Assert.Equal(CommitSignatureFormat.MaxSignaturesPerMessage, parsed.Count);
-        Assert.Equal(parsed.Count, parsed.Select(signature => signature.SignatureBase64).Distinct().Count());
+        Assert.Equal(signatures, CommitSignatureFormat.Parse(string.Join("\n", lines)));
     }
 
     [Fact]

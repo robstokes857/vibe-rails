@@ -249,6 +249,8 @@ public sealed class HumanSignaturePopup
     /// <summary>
     /// Adds the signature as a trailer: after a blank line, before a scissors line if there is one
     /// (everything below it is dropped by <c>git commit -v</c>), keeping the file's own line endings.
+    /// Signature lines over another tree, and earlier ones from the same key, are removed first: they
+    /// cannot help this commit, and kept they would pile up across amends and signing rounds.
     /// </summary>
     internal static async Task AppendSignatureAsync(string path, CommitSignature signature, CancellationToken cancellationToken)
     {
@@ -260,7 +262,7 @@ public sealed class HumanSignaturePopup
         var head = scissors >= 0 ? text[..scissors] : text;
         var tail = scissors >= 0 ? text[scissors..] : string.Empty;
 
-        var trimmedHead = head.TrimEnd('\r', '\n');
+        var trimmedHead = RemoveSupersededSignatures(head, signature).TrimEnd('\r', '\n');
         var lastLine = trimmedHead[(trimmedHead.LastIndexOf('\n') + 1)..].Trim();
         var separator = trimmedHead.Length == 0
             ? string.Empty
@@ -269,6 +271,23 @@ public sealed class HumanSignaturePopup
                 : newline + newline;
         var updated = trimmedHead + separator + line + newline + (tail.Length > 0 ? newline + tail : string.Empty);
         await File.WriteAllTextAsync(path, updated, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
+    }
+
+    private static string RemoveSupersededSignatures(string text, CommitSignature replacement)
+    {
+        var kept = new StringBuilder(text.Length);
+        var position = 0;
+        while (position < text.Length)
+        {
+            var end = text.IndexOf('\n', position);
+            var next = end < 0 ? text.Length : end + 1;
+            var line = text[position..next];
+            var superseded = CommitSignatureFormat.TryParseTrailer(line, out var existing)
+                && (existing.TreeId != replacement.TreeId || existing.KeyId == replacement.KeyId);
+            if (!superseded) kept.Append(line);
+            position = next;
+        }
+        return kept.ToString();
     }
 
     private static int FindScissorsLine(string text)

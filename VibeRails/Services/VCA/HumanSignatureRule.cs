@@ -209,8 +209,12 @@ public static class CommitSignatureFormat
     public const string Algorithm = "RSA-PSS-SHA256";
     public const string PayloadPrefix = "VibeRails human-verified commit v1\n";
 
-    /// <summary>Bounds the network work one commit message can cause.</summary>
-    public const int MaxSignaturesPerMessage = 5;
+    /// <summary>
+    /// Bounds the network work one commit message can cause: only the newest (last in the message)
+    /// this many signatures over the staged tree are sent for verification. The bound is applied
+    /// after the tree filter, so stale trailers left by an amend cannot crowd out a fresh one.
+    /// </summary>
+    public const int MaxVerifiedSignatures = 5;
 
     public static byte[] BuildPayload(string treeId) =>
         Encoding.UTF8.GetBytes($"{PayloadPrefix}tree {treeId}\n");
@@ -226,24 +230,31 @@ public static class CommitSignatureFormat
     /// <summary>
     /// Every well-formed signature line in a message whose Git comments are already stripped.
     /// Malformed lines are ignored rather than reported: they cannot satisfy the rule, and the rule's
-    /// own message already says what is missing. Duplicates collapse and at most
-    /// <see cref="MaxSignaturesPerMessage"/> are returned.
+    /// own message already says what is missing. Duplicates collapse; order is the message's. Parsing
+    /// is local, so nothing is capped here: <see cref="MaxVerifiedSignatures"/> bounds verification.
     /// </summary>
     public static IReadOnlyList<CommitSignature> Parse(string? message)
     {
         var signatures = new List<CommitSignature>();
         if (string.IsNullOrWhiteSpace(message)) return signatures;
 
+        var seen = new HashSet<string>(StringComparer.Ordinal);
         using var lines = new StringReader(message);
-        while (lines.ReadLine() is { } line && signatures.Count < MaxSignaturesPerMessage)
+        while (lines.ReadLine() is { } line)
         {
-            var trimmed = line.Trim();
-            if (!trimmed.StartsWith(Trailer, StringComparison.OrdinalIgnoreCase)) continue;
-            if (TryParseLine(trimmed[Trailer.Length..], out var signature)
-                && !signatures.Any(existing => existing.SignatureBase64 == signature.SignatureBase64))
+            if (TryParseTrailer(line, out var signature) && seen.Add(signature.SignatureBase64))
                 signatures.Add(signature);
         }
         return signatures;
+    }
+
+    /// <summary>One message line as a well-formed signature trailer, ignoring surrounding whitespace.</summary>
+    public static bool TryParseTrailer(string line, out CommitSignature signature)
+    {
+        signature = null!;
+        var trimmed = line.Trim();
+        return trimmed.StartsWith(Trailer, StringComparison.OrdinalIgnoreCase)
+            && TryParseLine(trimmed[Trailer.Length..], out signature);
     }
 
     private static bool TryParseLine(string body, out CommitSignature signature)

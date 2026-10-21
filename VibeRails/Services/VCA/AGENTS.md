@@ -209,8 +209,10 @@ where the id is the staged tree from the snapshot (`StagedIdentity.StagedTree`, 
 write-tree`). That is exactly the content being committed, so any staged change after signing
 invalidates it, while amending only the message keeps it valid.
 
-**Where it lives.** One trailer per signature, after Git comments are stripped, at most five read:
-`vibe-signature: v1 key=<viberails.ai key id> fp=<fingerprint> tree=<tree> sig=<base64>`.
+**Where it lives.** One trailer per signature, read after Git comments are stripped:
+`vibe-signature: v1 key=<viberails.ai key id> fp=<fingerprint> tree=<tree> sig=<base64>`. Only
+signatures over the staged tree go to viberails.ai, and only the newest (last) five of those, so
+stale trailers left by an amend cannot crowd out a fresh one.
 
 **Verification.** Deferred at pre-commit, on the Rules page and in MCP `validate_vca`. At commit-msg,
 a signature over another tree fails locally ("the staged content changed after signing"); the rest
@@ -230,13 +232,16 @@ offered while an unrelated STOP violation, or an unreachable viberails.ai, would
 `HumanSignaturePopup` shows the repository, subject, tree and changed files, lists keys synced for
 the current API key, reads the password key by key with echo off (redirected input refused,
 10-minute idle timeout, three attempts), signs with `SigningKeyService.SignCommitTreeAsync`,
-confirms with viberails.ai and appends the trailer above any scissors line.
+confirms with viberails.ai and appends the trailer above any scissors line. Appending also drops
+trailers over another tree and earlier ones from the same key, so signing rounds do not pile up.
 
 **Policy from HEAD.** Rules normally come from the staged vc.rules.md. For these two rules only,
 `RulesTool.AddCommittedSignatureRules` also reads the committed text of every modified, renamed or
 deleted vc.rules.md: a rule the commit removes or weakens is enforced at its committed level, and
 removing an approval counts as touching its path. Taking a gate away therefore needs the signature
-the gate asks for. The snapshot provider keeps `PreviousContent` for a deleted vc.rules.md for this.
+the gate asks for. The snapshot provider keeps `PreviousContent` for a committed vc.rules.md whatever
+replaced it (deleted, or staged as binary, oversized or a gitlink), so an unreadable staged policy
+cannot drop the committed one.
 
 **Threat model.** It stops an agent from producing an approval: the key password is never stored,
 the dashboard's Sign message route refuses the commit-approval prefix, no MCP tool signs, and the

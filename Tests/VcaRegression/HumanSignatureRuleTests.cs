@@ -195,6 +195,97 @@ public sealed class HumanSignatureRuleTests
         Assert.Contains("[STOP] " + HumanSignatureRule.HumanVerifiedName, run.Transcript);
     }
 
+    /// <summary>
+    /// PR #87 review P1: a staged vc.rules.md the snapshot cannot read as text used to drop the
+    /// committed signature rules with it, and the hook passed with "No vc.rules.md files found".
+    /// </summary>
+    [Theory]
+    [InlineData("human-verified/remove-rule", HumanSignatureRule.HumanVerifiedName, "binary")]
+    [InlineData("human-verified/remove-rule", HumanSignatureRule.HumanVerifiedName, "oversized")]
+    [InlineData("human-verified/remove-rule", HumanSignatureRule.HumanVerifiedName, "gitlink")]
+    [InlineData("signed-approval/basic", ApprovalRule, "binary")]
+    [InlineData("signed-approval/basic", ApprovalRule, "oversized")]
+    [InlineData("signed-approval/basic", ApprovalRule, "gitlink")]
+    public async Task UnreadableStagedPolicyStillNeedsTheCommittedSignature(string scenario, string rule, string replacement)
+    {
+        await using var repo = await VcaRegressionRepository.CreateAsync(scenario);
+        var policy = Path.Combine(repo.RepositoryPath, "vc.rules.md");
+        switch (replacement)
+        {
+            case "binary":
+                await File.WriteAllBytesAsync(policy, [0], TestContext.Current.CancellationToken);
+                await repo.GitAsync("add", "--", "vc.rules.md");
+                break;
+            case "oversized":
+                // Text, but over the snapshot's 5 MiB text limit, so it is classified like a binary.
+                await File.WriteAllTextAsync(policy, "## Vibe Rails Rules\n" + new string('x', 5 * 1024 * 1024) + "\n",
+                    TestContext.Current.CancellationToken);
+                await repo.GitAsync("add", "--", "vc.rules.md");
+                break;
+            case "gitlink":
+                var head = (await repo.GitAsync("rev-parse", "HEAD")).Trim();
+                await repo.GitAsync("update-index", "--cacheinfo", $"160000,{head},vc.rules.md");
+                break;
+        }
+
+        var blocked = await repo.RunCommitMessageAsync("Replace the policy\n");
+        Assert.True(blocked.ExitCode == 1, blocked.Transcript);
+        Assert.Contains("[STOP] " + rule, blocked.Transcript);
+
+        Use(repo, FakeCommitSignatureVerifier.ValidFor("owner@example.com"));
+        var signed = await repo.RunCommitMessageAsync($"Replace the policy\n\n{SignatureLine(await StagedTreeAsync(repo))}\n");
+        Assert.True(signed.ExitCode == 0, signed.Transcript);
+    }
+
+    /// <summary>PR #87 review P2: the five-signature budget used to be spent before the tree filter.</summary>
+    [Fact]
+    public async Task FreshSignatureAfterFiveStaleOnesPasses()
+    {
+        await using var repo = await VcaRegressionRepository.CreateAsync("human-verified/basic");
+        var verifier = Use(repo, FakeCommitSignatureVerifier.ValidFor("person@example.com"));
+        var tree = await StagedTreeAsync(repo);
+        var stale = Enumerable.Range(1, 5).Select(i => SignatureLine(new string('0', 40), (byte)i));
+
+        var run = await repo.RunCommitMessageAsync($"Retry signing\n\n{string.Join('\n', stale)}\n{SignatureLine(tree)}\n");
+
+        Assert.True(run.ExitCode == 0, run.Transcript);
+        Assert.Equal(tree, Assert.Single(verifier.Calls).TreeId);
+    }
+
+    [Fact]
+    public async Task OnlyTheNewestCurrentSignaturesAreVerified()
+    {
+        await using var repo = await VcaRegressionRepository.CreateAsync("human-verified/basic");
+        var verifier = Use(repo, new FakeCommitSignatureVerifier(_ =>
+            new CommitSignatureVerification(CommitSignatureStatus.Rejected, "not a valid signature")));
+        var tree = await StagedTreeAsync(repo);
+        var lines = Enumerable.Range(1, CommitSignatureFormat.MaxVerifiedSignatures + 2)
+            .Select(i => SignatureLine(tree, (byte)i))
+            .ToList();
+
+        var run = await repo.RunCommitMessageAsync($"Fix bug\n\n{string.Join('\n', lines)}\n");
+
+        Assert.Equal(1, run.ExitCode);
+        Assert.Equal(
+            CommitSignatureFormat.Parse(string.Join('\n', lines)).TakeLast(CommitSignatureFormat.MaxVerifiedSignatures),
+            verifier.Calls);
+    }
+
+    [Fact]
+    public async Task PopupReplacesStaleSignaturesAndPasses()
+    {
+        await using var repo = await VcaRegressionRepository.CreateAsync("human-verified/basic");
+        Use(repo, FakeCommitSignatureVerifier.ValidFor("person@example.com"));
+        UsePrompt(repo, sign: true);
+        var stale = Enumerable.Range(1, 5).Select(i => SignatureLine(new string('0', 40), (byte)i));
+
+        var run = await repo.RunCommitMessageAsync($"Amended\n\n{string.Join('\n', stale)}\n", "--prompt-acknowledgment");
+
+        Assert.True(run.ExitCode == 0, run.Transcript);
+        var message = await File.ReadAllTextAsync(repo.CommitMessagePath, TestContext.Current.CancellationToken);
+        Assert.Equal(await StagedTreeAsync(repo), Assert.Single(CommitSignatureFormat.Parse(message)).TreeId);
+    }
+
     [Fact]
     public async Task RemovingAnApprovalNeedsTheApprover()
     {
@@ -311,6 +402,11 @@ public sealed class HumanSignatureRuleTests
 
     internal static string SignatureLine(string tree) =>
         CommitSignatureFormat.Format(new CommitSignature(KeyId, Fingerprint, tree, SignatureBase64));
+
+    /// <summary>A distinct signature per <paramref name="fill"/>, so lines do not collapse as duplicates.</summary>
+    private static string SignatureLine(string tree, byte fill) =>
+        CommitSignatureFormat.Format(new CommitSignature(Guid.NewGuid(), Fingerprint, tree,
+            Convert.ToBase64String(Enumerable.Repeat(fill, 256).ToArray())));
 
     private static async Task<string> StagedTreeAsync(VcaRegressionRepository repo) =>
         (await repo.GitAsync("write-tree")).Trim();

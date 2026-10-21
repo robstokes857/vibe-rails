@@ -159,6 +159,26 @@ public sealed class HumanSignaturePopupTests : IDisposable
     }
 
     [Fact]
+    public async Task AppendReplacesStaleAndSameKeySignaturesButKeepsOtherSigners()
+    {
+        var keyId = Guid.NewGuid();
+        string Line(Guid key, string tree, byte fill) => CommitSignatureFormat.Format(
+            new CommitSignature(key, new string('c', 64), tree, Convert.ToBase64String(Enumerable.Repeat(fill, 256).ToArray())));
+        var staleTree = Line(Guid.NewGuid(), BaseTree, 1);
+        var sameKey = Line(keyId, Tree, 2);
+        var otherSigner = Line(Guid.NewGuid(), Tree, 3);
+        var commented = "# " + Line(Guid.NewGuid(), BaseTree, 4);
+        await File.WriteAllTextAsync(_messagePath,
+            $"Subject\r\n\r\n{staleTree}\r\n{otherSigner}\r\n{sameKey}\r\n{commented}\r\n", Ct);
+        var signature = new CommitSignature(keyId, new string('c', 64), Tree, Convert.ToBase64String(new byte[256]));
+
+        await HumanSignaturePopup.AppendSignatureAsync(_messagePath, signature, Ct);
+
+        Assert.Equal($"Subject\r\n\r\n{otherSigner}\r\n{commented}\r\n\r\n{CommitSignatureFormat.Format(signature)}\r\n",
+            await File.ReadAllTextAsync(_messagePath, Ct));
+    }
+
+    [Fact]
     public async Task RefusesToRunOutsideThePopupWindow()
     {
         var output = new StringWriter();

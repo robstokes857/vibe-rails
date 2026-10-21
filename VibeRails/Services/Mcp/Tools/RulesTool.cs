@@ -157,8 +157,8 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
                     .Select(rule => new VcaRuleSnapshot(rule.RuleText, rule.Enforcement, agentFile)));
             }
 
-            // Before the "no rule files" answer: a commit that deletes the last vc.rules.md still
-            // owes the signatures that file demanded.
+            // Before the "no rule files" answer: a commit that deletes the last vc.rules.md, or stages
+            // it as something unreadable, still owes the signatures that file demanded.
             AddCommittedSignatureRules(allRules, stagedFiles, gitRoot);
 
             if (agentFiles.Count == 0 && allRules.Count == 0)
@@ -923,10 +923,14 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
         if (signatures.Count == 0)
             return RuleValidationResult.SignatureNeeded($"{needed}, and the commit message has no vibe-signature: line. {HumanSignatureRule.Guidance}", request);
 
-        var current = signatures.Where(signature => signature.TreeId == treeId).ToList();
+        // The popup appends, so the newest signatures are last; the cap applies after the tree filter.
+        var current = signatures
+            .Where(signature => signature.TreeId == treeId)
+            .TakeLast(CommitSignatureFormat.MaxVerifiedSignatures)
+            .ToList();
         if (current.Count == 0)
             return RuleValidationResult.SignatureNeeded(
-                $"{needed}. The vibe-signature: line was made for tree {signatures[0].TreeId[..12]}, but the staged tree is "
+                $"{needed}. The vibe-signature: line was made for tree {signatures[^1].TreeId[..12]}, but the staged tree is "
                 + $"{treeId![..12]}: the staged content changed after signing. Sign again in the Git Guard popup.", request);
 
         verifier ??= ViberailsCommitSignatureVerifier.Shared;
