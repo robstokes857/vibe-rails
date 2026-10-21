@@ -104,6 +104,29 @@ namespace VibeRails.Services
                 throw new ArgumentException($"Invalid commit-message word list. {CommitMessageWordRule.SyntaxHelp}");
             }
 
+            if (HumanSignatureRule.LooksLikeSignedApproval(ruleText))
+            {
+                if (!HumanSignatureRule.TryParseSignedApproval(ruleText, out var approval))
+                {
+                    throw new ArgumentException(
+                        $"Invalid signed approval '{ruleText}'. {HumanSignatureRule.SignedApprovalSyntaxHelp}");
+                }
+
+                var approvalRoot = await _gitService.GetRootPathAsync(cancellationToken);
+                if (!PathLockRule.TryResolveRepositoryPath(
+                        new PathLockSpecification(PathLockKind.Directory, approval.RelativePath),
+                        agentPath,
+                        approvalRoot,
+                        out _,
+                        out var approvalError,
+                        "approval path"))
+                {
+                    throw new ArgumentException($"Invalid signed approval '{ruleText}': {approvalError}.");
+                }
+
+                return;
+            }
+
             if (!PathLockRule.TryParse(ruleText, out var pathLock))
             {
                 if (PathLockRule.LooksLikePathLock(ruleText))

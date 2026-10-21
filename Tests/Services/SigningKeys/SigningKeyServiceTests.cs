@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using VibeRails.DTOs;
 using VibeRails.Services.SigningKeys;
+using VibeRails.Services.VCA;
 using Xunit;
 
 namespace Tests.Services.SigningKeys;
@@ -120,6 +121,54 @@ public sealed class SigningKeyServiceTests : IDisposable
         signature[0] ^= 1;
         Assert.False(verifier.VerifyData(payload, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pss));
         await Assert.ThrowsAsync<ArgumentException>(() => _service.SignAsync(created.Key.Id, new("wrong-password", "AA=="), Ct));
+    }
+
+    [Fact]
+    public async Task Sign_RefusesTheCommitApprovalPrefix_SoOnlyTheGitGuardPopupApprovesCommits()
+    {
+        var created = await _service.CreateAsync(new("Signing key", Password), Ct);
+        var payload = CommitSignatureFormat.BuildPayload(new string('a', 40));
+
+        var error = await Assert.ThrowsAsync<ArgumentException>(() =>
+            _service.SignAsync(created.Key.Id, new(Password, Convert.ToBase64String(payload)), Ct));
+
+        Assert.Contains("Git Guard popup", error.Message);
+    }
+
+    [Fact]
+    public async Task SignCommitTree_SignsTheTreeStatementUnderTheSyncedCloudKeyId()
+    {
+        _apiKey = "commit-signing-api-key";
+        var cloudId = Guid.NewGuid();
+        _handler.Respond = captured => RegistrationReply(captured, cloudId);
+        var created = await _service.CreateAsync(new("Commit key", Password), Ct);
+        const string tree = "0123456789abcdef0123456789abcdef01234567";
+
+        var signature = await _service.SignCommitTreeAsync(created.Key.Id, Password, tree, Ct);
+
+        Assert.Equal(cloudId, signature.KeyId);
+        Assert.Equal(created.Key.Fingerprint, signature.Fingerprint);
+        Assert.Equal(tree, signature.TreeId);
+        Assert.Equal($"VibeRails human-verified commit v1\ntree {tree}\n",
+            Encoding.UTF8.GetString(CommitSignatureFormat.BuildPayload(tree)));
+        using var verifier = RSA.Create();
+        verifier.ImportFromPem(created.Key.PublicKeyPem);
+        Assert.True(verifier.VerifyData(CommitSignatureFormat.BuildPayload(tree),
+            Convert.FromBase64String(signature.SignatureBase64), HashAlgorithmName.SHA256, RSASignaturePadding.Pss));
+        Assert.Equal(signature, Assert.Single(CommitSignatureFormat.Parse("Subject\n\n" + CommitSignatureFormat.Format(signature))));
+        await Assert.ThrowsAsync<ArgumentException>(() => _service.SignCommitTreeAsync(created.Key.Id, "wrong-password", tree, Ct));
+    }
+
+    [Fact]
+    public async Task SignCommitTree_RequiresASyncedKeyAndAFullLowercaseTreeId()
+    {
+        var created = await _service.CreateAsync(new("Offline key", Password), Ct);
+
+        var unsynced = await Assert.ThrowsAsync<ArgumentException>(() =>
+            _service.SignCommitTreeAsync(created.Key.Id, Password, new string('b', 40), Ct));
+        Assert.Contains("Sync this key", unsynced.Message);
+        await Assert.ThrowsAsync<ArgumentException>(() => _service.SignCommitTreeAsync(created.Key.Id, Password, "HEAD", Ct));
+        await Assert.ThrowsAsync<ArgumentException>(() => _service.SignCommitTreeAsync(created.Key.Id, Password, new string('B', 40), Ct));
     }
 
     [Theory]

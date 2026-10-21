@@ -55,6 +55,11 @@ beyond its length. The registration-challenge prefix is refused on both sides: t
 will not sign such content outside the sync flow, and the server reports
 `registration_challenge` instead of verifying it, so a proof it saw during registration
 can never be replayed as a signed message.
+The same refusal covers the commit-approval prefix `VibeRails human-verified commit v1\n`. Only
+the Git Guard signing popup signs that statement, through `SignCommitTreeAsync`, for the VCA rules
+`Human verified` and `Signed Approval`; it needs a key synced for the current API key because Git
+Guard verifies commit signatures with the public endpoint below and uses the returned email. See
+the [VCA guide](../VCA/AGENTS.md#signed-commits-human-verified-and-signed-approval-2026-10-20).
 Successful verification returns `signerEmail` for the verified account owning that key.
 The account's `/Keys` page lists public keys, revocation state, and verification results
 with timestamps, SHA-256 payload hashes and sizes. The cloud does not retain raw payloads

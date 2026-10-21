@@ -16,7 +16,9 @@ public interface IVcaHookValidationService
         CancellationToken cancellationToken);
 }
 
-public sealed class VcaRulesHookValidationService(IGitStagedSnapshotProvider snapshotProvider) : IVcaHookValidationService
+public sealed class VcaRulesHookValidationService(
+    IGitStagedSnapshotProvider snapshotProvider,
+    ICommitSignatureVerifier? signatureVerifier = null) : IVcaHookValidationService
 {
     public async Task<VcaHookValidationResult> ValidateAsync(
         VcaHookInvocation invocation,
@@ -67,7 +69,8 @@ public sealed class VcaRulesHookValidationService(IGitStagedSnapshotProvider sna
             validateCommitMessage,
             cancellationToken,
             snapshot,
-            workingTreeScope: invocation.WorkingTreeScope);
+            workingTreeScope: invocation.WorkingTreeScope,
+            signatureVerifier: signatureVerifier);
         return new VcaHookValidationResult(
             report.Output,
             new VcaHookValidationSummary(

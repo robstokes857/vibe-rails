@@ -41,6 +41,10 @@ public sealed class VcaHookCommandParser : IVcaHookCommandParser
         var consoleWindowAttached = false;
         var coAuthorsAlreadyCleaned = false;
         var enqueueAutomatedJobs = false;
+        string? treeId = null;
+        string? baseTree = null;
+        var approvers = new List<string>();
+        var requirements = new List<string>();
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -138,6 +142,30 @@ public sealed class VcaHookCommandParser : IVcaHookCommandParser
                 continue;
             }
 
+            if (arg.Equals("--tree", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                treeId = args[++i];
+                continue;
+            }
+
+            if (arg.Equals("--base-tree", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                baseTree = args[++i];
+                continue;
+            }
+
+            if (arg.Equals("--approver", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                approvers.Add(args[++i]);
+                continue;
+            }
+
+            if (arg.Equals("--require", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                requirements.Add(args[++i]);
+                continue;
+            }
+
             if (arg.Equals("--demo-duration-ms", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
             {
                 if (int.TryParse(args[++i], out var ms) && ms > 0)
@@ -163,7 +191,10 @@ public sealed class VcaHookCommandParser : IVcaHookCommandParser
             consoleWindowAttached,
             WorkingTreeScope: false,
             CoAuthorsAlreadyCleaned: coAuthorsAlreadyCleaned,
-            EnqueueAutomatedJobs: enqueueAutomatedJobs);
+            EnqueueAutomatedJobs: enqueueAutomatedJobs,
+            Signing: kind == VcaHookKind.SignCommitMessage
+                ? new HumanSignaturePopupArguments(treeId, baseTree, approvers, requirements)
+                : null);
     }
 
     private static VcaHookKind ParseKind(string value)
@@ -180,6 +211,8 @@ public sealed class VcaHookCommandParser : IVcaHookCommandParser
             "acknowledge" => VcaHookKind.AcknowledgeCommitMessage,
             "acknowledge-commit-msg" => VcaHookKind.AcknowledgeCommitMessage,
             "acknowledge-commit-message" => VcaHookKind.AcknowledgeCommitMessage,
+            "sign-commit-msg" => VcaHookKind.SignCommitMessage,
+            "sign-commit-message" => VcaHookKind.SignCommitMessage,
             "preview" => VcaHookKind.Preview,
             "demo" => VcaHookKind.Preview,
             _ => VcaHookKind.PreCommit

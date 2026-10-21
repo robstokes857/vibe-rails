@@ -181,20 +181,28 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
             }
 
             // The committed version of the file, so consumers can tell newly introduced
-            // problems apart from ones the file already had. Modified/renamed files only;
+            // problems apart from ones the file already had. Modified/renamed text files only;
             // added and copied paths had no code at this location before.
+            // A committed vc.rules.md keeps its text whatever replaced it: deleted, or staged as
+            // binary, oversized or a gitlink. Signature rules it declared still apply to that
+            // commit (RulesTool.AddCommittedSignatureRules), so an unreadable replacement cannot
+            // remove them. Other deleted or binary files stay without a baseline, as before.
             string? previousContent = null;
-            if (!isBinary && entry.Kind is GitStagedChangeKind.Modified or GitStagedChangeKind.Renamed)
+            var previousPath = entry.PreviousRelativePath ?? entry.RelativePath;
+            var readsBaseline = entry.Kind switch
             {
-                var previousPath = entry.PreviousRelativePath ?? entry.RelativePath;
-                if (baseByPath.TryGetValue(previousPath, out var baseTreeEntry)
-                    && baseTreeEntry.Type == "blob"
-                    && baseTreeEntry.Mode != GitLinkMode)
-                {
-                    var previousBlob = await ReadTreeTextAsync(baseTreeEntry);
-                    if (!previousBlob.IsBinary)
-                        previousContent = previousBlob.Content;
-                }
+                GitStagedChangeKind.Modified or GitStagedChangeKind.Renamed => !isBinary || IsAgentFile(previousPath),
+                GitStagedChangeKind.Deleted => IsAgentFile(previousPath),
+                _ => false
+            };
+            if (readsBaseline
+                && baseByPath.TryGetValue(previousPath, out var baseTreeEntry)
+                && baseTreeEntry.Type == "blob"
+                && baseTreeEntry.Mode != GitLinkMode)
+            {
+                var previousBlob = await ReadTreeTextAsync(baseTreeEntry);
+                if (!previousBlob.IsBinary)
+                    previousContent = previousBlob.Content;
             }
 
             changedLines.TryGetValue(entry.RelativePath, out var lineCount);

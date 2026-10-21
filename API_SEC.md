@@ -631,6 +631,18 @@ Passwords/private keys/ordinary signing payloads stay local. Separately hosted p
 receives the submitted payload/signature and **discloses the verified signer's account email**,
 an owner-approved behavior explained by the KEYS UI. See [SigningKeyRoutes](VibeRails/Routes/SigningKeyRoutes.cs).
 
+Commit approvals (VCA `Human verified` / `Signed Approval`, 2026-10-20) are domain-separated: the
+Sign route also refuses payloads starting `VibeRails human-verified commit v1\n`, and no MCP tool
+signs. Only the Git Guard signing popup (`vb --vca-hook sign-commit-msg`, a CREATE_NEW_CONSOLE
+window, never a route or listener) signs that statement, after reading the key password from its
+own console with echo off and refusing redirected input. The commit-msg hook then sends the key id,
+fingerprint, the tree statement (a tree id, no repository content) and the signature to the fixed
+`https://viberails.ai/public/api/v1/signatures/verify`: no API key, redirects or cookies, a 15-second
+deadline and a 16-KiB response bound. It fails closed when the service cannot answer and never
+relays exception text. A process that already runs as the user and knows the password, or drives
+the popup through UI automation, is outside this boundary; see the
+[VCA guide](VibeRails/Services/VCA/AGENTS.md#signed-commits-human-verified-and-signed-approval-2026-10-20).
+
 ## Outbound services and credentials
 
 ### Automatic conversation titles (VIBE-149)

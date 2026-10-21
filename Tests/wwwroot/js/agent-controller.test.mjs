@@ -758,3 +758,99 @@ test('Display-name controls and form describe a searchable label without renamin
     assert.match(nestedHtml, /VibeRails\.Data\.Sqlite\/<wbr>DB/);
     assert.ok(nestedHtml.indexOf('VibeRails.Data.Sqlite/') < nestedHtml.indexOf('DB Rules for NoSQL DB 1'));
 });
+
+test('Signed Approval input creates a canonical rule and rejects bad paths or emails', () => {
+    const controller = new AgentController(createApp());
+    assert.equal(controller.buildSignedApprovalRuleText(String.raw`src\db.cs`, ' Owner@Example.com, b@example.io, owner@example.com '),
+        "Signed Approval('src/db.cs', 'owner@example.com, b@example.io')");
+    assert.equal(controller.buildSignedApprovalRuleText('./', 'a@example.com'), "Signed Approval('.', 'a@example.com')");
+    assert.deepEqual(controller.extractSignedApproval("Signed Approval('db.cs', 'a@example.com, b@example.com')"),
+        { path: 'db.cs', approvers: 'a@example.com, b@example.com' });
+    assert.deepEqual(controller.extractSignedApproval("Signed Approval('path to file or directory', 'approver@example.com')"),
+        { path: '', approvers: '' }, 'the catalog template is not a configured rule');
+    for (const [path, emails] of [
+        ['db.cs', ''], ['db.cs', 'nope'], ['db.cs', 'a@example.com,,b@example.com'], ['db.cs', "a'b@example.com"],
+        ['db.cs', 'a@example.com\n## Injected'], ['', 'a@example.com'], ['C:/db.cs', 'a@example.com'],
+        ['../db.cs', 'a@example.com'], ["it's.cs", 'a@example.com'], ['db.cs\n## Injected', 'a@example.com'],
+        ['db.cs', Array.from({ length: 11 }, (_, i) => `a${i}@example.com`).join(', ')]
+    ]) {
+        assert.throws(() => controller.buildSignedApprovalRuleText(path, emails), Error, `${path} / ${emails}`);
+    }
+});
+
+test('Manage/full-editor Add submits a configured Signed Approval', async () => {
+    const template = "Signed Approval('path to file or directory', 'approver@example.com')";
+    const app = createApp();
+    app.data.availableRulesWithDescriptions = [{ name: template, description: 'Needs a signature' }];
+    app.refreshDashboardData = async () => {};
+    const requests = [];
+    app.apiCall = async (...args) => requests.push(args);
+    const controller = new AgentController(app);
+    let submitHandler;
+    let html;
+    const submit = { disabled: false };
+    const path = { value: 'src/db.cs' };
+    const approvers = { value: 'owner@example.com' };
+    const form = {
+        querySelector(selector) {
+            if (selector === 'input[name="inline-rule-pick"]:checked') return { value: template };
+            if (selector === 'input[name="inline-rule-level"]:checked') return { value: 'STOP' };
+            if (selector === 'input[name="inline-signed-approval-path"]') return path;
+            if (selector === 'input[name="inline-signed-approval-approvers"]') return approvers;
+            if (selector === 'button[type="submit"]') return submit;
+            return null;
+        },
+        querySelectorAll: () => [],
+        addEventListener: (_name, handler) => { submitHandler = handler; }
+    };
+    controller.openRuleCrudModal = (_title, content) => {
+        html = content;
+        return { root: { querySelector: () => form }, close() {} };
+    };
+    controller.refreshRuleSurface = controller.focusRuleManagerControl = () => {};
+    // An existing approval does not hide the template: one file can protect several paths.
+    controller.showInlineAddRule({ path: 'C:/repo/vc.rules.md', rules: [{ text: template }] }, null);
+    assert.match(html, /data-inline-signed-approval-fields/);
+    assert.match(html, /data-inline-signed-approval-browse/);
+    await submitHandler({ preventDefault() {}, currentTarget: form });
+    assert.equal(requests[0][2].ruleText, "Signed Approval('src/db.cs', 'owner@example.com')");
+    assert.equal(requests[0][2].enforcement, 'STOP');
+    approvers.value = 'not an email';
+    await submitHandler({ preventDefault() {}, currentTarget: form });
+    assert.equal(requests.length, 1, 'an invalid approver never reaches the API');
+});
+
+test('The wizard configures a Signed Approval before moving to enforcement', t => {
+    const originalDocument = globalThis.document;
+    t.after(() => { globalThis.document = originalDocument; });
+    const handlers = {};
+    globalThis.document = { getElementById: id => ({ addEventListener: (_type, handler) => { handlers[id] = handler; } }) };
+    const template = "Signed Approval('path to file or directory', 'approver@example.com')";
+    const app = createApp();
+    app.data.availableRulesWithDescriptions = [{ name: template, description: 'Needs a signature' }];
+    const checkboxes = [{ id: 'rule-0', checked: true, dataset: { rule: template }, addEventListener() {} }];
+    const inputs = {
+        '[data-approval-path-index="0"]': { value: 'data' },
+        '[data-approval-emails-index="0"]': { value: 'Owner@Example.com' }
+    };
+    const container = {
+        innerHTML: '',
+        querySelectorAll: selector => selector.startsWith('input[type="checkbox"]') ? checkboxes : [],
+        querySelector: selector => inputs[selector] ?? null
+    };
+    const controller = new AgentController(app);
+    controller.wizardState.currentStep = 2;
+    controller.renderWizardStep = () => {};
+    controller.renderStep2Rules(container);
+    assert.match(container.innerHTML, /data-wizard-approval-browse="0"/);
+    assert.match(container.innerHTML, /data-approval-emails-index="0"/);
+    handlers['wizard-next-btn']();
+    assert.equal(controller.wizardState.currentStep, 3);
+    assert.deepEqual(controller.wizardState.selectedRules, [
+        { text: "Signed Approval('data', 'owner@example.com')", enforcement: 'WARN' }
+    ]);
+    inputs['[data-approval-emails-index="0"]'].value = '';
+    controller.wizardState.currentStep = 2;
+    handlers['wizard-next-btn']();
+    assert.equal(controller.wizardState.currentStep, 2, 'an approval without an approver stays on the input step');
+});

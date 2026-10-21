@@ -23,6 +23,18 @@ const PATH_LOCK_RULES = [
 
 const COMMIT_WORD_RULE = 'Check commit message for';
 
+// Signed Approval('path', 'a@example.com, b@example.com'): changes under the path need a signature
+// from a listed approver, made in the Git Guard popup. Like path locks it can repeat in one file.
+const SIGNED_APPROVAL_RULE = {
+    kind: 'file',
+    template: "Signed Approval('path to file or directory', 'approver@example.com')",
+    label: 'File or directory path',
+    placeholder: 'src/db.cs',
+    browseTitle: 'Choose a file that needs approval'
+};
+const MAX_APPROVERS = 10;
+const APPROVER_EMAIL = /^[^\s@'",()<>;\\`]{1,64}@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
+
 export function ruleFileDirectory(filePath) {
     const normalized = String(filePath || '').replaceAll('\\', '/');
     const slash = normalized.lastIndexOf('/');
@@ -88,6 +100,35 @@ export class AgentController {
         return /^Check commit message for(?:\s*:|$)/i.test(String(ruleText || ''));
     }
 
+    isSignedApprovalRule(ruleText) {
+        return /^\s*Signed Approval\s*\(/i.test(String(ruleText || ''));
+    }
+
+    extractSignedApproval(ruleText) {
+        if (!this.isSignedApprovalRule(ruleText) || ruleText === SIGNED_APPROVAL_RULE.template) return { path: '', approvers: '' };
+        const match = String(ruleText).match(/\(\s*(['"])(.*?)\1\s*,\s*(['"])(.*?)\3\s*\)\s*$/s);
+        return { path: match?.[2] || '', approvers: match?.[4] || '' };
+    }
+
+    buildSignedApprovalRuleText(rawPath, rawApprovers) {
+        const path = this.normalizeRuleArgumentPath(rawPath, SIGNED_APPROVAL_RULE.label, 'any');
+        const raw = String(rawApprovers || '');
+        if (/[\x00-\x1f\x7f]/.test(raw)) throw new Error('Enter approver emails on one line, separated by commas.');
+        const entries = raw.split(',').map(entry => entry.trim());
+        if (!raw.trim() || entries.some(entry => !entry)) {
+            throw new Error('Enter at least one approver email, for example owner@example.com. Separate several with commas.');
+        }
+        const approvers = [...new Set(entries.map(entry => entry.toLowerCase()))];
+        const invalid = approvers.find(entry => entry.length > 254 || !APPROVER_EMAIL.test(entry));
+        if (invalid) throw new Error(`"${invalid}" is not an email address. Use the approver's viberails.ai account email.`);
+        if (approvers.length > MAX_APPROVERS) throw new Error(`List at most ${MAX_APPROVERS} approvers.`);
+        return `Signed Approval('${path}', '${approvers.join(', ')}')`;
+    }
+
+    renderSignedApprovalHelp() {
+        return 'The path is relative to the folder containing <code>vc.rules.md</code>; a folder covers everything inside it, and <code>.</code> covers the whole folder. Approvers sign in the Git Guard popup with a Settings &gt; KEYS key, and viberails.ai must report one of these emails as the key\'s verified account email.';
+    }
+
     buildCommitWordRuleText(rawWords) {
         const raw = String(rawWords || '');
         if (/[\x00-\x1f\x7f]/.test(raw)) throw new Error('Enter the forbidden words on one line, separated by commas, without control characters.');
@@ -112,7 +153,7 @@ export class AgentController {
             const result = await this.app.pickFileSystemEntry({
                 mode: definition.kind,
                 initialPath: ruleFileDirectory(agent.path),
-                title: definition.kind === 'file' ? 'Choose a file to lock' : 'Choose a directory to lock',
+                title: definition.browseTitle || (definition.kind === 'file' ? 'Choose a file to lock' : 'Choose a directory to lock'),
                 triggerElement: button
             });
             if (result.canceled || input.isConnected === false) return;
@@ -142,35 +183,43 @@ export class AgentController {
         const definition = PATH_LOCK_RULES.find(item => item.template === ruleTemplate);
         if (!definition) return ruleTemplate;
 
+        const normalizedPath = this.normalizeRuleArgumentPath(rawPath, definition.label, definition.kind);
+        const name = definition.kind === 'file' ? 'File Lock' : 'Directory Lock';
+        return `${name}('${normalizedPath}')`;
+    }
+
+    // kind: 'file' (must name a file), 'directory' ('.' allowed), or 'any' (signed approvals).
+    normalizeRuleArgumentPath(rawPath, label, kind) {
         const enteredPath = String(rawPath || '').trim();
         if (!enteredPath) {
-            throw new Error(`${definition.label} is required.`);
+            throw new Error(`${label} is required.`);
         }
         if (/^(?:[a-z]:|[\\/])/i.test(enteredPath)) {
-            throw new Error(`${definition.label} must be relative to the vc.rules.md directory. ${definition.kind === 'directory' ? "Use '.' for this folder; '/' is an absolute path." : 'For example: src/config.json.'}`);
+            const hint = kind === 'directory' ? "Use '.' for this folder; '/' is an absolute path."
+                : kind === 'any' ? "For example: src/db.cs, or '.' for this folder."
+                    : 'For example: src/config.json.';
+            throw new Error(`${label} must be relative to the vc.rules.md directory. ${hint}`);
         }
         if (enteredPath.includes("'")) {
-            throw new Error(`${definition.label} cannot contain a single quote.`);
+            throw new Error(`${label} cannot contain a single quote.`);
         }
         // A rule is one line of vc.rules.md. A line break here would be written back as two lines,
         // and a second line starting with '#' ends the rules section, dropping every rule below it
         // from both the hook and this page. The server refuses it too; this is the readable error.
         if (/[\r\n\0]/.test(enteredPath)) {
-            throw new Error(`${definition.label} cannot contain a line break.`);
+            throw new Error(`${label} cannot contain a line break.`);
         }
 
         let normalizedPath = enteredPath.replaceAll('\\', '/');
         if (normalizedPath.split('/').includes('..')) {
-            throw new Error(`${definition.label} cannot leave the vc.rules.md directory.`);
+            throw new Error(`${label} cannot leave the vc.rules.md directory.`);
         }
         normalizedPath = normalizedPath.split('/').filter(part => part && part !== '.').join('/') || '.';
-        if (definition.kind === 'file' && normalizedPath === '.') {
-            throw new Error(`${definition.label} must identify a file.`);
+        if (kind === 'file' && normalizedPath === '.') {
+            throw new Error(`${label} must identify a file.`);
         }
         if (normalizedPath.length > 1) normalizedPath = normalizedPath.replace(/\/+$/, '');
-
-        const name = definition.kind === 'file' ? 'File Lock' : 'Directory Lock';
-        return `${name}('${normalizedPath}')`;
+        return normalizedPath;
     }
 
     showPathLockPathPicker(agent, ruleTemplate) {
@@ -586,7 +635,8 @@ export class AgentController {
         const existing = new Set((agent.rules || []).map(rule => rule.text));
         // Parameterized locks stay available so one vc.rules.md can protect multiple paths.
         const unused = available.filter(rule =>
-            this.isPathLockTemplate(rule.name) || this.isCommitWordRule(rule.name) || !existing.has(rule.name));
+            this.isPathLockTemplate(rule.name) || this.isCommitWordRule(rule.name)
+            || rule.name === SIGNED_APPROVAL_RULE.template || !existing.has(rule.name));
 
         if (unused.length === 0) {
             this.app.showToast('Add rule', 'Every available rule is already in this file.', 'info');
@@ -627,6 +677,18 @@ export class AgentController {
                         placeholder="WIP, fix later, temporary" autocomplete="off">
                     <small class="form-text text-muted">Separate entries with commas, without quotes. Example: <code>WIP, fix later, temporary</code>. Matching ignores case and checks whole words or phrases. <code>WIP</code> matches <code>wip</code>, but not <code>swipe</code>.</small>
                 </div>
+                <div class="mt-3 d-none" data-inline-signed-approval-fields>
+                    <label class="form-label" for="inline-signed-approval-path">${SIGNED_APPROVAL_RULE.label}</label>
+                    <div class="input-group">
+                        <input class="form-control" id="inline-signed-approval-path" name="inline-signed-approval-path"
+                            type="text" placeholder="${SIGNED_APPROVAL_RULE.placeholder}" autocomplete="off">
+                        <button class="btn btn-outline-secondary" type="button" data-inline-signed-approval-browse>Browse</button>
+                    </div>
+                    <label class="form-label mt-2" for="inline-signed-approval-approvers">Approver emails</label>
+                    <input class="form-control" id="inline-signed-approval-approvers" name="inline-signed-approval-approvers"
+                        type="text" placeholder="owner@example.com" autocomplete="off">
+                    <small class="form-text text-muted">${this.renderSignedApprovalHelp()} Separate several approvers with commas. Use STOP so an acknowledgment cannot replace the approval.</small>
+                </div>
                 <div class="form-label mt-3 mb-2">Enforcement</div>
                 <div class="rules-add-rule-levels">${levels}</div>
                 <div class="d-flex justify-content-end gap-2 mt-4">
@@ -654,6 +716,12 @@ export class AgentController {
             inlineForm?.querySelector('[data-inline-commit-word-fields]')?.classList.toggle('d-none', !commitWords);
             const wordsInput = inlineForm?.querySelector('input[name="inline-commit-words"]');
             if (wordsInput) wordsInput.required = commitWords;
+            const approval = selectedTemplate === SIGNED_APPROVAL_RULE.template;
+            inlineForm?.querySelector('[data-inline-signed-approval-fields]')?.classList.toggle('d-none', !approval);
+            ['inline-signed-approval-path', 'inline-signed-approval-approvers'].forEach(name => {
+                const input = inlineForm?.querySelector(`input[name="${name}"]`);
+                if (input) input.required = approval;
+            });
         };
         inlineForm?.querySelectorAll('input[name="inline-rule-pick"]').forEach(input =>
             input.addEventListener('change', syncPathLockFields));
@@ -663,6 +731,9 @@ export class AgentController {
             return this.browseRulePath(agent, PATH_LOCK_RULES.find(item => item.template === template),
                 inlineForm.querySelector('input[name="inline-path-lock-path"]'), browse);
         });
+        const approvalBrowse = inlineForm?.querySelector('[data-inline-signed-approval-browse]');
+        approvalBrowse?.addEventListener('click', () => this.browseRulePath(agent, SIGNED_APPROVAL_RULE,
+            inlineForm.querySelector('input[name="inline-signed-approval-path"]'), approvalBrowse));
 
         inlineForm?.addEventListener('submit', async (event) => {
             event.preventDefault();
@@ -677,7 +748,11 @@ export class AgentController {
             try {
                 ruleText = this.isCommitWordRule(ruleTemplate)
                     ? this.buildCommitWordRuleText(form.querySelector('input[name="inline-commit-words"]')?.value)
-                    : this.buildPathLockRuleText(ruleTemplate, form.querySelector('input[name="inline-path-lock-path"]')?.value);
+                    : ruleTemplate === SIGNED_APPROVAL_RULE.template
+                        ? this.buildSignedApprovalRuleText(
+                            form.querySelector('input[name="inline-signed-approval-path"]')?.value,
+                            form.querySelector('input[name="inline-signed-approval-approvers"]')?.value)
+                        : this.buildPathLockRuleText(ruleTemplate, form.querySelector('input[name="inline-path-lock-path"]')?.value);
             } catch (error) {
                 this.app.showToast('Rule settings', error.message, 'warning');
                 return;
@@ -1376,14 +1451,19 @@ export class AgentController {
         const ruleCheckboxes = rulesWithDescriptions.map((rule, index) => {
             const lockDefinition = PATH_LOCK_RULES.find(item => item.template === rule.name);
             const commitWordRule = this.isCommitWordRule(rule.name);
+            const approvalRule = rule.name === SIGNED_APPROVAL_RULE.template;
             const selectedRule = this.wizardState.selectedRules.find(selected =>
                 selected.text === rule.name
                 || (commitWordRule && this.isCommitWordRule(selected.text))
+                || (approvalRule && this.isSignedApprovalRule(selected.text))
                 || (lockDefinition && this.getPathLockDefinition(selected.text)?.kind === lockDefinition.kind));
             const draft = drafts[rule.name];
             const isChecked = draft?.checked ?? Boolean(selectedRule);
             const lockPath = draft?.path ?? (lockDefinition ? this.extractPathLockPath(selectedRule?.text) : '');
             const words = draft?.words ?? selectedRule?.text.slice(COMMIT_WORD_RULE.length).replace(/^:\s*/, '') ?? '';
+            const savedApproval = approvalRule ? this.extractSignedApproval(selectedRule?.text) : { path: '', approvers: '' };
+            const approvalPath = draft?.approvalPath ?? savedApproval.path;
+            const approvers = draft?.approvers ?? savedApproval.approvers;
             return `
                 <div class="form-check mb-3 pb-2 border-bottom">
                     <input class="form-check-input" type="checkbox" id="rule-${index}"
@@ -1411,6 +1491,21 @@ export class AgentController {
                                 type="text" placeholder="WIP, fix later, temporary" autocomplete="off"
                                 value="${this.app.escapeHtml(words)}">
                             <small class="form-text text-muted">Use commas between entries, without quotes: <code>WIP, fix later, temporary</code>. Matches whole words or phrases, ignoring case; <code>WIP</code> does not match <code>swipe</code>.</small>
+                        </div>` : ''}
+                    ${approvalRule ? `
+                        <div class="mt-2 ms-4">
+                            <label class="form-label small" for="approval-path-${index}">${SIGNED_APPROVAL_RULE.label}</label>
+                            <div class="input-group input-group-sm">
+                                <input class="form-control" id="approval-path-${index}" data-approval-path-index="${index}"
+                                    type="text" value="${this.app.escapeHtml(approvalPath)}"
+                                    placeholder="${SIGNED_APPROVAL_RULE.placeholder}" autocomplete="off">
+                                <button class="btn btn-outline-secondary" type="button" data-wizard-approval-browse="${index}">Browse</button>
+                            </div>
+                            <label class="form-label small mt-2" for="approval-emails-${index}">Approver emails</label>
+                            <input class="form-control form-control-sm" id="approval-emails-${index}" data-approval-emails-index="${index}"
+                                type="text" placeholder="owner@example.com" autocomplete="off"
+                                value="${this.app.escapeHtml(approvers)}">
+                            <small class="form-text text-muted">${this.renderSignedApprovalHelp()}</small>
                         </div>` : ''}
                 </div>
             `;
@@ -1453,9 +1548,16 @@ export class AgentController {
             button.addEventListener('click', () => this.browseRulePath(
                 { path: this.wizardState.directory }, definition, input, button));
         });
-        container.querySelectorAll('[data-path-lock-index], [data-commit-words-index]').forEach(input => {
+        container.querySelectorAll('[data-wizard-approval-browse]').forEach(button => {
+            const index = Number(button.dataset.wizardApprovalBrowse);
+            const input = container.querySelector(`[data-approval-path-index="${index}"]`);
+            button.addEventListener('click', () => this.browseRulePath(
+                { path: this.wizardState.directory }, SIGNED_APPROVAL_RULE, input, button));
+        });
+        container.querySelectorAll('[data-path-lock-index], [data-commit-words-index], [data-approval-path-index], [data-approval-emails-index]').forEach(input => {
             input.addEventListener('input', () => {
-                const index = input.dataset.pathLockIndex ?? input.dataset.commitWordsIndex;
+                const index = input.dataset.pathLockIndex ?? input.dataset.commitWordsIndex
+                    ?? input.dataset.approvalPathIndex ?? input.dataset.approvalEmailsIndex;
                 const checkbox = container.querySelector(`#rule-${index}`);
                 if (input.value.trim() && checkbox && !checkbox.checked) {
                     checkbox.checked = true;
@@ -1493,9 +1595,21 @@ export class AgentController {
                         return;
                     }
                 }
+                if (ruleTemplate === SIGNED_APPROVAL_RULE.template) {
+                    try {
+                        const index = cb.id.replace('rule-', '');
+                        ruleText = this.buildSignedApprovalRuleText(
+                            container.querySelector(`[data-approval-path-index="${index}"]`)?.value,
+                            container.querySelector(`[data-approval-emails-index="${index}"]`)?.value);
+                    } catch (error) {
+                        this.app.showToast('Signed approval', error.message, 'warning');
+                        return;
+                    }
+                }
                 const existingRule = this.wizardState.selectedRules.find(r =>
                     r.text === ruleText
                     || (this.isCommitWordRule(ruleText) && this.isCommitWordRule(r.text))
+                    || (this.isSignedApprovalRule(ruleText) && this.isSignedApprovalRule(r.text))
                     || (lockDefinition && this.getPathLockDefinition(r.text)?.kind === lockDefinition.kind));
                 newSelectedRules.push({
                     text: ruleText,
@@ -1531,7 +1645,9 @@ export class AgentController {
             drafts[checkbox.dataset.rule] = {
                 checked: checkbox.checked,
                 path: container.querySelector(`[data-path-lock-index="${index}"]`)?.value || '',
-                words: container.querySelector(`[data-commit-words-index="${index}"]`)?.value || ''
+                words: container.querySelector(`[data-commit-words-index="${index}"]`)?.value || '',
+                approvalPath: container.querySelector(`[data-approval-path-index="${index}"]`)?.value || '',
+                approvers: container.querySelector(`[data-approval-emails-index="${index}"]`)?.value || ''
             };
         });
         this.wizardState.ruleDrafts = drafts;

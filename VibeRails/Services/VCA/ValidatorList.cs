@@ -70,7 +70,11 @@ namespace VibeRails.Services.VCA
 
                 // Exact-file and recursive-directory locks
                 [Rule.FileLock] = new PathLockValidator(PathLockKind.File),
-                [Rule.DirectoryLock] = new PathLockValidator(PathLockKind.Directory)
+                [Rule.DirectoryLock] = new PathLockValidator(PathLockKind.Directory),
+
+                // Signed commits: verified only by the commit-msg hook
+                [Rule.HumanVerified] = new HumanSignatureValidator(Rule.HumanVerified),
+                [Rule.SignedApproval] = new HumanSignatureValidator(Rule.SignedApproval)
             };
         }
 

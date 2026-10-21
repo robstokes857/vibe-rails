@@ -767,7 +767,7 @@ example of a rule is never itself a rule.
 #### RulesService ([Services/RulesService.cs](../VibeRails/Services/RulesService.cs))
 **Purpose**: Define available rules and enforcement logic
 
-**Available Rules** (16 total):
+**Available Rules** (22 total):
 1. `LogAllFileChanges` - Log all file changes
 2. `LogFileChangesOver5Lines` - Log file changes > 5 lines
 3. `LogFileChangesOver10Lines` - Log file changes > 10 lines
@@ -784,6 +784,11 @@ example of a rule is never itself a rule.
 14. `CheckCommitMessageForWords` - Check commit message for
 15. `FileLock` - File Lock('path to file')
 16. `DirectoryLock` - Directory Lock('path to directory')
+17. `RequireVibeRailsSessionLink` - Require VibeRails session link
+18. `CodeQualityMinimumA` / 19. `CodeQualityMinimumB` / 20. `CodeQualityMinimumC` - Code quality minimum A/B/C
+21. `HumanVerified` - Human verified (a person signs the commit in the Git Guard popup)
+22. `SignedApproval` - Signed Approval('path', 'approver@example.com'); see the
+    [VCA guide](../VibeRails/Services/VCA/AGENTS.md#signed-commits-human-verified-and-signed-approval-2026-10-20)
 
 **Enforcement Levels**:
 - `WARN` - Log warning, allow continuation
