@@ -237,7 +237,10 @@ export class ScriptAgentPane {
             }
             const title = meta.cli === 'shell' ? meta.displayName : `${meta.displayName} · ${this.label || 'script'}`;
             const body = { cli: meta.cli, workingDirectory: context.workingDirectory || null, title };
-            if (meta.environmentName) body.environmentName = meta.environmentName;
+            if (meta.environmentName) {
+                body.environmentName = meta.environmentName;
+                body.environmentId = meta.envId;
+            }
             if (initialPrompt != null) body.initialPrompt = initialPrompt;
             tab.state.selection = selection;
             tab.state.label = meta.displayName;

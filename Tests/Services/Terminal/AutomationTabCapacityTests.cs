@@ -12,11 +12,60 @@ using VibeRails.Services;
 using VibeRails.Services.AgentTools;
 using VibeRails.Services.Terminal;
 using Xunit;
+using VibeRails.Auth;
 
 namespace Tests.Services.Terminal;
 
 public sealed class AutomationTabCapacityTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RejectedDuplicateStartPreservesLiveContactAndAcceptedReplacementRotatesIt(bool concurrent)
+    {
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var credentials = new AgentCredentialService();
+        var context = new LocalToolApiContext("http://127.0.0.1:12345", new AuthService(), credentials);
+        var attempts = new List<(string Session, string Tab)>();
+        using var http = new StatusHandler(async (request, ct) =>
+        {
+            Assert.EndsWith("/start", request.RequestUri!.AbsolutePath);
+            attempts.Add((request.Headers.GetValues("X-VibeRails-Tool-Session").Single(),
+                request.Headers.GetValues("X-VibeRails-Tool-Tab").Single()));
+            if (attempts.Count == 1) await Task.Delay(25, ct);
+            if (attempts.Count == 2)
+            {
+                Assert.Equal("first", credentials.Authenticate(attempts[0].Session, attempts[0].Tab)?.SessionId);
+                return new HttpResponseMessage(HttpStatusCode.BadRequest) { Content = new StringContent("A terminal session is already active.") };
+            }
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(
+                attempts.Count == 1 ? "{\"hasActiveSession\":true,\"sessionId\":\"first\"}" : "{\"hasActiveSession\":true,\"sessionId\":\"replacement\"}") };
+        });
+        var host = Host(services, http, toolContext: context);
+        var registry = Registry(host);
+        using var child = StartHarmlessProcess();
+        try
+        {
+            AddChild(registry, "caller", child, 1, null);
+            var first = host.StartSessionAsync("caller", new(Cli: "codex"), TestContext.Current.CancellationToken);
+            if (!concurrent) await first;
+            var duplicate = host.StartSessionAsync("caller", new(Cli: "codex"), TestContext.Current.CancellationToken);
+            await first;
+            await Assert.ThrowsAsync<InvalidOperationException>(() => duplicate);
+            Assert.Equal("first", credentials.Authenticate(attempts[0].Session, attempts[0].Tab)?.SessionId);
+            Assert.Null(credentials.Authenticate(attempts[1].Session, attempts[1].Tab));
+            await host.StartSessionAsync("caller", new(Cli: "codex"), TestContext.Current.CancellationToken);
+            Assert.Null(credentials.Authenticate(attempts[0].Session, attempts[0].Tab));
+            Assert.Equal("replacement", credentials.Authenticate(attempts[2].Session, attempts[2].Tab)?.SessionId);
+        }
+        finally
+        {
+            registry.Clear();
+            await host.DisposeAsync();
+            if (!child.HasExited) { child.Kill(true); await child.WaitForExitAsync(TestContext.Current.CancellationToken); }
+        }
+    }
+
     [Theory]
     [InlineData("503")]
     [InlineData("timeout")]
@@ -771,12 +820,13 @@ public sealed class AutomationTabCapacityTests
         .GetMethod("ReclaimIdleOwnedTabIfFullAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
         .Invoke(host, [TestContext.Current.CancellationToken])!;
 
-    private static TerminalTabHostService Host(ServiceProvider services, HttpMessageHandler http, IAppEventBus? events = null)
+    private static TerminalTabHostService Host(ServiceProvider services, HttpMessageHandler http, IAppEventBus? events = null,
+        ILocalToolApiContext? toolContext = null)
     {
         var factory = new Mock<IHttpClientFactory>();
         factory.Setup(value => value.CreateClient(It.IsAny<string>())).Returns(() => new HttpClient(http, disposeHandler: false));
         return new TerminalTabHostService(factory.Object, Mock.Of<ILocalClientTracker>(), events ?? Mock.Of<IAppEventBus>(),
-            Mock.Of<ILocalToolApiContext>(), Mock.Of<ITokenSavingsStore>(), services.GetRequiredService<IServiceScopeFactory>());
+            toolContext ?? Mock.Of<ILocalToolApiContext>(), Mock.Of<ITokenSavingsStore>(), services.GetRequiredService<IServiceScopeFactory>());
     }
 
     private static IDictionary Registry(TerminalTabHostService host) => (IDictionary)typeof(TerminalTabHostService)

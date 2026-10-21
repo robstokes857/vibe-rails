@@ -112,6 +112,22 @@ function createPane(app, { getLaunchContext = () => ({ workingDirectory: '/scrip
     return { pane, log };
 }
 
+test('Saved environments carry their stable ID from the workbench to terminal start', async t => {
+    const store = withStorage(t);
+    store.set(SCRIPT_AGENT_SELECTION_KEY, 'env:17:claude');
+    const app = fakeApp({ status: { hasActiveSession: false } });
+    app.data.environments = [{ id: 17, cli: 'claude', name: 'saved-agent', customPrompt: 'Review the script.' }];
+    const { pane, log } = createPane(app);
+    const { host, elements } = fakeHost();
+    pane.mount(host);
+    elements['[data-script-agent-select]'].value = 'env:17:claude';
+    await pane._discovery;
+    assert.equal(await pane.start(), true);
+    assert.equal(log.starts[0].body.environmentId, 17);
+    assert.equal(log.starts[0].body.environmentName, 'saved-agent');
+    pane.dispose();
+});
+
 test('An owner names one script\'s agent, and only a tab carrying one counts as owned', () => {
     assert.equal(OWNER, 'script-agent:reg-1');
     assert.equal(isOwnedTab({ tabId: 'a', owner: OWNER }), true);

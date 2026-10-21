@@ -10,6 +10,7 @@ public sealed class AgentCredentialService
     public sealed record Contact(string Session, string Tab, string Owner, bool Proxy, string? SessionId = null);
     private readonly object gate = new();
     private readonly Dictionary<string, Contact> contacts = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Contact> pendingTools = new(StringComparer.Ordinal);
     private Contact? proxy;
 
     /// <summary>Gets the capability associated with a tab or native session.</summary>
@@ -20,6 +21,25 @@ public sealed class AgentCredentialService
             var existing = contacts.Values.FirstOrDefault(c => !c.Proxy && c.Owner == owner);
             return existing ?? Create(owner, false);
         }
+    }
+
+    /// <summary>Prepares an unbound replacement while preserving the running session's contact.</summary>
+    public Contact PrepareTools(string owner)
+    {
+        lock (gate)
+        {
+            if (pendingTools.Remove(owner, out var previous)) contacts.Remove(previous.Session);
+            var contact = Create(owner, false);
+            pendingTools[owner] = contact;
+            return contact;
+        }
+    }
+
+    /// <summary>Discards a rejected start's candidate without affecting the active contact.</summary>
+    public void CancelPreparedTools(string owner)
+    {
+        lock (gate)
+            if (pendingTools.Remove(owner, out var candidate)) contacts.Remove(candidate.Session);
     }
 
     /// <summary>The current process-local proxy capability, never a dashboard secret.</summary>
@@ -45,6 +65,7 @@ public sealed class AgentCredentialService
         {
             foreach (var c in contacts.Values.Where(c => c.Owner == owner).ToArray())
                 contacts.Remove(c.Session);
+            pendingTools.Remove(owner);
             if (proxy?.Owner == owner) proxy = null;
         }
     }
@@ -53,8 +74,14 @@ public sealed class AgentCredentialService
     public void BindSession(string owner, string sessionId)
     {
         lock (gate)
-            foreach (var contact in contacts.Values.Where(c => !c.Proxy && c.Owner == owner).ToArray())
-                contacts[contact.Session] = contact with { SessionId = sessionId };
+        {
+            var contact = pendingTools.Remove(owner, out var candidate) ? candidate
+                : contacts.Values.FirstOrDefault(c => !c.Proxy && c.Owner == owner);
+            if (contact is null) return;
+            foreach (var previous in contacts.Values.Where(c => !c.Proxy && c.Owner == owner).ToArray())
+                contacts.Remove(previous.Session);
+            contacts[contact.Session] = contact with { SessionId = sessionId };
+        }
     }
 
     /// <summary>Validates both values against the same live capability.</summary>

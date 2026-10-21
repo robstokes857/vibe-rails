@@ -65,13 +65,14 @@ public sealed class AgentCredentialTests
     }
 
     [Theory]
-    [InlineData(false, "session-a")]
-    [InlineData(true, "session-b")]
-    public async Task EndedOrReplacedSessionsCannotUseOldToolContacts(bool active, string currentSession)
+    [InlineData(false, "session-a", true)]
+    [InlineData(true, "session-b", true)]
+    [InlineData(true, "session-a", false)]
+    public async Task EndedReplacedOrUnconfirmedSessionsCannotUseToolContacts(bool active, string currentSession, bool confirmed)
     {
         var credentials = new AgentCredentialService();
-        var contact = credentials.ForTools("tab-a");
-        credentials.BindSession("tab-a", "session-a");
+        var contact = credentials.PrepareTools("tab-a");
+        if (confirmed) credentials.BindSession("tab-a", "session-a");
         var host = new Mock<ITerminalTabHostService>();
         host.Setup(h => h.ListTabsAsync(It.IsAny<CancellationToken>())).ReturnsAsync([new TerminalTabStatusResponse("tab-a", DateTime.UtcNow, active, currentSession)]);
         using var services = new ServiceCollection().AddSingleton(credentials).AddSingleton(host.Object).BuildServiceProvider();

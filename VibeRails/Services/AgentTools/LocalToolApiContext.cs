@@ -62,8 +62,7 @@ public sealed class LocalToolApiContext : ILocalToolApiContext
 
     public IReadOnlyDictionary<string, string> BuildEnvironmentForTab(string tabId)
     {
-        _credentials.Revoke(tabId);
-        var contact = _credentials.ForTools(tabId);
+        var contact = _credentials.PrepareTools(tabId);
         return new Dictionary<string, string>
         {
             [ApiBaseUrlVariable] = _fallbackApiBaseUrl,
@@ -74,6 +73,7 @@ public sealed class LocalToolApiContext : ILocalToolApiContext
     }
 
     public void RevokeTab(string tabId) => _credentials.Revoke(tabId);
+    public void CancelTabLaunch(string tabId) => _credentials.CancelPreparedTools(tabId);
     public void AcceptParentContact(string session, string tab) => parentContact = new(session, tab);
     public void BindSession(string tabId, string sessionId) => _credentials.BindSession(tabId, sessionId);
 

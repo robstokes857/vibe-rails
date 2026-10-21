@@ -23,8 +23,16 @@ Dashboard confirmation is deliberately scoped: a page already executing arbitrar
 JavaScript with the full dashboard pair can read a no-PIN challenge. The scoped CLI pair is
 excluded; this does not claim to isolate an agent already able to edit the user's settings files.
 
-Validation: development build; full .NET suite (6,120 passed, 17 skipped); 1,064 frontend tests; both
+Validation: development build; full .NET suite (6,123 passed, 17 skipped); 1,065 frontend tests; both
 API_SEC.md listener sweeps (approved Program.cs host and PortFinder probe; other hits are
 fixtures). Independent review results are recorded on the fix card.
 This is a targeted remediation, not a fresh audit of every endpoint or every recommendation
 in the source scan. Unlisted scan hardening notes are not silently marked resolved here.
+
+Independent review follow-up (`a5518288526847efbab316b17a8a5e51`): both medium-high
+correctness findings are agreed. F1 now forwards the selected stable environment ID from the
+script workbench. F2 now prepares an unbound replacement contact, promotes it only after
+a confirmed session start, and discards rejected candidates while preserving the live contact.
+Production host/context regressions cover sequential and concurrent duplicate starts followed
+by an accepted replacement; the middleware also rejects unconfirmed candidates. Fresh review
+results are recorded on VIBE-182.

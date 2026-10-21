@@ -22,14 +22,16 @@ header. WebSocket handshakes use the session cookie/subprotocol and tab subproto
 query-string credentials are not accepted.
 
 CLI descendants receive separate random credential pairs, never the dashboard pair.
-Root tool contacts rotate on each tab launch, bind to the resulting session, and require its
+Root tool contacts rotate on each accepted tab launch, bind to the resulting session, and require its
 tab to remain active and reachable. They permit only GET picker/sharing capabilities, POST
 current-project card launch, and POST sharing links for an owned session. They cannot reach
 Settings, terminal input/start, shutdown, WebSockets or HTTP MCP. Proxy/control pairs rotate
 per PTY session and are revoked on exit; they permit only the five proxy trees and the exact
-token-saver/self-completion controls. Both values must belong to the same contact. These
-scopes add no middleware bypass or listener. The stdio Board store capability remains the
-local OS user's authority described below.
+token-saver/self-completion controls. Both values must belong to the same contact.
+Replacement contacts stay unbound until the child confirms startup; a rejected start discards
+only its candidate and preserves the live session's contact. Uncertain starts never promote a
+candidate. These scopes add no middleware bypass or listener. The stdio Board store capability
+remains the local OS user's authority described below.
 
 The bootstrap cookie is HttpOnly, SameSite=Lax and Secure on HTTPS and the normal HTTP
 `localhost` origin. Numeric loopback HTTP (`127.0.0.1` / `[::1]`) retains a non-Secure cookie:

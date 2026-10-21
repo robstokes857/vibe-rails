@@ -1251,6 +1251,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         {
             if (!response.IsSuccessStatusCode)
             {
+                if (payload is not null) _toolApiContext.CancelTabLaunch(child.TabId);
                 var errorText = await ReadErrorTextAsync(response, cancellationToken);
                 throw new InvalidOperationException(
                     $"Child request {path} failed ({(int)response.StatusCode}): {errorText}");
