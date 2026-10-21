@@ -1,0 +1,66 @@
+name: Windows installer
+
+on:
+  pull_request:
+    paths:
+      - 'deploy/installer/**'
+      - 'deploy/build-installer.ps1'
+      - '.github/workflows/installer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install pinned Inno Setup compiler
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $download = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.3.exe'
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe' -OutFile $download
+          if ((Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash.ToLowerInvariant() -ne '9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732') {
+              throw 'Inno Setup compiler checksum mismatch.'
+          }
+          if ((Get-AuthenticodeSignature -LiteralPath $download).Status -ne 'Valid') {
+              throw 'Inno Setup compiler signature is invalid.'
+          }
+          $compilerDir = Join-Path $env:RUNNER_TEMP 'inno'
+          $process = Start-Process -FilePath $download -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', '/NOICONS', ('/DIR="' + $compilerDir + '"')) -WindowStyle Hidden -PassThru -Wait
+          if ($process.ExitCode -ne 0) { throw "Inno installation failed: $($process.ExitCode)" }
+          "INNO_COMPILER=$compilerDir\ISCC.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Exercise installer lifecycle with inert payload
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $payload = Join-Path $env:RUNNER_TEMP 'installer-fixture-payload'
+          $files = @('vb.exe', 'appsettings.json', 'wwwroot/index.html', 'onnxruntime.dll',
+              'e_sqlite3.dll', 'vec0.dll', 'scripts/pre-commit-hook.sh', 'scripts/commit-msg-hook.sh',
+              'Models/BertV2/vocab.txt', 'msvcp140.dll', 'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')
+          foreach ($relative in $files) {
+              $path = Join-Path $payload $relative
+              [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($path)) | Out-Null
+              [IO.File]::WriteAllText($path, 'Inert installer regression fixture; never execute')
+          }
+          $model = Join-Path $payload 'model.onnx'
+          [IO.File]::WriteAllBytes($model, [byte[]]::new(1100000))
+          Compress-Archive -LiteralPath $model -DestinationPath (Join-Path $payload 'Models/BertV2/model.onnx.zip')
+          Remove-Item -LiteralPath $model
+          ./deploy/installer/test.ps1 -PayloadDirectory $payload -Compiler $env:INNO_COMPILER
+
+      - name: Upload installer logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-installer-test-logs
+          path: .test-artifacts/installer-test/*.log
+          if-no-files-found: ignore
+          retention-days: 7

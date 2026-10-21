@@ -49,11 +49,17 @@ function Invoke-Installer([string]$Executable, [string]$Label, [bool]$Succeed = 
     # -Wait includes descendants. Inno's uninstaller runs a temporary self-copy;
     # waiting only on the original process would race the actual uninstall.
     $process = Start-Process -FilePath $Executable -ArgumentList $arguments -WindowStyle Hidden -PassThru -Wait
+    if (($Succeed -and $process.ExitCode -ne 0) -or (-not $Succeed -and $process.ExitCode -eq 0)) {
+        if (Test-Path -LiteralPath $log) {
+            Get-Content -LiteralPath $log -Tail 80 | ForEach-Object { Write-Host $_ }
+        }
+    }
     if ($Succeed) { Assert ($process.ExitCode -eq 0) "$Label failed ($($process.ExitCode)); see $log" }
     else { Assert ($process.ExitCode -ne 0) "$Label unexpectedly succeeded; see $log" }
 }
 
 $uninstaller = Join-Path $root 'installer/unins000.exe'
+$testFailure = $null
 try {
     New-Item -ItemType Directory -Force -Path $output | Out-Null
     # Reject a contaminated release before any compiler invocation or model
@@ -77,12 +83,18 @@ try {
         $rejected = $true
     }
     Assert $rejected 'Installer accepted a release payload containing user data'
+    # The real install parent is the existing user profile. Reproduce that here
+    # while leaving the installation directory itself absent for the fresh test.
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $root) | Out-Null
     & (Join-Path $PSScriptRoot '../build-installer.ps1') -PayloadDirectory $PayloadDirectory `
         -Version 0.0.1 -OutputDirectory $output -Compiler $Compiler -TestRoot $root | Write-Host
     $setup = Join-Path $output 'VibeRails-Fixture-0.0.1-win-x64.exe'
     # A substring match would mistake this unrelated path for the install entry.
     [Environment]::SetEnvironmentVariable('Path', "$oldPath;$root-backup", 'User')
     Invoke-Installer $setup 'fresh' -Extra @('/TASKS=desktopicon')
+    $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().User
+    $folderOwner = (Get-Acl -LiteralPath $root).GetOwner([Security.Principal.SecurityIdentifier])
+    Assert ($folderOwner.Value -eq $currentUser.Value) 'New installation folder is not owned by the current user'
     Assert (Test-Path -LiteralPath $uninstaller) 'Uninstaller was not installed'
     Assert ((Get-Item -LiteralPath (Join-Path $root 'models/bertv2/model.onnx')).Length -gt 1000000) 'Runtime model was not extracted'
     Assert (Test-Path -LiteralPath $desktop) 'Desktop shortcut is missing'
@@ -109,6 +121,24 @@ try {
     }
     Invoke-Installer $setup 'upgrade'
     Assert ((Get-RawUserPath) -eq $savedPath) 'Repeat installation duplicated or changed PATH'
+
+    # Elevated runners default new directories to Administrators. New installs
+    # must correct that, but an existing differently owned folder must still be
+    # refused without taking ownership of it.
+    $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+    if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        $originalAcl = Get-Acl -LiteralPath $root
+        $foreignAcl = Get-Acl -LiteralPath $root
+        $foreignOwner = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+        $foreignAcl.SetOwner($foreignOwner)
+        Set-Acl -LiteralPath $root -AclObject $foreignAcl
+        try {
+            Invoke-Installer $setup 'foreign-owner-upgrade' $false
+            Invoke-Installer $uninstaller 'foreign-owner-uninstall' $false
+            $ownerAfterRefusal = (Get-Acl -LiteralPath $root).GetOwner([Security.Principal.SecurityIdentifier])
+            Assert ($ownerAfterRefusal.Value -eq $foreignOwner.Value) 'Installer took ownership of an existing folder'
+        } finally { Set-Acl -LiteralPath $root -AclObject $originalAcl }
+    }
 
     $vb = Join-Path $root 'vb.exe'
     $hash = (Get-FileHash -LiteralPath $vb).Hash
@@ -163,6 +193,9 @@ try {
     Invoke-Installer $uninstaller 'uninstall-existing-path'
     Assert ((Get-RawUserPath) -eq $preexistingPath) 'A pre-existing PATH entry was removed'
     Write-Host 'Installer lifecycle passed: fresh install, shortcuts, models, upgrade, locks, serialization, junctions, retained data, PATH, uninstall and reinstall.'
+} catch {
+    $testFailure = $_
+    throw
 } finally {
     # This is a dedicated fixture with its own AppId, shortcuts and ownership key.
     # Keep logs and retained sentinel files for inspection, and restore user PATH.
@@ -170,6 +203,9 @@ try {
         if (Test-Path -LiteralPath $uninstaller) {
             Invoke-Installer $uninstaller 'cleanup'
         }
+    } catch {
+        if ($null -eq $testFailure) { throw }
+        Write-Warning "Fixture cleanup also failed: $($_.Exception.Message)"
     } finally {
         $environmentKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
         try {
