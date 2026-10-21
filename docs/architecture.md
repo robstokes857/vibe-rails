@@ -1402,6 +1402,16 @@ dotnet build
 dotnet publish -c Release
 ```
 
+### Windows installer
+
+Windows releases also package a per-user Inno Setup EXE from the signed NativeAOT
+payload. App-local VC runtime DLLs support ONNX without an elevated redistributable
+install. The installer uses the stable `.vibe_rails` directory, explicit file
+ownership and preflight checks, preserving configuration, models and user data
+on upgrade/uninstall. Inno signs both Setup and its embedded uninstaller before
+the checksum is produced. Build details and lifecycle tests are in the
+[Windows installer guide](../deploy/installer/README.md).
+
 ### Release runners and Linux glibc baseline
 
 The tag-triggered [release workflow](../.github/workflows/release.yml) pins every Linux

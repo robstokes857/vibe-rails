@@ -178,6 +178,12 @@ downloaded at runtime. Open it from the **VibeRails** status-bar button, the
 
 **Standalone:** installers for Windows, Linux and macOS are on [viberails.ai](https://viberails.ai/).
 
+**Windows setup:** download `VibeRails-Setup-<version>-win-x64.exe` from the
+[GitHub release assets](https://github.com/robstokes857/vibe-rails/releases/latest)
+when available. It installs for your user without administrator privileges, adds
+a Start menu shortcut, and offers a desktop shortcut. Upgrades and uninstall
+preserve your VibeRails data. The ZIP and PowerShell installer remain available.
+
 You also need Claude Code or Codex installed and signed in.
 
 To connect a viberails.ai account, open **Settings → General → Account** and choose **Sign in**.

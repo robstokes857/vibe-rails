@@ -112,6 +112,11 @@ jobs:
             /p:TreatWarningsAsErrors=true \
             /p:ILLinkTreatWarningsAsErrors=true
 
+      - name: Bundle app-local Windows VC runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./deploy/prepare-windows-payload.ps1 -PayloadDirectory artifacts/win-x64
+
       - name: Sign Windows binary
         if: runner.os == 'Windows'
         uses: azure/trusted-signing-action@v0.4.0
@@ -288,6 +293,41 @@ jobs:
               fi
             done
           fi
+
+      - name: Install pinned Inno Setup compiler
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $download = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.3.exe'
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe' -OutFile $download
+          $expected = '9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732'
+          if ((Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) {
+              throw 'Inno Setup compiler checksum mismatch.'
+          }
+          if ((Get-AuthenticodeSignature -LiteralPath $download).Status -ne 'Valid') {
+              throw 'Inno Setup compiler signature is invalid.'
+          }
+          $compilerDir = Join-Path $env:RUNNER_TEMP 'inno'
+          $process = Start-Process -FilePath $download -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', '/NOICONS', ('/DIR="' + $compilerDir + '"')) -WindowStyle Hidden -PassThru -Wait
+          if ($process.ExitCode -ne 0) { throw "Inno installation failed: $($process.ExitCode)" }
+          "INNO_COMPILER=$compilerDir\ISCC.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Test Windows installer lifecycle
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./deploy/installer/test.ps1 -PayloadDirectory artifacts/win-x64 -Compiler $env:INNO_COMPILER
+
+      - name: Build signed Windows installer and checksum
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          ./deploy/build-installer.ps1 -PayloadDirectory artifacts/win-x64 -Version $version -OutputDirectory release-assets -Compiler $env:INNO_COMPILER -ReleaseSigning
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v7
