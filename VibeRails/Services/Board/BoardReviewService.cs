@@ -64,17 +64,25 @@ public sealed class BoardReviewService(IBoardStore store, IBoardService board)
         RunId: run.Id, SessionId: run.WorkerSessionId, ProcessStatus: run.Status.ToString(), Error: run.Error ?? run.Routing?.Problem,
         TerminalSessionId: run.SessionId, Routing: run.Routing);
 
-    /// <summary>Capture before reading code, using only the caller's server-derived checkout.</summary>
+    /// <summary>Register the linked caller as a reviewer and capture its server-derived checkout before reading code.</summary>
     public async Task<BoardReviewRecord> BeginAsync(string project, string cardId, string session, string workspace,
         string scope, string description, string? baseCommit, string? headCommit, bool includeDirty, CancellationToken ct)
     {
         RequireText(description, "Scope description", 2000);
-        if (!(await store.GetAgentSessionsAsync(project, cardId, session, ct)).Any())
-            throw new BoardValidationException("This session is not linked to the review card.");
+        var linked = (await store.GetAgentSessionsAsync(project, cardId, session, ct)).SingleOrDefault()?.Session
+            ?? throw new BoardValidationException("This session is not linked to the review card. Call attach_board_session for this card first.");
         var row = await store.GetReviewForSessionAsync(project, cardId, session, ct);
         if (row is null && await store.FindReviewRunAsync(project, cardId, null, session, ct) is {} run)
             row = FromRun(cardId, run);
-        if (row is null) throw new BoardValidationException("This session was not launched with Code review purpose for this card.");
+        if (row is null)
+        {
+            var author = await store.FindSessionAuthorAsync(session, ct);
+            // Stable per card/session so simultaneous first calls cannot create duplicate attempts.
+            // Review metadata records this explicit declaration; launch origins and old comments stay intact.
+            var id = "review_mcp_" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(cardId + "\n" + session)));
+            row = new(id, cardId, author?.Cli ?? linked.Cli, author?.Label ?? linked.DisplayName,
+                DateTime.UtcNow, SessionId: session, TabId: linked.TabId);
+        }
         if (row.ReportedUtc is not null || row.CapturedUtc is not null) return row;
         if (scope != "unknown") JobCheckScope.Parse(scope == "range" ? [scope, baseCommit ?? "", headCommit ?? ""] : [scope]);
         if (row.Routing is {} routing)
@@ -90,7 +98,13 @@ public sealed class BoardReviewService(IBoardStore store, IBoardService board)
         row = row with { Workspace = workspace, Scope = scope, ScopeDescription = description.Trim(),
             BaseCommit = capture.Base, HeadCommit = capture.Head, IncludeDirty = includeDirty,
             SnapshotHash = capture.Hash, CaptureLimitations = capture.Limitations, CapturedUtc = DateTime.UtcNow, ScopeFiles = capture.Files };
-        if (!await store.SaveReviewAsync(project, row, ct)) throw new BoardConflictException("Review changed or card is no longer available.");
+        if (!await store.SaveReviewAsync(project, row, ct))
+        {
+            var existing = await store.GetReviewAsync(project, cardId, row.Id, ct);
+            if (existing?.SessionId == session && existing.CapturedUtc is not null)
+                return existing;
+            throw new BoardConflictException("Review changed or card is no longer available.");
+        }
         return row;
     }
 

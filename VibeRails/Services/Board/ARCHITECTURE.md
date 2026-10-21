@@ -1135,7 +1135,14 @@ immutable and remain independent of process success, completion reports, lane na
 One comment refers to each saved report; discussions and handoffs stay in Comments. Reports are
 local Board evidence; hosted report publication remains outside this change.
 
-`begin_board_review` captures the calling terminal's actual checkout before review. Supported
+`begin_board_review` explicitly registers the calling linked terminal as a reviewer and captures
+its actual checkout before review; it does not require a Code review launch. An ordinary terminal
+first uses `attach_board_session` when it is not linked to the target card. Reviewer attribution
+comes from its stored session, with no caller-supplied identity or workspace. Registration uses the
+existing `BoardReviews` table, preserves launch origins and historical comments, and reuses any
+existing direct/Automation attempt with its frozen routing. A stable card/session ID deduplicates
+concurrent first calls; retries retain the first capture and saved report. Desktop activity cannot
+register or save a terminal review using an inherited correlation ID. Supported
 scopes are working-tree, unpushed, a pinned full-SHA range, repository, or explicit unknown scope.
 Range/unpushed reviews may include dirty changes. Captured file names, base/head and fingerprints
 are retained. Capture is repeated to detect concurrent changes; unavailable/binary contents or

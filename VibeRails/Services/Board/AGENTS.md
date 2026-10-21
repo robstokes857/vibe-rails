@@ -144,6 +144,10 @@ Purpose is explicit on the Worker/Environment and snapshotted onto each queued J
 UI and MCP share that contract. Keep process outcome separate from report result. Never infer
 review purpose from names, retag history, or turn a successful exit into approval. See
 [the review contract](ARCHITECTURE.md#explicit-code-reviews-vibe-20) for scope, freshness and storage.
+Calling `begin_board_review` is an explicit reviewer declaration for the current linked terminal,
+including ordinary terminals that were not launched from the Board for review. Reuse the session's
+existing attempt, preserve launch origins and old comments, and require attachment to the target
+card before registration. Desktop presence does not grant ownership of a terminal's review.
 Both worker/reviewer prompts must name `get_board_reviews` and explain polling and fixing agreed
 blocking findings. High (including critical) and medium-high findings block completion of reviewed
 work. Medium-low and low findings are non-blocking notes: the worker chooses to fix now or defer

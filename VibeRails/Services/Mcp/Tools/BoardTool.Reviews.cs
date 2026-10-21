@@ -8,13 +8,14 @@ namespace VibeRails.Services.Mcp.Tools;
 
 public sealed partial class BoardTool
 {
-    [McpServerTool, Description("Capture scope BEFORE reviewing code. Requires a session explicitly launched for Code review. Uses this terminal's actual checkout. Choose working-tree, unpushed, repository, range (full base/head SHAs), or unknown if ambiguous. A card does not define a Git diff boundary. Returns the durable review id; save_board_review must save the report afterward.")]
+    [McpServerTool, Description("Register yourself as this card's reviewer and capture scope BEFORE reviewing code. Works from any linked VibeRails terminal; a Code review launch is not required. Call attach_board_session first if this terminal is not linked to the card. Uses this terminal's actual checkout. Choose working-tree, unpushed, repository, range (full base/head SHAs), or unknown if ambiguous. A card does not define a Git diff boundary. Reuses your existing review and returns its durable id; save_board_review must save the report afterward.")]
     public async Task<string> BeginBoardReview(string scope, string scopeDescription, string? baseCommit = null,
         string? headCommit = null, bool includeDirty = true, string? card = null, CancellationToken cancellationToken = default)
     {
         try
         {
-            if (projects.CurrentSessionId is not {} session) return "FAIL: current agent session required.";
+            if (desktopActivity?.IsDesktop == true || projects.CurrentSessionId is not {} session)
+                return "FAIL: a current VibeRails terminal session is required to register as a reviewer.";
             var target = await ResolveCardAsync(card, cancellationToken);
             if (target.Error is not null) return target.Error;
             var row = await ReviewService.BeginAsync(target.Project, target.CardId!, session,
@@ -31,7 +32,8 @@ public sealed partial class BoardTool
     {
         try
         {
-            if (projects.CurrentSessionId is not {} session) return "FAIL: current agent session required.";
+            if (desktopActivity?.IsDesktop == true || projects.CurrentSessionId is not {} session)
+                return "FAIL: a current VibeRails terminal session is required to save its review.";
             var target = await ResolveCardAsync(card, cancellationToken);
             if (target.Error is not null) return target.Error;
             var row = await ReviewService.SaveAsync(target.Project, target.CardId!, session, reviewId, result,

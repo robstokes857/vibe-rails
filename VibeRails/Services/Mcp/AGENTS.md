@@ -52,6 +52,17 @@ cards end leases, renewals cannot resurrect ended/expired work, and an explicit 
 can start fresh on an open card. This is presence, not proof of thinking, review approval,
 terminal ownership, or an Automation run. The public DTO is only `hasActiveDesktopAgent`.
 
+## Self-registering for code review
+
+`begin_board_review` explicitly registers the calling linked VibeRails terminal as the card's
+reviewer and captures its actual checkout. A Board launch with Code review purpose is optional.
+Use `attach_board_session(card)` first when the terminal is not linked to that card; registration
+never attaches a session or changes its original launch purpose or historical comments. Desktop
+MCP activity alone is not a terminal identity and cannot register or save a terminal's review.
+Existing direct/Automation attempts retain their identity, routing and frozen inputs. Concurrent
+and repeated calls reuse the same attempt; `save_board_review` still requires its owning linked
+session and retains the first report. Unknown scope produces an Incomplete report, never approval.
+
 ## Ordered lane progress
 
 `report_automation_step` records reviewing/fixing/passed/failed for the current lane entry.

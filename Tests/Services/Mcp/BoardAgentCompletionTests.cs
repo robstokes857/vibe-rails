@@ -4,6 +4,7 @@ using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services;
 using VibeRails.Services.Board;
+using VibeRails.Services.Mcp;
 using VibeRails.Services.Mcp.Tools;
 using Xunit;
 
@@ -133,7 +134,7 @@ public sealed class BoardAgentCompletionTests : IDisposable
     }
 
     [Fact]
-    public async Task ReviewToolsRequireExplicitPurposeAndOwnSession_AndExposeCanonicalIncompleteReport()
+    public async Task ReviewToolsRegisterLinkedSessions_RequireOwnership_AndExposeCanonicalIncompleteReport()
     {
         var card = await Card();
         Assert.StartsWith("FAIL:", await tool.BeginBoardReview("unknown", "No session", card: card.Key, cancellationToken: Ct));
@@ -146,11 +147,60 @@ public sealed class BoardAgentCompletionTests : IDisposable
         Assert.Contains("get_board_reviews", await tool.GetBoardAgentStatus(card.Key, cancellationToken: Ct));
         var ordinary = Guid.NewGuid().ToString(); resolver.CurrentSessionId = ordinary;
         await store.LinkSessionAsync(root, card.Id, ordinary, null, "base:codex", "codex", "Code review name", "launch", Ct);
-        Assert.StartsWith("FAIL:", await tool.BeginBoardReview("unknown", "No inferred purpose", card: card.Key, cancellationToken: Ct));
+        Assert.Contains("Scope ambiguous", await tool.BeginBoardReview("unknown", "Explicitly volunteering to review", card: card.Key, cancellationToken: Ct));
+        var registered = Assert.Single((await store.GetReviewsAsync(root, card.Id, cancellationToken: Ct)).Where(r => r.SessionId == ordinary));
+        Assert.Equal("codex", registered.Provider);
+        Assert.Equal("launch", (await store.GetAgentSessionsAsync(root, card.Id, ordinary, Ct)).Single().Session.Origin);
         Assert.StartsWith("FAIL:", await tool.SaveBoardReview("review", "Findings", "Fake", "None", "None", card.Key, Ct));
         var other = await Card();
         Assert.StartsWith("FAIL:", await tool.GetBoardReviews(other.Key, "review", cancellationToken: Ct));
         Assert.Single((await store.GetCardDetailAsync(root, card.Id, Ct))!.Comments);
+    }
+
+    [Fact]
+    public async Task SelfRegistrationRequiresAnAttachmentAndValidScopeBeforeWriting()
+    {
+        var card = await Card();
+        var session = Guid.NewGuid().ToString();
+        resolver.CurrentSessionId = session;
+        await repository.CreateSessionAsync(session, "codex", null, root, Environment.ProcessId);
+        Assert.Contains("attach_board_session", await tool.BeginBoardReview("unknown", "Review", card: card.Key, cancellationToken: Ct));
+        Assert.Empty(await store.GetReviewsAsync(root, card.Id, cancellationToken: Ct));
+        Assert.StartsWith("Attached session", await tool.AttachBoardSession(card.Key, Ct));
+        Assert.StartsWith("FAIL:", await tool.BeginBoardReview("invalid", "Review", card: card.Key, cancellationToken: Ct));
+        Assert.StartsWith("FAIL:", await tool.BeginBoardReview("range", "Review", baseCommit: "not-a-sha", card: card.Key, cancellationToken: Ct));
+        Assert.StartsWith("FAIL:", await tool.BeginBoardReview("unknown", " ", card: card.Key, cancellationToken: Ct));
+        Assert.Empty(await store.GetReviewsAsync(root, card.Id, cancellationToken: Ct));
+        var other = await Card();
+        Assert.Contains("attach_board_session", await tool.BeginBoardReview("unknown", "Other card", card: other.Key, cancellationToken: Ct));
+        var foreign = Path.Combine(root, "foreign");
+        await store.EnsureDefaultColumnsAsync(foreign, Ct);
+        var foreignCard = await store.CreateCardAsync(foreign, new(null, "Foreign", "", null, "medium", null, [], false), Ct);
+        Assert.Contains("attach_board_session", await tool.BeginBoardReview("unknown", "Foreign review", card: foreignCard.Key, cancellationToken: Ct));
+        Assert.Empty(await store.GetReviewsAsync(foreign, foreignCard.Id, cancellationToken: Ct));
+
+        Assert.Contains("Scope ambiguous", await tool.BeginBoardReview("unknown", "Explicit review", card: card.Key, cancellationToken: Ct));
+        var registered = Assert.Single(await store.GetReviewsAsync(root, card.Id, cancellationToken: Ct));
+        Assert.Null(registered.ReportedUtc);
+        Assert.Empty((await store.GetCardDetailAsync(root, card.Id, Ct))!.Comments);
+        Assert.Contains("Incomplete", await tool.SaveBoardReview(registered.Id, "No findings reported", "None", "Read code", "Scope unknown", card.Key, Ct));
+        Assert.Contains(registered.Id, await tool.GetBoardReviews(card.Key, cancellationToken: Ct));
+    }
+
+    [Fact]
+    public async Task DesktopCannotRegisterOrSaveUsingAnInheritedTerminalSession()
+    {
+        var card = await Card();
+        resolver.CurrentSessionId = Guid.NewGuid().ToString();
+        await store.LinkSessionAsync(root, card.Id, resolver.CurrentSessionId, null, "base:codex", "codex", "Codex", "mcp", Ct);
+        Assert.Contains("Scope ambiguous", await tool.BeginBoardReview("unknown", "Terminal review", card: card.Key, cancellationToken: Ct));
+        var review = Assert.Single(await store.GetReviewsAsync(root, card.Id, cancellationToken: Ct));
+        using var tracker = new DesktopMcpActivityTracker(store, true, _ => null, TimeProvider.System);
+        var desktop = new BoardTool(service, resolver, store, new BoardWorkflowService(store, new BoardReviewService(store, service)), desktopActivity: tracker);
+        Assert.StartsWith("FAIL:", await desktop.BeginBoardReview("unknown", "Desktop review", card: card.Key, cancellationToken: Ct));
+        Assert.StartsWith("FAIL:", await desktop.SaveBoardReview(review.Id, "Incomplete", "None", "None", "Unknown", card.Key, Ct));
+        Assert.Null((await store.GetReviewAsync(root, card.Id, review.Id, Ct))!.ReportedUtc);
+        Assert.Single(await store.GetReviewsAsync(root, card.Id, cancellationToken: Ct));
     }
 
     private async Task<BoardCardRecord> Card()
