@@ -83,12 +83,18 @@ try {
         $rejected = $true
     }
     Assert $rejected 'Installer accepted a release payload containing user data'
+    # The real install parent is the existing user profile. Reproduce that here
+    # while leaving the installation directory itself absent for the fresh test.
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $root) | Out-Null
     & (Join-Path $PSScriptRoot '../build-installer.ps1') -PayloadDirectory $PayloadDirectory `
         -Version 0.0.1 -OutputDirectory $output -Compiler $Compiler -TestRoot $root | Write-Host
     $setup = Join-Path $output 'VibeRails-Fixture-0.0.1-win-x64.exe'
     # A substring match would mistake this unrelated path for the install entry.
     [Environment]::SetEnvironmentVariable('Path', "$oldPath;$root-backup", 'User')
     Invoke-Installer $setup 'fresh' -Extra @('/TASKS=desktopicon')
+    $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().User
+    $folderOwner = (Get-Acl -LiteralPath $root).GetOwner([Security.Principal.SecurityIdentifier])
+    Assert ($folderOwner.Value -eq $currentUser.Value) 'New installation folder is not owned by the current user'
     Assert (Test-Path -LiteralPath $uninstaller) 'Uninstaller was not installed'
     Assert ((Get-Item -LiteralPath (Join-Path $root 'models/bertv2/model.onnx')).Length -gt 1000000) 'Runtime model was not extracted'
     Assert (Test-Path -LiteralPath $desktop) 'Desktop shortcut is missing'
@@ -115,6 +121,24 @@ try {
     }
     Invoke-Installer $setup 'upgrade'
     Assert ((Get-RawUserPath) -eq $savedPath) 'Repeat installation duplicated or changed PATH'
+
+    # Elevated runners default new directories to Administrators. New installs
+    # must correct that, but an existing differently owned folder must still be
+    # refused without taking ownership of it.
+    $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+    if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        $originalAcl = Get-Acl -LiteralPath $root
+        $foreignAcl = Get-Acl -LiteralPath $root
+        $foreignOwner = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+        $foreignAcl.SetOwner($foreignOwner)
+        Set-Acl -LiteralPath $root -AclObject $foreignAcl
+        try {
+            Invoke-Installer $setup 'foreign-owner-upgrade' $false
+            Invoke-Installer $uninstaller 'foreign-owner-uninstall' $false
+            $ownerAfterRefusal = (Get-Acl -LiteralPath $root).GetOwner([Security.Principal.SecurityIdentifier])
+            Assert ($ownerAfterRefusal.Value -eq $foreignOwner.Value) 'Installer took ownership of an existing folder'
+        } finally { Set-Acl -LiteralPath $root -AclObject $originalAcl }
+    }
 
     $vb = Join-Path $root 'vb.exe'
     $hash = (Get-FileHash -LiteralPath $vb).Hash
