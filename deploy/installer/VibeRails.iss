@@ -82,6 +82,11 @@ const
 
 type
   TTokenBuffer = array[0..255] of LongWord;
+  TSecurityAttributes = record
+    Length: LongWord;
+    Descriptor: LongWord;
+    InheritHandle: LongWord;
+  end;
 
 var
   PayloadPaths: TArrayOfString;
@@ -107,6 +112,17 @@ function GetTokenInformation(Token: THandle; InfoClass: Integer;
 function GetNamedSecurityInfo(Name: String; ObjectType, SecurityInfo: LongWord;
   var Owner: LongWord; Group, Dacl, Sacl: LongWord; var Descriptor: LongWord): LongWord;
   external 'GetNamedSecurityInfoW@advapi32.dll stdcall';
+function ConvertSidToStringSid(Sid: LongWord; var Text: LongWord): Boolean;
+  external 'ConvertSidToStringSidW@advapi32.dll stdcall';
+function StringLength(Text: LongWord): Integer;
+  external 'lstrlenW@kernel32.dll stdcall';
+function CopyString(Destination: String; Source: LongWord; Size: Integer): LongWord;
+  external 'lstrcpynW@kernel32.dll stdcall';
+function ConvertSecurityDescriptor(Text: String; Revision: LongWord;
+  var Descriptor: LongWord; var Size: LongWord): Boolean;
+  external 'ConvertStringSecurityDescriptorToSecurityDescriptorW@advapi32.dll stdcall';
+function CreateUserDirectory(Name: String; var Security: TSecurityAttributes): Boolean;
+  external 'CreateDirectoryW@kernel32.dll stdcall';
 function EqualSid(First, Second: LongWord): Boolean;
   external 'EqualSid@advapi32.dll stdcall';
 function LocalFree(Memory: LongWord): LongWord;
@@ -163,6 +179,57 @@ begin
       Result := EqualSid(Owner, Buffer[0]);
     finally
       LocalFree(Descriptor);
+    end;
+  finally
+    CloseHandle(Token);
+  end;
+end;
+
+procedure CreateUserOwnedInstallDirectory;
+var
+  Root: String;
+  Token: THandle;
+  Buffer: TTokenBuffer;
+  Required, SidText, Descriptor: LongWord;
+  OwnerSid: String;
+  Security: TSecurityAttributes;
+begin
+  Root := ExpandConstant('{app}');
+  { Existing folders must pass Preflight; never take ownership of one. An
+    elevated process otherwise creates new folders owned by Administrators,
+    which would make this per-user install fail its own upgrade/uninstall. }
+  if DirExists(Root) then begin
+    if ((GetFileAttributes(Root) and ReparsePoint) <> 0) or not OwnedByCurrentUser(Root) then
+      RaiseException('The existing installation folder must belong to the current user and must not be a link.');
+    Exit;
+  end;
+  if not OpenProcessToken(GetCurrentProcess, 8, Token) then
+    RaiseException('Could not read the current user for the installation folder.');
+  try
+    if not GetTokenInformation(Token, 1, Buffer, SizeOf(Buffer), Required) then
+      RaiseException('Could not read the current user for the installation folder.');
+    if not ConvertSidToStringSid(Buffer[0], SidText) then
+      RaiseException('Could not read the current user SID for the installation folder.');
+    try
+      OwnerSid := StringOfChar(#0, StringLength(SidText) + 1);
+      CopyString(OwnerSid, SidText, Length(OwnerSid));
+      SetLength(OwnerSid, Length(OwnerSid) - 1);
+      if not ConvertSecurityDescriptor('O:' + OwnerSid, 1, Descriptor, Required) then
+        RaiseException('Could not prepare current-user ownership for the installation folder.');
+      try
+        { Inno Setup 6 uses the 32-bit SECURITY_ATTRIBUTES ABI. Set the owner
+          during creation; do not create then take ownership by pathname. A
+          competing creation fails without modifying that existing object. }
+        Security.Length := 12;
+        Security.Descriptor := Descriptor;
+        Security.InheritHandle := 0;
+        if not CreateUserDirectory(Root, Security) then
+          RaiseException('Could not create the current-user installation folder. Windows error: ' + IntToStr(DLLGetLastError));
+      finally
+        LocalFree(Descriptor);
+      end;
+    finally
+      LocalFree(SidText);
     end;
   finally
     CloseHandle(Token);
@@ -282,6 +349,7 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   Value, NewValue: String;
 begin
+  if CurStep = ssInstall then CreateUserOwnedInstallDirectory;
   if CurStep <> ssPostInstall then Exit;
   RegQueryStringValue(HKCU, 'Environment', 'Path', Value);
   if not ContainsInstallPath(Value) then begin

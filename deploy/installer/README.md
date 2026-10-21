@@ -54,8 +54,11 @@ log until uninstall; upgrades do not recursively clean the mixed data directory.
 
 Setup and uninstall serialize through a per-profile mutex across login sessions.
 Before changes, they check directory ownership, payload destination junctions and
-symlinks, and exclusive writable access to files they replace/remove. Busy setup
-offers retry/cancel; silent setup and uninstall fail. They do not terminate
+symlinks, and exclusive writable access to files they replace/remove.
+New installations explicitly give the installation folder to the current user,
+including when Setup was launched from an elevated shell. Existing folders must
+already belong to that user; Setup never takes ownership of an existing folder.
+Busy setup offers retry/cancel; silent setup and uninstall fail. They do not terminate
 processes or schedule replacement on reboot. This is a preflight check, not an
 atomic directory swap: a process starting afterward can still cause a normal
 Inno file-copy error. Close sessions using this installed executable before an
@@ -91,7 +94,10 @@ and pre-existing PATH ownership. It never starts the application or points a
 debug build at another state database. Logs and preserved sentinel files remain
 for inspection; use a new `-OutputDirectory` for a subsequent run.
 
-Release CI runs these checks against its fresh NativeAOT publish. Before public
+Installer pull requests also run this lifecycle on Windows with an inert payload,
+including elevated-runner ownership and refusal of differently owned folders.
+Release CI runs these checks against its fresh NativeAOT publish. Failed setup
+logs are printed and retained as workflow artifacts. Before public
 distribution, also exercise the signed Setup and uninstaller as a standard user
 on a clean Windows machine without .NET/VC runtimes or developer tools: check no
 UAC, launch both shortcuts, complete Setup, use terminals and BERT search, and
