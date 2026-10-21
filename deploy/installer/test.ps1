@@ -17,8 +17,16 @@ $uninstallKey = 'HKCU:/Software/Microsoft/Windows/CurrentVersion/Uninstall/{AF20
 if ((Test-Path -LiteralPath $root) -or (Test-Path -LiteralPath $uninstallKey)) {
     throw 'An earlier installer fixture is present. Inspect and uninstall it before rerunning.'
 }
-$oldPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-$pathKind = (Get-Item HKCU:/Environment).GetValueKind('Path')
+$environmentKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment')
+try {
+    $pathExisted = $null -ne $environmentKey -and $environmentKey.GetValueNames() -icontains 'Path'
+    $oldPath = if ($pathExisted) {
+        $environmentKey.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+    } else { '' }
+    $pathKind = if ($pathExisted) { $environmentKey.GetValueKind('Path') } else { [Microsoft.Win32.RegistryValueKind]::ExpandString }
+} finally {
+    if ($null -ne $environmentKey) { $environmentKey.Dispose() }
+}
 if (Test-Path -LiteralPath $ownerKey) { throw 'An earlier fixture PATH ownership record is present.' }
 $desktop = Join-Path ([Environment]::GetFolderPath('Desktop')) 'VibeRails Installer Test.lnk'
 $startMenu = Join-Path ([Environment]::GetFolderPath('Programs')) 'VibeRails Installer Test.lnk'
@@ -28,6 +36,12 @@ foreach ($shortcut in @($desktop, $startMenu)) {
 
 function Assert([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
+}
+function Get-RawUserPath {
+    $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment')
+    if ($null -eq $key) { return '' }
+    try { $key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) }
+    finally { $key.Dispose() }
 }
 function Invoke-Installer([string]$Executable, [string]$Label, [bool]$Succeed = $true, [string[]]$Extra = @()) {
     $log = Join-Path $output "$Label.log"
@@ -80,7 +94,7 @@ try {
         Assert ($link.Arguments -eq '--web') 'Shortcut launch arguments are incorrect'
         Assert ($link.IconLocation.StartsWith((Join-Path $root 'viberails.ico'))) 'Shortcut icon is incorrect'
     }
-    $savedPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    $savedPath = Get-RawUserPath
     Assert (($savedPath -split ';') -contains $root) 'Exact install PATH entry was not added'
     Assert (Test-Path -LiteralPath $ownerKey) 'PATH ownership was not recorded'
 
@@ -94,7 +108,7 @@ try {
         [IO.File]::WriteAllText($file, "keep:$relative")
     }
     Invoke-Installer $setup 'upgrade'
-    Assert ([Environment]::GetEnvironmentVariable('Path', 'User') -eq $savedPath) 'Repeat installation duplicated or changed PATH'
+    Assert ((Get-RawUserPath) -eq $savedPath) 'Repeat installation duplicated or changed PATH'
 
     $vb = Join-Path $root 'vb.exe'
     $hash = (Get-FileHash -LiteralPath $vb).Hash
@@ -134,7 +148,7 @@ try {
     Assert (-not (Test-Path -LiteralPath $vb)) 'Application executable remained after uninstall'
     Assert (-not (Test-Path -LiteralPath $desktop)) 'Desktop shortcut remained after uninstall'
     Assert (-not (Test-Path -LiteralPath $startMenu)) 'Start menu shortcut remained after uninstall'
-    Assert ([Environment]::GetEnvironmentVariable('Path', 'User') -eq "$oldPath;$root-backup") 'Uninstall changed unrelated PATH entries'
+    Assert ((Get-RawUserPath) -eq "$oldPath;$root-backup") 'Uninstall changed unrelated PATH entries'
     foreach ($relative in $sentinels) {
         Assert ([IO.File]::ReadAllText((Join-Path $root $relative)) -eq "keep:$relative") "User data changed: $relative"
     }
@@ -147,7 +161,7 @@ try {
     Invoke-Installer $setup 'reinstall-existing-path'
     Assert (-not (Test-Path -LiteralPath $ownerKey)) 'Installer claimed a pre-existing PATH entry'
     Invoke-Installer $uninstaller 'uninstall-existing-path'
-    Assert ([Environment]::GetEnvironmentVariable('Path', 'User') -eq $preexistingPath) 'A pre-existing PATH entry was removed'
+    Assert ((Get-RawUserPath) -eq $preexistingPath) 'A pre-existing PATH entry was removed'
     Write-Host 'Installer lifecycle passed: fresh install, shortcuts, models, upgrade, locks, serialization, junctions, retained data, PATH, uninstall and reinstall.'
 } finally {
     # This is a dedicated fixture with its own AppId, shortcuts and ownership key.
@@ -157,8 +171,11 @@ try {
             Invoke-Installer $uninstaller 'cleanup'
         }
     } finally {
-        $environmentKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
-        try { $environmentKey.SetValue('Path', $oldPath, $pathKind) }
+        $environmentKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+        try {
+            if ($pathExisted) { $environmentKey.SetValue('Path', $oldPath, $pathKind) }
+            else { $environmentKey.DeleteValue('Path', $false) }
+        }
         finally { $environmentKey.Dispose() }
     }
 }
