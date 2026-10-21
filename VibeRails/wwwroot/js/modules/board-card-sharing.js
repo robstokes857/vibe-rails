@@ -34,7 +34,7 @@ export function cardSharingSection(saved) {
     if (!saved) return '<section class="board-side-section"><h3 class="board-side-label">Share card</h3><p class="board-side-empty">Save the card to create a sharing link.</p></section>';
     return `<section class="board-side-section"><details data-card-sharing>
         <summary class="board-side-label"><i class="fa-solid fa-share-nodes" aria-hidden="true"></i> Share card</summary>
-        <p class="board-side-empty mt-2">A link shares this card, comments, documents, saved commit diffs and linked session recordings: with anyone who has it, or only with people you list.</p>
+        <p class="board-side-empty mt-2">A link shares this card, comments, documents, GitHub links, saved commit diffs and linked session recordings: with anyone who has it, or only with people you list.</p>
         <p class="board-side-empty">Saved changes, including new documents and sessions, update shared cards while VibeRails is open and signed in. Recordings become playable after they end and upload.</p>
         <label class="board-editor-label">Link name <input class="form-control form-control-sm" data-card-share-name maxlength="160"></label>
         ${audienceFields('card-share-access', { attr: 'data-card-share-audience' })}

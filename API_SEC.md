@@ -211,6 +211,8 @@ middleware serves their paths rather than registering individual API endpoints.
 | GET | `/api/v1/board/cards/{card}/checks/{checkId}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | POST | `/api/v1/board/cards/{card}/comments` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | DELETE | `/api/v1/board/cards/{card}/comments/{commentId}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/cards/{card}/code-links` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| DELETE | `/api/v1/board/cards/{card}/code-links/{linkId}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | GET | `/api/v1/board/cards/{card}/commits` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | POST | `/api/v1/board/cards/{card}/commits` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | DELETE | `/api/v1/board/cards/{card}/commits/{sha}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
@@ -448,6 +450,11 @@ See [Board instructions](VibeRails/Services/Board/AGENTS.md),
 - All Board REST routes are active-root-only and require both credentials. Ordinary routes
   derive the project from the dashboard root, never a request path; board, lane, card and child
   records are checked within that scope. Merge/move checks run in the write transaction.
+- GitHub card links accept only bounded HTTPS `github.com/owner/repo/pull/number` or
+  `/commit/sha` references. They are never fetched server-side. Labels are derived from the
+  canonical URL; the UI escapes text and uses `noopener noreferrer`. Session exports include
+  saved URLs and their attached card keys/titles, never unrelated card content. Public replay
+  explicitly projects these fields; normal share audience checks still apply.
 - **Explicit local discovery is broader (VIBE-6/VIBE-28):** Board search, `/board/local-cards/*`
   and MCP can address other local projects. Full permanent card keys/row IDs resolve stored
   ownership through `IBoardStore`; short/display aliases stay current-project scoped. Foreign

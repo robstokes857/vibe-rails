@@ -5,6 +5,48 @@ const { test, expect } = process.env.VIBERAILS_BOARD_STATIC === '1'
 const IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=';
 const DESCRIPTION = 'Repro screenshot\n![Screenshot.png](attachment:att_image)\n<img src=x onerror="window.__injected=true">';
 
+for (const width of [1440, 390]) {
+    test(`GitHub links preserve card drafts at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        let card;
+        await openBoard(page, { onCard: value => { card = value; card.codeLinks = []; } });
+        await page.route('**/api/v1/board/cards/card_test/code-links**', async route => {
+            if (route.request().method() === 'DELETE') {
+                card.codeLinks = [];
+                return route.fulfill({ json: { ok: true } });
+            }
+            const { url } = route.request().postDataJSON();
+            const link = { id: 'code_test', url, label: 'org/repo PR #42', kind: 'pull_request' };
+            card.codeLinks = [link];
+            return route.fulfill({ json: link });
+        });
+        await page.getByText('Description images', { exact: true }).click();
+        const editor = page.locator('[data-board-card-editor]');
+        const rail = editor.locator('[data-board-code-links]');
+        const title = editor.locator('#board-card-title');
+        const comment = editor.locator('[data-board-composer="comment"] textarea');
+        await title.fill('Keep this draft');
+        await comment.fill('Unposted comment');
+        await rail.getByRole('textbox').fill('https://github.com/org/repo/pull/42');
+        await rail.getByRole('button', { name: 'Link PR or commit', exact: true }).click();
+        const link = rail.getByRole('link', { name: 'org/repo PR #42', exact: true });
+        await expect(link).toHaveAttribute('href', 'https://github.com/org/repo/pull/42');
+        await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+        await expect(title).toHaveValue('Keep this draft');
+        await expect(comment).toHaveValue('Unposted comment');
+        const unlink = rail.getByRole('button', { name: 'Unlink org/repo PR #42', exact: true });
+        await unlink.focus();
+        await page.evaluate(() => window.app.boardController.refreshSessionActivity());
+        await expect(unlink).toBeFocused();
+        await rail.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: testInfo.outputPath('github-links.png') });
+        await unlink.click();
+        await expect(link).toHaveCount(0);
+        await expect(title).toHaveValue('Keep this draft');
+        await expect(comment).toHaveValue('Unposted comment');
+    });
+}
+
 async function expectAnimatedStyle(locator, property) {
     const read = () => locator.evaluate((element, name) => getComputedStyle(element)[name], property);
     const initial = await read();

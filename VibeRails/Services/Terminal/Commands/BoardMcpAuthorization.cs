@@ -38,7 +38,8 @@ public static class BoardMcpAuthorization
         "append_board_note",
         "add_board_attachment",
         "attach_board_session",
-        "link_board_commit"
+        "link_board_commit",
+        "link_board_code"
     ]);
 
     public static string[] AppendArguments(LLM llm, string[] arguments)

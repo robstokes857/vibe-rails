@@ -126,6 +126,12 @@ public sealed partial class BoardStore
         if (description.Length > 100_000)
             throw new BoardValidationException("The merged description would exceed 100,000 characters. Shorten it before merging.");
 
+        var codeLinks = (await ReadCodeLinksAsync(connection, transaction, source.Id, cancellationToken))
+            .Concat(await ReadCodeLinksAsync(connection, transaction, target.Id, cancellationToken))
+            .DistinctBy(link => link.Url).Count();
+        if (codeLinks > BoardCodeLinks.MaxLinks)
+            throw new BoardValidationException($"The merged card would exceed {BoardCodeLinks.MaxLinks} GitHub links.");
+
         foreach (var (oldId, newId) in attachmentIds)
         {
             await using var copy = connection.CreateCommand();
@@ -150,6 +156,8 @@ public sealed partial class BoardStore
                 INSERT OR IGNORE INTO BoardAdditionalCardSessions (SessionId, CardId, TabId, Selection, Cli, DisplayName, Origin, CreatedUTC)
                 SELECT SessionId, $target, TabId, Selection, Cli, DisplayName, Origin, CreatedUTC FROM {AllSessionsSql}
                 WHERE CardId = $source AND SessionId NOT IN (SELECT SessionId FROM {AllSessionsSql} WHERE CardId = $target);
+                INSERT OR IGNORE INTO BoardCodeLinks (Id, CardId, Url, Kind, Label, CreatedUTC)
+                SELECT 'code_' || lower(hex(randomblob(16))), $target, Url, Kind, Label, CreatedUTC FROM BoardCodeLinks WHERE CardId = $source;
                 INSERT OR IGNORE INTO BoardCommits (CardId, Sha, Author, Message, CommittedUTC, LinkedUTC)
                 SELECT $target, Sha, Author, Message, CommittedUTC, LinkedUTC FROM BoardCommits WHERE CardId = $source;
                 INSERT OR IGNORE INTO BoardCommitSnapshots (CardId, Sha, SnapshotJson)

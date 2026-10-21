@@ -55,6 +55,10 @@ public partial interface IBoardService
     Task<BoardSessionOutcomeRecord?> FindSessionOutcomeAsync(string sessionId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAttachmentAsync(string projectPath, string idOrKey, string attachmentId, CancellationToken cancellationToken = default);
 
+    /// <summary>Links a GitHub PR or commit URL without fetching remote content.</summary>
+    Task<BoardCodeLink?> LinkCodeAsync(string projectPath, string idOrKey, string url, CancellationToken cancellationToken = default);
+    /// <summary>Unlinks a saved GitHub reference from this card.</summary>
+    Task<bool> UnlinkCodeAsync(string projectPath, string idOrKey, string linkId, CancellationToken cancellationToken = default);
     Task<List<BoardCommitDto>?> GetCommitsAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
     Task<BoardCommitDto?> LinkCommitAsync(string projectPath, string idOrKey, string sha, CancellationToken cancellationToken = default, string? gitWorkingDirectory = null, string? sessionId = null);
     Task<bool> UnlinkCommitAsync(string projectPath, string idOrKey, string sha, CancellationToken cancellationToken = default);
@@ -544,6 +548,20 @@ public sealed partial class BoardService(
         return existing is not null && await store.DeleteAttachmentAsync(projectPath, existing.Id, attachmentId, cancellationToken);
     }
 
+    /// <inheritdoc />
+    public async Task<BoardCodeLink?> LinkCodeAsync(string projectPath, string idOrKey, string url, CancellationToken cancellationToken = default)
+    {
+        var card = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
+        return card is null ? null : await store.AddCodeLinkAsync(projectPath, card.Id, url, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> UnlinkCodeAsync(string projectPath, string idOrKey, string linkId, CancellationToken cancellationToken = default)
+    {
+        var card = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
+        return card is not null && await store.RemoveCodeLinkAsync(projectPath, card.Id, linkId, cancellationToken);
+    }
+
     public async Task<List<BoardCommitDto>?> GetCommitsAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default)
     {
         var existing = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
@@ -688,6 +706,7 @@ public sealed partial class BoardService(
                     .Select(d => new BoardJiraDeliveryDto(d.SourceId, d.Kind, d.Status, d.Message)).ToList(),
                 _ => []
             },
+            CodeLinks = detail.CodeLinks,
             LinkedCards = detail.LinkedCards.Select(card => ToDto(card, detail.Card.ProjectPath)).ToList(),
             PreviousWork = BoardHandoffService.WithFileStatus(detail.PreviousWork, detail.Card.ProjectPath),
             FileCandidates = detail.PreviousWork is null && detail.Commits.Count > 0

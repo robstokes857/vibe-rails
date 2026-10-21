@@ -200,6 +200,13 @@ mappings and a fixed Codex review alternative; the implementation scope is track
 
 ## Public card sharing
 
+The **GitHub links** rail saves PR and commit URLs independently of local commit snapshots.
+`link_board_code` provides the same operation to agents; `get_board_card` returns the references.
+They are not fetched from GitHub. `board-code-links/1` is additive. Card publication includes
+these references; session archive export captures links from all currently attached live cards.
+Previously frozen/uploaded session archives are not rewritten when card links change later.
+Board sync activity does not yet transfer this local rail between collaborators.
+
 The independent read-only card publication contract is in [Sharing/README.md](Sharing/README.md).
 Preserve saved-content capture, project/account binding, complete-payload rejection and draft-safe
 CRUD. This does not enable ordinary Board sync or create collaborator/terminal-control access.

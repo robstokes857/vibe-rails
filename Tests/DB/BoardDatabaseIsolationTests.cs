@@ -49,6 +49,10 @@ public sealed class BoardDatabaseIsolationTests : IDisposable
         var runtimeServices = new ServiceCollection();
         runtimeServices.AddSqliteStateStorage(_ => new SqliteStoragePaths(StatePath));
         using var runtime = runtimeServices.BuildServiceProvider();
+        // Native Automation recording resolves session storage even in a state-only host.
+        // Board references are needed at export time, not while resolving or writing sessions.
+        await runtime.GetRequiredService<ISessionStore>()
+            .CreateSessionAsync("state-only-session", "Codex", null, _directory, Environment.ProcessId);
         var index = 0;
         foreach (var store in new[] { direct, hook.GetRequiredService<IJobStore>(), runtime.GetRequiredService<IJobStore>() })
         {

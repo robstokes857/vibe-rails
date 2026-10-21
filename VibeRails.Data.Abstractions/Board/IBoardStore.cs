@@ -7,6 +7,13 @@ namespace VibeRails.Services.Board;
 /// </summary>
 public partial interface IBoardStore
 {
+    /// <summary>Reads saved GitHub PR and commit references for a live card.</summary>
+    Task<IReadOnlyList<BoardCodeLink>> GetCodeLinksAsync(string projectPath, string cardId, CancellationToken cancellationToken = default);
+    /// <summary>Validates and idempotently adds a GitHub reference to a live card.</summary>
+    Task<BoardCodeLink?> AddCodeLinkAsync(string projectPath, string cardId, string url, CancellationToken cancellationToken = default);
+    /// <summary>Removes only the reference on the specified live card.</summary>
+    Task<bool> RemoveCodeLinkAsync(string projectPath, string cardId, string linkId, CancellationToken cancellationToken = default);
+
     // Boards. A project always has at least one; every column belongs to exactly one. Methods
     // that take an optional boardId (after the token, house style) treat null as the project's
     // default board — the first by position — so single-board callers and tests read unchanged.

@@ -29,13 +29,15 @@ namespace VibeRails.DB
         private readonly string _connectionString;
         private readonly ILogger<Repository>? _logger;
         private readonly IProxyExchangeArchiveReader? _proxyArchiveReader;
+        private readonly Func<VibeRails.Services.Board.IBoardStore>? _boardStoreFactory;
 
         public Repository(string connectionString, ILogger<Repository>? logger = null,
-            IProxyExchangeArchiveReader? proxyArchiveReader = null)
+            IProxyExchangeArchiveReader? proxyArchiveReader = null, Func<VibeRails.Services.Board.IBoardStore>? boardStoreFactory = null)
         {
             _connectionString = connectionString;
             _logger = logger;
             _proxyArchiveReader = proxyArchiveReader;
+            _boardStoreFactory = boardStoreFactory;
             InitializeDatabase();
         }
 
@@ -1633,6 +1635,31 @@ namespace VibeRails.DB
                     writer.WriteNullValue();
                 }
             }
+
+            // Board reads stay behind IBoardStore and out of the state.db schema.
+            // Capture references only: no linked card descriptions, comments or repository paths.
+            writer.WritePropertyName("codeLinks");
+            writer.WriteStartArray();
+            if (_boardStoreFactory?.Invoke() is { } boardStore)
+            {
+                foreach (var card in await boardStore.GetSessionCardsAsync([sessionId], cancellationToken))
+                {
+                    if (card.ProjectPath is null) continue;
+                    foreach (var link in await boardStore.GetCodeLinksAsync(card.ProjectPath, card.CardId, cancellationToken))
+                    {
+                        writer.WriteStartObject();
+                        writer.WriteString("cardKey", card.Key);
+                        writer.WriteString("cardDisplayId", card.DisplayId ?? card.Key);
+                        writer.WriteString("cardTitle", card.Title);
+                        writer.WriteString("url", link.Url);
+                        writer.WriteString("kind", link.Kind);
+                        writer.WriteString("label", link.Label);
+                        writer.WriteEndObject();
+                        await FlushIfPendingAsync(writer, cancellationToken);
+                    }
+                }
+            }
+            writer.WriteEndArray();
 
             writer.WritePropertyName("proxyCoverage");
             writer.WriteStartObject();

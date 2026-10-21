@@ -500,6 +500,7 @@ public sealed partial class BoardStore : IBoardStore
             await ReadCommitsAsync(connection, card.Id, cancellationToken),
             [])
         {
+            CodeLinks = await ReadCodeLinksAsync(connection, null, card.Id, cancellationToken),
             LinkedCards = await ReadLinkedCardsAsync(connection, project, card.Id, cancellationToken, includeOtherProjects: true),
             PreviousWork = await ReadHandoffAsync(connection, card.Id, cancellationToken)
         };
@@ -2008,6 +2009,8 @@ public sealed partial class BoardStore : IBoardStore
         // only to the new table (BoardStore.AdoDelivery.cs). No backfill of earlier discussion.
         SqliteMigrationRunner.Apply(connection, "board-ado-delivery", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, AdoDeliverySchemaSql));
+        SqliteMigrationRunner.Apply(connection, "board-code-links", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, CodeLinksSchemaSql));
         ReconcileDerivedRows(connection);
     }
 

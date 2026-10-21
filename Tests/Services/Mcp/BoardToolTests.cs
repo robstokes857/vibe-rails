@@ -61,6 +61,18 @@ public sealed partial class BoardToolTests : IDisposable
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Fact]
+    public async Task GitHubReferencesAreIdempotentAndVisibleToAgents()
+    {
+        await _tool.CreateBoardCard("GitHub links", cancellationToken: Ct);
+        const string url = "https://github.com/org/repo/pull/42";
+        Assert.Contains(url, await _tool.LinkBoardCode(url, "PROJ-1", Ct));
+        Assert.Contains(url, await _tool.LinkBoardCode(url, "PROJ-1", Ct));
+        Assert.Single((await _service.GetCardAsync(_project, "PROJ-1", Ct))!.CodeLinks);
+        Assert.Contains("org/repo PR #42: " + url, await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct));
+        Assert.StartsWith("FAIL:", await _tool.LinkBoardCode("javascript:alert(1)", "PROJ-1", Ct));
+    }
+
+    [Fact]
     public async Task CheckToolReadsOnlySavedEvidenceForItsCard_AndPagesFullReport()
     {
         await _store.EnsureDefaultColumnsAsync(_project, Ct);

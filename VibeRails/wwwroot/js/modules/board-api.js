@@ -423,7 +423,17 @@ async function mergeBoardCardsAsync(cardId, targetCard) {
     return call(`/cards/${enc(cardId)}/merge`, 'POST', { targetCard });
 }
 
+async function addCodeLinkAsync(cardId, url) {
+    return call(`/cards/${enc(cardId)}/code-links`, 'POST', { url });
+}
+
+async function removeCodeLinkAsync(cardId, linkId) {
+    return call(`/cards/${enc(cardId)}/code-links/${enc(linkId)}`, 'DELETE');
+}
+
 export const BoardApi = {
+    addCodeLinkAsync,
+    removeCodeLinkAsync,
     deleteBoardCommentAsync,
     mergeBoardCardsAsync,
     attach,

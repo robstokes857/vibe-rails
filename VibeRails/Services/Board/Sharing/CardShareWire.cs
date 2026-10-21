@@ -11,7 +11,12 @@ public sealed record CardShareSnapshot(int Schema, string SourceKey, string Disp
     DateTime CreatedUtc, DateTime UpdatedUtc, IReadOnlyList<CardShareEntry> Discussion,
     IReadOnlyList<CardShareEntry> History, IReadOnlyList<CardShareSession> Sessions,
     IReadOnlyList<CardShareCommit> Commits, IReadOnlyList<CardShareAttachment> Attachments,
-    IReadOnlyList<CardShareRelated> RelatedCards, IReadOnlyList<CardShareEvidence> Evidence);
+    IReadOnlyList<CardShareRelated> RelatedCards, IReadOnlyList<CardShareEvidence> Evidence)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<CardShareCodeLink>? CodeLinks { get; init; }
+}
+public sealed record CardShareCodeLink(string Url, string Kind, string Label);
 public sealed record CardShareEntry(string Author, string? Purpose, string Body, DateTime CreatedUtc);
 public sealed record CardShareSession(Guid SourceId, string Name, string Cli, string Origin,
     DateTime CreatedUtc, DateTime? EndedUtc, int? ExitCode, string? Summary);

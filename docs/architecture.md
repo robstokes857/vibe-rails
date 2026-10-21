@@ -709,6 +709,10 @@ result metadata, work claims and progress live there too. See the [shared search
 local-card editor that resolves ownership from immutable identities. Related-card links can cross
 local projects; foreign links remain outside hosted publication. Moves, merges and repository
 launches keep their existing project scope. See the [search contract](../VibeRails/Services/Board/AGENTS.md#local-board-search-vibe-6).
+The saved card's GitHub links rail stores bounded, canonical PR/commit URLs in `BoardCodeLinks`
+behind `IBoardStore`. These references are independent of local commit snapshots. They appear
+in agent card reads, public card captures, and session archives for attached cards at export time.
+Frozen archives retain their original metadata; ordinary Board sync does not transfer the rail.
 MCP discovers all local boards, with current-project boards first and other projects separately
 labeled. Explicit board IDs and full permanent card keys select other projects; omitted targets
 retain the launching card/current-project defaults. See the [local discovery contract](../VibeRails/Services/Board/ARCHITECTURE.md#local-mcp-discovery-vibe-28).

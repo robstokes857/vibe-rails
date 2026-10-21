@@ -1,5 +1,10 @@
 # Board persistence
 
+`board-code-links/1` adds `BoardCodeLinks` for up to 50 GitHub PR/commit references per card.
+Canonical URLs deduplicate within each card. Add/remove rechecks live project membership in
+its write transaction and touches the card; merge copies and deduplicates links while retaining
+source rows. No old data is converted. Session export reads references through `IBoardStore`.
+
 `board-agent-workflow/1` adds nullable `BoardCards.WorkflowMode`, `ManagerSelection` and
 `ManagerOptionsJson` without converting older cards. NULL workflow reads as `manual`.
 Agent workflow manager settings are independent of worker `Assignee`/`BaseLlmOptions`;

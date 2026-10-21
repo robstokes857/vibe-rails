@@ -1,3 +1,4 @@
+import { codeLinksSection, renderCodeLinks } from './board-code-links.js';
 import { AGENT_PURPOSES, agentPurposeLabel, matchesCommentFilter } from './agent-purpose.js';
 import { cardChecksSection, bindCardChecks } from './board-card-checks.js';
 import { previousWorkHtml } from './board-previous-work.js';
@@ -91,7 +92,7 @@ function cardType(value) {
 }
 
 function cardActivitySnapshot(card) {
-    return JSON.stringify([card?.comments, card?.notes, card?.sessions, card?.attachments, card?.commits]);
+    return JSON.stringify([card?.comments, card?.notes, card?.sessions, card?.attachments, card?.commits, card?.codeLinks]);
 }
 
 // Outbound activity to the card's tracker. Older responses carry only the Jira list.
@@ -410,7 +411,7 @@ export class BoardController {
             }
             // Update only the rails and live controls. Never replace the user's draft fields.
             if (detail && editor.isConnected && editor === document.querySelector('[data-board-card-editor]') && editor.dataset.cardId === cardId
-                && !editor._boardUploading && !editor._boardSaving
+                && !editor._boardUploading && !editor._boardSaving && !editor._boardCodeLinkBusy
                 // Local comment/rail writes can finish while this GET is in flight. Keep their newer data.
                 && cardActivitySnapshot(editor._boardCard) === editorActivity) {
                 const card = editor._boardCard || detail;
@@ -418,18 +419,20 @@ export class BoardController {
                     || card.activeSessionId !== detail.activeSessionId || card.activeTabId !== detail.activeTabId;
                 const attachmentsChanged = JSON.stringify(card.attachments) !== JSON.stringify(detail.attachments);
                 const commitsChanged = JSON.stringify(card.commits) !== JSON.stringify(detail.commits);
+                const codeLinksChanged = JSON.stringify(card.codeLinks) !== JSON.stringify(detail.codeLinks);
                 const discussionChanged = cardActivitySnapshot(card) !== cardActivitySnapshot(detail)
                     || JSON.stringify(card.jiraDeliveries) !== JSON.stringify(detail.jiraDeliveries)
                     || JSON.stringify(card.remoteDeliveries) !== JSON.stringify(detail.remoteDeliveries);
                 Object.assign(card, { sessions: detail.sessions, activeSessionId: detail.activeSessionId,
                     activeTabId: detail.activeTabId, hasActiveAutomation: detail.hasActiveAutomation,
                     hasActiveDesktopAgent: detail.hasActiveDesktopAgent,
-                    comments: detail.comments, notes: detail.notes, attachments: detail.attachments, commits: detail.commits,
+                    comments: detail.comments, notes: detail.notes, attachments: detail.attachments, commits: detail.commits, codeLinks: detail.codeLinks,
                     jiraDeliveries: detail.jiraDeliveries, jiraIssueUrl: detail.jiraIssueUrl,
                     remoteDeliveries: detail.remoteDeliveries, remoteIssueUrl: detail.remoteIssueUrl });
                 if (changed) this.renderSessionsPanel(editor, card);
                 if (attachmentsChanged) this.renderAttachmentsPanel(editor, card);
                 if (commitsChanged) this.renderCommitsPanel(editor, card);
+                if (codeLinksChanged) renderCodeLinks(editor, card);
                 if (discussionChanged) {
                     this.renderCardDiscussion(editor, card);
                     editor.querySelectorAll('[data-board-composer]').forEach(composer => composer._refreshPreview?.());
@@ -1509,6 +1512,7 @@ export class BoardController {
                     <div data-board-previous-work>${previousWorkHtml(card)}</div>
                     ${card ? cardOrganizeSection() : ''}
                     ${renderCardLinksSection(card)}
+                    ${codeLinksSection(card)}
 
                     <section class="board-side-section">
                         <h3 class="board-side-label">
@@ -1706,6 +1710,7 @@ export class BoardController {
         this.renderCardDiscussion(editor, card);
         if (card) this.cardHistoryDispose = mountHistory(editor.querySelector('[data-board-history-view]'), card.boardId, card.id);
         this.renderCommitsPanel(editor, card);
+        renderCodeLinks(editor, card);
         this.renderSessionsPanel(editor, card);
         this.renderAttachmentsPanel(editor, card);
         // Agent context (VB-63): what an agent launched on this card would read, measured server-side
@@ -1814,6 +1819,14 @@ export class BoardController {
             });
         }
 
+        editor.querySelector('[data-board-code-links]')?.addEventListener('click', event => {
+            const button = event.target.closest('[data-board-remove-code-link]');
+            if (button) void this.changeCodeLink(editor, card, null, button.dataset.boardRemoveCodeLink);
+        });
+        editor.querySelector('[data-board-add-code-link]')?.addEventListener('submit', event => {
+            event.preventDefault();
+            void this.changeCodeLink(editor, card, new FormData(event.currentTarget).get('url'));
+        });
         editor.querySelector('[data-board-add-commit]')?.addEventListener('submit', event => {
             event.preventDefault();
             this.addCommit(editor, new FormData(event.currentTarget));
@@ -2261,6 +2274,33 @@ export class BoardController {
     }
 
     // ============================================
+    // GitHub references save independently without replacing the surrounding drafts.
+    async changeCodeLink(editor, card, url, removeId = null) {
+        if (editor._boardCodeLinkBusy || editor._boardSaving) return;
+        editor._boardCodeLinkBusy = true;
+        const host = editor.querySelector('[data-board-code-links]');
+        host.querySelectorAll('button, input').forEach(control => { control.disabled = true; });
+        try {
+            if (removeId) {
+                await BoardApi.removeCodeLinkAsync(card.id, removeId);
+                card.codeLinks = (card.codeLinks || []).filter(link => link.id !== removeId);
+            } else {
+                const link = await BoardApi.addCodeLinkAsync(card.id, String(url || '').trim());
+                card.codeLinks = [...(card.codeLinks || []).filter(item => item.id !== link.id), link];
+                host.querySelector('form')?.reset();
+            }
+            if (!editor.isConnected) return;
+            Object.assign(editor._boardCard, { codeLinks: card.codeLinks });
+            renderCodeLinks(editor, card);
+            editor._boardContext?.refresh();
+        } catch (error) {
+            this.app.showToast('Board', error?.message || 'Could not save the GitHub link.', 'error');
+        } finally {
+            editor._boardCodeLinkBusy = false;
+            host.querySelectorAll('button, input').forEach(control => { control.disabled = false; });
+        }
+    }
+
     // Commits (right rail)
     // ============================================
 
@@ -2532,7 +2572,7 @@ export class BoardController {
         // Every rail mutation that reloads the card (comment, commit, session) changed what an
         // agent would read; the Agent context section re-measures rather than going stale.
         if (editor._boardCard) Object.assign(editor._boardCard, {
-            comments: card.comments, notes: card.notes, sessions: card.sessions, commits: card.commits, attachments: card.attachments
+            comments: card.comments, notes: card.notes, sessions: card.sessions, commits: card.commits, codeLinks: card.codeLinks, attachments: card.attachments
         });
         editor._boardContext?.refresh();
         return card;

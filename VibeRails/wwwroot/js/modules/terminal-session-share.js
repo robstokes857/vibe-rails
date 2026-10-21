@@ -17,7 +17,7 @@ export function showSessionShareModal(app, sessionId, label) {
     const promise = new Promise(resolve => { settle = resolve; });
     app.showModal('Share session', `
         <div id="terminal-session-share">
-            <p>A link shares the terminal recording, prompts and saved code changes.</p>
+            <p>A link shares the terminal recording, prompts, saved code changes, and saved GitHub links with their attached Board card titles.</p>
             <p class="text-muted">Links expire after one month. You can revoke them sooner in
                 <a href="https://viberails.ai/SessionSharingLinks" target="_blank" rel="noopener noreferrer">Sharing links</a>.</p>
             <p data-share-name class="fw-semibold text-break"></p>

@@ -93,6 +93,7 @@ public sealed record BoardCardDetailRecord(
     IReadOnlyList<BoardCommitRecord> Commits,
     IReadOnlyList<BoardCommentRecord> Notes)
 {
+    public IReadOnlyList<BoardCodeLink> CodeLinks { get; init; } = [];
     public IReadOnlyList<BoardLinkedCardRecord> LinkedCards { get; init; } = [];
     public BoardHandoff? PreviousWork { get; init; }
 }

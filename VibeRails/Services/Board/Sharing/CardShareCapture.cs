@@ -86,7 +86,10 @@ public sealed class CardShareCapture(IBoardStore boards, ISessionStore sessions,
             card.Blocked, card.Flagged, card.CreatedUtc, card.UpdatedUtc,
             detail.Comments.Concat(detail.Notes).DistinctBy(c => c.Id).OrderBy(c => c.CreatedUtc).Select(Entry).ToList(),
             (await boards.GetCardHistoryAsync(project, card.Id, ct)).Select(c => HistoryEntry(c, card.Key)).ToList(), recordings, commits, files,
-            detail.LinkedCards.Select(c => new CardShareRelated(c.Key, c.DisplayId, c.Title)).ToList(), evidence);
+            detail.LinkedCards.Select(c => new CardShareRelated(c.Key, c.DisplayId, c.Title)).ToList(), evidence)
+        {
+            CodeLinks = detail.CodeLinks.Count == 0 ? null : detail.CodeLinks.Select(link => new CardShareCodeLink(link.Url, link.Kind, link.Label)).ToList()
+        };
         // Serialize the complete card once: these bytes are both the transfer body and the content hash.
         var json = JsonSerializer.SerializeToUtf8Bytes(snapshot, CardSharingJsonContext.Default.CardShareSnapshot);
         if (json.Length > MaxBytes - 1024) throw TooLarge();

@@ -708,6 +708,28 @@ public sealed partial class BoardTool(
         }
     }
 
+    [McpServerTool, Description("Link a GitHub pull request or commit URL to a Board card. Saves an external reference, without fetching GitHub or creating a local diff. Included in card publications and the next export of attached sessions. Safe to repeat. Use link_board_commit to also save a local commit diff.")]
+    public async Task<string> LinkBoardCode(
+        [Description("HTTPS GitHub URL, e.g. https://github.com/owner/repo/pull/123 or /commit/<sha>.")] string url,
+        [Description(CardArgumentHelp)] string? card = null,
+        CancellationToken cancellationToken = default,
+        McpServer? server = null)
+    {
+        try
+        {
+            var target = await ResolveCardAsync(card, cancellationToken);
+            if (target.Error is not null) return target.Error;
+            if (await ResolveAuthorAsync(server, cancellationToken) is not { } author) return UnnamedClientHint;
+            var link = await service.LinkCodeAsync(target.Project, target.CardId!, url, cancellationToken);
+            if (link is null) return $"FAIL: card not found: {card}";
+            await AutoLinkSessionAsync(target.Project, target.CardId!, cancellationToken);
+            await TrackDesktopActivityAsync(server, target.Project, target.CardId!, author.Label, cancellationToken);
+            return $"Linked {link.Label} to {target.CardKey}: {link.Url}";
+        }
+        catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
+        catch (Exception ex) when (ex is not OperationCanceledException) { return Fail("link the GitHub reference", ex); }
+    }
+
     [McpServerTool, Description("Save a git commit's changed-code snapshot from this terminal's checkout. One call links it to the target card AND every card attached to this session in the project. Safe to repeat from a session; existing links are kept. The snapshot remains viewable after the checkout is deleted. Call after committing; capture must succeed before any links are saved. Omit card to use the original session card as the target.")]
     public async Task<string> LinkBoardCommit(
         [Description("Commit sha (7-40 hex characters) from this terminal's checkout.")] string sha,
@@ -1124,6 +1146,12 @@ public sealed partial class BoardTool(
         // Linked time, not commit time: an old commit linked during this session is this session's activity.
         // The store lists commits by commit time, so the window is re-sorted by link time before the cap
         // below keeps the newest: a just-linked old commit must not be the one that falls off.
+        if (card.CodeLinks.Count > 0)
+        {
+            builder.Append("\nGitHub links:\n");
+            foreach (var link in card.CodeLinks.Take(options.AllActivity ? card.CodeLinks.Count : 10))
+                builder.Append("- ").Append(link.Label).Append(": ").Append(link.Url).Append('\n');
+        }
         var commitsStart = builder.Length;
         var commits = Window(card.Commits, c => c.LinkedAt, options, out var earlierCommits, out var laterCommits)
             .OrderByDescending(c => c.LinkedAt)

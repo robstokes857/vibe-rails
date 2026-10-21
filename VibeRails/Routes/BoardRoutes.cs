@@ -320,6 +320,15 @@ public static partial class BoardRoutes
                 : NotFound("Attachment", attachmentId)))
             .WithName("DeleteBoardAttachment");
 
+        app.MapPost("/api/v1/board/cards/{card}/code-links", (IBoardService board, string card, LinkBoardCodeRequest request, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(await board.LinkCodeAsync(Project(), card, request.Url ?? string.Empty, cancellationToken), "Card")))
+            .WithName("LinkBoardCardCode");
+
+        app.MapDelete("/api/v1/board/cards/{card}/code-links/{linkId}", (IBoardService board, string card, string linkId, CancellationToken cancellationToken) =>
+            RunAsync(async () => await board.UnlinkCodeAsync(Project(), card, linkId, cancellationToken)
+                ? Results.Ok(new OK("GitHub link removed")) : NotFound("GitHub link", linkId)))
+            .WithName("UnlinkBoardCardCode");
+
         app.MapGet("/api/v1/board/cards/{card}/commits", (IBoardService board, string card, CancellationToken cancellationToken) =>
             RunAsync(async () => OkOrNotFound(await board.GetCommitsAsync(Project(), card, cancellationToken), "Card")))
             .WithName("GetBoardCardCommits");

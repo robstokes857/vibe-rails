@@ -442,6 +442,7 @@ namespace VibeRails.DTOs
         public string? RemoteIssueUrl { get; init; }
         /// <summary>Outbound activity to <see cref="RemoteProvider"/>, newest first (the Jira delivery shape).</summary>
         public IReadOnlyList<BoardJiraDeliveryDto> RemoteDeliveries { get; init; } = [];
+        public IReadOnlyList<BoardCodeLink> CodeLinks { get; init; } = [];
         public List<BoardLinkedCardDto> LinkedCards { get; init; } = [];
         public BoardHandoff? PreviousWork { get; init; }
         public IReadOnlyList<BoardFileReference> FileCandidates { get; init; } = [];
@@ -498,6 +499,7 @@ namespace VibeRails.DTOs
     }
     public record BoardNoteListResponse(List<BoardCommentDto> Notes);
     public record AddBoardAttachmentRequest(string? Name = null, string? DataUrl = null, long? Bytes = null, string? MimeType = null);
+    public record LinkBoardCodeRequest(string? Url = null);
     public record LinkBoardCommitRequest(string? Sha = null);
     public record AddBoardSessionRequest(string? Id = null, string? DisplayName = null);
     public record UpdateBoardSessionRequest(string? DisplayName = null);
@@ -2095,6 +2097,8 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(AddBoardNoteRequest))]
     [JsonSerializable(typeof(BoardNoteListResponse))]
     [JsonSerializable(typeof(AddBoardAttachmentRequest))]
+    [JsonSerializable(typeof(LinkBoardCodeRequest))]
+    [JsonSerializable(typeof(BoardCodeLink))]
     [JsonSerializable(typeof(LinkBoardCommitRequest))]
     [JsonSerializable(typeof(AddBoardSessionRequest))]
     [JsonSerializable(typeof(UpdateBoardSessionRequest))]

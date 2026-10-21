@@ -30,6 +30,19 @@ public sealed class CardShareCaptureTests
         return new(_boards.Object, _sessions.Object, _summaries.Object);
     }
     [Fact]
+    public async Task CapturesGitHubReferencesWithoutLocalIdentifiers()
+    {
+        var link = BoardCodeLinks.Parse("https://github.com/org/repo/pull/42") with { Id = "private-id", CreatedUtc = Now };
+        var detail = new BoardCardDetailRecord(Card(), [], [], [], [], []) { CodeLinks = [link] };
+        var capture = await SetUp(detail).CaptureAsync("project", "card_test", Ct);
+        Assert.NotNull(capture.Snapshot.CodeLinks);
+        var shared = Assert.Single(capture.Snapshot.CodeLinks);
+        Assert.Equal(link.Url, shared.Url);
+        Assert.Equal("pull_request", shared.Kind);
+        Assert.DoesNotContain("private-id", System.Text.Encoding.UTF8.GetString(capture.Json));
+    }
+
+    [Fact]
     public async Task CapturesAllLinkedSessionsLargeDocumentsAndSavedCommitContentWithoutHostedSyncTruncation()
     {
         var sessions = Enumerable.Range(0, 205).Select(i => new BoardSessionRecord(Guid.NewGuid().ToString("D"), "card_test", null,

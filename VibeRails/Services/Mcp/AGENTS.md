@@ -161,6 +161,10 @@ path registers its own minimal services in `McpStdioHost.ConfigureServices`.
 
 ## Tools
 
+`link_board_code(url, card?)` saves a GitHub PR/commit reference without fetching the URL.
+It follows ordinary Board target resolution, author attribution, session attachment and desktop
+activity rules. References appear in `get_board_card`, card publication and future session exports.
+
 MCP normalizes C# method names to **snake_case**, so the wire names differ from the method names:
 
 | Wire name (snake_case) | Method | Description |

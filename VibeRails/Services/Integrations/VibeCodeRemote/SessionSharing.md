@@ -1,5 +1,11 @@
 # Session sharing (VIBE-35)
 
+New session archives also carry `codeLinks`: canonical GitHub PR/commit URLs and the keys,
+display labels and titles of attached Board cards, read through `IBoardStore`. The hosted
+compact replay projects only these declared fields and renders safe external links. Capture
+happens when the immutable archive is first written; later edits do not rewrite an existing
+spool or previously uploaded recording. Deploy the companion Front viewer before release.
+
 The terminal tab's Share action captures the current recording id and opens a modal that asks
 **who can view** before anything is created: anyone with the link (the default), or only people
 the user lists by email (up to 10 per session across its links; each person signs in to

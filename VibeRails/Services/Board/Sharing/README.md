@@ -23,6 +23,11 @@ link controls or https://viberails.ai/CardSharingLinks to revoke it.
 
 ## Capture and transport
 
+Optional `codeLinks` carries saved GitHub PR and commit URLs with derived labels. It is
+omitted for cards without links, preserving compatibility with older hosts for those cards.
+Cards with GitHub links require the companion Front contract/viewer update. Links do not
+imply a checkout or saved diff; they are never fetched by the capture service.
+
 `CardShareCapture` reads through IBoardStore, ISessionStore and IChatSummaryStore. It includes
 full discussion/history, saved handoff/review/check evidence, attached bytes, stored commit
 before/after content and session summaries. Repository references remain inert text, and related

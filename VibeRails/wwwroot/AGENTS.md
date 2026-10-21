@@ -163,6 +163,10 @@ base64 encoding. The resulting JSON is for
 
 ## Board
 
+`board-code-links.js` renders the saved card's **GitHub links** rail. Add/remove saves immediately
+through authenticated Board routes without replacing card or comment drafts. The input accepts
+GitHub PR/commit URLs; canonical links are separate from the saved local commit/diff rail.
+
 Desktop MCP activity uses `hasActiveDesktopAgent`, independently of `activeTabId`. Render a
 purple marching border plus a desktop icon for desktop-only activity; when a real terminal is
 also active, retain its cyan border/green dot and show the desktop icon too. Refresh the flag

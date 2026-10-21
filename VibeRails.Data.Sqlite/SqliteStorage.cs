@@ -47,8 +47,10 @@ public static class SqliteStorage
         services.TryAddSingleton<IProxyExchangeArchiveReader>(sp => new SqliteProxyExchangeArchiveReader(
             sp.GetRequiredService<SqliteStoragePaths>().ProxyDatabasePath,
             sp.GetService<ILogger<SqliteProxyExchangeArchiveReader>>()));
+        // Ordinary session/env consumers must not depend on Board health; resolve it only for export.
         services.TryAddScoped<IRepository>(sp => new Repository(StateConnectionString(sp),
-            sp.GetService<ILogger<Repository>>(), sp.GetRequiredService<IProxyExchangeArchiveReader>()));
+            sp.GetService<ILogger<Repository>>(), sp.GetRequiredService<IProxyExchangeArchiveReader>(),
+            () => sp.GetRequiredService<IBoardStore>()));
         services.TryAddScoped<ISessionStore>(sp => sp.GetRequiredService<IRepository>());
         services.TryAddScoped<ISessionArchiveReader>(sp => sp.GetRequiredService<IRepository>());
         services.TryAddScoped<IUserInputStore>(sp => sp.GetRequiredService<IRepository>());

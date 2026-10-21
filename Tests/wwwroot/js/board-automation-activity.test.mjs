@@ -118,6 +118,19 @@ test('a delayed poll cannot undo an upload that mutated the attachment array in 
     assert.equal(editor._boardCard.attachments[0].id, 'local-upload');
 });
 
+test('activity does not replace GitHub link controls while a link write is pending', async t => {
+    const editor = openEditor(t);
+    editor._boardCard.codeLinks = [];
+    const { controller, requests } = harness();
+    controller.renderCardDiscussion = () => assert.fail('pending link writes keep their controls');
+    const poll = controller.refreshSessionActivity();
+    editor._boardCodeLinkBusy = true;
+    requests[0].resolve({ cards: [] });
+    requests[1].resolve({ ...editor._boardCard, codeLinks: [{ id: 'old-link' }] });
+    await poll;
+    assert.deepEqual(editor._boardCard.codeLinks, []);
+});
+
 test('the running robot opens its Automation, and never opens the card or the working agent', async () => {
     const { controller, requests } = harness();
     const focused = [];
