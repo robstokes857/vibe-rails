@@ -49,11 +49,17 @@ function Invoke-Installer([string]$Executable, [string]$Label, [bool]$Succeed = 
     # -Wait includes descendants. Inno's uninstaller runs a temporary self-copy;
     # waiting only on the original process would race the actual uninstall.
     $process = Start-Process -FilePath $Executable -ArgumentList $arguments -WindowStyle Hidden -PassThru -Wait
+    if (($Succeed -and $process.ExitCode -ne 0) -or (-not $Succeed -and $process.ExitCode -eq 0)) {
+        if (Test-Path -LiteralPath $log) {
+            Get-Content -LiteralPath $log -Tail 80 | ForEach-Object { Write-Host $_ }
+        }
+    }
     if ($Succeed) { Assert ($process.ExitCode -eq 0) "$Label failed ($($process.ExitCode)); see $log" }
     else { Assert ($process.ExitCode -ne 0) "$Label unexpectedly succeeded; see $log" }
 }
 
 $uninstaller = Join-Path $root 'installer/unins000.exe'
+$testFailure = $null
 try {
     New-Item -ItemType Directory -Force -Path $output | Out-Null
     # Reject a contaminated release before any compiler invocation or model
@@ -163,6 +169,9 @@ try {
     Invoke-Installer $uninstaller 'uninstall-existing-path'
     Assert ((Get-RawUserPath) -eq $preexistingPath) 'A pre-existing PATH entry was removed'
     Write-Host 'Installer lifecycle passed: fresh install, shortcuts, models, upgrade, locks, serialization, junctions, retained data, PATH, uninstall and reinstall.'
+} catch {
+    $testFailure = $_
+    throw
 } finally {
     # This is a dedicated fixture with its own AppId, shortcuts and ownership key.
     # Keep logs and retained sentinel files for inspection, and restore user PATH.
@@ -170,6 +179,9 @@ try {
         if (Test-Path -LiteralPath $uninstaller) {
             Invoke-Installer $uninstaller 'cleanup'
         }
+    } catch {
+        if ($null -eq $testFailure) { throw }
+        Write-Warning "Fixture cleanup also failed: $($_.Exception.Message)"
     } finally {
         $environmentKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
         try {

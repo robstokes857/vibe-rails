@@ -318,6 +318,15 @@ jobs:
         shell: pwsh
         run: ./deploy/installer/test.ps1 -PayloadDirectory artifacts/win-x64 -Compiler $env:INNO_COMPILER
 
+      - name: Upload Windows installer test logs
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-installer-test-logs
+          path: .test-artifacts/installer-test/*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Build signed Windows installer and checksum
         if: runner.os == 'Windows'
         shell: pwsh
