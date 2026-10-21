@@ -22,8 +22,16 @@ namespace Tests.Routes;
 /// though only one of them could go on to own the single terminal slot. The route now hands down
 /// a delegate and the session service invokes it inside its lifecycle gate.
 /// </summary>
-public sealed class TerminalRoutesPromptDeferralTests
+[Collection("ProcessEnvIsolation")]
+public sealed class TerminalRoutesPromptDeferralTests : IDisposable
 {
+    private readonly string originalRoot = VibeRails.Utils.ParserConfigs.GetRootPath();
+    private readonly bool originalInGit = VibeRails.Utils.ParserConfigs.GetIsInGit();
+    private readonly string? originalBranch = VibeRails.Utils.ParserConfigs.GetGitBranch();
+    private readonly string? originalRemote = VibeRails.Utils.ParserConfigs.GetGitRemoteUrl();
+
+    public TerminalRoutesPromptDeferralTests() => VibeRails.Utils.ParserConfigs.SetGitState(AppContext.BaseDirectory, true);
+    public void Dispose() => VibeRails.Utils.ParserConfigs.SetGitState(originalRoot, originalInGit, originalBranch, originalRemote);
     private const string Prompt = "Deploy notes: {{step:2a1f0c4e-0000-4000-8000-000000000001}}";
     // One client per class: a client per test leaks TCP ports across the suite.
     private static readonly HttpClient SharedClient = new();
@@ -56,22 +64,22 @@ public sealed class TerminalRoutesPromptDeferralTests
     }
 
     [Theory]
-    [InlineData(false, null)]
-    [InlineData(true, null)]
-    [InlineData(true, "saved-environment")]
-    public async Task BoardToolAuthorization_IsExplicitAndReachesTheSession(bool authorizeBoardTools, string? environmentName)
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OnlyTheAuthenticatedParentCarrierGrantsBoardTools(bool authorizeBoardTools)
     {
         var (app, terminal, _) = await StartAppAsync();
         try
         {
             terminal.Setup(item => item.StartSessionAsync(
-                    LLM.Claude, It.IsAny<string>(), environmentName, It.IsAny<string[]>(),
+                    LLM.Claude, It.IsAny<string>(), null, It.IsAny<string[]>(),
                     It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<ResolvedPrompt>>>(), It.IsAny<string>(), authorizeBoardTools))
                 .ReturnsAsync(true);
             var client = SharedClient;
-            using var response = await client.PostAsJsonAsync(new Uri(new Uri(app.Urls.First()), "/api/v1/terminal/start"),
-                new StartTerminalRequest(WorkingDirectory: Path.GetTempPath(), Cli: "Claude", EnvironmentName: environmentName,
-                    AuthorizeBoardTools: authorizeBoardTools), TestContext.Current.CancellationToken);
+            using var message = new HttpRequestMessage(HttpMethod.Post, new Uri(new Uri(app.Urls.First()), "/api/v1/terminal/start"));
+            message.Content = new StringContent("{\"cli\":\"Claude\",\"authorizeBoardTools\":true}", System.Text.Encoding.UTF8, "application/json");
+            if (authorizeBoardTools) message.Headers.Add("X-VibeRails-Board-Authorization", "true");
+            using var response = await client.SendAsync(message, TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             terminal.VerifyAll();
         }
@@ -277,6 +285,32 @@ public sealed class TerminalRoutesPromptDeferralTests
         }
     }
 
+    [Theory]
+    [InlineData(null, false, false)]
+    [InlineData(17, true, false)]
+    [InlineData(17, false, true)]
+    public async Task SavedEnvironmentsRequireAnIdAndProjectVisibility(int? environmentId, bool foreign, bool allowed)
+    {
+        var (app, terminal, _) = await StartAppAsync();
+        try
+        {
+            var repository = Mock.Get(app.Services.GetRequiredService<IRepository>());
+            repository.Setup(r => r.GetEnvironmentByIdAsync(17, It.IsAny<CancellationToken>())).ReturnsAsync(new LLM_Environment
+            {
+                Id = 17, LLM = LLM.Claude, CustomName = "canonical-name",
+                ProjectPath = foreign ? Path.Combine(Path.GetTempPath(), "foreign-project-" + Guid.NewGuid().ToString("N")) : AppContext.BaseDirectory
+            });
+            terminal.Setup(t => t.StartSessionAsync(LLM.Claude, It.IsAny<string>(), "canonical-name", It.IsAny<string[]>(),
+                It.IsAny<string>(), false, It.IsAny<Func<Task<ResolvedPrompt>>>(), It.IsAny<string>(), false)).ReturnsAsync(true);
+            using var response = await SharedClient.PostAsJsonAsync(new Uri(new Uri(app.Urls.First()), "/api/v1/terminal/start"),
+                new StartTerminalRequest(Cli: "Claude", EnvironmentName: "stale-name", EnvironmentId: environmentId), TestContext.Current.CancellationToken);
+            Assert.Equal(allowed ? HttpStatusCode.OK : HttpStatusCode.NotFound, response.StatusCode);
+            repository.Verify(r => r.GetEnvironmentByNameAndLlmAsync(It.IsAny<string>(), It.IsAny<LLM>(), It.IsAny<CancellationToken>()), Times.Never);
+            if (!allowed) Assert.DoesNotContain(terminal.Invocations, i => i.Method.Name == nameof(ITerminalSessionService.StartSessionAsync));
+        }
+        finally { await StopAsync(app); }
+    }
+
     private static Task<HttpResponseMessage> PostStartAsync(WebApplication app)
     {
         var client = SharedClient;
@@ -309,6 +343,7 @@ public sealed class TerminalRoutesPromptDeferralTests
         builder.Services.AddSingleton<ILlmParser, LlmParser>();
         builder.Services.AddSingleton(new Mock<IRepository>().Object);
         builder.Services.AddSingleton(new Mock<ISessionResumeService>().Object);
+        builder.Services.AddSingleton(new VibeRails.ProcessRole(false, true));
 
         var app = builder.Build();
         TerminalRoutes.Map(app, Path.GetTempPath());

@@ -273,7 +273,13 @@ export class SettingsController {
 
     async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, openCodeLlmProxyEnabled, grokLlmProxyEnabled, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, clearApiKey = false, createVibeStoryTracking = true, createVibeStoryTrackingCustomEnvs = false) {
         try {
+            const previous = this.app.appSettings || {};
+            const sensitive = remoteAccess !== (previous.remoteAccess ?? false) || clearApiKey
+                || (apiKey && !apiKey.includes('•') && apiKey !== previous.apiKey);
+            const presenceProof = sensitive ? await this._requestPresenceProof() : null;
+            if (sensitive && presenceProof === null) return null;
             const savedSettings = await this.app.apiCall('/api/v1/settings', 'POST', {
+                presenceProof,
                 remoteAccess: remoteAccess,
                 apiKey: apiKey,
                 useVsCodeTheme: useVsCodeTheme,
@@ -658,10 +664,12 @@ export class SettingsController {
         this._pinIsSet = pinIsSet;
         this._updatePinUI(badge, btnSet, btnClear, pinIsSet);
 
-        btnSet.addEventListener('click', () => {
+        btnSet.addEventListener('click', async () => {
+            const presenceProof = await this._requestPresenceProof();
+            if (presenceProof === null) return;
             this._showPinModal(async (pin) => {
                 try {
-                    await this.app.apiCall('/api/v1/settings/pin', 'POST', { pin });
+                    await this.app.apiCall('/api/v1/settings/pin', 'POST', { pin, presenceProof });
                     this.app.closeModal();
                     this._pinIsSet = true;
                     this._updatePinUI(badge, btnSet, btnClear, true);
@@ -674,7 +682,9 @@ export class SettingsController {
 
         btnClear.addEventListener('click', async () => {
             try {
-                await this.app.apiCall('/api/v1/settings/pin', 'DELETE');
+                const presenceProof = await this._requestPresenceProof();
+                if (presenceProof === null) return;
+                await this.app.apiCall('/api/v1/settings/pin', 'DELETE', { pin: '', presenceProof });
                 this._pinIsSet = false;
                 this._updatePinUI(badge, btnSet, btnClear, false);
                 this.app.showToast('PIN Lock', 'PIN cleared', 'success');
@@ -720,6 +730,27 @@ export class SettingsController {
                 Set PIN`;
             btnClear.style.setProperty('display', 'none', 'important');
         }
+    }
+
+    async _requestPresenceProof() {
+        const challenge = await this.app.apiCall('/api/v1/settings/security-challenge', 'GET');
+        return new Promise(resolve => {
+            this.app.showModal('Confirm security change', `
+                <p>${challenge.pinRequired ? 'Enter your current remote access PIN.' : 'Type the confirmation code shown below to approve this change.'}</p>
+                ${challenge.pinRequired ? '' : `<p><strong>${this.app.escapeHtml(challenge.code)}</strong></p>`}
+                <input id="settings-presence-proof" class="form-control" type="${challenge.pinRequired ? 'password' : 'text'}" maxlength="128" autocomplete="off" aria-label="Confirmation">
+                <div class="mt-3"><button class="btn btn-secondary" data-action="close-modal">Cancel</button>
+                <button id="settings-presence-confirm" class="btn btn-primary">Continue</button></div>`,
+                { onClose: () => resolve(null) });
+            const input = document.getElementById('settings-presence-proof');
+            document.getElementById('settings-presence-confirm').addEventListener('click', () => {
+                const proof = input.value;
+                input.value = '';
+                resolve(proof);
+                this.app.closeModal();
+            });
+            input.focus();
+        });
     }
 
     _showPinModal(onConfirm) {

@@ -17,7 +17,8 @@ namespace VibeRails.DTOs
     public record LaunchCliRequest(
         string? WorkingDirectory = null,
         string? EnvironmentName = null,
-        string[]? Args = null
+        string[]? Args = null,
+        int? EnvironmentId = null
     );
 
     public record LaunchCliResponse(
@@ -1189,7 +1190,8 @@ namespace VibeRails.DTOs
         string? ResumeSessionId = null,
         string? ResumeSummary = null,
         BaseLlmOptions? BaseLlmOptions = null,
-        bool AuthorizeBoardTools = false
+        [property: JsonIgnore] bool AuthorizeBoardTools = false,
+        int? EnvironmentId = null
     )
     {
         /// <summary>Server-only review scope decision. Browser input cannot bypass workspace resolution.</summary>
@@ -1240,7 +1242,8 @@ namespace VibeRails.DTOs
         string? Cli = "Shell",
         string? EnvironmentName = null,
         string? Title = null,
-        string? InitialPrompt = null
+        string? InitialPrompt = null,
+        int? EnvironmentId = null
     );
 
     public record AgentToolSendInputRequest(
@@ -1354,7 +1357,8 @@ namespace VibeRails.DTOs
         // Responses always contain an explicit value; the default/base LLM nudge defaults on.
         bool? CreateVibeStoryTracking = null,
         // Independent saved/custom-environment nudge, default off. Omitted requests preserve it.
-        bool? CreateVibeStoryTrackingCustomEnvs = null
+        bool? CreateVibeStoryTrackingCustomEnvs = null,
+        string? PresenceProof = null
     );
     // Append new fields at the END of this record, with a default. Inserting one in the middle
     // shifts every positional argument after it: call sites only fail to compile when the types
@@ -1485,7 +1489,8 @@ namespace VibeRails.DTOs
     );
 
     // Remote PIN DTOs
-    public record SetPinRequest(string Pin);
+    public record SetPinRequest(string Pin, string? PresenceProof = null);
+    public record SecurityChallengeResponse(bool PinRequired, string? Code);
     public record PinStatusResponse(bool IsSet);
 
     // BERT Explorer DTOs
@@ -2008,6 +2013,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(VerifySignatureRequest))]
     [JsonSerializable(typeof(PublicSignatureVerificationResponse))]
     [JsonSerializable(typeof(SetPinRequest))]
+    [JsonSerializable(typeof(SecurityChallengeResponse))]
     [JsonSerializable(typeof(PinStatusResponse))]
     // Kanban board DTOs
     [JsonSerializable(typeof(BoardSummaryResponse))]

@@ -184,6 +184,14 @@ public sealed partial class PythonScriptService : IPythonScriptService
 
     public string GetScriptsDirectory() => Path.Combine(_installDirectory, ScriptsSubdirectory);
 
+    /// <summary>Discovers the approved-script runtime outside the open repository and its active venv.</summary>
+    public static PythonRunnerOptions DiscoverPythonRunnerOptions(string scriptsDirectory)
+    {
+        var candidate = PythonLocator.Discover(scriptsDirectory).FirstOrDefault(c =>
+            c.Kind is not (PythonSourceKind.EnvironmentOverride or PythonSourceKind.ActiveVirtualEnv));
+        return candidate?.ToOptions() ?? throw new InvalidOperationException("No Python interpreter was found outside the repository. Install Python on PATH.");
+    }
+
     private string SigningFilePath => Path.Combine(_installDirectory, SigningFileName);
 
     public async Task<PythonScriptListResponse> GetStatusAsync(

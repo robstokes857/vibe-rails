@@ -58,6 +58,7 @@ public class TerminalRunner
     private readonly IAppEventBus _appEventBus;
     private readonly IHostApplicationLifetime? _appLifetime;
     private readonly IManagedWorktreeService? _worktrees;
+    private readonly VibeRails.Auth.AgentCredentialService? _agentCredentials;
 
     public TerminalRunner(
         ITerminalStateService stateService,
@@ -69,7 +70,8 @@ public class TerminalRunner
         IEnvironmentStepRunner stepRunner,
         IAppEventBus appEventBus,
         IHostApplicationLifetime? appLifetime = null,
-        IManagedWorktreeService? worktrees = null)
+        IManagedWorktreeService? worktrees = null,
+        VibeRails.Auth.AgentCredentialService? agentCredentials = null)
     {
         _stateService = stateService;
         _commandService = commandService;
@@ -81,6 +83,7 @@ public class TerminalRunner
         _appEventBus = appEventBus;
         _appLifetime = appLifetime;
         _worktrees = worktrees;
+        _agentCredentials = agentCredentials;
     }
 
     /// <summary>
@@ -148,6 +151,7 @@ public class TerminalRunner
             }
 
             var sessionTitle = ResolveSessionTitle(workDir, title);
+            _agentCredentials?.BeginSession(sessionId);
             var preparedSession = await _commandService.PrepareSessionAsync(
                 llm, envName, extraArgs, initialPrompt, summary, sessionId, authorizeBoardTools: authorizeBoardTools);
             foreach (var kvp in _toolApiContext.BuildEnvironment(sessionId))
@@ -222,6 +226,8 @@ public class TerminalRunner
                     ct: ct);
             }
             terminal.EncodeBareLineFeedAsWin32ShiftEnter = CodexWindowsInputRewriter.ShouldRewrite(llm);
+            terminal.Exited += (_, _) => _agentCredentials?.Revoke(sessionId);
+            if (terminal.HasExited) _agentCredentials?.Revoke(sessionId);
             if (preparedSession.OpenCodeProxyActive)
             {
                 var lease = _llmProxySessionState.ActivateOpenCodeProxy();
@@ -672,6 +678,7 @@ public class TerminalRunner
             }
 
             openCodeProxyLease?.Dispose();
+            _agentCredentials?.Revoke(sessionId);
             ReleaseWorktreeLease(sessionId);
 
             await _stateService.CompleteSessionAsync(sessionId, -1);

@@ -41,7 +41,7 @@ public static class RouteExtensions
         CompressionRoutes.Map(app);
         TerminalRoutes.Map(app, launchDirectory);
         TerminalTabsRoutes.Map(app);
-        AgentToolRoutes.Map(app);
+        if (isActiveRootBackend) AgentToolRoutes.Map(app);
         SandboxRoutes.Map(app, launchDirectory);
         McpRoutes.Map(app);
         AgentRoutes.Map(app);
@@ -51,7 +51,7 @@ public static class RouteExtensions
             CodeGraphRoutes.Map(app);
         LlmSettingsRoutes.Map(app);
         UpdateRoutes.Map(app);
-        AppSettingsRoutes.Map(app);
+        AppSettingsRoutes.Map(app, isActiveRootBackend);
         if (isActiveRootBackend)
             RemoteAccountLinkRoutes.Map(app);
         if (isActiveRootBackend)
@@ -69,7 +69,7 @@ public static class RouteExtensions
         // Kanban board: dashboard-only surface, and its launch endpoint needs the in-process tab host.
         if (isActiveRootBackend)
             BoardRoutes.Map(app);
-        PinRoutes.Map(app);
+        if (isActiveRootBackend) PinRoutes.Map(app);
         PushRoutes.Map(app);
         LifecycleRoutes.Map(app);
         app.Services.GetRequiredService<AppEventWebSocketHandler>().MapWebSocket(app);

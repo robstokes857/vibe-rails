@@ -155,12 +155,21 @@ config. Disabling it affects new sessions. It does not set `AuthorizeBoardTools`
 permissions, remove explicit Board instructions, or apply to plain shell sessions.
 
 Start work also sets `StartTerminalRequest.AuthorizeBoardTools` for base and saved-environment
-launches. It defaults to false everywhere else and travels through TerminalRoutes,
+launches. It is excluded from JSON in both directions; the authenticated root-to-child request
+carries the decision in a server-set header. It defaults to false elsewhere and travels through TerminalRoutes,
 TerminalSessionService, TerminalRunner and CommandService. The launch prompt explicitly
 authorizes the Board workflow for every provider. `Commands/BoardMcpAuthorization.cs` grants
 only the reviewed Board tools and own-session completion tool in `ToolNames`, using exact per-tool rules. Unrelated
 MCP tools retain their normal approval policy. Never add a server-wide grant: future tools must
 be reviewed individually before they enter this allowlist.
+
+CLI descendants receive scoped credentials, never the dashboard's process pair.
+`AgentCredentialService` rotates root tool contacts per launch and binds them to a confirmed,
+active tab session. Proxy/control contacts rotate per PTY session and are revoked on exit.
+The root-to-child launch carries the fresh root contact in authenticated headers, and
+`TerminalRunner` overwrites inherited/custom Environment values before spawning descendants.
+The allowlist and ownership rules live in `API_SEC.md`; do not add broad terminal, Settings,
+shutdown or HTTP MCP access to an agent contact.
 
 Board cards may select the Agent workflow with an independent saved manager. Starting work
 launches that manager with its own base options or saved environment. It delegates through the

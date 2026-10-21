@@ -60,7 +60,8 @@ points on authoring, signing and execution.
 
 `PythonScriptService.RuntimeFor` maps the lower-case extension to `JobScriptRuntime`; the name rule
 accepts only `.py`, `.ps1` and `.sh`, and the frontend mirrors it in `script-runtimes.js` (a node
-test compares the two patterns). Python keeps PyBridge discovery (venv → conda → PATH). pwsh and
+test compares the two patterns). Python uses `DiscoverPythonRunnerOptions` from the installed
+scripts directory, excluding active-venv/PYBRIDGE_PYTHON overrides from the open repository. pwsh and
 bash resolve through `JobExecutableResolver`, the same lookup repository Automation scripts use
 (Git Bash on Windows, never the System32 WSL bridge), and the missing-interpreter wording comes
 from `AutomationScriptService.MissingRuntimeMessage`.

@@ -68,6 +68,10 @@ export class VibeControlApp {
         this.automationNavLauncher = new AutomationNavLauncher(this);
         this.appEventClient = new AppEventClient(this);
         this.appEventClient.on('remote-account-linked', () => void this.refreshAccountSettings());
+        this.appEventClient.on('account_key_changed', () => {
+            this.showToast('Account security', 'The viberails.ai API key was changed.', 'warning');
+            void this.refreshAccountSettings();
+        });
         this.lifecycleHeartbeatTimer = null;
         this.lifecycleClientId = this.getOrCreateLifecycleClientId();
         this.navbarsCollapsed = false;

@@ -26,6 +26,11 @@ public static class LlmZaiProxyRoutes
     {
         app.Map(LlmProxyZaiConfig.ZaiProxyPath + "/{**rest}", static async context =>
         {
+            if (!context.RequestServices.GetRequiredService<ILlmProxyAuthGate>().IsRequestAuthenticated(context))
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                return;
+            }
             var settings = context.RequestServices
                 .GetRequiredService<ILlmProxySettingsService>()
                 .GetSettings();

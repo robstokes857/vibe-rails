@@ -126,7 +126,7 @@ internal static class LlmProxyRelay
                 context.Request, transformed, recorder, cancellationToken);
 
             using var upstreamRequest = CreateUpstreamRequest(context, target, upstreamBody);
-            var http = httpClientFactory.CreateClient();
+            var http = httpClientFactory.CreateClient("llm-proxy");
             // An SSE turn streams for as long as the model keeps generating, which routinely outlasts
             // HttpClient's 100 s default timeout — that firing would abort the read mid-turn. Leave it
             // unbounded and rely on the client's RequestAborted token to end the relay when the CLI quits.

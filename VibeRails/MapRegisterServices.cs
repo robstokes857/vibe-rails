@@ -137,10 +137,13 @@ namespace VibeRails
 
             serviceCollection.AddSingleton<IGitDiffCaptureService, GitDiffCaptureService>();
             serviceCollection.AddSingleton<ILlmParser, LlmParser>();
+            serviceCollection.AddSingleton<AgentCredentialService>();
+            serviceCollection.AddSingleton<SettingsPresenceService>();
             serviceCollection.AddSingleton<ILocalToolApiContext>(sp =>
-                new LocalToolApiContext(localApiBaseUrl, sp.GetRequiredService<IAuthService>()));
+                new LocalToolApiContext(localApiBaseUrl, sp.GetRequiredService<IAuthService>(), sp.GetRequiredService<AgentCredentialService>()));
             serviceCollection.AddSingleton<ILocalLlmProxyContext>(sp =>
-                new LocalLlmProxyContext(localApiBaseUrl, sp.GetRequiredService<IAuthService>()));
+                new LocalLlmProxyContext(localApiBaseUrl, sp.GetRequiredService<IAuthService>(), sp.GetRequiredService<AgentCredentialService>()));
+            serviceCollection.AddHttpClient("llm-proxy").ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
             serviceCollection.AddSingleton<ILlmProxySessionState, LlmProxySessionState>();
             // Singleton, and ungated: the pause must outlive request scopes, and it is the terminal
             // tab child — not the root — that hosts the proxy an agent is asking to pause. In the
@@ -259,7 +262,8 @@ namespace VibeRails
             serviceCollection.AddSingleton<Services.PythonScripts.IPythonScriptService>(sp =>
                 new Services.PythonScripts.PythonScriptService(
                     pythonRunnerProvider: () => new PyBridge.PythonRunner(
-                        PyBridge.PythonRunnerOptions.Discover())));
+                        Services.PythonScripts.PythonScriptService.DiscoverPythonRunnerOptions(
+                            new Services.PythonScripts.PythonScriptService().GetScriptsDirectory()))));
             serviceCollection.AddScoped<IGetUserText, GetUserText>();
             serviceCollection.AddScoped<IProjectCache, ProjectCache>();
             serviceCollection.AddScoped<IGlobalCache, GlobalCache>();

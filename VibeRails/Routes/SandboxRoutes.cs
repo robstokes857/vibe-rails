@@ -113,9 +113,9 @@ public static class SandboxRoutes
                     process = System.Diagnostics.Process.Start(
                         new System.Diagnostics.ProcessStartInfo
                         {
-                            FileName = ShellDefaults.WindowsCommandShell,
-                            Arguments = "-NoExit -NoProfile",
-                            WorkingDirectory = sandbox.Path,
+                            FileName = ShellDefaults.ResolveWindowsCommandShellPath(),
+                            ArgumentList = { "-NoExit", "-NoProfile", "-Command",
+                                $"Set-Location -LiteralPath {ShellArgSanitizer.DecodedPowerShellLiteral(sandbox.Path)}" },
                             UseShellExecute = true
                         });
                 }
@@ -179,13 +179,7 @@ public static class SandboxRoutes
             try
             {
                 var process = System.Diagnostics.Process.Start(
-                    new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = "code",
-                        Arguments = ".",
-                        WorkingDirectory = sandbox.Path,
-                        UseShellExecute = true
-                    });
+                    VsCodeLauncher.CreateStartInfo(sandbox.Path, null));
 
                 if (process == null)
                     return Results.BadRequest(new ErrorResponse("Failed to start VS Code. Make sure 'code' command is in your PATH."));
@@ -234,11 +228,19 @@ public static class SandboxRoutes
             // appended here: LaunchInTerminal always spawns vb, and CliLoop resolves the prompt
             // ({{step:...}}/{{datetime}} placeholders included) in the process that owns the PTY,
             // exactly once per launch.
-            if (!string.IsNullOrEmpty(envName))
+            string[]? launcherArgs = null;
+            if (!string.IsNullOrEmpty(envName) || request?.EnvironmentId is not null)
             {
-                var environment = await repository.GetEnvironmentByNameAndLlmAsync(envName, llm, cancellationToken);
+                var environment = request?.EnvironmentId is int environmentId
+                    ? await repository.GetEnvironmentByIdAsync(environmentId, cancellationToken) : null;
+                if (environment is null || environment.LLM != llm)
+                    return Results.NotFound(new ErrorResponse("Environment not found in this project. Choose it again."));
+                envName = environment.CustomName;
+                launcherArgs = ["--env-id", environment.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)];
                 if (environment != null)
                 {
+                    if (!ProjectPathComparer.IsVisibleIn(environment.ProjectPath, ParserConfigs.GetRootPath()))
+                        return Results.NotFound(new ErrorResponse("Environment not found in this project."));
                     if (!string.IsNullOrEmpty(environment.CustomArgs))
                     {
                         var customArgs = ShellArgSanitizer.ParseAndValidate(environment.CustomArgs);
@@ -247,7 +249,7 @@ public static class SandboxRoutes
                 }
             }
 
-            var result = launchService.LaunchInTerminal(llm, envName, sandbox.Path, args.ToArray());
+            var result = launchService.LaunchInTerminal(llm, envName, sandbox.Path, args.ToArray(), launcherArgs);
 
             return Results.Ok(new LaunchCliResponse(
                 Success: result.Success,

@@ -17,6 +17,20 @@ public sealed class CardShareCaptureTests
     private static BoardCardRecord Card() => new("card_test", "project", 1, "lane", 0, "Complete card", "Description",
         null, "medium", 3, ["feature"], false, 1, Now, Now, BoardId: "board", StoredKey: "VB-CARDS-123");
 
+    [Fact]
+    public async Task SharesOnlyRelatedCardsFromTheProjectScopedPublicationProjection()
+    {
+        var local = new BoardLinkedCardRecord("local", 2, "Public local", "board", "Board", "lane", "Lane", ProjectPath: "project");
+        var foreign = local with { Id = "foreign", Title = "PRIVATE_OTHER_PROJECT", ProjectPath = "other" };
+        var detail = new BoardCardDetailRecord(Card(), [], [], [], [], []) { LinkedCards = [local, foreign] };
+        var capture = SetUp(detail);
+        _boards.Setup(b => b.GetSyncActivityAsync("project", "board", "card_test", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BoardSyncActivityRecord([], [], [], [local]));
+        var document = await capture.CaptureAsync("project", "card_test", Ct);
+        Assert.DoesNotContain("PRIVATE_OTHER_PROJECT", System.Text.Encoding.UTF8.GetString(document.Json));
+        Assert.Contains("Public local", System.Text.Encoding.UTF8.GetString(document.Json));
+    }
+
     private CardShareCapture SetUp(BoardCardDetailRecord detail, IReadOnlyList<BoardAttachmentMetadata>? attachments = null)
     {
         _boards.Setup(b => b.FindCardAsync("project", "card_test", It.IsAny<CancellationToken>())).ReturnsAsync(detail.Card);

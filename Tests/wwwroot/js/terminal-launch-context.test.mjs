@@ -9,11 +9,11 @@ function createLauncher({ cli = 'codex', environmentName = null, customPrompt, g
     const manager = Object.assign(Object.create(TerminalManager.prototype), {
         app: { data: {
             configs: { rootPath: '/project' },
-            environments: environmentName ? [{ cli, name: environmentName, customPrompt }] : []
+            environments: environmentName ? [{ id: 17, cli, name: environmentName, customPrompt }] : []
         } },
         options: { getLaunchContext },
         getActiveTab: () => active,
-        getSelectionMeta: () => ({ cli, environmentName, displayName: environmentName || cli }),
+        getSelectionMeta: () => ({ cli, environmentName, envId: environmentName ? 17 : null, displayName: environmentName || cli }),
         applySelection() {},
         async createAndActivateTab() {
             active = {
@@ -48,6 +48,7 @@ test('Start sends host context to each agent using its selected environment and 
         assert.deepEqual(requests, [{
             cli,
             environmentName: 'Script helper',
+            environmentId: 17,
             workingDirectory: 'C:\\My Scripts',
             title: 'Script helper Terminal',
             initialPrompt: 'Explain your changes.\n\nRead C:\\My Scripts\\deploy.ps1 and wait for my request.'

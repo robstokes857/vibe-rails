@@ -19,7 +19,8 @@ public sealed class CodeQualityTests
         provider.Setup(p => p.CaptureAsync(repo.RepositoryPath, Moq.It.IsAny<CancellationToken>()))
             .ReturnsAsync(snapshot);
 
-        var output = await new RulesTool(provider.Object).ValidateVca(repo.RepositoryPath);
+        var report = await RulesTool.ValidateVcaReportAsync(provider.Object, repo.RepositoryPath);
+        var output = report.Output;
 
         Assert.Contains("Code quality minimum C", output);
         provider.Verify(p => p.CaptureAsync(repo.RepositoryPath, Moq.It.IsAny<CancellationToken>()), Moq.Times.Once);

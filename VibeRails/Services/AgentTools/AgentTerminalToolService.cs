@@ -47,6 +47,7 @@ public sealed class AgentTerminalToolService : IAgentTerminalToolService
                     WorkingDirectory: request.WorkingDirectory,
                     Cli: LlmParser.ToWireName(llm),
                     EnvironmentName: request.EnvironmentName,
+                    EnvironmentId: request.EnvironmentId,
                     Title: request.Title,
                     InitialPrompt: request.InitialPrompt),
                 cancellationToken);

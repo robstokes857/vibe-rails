@@ -25,7 +25,7 @@ public sealed class BoardToolAuthorizationTests
         Assert.False(omitted!.AuthorizeBoardTools);
         var authorized = new StartTerminalRequest(Cli: "Claude", AuthorizeBoardTools: true);
         var serialized = JsonSerializer.Serialize(authorized, AppJsonSerializerContext.Default.StartTerminalRequest);
-        Assert.True(JsonSerializer.Deserialize(serialized, AppJsonSerializerContext.Default.StartTerminalRequest)!.AuthorizeBoardTools);
+        Assert.False(JsonSerializer.Deserialize(serialized, AppJsonSerializerContext.Default.StartTerminalRequest)!.AuthorizeBoardTools);
     }
 
     [Theory]

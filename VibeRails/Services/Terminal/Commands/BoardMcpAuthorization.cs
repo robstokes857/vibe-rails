@@ -55,7 +55,7 @@ public static class BoardMcpAuthorization
         }
         else if (llm == LLM.Claude)
         {
-            // --allowedTools is variadic; the delimiter below keeps the positional task
+            // --allowedTools is variadic; the prompt builder's delimiter keeps the positional task
             // prompt from being swallowed as a rule. Always name each tool explicitly.
             grants.Add("--allowedTools=" + string.Join(',',
                 ToolNames.Select(tool => $"mcp__{ServerName}__{tool}")));
@@ -77,8 +77,6 @@ public static class BoardMcpAuthorization
         var result = new List<string>(arguments);
         var delimiter = result.IndexOf("--");
         result.InsertRange(delimiter < 0 ? result.Count : delimiter, grants);
-        if (llm == LLM.Claude && delimiter < 0)
-            result.Add("--");
         return result.ToArray();
     }
 }

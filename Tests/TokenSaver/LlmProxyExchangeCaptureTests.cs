@@ -34,6 +34,7 @@ public sealed class LlmProxyExchangeCaptureTests
         var auth = new Mock<ILlmProxyAuthGate>();
         auth.Setup(gate => gate.ValidateSessionToken(It.IsAny<string?>())).Returns(true);
         auth.Setup(gate => gate.ValidateTabToken(It.IsAny<string?>())).Returns(true);
+        auth.Setup(gate => gate.ValidateTokens(It.IsAny<string?>(), It.IsAny<string?>())).Returns(true);
         var events = new Mock<ILlmProxyEventSink>(MockBehavior.Loose);
 
         await LlmProxyRelay.HandleAsync(
@@ -60,7 +61,11 @@ public sealed class LlmProxyExchangeCaptureTests
 
     private sealed class ClientFactory(HttpClient client) : IHttpClientFactory
     {
-        public HttpClient CreateClient(string name) => client;
+        public HttpClient CreateClient(string name)
+        {
+            Assert.Equal("llm-proxy", name);
+            return client;
+        }
     }
 
     private sealed class UpstreamHandler(HttpResponseMessage response) : HttpMessageHandler

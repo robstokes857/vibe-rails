@@ -31,6 +31,7 @@ public static class TerminalRoutes
             IRepository repository,
             ISessionResumeService sessionResumeService,
             IPromptPlaceholderService promptPlaceholders,
+            HttpContext context,
             StartTerminalRequest? request,
             CancellationToken cancellationToken) =>
         {
@@ -56,7 +57,7 @@ public static class TerminalRoutes
             BaseLlmOptions? baseOptions;
             try
             {
-                if (!string.IsNullOrEmpty(request.EnvironmentName) && request.BaseLlmOptions is not null)
+                if ((!string.IsNullOrEmpty(request.EnvironmentName) || request.EnvironmentId.HasValue) && request.BaseLlmOptions is not null)
                     return Results.BadRequest(new ErrorResponse("Base LLM options cannot override a saved environment."));
                 baseOptions = BaseLlmOptionsBuilder.Normalize(llm, request.BaseLlmOptions);
             }
@@ -77,19 +78,24 @@ public static class TerminalRoutes
             string[]? extraArgs = BaseLlmOptionsBuilder.BuildArguments(llm, baseOptions);
             string? environmentPrompt = null;
             int? environmentId = null;
-            if (!string.IsNullOrEmpty(request.EnvironmentName))
+            if (!string.IsNullOrEmpty(request.EnvironmentName) || request.EnvironmentId.HasValue)
             {
-                var environment = await repository.GetEnvironmentByNameAndLlmAsync(request.EnvironmentName, llm, cancellationToken);
+                var environment = request.EnvironmentId is int requestedEnvironmentId
+                    ? await repository.GetEnvironmentByIdAsync(requestedEnvironmentId, cancellationToken) : null;
+                if (environment is null || environment.LLM != llm)
+                    return Results.NotFound(new ErrorResponse("Environment not found in this project. Choose it again."));
+                request = request with { EnvironmentName = environment.CustomName };
                 if (environment != null)
                 {
+                    if (!ProjectPathComparer.IsVisibleIn(environment.ProjectPath, ParserConfigs.GetRootPath()))
+                        return Results.NotFound(new ErrorResponse("Environment not found in this project."));
                     if (!string.IsNullOrEmpty(environment.CustomArgs))
                     {
                         extraArgs = ShellArgSanitizer.ParseAndValidate(environment.CustomArgs);
                     }
                     environmentPrompt = environment.CustomPrompt;
                     environmentId = environment.Id;
-                    environment.LastUsedUTC = DateTime.UtcNow;
-                    await repository.UpdateEnvironmentAsync(environment, cancellationToken);
+                    await repository.TouchEnvironmentLastUsedAsync(environment.Id, cancellationToken);
                 }
             }
 
@@ -138,8 +144,16 @@ public static class TerminalRoutes
                 if (!string.IsNullOrEmpty(request.ResumeSessionId))
                     summary = await sessionResumeService.AppendBoardContextAsync(request.ResumeSessionId, summary, cancellationToken);
 
+                if (app.Services.GetService<ProcessRole>() is { IsTerminalTabChild: true }
+                    && context.Request.Headers["X-VibeRails-Tool-Session"].FirstOrDefault() is { } toolSession
+                    && context.Request.Headers["X-VibeRails-Tool-Tab"].FirstOrDefault() is { } toolTab
+                    && VibeRails.Auth.AgentCredentialService.IsAgentToken(toolSession)
+                    && VibeRails.Auth.AgentCredentialService.IsAgentToken(toolTab))
+                    app.Services.GetRequiredService<VibeRails.Services.AgentTools.ILocalToolApiContext>().AcceptParentContact(toolSession, toolTab);
+
                 var success = await terminalService.StartSessionAsync(llm, workDir, request.EnvironmentName, extraArgs, request.Title, request.MakeRemote, resolveInitialPrompt, summary,
-                    authorizeBoardTools: request.AuthorizeBoardTools);
+                    authorizeBoardTools: app.Services.GetService<ProcessRole>() is { IsActiveRootBackend: false, IsTerminalTabChild: true }
+                        && context.Request.Headers["X-VibeRails-Board-Authorization"] == "true");
 
                 if (!success)
                 {

@@ -6,7 +6,7 @@ Terminal Share creates a public replay link through the protected root API. The 
 job prioritizes completed recordings with durable requests pinned to the creating API key;
 already-exported sessions can be sent to the link's account without discarding prior evidence.
 The `create_session_share_link` MCP tool reaches the same root route using inherited terminal
-identity and root credentials. It returns a `vibe-share:<url>` commit line. The optional VCA rule
+identity and scoped root tool credentials. It returns a `vibe-share:<url>` commit line. The optional VCA rule
 `Require VibeRails session link` defers until commit-msg, checks those lines before scanning other
 message URLs, and applies the existing enforcement levels without a network lookup. The rule
 checks presence/URL shape only; upload readiness, session ownership and link expiry are not verified.
@@ -689,7 +689,7 @@ arguments. Default inherits CLI settings. See the model maintenance checklist in
 `vibe-books/custom_envs/CLI_OPTIONS.md` when adding models or speed tiers.
 Board MCP create/update uses the same typed assignment and `BaseLlmOptions` validation as
 the UI. `list_board_agent_options` and `start_board_agent` call the existing authenticated
-root picker/launch routes using inherited root credentials; Start uses the card's saved
+root picker/launch routes using inherited scoped launch credentials; Start uses the card's saved
 settings and returns a session ID to poll, without changing running agents or global config.
 Desktop MCP work is independent of terminal sessions: `DesktopMcpActivityTracker` writes
 90-second leases through `IBoardStore` into additive `BoardDesktopActivity` storage in

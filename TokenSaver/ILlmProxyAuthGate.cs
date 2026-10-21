@@ -11,6 +11,8 @@ public interface ILlmProxyAuthGate
     bool ValidateSessionToken(string? token);
 
     bool ValidateTabToken(string? token);
+
+    bool ValidateTokens(string? session, string? tab) => ValidateSessionToken(session) && ValidateTabToken(tab);
 }
 
 public static class LlmProxyAuthGateExtensions
@@ -31,6 +33,6 @@ public static class LlmProxyAuthGateExtensions
 
         var sessionToken = context.Request.Headers[LlmProxyCodexConfig.SessionHeaderName].FirstOrDefault();
         var tabToken = context.Request.Headers[LlmProxyCodexConfig.TabHeaderName].FirstOrDefault();
-        return authGate.ValidateSessionToken(sessionToken) && authGate.ValidateTabToken(tabToken);
+        return authGate.ValidateTokens(sessionToken, tabToken);
     }
 }

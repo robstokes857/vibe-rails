@@ -286,8 +286,7 @@ public sealed class CliWrapper : ICliWrapper
         {
             var startInfo = new ProcessStartInfo
             {
-                FileName = script.Executable,
-                WorkingDirectory = workingDirectory,
+                FileName = ShellDefaults.ResolveWindowsCommandShellPath(),
                 // Required for a real window. It also means env vars cannot be set through
                 // ProcessStartInfo, which is why they are baked into the script instead.
                 UseShellExecute = true,

@@ -1567,6 +1567,7 @@ export class TerminalManager {
         };
         if (meta.environmentName) {
             body.environmentName = meta.environmentName;
+            body.environmentId = meta.envId;
         }
         if (initialPrompt != null) {
             body.initialPrompt = initialPrompt;
@@ -1695,6 +1696,8 @@ export class TerminalManager {
         const body = {
             cli: lower(options.cli),
             environmentName: options.environmentName || null,
+            environmentId: options.environmentId || meta.envId || (this.app.data.environments || []).find(env =>
+                env.name === options.environmentName && lower(env.cli) === lower(options.cli))?.id || null,
             workingDirectory: requestedWorkingDirectory || null,
             title: requestedTitle || null,
             resumeSessionId: options.resumeSessionId || null,

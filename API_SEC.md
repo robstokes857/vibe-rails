@@ -21,6 +21,16 @@ secret, not two factors. The tab token lives in browser `sessionStorage` and tra
 header. WebSocket handshakes use the session cookie/subprotocol and tab subprotocol;
 query-string credentials are not accepted.
 
+CLI descendants receive separate random credential pairs, never the dashboard pair.
+Root tool contacts rotate on each tab launch, bind to the resulting session, and require its
+tab to remain active and reachable. They permit only GET picker/sharing capabilities, POST
+current-project card launch, and POST sharing links for an owned session. They cannot reach
+Settings, terminal input/start, shutdown, WebSockets or HTTP MCP. Proxy/control pairs rotate
+per PTY session and are revoked on exit; they permit only the five proxy trees and the exact
+token-saver/self-completion controls. Both values must belong to the same contact. These
+scopes add no middleware bypass or listener. The stdio Board store capability remains the
+local OS user's authority described below.
+
 The bootstrap cookie is HttpOnly, SameSite=Lax and Secure on HTTPS and the normal HTTP
 `localhost` origin. Numeric loopback HTTP (`127.0.0.1` / `[::1]`) retains a non-Secure cookie:
 Chromium rejects Secure cookies on those origins. This compatibility exception adds no
@@ -51,8 +61,8 @@ Exactly these cases bypass `CookieAuthMiddleware`:
    [AuthService](VibeRails/Auth/AuthService.cs).
 2. **Exact `GET /health`**, case-insensitive: bare readiness probe, no application data.
 3. **Every `OPTIONS` request**: preflight bypass. Verb-specific business handlers do not run.
-   Method-unrestricted mappings can receive non-preflight OPTIONS: enabled proxies still
-   enforce their own two-header gate, and WebSocket handlers reject non-upgrade requests.
+   Method-unrestricted mappings can receive non-preflight OPTIONS: proxies enforce their
+   two-header gate before checking feature state, and WebSocket handlers reject non-upgrade requests.
 
 **This list must not grow.** A new skip path/predicate is a security regression: reject it
 unless this contract is amended with an explicit justification in the same PR. Other verbs
@@ -69,10 +79,9 @@ also require both **headers** through [ILlmProxyAuthGate](TokenSaver/ILlmProxyAu
 The middleware's tab check matches paths containing `/api/`, MCP paths and WebSocket
 handshakes. Normal Z.AI paths (`/llm/zai/api/paas/v4/...`) therefore require both credentials
 in middleware. Other normal proxy paths, and nonstandard Z.AI catch-all paths without `/api/`,
-require only the session there. Because handlers check the feature flag before their own gate,
-a session-only caller can see disabled 404 versus enabled 401. This is an authenticated
-feature-state distinction; it never authorizes relay work. Missing-session requests receive
-401 regardless of feature state, except for the documented OPTIONS bypass. `/llm/**` auth
+require only the session there. All five handlers check their two-header gate before feature
+state, including OPTIONS. Missing or incomplete credentials receive 401 regardless of whether
+the proxy is enabled. Only an authenticated caller can see a disabled 404. `/llm/**` auth
 failures are plain-text status responses, never the browser HTML auth page.
 
 `viberails_terminal_session` is correlation metadata, not a credential; spoofing it can
@@ -386,6 +395,7 @@ middleware serves their paths rather than registering individual API endpoints.
 | GET | `/api/v1/sessions/{sessionId}/output` | [SessionRoutes.cs](VibeRails/Routes/SessionRoutes.cs) |
 | GET | `/api/v1/settings` | [AppSettingsRoutes.cs](VibeRails/Routes/AppSettingsRoutes.cs) |
 | POST | `/api/v1/settings` | [AppSettingsRoutes.cs](VibeRails/Routes/AppSettingsRoutes.cs) |
+| GET | `/api/v1/settings/security-challenge` | [AppSettingsRoutes.cs](VibeRails/Routes/AppSettingsRoutes.cs) |
 | GET | `/api/v1/settings/backups` | [DataExportRoutes.cs](VibeRails/Routes/DataExportRoutes.cs) |
 | POST | `/api/v1/settings/computer-name` | [AppSettingsRoutes.cs](VibeRails/Routes/AppSettingsRoutes.cs) |
 | GET | `/api/v1/settings/keys` | [SigningKeyRoutes.cs](VibeRails/Routes/SigningKeyRoutes.cs) |
@@ -465,6 +475,7 @@ See [Board instructions](VibeRails/Services/Board/AGENTS.md),
   candidates before ranking/limits using the server's project. Related-card targets are checked
   live inside the write transaction, including draft creation; foreign targets need full keys/IDs.
   Cross-project links and target metadata are excluded from hosted activity publication.
+  Public card shares use that same project-filtered related-card projection.
 - Session attachment takes the caller's inherited session, not an arbitrary MCP session argument,
   and remains within one project. Reads never auto-link; foreign-project writes preserve caller
   defaults/session links. Card-session reads require membership; document IDs must belong to the
@@ -522,6 +533,10 @@ Native policy/deny rules still apply; Antigravity has prompt-only authorization 
 native grant is unverified. The explicit, default-off base-CLI YOLO option is a separate user
 choice; saved environments retain their own arguments. Resolve environments by ID and project
 visibility, with no name fallback. Launch options use argv and `ShellArgSanitizer`.
+`AuthorizeBoardTools` is excluded from JSON in both directions; only the authenticated
+root-to-tab-child request carries the server's decision in a private header. CLI contacts
+cannot call that child start route. Positional Claude/Codex/Grok prompts follow `--`; CLIs
+with named prompt options reject initial messages whose first non-whitespace character is `-`.
 
 Board MCP assignment parity (2026-10-10): create/update accept the UI's typed base launch
 options. `list_board_agent_options` and `start_board_agent` use inherited root tool API
@@ -553,6 +568,21 @@ decision requiring validation against each provider's real TUI; see the removed 
 incident below. Ordinary authenticated terminal-input routes remain their own capability.
 
 ### Repository access, scripts and local reads
+
+Settings writes and all remote-PIN routes are root-only. Account-key replacement/removal,
+Remote Access and relay toggle changes, and PIN set/clear require the current PIN. Without
+a configured PIN, the dashboard shows a random confirmation code that expires after two
+minutes and is consumed once. Five failed proofs impose a five-minute process-wide cooldown;
+issuing another challenge does not reset it. Scoped CLI credentials cannot obtain a challenge
+or perform these writes. This is dashboard confirmation, not protection against arbitrary
+same-origin JavaScript executing with the dashboard's full authority. Responses do not echo
+proofs; key changes emit a fixed event and warning with no credential. Account linking retains
+its separate explicit hosted approval flow.
+
+Approved Python script discovery starts in the installed scripts directory and excludes
+repository/active-venv and PYBRIDGE_PYTHON overrides. Visible Windows shell launches resolve
+an absolute pwsh.exe from absolute PATH entries and change directory inside the quoted script;
+VS Code uses its resolved application executable. Repository folders never select these programs.
 
 The root-only script terminal WebSocket (`/api/v1/python-scripts/run/terminal/ws`) uses the
 existing authenticated Kestrel listener and both credentials, with no middleware exception.
@@ -698,7 +728,7 @@ Configuration cleaning and search detection are not substitutes for outbound tra
 
 `create_session_share_link` exposes the same operation to a managed terminal through MCP. It
 takes a display name and only the inherited current session, never a caller-supplied target.
-The stdio child calls the existing root route with both inherited root credentials; it accepts
+The stdio child calls the existing root route with its inherited scoped tool pair; it accepts
 only loopback HTTP(S), disables redirects/proxies/cookies, and bounds the local hop to 30 seconds
 and 16 KiB. Codex forwards environment variable names per launch, never credential values in argv
 or shared config. No Board auto-grant is added. Callers without a terminal/root context fail;

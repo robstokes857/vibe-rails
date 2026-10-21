@@ -28,8 +28,10 @@ public sealed class LocalLlmProxyContextTests
             var context = new LocalLlmProxyContext("http://127.0.0.1:4200/", auth.Object);
 
             Assert.Equal("http://127.0.0.1:4200", context.ApiBaseUrl);
-            Assert.Equal("child-session-token", context.SessionToken);
-            Assert.Equal("child-tab-token", context.TabToken);
+            Assert.StartsWith("vr_agent_", context.SessionToken);
+            Assert.StartsWith("vr_agent_", context.TabToken);
+            Assert.NotEqual("child-session-token", context.SessionToken);
+            Assert.NotEqual("child-tab-token", context.TabToken);
         }
         finally
         {

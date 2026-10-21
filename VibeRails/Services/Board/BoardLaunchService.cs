@@ -206,6 +206,7 @@ public sealed class BoardLaunchService(
                     WorkingDirectory: projectPath,
                     Cli: parsed.Cli,
                     EnvironmentName: environment?.CustomName,
+                    EnvironmentId: environment?.Id,
                     Title: title,
                     InitialPrompt: prompt,
                     BaseLlmOptions: launchOptions,

@@ -10,23 +10,25 @@ public sealed class LocalToolApiContext : ILocalToolApiContext
     public const string CurrentTabIdVariable = "VIBERAILS_TOOL_CURRENT_TAB_ID";
     public const string CurrentSessionIdVariable = "VIBERAILS_TOOL_CURRENT_SESSION_ID";
 
-    private readonly IAuthService _authService;
+    private readonly AgentCredentialService _credentials;
+    private sealed record ParentContact(string Session, string Tab);
+    private ParentContact? parentContact;
     private readonly string _fallbackApiBaseUrl;
 
-    public LocalToolApiContext(string fallbackApiBaseUrl, IAuthService authService)
+    public LocalToolApiContext(string fallbackApiBaseUrl, IAuthService authService, AgentCredentialService? credentials = null)
     {
         _fallbackApiBaseUrl = NormalizeBaseUrl(fallbackApiBaseUrl);
-        _authService = authService;
+        _credentials = credentials ?? new AgentCredentialService();
     }
 
     public string ApiBaseUrl =>
         NormalizeBaseUrl(Environment.GetEnvironmentVariable(ApiBaseUrlVariable) ?? _fallbackApiBaseUrl);
 
     public string SessionToken =>
-        Environment.GetEnvironmentVariable(SessionTokenVariable) ?? _authService.GetInstanceToken();
+        parentContact?.Session ?? Environment.GetEnvironmentVariable(SessionTokenVariable) ?? _credentials.ForTools("native").Session;
 
     public string TabToken =>
-        Environment.GetEnvironmentVariable(TabTokenVariable) ?? _authService.GetTabToken();
+        parentContact?.Tab ?? Environment.GetEnvironmentVariable(TabTokenVariable) ?? _credentials.ForTools("native").Tab;
 
     public string? CurrentTabId =>
         EmptyToNull(Environment.GetEnvironmentVariable(CurrentTabIdVariable));
@@ -44,10 +46,36 @@ public sealed class LocalToolApiContext : ILocalToolApiContext
             env[CurrentTabIdVariable] = CurrentTabId!;
 
         if (!string.IsNullOrWhiteSpace(currentSessionId))
+        {
             env[CurrentSessionIdVariable] = currentSessionId!;
+            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(SessionTokenVariable)))
+            {
+                var contact = _credentials.ForTools(currentSessionId);
+                _credentials.BindSession(currentSessionId, currentSessionId);
+                env[SessionTokenVariable] = contact.Session;
+                env[TabTokenVariable] = contact.Tab;
+            }
+        }
 
         return env;
     }
+
+    public IReadOnlyDictionary<string, string> BuildEnvironmentForTab(string tabId)
+    {
+        _credentials.Revoke(tabId);
+        var contact = _credentials.ForTools(tabId);
+        return new Dictionary<string, string>
+        {
+            [ApiBaseUrlVariable] = _fallbackApiBaseUrl,
+            [SessionTokenVariable] = contact.Session,
+            [TabTokenVariable] = contact.Tab,
+            [CurrentTabIdVariable] = tabId
+        };
+    }
+
+    public void RevokeTab(string tabId) => _credentials.Revoke(tabId);
+    public void AcceptParentContact(string session, string tab) => parentContact = new(session, tab);
+    public void BindSession(string tabId, string sessionId) => _credentials.BindSession(tabId, sessionId);
 
     /// <summary>
     /// Normalizes a local API base URL. Delegates to the TokenSaver library's

@@ -95,6 +95,7 @@ test('saving settings omits retired options and preserves following arguments', 
         showError(message) { throw new Error(message); }
     };
     const controller = new SettingsController(app);
+    controller._requestPresenceProof = async () => '1234';
 
     await controller.saveSettings(
         /* remoteAccess */ false,

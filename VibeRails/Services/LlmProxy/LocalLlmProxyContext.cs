@@ -41,15 +41,15 @@ public sealed class LocalLlmProxyContext : ILocalLlmProxyContext
     /// </summary>
     public const string BaseUrlVariable = "VIBERAILS_LLM_PROXY_BASE";
 
-    private readonly IAuthService _authService;
+    private readonly AgentCredentialService _credentials;
 
-    public LocalLlmProxyContext(string apiBaseUrl, IAuthService authService)
+    public LocalLlmProxyContext(string apiBaseUrl, IAuthService authService, AgentCredentialService? credentials = null)
     {
         ApiBaseUrl = LlmProxyBaseUrl.Normalize(apiBaseUrl);
-        _authService = authService;
+        _credentials = credentials ?? new AgentCredentialService();
     }
 
     public string ApiBaseUrl { get; }
-    public string SessionToken => _authService.GetInstanceToken();
-    public string TabToken => _authService.GetTabToken();
+    public string SessionToken => _credentials.ProxyContact.Session;
+    public string TabToken => _credentials.ProxyContact.Tab;
 }

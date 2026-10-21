@@ -4,12 +4,14 @@ using VibeRails.Services;
 using VibeRails.Services.HttpRelay;
 using VibeRails.Services.Integrations.VibeCodeRemote;
 using VibeRails.Utils;
+using VibeRails.Auth;
+using VibeRails.Interfaces;
 
 namespace VibeRails.Routes;
 
 public static class AppSettingsRoutes
 {
-    public static void Map(WebApplication app)
+    public static void Map(WebApplication app, bool allowWrites = true)
     {
         // GET /api/v1/settings - Read current app settings
         app.MapGet("/api/v1/settings", () =>
@@ -17,9 +19,30 @@ public static class AppSettingsRoutes
             return Results.Ok(BuildAppSettingsDto(Config.LoadFresh()));
         }).WithName("GetAppSettings");
 
+        if (!allowWrites) return;
+
+        app.MapGet("/api/v1/settings/security-challenge", (HttpContext context, SettingsPresenceService presence) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            return Results.Ok(presence.Challenge(RemoteConfig.IsPinConfigured));
+        });
+
         // POST /api/v1/settings - Update app settings
-        app.MapPost("/api/v1/settings", (AppSettingsDto settingsDto) =>
-            Results.Ok(UpdateSettings(settingsDto, Config.Store, app.Services.GetService<IRemoteHttpRelayClient>())))
+        app.MapPost("/api/v1/settings", (AppSettingsDto settingsDto, HttpContext context, SettingsPresenceService presence) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            using var lease = Config.Store.AcquireWriteLock();
+            var settings = Config.LoadFresh();
+            if (RequiresPresence(settingsDto, settings) && !presence.Verify(settingsDto.PresenceProof, settings))
+                return Results.Json(new ErrorResponse("Confirm this change with your current PIN or a fresh dashboard code."), statusCode: 403);
+            var result = UpdateSettings(settingsDto, Config.Store, app.Services.GetService<IRemoteHttpRelayClient>());
+            if (settings.ApiKey != Config.LoadFresh().ApiKey)
+            {
+                Serilog.Log.Warning("[Settings] Account API key changed from the root dashboard");
+                app.Services.GetService<IAppEventBus>()?.Publish("account_key_changed", new ErrorResponse("Account API key changed."), AppJsonSerializerContext.Default.ErrorResponse);
+            }
+            return Results.Ok(result);
+        })
             .WithName("UpdateAppSettings");
 
         // POST /api/v1/settings/computer-name - Update ONLY the notification computer
@@ -29,6 +52,12 @@ public static class AppSettingsRoutes
         app.MapPost("/api/v1/settings/computer-name", (UpdateComputerNameDto dto) =>
             Results.Ok(UpdateComputerName(dto, Config.Store))).WithName("UpdateComputerName");
     }
+
+    internal static bool RequiresPresence(AppSettingsDto request, Settings settings) =>
+        request.RemoteAccess != settings.RemoteAccess
+        || request.RouteThroughVibeRailsAi.HasValue && request.RouteThroughVibeRailsAi.Value != settings.RouteThroughVibeRailsAi
+        || request.ClearApiKey == true && !string.IsNullOrEmpty(settings.ApiKey)
+        || !string.IsNullOrWhiteSpace(request.ApiKey) && !request.ApiKey.Contains('•') && request.ApiKey != settings.ApiKey;
 
     // The internal store parameter is solely for isolated regression fixtures. Production calls
     // always use Config.Store and therefore the normal application settings path.

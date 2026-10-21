@@ -436,6 +436,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                 return false;
             }
             _tabs.Remove(tabId);
+            _toolApiContext.RevokeTab(tabId);
             if (_tabRelayCts.Remove(tabId, out var relayCts))
             {
                 relayCts.Cancel();
@@ -504,6 +505,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                 // RequestAborted still cancels the whole thing.
                 timeout: System.Threading.Timeout.InfiniteTimeSpan);
             child.LastStartedSessionId = session.SessionId;
+            if (session.SessionId is not null) _toolApiContext.BindSession(tabId, session.SessionId);
             return session;
         }
         finally
@@ -525,7 +527,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         StartTerminalRequest request,
         CancellationToken cancellationToken)
     {
-        if (request.PreserveWorkingDirectory || string.IsNullOrWhiteSpace(request.EnvironmentName))
+        if (string.IsNullOrWhiteSpace(request.EnvironmentName) && !request.EnvironmentId.HasValue)
             return request;
 
         await using var scope = _scopeFactory.CreateAsyncScope();
@@ -534,12 +536,14 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             return request;
 
         var repository = scope.ServiceProvider.GetRequiredService<IRepository>();
-        var environment = await repository.GetEnvironmentByNameAndLlmAsync(
-            request.EnvironmentName,
-            llm,
-            cancellationToken);
+        var environment = request.EnvironmentId is int environmentId
+            ? await repository.GetEnvironmentByIdAsync(environmentId, cancellationToken) : null;
+        if (environment is null || environment.LLM != llm
+            || !ProjectPathComparer.IsVisibleIn(environment.ProjectPath, ParserConfigs.GetRootPath()))
+            throw new InvalidOperationException("Environment not found in this project. Choose it again.");
+        request = request with { EnvironmentName = environment.CustomName };
 
-        if (environment is null || !environment.UsesWorkspaceClone)
+        if (request.PreserveWorkingDirectory || !environment.UsesWorkspaceClone)
             return request;
 
         var projectPath = string.IsNullOrWhiteSpace(request.WorkingDirectory)
@@ -868,6 +872,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         lock (_lock)
         {
             snapshot = _tabs.Values.ToArray();
+            foreach (var child in snapshot) _toolApiContext.RevokeTab(child.TabId);
             _tabs.Clear();
             foreach (var cts in _tabRelayCts.Values)
             {
@@ -999,7 +1004,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         foreach (var argument in arguments)
             process.StartInfo.ArgumentList.Add(argument);
 
-        foreach (var kvp in _toolApiContext.BuildEnvironment())
+        foreach (var kvp in _toolApiContext.BuildEnvironmentForTab(tabId))
         {
             process.StartInfo.Environment[kvp.Key] = kvp.Value;
         }
@@ -1117,6 +1122,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         catch
         {
             // Ensure failed handshakes never leave orphaned vb child processes.
+            _toolApiContext.RevokeTab(tabId);
             await TerminateRawProcessAsync(process);
             throw;
         }
@@ -1371,7 +1377,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         return request;
     }
 
-    private static HttpRequestMessage CreateChildRequest(
+    private HttpRequestMessage CreateChildRequest(
         TerminalChildProcess child,
         HttpMethod method,
         string path,
@@ -1380,6 +1386,14 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         var request = NewChildRequest(child, method, path);
         if (payload != null)
         {
+            var contact = _toolApiContext.BuildEnvironmentForTab(child.TabId);
+            if (contact is not null)
+            {
+                request.Headers.Add("X-VibeRails-Tool-Session", contact[LocalToolApiContext.SessionTokenVariable]);
+                request.Headers.Add("X-VibeRails-Tool-Tab", contact[LocalToolApiContext.TabTokenVariable]);
+            }
+            if (payload.AuthorizeBoardTools)
+                request.Headers.Add("X-VibeRails-Board-Authorization", "true");
             var json = JsonSerializer.Serialize(payload, AppJsonSerializerContext.Default.StartTerminalRequest);
             request.Content = new StringContent(json, Encoding.UTF8, "application/json");
         }
@@ -1669,6 +1683,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             {
                 automation = child.Automation is not null;
                 _tabs.Remove(tabId);
+                _toolApiContext.RevokeTab(tabId);
                 _tabRelayCts.Remove(tabId, out relayCts);
                 ReleaseTabsOwnerIfNeededLocked();
                 removed = true;

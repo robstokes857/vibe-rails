@@ -21,6 +21,8 @@ internal static class LlmPromptArgvBuilder
     {
         if (string.IsNullOrWhiteSpace(prompt)) return;
 
+        ValidatePrompt(llm, prompt);
+
         if (llm == LLM.Copilot)
             argv.Add($"--interactive={prompt}");
         else if (llm == LLM.Antigravity)
@@ -28,6 +30,16 @@ internal static class LlmPromptArgvBuilder
         else if (llm == LLM.OpenCode || llm == LLM.Glm52 || llm == LLM.Glm53 || llm == LLM.DeepSeekV4Pro || llm == LLM.KimiK3)
             argv.Add($"--prompt={prompt}");
         else
+        {
+            argv.Add("--");
             argv.Add(prompt);
+        }
+    }
+
+    internal static void ValidatePrompt(LLM llm, string prompt)
+    {
+        if (llm is not (LLM.Claude or LLM.Codex or LLM.Grok46)
+            && prompt.TrimStart().StartsWith('-'))
+            throw new ArgumentException("The initial message cannot start with '-' for this CLI.");
     }
 }

@@ -104,6 +104,7 @@ public class LlmProxyRoutesTests
     [Theory]
     [InlineData(true, false, HttpStatusCode.Unauthorized)]
     [InlineData(false, true, HttpStatusCode.NotFound)]
+    [InlineData(false, false, HttpStatusCode.Unauthorized)]
     public async Task OpenAiProxy_RejectedOrDisabledRequest_DoesNotPublishActivity(
         bool enabled,
         bool authenticated,

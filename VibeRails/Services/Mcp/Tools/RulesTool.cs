@@ -86,10 +86,9 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
 
     [McpServerTool]
     [Description("Validates staged files against VCA rules defined in vc.rules.md files. Supports '- [WARN] Rule' and '- Rule (WARN)' formats. Call this BEFORE attempting to commit changes. Returns validation results with any COMMIT-level violations that require acknowledgment.")]
-    public async Task<string> ValidateVca(
-        [Description("Optional working directory. If not provided, uses current directory.")] string? workingDirectory = null)
+    public async Task<string> ValidateVca()
     {
-        var report = await ValidateVcaReportAsync(snapshotProvider, workingDirectory);
+        var report = await ValidateVcaReportAsync(snapshotProvider, Directory.GetCurrentDirectory());
         return report.Output;
     }
 

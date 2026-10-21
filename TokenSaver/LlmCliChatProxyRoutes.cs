@@ -27,6 +27,11 @@ public static class LlmCliChatProxyRoutes
     {
         app.Map(LlmProxyCliChatConfig.CliChatProxyPath + "/{**rest}", static async context =>
         {
+            if (!context.RequestServices.GetRequiredService<ILlmProxyAuthGate>().IsRequestAuthenticated(context))
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                return;
+            }
             var settings = context.RequestServices
                 .GetRequiredService<ILlmProxySettingsService>()
                 .GetSettings();

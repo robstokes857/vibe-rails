@@ -51,7 +51,7 @@ public static class PythonScriptRunProcessHost
         var service = new PythonScriptService(
             installDirectory: installDirectory,
             allProjects: true,
-            pythonRunnerProvider: () => new PythonRunner(PythonRunnerOptions.Discover(scriptsDirectory)));
+            pythonRunnerProvider: () => new PythonRunner(PythonScriptService.DiscoverPythonRunnerOptions(scriptsDirectory)));
 
         try
         {

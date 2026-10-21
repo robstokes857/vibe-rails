@@ -18,7 +18,7 @@ rewrite saved assignments, and the manager retains pipeline responsibility. Crea
 `workflowMode`, `managerSelection` and `managerBaseLlmOptions` (update also accepts
 `clearManagerBaseLlmOptions`); shared validation applies independently from worker settings.
 Agent status names each session's manager/worker role. Discovery/start require inherited
-`VIBERAILS_TOOL_*` root credentials and an open root; standalone MCP clients and the root's
+`VIBERAILS_TOOL_*` scoped per-launch credentials and an open root; standalone MCP clients and the root's
 MCP Explorer without that inherited context get an actionable failure. They use the existing
 loopback-only client pattern, both credentials, bounded responses and no redirects/proxies/cookies.
 Start is limited to the root's project. Poll `get_board_agent_status` using the returned session

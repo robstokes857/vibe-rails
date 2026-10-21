@@ -197,6 +197,7 @@ public class CommandService : ICommandService
 
         if (!string.IsNullOrWhiteSpace(prompt))
         {
+            LlmPromptArgvBuilder.ValidatePrompt(llm, prompt);
             var quoted = SafeShellArg(prompt);
 
             cliCommand = llm switch
@@ -208,7 +209,7 @@ public class CommandService : ICommandService
                 // Glm52 / Glm53 / DeepSeekV4Pro / KimiK3 are OpenCode under the hood and share the --prompt convention.
                 // Native Grok takes a trailing positional as the first TUI turn; -p is headless.
                 LLM.OpenCode or LLM.Glm52 or LLM.Glm53 or LLM.DeepSeekV4Pro or LLM.KimiK3 => $"{cliCommand} --prompt={quoted}",
-                _ => $"{cliCommand} {quoted}"
+                _ => $"{cliCommand} -- {quoted}"
             };
 
             // Checked after escaping, not before: every ` " $ in the prompt doubles on Windows and

@@ -71,10 +71,12 @@ public sealed class PowerShellValueQuotingTests
         var echo = WriteEchoScript(dir.Path);
 
         var result = await RunScriptAsync(pwsh, JobProcessLauncher.BuildWindowsScript(
-            pwsh, ["-NoProfile", "-NonInteractive", "-File", echo, "--workdir", Hostile]));
+            pwsh, ["-NoProfile", "-NonInteractive", "-File", echo, "--workdir", Hostile], dir.Path)
+            + "\n'DIR:' + " + string.Format(Print, "(Get-Location).ProviderPath"));
 
         result.AssertClean();
         Assert.Equal(["--workdir", Hostile], result.Values("ARG:"));
+        Assert.Equal(Path.TrimEndingDirectorySeparator(dir.Path), Assert.Single(result.Values("DIR:")), ignoreCase: true);
     }
 
     [Fact]

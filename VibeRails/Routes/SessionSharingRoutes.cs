@@ -26,6 +26,19 @@ public static class SessionSharingRoutes
         {
             context.Response.Headers.CacheControl = "no-store";
             context.Response.Headers["Referrer-Policy"] = "no-referrer";
+            if (context.Items[typeof(VibeRails.Auth.AgentCredentialService.Contact)] is VibeRails.Auth.AgentCredentialService.Contact contact)
+            {
+                var tabs = await context.RequestServices.GetRequiredService<VibeRails.Services.Terminal.ITerminalTabHostService>().ListTabsAsync(ct);
+                var ownerTab = tabs.FirstOrDefault(tab => tab.TabId == contact.Owner && tab.HasActiveSession);
+                var ownsSession = contact.Owner == sessionId.ToString("D") || ownerTab?.SessionId == sessionId.ToString("D");
+                if (!ownsSession && ownerTab?.JobRunId is { } runId)
+                {
+                    var actions = await context.RequestServices.GetRequiredService<VibeRails.DB.IJobStore>().GetRunActionsAsync(runId, ct);
+                    ownsSession = actions.Any(action => action.SessionId == sessionId.ToString("D"));
+                }
+                if (!ownsSession)
+                    return Results.StatusCode(403);
+            }
             if (context.Request.ContentLength > MaxBodyBytes) return Results.StatusCode(413);
             if (!context.Request.HasJsonContentType()) return Results.StatusCode(415);
             CreateSessionShareRequest? body;

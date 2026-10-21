@@ -1,5 +1,6 @@
 using VibeRails.Auth;
 using VibeRails.Services;
+using VibeRails.Services.Terminal;
 
 namespace VibeRails.Middleware;
 
@@ -18,6 +19,34 @@ public class CookieAuthMiddleware
     {
         var path = context.Request.Path.Value ?? "";
         var isWebSocketRequest = IsWebSocketHandshake(context);
+
+        var suppliedSession = context.Request.Headers["viberails_session"].FirstOrDefault();
+        var suppliedTab = context.Request.Headers["viberails_tab"].FirstOrDefault();
+        if (AgentCredentialService.IsAgentToken(suppliedSession) || AgentCredentialService.IsAgentToken(suppliedTab))
+        {
+            var contact = context.RequestServices.GetService<AgentCredentialService>()?.Authenticate(suppliedSession, suppliedTab);
+            if (contact is null || isWebSocketRequest || !AgentCredentialService.Allows(contact, context.Request))
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                return;
+            }
+            if (!contact.Proxy)
+            {
+                var session = context.RequestServices.GetService<ITerminalSessionService>();
+                var native = contact.SessionId is not null && session?.HasActiveSession == true && session.ActiveSessionId == contact.SessionId && contact.Owner == contact.SessionId;
+                var host = context.RequestServices.GetService<ITerminalTabHostService>();
+                var tabs = !native && host is not null ? await host.ListTabsAsync(context.RequestAborted) : [];
+                if (!native && !tabs.Any(tab => tab.TabId == contact.Owner && tab.StatusAvailable
+                    && tab.HasActiveSession && contact.SessionId is not null && tab.SessionId == contact.SessionId))
+                {
+                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    return;
+                }
+            }
+            context.Items[typeof(AgentCredentialService.Contact)] = contact;
+            await _next(context);
+            return;
+        }
 
         // Skip auth ONLY for the exact GET bootstrap route (it mints the credentials), the exact
         // GET readiness probe, and CORS preflights. This list is frozen: adding a path or

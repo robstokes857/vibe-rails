@@ -53,12 +53,11 @@ public sealed class JobProcessLauncher : IJobProcessLauncher
         bool launchMinimized)
     {
         var scriptPath = Path.Combine(Path.GetTempPath(), $"viberails-job-{Guid.NewGuid():N}.ps1");
-        File.WriteAllText(scriptPath, BuildWindowsScript(executable, arguments), new UTF8Encoding(false));
+        File.WriteAllText(scriptPath, BuildWindowsScript(executable, arguments, workingDirectory), new UTF8Encoding(false));
 
         var startInfo = new ProcessStartInfo
         {
-            FileName = ShellDefaults.WindowsCommandShell,
-            WorkingDirectory = workingDirectory,
+            FileName = ShellDefaults.ResolveWindowsCommandShellPath(),
             UseShellExecute = true,
             WindowStyle = launchMinimized ? ProcessWindowStyle.Minimized : ProcessWindowStyle.Normal
         };
@@ -81,12 +80,14 @@ public sealed class JobProcessLauncher : IJobProcessLauncher
         return new LaunchResult(true, "Automation launched in a new terminal window.");
     }
 
-    internal static string BuildWindowsScript(string executable, IReadOnlyList<string> arguments)
+    internal static string BuildWindowsScript(string executable, IReadOnlyList<string> arguments, string? workingDirectory = null)
     {
         // A tiny temporary script is used only to create the new terminal. PowerShell splatting
         // keeps every VibeRails argument as a distinct argv value; paths and run ids never become
         // an interpolated command line, and each value is decoded data, never PowerShell text.
         var builder = new StringBuilder();
+        if (workingDirectory is not null)
+            builder.AppendLine($"Set-Location -LiteralPath {ShellArgSanitizer.DecodedPowerShellLiteral(workingDirectory)} -ErrorAction Stop");
         builder.AppendLine("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8");
         builder.AppendLine($"$exe = {ShellArgSanitizer.DecodedPowerShellLiteral(executable)}");
         builder.Append("$argv = @(");
