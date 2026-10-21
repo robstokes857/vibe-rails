@@ -16,6 +16,19 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+function Get-InnoSignToolCommand {
+    param(
+        [Parameter(Mandatory)][string]$PowerShellPath,
+        [Parameter(Mandatory)][string]$SigningScript
+    )
+    # ISCC's /S parser needs its own $q placeholders for embedded quotes.
+    # Literal quotes are split into extra script filenames by the native CLI.
+    # Escape literal dollars in paths before inserting Inno's placeholders.
+    $quotedPowerShell = '$q' + $PowerShellPath.Replace('$', '$$') + '$q'
+    $quotedScript = '$q' + $SigningScript.Replace('$', '$$') + '$q'
+    return $quotedPowerShell + ' -NoProfile -NonInteractive -File ' + $quotedScript + ' -Path $f'
+}
+
 $payload = (Resolve-Path -LiteralPath $PayloadDirectory).Path
 $output = [IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Force -Path $output | Out-Null
@@ -121,7 +134,7 @@ try {
         # live only in the signing step's environment, never in command lines.
         $signScript = Join-Path $PSScriptRoot 'installer/sign.ps1'
         $pwshPath = (Get-Command pwsh -ErrorAction Stop).Source
-        $signCommand = '"' + $pwshPath + '" -NoProfile -NonInteractive -File "' + $signScript + '" -Path $f'
+        $signCommand = Get-InnoSignToolCommand -PowerShellPath $pwshPath -SigningScript $signScript
         $compilerArgs += '/DReleaseSigning'
         $compilerArgs += '/Strusted=' + $signCommand
     }

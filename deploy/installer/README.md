@@ -77,6 +77,9 @@ same TrustedSigning 0.4.1 module and identity as the existing binary signing
 action. Azure credentials are supplied only in that step's environment. Invalid
 signatures fail the build; the checksum is written after signing. Local builds
 are unsigned and must not be represented as signed releases.
+The compiler's signing command uses Inno's `$q`/`$$` escaping so paths remain
+intact. The Windows PR check compiles an inert signer probe to test this command
+without Azure credentials or a real signature.
 
 Run the lifecycle regression on Windows:
 

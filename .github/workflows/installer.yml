@@ -5,6 +5,7 @@ on:
     paths:
       - 'deploy/installer/**'
       - 'deploy/build-installer.ps1'
+      - 'Tests/Deployment/InstallerSigningCommandTests.ps1'
       - '.github/workflows/installer.yml'
   workflow_dispatch:
 
@@ -55,6 +56,10 @@ jobs:
           Compress-Archive -LiteralPath $model -DestinationPath (Join-Path $payload 'Models/BertV2/model.onnx.zip')
           Remove-Item -LiteralPath $model
           ./deploy/installer/test.ps1 -PayloadDirectory $payload -Compiler $env:INNO_COMPILER
+
+      - name: Test installer signing command
+        shell: pwsh
+        run: ./Tests/Deployment/InstallerSigningCommandTests.ps1 -Compiler $env:INNO_COMPILER
 
       - name: Upload installer logs
         if: always()
