@@ -22,6 +22,11 @@ dotnet publish VibeRails/VibeRails.csproj -c Release -r win-x64 --self-contained
 Visual Studio's x64 redistributable directory. These ship in the ZIP and VSIX
 as well. It never installs the machine-wide VC redistributable. A custom licensed
 redistributable location can be supplied with `-RuntimeDirectory`.
+Discovery prefers the newest numeric MSVC directory and also supports toolset
+aliases such as `v143` and `v145` without treating them as version numbers.
+The isolated runtime-discovery and payload-copy regression runs with
+`pwsh -NoProfile -File Tests/Deployment/WindowsRuntimePayloadTests.ps1` and
+as part of `dotnet test Tests/Tests.csproj`.
 
 The builder requires known assets and rejects unrecognized payload files. It
 generates explicit Inno file entries from the publish output; symbols, import

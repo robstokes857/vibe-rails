@@ -4,17 +4,18 @@ using Xunit;
 namespace Tests.Deployment;
 
 /// <summary>
-/// Runs the PowerShell regression test for deploy/local_deploy.ps1's payload validator under
-/// dotnet test, so the "never overwrite state.db or board.db" guard cannot regress silently.
-/// The .ps1 loads only the validator function; it never executes the deployment itself.
+/// Runs isolated PowerShell regressions for deployment payload validation and runtime bundling.
+/// These scripts never install the application or touch its user data.
 /// </summary>
 public sealed class LocalDeployPayloadTests
 {
-    [Fact]
-    public async Task DeployPayloadValidator_RejectsEveryDatabaseFile()
+    [Theory]
+    [InlineData("LocalDeployPayloadTests.ps1", "No deployment was run")]
+    [InlineData("WindowsRuntimePayloadTests.ps1", "No installation was run")]
+    public async Task DeploymentPayloadRegression_Passes(string scriptName, string expectedMessage)
     {
         var cancellationToken = TestContext.Current.CancellationToken;
-        var script = Path.Combine(FindRepositoryRoot(), "Tests", "Deployment", "LocalDeployPayloadTests.ps1");
+        var script = Path.Combine(FindRepositoryRoot(), "Tests", "Deployment", scriptName);
         Assert.True(File.Exists(script), $"Missing {script}");
 
         var pwsh = FindOnPath(OperatingSystem.IsWindows() ? "pwsh.exe" : "pwsh");
@@ -39,7 +40,7 @@ public sealed class LocalDeployPayloadTests
         var output = await stdout;
         Assert.True(process.ExitCode == 0, $"pwsh exited {process.ExitCode}.\n{output}\n{await stderr}");
         Assert.Contains("Passed:", output);
-        Assert.Contains("No deployment was run", output);
+        Assert.Contains(expectedMessage, output);
     }
 
     private static string FindRepositoryRoot()
