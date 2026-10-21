@@ -7,14 +7,31 @@ param(
     [string]$RuntimeDirectory
 )
 $ErrorActionPreference = 'Stop'
+
+function Find-VcRuntimeDirectory {
+    param([Parameter(Mandatory)][string]$RedistDirectory)
+
+    # Visual Studio includes toolset aliases such as v143/v145 alongside numeric
+    # versions. Prefer the newest numeric version; aliases are a fallback when
+    # no versioned directory contains an x64 CRT. Never cast an alias to Version.
+    $candidates = foreach ($directory in Get-ChildItem -LiteralPath $RedistDirectory -Directory) {
+        $version = $null
+        if ([version]::TryParse($directory.Name, [ref]$version)) {
+            [pscustomobject]@{ Directory = $directory; Version = $version }
+        } elseif ($directory.Name -match '^v(\d+)$') {
+            [pscustomobject]@{ Directory = $directory; Version = [version]::new(0, [int]$Matches[1]) }
+        }
+    }
+    $candidates | Sort-Object Version -Descending | ForEach-Object {
+        Get-ChildItem -Path (Join-Path $_.Directory.FullName 'x64/Microsoft.VC*.CRT') -Directory -ErrorAction SilentlyContinue
+    } | Select-Object -First 1 -ExpandProperty FullName
+}
+
 if (-not $RuntimeDirectory) {
     $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
     $vsRoot = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
     if ($LASTEXITCODE -ne 0 -or -not $vsRoot) { throw 'Visual C++ redistributable files were not found.' }
-    $RuntimeDirectory = Get-ChildItem -LiteralPath (Join-Path $vsRoot 'VC/Redist/MSVC') -Directory |
-        Sort-Object { [version]$_.Name } -Descending | ForEach-Object {
-            Get-ChildItem -Path (Join-Path $_.FullName 'x64/Microsoft.VC*.CRT') -Directory -ErrorAction SilentlyContinue
-        } | Select-Object -First 1 -ExpandProperty FullName
+    $RuntimeDirectory = Find-VcRuntimeDirectory -RedistDirectory (Join-Path $vsRoot 'VC/Redist/MSVC')
 }
 if (-not $RuntimeDirectory) { throw 'No x64 Microsoft.VC*.CRT redistributable directory was found.' }
 $payload = (Resolve-Path -LiteralPath $PayloadDirectory).Path
