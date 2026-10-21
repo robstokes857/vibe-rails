@@ -4,7 +4,7 @@ A VS Code extension that embeds the VibeRails dashboard directly inside Visual S
 
 ![VibeRails Board with fictional demo work](media/screenshots/15-board-wide.png)
 
-[Visual tour](../ABOUT.md) · [Screenshot collection](media/screenshots/README.md)
+[Project overview](../README.md) · [Screenshot collection](media/screenshots/README.md)
 
 Screenshots capture the shared dashboard UI with fictional demo data. They show the interface embedded by the extension; editor chrome is outside the capture.
 
