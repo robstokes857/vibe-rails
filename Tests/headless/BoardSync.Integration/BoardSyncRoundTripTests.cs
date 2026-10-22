@@ -356,6 +356,11 @@ public sealed class BoardSyncRoundTripTests : IDisposable
         await store.AddCommitAsync(root, card.Id, sha, "Fixture author", "Fixture change", DateTime.UtcNow,
             new([new("src/file.cs", "csharp", "original", "saved replacement")], 1), Ct);
         var attachment = (await store.AddAttachmentContentAsync(root, card.Id, "result.txt", "text/plain", "saved attachment"u8.ToArray(), Ct))!;
+        // Invalid UTF-8 proves the transport and the parts protocol move raw bytes, never decoded text.
+        var binary = new byte[1024];
+        new Random(184).NextBytes(binary);
+        binary[0] = 0xff; binary[1] = 0x80; binary[2] = 0x00;
+        var binaryAttachment = (await store.AddAttachmentContentAsync(root, card.Id, "result.bin", "application/octet-stream", binary, Ct))!;
         await store.LinkCardAsync(root, card.Id, related.Id, Ct);
         await store.SetBoardSyncEnabledAsync(root, card.BoardId, true, Ct);
         await sync.SyncDueAsync(Ct);
@@ -380,11 +385,11 @@ public sealed class BoardSyncRoundTripTests : IDisposable
             Assert.Equal(sha, commit.Sha);
             Assert.Empty(commit.Files);
             Assert.NotNull(commit.Content);
-            var saved = Assert.Single(snapshot.Attachments);
-            Assert.Equal(attachment.Id, saved.Id);
-            Assert.Null(saved.ContentBase64);
-            Assert.NotNull(saved.Content);
-            var referenced = new[] { commit.Content!, saved.Content! }.Select(c => Assert.Single(c.Parts)).ToList();
+            Assert.Equal(2, snapshot.Attachments.Count);
+            var saved = Assert.Single(snapshot.Attachments, a => a.Id == attachment.Id);
+            var savedBinary = Assert.Single(snapshot.Attachments, a => a.Id == binaryAttachment.Id);
+            Assert.All(snapshot.Attachments, a => { Assert.Null(a.ContentBase64); Assert.NotNull(a.Content); });
+            var referenced = new[] { commit.Content!, saved.Content!, savedBinary.Content! }.Select(c => Assert.Single(c.Parts)).ToList();
             Assert.Equal(referenced.Select(p => p.Sha256).Order(), transport.PartUploads.Order());
             var stored = await db.BackupParts.Where(p => p.UserId == Owner).ToListAsync(Ct);
             Assert.All(referenced, part => Assert.Contains(stored,
@@ -392,6 +397,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
             // The hosted side reassembles and verifies the complete bytes from those parts.
             var hosted = new BoardActivityService(db);
             Assert.Equal("saved attachment", Encoding.UTF8.GetString(await ReadContent(hosted, remoteId, card.Id, saved.Id, attachment: true)));
+            Assert.Equal(binary, await ReadContent(hosted, remoteId, card.Id, savedBinary.Id, attachment: true));
             var diff = JsonSerializer.Deserialize<VibeRails.DTOs.SandboxDiffResponse>(await ReadContent(hosted, remoteId, card.Id, sha, attachment: false), WebJson)!;
             var file = Assert.Single(diff.Files);
             Assert.Equal("src/file.cs", file.FileName);
@@ -403,6 +409,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
         await store.UnlinkSessionAsync(root, card.Id, agentSession, Ct);
         await store.RemoveCommitAsync(root, card.Id, sha, Ct);
         await store.DeleteAttachmentAsync(root, card.Id, attachment.Id, Ct);
+        await store.DeleteAttachmentAsync(root, card.Id, binaryAttachment.Id, Ct);
         await store.UnlinkCardAsync(root, card.Id, related.Id, Ct);
         await Sync(card);
         await using (var db = Db())
