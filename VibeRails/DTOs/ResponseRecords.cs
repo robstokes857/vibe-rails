@@ -716,7 +716,8 @@ namespace VibeRails.DTOs
         string? Id = null,
         string? DisplayName = null,
         string Scope = "global",
-        string? ProjectPath = null
+        string? ProjectPath = null,
+        bool RequiresWritePin = false
     );
 
     public record PythonScriptListResponse(
@@ -728,7 +729,8 @@ namespace VibeRails.DTOs
 
     public record SetPythonScriptPinRequest(
         string? CurrentPin,
-        string? NewPin
+        string? NewPin,
+        string? PresenceProof = null
     );
 
     public record PythonScriptApprovalRequest(
@@ -789,8 +791,8 @@ namespace VibeRails.DTOs
     );
 
 
-    // Script authoring (create / edit / import / rename / delete). None of these carry a
-    // PIN or create an approval. Saves use the raw-byte Version as an optimistic concurrency
+    // Script authoring never creates approvals. External writes require the signing PIN.
+    // Saves use the raw-byte Version as an optimistic concurrency
     // token; the signing status still comes from the separately approved canonical hash.
     public record PythonScriptContentResponse(
         string Name,
@@ -808,7 +810,8 @@ namespace VibeRails.DTOs
         string? Directory = null,
         string? DisplayName = null,
         string Scope = "global",
-        bool RequirePinEachRun = false
+        bool RequirePinEachRun = false,
+        string? Pin = null
     );
 
     public record PythonScriptSaveResponse(
@@ -832,7 +835,8 @@ namespace VibeRails.DTOs
 
     public record PythonScriptRenameRequest(
         string? Name,
-        string? NewName
+        string? NewName,
+        string? Pin = null
     );
 
     // ReturnJson is the script's return value: the JSON object or array it printed as

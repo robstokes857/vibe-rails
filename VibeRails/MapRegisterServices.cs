@@ -263,7 +263,9 @@ namespace VibeRails
                 new Services.PythonScripts.PythonScriptService(
                     pythonRunnerProvider: () => new PyBridge.PythonRunner(
                         Services.PythonScripts.PythonScriptService.DiscoverPythonRunnerOptions(
-                            new Services.PythonScripts.PythonScriptService().GetScriptsDirectory()))));
+                            new Services.PythonScripts.PythonScriptService().GetScriptsDirectory())),
+                    firstPinPresenceVerifier: proof => sp.GetRequiredService<SettingsPresenceService>()
+                        .Verify(proof, Config.LoadFresh())));
             serviceCollection.AddScoped<IGetUserText, GetUserText>();
             serviceCollection.AddScoped<IProjectCache, ProjectCache>();
             serviceCollection.AddScoped<IGlobalCache, GlobalCache>();

@@ -8,8 +8,9 @@ namespace VibeRails.Services.PythonScripts;
 /// Kestrel/auth/browser startup — signing state is file-based, so this process talks
 /// straight to <see cref="PythonScriptService"/>. The PIN is read from an interactive
 /// console only, with echo suppressed, and never printed or logged. Piped/redirected
-/// stdin is refused so that <c>echo pin | vb --sign-script x.py</c> cannot enrol or
-/// approve unattended — a speed bump, not a boundary: an agent running as the user can
+/// stdin is refused so that <c>echo pin | vb --sign-script x.py</c> cannot
+/// approve unattended. First-PIN setup requires the dashboard. This is a speed bump,
+/// not a boundary: an agent running as the user can
 /// still drive a pseudo-console (see the threat model on <see cref="PythonScriptService"/>).
 /// </summary>
 public static class PythonScriptSignProcessHost
@@ -71,17 +72,8 @@ public static class PythonScriptSignProcessHost
             }
             if (!status.PinConfigured)
             {
-                Console.WriteLine("No signing PIN is configured yet. Create one now.");
-                var first = ReadPin("New PIN (4+ characters): ");
-                var second = ReadPin("Confirm PIN: ");
-                if (!string.Equals(first, second, StringComparison.Ordinal))
-                {
-                    Console.Error.WriteLine("PINs did not match. Nothing was changed.");
-                    return 1;
-                }
-
-                await service.SetPinAsync(new SetPythonScriptPinRequest(null, first));
-                Console.WriteLine("Signing PIN created.");
+                Console.Error.WriteLine("Create the first signing PIN from the dashboard's Automation page, then sign here.");
+                return 1;
             }
 
             var pin = ReadPin("Signing PIN: ");
@@ -107,7 +99,7 @@ public static class PythonScriptSignProcessHost
     /// <summary>
     /// Masked interactive PIN prompt. Redirected stdin is refused rather than read: the
     /// PIN exists to require a person at the keyboard, so accepting it from a pipe would
-    /// make first-time enrolment and every approval scriptable. Echo suppression only —
+    /// make every approval scriptable. Echo suppression only —
     /// the PIN itself never leaves this process except as the PBKDF2 check inside the
     /// service.
     /// </summary>

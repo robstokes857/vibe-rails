@@ -158,7 +158,8 @@ public sealed class PythonScriptServiceTests : IDisposable
         Assert.Equal(0, result.ExitCode);
         Assert.Equal("ok", result.StandardOutput);
         Assert.NotNull(executedArguments);
-        var executedPath = Assert.Single(executedArguments);
+        Assert.Equal(new[] { "-I", "-u", "-X", "utf8" }, executedArguments.Take(4));
+        var executedPath = executedArguments[4];
         // The exact verified bytes run from the cache, never the still-writable original.
         Assert.NotEqual(ScriptPath("good.py"), executedPath);
         Assert.Equal(ScriptPath(".vb-scripts"), Path.GetDirectoryName(executedPath));
@@ -352,7 +353,7 @@ public sealed class PythonScriptServiceTests : IDisposable
             .Returns((IReadOnlyList<string> arguments, string? input, Action<string>? output,
                 Action<string>? error, CancellationToken token) => Task.FromResult(new PythonResult
             {
-                ExitCode = 0, StandardOutput = File.ReadAllText(arguments[0]), StandardError = "",
+                ExitCode = 0, StandardOutput = File.ReadAllText(arguments[4]), StandardError = "",
                 RunTime = TimeSpan.Zero, Executable = "python", CommandLine = "python"
             }));
 
@@ -405,7 +406,7 @@ public sealed class PythonScriptServiceTests : IDisposable
             Assert.Skip("No usable Python interpreter on this machine.");
         }
 
-        var service = new PythonScriptService(probe, _installDirectory);
+        var service = new PythonScriptService(probe, _installDirectory, firstPinPresenceVerifier: _ => true);
         await WriteScriptAsync("hello.py", "print('hello from viberails')\n");
         await service.SetPinAsync(
             new SetPythonScriptPinRequest(null, "1234"), TestContext.Current.CancellationToken);
@@ -1065,9 +1066,9 @@ public sealed class PythonScriptServiceTests : IDisposable
             TestContext.Current.CancellationToken);
 
         Assert.NotNull(executedArguments);
-        // The script path stays argv[0]; the caller's tokens follow it in order.
-        Assert.Equal(4, executedArguments.Count);
-        Assert.Equal(new[] { "--out", "report.csv", "50" }, executedArguments.Skip(1));
+        // Isolation and IO flags precede the script path; the caller's tokens follow it in order.
+        Assert.Equal(8, executedArguments.Count);
+        Assert.Equal(new[] { "--out", "report.csv", "50" }, executedArguments.Skip(5));
         Assert.Equal("piped text", executedStandardInput);
     }
 
@@ -1194,7 +1195,7 @@ public sealed class PythonScriptServiceTests : IDisposable
         return new PythonScriptService(
             capturedRunner,
             _installDirectory,
-            runnerFactory: _ => capturedRunner);
+            runnerFactory: _ => capturedRunner, firstPinPresenceVerifier: _ => true);
     }
 
     private string ScriptPath(string name) =>

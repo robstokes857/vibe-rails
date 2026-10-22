@@ -7,6 +7,7 @@ using Xunit;
 
 namespace Tests.Services.Jobs;
 
+[Collection("ProcessEnvIsolation")]
 public sealed class AutomationScriptServiceTests : IDisposable
 {
     private readonly string _root = Path.Combine(
@@ -21,7 +22,7 @@ public sealed class AutomationScriptServiceTests : IDisposable
         Directory.CreateDirectory(_workspace);
         _resolver
             .Setup(candidate => candidate.Resolve(JobScriptRuntime.Python))
-            .Returns(new JobExecutable("python-test", ["-I"]));
+            .Returns(new JobExecutable("python-test", []));
         _resolver
             .Setup(candidate => candidate.Resolve(JobScriptRuntime.PowerShell))
             .Returns(new JobExecutable("pwsh-test", []));
@@ -117,6 +118,37 @@ public sealed class AutomationScriptServiceTests : IDisposable
                 approveCurrentVersion: false));
 
         Assert.Contains("has changed", error.Message);
+    }
+
+    [Fact]
+    public async Task PrepareAsync_IsolatesPythonAfterTheWindowsLauncherPrefix()
+    {
+        _resolver.Setup(candidate => candidate.Resolve(JobScriptRuntime.Python))
+            .Returns(new JobExecutable("py-test", ["-3"]));
+        var path = WriteScript("scripts/check.py", "import json\n");
+        var action = await Service().NormalizeAsync(_root, ScriptAction(path), TestContext.Current.CancellationToken);
+        var prepared = await Service().PrepareAsync(_root, _root, RunAction(action), TestContext.Current.CancellationToken);
+        Assert.Equal(new[] { "-3", "-I", path }, prepared.Arguments);
+    }
+
+    [Fact]
+    public async Task PreparedPythonRunCannotImportRepositoryOrEnvironmentCode()
+    {
+        var python = PyBridge.PythonLocator.FindBest();
+        Assert.SkipWhen(python is null, "Python is required for the isolation regression.");
+        _resolver.Setup(candidate => candidate.Resolve(JobScriptRuntime.Python))
+            .Returns(new JobExecutable(python!.ToOptions().PythonExecutable, []));
+        var path = WriteScript("scripts/check.py", "import json, sys\nassert sys.flags.isolated\nprint(json.dumps({'ok': True}))\n");
+        WriteScript("scripts/json.py", "raise RuntimeError('repository import')\n");
+        WriteScript("scripts/sitecustomize.py", "raise RuntimeError('startup import')\n");
+        var action = await Service().NormalizeAsync(_root, ScriptAction(path), TestContext.Current.CancellationToken);
+        var prepared = await Service().PrepareAsync(_root, _root, RunAction(action), TestContext.Current.CancellationToken);
+        var options = new PyBridge.PythonRunnerOptions { PythonExecutable = prepared.Executable, WorkingDirectory = prepared.WorkingDirectory };
+        options.EnvironmentVariables["PYTHONPATH"] = Path.GetDirectoryName(path);
+        var result = await new PyBridge.PythonRunner(options).RunAsync(prepared.Arguments, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal("", result.StandardError);
+        Assert.Contains("\"ok\": true", result.StandardOutput);
     }
 
     [Fact]

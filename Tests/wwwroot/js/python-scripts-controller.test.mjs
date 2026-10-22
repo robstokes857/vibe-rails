@@ -508,10 +508,10 @@ test('Run output combines stdout and stderr the same way for the row and the wor
     assert.deepEqual(Object.keys(PYTHON_SCRIPT_STATUS_META), ['approved', 'modified', 'unapproved']);
 });
 
-test('Authoring endpoints never carry a PIN, and only approve/revoke ask for one', () => {
+test('Create and import do not carry a PIN or grant approval', () => {
     const source = readFileSync(modulePath, 'utf8');
 
-    for (const endpoint of ['/create', '/content', '/rename', '/import']) {
+    for (const endpoint of ['/create', '/import']) {
         const call = source.slice(source.indexOf(`${endpoint}\``));
         assert.doesNotMatch(call.slice(0, 400), /\bpin\b/i, `${endpoint} must not send a PIN`);
     }
@@ -850,4 +850,75 @@ test('Script runtimes mirror the server: one name rule, extension picks the inte
     assert.equal(runtimes.scriptRuntimeFor('a.ps1').monacoLanguage, 'powershell');
     assert.match(service, /"\.ps1" => JobScriptRuntime\.PowerShell/);
     assert.match(service, /"\.sh" => JobScriptRuntime\.Bash/);
+});
+
+
+test('First signing PIN setup sends typed presence proof and cancellation sends no PIN mutation', async () => {
+    for (const pinRequired of [false, true]) {
+        const app = createApp();
+        const controller = controllerWith([], app);
+        controller.state.pinConfigured = false;
+        const forms = [];
+        controller._promptForm = async form => {
+            forms.push(form);
+            return forms.length === 1 ? { newPin: '1234', confirmPin: '1234' } : { proof: 'typed-proof' };
+        };
+        app.apiCall = async (url, method, body) => {
+            app.calls.push({ url, method, body });
+            return method === 'GET' ? { pinRequired, code: 'A1B2C3D4' } : { pinConfigured: true, scripts: [] };
+        };
+        await controller.openPinSetupModal();
+        assert.equal(forms.length, 2);
+        assert.match(forms[1].body, pinRequired ? /remote access PIN/ : /A1B2C3D4/);
+        assert.deepEqual(app.calls[1].body, { currentPin: null, newPin: '1234', presenceProof: 'typed-proof' });
+        assert.equal(controller.state.presenceProof, undefined);
+    }
+    const app = createApp();
+    const controller = controllerWith([], app);
+    controller.state.pinConfigured = false;
+    let count = 0;
+    controller._promptForm = async () => ++count === 1 ? { newPin: '1234', confirmPin: '1234' } : null;
+    await controller.openPinSetupModal();
+    assert.equal(app.calls.filter(call => call.method === 'POST').length, 0);
+});
+
+test('Changing a signing PIN uses the current signing PIN without a new presence challenge', async () => {
+    const app = createApp();
+    const controller = controllerWith([], app);
+    controller._promptForm = async () => ({ currentPin: '1234', newPin: '5678', confirmPin: '5678' });
+    await controller.openPinSetupModal();
+    assert.equal(app.calls.length, 1);
+    assert.deepEqual(app.calls[0].body, { currentPin: '1234', newPin: '5678' });
+});
+
+test('External saves prompt for each PIN and cancellation sends no write', async () => {
+    const app = createApp();
+    const controller = controllerWith([{ ...SCRIPT, requiresWritePin: true }], app);
+    controller._promptPin = async () => null;
+    await assert.rejects(controller.saveContent(SCRIPT.name, 'changed', 'version'), /cancelled/);
+    assert.equal(app.calls.length, 0);
+    let prompts = 0;
+    controller._promptPin = async () => { prompts++; return '1234'; };
+    app.apiCall = async (url, method, body) => {
+        app.calls.push({ url, method, body });
+        return { state: { scripts: [{ ...SCRIPT, requiresWritePin: true }] }, version: 'new-version' };
+    };
+    await controller.saveContent(SCRIPT.name, 'changed', 'version');
+    await controller.saveContent(SCRIPT.name, 'changed again', 'new-version');
+    assert.equal(prompts, 2);
+    assert.equal(app.calls[0].body.pin, '1234');
+    assert.equal(controller.state.pin, undefined);
+    assert.equal(controller.scriptByName(SCRIPT.name).pin, undefined);
+});
+
+test('External rename cancellation sends no write and confirmation includes the signing PIN', async () => {
+    const app = createApp();
+    const controller = controllerWith([{ ...SCRIPT, requiresWritePin: true }], app);
+    controller._promptForm = async () => ({ name: 'weekly.py' });
+    controller._promptPin = async () => null;
+    assert.equal(await controller.rename(SCRIPT.name), null);
+    assert.equal(app.calls.length, 0);
+    controller._promptPin = async () => '1234';
+    await controller.rename(SCRIPT.name);
+    assert.deepEqual(app.calls[0].body, { name: SCRIPT.name, newName: 'weekly.py', pin: '1234' });
 });

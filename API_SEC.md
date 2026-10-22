@@ -619,7 +619,11 @@ file existence and file version metadata, and start no processes. Results live i
   and create disabled Automations. Discovery grants no approval: Job save/run hash checks remain
   authoritative. Discovery caps reads at 200 candidates/32 MiB; its ≤256-character query is a
   substring filter applied before budgets, never a path/command. Script execution uses an explicit
-  interpreter and argv. Ordinary signed-Python authoring/execution retains its approval checks.
+  interpreter and argv. Approved Python runs use isolated mode (`-I`); scripts must be
+  self-contained. Signing-PIN checks share a process-wide five-failure/five-minute cooldown.
+  First signing-PIN setup requires dashboard presence. Create/restore stay inside UserScripts
+  or the server-derived current repository; saves and renames outside those roots require the
+  signing PIN. Import alone grants neither approval nor permission to write the file.
 - Card Automation requests resolve card/job in the server's project and recheck enabled state,
   project and overlap in the run transaction. Lane skip matches the current card/job/event pair;
   stale requests conflict. Waiting skips and their receipts commit atomically; running skips

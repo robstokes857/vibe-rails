@@ -805,8 +805,10 @@ export class PythonScriptsController {
 
         const newName = values.name.trim();
         try {
+            const pin = script.requiresWritePin ? await this._promptExternalWritePin() : undefined;
+            if (pin === null) return null;
             const nextState = await this.app.apiCall(`${API}/rename`, 'POST',
-                { name, newName },
+                { name, newName, ...(pin !== undefined ? { pin } : {}) },
                 { showLoading: false, preferErrorResponseMessage: true });
             this._applyState(nextState);
             this.lastRunByName.delete(name);
@@ -860,14 +862,22 @@ export class PythonScriptsController {
      * script's new status + version. Never carries a PIN — saving cannot sign.
      */
     async saveContent(name, content, expectedVersion) {
+        const pin = this.scriptByName(name)?.requiresWritePin ? await this._promptExternalWritePin() : undefined;
+        if (pin === null) throw new Error('Save cancelled.');
         const result = await this.app.apiCall(`${API}/content`, 'POST',
-            { name, content, expectedVersion },
+            { name, content, expectedVersion, ...(pin !== undefined ? { pin } : {}) },
             { showLoading: false, preferErrorResponseMessage: true });
         this._applyState(result.state);
         return {
             status: this.scriptByName(name)?.status || 'unapproved',
             version: result.version
         };
+    }
+
+    _promptExternalWritePin() {
+        return this._promptPin({ title: 'Write external script',
+            body: 'This file is outside UserScripts and the current repository. Enter your signing PIN to change it.',
+            submitLabel: 'Continue' });
     }
 
     /**
@@ -1128,8 +1138,22 @@ export class PythonScriptsController {
         });
         if (values === null) return;
         try {
+            let presenceProof;
+            if (!changing) {
+                const challenge = await this.app.apiCall('/api/v1/settings/security-challenge', 'GET');
+                const confirmation = await this._promptForm({
+                    title: 'Confirm signing PIN setup',
+                    body: challenge.pinRequired ? 'Enter your current remote access PIN.'
+                        : `Type this dashboard confirmation code: ${challenge.code}`,
+                    fields: [{ key: 'proof', label: 'Confirmation', ...(challenge.pinRequired ? {} : { type: 'text' }) }],
+                    submitLabel: 'Create PIN'
+                });
+                if (confirmation === null) return;
+                presenceProof = confirmation.proof;
+            }
             this._applyState(await this.app.apiCall(`${API}/pin`, 'POST',
-                { currentPin: values.currentPin || null, newPin: values.newPin },
+                { currentPin: values.currentPin || null, newPin: values.newPin,
+                    ...(presenceProof !== undefined ? { presenceProof } : {}) },
                 { showLoading: false, preferErrorResponseMessage: true }));
             this.app.showToast('Signing PIN saved', 'Use it to sign scripts from now on.', 'success', { compact: true });
         } catch (error) {

@@ -1,5 +1,15 @@
 # Security finding dispositions — VIBE-182 (2026-10-21)
 
+VIBE-186 follow-up (VB-YOV5H-258): S-9, S-10(a) and S-11 are agreed. Remediation in
+local main bounds create/restore to UserScripts/the current repository, requires
+the signing PIN for external saves/renames, requires dashboard presence for first signing-PIN
+setup, shares a five-failure/five-minute cooldown across every signing-PIN operation in a
+process, and isolates approved Python library/Automation runs with `-I`. Library runs retain
+UTF-8/unbuffered IO explicitly. No schema or stored-data changes. Regression validation and
+independent review disposition are recorded on VIBE-186. Scope excludes same-user OS file
+access, deliberate unsigned imports inside approved code, and cross-process/restart-persistent
+PIN throttling; the counter is intentionally in memory per signing document.
+
 Source: card VB-RS8DU-252 / VIBE-180, attachment `security-scan-2026-10-21.md`.
 Fix card: VB-R5WOA-254 / VIBE-182. All eleven findings below are agreed and fixed in
 local main. Validation and independent Board review status are recorded on the fix card. The original scan remains

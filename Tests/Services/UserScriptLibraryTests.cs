@@ -13,7 +13,7 @@ public sealed class UserScriptLibraryTests : IDisposable
     private string RepoA => Path.Combine(_root, "repo-a");
     private string RepoB => Path.Combine(_root, "repo-b");
     private PythonScriptService Service(string? project = null) => new(installDirectory: Install,
-        projectRootProvider: () => project ?? RepoA);
+        projectRootProvider: () => project ?? RepoA, firstPinPresenceVerifier: _ => true);
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }
@@ -103,13 +103,13 @@ public sealed class UserScriptLibraryTests : IDisposable
         runner.Setup(item => item.RunAsync(It.IsAny<IReadOnlyList<string>>(), It.IsAny<string?>(),
             It.IsAny<Action<string>?>(), It.IsAny<Action<string>?>(), It.IsAny<CancellationToken>()))
             .Callback(new InvocationAction(call => {
-                executedPath = ((IReadOnlyList<string>)call.Arguments[0])[0];
+                executedPath = ((IReadOnlyList<string>)call.Arguments[0])[4];
                 File.WriteAllText(path, "print('changed after verification')\n");
                 Assert.Equal("print('hello')\n", File.ReadAllText(executedPath));
             }))
             .ReturnsAsync(new PythonResult { ExitCode = 0, StandardOutput = "hello", StandardError = "", Executable = "python", CommandLine = "python", RunTime = TimeSpan.Zero });
         var service = new PythonScriptService(runner.Object, Install,
-            runnerFactory: value => { options = value; return runner.Object; }, projectRootProvider: () => RepoA);
+            runnerFactory: value => { options = value; return runner.Object; }, projectRootProvider: () => RepoA, firstPinPresenceVerifier: _ => true);
         var entry = Assert.Single((await service.ImportAsync(new(path), Ct)).Scripts);
         await service.SetPinAsync(new(null, "1234"), Ct);
         await service.ApproveAsync(new(entry.Id, "1234"), Ct);

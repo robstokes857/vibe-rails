@@ -17,6 +17,7 @@ using Xunit;
 namespace Tests.Routes;
 
 /// <summary>Real WebSocket + PTY regressions. Uses only disposable registered script fixtures.</summary>
+[Collection("ProcessEnvIsolation")]
 public sealed class PythonScriptTerminalTests : IAsyncLifetime
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "vb-script-terminal", Guid.NewGuid().ToString("N"));
@@ -34,7 +35,7 @@ public sealed class PythonScriptTerminalTests : IAsyncLifetime
     {
         var executable = Environment.GetEnvironmentVariable("VIBERAILS_TEST_PYTHON");
         var options = string.IsNullOrEmpty(executable) ? PythonRunnerOptions.Discover() : new PythonRunnerOptions { PythonExecutable = executable };
-        _scripts = new PythonScriptService(new PythonRunner(options), installDirectory: _directory);
+        _scripts = new PythonScriptService(new PythonRunner(options), installDirectory: _directory, firstPinPresenceVerifier: _ => true);
         await _scripts.SetPinAsync(new SetPythonScriptPinRequest(null, "1234"), Token);
         var builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
@@ -158,7 +159,7 @@ public sealed class PythonScriptTerminalTests : IAsyncLifetime
             WebSocketReceiveResult received;
             try { received = await socket.ReceiveAsync(bytes, Token); }
             catch (OperationCanceledException) { Assert.Fail($"Timed out waiting for terminal. Received: {text}"); throw; }
-            Assert.NotEqual(WebSocketMessageType.Close, received.MessageType);
+            Assert.True(received.MessageType != WebSocketMessageType.Close, $"Terminal closed before expected output. Received: {text}");
             text.Append(Encoding.UTF8.GetString(bytes, 0, received.Count));
             // xterm answers the console's cursor-position query before getpass reads keys.
             if (Encoding.UTF8.GetString(bytes, 0, received.Count).Contains("\u001b[6n"))

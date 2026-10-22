@@ -37,6 +37,42 @@ public sealed class PythonScriptRoutesTests : IDisposable
     }
 
     [Fact]
+    public async Task FirstPinPresenceProofAndExternalWritePinBindThroughAotJson()
+    {
+        var presence = new VibeRails.Auth.SettingsPresenceService();
+        var settings = new VibeRails.Utils.Settings();
+        var service = new PythonScriptService(installDirectory: _installDirectory,
+            firstPinPresenceVerifier: proof => presence.Verify(proof, settings));
+        await WithHostAsync(async baseUri =>
+        {
+            using var denied = await PostAsync(baseUri, "/api/v1/python-scripts/pin",
+                new SetPythonScriptPinRequest(null, "1234"), AppJsonSerializerContext.Default.SetPythonScriptPinRequest);
+            Assert.Equal(HttpStatusCode.BadRequest, denied.StatusCode);
+            using var configured = await PostAsync(baseUri, "/api/v1/python-scripts/pin",
+                new SetPythonScriptPinRequest(null, "1234", presence.Challenge(false).Code),
+                AppJsonSerializerContext.Default.SetPythonScriptPinRequest);
+            Assert.Equal(HttpStatusCode.OK, configured.StatusCode);
+            var external = Path.Combine(_installDirectory, "profile.ps1");
+            File.WriteAllText(external, "Write-Output 1");
+            await service.ImportAsync(new(external), TestContext.Current.CancellationToken);
+            var version = (await service.GetContentAsync("profile.ps1", TestContext.Current.CancellationToken)).Version;
+            using var refused = await PostAsync(baseUri, "/api/v1/python-scripts/content",
+                new PythonScriptSaveRequest("profile.ps1", "attack", version), AppJsonSerializerContext.Default.PythonScriptSaveRequest);
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+            Assert.Equal("Write-Output 1", File.ReadAllText(external));
+            using var saved = await PostAsync(baseUri, "/api/v1/python-scripts/content",
+                new PythonScriptSaveRequest("profile.ps1", "Write-Output 2", version, Pin: "1234"),
+                AppJsonSerializerContext.Default.PythonScriptSaveRequest);
+            Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+            Assert.Equal("Write-Output 2", File.ReadAllText(external));
+            using var renamed = await PostAsync(baseUri, "/api/v1/python-scripts/rename",
+                new PythonScriptRenameRequest("profile.ps1", "renamed.ps1", "1234"),
+                AppJsonSerializerContext.Default.PythonScriptRenameRequest);
+            Assert.Equal(HttpStatusCode.OK, renamed.StatusCode);
+        }, pythonScripts: service);
+    }
+
+    [Fact]
     public async Task RegistrationSettingsBindThroughTheAotContextAndKeepTheOriginalFile()
     {
         Directory.CreateDirectory(_installDirectory);
@@ -383,7 +419,7 @@ public sealed class PythonScriptRoutesTests : IDisposable
     {
         var interpreter = PythonLocator.FindBest();
         Assert.SkipWhen(interpreter is null, "Python is not installed on this machine.");
-        var service = new PythonScriptService(new PythonRunner(interpreter!.ToOptions()), _installDirectory);
+        var service = new PythonScriptService(new PythonRunner(interpreter!.ToOptions()), _installDirectory, firstPinPresenceVerifier: _ => true);
         await service.CreateAsync(new PythonScriptSaveRequest("wait.py", """
             import os, pathlib, subprocess, sys, time
             child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])
@@ -474,7 +510,7 @@ public sealed class PythonScriptRoutesTests : IDisposable
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Services.AddSingleton(pythonScripts
-            ?? new PythonScriptService(pythonRunner: null, installDirectory: _installDirectory));
+            ?? new PythonScriptService(pythonRunner: null, installDirectory: _installDirectory, firstPinPresenceVerifier: _ => true));
         if (tabHost is not null)
             builder.Services.AddSingleton(tabHost);
         builder.Services.ConfigureHttpJsonOptions(options =>

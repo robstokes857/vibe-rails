@@ -215,7 +215,7 @@ public sealed class PythonScriptShellRuntimeTests : IDisposable
     {
         Assert.SkipWhen(new JobExecutableResolver().Resolve(JobScriptRuntime.PowerShell) is null,
             "PowerShell 7 (pwsh) is not installed on this machine.");
-        var service = new PythonScriptService(installDirectory: _installDirectory);
+        var service = new PythonScriptService(installDirectory: _installDirectory, firstPinPresenceVerifier: _ => true);
         await SignAsync(service, "greet.ps1",
             "param([string]$Name = 'nobody')\r\n"
             + "Write-Output \"hello $Name\"\r\n"
@@ -236,7 +236,7 @@ public sealed class PythonScriptShellRuntimeTests : IDisposable
     {
         Assert.SkipWhen(new JobExecutableResolver().Resolve(JobScriptRuntime.Bash) is null,
             "Bash (Git Bash on Windows) is not installed on this machine.");
-        var service = new PythonScriptService(installDirectory: _installDirectory);
+        var service = new PythonScriptService(installDirectory: _installDirectory, firstPinPresenceVerifier: _ => true);
         await SignAsync(service, "greet.sh",
             "#!/usr/bin/env bash\r\n"
             + "set -euo pipefail\r\n"
@@ -257,7 +257,7 @@ public sealed class PythonScriptShellRuntimeTests : IDisposable
     {
         Assert.SkipWhen(new JobExecutableResolver().Resolve(JobScriptRuntime.PowerShell) is null,
             "PowerShell 7 (pwsh) is not installed on this machine.");
-        var service = new PythonScriptService(installDirectory: _installDirectory);
+        var service = new PythonScriptService(installDirectory: _installDirectory, firstPinPresenceVerifier: _ => true);
         await SignAsync(service, "leave.ps1",
             "[System.IO.File]::WriteAllText((Join-Path $PWD 'interactive-location.txt'), $PSCommandPath)\nexit 7\n");
 
@@ -284,7 +284,7 @@ public sealed class PythonScriptShellRuntimeTests : IDisposable
         Assert.SkipWhen(new JobExecutableResolver().Resolve(JobScriptRuntime.PowerShell) is null,
             "PowerShell 7 (pwsh) is not installed on this machine.");
         var ct = TestContext.Current.CancellationToken;
-        var service = new PythonScriptService(installDirectory: _installDirectory);
+        var service = new PythonScriptService(installDirectory: _installDirectory, firstPinPresenceVerifier: _ => true);
         const string content = "[System.IO.File]::WriteAllText((Join-Path $PWD 'executed-location.txt'), $PSCommandPath)\nexit 7\n";
         await SignAsync(service, "repair.ps1", content);
         await service.RunAsync("repair.ps1", ct);
@@ -338,7 +338,7 @@ public sealed class PythonScriptShellRuntimeTests : IDisposable
                 factoryOptions.Add(options);
                 return capturedRunner;
             },
-            executableResolver: resolver);
+            executableResolver: resolver, firstPinPresenceVerifier: _ => true);
         return (service, runner, factoryOptions);
     }
 
@@ -360,7 +360,7 @@ public sealed class PythonScriptShellRuntimeTests : IDisposable
         File.WriteAllText(ScriptPath(name), content);
         if (new[] { ".py", ".ps1", ".sh" }.Contains(Path.GetExtension(name)))
         {
-            var library = new PythonScriptService(installDirectory: _installDirectory);
+            var library = new PythonScriptService(installDirectory: _installDirectory, firstPinPresenceVerifier: _ => true);
             if (!(await library.GetStatusAsync(TestContext.Current.CancellationToken)).Scripts.Any(item => item.Path == ScriptPath(name)))
                 await library.ImportAsync(new PythonScriptImportRequest(ScriptPath(name)), TestContext.Current.CancellationToken);
         }

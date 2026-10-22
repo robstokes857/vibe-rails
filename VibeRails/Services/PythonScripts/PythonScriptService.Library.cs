@@ -86,6 +86,23 @@ public sealed partial class PythonScriptService
     private static bool IsWithin(string path, string directory) => path.StartsWith(
         Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory)) + Path.DirectorySeparatorChar, PathComparison);
 
+    private bool IsAuthoringPath(string path) => IsWithin(Path.GetFullPath(path), GetScriptsDirectory())
+        || (CurrentProject() is { } project && IsWithin(Path.GetFullPath(path), project));
+
+    private void RequireCreateBoundary(string path)
+    {
+        if (!IsAuthoringPath(path))
+            throw new PythonScriptValidationException("Create scripts inside UserScripts or the current repository.");
+    }
+
+    private void RequireWriteAuthorization(string path, string? pin)
+    {
+        if (IsAuthoringPath(path)) return;
+        var document = ReadDocument();
+        if (document.Pin == null || !VerifyPin(document, pin))
+            throw new PythonScriptValidationException("Enter your signing PIN to write a script outside UserScripts or the current repository.");
+    }
+
     private static string DisplayName(string? value, string path)
     {
         var name = string.IsNullOrWhiteSpace(value) ? Path.GetFileName(path) : value.Trim();
@@ -139,7 +156,7 @@ public sealed partial class PythonScriptService
         return ComputeCanonicalHash(entry.Id + "\n" + entry.Path, content);
     }
 
-    /// <summary>Create a registered user file in the managed folder or a selected local folder.</summary>
+    /// <summary>Create a registered user file inside UserScripts or the current repository.</summary>
     public async Task<PythonScriptListResponse> CreateAsync(PythonScriptSaveRequest request, CancellationToken cancellationToken = default)
     {
         var name = ValidateScriptName(request.Name);
@@ -150,6 +167,7 @@ public sealed partial class PythonScriptService
             {
                 existing = Registration(name);
                 var restorePath = ValidateLibraryPath(existing.Path);
+                RequireCreateBoundary(restorePath);
                 if (PathEntryExists(restorePath))
                     throw new PythonScriptValidationException("The script already exists. Reopen it before saving.");
                 WriteDocument(WithoutApprovals(ReadDocument(), existing.Id));
@@ -160,6 +178,7 @@ public sealed partial class PythonScriptService
         var directory = ValidateLibraryPath(string.IsNullOrWhiteSpace(request.Directory)
             ? GetScriptsDirectory() : request.Directory, directory: true);
         var path = ValidateLibraryPath(Path.Combine(directory, name));
+        RequireCreateBoundary(path);
         var bytes = EncodeScriptContent(request.Content);
         var entry = NewRegistration(path, request.DisplayName, request.Scope, request.RequirePinEachRun);
         using (await AcquireCrossProcessWriteLockAsync(cancellationToken))
@@ -238,6 +257,7 @@ public sealed partial class PythonScriptService
             ReadScriptBytes(source);
             var target = ValidateLibraryPath(Path.Combine(Path.GetDirectoryName(source)!, name));
             if (source == target) return await GetStatusAsync(cancellationToken);
+            RequireWriteAuthorization(source, request.Pin);
             var library = ReadLibrary();
             if (!string.Equals(source, target, PathComparison)) EnsureNotRegistered(library, target);
             // Clear first: even a failed move cannot transfer an approval to a new file.

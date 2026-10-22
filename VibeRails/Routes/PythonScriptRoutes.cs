@@ -102,9 +102,8 @@ public static class PythonScriptRoutes
             Results.Ok(service.GetRunHistory()))
             .WithName("GetPythonScriptRuns");
 
-        // Authoring. None of these take a PIN, and none of them can make a script runnable:
-        // every write moves the file's canonical hash away from whatever was approved. Only
-        // approve/revoke above touch the signing document's trust.
+        // Authoring never grants approval. Creating is bounded to UserScripts/the current
+        // repository; writing or renaming imported external files requires the signing PIN.
         app.MapGet("/api/v1/python-scripts/content", (
             IPythonScriptService service,
             string? name,

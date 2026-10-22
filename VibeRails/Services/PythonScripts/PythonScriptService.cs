@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
@@ -41,7 +42,7 @@ public interface IPythonScriptService
     PythonScriptRunHistoryResponse GetRunHistory();
     string GetScriptsDirectory();
 
-    // Authoring. These never take a PIN — see the class remarks.
+    // Authoring inside UserScripts/current repository needs no PIN; external writes do.
     Task<PythonScriptContentResponse> GetContentAsync(
         string? name, CancellationToken cancellationToken = default);
     Task<PythonScriptSaveResponse> SaveContentAsync(
@@ -73,10 +74,9 @@ public sealed class PythonScriptValidationException(string message) : Exception(
 ///
 /// Threat model — read this before treating the PIN as a trust boundary. It raises the
 /// bar for anything limited to the HTTP API or the CLI to bless a script, but it is NOT
-/// a hard boundary against a managed agent running as the user. Such an agent is handed
-/// the same tool-API tokens as the human dashboard (see <c>LocalToolApiContext</c>) and
-/// routes to the same backend, so at the HTTP layer it is indistinguishable from the
-/// user and can call approve/run; it can also rewrite this very document on disk. A real
+/// a hard boundary against a managed agent running as the user. Scoped CLI credentials
+/// cannot access these routes, but an agent with OS file access can rewrite this very
+/// document on disk. A real
 /// boundary would need out-of-process privilege separation or a genuine user-presence
 /// signal (an OS secure prompt or an external protected key) — a PIN checked in-process
 /// cannot provide that while the agent shares the user's identity. Treat signing as
@@ -87,8 +87,9 @@ public sealed class PythonScriptValidationException(string message) : Exception(
 /// with the registration ID and absolute path mixed in, so CRLF churn (git autocrlf, editors) cannot
 /// invalidate an approval, while renaming a file or changing its canonical content does.
 ///
-/// Authoring (create / save / register / rename / remove) deliberately takes no PIN and can
-/// never create an approval. Create/import/rename always land unsigned; a changed save
+/// Authoring never creates an approval. Creation is bounded to UserScripts/the current
+/// repository; writes and renames outside those roots require the signing PIN.
+/// Create/import/rename always land unsigned; a changed save
 /// becomes modified, while a byte-for-byte or canonical line-ending-only save may retain
 /// the approval for that same version. New registrations use fresh IDs; remove and rename
 /// revoke existing approvals. Removal retains the file on disk, and restoring a removed
@@ -108,7 +109,8 @@ public sealed partial class PythonScriptService : IPythonScriptService
     internal const int PinIterations = 210_000;
     private const int PinMinLength = 4;
     private const int PinMaxLength = 128;
-    private const int PinFailureDelayMs = 300;
+    private static readonly ConcurrentDictionary<string, SigningPinAttempts> PinAttempts = new(
+        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
     private const int MaxScriptBytes = 5 * 1024 * 1024;
     private const int MaxCapturedOutputChars = 200_000;
     // Argv and stdin arrive from the local, authenticated UI and never touch a shell, but
@@ -139,6 +141,8 @@ public sealed partial class PythonScriptService : IPythonScriptService
     private readonly Lazy<IPythonRunner?> _pythonRunner;
     private readonly Func<PythonRunnerOptions, IPythonRunner> _runnerFactory;
     private readonly IJobExecutableResolver _executableResolver;
+    private readonly Func<string?, bool> _firstPinPresenceVerifier;
+    private readonly TimeProvider _timeProvider;
     private readonly SemaphoreSlim _documentLock = new(1, 1);
     private readonly object _historyLock = new();
     private readonly List<PythonScriptRunRecord> _runHistory = [];
@@ -150,7 +154,9 @@ public sealed partial class PythonScriptService : IPythonScriptService
         Func<IPythonRunner?>? pythonRunnerProvider = null,
         IJobExecutableResolver? executableResolver = null,
         Func<string?>? projectRootProvider = null,
-        bool allProjects = false)
+        bool allProjects = false,
+        Func<string?, bool>? firstPinPresenceVerifier = null,
+        TimeProvider? timeProvider = null)
     {
         _pythonRunner = new Lazy<IPythonRunner?>(
             () => pythonRunner ?? pythonRunnerProvider?.Invoke(),
@@ -162,6 +168,8 @@ public sealed partial class PythonScriptService : IPythonScriptService
         _executableResolver = executableResolver ?? new JobExecutableResolver();
         _projectRoot = projectRootProvider ?? (() => ParserConfigs.GetRootPath());
         _allProjects = allProjects;
+        _firstPinPresenceVerifier = firstPinPresenceVerifier ?? (_ => false);
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <summary>The interpreter a script runs under, from its (validated) file extension.</summary>
@@ -255,6 +263,9 @@ public sealed partial class PythonScriptService : IPythonScriptService
             try
             {
                 var document = ReadDocument();
+                if (document.Pin == null && !_firstPinPresenceVerifier(request.PresenceProof))
+                    throw new PythonScriptValidationException(
+                        "Confirm the first signing PIN with your remote access PIN or a fresh dashboard code.");
                 if (document.Pin == null || VerifyPin(document, request.CurrentPin))
                 {
                     var salt = RandomNumberGenerator.GetBytes(16);
@@ -276,9 +287,6 @@ public sealed partial class PythonScriptService : IPythonScriptService
             }
         }
 
-        // Wrong current PIN: throttle outside every lock so a typo never serializes
-        // concurrent readers behind a 300 ms sleep.
-        await Task.Delay(TimeSpan.FromMilliseconds(PinFailureDelayMs), cancellationToken);
         throw new PythonScriptValidationException("Incorrect PIN.");
     }
 
@@ -331,7 +339,6 @@ public sealed partial class PythonScriptService : IPythonScriptService
             }
         }
 
-        await Task.Delay(TimeSpan.FromMilliseconds(PinFailureDelayMs), cancellationToken);
         throw new PythonScriptValidationException("Incorrect PIN.");
     }
 
@@ -373,7 +380,6 @@ public sealed partial class PythonScriptService : IPythonScriptService
             }
         }
 
-        await Task.Delay(TimeSpan.FromMilliseconds(PinFailureDelayMs), cancellationToken);
         throw new PythonScriptValidationException("Incorrect PIN.");
     }
 
@@ -672,6 +678,9 @@ public sealed partial class PythonScriptService : IPythonScriptService
         // prevents an approval from being recorded in the middle of a replacement.
         using (await AcquireCrossProcessWriteLockAsync(cancellationToken))
         {
+            // Resolve again under the mutation lock: a concurrent rename changes the path.
+            scriptPath = ResolveScriptPath(name);
+            RequireWriteAuthorization(scriptPath, request.Pin);
             var current = ReadScriptBytes(scriptPath);
             if (!string.Equals(
                     ComputeContentVersion(current), expectedVersion, StringComparison.OrdinalIgnoreCase))
@@ -796,6 +805,12 @@ public sealed partial class PythonScriptService : IPythonScriptService
                 yield return AutomationScriptService.ToBashPath(workingDirectory, verifiedCopy);
                 break;
             default:
+                // Isolation excludes the script/cache directory, CWD, user site and PYTHON*.
+                // Explicit flags retain PyBridge's unbuffered UTF-8 IO despite -E implied by -I.
+                yield return "-I";
+                yield return "-u";
+                yield return "-X";
+                yield return "utf8";
                 yield return verifiedCopy;
                 break;
         }
@@ -988,7 +1003,8 @@ public sealed partial class PythonScriptService : IPythonScriptService
             scripts.Add(new PythonScriptInfo(Path.GetFileName(entry.Path), status, approval?.ApprovedUtc,
                 info?.LastWriteTimeUtc.ToString("O"), info?.Length ?? 0, entry.Path,
                 entry.RequirePinEachRun || (document.RequirePinEachRunNames ?? []).Contains(entry.Id),
-                entry.Id, entry.DisplayName, entry.ProjectPath == null ? "global" : "repo", entry.ProjectPath));
+                entry.Id, entry.DisplayName, entry.ProjectPath == null ? "global" : "repo", entry.ProjectPath,
+                !IsAuthoringPath(entry.Path)));
         }
         return new PythonScriptListResponse(document.Pin != null, GetScriptsDirectory(), scripts, document.RequirePinEachRun);
     }
@@ -1360,10 +1376,14 @@ public sealed partial class PythonScriptService : IPythonScriptService
             32);
 
     /// <summary>
-    /// Constant-time PIN check with no side effects. Callers apply the anti-guessing delay
-    /// after releasing every lock, so a wrong PIN never stalls a concurrent reader.
+    /// Serialize guesses across every service instance and PIN-protected operation in this
+    /// process. Five failures block all guesses (including correct PINs) for five minutes.
     /// </summary>
-    private static bool VerifyPin(PythonScriptSigningDocument document, string? pin)
+    private bool VerifyPin(PythonScriptSigningDocument document, string? pin) =>
+        PinAttempts.GetOrAdd(Path.GetFullPath(SigningFilePath), _ => new SigningPinAttempts())
+            .Verify(() => VerifyPinHash(document, pin), _timeProvider.GetUtcNow());
+
+    private static bool VerifyPinHash(PythonScriptSigningDocument document, string? pin)
     {
         var record = document.Pin;
         if (record == null || string.IsNullOrEmpty(pin))
@@ -1381,6 +1401,33 @@ public sealed partial class PythonScriptService : IPythonScriptService
         catch (FormatException)
         {
             return false;
+        }
+    }
+
+    private sealed class SigningPinAttempts
+    {
+        private readonly object _gate = new();
+        private int _failures;
+        private DateTimeOffset _retryAfter;
+
+        public bool Verify(Func<bool> verify, DateTimeOffset now)
+        {
+            lock (_gate)
+            {
+                if (now < _retryAfter)
+                    throw new PythonScriptValidationException("Too many incorrect signing PIN attempts. Try again in five minutes.");
+                if (verify())
+                {
+                    _failures = 0;
+                    return true;
+                }
+                if (++_failures >= 5)
+                {
+                    _retryAfter = now.AddMinutes(5);
+                    _failures = 0;
+                }
+                return false;
+            }
         }
     }
 

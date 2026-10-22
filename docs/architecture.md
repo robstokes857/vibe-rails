@@ -1044,7 +1044,7 @@ hash pinning; the extension picks the interpreter):
 Registrations in `~/.vibe_rails/user_script_library.json` hold stable IDs, local paths, display
 names, optional project roots and run-PIN requirements. Global scripts appear everywhere; Repo
 scripts are filtered by the server's current root. Creation defaults to `scripts/UserScripts`
-and can use a selected folder; Add from disk references the original. No folder scanning or
+and can use a folder inside the current repository; Add from disk references the original. No folder scanning or
 legacy import occurs, and removing a registration leaves its file. Signing keeps the existing
 PIN document, binding each new approval to ID/path/content. Both documents share the existing
 cross-process lock. Runs reuse `.vb-scripts/.vibe-rails-{signed SHA-256 hash}.{extension}` beneath
@@ -1060,6 +1060,15 @@ shows a restore button; Stop/Close/disconnect kill the process tree. Input and o
 recorded, remembered or attached to normal terminal tabs. The captured HTTP run API remains
 available to existing callers.
 
+Python library and Automation launches use `-I` to exclude repository/cache imports, user site
+packages and PYTHON* overrides. Approved scripts must be self-contained; trusted interpreter
+packages and the standard library remain usable. Library runs pass `-u -X utf8` to preserve
+PyBridge IO. First signing-PIN setup verifies dashboard presence through `SettingsPresenceService`;
+later changes require the existing signing PIN. All signing-PIN checks share a process-wide
+five-failure/five-minute cooldown per signing document. Imported paths outside UserScripts and
+the current server-derived repository require the signing PIN for saves and renames; creation
+and missing-file restore stay inside those roots. Metadata scope does not grant write access.
+
 - `GET /api/v1/python-scripts` - List scripts with signing status
 - `POST /api/v1/python-scripts/settings` - Update display name, Global/Repo scope and PIN-on-each-run requirement
 - `POST /api/v1/python-scripts/pin` - Create or change the signing PIN
@@ -1067,7 +1076,7 @@ available to existing callers.
 - `POST /api/v1/python-scripts/run` - Run a signed script; `GET .../runs` for history
 - `GET|POST /api/v1/python-scripts/content` - Read / write a script's text. GET returns a
   raw-content version; POST requires it as `expectedVersion` so a stale editor cannot overwrite
-  a newer file. No PIN is accepted and a write can never create an approval.
+  a newer file. External writes require `pin`; a write never creates an approval.
 - `POST /api/v1/python-scripts/create` | `/rename` - File management; `DELETE /api/v1/python-scripts?name=` removes only the registration
 - `POST /api/v1/python-scripts/import` - Register a regular UTF-8 file at its existing local path (root-dashboard backend only, like the filesystem picker; network/device
   paths and links are rejected)

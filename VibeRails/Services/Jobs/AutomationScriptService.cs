@@ -173,6 +173,7 @@ public sealed class AutomationScriptService(IJobExecutableResolver executableRes
                 arguments.Add(ToBashPath(workingDirectory, script.FullPath));
                 break;
             case JobScriptRuntime.Python:
+                arguments.Add("-I");
                 arguments.Add(script.FullPath);
                 break;
         }

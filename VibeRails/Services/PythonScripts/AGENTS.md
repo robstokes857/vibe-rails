@@ -10,7 +10,7 @@ classes, `/api/v1/python-scripts`, `--run-python-script`), but since VIBE-56 a s
    register a `.ps1`, `.sh` or `.py` file; scripts share the page's one list with workflows.
    New script selects a runtime and a destination (UI default `~/.vibe_rails/scripts/UserScripts/{project_name}/`,
    using the current repository folder name,
-   or a local folder selected with the shared file picker). Add from disk registers the original
+   or a folder inside the current repository selected with the shared file picker). Add from disk registers the original
    path without copying. Both forms offer a display name, Global/Repo scope and PIN on every run.
    In VS Code, right-click a local script and choose **Add to VibeRails Scripts…** to open this
    same form with its path already selected. Existing visible registrations open instead of
@@ -51,7 +51,11 @@ reparse points are rejected before cache repair. Publication uses the
 existing cross-process signing lock, released before execution. Completed and cancelled runs
 retain cached versions; no automatic pruning or historical-file cleanup occurs.
 `$PSScriptRoot` and Python `__file__` point into `.vb-scripts`; ordinary working-directory-relative
-paths still use the original folder. Python sibling imports may require an explicit import path.
+paths still use the original folder. Approved Python scripts (library and repository Automation
+scripts) run with `-I`: script/cache directories, cwd, PYTHON* overrides and user site packages
+are excluded from import discovery. Scripts must be self-contained; do not add repository paths
+to `sys.path` or load unsigned sibling code. Standard-library and trusted interpreter-installed
+packages remain available. Library runs explicitly retain unbuffered UTF-8 IO with `-u -X utf8`.
 Imported code, installed packages and invoked programs are not covered by the single-file
 signature. Every path component, including the staging directory, is checked for links/reparse
 points on authoring, signing and execution.
@@ -104,7 +108,19 @@ required signing PIN for each launch; cancellation starts nothing. PINs are neve
 with arguments/stdin or retained in controller/window state. New request DTOs require an
 `AppJsonSerializerContext` registration and a real HTTP binding regression.
 
-Authoring does not take a PIN or create approvals. Saves require the raw-content version read by
+The first signing PIN requires a fresh dashboard presence proof (the remote access PIN, or a
+single-use two-minute dashboard code if none exists). The local signing helper requires initial
+setup in the dashboard. Every signing-PIN verification shares a process-wide counter per signing
+document: five failures cause a five-minute cooldown, including across service instances and
+approval, revocation, PIN changes, run requirements, runs and external authoring. A successful
+check resets failures; a correct PIN cannot bypass an active cooldown. Restarting the process
+resets this in-memory throttle; separate backend processes have separate counters.
+
+Authoring never creates approvals. Create (including missing-file restore) stays inside UserScripts
+or the current server-derived repository. Import may register other local paths without writing
+them; saving or renaming those external files requires the signing PIN, regardless of Global/Repo
+metadata. The list's `requiresWritePin` drives transient UI prompts; the service rechecks the
+boundary on every write. Saves require the raw-content version read by
 the editor; stale saves must not overwrite newer bytes. Import paths reject network/device paths
 and links. Runtime discovery is lazy: listing and signing need no interpreter, and only a `.py`
 run probes for Python.

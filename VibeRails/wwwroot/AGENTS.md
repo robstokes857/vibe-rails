@@ -1288,7 +1288,11 @@ recovery rechecks content after a library refresh: retained registrations do not
 - **Shared flows**: signing (PIN prompt), revoke, rename, delete, duplicate, copy path,
   run and `saveContent` are public methods on `PythonScriptsController`
   (`app.jobController.pythonScripts`) that work unmounted; the workbench follows list
-  updates through `onStateChange`. **Run** everywhere opens the private script terminal below,
+  updates through `onStateChange`. First signing-PIN setup prompts for the remote access PIN
+  or a fresh dashboard confirmation code. Server-provided `requiresWritePin` prompts for the
+  signing PIN on external saves/renames; cancelling sends no mutation. PINs/proofs stay in
+  local call variables and never enter controller state. New files stay inside UserScripts
+  or the current repository. **Run** everywhere opens the private script terminal below,
   refusing unsigned or unsaved scripts. `runInTerminal` remains a compatibility alias.
 
 ## Python script run window
