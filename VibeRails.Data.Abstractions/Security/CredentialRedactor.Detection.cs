@@ -4,25 +4,29 @@ namespace VibeRails.Security;
 
 public static partial class CredentialRedactor
 {
-    // --- Secret detection patterns (compiled once) ---
+    // Detection is used as an exclusion filter. Fail closed on over-budget text/timeouts so
+    // a secret beyond the examined window cannot enter the index or a search response.
+    private const int SecretLineWindow = 4096;
+    private const int SecretTextLimit = 1024 * 1024;
+    private static readonly TimeSpan SecretMatchTimeout = TimeSpan.FromMilliseconds(100);
 
     private static readonly Regex[] SecretPatterns =
     [
         // Anthropic API keys
-        new(@"sk-ant-api\d{2}-[A-Za-z0-9_-]{20,}", RegexOptions.Compiled),
+        new(@"sk-ant-api\d{2}-[A-Za-z0-9_-]{20,}", RegexOptions.NonBacktracking, SecretMatchTimeout),
 
         // OpenAI API keys
-        new(@"sk-[A-Za-z0-9]{20,}", RegexOptions.Compiled),
+        new(@"sk-[A-Za-z0-9]{20,}", RegexOptions.NonBacktracking, SecretMatchTimeout),
 
         // AWS access key IDs
-        new(@"AKIA[A-Z0-9]{16}", RegexOptions.Compiled),
+        new(@"AKIA[A-Z0-9]{16}", RegexOptions.NonBacktracking, SecretMatchTimeout),
 
         // GitHub tokens (classic and fine-grained)
-        new(@"gh[pos]_[A-Za-z0-9]{36,}", RegexOptions.Compiled),
-        new(@"github_pat_[A-Za-z0-9_]{22,}", RegexOptions.Compiled),
+        new(@"gh[pos]_[A-Za-z0-9]{36,}", RegexOptions.NonBacktracking, SecretMatchTimeout),
+        new(@"github_pat_[A-Za-z0-9_]{22,}", RegexOptions.NonBacktracking, SecretMatchTimeout),
 
         // Slack tokens
-        new(@"xox[bpsar]-[A-Za-z0-9\-]{10,}", RegexOptions.Compiled),
+        new(@"xox[bpsar]-[A-Za-z0-9\-]{10,}", RegexOptions.NonBacktracking, SecretMatchTimeout),
 
         // Environment variable assignments setting secret-named variables. Leading
         // word boundary keeps the `setx?` branch from matching the "set" tail inside
@@ -30,15 +34,15 @@ public static partial class CredentialRedactor
         // "reset" and a secret-named keyword (e.g. "How do I reset my password?")
         // gets falsely flagged.
         new(@"\b(?:export|setx?|\[Environment\].*SetEnvironmentVariable)\b.*\b(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)\b",
-            RegexOptions.Compiled | RegexOptions.IgnoreCase),
+            RegexOptions.NonBacktracking | RegexOptions.IgnoreCase, SecretMatchTimeout),
 
         // PowerShell SetEnvironmentVariable with quoted args (catches the specific pattern from the user's example)
         new(@"\[Environment\]::SetEnvironmentVariable\s*\(",
-            RegexOptions.Compiled | RegexOptions.IgnoreCase),
+            RegexOptions.NonBacktracking | RegexOptions.IgnoreCase, SecretMatchTimeout),
 
         // Inline credential assignments: password=xyz, token: abc123etc
         new(@"(?:password|token|secret|api_?key|credential|auth)\s*[=:]\s*\S{8,}",
-            RegexOptions.Compiled | RegexOptions.IgnoreCase),
+            RegexOptions.NonBacktracking | RegexOptions.IgnoreCase, SecretMatchTimeout),
     ];
 
     /// <summary>
@@ -47,11 +51,17 @@ public static partial class CredentialRedactor
     /// </summary>
     public static bool ContainsKnownSecret(string text)
     {
-        foreach (var pattern in SecretPatterns)
+        if (text.Length > SecretTextLimit) return true;
+        try
         {
-            if (pattern.IsMatch(text))
-                return true;
+            foreach (var line in text.AsSpan().EnumerateLines())
+            {
+                if (line.Length > SecretLineWindow) return true;
+                foreach (var pattern in SecretPatterns)
+                    if (pattern.IsMatch(line)) return true;
+            }
         }
+        catch (RegexMatchTimeoutException) { return true; }
         return false;
     }
 }

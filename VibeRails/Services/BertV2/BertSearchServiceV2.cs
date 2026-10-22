@@ -24,7 +24,7 @@ public sealed class BertSearchServiceV2 : IBertSearchServiceV2
 
     public BertSearchResponse Search(string query, string mode, string scope, int topK)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(query);
+        BertSearchDefaults.ValidateQuery(query);
 
         var normalizedMode = NormalizeMode(mode);
         var normalizedScope = NormalizeScope(scope);

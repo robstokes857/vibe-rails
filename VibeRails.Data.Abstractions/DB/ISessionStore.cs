@@ -28,6 +28,10 @@ public interface ISessionStore
 
     Task<List<SessionLogChunkRecord>> GetSessionLogChunksAsync(string sessionId, CancellationToken cancellationToken);
 
+    /// <summary>Reads a consistent recording snapshot, enforcing byte/row limits before materializing values.</summary>
+    /// <exception cref="SessionRecordingTooLargeException">The recording exceeds the interactive export budget.</exception>
+    Task<SessionRecordingData?> GetSessionRecordingAsync(string sessionId, SessionRecordingKind kind, CancellationToken cancellationToken);
+
     Task InsertTerminalSessionLogAsync(string sessionId, int sequence, byte[] data, bool isAlternateScreen, int cols, int rows);
 
     /// <summary>

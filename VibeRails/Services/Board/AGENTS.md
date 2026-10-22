@@ -487,8 +487,8 @@ never outside the dashboard's root path.
 
 Read API_SEC before changing exposure/authentication/listeners. Board HTTP routes stay under
 `/api/v1/board`, behind session **and** tab credentials, active-root only. HTTP MCP stays behind
-the same credential pair; stdio stays a local child with no listener. Record confirmed violations
-in root `SECURITY_ERROR.md`; distinguish findings from speculative risks and accepted policy.
+the same credential pair; stdio stays a local child with no listener. Distinguish confirmed
+violations from speculative risks and accepted policy.
 
 Board tool authorization is an explicit, default-false launch field. Keep HTTP/stdio registrations
 and the exact per-tool grant allowlist in sync. No server wildcard, unrelated-tool approval,

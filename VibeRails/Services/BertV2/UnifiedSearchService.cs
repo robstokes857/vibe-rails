@@ -39,7 +39,7 @@ public sealed class UnifiedSearchService : IUnifiedSearchService
 
     public UnifiedSearchResponse Search(string query, int topK, float[]? queryEmbedding = null)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(query);
+        BertSearchDefaults.ValidateQuery(query);
         var normalizedTopK = Math.Clamp(topK <= 0 ? BertSearchDefaults.DefaultTopK : topK, 1, BertSearchDefaults.MaxTopK);
 
         var totalSw = Stopwatch.StartNew();

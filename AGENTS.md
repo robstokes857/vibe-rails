@@ -8,8 +8,7 @@ Runbooks, investigation notes, and diagnostic Python helpers live in the private
 build/install scripts, and component documentation in this repository.
 
 [API_SEC.md](API_SEC.md) stays here as the API security contract and review gate.
-Read it before changing API exposure, authentication, or production listeners;
-record security violations in `SECURITY_ERROR.md` for the owner to review.
+Read it before changing API exposure, authentication, or production listeners.
 
 ## Database change policy
 

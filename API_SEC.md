@@ -2,7 +2,6 @@
 
 Read this before changing API exposure, authentication, production listeners, or outbound
 credentials/data. This file holds the current boundaries and significant security decisions.
-Open findings and fixes awaiting owner review belong in `SECURITY_ERROR.md`, when present.
 Routine audit results belong with the change, not in this document.
 
 - [Authentication and exceptions](#1-authentication)
@@ -1010,8 +1009,8 @@ owners whose roots already ran the vulnerable feature should check delivered con
 - **Worker launch restrictions lost on save, 2026-10-05 (VIBE-58):** an Automation rename could
   rewrite its shared Environment and drop `--sandbox read-only` and other unrepresented native
   arguments. Metadata-only saves must leave the Worker untouched; Worker edits must preserve
-  unknown arguments. Fix/owner-review status is recorded in `SECURITY_ERROR.md` while pending;
-  retain browser and argument round-trip coverage rather than treating a successful save as proof.
+  unknown arguments. Retain browser and argument round-trip coverage rather than treating a
+  successful save as proof.
 
 ## Review and upkeep
 
@@ -1026,8 +1025,8 @@ Useful starting points: `Tests/Middleware/CookieAuthMiddlewareTests.cs`, `Tests/
 `Tests/Routes/AuthRoutesTests.cs`, the five LLM proxy route suites, control-route tests,
 `Tests/Services/Mcp/McpServerHttpTests.cs`, and the affected feature's route/service tests.
 Record the review scope, listener classification, test command/results and limitations in the
-PR, Board comment or private `vibe-books` investigation. Record violations in `SECURITY_ERROR.md`
-for owner review; never normalize rejected working-tree changes into this approved contract.
+PR, Board comment or private `vibe-books` investigation. Never normalize rejected working-tree
+changes into this approved contract.
 
 Keep this file small:
 

@@ -56,6 +56,7 @@ public static class BertRoutes
         {
             try
             {
+                BertSearchDefaults.ValidateQuery(request.Query);
                 return Results.Ok(bertSearch.Search(request.Query, request.Mode, request.Scope, request.TopK));
             }
             catch (ArgumentException ex)

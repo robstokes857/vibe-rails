@@ -14,9 +14,24 @@ namespace VibeRails.Services.VCA
         {
             try
             {
-                var lines = await File.ReadAllLinesAsync(filePath, ct);
-                return lines.Length;
+                using var reader = new StreamReader(filePath);
+                var buffer = new char[4096];
+                var lines = 0;
+                var previousCr = false;
+                var endsWithNewline = true;
+                int read;
+                while ((read = await reader.ReadAsync(buffer.AsMemory(), ct)) > 0)
+                {
+                    foreach (var c in buffer.AsSpan(0, read))
+                    {
+                        if (c == '\r' || (c == '\n' && !previousCr)) lines++;
+                        previousCr = c == '\r';
+                        endsWithNewline = c is '\r' or '\n';
+                    }
+                }
+                return endsWithNewline ? lines : checked(lines + 1);
             }
+            catch (OperationCanceledException) { throw; }
             catch
             {
                 return 0;

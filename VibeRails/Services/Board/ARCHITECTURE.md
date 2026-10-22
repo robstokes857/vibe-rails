@@ -925,7 +925,7 @@ explicit retention/export controls rather than silently reintroducing the old by
 Two repository-wide listener searches found only the approved main Kestrel implementation,
 the non-serving `PortFinder` probe and test hosts; the cross-runtime search had no matches.
 Board route enumeration matched the 34-route Board inventory in [API_SEC.md](../../../API_SEC.md).
-No API security-contract violation was established, so no `SECURITY_ERROR.md` was created.
+No API security-contract violation was established.
 This was not a new inventory reconciliation of every unrelated application endpoint.
 
 ## Prioritized findings

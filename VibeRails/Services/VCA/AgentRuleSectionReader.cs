@@ -58,6 +58,9 @@ public static partial class AgentRuleSectionReader
     /// <summary>The heading new files should use. Written by the Rules page when it creates a file.</summary>
     public const string CanonicalHeading = "## Vibe Rails Rules";
 
+    /// <summary>Maximum source line length. Oversized documents fail instead of silently dropping policy.</summary>
+    public const int MaxLineLength = 4096;
+
     /// <summary>
     /// Headings that open a rules section, compared case-insensitively with the leading
     /// <c>#</c> characters stripped. Deliberately specific: a bare <c>## Rules</c> is far too
@@ -72,10 +75,10 @@ public static partial class AgentRuleSectionReader
     // Enforcement vocabulary understood in rule lines. A deliberate superset of
     // Services.EnforcementParser (WARN/COMMIT/STOP): SKIP and DISABLED are opt-outs the hook
     // honors, and the caller decides what to do with them.
-    [GeneratedRegex(@"^-\s*\[(WARN|COMMIT|STOP|SKIP|DISABLED)\]\s*(.+)$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^-\s*\[(WARN|COMMIT|STOP|SKIP|DISABLED)\]\s*(.+)$", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking, 100)]
     private static partial Regex BracketRule();
 
-    [GeneratedRegex(@"^-\s*(.+?)\s*\((WARN|COMMIT|STOP|SKIP|DISABLED)\)\s*$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^-\s*(.+?)\s*\((WARN|COMMIT|STOP|SKIP|DISABLED)\)\s*$", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking, 100)]
     private static partial Regex SuffixRule();
 
     [GeneratedRegex(@"^\s*(?:```|~~~)")]
@@ -102,20 +105,21 @@ public static partial class AgentRuleSectionReader
             return new AgentRuleDocument(sections, rules);
         }
 
-        if (content[0] == '\uFEFF')
-        {
-            content = content[1..];
-        }
+        var source = content.AsSpan();
+        if (source[0] == '\uFEFF') source = source[1..];
 
         var insideFence = false;
         var insideRulesSection = false;
         var sectionHeadingLineIndex = -1;
 
-        var lines = content.Split('\n');
-        for (var lineIndex = 0; lineIndex < lines.Length; lineIndex++)
+        var lineIndex = -1;
+        foreach (var range in source.Split('\n'))
         {
-            var rawLine = lines[lineIndex];
-            var line = rawLine.TrimEnd('\r');
+            lineIndex++;
+            var rawLine = source[range].TrimEnd('\r');
+            if (rawLine.Length > MaxLineLength)
+                throw new InvalidDataException($"Rule file line {lineIndex + 1} exceeds {MaxLineLength} characters.");
+            var line = rawLine.ToString();
 
             if (FenceDelimiter().IsMatch(line))
             {

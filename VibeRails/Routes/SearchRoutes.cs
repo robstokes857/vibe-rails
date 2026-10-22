@@ -15,6 +15,7 @@ public static class SearchRoutes
         {
             try
             {
+                BertSearchDefaults.ValidateQuery(request.Query);
                 return Results.Ok(unifiedSearch.Search(request.Query, request.TopK));
             }
             catch (ArgumentException ex)

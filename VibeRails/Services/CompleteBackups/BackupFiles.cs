@@ -296,7 +296,8 @@ public sealed class BackupFiles(IServiceScopeFactory scopes)
             await using var input = OpenRead(path);
             if (IsRedactedJson(Path.GetFileName(path)))
             {
-                using var doc = await JsonDocument.ParseAsync(input, RedactedJsonOptions, ct);
+                using var captured = await ReadConfigurationAsync(input, ct);
+                using var doc = JsonDocument.Parse(captured.GetBuffer().AsMemory(0, (int)captured.Length), RedactedJsonOptions);
                 var redacted = new MemoryStream();
                 using (var writer = new Utf8JsonWriter(redacted)) WriteSettings(doc.RootElement, writer);
                 redacted.Position = 0;
@@ -304,7 +305,8 @@ public sealed class BackupFiles(IServiceScopeFactory scopes)
             }
             if (IsRedactedToml(Path.GetFileName(path)))
             {
-                using var reader = new StreamReader(input, Encoding.UTF8);
+                using var captured = await ReadConfigurationAsync(input, ct);
+                using var reader = new StreamReader(captured, Encoding.UTF8);
                 return (new MemoryStream(Encoding.UTF8.GetBytes(RedactToml(await reader.ReadToEndAsync(ct)))), null);
             }
             if (input.Length <= InMemoryCaptureBytes)
@@ -328,6 +330,27 @@ public sealed class BackupFiles(IServiceScopeFactory scopes)
 
     private static FileStream OpenRead(string path) => new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete,
         128 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+
+    // Check the open handle before reading, and enforce the cap during the read too: another
+    // process may append after the length check. No parser sees an unbounded configuration.
+    private static async Task<MemoryStream> ReadConfigurationAsync(Stream input, CancellationToken ct)
+    {
+        if (input.Length > InMemoryCaptureBytes) throw new IOException("Configuration exceeds capture limit.");
+        var captured = new MemoryStream((int)input.Length);
+        try
+        {
+            var buffer = new byte[64 * 1024];
+            int read;
+            while ((read = await input.ReadAsync(buffer, ct)) > 0)
+            {
+                if (captured.Length + read > InMemoryCaptureBytes) throw new IOException("Configuration exceeds capture limit.");
+                captured.Write(buffer, 0, read);
+            }
+            captured.Position = 0;
+            return captured;
+        }
+        catch { captured.Dispose(); throw; }
+    }
 
     // opencode.jsonc and hand-edited settings carry comments and trailing commas; a parse failure would drop the whole file.
     private static readonly JsonDocumentOptions RedactedJsonOptions = new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
@@ -374,6 +397,7 @@ public sealed class BackupFiles(IServiceScopeFactory scopes)
     /// </summary>
     internal static string RedactToml(string text)
     {
+        if (text.Length > InMemoryCaptureBytes) throw new JsonException("TOML exceeds capture limit.");
         var lines = text.Replace("\r\n", "\n").Split('\n');
         var output = new StringBuilder(text.Length);
         var blockedTable = false;
@@ -394,7 +418,14 @@ public sealed class BackupFiles(IServiceScopeFactory scopes)
             }
             var equals = IndexOutsideQuotes(line, '=');
             var value = new StringBuilder(equals < 0 ? "" : line[(equals + 1)..]);
-            while (TomlValueIsOpen(value.ToString()) && i + 1 < lines.Length) value.Append('\n').Append(lines[++i]);
+            var state = new TomlValueState();
+            state.Read(value.ToString());
+            while (state.IsOpen && i + 1 < lines.Length)
+            {
+                var next = lines[++i];
+                state.Read(next);
+                value.Append('\n').Append(next);
+            }
             // Anything that is not a key/value pair is dropped rather than copied unexamined.
             if (equals < 0 || blockedTable) continue;
             if (RedactTomlEntry(line[..equals].Trim(), value.ToString().Trim()) is { } entry) output.Append(entry).Append('\n');
@@ -613,23 +644,48 @@ public sealed class BackupFiles(IServiceScopeFactory scopes)
     }
 
     /// <summary>True while a value still needs following lines: an unclosed multi-line string or bracket.</summary>
-    private static bool TomlValueIsOpen(string value)
+    private sealed class TomlValueState
     {
-        var depth = 0;
-        for (var i = 0; i < value.Length; i++)
+        private int depth;
+        private char quote;
+        private bool triple;
+
+        public bool IsOpen => triple || depth > 0;
+
+        // Each source line is visited once, including multi-line strings and arrays.
+        public void Read(ReadOnlySpan<char> line)
         {
-            var c = value[i];
-            if (c is '"' or '\'')
+            for (var i = 0; i < line.Length; i++)
             {
-                var triple = new string(c, 3);
-                if (string.CompareOrdinal(value, i, triple, 0, 3) == 0 && value.IndexOf(triple, i + 3, StringComparison.Ordinal) < 0) return true;
-                i = TomlStringEnd(value, i) - 1;
+                var c = line[i];
+                if (quote != '\0')
+                {
+                    if (quote == '"' && c == '\\') { i++; continue; }
+                    if (c != quote) continue;
+                    if (triple)
+                    {
+                        if (i + 2 >= line.Length || line[i + 1] != quote || line[i + 2] != quote) continue;
+                        i += 2;
+                        for (var extra = 0; extra < 2 && i + 1 < line.Length && line[i + 1] == quote; extra++) i++;
+                    }
+                    quote = '\0';
+                    triple = false;
+                }
+                else if (c == '#') break;
+                else if (c is '"' or '\'')
+                {
+                    quote = c;
+                    triple = i + 2 < line.Length && line[i + 1] == c && line[i + 2] == c;
+                    if (triple) i += 2;
+                }
+                else if (c is '[' or '{')
+                {
+                    if (++depth > 64) throw new JsonException("TOML nesting exceeds capture limit.");
+                }
+                else if (c is ']' or '}') depth--;
             }
-            else if (c == '#') { var newline = value.IndexOf('\n', i); if (newline < 0) break; i = newline; }
-            else if (c is '[' or '{') depth++;
-            else if (c is ']' or '}') depth--;
+            if (!triple) quote = '\0';
         }
-        return depth > 0;
     }
 
     /// <summary>Index just past the TOML string starting at <paramref name="start"/>: basic, literal or multi-line.</summary>
