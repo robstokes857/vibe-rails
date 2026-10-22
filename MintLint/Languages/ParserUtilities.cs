@@ -103,6 +103,63 @@ internal static class ParserUtilities
         return index;
     }
 
+    /// <summary>
+    /// Counts generic lists closed by a token; the tokenizer emits nested closes as shift operators.
+    /// </summary>
+    public static int CloseAngleCount(string text) => text switch
+    {
+        ">" => 1,
+        ">>" => 2,
+        ">>>" => 3,
+        _ => 0
+    };
+
+    /// <summary>Finds the end of a generic list, including a combined nested closing token.</summary>
+    public static int FindMatchingCloseAngle(List<Token> tokens, int openAngle, int end)
+    {
+        int depth = 0;
+        for (int i = openAngle; i <= end && i < tokens.Count; i++)
+        {
+            if (tokens[i].Text == "<")
+            {
+                depth++;
+                continue;
+            }
+
+            int closes = CloseAngleCount(tokens[i].Text);
+            if (closes > 0)
+            {
+                depth -= closes;
+                if (depth <= 0)
+                {
+                    return i;
+                }
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>Finds the start of a generic list when scanning backward from its closing token.</summary>
+    public static int FindMatchingOpenAngleBack(List<Token> tokens, int closeAngle)
+    {
+        int depth = 0;
+        for (int i = closeAngle; i >= 0; i--)
+        {
+            depth += CloseAngleCount(tokens[i].Text);
+            if (tokens[i].Text == "<")
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return i;
+                }
+            }
+        }
+
+        return -1;
+    }
+
     public static void AssignFunctionParents(ParsedSource parsed)
     {
         // A function's parent is the narrowest function that starts strictly before it and ends

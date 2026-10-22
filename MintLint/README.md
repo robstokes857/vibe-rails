@@ -37,6 +37,18 @@ forward through incomplete blocks; in particular, an unclosed `switch`, `match`,
 `select` body must never reset the scan position to its missing closing brace. Source-input
 regression tests cover these fragments, including PowerShell `[switch]` parameters.
 
+## Declaration and parameter parsing
+
+C# member signatures stop before field initializers, expression bodies, and generic
+constraints. Expression-bodied properties count as fields, while generic methods keep
+their declared names even with `where T : new()` constraints. Java annotations with
+arguments do not count as methods.
+
+Parameter counts exclude commas inside generic type arguments, including nested lists
+whose closing tokens are `>>` or `>>>`. Generic calls in default expressions are also
+recognized; comparison operators in defaults preserve parameter separators. These cases
+are covered by `Tests/MintLintTests/MintLintParserGapTests.cs`.
+
 ---
 
 *Last checked: 2026-08-06T18:21:17Z by opencode (glm-5.2)*

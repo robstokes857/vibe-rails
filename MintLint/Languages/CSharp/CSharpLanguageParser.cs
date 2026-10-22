@@ -223,10 +223,26 @@ internal sealed class CSharpLanguageParser : ILanguageParser
                 break;
             }
 
-            // Whatever follows a top-level `=` initializes a field or property, so the calls in
-            // `Index _byName = new();` or `int _seed = Compute(3);` are not member declarations.
+            // Initializers and expression bodies contain calls, not declaration parameters.
+            // Constraints likewise contain `new()`, which must not replace the method's own list.
             int assignment = FindFirstTopLevelToken(parsed, "=", declarationStart, boundary - 1);
             int signatureEnd = assignment >= 0 ? assignment - 1 : boundary - 1;
+            int arrow = FindFirstTopLevelToken(parsed, "=>", declarationStart, signatureEnd);
+            if (arrow >= 0)
+            {
+                signatureEnd = arrow - 1;
+            }
+
+            int constraint = FindFirstTopLevelToken(parsed, "where", declarationStart, signatureEnd);
+            while (constraint >= 0 && (constraint == declarationStart || tokens[constraint - 1].Text != ")"))
+            {
+                constraint = FindFirstTopLevelToken(parsed, "where", constraint + 1, signatureEnd);
+            }
+
+            if (constraint >= 0)
+            {
+                signatureEnd = constraint - 1;
+            }
 
             if (tokens[boundary].Text == "{")
             {
@@ -234,7 +250,7 @@ internal sealed class CSharpLanguageParser : ILanguageParser
                 int openParen = FindLastTopLevelToken(parsed, "(", declarationStart, signatureEnd);
                 if (openParen >= 0)
                 {
-                    int nameIndex = ParserUtilities.PreviousSignificant(tokens, openParen - 1);
+                    int nameIndex = ResolveNameBeforeParameters(tokens, openParen);
                     if (nameIndex >= declarationStart && ParserUtilities.IsNameToken(tokens[nameIndex]))
                     {
                         FunctionSpan method = new(tokens[nameIndex].Text, nameIndex, boundary, bodyEnd, isMethod: true, classIndex);
@@ -256,13 +272,12 @@ internal sealed class CSharpLanguageParser : ILanguageParser
             }
 
             // An expression-bodied member: `ReturnType Name(params) => expression;`.
-            int arrow = FindFirstTopLevelToken(parsed, "=>", declarationStart, signatureEnd);
             if (arrow >= 0)
             {
-                int arrowOpenParen = FindLastTopLevelToken(parsed, "(", declarationStart, arrow - 1);
-                if (arrowOpenParen >= 0 && parsed.ParenPartner[arrowOpenParen] == arrow - 1)
+                int arrowOpenParen = FindLastTopLevelToken(parsed, "(", declarationStart, signatureEnd);
+                if (arrowOpenParen >= 0 && parsed.ParenPartner[arrowOpenParen] == signatureEnd)
                 {
-                    int methodName = ParserUtilities.PreviousSignificant(tokens, arrowOpenParen - 1);
+                    int methodName = ResolveNameBeforeParameters(tokens, arrowOpenParen);
                     if (methodName >= declarationStart && ParserUtilities.IsNameToken(tokens[methodName]))
                     {
                         FunctionSpan method = new(tokens[methodName].Text, methodName, arrow, boundary, isMethod: true, classIndex);
@@ -277,9 +292,9 @@ internal sealed class CSharpLanguageParser : ILanguageParser
             // A `;`-terminated member shaped like `ReturnType Name(params);` is an
             // abstract or interface method declaration with no body.
             int abstractOpenParen = FindLastTopLevelToken(parsed, "(", declarationStart, signatureEnd);
-            if (abstractOpenParen >= 0 && parsed.ParenPartner[abstractOpenParen] == boundary - 1)
+            if (abstractOpenParen >= 0 && parsed.ParenPartner[abstractOpenParen] == signatureEnd)
             {
-                int methodName = ParserUtilities.PreviousSignificant(tokens, abstractOpenParen - 1);
+                int methodName = ResolveNameBeforeParameters(tokens, abstractOpenParen);
                 if (methodName >= declarationStart && ParserUtilities.IsNameToken(tokens[methodName]))
                 {
                     FunctionSpan declaration = new(tokens[methodName].Text, methodName, boundary, boundary, isMethod: true, classIndex);
@@ -378,6 +393,18 @@ internal sealed class CSharpLanguageParser : ILanguageParser
         }
 
         return -1;
+    }
+
+    private static int ResolveNameBeforeParameters(List<Token> tokens, int openParen)
+    {
+        int nameIndex = openParen - 1;
+        if (nameIndex >= 0 && ParserUtilities.CloseAngleCount(tokens[nameIndex].Text) > 0)
+        {
+            int openAngle = ParserUtilities.FindMatchingOpenAngleBack(tokens, nameIndex);
+            nameIndex = openAngle - 1;
+        }
+
+        return nameIndex;
     }
 
     private static string ReadDottedName(List<Token> tokens, ref int index, int line)

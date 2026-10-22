@@ -4,12 +4,111 @@ using Xunit;
 namespace Tests.MintLintTests;
 
 /// <summary>
-/// VIBE-174: parser gaps found while testing the nested-generic fix (VIBE-170 B3). None of them
-/// needs a nested generic: a call in a field initializer read as a method, a field declaration
-/// split at the commas of its own generic arguments, and Go type parameters hiding the function.
+/// VIBE-174/VIBE-175: regression coverage for declaration boundaries, annotations, generic
+/// parameter lists, and Go type parameters found while testing the nested-generic fix.
 /// </summary>
 public sealed class MintLintParserGapTests
 {
+    [Fact]
+    public void CSharp_ExpressionBodiedPropertyCalls_AreFields()
+    {
+        const string source = """
+            public sealed class Person
+            {
+                private int _x;
+                public string Name => Format(_x);
+                public string Label => Format(_x).Trim();
+                public string Describe(int count) => Format(count);
+            }
+            """;
+
+        FileMetrics metrics = Analyze("Person.cs", source);
+
+        Assert.Equal(["Describe"], MemberFunctionNames(metrics));
+        Assert.Equal(1, Function(metrics, "Describe").ParameterCount);
+        ClassMetrics person = Assert.Single(metrics.Classes);
+        Assert.Equal(1, person.MethodCount);
+        Assert.Equal(3, person.FieldCount);
+    }
+
+    [Theory]
+    [InlineData("T Create<T>() where T : new();", "Create", 0)]
+    [InlineData("public T Make<T>(int count) where T : new() { return new T(); }", "Make", 1)]
+    [InlineData("public T Build<T, U>(U value, int count) where T : class, new() where U : new() => new T();", "Build", 2)]
+    [InlineData("public T Convert<T, U>(U value) { return default; }", "Convert", 1)]
+    [InlineData("public T Identity<T>(T value) => value;", "Identity", 1)]
+    [InlineData("public void where(int value) { }", "where", 1)]
+    [InlineData("public T where<T>(int value) where T : new() { return new T(); }", "where", 1)]
+    public void CSharp_GenericConstraints_KeepTheDeclaredMethod(string declaration, string name, int parameters)
+    {
+        FileMetrics metrics = Analyze("Factory.cs", "public class Factory { " + declaration + " }");
+
+        Assert.Equal([name], MemberFunctionNames(metrics));
+        Assert.Equal(parameters, Function(metrics, name).ParameterCount);
+        ClassMetrics factory = Assert.Single(metrics.Classes);
+        Assert.Equal(1, factory.MethodCount);
+        Assert.Equal(0, factory.FieldCount);
+    }
+
+    [Theory]
+    [InlineData("@Column(length = 10)")]
+    [InlineData("@persistence.Column(length = 10, nullable = false)")]
+    [InlineData("@Indexed @Column(length = 10)")]
+    [InlineData("private @Column(length = 10)")]
+    public void Java_AnnotationArguments_DoNotDeclareMethods(string annotation)
+    {
+        string source = """
+            public class Article {
+            ANNOTATION String title;
+                @Size(max = 10) public String format(int width) { return title; }
+                @Size(max = 10) public abstract String shorten(int width, int height);
+            }
+            """.Replace("ANNOTATION", annotation);
+
+        FileMetrics metrics = Analyze("Article.java", source);
+
+        Assert.Equal(["format", "shorten"], MemberFunctionNames(metrics));
+        Assert.Equal(1, Function(metrics, "format").ParameterCount);
+        Assert.Equal(2, Function(metrics, "shorten").ParameterCount);
+        ClassMetrics article = Assert.Single(metrics.Classes);
+        Assert.Equal(2, article.MethodCount);
+        Assert.Equal(1, article.FieldCount);
+    }
+
+    [Theory]
+    [InlineData("Generic.cs", "class C { void Put(Dictionary<string, int> m) {} }", "Put", 1)]
+    [InlineData("Generic.java", "class C { void put(Map<String, Integer> m) {} }", "put", 1)]
+    [InlineData("Nested.cs", "class C { void Put(Dictionary<string, List<int>> m, int n) {} }", "Put", 2)]
+    [InlineData("Nested.java", "class C { void put(Map<String, Map<Integer, List<Long>>> m, int n) {} }", "put", 2)]
+    [InlineData("Nested.cpp", "void put(std::map<int, std::pair<int, int>> m, int n) {}", "put", 2)]
+    [InlineData("nested.rs", "fn put(m: Map<String, Vec<Pair<i32, i32>>>, n: i32) {}", "put", 2)]
+    [InlineData("nested.ts", "function put(m: Map<string, Map<number, number>>, n: number) {}", "put", 2)]
+    [InlineData("Mixed.cs", "class C { void Put(Dictionary<string, (int, int)> m, (int, int) n, int[] a) {} }", "Put", 3)]
+    public void GenericParameterTypes_CountOnlyParameterSeparators(string path, string source, string name, int parameters)
+    {
+        Assert.Equal(parameters, Function(Analyze(path, source), name).ParameterCount);
+    }
+
+    [Theory]
+    [InlineData("Defaults.cs", "class C { void Put(bool a = 1 < 2, bool b = 3 > 2, int c = 0) {} }")]
+    [InlineData("defaults.cpp", "void Put(bool a = 1 < 2, bool b = 3 > 2, int c = 0) {}")]
+    [InlineData("defaults.ts", "function Put(a = lo < hi, b = hi > lo, c = [1, 2]) {}")]
+    [InlineData("defaults.js", "function Put(a = lo < hi, b = hi > lo, c = [1, 2]) {}")]
+    [InlineData("defaults.py", "def Put(a = lo < hi, b = hi > lo, c = [1, 2]):\n    pass")]
+    [InlineData("defaults.rb", "def Put(a = lo < hi, b = hi > lo, c = [1, 2])\nend")]
+    public void ParameterDefaults_ComparisonsDoNotHideSeparators(string path, string source)
+    {
+        Assert.Equal(3, Function(Analyze(path, source), "Put").ParameterCount);
+    }
+
+    [Theory]
+    [InlineData("defaults.cpp", "void Put(Map<int, int> m = make<int, int>(), bool a = 1 < 2, bool b = 3 > 2) {}")]
+    [InlineData("defaults.ts", "function Put(m = make<string, number>(), a = lo < hi, b = hi > lo) {}")]
+    public void ParameterDefaults_GenericCallsDoNotAddParameters(string path, string source)
+    {
+        Assert.Equal(3, Function(Analyze(path, source), "Put").ParameterCount);
+    }
+
     [Fact]
     public void CSharp_TargetTypedNewInFieldInitializer_IsNotAMethod()
     {

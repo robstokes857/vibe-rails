@@ -454,6 +454,9 @@ internal static class MetricEngine
 
         int count = 1;
         int depth = 0;
+        bool inDefault = false;
+        bool hasGenericTypes = parsed.Language is SourceLanguage.CSharp or SourceLanguage.Java
+            or SourceLanguage.Cpp or SourceLanguage.Rust or SourceLanguage.TypeScript;
         for (int i = open + 1; i < close; i++)
         {
             string text = tokens[i].Text;
@@ -468,10 +471,51 @@ internal static class MetricEngine
             else if (text == "," && depth == 0)
             {
                 count++;
+                inDefault = false;
+            }
+            else if (text == "=" && depth == 0)
+            {
+                inDefault = true;
+            }
+            else if (text == "<" && depth == 0 && hasGenericTypes)
+            {
+                int genericEnd = FindParameterGenericEnd(tokens, i, close - 1, inDefault);
+                if (genericEnd > i)
+                {
+                    i = genericEnd;
+                }
             }
         }
 
         return count;
+    }
+
+    private static int FindParameterGenericEnd(List<Token> tokens, int openAngle, int end, bool inDefault)
+    {
+        int closeAngle = ParserUtilities.FindMatchingCloseAngle(tokens, openAngle, end);
+        if (closeAngle < 0)
+        {
+            return -1;
+        }
+
+        // A comparison can pair with `>` in a later parameter's default. A generic list
+        // cannot contain that parameter's `=`, so never hide the intervening separator.
+        for (int i = openAngle + 1; i < closeAngle; i++)
+        {
+            if (tokens[i].Text == "=")
+            {
+                return -1;
+            }
+        }
+
+        // In an expression, require a generic call/construction or qualified member access.
+        // Otherwise `<` and `>` may simply compare values in the default expression.
+        if (inDefault && (closeAngle >= end || tokens[closeAngle + 1].Text is not ("(" or "{" or "." or "::")))
+        {
+            return -1;
+        }
+
+        return closeAngle;
     }
 
     private static int FindPowerShellParamBlock(ParsedSource parsed, FunctionSpan span)

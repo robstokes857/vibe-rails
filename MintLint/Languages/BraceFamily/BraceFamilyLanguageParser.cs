@@ -628,9 +628,9 @@ internal abstract class BraceFamilyLanguageParser : ILanguageParser
         }
 
         int ownerIndex = ParserUtilities.PreviousSignificant(tokens, previous - 1);
-        if (ownerIndex >= 0 && CloseAngleCount(tokens[ownerIndex].Text) > 0)
+        if (ownerIndex >= 0 && ParserUtilities.CloseAngleCount(tokens[ownerIndex].Text) > 0)
         {
-            int openAngle = FindMatchingOpenAngleBack(tokens, ownerIndex);
+            int openAngle = ParserUtilities.FindMatchingOpenAngleBack(tokens, ownerIndex);
             ownerIndex = openAngle > 0 ? ParserUtilities.PreviousSignificant(tokens, openAngle - 1) : -1;
         }
 
@@ -673,7 +673,7 @@ internal abstract class BraceFamilyLanguageParser : ILanguageParser
         }
 
         string text = tokens[previous].Text;
-        if (text is "." or "->" or "new" or ":" or ",")
+        if (text is "@" or "." or "->" or "new" or ":" or ",")
         {
             return false;
         }
@@ -720,9 +720,9 @@ internal abstract class BraceFamilyLanguageParser : ILanguageParser
     {
         List<Token> tokens = parsed.Tokens;
         int nameIndex = ParserUtilities.PreviousSignificant(tokens, parameterStart - 1);
-        if (nameIndex >= 0 && CloseAngleCount(tokens[nameIndex].Text) > 0)
+        if (nameIndex >= 0 && ParserUtilities.CloseAngleCount(tokens[nameIndex].Text) > 0)
         {
-            int openAngle = FindMatchingOpenAngleBack(tokens, nameIndex);
+            int openAngle = ParserUtilities.FindMatchingOpenAngleBack(tokens, nameIndex);
             if (openAngle >= 0)
             {
                 nameIndex = ParserUtilities.PreviousSignificant(tokens, openAngle - 1);
@@ -945,7 +945,8 @@ internal abstract class BraceFamilyLanguageParser : ILanguageParser
         }
 
         int nameIndex = ResolveNameBeforeParameters(parsed, openParen);
-        if (nameIndex < start || !IsPotentialFunctionName(tokens[nameIndex]))
+        if (nameIndex < start || !IsPotentialFunctionName(tokens[nameIndex]) ||
+            !IsPlausibleFunctionNameContext(tokens, nameIndex))
         {
             return false;
         }
@@ -1009,7 +1010,7 @@ internal abstract class BraceFamilyLanguageParser : ILanguageParser
     /// </summary>
     private static int SkipGenericArguments(List<Token> tokens, int openAngle, int end)
     {
-        int closeAngle = FindMatchingCloseAngle(tokens, openAngle, end);
+        int closeAngle = ParserUtilities.FindMatchingCloseAngle(tokens, openAngle, end);
         if (closeAngle < 0)
         {
             return openAngle;
@@ -1095,7 +1096,7 @@ internal abstract class BraceFamilyLanguageParser : ILanguageParser
 
             if (text == "<")
             {
-                int closeAngle = FindMatchingCloseAngle(tokens, i, tokens.Count - 1);
+                int closeAngle = ParserUtilities.FindMatchingCloseAngle(tokens, i, tokens.Count - 1);
                 if (closeAngle > i)
                 {
                     i = closeAngle;
@@ -1130,7 +1131,7 @@ internal abstract class BraceFamilyLanguageParser : ILanguageParser
 
             if (text == "<")
             {
-                int closeAngle = FindMatchingCloseAngle(parsed.Tokens, i, classEnd - 1);
+                int closeAngle = ParserUtilities.FindMatchingCloseAngle(parsed.Tokens, i, classEnd - 1);
                 if (closeAngle > i)
                 {
                     i = closeAngle;
@@ -1166,7 +1167,7 @@ internal abstract class BraceFamilyLanguageParser : ILanguageParser
             {
                 // Only a declaration's type comes before its `=`, so this `<` opens an argument list,
                 // and the `=` in `template <typename T = int>` is not the declaration's.
-                int closeAngle = FindMatchingCloseAngle(tokens, i, end);
+                int closeAngle = ParserUtilities.FindMatchingCloseAngle(tokens, i, end);
                 if (closeAngle > i)
                 {
                     i = closeAngle;
@@ -1260,64 +1261,6 @@ internal abstract class BraceFamilyLanguageParser : ILanguageParser
         return -1;
     }
 
-    /// <summary>
-    /// How many generic argument lists a token closes. The tokenizer reads <c>&gt;&gt;</c> and
-    /// <c>&gt;&gt;&gt;</c> as single shift operators, so <c>List&lt;List&lt;int&gt;&gt;</c> ends in one
-    /// token that closes two lists.
-    /// </summary>
-    private static int CloseAngleCount(string text) => text switch
-    {
-        ">" => 1,
-        ">>" => 2,
-        ">>>" => 3,
-        _ => 0
-    };
-
-    private static int FindMatchingCloseAngle(List<Token> tokens, int openAngle, int end)
-    {
-        int depth = 0;
-        for (int i = openAngle; i <= end && i < tokens.Count; i++)
-        {
-            if (tokens[i].Text == "<")
-            {
-                depth++;
-                continue;
-            }
-
-            // A shift token that closes this list and an enclosing one still ends this list.
-            int closes = CloseAngleCount(tokens[i].Text);
-            if (closes > 0)
-            {
-                depth -= closes;
-                if (depth <= 0)
-                {
-                    return i;
-                }
-            }
-        }
-
-        return -1;
-    }
-
-    private static int FindMatchingOpenAngleBack(List<Token> tokens, int closeAngle)
-    {
-        int depth = 0;
-        for (int i = closeAngle; i >= 0; i--)
-        {
-            depth += CloseAngleCount(tokens[i].Text);
-            if (tokens[i].Text == "<")
-            {
-                depth--;
-                if (depth == 0)
-                {
-                    return i;
-                }
-            }
-        }
-
-        return -1;
-    }
-
     private static string ResolveRustImplOwner(List<Token> tokens, int implIndex, int bodyStart)
     {
         int forIndex = -1;
@@ -1332,7 +1275,7 @@ internal abstract class BraceFamilyLanguageParser : ILanguageParser
         int start = forIndex >= 0 ? forIndex + 1 : implIndex + 1;
         if (start < bodyStart && tokens[start].Text == "<")
         {
-            int genericEnd = FindMatchingCloseAngle(tokens, start, bodyStart - 1);
+            int genericEnd = ParserUtilities.FindMatchingCloseAngle(tokens, start, bodyStart - 1);
             if (genericEnd > start)
             {
                 start = genericEnd + 1;
@@ -1348,7 +1291,7 @@ internal abstract class BraceFamilyLanguageParser : ILanguageParser
 
             if (tokens[i].Text == "<")
             {
-                int genericEnd = FindMatchingCloseAngle(tokens, i, bodyStart - 1);
+                int genericEnd = ParserUtilities.FindMatchingCloseAngle(tokens, i, bodyStart - 1);
                 if (genericEnd > i)
                 {
                     i = genericEnd;
