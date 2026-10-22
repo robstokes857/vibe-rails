@@ -102,6 +102,17 @@ public sealed class MintLintParserGapTests
     }
 
     [Theory]
+    [InlineData("Defaults.cs", "class C { void Put(bool a = 1 < (8 >> (1)), int b = 0) {} }")]
+    [InlineData("Unsigned.cs", "class C { void Put(bool a = 1 < (8 >>> (1)), int b = 0) {} }")]
+    [InlineData("defaults.cpp", "void Put(bool a = 1 < (2 > (0)), int b = 0) {}")]
+    [InlineData("defaults.ts", "function Put(a = 1 < (8 >> (1)), b = 0) {}")]
+    public void ParameterDefaults_ParenthesizedComparisonsKeepDelimiterDepth(string path, string source)
+    {
+        // VIBE-175 review N1: a `>` inside a subexpression cannot close the earlier comparison's `<`.
+        Assert.Equal(2, Function(Analyze(path, source), "Put").ParameterCount);
+    }
+
+    [Theory]
     [InlineData("defaults.cpp", "void Put(Map<int, int> m = make<int, int>(), bool a = 1 < 2, bool b = 3 > 2) {}")]
     [InlineData("defaults.ts", "function Put(m = make<string, number>(), a = lo < hi, b = hi > lo) {}")]
     public void ParameterDefaults_GenericCallsDoNotAddParameters(string path, string source)

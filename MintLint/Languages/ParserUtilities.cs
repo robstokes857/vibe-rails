@@ -118,15 +118,41 @@ internal static class ParserUtilities
     public static int FindMatchingCloseAngle(List<Token> tokens, int openAngle, int end)
     {
         int depth = 0;
+        int pairedDepth = 0;
         for (int i = openAngle; i <= end && i < tokens.Count; i++)
         {
-            if (tokens[i].Text == "<")
+            string text = tokens[i].Text;
+            // Angles inside a tuple, array or expression cannot close the enclosing list.
+            // In particular, `1 < (8 >> (1))` is a comparison, not a generic call.
+            if (text is "(" or "[" or "{")
+            {
+                pairedDepth++;
+                continue;
+            }
+
+            if (text is ")" or "]" or "}")
+            {
+                if (pairedDepth == 0)
+                {
+                    return -1;
+                }
+
+                pairedDepth--;
+                continue;
+            }
+
+            if (pairedDepth > 0)
+            {
+                continue;
+            }
+
+            if (text == "<")
             {
                 depth++;
                 continue;
             }
 
-            int closes = CloseAngleCount(tokens[i].Text);
+            int closes = CloseAngleCount(text);
             if (closes > 0)
             {
                 depth -= closes;
