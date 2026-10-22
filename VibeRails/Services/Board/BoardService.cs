@@ -449,7 +449,8 @@ public sealed partial class BoardService(
             Type: type, Flagged: request.Flagged, DisplayId: request.DisplayId is null ? null : BoardDisplayIds.Normalize(request.DisplayId), FlagReason: flagReason,
             WorkflowMode: request.WorkflowMode is null ? null : workflowMode,
             ManagerSelection: managerSelection, ClearManagerSelection: clearManager,
-            ManagerBaseLlmOptions: managerOptions, ClearManagerBaseLlmOptions: clearManagerOptions);
+            ManagerBaseLlmOptions: managerOptions, ClearManagerBaseLlmOptions: clearManagerOptions,
+            ClearGhost: request.ClearGhost);
         var updated = await store.UpdateCardAsync(projectPath, existing.Id, patch, cancellationToken, author);
         if (updated is null) return null;
         var detail = await store.GetCardDetailAsync(projectPath, updated.Id, cancellationToken);
@@ -704,6 +705,7 @@ public sealed partial class BoardService(
                 _ => []
             },
             CodeLinks = detail.CodeLinks,
+            GhostReason = detail.Card.GhostReason,
             LinkedCards = detail.LinkedCards.Select(card => ToDto(card, detail.Card.ProjectPath)).ToList(),
             PreviousWork = BoardHandoffService.WithFileStatus(detail.PreviousWork, detail.Card.ProjectPath),
             FileCandidates = detail.PreviousWork is null && detail.Commits.Count > 0
@@ -782,7 +784,8 @@ public sealed partial class BoardService(
     {
         // Jira first, as the Jira fields always have been; a card is linked to one tracker in practice.
         RemoteProvider = card.JiraIssueKey is not null ? TrackerProviders.Jira : card.AdoWorkItemId is not null ? TrackerProviders.Ado : null,
-        RemoteIssueKey = card.JiraIssueKey ?? (card.AdoWorkItemId is int id ? AzureDevOps.AdoFieldMapping.Key(id) : null)
+        RemoteIssueKey = card.JiraIssueKey ?? (card.AdoWorkItemId is int id ? AzureDevOps.AdoFieldMapping.Key(id) : null),
+        GhostReason = card.GhostReason
     };
 
     private static bool IsWorkflowAgent(string origin, bool agentWorkflow) => agentWorkflow

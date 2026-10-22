@@ -371,6 +371,8 @@ namespace VibeRails.DTOs
         /// <summary>The linked issue's page, built from the saved connection; null when it can't be.
         /// Filled for list and page responses, so a lane tile's badge links (VIBE-171).</summary>
         public string? RemoteIssueUrl { get; init; }
+        /// <summary>Why post-processing marked this finished card a ghost (<c>no-code</c>, <c>not-landed</c>), or null (VIBE-185).</summary>
+        public string? GhostReason { get; init; }
     }
     public record BoardCardListResponse(List<BoardCardSummaryResponse> Cards)
     {
@@ -447,6 +449,8 @@ namespace VibeRails.DTOs
         public List<BoardLinkedCardDto> LinkedCards { get; init; } = [];
         public BoardHandoff? PreviousWork { get; init; }
         public IReadOnlyList<BoardFileReference> FileCandidates { get; init; } = [];
+        /// <summary>Why post-processing marked this finished card a ghost, or null (VIBE-185).</summary>
+        public string? GhostReason { get; init; }
     }
     public record BoardJiraDeliveryDto(string SourceId, string Kind, string Status, string? Message);
     public record CreateBoardCardRequest(
@@ -482,7 +486,9 @@ namespace VibeRails.DTOs
         string? Type = null,
         bool? Flagged = null, string? DisplayId = null, string? FlagReason = null,
         string? WorkflowMode = null, string? ManagerSelection = null, BaseLlmOptions? ManagerBaseLlmOptions = null,
-        bool ClearManagerBaseLlmOptions = false);
+        bool ClearManagerBaseLlmOptions = false,
+        // Removes the post-processing ghost (VIBE-185). Nothing sets one through this request.
+        bool ClearGhost = false);
 
     // SkipAutomations (VB-34): move without recording a lane entry for the destination lane's
     // Automations. Per request, never sticky; the skip is recorded as a comment by the user.

@@ -73,10 +73,12 @@ public sealed record BoardCardRecord(
     BaseLlmOptions? ManagerBaseLlmOptions = null,
     int? AdoWorkItemId = null,
     string? JiraConnectionId = null,
-    string? AdoConnectionId = null)
+    string? AdoConnectionId = null,
+    string? GhostReason = null)
 {
     // JiraConnectionId and AdoConnectionId belong to the same link rows as JiraIssueKey and
     // AdoWorkItemId, so a lane tile can build the issue link without a per-card lookup (VIBE-171).
+    // GhostReason (VIBE-185) is set once by post-processing and only ever cleared by the user.
 
     /// <summary>The stored <c>PREFIX-RRRRR-n</c> key (cards created since board/14), else the
     /// computed legacy <c>PREFIX-n</c>.</summary>
@@ -259,7 +261,8 @@ public sealed record BoardCardPatch(
     string? ManagerSelection = null,
     bool ClearManagerSelection = false,
     BaseLlmOptions? ManagerBaseLlmOptions = null,
-    bool ClearManagerBaseLlmOptions = false);
+    bool ClearManagerBaseLlmOptions = false,
+    bool ClearGhost = false);
 
 /// <summary>Stable card workflow values; manager settings remain independent of the worker assignment.</summary>
 public static class BoardWorkflowModes

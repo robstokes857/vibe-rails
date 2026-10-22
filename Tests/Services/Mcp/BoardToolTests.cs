@@ -831,8 +831,12 @@ public sealed partial class BoardToolTests : IDisposable
         _resolver.CurrentSessionId = "11111111-2222-3333-4444-555555555555";
         await _store.LinkSessionAsync(_project, (await _service.FindCardAsync(_project, "PROJ-2", Ct))!.Id, _resolver.CurrentSessionId!, null, "base:codex", "codex", "Codex", BoardSessionRecord.LaunchOrigin, Ct);
         Assert.Equal("PROJ-2 (PROJ-2) [Review] [Task] (medium) On sprint — agent-made", BoardKeyText.Short(await _tool.ListBoardCards(cancellationToken: Ct)));
-        Assert.Equal("Created PROJ-3: Sibling", BoardKeyText.Short(await _tool.CreateBoardCard("Sibling", cancellationToken: Ct)));
-        Assert.Equal(sprint.Id, (await _service.FindCardAsync(_project, "PROJ-3", Ct))!.BoardId);
+        // ...and, since VIBE-185, assigns the new card to the LLM that terminal runs.
+        Assert.Equal("Created PROJ-3: Sibling\nAssigned to base:codex, the LLM this VibeRails terminal runs. Pass assignee=\"\" to create a card unassigned.",
+            BoardKeyText.Short(await _tool.CreateBoardCard("Sibling", cancellationToken: Ct)));
+        var sibling = (await _service.FindCardAsync(_project, "PROJ-3", Ct))!;
+        Assert.Equal(sprint.Id, sibling.BoardId);
+        Assert.Equal("base:codex", sibling.Assignee);
         Assert.Contains("; current)", (await _tool.ListBoards(Ct)).Split('\n').Single(line => line.Contains("Sprint 2")));
     }
 

@@ -87,6 +87,7 @@ Use microtasks, not short-delay `setTimeout` batching, for webview activity even
 | [js/modules/board-text.js](js/modules/board-text.js) | Renders a comment/description body. **Escape-first**: the input is escaped before any transform, so no sanitizer is needed and none is present |
 | [js/modules/board-file-refs.js](js/modules/board-file-refs.js) | The composer's `@` typeahead over `GET /api/v1/board/files`: inserts `@path` / `@"path"` text, "Browse for a file…" fallback through the shared file explorer; pure helpers are node-tested |
 | [js/modules/board-card-context.js](js/modules/board-card-context.js) | The card editor's **Agent context** block (VB-63), inside the saved card's collapsed **Advanced** section: fetches `GET /api/v1/board/cards/{id}/context` when Advanced is opened and after rail changes while it stays open, and shows ≈tokens for the launch prompt, `get_board_card` and `list_board_columns`, a by-content breakdown, what is available but not sent, and the last recorded launch; a failed measurement reports inline only; node-tested |
+| [js/modules/board-ghost.js](js/modules/board-ghost.js) | The post-processing ghost (VIBE-185): `ghostSummary` (fixed text per `ghostReason`, never the raw value), the tile's key-row runner, the saved card's **Advanced** "Ghost" checkbox and `readGhostField` (`clearGhost` only while that box is shown); node-tested in `board-ghost.test.mjs` |
 | [js/modules/board-card-label.js](js/modules/board-card-label.js) | The one card-naming rule: `cardDisplayId` (display ID, else key), `cardLabel` (`ID · Title`), `shortCardKey` and `cardSearchText`. Board, linked cards and chat history import it rather than composing labels themselves |
 | [js/modules/diff-modal.js](js/modules/diff-modal.js) | Shared Monaco diff viewer as a nested modal layer. Used by Board commits |
 
@@ -686,6 +687,13 @@ mark's tooltip and the editor's provenance block (`board-agent-provenance.js`) n
 (`agentMadeBy`), when (`createdAt`, with the year) and its session (`agentMadeSessionId`), whose
 button replays that session seeked to the creation moment; all three are escaped card data. Clicking a card's tag or avatar toggles that filter,
 which is why those two controls stop propagation before the card's own open handler runs.
+
+A card with `ghostReason` (VIBE-185, set once by server post-processing) wraps its key row in
+`.board-key.has-ghost`: every 14 s the key and robot mark drop out, a Font Awesome ghost runs
+across the row, and the key returns (`board-ghost-*` keyframes in the board template; reduced
+motion shows a still ghost after the key). Never name it `is-ghost`: that class is Sortable's drag
+placeholder on `.board-card`. Clearing is the Advanced checkbox plus Save, which sends
+`clearGhost: true`; the browser never sets a ghost.
 
 ## Chat history sidebar
 

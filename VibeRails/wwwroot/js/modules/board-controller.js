@@ -54,6 +54,7 @@ import { cardSharingSection, bindCardSharing } from './board-card-sharing.js';
 import { contextSectionMarkup, bindCardContext } from './board-card-context.js';
 import { cardDisplayId, cardLabel } from './board-card-label.js';
 import { agentMadeSummary, agentProvenanceHtml, bindAgentProvenance } from './board-agent-provenance.js';
+import { ghostKeyHtml, ghostSettingHtml, ghostSummary, readGhostField } from './board-ghost.js';
 import { renderCommentHtml, wrapSelectionAsCode, toPlainPreview } from './board-text.js';
 import { historySection, mountHistory } from './board-history.js';
 import { bindBoardReferences, canonicalSessionId } from './board-references.js';
@@ -893,6 +894,7 @@ export class BoardController {
         // never filters the board, so a click meant to reassign cannot make cards vanish. The
         // toolbar's assignee filter is the way to filter.
         const id = escapeHtml(cardDisplayId(card));
+        const ghost = ghostSummary(card);
         const running = this.hasRunningSession(card);
         const startLabel = running ? (card.workflowMode === 'agent' ? 'Go to manager' : 'Go to agent') : 'Start work';
         const startWork = `<button type="button" class="btn btn-sm btn-outline-success board-card-start-work"
@@ -910,12 +912,12 @@ export class BoardController {
         // is-live paints the marching "an agent is on this" border (see the template CSS).
         return `
             <article class="board-card${card.flagged ? ' is-flagged' : ''}${card.blocked ? ' is-blocked' : ''}${card.activeTabId || card.hasActiveDesktopAgent ? ' is-live' : ''}${card.hasActiveDesktopAgent && !card.activeTabId ? ' is-desktop-live' : ''}" data-card-id="${escapeHtml(card.id)}"
-                tabindex="0" role="button" aria-label="${escapeHtml(cardDisplayId(card))}: ${escapeHtml(card.title)}${card.agentMade ? ` — ${escapeHtml(agentMadeSummary(card))}` : ''}${card.flagged ? ' — Needs your attention' : ''}">
+                tabindex="0" role="button" aria-label="${escapeHtml(cardDisplayId(card))}: ${escapeHtml(card.title)}${card.agentMade ? ` — ${escapeHtml(agentMadeSummary(card))}` : ''}${card.flagged ? ' — Needs your attention' : ''}${ghost ? ` — ${escapeHtml(ghost)}` : ''}">
                 <span class="board-card-rail" data-priority="${escapeHtml(card.priority)}"
                     title="${escapeHtml(card.priority)} priority"></span>
                 <div class="board-card-body">
                     <div class="board-card-top">
-                        <span class="board-key">${card.flagged ? '<i class="fa-solid fa-flag board-attention-flag" title="Needs your attention" aria-hidden="true"></i> ' : ''}${card.agentMade ? `<i class="fa-solid fa-robot board-agent-mark" title="${escapeHtml(agentMadeSummary(card))}" aria-label="${escapeHtml(agentMadeSummary(card))}"></i> ` : ''}${escapeHtml(cardDisplayId(card))}</span>
+                        <span class="board-key${ghost ? ' has-ghost' : ''}"${ghost ? ` title="${escapeHtml(ghost)}"` : ''}>${ghostKeyHtml(`${card.flagged ? '<i class="fa-solid fa-flag board-attention-flag" title="Needs your attention" aria-hidden="true"></i> ' : ''}${card.agentMade ? `<i class="fa-solid fa-robot board-agent-mark" title="${escapeHtml(agentMadeSummary(card))}" aria-label="${escapeHtml(agentMadeSummary(card))}"></i> ` : ''}${escapeHtml(cardDisplayId(card))}`, card)}</span>
                         <span class="board-card-top-right">
                             <span class="board-type-chip" data-type="${escapeHtml(type.value)}"
                                 title="${escapeHtml(type.label)}">${escapeHtml(type.label)}</span>
@@ -1573,6 +1575,7 @@ export class BoardController {
 
                     ${card ? `<section class="board-side-section"><details data-board-advanced>
                         <summary class="board-side-label">Advanced</summary>
+                        ${ghostSettingHtml(card)}
                         <label class="board-editor-label mt-2" for="board-card-display-id">Display ID</label>
                         <input class="form-control form-control-sm" id="board-card-display-id" maxlength="32" spellcheck="false" value="${escapeHtml(cardDisplayId(card))}">
                         <p class="board-editor-muted mt-2">Permanent ID: <code>${escapeHtml(card.key)}</code></p>
@@ -2615,7 +2618,8 @@ export class BoardController {
             managerSelection: value('#board-card-manager'),
             managerBaseLlmOptions: readBoardLaunchOptions(editor.querySelector('[data-board-manager-launch-options]') || editor, value('#board-card-manager')),
             blocked: Boolean(editor.querySelector('[data-board-blocked]')?.checked),
-            flagged: Boolean(editor.querySelector('[data-board-flagged]')?.checked)
+            flagged: Boolean(editor.querySelector('[data-board-flagged]')?.checked),
+            ...readGhostField(editor)
         };
     }
 

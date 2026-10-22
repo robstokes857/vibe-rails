@@ -11,6 +11,13 @@ an unchanged assignee. Saved environments reject base overrides. For Astra use
 Card reads and assignment receipts show saved settings, not the effective settings of a
 running session. Default speed inherits the CLI configuration.
 
+Since VIBE-185, `create_board_card` without `assignee` assigns the card to the creating VibeRails
+terminal's LLM: the Board launch's picker key, else the terminal's CLI and offered saved
+environment (Workers and hidden environments fall back to `base:<cli>`). The reply says so.
+Desktop clients and CLIs VibeRails did not launch stay unassigned. `assignee: ""` creates the card
+unassigned. A bare provider name such as `claude` is shorthand for `base:claude` on create and
+update. `get_board_card` prints a `Ghost:` line when post-processing marked the finished card.
+
 `start_board_agent(card)` calls the same root route as Start work: Agent cards launch the saved
 manager by default. `intent=worker` launches the saved worker, with optional `selection` and
 bounded `task` instructions; `intent=code_review` launches a direct reviewer. Overrides never

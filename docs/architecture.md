@@ -875,6 +875,8 @@ Substituted values are never scanned again for tokens.
 absolute expiry. The additive `managed-worktrees/1` migration runs automatically. Retention
 defaults to 7 days; accepted overrides are 7–36500 days or `never`. The root-only
 `WorktreeCleanupJob` checks every ten minutes while VibeRails is open; there is no separate host.
+`BoardCardPostProcessingJob` follows the same pattern for the Board's run-once card pass (VIBE-185),
+every five minutes on root backends; see the [Board guide](../VibeRails/Services/Board/AGENTS.md#card-post-processing-and-the-ghost-vibe-185).
 Overdue work is picked up after reopening. Expiry is age-based, independent of merges, and
 removes uncommitted, untracked and ignored files too. Branches are retained.
 

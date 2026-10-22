@@ -211,6 +211,11 @@ namespace VibeRails
             serviceCollection.AddScoped<Services.Board.BoardAutomationService>();
             serviceCollection.AddScoped<Services.Board.BoardCardAutomationService>();
             serviceCollection.AddScoped<Services.Board.BoardChecksReader>();
+            // Run-once card post-processing (VIBE-185). Each IBoardCardPostProcessor registration is
+            // one rule; the job below runs them on active roots only.
+            serviceCollection.AddSingleton<Services.Board.PostProcessing.IBoardDefaultBranchCheck, Services.Board.PostProcessing.GitDefaultBranchCheck>();
+            serviceCollection.AddSingleton<Services.Board.PostProcessing.IBoardCardPostProcessor, Services.Board.PostProcessing.GhostCardPostProcessor>();
+            serviceCollection.AddSingleton<Services.Board.PostProcessing.BoardCardPostProcessingService>();
             // Singleton: it holds the ten-second repo file-list cache behind the composer's `@` typeahead.
             serviceCollection.AddSingleton<Services.Board.IBoardFileIndexService, Services.Board.BoardFileIndexService>();
             serviceCollection.AddSingleton<Services.Jobs.AutomationScriptCatalogService>();
@@ -403,6 +408,8 @@ namespace VibeRails
                 if (isActiveRootBackendProcess)
                 {
                     if (!isFakeCliTestProcess) serviceCollection.AddHostedService<WorktreeCleanupJob>();
+                    // A UI-test host shares the developer's board.db; it must not process real cards.
+                    if (!isFakeCliTestProcess) serviceCollection.AddHostedService<BoardCardPostProcessingJob>();
                     serviceCollection.AddHttpClient(ConversationTitleClient.HttpClientName,
                             client => client.Timeout = TimeSpan.FromSeconds(20))
                         .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler

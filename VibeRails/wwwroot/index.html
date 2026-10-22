@@ -3512,6 +3512,71 @@
                     font-size: 0.72rem;
                 }
 
+                /* Post-processing ghost (VIBE-185): an agent worked on this finished card but no
+                   code landed. Every 14s the key and robot mark drop out, a ghost runs across the
+                   row (clipped by .board-key's overflow), and the key comes back. The runner moves
+                   by left (0 to 100% of the row) while its own translate goes -120% to 0, so it
+                   enters fully hidden on the left and leaves fully hidden on the right. */
+                .board-view .board-key.has-ghost {
+                    position: relative;
+                }
+
+                .board-view .board-key.has-ghost .board-key-label {
+                    display: inline-block;
+                    max-width: 100%;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    vertical-align: bottom;
+                    animation: board-ghost-key 14s ease-in-out infinite;
+                }
+
+                .board-view .board-ghost-runner {
+                    position: absolute;
+                    top: 50%;
+                    left: 0;
+                    color: #e2e8f0;
+                    font-size: 0.72rem;
+                    line-height: 1;
+                    opacity: 0;
+                    pointer-events: none;
+                    filter: drop-shadow(0 0 3px rgba(165, 180, 252, 0.75));
+                    animation: board-ghost-run 14s linear infinite;
+                }
+
+                .board-view .board-ghost-runner i {
+                    display: inline-block;
+                    animation: board-ghost-bob 0.4s ease-in-out infinite alternate;
+                }
+
+                @keyframes board-ghost-key {
+                    0%, 8% { opacity: 1; transform: translateY(0); filter: blur(0); }
+                    12%, 44% { opacity: 0; transform: translateY(0.7em); filter: blur(2px); }
+                    50%, 100% { opacity: 1; transform: translateY(0); filter: blur(0); }
+                }
+
+                @keyframes board-ghost-run {
+                    0%, 10% { left: 0; opacity: 0; transform: translate(-120%, -50%); }
+                    13%, 41% { opacity: 1; }
+                    45%, 100% { left: 100%; opacity: 0; transform: translate(0, -50%); }
+                }
+
+                @keyframes board-ghost-bob {
+                    from { transform: translateY(-1px) rotate(-8deg); }
+                    to { transform: translateY(1px) rotate(8deg); }
+                }
+
+                /* Without motion the key stays put and a still ghost follows it. */
+                @media (prefers-reduced-motion: reduce) {
+                    .board-view .board-key.has-ghost .board-key-label,
+                    .board-view .board-ghost-runner i { animation: none; }
+                    .board-view .board-ghost-runner {
+                        position: static;
+                        margin-left: 0.3rem;
+                        opacity: 0.85;
+                        animation: none;
+                    }
+                }
+
                 .board-view .board-card-rail {
                     background: var(--color-primary, #3b82f6);
                 }

@@ -190,6 +190,47 @@ Read [CHECKS.md](CHECKS.md) for scope, immutable evidence and UI lifecycle.
 Keep deterministic checks outside the Git preflight pipeline and all evidence behind IBoardStore.
 Results never move cards. Existing review recipes retain their ordered check actions.
 
+## Card post-processing and the ghost (VIBE-185)
+
+A card gets exactly one post-processing pass once it has settled in its board's last lane: no card
+activity for 10 minutes, on a board with at least two lanes. `BoardCardPostProcessingJob` (root
+backends only, every 5 minutes, never in the fake-CLI test host) runs
+`BoardCardPostProcessingService`, which hands each candidate to every registered
+`IBoardCardPostProcessor` and commits all outcomes with `PostProcessed = 1` in one conditional store
+write. The write applies only while the card is unprocessed, live, in the same lane and untouched
+since the read, so concurrent roots apply it once. A processor that defers (git timed out)
+holds the card until 24 hours after its last activity, then the card is processed without that
+outcome. To add a rule, implement the interface, register it beside `GhostCardPostProcessor` in
+`MapRegisterServices` and extend `BoardPostProcessingResult` and the store write with its effect.
+No existing card is ever processed (no backfill): see `board-post-processing/1` below.
+
+The first rule, `GhostCardPostProcessor`, sets `GhostReason` when an agent worked on a finished card
+but no code landed. Owner rules (2026-10-22):
+- **Never a ghost:** Research Spikes; a last lane or board whose name means "not done" (Canceled,
+  Not Doing, Won't Do and similar; letters-only match); no linked session; a GitHub PR or commit link.
+- **Ghost:** `no-code` when nothing is linked at all. `not-landed` when commits are linked but none
+  is on the project's default branch.
+
+`GitDefaultBranchCheck` reads local refs only: the branch `origin/HEAD` names, else `main`, else
+`master`, both the local branch and `origin/<name>`. It never fetches, so it makes no network call
+and raises no credential prompt. A commit counts when it is an ancestor of either ref, or when
+`git cherry` finds an equivalent patch there (a rebase or the PR bot's amend). A squash of several
+commits is not detected; a GitHub PR link on the card covers that case. No checkout, not a
+repository, or no default branch means unverifiable, which is not a ghost.
+
+The tile animates the ghost; the editor's Advanced "Ghost" checkbox clears it (`ClearGhost` on the
+update request). Clearing never re-queues the pass. `get_board_card` states the ghost; no MCP tool
+sets or clears it. The ghost and its History entries are local-only and never synced.
+
+## Agent-made cards are assigned to their maker (VIBE-185)
+
+`create_board_card` without `assignee` assigns a card made from a VibeRails terminal to that
+terminal's LLM (`IBoardStore.FindSessionLlmAsync`). It uses the Board launch's exact picker key,
+else the terminal's recorded CLI and saved environment. A Worker or hidden environment, which the
+picker does not offer, falls back to `base:<cli>`. Desktop clients and CLIs VibeRails did not
+launch stay unassigned. `assignee: ""` keeps a card unassigned, and a bare provider name
+(`claude`, `codex`) is shorthand for its base key on create and update.
+
 ## Workflow intent (VIBE-17)
 
 Keep the existing automatic lane-entry execution and settling delay. Humans and LLM agents
@@ -496,6 +537,9 @@ remain stored; automatic full-snapshot scheduling is removed. See [SYNC.md](SYNC
 ## Storage changes
 
 Read [database migration instructions](../../../VibeRails.Data.Sqlite/DB/AGENTS.md).
+`board-post-processing/1` (VIBE-185, additive) adds `BoardCards.PostProcessed` (default 1, so
+existing cards and an older binary's inserts are already processed; only current inserts write 0),
+nullable `BoardCards.GhostReason` and a partial pending index. No backfill.
 `board/1`–`board/27` already exist. `board/27` (VIBE-96, additive) adds nullable
 `BoardCards.AgentMadeBy` / `AgentMadeSessionId`, written only beside `AgentMade`, no backfill.
 `board/24` (VIBE-11, additive) adds `BoardCards.AgentMade`
@@ -561,6 +605,7 @@ Never replace the durable queue with a browser timer or an in-memory queue.
 | UI behavior | `Tests/wwwroot/js/board-*.test.mjs`; `UITests/tests/board-ux.spec.js` and `board-attachment-security.spec.js` |
 | `@path` references / file index | `BoardFileIndexServiceTests`, the referenced-files cases in `BoardPromptComposerTests`, the files route case in `BoardRoutesTests`, `board-text.test.mjs`, `board-file-refs.test.mjs`, the typeahead case in `board-ux.spec.js` |
 | Schema changes | `Tests/DB/SchemaSnapshotTests.cs`, `PreviousReleaseCompatibilityTests.cs`, migration/Board adoption tests |
+| Post-processing / ghost / maker assignment | `BoardPostProcessingTests`, `GhostCardPostProcessorTests` (real temp Git repositories), `BoardToolClientAuthorTests.CreatorAssignee`, `board-ghost.test.mjs` |
 | Database separation / host composition | `Tests/DB/BoardDatabaseIsolationTests.cs`, split-file `BoardSettingsTests`, route and MCP Board tests |
 
 Common focused commands from repository root:

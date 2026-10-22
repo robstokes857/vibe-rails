@@ -392,7 +392,8 @@ public sealed partial class BoardTool(
             + "Do not invent one. Ignored when this MCP server already knows the launching session.")] string? sessionId = null,
         CancellationToken cancellationToken = default,
         McpServer? server = null,
-        [Description("LLM picker key from list_board_agent_options, e.g. base:codex or env:7:codex. Optional.")] string? assignee = null,
+        [Description("LLM picker key from list_board_agent_options, e.g. base:codex or env:7:codex, or a bare provider name such as claude or codex. "
+            + "Omitted: a VibeRails terminal assigns the card to its own LLM; other clients leave it unassigned. Pass an empty string to create it unassigned.")] string? assignee = null,
         [Description("Base CLI launch settings, matching the Board UI: model, effort, mode, yolo, speed. Example: {model: gpt-6-astra, effort: xhigh, speed: ultrafast}. Only valid with a base assignee; saved environments use their own settings.")] BaseLlmOptions? baseLlmOptions = null,
         [Description("manual (default) | agent. Agent gives a selected manager responsibility for the card's pipeline.")] string? workflowMode = null,
         [Description("Manager picker key from list_board_agent_options. Required for agent workflow; separate from worker assignee.")] string? managerSelection = null,
@@ -417,13 +418,16 @@ public sealed partial class BoardTool(
             if (await ResolveAuthorAsync(server, cancellationToken) is not { } author)
                 return UnnamedClientHint;
             var maker = await ResolveCardMakerAsync(author, agentName, sessionId, cancellationToken);
-            RequireBaseAssignee(assignee, baseLlmOptions);
+            // Omitted: the agent that made the card is the one working it (VIBE-185). "" keeps it unassigned.
+            var autoAssignee = assignee is null ? await ResolveCreatorAssigneeAsync(author, cancellationToken) : null;
+            var cardAssignee = autoAssignee ?? ExpandAssignee(assignee);
+            RequireBaseAssignee(cardAssignee, baseLlmOptions);
             RequireBaseAssignee(managerSelection, managerBaseLlmOptions);
             var created = await service.CreateCardAsync(project, new CreateBoardCardRequest(
                 Title: title,
                 ColumnId: columnId,
                 Description: description,
-                Assignee: assignee,
+                Assignee: cardAssignee,
                 BaseLlmOptions: baseLlmOptions,
                 Priority: priority,
                 Tags: SplitTags(tags),
@@ -441,6 +445,7 @@ public sealed partial class BoardTool(
                 + (created.AgentMade && (agentName is not null || sessionId is not null)
                     ? "\n" + DescribeCardMaker(created.AgentMadeBy, created.AgentMadeSessionId, created.CreatedAt) : "")
                 + (maker.Note is null ? "" : "\n" + maker.Note)
+                + (autoAssignee is not null ? $"\nAssigned to {created.Assignee}, the LLM this VibeRails terminal runs. Pass assignee=\"\" to create a card unassigned." : "")
                 + (assignee is not null || baseLlmOptions is not null ? "\n" + DescribeAgentSettings(created.Assignee, created.BaseLlmOptions) : "")
                 + (workflowMode is not null || managerSelection is not null || managerBaseLlmOptions is not null ? "\n" + DescribeManagerSettings(created) : "")
                 + (outsideProject ? $"\nOther local project: {project} (board {target.BoardName}, id {target.BoardId})" : "");
@@ -468,7 +473,7 @@ public sealed partial class BoardTool(
         [Description("Required with flagged=true: explain the major issue and the specific information, decision or action needed from the user. Saved as a red attention comment in the same operation.")] string? flagReason = null,
         CancellationToken cancellationToken = default,
         McpServer? server = null,
-        [Description("LLM picker key from list_board_agent_options, e.g. base:codex or env:7:codex. Empty string clears the assignment; omitted preserves it. Changing the assignee clears its old base options unless you supply new ones.")] string? assignee = null,
+        [Description("LLM picker key from list_board_agent_options, e.g. base:codex or env:7:codex, or a bare provider name such as claude. Empty string clears the assignment; omitted preserves it. Changing the assignee clears its old base options unless you supply new ones.")] string? assignee = null,
         [Description("Replaces all saved base CLI options: model, effort, mode, yolo, speed. speed is default, fast or ultrafast (model dependent); Astra supports ultrafast. Omitted preserves options for the same assignee. Saved environments use their own settings and reject base overrides.")] BaseLlmOptions? baseLlmOptions = null,
         [Description("Clear the saved base CLI options. Cannot be combined with baseLlmOptions.")] bool clearBaseLlmOptions = false,
         [Description("manual | agent. Omitted preserves the card's workflow.")] string? workflowMode = null,
@@ -487,6 +492,7 @@ public sealed partial class BoardTool(
                 return "FAIL: supply baseLlmOptions or clearBaseLlmOptions, not both.";
             if (clearManagerBaseLlmOptions && managerBaseLlmOptions is not null)
                 return "FAIL: supply managerBaseLlmOptions or clearManagerBaseLlmOptions, not both.";
+            assignee = ExpandAssignee(assignee);
             if (baseLlmOptions is not null)
             {
                 var existing = await service.FindCardAsync(target.Project, target.CardId!, cancellationToken);
@@ -1060,6 +1066,12 @@ public sealed partial class BoardTool(
         builder.Append('\n');
         if (card.HasActiveDesktopAgent)
             builder.AppendLine("Desktop app activity: active or recently active through MCP (separate from terminal sessions).");
+        if (card.GhostReason is { } ghost)
+            builder.Append("Ghost: agent sessions worked on this finished card, but ")
+                .Append(ghost == BoardGhostReasons.NotLanded
+                    ? "none of its linked commits is on the default branch"
+                    : "no commit or GitHub link was linked")
+                .Append(". The owner clears this under Advanced.\n");
         if (!string.IsNullOrWhiteSpace(card.Assignee))
             builder.Append(DescribeAgentSettings(card.Assignee, card.BaseLlmOptions)).Append('\n');
         if (card.WorkflowMode == BoardWorkflowModes.Agent)

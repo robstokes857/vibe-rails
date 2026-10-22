@@ -1,5 +1,17 @@
 # Board persistence
 
+`board-post-processing/1` (VIBE-185) adds `BoardCards.PostProcessed INTEGER NOT NULL DEFAULT 1`,
+nullable `GhostReason` and `IX_BoardCards_PostProcessPending` (`WHERE PostProcessed = 0`). The
+default is the no-backfill rule: every card that existed before the migration, and every card an
+older binary inserts, is already processed; only `InsertCardAsync` writes 0. Candidates
+(`BoardStore.PostProcessing.cs`) are live, unprocessed cards in the last lane (Position, then
+CreatedUTC) of a board with at least two lanes, unchanged since the settle time.
+`CompletePostProcessingAsync` re-reads the card in its write transaction and applies only while it
+is unprocessed, live, in the same lane and not touched since the read. It neither touches nor
+promotes the card. Ghost changes write local-only (`RemoteSeq 0`) Card Log entries; the ghost is
+not a sync field. `FindSessionLlmAsync` (`BoardStore.SessionLlm.cs`) reads a session's Board launch
+selection, then its `Sessions` row and `Environments` from state.db, behind the usual schema probes.
+
 `board-code-links/1` adds `BoardCodeLinks` for up to 50 GitHub PR/commit references per card.
 Canonical URLs deduplicate within each card. Add/remove rechecks live project membership in
 its write transaction and touches the card; merge copies and deduplicates links while retaining

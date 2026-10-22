@@ -1,0 +1,135 @@
+using System.Data;
+using Microsoft.Data.Sqlite;
+
+namespace VibeRails.Services.Board;
+
+/// <summary>
+/// Card post-processing (board-post-processing/1, VIBE-185): one pass per card once it settles in
+/// its board's last lane. <c>BoardCards.PostProcessed</c> defaults to 1, so cards that existed before
+/// this migration, and cards an older binary inserts, are never processed; <see cref="InsertCardAsync"/>
+/// writes 0. The pass's outcome (today only <c>GhostReason</c>) and <c>PostProcessed = 1</c> commit
+/// together, and only while the card is exactly as the pass read it, so concurrent roots apply it once.
+/// </summary>
+public sealed partial class BoardStore
+{
+    private const string PostProcessingSchemaSql = """
+        CREATE INDEX IF NOT EXISTS IX_BoardCards_PostProcessPending ON BoardCards(ColumnId) WHERE PostProcessed = 0;
+        """;
+
+    private static readonly BoardAuthor PostProcessingAuthor = BoardAuthor.System("VibeRails post-processing");
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<BoardPostProcessingCandidate>> GetPostProcessingCandidatesAsync(DateTime settledBeforeUtc, int limit,
+        CancellationToken cancellationToken = default)
+    {
+        if (limit <= 0) return [];
+        await using var connection = await OpenAsync(cancellationToken);
+        var rows = new List<BoardPostProcessingCandidate>();
+        await using (var command = connection.CreateCommand())
+        {
+            // The last lane is the one ReadColumnsAsync lists last (Position, then CreatedUTC). A board
+            // with one lane has no "finished" lane, so its cards are never candidates.
+            command.CommandText = $"""
+                SELECT c.Id, c.ProjectPath, {CardKeySql}, c.Type, k.BoardId, b.Name, c.ColumnId, k.Name, c.UpdatedUTC,
+                       (SELECT COUNT(*) FROM {AllSessionsSql} s WHERE s.CardId = c.Id),
+                       (SELECT COUNT(*) FROM BoardCodeLinks l WHERE l.CardId = c.Id)
+                FROM BoardCards c
+                {CardPrefixJoinSql}
+                JOIN BoardColumns k ON k.Id = c.ColumnId
+                JOIN Boards b ON b.Id = k.BoardId
+                WHERE c.PostProcessed = 0 AND c.DeletedUTC IS NULL AND c.UpdatedUTC <= $settled
+                  AND EXISTS (SELECT 1 FROM BoardColumns o WHERE o.BoardId = k.BoardId AND o.Id <> k.Id)
+                  AND NOT EXISTS (SELECT 1 FROM BoardColumns o WHERE o.BoardId = k.BoardId AND o.Id <> k.Id
+                      AND (o.Position > k.Position OR (o.Position = k.Position AND o.CreatedUTC > k.CreatedUTC)))
+                ORDER BY c.UpdatedUTC, c.Id
+                LIMIT $limit;
+                """;
+            command.Parameters.AddWithValue("$settled", ToDb(settledBeforeUtc));
+            command.Parameters.AddWithValue("$limit", limit);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                rows.Add(new BoardPostProcessingCandidate(
+                    CardId: reader.GetString(0),
+                    ProjectPath: reader.GetString(1),
+                    Key: reader.GetString(2),
+                    Type: reader.GetString(3),
+                    BoardId: reader.GetString(4),
+                    BoardName: reader.GetString(5),
+                    ColumnId: reader.GetString(6),
+                    LaneName: reader.GetString(7),
+                    UpdatedUtc: ParseDb(reader.GetString(8)),
+                    SessionCount: reader.GetInt32(9),
+                    CodeLinkCount: reader.GetInt32(10),
+                    CommitShas: []));
+            }
+        }
+
+        for (var i = 0; i < rows.Count; i++)
+        {
+            await using var commits = connection.CreateCommand();
+            commits.CommandText = "SELECT Sha FROM BoardCommits WHERE CardId = $card ORDER BY LinkedUTC, Sha;";
+            commits.Parameters.AddWithValue("$card", rows[i].CardId);
+            var shas = new List<string>();
+            await using var reader = await commits.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+                shas.Add(reader.GetString(0));
+            rows[i] = rows[i] with { CommitShas = shas };
+        }
+        return rows;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> CompletePostProcessingAsync(BoardPostProcessingCandidate candidate, BoardPostProcessingResult result,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
+        string? previousGhost;
+        await using (var read = connection.CreateCommand())
+        {
+            read.Transaction = transaction;
+            read.CommandText = """
+                SELECT UpdatedUTC, GhostReason FROM BoardCards
+                WHERE Id = $id AND PostProcessed = 0 AND DeletedUTC IS NULL AND ColumnId = $column;
+                """;
+            read.Parameters.AddWithValue("$id", candidate.CardId);
+            read.Parameters.AddWithValue("$column", candidate.ColumnId);
+            await using var reader = await read.ExecuteReaderAsync(cancellationToken);
+            // Processed by another root, deleted, moved, or touched since it was read: the decision
+            // may be stale. A card that still qualifies is read afresh by a later pass.
+            if (!await reader.ReadAsync(cancellationToken) || ParseDb(reader.GetString(0)) > candidate.UpdatedUtc)
+                return false;
+            previousGhost = reader.IsDBNull(1) ? null : reader.GetString(1);
+        }
+
+        var ghost = result.GhostReason ?? previousGhost;
+        await using (var update = connection.CreateCommand())
+        {
+            update.Transaction = transaction;
+            // Neither UpdatedUTC nor the card's position changes: this is an annotation, not activity.
+            update.CommandText = "UPDATE BoardCards SET PostProcessed = 1, GhostReason = $ghost WHERE Id = $id;";
+            update.Parameters.AddWithValue("$ghost", (object?)ghost ?? DBNull.Value);
+            update.Parameters.AddWithValue("$id", candidate.CardId);
+            await update.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await LogGhostChangedAsync(connection, transaction, candidate.CardId, previousGhost, ghost, PostProcessingAuthor,
+            DateTime.UtcNow, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return true;
+    }
+
+    /// <summary>
+    /// A local-only History entry when the ghost appears or is cleared. Never synced: the ghost is
+    /// this machine's reading of its own sessions and Git checkout, not a shared card field.
+    /// </summary>
+    private static Task LogGhostChangedAsync(SqliteConnection connection, SqliteTransaction transaction, string cardId,
+        string? before, string? after, BoardAuthor author, DateTime createdUtc, CancellationToken cancellationToken)
+    {
+        var log = new CardLogChanges();
+        log.Ghost(before, after);
+        return log.IsEmpty ? Task.CompletedTask
+            : InsertLogEntryAsync(connection, transaction, cardId, author, BoardCommentKinds.Change,
+                log.Summary, log.ToJson(), createdUtc, cancellationToken, localOnly: true);
+    }
+}

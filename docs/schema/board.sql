@@ -32,6 +32,9 @@ CREATE INDEX IX_BoardCardSessions_Card ON BoardCardSessions(CardId);
 -- index IX_BoardCards_Column
 CREATE INDEX IX_BoardCards_Column ON BoardCards(ColumnId, Position);
 
+-- index IX_BoardCards_PostProcessPending
+CREATE INDEX IX_BoardCards_PostProcessPending ON BoardCards(ColumnId) WHERE PostProcessed = 0;
+
 -- index IX_BoardChecks_Card
 CREATE INDEX IX_BoardChecks_Card ON BoardChecks(CardId, StartedUTC DESC);
 
@@ -150,7 +153,7 @@ CREATE TABLE BoardCardSequences ( ProjectPath TEXT PRIMARY KEY COLLATE NOCASE, L
 CREATE TABLE BoardCardSessions ( SessionId TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, TabId TEXT NULL, Selection TEXT NOT NULL, Cli TEXT NOT NULL, DisplayName TEXT NOT NULL, Origin TEXT NOT NULL, CreatedUTC TEXT NOT NULL );
 
 -- table BoardCards
-CREATE TABLE BoardCards ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Number INTEGER NOT NULL, ColumnId TEXT NOT NULL REFERENCES BoardColumns(Id), Position INTEGER NOT NULL, Title TEXT NOT NULL, Description TEXT NOT NULL DEFAULT '', Assignee TEXT NULL, Priority TEXT NOT NULL DEFAULT 'medium', Type TEXT NOT NULL DEFAULT 'task', Points INTEGER NULL, Tags TEXT NOT NULL DEFAULT '[]', Blocked INTEGER NOT NULL DEFAULT 0, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, Flagged INTEGER NOT NULL DEFAULT 0, CardKey TEXT, DeletedUTC TEXT, DisplayId TEXT, AgentMade INTEGER NOT NULL DEFAULT 0, AgentMadeBy TEXT, AgentMadeSessionId TEXT, WorkflowMode TEXT, ManagerSelection TEXT, ManagerOptionsJson TEXT, UNIQUE(ProjectPath, Number) );
+CREATE TABLE BoardCards ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Number INTEGER NOT NULL, ColumnId TEXT NOT NULL REFERENCES BoardColumns(Id), Position INTEGER NOT NULL, Title TEXT NOT NULL, Description TEXT NOT NULL DEFAULT '', Assignee TEXT NULL, Priority TEXT NOT NULL DEFAULT 'medium', Type TEXT NOT NULL DEFAULT 'task', Points INTEGER NULL, Tags TEXT NOT NULL DEFAULT '[]', Blocked INTEGER NOT NULL DEFAULT 0, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, Flagged INTEGER NOT NULL DEFAULT 0, CardKey TEXT, DeletedUTC TEXT, DisplayId TEXT, AgentMade INTEGER NOT NULL DEFAULT 0, AgentMadeBy TEXT, AgentMadeSessionId TEXT, WorkflowMode TEXT, ManagerSelection TEXT, ManagerOptionsJson TEXT, PostProcessed INTEGER NOT NULL DEFAULT 1, GhostReason TEXT, UNIQUE(ProjectPath, Number) );
 
 -- table BoardChecks
 CREATE TABLE BoardChecks ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, RunId TEXT NOT NULL, ActionId TEXT NOT NULL, StartedUTC TEXT NOT NULL, EndedUTC TEXT NULL, SummaryJson TEXT NOT NULL, ResultJson TEXT NULL, UNIQUE(CardId, RunId, ActionId) );

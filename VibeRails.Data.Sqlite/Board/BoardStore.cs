@@ -605,9 +605,9 @@ public sealed partial class BoardStore : IBoardStore
             insert.Transaction = transaction;
             insert.CommandText = """
                 INSERT INTO BoardCards
-                    (Id, ProjectPath, Number, ColumnId, Position, Title, Description, Assignee, Priority, Type, Points, Tags, Blocked, Flagged, CreatedUTC, UpdatedUTC, CardKey, DisplayId, AgentMade, AgentMadeBy, AgentMadeSessionId, WorkflowMode, ManagerSelection, ManagerOptionsJson)
+                    (Id, ProjectPath, Number, ColumnId, Position, Title, Description, Assignee, Priority, Type, Points, Tags, Blocked, Flagged, CreatedUTC, UpdatedUTC, CardKey, DisplayId, AgentMade, AgentMadeBy, AgentMadeSessionId, WorkflowMode, ManagerSelection, ManagerOptionsJson, PostProcessed)
                 VALUES
-                    ($id, $project, $number, $column, $position, $title, $description, $assignee, $priority, $type, $points, $tags, $blocked, $flagged, $created, $updated, $cardKey, $displayId, $agentMade, $agentMadeBy, $agentMadeSession, $workflow, $manager, $managerOptions);
+                    ($id, $project, $number, $column, $position, $title, $description, $assignee, $priority, $type, $points, $tags, $blocked, $flagged, $created, $updated, $cardKey, $displayId, $agentMade, $agentMadeBy, $agentMadeSession, $workflow, $manager, $managerOptions, 0);
                 """;
             insert.Parameters.AddWithValue("$id", id);
             insert.Parameters.AddWithValue("$cardKey", cardKey);
@@ -735,7 +735,8 @@ public sealed partial class BoardStore : IBoardStore
             BaseLlmOptions = patch.ClearBaseLlmOptions ? null : patch.BaseLlmOptions ?? existing.BaseLlmOptions,
             WorkflowMode = patch.WorkflowMode ?? existing.WorkflowMode,
             ManagerSelection = patch.ClearManagerSelection ? null : patch.ManagerSelection ?? existing.ManagerSelection,
-            ManagerBaseLlmOptions = patch.ClearManagerBaseLlmOptions ? null : patch.ManagerBaseLlmOptions ?? existing.ManagerBaseLlmOptions
+            ManagerBaseLlmOptions = patch.ClearManagerBaseLlmOptions ? null : patch.ManagerBaseLlmOptions ?? existing.ManagerBaseLlmOptions,
+            GhostReason = patch.ClearGhost ? null : existing.GhostReason
         };
         ValidateAgentWorkflow(updated.WorkflowMode, updated.ManagerSelection);
 
@@ -745,9 +746,10 @@ public sealed partial class BoardStore : IBoardStore
             command.CommandText = """
                 UPDATE BoardCards SET ColumnId = $column, Position = $position, Title = $title, Description = $description,
                     Assignee = $assignee, Priority = $priority, Type = $type, Points = $points, Tags = $tags, Blocked = $blocked, Flagged = $flagged, DisplayId = $displayId, UpdatedUTC = $updated,
-                    WorkflowMode = $workflow, ManagerSelection = $manager, ManagerOptionsJson = $managerOptions
+                    WorkflowMode = $workflow, ManagerSelection = $manager, ManagerOptionsJson = $managerOptions, GhostReason = $ghost
                 WHERE Id = $id;
                 """;
+            command.Parameters.AddWithValue("$ghost", (object?)updated.GhostReason ?? DBNull.Value);
             command.Parameters.AddWithValue("$column", updated.ColumnId);
             command.Parameters.AddWithValue("$position", updated.Position);
             command.Parameters.AddWithValue("$title", updated.Title);
@@ -775,6 +777,7 @@ public sealed partial class BoardStore : IBoardStore
         await LogCardChangedAsync(connection, transaction, existing, updated, fromLaneName, toLaneName,
             author, cancellationToken, stamp);
         await LogAgentWorkflowChangedAsync(connection, transaction, existing, updated, author, cancellationToken);
+        await LogGhostChangedAsync(connection, transaction, existing.Id, existing.GhostReason, updated.GhostReason, author, updated.UpdatedUtc, cancellationToken);
         if (flagReason is not null)
             await InsertAttentionAsync(connection, transaction, updated.Id, author, flagReason, cancellationToken);
         await ReconcileMissingSyncedLaneAsync(connection, transaction, updated, stamp, cancellationToken);
@@ -1343,7 +1346,8 @@ public sealed partial class BoardStore : IBoardStore
                COALESCE(c.WorkflowMode, 'manual'), c.ManagerSelection, c.ManagerOptionsJson,
                (SELECT a.WorkItemId FROM BoardAdoLinks a WHERE a.CardId = c.Id ORDER BY a.LastPulledUTC DESC, a.rowid DESC LIMIT 1),
                (SELECT j.SiteId FROM BoardJiraLinks j WHERE j.CardId = c.Id ORDER BY j.LastPulledUTC DESC, j.rowid DESC LIMIT 1),
-               (SELECT a.ConnectionId FROM BoardAdoLinks a WHERE a.CardId = c.Id ORDER BY a.LastPulledUTC DESC, a.rowid DESC LIMIT 1)
+               (SELECT a.ConnectionId FROM BoardAdoLinks a WHERE a.CardId = c.Id ORDER BY a.LastPulledUTC DESC, a.rowid DESC LIMIT 1),
+               c.GhostReason
         FROM BoardCards c
         {CardPrefixJoinSql}
         """;
@@ -1542,7 +1546,8 @@ public sealed partial class BoardStore : IBoardStore
         ManagerBaseLlmOptions: reader.IsDBNull(28) ? null : JsonSerializer.Deserialize(reader.GetString(28), StorageJsonSerializerContext.Default.BaseLlmOptions),
         AdoWorkItemId: reader.IsDBNull(29) ? null : reader.GetInt32(29),
         JiraConnectionId: reader.IsDBNull(30) ? null : reader.GetString(30),
-        AdoConnectionId: reader.IsDBNull(31) ? null : reader.GetString(31));
+        AdoConnectionId: reader.IsDBNull(31) ? null : reader.GetString(31),
+        GhostReason: reader.IsDBNull(32) ? null : reader.GetString(32));
 
     private static async Task<IReadOnlyList<BoardCommentRecord>> ReadCommentsAsync(SqliteConnection connection, string cardId, CancellationToken cancellationToken)
     {
@@ -2003,6 +2008,16 @@ public sealed partial class BoardStore : IBoardStore
             SqliteSchema.Execute(db, transaction, AdoDeliverySchemaSql));
         SqliteMigrationRunner.Apply(connection, "board-code-links", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, CodeLinksSchemaSql));
+        // board-post-processing/1 (VIBE-185): the run-once card pass and the ghost it can set
+        // (BoardStore.PostProcessing.cs). PostProcessed defaults to 1, so every card that already
+        // exists, and every card an older binary inserts, counts as processed with no backfill;
+        // only this binary's inserts write 0. GhostReason is nullable and local-only.
+        SqliteMigrationRunner.Apply(connection, "board-post-processing", 1, MigrationKind.Additive, (db, transaction) =>
+        {
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardCards ADD COLUMN PostProcessed INTEGER NOT NULL DEFAULT 1");
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardCards ADD COLUMN GhostReason TEXT");
+            SqliteSchema.Execute(db, transaction, PostProcessingSchemaSql);
+        });
         ReconcileDerivedRows(connection);
     }
 

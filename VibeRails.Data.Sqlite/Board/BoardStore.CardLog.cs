@@ -284,6 +284,20 @@ public sealed partial class BoardStore
             }
         }
 
+        // Local History only (VIBE-185); the portable change allowlist does not carry it.
+        public void Ghost(string? before, string? after)
+        {
+            if (string.Equals(before, after, StringComparison.Ordinal)) return;
+            WriteFromTo("ghost", w => WriteNullableString(w, before), w => WriteNullableString(w, after));
+            _summary.Add(after switch
+            {
+                null => "Ghost cleared",
+                BoardGhostReasons.NoCode => "Ghost: agent sessions worked on this card, but no commit or GitHub link was linked",
+                BoardGhostReasons.NotLanded => "Ghost: agent sessions worked on this card, but none of its linked commits is on the default branch",
+                _ => "Ghost: " + after
+            });
+        }
+
         private void WriteTo(string field, Action<Utf8JsonWriter> to)
         {
             _json.WriteStartObject(field);
