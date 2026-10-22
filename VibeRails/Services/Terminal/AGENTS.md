@@ -3,6 +3,14 @@
 Current implementation reference for `VibeRails/Services/Terminal`.
 Verified against source on 2026-08-01.
 
+## Required owner approval
+
+Terminal changes require Rob's signed approval at STOP through the root `vc.rules.md`,
+including this subtree and the listed shared frontend, launcher and host files. Read the
+[terminal review checklist](../../../docs/terminal-change-review.md) before changing behavior.
+Add new terminal files outside protected directories to the root policy in the same change.
+Do not weaken or bypass the gate; an agent's acknowledgment is not owner approval.
+
 ## Scope
 This folder owns PTY lifecycle, session tracking hooks, local WebSocket viewer handling, and remote relay integration.
 
