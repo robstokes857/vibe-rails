@@ -95,6 +95,10 @@ and existing policy files.
 
 ### 6. Bytes
 
+Rule discovery rejects any source line longer than 4,096 characters with an explicit error;
+it never silently skips oversized policy. Enforcement patterns use non-backtracking regexes
+with timeouts. The legacy file reader counts lines in fixed-size buffers.
+
 A leading UTF-8 byte-order mark is ignored (2026-09-26). The hook decodes index bytes
 without a BOM-stripping reader, so a rules heading on the first line of a file saved with a
 BOM was invisible to the hook while the Rules page and the MCP `validate_vca` tool, whose

@@ -6,7 +6,7 @@ public static partial class CredentialRedactor
 {
     // Detection is used as an exclusion filter. Fail closed on over-budget text/timeouts so
     // a secret beyond the examined window cannot enter the index or a search response.
-    private const int SecretLineWindow = 4096;
+    private const int SecretLineWindow = 64 * 1024;
     private const int SecretTextLimit = 1024 * 1024;
     private static readonly TimeSpan SecretMatchTimeout = TimeSpan.FromMilliseconds(100);
 
@@ -60,6 +60,11 @@ public static partial class CredentialRedactor
                 foreach (var pattern in SecretPatterns)
                     if (pattern.IsMatch(line)) return true;
             }
+            // The final two assignment patterns allow whitespace across line breaks. Keep
+            // that exclusion policy too, within the total text cap and linear match timeout.
+            if (text.AsSpan().IndexOfAny('\r', '\n') >= 0)
+                foreach (var pattern in SecretPatterns.AsSpan(SecretPatterns.Length - 2))
+                    if (pattern.IsMatch(text)) return true;
         }
         catch (RegexMatchTimeoutException) { return true; }
         return false;

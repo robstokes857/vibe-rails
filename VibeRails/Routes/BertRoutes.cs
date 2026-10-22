@@ -61,7 +61,7 @@ public static class BertRoutes
             }
             catch (ArgumentException ex)
             {
-                return Results.BadRequest(new { error = ex.Message });
+                return Results.BadRequest(new ErrorResponse(ex.Message));
             }
         }).WithName("SearchBertCaptures");
     }

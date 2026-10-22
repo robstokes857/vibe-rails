@@ -20,7 +20,7 @@ public static class SearchRoutes
             }
             catch (ArgumentException ex)
             {
-                return Results.BadRequest(new { error = ex.Message });
+                return Results.BadRequest(new ErrorResponse(ex.Message));
             }
         }).WithName("UnifiedSearch");
     }

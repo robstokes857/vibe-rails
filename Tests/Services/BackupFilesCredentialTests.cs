@@ -22,6 +22,49 @@ public sealed class BackupFilesCredentialTests : IDisposable
     public BackupFilesCredentialTests() { Directory.CreateDirectory(root); Directory.CreateDirectory(Home); }
 
     [Theory]
+    [InlineData("settings.json")]
+    [InlineData("config.toml")]
+    public async Task OversizedConfigurationIsOmittedBeforeParsing(string name)
+    {
+        var path = Path.Combine(root, name);
+        // Valid files: the old implementation parsed and archived these despite exceeding
+        // the cap (invalid first bytes would only exercise the existing parse-error path).
+        await File.WriteAllTextAsync(path, name.EndsWith(".json", StringComparison.Ordinal)
+            ? "{}" + new string(' ', BackupFiles.InMemoryCaptureBytes)
+            : "model = \"" + new string('x', BackupFiles.InMemoryCaptureBytes) + "\"", Ct);
+        using var output = new MemoryStream();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var issues = await BackupFiles.WriteZipAsync(output, [new(path, name)], new SqliteDatabaseSnapshotStore(), root, Ct);
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(2), $"Oversized config took {sw.Elapsed}");
+        Assert.Single(issues);
+        output.Position = 0;
+        using var zip = new ZipArchive(output, ZipArchiveMode.Read);
+        Assert.Null(zip.GetEntry(name));
+        Assert.DoesNotContain(name, await Read(zip, "files.json"));
+    }
+
+    [Fact]
+    public void MultilineTomlIsScannedIncrementally()
+    {
+        var text = "args = [\n" + string.Concat(Enumerable.Repeat("# harmless padding\n", 50_000))
+            + "\"--token\", \"private-value\"]\nmodel = \"keep\"\n";
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var redacted = BackupFiles.RedactToml(text);
+        Assert.DoesNotContain("private-value", redacted);
+        Assert.Contains("model = \"keep\"", redacted);
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(2), $"Multiline TOML took {sw.Elapsed}");
+    }
+
+    [Fact]
+    public void DeepTomlFailsBeforeRecursiveRedaction()
+    {
+        var text = "value = " + new string('[', 10_000) + "0" + new string(']', 10_000);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        Assert.Throws<System.Text.Json.JsonException>(() => BackupFiles.RedactToml(text));
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(2));
+    }
+
+    [Theory]
     // Every credential store observed in real CLI homes: name-based, so the family is caught, not one spelling.
     [InlineData("mcp-auth.json")]
     [InlineData("auth.json")]

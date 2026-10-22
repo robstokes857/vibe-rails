@@ -1239,7 +1239,21 @@ pending lexical-index writes and applies one-month state / seven-day proxy reten
 export-acknowledged sessions.
 
 ### Service Layer Pattern
-Business logic isolated from HTTP concerns. Services are reusable across CLI and web modes.
+
+Business logic is isolated from HTTP concerns. Services are reusable across CLI and web modes.
+
+Interactive Chat History recording responses (`raw-session`, `replay`, `terminal-replay`)
+read a consistent snapshot through `ISessionStore.GetSessionRecordingAsync`. The store checks
+a shared 16 MiB source-byte / 20,000-row budget before materializing each value. Oversized
+recordings return HTTP 413 and retain all stored data. A two-request limit per process covers
+loading and response transmission; extra requests receive HTTP 429. Raw ZIP entries stream
+asynchronously to the response, preserving binary bytes, base64 continuity and JSON metadata.
+
+Unified and BERT search reject queries over 1,000 characters before whitespace scanning,
+embedding or lexical work. Index/search secret detection examines lines of at most 65,536
+characters in inputs of at most 1,048,576 characters using non-backtracking regexes with 100 ms timeouts;
+over-budget text and timeouts are treated as sensitive and excluded. Transcript redaction
+keeps its separate policy.
 
 ### Factory Pattern
 `BaseLlmCliLauncher` base class with CLI-type-specific implementations:

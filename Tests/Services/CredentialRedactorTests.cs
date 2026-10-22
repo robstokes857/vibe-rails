@@ -6,6 +6,35 @@ namespace Tests.Services;
 
 public sealed class CredentialRedactorTests
 {
+    [Theory]
+    [InlineData(" [Environment]")]
+    [InlineData(" export x")]
+    [InlineData(" password    ")]
+    public void DetectionRejectsHostileWorkWithinTwoSeconds(string unit)
+    {
+        // Near misses hit the old overlapping .* branches repeatedly, on the AOT interpreter too.
+        var line = string.Concat(Enumerable.Repeat(unit, 64_000 / unit.Length));
+        var text = string.Join('\n', Enumerable.Repeat(line, 8));
+        CredentialRedactor.ContainsKnownSecret("ordinary warmup");
+        var sw = Stopwatch.StartNew();
+        Assert.False(CredentialRedactor.ContainsKnownSecret(text));
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(2), $"Secret detection took {sw.Elapsed}");
+    }
+
+    [Fact]
+    public void DetectionFailsClosedOutsideItsBudgetAndStillFindsLaterLines()
+    {
+        var sw = Stopwatch.StartNew();
+        Assert.True(CredentialRedactor.ContainsKnownSecret(new string('x', 8 * 1024 * 1024)));
+        Assert.True(CredentialRedactor.ContainsKnownSecret("ordinary\n" + new string('x', 64 * 1024 + 1)));
+        Assert.False(CredentialRedactor.ContainsKnownSecret(new string('x', 64 * 1024)));
+        Assert.True(CredentialRedactor.ContainsKnownSecret("ordinary\nexport TOKEN=abcdefghijk"));
+        Assert.True(CredentialRedactor.ContainsKnownSecret("password=\nabcdefghijk"));
+        Assert.True(CredentialRedactor.ContainsKnownSecret("[Environment]::SetEnvironmentVariable\n("));
+        Assert.False(CredentialRedactor.ContainsKnownSecret("export PATH=/usr/bin\npassword reset"));
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(2));
+    }
+
     private const string X = CredentialRedactor.TranscriptMask;
 
     [Theory]

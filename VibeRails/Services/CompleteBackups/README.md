@@ -39,6 +39,11 @@ fail explicitly. Resource pressure defers the job.
 
 ## Exact file and credential policy
 
+JSON/JSONC and TOML configuration capture is limited to 16 MiB before parsing, including a
+bounded read if the file grows. Oversized files are omitted with an incomplete-coverage issue;
+they are never copied without redaction. TOML multiline state is scanned once per line and
+nesting is limited to 64 levels before recursive redaction.
+
 Included: installation-root `.json/.toml/.yaml/.yml/.md` files, `scripts/`, `envs/`, `history/`,
 configured environment paths, default `.codex/.claude/.copilot/.opencode/.grok/.gemini` homes,
 and `.config/opencode` plus `.local/share/opencode`. Automation ScriptPath files must resolve

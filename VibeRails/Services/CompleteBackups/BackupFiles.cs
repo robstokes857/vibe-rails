@@ -297,7 +297,7 @@ public sealed class BackupFiles(IServiceScopeFactory scopes)
             if (IsRedactedJson(Path.GetFileName(path)))
             {
                 using var captured = await ReadConfigurationAsync(input, ct);
-                using var doc = JsonDocument.Parse(captured.GetBuffer().AsMemory(0, (int)captured.Length), RedactedJsonOptions);
+                using var doc = await JsonDocument.ParseAsync(captured, RedactedJsonOptions, ct);
                 var redacted = new MemoryStream();
                 using (var writer = new Utf8JsonWriter(redacted)) WriteSettings(doc.RootElement, writer);
                 redacted.Position = 0;
