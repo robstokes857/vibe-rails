@@ -107,6 +107,11 @@
                 <i class="fa-solid fa-plug me-1"></i>
                 <span>MCP</span>
             </button>
+            <button class="app-subnav-link" data-action="navigate" data-view="pr-reviews"
+                title="PR Reviews — review log and next-up queue for this project's GitHub pull requests">
+                <i class="fa-solid fa-code-pull-request me-1"></i>
+                <span>Reviews</span>
+            </button>
             <button type="button" class="app-subnav-link automation-launch-btn" data-action="automation-launcher"
                 title="Launch an agent or automation" aria-haspopup="menu" aria-expanded="false"
                 aria-label="Launch an agent or automation">
@@ -2880,6 +2885,140 @@
                     <iframe class="mcp-remote-frame" data-mcp-remote-frame title="Isolated remote MCP inspector"
                         sandbox="allow-scripts" referrerpolicy="no-referrer" src="mcp-remote.html"></iframe>
                 </section>
+            </div>
+        </div>
+    </template>
+
+    <!-- PR Reviews (view 'pr-reviews'): lead-review log for the project's GitHub pull requests.
+         The list and one PR's detail are two pages of this one view; pr-reviews-controller.js. -->
+    <template id="pr-reviews-template">
+        <div class="view pr-reviews-view" data-view="pr-reviews">
+            <style>
+                .pr-reviews-view { color: var(--color-text, #e6e6e6); display: grid; gap: 1.5rem; min-width: 0; }
+                .pr-reviews-view [hidden] { display: none !important; }
+                .pr-reviews-view .pr-subtitle { color: var(--color-text-muted, #9aa0a6); margin: 0.25rem 0 0; }
+                .pr-reviews-view .pr-subtitle a,
+                .pr-reviews-view a.pr-row-title { color: var(--color-accent, #06b6d4); }
+                .pr-reviews-view .pr-section { display: grid; gap: 0.75rem; min-width: 0; }
+                .pr-reviews-view .pr-section > * { min-width: 0; }
+                .pr-reviews-view .pr-section-heading { display: flex; flex-direction: column; gap: 0.1rem; }
+                .pr-reviews-view .pr-section-bar { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 0.75rem; }
+                .pr-reviews-view .pr-section-title { font-size: 1.15rem; font-weight: 600; margin: 0; }
+                .pr-reviews-view .pr-count { color: var(--color-text-muted, #9aa0a6); font-weight: 400; margin-left: 0.25rem; }
+                .pr-reviews-view .pr-eyebrow { font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted, #9aa0a6); }
+                .pr-reviews-view .pr-eyebrow[data-tone="warning"] { color: var(--color-warning, #f59e0b); }
+                .pr-reviews-view .pr-eyebrow[data-tone="danger"] { color: var(--color-danger, #ef4444); }
+                .pr-reviews-view .pr-muted { color: var(--color-text-muted, #9aa0a6); font-size: 0.85rem; }
+                .pr-reviews-view .pr-list { display: grid; border: 1px solid var(--color-border, #2d2f36); border-radius: 8px; overflow: hidden; }
+                .pr-reviews-view .pr-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.75rem;
+                    padding: 0.65rem 0.9rem; background: var(--color-bg-surface, #1b1d22); color: inherit; text-align: left; width: 100%;
+                    border: 0; border-bottom: 1px solid var(--color-border, #2d2f36); border-left: 3px solid transparent; }
+                .pr-reviews-view .pr-list > .pr-row:last-child { border-bottom: 0; }
+                .pr-reviews-view button.pr-row:hover, .pr-reviews-view button.pr-row:focus-visible { background: var(--color-bg-surface-hover, #23262d); }
+                .pr-reviews-view .pr-row[data-tone="warning"] { border-left-color: var(--color-warning, #f59e0b); }
+                .pr-reviews-view .pr-row[data-tone="danger"] { border-left-color: var(--color-danger, #ef4444); }
+                .pr-reviews-view .pr-open-row { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+                .pr-reviews-view .pr-number { font-family: var(--font-mono, ui-monospace, monospace); color: var(--color-primary, #8b5cf6); }
+                .pr-reviews-view .pr-row-main { display: grid; min-width: 0; }
+                .pr-reviews-view .pr-row-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+                .pr-reviews-view .pr-row-meta { color: var(--color-text-muted, #9aa0a6); font-size: 0.8rem; }
+                .pr-reviews-view .pr-row-badges { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
+                .pr-reviews-view .pr-badge { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.1rem 0.5rem; border-radius: 999px;
+                    font-size: 0.75rem; white-space: nowrap; border: 1px solid var(--color-border, #2d2f36); color: var(--color-text-muted, #9aa0a6); }
+                .pr-reviews-view .pr-badge[data-tone="success"] { color: var(--color-success, #22c55e); border-color: color-mix(in srgb, var(--color-success, #22c55e) 45%, transparent); }
+                .pr-reviews-view .pr-badge[data-tone="warning"] { color: var(--color-warning, #f59e0b); border-color: color-mix(in srgb, var(--color-warning, #f59e0b) 45%, transparent); }
+                .pr-reviews-view .pr-badge[data-tone="danger"] { color: var(--color-danger, #ef4444); border-color: color-mix(in srgb, var(--color-danger, #ef4444) 45%, transparent); }
+                .pr-reviews-view .pr-badge[data-tone="info"],
+                .pr-reviews-view .pr-badge[data-tone="accent"] { color: var(--color-accent, #06b6d4); border-color: color-mix(in srgb, var(--color-accent, #06b6d4) 45%, transparent); }
+                .pr-reviews-view .pr-empty { padding: 1rem; border: 1px dashed var(--color-border, #2d2f36); border-radius: 8px;
+                    background: var(--color-bg-base, #121212); color: var(--color-text-muted, #9aa0a6); }
+                .pr-reviews-view .pr-alert { margin: 0; padding: 0.75rem 1rem; border-radius: 8px; border: 1px solid var(--color-border, #2d2f36); }
+                .pr-reviews-view .pr-alert[data-tone="danger"] { border-color: var(--color-danger, #ef4444); background: color-mix(in srgb, var(--color-danger, #ef4444) 10%, transparent); }
+                .pr-reviews-view .pr-alert[data-tone="info"] { border-color: var(--color-accent, #06b6d4); background: color-mix(in srgb, var(--color-accent, #06b6d4) 8%, transparent); }
+                .pr-reviews-view .pr-next { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem;
+                    padding: 0.85rem 1rem; border: 1px solid var(--color-border, #2d2f36); border-left: 3px solid var(--color-accent, #06b6d4);
+                    border-radius: 8px; background: var(--color-bg-surface, #1b1d22); margin-bottom: 0.75rem; }
+                .pr-reviews-view .pr-next[data-tone="warning"] { border-left-color: var(--color-warning, #f59e0b); }
+                .pr-reviews-view .pr-next[data-tone="muted"] { border-left-color: var(--color-border, #2d2f36); }
+                .pr-reviews-view .pr-next-main { display: grid; gap: 0.2rem; min-width: 0; }
+                .pr-reviews-view .pr-next-title { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+                .pr-reviews-view .pr-filters { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; }
+                .pr-reviews-view .pr-filters .form-control { flex: 1 1 240px; min-width: 0; }
+                .pr-reviews-view .pr-filters .btn-group { flex-wrap: wrap; max-width: 100%; }
+                .pr-reviews-view .pr-filters .btn { white-space: nowrap; }
+                .pr-reviews-view .pr-filters .btn[aria-pressed="true"] { background: var(--color-bg-elevated, #2a2d35); color: var(--color-text, #e6e6e6); }
+                .pr-reviews-view .pr-card { display: grid; gap: 0.5rem; padding: 1rem 1.1rem; border: 1px solid var(--color-border, #2d2f36);
+                    border-radius: 8px; background: var(--color-bg-surface, #1b1d22); }
+                .pr-reviews-view .pr-card[data-tone="danger"] { border-color: color-mix(in srgb, var(--color-danger, #ef4444) 60%, transparent); }
+                .pr-reviews-view .pr-pending { border-color: color-mix(in srgb, var(--color-warning, #f59e0b) 55%, transparent); }
+                .pr-reviews-view .pr-card-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 0.75rem; }
+                .pr-reviews-view .pr-card-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+                .pr-reviews-view .pr-start-card { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; }
+                .pr-reviews-view .pr-detail-head { grid-template-columns: minmax(0, 1fr) auto; gap: 1rem; }
+                .pr-reviews-view .pr-detail-title { font-size: 1.35rem; margin: 0.15rem 0 0.4rem; overflow-wrap: anywhere; }
+                .pr-reviews-view .pr-detail-summary { color: var(--color-text-muted, #9aa0a6); margin: 0 0 0.5rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+                .pr-reviews-view .pr-detail-side { display: grid; gap: 0.4rem; align-content: start; justify-items: stretch; min-width: 170px; }
+                .pr-reviews-view .pr-form-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
+                .pr-reviews-view .pr-verdict { width: auto; min-width: 200px; }
+                .pr-reviews-view .pr-form-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 0.5rem; margin-top: 0.5rem; }
+                .pr-reviews-view .pr-form-actions .pr-muted { margin-right: auto; }
+                .pr-reviews-view .pr-feedback-input { font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.85rem; }
+                .pr-reviews-view .pr-feedback { margin: 0.5rem 0 0; padding: 0.85rem; border: 1px solid var(--color-border, #2d2f36); border-radius: 6px;
+                    background: var(--color-bg-base, #121212); color: inherit; font-family: inherit; font-size: 0.875rem;
+                    white-space: pre-wrap; overflow-wrap: anywhere; }
+                .pr-reviews-view .pr-feedback.is-collapsed { max-height: 280px; overflow: hidden; }
+                .pr-reviews-view .pr-review + .pr-review { margin-top: 0.75rem; }
+                @media (max-width: 768px) {
+                    .pr-reviews-view .pr-row, .pr-reviews-view .pr-open-row { grid-template-columns: auto minmax(0, 1fr); }
+                    .pr-reviews-view .pr-row-badges, .pr-reviews-view .pr-row-action { grid-column: 2; }
+                    .pr-reviews-view .pr-detail-head { grid-template-columns: minmax(0, 1fr); }
+                }
+            </style>
+
+            <header class="vb-page-header">
+                <div class="vb-page-heading">
+                    <h1 class="vb-page-title">PR Reviews</h1>
+                    <p class="pr-subtitle" data-pr-repository>Lead-review log for this project's GitHub pull requests</p>
+                </div>
+            </header>
+
+            <div class="pr-section" data-pr-list-page>
+                <div data-pr-problem hidden></div>
+                <section class="pr-section" data-pr-pending-section data-pr-needs-repo hidden></section>
+                <section class="pr-section" data-pr-blocked-section data-pr-needs-repo hidden></section>
+                <section class="pr-section" data-pr-needs-repo hidden>
+                    <div class="pr-section-bar">
+                        <div class="pr-section-heading">
+                            <span class="pr-eyebrow">Live from the GitHub CLI</span>
+                            <h2 class="pr-section-title">Open on GitHub <span class="pr-count" data-pr-open-count>0</span></h2>
+                        </div>
+                        <div class="pr-card-actions align-items-center">
+                            <span class="pr-muted" data-pr-updated role="status" aria-live="polite"></span>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" data-pr-refresh>
+                                <i class="fa-solid fa-rotate" aria-hidden="true"></i> Refresh</button>
+                        </div>
+                    </div>
+                    <div data-pr-open-body></div>
+                </section>
+                <section class="pr-section" data-pr-needs-repo hidden>
+                    <div class="pr-section-heading">
+                        <span class="pr-eyebrow">Local review history, newest write first</span>
+                        <h2 class="pr-section-title">All pull requests <span class="pr-count" data-pr-all-count>0</span></h2>
+                    </div>
+                    <div class="pr-filters">
+                        <input type="search" class="form-control form-control-sm" data-pr-query maxlength="200"
+                            placeholder="Filter by number, title, author or overview" aria-label="Filter pull requests">
+                        <div class="btn-group" role="group" aria-label="GitHub state" data-pr-lifecycle-filters></div>
+                        <div class="btn-group" role="group" aria-label="Review state" data-pr-status-filters></div>
+                    </div>
+                    <div data-pr-all-body></div>
+                </section>
+            </div>
+
+            <div class="pr-section" data-pr-detail-page hidden>
+                <div><button type="button" class="btn btn-sm btn-outline-secondary" data-pr-back>
+                    <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> All PRs</button></div>
+                <div class="pr-section" data-pr-detail-body aria-busy="false"></div>
             </div>
         </div>
     </template>

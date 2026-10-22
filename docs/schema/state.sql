@@ -65,6 +65,15 @@ CREATE INDEX idx_job_triggers_due ON JobTriggers(Kind, NextRunUTC);
 -- index idx_jobs_project
 CREATE INDEX idx_jobs_project ON Jobs(ProjectPath, Enabled, DeletedUTC);
 
+-- index idx_pr_review_pull_requests_updated
+CREATE INDEX idx_pr_review_pull_requests_updated ON PrReviewPullRequests (Repository, UpdatedUTC);
+
+-- index idx_pr_reviews_one_in_progress
+CREATE UNIQUE INDEX idx_pr_reviews_one_in_progress ON PrReviews (Repository, PrNumber) WHERE Status = 'in_progress';
+
+-- index idx_pr_reviews_pr
+CREATE INDEX idx_pr_reviews_pr ON PrReviews (Repository, PrNumber, Status);
+
 -- index idx_sandboxes_environment
 CREATE INDEX idx_sandboxes_environment ON Sandboxes(EnvironmentId);
 
@@ -160,6 +169,12 @@ CREATE TABLE Jobs ( Id INTEGER PRIMARY KEY AUTOINCREMENT, Name TEXT NOT NULL, Pr
 
 -- table ManagedWorktrees
 CREATE TABLE ManagedWorktrees ( Id TEXT PRIMARY KEY, Path TEXT NOT NULL UNIQUE, GitCommonDirectory TEXT NOT NULL, GitDirectory TEXT NOT NULL, Branch TEXT NOT NULL, CreatedUTC TEXT NOT NULL, DeleteAfterUTC TEXT NULL );
+
+-- table PrReviewPullRequests
+CREATE TABLE PrReviewPullRequests ( Repository TEXT NOT NULL COLLATE NOCASE, Number INTEGER NOT NULL CHECK (Number > 0), Title TEXT NOT NULL, Author TEXT NOT NULL, OpenedUTC TEXT NOT NULL, Summary TEXT NOT NULL DEFAULT '', GitHubState TEXT NOT NULL DEFAULT '', GitHubStateUTC TEXT, GitHubCheckedUTC TEXT, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, PRIMARY KEY (Repository, Number) );
+
+-- table PrReviews
+CREATE TABLE PrReviews ( Id INTEGER PRIMARY KEY AUTOINCREMENT, Repository TEXT NOT NULL COLLATE NOCASE, PrNumber INTEGER NOT NULL, HeadSha TEXT NOT NULL DEFAULT '', Status TEXT NOT NULL CHECK (Status IN ('in_progress', 'completed')), Verdict TEXT, Blocking INTEGER NOT NULL DEFAULT 0 CHECK (Blocking IN (0, 1)), Feedback TEXT NOT NULL DEFAULT '', StartedUTC TEXT NOT NULL, ReviewedUTC TEXT, UpdatedUTC TEXT NOT NULL, FOREIGN KEY (Repository, PrNumber) REFERENCES PrReviewPullRequests (Repository, Number) ON DELETE CASCADE );
 
 -- table ProjectCache
 CREATE TABLE ProjectCache ( ProjectPath TEXT NOT NULL, Key TEXT NOT NULL, Value TEXT NOT NULL DEFAULT '', UpdatedUTC TEXT NOT NULL, PRIMARY KEY (ProjectPath, Key) );

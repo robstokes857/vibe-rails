@@ -46,6 +46,11 @@ public class McpServerHttpTests : IAsyncLifetime
         "create_session_share_link",
         "add_jira_comment",
         "add_ado_comment",
+        "get_pr_review_queue",
+        "get_pr_review",
+        "start_pr_review",
+        "save_pr_review_draft",
+        "complete_pr_review",
     };
 
     public async ValueTask InitializeAsync()
@@ -73,6 +78,11 @@ public class McpServerHttpTests : IAsyncLifetime
         builder.Services.AddScoped<BoardWorkflowService>();
         VibeRails.Services.GitPreflight.GitPreflightServiceCollectionExtensions.AddGitSnapshots(builder.Services);
         builder.Services.AddScoped<RulesTool>();
+        builder.Services.AddSingleton(Mock.Of<VibeRails.DB.IPrReviewStore>());
+        builder.Services.AddSingleton(Mock.Of<VibeRails.Services.PrReviews.IGitHubPullRequestClient>());
+        builder.Services.AddSingleton(Mock.Of<VibeRails.Services.PrReviews.IPrReviewRepositoryResolver>());
+        builder.Services.AddScoped<VibeRails.Services.PrReviews.PrReviewService>();
+        builder.Services.AddScoped<PrReviewTool>();
 
         builder.Services
             .AddMcpServer(options =>

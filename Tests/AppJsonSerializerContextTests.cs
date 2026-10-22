@@ -391,4 +391,30 @@ public sealed class AppJsonSerializerContextTests
         Assert.Contains("\"exitCode\":1", json);
         Assert.Contains("\"timedOut\":false", json);
     }
+
+    [Fact]
+    public void PrReviewRequest_TellsAnOmittedServerTimestampFromOneThatWasSent()
+    {
+        var omitted = JsonSerializer.Deserialize("""{"number":7,"title":"t","blocking":true}""",
+            AppJsonSerializerContext.Default.PrReviewRequest)!;
+        var sent = JsonSerializer.Deserialize("""{"reviewedAt":null}""",
+            AppJsonSerializerContext.Default.PrReviewRequest)!;
+
+        Assert.Equal(7, omitted.Number);
+        Assert.True(omitted.Blocking);
+        Assert.Equal(JsonValueKind.Undefined, omitted.ReviewedAt.ValueKind);
+        Assert.Equal(JsonValueKind.Null, sent.ReviewedAt.ValueKind);
+    }
+
+    [Fact]
+    public void PrReviewQueueResponse_KeepsItsWireShape()
+    {
+        var json = JsonSerializer.Serialize(
+            new PrReviewQueueResponse("octo/widgets", null, [], [], new PrReviewQueueCounts(3, 1, 1, 1)),
+            AppJsonSerializerContext.Default.PrReviewQueueResponse);
+
+        Assert.Equal(
+            """{"repository":"octo/widgets","next":null,"queue":[],"skipped":[],"counts":{"open":3,"eligible":1,"drafts":1,"upToDate":1}}""",
+            json);
+    }
 }

@@ -146,6 +146,17 @@ This document describes the database layer: Environments, Sandboxes, AgentMetada
 
 ---
 
+## PR review storage
+
+`pr-reviews/1` adds `PrReviewPullRequests` and `PrReviews` to normal `state.db`, behind
+`IPrReviewStore` (additive; `PrReviewStore.EnsureSchema` runs on first use, so the `vb mcp` host
+needs only `AddSqlitePrReviewStorage`). Both are keyed by GitHub `owner/name` (`COLLATE NOCASE`)
+and PR number; reviews cascade with their PR. A partial unique index allows one `in_progress`
+review per PR. `Verdict` and `GitHubState` are validated in code rather than by CHECK so a new
+value stays an additive change. The tracker state is derived on read, never stored, and a GitHub
+lifecycle sync never moves `UpdatedUTC` (the last review write). Writes take `BEGIN IMMEDIATE`.
+See the [PR Reviews guide](../../VibeRails/Services/PrReviews/AGENTS.md).
+
 ## Prompt worktree storage
 
 `managed-worktrees/1` automatically adds `ManagedWorktrees` to normal `state.db`, behind

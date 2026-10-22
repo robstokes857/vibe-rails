@@ -495,6 +495,18 @@ the unused key on the site. No new local listener, callback, authentication exce
 database, daemon or OS registration is required. The hosted implementation must be deployed
 before clients can use sign-in; older sites leave the manual API key input usable.
 
+### PR review tracker
+
+The **Reviews** page (`pr-reviews` view) and five MCP tools keep a lead-review log for the
+current project's GitHub pull requests, ported from a standalone Node/Express tracker. The
+repository is parsed from the project's `origin` remote; records live in `state.db`
+(`pr-reviews/1`) keyed by `owner/name` and PR number. `PrReviewService` owns the rules (derived
+status, server-owned timestamps, idempotent start, draft checkpoints), `PrReviewQueue` picks the
+next PR by rank then age, and `GitHubPullRequestClient` reads open PRs and lifecycle states
+through the user's own `gh`, never writing to GitHub. Routes are root-only under
+`/api/v1/pr-reviews`. Contract: [PR Reviews guide](../VibeRails/Services/PrReviews/AGENTS.md);
+security notes: [API_SEC.md](../API_SEC.md#github-pull-request-reads-pr-reviews).
+
 ### Code report inspection
 
 VCA offers `Code quality minimum A`, `B`, and `C` rules. `CodeQualityRule` uses MintLint's

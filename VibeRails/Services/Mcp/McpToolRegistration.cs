@@ -29,7 +29,8 @@ public static class McpToolRegistration
         .WithTools<SessionSharingTool>(SerializerOptions)
         .WithTools<BoardAgentLaunchTool>(SerializerOptions)
         .WithTools<BoardAgentOptionsTool>(SerializerOptions)
-        .WithTools<BoardTool>(SerializerOptions);
+        .WithTools<BoardTool>(SerializerOptions)
+        .WithTools<PrReviewTool>(SerializerOptions);
 
     /// <summary>
     /// The root backend's Streamable HTTP transport. SDK 2.x serves every request statelessly by default, which drops the

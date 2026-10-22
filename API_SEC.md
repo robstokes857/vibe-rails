@@ -355,6 +355,18 @@ middleware serves their paths rather than registering individual API endpoints.
 | GET | `/api/v1/mcp/status` | [McpRoutes.cs](VibeRails/Routes/McpRoutes.cs) |
 | GET | `/api/v1/mcp/tools` | [McpRoutes.cs](VibeRails/Routes/McpRoutes.cs) |
 | POST | `/api/v1/mcp/tools/{name}` | [McpRoutes.cs](VibeRails/Routes/McpRoutes.cs) |
+| GET | `/api/v1/pr-reviews` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
+| POST | `/api/v1/pr-reviews` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
+| POST | `/api/v1/pr-reviews/github/sync` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
+| GET | `/api/v1/pr-reviews/queue` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
+| DELETE | `/api/v1/pr-reviews/reviews/{id}` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
+| PUT | `/api/v1/pr-reviews/reviews/{id}` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
+| DELETE | `/api/v1/pr-reviews/{number}` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
+| GET | `/api/v1/pr-reviews/{number}` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
+| PUT | `/api/v1/pr-reviews/{number}` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
+| POST | `/api/v1/pr-reviews/{number}/reviews/complete` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
+| POST | `/api/v1/pr-reviews/{number}/reviews/draft` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
+| POST | `/api/v1/pr-reviews/{number}/reviews/start` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
 | GET | `/api/v1/projects/name` | [ProjectRoutes.cs](VibeRails/Routes/ProjectRoutes.cs) |
 | PUT | `/api/v1/projects/name` | [ProjectRoutes.cs](VibeRails/Routes/ProjectRoutes.cs) |
 | POST | `/api/v1/push/send` | [PushRoutes.cs](VibeRails/Routes/PushRoutes.cs) |
@@ -530,6 +542,11 @@ It accesses Board storage through `IBoardStore` under the local OS user's author
 context is local process identity, not a per-card server ACL. `HostShellTools` and
 `WebResearchTools` remain unregistered on both transports; Python MCP tools/signing help and
 their exposure routes were removed. Do not restore these capabilities incidentally.
+
+The five PR review tools (`get_pr_review_queue`, `get_pr_review`, `start_pr_review`,
+`save_pr_review_draft`, `complete_pr_review`) are on both transports and outside the Board
+auto-grants. They resolve the project through `IBoardProjectResolver`, take no repository or
+path argument, write only local `state.db` review records and run `gh` read-only, as above.
 
 Board Start work and Board-triggered Workers use the exact per-tool grants in
 [BoardMcpAuthorization](VibeRails/Services/Terminal/Commands/BoardMcpAuthorization.cs).
@@ -953,6 +970,23 @@ The complete outbound endpoint list (api-version 7.1, comments 7.1-preview.4):
 `POST {org}/{project}/_apis/wit/workItems/{id}/comments?format=html`. See
 [AzureDevOpsClient](VibeRails/Services/AzureDevOps/AzureDevOpsClient.cs) and
 [AdoBoardLink](VibeRails/Services/AzureDevOps/AdoBoardLink.cs).
+
+### GitHub pull request reads (PR Reviews)
+
+The [PR review tracker](VibeRails/Services/PrReviews/AGENTS.md) reads GitHub through the user's
+own authenticated `gh` CLI. VibeRails holds no GitHub credential, stores no token and never writes
+to GitHub: the only calls are `gh pr list` (open PRs, at most 100) and a `gh api graphql` query for
+tracked PRs' open/merged/closed state. Both run through `ICliWrapper` as argv with an explicit
+`-R owner/name` or GraphQL variables, stdin closed, prompts and update notices disabled, a
+20-second timeout and bounded error text. The repository is parsed from the dashboard project's
+`origin` remote and accepted only for github.com with GitHub's owner/name character rules; the
+remote URL itself (which can embed a credential) is never echoed. PR links are built from that
+parsed repository, never from CLI output. Titles, authors and feedback are untrusted text: the
+page escapes them and the MCP tools return them as JSON data.
+
+The `/api/v1/pr-reviews/**` routes are root-only and project-scoped from the dashboard root.
+Review ids are global, so reads and writes by id also match the current repository and answer
+404 for another project's review. Records live in `state.db` (`pr-reviews/1`, additive).
 
 ### Complete backups
 

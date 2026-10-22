@@ -109,6 +109,21 @@ public class McpStdioHostTests
     }
 
     [Fact]
+    public void ConfigureServices_ResolvesThePrReviewServiceWithItsOwnStore()
+    {
+        // The PR review tools work from any terminal too, so this child registers the store and
+        // the gh client itself. Resolving opens no database: the store creates its schema on first use.
+        var services = new ServiceCollection();
+        McpStdioHost.ConfigureServices(services);
+        using var provider = services.BuildServiceProvider(validateScopes: true);
+        using var scope = provider.CreateScope();
+
+        Assert.Contains(services, d => d.ServiceType == typeof(PrReviewTool));
+        Assert.NotNull(scope.ServiceProvider.GetRequiredService<VibeRails.Services.PrReviews.PrReviewService>());
+        Assert.NotNull(provider.GetRequiredService<VibeRails.DB.IPrReviewStore>());
+    }
+
+    [Fact]
     public void ConfigureServices_ResolvesSearchDbService_NotJustRegistersIt()
     {
         // Descriptor assertions alone let a real outage through: BertSearchDbService moved to a

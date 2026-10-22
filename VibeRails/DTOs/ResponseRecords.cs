@@ -2155,6 +2155,15 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(DeviceLinkToken))]
     [JsonSerializable(typeof(UserScriptLibrary))]
     [JsonSerializable(typeof(PythonScriptSettingsRequest))]
+    // PR reviews (PrReviewRecords.cs); the store's records are the wire shape for PRs and reviews.
+    [JsonSerializable(typeof(PrReviewRequest))]
+    [JsonSerializable(typeof(PrReviewListResponse))]
+    [JsonSerializable(typeof(PrReviewDetailResponse))]
+    [JsonSerializable(typeof(PrReviewWriteResponse))]
+    [JsonSerializable(typeof(PrReviewSyncResponse))]
+    [JsonSerializable(typeof(PrReviewDeleteResponse))]
+    [JsonSerializable(typeof(PrReviewQueueResponse))]
+    [JsonSerializable(typeof(VibeRails.DB.PrReview))]
     internal partial class AppJsonSerializerContext : JsonSerializerContext
     {
     }
