@@ -20,6 +20,11 @@ secret, not two factors. The tab token lives in browser `sessionStorage` and tra
 header. WebSocket handshakes use the session cookie/subprotocol and tab subprotocol;
 query-string credentials are not accepted.
 
+The VS Code bridge keeps credential variables in its private closure and adds session/tab
+credentials only to the exact backend HTTP or WebSocket origin. Browser pages keep the session
+cookie HttpOnly. Dashboard and bootstrap inline scripts use a fresh response nonce; script CSP
+does not allow arbitrary inline scripts, and browser connections are restricted to `'self'`.
+
 CLI descendants receive separate random credential pairs, never the dashboard pair.
 Root tool contacts rotate on each accepted tab launch, bind to the resulting session, and require its
 tab to remain active and reachable. They permit only GET picker/sharing capabilities, POST

@@ -8,12 +8,13 @@ function fixture(importScript) {
     let receive;
     const host = {
         __viberails_VSCODE__: true,
+        parent: {},
         addEventListener: (type, handler) => { assert.equal(type, 'message'); receive = handler; },
         __viberails_scriptImportReady__: () => assert.equal(typeof receive, 'function'),
         __viberails_scriptImportReceived__: (...args) => replies.push(args)
     };
     setupVSCodeScriptImport({ jobController: { pythonScripts: { importScript } }, showError: message => errors.push(message) }, host);
-    return { replies, errors, send: data => receive({ data }) };
+    return { replies, errors, send: (data, source = host.parent) => receive({ data, source }) };
 }
 
 test('The bridge acknowledges delivery before the user finishes and rejects overlapping dialogs', async () => {
@@ -46,4 +47,15 @@ test('The bridge ignores unrelated/malformed messages, reports failures, and rec
 test('Ordinary browsers and older extensions need no bridge', () => {
     setupVSCodeScriptImport({}, {});
     setupVSCodeScriptImport({}, { __viberails_VSCODE__: true });
+});
+
+
+test('foreign windows cannot import scripts or receive acknowledgements', async () => {
+    const paths = [];
+    const f = fixture(async path => paths.push(path));
+    for (const source of [{}, null]) await f.send({ command: 'importScript', requestId: 'forged', path: '/bad.py' }, source);
+    assert.deepEqual(paths, []);
+    assert.deepEqual(f.replies, []);
+    await f.send({ command: 'importScript', requestId: 'real', path: '/good.py' });
+    assert.deepEqual(paths, ['/good.py']);
 });

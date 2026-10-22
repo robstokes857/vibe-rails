@@ -299,10 +299,10 @@ suite('VibeRails VS Code Smoke', function () {
             const result = new Promise<{ checks?: string[]; error?: string }>((resolve, reject) => {
                 const timer = setTimeout(() => reject(new Error('Report webview did not finish its checks.')), 90000);
                 const subscription = panel.webview.onDidReceiveMessage(message => {
-                    if (message.command !== 'report-test-result') return;
+                    if (message.command !== 'setTitle' || !message.title?.startsWith('report-test-result:')) return;
                     clearTimeout(timer);
                     subscription.dispose();
-                    resolve(message);
+                    resolve(JSON.parse(message.title.slice('report-test-result:'.length)));
                 });
             });
             // Only test HTML receives this probe. The production host, CSP and modules are unchanged.
@@ -317,11 +317,15 @@ suite('VibeRails VS Code Smoke', function () {
                 };
                 try {
                     await wait(() => window.app?.data?.configs?.rootPath && document.querySelector('#app-content [data-view]'), 'initial view');
+                    await document.fonts.ready;
+                    const fonts = await document.fonts.load('16px Lato');
+                    if (!fonts.length || !document.fonts.check('16px Lato')) throw new Error('The dashboard font failed to load');
                     window.app.navigate('code-quality');
                     await wait(() => document.querySelector('.code-report .qr')?.dataset.state === 'complete', 'report completion');
                     const viewer = window.app.ruleController.codeReportViewer;
+                    await viewer.ready;
                     const atlas = viewer.atlas;
-                    if (!atlas) throw new Error('The authenticated repository graph failed to mount');
+                    if (!atlas) throw new Error('The authenticated repository graph failed to mount: ' + viewer.mapHost.textContent);
                     const frame = viewer.root.querySelector('iframe');
                     if (!frame || frame.sandbox.contains('allow-same-origin')) throw new Error('Iframe isolation changed');
                     checks.push('real report and graph loaded with nonce and opaque-origin sandbox');
@@ -331,9 +335,9 @@ suite('VibeRails VS Code Smoke', function () {
                         const node = viewer.graph.nodes.find(n => n.kind === 'file' && n.path === file.file);
                         if (!node) throw new Error('A report file is missing from the map');
                         await atlas.openDetails(node.id);
-                        await wait(() => viewer.dialog.open, 'saved details');
-                        if (!viewer.dialog.textContent.includes('Show in code explorer')) throw new Error('Details action missing');
-                        viewer.dialog.close();
+                        await wait(() => !viewer.details.hidden, 'saved details');
+                        if (!viewer.details.textContent.includes('Show in code explorer')) throw new Error('Details action missing');
+                        viewer.closeDetails();
                         checks.push('file focus and saved details');
                     }
                     const originalPreference = document.documentElement.dataset.viberailsVscodeTheme;
@@ -347,8 +351,8 @@ suite('VibeRails VS Code Smoke', function () {
                     await wait(() => !document.querySelector('.code-report'), 'route disposal');
                     if (!viewer.destroyed || frame.isConnected) throw new Error('Report not disposed');
                     checks.push('route disposal');
-                    vscode.postMessage({command:'report-test-result', checks});
-                } catch(error) { vscode.postMessage({command:'report-test-result', error:String(error.stack || error)}); }
+                    window.__viberails_setTitle__('report-test-result:' + JSON.stringify({checks}));
+                } catch(error) { window.__viberails_setTitle__('report-test-result:' + JSON.stringify({error:String(error.stack || error)})); }
             </script></body>`);
             const outcome = await result;
             assert.equal(outcome.error, undefined, outcome.error);

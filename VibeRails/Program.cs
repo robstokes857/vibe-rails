@@ -351,14 +351,28 @@ if (Directory.Exists(webRootPath))
         FileProvider = fileProvider,
         DefaultFileNames = new List<string> { "index.html" }
     });
+    var dashboardHtml = new NonceHtmlResult(Path.Combine(webRootPath, "index.html"));
+    var mcpRemoteHtml = new NonceHtmlResult(Path.Combine(webRootPath, "mcp-remote.html"));
+    app.Use(async (context, next) =>
+    {
+        if (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsHead(context.Request.Method))
+        {
+            var html = context.Request.Path.Equals("/index.html", StringComparison.OrdinalIgnoreCase) ? dashboardHtml
+                : context.Request.Path.Equals("/mcp-remote.html", StringComparison.OrdinalIgnoreCase) ? mcpRemoteHtml : null;
+            if (html is not null)
+            {
+                await html.ExecuteAsync(context);
+                return;
+            }
+        }
+        await next(context);
+    });
     app.UseStaticFiles(new StaticFileOptions { FileProvider = fileProvider });
 
     // A dedicated entry path keeps Git Guard launchable without creating a second
     // frontend runtime. The authenticated SPA detects this path and renders its
     // focused, navigation-free preflight surface.
-    app.MapGet("/git-guard", () => Results.File(
-        Path.Combine(webRootPath, "index.html"),
-        contentType: "text/html"));
+    app.MapGet("/git-guard", () => dashboardHtml);
 }
 
 app.MapApiEndpoints(launchDirectory);

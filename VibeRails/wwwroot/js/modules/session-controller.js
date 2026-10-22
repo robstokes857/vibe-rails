@@ -1,4 +1,5 @@
 import { launchKind } from './launch-kind.js';
+import { escapeHtml } from './utils.js';
 
 export class SessionController {
     constructor(app) {
@@ -34,7 +35,7 @@ export class SessionController {
             const sessions = await this.app.apiCall('/api/v1/sessions/recent?limit=10', 'GET');
             this.populateSessionsList(sessionsList, sessions);
         } catch (error) {
-            sessionsList.innerHTML = `<p class="text-danger text-center">Failed to load sessions: ${error.message}</p>`;
+            sessionsList.innerHTML = `<p class="text-danger text-center">Failed to load sessions: ${escapeHtml(error.message)}</p>`;
         }
     }
 

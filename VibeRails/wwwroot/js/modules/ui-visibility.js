@@ -1,3 +1,5 @@
+import { isParentMessage } from './parent-message.js';
+
 /** Browser visibility plus the VS Code panel state (retained webviews stay document-visible). */
 export class UiVisibility {
     constructor(host = window, page = document) {
@@ -15,8 +17,8 @@ export class UiVisibility {
         this.onFocus = () => {
             if (!this.isHidden()) this.notifyVisible();
         };
-        this.onMessage = ({ data }) => {
-            if (!host.__viberails_VSCODE__ || data?.command !== 'hostVisibility'
+        this.onMessage = ({ source, data }) => {
+            if (!isParentMessage({ source }, host) || !host.__viberails_VSCODE__ || data?.command !== 'hostVisibility'
                 || typeof data.visible !== 'boolean') return;
             this.hostHidden = !data.visible;
             this.onChange();

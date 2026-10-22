@@ -8,8 +8,8 @@ a new library to this directory.
 
 | File | What it is | Version |
 | --- | --- | --- |
-| `pdf.min.js` | PDF.js renderer (ES module build) | 5.4.149 |
-| `pdf.worker.min.js` | PDF.js worker, loaded through `GlobalWorkerOptions.workerSrc` | 5.4.149 |
+| `pdf.min.js` | PDF.js renderer (ES module build) | 6.3.289 |
+| `pdf.worker.min.js` | PDF.js worker, loaded through `GlobalWorkerOptions.workerSrc` | 6.3.289 |
 | `LICENSE-pdfjs.txt` | Apache-2.0, as shipped by the project | — |
 | `board-attachments.css` | Our own styles for the viewer layer | — |
 

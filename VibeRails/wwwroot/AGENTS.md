@@ -32,6 +32,14 @@ These rules supersede the older separate-notes and no-cross-board-transfer descr
 
 Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 
+Dashboard inline scripts use `{{VIBERAILS_CSP_NONCE}}`, replaced per response by the backend
+and by the VS Code HTML builder. Keep `window.__viberails_NONCE__` available to script loaders
+and Atlas. The opaque MCP remote frame also receives a per-response nonce: an external script
+cannot use its session cookie from the opaque sandbox. Other static HTML uses external scripts.
+The bootstrap HTML also needs the response nonce so it can save the tab token and redirect.
+VS Code command/visibility handlers use `isParentMessage`: normally `window.parent`, with
+the actual frame hierarchy checked when VS Code replaces parent/top with the webview itself.
+
 ## Page headings (VIBE-70)
 
 Rules, Quality, Vibe AI, MCP and Settings use `vb-page-header`, `vb-page-heading` and

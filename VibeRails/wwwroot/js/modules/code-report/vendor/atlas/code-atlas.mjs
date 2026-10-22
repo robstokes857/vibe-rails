@@ -327,7 +327,7 @@ function createMount(template, contract, presentation) {
         const frame = document.createElement('iframe');
         frame.title = title ?? `${graph.repository.name} code graph`;
         // A separate document isolates styles, DOM IDs, shortcuts and animation lifetimes.
-        frame.setAttribute('sandbox', 'allow-scripts allow-popups allow-popups-to-escape-sandbox');
+        frame.setAttribute('sandbox', 'allow-scripts');
         frame.style.cssText = 'display:block;width:100%;height:100%;border:0;';
         frame.srcdoc = html;
         const channel = new MessageChannel(), pending = new Map();

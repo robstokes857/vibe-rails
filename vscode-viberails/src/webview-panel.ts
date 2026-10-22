@@ -285,18 +285,22 @@ export class WebviewPanelManager {
         const __vb_token__ = '${sessionToken}';
         const __vb_tab_token__ = ${tabToken ? `'${tabToken}'` : 'null'};
         if (__vb_tab_token__) { sessionStorage.setItem('viberails_tab', __vb_tab_token__); }
-        window.__viberails_SESSION_TOKEN__ = __vb_token__;
         const __vb_orig_fetch__ = window.fetch;
         window.fetch = function(input, init) {
-            init = init || {};
-            const headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined));
+            const target = new URL(input instanceof Request ? input.url : input, document.baseURI);
+            if (target.origin !== '${loopbackHttpOrigin}') {
+                return __vb_orig_fetch__.call(this, input, init);
+            }
+            const headers = new Headers(init?.headers || (input instanceof Request ? input.headers : undefined));
             headers.set('viberails_session', __vb_token__);
             if (__vb_tab_token__) { headers.set('viberails_tab', __vb_tab_token__); }
-            init.headers = headers;
-            return __vb_orig_fetch__.call(this, input, init);
+            return __vb_orig_fetch__.call(this, input, { ...init, headers });
         };
         const __vb_orig_ws__ = window.WebSocket;
         window.WebSocket = function(url, protocols) {
+            if (new URL(url, document.baseURI).origin !== '${loopbackWsOrigin}') {
+                return protocols === undefined ? new __vb_orig_ws__(url) : new __vb_orig_ws__(url, protocols);
+            }
             // Merge BOTH tokens into subprotocols so the server can validate them. NEVER put the
             // session token in the URL: query strings land verbatim in the server's request log.
             // Both tokens are URL-safe base64 specifically so they are valid subprotocol values;
@@ -315,9 +319,7 @@ export class WebviewPanelManager {
         window.WebSocket.OPEN = __vb_orig_ws__.OPEN;
         window.WebSocket.CLOSING = __vb_orig_ws__.CLOSING;
         window.WebSocket.CLOSED = __vb_orig_ws__.CLOSED;
-        ` : `
-        window.__viberails_SESSION_TOKEN__ = null;
-        `;
+        ` : '';
 
         // The dashboard owns its own Exit buttons (`.nav-exit-btn-sm` in the top nav and
         // sidebar, both visible by default) and wires them in app.js `setupVSCodeIntegration()`.
@@ -333,6 +335,7 @@ export class WebviewPanelManager {
     <meta http-equiv="Content-Security-Policy" content="${csp}">
     <base href="${assetsBaseUri}/">
     <script nonce="${nonce}">
+        (() => {
         document.documentElement.dataset.viberailsHost = 'vscode';
         window.__viberails_API_BASE__ = '${loopbackHttpOrigin}';
         window.__viberails_VSCODE__ = true;
@@ -349,9 +352,11 @@ export class WebviewPanelManager {
         };
         window.__viberails_launcherChanged__ = function() { vscode.postMessage({ command: 'launcherChanged' }); };
         ${fetchPatch}
+        })();
     </script>`;
 
         html = html.replace(/<head>/i, `<head>${headInjection}`);
+        html = html.replace(/\{\{VIBERAILS_CSP_NONCE\}\}/g, nonce);
         html = html.replace(/<script(?![^>]*\bnonce=)/g, `<script nonce="${nonce}"`);
 
         return html;

@@ -1,10 +1,13 @@
+import { isParentMessage } from './parent-message.js';
+
 /** Wire the extension's file command only after the dashboard has initialized. */
 export function setupVSCodeScriptImport(app, host = window) {
     if (!host.__viberails_VSCODE__ || typeof host.__viberails_scriptImportReady__ !== 'function'
         || typeof host.__viberails_scriptImportReceived__ !== 'function') return;
 
     let importing = false;
-    host.addEventListener('message', async ({ data }) => {
+    host.addEventListener('message', async ({ source, data }) => {
+        if (!isParentMessage({ source }, host)) return;
         if (data?.command !== 'importScript' || typeof data.requestId !== 'string'
             || typeof data.path !== 'string') return;
         if (importing) {

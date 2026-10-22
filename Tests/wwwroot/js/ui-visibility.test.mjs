@@ -18,12 +18,12 @@ function surface(properties = {}) {
             listeners.get(type).add(listener);
         },
         removeEventListener(type, listener) { listeners.get(type)?.delete(listener); },
-        emit(type, data) { for (const listener of listeners.get(type) || []) listener({ data }); }
+        emit(type, data, source = this.parent) { for (const listener of listeners.get(type) || []) listener({ data, source }); }
     }, properties);
 }
 
 function fixture(t, vscode = true) {
-    const host = surface({ __viberails_VSCODE__: vscode });
+    const host = surface({ __viberails_VSCODE__: vscode, parent: {} });
     const page = surface({ hidden: false, querySelector: () => null });
     const visibility = new UiVisibility(host, page);
     const app = {
@@ -212,4 +212,15 @@ test('lane activity pauses and refreshes on reveal, then releases its subscripti
     f.show(false); f.show(true); clock.tick();
     assert.equal(reads, 1);
     assert.equal(f.visibility.listeners.size, 0);
+});
+
+
+test('foreign windows cannot change host visibility', t => {
+    const f = fixture(t);
+    for (const source of [{}, null, f.host]) {
+        f.host.emit('message', { command: 'hostVisibility', visible: false }, source);
+        assert.equal(f.app.isUiHidden(), false);
+    }
+    f.show(false);
+    assert.equal(f.app.isUiHidden(), true);
 });

@@ -19,7 +19,8 @@
         /* Hide nav until app stylesheet loads to prevent FOUC */
         .app-subnav { opacity: 0; }
     </style>
-    <script>
+    <script nonce="{{VIBERAILS_CSP_NONCE}}">
+        window.__viberails_NONCE__ = document.currentScript.nonce;
         window.__viberails_cache_bust__ = Date.now().toString(36);
 
         if (window.location.pathname.replace(/\/+$/, '') === '/git-guard') {
@@ -5209,7 +5210,7 @@
     <script src="assets/xterm/terminal-themes.js"></script>
     <script src="assets/sortable.min.js"></script>
     <script src="assets/tom-select/tom-select.complete.min.js"></script>
-    <script>
+    <script nonce="{{VIBERAILS_CSP_NONCE}}">
         const loadVibeRailsScript = (src, type) => new Promise((resolve, reject) => {
             const script = document.createElement('script');
             script.src = window.__viberails_asset_url__(src);

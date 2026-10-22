@@ -116,6 +116,9 @@ remain in the backend and never enter bridge messages. No URI callback handler i
 ### Security
 
 - Content Security Policy (CSP) enforced for webview
+- Session credential variables and the VS Code API object stay inside the injected IIFE.
+  Fetch headers and WebSocket credential subprotocols are added only for the exact backend
+  origin (including its scheme and port); requests to resource or external origins pass through.
 - CORS configured for localhost and vscode-webview origins
 - No inline scripts - all event handlers use proper addEventListener
 - The `fonts.googleapis.com` / `fonts.gstatic.com` CSP entries are load-bearing: `assets/bootstrap.min.css` `@import`s the Lato family, which HTML `<link>` stripping does not remove

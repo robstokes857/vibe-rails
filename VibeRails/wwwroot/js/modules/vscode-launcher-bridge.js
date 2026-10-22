@@ -14,10 +14,13 @@
  * Install this BEFORE setupVSCodeScriptImport: that call posts the ready signal which releases
  * messages the extension queued while the page was still loading.
  */
+import { isParentMessage } from './parent-message.js';
+
 export function setupVSCodeLauncherBridge(app, host = window) {
     if (!host.__viberails_VSCODE__ || typeof host.addEventListener !== 'function') return;
 
-    host.addEventListener('message', ({ data }) => {
+    host.addEventListener('message', ({ source, data }) => {
+        if (!isParentMessage({ source }, host)) return;
         if (!data || typeof data !== 'object') return;
         switch (data.command) {
             case 'runScript':

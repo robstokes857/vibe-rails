@@ -86,7 +86,7 @@ below; the optional Files section lists files covered by this policy.";
         <div class=""spinner""></div>
         <p>Redirecting...</p>
     </div>
-    <script>
+    <script nonce=""{{VIBERAILS_CSP_NONCE}}"">
         // Store the tab token in sessionStorage (per-tab only, never shared, dies when tab closes)
         sessionStorage.setItem('viberails_tab', '__VIBERAILS_TAB_TOKEN__');
         // Wait 1 second to show the auth screen, then redirect

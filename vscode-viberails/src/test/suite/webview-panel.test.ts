@@ -57,6 +57,66 @@ suite('Webview HTML', () => {
     }
 });
 
+suite('Webview credential boundary', () => {
+    test('keeps credentials private and authenticates only the exact backend origin', () => {
+        const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'viberails-credentials-'));
+        const manager = new WebviewPanelManager(directory);
+        try {
+            fs.writeFileSync(path.join(directory, 'index.html'), '<html><head></head><body><script nonce="{{VIBERAILS_CSP_NONCE}}">void 0;</script></body></html>');
+            const webview = { cspSource: 'https://webview.example', asWebviewUri: (uri: vscode.Uri) => uri } as vscode.Webview;
+            const builder = manager as unknown as { buildHtml(webview: vscode.Webview, port: number, session: string, tab: string): string };
+            const html = builder.buildHtml(webview, 5000, 'secret-session', 'secret-tab');
+            assert.ok(!html.includes('{{VIBERAILS_CSP_NONCE}}'));
+            const nonce = html.match(/<script nonce="([^"]+)"/)?.[1];
+            assert.ok(nonce);
+            for (const script of html.matchAll(/<script([^>]*)>/g)) assert.ok(script[1].includes(`nonce="${nonce}"`));
+            const injection = html.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)?.[1];
+            assert.ok(injection);
+            const fetched: Array<{ input: unknown; init?: RequestInit }> = [];
+            const sockets: Array<{ url: string; protocols: unknown }> = [];
+            class FakeSocket {
+                constructor(url: string, protocols?: unknown) { sockets.push({ url, protocols }); }
+            }
+            const globals: Record<string, any> = {
+                fetch: (input: unknown, init?: RequestInit) => { fetched.push({ input, init }); }, WebSocket: FakeSocket
+            };
+            const sandbox = vm.createContext({ window: globals, URL, Request, Headers,
+                document: { baseURI: 'https://webview.example/assets/', documentElement: { dataset: {} } },
+                sessionStorage: { setItem() {} }, acquireVsCodeApi: () => ({ postMessage() {} }) });
+            vm.runInContext(injection, sandbox);
+            assert.equal(globals.__viberails_SESSION_TOKEN__, undefined);
+            assert.equal(vm.runInContext('typeof __vb_token__', sandbox), 'undefined');
+            assert.equal(vm.runInContext('typeof __vb_tab_token__', sandbox), 'undefined');
+            const init = { headers: { existing: 'preserved' } };
+            globals.fetch('http://localhost:5000/api/v1/test', init);
+            globals.fetch(new URL('http://localhost:5000/api/v1/test'));
+            globals.fetch(new Request('http://localhost:5000/api/v1/test', { headers: { existing: 'request' } }));
+            for (const call of fetched) {
+                const headers = new Headers(call.init?.headers);
+                assert.equal(headers.get('viberails_session'), 'secret-session');
+                assert.equal(headers.get('viberails_tab'), 'secret-tab');
+            }
+            assert.equal(new Headers(fetched[2].init?.headers).get('existing'), 'request');
+            assert.deepEqual(init, { headers: { existing: 'preserved' } });
+            for (const url of ['https://example.com/', 'http://localhost:5001/', 'http://localhost.evil.test:5000/',
+                'https://localhost:5000/', 'http://127.0.0.1:5000/', './asset.js']) {
+                globals.fetch(url, init);
+                assert.equal(fetched[fetched.length - 1]?.init, init);
+                assert.equal(new Headers(fetched[fetched.length - 1]?.init?.headers).get('viberails_session'), null);
+            }
+            new globals.WebSocket('ws://localhost:5000/api/v1/events', ['application', 'secret-tab']);
+            assert.equal(JSON.stringify(sockets[0].protocols), JSON.stringify(['application', 'secret-tab', 'secret-session']));
+            for (const url of ['wss://example.com/', 'ws://localhost:5001/', 'wss://localhost:5000/']) {
+                new globals.WebSocket(url, ['application']);
+                assert.equal(JSON.stringify(sockets[sockets.length - 1]?.protocols), JSON.stringify(['application']));
+            }
+        } finally {
+            manager.dispose();
+            fs.rmSync(directory, { recursive: true, force: true });
+        }
+    });
+});
+
 async function waitFor(condition: () => boolean, timeoutMs: number, message: string): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     while (!condition()) {

@@ -10,6 +10,7 @@ function fixture({ run = async () => {}, customize = async () => {}, refreshRuns
     let receive = null;
     const host = {
         __viberails_VSCODE__: true,
+        parent: {},
         addEventListener: (type, handler) => { assert.equal(type, 'message'); receive = handler; }
     };
     const app = {
@@ -24,7 +25,7 @@ function fixture({ run = async () => {}, customize = async () => {}, refreshRuns
     };
     setupVSCodeLauncherBridge(app, host);
     assert.equal(typeof receive, 'function');
-    return { calls, errors, toasts, navigations, send: (data) => receive({ data }) };
+    return { calls, errors, toasts, navigations, send: (data, source = host.parent) => receive({ data, source }) };
 }
 
 const settled = () => new Promise((resolve) => setImmediate(resolve));
@@ -117,4 +118,17 @@ test('plain browsers get no bridge and a dashboard without the controllers toler
         receive({ data: { command, name: 'x' } });
     }
     await settled();
+});
+
+
+test('foreign windows cannot run scripts, navigate or post queued feedback', async () => {
+    const f = fixture();
+    for (const source of [{}, null]) {
+        for (const data of [{ command: 'runScript', name: 'bad' }, { command: 'openLauncherCustomize' },
+            { command: 'manageAutomations' }, { command: 'automationQueued', message: 'forged' }]) f.send(data, source);
+    }
+    await settled();
+    assert.deepEqual(f.calls, []);
+    assert.deepEqual(f.navigations, []);
+    assert.deepEqual(f.toasts, []);
 });

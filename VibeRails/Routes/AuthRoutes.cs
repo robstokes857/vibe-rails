@@ -1,4 +1,5 @@
 using VibeRails.Auth;
+using VibeRails.Middleware;
 using VibeRails.Services;
 
 namespace VibeRails.Routes;
@@ -43,6 +44,8 @@ public static class AuthRoutes
             var html = STRINGS.AUTH_BOOTSTRAP_HTML
                 .Replace("window.location.replace('/')", $"window.location.replace(\"{destinationEscaped}\")");
             html = authService.ReplaceTabInHtmlString(html);
+            html = html.Replace(SecurityHeadersMiddleware.NoncePlaceholder,
+                SecurityHeadersMiddleware.GetNonce(context), StringComparison.Ordinal);
             return Results.Content(html, "text/html");
         }).WithName("AuthBootstrap");
     }
