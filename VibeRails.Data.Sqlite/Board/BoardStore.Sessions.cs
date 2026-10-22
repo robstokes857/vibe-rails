@@ -5,6 +5,28 @@ namespace VibeRails.Services.Board;
 public sealed partial class BoardStore
 {
     /// <inheritdoc />
+    public async Task<bool> IsSessionVisibleInProjectAsync(string projectPath, string sessionId, CancellationToken cancellationToken = default)
+    {
+        await using var state = await OpenStateAsync(cancellationToken);
+        if (!await _stateFeatures.HasTableAsync(state, "Sessions", cancellationToken)
+            || !_stateFeatures.HasColumn(state, "Sessions", "WorkingDirectory")) return false;
+
+        await using var query = state.CreateCommand();
+        query.CommandText = "SELECT WorkingDirectory FROM Sessions WHERE Id = $session LIMIT 1;";
+        query.Parameters.AddWithValue("$session", sessionId);
+        if (await query.ExecuteScalarAsync(cancellationToken) is not string directory || string.IsNullOrWhiteSpace(directory))
+            return false;
+        try
+        {
+            return string.Equals(NormalizeProjectPath(directory), NormalizeProjectPath(projectPath), BoardPaths.ProjectPathComparison);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or IOException)
+        {
+            return false;
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<bool> ConfirmSessionLaunchOriginAsync(string projectPath, string cardId, string sessionId,
         string origin, CancellationToken cancellationToken = default)
     {

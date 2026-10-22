@@ -568,7 +568,8 @@ public static partial class BoardRoutes
         }
         catch (InvalidOperationException ex)
         {
-            return Results.BadRequest(new ErrorResponse(ex.Message));
+            Serilog.Log.Warning(ex, "[Board] Could not complete Board request");
+            return Results.BadRequest(new ErrorResponse("Could not complete the Board request. Try again or check the application log."));
         }
     }
 }

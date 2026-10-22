@@ -18,5 +18,6 @@ public sealed record JobCheckScope(string Kind, string? Base = null, string? Hea
         throw new ArgumentException("Choose working-tree, unpushed, repository, or a range with full base and head commit SHAs. Linked commits do not define the scope.");
     }
 
-    private static bool IsSha(string value) => value.Length == 40 && value.All(char.IsAsciiHexDigit);
+    /// <summary>Whether a stored or supplied revision is a full hexadecimal commit SHA.</summary>
+    public static bool IsSha(string? value) => value is { Length: 40 } && value.All(char.IsAsciiHexDigit);
 }

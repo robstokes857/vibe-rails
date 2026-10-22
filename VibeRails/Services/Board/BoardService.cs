@@ -621,6 +621,8 @@ public sealed partial class BoardService(
         var existing = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
         if (existing is null)
             return null;
+        if (origin == BoardSessionRecord.ManualOrigin && !await store.IsSessionVisibleInProjectAsync(projectPath, id, cancellationToken))
+            throw new BoardValidationException("Choose an existing session from this project.");
         var name = string.IsNullOrWhiteSpace(displayName) ? "Working session" : displayName.Trim();
         if (name.Length > 120) name = name[..120];
         var record = await store.LinkSessionAsync(projectPath, existing.Id, id, tabId, selection, cli, name, origin, cancellationToken);

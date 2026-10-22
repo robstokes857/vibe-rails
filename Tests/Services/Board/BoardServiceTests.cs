@@ -56,6 +56,7 @@ public sealed class BoardServiceTests : IDisposable
 
         // A real terminal can independently work on the same card.
         const string session = "77777777-7777-4777-8777-777777777777";
+        await SeedSessionAsync(session, _project);
         await _service.LinkSessionAsync(_project, card.Id, session, "tab", "", "codex", "CLI", BoardSessionRecord.ManualOrigin, Ct);
         _live.Sessions[session] = "tab";
         detail = (await _service.GetCardAsync(_project, card.Id, Ct))!;
@@ -143,6 +144,7 @@ public sealed class BoardServiceTests : IDisposable
         var card = await _service.CreateCardAsync(_project, new(Title: "Automation card"), Ct);
         const string id = "55555555-5555-4555-8555-555555555555";
         const string ordinary = "66666666-6666-4666-8666-666666666666";
+        await SeedSessionAsync(ordinary, _project);
         await _service.LinkSessionAsync(_project, card.Id, id, "automation-tab", "", "shell", "Renamed review", BoardSessionRecord.LaunchOrigin, Ct);
         await _service.LinkSessionAsync(_project, card.Id, ordinary, "agent-tab", "", "codex", "Automation: just a name", BoardSessionRecord.ManualOrigin, Ct);
         await using (var connection = new SqliteConnection(_connectionString))
@@ -518,9 +520,45 @@ public sealed class BoardServiceTests : IDisposable
         }
 
         var compact = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").ToString("N");
+        await SeedSessionAsync(Guid.Parse(compact).ToString("D"), _project);
         var linked = await _service.LinkSessionAsync(_project, created.Id, compact, null, "", "", "Replay", BoardSessionRecord.ManualOrigin, Ct);
         Assert.Equal("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", linked!.Id);
         Assert.DoesNotContain((await _service.GetCardAsync(_project, created.Id, Ct))!.Sessions, s => s.Id.Contains('<', StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ManualSessionLinksRequireRecordedProjectVisibility()
+    {
+        var card = await _service.CreateCardAsync(_project, new(Title: "Session scope"), Ct);
+        var missing = Guid.NewGuid().ToString();
+        var foreign = Guid.NewGuid().ToString();
+        var local = Guid.NewGuid().ToString();
+        // Fresh Board-only hosts have no session history table and must fail closed.
+        await Assert.ThrowsAsync<BoardValidationException>(() =>
+            _service.LinkSessionAsync(_project, card.Id, missing, null, "", "", "Replay", BoardSessionRecord.ManualOrigin, Ct));
+        await SeedSessionAsync(foreign, _project + "-other");
+        await SeedSessionAsync(local, _project + Path.DirectorySeparatorChar);
+        foreach (var id in new[] { missing, foreign })
+            await Assert.ThrowsAsync<BoardValidationException>(() =>
+                _service.LinkSessionAsync(_project, card.Id, id, null, "", "", "Replay", BoardSessionRecord.ManualOrigin, Ct));
+        Assert.Empty((await _service.GetSessionsAsync(_project, card.Id, Ct))!);
+        Assert.NotNull(await _service.LinkSessionAsync(_project, card.Id, local, null, "", "", "Replay", BoardSessionRecord.ManualOrigin, Ct));
+        // A launch can link before the new terminal has recorded its Sessions row.
+        Assert.NotNull(await _service.LinkSessionAsync(_project, card.Id, missing, null, "", "", "Launch", BoardSessionRecord.LaunchOrigin, Ct));
+    }
+
+    private async Task SeedSessionAsync(string id, string directory)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(Ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = VibeRails.DB.SqlStrings.CreateSessionsTable;
+        await command.ExecuteNonQueryAsync(Ct);
+        command.CommandText = "INSERT INTO Sessions (Id, Cli, WorkingDirectory, StartedUTC) VALUES ($id, 'codex', $directory, $started);";
+        command.Parameters.AddWithValue("$id", id);
+        command.Parameters.AddWithValue("$directory", directory);
+        command.Parameters.AddWithValue("$started", DateTime.UtcNow.ToString("O"));
+        await command.ExecuteNonQueryAsync(Ct);
     }
 
     [Fact]

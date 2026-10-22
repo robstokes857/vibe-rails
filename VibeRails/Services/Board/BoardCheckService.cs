@@ -61,7 +61,12 @@ public sealed class BoardCheckService(
 
     internal async Task<GitStagedSnapshot> CaptureAsync(string workspace, JobCheckScope scope, CancellationToken ct)
     {
-        if (scope.Kind == "range") return await snapshots.CaptureRangeAsync(workspace, scope.Base!, scope.Head!, ct);
+        if (scope.Kind == "range")
+        {
+            if (!JobCheckScope.IsSha(scope.Base) || !JobCheckScope.IsSha(scope.Head))
+                throw new ArgumentException("Check ranges require full base and head commit SHAs.");
+            return await snapshots.CaptureRangeAsync(workspace, scope.Base!, scope.Head!, ct);
+        }
         if (scope.Kind == "repository") return await snapshots.CaptureRepositoryAsync(workspace, ct);
         if (scope.Kind == "unpushed") return await snapshots.CaptureUnpushedAsync(workspace, ct);
         var head = await ReadHeadAsync(workspace, ct);

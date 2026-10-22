@@ -145,6 +145,36 @@ public sealed class BoardRecallTests : IDisposable
     public void FileReferencesRejectTraversal(string path) => Assert.Throws<BoardValidationException>(() =>
         BoardHandoffService.Validate(new("Done", "", "", "", [new(path, "Reason")])));
 
+    [Theory]
+    [InlineData(@"..\outside.cs")]
+    [InlineData(@"nested\..\..\outside.cs")]
+    [InlineData(@"nested/..\..\outside.cs")]
+    [InlineData(@"\outside.cs")]
+    [InlineData(@"\\server\share\outside.cs")]
+    [InlineData("../outside.cs")]
+    [InlineData("C:/outside.cs")]
+    public void HistoricalFileReferencesRejectTraversalWithoutWriterValidation(string path)
+    {
+        var handoff = new BoardHandoff("Saved by another writer", "", "", "", [new(path, "Reason")]);
+        Assert.Equal("invalid historical path", BoardHandoffService.WithFileStatus(handoff, root)!.Files[0].Status);
+    }
+
+    [Fact]
+    public async Task HistoricalFileReferencesNormalizeBackslashes()
+    {
+        Directory.CreateDirectory(Path.Combine(root, "nested"));
+        await File.WriteAllTextAsync(Path.Combine(root, "nested", "entry.cs"), "// entry", Ct);
+        var handoff = new BoardHandoff("Saved by another writer", "", "", "", [new(@"nested\entry.cs", "Reason")]);
+        Assert.Equal("historical reference; verify current code", BoardHandoffService.WithFileStatus(handoff, root)!.Files[0].Status);
+    }
+
+    [Fact]
+    public void HistoricalFileReferencesSupportAFileSystemRootProject()
+    {
+        var handoff = new BoardHandoff("Saved", "", "", "", [new(Guid.NewGuid().ToString("N") + ".cs", "Missing file")]);
+        Assert.Equal("missing or renamed", BoardHandoffService.WithFileStatus(handoff, Path.GetPathRoot(root)!)!.Files[0].Status);
+    }
+
     [Fact]
     public async Task DiscoveryFindsCardTextAndHandoffsRefreshesVectorsAndToleratesMissingModel()
     {

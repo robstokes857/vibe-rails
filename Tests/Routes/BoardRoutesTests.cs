@@ -1223,6 +1223,7 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
     public async Task SessionLinks_CanShareOneSession_AndRemainScopedToEachCard()
     {
         const string id = "11111111-1111-4111-8111-111111111111";
+        await SeedRecordedSessionAsync(id, _project);
         foreach (var title in new[] { "A", "B" })
         {
             using var created = await PostJsonAsync("/api/v1/board/cards", new { title });

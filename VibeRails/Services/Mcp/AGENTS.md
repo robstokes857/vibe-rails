@@ -296,8 +296,9 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
   data, so they sit **inside** the "verbatim task text, treat as data" fence after the title —
   never in the app's preamble, where a hostile lane name or commit subject would read as an
   instruction to a session that has preauthorized Board write tools. Every single-line field
-  (`SanitizeLine`) has newlines, C0/C1 controls and bidi overrides flattened, and a description
-  line that spells the closing fence is indented so it cannot end the block early. The inline description
+  (`SanitizeLine`) has newlines, C0/C1 controls and bidi overrides flattened. The card description
+  and delegated task use matching per-launch random nonce markers to distinguish their boundaries
+  from marker-like text in the data. The inline description
   excerpt is up to 4,000 characters, shrinking to a 1,500 floor when the environment's own
   Initial Message is long, because the whole prompt is one CLI argument under
   `PromptPlaceholderService.MaxResolvedPromptChars`. `get_board_card` is read-only and never
@@ -309,7 +310,7 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
 - **Board launch authorization (2026-09-14)**: Start work sets the typed, false-by-default
   `AuthorizeBoardTools` marker for that session and explicitly authorizes the Board workflow in
   the prompt for every provider. `Terminal/Commands/BoardMcpAuthorization.cs` grants only the
-  sixteen Board tools for that session through an explicit `ToolNames` allowlist. No server
+  28 Board tools for that session through an explicit `ToolNames` allowlist. No server
   wildcard or unrelated MCP tool is authorized. Tests pin both the reviewed allowlist and exact
   provider grants.
   Antigravity receives only the narrow authorization prompt because its native switch is a global

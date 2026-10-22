@@ -40,6 +40,22 @@ public sealed class BoardChecksTests : IAsyncLifetime
     private Task<BoardCheckRecord> Run(JobActionKind kind, params string[] args) => Engine().ExecuteAsync(repo, repo,
         card.Key, Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), kind, args, Ct);
 
+    [Theory]
+    [InlineData("HEAD")]
+    [InlineData("--all")]
+    [InlineData("0123456")]
+    [InlineData("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")]
+    [InlineData(null)]
+    public async Task FreshnessRejectsInvalidHistoricalRangeRevisionsBeforeGit(string? revision)
+    {
+        var valid = new BoardCheckRecord("old", card.Id, "run", "action", "VCA", "Passed", "range",
+            baseline, baseline, "hash", null, "1", DateTime.UtcNow, DateTime.UtcNow, "Stored", 0, 0, 0, 0, []);
+        foreach (var record in new[] { valid with { BaseCommit = revision }, valid with { HeadCommit = revision } })
+            Assert.Equal("Unknown freshness: scope is unavailable", await Engine().FreshnessAsync(repo, record, Ct));
+        // Capture itself rejects an invalid range before a git process can consume it.
+        await Assert.ThrowsAsync<ArgumentException>(() => Engine().CaptureAsync(repo, new("range", revision, baseline), Ct));
+    }
+
     [Fact]
     public async Task ReaderShowsQueueAndCancelledBeforeCheck_AndReconcilesInterruptedEvidence()
     {

@@ -42,10 +42,14 @@ public static class BoardHandoffService
 
     private static string FileStatus(string project, string path)
     {
+        path = path.Replace('\\', '/');
         if (!IsRelativePath(path)) return "invalid historical path";
         try
         {
             var current = Path.GetFullPath(project);
+            var root = Path.EndsInDirectorySeparator(current) ? current : current + Path.DirectorySeparatorChar;
+            var target = Path.GetFullPath(Path.Combine(current, path));
+            if (!target.StartsWith(root, BoardPaths.ProjectPathComparison)) return "invalid historical path";
             foreach (var part in path.Split('/'))
             {
                 current = Path.Combine(current, part);

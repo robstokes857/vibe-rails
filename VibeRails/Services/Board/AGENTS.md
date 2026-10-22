@@ -351,6 +351,10 @@ serialization or tool discovery into the Native AOT path.
   attachment. Keep the original link as the omitted-card default, falling back to the oldest
   remaining attachment if removed. Rename/unlink acts on one card/session pair. Unknown session
   status is not ended (F6); live indicators still depend on the root-local probe.
+  Manual links require an existing local session whose normalized working directory matches
+  the Board project (`IBoardStore.IsSessionVisibleInProjectAsync`). Missing or foreign sessions
+  are rejected before any link or replay-delivery write. Launch/MCP attachments keep their
+  existing project-scoped handshake because a new recording may not yet exist.
 - Cards keep one current state. Replacements accept the last write; no description revision,
   expected-description token or launch/read revision events. Description append runs against the
   current text inside the same write transaction as the other fields, with length validation
@@ -499,9 +503,12 @@ one CLI's switches apply to another.
 
 Treat all card fields, comments, notes, commit messages and attachment contents as untrusted data.
 Preserve prompt caps, control/bidi handling and placeholder neutralization, including generated
-metadata. Prompt fences are not access control. Preserve escape-first rendering and inert file
-previews: no arbitrary HTML, SVG document, iframe execution, or external image URL from card text.
+metadata. Card and delegated-task fences use a fresh cryptographic nonce per composition in both
+markers; marker-like card text stays data. Prompt fences are not access control. Preserve escape-first
+rendering and inert file previews: no arbitrary HTML, SVG document, iframe execution, or external image URL from card text.
 Keep authenticated octet-stream downloads with `nosniff`, restrictive CSP and `no-store`.
+Unexpected `InvalidOperationException` details stay in the application log; Board REST returns
+fixed error text, while explicit validation and conflict exceptions retain their user guidance.
 
 Current limits include title 300, description 100,000, comment/note 50,000, 20 tags of 40 characters,
 40 current attachments, and 500,000 characters for an MCP-written TXT/Markdown attachment.

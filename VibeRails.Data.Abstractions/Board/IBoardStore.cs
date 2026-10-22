@@ -75,6 +75,9 @@ public partial interface IBoardStore
     /// <summary>Ended time, exit code and chat summary for a session, when the Sessions / ChatSummary tables exist in this host; null otherwise.</summary>
     Task<BoardSessionOutcomeRecord?> FindSessionOutcomeAsync(string sessionId, CancellationToken cancellationToken = default);
 
+    /// <summary>Whether a recorded local session's working directory belongs to this project. Missing sessions are not visible.</summary>
+    Task<bool> IsSessionVisibleInProjectAsync(string projectPath, string sessionId, CancellationToken cancellationToken = default);
+
     Task<BoardSessionRecord?> LinkSessionAsync(string projectPath, string cardId, string sessionId, string? tabId, string selection, string cli, string displayName, string origin, CancellationToken cancellationToken = default);
     /// <summary>Confirm an in-flight launch's origin when an early attachment already linked that exact session/card.</summary>
     Task<bool> ConfirmSessionLaunchOriginAsync(string projectPath, string cardId, string sessionId, string origin, CancellationToken cancellationToken = default);
