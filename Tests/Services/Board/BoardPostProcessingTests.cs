@@ -165,6 +165,28 @@ public sealed class BoardPostProcessingTests : IDisposable
     }
 
     [Fact]
+    public async Task ALaneRenamedOrReorderedAfterTheReadIsLeftForALaterPass()
+    {
+        // VIBE-185 review N1: lane edits never touch the card, so the write re-checks the layout.
+        var (card, lanes) = await CreateCardAsync();
+        await store.MoveCardAsync(root, card.Id, lanes[^1].Id, null, Ct);
+        var candidate = Assert.Single(await store.GetPostProcessingCandidatesAsync(Later, 10, Ct));
+
+        await store.UpdateColumnAsync(root, lanes[^1].Id, "Canceled", null, Ct);
+        Assert.False(await store.CompletePostProcessingAsync(candidate, new(BoardGhostReasons.NoCode), Ct));
+        var renamed = Assert.Single(await store.GetPostProcessingCandidatesAsync(Later, 10, Ct));
+        Assert.Equal("Canceled", renamed.LaneName);
+
+        await store.ReorderColumnsAsync(root, [lanes[^1].Id, .. lanes.Take(lanes.Count - 1).Select(lane => lane.Id)], Ct);
+        Assert.False(await store.CompletePostProcessingAsync(renamed, new(BoardGhostReasons.NoCode), Ct));
+        Assert.Empty(await store.GetPostProcessingCandidatesAsync(Later, 10, Ct));
+
+        var after = (await store.FindCardAsync(root, card.Id, Ct))!;
+        Assert.Null(after.GhostReason);
+        Assert.Equal(1, await ExecuteScalarAsync($"SELECT 1 FROM BoardCards WHERE Id = '{card.Id}' AND PostProcessed = 0"));
+    }
+
+    [Fact]
     public async Task ClearingTheGhostIsAnOrdinaryUpdateWithLocalHistory()
     {
         var (card, lanes) = await CreateCardAsync();
@@ -257,6 +279,15 @@ public sealed class BoardPostProcessingTests : IDisposable
         await using var reader = await command.ExecuteReaderAsync(Ct);
         Assert.True(await reader.ReadAsync(Ct));
         return (reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetInt64(1), reader.GetString(2));
+    }
+
+    private async Task<long> ExecuteScalarAsync(string sql)
+    {
+        await using var db = new SqliteConnection(BoardConnection);
+        await db.OpenAsync(Ct);
+        await using var command = db.CreateCommand();
+        command.CommandText = sql;
+        return (long)(await command.ExecuteScalarAsync(Ct) ?? 0L);
     }
 
     private async Task<long> CountLogsAsync(string cardId)

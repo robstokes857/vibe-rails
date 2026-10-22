@@ -7,8 +7,9 @@ older binary inserts, is already processed; only `InsertCardAsync` writes 0. Can
 (`BoardStore.PostProcessing.cs`) are live, unprocessed cards in the last lane (Position, then
 CreatedUTC) of a board with at least two lanes, unchanged since the settle time.
 `CompletePostProcessingAsync` re-reads the card in its write transaction and applies only while it
-is unprocessed, live, in the same lane and not touched since the read. It neither touches nor
-promotes the card. Ghost changes write local-only (`RemoteSeq 0`) Card Log entries; the ghost is
+is unprocessed, live, in the same lane and not touched since the read, and while that lane and its
+board keep the names the pass judged and the lane is still the last of at least two (lane edits
+never touch the card, VIBE-185 review N1). It neither touches nor promotes the card. Ghost changes write local-only (`RemoteSeq 0`) Card Log entries; the ghost is
 not a sync field. `FindSessionLlmAsync` (`BoardStore.SessionLlm.cs`) reads a session's Board launch
 selection, then its `Sessions` row and `Environments` from state.db, behind the usual schema probes.
 

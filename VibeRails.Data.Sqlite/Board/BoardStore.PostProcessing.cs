@@ -18,6 +18,14 @@ public sealed partial class BoardStore
 
     private static readonly BoardAuthor PostProcessingAuthor = BoardAuthor.System("VibeRails post-processing");
 
+    // Lane k is its board's last lane (the one ReadColumnsAsync lists last: Position, then CreatedUTC)
+    // and the board has another lane. A board with one lane has no "finished" lane.
+    private const string LastOfSeveralLanesSql = """
+        EXISTS (SELECT 1 FROM BoardColumns o WHERE o.BoardId = k.BoardId AND o.Id <> k.Id)
+        AND NOT EXISTS (SELECT 1 FROM BoardColumns o WHERE o.BoardId = k.BoardId AND o.Id <> k.Id
+            AND (o.Position > k.Position OR (o.Position = k.Position AND o.CreatedUTC > k.CreatedUTC)))
+        """;
+
     /// <inheritdoc />
     public async Task<IReadOnlyList<BoardPostProcessingCandidate>> GetPostProcessingCandidatesAsync(DateTime settledBeforeUtc, int limit,
         CancellationToken cancellationToken = default)
@@ -27,8 +35,6 @@ public sealed partial class BoardStore
         var rows = new List<BoardPostProcessingCandidate>();
         await using (var command = connection.CreateCommand())
         {
-            // The last lane is the one ReadColumnsAsync lists last (Position, then CreatedUTC). A board
-            // with one lane has no "finished" lane, so its cards are never candidates.
             command.CommandText = $"""
                 SELECT c.Id, c.ProjectPath, {CardKeySql}, c.Type, k.BoardId, b.Name, c.ColumnId, k.Name, c.UpdatedUTC,
                        (SELECT COUNT(*) FROM {AllSessionsSql} s WHERE s.CardId = c.Id),
@@ -38,9 +44,7 @@ public sealed partial class BoardStore
                 JOIN BoardColumns k ON k.Id = c.ColumnId
                 JOIN Boards b ON b.Id = k.BoardId
                 WHERE c.PostProcessed = 0 AND c.DeletedUTC IS NULL AND c.UpdatedUTC <= $settled
-                  AND EXISTS (SELECT 1 FROM BoardColumns o WHERE o.BoardId = k.BoardId AND o.Id <> k.Id)
-                  AND NOT EXISTS (SELECT 1 FROM BoardColumns o WHERE o.BoardId = k.BoardId AND o.Id <> k.Id
-                      AND (o.Position > k.Position OR (o.Position = k.Position AND o.CreatedUTC > k.CreatedUTC)))
+                  AND {LastOfSeveralLanesSql}
                 ORDER BY c.UpdatedUTC, c.Id
                 LIMIT $limit;
                 """;
@@ -89,15 +93,25 @@ public sealed partial class BoardStore
         await using (var read = connection.CreateCommand())
         {
             read.Transaction = transaction;
-            read.CommandText = """
-                SELECT UpdatedUTC, GhostReason FROM BoardCards
-                WHERE Id = $id AND PostProcessed = 0 AND DeletedUTC IS NULL AND ColumnId = $column;
+            // Lane and board names and the lane order change without touching the card, and the
+            // decision rests on them too (a lane renamed Canceled, a new lane after this one).
+            read.CommandText = $"""
+                SELECT c.UpdatedUTC, c.GhostReason FROM BoardCards c
+                JOIN BoardColumns k ON k.Id = c.ColumnId
+                JOIN Boards b ON b.Id = k.BoardId
+                WHERE c.Id = $id AND c.PostProcessed = 0 AND c.DeletedUTC IS NULL AND c.ColumnId = $column
+                  AND k.Name = $lane AND b.Id = $board AND b.Name = $boardName
+                  AND {LastOfSeveralLanesSql};
                 """;
             read.Parameters.AddWithValue("$id", candidate.CardId);
             read.Parameters.AddWithValue("$column", candidate.ColumnId);
+            read.Parameters.AddWithValue("$lane", candidate.LaneName);
+            read.Parameters.AddWithValue("$board", candidate.BoardId);
+            read.Parameters.AddWithValue("$boardName", candidate.BoardName);
             await using var reader = await read.ExecuteReaderAsync(cancellationToken);
-            // Processed by another root, deleted, moved, or touched since it was read: the decision
-            // may be stale. A card that still qualifies is read afresh by a later pass.
+            // Processed by another root, deleted, moved, touched, or its lane renamed or no longer
+            // last since it was read: the decision may be stale. A card that still qualifies is read
+            // afresh by a later pass.
             if (!await reader.ReadAsync(cancellationToken) || ParseDb(reader.GetString(0)) > candidate.UpdatedUtc)
                 return false;
             previousGhost = reader.IsDBNull(1) ? null : reader.GetString(1);

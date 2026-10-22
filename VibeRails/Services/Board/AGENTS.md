@@ -198,7 +198,8 @@ backends only, every 5 minutes, never in the fake-CLI test host) runs
 `BoardCardPostProcessingService`, which hands each candidate to every registered
 `IBoardCardPostProcessor` and commits all outcomes with `PostProcessed = 1` in one conditional store
 write. The write applies only while the card is unprocessed, live, in the same lane and untouched
-since the read, so concurrent roots apply it once. A processor that defers (git timed out)
+since the read, and the lane and board keep their names and the lane is still last, so concurrent
+roots apply it once and a lane renamed or reordered mid-pass never takes a stale outcome. A processor that defers (git timed out)
 holds the card until 24 hours after its last activity, then the card is processed without that
 outcome. To add a rule, implement the interface, register it beside `GhostCardPostProcessor` in
 `MapRegisterServices` and extend `BoardPostProcessingResult` and the store write with its effect.
