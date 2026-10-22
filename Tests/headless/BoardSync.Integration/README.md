@@ -18,4 +18,4 @@ For another checkout location, add `-p:FrontRepoRoot=C:/path/to/VibeRails-Front`
 This project is intentionally outside the standard `Tests.csproj` suite because it requires
 both repositories. It checks the JSON contract, bidirectional edits and comments, notes,
 arrival ordering after offline edits, lost acknowledgements, stable card identities,
-local lane Automation events, and upload boundaries.
+local lane Automation events, the schema-2 complete-content parts upload, and upload boundaries.

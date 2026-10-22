@@ -1,4 +1,5 @@
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
@@ -7,6 +8,7 @@ using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Options;
 using VibeRails.Services.Board;
 using VibeRails.Services.Board.Sync;
 using VibeRails.Services.Diagnostics;
@@ -15,7 +17,9 @@ using VibeRails_Front.Data;
 using VibeRails_Front.Data.Entities;
 using VibeRails_Front.Data.Ownership;
 using VibeRails_Front.Services;
+using VibeRails_Front.Services.Backups;
 using VibeRails_Front.Services.Boards;
+using VibeRails_Front.Services.FileStorage;
 using Xunit;
 using DesktopSync = VibeRails.Services.Board.Sync.BoardSyncService;
 using HostedSync = VibeRails_Front.Services.Boards.BoardSyncService;
@@ -31,6 +35,9 @@ public sealed class BoardSyncRoundTripTests : IDisposable
     private readonly string remoteName = "vb51-coupled-" + Guid.NewGuid().ToString("N");
     private readonly BoardStore store;
     private readonly BoardSyncActivityCache activityCache = new();
+    // Hosted complete-content storage: the same services production wires behind the parts route.
+    private readonly PartBlobs blobs = new();
+    private readonly BackupAdmission admission = new(Options.Create(new BackupLimits()));
     private readonly DesktopSync sync;
     private readonly BoardSyncHttpClient client;
     private readonly ControllerTransport transport;
@@ -359,6 +366,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
         {
             var row = await db.SyncedCardActivities.SingleAsync(a => a.BoardId == remoteId && a.CardId == card.Id, Ct);
             var snapshot = BoardActivityContract.Parse(Encoding.UTF8.GetBytes(row.SnapshotJson));
+            Assert.Equal(2, snapshot.Schema);
             Assert.Equal(2, snapshot.Sessions.Count);
             Assert.Contains(snapshot.Sessions, s => s.Id == session && !s.IsAutomation);
             var agent = Assert.Single(snapshot.Sessions, s => s.Id == agentSession);
@@ -366,9 +374,28 @@ public sealed class BoardSyncRoundTripTests : IDisposable
             Assert.Equal(0, agent.ExitCode);
             Assert.NotNull(agent.EndedUtc);
             Assert.Equal("Reviewed the saved code.", agent.Summary);
-            Assert.Equal("saved replacement", Assert.Single(Assert.Single(snapshot.Commits).Files).After);
-            Assert.Equal("saved attachment", Encoding.UTF8.GetString(Convert.FromBase64String(Assert.Single(snapshot.Attachments).ContentBase64!)));
             Assert.Equal(related.Key, Assert.Single(snapshot.LinkedCards).Key);
+            // Schema 2 carries complete content as references to verified parts, never inline.
+            var commit = Assert.Single(snapshot.Commits);
+            Assert.Equal(sha, commit.Sha);
+            Assert.Empty(commit.Files);
+            Assert.NotNull(commit.Content);
+            var saved = Assert.Single(snapshot.Attachments);
+            Assert.Equal(attachment.Id, saved.Id);
+            Assert.Null(saved.ContentBase64);
+            Assert.NotNull(saved.Content);
+            var referenced = new[] { commit.Content!, saved.Content! }.Select(c => Assert.Single(c.Parts)).ToList();
+            Assert.Equal(referenced.Select(p => p.Sha256).Order(), transport.PartUploads.Order());
+            var stored = await db.BackupParts.Where(p => p.UserId == Owner).ToListAsync(Ct);
+            Assert.All(referenced, part => Assert.Contains(stored,
+                s => s.Sha256 == part.Sha256 && s.Bytes == part.Bytes && s.ChecksumsVerified && s.Referenced));
+            // The hosted side reassembles and verifies the complete bytes from those parts.
+            var hosted = new BoardActivityService(db);
+            Assert.Equal("saved attachment", Encoding.UTF8.GetString(await ReadContent(hosted, remoteId, card.Id, saved.Id, attachment: true)));
+            var diff = JsonSerializer.Deserialize<VibeRails.DTOs.SandboxDiffResponse>(await ReadContent(hosted, remoteId, card.Id, sha, attachment: false), WebJson)!;
+            var file = Assert.Single(diff.Files);
+            Assert.Equal("src/file.cs", file.FileName);
+            Assert.Equal("saved replacement", file.ModifiedContent);
         }
         Assert.DoesNotContain("private-tab", string.Join("\n", transport.Bodies));
         Assert.DoesNotContain("env:7", string.Join("\n", transport.Bodies));
@@ -382,11 +409,23 @@ public sealed class BoardSyncRoundTripTests : IDisposable
         {
             var row = await db.SyncedCardActivities.SingleAsync(a => a.BoardId == remoteId && a.CardId == card.Id, Ct);
             var snapshot = BoardActivityContract.Parse(Encoding.UTF8.GetBytes(row.SnapshotJson));
+            // An empty replacement still needs a schema-2 acknowledgement so part references are released.
+            Assert.Equal(2, snapshot.Schema);
             Assert.Empty(snapshot.Sessions);
             Assert.Empty(snapshot.Commits);
             Assert.Empty(snapshot.Attachments);
             Assert.Empty(snapshot.LinkedCards);
         }
+    }
+
+    private async Task<byte[]> ReadContent(BoardActivityService hosted, Guid boardId, string cardId, string identity, bool attachment)
+    {
+        var opened = await hosted.OpenContentAsync(Owner, boardId, cardId, identity, attachment, blobs, Ct);
+        Assert.NotNull(opened);
+        await using var stream = opened.Value.Stream;
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer, Ct);
+        return buffer.ToArray();
     }
 
     private async Task<Guid> Publish(BoardCardRecord card)
@@ -423,25 +462,58 @@ public sealed class BoardSyncRoundTripTests : IDisposable
         public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
     }
 
+    /// <summary>In-memory stand-in for the hosted blob store; verifies length and digest as production does.</summary>
+    private sealed class PartBlobs : IFileStorageService
+    {
+        private readonly Dictionary<string, byte[]> files = [];
+
+        public async Task<FileUploadResult> UploadAsync(FileUploadRequest request, CancellationToken ct)
+        {
+            using var output = new MemoryStream();
+            await request.Content.CopyToAsync(output, ct);
+            var bytes = output.ToArray();
+            if (bytes.Length != request.ExpectedLength || Convert.ToHexStringLower(SHA256.HashData(bytes)) != request.ExpectedSha256)
+                return new(FileUploadStatus.HashMismatch, request.BlobName);
+            files[request.BlobName] = bytes;
+            return new(FileUploadStatus.Stored, request.BlobName, bytes.Length);
+        }
+
+        public Task<StagedBlocksResult> GetStagedBlocksAsync(StagedBlocksRequest request, CancellationToken ct) =>
+            Task.FromResult(new StagedBlocksResult(StagedBlockStatus.Ok, request.BlobName,
+                files.ContainsKey(request.BlobName), files.GetValueOrDefault(request.BlobName)?.Length ?? 0, []));
+
+        public Task<FileDownloadResult> OpenReadAsync(string blobName, CancellationToken ct) =>
+            Task.FromResult(files.TryGetValue(blobName, out var bytes)
+                ? new FileDownloadResult(FileDownloadStatus.Ok, blobName, new MemoryStream(bytes), bytes.Length)
+                : new FileDownloadResult(FileDownloadStatus.NotFound, blobName));
+
+        public Task<StageBlockResult> StageBlockAsync(StageBlockRequest request, CancellationToken ct) => throw new NotSupportedException();
+        public Task<FileUploadResult> CommitBlocksAsync(CommitBlocksRequest request, CancellationToken ct) => throw new NotSupportedException();
+    }
+
     private sealed class ControllerTransport(BoardSyncRoundTripTests fixture) : HttpMessageHandler
     {
         public bool LoseNextPushAcknowledgement { get; set; }
         public List<string> Bodies { get; } = [];
         public List<string> PushBodies { get; } = [];
+        public List<string> PartUploads { get; } = [];
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             Assert.Equal("board-sync.invalid", request.RequestUri!.Host);
             Assert.Equal("fixture-owner-key", Assert.Single(request.Headers.GetValues("X-Api-Key")));
-            var body = request.Content is null ? "" : await request.Content.ReadAsStringAsync(ct);
+            // Bytes pass through unchanged: content parts are octet-stream and read by Content-Length.
+            byte[] raw = request.Content is null ? [] : await request.Content.ReadAsByteArrayAsync(ct);
+            var body = Encoding.UTF8.GetString(raw);
             if (body.Length > 0) Bodies.Add(body);
             var http = new DefaultHttpContext();
             http.Items[CurrentUser.ResolvedApiKeyItemKey] = new ApiKey
             {
                 Id = 1, UserId = Owner, KeyHash = "fixture", KeyPrefix = "fixt", KeySuffix = "-key"
             };
-            http.Request.ContentType = "application/json";
-            http.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(body));
+            http.Request.ContentType = request.Content?.Headers.ContentType?.MediaType ?? "application/json";
+            if (raw.Length > 0) http.Request.ContentLength = raw.Length;
+            http.Request.Body = new MemoryStream(raw);
             await using var db = fixture.Db();
             var controller = new BoardsApiController(new HostedSync(db, TimeProvider.System))
             {
@@ -469,6 +541,19 @@ public sealed class BoardSyncRoundTripTests : IDisposable
                 };
                 result = await activity.Replace(Guid.Parse(path[^4]), path[^2], ct);
             }
+            else if (path is [.., "board-content", "parts", var partHash])
+            {
+                // Schema-2 complete content: verified account-owned parts are stored through the
+                // hosted parts controller before an activity snapshot may reference them.
+                Assert.Equal(HttpMethod.Put, request.Method);
+                Assert.Equal("application/octet-stream", request.Content!.Headers.ContentType!.MediaType);
+                PartUploads.Add(partHash);
+                var parts = new BoardContentPartsController(new BackupStorageService(db, fixture.blobs), fixture.admission)
+                {
+                    ControllerContext = new ControllerContext { HttpContext = http }
+                };
+                result = await parts.Put(partHash, ct);
+            }
             else if (request.Method == HttpMethod.Get && Guid.TryParse(path[^1], out var describedBoard))
             {
                 var sharing = new BoardSharingApiController(new VibeRails_Front.Services.Boards.BoardSharingService(db, TimeProvider.System))
@@ -494,6 +579,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
     public void Dispose()
     {
         activityCache.Dispose();
+        admission.Dispose();
         transport.Dispose();
         // root is the unique directory allocated by this fixture, never an application directory.
         Directory.Delete(root, recursive: true);
