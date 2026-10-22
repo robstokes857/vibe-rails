@@ -1244,7 +1244,8 @@ Business logic is isolated from HTTP concerns. Services are reusable across CLI 
 
 Interactive Chat History recording responses (`raw-session`, `replay`, `terminal-replay`)
 read a consistent snapshot through `ISessionStore.GetSessionRecordingAsync`. The store checks
-a shared 16 MiB source-byte / 20,000-row budget before materializing each value. Oversized
+a shared 16 MiB source-byte / 20,000-row budget in payload-free SQLite preflight queries
+before selecting any contents (including native allocations). Oversized
 recordings return HTTP 413 and retain all stored data. A two-request limit per process covers
 loading and response transmission; extra requests receive HTTP 429. Raw ZIP entries stream
 asynchronously to the response, preserving binary bytes, base64 continuity and JSON metadata.

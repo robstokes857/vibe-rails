@@ -6,6 +6,10 @@ using Xunit;
 
 namespace Tests.DB;
 
+[CollectionDefinition("Session recording native memory", DisableParallelization = true)]
+public sealed class SessionRecordingMemoryCollection;
+
+[Collection("Session recording native memory")]
 public sealed class SessionRecordingLimitsTests
 {
     [Theory]
@@ -31,8 +35,14 @@ public sealed class SessionRecordingLimitsTests
         insert.Parameters.AddWithValue("$time", DateTime.UtcNow.ToString("O"));
         await insert.ExecuteNonQueryAsync(ct);
 
+        // SQLite's native heap must stay bounded too. Selecting the payload alongside its
+        // length allocates the entire oversized value inside sqlite3_step, before any C# check.
+        Assert.Equal(0, SQLitePCL.raw.sqlite3_status(SQLitePCL.raw.SQLITE_STATUS_MEMORY_USED, out var baseline, out _, 1));
+        Assert.True(baseline > 0, "SQLite native memory accounting must be enabled for this regression.");
         var sw = Stopwatch.StartNew();
         await Assert.ThrowsAsync<SessionRecordingTooLargeException>(() => repository.GetSessionRecordingAsync("session", kind, ct));
+        Assert.Equal(0, SQLitePCL.raw.sqlite3_status(SQLitePCL.raw.SQLITE_STATUS_MEMORY_USED, out _, out var peak, 0));
+        Assert.True(peak - baseline < 2 * 1024 * 1024, $"Rejection allocated {peak - baseline:N0} native bytes.");
         Assert.True(sw.Elapsed < TimeSpan.FromSeconds(2), $"Recording rejection took {sw.Elapsed}");
     }
 

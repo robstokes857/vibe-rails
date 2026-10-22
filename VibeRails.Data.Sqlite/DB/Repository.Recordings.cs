@@ -30,9 +30,20 @@ public partial class Repository
             bytes += length;
         }
 
-        await ReadAsync("SELECT Id, Timestamp, Content, IsError, length(Content) FROM SessionLogs WHERE SessionId = $sessionId", reader =>
+        // sqlite3_step materializes every selected payload before C# can inspect a length.
+        // First read ONLY lengths, using metadata-only octet_length for TEXT (a CAST to BLOB
+        // forces TEXT materialization). The same snapshot pins the subsequent contents.
+        await ReadAsync("SELECT length(Content) FROM SessionLogs WHERE SessionId = $sessionId", reader => Charge(reader.GetInt64(0)));
+        if (kind == SessionRecordingKind.Raw)
+            await ReadAsync("""
+                SELECT octet_length(InputText) + coalesce(octet_length(GitCommitHash), 0)
+                FROM UserInputs WHERE SessionId = $sessionId
+                """, reader => Charge(reader.GetInt64(0)));
+        if (kind == SessionRecordingKind.TerminalReplay)
+            await ReadAsync("SELECT length(Data) FROM TerminalSessionLogs WHERE SessionId = $sessionId", reader => Charge(reader.GetInt64(0)));
+
+        await ReadAsync("SELECT Id, Timestamp, Content, IsError FROM SessionLogs WHERE SessionId = $sessionId", reader =>
         {
-            Charge(reader.GetInt64(4));
             result.Chunks.Add(new(reader.GetInt64(0), ReadDate(reader, 1), (byte[])reader[2], reader.GetBoolean(3)));
         });
         result.Chunks.Sort((a, b) => a.Id.CompareTo(b.Id));
@@ -40,12 +51,10 @@ public partial class Repository
         if (kind == SessionRecordingKind.Raw)
         {
             await ReadAsync("""
-                SELECT Id, Sequence, InputText, GitCommitHash, TimestampUTC,
-                       length(CAST(InputText AS BLOB)) + coalesce(length(CAST(GitCommitHash AS BLOB)), 0)
+                SELECT Id, Sequence, InputText, GitCommitHash, TimestampUTC
                 FROM UserInputs WHERE SessionId = $sessionId
                 """, reader =>
             {
-                Charge(reader.GetInt64(5));
                 result.Inputs.Add(new(reader.GetInt64(0), sessionId, reader.GetInt32(1), reader.GetString(2),
                     reader.IsDBNull(3) ? null : reader.GetString(3), ReadDate(reader, 4)));
             });
@@ -54,11 +63,10 @@ public partial class Repository
         if (kind == SessionRecordingKind.TerminalReplay)
         {
             await ReadAsync("""
-                SELECT Id, Sequence, IsAlternateScreen, Data, Cols, Rows, Timestamp, length(Data)
+                SELECT Id, Sequence, IsAlternateScreen, Data, Cols, Rows, Timestamp
                 FROM TerminalSessionLogs WHERE SessionId = $sessionId
                 """, reader =>
             {
-                Charge(reader.GetInt64(7));
                 result.TerminalLogs.Add(new(reader.GetInt64(0), sessionId, reader.GetInt32(1), reader.GetBoolean(2),
                     (byte[])reader[3], reader.GetInt32(4), reader.GetInt32(5), ReadDate(reader, 6)));
             });
