@@ -55,22 +55,8 @@ public sealed class CardSharingRoundTripTests
             await boards.LinkSessionAsync(root, card.Id, sessionId, null, "base:codex", "codex", "Implementation", "launch", ct);
             await sessions.SaveChatSummaryAsync(new ChatSummary { SessionId = sessionId, SummaryText = "Full session summary", Date = DateTime.UtcNow }, ct);
 
-            var remoteRoot = new InMemoryDatabaseRoot();
-            var remoteName = "card-roundtrip-" + Guid.NewGuid().ToString("N");
-            VibeRailsDbContext Db()
-            {
-                var db = new VibeRailsDbContext(new DbContextOptionsBuilder<VibeRailsDbContext>().UseInMemoryDatabase(remoteName, remoteRoot).Options);
-                db.SetCurrentUser(23); return db;
-            }
-            await using (var db = Db())
-            {
-                db.Users.Add(new User { Id = 23, Auth0Id = "auth0|synthetic-card-owner" });
-                using (db.BeginPrivilegedWrite(PrivilegedWrites.IdentityBootstrap)) await db.SaveChangesAsync(ct);
-                db.ApiKeys.Add(new ApiKey { Id = 1, UserId = 23, KeyHash = "fixture", Capabilities = ApiKeyCapability.Boards | ApiKeyCapability.Sessions,
-                    CreatedUtc = DateTime.UtcNow, ExpiresUtc = DateTime.UtcNow.AddMonths(2) });
-                await db.SaveChangesAsync(ct);
-            }
-            using var transport = new Transport(Db, key);
+            var remote = await RemoteAsync(ct);
+            using var transport = new Transport(remote, key);
             using var http = new HttpClient(transport);
             var publisher = new CardSharePublisher(boards, new(boards, sessions, sessions), new(http), sessions,
                 new BoardSyncLock(Path.Combine(root, "sync.lock")), new());
@@ -81,7 +67,7 @@ public sealed class CardSharingRoundTripTests
             var fingerprint = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(key)));
             Assert.Equal(sessionId, (await sessions.GetNextSharedSessionAsync(fingerprint, DateTime.UtcNow, ct))!.SessionId);
 
-            await using var readDb = Db();
+            await using var readDb = remote();
             var access = new Hosted.CardSharingAccess(readDb, TimeProvider.System, new VibeRails_Front.Services.Sharing.ShareViewerResolver());
             var json = JsonSerializer.SerializeToElement((await access.ReadAsync(publicKey, ct)).Value, Hosted.CardShareContract.Json);
             Assert.Equal("Shared work", json.GetProperty("title").GetString());
@@ -103,7 +89,7 @@ public sealed class CardSharingRoundTripTests
             await using (var brotli = new BrotliStream(compressed, CompressionLevel.Fastest, leaveOpen: true))
                 await brotli.WriteAsync(exported.ToArray(), ct);
             var blob = compressed.ToArray();
-            await using (var db = Db())
+            await using (var db = remote())
             {
                 db.DataEnvelopes.Add(new DataEnvelope { UserId = 23, Kind = "session", SourceId = Guid.Parse(sessionId), SchemaVersion = 2,
                     ComputerName = "fixture", BlobName = "fixture-recording", Sha256 = Convert.ToHexStringLower(SHA256.HashData(blob)), CompressedBytes = blob.Length });
@@ -142,6 +128,85 @@ public sealed class CardSharingRoundTripTests
             ParserConfigs.SetApiKey(previousKey);
             Directory.Delete(root, recursive: true); // Only the unique disposable fixture allocated above.
         }
+    }
+
+    /// <summary>
+    /// VIBE-181: the desktop omits codeLinks for a card without links and hashes the bytes it sends,
+    /// while the host's revision hashes its own re-serialization. The two must agree with no links,
+    /// with a link and after the last link is removed. Otherwise the first sweep resends unchanged
+    /// content and later sweeps report a serialization divergence.
+    /// </summary>
+    [Fact]
+    public async Task CodeLinksAbsentAddedAndRemoved_HostedRevisionEqualsDesktopHash_WithoutRedundantRefresh()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var root = Path.Combine(Path.GetTempPath(), "card-sharing-links-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var previousKey = ParserConfigs.GetApiKey();
+        const string key = "synthetic-card-account";
+        ParserConfigs.SetApiKey(key);
+        try
+        {
+            var sessions = new Repository($"Data Source={Path.Combine(root, "state.db")};Pooling=False");
+            var boards = new BoardStore($"Data Source={Path.Combine(root, "board.db")};Pooling=False", $"Data Source={Path.Combine(root, "state.db")};Pooling=False");
+            await boards.EnsureDefaultColumnsAsync(root, ct);
+            var columns = await boards.GetColumnsAsync(root, ct);
+            var card = (await boards.CreateCardAsync(root, new(columns[0].Id, "Linked work", "No links yet", null, "medium", null, [], false), ct))!;
+            var remote = await RemoteAsync(ct);
+            using var transport = new Transport(remote, key);
+            using var http = new HttpClient(transport);
+            var now = DateTime.UtcNow;
+            var capture = new CardShareCapture(boards, sessions, sessions);
+            var publisher = new CardSharePublisher(boards, capture, new(http), sessions,
+                new BoardSyncLock(Path.Combine(root, "sync.lock")), new(null, () => now));
+            var created = await publisher.CreateAsync(root, card.Id, "Links", ct);
+            Assert.True(created.Success, created.Message);
+
+            async Task SweepAndAssertAligned(int refreshes, bool hasLinks)
+            {
+                now += CardShareRefreshState.Interval;
+                await publisher.RefreshDueAsync(ct);
+                Assert.Equal(refreshes, transport.Refreshes);
+                await using var db = remote();
+                var source = Assert.Single(await new Hosted.CardSharingService(db, TimeProvider.System).SourcesAsync(1, 0, ct));
+                var publication = await db.CardSharePublications.SingleAsync(p => p.Id == source.Id, ct);
+                Assert.Equal(hasLinks, publication.SnapshotJson.Contains("\"codeLinks\"", StringComparison.Ordinal));
+                Assert.Equal((await capture.CaptureAsync(root, card.Id, ct)).Hash, source.Revision);
+            }
+            await SweepAndAssertAligned(refreshes: 0, hasLinks: false); // Unchanged since creation: nothing is resent.
+            var link = await boards.AddCodeLinkAsync(root, card.Id, "https://github.com/org/repo/pull/42", ct);
+            Assert.NotNull(link);
+            await SweepAndAssertAligned(refreshes: 1, hasLinks: true);
+            Assert.True(await boards.RemoveCodeLinkAsync(root, card.Id, link.Id, ct));
+            await SweepAndAssertAligned(refreshes: 2, hasLinks: false);
+            await SweepAndAssertAligned(refreshes: 2, hasLinks: false); // Last link removed, then unchanged: no resend.
+        }
+        finally
+        {
+            ParserConfigs.SetApiKey(previousKey);
+            Directory.Delete(root, recursive: true); // Only the unique disposable fixture allocated above.
+        }
+    }
+
+    /// <summary>A synthetic hosted database seeded with owner 23 and its Boards and Sessions API key 1.</summary>
+    private static async Task<Func<VibeRailsDbContext>> RemoteAsync(CancellationToken ct)
+    {
+        var remoteRoot = new InMemoryDatabaseRoot();
+        var remoteName = "card-roundtrip-" + Guid.NewGuid().ToString("N");
+        VibeRailsDbContext Db()
+        {
+            var db = new VibeRailsDbContext(new DbContextOptionsBuilder<VibeRailsDbContext>().UseInMemoryDatabase(remoteName, remoteRoot).Options);
+            db.SetCurrentUser(23); return db;
+        }
+        await using (var db = Db())
+        {
+            db.Users.Add(new User { Id = 23, Auth0Id = "auth0|synthetic-card-owner" });
+            using (db.BeginPrivilegedWrite(PrivilegedWrites.IdentityBootstrap)) await db.SaveChangesAsync(ct);
+            db.ApiKeys.Add(new ApiKey { Id = 1, UserId = 23, KeyHash = "fixture", Capabilities = ApiKeyCapability.Boards | ApiKeyCapability.Sessions,
+                CreatedUtc = DateTime.UtcNow, ExpiresUtc = DateTime.UtcNow.AddMonths(2) });
+            await db.SaveChangesAsync(ct);
+        }
+        return Db;
     }
 
     private sealed class Transport(Func<VibeRailsDbContext> dbFactory, string key) : HttpMessageHandler

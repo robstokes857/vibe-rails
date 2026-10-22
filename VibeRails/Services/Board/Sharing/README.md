@@ -25,6 +25,10 @@ link controls or https://viberails.ai/CardSharingLinks to revoke it.
 
 Optional `codeLinks` carries saved GitHub PR and commit URLs with derived labels. It is
 omitted for cards without links, preserving compatibility with older hosts for those cards.
+The hosted contract declares the property the same way (nullable, omitted when null), so its
+revision of a card without links, including after the last link is removed, equals the desktop
+hash; the `CodeLinksAbsentAddedAndRemoved` round trip guards that (VIBE-181). Hosts from before
+that change re-serialize a missing list as `[]`, resend the card once and log the divergence.
 Cards with GitHub links require the companion Front contract/viewer update. Links do not
 imply a checkout or saved diff; they are never fetched by the capture service.
 
