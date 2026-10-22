@@ -603,6 +603,15 @@ name, then the "Azure DevOps" lane) and never moves it afterwards. `AdoPullSched
 live in `ado-tokens.json`. Storage is `board-ado/1`. The Board guide's "Dedicated Azure DevOps
 boards" section has the rules.
 
+Both tracker clients use `BoundedHttpContent` to cap each JSON read at 4 MiB before parsing,
+including responses without a reliable Content-Length. One 30-second deadline covers headers
+and the entire body; limit and timeout failures return ordinary failed-call results. Tracker
+4xx responses use fixed wording without reading remote error prose, so pull reports cannot
+persist it. Caller cancellation still propagates. The update checker uses the same reader with
+a 1-MiB cap and 30-second deadline. Its handler and the shared outbound handler disable redirects
+and cookies; TokenSaver control also disables system proxies in both MCP transports through
+`AddTokenSaverMcp`.
+
 VIBE-168 adds the delivery side. New comments and session links on a work-item card post to the
 work item (HTML paragraphs plus vetted replay links) through `AdoDeliveryService`, drained every
 5 seconds by `AdoPullScheduler`; `syncToRemote=false` keeps an internal note. `add_ado_comment`

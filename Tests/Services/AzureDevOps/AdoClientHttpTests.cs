@@ -190,10 +190,10 @@ public sealed class AdoClientHttpTests
         Assert.Equal(TimeSpan.FromSeconds(7), limited.RetryAfter);
         var bad = await client.QueryIdsAsync(Org, Project, Team, "SELECT nonsense", "pat", Ct);
         Assert.Equal(AdoCallOutcome.BadQuery, bad.Outcome);
-        Assert.Equal("TF51005: The query references a field that does not exist.", bad.Detail);
+        Assert.Equal("Azure DevOps rejected the query.", bad.Detail);
         var batch = await client.GetWorkItemsAsync(Org, Project, [1], ["Custom.Gone"], "pat", Ct);
         Assert.Equal(AdoCallOutcome.Failed, batch.Outcome);
-        Assert.Equal("TF51535: Cannot find field Custom.Gone.", batch.Detail);
+        Assert.Equal("Azure DevOps rejected the request for the work items.", batch.Detail);
         Assert.Equal(AdoCallOutcome.Failed, (await client.GetFieldsAsync(Org, "pat", Ct)).Outcome);
         Assert.Equal(AdoCallOutcome.Failed, (await client.GetFieldsAsync(Org, "pat", Ct)).Outcome);
         Assert.Equal(AdoCallOutcome.Failed, (await client.GetFieldsAsync(Org, "pat", Ct)).Outcome);
@@ -206,7 +206,6 @@ public sealed class AdoClientHttpTests
     /// </summary>
     [Theory]
     [InlineData(HttpStatusCode.OK)]
-    [InlineData(HttpStatusCode.BadRequest)]
     public async Task ABodyThatStallsAfterItsHeaders_FailsAtTheDeadline(HttpStatusCode status)
     {
         var handler = new StallingHandler(status);

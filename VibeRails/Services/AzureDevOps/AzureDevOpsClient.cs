@@ -117,6 +117,7 @@ public sealed partial class AzureDevOpsClient(HttpClient http, TimeSpan? request
     public const string ApiVersion = "7.1";
     public const int BatchSize = 200;
     public const int MaxBatches = 10;
+    public const int MaxResponseBytes = 4 * 1024 * 1024;
     public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
     private readonly TimeSpan _timeout = requestTimeout ?? RequestTimeout;
 
@@ -224,6 +225,10 @@ public sealed partial class AzureDevOpsClient(HttpClient http, TimeSpan? request
             {
                 return new(AdoCallOutcome.Failed, null, $"Azure DevOps could not be reached for the {what}.", null);
             }
+            catch (InvalidDataException)
+            {
+                return new(AdoCallOutcome.Failed, null, "Azure DevOps's response exceeded the 4 MiB limit.", null);
+            }
         }
     }
 
@@ -243,10 +248,9 @@ public sealed partial class AzureDevOpsClient(HttpClient http, TimeSpan? request
             case HttpStatusCode.TooManyRequests:
                 return new(AdoCallOutcome.RateLimited, null, "Azure DevOps rate limited the request.", ReadRetryAfter(response));
             case HttpStatusCode.BadRequest:
-                var message = await ReadErrorAsync(response, cancellationToken);
                 return badRequestIsQuery
-                    ? new(AdoCallOutcome.BadQuery, null, message ?? "Azure DevOps rejected the query.", null)
-                    : new(AdoCallOutcome.Failed, null, message ?? $"Azure DevOps rejected the request for the {what}.", null);
+                    ? new(AdoCallOutcome.BadQuery, null, "Azure DevOps rejected the query.", null)
+                    : new(AdoCallOutcome.Failed, null, $"Azure DevOps rejected the request for the {what}.", null);
         }
         if (!response.IsSuccessStatusCode)
             return new(AdoCallOutcome.Failed, null, $"Azure DevOps returned {(int)response.StatusCode} for the {what}.", null);
@@ -256,8 +260,7 @@ public sealed partial class AzureDevOpsClient(HttpClient http, TimeSpan? request
         JsonDocument document;
         try
         {
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            document = await BoundedHttpContent.ReadJsonAsync(response.Content, MaxResponseBytes, cancellationToken);
         }
         catch (JsonException)
         {
@@ -502,19 +505,4 @@ public sealed partial class AzureDevOpsClient(HttpClient http, TimeSpan? request
         return null;
     }
 
-    // Azure DevOps errors are {"message": "TF51005: ..."}; anything else keeps the generic text.
-    private static async Task<string?> ReadErrorAsync(HttpResponseMessage response, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            using var document = JsonDocument.Parse(body);
-            var message = ReadString(document.RootElement, "message")?.Trim();
-            return string.IsNullOrEmpty(message) ? null : message.Length <= 500 ? message : message[..500];
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
 }

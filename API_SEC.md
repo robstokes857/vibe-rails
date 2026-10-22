@@ -886,7 +886,9 @@ Accept only HTTPS site/board links without user info. Board/filter IDs must be d
 keys match `[A-Z][A-Z0-9_]+` before use in REST paths/JQL; the client rechecks IDs. Discard unrelated
 link query parameters. Narrowing JQL is URL-encoded as the board call's `jql` value and cannot
 contain ORDER BY. All outbound reads use saved-origin HTTP basic (email/token), with redirects
-disabled and 3xx treated as failure: `/rest/api/3/myself`, `/rest/api/3/search/jql`,
+and cookies disabled, a 30-second deadline covering headers and body, and a 4-MiB response cap.
+Error responses use fixed wording; remote error prose is never reflected or persisted.
+3xx is treated as failure: `/rest/api/3/myself`, `/rest/api/3/search/jql`,
 `/rest/api/3/filter/{id}`, `/rest/agile/1.0/board/{id}` and its `/configuration`, plus
 `/rest/software/1.0/board/{id}/issue` and `/issue/approximate-count`. Do not use the deprecated
 agile board-issue endpoint or forward a saved token to another host.
@@ -933,7 +935,8 @@ initial project-access check; Board Settings lists both scopes.
   percent-escaped. A saved query id must be a GUID.
   The work item id in a comment path is the stored positive integer.
 - **Transport:** HTTP basic with an empty user and the token, `X-TFS-FedAuthRedirect: Suppress`,
-  redirects and cookies disabled, one 30-second deadline covering headers and body. A 302, 203
+  redirects and cookies disabled, one 30-second deadline covering headers and body, and a 4-MiB
+  read-response cap. Error responses use fixed wording, never remote error prose. A 302, 203
   or non-JSON 2xx (the sign-in page) is a refused token. The token is never sent to another host.
 - **WIQL:** literals come only from server-returned values with `'` doubled; the user's narrowing
   clause is wrapped in parentheses and may not contain `ORDER BY` or unbalanced parentheses.

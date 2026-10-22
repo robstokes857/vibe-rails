@@ -84,31 +84,24 @@ public interface IJiraCloudClient
         string siteUrl, string email, string apiToken, string filterId, CancellationToken cancellationToken);
 }
 
-public sealed partial class JiraCloudClient(HttpClient http) : IJiraCloudClient, IJiraCommentClient
+/// <param name="requestTimeout">Deadline for headers and body; defaults to 30 seconds.</param>
+public sealed partial class JiraCloudClient(HttpClient http, TimeSpan? requestTimeout = null) : IJiraCloudClient, IJiraCommentClient
 {
     public const string HttpClientName = "jira-cloud";
     public const int PageSize = 50;
+    public const int MaxResponseBytes = 4 * 1024 * 1024;
+    public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
+    private readonly TimeSpan _timeout = requestTimeout ?? RequestTimeout;
 
     private static readonly string[] BaseFields =
         ["summary", "description", "status", "issuetype", "priority", "labels", "assignee", "parent", "updated"];
 
-    public async Task<JiraCallResult<string>> TestAsync(string siteUrl, string email, string apiToken, CancellationToken cancellationToken)
-    {
-        var site = JiraSite.Parse(siteUrl);
-        using var request = new HttpRequestMessage(HttpMethod.Get, site.Api("myself"));
-        Authorize(request, email, apiToken);
-        using var response = await http.SendAsync(request, cancellationToken);
-        if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-            return new(JiraCallOutcome.Unauthorized, null, "Jira refused the email and API token.", null);
-        if (!response.IsSuccessStatusCode)
-            return new(JiraCallOutcome.Failed, null, $"Jira returned {(int)response.StatusCode} from /myself.", null);
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-        var name = ReadString(document.RootElement, "displayName") ?? ReadString(document.RootElement, "emailAddress");
-        return new(JiraCallOutcome.Ok, name ?? "connected", null, null);
-    }
+    public Task<JiraCallResult<string>> TestAsync(string siteUrl, string email, string apiToken, CancellationToken cancellationToken) =>
+        GetJsonAsync(JiraSite.Parse(siteUrl).Api("myself"), email, apiToken, "/myself",
+            root => ReadString(root, "displayName") ?? ReadString(root, "emailAddress") ?? "connected",
+            cancellationToken, forbiddenIsUnauthorized: true, badRequestIsJql: false);
 
-    public async Task<JiraCallResult<JiraSearchPage>> SearchAsync(
+    public Task<JiraCallResult<JiraSearchPage>> SearchAsync(
         string siteUrl, string email, string apiToken, string jql, string? nextPageToken,
         string? storyPointsFieldId, CancellationToken cancellationToken)
     {
@@ -121,21 +114,8 @@ public sealed partial class JiraCloudClient(HttpClient http) : IJiraCloudClient,
         if (!string.IsNullOrEmpty(nextPageToken))
             query.Append("&nextPageToken=").Append(Uri.EscapeDataString(nextPageToken));
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, site.Api("search/jql") + "?" + query);
-        Authorize(request, email, apiToken);
-        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-            return new(JiraCallOutcome.Unauthorized, null, "Jira refused the email and API token.", null);
-        if (response.StatusCode == HttpStatusCode.TooManyRequests)
-            return new(JiraCallOutcome.RateLimited, null, "Jira rate limited the pull.", ReadRetryAfter(response));
-        if (response.StatusCode == HttpStatusCode.BadRequest)
-            return new(JiraCallOutcome.BadJql, null, await ReadErrorAsync(response, cancellationToken), null);
-        if (!response.IsSuccessStatusCode)
-            return new(JiraCallOutcome.Failed, null, $"Jira search returned {(int)response.StatusCode}.", null);
-
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-        return new(JiraCallOutcome.Ok, ReadPage(document.RootElement, storyPointsFieldId), null, null);
+        return GetJsonAsync(site.Api("search/jql") + "?" + query, email, apiToken, "search",
+            root => ReadPage(root, storyPointsFieldId), cancellationToken, forbiddenIsUnauthorized: true);
     }
 
     public Task<JiraCallResult<JiraBoard>> GetBoardAsync(
@@ -196,7 +176,36 @@ public sealed partial class JiraCloudClient(HttpClient http) : IJiraCloudClient,
     /// </summary>
     private async Task<JiraCallResult<T>> GetJsonAsync<T>(
         string url, string email, string apiToken, string what, Func<JsonElement, T?> read,
-        CancellationToken cancellationToken) where T : class
+        CancellationToken cancellationToken, bool forbiddenIsUnauthorized = false, bool badRequestIsJql = true) where T : class
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(_timeout);
+        try
+        {
+            return await ReceiveJsonAsync(url, email, apiToken, what, read, deadline.Token,
+                forbiddenIsUnauthorized, badRequestIsJql);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new(JiraCallOutcome.Failed, null, $"Jira did not answer within {_timeout.TotalSeconds:0} seconds for the {what}.", null);
+        }
+        catch (HttpRequestException)
+        {
+            return new(JiraCallOutcome.Failed, null, $"Jira could not be reached for the {what}.", null);
+        }
+        catch (InvalidDataException)
+        {
+            return new(JiraCallOutcome.Failed, null, "Jira's response exceeded the 4 MiB limit.", null);
+        }
+        catch (JsonException)
+        {
+            return new(JiraCallOutcome.Failed, null, $"Jira's answer for the {what} could not be read.", null);
+        }
+    }
+
+    private async Task<JiraCallResult<T>> ReceiveJsonAsync<T>(
+        string url, string email, string apiToken, string what, Func<JsonElement, T?> read,
+        CancellationToken cancellationToken, bool forbiddenIsUnauthorized, bool badRequestIsJql) where T : class
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         Authorize(request, email, apiToken);
@@ -204,21 +213,22 @@ public sealed partial class JiraCloudClient(HttpClient http) : IJiraCloudClient,
         switch (response.StatusCode)
         {
             case HttpStatusCode.Unauthorized:
+            case HttpStatusCode.Forbidden when forbiddenIsUnauthorized:
                 return new(JiraCallOutcome.Unauthorized, null, "Jira refused the email and API token.", null);
             case HttpStatusCode.Forbidden:
                 return new(JiraCallOutcome.Forbidden, null, $"Jira did not let this account read the {what}.", null);
             case HttpStatusCode.NotFound:
-                return new(JiraCallOutcome.NotFound, null, $"Jira has no {what} that this account can see.", null);
+                return new(forbiddenIsUnauthorized ? JiraCallOutcome.Failed : JiraCallOutcome.NotFound,
+                    null, $"Jira has no {what} that this account can see.", null);
             case HttpStatusCode.TooManyRequests:
                 return new(JiraCallOutcome.RateLimited, null, "Jira rate limited the request.", ReadRetryAfter(response));
-            case HttpStatusCode.BadRequest:
-                return new(JiraCallOutcome.BadJql, null, await ReadErrorAsync(response, cancellationToken), null);
+            case HttpStatusCode.BadRequest when badRequestIsJql:
+                return new(JiraCallOutcome.BadJql, null, "Jira rejected the JQL.", null);
         }
         if (!response.IsSuccessStatusCode)
             return new(JiraCallOutcome.Failed, null, $"Jira returned {(int)response.StatusCode} for the {what}.", null);
 
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        using var document = await BoundedHttpContent.ReadJsonAsync(response.Content, MaxResponseBytes, cancellationToken);
         var value = read(document.RootElement);
         return value is null
             ? new(JiraCallOutcome.Failed, null, $"Jira's answer for the {what} could not be read.", null)
@@ -412,24 +422,6 @@ public sealed partial class JiraCloudClient(HttpClient http) : IJiraCloudClient,
         return null;
     }
 
-    private static async Task<string> ReadErrorAsync(HttpResponseMessage response, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            using var document = JsonDocument.Parse(body);
-            if (document.RootElement.TryGetProperty("errorMessages", out var messages)
-                && messages.ValueKind == JsonValueKind.Array
-                && messages.GetArrayLength() > 0
-                && messages[0].ValueKind == JsonValueKind.String)
-                return messages[0].GetString() ?? "Jira rejected the JQL.";
-        }
-        catch (JsonException)
-        {
-            // The status code already says the JQL was rejected.
-        }
-        return "Jira rejected the JQL.";
-    }
 }
 
 /// <summary>A Jira Cloud site URL. Only https hosts are accepted; no path, query, or credentials.</summary>

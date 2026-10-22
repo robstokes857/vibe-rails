@@ -5,15 +5,19 @@ namespace VibeRails.Services;
 
 public class UpdateService
 {
+    internal const int MaxResponseBytes = 1024 * 1024;
+    internal static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
     private readonly HttpClient _httpClient;
+    private readonly TimeSpan _requestTimeout;
     private readonly string _githubRepo = "robstokes857/vibe-rails";
     private UpdateInfo? _cachedUpdateInfo;
     private DateTime _lastCheck = DateTime.MinValue;
     private readonly TimeSpan _cacheExpiration = TimeSpan.FromHours(1);
 
-    public UpdateService(HttpClient httpClient)
+    public UpdateService(HttpClient httpClient, TimeSpan? requestTimeout = null)
     {
         _httpClient = httpClient;
+        _requestTimeout = requestTimeout ?? RequestTimeout;
         _httpClient.DefaultRequestHeaders.Add("User-Agent", "VibeRails-UpdateChecker");
     }
 
@@ -27,16 +31,16 @@ public class UpdateService
 
         try
         {
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            deadline.CancelAfter(_requestTimeout);
             var currentVersion = VersionInfo.Version;
             var releaseUrl = $"https://api.github.com/repos/{_githubRepo}/releases/latest";
 
-            var response = await _httpClient.GetAsync(releaseUrl, cancellationToken);
+            using var response = await _httpClient.GetAsync(releaseUrl, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
             response.EnsureSuccessStatusCode();
 
-            var json = await response.Content.ReadAsStringAsync(cancellationToken);
-
             // Parse JSON using JsonDocument for AOT compatibility
-            using var doc = JsonDocument.Parse(json);
+            using var doc = await BoundedHttpContent.ReadJsonAsync(response.Content, MaxResponseBytes, deadline.Token);
             var root = doc.RootElement;
 
             if (!root.TryGetProperty("tag_name", out var tagElement))

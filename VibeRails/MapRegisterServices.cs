@@ -24,7 +24,6 @@ using VibeRails.Services.Jira;
 using VibeRails.Services.Mcp.HostShell;
 using VibeRails.Services.Mcp.Tools;
 using VibeRails.Services.Mcp.WebResearch;
-using VibeRails.Services.Messaging;
 using VibeRails.Services.Terminal;
 using VibeRails.Services.Workspaces;
 using VibeRails.Services.Terminal.Consumers;
@@ -334,11 +333,7 @@ namespace VibeRails
                 // is short-timeout because every call is a loopback hop to this machine's proxy.
                 // Registered here AND in McpStdioHost.ConfigureServices — the two transports must
                 // expose the same tools.
-                serviceCollection.AddHttpClient(TokenSaverTool.HttpClientName, client =>
-                {
-                    client.Timeout = TimeSpan.FromSeconds(10);
-                });
-                serviceCollection.AddScoped<TokenSaverTool>();
+                serviceCollection.AddTokenSaverMcp();
                 serviceCollection.AddAgentSessionMcp();
                 serviceCollection.AddSessionSharingMcp();
                 serviceCollection.AddBoardAgentLaunchMcp();
@@ -479,19 +474,12 @@ namespace VibeRails
                 .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
 
             // Update Service (singleton with HttpClient)
-            serviceCollection.AddHttpClient<UpdateService>();
+            serviceCollection.AddHttpClient<UpdateService>()
+                .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
 
             // Dedicated persistent HTTP-over-WSS relay. It connects on first use and is reset by
             // settings changes so API-key rotation is reflected by the next handshake.
             serviceCollection.AddSingleton<IRemoteHttpRelayClient, RemoteHttpRelayClient>();
-
-            // WebSocket Messaging Client (singleton - auto-reconnects, URL from appsettings.json)
-            serviceCollection.AddSingleton<MessagingClient>(sp =>
-            {
-                var configuration = sp.GetRequiredService<IConfiguration>();
-                var frontendUrl = configuration["VibeRails:FrontendUrl"] ?? throw new InvalidOperationException("VibeRails:FrontendUrl is not configured in appsettings.json");
-                return new MessagingClient(frontendUrl);
-            });
 
             // Authentication service (singleton - one token per instance)
             serviceCollection.AddSingleton<IAuthService, AuthService>();
@@ -515,7 +503,8 @@ namespace VibeRails
         internal static HttpMessageHandler CreateNoRedirectHttpMessageHandler() =>
             new HttpClientHandler
             {
-                AllowAutoRedirect = false
+                AllowAutoRedirect = false,
+                UseCookies = false
             };
 
         /// <summary>

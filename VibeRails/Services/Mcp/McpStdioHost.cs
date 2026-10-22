@@ -127,11 +127,7 @@ public static class McpStdioHost
         // spawns this process and hands it the environment naming the proxy to call, so this child
         // can pause the exact tab whose output it is reading. Named client, short timeout — the
         // call is a loopback hop, so slow means broken.
-        services.AddHttpClient(TokenSaverTool.HttpClientName, client =>
-        {
-            client.Timeout = TimeSpan.FromSeconds(10);
-        });
-        services.AddScoped<TokenSaverTool>();
+        services.AddTokenSaverMcp();
         services.AddAgentSessionMcp();
         services.AddSessionSharingMcp();
         services.AddBoardAgentLaunchMcp();

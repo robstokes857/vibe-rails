@@ -42,6 +42,18 @@ public static class McpToolRegistration
         builder.WithHttpTransport(options => options.SessionMode = HttpServerSessionMode.StatefulForInitializeClients);
 
     /// <summary>Local control credentials must never follow redirects to another destination.</summary>
+    public static IServiceCollection AddTokenSaverMcp(this IServiceCollection services)
+    {
+        services.AddHttpClient(TokenSaverTool.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(10))
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+            {
+                AllowAutoRedirect = false, UseProxy = false, UseCookies = false
+            });
+        services.AddScoped<TokenSaverTool>();
+        return services;
+    }
+
+    /// <summary>Local control credentials must never follow redirects to another destination.</summary>
     public static IServiceCollection AddAgentSessionMcp(this IServiceCollection services)
     {
         services.AddHttpClient(AgentSessionTool.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(10))

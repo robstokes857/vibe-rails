@@ -1218,7 +1218,7 @@ public sealed class JiraCloudClientHttpTests
     }
 
     [Fact]
-    public async Task BadJqlReportsTheJiraMessage()
+    public async Task BadJqlReportsFixedWordingWithoutTheJiraMessage()
     {
         var handler = new QueueHandler();
         handler.Enqueue(HttpStatusCode.BadRequest, """{"errorMessages":["Unbounded JQL queries are not allowed."]}""");
@@ -1228,7 +1228,7 @@ public sealed class JiraCloudClientHttpTests
         var result = await client.SearchAsync("https://acme.atlassian.net", "ada@example.com", "secret",
             "order by key desc", null, null, TestContext.Current.CancellationToken);
         Assert.Equal(JiraCallOutcome.BadJql, result.Outcome);
-        Assert.Equal("Unbounded JQL queries are not allowed.", result.Detail);
+        Assert.Equal("Jira rejected the JQL.", result.Detail);
     }
 
     private sealed class QueueHandler : HttpMessageHandler
