@@ -2,6 +2,9 @@ const { test, expect } = require('./fixtures');
 
 test('dashboard entry points serve fresh matching CSP nonces', async ({ page, context }) => {
     test.setTimeout(60000);
+    // The page adds its tab header to backend API calls; global fixture headers would
+    // also reach Google Fonts and cause its CORS preflight to fail in a fresh browser.
+    await context.setExtraHTTPHeaders({});
     const nonces = new Set();
     for (const path of ['/', '/index.html', '/git-guard', '/mcp-remote.html']) {
         const response = await context.request.get(path);
