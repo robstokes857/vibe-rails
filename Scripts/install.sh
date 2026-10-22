@@ -384,10 +384,16 @@ install_bertv2_assets "$INSTALL_DIR"
 # Make binary executable
 chmod +x "$INSTALL_DIR/vb"
 
-# Add to PATH in shell rc files
+# Add to PATH in shell rc files. Pass "create" as the second argument to create
+# the rc file when it does not exist yet.
 add_to_path() {
     local rc_file="$1"
+    local create="${2:-}"
     local export_line='export PATH="$HOME/.vibe_rails:$PATH"'
+
+    if [ ! -f "$rc_file" ] && [ "$create" = "create" ]; then
+        touch "$rc_file"
+    fi
 
     if [ -f "$rc_file" ]; then
         if ! grep -q ".vibe_rails" "$rc_file"; then
@@ -402,6 +408,21 @@ add_to_path() {
 }
 
 echo -e "${CYAN}Configuring PATH...${NC}"
+
+# The login shell's rc file must exist: a fresh macOS account runs zsh with no
+# ~/.zshrc, and skipping missing files left vb off PATH entirely.
+case "$(basename "${SHELL:-}")" in
+    zsh)  LOGIN_RC="$HOME/.zshrc" ;;
+    bash)
+        if [ "$OS_TYPE" = "macos" ]; then
+            LOGIN_RC="$HOME/.bash_profile"
+        else
+            LOGIN_RC="$HOME/.bashrc"
+        fi
+        ;;
+    *)    LOGIN_RC="$HOME/.profile" ;;
+esac
+add_to_path "$LOGIN_RC" create
 
 # Add to common shell rc files
 add_to_path "$HOME/.bashrc"
@@ -420,7 +441,7 @@ echo -e "${CYAN}Installed to: $INSTALL_DIR${NC}"
 echo ""
 echo -e "${YELLOW}To get started, either:${NC}"
 echo -e "  1. Open a NEW terminal, or"
-echo -e "  2. Run: ${NC}source ~/.bashrc${YELLOW} (or ~/.zshrc / ~/.zprofile)${NC}"
+echo -e "  2. Run: ${NC}source $LOGIN_RC${NC}"
 echo ""
 echo -e "${YELLOW}Then run:${NC}"
 echo -e "  vb --help"
