@@ -20,7 +20,11 @@
         .app-subnav { opacity: 0; }
     </style>
     <script nonce="{{VIBERAILS_CSP_NONCE}}">
-        window.__viberails_NONCE__ = document.currentScript.nonce;
+        const pageNonce = document.currentScript.nonce;
+        // Raw static test hosts do not substitute the response nonce placeholder.
+        if (/^[A-Za-z0-9+/_-]{1,128}={0,2}$/.test(pageNonce)) {
+            window.__viberails_NONCE__ = pageNonce;
+        }
         window.__viberails_cache_bust__ = Date.now().toString(36);
 
         if (window.location.pathname.replace(/\/+$/, '') === '/git-guard') {
