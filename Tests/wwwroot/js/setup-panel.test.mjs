@@ -75,12 +75,32 @@ test('a method whose prerequisite is missing is blocked by that tool', () => {
     assert.equal(codex.methods[1].blockedBy.name, 'Node.js');
 });
 
-test('package managers sit under Optional and only while missing', () => {
-    const present = buildSetupModel(status([tool('winget', 'package-manager', 'ready')]));
+test('a missing package manager comes first, only while missing, and never raises the alert', () => {
+    const present = buildSetupModel(status([tool('brew', 'package-manager', 'ready')]));
     assert.equal(present.sections.length, 0);
-    const absent = buildSetupModel(status([tool('winget', 'package-manager', 'missing')]));
-    assert.deepEqual(rows(absent, 'optional', 'optional').map(item => item.id), ['winget']);
-    assert.equal(rows(absent, 'optional', 'optional')[0].expandedByDefault, true);
+    const absent = buildSetupModel(status([
+        tool('git', 'required', 'ready'),
+        tool('claude', 'agent', 'ready'),
+        tool('brew', 'package-manager', 'missing'),
+        tool('node', 'optional', 'missing')
+    ]));
+    assert.deepEqual(absent.sections.map(item => item.key), ['package-manager', 'required', 'optional']);
+    assert.deepEqual(rows(absent, 'package-manager', 'package-manager').map(item => item.id), ['brew']);
+    assert.equal(rows(absent, 'package-manager', 'package-manager')[0].expandedByDefault, true);
+    assert.equal(absent.alert, null);
+});
+
+test('the recommended method stays selected while its package manager is missing', async () => {
+    const { SetupPanel } = await import('../../../VibeRails/wwwroot/js/modules/setup-panel.js');
+    const container = { innerHTML: '', addEventListener() {} };
+    const panel = new SetupPanel({}, container, {});
+    panel.status = status([
+        tool('codex', 'agent', 'missing', { methods: [method('brew', { requires: 'brew', recommended: true }), method('native')] }),
+        tool('brew', 'package-manager', 'missing', { name: 'Homebrew' })
+    ]);
+    panel.render();
+    assert.match(container.innerHTML, /aria-checked="true"\s+data-setup-action="method"\s+data-tool="codex" data-method="brew"/);
+    assert.match(container.innerHTML, /Needs Homebrew first\./);
 });
 
 // ---- Installer ownership (PR #84 review) ------------------------------------------------

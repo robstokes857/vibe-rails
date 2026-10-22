@@ -95,9 +95,9 @@ public static class SetupToolCatalog
             windows
                 ? [WingetPackage("Git.Git")]
                 : mac
-                    ? [new("xcode", "Apple Command Line Tools", "xcode-select --install",
-                            Note: "Opens Apple's installer dialog."),
-                       BrewFormula("git")]
+                    ? [BrewFormula("git"),
+                       new("xcode", "Apple Command Line Tools", "xcode-select --install",
+                            Note: "Opens Apple's installer dialog.")]
                     : [],
             // A fresh Mac has /usr/bin/git before it has Git: running it offers the installer.
             AppleDeveloperShims: [Git]));
@@ -122,8 +122,8 @@ public static class SetupToolCatalog
                 ? [Native("irm https://claude.ai/install.ps1 | iex", "Self-updating native build. No Node.js needed."),
                    new(Winget, "winget", "winget install Anthropic.ClaudeCode", Requires: Winget),
                    NpmPackage("@anthropic-ai/claude-code")]
-                : [Native("curl -fsSL https://claude.ai/install.sh | bash", "Self-updating native build. No Node.js needed."),
-                   .. mac ? [BrewCask("claude-code")] : Array.Empty<SetupInstallMethod>(),
+                : [.. MacBrewFirst(mac, BrewCask("claude-code"),
+                       Native("curl -fsSL https://claude.ai/install.sh | bash", "Self-updating native build. No Node.js needed.")),
                    NpmPackage("@anthropic-ai/claude-code")],
             Brand: "claude"));
 
@@ -135,8 +135,7 @@ public static class SetupToolCatalog
             windows
                 ? [Native("irm https://chatgpt.com/codex/install.ps1 | iex"),
                    NpmPackage("@openai/codex")]
-                : [Native("curl -fsSL https://chatgpt.com/codex/install.sh | sh"),
-                   .. mac ? [BrewCask("codex")] : Array.Empty<SetupInstallMethod>(),
+                : [.. MacBrewFirst(mac, BrewCask("codex"), Native("curl -fsSL https://chatgpt.com/codex/install.sh | sh")),
                    NpmPackage("@openai/codex")],
             Brand: "codex"));
 
@@ -148,8 +147,7 @@ public static class SetupToolCatalog
             windows
                 ? [new(Winget, "winget", "winget install GitHub.Copilot", Requires: Winget),
                    NpmPackage("@github/copilot")]
-                : [Native("curl -fsSL https://gh.io/copilot-install | bash"),
-                   .. mac ? [BrewCask("copilot-cli")] : Array.Empty<SetupInstallMethod>(),
+                : [.. MacBrewFirst(mac, BrewCask("copilot-cli"), Native("curl -fsSL https://gh.io/copilot-install | bash")),
                    NpmPackage("@github/copilot")],
             Brand: "copilot"));
 
@@ -162,8 +160,7 @@ public static class SetupToolCatalog
             windows ? [] : ["~/.opencode/bin/opencode"],
             windows
                 ? [NpmPackage("opencode-ai")]
-                : [Native("curl -fsSL https://opencode.ai/install | bash"),
-                   .. mac ? [BrewFormula("anomalyco/tap/opencode")] : Array.Empty<SetupInstallMethod>(),
+                : [.. MacBrewFirst(mac, BrewFormula("anomalyco/tap/opencode"), Native("curl -fsSL https://opencode.ai/install | bash")),
                    NpmPackage("opencode-ai")],
             Brand: "opencode"));
 
@@ -230,16 +227,32 @@ public static class SetupToolCatalog
         if (mac)
         {
             tools.Add(new SetupTool(Homebrew, "Homebrew", SetupToolGroup.PackageManager,
-                "macOS package manager. Several installs here use it.",
+                "macOS package manager. The recommended way to install Git and the AI CLIs below.",
                 "https://brew.sh/",
                 [Homebrew],
                 ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"],
-                [Native("/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"",
-                    "Asks for your password.")]));
+                [Native(HomebrewInstall,
+                    "Asks for your password. Also installs Apple's Command Line Tools, which include Git.")]));
         }
 
         return tools;
     }
+
+    /// <summary>
+    /// Homebrew's installer, then the "Next steps" it only prints: on Apple Silicon brew lives in
+    /// /opt/homebrew/bin, which no shell has on PATH until the login profile runs brew shellenv.
+    /// Without that line the brew installs here fail with "command not found" and a restart does
+    /// not help. Skipped when the profile already mentions brew shellenv.
+    /// </summary>
+    public const string HomebrewInstall =
+        "/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+        + " && { case \"$SHELL\" in */bash) profile=~/.bash_profile ;; *) profile=~/.zprofile ;; esac;"
+        + " grep -qs 'brew shellenv' \"$profile\""
+        + " || printf '\\neval \"$(/opt/homebrew/bin/brew shellenv)\"\\n' >> \"$profile\"; }";
+
+    // Homebrew is the recommended route on macOS; elsewhere the vendor's installer stays first.
+    private static SetupInstallMethod[] MacBrewFirst(bool mac, SetupInstallMethod brew, SetupInstallMethod native) =>
+        mac ? [brew, native] : [native];
 
     private static SetupInstallMethod Native(string command, string? note = null) =>
         new("native", "Official installer", command, Note: note);

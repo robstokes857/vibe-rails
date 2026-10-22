@@ -10,8 +10,9 @@ function listNames(names) {
 
 /**
  * What the Setup page and the app-load warning say, from one status response. Pure, so the
- * wording is testable without a DOM. Required (the essentials, then "at least one" AI CLI)
- * comes first; Optional, including any missing package manager, comes last.
+ * wording is testable without a DOM. A missing package manager comes first, because the
+ * recommended installs below it need it; then Required (the essentials, then "at least one"
+ * AI CLI); Optional comes last.
  */
 export function buildSetupModel(status) {
     const tools = status?.tools || [];
@@ -33,6 +34,13 @@ export function buildSetupModel(status) {
     const pick = (...groups) => tools.filter(tool => groups.includes(tool.group)).map(decorate);
     const sections = [
         {
+            // Package managers only appear when one is missing. Not required: every tool that
+            // recommends one also offers an install without it.
+            key: 'package-manager', title: 'Package manager', groups: [
+                { key: 'package-manager', tools: pick('package-manager').filter(tool => !tool.installed) }
+            ]
+        },
+        {
             key: 'required', title: 'Required', groups: [
                 { key: 'required', tools: pick('required') },
                 { key: 'agent', title: 'AI coding CLI', hint: 'Install at least one.', tools: pick('agent') }
@@ -40,8 +48,7 @@ export function buildSetupModel(status) {
         },
         {
             key: 'optional', title: 'Optional', groups: [
-                // Package managers only appear when one is missing.
-                { key: 'optional', tools: pick('optional', 'package-manager').filter(tool => tool.group !== 'package-manager' || !tool.installed) }
+                { key: 'optional', tools: pick('optional') }
             ]
         }
     ].map(section => ({ ...section, groups: section.groups.filter(group => group.tools.length > 0) }))
@@ -167,8 +174,9 @@ export class SetupPanel {
                 </div>
             </div>`;
         }
-        const selectedId = this.selectedMethod.get(tool.id)
-            ?? (tool.methods.find(method => !method.blockedBy) || tool.methods[0]).id;
+        // The recommended method stays selected even while blocked: its "Needs … first" link is
+        // the way to it, and the other methods are one click away.
+        const selectedId = this.selectedMethod.get(tool.id) ?? tool.methods[0].id;
         const method = tool.methods.find(candidate => candidate.id === selectedId) || tool.methods[0];
         const choices = tool.methods.length > 1
             ? `<div class="vb-setup-methods" role="radiogroup" aria-label="Install with">

@@ -6,9 +6,17 @@ warning bar) and `setup-install-window.js` (floating install terminal). Routes: 
 root-only.
 
 - `SetupToolCatalog` is the only source of install commands. Each method's `Command` is a
-  compile-time constant taken from the vendor's own page; the first method is the recommended one.
+  compile-time constant taken from the vendor's own page; the first method is the recommended one
+  and the page keeps it selected even while its prerequisite is missing ("Needs Homebrew first").
   Keep commands in step with the linked pages. On Windows OpenCode is npm-only because
   `CommandService.ResolveOpenCodeMcpExecutable` calls npm's `opencode.cmd`.
+- On macOS Homebrew is the recommended method wherever one exists (Git, Claude Code, Codex,
+  Copilot, OpenCode); each of those still offers a route without it. A missing package manager is
+  listed first on the page but is not Required, so it never raises the warning bar. Homebrew's
+  installer pulls in Apple's Command Line Tools, which is expected and makes Git Ready. It does
+  not put `/opt/homebrew/bin` on PATH (it only prints "Next steps"), so the catalog's Homebrew
+  command appends `brew shellenv` to the login profile, and the install terminal puts
+  `/opt/homebrew/bin` first on PATH so a brew install works in the same session.
 - `SetupToolProbe` checks file existence only and never starts the tool. **Ready** means found
   on this process's PATH, which new terminals inherit. **Restart needed** means found only on the
   user/machine PATH Windows stores now, or at a vendor path. That is what a CLI installed after

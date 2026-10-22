@@ -71,13 +71,36 @@ public sealed class SetupToolCatalogTests
     }
 
     [Fact]
-    public void TheRecommendedMethodIsTheVendorsNativeInstallerWhereOneExists()
+    public void TheRecommendedMethodIsTheVendorsNativeInstallerOffMac()
     {
-        foreach (var platform in new[] { SetupPlatform.Windows, SetupPlatform.MacOS, SetupPlatform.Linux })
+        foreach (var platform in new[] { SetupPlatform.Windows, SetupPlatform.Linux })
         {
             var claude = SetupToolCatalog.For(platform).Single(tool => tool.Id == "claude");
             Assert.Equal("native", claude.Methods[0].Id);
             Assert.Null(claude.Methods[0].Requires);
         }
+    }
+
+    [Fact]
+    public void OnMacHomebrewIsRecommendedWhereverItIsOffered()
+    {
+        var tools = SetupToolCatalog.For(SetupPlatform.MacOS);
+        foreach (var tool in tools.Where(tool => tool.Methods.Any(method => method.Id == SetupToolCatalog.Homebrew)))
+            Assert.Equal(SetupToolCatalog.Homebrew, tool.Methods[0].Id);
+        // Every brew-first tool still offers a route that does not need Homebrew.
+        foreach (var id in new[] { "git", "claude", "codex", "copilot", "opencode" })
+            Assert.Contains(tools.Single(tool => tool.Id == id).Methods, method => method.Requires is null);
+    }
+
+    [Fact]
+    public void HomebrewInstallPutsBrewOnTheLoginShellPath()
+    {
+        var brew = SetupToolCatalog.For(SetupPlatform.MacOS).Single(tool => tool.Id == SetupToolCatalog.Homebrew);
+        var command = Assert.Single(brew.Methods).Command;
+        Assert.StartsWith("/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\" && ", command);
+        Assert.Contains("grep -qs 'brew shellenv'", command);
+        Assert.Contains("eval \"$(/opt/homebrew/bin/brew shellenv)\"", command);
+        // One line on the page: printf writes the newlines, the command text has none.
+        Assert.DoesNotContain('\n', command);
     }
 }

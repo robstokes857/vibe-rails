@@ -18,6 +18,8 @@ public static class SetupInstallTerminalSession
     private static readonly PrivatePtyText Text = new(
         "Invalid install request.", "Could not start the installer.", "Install finished");
 
+    private const string HomebrewBin = "/opt/homebrew/bin";
+
     public static Task RunAsync(WebSocket socket, CancellationToken cancellationToken) =>
         PrivatePtySession.RunAsync(socket, (message, _) => Task.FromResult(Prepare(message)), Text, cancellationToken);
 
@@ -59,6 +61,10 @@ public static class SetupInstallTerminalSession
         // An installer that ran a minute ago (Node.js before npm, say) changed the PATH Windows
         // stores, not the one this process started with.
         start.Environment["PATH"] = SetupProbeEnvironment.CurrentPathValue();
+        // Homebrew installed from this page a minute ago is only in the login profile, which
+        // this VibeRails process has not read.
+        if (OperatingSystem.IsMacOS())
+            start.Environment["PATH"] = $"{HomebrewBin}{Path.PathSeparator}{start.Environment["PATH"]}";
         return start;
     }
 
