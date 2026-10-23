@@ -13,6 +13,9 @@ project, including the migration runner and stores outside `DB/` and `Board/`.
 - Board-owned state uses `~/.vibe_rails/board.db` in every configuration. The old Board tables
   in `state.db` are retained but unused: no import, cleanup or synchronization. Keep Board access
   behind `IBoardStore` so future shared API storage can replace this implementation.
+- PR review state uses `~/.vibe_rails/pr_reviews.db` in every configuration, behind
+  `IPrReviewStore`. Automatic legacy adoption reads `state.db` without modifying its schema or
+  data; preserve adoption receipts and review-id mappings, including after local deletions.
 - Removing a feature means retiring its current code paths. Leave unused tables and columns,
   and their stored data, in place. Feature removal alone is not permission to drop or purge them.
 - Unused schema is accepted technical debt. Do not add cleanup, historical-data conversion,

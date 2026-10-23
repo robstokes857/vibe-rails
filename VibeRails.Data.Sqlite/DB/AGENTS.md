@@ -148,13 +148,21 @@ This document describes the database layer: Environments, Sandboxes, AgentMetada
 
 ## PR review storage
 
-`pr-reviews/1` adds `PrReviewPullRequests` and `PrReviews` to normal `state.db`, behind
+`pr-reviews/1` creates `PrReviewPullRequests` and `PrReviews` in `~/.vibe_rails/pr_reviews.db`, behind
 `IPrReviewStore` (additive; `PrReviewStore.EnsureSchema` runs on first use, so the `vb mcp` host
 needs only `AddSqlitePrReviewStorage`). Both are keyed by GitHub `owner/name` (`COLLATE NOCASE`)
 and PR number; reviews cascade with their PR. A partial unique index allows one `in_progress`
 review per PR. `Verdict` and `GitHubState` are validated in code rather than by CHECK so a new
 value stays an additive change. The tracker state is derived on read, never stored, and a GitHub
 lifecycle sync never moves `UpdatedUTC` (the last review write). Writes take `BEGIN IMMEDIATE`.
+The file uses generation 1 in every configuration and host. `pr-review-adoption/1` adds
+`PrReviewLegacyAdoptions` (per-PR source/target fingerprints) and `PrReviewLegacyIds` (stable
+legacy-to-current review ids), without foreign keys so local deletion retains adoption receipts.
+Before each repository operation, a separate read-only `state.db` snapshot is reconciled while
+holding only the dedicated file's writer lock. Legacy tables, rows, receipts and generation
+stay untouched. Late old-version writes adopt if the destination PR has not diverged; conflicting
+edits fail explicitly with both copies preserved. Unchanged source rows never resurrect new-side
+deletions. No ATTACH, dual writes, destructive cleanup or manual upgrade steps are involved.
 See the [PR Reviews guide](../../VibeRails/Services/PrReviews/AGENTS.md).
 
 ## Prompt worktree storage

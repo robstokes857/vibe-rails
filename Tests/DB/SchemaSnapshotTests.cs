@@ -33,6 +33,7 @@ public sealed class SchemaSnapshotTests
             SqliteStorage.EnsureAllSchemas(new SqliteStoragePaths(statePath, null, proxyPath));
             AssertSnapshot(root, "state.sql", Dump(statePath));
             AssertSnapshot(root, "board.sql", Dump(Path.Combine(directory, "board.db")));
+            AssertSnapshot(root, "pr_reviews.sql", Dump(Path.Combine(directory, "pr_reviews.db")));
             AssertSnapshot(root, "proxy_exchanges.sql", Dump(proxyPath));
             AssertSnapshot(root, "search.sql", Dump(Path.Combine(directory, "search.db")));
         }

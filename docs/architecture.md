@@ -500,7 +500,7 @@ before clients can use sign-in; older sites leave the manual API key input usabl
 
 The **Reviews** page (`pr-reviews` view) and five MCP tools keep a lead-review log for the
 current project's GitHub pull requests, ported from a standalone Node/Express tracker. The
-repository is parsed from the project's `origin` remote; records live in `state.db`
+repository is parsed from the project's `origin` remote; records live in `pr_reviews.db`
 (`pr-reviews/1`) keyed by `owner/name` and PR number. `PrReviewService` owns the rules (derived
 status, server-owned timestamps, idempotent start, draft checkpoints), `PrReviewQueue` picks the
 next PR by rank then age, and `GitHubPullRequestClient` reads open PRs, lifecycle states and a
@@ -509,6 +509,13 @@ to GitHub. Detail-page starts capture that current head; local form drafts survi
 actions, with inputs locked until a save and re-read finish. Routes are root-only under
 `/api/v1/pr-reviews`. Contract: [PR Reviews guide](../VibeRails/Services/PrReviews/AGENTS.md);
 security notes: [API_SEC.md](../API_SEC.md#github-pull-request-reads-pr-reviews).
+
+All hosts/configurations use the same dedicated file through `IPrReviewStore`. Automatic
+legacy adoption reads `state.db` without changing it and atomically records per-PR fingerprints
+and stable review-id mappings. Later older-version writes adopt when the target PR has not
+diverged; conflicting edits return 409/MCP failure with both copies preserved. Unchanged legacy
+rows cannot overwrite local edits or resurrect deletions. See the guide for this compatibility
+boundary and the independent generation-1 schema.
 
 ### Code report inspection
 

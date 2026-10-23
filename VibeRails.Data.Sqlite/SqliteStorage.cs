@@ -14,6 +14,7 @@ public sealed record SqliteStoragePaths(string StatePath, string? VectorPath = n
 {
     internal string ProxyDatabasePath => ProxyPath ?? Path.Combine(Path.GetDirectoryName(StatePath) ?? ".", "proxy_exchanges.db");
     public string BoardDatabasePath => Path.Combine(Path.GetDirectoryName(StatePath) ?? ".", "board.db");
+    public string PrReviewDatabasePath => Path.Combine(Path.GetDirectoryName(StatePath) ?? ".", "pr_reviews.db");
     public string SearchDatabasePath => Path.Combine(Path.GetDirectoryName(StatePath) ?? ".", "search.db");
 }
 
@@ -64,7 +65,7 @@ public static class SqliteStorage
         services.TryAddSingleton<IJobStore>(sp => new JobStore(StateConnectionString(sp), sp.GetService<BoardAutomationEventSource>()?.Store, sp.GetService<IReviewRunSnapshotFactory>()));
         services.TryAddSingleton<ITokenSavingsStore>(sp => new TokenSavingsStore(StateConnectionString(sp)));
         services.TryAddSingleton<ICodeAnalyzerIgnoreStore>(sp => new CodeAnalyzerIgnoreStore(StateConnectionString(sp)));
-        services.TryAddSingleton<IPrReviewStore>(sp => new PrReviewStore(StateConnectionString(sp)));
+        services.TryAddSingleton<IPrReviewStore>(sp => CreatePrReviewStore(sp.GetRequiredService<SqliteStoragePaths>().StatePath));
         services.TryAddSingleton<ILlmExchangeLogStore>(sp => new LlmExchangeLogStore(ConnectionString(
             sp.GetRequiredService<SqliteStoragePaths>().ProxyDatabasePath)));
         services.TryAddSingleton<IDatabaseSnapshotStore, SqliteDatabaseSnapshotStore>();
@@ -90,9 +91,14 @@ public static class SqliteStorage
     public static IServiceCollection AddSqlitePrReviewStorage(this IServiceCollection services,
         Func<IServiceProvider, string> statePathFactory)
     {
-        services.TryAddSingleton<IPrReviewStore>(sp => new PrReviewStore(ConnectionString(statePathFactory(sp))));
+        services.TryAddSingleton<IPrReviewStore>(sp => CreatePrReviewStore(statePathFactory(sp)));
         return services;
     }
+
+    /// <summary>Dedicated PR history, with automatic read-only adoption from the legacy state file.</summary>
+    public static IPrReviewStore CreatePrReviewStore(string stateDatabasePath) =>
+        new PrReviewStore(ConnectionString(new SqliteStoragePaths(stateDatabasePath).PrReviewDatabasePath),
+            legacyConnectionString: ConnectionString(stateDatabasePath));
 
     public static IServiceCollection AddSqliteJobStorage(this IServiceCollection services,
         Func<IServiceProvider, string> statePathFactory)
@@ -129,9 +135,10 @@ public static class SqliteStorage
         {
             TokenSavingsStore.EnsureSchema(connection);
             CodeAnalyzerIgnoreStore.EnsureSchema(connection);
-            PrReviewStore.EnsureSchema(connection);
             CompressionCapturesSchema.EnsureSchema(connection);
         }
+        using (var connection = SqliteConnectionFactory.Open(ConnectionString(paths.PrReviewDatabasePath)))
+            PrReviewStore.EnsureSchema(connection);
         using (var connection = SqliteConnectionFactory.Open(ConnectionString(paths.ProxyDatabasePath)))
             LlmExchangeLogStore.EnsureSchema(connection);
 

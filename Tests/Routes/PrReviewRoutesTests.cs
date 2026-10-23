@@ -135,6 +135,17 @@ public sealed class PrReviewRoutesTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Divergent_legacy_history_returns_a_safe_409_message()
+    {
+        _repositories.Setup(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new PrReviewAdoptionConflictException(7));
+        using var response = await Send(HttpMethod.Get, "/api/v1/pr-reviews");
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(new PrReviewAdoptionConflictException(7).Message,
+            (await Json(response)).GetProperty("error").GetString());
+    }
+
+    [Fact]
     public async Task The_queue_answers_502_when_github_cannot_be_reached()
     {
         _github.Setup(g => g.ListOpenAsync(Repo, It.IsAny<string>(), It.IsAny<CancellationToken>()))

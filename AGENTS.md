@@ -35,6 +35,10 @@ Board state lives in `~/.vibe_rails/board.db` in all configurations, including D
 component split, not a development database. Legacy Board tables in `state.db` remain untouched;
 the current application does not read, write, migrate or synchronize them.
 
+PR Reviews lives in `~/.vibe_rails/pr_reviews.db` in all configurations, behind `IPrReviewStore`.
+Automatic adoption reads legacy PR history in `state.db` without changing its schema or data.
+See the [PR Reviews guide](VibeRails/Services/PrReviews/AGENTS.md) for older-version conflicts.
+
 **Removing a feature does not authorize deleting its stored data, tables, or columns.** Stop
 reading and writing the retired fields/tables in the current code and leave them in place.
 Unused schema is acceptable technical debt; do not prioritize its cleanup over requested work.

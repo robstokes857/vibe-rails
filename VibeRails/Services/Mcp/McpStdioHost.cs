@@ -149,7 +149,7 @@ public static class McpStdioHost
         VibeRails.Services.GitPreflight.GitPreflightServiceCollectionExtensions.AddGitSnapshots(services);
         services.AddScoped<RulesTool>();
         services.AddScoped<BoardTool>();
-        // PR review tools. The store owns its additive state.db schema, so this child needs only
+        // PR review tools. The store owns its dedicated schema and read-only legacy adoption, so this child needs only
         // that store, not the dashboard's Repository. `gh` output is captured, never written here.
         services.AddSqlitePrReviewStorage(_ => ResolveStatePath());
         VibeRails.Services.PrReviews.PrReviewServiceCollectionExtensions.AddPrReviews(services);

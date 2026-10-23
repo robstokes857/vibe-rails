@@ -61,6 +61,14 @@ public sealed class PrReviewToolTests : IDisposable
     }
 
     [Fact]
+    public async Task Adoption_conflicts_explain_that_both_histories_are_preserved()
+    {
+        _github.Setup(g => g.ListOpenAsync(It.IsAny<GitHubRepository>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new PrReviewAdoptionConflictException(7));
+        Assert.Equal("FAIL: " + new PrReviewAdoptionConflictException(7).Message, await _tool.GetPrReviewQueue(_ct));
+    }
+
+    [Fact]
     public async Task Unexpected_failures_do_not_leak_detail()
     {
         _github.Setup(g => g.ListOpenAsync(It.IsAny<GitHubRepository>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))

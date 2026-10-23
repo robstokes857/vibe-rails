@@ -4,9 +4,28 @@ The **Reviews** page and five MCP tools track lead reviews of the current projec
 requests: which PRs were reviewed, what each pass found, and which PR to review next. Frontend:
 `wwwroot/js/modules/pr-reviews-controller.js` (list and detail pages, polling) and
 `pr-reviews-view.js` (wording, list arithmetic and markup; node-tested). Routes:
-`Routes/PrReviewRoutes.cs`, root-only. Storage: `PrReviewStore` in `state.db`, component
+`Routes/PrReviewRoutes.cs`, root-only. Storage: `IPrReviewStore` / `PrReviewStore` in
+`~/.vibe_rails/pr_reviews.db` in Debug, Release, root backend and stdio MCP alike, component
 `pr-reviews/1` (additive). Nothing in this feature writes to GitHub.
 
+- **Automatic legacy adoption.** Before each repository operation, the store reads a consistent
+  snapshot of its PRs and passes from legacy `state.db` using a separate read-only connection.
+  The new feature never changes the legacy schema or rows and never locks its writer. Adoption
+  data, `pr-review-adoption/1` fingerprints and review-id mappings commit together under the
+  dedicated file's writer lock; competing starts cannot duplicate or reorder adoption. Existing
+  ids are retained when available; collisions with new passes receive stable mapped ids.
+  All stored fields, including draft feedback, verdicts, blocking flags, lifecycle and raw
+  timestamps, carry over. There are currently no persisted feature-owned settings.
+- **Older versions can keep running.** Later legacy changes (including deletions) adopt on the
+  next operation if the destination PR has not changed since its last adoption. Unchanged legacy
+  rows never overwrite local edits or resurrect local deletions. A PR changed in both files
+  stops repository operations with a readable HTTP 409 / MCP failure; both copies and the last
+  adoption fingerprints remain intact. Reconciliation is conservative at PR granularity,
+  including lifecycle/timestamp changes; it does not guess a winner or mirror new writes back
+  to older versions. Conflicting edits require explicit reconciliation before that repository
+  can proceed. Other repositories are unaffected. Missing legacy files/tables are rechecked on
+  later calls; failures roll back and retry automatically. Schema generation is independently
+  guarded at 1 in the dedicated file. No upgrade command or manual backup is needed.
 - **The repository comes from the project.** `PrReviewRepositoryResolver` parses the dashboard
   project's `origin` remote (`GitHubRepository.TryParseRemote`): github.com only, owner/name
   checked against GitHub's character rules. Records are keyed by `owner/name` and PR number, so
@@ -52,7 +71,7 @@ MCP tools (both transports, outside the Board auto-grants): `get_pr_review_queue
 `get_pr_review`, `start_pr_review`, `save_pr_review_draft`, `complete_pr_review`. They resolve
 the project through `IBoardProjectResolver` and take no repository or path argument.
 
-Tests: `Tests/DB/PrReviewStoreTests.cs`, `Tests/Services/PrReviews/*`,
+Tests: `Tests/DB/PrReviewStoreTests.cs`, `Tests/DB/PrReviewDatabaseIsolationTests.cs`, `Tests/Services/PrReviews/*`,
 `Tests/Routes/PrReviewRoutesTests.cs`, `Tests/Services/Mcp/PrReviewToolTests.cs`,
 `Tests/wwwroot/js/pr-reviews-*.test.mjs`, `UITests/tests/pr-reviews.spec.js` (static frontend with
 API fixtures; `playwright.pr-reviews.config.js`).

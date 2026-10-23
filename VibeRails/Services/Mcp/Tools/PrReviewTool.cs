@@ -90,6 +90,10 @@ public sealed class PrReviewTool(PrReviewService reviews, IBoardProjectResolver 
         {
             return "FAIL: " + ex.Message;
         }
+        catch (VibeRails.DB.PrReviewAdoptionConflictException ex)
+        {
+            return "FAIL: " + ex.Message;
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // The model gets a readable sentence; the detail (paths, SQL) stays in the file log.

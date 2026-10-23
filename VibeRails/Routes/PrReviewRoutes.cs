@@ -103,5 +103,9 @@ public static class PrReviewRoutes
         {
             return Results.Json(new ErrorResponse(ex.Message), statusCode: ex.StatusCode);
         }
+        catch (VibeRails.DB.PrReviewAdoptionConflictException ex)
+        {
+            return Results.Json(new ErrorResponse(ex.Message), statusCode: StatusCodes.Status409Conflict);
+        }
     }
 }

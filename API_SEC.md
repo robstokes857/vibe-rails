@@ -546,7 +546,9 @@ their exposure routes were removed. Do not restore these capabilities incidental
 The five PR review tools (`get_pr_review_queue`, `get_pr_review`, `start_pr_review`,
 `save_pr_review_draft`, `complete_pr_review`) are on both transports and outside the Board
 auto-grants. They resolve the project through `IBoardProjectResolver`, take no repository or
-path argument, write only local `state.db` review records and run `gh` read-only, as above.
+path argument, write only local `pr_reviews.db` review records and run `gh` read-only, as above.
+Legacy adoption reads `state.db` through a separate read-only connection; divergence returns
+a fixed conflict message with a PR number, never paths, SQL, credentials or draft text.
 
 Board Start work and Board-triggered Workers use the exact per-tool grants in
 [BoardMcpAuthorization](VibeRails/Services/Terminal/Commands/BoardMcpAuthorization.cs).
@@ -990,7 +992,7 @@ page escapes them and the MCP tools return them as JSON data.
 
 The `/api/v1/pr-reviews/**` routes are root-only and project-scoped from the dashboard root.
 Review ids are global, so reads and writes by id also match the current repository and answer
-404 for another project's review. Records live in `state.db` (`pr-reviews/1`, additive).
+404 for another project's review. Records live in `pr_reviews.db` (`pr-reviews/1`, additive).
 
 ### Complete backups
 

@@ -5,14 +5,16 @@ using VibeRails.Data.Sqlite;
 namespace VibeRails.DB;
 
 /// <summary>
-/// Lead-review records for GitHub pull requests in the normal <c>state.db</c>. Connection per
+/// Lead-review records for GitHub pull requests in <c>pr_reviews.db</c>. Connection per
 /// operation; the additive <c>pr-reviews/1</c> schema is created on first use so the store works
 /// in any host without the dashboard's migration pass. Every multi-statement write takes the
 /// writer lock up front (<c>BEGIN IMMEDIATE</c>) so a read-then-write cannot interleave with
 /// another process's write to the same PR.
 /// </summary>
-public sealed class PrReviewStore(string connectionString, TimeProvider? timeProvider = null) : IPrReviewStore
+public sealed partial class PrReviewStore(string connectionString, TimeProvider? timeProvider = null,
+    string? legacyConnectionString = null) : IPrReviewStore
 {
+    internal const int Generation = 1;
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
     private volatile bool _schemaReady;
 
@@ -46,7 +48,7 @@ public sealed class PrReviewStore(string connectionString, TimeProvider? timePro
     /// <inheritdoc />
     public async Task<IReadOnlyList<PrReviewPullRequest>> ListAsync(string repository, CancellationToken ct = default)
     {
-        await using var db = await OpenAsync(ct);
+        await using var db = await OpenAsync(repository, ct);
         await using var command = Command(db, null,
             PullRequestProjection + " WHERE p.Repository = $repository ORDER BY p.UpdatedUTC DESC, p.Number DESC;",
             ("$repository", repository));
@@ -59,14 +61,14 @@ public sealed class PrReviewStore(string connectionString, TimeProvider? timePro
     /// <inheritdoc />
     public async Task<PrReviewPullRequest?> GetAsync(string repository, int number, CancellationToken ct = default)
     {
-        await using var db = await OpenAsync(ct);
+        await using var db = await OpenAsync(repository, ct);
         return ReadPullRequest(db, null, repository, number);
     }
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<PrReview>> GetReviewsAsync(string repository, int number, CancellationToken ct = default)
     {
-        await using var db = await OpenAsync(ct);
+        await using var db = await OpenAsync(repository, ct);
         await using var command = Command(db, null, $"""
             SELECT {ReviewColumns} FROM PrReviews
             WHERE Repository = $repository AND PrNumber = $number
@@ -81,7 +83,7 @@ public sealed class PrReviewStore(string connectionString, TimeProvider? timePro
 
     /// <inheritdoc />
     public Task<PrReviewWriteResult> UpsertAsync(string repository, int number, PrReviewPullRequestFields fields,
-        CancellationToken ct = default) => WriteAsync(ct, (db, tx, now) =>
+        CancellationToken ct = default) => WriteAsync(repository, ct, (db, tx, now) =>
         {
             var upsert = UpsertPullRequest(db, tx, repository, number, fields, now);
             return upsert.Outcome == PrReviewWriteOutcome.MissingField
@@ -91,7 +93,7 @@ public sealed class PrReviewStore(string connectionString, TimeProvider? timePro
 
     /// <inheritdoc />
     public Task<PrReviewWriteResult> UpdateAsync(string repository, int number, PrReviewPullRequestFields fields,
-        CancellationToken ct = default) => WriteAsync(ct, (db, tx, now) =>
+        CancellationToken ct = default) => WriteAsync(repository, ct, (db, tx, now) =>
         {
             if (ReadPullRequest(db, tx, repository, number) is null)
                 return new PrReviewWriteResult(PrReviewWriteOutcome.NotTracked);
@@ -102,7 +104,7 @@ public sealed class PrReviewStore(string connectionString, TimeProvider? timePro
     /// <inheritdoc />
     public async Task<bool> DeleteAsync(string repository, int number, CancellationToken ct = default)
     {
-        await using var db = await OpenAsync(ct);
+        await using var db = await OpenAsync(repository, ct);
         await using var command = Command(db, null,
             "DELETE FROM PrReviewPullRequests WHERE Repository = $repository AND Number = $number;",
             ("$repository", repository), ("$number", number));
@@ -111,7 +113,7 @@ public sealed class PrReviewStore(string connectionString, TimeProvider? timePro
 
     /// <inheritdoc />
     public Task<PrReviewWriteResult> StartReviewAsync(string repository, int number, PrReviewPullRequestFields fields,
-        string? headSha, CancellationToken ct = default) => WriteAsync(ct, (db, tx, now) =>
+        string? headSha, CancellationToken ct = default) => WriteAsync(repository, ct, (db, tx, now) =>
         {
             var upsert = UpsertPullRequest(db, tx, repository, number, fields, now);
             if (upsert.Outcome == PrReviewWriteOutcome.MissingField) return upsert;
@@ -139,7 +141,7 @@ public sealed class PrReviewStore(string connectionString, TimeProvider? timePro
 
     /// <inheritdoc />
     public Task<PrReviewWriteResult> SaveDraftAsync(string repository, int number, PrReviewFields fields, string? summary,
-        CancellationToken ct = default) => WriteAsync(ct, (db, tx, now) =>
+        CancellationToken ct = default) => WriteAsync(repository, ct, (db, tx, now) =>
         {
             if (RequirePendingReview(db, tx, repository, number, out var pending) is { } missing) return missing;
             Execute(db, tx, """
@@ -156,7 +158,7 @@ public sealed class PrReviewStore(string connectionString, TimeProvider? timePro
 
     /// <inheritdoc />
     public Task<PrReviewWriteResult> CompleteReviewAsync(string repository, int number, string verdict, bool blocking,
-        string feedback, string? headSha, string? summary, CancellationToken ct = default) => WriteAsync(ct, (db, tx, now) =>
+        string feedback, string? headSha, string? summary, CancellationToken ct = default) => WriteAsync(repository, ct, (db, tx, now) =>
         {
             if (RequirePendingReview(db, tx, repository, number, out var pending) is { } missing) return missing;
             Execute(db, tx, """
@@ -174,7 +176,7 @@ public sealed class PrReviewStore(string connectionString, TimeProvider? timePro
     /// <inheritdoc />
     public async Task<PrReview?> UpdateReviewAsync(string repository, long id, PrReviewFields fields, CancellationToken ct = default)
     {
-        var result = await WriteAsync(ct, (db, tx, now) =>
+        var result = await WriteAsync(repository, ct, (db, tx, now) =>
         {
             if (ReadReview(db, tx, repository, id) is not { } existing)
                 return new PrReviewWriteResult(PrReviewWriteOutcome.NotTracked);
@@ -194,7 +196,7 @@ public sealed class PrReviewStore(string connectionString, TimeProvider? timePro
     /// <inheritdoc />
     public async Task<int?> DeleteReviewAsync(string repository, long id, CancellationToken ct = default)
     {
-        var result = await WriteAsync(ct, (db, tx, now) =>
+        var result = await WriteAsync(repository, ct, (db, tx, now) =>
         {
             if (ReadReview(db, tx, repository, id) is not { } existing)
                 return new PrReviewWriteResult(PrReviewWriteOutcome.NotTracked);
@@ -208,7 +210,7 @@ public sealed class PrReviewStore(string connectionString, TimeProvider? timePro
     /// <inheritdoc />
     public async Task<IReadOnlyList<int>> ListNumbersAsync(string repository, CancellationToken ct = default)
     {
-        await using var db = await OpenAsync(ct);
+        await using var db = await OpenAsync(repository, ct);
         await using var command = Command(db, null,
             "SELECT Number FROM PrReviewPullRequests WHERE Repository = $repository ORDER BY Number;",
             ("$repository", repository));
@@ -230,7 +232,7 @@ public sealed class PrReviewStore(string connectionString, TimeProvider? timePro
 
         var recorded = 0;
         var changed = 0;
-        await WriteAsync(ct, (db, tx, now) =>
+        await WriteAsync(repository, ct, (db, tx, now) =>
         {
             foreach (var state in states)
             {
@@ -256,7 +258,7 @@ public sealed class PrReviewStore(string connectionString, TimeProvider? timePro
 
     internal static void EnsureSchema(SqliteConnection connection)
     {
-        SqliteMigrationRunner.RequireGenerationAtMost(connection, StateDatabaseSchema.Generation, "state.db");
+        SqliteMigrationRunner.RequireGenerationAtMost(connection, Generation, "pr_reviews.db");
         SqliteMigrationRunner.Apply(connection, "pr-reviews", 1, MigrationKind.Additive, (db, transaction) =>
         {
             // Verdict and GitHubState are validated in code, not by CHECK: a future value would
@@ -306,12 +308,14 @@ public sealed class PrReviewStore(string connectionString, TimeProvider? timePro
                     ON PrReviewPullRequests (Repository, UpdatedUTC);
                 """);
         });
+        EnsureAdoptionSchema(connection);
+        SqliteMigrationRunner.StampGeneration(connection, Generation);
     }
 
-    private async Task<PrReviewWriteResult> WriteAsync(CancellationToken ct,
+    private async Task<PrReviewWriteResult> WriteAsync(string repository, CancellationToken ct,
         Func<SqliteConnection, SqliteTransaction, string, PrReviewWriteResult> write)
     {
-        await using var db = await OpenAsync(ct);
+        await using var db = await OpenAsync(repository, ct);
         using var tx = db.BeginTransaction(deferred: false);
         var result = write(db, tx, _time.GetUtcNow().UtcDateTime.ToString("O"));
         if (result.Outcome is PrReviewWriteOutcome.Saved or PrReviewWriteOutcome.Created)
@@ -457,7 +461,7 @@ public sealed class PrReviewStore(string connectionString, TimeProvider? timePro
         command.ExecuteNonQuery();
     }
 
-    private async Task<SqliteConnection> OpenAsync(CancellationToken ct)
+    private async Task<SqliteConnection> OpenAsync(string repository, CancellationToken ct)
     {
         var connection = await SqliteConnectionFactory.OpenAsync(connectionString, ct);
         try
@@ -467,6 +471,8 @@ public sealed class PrReviewStore(string connectionString, TimeProvider? timePro
                 EnsureSchema(connection);
                 _schemaReady = true;
             }
+            if (legacyConnectionString is not null)
+                ReconcileLegacy(connection, legacyConnectionString, repository, ct);
             return connection;
         }
         catch
