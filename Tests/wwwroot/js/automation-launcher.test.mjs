@@ -129,16 +129,19 @@ test('normalizeLauncherItems sorts by saved order, keeps hidden rows, and drops 
 });
 
 test('unsigned scripts and hidden rows never render; icons follow the kind', () => {
-    const launcher = launcherWith(CATALOG);
+    const launcher = launcherWith([...CATALOG,
+        { key: 'script:changed.py', kind: 'script', label: 'changed.py', jobId: 0, enabled: true, order: 4, status: 'modified' }]);
     launcher._renderFlyoutItems();
     const html = launcher.flyout.target.html;
 
-    // Visible, runnable rows only, in saved order. The unsigned tidy.py is omitted rather than
-    // shown disabled (the customize modal still lists it, so its order/show preference survives).
+    // Visible, runnable rows only, in saved order. The unsigned tidy.py and the modified
+    // changed.py are omitted rather than shown disabled (the customize modal still lists them,
+    // so their order/show preference survives).
     assert.deepEqual([...html.matchAll(/automation-launch-item-label">([^<]+)</g)].map((match) => match[1]),
         ['Nightly sweep', 'backup.py']);
     assert.doesNotMatch(html, /Hidden one/);
     assert.doesNotMatch(html, /tidy\.py/);
+    assert.doesNotMatch(html, /changed\.py/);
     assert.doesNotMatch(html, /Not signed|is-unsigned|Sign it on the Automation page/);
 
     const rows = html.split('<button').slice(1);
