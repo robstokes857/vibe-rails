@@ -390,6 +390,12 @@ middleware serves their paths rather than registering individual API endpoints.
 | GET | `/api/v1/python-scripts/run/terminal/ws` | [PythonScriptRoutes.cs](VibeRails/Routes/PythonScriptRoutes.cs) |
 | GET | `/api/v1/python-scripts/runs` | [PythonScriptRoutes.cs](VibeRails/Routes/PythonScriptRoutes.cs) |
 | POST | `/api/v1/python-scripts/settings` | [PythonScriptRoutes.cs](VibeRails/Routes/PythonScriptRoutes.cs) |
+| GET | `/api/v1/review-requests` | [ReviewRequestRoutes.cs](VibeRails/Routes/ReviewRequestRoutes.cs) |
+| POST | `/api/v1/review-requests` | [ReviewRequestRoutes.cs](VibeRails/Routes/ReviewRequestRoutes.cs) |
+| DELETE | `/api/v1/review-requests/{id:guid}` | [ReviewRequestRoutes.cs](VibeRails/Routes/ReviewRequestRoutes.cs) |
+| GET | `/api/v1/review-requests/{id:guid}` | [ReviewRequestRoutes.cs](VibeRails/Routes/ReviewRequestRoutes.cs) |
+| POST | `/api/v1/review-requests/{id:guid}/cancel` | [ReviewRequestRoutes.cs](VibeRails/Routes/ReviewRequestRoutes.cs) |
+| POST | `/api/v1/review-requests/{id:guid}/decisions` | [ReviewRequestRoutes.cs](VibeRails/Routes/ReviewRequestRoutes.cs) |
 | GET | `/api/v1/rules` | [RulesRoutes.cs](VibeRails/Routes/RulesRoutes.cs) |
 | GET | `/api/v1/rules/details` | [RulesRoutes.cs](VibeRails/Routes/RulesRoutes.cs) |
 | GET | `/api/v1/sandboxes` | [SandboxRoutes.cs](VibeRails/Routes/SandboxRoutes.cs) |
@@ -709,6 +715,23 @@ deadline and a 16-KiB response bound. It fails closed when the service cannot an
 relays exception text. A process that already runs as the user and knows the password, or drives
 the popup through UI automation, is outside this boundary; see the
 [VCA guide](VibeRails/Services/VCA/AGENTS.md#signed-commits-human-verified-and-signed-approval-2026-10-20).
+
+### Review requests before a commit (VB-50, slice A)
+
+Root-only `/api/v1/review-requests` requires both credentials and answers no-store. Creation reads
+the project's staged index through the hook's snapshot reader (project derived server-side, never
+from the request), bounds text at 256 KiB per file and 4 MiB per bundle, validates reviewer emails
+(at most ten) and attached session ids (at most ten, looked up locally), and stores the bundle in
+state.db (`review-requests/1`, additive). Bodies are capped at 16 KiB (create) and 32 KiB
+(decisions); refusals carry fixed local wording and a code, never exception text. Nothing in this
+slice leaves the machine: no request is sent, no session is uploaded. The decisions route's only
+outbound call is the existing public signature verification above, with a tree id and no content,
+and an approval is stored only when that verification names a verified signer listed on the
+request. The commit-msg hook applies a stored, verified approval to the message before offering the
+popup and then rechecks it like any other trailer; the ledger read is bounded to three seconds and
+quiet on failure, so it can place a signature but never pass a commit by itself. No MCP tool
+creates, decides or signs. Sending requests and sessions to viberails.ai is a later slice with its
+own review here; see [the component contract](VibeRails/Services/ReviewRequests/README.md).
 
 ## Outbound services and credentials
 

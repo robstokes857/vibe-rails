@@ -259,6 +259,16 @@ VIBE-200 it never did: `Console.In` is a `SyncTextReader`, whose `ReadLineAsync`
 so the timeout race never started. Console reads that race a timer go through
 `VcaHookProcessHost.ReadLineInBackground`.
 
+**Stored review approvals (VB-50).** Before the popup, commit-msg asks `IStoredCommitApprovalSource`
+(`ReviewRequestApprovalSource`, the review-request ledger in state.db) for a verified approval over
+the staged tree from one of the rule's approvers (any verified signer for `Human verified`). A hit
+is appended with `HumanSignaturePopup.AppendSignatureAsync` and the commit is rechecked, which
+verifies it with viberails.ai like any trailer; the transcript says "Applied the signed approval
+from <email>". This runs whether or not a person can answer the popup, so an agent's commit passes on
+a person's approval and never without one. Each stored signature is applied at most once per run,
+the ledger read is bounded to 3 s and quiet on failure, and a cancelled request's approvals are not
+offered. Contract: [Services/ReviewRequests/README.md](../ReviewRequests/README.md).
+
 **Policy from HEAD.** Rules normally come from the staged vc.rules.md. These two rules follow the
 committed policy instead, in both directions:
 
@@ -389,6 +399,7 @@ boundary, including rejection with valid API credentials.
 | Every catalog rule × every level, real repos | `Tests/VcaRegression/` (fixture scenarios under `Fixtures/`; see its README) |
 | Rules-page CRUD | `Tests/AgentFileServiceTests.cs` |
 | Signed commits | `Tests/VcaRegression/HumanSignatureRuleTests.cs` (real hook, fake verifier and popup), `Tests/Services/VCA/HumanSignature*Tests.cs`, `CommitSignatureVerifierTests.cs` |
+| Stored review approvals | `Tests/VcaRegression/StoredReviewApprovalTests.cs` (real hook, seeded ledger, popup that never signs) |
 
 `VcaHookEndToEndTests` builds throwaway Git repositories and runs the real hook host against them.
 Prefer adding cases there for anything that touches what blocks a commit — it is the only layer

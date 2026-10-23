@@ -529,6 +529,23 @@ Resolution uses optimistic content tokens (409 on stale choices). Unchanged lega
 rows cannot overwrite local edits or resurrect deletions. See the guide for this compatibility
 boundary and the independent generation-1 schema.
 
+### Review requests before a commit (VB-50)
+
+A review step earlier than a pull request: the developer asks a named person to look at the
+staged changes and the AI sessions that produced them, and to sign off. Slice A (2026-10-23) is
+the desktop core. `ReviewBundleCapture` reads the staged snapshot into a bounded bundle (tree id,
+base, files with base/staged text, attached sessions, reviewers); `ReviewRequestService` stores
+requests and decisions in state.db (`review-requests/1`, additive, `IReviewRequestStore`) and
+accepts an approval only as a `vibe-signature:` trailer over the request's tree that viberails.ai
+verifies to a listed reviewer's verified email. The commit-msg hook (`IStoredCommitApprovalSource`)
+places such an approval in the message before offering the signing popup and rechecks it like any
+trailer, so an agent's commit can pass on a person's approval. Routes are root-only under
+`/api/v1/review-requests`. The signed statement is the existing staged-tree statement, so the
+`Signed Approval` rule is the gate and no new rule exists. Transport to viberails.ai, the reviewer
+page and the card UI are later slices. Contract and decisions:
+[Review requests](../VibeRails/Services/ReviewRequests/README.md); security notes:
+[API_SEC.md](../API_SEC.md#review-requests-before-a-commit-vb-50-slice-a).
+
 ### Code report inspection
 
 VCA offers `Code quality minimum A`, `B`, and `C` rules. `CodeQualityRule` uses MintLint's

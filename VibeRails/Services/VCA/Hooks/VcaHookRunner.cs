@@ -16,6 +16,7 @@ public sealed class VcaHookRunner : IVcaHookRunner
     private readonly IVcaHookPresenter _presenter;
     private readonly ICommitMessageCoAuthorCleaner _coAuthorCleaner;
     private readonly IHumanSignaturePrompt? _signaturePrompt;
+    private readonly IStoredCommitApprovalSource? _storedApprovals;
 
     /// <summary>How many times one commit-msg run offers the signing popup.</summary>
     internal const int MaxSignatureRounds = 3;
@@ -25,13 +26,15 @@ public sealed class VcaHookRunner : IVcaHookRunner
         IVcaHookValidationAnalyzer analyzer,
         IVcaHookPresenter presenter,
         ICommitMessageCoAuthorCleaner coAuthorCleaner,
-        IHumanSignaturePrompt? signaturePrompt = null)
+        IHumanSignaturePrompt? signaturePrompt = null,
+        IStoredCommitApprovalSource? storedApprovals = null)
     {
         _preflightPipeline = preflightPipeline;
         _analyzer = analyzer;
         _presenter = presenter;
         _coAuthorCleaner = coAuthorCleaner;
         _signaturePrompt = signaturePrompt;
+        _storedApprovals = storedApprovals;
     }
 
     public async Task<int> RunAsync(VcaHookInvocation invocation, CancellationToken cancellationToken)
@@ -155,10 +158,34 @@ public sealed class VcaHookRunner : IVcaHookRunner
         string validationOutput,
         CancellationToken cancellationToken)
     {
+        // Signatures already applied from the review ledger this run: a recheck that still fails
+        // (viberails.ai unreachable, say) must not apply the same approval again and again.
+        var applied = new HashSet<string>(StringComparer.Ordinal);
         for (var round = 0; round < MaxSignatureRounds; round++)
         {
             var pending = PendingSignatures(summary);
-            if (pending.Count == 0 || _signaturePrompt is null)
+            if (pending.Count == 0)
+                break;
+
+            // A reviewer may already have approved exactly this tree (VB-50). Their verified
+            // signature goes into the message first; the recheck verifies it like any other trailer,
+            // so an agent's commit passes on a person's approval without a popup, and never without one.
+            var stored = await FindStoredApprovalAsync(invocation, pending, applied, cancellationToken);
+            if (stored is not null)
+            {
+                await HumanSignaturePopup.AppendSignatureAsync(invocation.CommitMessagePath!, stored.Signature, cancellationToken);
+                applied.Add(stored.Signature.SignatureBase64);
+                await _presenter.WriteSuccessAsync(
+                    $"Applied the signed approval from {stored.SignerEmail} (review request {ShortId(stored.RequestId)}). Checking the commit again...");
+                var approvedRecheck = await RunPreflightAsync(preflightRequest, cancellationToken);
+                if (approvedRecheck.VcaSummary is null)
+                    break;
+                summary = approvedRecheck.VcaSummary;
+                validationOutput = VcaOutput(approvedRecheck);
+                continue;
+            }
+
+            if (_signaturePrompt is null)
                 break;
 
             // Said out loud: a silent block is what sent an agent to run the hook by hand (VIBE-200).
@@ -197,6 +224,31 @@ public sealed class VcaHookRunner : IVcaHookRunner
 
         return (summary, validationOutput);
     }
+
+    /// <summary>
+    /// The first pending signature finding that a stored, verified review approval can satisfy. Every
+    /// finding covers the same staged tree; they differ in approvers, so each is asked in turn.
+    /// </summary>
+    private async Task<StoredCommitApproval?> FindStoredApprovalAsync(
+        VcaHookInvocation invocation,
+        IReadOnlyList<VcaRuleFinding> pending,
+        HashSet<string> applied,
+        CancellationToken cancellationToken)
+    {
+        if (_storedApprovals is null || string.IsNullOrWhiteSpace(invocation.CommitMessagePath))
+            return null;
+        foreach (var finding in pending)
+        {
+            if (finding.SignatureRequest is not { } request)
+                continue;
+            var stored = await _storedApprovals.FindAsync(request, cancellationToken);
+            if (stored is not null && stored.Signature.TreeId == request.TreeId && !applied.Contains(stored.Signature.SignatureBase64))
+                return stored;
+        }
+        return null;
+    }
+
+    private static string ShortId(string id) => id.Length > 8 ? id[..8] : id;
 
     /// <summary>
     /// Why this commit-msg run cannot ask a person, in terms they can act on. The hook script asks for

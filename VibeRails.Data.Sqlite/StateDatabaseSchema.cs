@@ -224,6 +224,41 @@ internal static class StateDatabaseSchema
                     DeleteAfterUTC TEXT NULL
                 );
                 """));
+        // Review requests before a commit (VB-50): what a reviewer reads (BundleJson) beside the tree
+        // id their signature covers. Decisions keep the verified trailer fields so the commit hook can
+        // apply an approval it finds here, then recheck it with viberails.ai like any other trailer.
+        SqliteMigrationRunner.Apply(connection, "review-requests", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, """
+                CREATE TABLE ReviewRequests (
+                    Id TEXT PRIMARY KEY,
+                    ProjectPath TEXT NOT NULL,
+                    Scope TEXT NOT NULL,
+                    TreeId TEXT NOT NULL,
+                    BaseCommit TEXT NULL,
+                    CardKey TEXT NULL,
+                    Status TEXT NOT NULL,
+                    BundleJson TEXT NOT NULL,
+                    CreatedUTC TEXT NOT NULL,
+                    UpdatedUTC TEXT NOT NULL
+                );
+                CREATE INDEX idx_review_requests_project ON ReviewRequests(ProjectPath, CreatedUTC DESC);
+                CREATE INDEX idx_review_requests_tree ON ReviewRequests(TreeId);
+                CREATE TABLE ReviewDecisions (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    RequestId TEXT NOT NULL REFERENCES ReviewRequests(Id) ON DELETE CASCADE,
+                    Reviewer TEXT NOT NULL,
+                    Decision TEXT NOT NULL,
+                    Comment TEXT NULL,
+                    KeyId TEXT NULL,
+                    Fingerprint TEXT NULL,
+                    TreeId TEXT NULL,
+                    SignatureBase64 TEXT NULL,
+                    DecidedUTC TEXT NOT NULL,
+                    VerifiedUTC TEXT NULL
+                );
+                CREATE INDEX idx_review_decisions_request ON ReviewDecisions(RequestId, DecidedUTC);
+                CREATE INDEX idx_review_decisions_tree ON ReviewDecisions(TreeId) WHERE VerifiedUTC IS NOT NULL;
+                """));
         JobStore.EnsureSessionLinkSchema(connection);
         // Every breaking step above has now been applied (or was already), so the file is at this
         // build's generation. Stamping after the fact also covers databases migrated before the

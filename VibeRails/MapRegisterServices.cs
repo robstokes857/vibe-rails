@@ -106,6 +106,12 @@ namespace VibeRails
                 serviceCollection.AddSingleton(sp => new Services.SigningKeys.SigningKeyService(
                     sp.GetRequiredService<IHttpClientFactory>().CreateClient("signing-key-registration"),
                     sp.GetRequiredService<Services.SigningKeys.SigningKeyStore>(), () => Config.LoadFresh().ApiKey));
+                // Review requests before a commit (VB-50): the staged-snapshot reader and the commit
+                // signature verifier come from AddGitPreflight below; the store from AddSqliteStorage.
+                serviceCollection.AddSingleton(sp => new Services.ReviewRequests.ReviewRequestService(
+                    sp.GetRequiredService<DB.IReviewRequestStore>(),
+                    sp.GetRequiredService<Services.GitPreflight.IGitStagedSnapshotProvider>(),
+                    sp.GetRequiredService<Services.VCA.ICommitSignatureVerifier>()));
             }
 
             // Host filesystem metadata is exposed only by an active root backend. Terminal-tab

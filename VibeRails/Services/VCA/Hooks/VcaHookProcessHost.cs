@@ -369,16 +369,20 @@ public static class VcaHookProcessHost
         services.AddSingleton<ICommitMessageCoAuthorCleaner, CommitMessageCoAuthorCleaner>();
         services.AddSingleton<IVcaHookRunner, VcaHookRunner>();
         services.AddSingleton<IVcaHookValidationAnalyzer, VcaHookValidationAnalyzer>();
-        services.AddSqliteJobStorage(_ =>
-        {
-            var installDirectory = PathConstants.GetInstallDirPath();
-            Directory.CreateDirectory(installDirectory);
-            var statePath = Path.Combine(installDirectory, PathConstants.STATE_FILENAME);
-            return statePath;
-        });
+        services.AddSqliteJobStorage(_ => StatePath());
+        // Approvals a reviewer already gave over the staged tree (VB-50). Same file; read only here.
+        services.AddSqliteReviewRequestStorage(_ => StatePath());
+        services.AddSingleton<IStoredCommitApprovalSource, ReviewRequestApprovalSource>();
         services.AddGitPreflight();
         services.AddSingleton<IVcaHookPresenter>(_ =>
             new VcaConsoleHookPresenter(new VcaHookConsoleOptions(output, error, input, enableSpinner, style)));
         services.AddSingleton<IHumanSignaturePrompt>(_ => new HumanSignaturePromptLauncher(output, error, style));
+    }
+
+    private static string StatePath()
+    {
+        var installDirectory = PathConstants.GetInstallDirPath();
+        Directory.CreateDirectory(installDirectory);
+        return Path.Combine(installDirectory, PathConstants.STATE_FILENAME);
     }
 }

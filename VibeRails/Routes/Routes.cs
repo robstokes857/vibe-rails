@@ -30,6 +30,8 @@ public static class RouteExtensions
         ChatHistoryRoutes.Map(app);
         if (isActiveRootBackend) SessionReplayRoutes.Map(app);
         if (isActiveRootBackend) SessionSharingRoutes.Map(app);
+        // Review requests before a commit (VB-50): dashboard-only, reads the project's staged index.
+        if (isActiveRootBackend) ReviewRequestRoutes.Map(app);
         LlmProxyRoutes.Map(app);
         LlmAnthropicProxyRoutes.Map(app);
         LlmZaiProxyRoutes.Map(app);

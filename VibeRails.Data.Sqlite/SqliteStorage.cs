@@ -61,6 +61,7 @@ public static class SqliteStorage
         services.TryAddScoped<IChatSummaryStore>(sp => sp.GetRequiredService<IRepository>());
         services.TryAddSingleton<IConversationTitleStore>(sp => new ConversationTitleStore(StateConnectionString(sp)));
         services.TryAddSingleton<IManagedWorktreeStore>(sp => new ManagedWorktreeStore(StateConnectionString(sp)));
+        services.TryAddSingleton<IReviewRequestStore>(sp => new ReviewRequestStore(StateConnectionString(sp)));
         services.TryAddSingleton<IBoardStore>(sp => CreateBoardStore(sp.GetRequiredService<SqliteStoragePaths>().StatePath));
         services.TryAddSingleton<IJobStore>(sp => new JobStore(StateConnectionString(sp), sp.GetService<BoardAutomationEventSource>()?.Store, sp.GetService<IReviewRunSnapshotFactory>()));
         services.TryAddSingleton<ITokenSavingsStore>(sp => new TokenSavingsStore(StateConnectionString(sp)));
@@ -104,6 +105,17 @@ public static class SqliteStorage
         Func<IServiceProvider, string> statePathFactory)
     {
         services.TryAddSingleton<IJobStore>(sp => new JobStore(ConnectionString(statePathFactory(sp)), sp.GetService<BoardAutomationEventSource>()?.Store, sp.GetService<IReviewRunSnapshotFactory>()));
+        return services;
+    }
+
+    /// <summary>
+    /// Review requests alone, for the commit hook host: it reads approvals a reviewer already gave
+    /// over the staged tree. Same state.db, additive schema, no Board or session registration.
+    /// </summary>
+    public static IServiceCollection AddSqliteReviewRequestStorage(this IServiceCollection services,
+        Func<IServiceProvider, string> statePathFactory)
+    {
+        services.TryAddSingleton<IReviewRequestStore>(sp => new ReviewRequestStore(ConnectionString(statePathFactory(sp))));
         return services;
     }
 

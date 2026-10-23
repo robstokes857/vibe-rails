@@ -1,0 +1,70 @@
+namespace VibeRails.DB;
+
+/// <summary>
+/// A request for a person to review a set of changes before they are committed (VB-50). The row
+/// keeps the identity that is approved (the tree id) beside the bundle a reviewer reads, which is
+/// stored as JSON because its shape belongs to the application, not the database.
+/// </summary>
+/// <param name="Status">One of <c>open</c>, <c>approved</c>, <c>rejected</c>, <c>cancelled</c>.</param>
+public sealed record ReviewRequestRecord(
+    string Id,
+    string ProjectPath,
+    string Scope,
+    string TreeId,
+    string? BaseCommit,
+    string? CardKey,
+    string Status,
+    string BundleJson,
+    DateTime CreatedUTC,
+    DateTime UpdatedUTC);
+
+/// <summary>
+/// One reviewer's answer. An approval carries the signature trailer fields it was verified from;
+/// <see cref="VerifiedUTC"/> is set only after viberails.ai confirmed the signature and the signer's
+/// verified email, so the commit hook can trust a row it reads back without a second round trip
+/// before the recheck.
+/// </summary>
+/// <param name="Decision"><c>approved</c> or <c>rejected</c>.</param>
+public sealed record ReviewDecisionRecord(
+    long Id,
+    string RequestId,
+    string Reviewer,
+    string Decision,
+    string? Comment,
+    Guid? KeyId,
+    string? Fingerprint,
+    string? TreeId,
+    string? SignatureBase64,
+    DateTime DecidedUTC,
+    DateTime? VerifiedUTC);
+
+/// <summary>Durable review requests and decisions in state.db (component <c>review-requests</c>).</summary>
+public interface IReviewRequestStore
+{
+    /// <summary>Adds a new request. The id must be unique.</summary>
+    Task AddAsync(ReviewRequestRecord request, CancellationToken ct = default);
+
+    /// <summary>The request with this id, or null.</summary>
+    Task<ReviewRequestRecord?> GetAsync(string id, CancellationToken ct = default);
+
+    /// <summary>Requests for one project, newest first, at most <paramref name="limit"/>.</summary>
+    Task<IReadOnlyList<ReviewRequestRecord>> ListAsync(string projectPath, int limit, CancellationToken ct = default);
+
+    /// <summary>Changes the status and stamps the update time. False when the request does not exist.</summary>
+    Task<bool> UpdateStatusAsync(string id, string status, DateTime updatedUtc, CancellationToken ct = default);
+
+    /// <summary>Removes the request and its decisions. False when it did not exist.</summary>
+    Task<bool> DeleteAsync(string id, CancellationToken ct = default);
+
+    /// <summary>Records a decision and returns it with its assigned id.</summary>
+    Task<ReviewDecisionRecord> AddDecisionAsync(ReviewDecisionRecord decision, CancellationToken ct = default);
+
+    /// <summary>Decisions for one request, oldest first.</summary>
+    Task<IReadOnlyList<ReviewDecisionRecord>> GetDecisionsAsync(string requestId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Verified approvals whose signature covers <paramref name="treeId"/>, newest first, across every
+    /// request that is not cancelled. The commit hook filters these by the rule's approvers.
+    /// </summary>
+    Task<IReadOnlyList<ReviewDecisionRecord>> FindVerifiedApprovalsAsync(string treeId, CancellationToken ct = default);
+}
