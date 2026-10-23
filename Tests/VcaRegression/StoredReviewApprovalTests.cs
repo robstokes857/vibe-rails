@@ -136,7 +136,52 @@ public sealed class StoredReviewApprovalTests
         return command.ExecuteScalar() is not null;
     }
 
-    private static async Task SeedApprovalAsync(VcaRegressionRepository repo, string tree, string reviewer, string status = "open")
+    /// <summary>
+    /// Codex review N1: four rules with four stored approvals used to spend the three popup rounds
+    /// and block on the fourth. The ledger pass is now outside those rounds and applies them all.
+    /// </summary>
+    [Fact]
+    public async Task EveryStoredApprovalIsAppliedInOnePass()
+    {
+        await using var repo = await VcaRegressionRepository.CreateAsync("signed-approval/four-rules");
+        var keys = new Dictionary<Guid, string>
+        {
+            [Guid.NewGuid()] = "one@example.com",
+            [Guid.NewGuid()] = "two@example.com",
+            [Guid.NewGuid()] = "three@example.com",
+            [Guid.NewGuid()] = "four@example.com"
+        };
+        var verifier = Use(repo, new FakeCommitSignatureVerifier(signature =>
+            keys.TryGetValue(signature.KeyId, out var email)
+                ? new CommitSignatureVerification(CommitSignatureStatus.Valid, "valid", email)
+                : new CommitSignatureVerification(CommitSignatureStatus.Rejected, "unknown key")));
+        var prompt = UseDecliningPrompt(repo);
+        foreach (var name in new[] { "a.cs", "b.cs", "c.cs", "d.cs" })
+            await File.WriteAllTextAsync(Path.Combine(repo.RepositoryPath, name), $"class {name[0]} {{ }}\n", TestContext.Current.CancellationToken);
+        await repo.GitAsync("add", "--", "a.cs", "b.cs", "c.cs", "d.cs");
+        var tree = await StagedTreeAsync(repo);
+        var fill = 1;
+        foreach (var (keyId, email) in keys)
+        {
+            // Distinct keys and distinct signature bytes: the trailer writer drops earlier lines from
+            // the same key, and the ledger pass adds each signature once.
+            await SeedApprovalAsync(repo, tree, email, keyId: keyId,
+                signatureBase64: Convert.ToBase64String(Enumerable.Repeat((byte)fill++, 256).ToArray()));
+        }
+
+        var run = await repo.RunCommitMessageAsync("Change all four\n");
+
+        Assert.True(run.ExitCode == 0, run.Transcript);
+        Assert.Equal(4, Count(run.Transcript, "Applied the signed approval from"));
+        Assert.Equal(1, Count(run.Transcript, "Checking the commit again"));
+        Assert.Empty(prompt.Requests);
+        var message = await File.ReadAllTextAsync(repo.CommitMessagePath, TestContext.Current.CancellationToken);
+        Assert.Equal(keys.Keys.Order(), CommitSignatureFormat.Parse(message).Select(signature => signature.KeyId).Order());
+        Assert.Equal(4, verifier.Calls.DistinctBy(signature => signature.KeyId).Count());
+    }
+
+    private static async Task SeedApprovalAsync(VcaRegressionRepository repo, string tree, string reviewer, string status = "open",
+        Guid? keyId = null, string? signatureBase64 = null)
     {
         var store = UseStore(repo);
         var now = DateTime.UtcNow;
@@ -144,7 +189,8 @@ public sealed class StoredReviewApprovalTests
             null, ReviewRequestStatus.Open, "{}", now, now);
         await store.AddAsync(request, TestContext.Current.CancellationToken);
         var outcome = await store.RecordDecisionAsync(new ReviewDecisionRecord(0, request.Id, reviewer, ReviewDecisionKind.Approved, null,
-            HumanSignatureRuleTests.KeyId, HumanSignatureRuleTests.Fingerprint, tree, HumanSignatureRuleTests.SignatureBase64, now, now),
+            keyId ?? HumanSignatureRuleTests.KeyId, HumanSignatureRuleTests.Fingerprint, tree,
+            signatureBase64 ?? HumanSignatureRuleTests.SignatureBase64, now, now),
             now, TestContext.Current.CancellationToken);
         Assert.NotNull(outcome);
         if (status != ReviewRequestStatus.Open)

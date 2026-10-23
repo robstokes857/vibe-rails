@@ -158,34 +158,30 @@ public sealed class VcaHookRunner : IVcaHookRunner
         string validationOutput,
         CancellationToken cancellationToken)
     {
-        // Signatures already applied from the review ledger this run: a recheck that still fails
-        // (viberails.ai unreachable, say) must not apply the same approval again and again.
-        var applied = new HashSet<string>(StringComparer.Ordinal);
+        // A reviewer may already have approved exactly this tree (VB-50). Every stored, verified
+        // approval that fits a pending finding goes into the message in one pass, then one recheck
+        // verifies them like any other trailer: an agent's commit passes on a person's approval
+        // without a popup, and never without one. This pass is outside the popup rounds, so four
+        // rules with four approvals do not spend the budget a person gets at the popup.
+        var pendingBefore = PendingSignatures(summary);
+        if (pendingBefore.Count > 0)
+        {
+            var applied = await ApplyStoredApprovalsAsync(invocation, pendingBefore, cancellationToken);
+            if (applied > 0)
+            {
+                await _presenter.WriteSuccessAsync("Checking the commit again...");
+                var approvedRecheck = await RunPreflightAsync(preflightRequest, cancellationToken);
+                if (approvedRecheck.VcaSummary is null)
+                    return (summary, validationOutput);
+                summary = approvedRecheck.VcaSummary;
+                validationOutput = VcaOutput(approvedRecheck);
+            }
+        }
+
         for (var round = 0; round < MaxSignatureRounds; round++)
         {
             var pending = PendingSignatures(summary);
-            if (pending.Count == 0)
-                break;
-
-            // A reviewer may already have approved exactly this tree (VB-50). Their verified
-            // signature goes into the message first; the recheck verifies it like any other trailer,
-            // so an agent's commit passes on a person's approval without a popup, and never without one.
-            var stored = await FindStoredApprovalAsync(invocation, pending, applied, cancellationToken);
-            if (stored is not null)
-            {
-                await HumanSignaturePopup.AppendSignatureAsync(invocation.CommitMessagePath!, stored.Signature, cancellationToken);
-                applied.Add(stored.Signature.SignatureBase64);
-                await _presenter.WriteSuccessAsync(
-                    $"Applied the signed approval from {stored.SignerEmail} (review request {ShortId(stored.RequestId)}). Checking the commit again...");
-                var approvedRecheck = await RunPreflightAsync(preflightRequest, cancellationToken);
-                if (approvedRecheck.VcaSummary is null)
-                    break;
-                summary = approvedRecheck.VcaSummary;
-                validationOutput = VcaOutput(approvedRecheck);
-                continue;
-            }
-
-            if (_signaturePrompt is null)
+            if (pending.Count == 0 || _signaturePrompt is null)
                 break;
 
             // Said out loud: a silent block is what sent an agent to run the hook by hand (VIBE-200).
@@ -226,26 +222,30 @@ public sealed class VcaHookRunner : IVcaHookRunner
     }
 
     /// <summary>
-    /// The first pending signature finding that a stored, verified review approval can satisfy. Every
-    /// finding covers the same staged tree; they differ in approvers, so each is asked in turn.
+    /// Appends a stored, verified review approval for every pending signature finding it can satisfy
+    /// and returns how many were added. Every finding covers the same staged tree; they differ in
+    /// approvers, so each is asked in turn, and one approval that fits several findings is added once.
     /// </summary>
-    private async Task<StoredCommitApproval?> FindStoredApprovalAsync(
+    private async Task<int> ApplyStoredApprovalsAsync(
         VcaHookInvocation invocation,
         IReadOnlyList<VcaRuleFinding> pending,
-        HashSet<string> applied,
         CancellationToken cancellationToken)
     {
         if (_storedApprovals is null || string.IsNullOrWhiteSpace(invocation.CommitMessagePath))
-            return null;
+            return 0;
+        var applied = new HashSet<string>(StringComparer.Ordinal);
         foreach (var finding in pending)
         {
             if (finding.SignatureRequest is not { } request)
                 continue;
             var stored = await _storedApprovals.FindAsync(request, cancellationToken);
-            if (stored is not null && stored.Signature.TreeId == request.TreeId && !applied.Contains(stored.Signature.SignatureBase64))
-                return stored;
+            if (stored is null || stored.Signature.TreeId != request.TreeId || !applied.Add(stored.Signature.SignatureBase64))
+                continue;
+            await HumanSignaturePopup.AppendSignatureAsync(invocation.CommitMessagePath, stored.Signature, cancellationToken);
+            await _presenter.WriteSuccessAsync(
+                $"Applied the signed approval from {stored.SignerEmail} (review request {ShortId(stored.RequestId)}).");
         }
-        return null;
+        return applied.Count;
     }
 
     private static string ShortId(string id) => id.Length > 8 ? id[..8] : id;

@@ -148,6 +148,26 @@ public sealed class ReviewRequestServiceTests : IAsyncLifetime
         Assert.Equal(ReviewBundleOmission.Binary, files[1].Omitted);
     }
 
+    /// <summary>Codex review N2: a deleted text file over the per-file bound is oversized, not binary.</summary>
+    [Fact]
+    public async Task DeletedOversizedTextIsLabelledOversizedNotBinary()
+    {
+        await File.WriteAllTextAsync(Path.Combine(Repo, "big.txt"), new string('x', ReviewBundleCapture.MaxFileContentBytes + 1), Ct);
+        await Git("add", "--", "big.txt");
+        await Git("-c", "core.hooksPath=", "commit", "-q", "-m", "add big");
+        await Git("rm", "-q", "--", "big.txt");
+        var service = Service(FakeCommitSignatureVerifier.ValidFor("owner@example.com"));
+
+        var created = await service.CreateAsync(Repo, new CreateReviewRequest(Reviewers: ["owner@example.com"]), null, Ct);
+
+        var file = Assert.Single((await service.GetAsync(Repo, created.Id, Ct)).Bundle.Files);
+        Assert.Equal("deleted", file.Change);
+        Assert.False(file.Binary);
+        Assert.Equal(ReviewBundleOmission.Oversized, file.Omitted);
+        Assert.Null(file.Before);
+        Assert.Null(file.After);
+    }
+
     /// <summary>
     /// Codex review F2: a cancel that lands while an approval is being verified must win. The
     /// decision is refused and nothing becomes eligible for the commit hook.

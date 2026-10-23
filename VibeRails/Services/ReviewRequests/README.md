@@ -15,7 +15,8 @@ that exists (slice A, 2026-10-23: the desktop core) and records the design decis
   says why (`binary`, `oversized`, `bundle-limit`), so the reviewer knows what they are not seeing.
   The hook's snapshot carries no baseline for a deleted path and flags it binary, so deleted files
   are read from the frozen base tree (`GitStagedSnapshotProvider.TryReadTreeTextAsync`) under the
-  same bounds: a deleted text file shows what was removed; a deleted binary stays `binary`.
+  same bounds: a deleted text file shows what was removed; a deleted binary stays `binary`; a
+  deleted text file over the per-file bound is `oversized` and is not read at all.
 - **Ledger.** `IReviewRequestStore` / `ReviewRequestStore` in state.db, additive component
   `review-requests/1`: `ReviewRequests` (id, project, scope, tree id, base commit, card key, status,
   bundle JSON, timestamps) and `ReviewDecisions` (reviewer, decision, comment, the verified trailer
@@ -40,8 +41,10 @@ that exists (slice A, 2026-10-23: the desktop core) and records the design decis
   any other trailer. So an agent's commit passes once a person has approved exactly that tree, and
   never without one. `ReviewRequestApprovalSource` resolves the store only when a signature finding
   is pending (building the hook runner opens no database), reads the ledger within three seconds
-  and is quiet on any failure: the ledger is a convenience, never a gate. Each stored signature is
-  applied at most once per run, so an unreachable viberails.ai cannot loop. Both hook test
+  and is quiet on any failure: the ledger is a convenience, never a gate. The ledger pass runs once,
+  before and outside the three popup rounds, and appends every fitting approval (one per pending
+  finding, each signature once) followed by a single recheck, so four rules with four approvals
+  pass and an unreachable viberails.ai cannot loop. Both hook test
   harnesses (`VcaRegressionRepository`, `VcaHookEndToEndTests`) replace the store with the same
   per-repository file they give the job store, so no hook test opens the user's state.db.
 - **Routes.** `/api/v1/review-requests` on the active root only, both local credentials, no-store:

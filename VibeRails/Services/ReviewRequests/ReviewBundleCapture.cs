@@ -3,8 +3,11 @@ using VibeRails.Services.GitPreflight;
 
 namespace VibeRails.Services.ReviewRequests;
 
-/// <summary>Reads one path of the frozen base tree as text: binary (or unreadable) with no content, or the text.</summary>
-public delegate Task<(bool IsBinary, string? Content)> ReviewBaseTextReader(string relativePath, CancellationToken cancellationToken);
+/// <summary>
+/// Reads one path of the frozen base tree: binary (or unreadable) with no content, oversized with
+/// no content, or the text.
+/// </summary>
+public delegate Task<(bool IsBinary, bool Oversized, string? Content)> ReviewBaseTextReader(string relativePath, CancellationToken cancellationToken);
 
 /// <summary>
 /// Turns a staged snapshot into the bundle a reviewer reads. Content is bounded per file and per
@@ -26,13 +29,13 @@ public static class ReviewBundleCapture
     /// <summary>All file text in one bundle, in UTF-8 bytes. Files are visited in path order.</summary>
     public const int MaxBundleContentBytes = 4 * 1024 * 1024;
 
-    /// <summary>The snapshot provider's own text cap; a base blob above it is reported as binary.</summary>
-    public const long MaxBaseBlobBytes = 5 * 1024 * 1024;
-
-    /// <summary>Reads deleted paths' base text with the snapshot provider, from the snapshot's own base tree.</summary>
+    /// <summary>
+    /// Reads deleted paths' base text with the snapshot provider, from the snapshot's own base tree.
+    /// A blob over the per-file bound is reported oversized without being read.
+    /// </summary>
     public static ReviewBaseTextReader BaseTextReader(GitStagedSnapshot snapshot) =>
         (path, ct) => GitStagedSnapshotProvider.TryReadTreeTextAsync(
-            snapshot.RepositoryPath, snapshot.StagedIdentity?.BaseTree ?? string.Empty, path, MaxBaseBlobBytes, ct);
+            snapshot.RepositoryPath, snapshot.StagedIdentity?.BaseTree ?? string.Empty, path, MaxFileContentBytes, ct);
 
     public static async Task<ReviewBundle> BuildAsync(
         GitStagedSnapshot snapshot,
@@ -52,15 +55,17 @@ public static class ReviewBundleCapture
         {
             cancellationToken.ThrowIfCancellationRequested();
             var binary = file.IsBinary;
+            var oversized = false;
             var baseText = file.PreviousContent;
             var stagedText = file.Content;
             if (file.ChangeKind == GitStagedChangeKind.Deleted && readBaseText is not null)
             {
                 // The index has nothing at this path, so the snapshot could only say "binary";
                 // what the reviewer wants is the text that is going away.
-                var (baseIsBinary, content) = await readBaseText(file.PreviousRelativePath ?? file.RelativePath, cancellationToken);
+                var (baseIsBinary, baseIsOversized, content) = await readBaseText(file.PreviousRelativePath ?? file.RelativePath, cancellationToken);
                 binary = baseIsBinary;
-                baseText = baseIsBinary ? null : content;
+                oversized = baseIsOversized;
+                baseText = baseIsBinary || baseIsOversized ? null : content;
                 stagedText = null;
             }
 
@@ -72,7 +77,7 @@ public static class ReviewBundleCapture
             else
             {
                 var size = Utf8Length(stagedText) + Utf8Length(baseText);
-                if (size > MaxFileContentBytes)
+                if (oversized || size > MaxFileContentBytes)
                     omitted = ReviewBundleOmission.Oversized;
                 else if (size > budget)
                     omitted = ReviewBundleOmission.BundleLimit;

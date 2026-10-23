@@ -1146,11 +1146,11 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
 
     /// <summary>
     /// One path of a frozen tree as text, for consumers that need a baseline the snapshot does not
-    /// carry (a review bundle shows what a deleted file contained). Binary, oversized (over
-    /// <paramref name="maximumBytes"/> or the 5 MiB text cap) and missing paths come back as binary
-    /// with no content; the caller decides how to label them.
+    /// carry (a review bundle shows what a deleted file contained). A blob larger than
+    /// <paramref name="maximumBytes"/> is reported as oversized without being read, so the caller
+    /// can label it as such; binary content and missing paths come back as binary with no content.
     /// </summary>
-    public static async Task<(bool IsBinary, string? Content)> TryReadTreeTextAsync(
+    public static async Task<(bool IsBinary, bool Oversized, string? Content)> TryReadTreeTextAsync(
         string repositoryPath,
         string treeId,
         string relativePath,
@@ -1158,14 +1158,21 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         CancellationToken cancellationToken)
     {
         if (!IsObjectId(treeId) || string.IsNullOrEmpty(relativePath))
-            return (true, null);
+            return (true, false, null);
+        var objectSpec = $"{treeId}:{relativePath}";
+        var sizeResult = await RunTextGitAsync(repositoryPath, ["cat-file", "-s", objectSpec], cancellationToken);
+        if (sizeResult.ExitCode != 0 || sizeResult.TimedOut
+            || !long.TryParse(sizeResult.StdOut.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var size))
+            return (true, false, null);
+        if (size > maximumBytes)
+            return (false, true, null);
         var blob = await TryReadTextBlobAsync(
             repositoryPath,
-            $"{treeId}:{relativePath}",
-            knownSize: null,
-            new SnapshotMemoryBudget(maximumBytes),
+            objectSpec,
+            size,
+            new SnapshotMemoryBudget(Math.Max(size, 1)),
             cancellationToken);
-        return (blob.IsBinary, blob.Content);
+        return (blob.IsBinary, false, blob.Content);
     }
 
     private static HashSet<string> CollectGitLinkPaths(IReadOnlyList<GitIndexEntry> entries) =>
