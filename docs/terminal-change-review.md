@@ -1,37 +1,17 @@
-# Terminal change approval and review
+# Terminal change review
 
-Changes to the terminal require Rob's approval. The root [vc.rules.md](../vc.rules.md)
-uses `Signed Approval(..., 'RobStokes857@gmail.com') (STOP)` for the terminal backend,
-PTY provider, emulator, browser terminal, bundled xterm, terminal launchers, host
-lifecycle, VS Code host, and the listed shared entry points. Core terminal regression
-directories are covered too. Shared files are gated as whole files, including changes
-to their non-terminal code.
+The repository's terminal signing rules have been removed from
+[vc.rules.md](../vc.rules.md). A narrower signing policy can be added later; this
+checklist retains the terminal regression risks and review guidance.
 
-## How approval works
-
-Git Guard defers the check at pre-commit and requires Rob's signature at commit-msg.
-Rob reviews the complete staged diff, then signs in the separate Git Guard popup
-using a Settings > KEYS key registered to his verified viberails.ai account. One
-signature covers all applicable approval rules for that staged tree. Changing staged
-content afterward requires a new signature. Missing approval, an unapproved signer,
-or unavailable signature verification blocks the commit; a textual acknowledgment
-does not satisfy STOP.
-
-The root policy protects itself and this checklist. Once committed, removing or
-weakening an approval rule still requires approval under the committed policy.
 Existing nested rules remain in force: notably `TerminalEmulator` has a directory
-lock, and `Pty.Net` has additional STOP checks. A signature does not override them.
+lock, and `Pty.Net` has additional STOP checks.
 
-This is a Git Guard commit gate, not a filesystem edit lock or branch protection.
-It requires active hooks and a VibeRails build supporting Signed Approval; skipping
-hooks bypasses local enforcement. The hook installation in this checkout points to
-the per-user installed `vb.exe`.
-
-Approval is path-based. New files under protected directories are covered automatically.
-For new terminal modules or dependencies outside those directories, extend the root
-policy in the same change; literal approval paths do not support filename globs.
-Review terminal-affecting changes in shared files even when their immediate purpose
-is another feature. The separate remote relay repository is outside this policy.
+Review terminal-affecting changes in shared files when they alter launch arguments,
+terminal service registration, process shutdown/ownership, input routing, terminal
+visibility/size, or shared CSS that affects the terminal container. Any future signing
+policy should focus on terminal runtime code rather than blanket-gating general
+application, Board, Jobs, settings, documentation, or test files.
 
 ## Highest-risk changes
 
