@@ -70,6 +70,29 @@ public sealed class PrReviewPublishingTests : IDisposable
         Assert.Equal("published", (await _service.PublishAsync(Project, 7, result.Review.Id, _ct)).Status);
     }
 
+    [Fact]
+    public async Task Disable_between_completion_commit_and_publish_gate_returns_the_saved_local_result()
+    {
+        await Start();
+        var resolutions = 0;
+        var resolver = new Mock<IPrReviewRepositoryResolver>();
+        resolver.Setup(r => r.ResolveAsync(Project, It.IsAny<CancellationToken>())).Returns(async () =>
+        {
+            // Complete resolves once before committing; Publish resolves again after the enabled read.
+            if (Interlocked.Increment(ref resolutions) == 2)
+                await _store.SetReviewerSettingsAsync(false, _ct);
+            return new PrReviewProject(Project, Repo, null);
+        });
+        var service = new PrReviewService(_store, _github.Object, resolver.Object);
+        var result = await service.CompleteAsync(Project, 7, new(Feedback: "Saved findings", Verdict: "request_changes"), _ct);
+        Assert.Equal("completed", result.Review!.Status);
+        Assert.Equal("Saved findings", result.Review.Feedback);
+        Assert.Equal("disabled", result.Delivery!.Status);
+        Assert.Null(result.Delivery.GitHubId);
+        Assert.Single((await service.GetAsync(Project, 7, _ct)).Reviews);
+        _github.VerifyNoOtherCalls();
+    }
+
     [Theory]
     [InlineData("request_changes", null, "REQUEST_CHANGES")]
     [InlineData("request_changes", false, "REQUEST_CHANGES")]

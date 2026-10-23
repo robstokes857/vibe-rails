@@ -218,8 +218,21 @@ public sealed class PrReviewService(IPrReviewStore store, IGitHubPullRequestClie
         var result = await store.CompleteReviewAsync(repository, number, verdict, blocking, feedback, headSha, summary, ct);
         RequireSaved(result, number);
         var delivery = await store.EnsureDeliveryAsync(repository, result.Review!.Id, ct);
-        if ((await store.GetReviewerSettingsAsync(ct)).Enabled)
-            delivery = await PublishAsync(projectPath, number, result.Review.Id, ct);
+        try
+        {
+            if ((await store.GetReviewerSettingsAsync(ct)).Enabled)
+                delivery = await PublishAsync(projectPath, number, result.Review.Id, ct);
+        }
+        catch (PrReviewException ex)
+        {
+            // The local result is committed. A concurrent disable/project change can prevent
+            // publishing, but must not turn that saved completion into an HTTP/MCP failure.
+            var enabled = (await store.GetReviewerSettingsAsync(CancellationToken.None)).Enabled;
+            await store.SetDeliveryResultAsync(repository, result.Review.Id, enabled ? "failed" : "disabled", null,
+                ex.Message, CancellationToken.None, delivery.Status);
+            delivery = (await store.GetDeliveriesAsync(repository, number, CancellationToken.None))
+                .Single(d => d.ReviewId == result.Review.Id);
+        }
         return new PrReviewWriteResponse(result.PullRequest!, result.Review, false) { Delivery = delivery };
     }
 

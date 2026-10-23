@@ -30,7 +30,9 @@ requests: which PRs were reviewed, what each pass found, and which PR to review 
   `delivery`. States are `pending`, `disabled`, `failed`, `unknown`, `published`. Authentication,
   permissions, stale heads and publishing errors remain visible beside the local completed
   result. Only a matching positive GitHub id, identity, body, commit and review event confirms
-  publication. A unique marker and a cross-process SQLite reservation prevent duplicate POSTs.
+  publication. A disable/project change after the local commit returns the saved completion
+  with a separate disabled/failed delivery, so the page can reload the completed result.
+  A unique marker and a cross-process SQLite reservation prevent duplicate POSTs.
   Before sending, the reservation durably becomes `unknown`; a crash/timeout/unexpected response
   cannot authorize another POST. Retry checks the original account's GitHub reviews for its
   exact snapshot (100/page, at most 20 pages); absence is still unknown, never proof to resend.
