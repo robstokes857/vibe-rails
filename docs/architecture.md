@@ -48,10 +48,11 @@ General Settings displays per-dataset coverage. Restore/inspection instructions 
 
 ## Vibe AI navigation
 
-Vibe AI is always shown in both navigation layouts; there is no visibility setting. The retired
-`ShowVibeAiUi` key stays in the shared settings file for older versions. Settings updates ignore
-a requested value and preserve the stored one, startup leaves it unchanged, and responses always
-report `true`.
+The Vibe AI UI is hidden: its navigation link and view loader are removed, and old
+`?view=vibe-rails-ai` links fall back to Terminals. The controller and template are retained
+for future use. There is no visibility setting. The retired `ShowVibeAiUi` key stays in the
+shared settings file for older versions. Settings updates ignore a requested value and
+preserve the stored one, startup leaves it unchanged, and responses always report `true`.
 
 ## Optional Vibe Story tracking
 

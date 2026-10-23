@@ -16,7 +16,7 @@ boards/lanes and a card search, confirms the destination and lane Automation cou
 to replace an editor with unsaved drafts. Dispose it on close/replacement/unload. The existing
 navbar **Sign in** opens the device approval flow when signed out. The top navigation is the
 only application navigation. Quality is third and Rules fourth; they are separate destinations.
-Automation follows Rules, then ENVs, Vibe AI, MCP and Reviews. The standalone play button opens
+Automations follows Agents, then MCP and Reviews. The standalone play button opens
 Quick actions for automations and signed scripts beside the accessible icon-only Settings cog.
 Its footer offers only **Customize list…**; open Agents and Automations through their top navigation links.
 Rules runs validation only; Quality restores or starts its own cached scan when opened.
@@ -103,10 +103,11 @@ Use microtasks, not short-delay `setTimeout` batching, for webview activity even
 
 ## Vibe AI navigation
 
-The Vibe AI link in the top navigation is always visible; there is no setting to
-hide it, and none should be added back. The retired `ShowVibeAiUi` key stays in `settings.json`
-for older versions that still read it: the settings route ignores a requested value, preserves
-the stored one, and always reports `showVibeAiUi: true`. The frontend neither sends nor reads it.
+The Vibe AI UI is hidden: there is no navigation link, registered view loader or startup/
+duplicate-tab destination. Its controller and template are retained for future use. There is
+no visibility setting. The retired `ShowVibeAiUi` key stays in `settings.json` for older versions
+that still read it: the settings route ignores a requested value, preserves the stored one,
+and always reports `showVibeAiUi: true`. The frontend neither sends nor reads it.
 
 ## Retired HTTP relay setting
 

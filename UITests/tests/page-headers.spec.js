@@ -4,7 +4,6 @@ const { test, expect } = require('@playwright/test');
 const VIEWS = [
     ['agents', 'Rules'],
     ['code-quality', 'Code quality'],
-    ['vibe-rails-ai', 'Vibe AI Search'],
     ['mcp', 'MCP Explorer'],
     ['pr-reviews', 'PR Reviews'],
     ['settings', 'Application Settings']
@@ -76,10 +75,6 @@ for (const width of [1440, 768, 390]) {
 
             if (view === 'agents') {
                 await expect(header.getByRole('switch')).toBeEnabled();
-            } else if (view === 'vibe-rails-ai') {
-                const diagnostics = header.getByRole('button', { name: 'Diagnostics' });
-                await diagnostics.click();
-                await expect(diagnostics).toHaveAttribute('aria-expanded', 'true');
             } else if (view === 'mcp') {
                 const remote = header.getByRole('button', { name: 'Remote', exact: true });
                 await remote.focus();

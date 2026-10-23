@@ -14,7 +14,6 @@ import { TerminalController } from './js/modules/terminal-multitab.js';
 import { SettingsController } from './js/modules/settings-controller.js';
 import { SetupAlert } from './js/modules/setup-panel.js';
 import { RemoteAccountLinkPanel } from './js/modules/remote-account-link.js';
-import { VibeRailsAiController } from './js/modules/vibe-rails-ai-controller.js';
 import { McpController } from './js/modules/mcp-controller.js';
 import { PrReviewsController } from './js/modules/pr-reviews-controller.js';
 import { JobController } from './js/modules/jobs-controller.js';
@@ -61,7 +60,6 @@ export class VibeControlApp {
         this.terminalController = new TerminalController(this);
         this.settingsController = new SettingsController(this);
         this.setupAlert = new SetupAlert(this);
-        this.vibeRailsAiController = new VibeRailsAiController(this);
         this.mcpController = new McpController(this);
         this.prReviewsController = new PrReviewsController(this);
         this.jobController = new JobController(this);
@@ -613,7 +611,6 @@ export class VibeControlApp {
             'sessions',
             'settings',
             'terminal-focus',
-            'vibe-rails-ai',
             'mcp',
             'pr-reviews',
             'ai-agents',
@@ -875,7 +872,6 @@ export class VibeControlApp {
             'sessions': () => this.sessionController.loadSessions(),
             'settings': () => this.settingsController.loadSettings(data),
             'terminal-focus': () => this.terminalController.loadTerminalFocusView(data),
-            'vibe-rails-ai': () => this.vibeRailsAiController.loadView(),
             'mcp': () => this.mcpController.loadView(),
             // The list, or one PR's detail page when data carries { number }.
             'pr-reviews': () => this.prReviewsController.loadView(data),
