@@ -25,6 +25,12 @@ public sealed class BackupFiles(IServiceScopeFactory scopes)
     /// <summary>Files up to this size are read into memory before their zip entry exists; larger ones are staged on disk.</summary>
     internal const int InMemoryCaptureBytes = 16 * 1024 * 1024;
 
+    // Each character costs one unit plus one per enclosing array/inline table. This bounds
+    // the aggregate size of the substrings and scans the recursive renderer can produce.
+    internal const int TomlRedactionWorkLimit = 16 * 1024 * 1024;
+
+    private sealed class TomlWorkLimitException() : JsonException("TOML redaction work limit exceeded.");
+
     public Task<List<BackupFileSource>> EnumerateAsync(string root, CancellationToken ct) =>
         EnumerateAsync(root, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ct);
 
@@ -248,6 +254,8 @@ public sealed class BackupFiles(IServiceScopeFactory scopes)
                 // A database snapshot is consistent by construction; any other file must be unchanged by its read.
                 if (!IsDatabase(source.Path) && stamp != FileStamp(source.Path)) Issue("File changed during capture; retry required.");
             }
+            catch (TomlWorkLimitException)
+            { Issue("TOML redaction work limit exceeded; configuration omitted."); continue; }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or StorageException)
             { Issue("File could not be completely captured."); continue; }
             // The entry exists only once the source has been read completely, so a read or parse failure never
@@ -401,6 +409,7 @@ public sealed class BackupFiles(IServiceScopeFactory scopes)
         var lines = text.Replace("\r\n", "\n").Split('\n');
         var output = new StringBuilder(text.Length);
         var blockedTable = false;
+        var remainingWork = TomlRedactionWorkLimit;
         for (var i = 0; i < lines.Length; i++)
         {
             var line = lines[i].Trim();
@@ -419,11 +428,11 @@ public sealed class BackupFiles(IServiceScopeFactory scopes)
             var equals = IndexOutsideQuotes(line, '=');
             var value = new StringBuilder(equals < 0 ? "" : line[(equals + 1)..]);
             var state = new TomlValueState();
-            state.Read(value.ToString());
+            state.Read(value.ToString(), ref remainingWork);
             while (state.IsOpen && i + 1 < lines.Length)
             {
                 var next = lines[++i];
-                state.Read(next);
+                state.Read(next, ref remainingWork);
                 value.Append('\n').Append(next);
             }
             // Anything that is not a key/value pair is dropped rather than copied unexamined.
@@ -652,26 +661,30 @@ public sealed class BackupFiles(IServiceScopeFactory scopes)
 
         public bool IsOpen => triple || depth > 0;
 
-        // Each source line is visited once, including multi-line strings and arrays.
-        public void Read(ReadOnlySpan<char> line)
+        // Each source line is visited once, including multi-line strings and arrays. The budget
+        // belongs to the whole file, and is checked before any recursive rendering of this value.
+        public void Read(ReadOnlySpan<char> line, ref int remainingWork)
         {
             for (var i = 0; i < line.Length; i++)
             {
+                var start = i;
+                var weight = Math.Max(depth, 0) + 1;
                 var c = line[i];
                 if (quote != '\0')
                 {
-                    if (quote == '"' && c == '\\') { i++; continue; }
-                    if (c != quote) continue;
-                    if (triple)
+                    if (quote == '"' && c == '\\') i = Math.Min(i + 1, line.Length - 1);
+                    else if (c == quote && (!triple || (i + 2 < line.Length && line[i + 1] == quote && line[i + 2] == quote)))
                     {
-                        if (i + 2 >= line.Length || line[i + 1] != quote || line[i + 2] != quote) continue;
-                        i += 2;
-                        for (var extra = 0; extra < 2 && i + 1 < line.Length && line[i + 1] == quote; extra++) i++;
+                        if (triple)
+                        {
+                            i += 2;
+                            for (var extra = 0; extra < 2 && i + 1 < line.Length && line[i + 1] == quote; extra++) i++;
+                        }
+                        quote = '\0';
+                        triple = false;
                     }
-                    quote = '\0';
-                    triple = false;
                 }
-                else if (c == '#') break;
+                else if (c == '#') i = line.Length - 1;
                 else if (c is '"' or '\'')
                 {
                     quote = c;
@@ -683,6 +696,10 @@ public sealed class BackupFiles(IServiceScopeFactory scopes)
                     if (++depth > 64) throw new JsonException("TOML nesting exceeds capture limit.");
                 }
                 else if (c is ']' or '}') depth--;
+                // Include skipped escapes, quote delimiters and comments too. Over-counting
+                // discarded text is intentional; no nested input can evade the work bound.
+                remainingWork -= (i - start + 1) * weight;
+                if (remainingWork < 0) throw new TomlWorkLimitException();
             }
             if (!triple) quote = '\0';
         }

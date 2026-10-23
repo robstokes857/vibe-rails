@@ -16,10 +16,12 @@ namespace Tests.Services;
 public sealed class BackupFilesCredentialTests : IDisposable
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "vb-backup-files-" + Guid.NewGuid().ToString("N"));
+    private readonly ITestOutputHelper output;
     private string Home => Path.Combine(root, "home");
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    public BackupFilesCredentialTests() { Directory.CreateDirectory(root); Directory.CreateDirectory(Home); }
+    public BackupFilesCredentialTests(ITestOutputHelper output)
+    { this.output = output; Directory.CreateDirectory(root); Directory.CreateDirectory(Home); }
 
     [Theory]
     [InlineData("settings.json")]
@@ -62,6 +64,94 @@ public sealed class BackupFilesCredentialTests : IDisposable
         var sw = System.Diagnostics.Stopwatch.StartNew();
         Assert.Throws<System.Text.Json.JsonException>(() => BackupFiles.RedactToml(text));
         Assert.True(sw.Elapsed < TimeSpan.FromSeconds(2));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public void NearLimitTomlNestingKeepsRedactionWithinResourceBounds(bool inlineTables, bool multiline)
+    {
+        // All 64 permitted levels, using about 95% of the aggregate work allowance.
+        var text = "value = " + NestedTomlValue(240 * 1024, inlineTables, multiline);
+        // Inline tables copy key/value pairs too; leave headroom for both renderers while
+        // keeping the allowed near-budget case well below the old 833 MB reproduction.
+        var (redacted, error) = RedactWithinResourceBounds(text, 192);
+
+        Assert.Null(error);
+        var expected = inlineTables
+            ? string.Concat(Enumerable.Repeat("{ next = ", 63)) + "{ model = \"keep\" }" + string.Concat(Enumerable.Repeat(" }", 63))
+            : new string('[', 64) + "\"--api-key\", \"[redacted]\"" + new string(']', 64);
+        Assert.Equal("value = " + expected + "\n", redacted);
+        Assert.DoesNotContain("private-value", redacted);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public void PaddedTomlAtNestingLimitFailsBeforeRecursiveAllocations(bool inlineTables, bool multiline)
+    {
+        // Valid ~2 MiB input within both old limits; previously amplified to ~833 MB of allocations.
+        var text = "value = " + NestedTomlValue(2 * 1024 * 1024, inlineTables, multiline);
+        var (_, error) = RedactWithinResourceBounds(text, 48);
+        var captureError = Assert.IsAssignableFrom<System.Text.Json.JsonException>(error);
+        Assert.Equal("TOML redaction work limit exceeded.", captureError.Message);
+    }
+
+    [Fact]
+    public void TomlWorkBudgetIsSharedAcrossValues()
+    {
+        var value = NestedTomlValue(32 * 1024, inlineTables: false, multiline: true);
+        // Each entry fits on its own, but nine entries exceed the file-wide budget.
+        var text = string.Concat(Enumerable.Range(0, 9).Select(i => $"value{i} = {value}\n"));
+        var (_, error) = RedactWithinResourceBounds(text, 128);
+        var captureError = Assert.IsAssignableFrom<System.Text.Json.JsonException>(error);
+        Assert.Equal("TOML redaction work limit exceeded.", captureError.Message);
+    }
+
+    [Fact]
+    public async Task OverBudgetTomlIsOmittedWithAnExplicitIssueAndSourcePreserved()
+    {
+        var text = "model = \"keep\"\nvalue = " + NestedTomlValue(2 * 1024 * 1024, inlineTables: false, multiline: false);
+        var path = Path.Combine(root, "config.toml");
+        await File.WriteAllTextAsync(path, text, Ct);
+        var kept = Path.Combine(root, "other.toml");
+        await File.WriteAllTextAsync(kept, "args = [\"--token\", \"private-value\"]", Ct);
+        using var archive = new MemoryStream();
+        var issues = await BackupFiles.WriteZipAsync(archive, [new(path, "config.toml"), new(kept, "other.toml")],
+            new SqliteDatabaseSnapshotStore(), root, Ct);
+
+        Assert.Equal("config.toml: TOML redaction work limit exceeded; configuration omitted.", Assert.Single(issues));
+        archive.Position = 0;
+        using var zip = new ZipArchive(archive, ZipArchiveMode.Read);
+        Assert.Null(zip.GetEntry("config.toml"));
+        Assert.DoesNotContain("config.toml", await Read(zip, "files.json"));
+        Assert.Equal("args = [\"--token\", \"[redacted]\"]\n", await Read(zip, "other.toml"));
+        Assert.Equal(text, await File.ReadAllTextAsync(path, Ct));
+    }
+
+    private (string? Redacted, Exception? Error) RedactWithinResourceBounds(string text, int allocationLimitMiB)
+    {
+        BackupFiles.RedactToml("value = [\"--token\", \"warmup\"]");
+        string? redacted = null;
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var error = Record.Exception(() => redacted = BackupFiles.RedactToml(text));
+        sw.Stop();
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        output.WriteLine($"TOML {text.Length:N0} chars: {sw.Elapsed.TotalMilliseconds:N1} ms, {allocated:N0} allocated bytes");
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(2), $"TOML took {sw.Elapsed}");
+        Assert.True(allocated < allocationLimitMiB * 1024L * 1024, $"TOML allocated {allocated:N0} bytes");
+        return (redacted, error);
+    }
+
+    private static string NestedTomlValue(int padding, bool inlineTables, bool multiline)
+    {
+        var whitespace = (multiline ? "\n" : "") + new string(' ', padding);
+        return inlineTables
+            ? string.Concat(Enumerable.Repeat("{ next = ", 63)) + "{" + whitespace + "api_key = \"private-value\", model = \"keep\" }" + string.Concat(Enumerable.Repeat(" }", 63))
+            : new string('[', 64) + whitespace + "\"--api-key\", \"private-value\"" + new string(']', 64);
     }
 
     [Theory]

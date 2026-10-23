@@ -42,7 +42,13 @@ fail explicitly. Resource pressure defers the job.
 JSON/JSONC and TOML configuration capture is limited to 16 MiB before parsing, including a
 bounded read if the file grows. Oversized files are omitted with an incomplete-coverage issue;
 they are never copied without redaction. TOML multiline state is scanned once per line and
-nesting is limited to 64 levels before recursive redaction.
+nesting is limited to 64 levels before recursive redaction. A file-wide redaction work budget
+allows 16 Mi character visits, counting each value character once plus once per enclosing
+array or inline table (including whitespace, comments and string bodies). The incremental
+scanner checks this before rendering each value, bounding recursive substring/scan amplification
+even for valid input below the byte and nesting limits. An over-budget file is omitted entirely
+with an explicit `TOML redaction work limit exceeded; configuration omitted.` coverage issue;
+the source and existing archives remain untouched.
 
 Included: installation-root `.json/.toml/.yaml/.yml/.md` files, `scripts/`, `envs/`, `history/`,
 configured environment paths, default `.codex/.claude/.copilot/.opencode/.grok/.gemini` homes,
