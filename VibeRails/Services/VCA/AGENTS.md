@@ -242,8 +242,11 @@ inherited `VIBERAILS_TOOL_CURRENT_SESSION_ID`, then cards the message names by k
 read from board.db within 3 s and silently skipped when it cannot); the whole message minus comments
 and old trailers; every changed file with `+added -deleted` counts from the two tree objects; the
 tree; and the rules that asked. Card and message text is the committer's, possibly an agent's, so
-control characters are stripped before printing and the popup says the signature covers the files
-and tree only. Then it lists keys synced for the current API key. With none, it waits in the same
+control, format and separator characters print as `\uXXXX` escapes (`HumanSignaturePopup.Clean`)
+and the popup says the signature covers the files and tree only. Paths and approver lists are
+otherwise printed exactly and never cut; only the card and message lines are bounded, with "...".
+Do not route this text through `BoardPromptComposer.SanitizeLine`: it collapses spaces, rewrites
+braces and truncates, which made two different paths print alike. Then it lists keys synced for the current API key. With none, it waits in the same
 window ("press Enter to check again") while the person creates and syncs one, rather than failing
 and leaving a stale "no signing key" window behind a second attempt. It reads the password key by
 key with echo off (redirected input refused, 10-minute idle timeout, three attempts), signs with

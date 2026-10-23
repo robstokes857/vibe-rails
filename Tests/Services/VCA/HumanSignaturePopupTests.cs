@@ -83,7 +83,7 @@ public sealed class HumanSignaturePopupTests : IDisposable
 
     /// <summary>
     /// VIBE-200 owner note: before asking for approval, show the files, the Board card and a
-    /// description. The card and message are the committer's text, so escape sequences are removed.
+    /// description. The card and message are the committer's text, so escape sequences print escaped.
     /// </summary>
     [Fact]
     public async Task SummaryShowsCardDescriptionAndChangesWithoutControlCharacters()
@@ -105,8 +105,9 @@ public sealed class HumanSignaturePopupTests : IDisposable
         var transcript = output.ToString();
         Assert.DoesNotContain('\u001b', transcript);
         Assert.DoesNotContain('\a', transcript);
-        Assert.Contains("VIBE-200 (VB-WI983-272) · Signing [31mworkflow · named in the message", transcript);
-        Assert.Contains("Require owner approval", transcript);
+        Assert.Contains(@"VIBE-200 (VB-WI983-272) · Signing \u001B[31mworkflow · named in the message", transcript);
+        Assert.Contains(@"Require owner approval \u001B[2J", transcript);
+        Assert.Contains(@"Second line\u001B]0;fake\u0007", transcript);
         Assert.Contains("Why: terminal changes are risky.", transcript);
         Assert.Contains("Second line", transcript);
         Assert.DoesNotContain("Please enter the commit message", transcript);
@@ -115,6 +116,44 @@ public sealed class HumanSignaturePopupTests : IDisposable
         Assert.Contains("A docs/review.md (+25 -0)", transcript);
         Assert.Contains("may be an agent", transcript);
         Assert.True(transcript.IndexOf("Card", StringComparison.Ordinal) < transcript.IndexOf("Required", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// VIBE-200 review N1: the prompt sanitizer used at first collapsed spaces and cut at 160
+    /// characters, so 'same path.cs' and 'same  path.cs' printed alike and a long path lost its end.
+    /// </summary>
+    [Fact]
+    public async Task SummaryPrintsEveryPathExactlyAndEscapesInvisibleCharacters()
+    {
+        await File.WriteAllTextAsync(_messagePath, "Subject\n", Ct);
+        var longPath = new string('a', 165) + "-protected.cs";
+        var output = new StringWriter();
+        var popup = new HumanSignaturePopup(output, new ScriptedConsole(secrets: [null]), new FakeSigner(Key("Laptop")),
+            Verifier("a@example.com"), VcaConsoleStyle.Plain,
+            (_, _, _, _) => Task.FromResult<IReadOnlyList<string>>(
+                ["A same path.cs (+1 -0)", "A same  path.cs (+1 -0)", "A {{x}}.cs (+1 -0)", $"A {longPath} (+1 -0)",
+                    "A safe\u202Egnp.exe (+1 -0)", "A zero\u200Bwidth.cs (+1 -0)"]),
+            (_, _, _) => Task.FromResult<IReadOnlyList<string>>([]));
+
+        await popup.RunAsync(Request([]), Ct);
+
+        var transcript = output.ToString();
+        Assert.Contains("A same path.cs (+1 -0)", transcript);
+        Assert.Contains("A same  path.cs (+1 -0)", transcript);
+        Assert.Contains("A {{x}}.cs (+1 -0)", transcript);
+        Assert.Contains($"A {longPath} (+1 -0)", transcript);
+        Assert.Contains(@"A safe\u202Egnp.exe (+1 -0)", transcript);
+        Assert.Contains(@"A zero\u200Bwidth.cs (+1 -0)", transcript);
+        Assert.DoesNotContain('\u202E', transcript);
+        Assert.DoesNotContain('\u200B', transcript);
+    }
+
+    [Fact]
+    public void CleanBoundsOnlyWhenAskedAndMarksTheCut()
+    {
+        Assert.Equal("keep  {{this}}", HumanSignaturePopup.Clean("keep  {{this}}"));
+        Assert.Equal("abc...", HumanSignaturePopup.Clean("abcdef", 3));
+        Assert.Equal(@"line\u2028break", HumanSignaturePopup.Clean("line\u2028break"));
     }
 
     [Fact]

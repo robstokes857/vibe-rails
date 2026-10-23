@@ -1,7 +1,7 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 using VibeRails.DTOs;
-using VibeRails.Services.Board;
 using VibeRails.Services.Git;
 using VibeRails.Services.SigningKeys;
 using VibeRails.Utils;
@@ -158,9 +158,9 @@ public sealed class HumanSignaturePopup
     /// What the person is approving, before any key or password prompt (VIBE-200): the Board card,
     /// the whole commit message, every changed file with its line counts, then the tree and the
     /// rules that asked for the signature, last so they sit right above the prompt. The card and the
-    /// message are the committer's own words, possibly an agent's, so every line is stripped of
-    /// control characters (an escape sequence could otherwise repaint this screen) and the person is
-    /// told that the files and the tree are what the signature covers.
+    /// message are the committer's own words, possibly an agent's, so control characters in every
+    /// line are shown escaped (an escape sequence could otherwise repaint this screen) and the person
+    /// is told that the files and the tree are what the signature covers.
     /// </summary>
     private async Task WriteSummaryAsync(HumanSignaturePopupRequest request, CancellationToken cancellationToken)
     {
@@ -173,7 +173,7 @@ public sealed class HumanSignaturePopup
         catch (Exception ex) when (ex is not OperationCanceledException) { cards = []; }
         await WriteFieldAsync("Card", cards.Count == 0
             ? ["(none found)"]
-            : cards.Take(MaxListedCards).Select(card => Clean(card)).ToList());
+            : cards.Take(MaxListedCards).Select(card => Clean(card, MaxLineChars)).ToList());
 
         var (subject, description, more) = DescribeMessage(message);
         await WriteFieldAsync("Message", [subject]);
@@ -199,8 +199,7 @@ public sealed class HumanSignaturePopup
         }
 
         await WriteFieldAsync("Tree", [request.TreeId]);
-        // Longer bound: an approval names every accepted signer, and a cut list would hide one.
-        await WriteFieldAsync("Required", request.Requirements.Select(requirement => Clean(requirement, 600)).ToList());
+        await WriteFieldAsync("Required", request.Requirements.Select(requirement => Clean(requirement)).ToList());
         await _output.WriteLineAsync();
         await _output.WriteLineAsync(
             $"{s.Dim}The card and the message are written by whoever made the commit, which may be an agent. "
@@ -407,7 +406,7 @@ public sealed class HumanSignaturePopup
                 continue;
             if (line.Length == 0 && (lines.Count == 0 || lines[^1].Length == 0))
                 continue;
-            lines.Add(line.Length == 0 ? string.Empty : Clean(line));
+            lines.Add(line.Length == 0 ? string.Empty : Clean(line, MaxLineChars));
         }
         while (lines.Count > 0 && lines[^1].Length == 0)
             lines.RemoveAt(lines.Count - 1);
@@ -419,8 +418,28 @@ public sealed class HumanSignaturePopup
         return (lines[0], shown, body.Count - shown.Count);
     }
 
-    /// <summary>One display line with control characters and bidi overrides removed, bounded.</summary>
-    private static string Clean(string text, int maxChars = MaxLineChars) => BoardPromptComposer.SanitizeLine(text, maxChars);
+    /// <summary>
+    /// One display line with every control, format (zero-width, bidi) and line-separator character
+    /// shown as a <c>\uXXXX</c> escape, so committer text cannot repaint the screen and two different
+    /// names never print alike. Everything else is kept exactly, spacing and braces included: file
+    /// paths and approver lists are what the person approves. Only free text is bounded, and a cut
+    /// ends in "..." so it shows.
+    /// </summary>
+    internal static string Clean(string text, int? maxChars = null)
+    {
+        var builder = new StringBuilder(text.Length);
+        foreach (var c in text)
+        {
+            if (char.IsControl(c) || CharUnicodeInfo.GetUnicodeCategory(c) is UnicodeCategory.Format
+                    or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator)
+                builder.Append(@"\u").Append(((int)c).ToString("X4", CultureInfo.InvariantCulture));
+            else
+                builder.Append(c);
+        }
+
+        var line = builder.ToString();
+        return maxChars is { } max && line.Length > max ? line[..max] + "..." : line;
+    }
 
     private static async Task<IReadOnlyList<string>> ListChangesWithGitAsync(
         string workingDirectory, string baseTree, string treeId, CancellationToken cancellationToken)
