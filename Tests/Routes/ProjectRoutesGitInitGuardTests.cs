@@ -84,6 +84,40 @@ public sealed class ProjectRoutesGitInitGuardTests
     }
 
     [Fact]
+    public void BlocksDevicePrefixedSpellingsOfAProtectedFolder()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Device path prefixes are a Windows spelling.");
+
+        Assert.True(IsDangerous(@"\\?\" + Profile));
+        Assert.True(IsDangerous(@"\\.\" + Path.Combine(Profile, "Documents")));
+        Assert.True(IsDangerous(@"\\?\C:\"));
+        Assert.False(IsDangerous(@"\\?\" + Path.Combine(Profile, "source", "app")));
+    }
+
+    [Fact]
+    public void BlocksALinkThatPointsAtAProtectedFolder()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"vb_git_init_link_{Guid.NewGuid():N}");
+        var profile = Directory.CreateDirectory(Path.Combine(root, "Users", "tester")).FullName;
+        Directory.CreateDirectory(Path.Combine(profile, "Documents"));
+        var alias = Path.Combine(root, "alias");
+        try
+        {
+            CreateDirectoryLink(alias, profile);
+
+            Assert.True(ProjectRoutes.IsDangerousDirectory(alias, profile, []));
+            Assert.True(ProjectRoutes.IsDangerousDirectory(Path.Combine(alias, "Documents"), profile, []));
+            Assert.False(ProjectRoutes.IsDangerousDirectory(Path.Combine(alias, "Documents", "app"), profile, []));
+        }
+        finally
+        {
+            if (new DirectoryInfo(alias).LinkTarget is not null)
+                Directory.Delete(alias);
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void AProfileDirectlyUnderTheRootDoesNotBlockOtherTopLevelDirectories()
     {
         var rootProfile = OperatingSystem.IsWindows() ? @"C:\root" : "/root";
@@ -91,5 +125,33 @@ public sealed class ProjectRoutesGitInitGuardTests
 
         Assert.True(ProjectRoutes.IsDangerousDirectory(rootProfile, rootProfile, []));
         Assert.False(ProjectRoutes.IsDangerousDirectory(topLevel, rootProfile, []));
+    }
+
+    /// <summary>A symlink where permitted; on Windows a junction, which needs no privilege.</summary>
+    private static void CreateDirectoryLink(string link, string target)
+    {
+        try
+        {
+            Directory.CreateSymbolicLink(link, target);
+            return;
+        }
+        catch (Exception ex) when (OperatingSystem.IsWindows() && ex is UnauthorizedAccessException or IOException)
+        {
+        }
+
+        var startInfo = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = Path.Combine(Environment.SystemDirectory, "cmd.exe"),
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        foreach (var argument in new[] { "/d", "/c", "mklink", "/J", link, target })
+            startInfo.ArgumentList.Add(argument);
+        using var process = System.Diagnostics.Process.Start(startInfo)!;
+        process.WaitForExit();
+        if (process.ExitCode != 0)
+            Assert.Skip("Could not create a directory link: " + process.StandardError.ReadToEnd());
     }
 }

@@ -381,8 +381,70 @@ public static class ProjectRoutes
         return knownUserFolders.Any(folder => !string.IsNullOrWhiteSpace(folder) && Matches(folder));
     }
 
-    private static string NormalizeDirectory(string path) =>
-        Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+    /// <summary>
+    /// One spelling per directory, so a blocked folder cannot be reached by another name: the
+    /// <c>\\?\</c> / <c>\\.\</c> device prefixes are dropped, a symbolic link or junction is
+    /// replaced by its final target, and a Windows 8.3 short name (<c>ROBERT~1</c>) by the long
+    /// name. Components that do not exist are kept as written.
+    /// </summary>
+    internal static string NormalizeDirectory(string path)
+    {
+        var full = Path.GetFullPath(StripDevicePrefix(path));
+        var root = Path.GetPathRoot(full);
+        if (string.IsNullOrEmpty(root))
+            return Path.TrimEndingDirectorySeparator(full);
+
+        var resolved = root;
+        foreach (var segment in full[root.Length..].Split(
+                     [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                     StringSplitOptions.RemoveEmptyEntries))
+        {
+            resolved = ResolveSegment(resolved, segment);
+        }
+
+        return Path.TrimEndingDirectorySeparator(resolved);
+    }
+
+    private static string ResolveSegment(string parent, string segment)
+    {
+        var next = Path.Combine(parent, segment);
+        try
+        {
+            var directory = new DirectoryInfo(next);
+            if (directory.LinkTarget is not null)
+            {
+                var target = directory.ResolveLinkTarget(returnFinalTarget: true);
+                return target is null ? next : Path.GetFullPath(StripDevicePrefix(target.FullName));
+            }
+
+            // FindFirstFile matches short names too and reports the long one.
+            if (OperatingSystem.IsWindows() && segment.Contains('~') && directory.Exists)
+            {
+                var longName = new DirectoryInfo(parent).EnumerateDirectories(segment).FirstOrDefault()?.Name;
+                if (!string.IsNullOrEmpty(longName))
+                    return Path.Combine(parent, longName);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            // Unreadable component: compare it as written.
+        }
+
+        return next;
+    }
+
+    private static string StripDevicePrefix(string path)
+    {
+        if (!OperatingSystem.IsWindows())
+            return path;
+        if (path.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
+            return @"\\" + path[8..];
+        if (path.StartsWith(@"\\?\", StringComparison.Ordinal)
+            || path.StartsWith(@"\\.\", StringComparison.Ordinal)
+            || path.StartsWith(@"\??\", StringComparison.Ordinal))
+            return path[4..];
+        return path;
+    }
 
     /// <summary>Personal folders the OS may have redirected out of the profile (OneDrive backup).</summary>
     private static IEnumerable<string?> GetKnownUserFolders() =>

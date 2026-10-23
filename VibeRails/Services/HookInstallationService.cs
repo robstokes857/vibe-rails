@@ -820,7 +820,32 @@ namespace VibeRails.Services
                 ["rev-parse", "--git-common-dir"],
                 ".git",
                 cancellationToken);
-            return new HooksLocation(hooksPath, IsSameOrUnderDirectory(hooksPath, gitCommonDirectory));
+            return new HooksLocation(
+                hooksPath,
+                IsSameOrUnderDirectory(hooksPath, gitCommonDirectory)
+                    && !TraversesLinkBelow(hooksPath, gitCommonDirectory));
+        }
+
+        /// <summary>
+        /// True when a symbolic link or junction sits between <paramref name="directory"/>
+        /// (exclusive) and <paramref name="path"/> (inclusive). A lexically inside path such as
+        /// <c>.git/hooks</c> can still be a junction that writes somewhere else entirely.
+        /// </summary>
+        private static bool TraversesLinkBelow(string path, string directory)
+        {
+            for (var current = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+                 current != null && !SameDirectory(current, directory);
+                 current = Path.GetDirectoryName(current))
+            {
+                var info = new DirectoryInfo(current);
+                if (info.LinkTarget is not null
+                    || (info.Exists && info.Attributes.HasFlag(FileAttributes.ReparsePoint)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>

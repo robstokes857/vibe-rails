@@ -699,6 +699,51 @@ echo ""Another hook""
         }
 
         [Fact]
+        public async Task InstallHooksAsync_TreatsALinkedHooksDirectoryInsideGitAsOutside()
+        {
+            // .git/hooks looks owned, but a junction or symlink there writes somewhere else.
+            await RunGitAsync("init");
+            var elsewhere = Path.Combine(Path.GetTempPath(), $"vb_linked_hooks_{Guid.NewGuid()}");
+            Directory.CreateDirectory(elsewhere);
+            Directory.Delete(_hooksDir, recursive: true);
+            try
+            {
+                if (OperatingSystem.IsWindows())
+                {
+                    // A junction needs no Developer Mode or elevation, unlike a symlink.
+                    using var mklink = Process.Start(new ProcessStartInfo
+                    {
+                        FileName = Path.Combine(Environment.SystemDirectory, "cmd.exe"),
+                        ArgumentList = { "/d", "/c", "mklink", "/J", _hooksDir, elsewhere },
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                    })!;
+                    await mklink.WaitForExitAsync(TestContext.Current.CancellationToken);
+                    Assert.True(mklink.ExitCode == 0, await mklink.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken));
+                }
+                else
+                {
+                    Directory.CreateSymbolicLink(_hooksDir, elsewhere);
+                }
+
+                var status = await _service.GetStatusAsync(_testRepoPath, TestContext.Current.CancellationToken);
+                var result = await _service.InstallHooksAsync(_testRepoPath, TestContext.Current.CancellationToken);
+
+                Assert.True(status.HooksPathOutsideGitDirectory);
+                Assert.Equal(HookInstallationError.HooksDirectoryOutsideGitDirectory, result.ErrorType);
+                Assert.Empty(Directory.GetFileSystemEntries(elsewhere));
+            }
+            finally
+            {
+                if (new DirectoryInfo(_hooksDir).LinkTarget is not null)
+                    Directory.Delete(_hooksDir);
+                Directory.Delete(elsewhere, recursive: true);
+            }
+        }
+
+        [Fact]
         public async Task InstallHooksAsync_LinkedWorktreeInstallsIntoTheSharedGitDirectoryWithoutConfirmation()
         {
             await RunGitAsync("init");
