@@ -147,6 +147,21 @@ public sealed class PrReviewRoutesTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task The_detail_page_can_start_a_pass_at_the_current_github_head()
+    {
+        _github.Setup(g => g.GetAsync(Repo, It.IsAny<string>(), 7, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new GitHubPullRequest(7, "Live title", "octocat", new DateTime(2026, 8, 1), null,
+                false, "abc1234", Repo.PullRequestUrl(7)));
+
+        using var started = await Send(HttpMethod.Post, "/api/v1/pr-reviews/7/reviews/start", """{"useCurrentHead":true}""");
+
+        Assert.Equal(HttpStatusCode.Created, started.StatusCode);
+        var json = await Json(started);
+        Assert.Equal("abc1234", json.GetProperty("review").GetProperty("headSha").GetString());
+        Assert.Equal("Live title", json.GetProperty("pullRequest").GetProperty("title").GetString());
+    }
+
+    [Fact]
     public async Task Sync_reports_what_github_said()
     {
         await Send(HttpMethod.Post, "/api/v1/pr-reviews",

@@ -13,6 +13,10 @@ public sealed class GitHubCliException(string message) : Exception(message);
 /// <summary>Read-only pull request queries. Nothing here writes to GitHub.</summary>
 public interface IGitHubPullRequestClient
 {
+    /// <summary>Reads one PR by number, including its current head, even outside the open-list limit.</summary>
+    Task<GitHubPullRequest> GetAsync(GitHubRepository repository, string workingDirectory, int number,
+        CancellationToken ct = default);
+
     /// <summary>The repository's open pull requests, at most <see cref="GitHubPullRequestClient.OpenListLimit"/>.</summary>
     Task<IReadOnlyList<GitHubPullRequest>> ListOpenAsync(GitHubRepository repository, string workingDirectory,
         CancellationToken ct = default);
@@ -44,10 +48,33 @@ public sealed class GitHubPullRequestClient(ICliWrapper cli) : IGitHubPullReques
 
     private static readonly IReadOnlyDictionary<string, string?> GhEnvironment = new Dictionary<string, string?>
     {
+        ["GH_HOST"] = "github.com",
         ["GH_PROMPT_DISABLED"] = "1",
         ["GH_NO_UPDATE_NOTIFIER"] = "1",
         ["NO_COLOR"] = "1",
     };
+
+    public async Task<GitHubPullRequest> GetAsync(GitHubRepository repository, string workingDirectory, int number,
+        CancellationToken ct = default)
+    {
+        var result = await RunAsync(workingDirectory,
+            ["pr", "view", number.ToString(CultureInfo.InvariantCulture), "-R", repository.FullName,
+             "--json", "number,title,author,createdAt,updatedAt,isDraft,headRefOid"], ct);
+        if (!result.IsSuccess)
+            throw new GitHubCliException(Failure("read the pull request", repository, result));
+        try
+        {
+            using var document = JsonDocument.Parse(result.StandardOutput);
+            var pr = ParsePullRequest(document.RootElement, repository);
+            return pr is not null && pr.Number == number && !string.IsNullOrWhiteSpace(pr.HeadSha)
+                ? pr
+                : throw new JsonException();
+        }
+        catch (JsonException)
+        {
+            throw new GitHubCliException("The GitHub CLI returned an unexpected pull request answer.");
+        }
+    }
 
     public async Task<IReadOnlyList<GitHubPullRequest>> ListOpenAsync(GitHubRepository repository, string workingDirectory,
         CancellationToken ct = default)
@@ -102,23 +129,25 @@ public sealed class GitHubPullRequestClient(ICliWrapper cli) : IGitHubPullReques
         var result = new List<GitHubPullRequest>();
         foreach (var item in document.RootElement.EnumerateArray())
         {
-            if (!item.TryGetProperty("number", out var numberElement) || !numberElement.TryGetInt32(out var number) || number <= 0)
-                continue;
-            var opened = ReadTime(item, "createdAt");
-            if (opened is null) continue;
-            var author = item.TryGetProperty("author", out var authorElement) && authorElement.ValueKind == JsonValueKind.Object
-                ? ReadString(authorElement, "login") : null;
-            result.Add(new GitHubPullRequest(
-                number,
-                ReadString(item, "title") ?? "",
-                string.IsNullOrWhiteSpace(author) ? "unknown" : author,
-                opened.Value,
-                ReadTime(item, "updatedAt"),
-                item.TryGetProperty("isDraft", out var draft) && draft.ValueKind == JsonValueKind.True,
-                ReadString(item, "headRefOid") ?? "",
-                repository.PullRequestUrl(number)));
+            if (ParsePullRequest(item, repository) is { } pr) result.Add(pr);
         }
         return result;
+    }
+
+    private static GitHubPullRequest? ParsePullRequest(JsonElement item, GitHubRepository repository)
+    {
+        if (item.ValueKind != JsonValueKind.Object
+            || !item.TryGetProperty("number", out var numberElement) || numberElement.ValueKind != JsonValueKind.Number
+            || !numberElement.TryGetInt32(out var number) || number <= 0)
+            return null;
+        var opened = ReadTime(item, "createdAt");
+        if (opened is null) return null;
+        var author = item.TryGetProperty("author", out var authorElement) && authorElement.ValueKind == JsonValueKind.Object
+            ? ReadString(authorElement, "login") : null;
+        return new GitHubPullRequest(number, ReadString(item, "title") ?? "",
+            string.IsNullOrWhiteSpace(author) ? "unknown" : author, opened.Value, ReadTime(item, "updatedAt"),
+            item.TryGetProperty("isDraft", out var draft) && draft.ValueKind == JsonValueKind.True,
+            ReadString(item, "headRefOid") ?? "", repository.PullRequestUrl(number));
     }
 
     /// <summary>Aliased by number so one request answers the whole batch.</summary>

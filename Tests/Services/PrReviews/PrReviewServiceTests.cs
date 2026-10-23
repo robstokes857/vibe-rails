@@ -53,6 +53,55 @@ public sealed class PrReviewServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Starting_at_the_current_head_keeps_later_commits_eligible()
+    {
+        await _service.StartAsync(Project, 7, NewPr with { HeadSha = "old1234" }, _ct);
+        await _service.CompleteAsync(Project, 7, new PrReviewRequest(Feedback: "old pass", Verdict: "comments"), _ct);
+        var live = new GitHubPullRequest(7, "Updated title", "hubot", new DateTime(2026, 8, 1), null,
+            false, "current1234", Repo.PullRequestUrl(7));
+        _github.Setup(g => g.GetAsync(Repo, Project, 7, It.IsAny<CancellationToken>())).ReturnsAsync(live);
+
+        var started = await _service.StartAsync(Project, 7, new PrReviewRequest(UseCurrentHead: true), _ct);
+        var completed = await _service.CompleteAsync(Project, 7,
+            new PrReviewRequest(Feedback: "new pass", Verdict: "comments"), _ct);
+        _github.Setup(g => g.ListOpenAsync(Repo, Project, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([live with { HeadSha = "later5678" }]);
+        var queue = await _service.QueueAsync(Project, _ct);
+
+        Assert.True(started.Created);
+        Assert.Equal("Updated title", started.PullRequest.Title);
+        Assert.Equal("current1234", completed.PullRequest.ReviewedHeadSha);
+        Assert.Equal(PrReviewQueue.NewCommits, queue.Next!.Reason);
+    }
+
+    [Fact]
+    public async Task A_current_head_lookup_can_create_an_untracked_pr_by_number()
+    {
+        _github.Setup(g => g.GetAsync(Repo, Project, 7, It.IsAny<CancellationToken>())).ReturnsAsync(
+            new GitHubPullRequest(7, "Live title", "hubot", new DateTime(2026, 8, 1), null,
+                false, "current1234", Repo.PullRequestUrl(7)));
+
+        var started = await _service.StartAsync(Project, 7, new PrReviewRequest(UseCurrentHead: true), _ct);
+
+        Assert.True(started.Created);
+        Assert.Equal("current1234", started.Review!.HeadSha);
+        Assert.Equal("Live title", started.PullRequest.Title);
+    }
+
+    [Fact]
+    public async Task A_failed_current_head_lookup_does_not_start_a_review()
+    {
+        await _service.UpsertAsync(Project, NewPr with { Number = 7 }, _ct);
+        _github.Setup(g => g.GetAsync(Repo, Project, 7, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new GitHubCliException("The GitHub CLI (gh) is not signed in."));
+
+        await AssertError(502, "The GitHub CLI (gh) is not signed in.", () =>
+            _service.StartAsync(Project, 7, new PrReviewRequest(UseCurrentHead: true), _ct));
+
+        Assert.Empty((await _service.GetAsync(Project, 7, _ct)).Reviews);
+    }
+
+    [Fact]
     public async Task An_explicit_blocking_flag_overrides_the_verdict_default()
     {
         await _service.StartAsync(Project, 7, NewPr, _ct);

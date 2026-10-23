@@ -502,8 +502,10 @@ current project's GitHub pull requests, ported from a standalone Node/Express tr
 repository is parsed from the project's `origin` remote; records live in `state.db`
 (`pr-reviews/1`) keyed by `owner/name` and PR number. `PrReviewService` owns the rules (derived
 status, server-owned timestamps, idempotent start, draft checkpoints), `PrReviewQueue` picks the
-next PR by rank then age, and `GitHubPullRequestClient` reads open PRs and lifecycle states
-through the user's own `gh`, never writing to GitHub. Routes are root-only under
+next PR by rank then age, and `GitHubPullRequestClient` reads open PRs, lifecycle states and a
+numbered PR's current head through the user's own `gh`, pinned to github.com and never writing
+to GitHub. Detail-page starts capture that current head; local form drafts survive other detail
+actions, with inputs locked until a save and re-read finish. Routes are root-only under
 `/api/v1/pr-reviews`. Contract: [PR Reviews guide](../VibeRails/Services/PrReviews/AGENTS.md);
 security notes: [API_SEC.md](../API_SEC.md#github-pull-request-reads-pr-reviews).
 

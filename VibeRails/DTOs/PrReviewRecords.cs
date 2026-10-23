@@ -20,7 +20,8 @@ namespace VibeRails.DTOs
         JsonElement CreatedAt = default,
         JsonElement UpdatedAt = default,
         JsonElement StartedAt = default,
-        JsonElement ReviewedAt = default);
+        JsonElement ReviewedAt = default,
+        bool UseCurrentHead = false);
 
     /// <summary>
     /// Every tracked PR in the current project's GitHub repository. Repository is null when the

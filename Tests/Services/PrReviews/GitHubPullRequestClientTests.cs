@@ -34,6 +34,48 @@ public sealed class GitHubPullRequestClientTests
         Assert.Equal("C:/work", sent.WorkingDirectory);
         Assert.Equal(["pr", "list", "-R", "octo/widgets"], sent.Arguments.Take(4));
         Assert.Equal("1", sent.EnvironmentVariables!["GH_PROMPT_DISABLED"]);
+        Assert.Equal("github.com", sent.EnvironmentVariables["GH_HOST"]);
+    }
+
+    [Fact]
+    public async Task Reads_a_head_by_number_without_relying_on_the_open_list()
+    {
+        CliRequest? sent = null;
+        var cli = Cli(request => sent = request, Success("""
+            {"number":7,"title":"feat: x","author":{"login":"octocat"},"createdAt":"2026-08-01T14:00:00Z",
+             "headRefOid":"abc1234","url":"https://example.invalid/7"}
+            """));
+
+        var pr = await new GitHubPullRequestClient(cli).GetAsync(Repo, "C:/work", 7, _ct);
+
+        Assert.Equal("abc1234", pr.HeadSha);
+        Assert.Equal("https://github.com/octo/widgets/pull/7", pr.Url);
+        Assert.Equal(["pr", "view", "7", "-R", "octo/widgets"], sent!.Arguments.Take(5));
+        Assert.Equal("github.com", sent.EnvironmentVariables!["GH_HOST"]);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("{\"number\":\"7\"}")]
+    [InlineData("{\"number\":8,\"createdAt\":\"2026-08-01T14:00:00Z\",\"headRefOid\":\"abc1234\"}")]
+    [InlineData("{\"number\":7,\"createdAt\":\"2026-08-01T14:00:00Z\"}")]
+    public async Task Refuses_a_missing_or_mismatched_head_in_a_single_pr_answer(string json)
+    {
+        var error = await Assert.ThrowsAsync<GitHubCliException>(() =>
+            new GitHubPullRequestClient(Cli(_ => { }, Success(json))).GetAsync(Repo, "C:/work", 7, _ct));
+
+        Assert.Equal("The GitHub CLI returned an unexpected pull request answer.", error.Message);
+    }
+
+    [Fact]
+    public async Task A_single_pr_failure_never_reflects_stderr()
+    {
+        var error = await Assert.ThrowsAsync<GitHubCliException>(() =>
+            new GitHubPullRequestClient(Cli(_ => { }, Failed(1, "untrusted remote error")))
+                .GetAsync(Repo, "C:/work", 7, _ct));
+
+        Assert.StartsWith("Unable to read the pull request", error.Message);
+        Assert.DoesNotContain("untrusted", error.Message);
     }
 
     [Fact]
@@ -67,7 +109,7 @@ public sealed class GitHubPullRequestClientTests
     public void Ignores_malformed_rows_and_defaults_an_unknown_author()
     {
         var prs = GitHubPullRequestClient.ParseOpenPullRequests("""
-            [{"number":0,"createdAt":"2026-08-01T14:00:00Z"},
+            [null, 7, {"number":"7"}, {"number":0,"createdAt":"2026-08-01T14:00:00Z"},
              {"number":3},
              {"number":4,"title":"t","author":null,"createdAt":"2026-08-01T14:00:00Z"}]
             """, Repo);
@@ -110,6 +152,7 @@ public sealed class GitHubPullRequestClientTests
         Assert.Equal(["api", "graphql"], sent!.Arguments.Take(2));
         Assert.Contains("owner=octo", sent.Arguments);
         Assert.Contains("name=widgets", sent.Arguments);
+        Assert.Equal("github.com", sent.EnvironmentVariables!["GH_HOST"]);
     }
 
     [Fact]

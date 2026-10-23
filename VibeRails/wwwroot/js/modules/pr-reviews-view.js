@@ -241,7 +241,7 @@ export function verdictOptions(selected) {
 export function pendingReviewForm(pr, pending, busy = '') {
     const verdict = pending.verdict || 'comments';
     const hasDraft = pending.updatedUtc && pending.updatedUtc !== pending.startedUtc;
-    return `<form class="pr-card pr-pending" data-pr-pending-form data-blocking="${pending.blocking ? 'true' : 'false'}">
+    return `<form class="pr-card pr-pending" data-pr-pending-form="${esc(pending.id)}" data-blocking="${pending.blocking ? 'true' : 'false'}">
         <div class="pr-card-head">
             <div><span class="pr-eyebrow" data-tone="warning">Review in progress</span>
                 <h2 class="pr-section-title">Finish this review</h2>

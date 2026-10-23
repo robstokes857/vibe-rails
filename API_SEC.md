@@ -975,9 +975,11 @@ The complete outbound endpoint list (api-version 7.1, comments 7.1-preview.4):
 
 The [PR review tracker](VibeRails/Services/PrReviews/AGENTS.md) reads GitHub through the user's
 own authenticated `gh` CLI. VibeRails holds no GitHub credential, stores no token and never writes
-to GitHub: the only calls are `gh pr list` (open PRs, at most 100) and a `gh api graphql` query for
-tracked PRs' open/merged/closed state. Both run through `ICliWrapper` as argv with an explicit
-`-R owner/name` or GraphQL variables, stdin closed, prompts and update notices disabled and a
+to GitHub: the only calls are `gh pr list` (open PRs, at most 100), `gh pr view` (one PR's metadata
+and current head when starting from its detail page), and a `gh api graphql` query for tracked
+PRs' open/merged/closed state. All run through `ICliWrapper` as argv with an explicit
+`-R owner/name` or GraphQL variables, `GH_HOST=github.com` overriding inherited host selection,
+stdin closed, prompts and update notices disabled and a
 20-second timeout. Failures use fixed wording chosen by how `gh` ended (not started, timed out,
 not signed in, or its exit code); `gh`'s stderr, which can carry GitHub's error prose, is never
 reflected to the page or MCP. The repository is parsed from the dashboard project's

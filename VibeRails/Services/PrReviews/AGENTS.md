@@ -24,6 +24,9 @@ requests: which PRs were reviewed, what each pass found, and which PR to review 
 - **Start is idempotent; one pending pass per PR.** Start upserts the PR and returns the open pass
   if there is one (a partial unique index enforces it). Draft checkpoints only the supplied
   fields. Untracked (404) and tracked-without-a-pending-pass (409) are different errors.
+  The detail page sends `useCurrentHead: true` on start: `gh pr view` reads that number's metadata
+  and current SHA before any write, including PRs outside the open-list limit. A failed lookup
+  is a 502 and starts nothing. Explicit SHA starts, including MCP, remain local writes.
 - **GitHub's lifecycle is separate and never rewrites a review.** `POST github/sync` asks GitHub
   for every tracked PR's open/merged/closed state by number (aliased GraphQL, 50 per call; a
   number that is not a PR here still lets the rest of the batch through). It never moves
@@ -36,12 +39,14 @@ requests: which PRs were reviewed, what each pass found, and which PR to review 
   matches the full head it abbreviates, so a short SHA does not re-queue a PR forever. The queue
   answers 502 when `gh` fails, so "nothing to review" and "cannot see GitHub" never look alike.
 - **`gh` is the user's.** `GitHubPullRequestClient` runs it through `ICliWrapper` (argv, stdin
-  closed, `GH_PROMPT_DISABLED`, 20 s timeout) with an explicit `-R owner/name` or GraphQL
+  closed, `GH_HOST=github.com`, `GH_PROMPT_DISABLED`, 20 s timeout) with an explicit `-R owner/name` or GraphQL
   variables. VibeRails stores no GitHub credential. Failure messages are fixed wording keyed on how
   `gh` ended; its stderr is never reflected. See API_SEC.md, "GitHub pull request reads".
 - **The page** polls queue, sync and list once a minute on the list page only, never while the
   UI is hidden, and never with a second round behind a slow first. The detail page does not poll,
-  so a half-written review is not re-rendered away. Deletes go through `confirmDialog`.
+  so a half-written review is not re-rendered away. Each form keeps unsaved values across local
+  detail actions; saving clears only the submitted form's draft. Inputs stay disabled through
+  the save and re-read. Deletes go through `confirmDialog` and discard superseded confirmations.
 
 MCP tools (both transports, outside the Board auto-grants): `get_pr_review_queue`,
 `get_pr_review`, `start_pr_review`, `save_pr_review_draft`, `complete_pr_review`. They resolve
@@ -49,4 +54,5 @@ the project through `IBoardProjectResolver` and take no repository or path argum
 
 Tests: `Tests/DB/PrReviewStoreTests.cs`, `Tests/Services/PrReviews/*`,
 `Tests/Routes/PrReviewRoutesTests.cs`, `Tests/Services/Mcp/PrReviewToolTests.cs`,
-`Tests/wwwroot/js/pr-reviews-view.test.mjs`.
+`Tests/wwwroot/js/pr-reviews-*.test.mjs`, `UITests/tests/pr-reviews.spec.js` (static frontend with
+API fixtures; `playwright.pr-reviews.config.js`).

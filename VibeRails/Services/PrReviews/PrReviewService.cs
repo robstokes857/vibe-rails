@@ -140,12 +140,22 @@ public sealed class PrReviewService(IPrReviewStore store, IGitHubPullRequestClie
     public async Task<PrReviewWriteResponse> StartAsync(string projectPath, int number, PrReviewRequest? request,
         CancellationToken ct = default)
     {
-        var repository = await RequireRepositoryNameAsync(projectPath, ct);
+        var project = await RequireRepositoryAsync(projectPath, ct);
+        var repository = project.Repository!.FullName;
         request ??= Empty;
         RejectManagedTimes(request);
         RequireNumber(number);
         var headSha = ReadText(request.HeadSha, "headSha", MaxHeadSha);
-        var result = await store.StartReviewAsync(repository, number, ReadPullRequestFields(request), headSha, ct);
+        var fields = ReadPullRequestFields(request);
+        if (request.UseCurrentHead)
+        {
+            GitHubPullRequest current;
+            try { current = await github.GetAsync(project.Repository, project.Path, number, ct); }
+            catch (GitHubCliException ex) { throw new PrReviewException(502, ex.Message); }
+            headSha = current.HeadSha;
+            fields = fields with { Title = current.Title, Author = current.Author, OpenedUtc = current.OpenedUtc };
+        }
+        var result = await store.StartReviewAsync(repository, number, fields, headSha, ct);
         RequireSaved(result, number);
         return new PrReviewWriteResponse(result.PullRequest!, result.Review, result.Outcome == PrReviewWriteOutcome.Created);
     }

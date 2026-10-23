@@ -27,7 +27,8 @@ export class PrReviewsController {
     emptyState(number) {
         return {
             number, list: null, listError: '', queue: null, queueError: '', queueLoading: false, queueLoadedAt: null,
-            starting: null, detail: null, detailError: '', busy: '', editingReviewId: null, editingPr: false
+            starting: null, detail: null, detailError: '', busy: '', editingReviewId: null, editingPr: false,
+            pendingDraft: null, reviewDrafts: {}, prDraft: null
         };
     }
 
@@ -107,11 +108,14 @@ export class PrReviewsController {
      * together; the local list is re-read afterwards because an agent may have written a review.
      */
     async refreshGitHub(generation) {
-        if (!this.state.list?.repository || this.pollPending) return;
+        if (this.pollPending) return;
         this.pollPending = true;
         this.state.queueLoading = true;
         this.renderOpen();
         try {
+            // A failed initial local read must not disable every later refresh.
+            if (!this.state.list) await this.loadList(generation);
+            if (!this.isCurrent(generation) || !this.state.list?.repository) return;
             const tracked = this.state.list.pullRequests?.length || 0;
             const [queue, sync] = await Promise.allSettled([
                 this.request('/queue'),
@@ -152,7 +156,7 @@ export class PrReviewsController {
     }
 
     /** Every detail mutation has the same shape: call, toast, re-read, report. */
-    async mutate(work, notice, busy = 'saving') {
+    async mutate(work, notice, busy = 'saving', onSaved = null) {
         if (this.state.busy) return false;
         const generation = this.generation;
         this.state.busy = busy;
@@ -160,8 +164,8 @@ export class PrReviewsController {
         try {
             await work();
             if (!this.isCurrent(generation)) return false;
+            onSaved?.();
             if (notice) this.app.showToast('PR Reviews', notice, 'success');
-            this.state.busy = '';
             await this.loadDetail(generation);
             return true;
         } catch (error) {
@@ -328,27 +332,31 @@ export class PrReviewsController {
         if (repo) repo.innerHTML = `Lead-review log for ${repositoryLink(`https://github.com/${detail.repository}`, detail.repository)}`;
         const pending = detail.reviews.find(review => review.status === 'in_progress');
         const completed = detail.reviews.filter(review => review.status === 'completed');
+        const pendingDraft = this.state.pendingDraft?.id === pending?.id ? this.state.pendingDraft : null;
         const reviewArea = pending
-            ? pendingReviewForm(pr, pending, busy)
+            ? pendingReviewForm({ ...pr, ...(pendingDraft ? { summary: pendingDraft.summary } : {}) },
+                { ...pending, ...pendingDraft }, busy)
             : `<section class="pr-card pr-start-card">
                 <div><span class="pr-eyebrow">No pending review</span><h2 class="pr-section-title">Ready for another pass?</h2></div>
                 <button type="button" class="btn btn-primary" data-pr-start-review${busy ? ' disabled' : ''}>Start review</button>
             </section>`;
-        body.innerHTML = (editingPr ? pullRequestEditForm(pr) : detailHeader(pr, detail.url))
+        body.innerHTML = (editingPr ? pullRequestEditForm({ ...pr, ...this.state.prDraft }) : detailHeader(pr, detail.url))
             + detailAlerts(pr)
             + reviewArea
             + `<section class="pr-section">${sectionHeading('Newest first', 'Review history', completed.length)}
                 ${completed.length
-                    ? completed.map((review, index) => reviewCard(review, { isLatest: index === 0, editing: review.id === editingReviewId })).join('')
+                    ? completed.map((review, index) => reviewCard({ ...review, ...this.state.reviewDrafts[review.id] },
+                        { isLatest: index === 0, editing: review.id === editingReviewId })).join('')
                     : emptyState('No completed reviews yet.')}
             </section>`;
+        this.syncBusyButtons();
     }
 
     syncBusyButtons() {
         const busy = Boolean(this.state.busy);
-        for (const button of this.root?.querySelectorAll('[data-pr-detail-body] button') || []) {
-            if (button.matches('[data-pr-back], [data-pr-expand]')) continue;
-            button.disabled = busy;
+        for (const control of this.root?.querySelectorAll('[data-pr-detail-body] :is(button, input, textarea, select)') || []) {
+            if (control.matches('[data-pr-back], [data-pr-expand]')) continue;
+            control.disabled = busy;
         }
     }
 
@@ -361,6 +369,7 @@ export class PrReviewsController {
         root.addEventListener('submit', event => void this.onSubmit(event));
         root.addEventListener('change', event => this.onChange(event));
         root.addEventListener('input', event => {
+            this.rememberForm(event.target);
             if (!event.target.matches('[data-pr-query]')) return;
             this.filters.query = event.target.value;
             this.renderList();
@@ -400,12 +409,12 @@ export class PrReviewsController {
             const collapsed = feedback?.classList.toggle('is-collapsed');
             target.textContent = collapsed ? 'Show full review' : 'Show less';
         } else if (target.matches('[data-pr-start-review]')) {
-            await this.mutate(() => this.request(`/${this.state.number}/reviews/start`, 'POST'),
+            await this.mutate(() => this.request(`/${this.state.number}/reviews/start`, 'POST', { useCurrentHead: true }),
                 `Review started for PR #${this.state.number}.`);
         } else if (target.matches('[data-pr-save-draft]')) {
             const form = target.closest('form');
             await this.mutate(() => this.request(`/${this.state.number}/reviews/draft`, 'POST', this.readPendingForm(form)),
-                'Draft saved.', 'draft');
+                'Draft saved.', 'draft', () => { this.state.pendingDraft = null; });
         } else if (target.matches('[data-pr-toggle-blocker]')) {
             const blocking = target.dataset.blocking !== 'true';
             await this.mutate(() => this.request(`/reviews/${target.dataset.prToggleBlocker}`, 'PUT', { blocking }),
@@ -414,18 +423,23 @@ export class PrReviewsController {
             this.state.editingReviewId = Number(target.dataset.prEditReview);
             this.renderDetail();
         } else if (target.matches('[data-pr-cancel-edit]')) {
+            delete this.state.reviewDrafts[this.state.editingReviewId];
             this.state.editingReviewId = null;
             this.renderDetail();
         } else if (target.matches('[data-pr-delete-review]')) {
+            const generation = this.generation;
             const confirmed = await confirmDialog({
                 title: 'Delete this review?', danger: true, confirmLabel: 'Delete review',
                 message: 'This permanently removes this review from the PR history. GitHub is not touched.'
             });
-            if (confirmed) await this.mutate(() => this.request(`/reviews/${target.dataset.prDeleteReview}`, 'DELETE'), 'Review deleted.');
+            if (confirmed && this.isCurrent(generation)) {
+                await this.mutate(() => this.request(`/reviews/${target.dataset.prDeleteReview}`, 'DELETE'), 'Review deleted.');
+            }
         } else if (target.matches('[data-pr-edit-pr]')) {
             this.state.editingPr = true;
             this.renderDetail();
         } else if (target.matches('[data-pr-cancel-pr-edit]')) {
+            this.state.prDraft = null;
             this.state.editingPr = false;
             this.renderDetail();
         } else if (target.matches('[data-pr-delete-pr]')) {
@@ -440,7 +454,8 @@ export class PrReviewsController {
         if (form.matches('[data-pr-pending-form]')) {
             const body = this.readPendingForm(form);
             await this.mutate(() => this.request(`/${number}/reviews/complete`, 'POST', body),
-                body.blocking ? `PR #${number} recorded as a blocker.` : `Review completed for PR #${number}.`, 'complete');
+                body.blocking ? `PR #${number} recorded as a blocker.` : `Review completed for PR #${number}.`, 'complete',
+                () => { this.state.pendingDraft = null; });
         } else if (form.matches('[data-pr-review-edit]')) {
             const id = form.dataset.prReviewEdit;
             const body = {
@@ -448,28 +463,30 @@ export class PrReviewsController {
                 verdict: form.elements.verdict.value,
                 blocking: form.elements.blocking.checked
             };
-            // Leave edit mode inside the save, so the re-read paints the saved card, not the form.
-            await this.mutate(async () => {
-                await this.request(`/reviews/${id}`, 'PUT', body);
+            await this.mutate(() => this.request(`/reviews/${id}`, 'PUT', body), 'Review updated.', 'saving', () => {
+                delete this.state.reviewDrafts[id];
                 this.state.editingReviewId = null;
-            }, 'Review updated.');
+            });
         } else if (form.matches('[data-pr-pr-edit]')) {
             const body = {
                 title: form.elements.title.value,
                 author: form.elements.author.value,
                 summary: form.elements.summary.value
             };
-            await this.mutate(async () => {
-                await this.request(`/${number}`, 'PUT', body);
+            await this.mutate(() => this.request(`/${number}`, 'PUT', body), `PR #${number} updated.`, 'saving', () => {
+                this.state.prDraft = null;
                 this.state.editingPr = false;
-            }, `PR #${number} updated.`);
+            });
         }
     }
 
     /** Requesting changes IS the blocker verdict by default; keep them in step on a verdict change. */
     onChange(event) {
         const form = event.target.closest('[data-pr-pending-form]');
-        if (!form) return;
+        if (!form) {
+            this.rememberForm(event.target);
+            return;
+        }
         const blocking = form.querySelector('[data-pr-blocking]');
         if (event.target.matches('[data-pr-verdict]') && blocking) {
             blocking.checked = event.target.value === BLOCKING_VERDICT;
@@ -485,6 +502,27 @@ export class PrReviewsController {
                 complete.textContent = on ? 'Complete as blocker' : 'Complete review';
             }
         }
+        this.rememberForm(event.target);
+    }
+
+    /** Keep each form's unsaved values across detail re-renders caused by another action. */
+    rememberForm(target) {
+        const form = target.closest('form');
+        if (form?.matches('[data-pr-pending-form]')) {
+            this.state.pendingDraft = { id: Number(form.dataset.prPendingForm), ...this.readPendingForm(form) };
+        } else if (form?.matches('[data-pr-review-edit]')) {
+            this.state.reviewDrafts[form.dataset.prReviewEdit] = {
+                feedback: form.elements.feedback.value,
+                verdict: form.elements.verdict.value,
+                blocking: form.elements.blocking.checked
+            };
+        } else if (form?.matches('[data-pr-pr-edit]')) {
+            this.state.prDraft = {
+                title: form.elements.title.value,
+                author: form.elements.author.value,
+                summary: form.elements.summary.value
+            };
+        }
     }
 
     readPendingForm(form) {
@@ -498,12 +536,12 @@ export class PrReviewsController {
 
     async deletePullRequest() {
         const number = this.state.number;
+        const generation = this.generation;
         const confirmed = await confirmDialog({
             title: `Delete PR #${number}?`, danger: true, confirmLabel: 'Delete PR',
             message: 'This permanently removes the PR and all of its review history from the tracker. GitHub is not touched.'
         });
-        if (!confirmed) return;
-        const generation = this.generation;
+        if (!confirmed || !this.isCurrent(generation)) return;
         try {
             await this.request(`/${number}`, 'DELETE');
             if (!this.isCurrent(generation)) return;
