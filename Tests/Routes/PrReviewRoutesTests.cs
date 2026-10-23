@@ -39,7 +39,8 @@ public sealed class PrReviewRoutesTests : IAsyncLifetime
         // The route derives the project from the dashboard root; the resolver stands in for git.
         _repositories.Setup(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string path, CancellationToken _) => new PrReviewProject(path, Repo, null));
-        builder.Services.AddSingleton<IPrReviewStore>(new PrReviewStore($"Data Source={_dbPath};Mode=ReadWriteCreate"));
+        builder.Services.AddSingleton<IPrReviewStore>(new PrReviewStore($"Data Source={_dbPath};Mode=ReadWriteCreate",
+            legacyConnectionString: $"Data Source={_dbPath}.legacy;Mode=ReadWriteCreate"));
         builder.Services.AddSingleton(_github.Object);
         builder.Services.AddSingleton(_repositories.Object);
         builder.Services.AddScoped<PrReviewService>();
@@ -61,6 +62,8 @@ public sealed class PrReviewRoutesTests : IAsyncLifetime
         await _app.DisposeAsync();
         SqliteConnection.ClearPool(new SqliteConnection($"Data Source={_dbPath};Mode=ReadWriteCreate"));
         try { File.Delete(_dbPath); } catch (IOException) { }
+        SqliteConnection.ClearPool(new SqliteConnection($"Data Source={_dbPath}.legacy;Mode=ReadWriteCreate"));
+        try { File.Delete(_dbPath + ".legacy"); } catch (IOException) { }
     }
 
     [Fact]
@@ -68,9 +71,11 @@ public sealed class PrReviewRoutesTests : IAsyncLifetime
     {
         using var none = await Send(HttpMethod.Get, "/api/v1/pr-reviews", session: false, tab: false);
         using var sessionOnly = await Send(HttpMethod.Post, "/api/v1/pr-reviews/7/reviews/start", "{}", tab: false);
+        using var resolution = await Send(HttpMethod.Post, "/api/v1/pr-reviews/7/legacy-conflict/resolve", "{}", session: false, tab: false);
 
         Assert.Equal(HttpStatusCode.Unauthorized, none.StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, sessionOnly.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, resolution.StatusCode);
         _repositories.Verify(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -143,6 +148,28 @@ public sealed class PrReviewRoutesTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         Assert.Equal(new PrReviewAdoptionConflictException(7).Message,
             (await Json(response)).GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task Conflicts_are_inspectable_and_resolved_with_version_tokens_through_the_API()
+    {
+        var legacy = new PrReviewStore($"Data Source={_dbPath}.legacy;Mode=ReadWriteCreate");
+        await legacy.StartReviewAsync("octo/widgets", 7, new("title", "author", DateTime.UtcNow), null, Ct);
+        using var adopted = await Send(HttpMethod.Get, "/api/v1/pr-reviews");
+        using var edited = await Send(HttpMethod.Post, "/api/v1/pr-reviews/7/reviews/draft", """{"feedback":"local"}""");
+        await legacy.SaveDraftAsync("octo/widgets", 7, new(Feedback: "legacy draft"), null, Ct);
+        using var list = await Send(HttpMethod.Get, "/api/v1/pr-reviews");
+        var conflict = (await Json(list)).GetProperty("legacyConflicts")[0];
+        Assert.Equal("legacy draft", conflict.GetProperty("legacy").GetProperty("reviews")[0].GetProperty("feedback").GetString());
+        using var stale = await Send(HttpMethod.Post, "/api/v1/pr-reviews/7/legacy-conflict/resolve",
+            JsonSerializer.Serialize(new { sourceHash = new string('0', 64), targetHash = new string('0', 64), useLegacy = true }));
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        using var resolved = await Send(HttpMethod.Post, "/api/v1/pr-reviews/7/legacy-conflict/resolve",
+            JsonSerializer.Serialize(new { sourceHash = conflict.GetProperty("sourceHash").GetString(),
+                targetHash = conflict.GetProperty("targetHash").GetString(), useLegacy = true }));
+        Assert.Equal(HttpStatusCode.OK, resolved.StatusCode);
+        using var detail = await Send(HttpMethod.Get, "/api/v1/pr-reviews/7");
+        Assert.Equal("legacy draft", (await Json(detail)).GetProperty("reviews")[0].GetProperty("feedback").GetString());
     }
 
     [Fact]

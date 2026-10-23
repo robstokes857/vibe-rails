@@ -367,6 +367,7 @@ middleware serves their paths rather than registering individual API endpoints.
 | POST | `/api/v1/pr-reviews/{number}/reviews/complete` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
 | POST | `/api/v1/pr-reviews/{number}/reviews/draft` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
 | POST | `/api/v1/pr-reviews/{number}/reviews/start` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
+| POST | `/api/v1/pr-reviews/{number}/legacy-conflict/resolve` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
 | GET | `/api/v1/projects/name` | [ProjectRoutes.cs](VibeRails/Routes/ProjectRoutes.cs) |
 | PUT | `/api/v1/projects/name` | [ProjectRoutes.cs](VibeRails/Routes/ProjectRoutes.cs) |
 | POST | `/api/v1/push/send` | [PushRoutes.cs](VibeRails/Routes/PushRoutes.cs) |
@@ -547,8 +548,10 @@ The five PR review tools (`get_pr_review_queue`, `get_pr_review`, `start_pr_revi
 `save_pr_review_draft`, `complete_pr_review`) are on both transports and outside the Board
 auto-grants. They resolve the project through `IBoardProjectResolver`, take no repository or
 path argument, write only local `pr_reviews.db` review records and run `gh` read-only, as above.
-Legacy adoption reads `state.db` through a separate read-only connection; divergence returns
-a fixed conflict message with a PR number, never paths, SQL, credentials or draft text.
+Legacy adoption reads `state.db` through a separate read-only connection. List responses include
+project-scoped conflicting histories, escaped as untrusted text in Reviews. Resolution requires
+both credentials, the current repository, and matching source/target content-version tokens;
+stale choices return 409. Both snapshots remain archived locally. No paths or SQL are returned.
 
 Board Start work and Board-triggered Workers use the exact per-tool grants in
 [BoardMcpAuthorization](VibeRails/Services/Terminal/Commands/BoardMcpAuthorization.cs).

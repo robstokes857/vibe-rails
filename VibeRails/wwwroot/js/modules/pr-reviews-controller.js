@@ -6,7 +6,7 @@ import { confirmDialog, escapeHtml } from './utils.js';
 import {
     LIFECYCLE_FILTERS, STATUS_ORDER, BLOCKING_VERDICT, statusMeta, summarizePullRequests, retiredBlockerNote,
     repositoryLink, sectionHeading, emptyState, trackedRow, openRow, nextUpCard, detailHeader, detailAlerts,
-    pendingReviewForm, reviewCard, pullRequestEditForm
+    pendingReviewForm, reviewCard, pullRequestEditForm, legacyConflictPanel
 } from './pr-reviews-view.js';
 
 const esc = escapeHtml;
@@ -75,6 +75,7 @@ export class PrReviewsController {
     pollTick() {
         if (this.app.currentView !== VIEW || this.state.number || !this.root) return null;
         if (this.app.isUiHidden() || this.pollPending) return null;
+        if (this.state.busy || this.q('[data-pr-legacy-conflicts] details[open]')) return null;
         return this.refreshGitHub(this.generation);
     }
 
@@ -238,6 +239,13 @@ export class PrReviewsController {
         for (const section of this.root?.querySelectorAll('[data-pr-needs-repo]') || []) section.hidden = !available;
         if (!available) return;
 
+        const conflicts = this.q('[data-pr-legacy-conflicts]');
+        if (conflicts) {
+            conflicts.hidden = !list.legacyConflicts?.length;
+            conflicts.innerHTML = (list.legacyConflicts || []).map(legacyConflictPanel).join('');
+            for (const button of conflicts.querySelectorAll('button')) button.disabled = Boolean(this.state.busy);
+        }
+
         const summary = summarizePullRequests(list.pullRequests, this.filters);
         const pending = this.q('[data-pr-pending-section]');
         if (pending) {
@@ -390,7 +398,9 @@ export class PrReviewsController {
             }
             return;
         }
-        if (target.matches('[data-pr-open]')) {
+        if (target.matches('[data-pr-resolve-legacy]')) {
+            await this.resolveLegacyConflict(Number(target.dataset.prResolveLegacy), target.dataset.useLegacy === 'true');
+        } else if (target.matches('[data-pr-open]')) {
             this.app.navigate(VIEW, { number: Number(target.dataset.prOpen) });
         } else if (target.matches('[data-pr-start]')) {
             await this.startFromQueue(Number(target.dataset.prStart));
@@ -444,6 +454,34 @@ export class PrReviewsController {
             this.renderDetail();
         } else if (target.matches('[data-pr-delete-pr]')) {
             await this.deletePullRequest();
+        }
+    }
+
+    async resolveLegacyConflict(number, useLegacy) {
+        if (this.state.busy) return;
+        const conflict = this.state.list?.legacyConflicts?.find(item => item.number === number);
+        if (!conflict) return;
+        const generation = this.generation;
+        const confirmed = await confirmDialog({
+            title: `Resolve PR #${number} histories?`,
+            message: `Continue with the ${useLegacy ? 'legacy' : 'current'} history? Both saved copies will be retained.`,
+            confirmLabel: useLegacy ? 'Use legacy history' : 'Keep current history'
+        });
+        if (!confirmed || !this.isCurrent(generation) || this.state.busy) return;
+        this.state.busy = 'resolving';
+        this.renderList();
+        try {
+            await this.request(`/${number}/legacy-conflict/resolve`, 'POST', {
+                sourceHash: conflict.sourceHash, targetHash: conflict.targetHash, useLegacy
+            });
+        } catch (error) {
+            if (error?.name !== 'AbortError' && this.isCurrent(generation))
+                this.app.showToast('PR Reviews', error?.message || 'The histories could not be reconciled.', 'error');
+        } finally {
+            if (this.isCurrent(generation)) {
+                this.state.busy = '';
+                await this.loadList(generation);
+            }
         }
     }
 

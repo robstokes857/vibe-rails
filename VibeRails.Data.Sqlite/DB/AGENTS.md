@@ -160,8 +160,11 @@ The file uses generation 1 in every configuration and host. `pr-review-adoption/
 legacy-to-current review ids), without foreign keys so local deletion retains adoption receipts.
 Before each repository operation, a separate read-only `state.db` snapshot is reconciled while
 holding only the dedicated file's writer lock. Legacy tables, rows, receipts and generation
-stay untouched. Late old-version writes adopt if the destination PR has not diverged; conflicting
-edits fail explicitly with both copies preserved. Unchanged source rows never resurrect new-side
+stay untouched. Late old-version writes adopt if the destination PR has not diverged. Lifecycle
+refreshes merge by check time, independently of authored-content fingerprints. Conflicting edits
+archive both exact snapshots (`pr-review-adoption/2`) and remain inspectable/resolvable through
+the store and Reviews page without blocking repository operations. Version tokens protect an
+explicit choice from concurrent edits, and resolution retains the archives. Unchanged source rows never resurrect new-side
 deletions. No ATTACH, dual writes, destructive cleanup or manual upgrade steps are involved.
 See the [PR Reviews guide](../../VibeRails/Services/PrReviews/AGENTS.md).
 

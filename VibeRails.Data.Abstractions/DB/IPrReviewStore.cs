@@ -142,12 +142,25 @@ public sealed record PrReviewWriteResult(
     PrReview? Review = null,
     string? MissingField = null);
 
+/// <summary>A preserved side of an adoption conflict, including drafts and completed passes.</summary>
+public sealed record PrReviewHistory(PrReviewPullRequest? PullRequest, List<PrReview> Reviews);
+
+/// <summary>Two divergent histories and optimistic tokens for an explicit reconciliation.</summary>
+public sealed record PrReviewLegacyConflict(int Number, string SourceHash, string TargetHash,
+    PrReviewHistory Legacy, PrReviewHistory Current);
+
 /// <summary>
 /// Lead-review records for GitHub pull requests, keyed by repository and PR number. Every write
 /// that changes a review stamps the PR's last-write time; recording GitHub's lifecycle does not.
 /// </summary>
 public interface IPrReviewStore
 {
+    /// <summary>Inspectable conflicts; conflicts never block ordinary repository operations.</summary>
+    Task<IReadOnlyList<PrReviewLegacyConflict>> GetLegacyConflictsAsync(string repository, CancellationToken ct = default);
+
+    /// <summary>Chooses a history only if both displayed versions are still current. Both snapshots remain archived.</summary>
+    Task<bool> ResolveLegacyConflictAsync(string repository, int number, string sourceHash, string targetHash,
+        bool useLegacy, CancellationToken ct = default);
     /// <summary>Every tracked PR in the repository, most recent review write first.</summary>
     Task<IReadOnlyList<PrReviewPullRequest>> ListAsync(string repository, CancellationToken ct = default);
 

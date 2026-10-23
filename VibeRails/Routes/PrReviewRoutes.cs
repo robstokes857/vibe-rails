@@ -35,6 +35,14 @@ public static class PrReviewRoutes
             }))
             .WithName("UpsertPrReview");
 
+        routes.MapPost("/{number:int}/legacy-conflict/resolve", ([FromServices] PrReviewService service, int number,
+            PrReviewResolveLegacyRequest request, CancellationToken ct) => RunAsync(async () =>
+            {
+                await service.ResolveLegacyConflictAsync(Project(), number, request, ct);
+                return Results.Ok(new PrReviewDeleteResponse(number, null));
+            }))
+            .WithName("ResolvePrReviewLegacyConflict");
+
         // The one call an unattended run needs: which PR next, and why.
         routes.MapGet("/queue", ([FromServices] PrReviewService service, CancellationToken ct) =>
             RunAsync(async () => Results.Ok(await service.QueueAsync(Project(), ct))))

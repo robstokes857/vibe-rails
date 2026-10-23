@@ -173,6 +173,28 @@ export function emptyState(message) {
     return `<div class="pr-empty">${esc(message)}</div>`;
 }
 
+/** Conflicts remain inspectable even when the current copy of the PR was deleted. */
+export function legacyConflictPanel(conflict) {
+    const history = (label, value) => `<details><summary>${esc(label)}</summary>
+        ${value?.pullRequest ? `<h3 class="h6 mt-2">${esc(value.pullRequest.title)}</h3>
+            <p>@${esc(value.pullRequest.author)} · ${esc(formatDate(value.pullRequest.updatedUtc, true))}</p>
+            <pre class="pr-feedback">${esc(value.pullRequest.summary)}</pre>` : '<p>This copy of the PR was deleted.</p>'}
+        ${(value?.reviews || []).map(review => `<article class="mt-2">
+            <p>${esc(review.status === 'in_progress' ? 'Pending draft' : 'Completed pass')} · ${esc(review.verdict || 'No verdict')}
+            ${review.blocking ? ' · Blocker' : ''} · ${esc(formatDate(review.reviewedUtc || review.startedUtc, true))}
+            · head <code>${esc(review.headSha || '—')}</code></p>
+            <pre class="pr-feedback">${esc(review.feedback)}</pre></article>`).join('')}</details>`;
+    return `<section class="pr-card pr-alert" data-tone="warning">
+        <h2 class="pr-section-title">Two histories for PR #${esc(conflict.number)}</h2>
+        <p>An older VibeRails version changed this PR after the current history was edited.
+        Inspect both copies and choose which to continue using. Both copies remain saved.</p>
+        ${history('Current history', conflict.current)}${history('Legacy history', conflict.legacy)}
+        <div class="pr-form-actions">
+            <button type="button" class="btn btn-outline-secondary" data-pr-resolve-legacy="${esc(conflict.number)}" data-use-legacy="false">Keep current history</button>
+            <button type="button" class="btn btn-outline-warning" data-pr-resolve-legacy="${esc(conflict.number)}" data-use-legacy="true">Use legacy history</button>
+        </div></section>`;
+}
+
 /** One tracked PR in a list. The whole row opens the PR's detail page. */
 export function trackedRow(pr, tone = '') {
     const reviewed = pr.lastReviewedUtc ? ` · reviewed ${esc(formatRelativeTime(pr.lastReviewedUtc))}` : '';

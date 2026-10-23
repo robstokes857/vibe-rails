@@ -18,12 +18,17 @@ requests: which PRs were reviewed, what each pass found, and which PR to review 
   timestamps, carry over. There are currently no persisted feature-owned settings.
 - **Older versions can keep running.** Later legacy changes (including deletions) adopt on the
   next operation if the destination PR has not changed since its last adoption. Unchanged legacy
-  rows never overwrite local edits or resurrect local deletions. A PR changed in both files
-  stops repository operations with a readable HTTP 409 / MCP failure; both copies and the last
-  adoption fingerprints remain intact. Reconciliation is conservative at PR granularity,
-  including lifecycle/timestamp changes; it does not guess a winner or mirror new writes back
-  to older versions. Conflicting edits require explicit reconciliation before that repository
-  can proceed. Other repositories are unaffected. Missing legacy files/tables are rechecked on
+  rows never overwrite local edits or resurrect local deletions. GitHub lifecycle fields and
+  last-write bookkeeping are excluded from authored-content fingerprints; lifecycle refreshes
+  merge by latest check time, so automatic polling cannot produce edit conflicts. A PR changed
+  in both files keeps serving its current history and adds an inspectable conflict to the Reviews
+  list, even for a locally deleted PR. Other reads/writes and imports continue. Both exact
+  snapshots are archived in `PrReviewLegacyConflicts` (`pr-review-adoption/2`). The user can
+  inspect drafts/passes and choose **Keep current history** or **Use legacy history** through
+  `POST /{number}/legacy-conflict/resolve`; matching content-version tokens prevent stale choices
+  from overwriting later edits (409 asks for a fresh inspection). Archives remain after resolution.
+  This is conservative at PR granularity for authored edits; new writes are never mirrored back
+  to older versions. List polling pauses while an inspection is open. Missing legacy files/tables are rechecked on
   later calls; failures roll back and retry automatically. Schema generation is independently
   guarded at 1 in the dedicated file. No upgrade command or manual backup is needed.
 - **The repository comes from the project.** `PrReviewRepositoryResolver` parses the dashboard

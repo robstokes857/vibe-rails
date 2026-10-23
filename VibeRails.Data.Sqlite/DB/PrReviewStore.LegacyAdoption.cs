@@ -13,7 +13,8 @@ public sealed partial class PrReviewStore
 
     private sealed record LegacySnapshot(object[]? PullRequest, List<object[]> Reviews);
 
-    private static void EnsureAdoptionSchema(SqliteConnection connection) =>
+    private static void EnsureAdoptionSchema(SqliteConnection connection)
+    {
         SqliteMigrationRunner.Apply(connection, "pr-review-adoption", 1, MigrationKind.Additive, (db, tx) =>
             SqliteSchema.Execute(db, tx, """
                 CREATE TABLE IF NOT EXISTS PrReviewLegacyAdoptions (
@@ -30,6 +31,24 @@ public sealed partial class PrReviewStore
                     Number INTEGER NOT NULL
                 );
                 """));
+        SqliteMigrationRunner.Apply(connection, "pr-review-adoption", 2, MigrationKind.Additive, (db, tx) =>
+        {
+            SqliteSchema.AdoptStatement(db, tx, "ALTER TABLE PrReviewLegacyAdoptions ADD COLUMN SourceContentHash TEXT");
+            SqliteSchema.AdoptStatement(db, tx, "ALTER TABLE PrReviewLegacyAdoptions ADD COLUMN TargetContentHash TEXT");
+            SqliteSchema.AdoptStatement(db, tx, "ALTER TABLE PrReviewLegacyAdoptions ADD COLUMN ConflictSourceHash TEXT");
+            SqliteSchema.Execute(db, tx, """
+                CREATE TABLE IF NOT EXISTS PrReviewLegacyConflicts (
+                    Repository TEXT NOT NULL COLLATE NOCASE,
+                    Number INTEGER NOT NULL,
+                    SourceHash TEXT NOT NULL,
+                    TargetHash TEXT NOT NULL,
+                    SourceSnapshot BLOB NOT NULL,
+                    TargetSnapshot BLOB NOT NULL,
+                    PRIMARY KEY (Repository, Number, SourceHash, TargetHash)
+                );
+                """);
+        });
+    }
 
     // Never ATTACH state.db to the writer: BEGIN IMMEDIATE would also lock its writer.
     // Acquire the target lock BEFORE the source snapshot, so competing importers cannot apply
@@ -69,29 +88,56 @@ public sealed partial class PrReviewStore
             {
                 ct.ThrowIfCancellationRequested();
                 var legacy = ReadSnapshot(source, read, repository, number);
-                var sourceHash = Fingerprint(legacy);
-                string? previousSource = null, previousTarget = null;
+                var sourceHash = Fingerprint(legacy, contentOnly: true);
+                string? previousSource = null, previousTarget = null, previousFullSource = null, previousFullTarget = null;
                 using (var receipt = Command(target, write, """
-                    SELECT SourceHash, TargetHash FROM PrReviewLegacyAdoptions WHERE Repository=$repo AND Number=$number;
+                    SELECT SourceContentHash, TargetContentHash, SourceHash, TargetHash
+                    FROM PrReviewLegacyAdoptions WHERE Repository=$repo AND Number=$number;
                     """, ("$repo", repository), ("$number", number)))
                 using (var reader = receipt.ExecuteReader())
-                    if (reader.Read()) { previousSource = reader.GetString(0); previousTarget = reader.GetString(1); }
-                if (sourceHash == previousSource) continue;
+                    if (reader.Read())
+                    {
+                        previousSource = reader.IsDBNull(0) ? null : reader.GetString(0);
+                        previousTarget = reader.IsDBNull(1) ? null : reader.GetString(1);
+                        previousFullSource = reader.GetString(2); previousFullTarget = reader.GetString(3);
+                    }
 
                 var current = ReadSnapshot(target, write, repository, number);
-                var targetHash = Fingerprint(current);
-                // Local deletions remain deleted while the source stays unchanged. An old-version
-                // edit after a local edit/delete is a real conflict, never a reason to resurrect it.
+                var targetHash = Fingerprint(current, contentOnly: true);
+                // Upgrade earlier adoption receipts without treating unchanged histories as conflicts.
+                if (previousSource is null && previousFullSource == Fingerprint(legacy)) previousSource = sourceHash;
+                if (previousTarget is null && previousFullTarget == Fingerprint(current)) previousTarget = targetHash;
+                MergeLifecycle(target, write, repository, number, legacy, current);
+                if (previousFullSource is not null && (previousSource is null || previousTarget is null)
+                    && Fingerprint(MapLegacyIds(target, write, legacy), contentOnly: true) == targetHash)
+                {
+                    RecordAdoption(target, write, repository, number, legacy);
+                    continue;
+                }
+                if (sourceHash == previousSource)
+                {
+                    Execute(target, write, """
+                        UPDATE PrReviewLegacyAdoptions SET SourceContentHash=$source,
+                            TargetContentHash=COALESCE(TargetContentHash,$target), ConflictSourceHash=NULL
+                        WHERE Repository=$repo AND Number=$number;
+                        """, ("$source", sourceHash), ("$target", previousTarget), ("$repo", repository), ("$number", number));
+                    continue;
+                }
                 if (previousTarget is null ? current.PullRequest is not null : previousTarget != targetHash)
-                    throw new PrReviewAdoptionConflictException(number);
+                {
+                    // Preserve both exact snapshots and continue serving the current history.
+                    // Conflicts are visible/resolvable on Reviews, including a locally deleted PR.
+                    ArchiveConflict(target, write, repository, number, sourceHash, targetHash, legacy, current);
+                    Execute(target, write, """
+                        INSERT INTO PrReviewLegacyAdoptions (Repository,Number,SourceHash,TargetHash,ConflictSourceHash)
+                        VALUES ($repo,$number,'','',$source)
+                        ON CONFLICT (Repository,Number) DO UPDATE SET ConflictSourceHash=$source;
+                        """, ("$repo", repository), ("$number", number), ("$source", sourceHash));
+                    continue;
+                }
 
-                CopySnapshot(target, write, repository, number, legacy);
-                Execute(target, write, """
-                    INSERT INTO PrReviewLegacyAdoptions (Repository, Number, SourceHash, TargetHash)
-                    VALUES ($repo, $number, $source, $target)
-                    ON CONFLICT (Repository, Number) DO UPDATE SET SourceHash=$source, TargetHash=$target;
-                    """, ("$repo", repository), ("$number", number), ("$source", sourceHash),
-                    ("$target", Fingerprint(ReadSnapshot(target, write, repository, number))));
+                CopySnapshot(target, write, repository, number, WithLatestLifecycle(legacy, current));
+                RecordAdoption(target, write, repository, number, legacy);
             }
             ct.ThrowIfCancellationRequested();
             write.Commit();
@@ -122,7 +168,10 @@ public sealed partial class PrReviewStore
         return rows;
     }
 
-    private static string Fingerprint(LegacySnapshot snapshot)
+    private static string Fingerprint(LegacySnapshot snapshot, bool contentOnly = false) =>
+        Convert.ToHexString(SHA256.HashData(SerializeSnapshot(snapshot, contentOnly)));
+
+    private static byte[] SerializeSnapshot(LegacySnapshot snapshot, bool contentOnly = false)
     {
         // Length-prefixed, typed values distinguish NULL, empty text and text containing separators.
         // Use raw stored values so timestamps and draft contents are adopted without conversion.
@@ -133,14 +182,17 @@ public sealed partial class PrReviewStore
             foreach (var row in (snapshot.PullRequest is null ? [] : new[] { snapshot.PullRequest }).Concat(snapshot.Reviews))
             {
                 writer.Write(row.Length);
-                foreach (var value in row)
+                for (var i = 0; i < row.Length; i++)
                 {
+                    // Lifecycle polling and last-write bookkeeping are not authored review edits.
+                    var value = contentOnly && (i == 10 || (ReferenceEquals(row, snapshot.PullRequest) && i is 6 or 7 or 8))
+                        ? DBNull.Value : row[i];
                     writer.Write(value is DBNull ? "null" : value.GetType().Name);
                     writer.Write(Convert.ToString(value, CultureInfo.InvariantCulture) ?? "");
                 }
             }
         }
-        return Convert.ToHexString(SHA256.HashData(bytes.GetBuffer().AsSpan(0, checked((int)bytes.Length))));
+        return bytes.ToArray();
     }
 
     private static void CopySnapshot(SqliteConnection db, SqliteTransaction tx, string repository, int number, LegacySnapshot source)

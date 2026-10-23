@@ -4,11 +4,23 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
     summarizePullRequests, retiredBlockerNote, isLive, trackedRow, openRow, nextUpCard, pendingReviewForm,
-    reviewCard, detailAlerts, detailHeader, pullRequestLink, repositoryLink, shortSha
+    reviewCard, detailAlerts, detailHeader, pullRequestLink, repositoryLink, shortSha, legacyConflictPanel
 } from '../../../VibeRails/wwwroot/js/modules/pr-reviews-view.js';
 
 const pr = (number, status, gitHubState = 'open', extra = {}) => ({
     number, status, gitHubState, title: `PR ${number}`, author: 'octocat', summary: '', completedCount: 1, ...extra
+});
+
+test('legacy conflicts show deleted copies, drafts and escaped history with explicit choices', () => {
+    const html = legacyConflictPanel({ number: 7, current: { pullRequest: null, reviews: [] },
+        legacy: { pullRequest: { title: '<script>bad</script>', author: 'a', summary: '<img src=x>' },
+            reviews: [{ status: 'in_progress', feedback: '<svg onload=bad()>', blocking: true }] } });
+    assert.match(html, /This copy of the PR was deleted/);
+    assert.match(html, /Pending draft/);
+    assert.match(html, /Keep current history/);
+    assert.match(html, /Use legacy history/);
+    assert.match(html, /&lt;script&gt;/);
+    assert.doesNotMatch(html, /<script>|<svg|<img/);
 });
 
 test('unsynced PRs are live; only merged and closed retire a PR', () => {

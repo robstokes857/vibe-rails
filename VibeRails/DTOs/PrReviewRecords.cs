@@ -31,7 +31,12 @@ namespace VibeRails.DTOs
         string? Repository,
         string? RepositoryUrl,
         string? Problem,
-        List<PrReviewPullRequest> PullRequests);
+        List<PrReviewPullRequest> PullRequests)
+    {
+        public List<PrReviewLegacyConflict> LegacyConflicts { get; init; } = [];
+    }
+
+    public record PrReviewResolveLegacyRequest(string SourceHash, string TargetHash, bool UseLegacy);
 
     public record PrReviewDetailResponse(
         string Repository,

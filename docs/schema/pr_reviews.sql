@@ -12,7 +12,10 @@ CREATE UNIQUE INDEX idx_pr_reviews_one_in_progress ON PrReviews (Repository, PrN
 CREATE INDEX idx_pr_reviews_pr ON PrReviews (Repository, PrNumber, Status);
 
 -- table PrReviewLegacyAdoptions
-CREATE TABLE PrReviewLegacyAdoptions ( Repository TEXT NOT NULL COLLATE NOCASE, Number INTEGER NOT NULL, SourceHash TEXT NOT NULL, TargetHash TEXT NOT NULL, PRIMARY KEY (Repository, Number) );
+CREATE TABLE PrReviewLegacyAdoptions ( Repository TEXT NOT NULL COLLATE NOCASE, Number INTEGER NOT NULL, SourceHash TEXT NOT NULL, TargetHash TEXT NOT NULL, SourceContentHash TEXT, TargetContentHash TEXT, ConflictSourceHash TEXT, PRIMARY KEY (Repository, Number) );
+
+-- table PrReviewLegacyConflicts
+CREATE TABLE PrReviewLegacyConflicts ( Repository TEXT NOT NULL COLLATE NOCASE, Number INTEGER NOT NULL, SourceHash TEXT NOT NULL, TargetHash TEXT NOT NULL, SourceSnapshot BLOB NOT NULL, TargetSnapshot BLOB NOT NULL, PRIMARY KEY (Repository, Number, SourceHash, TargetHash) );
 
 -- table PrReviewLegacyIds
 CREATE TABLE PrReviewLegacyIds ( LegacyId INTEGER PRIMARY KEY, ReviewId INTEGER NOT NULL UNIQUE, Repository TEXT NOT NULL COLLATE NOCASE, Number INTEGER NOT NULL );

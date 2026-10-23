@@ -15,7 +15,7 @@ function reviewFixture() {
     };
 }
 
-async function mount(page, detail) {
+async function mount(page, detail, listExtras = {}) {
     await page.addInitScript(() => sessionStorage.setItem('viberails_tab', 'reviews-fixture'));
     await page.routeWebSocket('**/api/v1/events/ws*', () => {});
     await page.route('**/api/v1/**', route => {
@@ -29,7 +29,7 @@ async function mount(page, detail) {
             '/api/v1/hooks/status': { inGitRepo: true, isInstalled: true },
             '/api/v1/pr-reviews': {
                 repository: 'octo/widgets', repositoryUrl: 'https://github.com/octo/widgets',
-                problem: null, pullRequests: [detail.pullRequest]
+                problem: null, pullRequests: [detail.pullRequest], ...listExtras
             },
             '/api/v1/pr-reviews/queue': {
                 repository: 'octo/widgets', next: null, queue: [], skipped: [],
@@ -42,6 +42,31 @@ async function mount(page, detail) {
     await page.goto('/?view=pr-reviews', { waitUntil: 'domcontentloaded' });
     await page.locator('[data-pr-open="7"]').first().click();
     await expect(page.getByRole('heading', { name: 'Widgets', exact: true })).toBeVisible();
+}
+
+for (const useLegacy of [false, true]) {
+    test(`legacy history conflict can be inspected and resolved with ${useLegacy ? 'legacy' : 'current'} history`, async ({ page }) => {
+        const detail = reviewFixture();
+        const list = { legacyConflicts: [{ number: 7, sourceHash: 'a'.repeat(64), targetHash: 'b'.repeat(64),
+            current: { pullRequest: null, reviews: [] }, legacy: { pullRequest: detail.pullRequest, reviews: detail.reviews } }] };
+        await mount(page, detail, list);
+        let submitted;
+        await page.route('**/api/v1/pr-reviews/7/legacy-conflict/resolve', route => {
+            submitted = route.request().postDataJSON();
+            list.legacyConflicts = [];
+            return route.fulfill({ json: { number: 7 } });
+        });
+        await page.locator('[data-pr-back]').click();
+        const panel = page.locator('[data-pr-legacy-conflicts]');
+        await panel.getByText('Current history', { exact: true }).click();
+        await expect(panel.getByText('This copy of the PR was deleted.')).toBeVisible();
+        await panel.getByText('Legacy history', { exact: true }).click();
+        await expect(panel.getByText('Saved draft', { exact: true })).toBeVisible();
+        await panel.getByRole('button', { name: useLegacy ? 'Use legacy history' : 'Keep current history', exact: true }).click();
+        await page.getByRole('alertdialog').getByRole('button', { name: useLegacy ? 'Use legacy history' : 'Keep current history', exact: true }).click();
+        await expect(panel).toBeHidden();
+        expect(submitted).toEqual({ sourceHash: 'a'.repeat(64), targetHash: 'b'.repeat(64), useLegacy });
+    });
 }
 
 test('pending feedback survives editing and cancelling other forms', async ({ page }) => {

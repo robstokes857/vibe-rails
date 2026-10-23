@@ -513,7 +513,9 @@ security notes: [API_SEC.md](../API_SEC.md#github-pull-request-reads-pr-reviews)
 All hosts/configurations use the same dedicated file through `IPrReviewStore`. Automatic
 legacy adoption reads `state.db` without changing it and atomically records per-PR fingerprints
 and stable review-id mappings. Later older-version writes adopt when the target PR has not
-diverged; conflicting edits return 409/MCP failure with both copies preserved. Unchanged legacy
+diverged; conflicting authored edits archive both copies and offer inspection/resolution in
+Reviews without blocking other operations. Lifecycle refreshes do not count as authored edits.
+Resolution uses optimistic content tokens (409 on stale choices). Unchanged legacy
 rows cannot overwrite local edits or resurrect deletions. See the guide for this compatibility
 boundary and the independent generation-1 schema.
 

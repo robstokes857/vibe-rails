@@ -61,7 +61,22 @@ public sealed class PrReviewService(IPrReviewStore store, IGitHubPullRequestClie
         if (project.Repository is not { } repository)
             return new PrReviewListResponse(null, null, project.Problem, []);
         var pullRequests = await store.ListAsync(repository.FullName, ct);
-        return new PrReviewListResponse(repository.FullName, repository.Url, null, pullRequests.ToList());
+        return new PrReviewListResponse(repository.FullName, repository.Url, null, pullRequests.ToList())
+        {
+            LegacyConflicts = (await store.GetLegacyConflictsAsync(repository.FullName, ct)).ToList()
+        };
+    }
+
+    /// <summary>Explicitly reconciles inspected histories; concurrent edits require a fresh inspection.</summary>
+    public async Task ResolveLegacyConflictAsync(string projectPath, int number, PrReviewResolveLegacyRequest request,
+        CancellationToken ct = default)
+    {
+        var repository = await RequireRepositoryNameAsync(projectPath, ct);
+        RequireNumber(number);
+        if (request.SourceHash?.Length != 64 || request.TargetHash?.Length != 64)
+            throw new PrReviewException(400, "Both history version tokens are required.");
+        if (!await store.ResolveLegacyConflictAsync(repository, number, request.SourceHash, request.TargetHash, request.UseLegacy, ct))
+            throw new PrReviewException(409, "The histories changed. Refresh Reviews and inspect both copies again before choosing.");
     }
 
     public async Task<PrReviewDetailResponse> GetAsync(string projectPath, int number, CancellationToken ct = default)

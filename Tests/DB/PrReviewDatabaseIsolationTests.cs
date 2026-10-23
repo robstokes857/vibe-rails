@@ -149,12 +149,19 @@ public sealed class PrReviewDatabaseIsolationTests : IDisposable
         else await current.SaveDraftAsync(Repo, 2, new(Feedback: "new draft"), null, _ct);
         await Legacy.SaveDraftAsync(Repo, 2, new(Feedback: "old draft"), null, _ct);
 
-        var failure = await Assert.ThrowsAsync<PrReviewAdoptionConflictException>(() => Current.ListAsync(Repo, _ct));
-        Assert.Equal(2, failure.Number);
-        Assert.Contains("Both copies are preserved", failure.Message);
+        await Current.ListAsync(Repo, _ct);
+        var conflict = Assert.Single(await Current.GetLegacyConflictsAsync(Repo, _ct));
+        Assert.Equal(2, conflict.Number);
+        Assert.Equal("old draft", Assert.Single(conflict.Legacy.Reviews).Feedback);
+        if (delete) Assert.Null(conflict.Current.PullRequest);
+        else Assert.Equal("new draft", Assert.Single(conflict.Current.Reviews).Feedback);
         Assert.Equal("old draft", Scalar(State, "SELECT Feedback FROM PrReviews;"));
         Assert.Equal(delete ? null : "new draft", Scalar(Reviews, "SELECT Feedback FROM PrReviews;"));
         Assert.Equal(1L, Scalar(Reviews, "SELECT COUNT(*) FROM PrReviewLegacyAdoptions;"));
+        Assert.True(await Current.ResolveLegacyConflictAsync(Repo, 2, conflict.SourceHash, conflict.TargetHash, false, _ct));
+        Assert.Empty(await Current.GetLegacyConflictsAsync(Repo, _ct));
+        Assert.Equal(delete ? null : "new draft", Scalar(Reviews, "SELECT Feedback FROM PrReviews;"));
+        Assert.Equal(1L, Scalar(Reviews, "SELECT COUNT(*) FROM PrReviewLegacyConflicts;"));
     }
 
     [Fact]
@@ -205,32 +212,99 @@ public sealed class PrReviewDatabaseIsolationTests : IDisposable
     }
 
     [Fact]
-    public async Task Conflict_rolls_back_other_imports_and_can_retry_after_resolution()
+    public async Task Conflict_does_not_block_other_imports_and_legacy_resolution_preserves_both_snapshots()
     {
         await Legacy.StartReviewAsync(Repo, 2, Fields, null, _ct);
         await Current.SaveDraftAsync(Repo, 2, new(Feedback: "local"), null, _ct);
         await Legacy.StartReviewAsync(Repo, 1, Fields, null, _ct);
         await Legacy.SaveDraftAsync(Repo, 2, new(Feedback: "legacy"), null, _ct);
-        await Assert.ThrowsAsync<PrReviewAdoptionConflictException>(() => Current.ListAsync(Repo, _ct));
-        Assert.Equal(1L, Scalar(Reviews, "SELECT COUNT(*) FROM PrReviewPullRequests;"));
-        Assert.Equal(1L, Scalar(Reviews, "SELECT COUNT(*) FROM PrReviewLegacyIds;"));
-        // Restore the target's baseline to model an explicit reconciliation, then retry.
+        Assert.Equal(2, (await Current.ListAsync(Repo, _ct)).Count);
+        Assert.NotNull(await Current.GetAsync(Repo, 1, _ct));
+        var conflict = Assert.Single(await Current.GetLegacyConflictsAsync(Repo, _ct));
+        Assert.False(await Current.ResolveLegacyConflictAsync("other/repo", 2, conflict.SourceHash, conflict.TargetHash, true, _ct));
+        Assert.True(await Current.ResolveLegacyConflictAsync(Repo, 2, conflict.SourceHash, conflict.TargetHash, true, _ct));
+        Assert.Equal("legacy", Assert.Single(await Current.GetReviewsAsync(Repo, 2, _ct)).Feedback);
+        Assert.Empty(await Current.GetLegacyConflictsAsync(Repo, _ct));
+        Assert.Equal(1L, Scalar(Reviews, "SELECT COUNT(*) FROM PrReviewLegacyConflicts;"));
+    }
+
+    [Fact]
+    public async Task Receipts_from_before_content_hashes_adopt_lifecycle_changes_without_false_conflicts()
+    {
+        await Legacy.StartReviewAsync(Repo, 1, Fields, null, _ct);
+        await Current.ListAsync(Repo, _ct);
         using (var db = SqliteConnectionFactory.Open(Connection(Reviews)))
-        using (var cmd = db.CreateCommand())
+        using (var command = db.CreateCommand())
         {
-            cmd.CommandText = "UPDATE PrReviews SET Feedback='', UpdatedUTC=(SELECT StartedUTC FROM PrReviews LIMIT 1);";
-            // The original Start stores these timestamps in the same operation.
-            cmd.ExecuteNonQuery();
+            command.CommandText = "UPDATE PrReviewLegacyAdoptions SET SourceContentHash=NULL,TargetContentHash=NULL;";
+            command.ExecuteNonQuery();
         }
-        // PR UpdatedUTC also changed locally; restoring it permits automatic retry.
-        using (var db = SqliteConnectionFactory.Open(Connection(Reviews)))
-        using (var cmd = db.CreateCommand())
+        await Legacy.RecordGitHubStatesAsync(Repo, [new(1, PrGitHubState.Open, null)], _ct);
+        await Current.RecordGitHubStatesAsync(Repo, [new(1, PrGitHubState.Open, null)], _ct);
+        Assert.Empty(await Current.GetLegacyConflictsAsync(Repo, _ct));
+        await Legacy.SaveDraftAsync(Repo, 1, new(Feedback: "later"), null, _ct);
+        Assert.Equal("later", Assert.Single(await Current.GetReviewsAsync(Repo, 1, _ct)).Feedback);
+    }
+
+    [Fact]
+    public async Task Invalid_legacy_rows_roll_back_data_mappings_and_receipts_and_retry_after_repair()
+    {
+        await Legacy.StartReviewAsync(Repo, 1, Fields, null, _ct);
+        await Legacy.StartReviewAsync(Repo, 2, Fields, null, _ct);
+        using (var db = SqliteConnectionFactory.Open(Connection(State)))
+        using (var command = db.CreateCommand())
         {
-            cmd.CommandText = "UPDATE PrReviewPullRequests SET UpdatedUTC=CreatedUTC;";
-            cmd.ExecuteNonQuery();
+            command.CommandText = "PRAGMA ignore_check_constraints=ON; UPDATE PrReviews SET Status='invalid' WHERE PrNumber=2;";
+            command.ExecuteNonQuery();
+        }
+        await Assert.ThrowsAsync<SqliteException>(() => Current.ListAsync(Repo, _ct));
+        Assert.Equal(0L, Scalar(Reviews, "SELECT COUNT(*) FROM PrReviewPullRequests;"));
+        Assert.Equal(0L, Scalar(Reviews, "SELECT COUNT(*) FROM PrReviewLegacyIds;"));
+        Assert.Equal(0L, Scalar(Reviews, "SELECT COUNT(*) FROM PrReviewLegacyAdoptions;"));
+        using (var db = SqliteConnectionFactory.Open(Connection(State)))
+        using (var command = db.CreateCommand())
+        {
+            command.CommandText = "UPDATE PrReviews SET Status='in_progress' WHERE PrNumber=2;";
+            command.ExecuteNonQuery();
         }
         Assert.Equal(2, (await Current.ListAsync(Repo, _ct)).Count);
-        Assert.Equal("legacy", Assert.Single(await Current.GetReviewsAsync(Repo, 2, _ct)).Feedback);
+    }
+
+    [Fact]
+    public async Task Routine_lifecycle_polls_and_late_legacy_review_edits_do_not_conflict()
+    {
+        await Legacy.StartReviewAsync(Repo, 1, Fields, null, _ct);
+        await Legacy.StartReviewAsync(Repo, 2, Fields, null, _ct);
+        await Current.ListAsync(Repo, _ct);
+        await Current.RecordGitHubStatesAsync(Repo, [new(1, PrGitHubState.Open, null)], _ct);
+        await Legacy.RecordGitHubStatesAsync(Repo, [new(1, PrGitHubState.Open, null)], _ct);
+        Assert.Equal(2, (await Current.ListAsync(Repo, _ct)).Count);
+        Assert.NotNull(await Current.GetAsync(Repo, 2, _ct));
+        Assert.Empty(await Current.GetLegacyConflictsAsync(Repo, _ct));
+        await Legacy.SaveDraftAsync(Repo, 1, new(Feedback: "late old draft"), null, _ct);
+        Assert.Equal("late old draft", Assert.Single(await Current.GetReviewsAsync(Repo, 1, _ct)).Feedback);
+        Assert.Empty(await Current.GetLegacyConflictsAsync(Repo, _ct));
+        Assert.True(await Current.DeleteAsync(Repo, 1, _ct));
+        Assert.Single(await Current.ListAsync(Repo, _ct));
+    }
+
+    [Fact]
+    public async Task Conflict_resolution_rejects_stale_choices_after_either_side_changes()
+    {
+        await Legacy.StartReviewAsync(Repo, 1, Fields, null, _ct);
+        await Current.SaveDraftAsync(Repo, 1, new(Feedback: "local"), null, _ct);
+        await Legacy.SaveDraftAsync(Repo, 1, new(Feedback: "old"), null, _ct);
+        var conflict = Assert.Single(await Current.GetLegacyConflictsAsync(Repo, _ct));
+        await Current.SaveDraftAsync(Repo, 1, new(Feedback: "newer local"), null, _ct);
+        Assert.False(await Current.ResolveLegacyConflictAsync(Repo, 1, conflict.SourceHash, conflict.TargetHash, true, _ct));
+        conflict = Assert.Single(await Current.GetLegacyConflictsAsync(Repo, _ct));
+        await Legacy.SaveDraftAsync(Repo, 1, new(Feedback: "newer old"), null, _ct);
+        Assert.False(await Current.ResolveLegacyConflictAsync(Repo, 1, conflict.SourceHash, conflict.TargetHash, false, _ct));
+        Assert.Equal("newer local", Assert.Single(await Current.GetReviewsAsync(Repo, 1, _ct)).Feedback);
+        conflict = Assert.Single(await Current.GetLegacyConflictsAsync(Repo, _ct));
+        await Current.RecordGitHubStatesAsync(Repo, [new(1, PrGitHubState.Open, null)], _ct);
+        Assert.True(await Current.ResolveLegacyConflictAsync(Repo, 1, conflict.SourceHash, conflict.TargetHash, true, _ct));
+        Assert.Equal("newer old", Assert.Single(await Current.GetReviewsAsync(Repo, 1, _ct)).Feedback);
     }
 
     private static string Connection(string path) => new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString();
