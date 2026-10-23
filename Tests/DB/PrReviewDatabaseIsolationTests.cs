@@ -152,6 +152,7 @@ public sealed class PrReviewDatabaseIsolationTests : IDisposable
         await Current.ListAsync(Repo, _ct);
         var conflict = Assert.Single(await Current.GetLegacyConflictsAsync(Repo, _ct));
         Assert.Equal(2, conflict.Number);
+        Assert.Equal(Repo, conflict.Repository);
         Assert.Equal("old draft", Assert.Single(conflict.Legacy.Reviews).Feedback);
         if (delete) Assert.Null(conflict.Current.PullRequest);
         else Assert.Equal("new draft", Assert.Single(conflict.Current.Reviews).Feedback);

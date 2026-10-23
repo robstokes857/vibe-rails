@@ -22,7 +22,7 @@ public sealed partial class PrReviewStore
             var number = checked((int)(long)row[0]);
             var current = ReadSnapshot(db, tx, repository, number);
             result.Add(new(number, (string)row[1], Fingerprint(current, contentOnly: true),
-                MapHistory(DeserializeSnapshot((byte[])row[2])), MapHistory(current)));
+                MapHistory(DeserializeSnapshot((byte[])row[2])), MapHistory(current)) { Repository = repository });
         }
         return result;
     }

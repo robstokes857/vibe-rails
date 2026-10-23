@@ -193,6 +193,7 @@ public sealed class PrReviewRoutesTests : IAsyncLifetime
         await legacy.SaveDraftAsync("octo/widgets", 7, new(Feedback: "legacy draft"), null, Ct);
         using var list = await Send(HttpMethod.Get, "/api/v1/pr-reviews");
         var conflict = (await Json(list)).GetProperty("legacyConflicts")[0];
+        Assert.Equal("octo/widgets", conflict.GetProperty("repository").GetString());
         Assert.Equal("legacy draft", conflict.GetProperty("legacy").GetProperty("reviews")[0].GetProperty("feedback").GetString());
         using var stale = await Send(HttpMethod.Post, "/api/v1/pr-reviews/7/legacy-conflict/resolve",
             JsonSerializer.Serialize(new { sourceHash = new string('0', 64), targetHash = new string('0', 64), useLegacy = true }));
@@ -277,6 +278,37 @@ public sealed class PrReviewRoutesTests : IAsyncLifetime
         Assert.Equal(2, (await Json(oldClient)).GetProperty("repositories").GetArrayLength());
         Assert.Equal("no-store", list.Headers.CacheControl!.ToString());
         _repositories.Verify(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Actual_conflict_payloads_identify_overlapping_numbers_after_local_deletion(bool useLegacy)
+    {
+        using var configured = await Send(HttpMethod.Put, "/api/v1/pr-reviews/settings",
+            """{"enabled":false,"repositories":["octo/widgets","else/tools"]}""");
+        var legacy = new PrReviewStore($"Data Source={_dbPath}.legacy;Mode=ReadWriteCreate");
+        foreach (var repo in new[] { "octo/widgets", "else/tools" })
+            await legacy.StartReviewAsync(repo, 7, new("title", "author", DateTime.UtcNow), null, Ct);
+        using var adopted = await Send(HttpMethod.Get, "/api/v1/pr-reviews");
+        using var deleted = await Send(HttpMethod.Delete, "/api/v1/pr-reviews/7?repository=else%2Ftools");
+        using var draft = await Send(HttpMethod.Post, "/api/v1/pr-reviews/7/reviews/draft?repository=octo%2Fwidgets", """{"feedback":"local"}""");
+        foreach (var repo in new[] { "octo/widgets", "else/tools" })
+            await legacy.SaveDraftAsync(repo, 7, new(Feedback: "legacy"), null, Ct);
+        using var list = await Send(HttpMethod.Get, "/api/v1/pr-reviews");
+        var conflicts = (await Json(list)).GetProperty("legacyConflicts").EnumerateArray().ToList();
+        Assert.Equal(2, conflicts.Count);
+        var conflict = Assert.Single(conflicts, c => c.GetProperty("repository").GetString() == "else/tools");
+        Assert.Equal(JsonValueKind.Null, conflict.GetProperty("current").GetProperty("pullRequest").ValueKind);
+        using var resolved = await Send(HttpMethod.Post, "/api/v1/pr-reviews/7/legacy-conflict/resolve?repository=else%2Ftools",
+            JsonSerializer.Serialize(new { sourceHash = conflict.GetProperty("sourceHash").GetString(),
+                targetHash = conflict.GetProperty("targetHash").GetString(), useLegacy }));
+        Assert.Equal(HttpStatusCode.OK, resolved.StatusCode);
+        using var after = await Send(HttpMethod.Get, "/api/v1/pr-reviews");
+        var remaining = (await Json(after)).GetProperty("legacyConflicts").EnumerateArray().ToList();
+        Assert.Equal("octo/widgets", Assert.Single(remaining).GetProperty("repository").GetString());
+        using var detail = await Send(HttpMethod.Get, "/api/v1/pr-reviews/7?repository=else%2Ftools");
+        Assert.Equal(useLegacy ? HttpStatusCode.OK : HttpStatusCode.NotFound, detail.StatusCode);
     }
 
     private async Task<HttpResponseMessage> Send(HttpMethod method, string path, string? body = null,

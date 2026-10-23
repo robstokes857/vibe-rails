@@ -147,7 +147,11 @@ public sealed record PrReviewHistory(PrReviewPullRequest? PullRequest, List<PrRe
 
 /// <summary>Two divergent histories and optimistic tokens for an explicit reconciliation.</summary>
 public sealed record PrReviewLegacyConflict(int Number, string SourceHash, string TargetHash,
-    PrReviewHistory Legacy, PrReviewHistory Current);
+    PrReviewHistory Legacy, PrReviewHistory Current)
+{
+    /// <summary>The repository remains available even when both current history and PR are deleted.</summary>
+    public string Repository { get; init; } = "";
+}
 
 /// <summary>
 /// Lead-review records for GitHub pull requests, keyed by repository and PR number. Every write

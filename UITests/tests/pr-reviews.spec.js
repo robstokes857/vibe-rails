@@ -47,24 +47,31 @@ async function mount(page, detail, listExtras = {}, queueFixture = null) {
 for (const useLegacy of [false, true]) {
     test(`legacy history conflict can be inspected and resolved with ${useLegacy ? 'legacy' : 'current'} history`, async ({ page }) => {
         const detail = reviewFixture();
-        const list = { legacyConflicts: [{ repository: 'octo/widgets', number: 7, sourceHash: 'a'.repeat(64), targetHash: 'b'.repeat(64),
-            current: { pullRequest: null, reviews: [] }, legacy: { pullRequest: detail.pullRequest, reviews: detail.reviews } }] };
+        const list = { repository: null, repositories: ['octo/widgets', 'else/tools'], legacyConflicts: [
+            { repository: 'octo/widgets', number: 7, sourceHash: 'c'.repeat(64), targetHash: 'd'.repeat(64),
+                current: { pullRequest: null, reviews: [] }, legacy: { pullRequest: detail.pullRequest, reviews: detail.reviews } },
+            { repository: 'else/tools', number: 7, sourceHash: 'a'.repeat(64), targetHash: 'b'.repeat(64),
+                current: { pullRequest: null, reviews: [] }, legacy: { pullRequest: { ...detail.pullRequest, repository: 'else/tools' }, reviews: detail.reviews } }
+        ] };
         await mount(page, detail, list);
         let submitted;
         await page.route('**/api/v1/pr-reviews/7/legacy-conflict/resolve*', route => {
             submitted = route.request().postDataJSON();
-            list.legacyConflicts = [];
+            expect(new URL(route.request().url()).searchParams.get('repository')).toBe('else/tools');
+            list.legacyConflicts = list.legacyConflicts.filter(c => c.repository !== 'else/tools');
             return route.fulfill({ json: { number: 7 } });
         });
         await page.locator('[data-pr-back]').click();
-        const panel = page.locator('[data-pr-legacy-conflicts]');
+        const conflicts = page.locator('[data-pr-legacy-conflicts]');
+        const panel = conflicts.locator('section').filter({ hasText: 'Two histories for else/tools PR #7' });
         await panel.getByText('Current history', { exact: true }).click();
         await expect(panel.getByText('This copy of the PR was deleted.')).toBeVisible();
         await panel.getByText('Legacy history', { exact: true }).click();
         await expect(panel.getByText('Saved draft', { exact: true })).toBeVisible();
         await panel.getByRole('button', { name: useLegacy ? 'Use legacy history' : 'Keep current history', exact: true }).click();
         await page.getByRole('alertdialog').getByRole('button', { name: useLegacy ? 'Use legacy history' : 'Keep current history', exact: true }).click();
-        await expect(panel).toBeHidden();
+        await expect(panel).toHaveCount(0);
+        await expect(conflicts.getByRole('heading', { name: 'Two histories for octo/widgets PR #7', exact: true })).toBeVisible();
         expect(submitted).toEqual({ sourceHash: 'a'.repeat(64), targetHash: 'b'.repeat(64), useLegacy });
     });
 }
