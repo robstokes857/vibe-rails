@@ -59,6 +59,105 @@ public sealed class HumanSignaturePopupTests : IDisposable
         Assert.Equal("Subject\n", await File.ReadAllTextAsync(_messagePath, Ct));
     }
 
+    /// <summary>
+    /// VIBE-200: the first popup reported no synced key and stayed up showing that failure after the
+    /// person had created a key and signed in a second popup. Now the same window waits for the key.
+    /// </summary>
+    [Fact]
+    public async Task NoSyncedKeyWaitsForOneAndChecksAgainOnEnter()
+    {
+        await File.WriteAllTextAsync(_messagePath, "Subject\n", Ct);
+        var signer = new AppearingKeySigner(new FakeSigner(Key("Laptop")), emptyChecks: 2);
+        var console = new ScriptedConsole(lines: ["", ""], secrets: ["correct horse battery"]);
+        var output = new StringWriter();
+
+        var exit = await Popup(output, console, signer, Verifier("a@example.com")).RunAsync(Request([]), Ct);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(3, signer.Checks);
+        var transcript = output.ToString();
+        Assert.Contains("This window waits", transcript);
+        Assert.Contains("Still no synced signing key.", transcript);
+        Assert.Contains("Verified: signed by a@example.com", transcript);
+    }
+
+    /// <summary>
+    /// VIBE-200 owner note: before asking for approval, show the files, the Board card and a
+    /// description. The card and message are the committer's text, so escape sequences are removed.
+    /// </summary>
+    [Fact]
+    public async Task SummaryShowsCardDescriptionAndChangesWithoutControlCharacters()
+    {
+        var stale = CommitSignatureFormat.Format(new CommitSignature(Guid.NewGuid(), new string('a', 64), new string('0', 40),
+            Convert.ToBase64String(new byte[256])));
+        await File.WriteAllTextAsync(_messagePath,
+            "Require owner approval \u001b[2J\n\nWhy: terminal changes are risky.\nSecond line\u001b]0;fake\a\n"
+                + "# Please enter the commit message\n" + stale + "\n", Ct);
+        var output = new StringWriter();
+        var popup = new HumanSignaturePopup(output, new ScriptedConsole(secrets: [null]), new FakeSigner(Key("Laptop")),
+            Verifier("a@example.com"), VcaConsoleStyle.Plain,
+            (_, _, _, _) => Task.FromResult<IReadOnlyList<string>>(["M db.cs (+2 -1)", "A docs/review.md (+25 -0)"]),
+            (_, message, _) => Task.FromResult<IReadOnlyList<string>>(
+                message.Contains("Require owner approval") ? ["VIBE-200 (VB-WI983-272) · Signing \u001b[31mworkflow · named in the message"] : []));
+
+        await popup.RunAsync(Request(["owner@example.com"]), Ct);
+
+        var transcript = output.ToString();
+        Assert.DoesNotContain('\u001b', transcript);
+        Assert.DoesNotContain('\a', transcript);
+        Assert.Contains("VIBE-200 (VB-WI983-272) · Signing [31mworkflow · named in the message", transcript);
+        Assert.Contains("Require owner approval", transcript);
+        Assert.Contains("Why: terminal changes are risky.", transcript);
+        Assert.Contains("Second line", transcript);
+        Assert.DoesNotContain("Please enter the commit message", transcript);
+        Assert.DoesNotContain("vibe-signature:", transcript);
+        Assert.Contains("2 file(s)", transcript);
+        Assert.Contains("A docs/review.md (+25 -0)", transcript);
+        Assert.Contains("may be an agent", transcript);
+        Assert.True(transcript.IndexOf("Card", StringComparison.Ordinal) < transcript.IndexOf("Required", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task SummarySaysWhenNoCardIsFound()
+    {
+        await File.WriteAllTextAsync(_messagePath, "Subject\n", Ct);
+        var output = new StringWriter();
+
+        await Popup(output, new ScriptedConsole(secrets: [null]), new FakeSigner(Key("Laptop")), Verifier("a@example.com"))
+            .RunAsync(Request([]), Ct);
+
+        Assert.Contains("(none found)", output.ToString());
+    }
+
+    [Fact]
+    public async Task BoardCardsComeFromTheSessionAndFromKeysTheMessageNames()
+    {
+        var root = Path.Combine(_directory, "board");
+        Directory.CreateDirectory(root);
+        var connection = $"Data Source={Path.Combine(root, "state.db")};Mode=ReadWriteCreate;Cache=Shared;Pooling=False";
+        var store = new VibeRails.Services.Board.BoardStore(connection, connection);
+        var project = Path.Combine(root, "repo");
+        await store.EnsureDefaultColumnsAsync(project, Ct);
+        var sessionCard = await store.CreateCardAsync(project, NewCard("Terminal work"), Ct);
+        var namedCard = await store.CreateCardAsync(project, NewCard("Named work"), Ct);
+        await store.LinkSessionAsync(project, sessionCard.Id, "session-1", null, "base:claude", "claude", "Name",
+            VibeRails.Services.Board.BoardSessionRecord.LaunchOrigin, Ct);
+        var named = HumanSignatureBoardCards.NamedReferences(
+            $"Fix the hook ({namedCard.Key}, {sessionCard.Key}) and keep UTF-8 output");
+
+        var lines = await HumanSignatureBoardCards.FindAsync(store, project, "session-1", named, Ct);
+
+        // Cards created since board/14 have a display ID beside the permanent key.
+        Assert.NotEqual(sessionCard.Key, sessionCard.DisplayId);
+        Assert.Equal(
+            [
+                $"{sessionCard.DisplayId} ({sessionCard.Key}) · Terminal work · the committing terminal's card",
+                $"{namedCard.DisplayId} ({namedCard.Key}) · Named work · named in the message"
+            ],
+            lines);
+        Assert.Empty(await HumanSignatureBoardCards.FindAsync(store, project, null, HumanSignatureBoardCards.NamedReferences("UTF-8 only"), Ct));
+    }
+
     [Fact]
     public async Task WrongPasswordRetriesAndEscapeCancels()
     {
@@ -215,10 +314,13 @@ public sealed class HumanSignaturePopupTests : IDisposable
             ? ["Human verified (any registered signing key)"]
             : [$"Signed Approval('db.cs', '{approvers[0]}') ({approvers[0]})"]);
 
+    // No card lookup: the production one follows this process's VIBERAILS_TOOL_CURRENT_SESSION_ID
+    // into the live board.db when the suite runs inside a VibeRails terminal.
     private static HumanSignaturePopup Popup(TextWriter output, IHumanSignatureConsole console, ICommitTreeSigner signer,
         ICommitSignatureVerifier verifier) =>
         new(output, console, signer, verifier, VcaConsoleStyle.Plain,
-            (_, _, _, _) => Task.FromResult<IReadOnlyList<string>>(["M db.cs"]));
+            (_, _, _, _) => Task.FromResult<IReadOnlyList<string>>(["M db.cs"]),
+            (_, _, _) => Task.FromResult<IReadOnlyList<string>>([]));
 
     private static FakeCommitSignatureVerifierForPopup Verifier(string email) =>
         new(new CommitSignatureVerification(CommitSignatureStatus.Valid, "valid", email));
@@ -267,6 +369,21 @@ public sealed class HumanSignaturePopupTests : IDisposable
             return Task.FromResult(new CommitSignature(key.CloudKeyId!.Value, new string('c', 64), treeId,
                 Convert.ToBase64String(new byte[512])));
         }
+    }
+
+    private static VibeRails.Services.Board.NewBoardCard NewCard(string title) =>
+        new(null, title, "", null, "medium", null, [], false);
+
+    /// <summary>Reports no keys for the first <paramref name="emptyChecks"/> checks, then the inner signer's.</summary>
+    private sealed class AppearingKeySigner(FakeSigner inner, int emptyChecks) : ICommitTreeSigner
+    {
+        public int Checks { get; private set; }
+
+        public async Task<IReadOnlyList<SigningKeyInfo>> ListKeysAsync(CancellationToken cancellationToken) =>
+            ++Checks <= emptyChecks ? [] : await inner.ListKeysAsync(cancellationToken);
+
+        public Task<CommitSignature> SignAsync(Guid keyId, string password, string treeId, CancellationToken cancellationToken) =>
+            inner.SignAsync(keyId, password, treeId, cancellationToken);
     }
 
     private sealed class FakeCommitSignatureVerifierForPopup(CommitSignatureVerification answer) : ICommitSignatureVerifier

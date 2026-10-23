@@ -214,7 +214,7 @@ public static class VcaHookProcessHost
             bool closedByUser;
             if (style.Enabled)
             {
-                readTask = input.ReadLineAsync();
+                readTask = ReadLineInBackground(input);
                 closedByUser = await CountdownForEnterAsync(
                     output, readTask, exitCode, timeout, style, cancellationToken);
                 await output.WriteLineAsync();
@@ -229,7 +229,7 @@ public static class VcaHookProcessHost
                 await output.WriteAsync(message);
                 await output.FlushAsync();
 
-                readTask = input.ReadLineAsync();
+                readTask = ReadLineInBackground(input);
                 closedByUser = await Task.WhenAny(
                     readTask,
                     Task.Delay(timeout, cancellationToken)) == readTask;
@@ -255,6 +255,18 @@ public static class VcaHookProcessHost
             // Best effort — if stdin is closed or unavailable, just exit.
         }
     }
+
+    /// <summary>
+    /// Reads one line on a thread-pool thread, so a caller can race it against a timeout.
+    /// <c>Console.In</c> is a <c>SyncTextReader</c>, whose <c>ReadLineAsync</c> is
+    /// <c>Task.FromResult(ReadLine())</c>: it blocks the calling thread until Enter. Awaited
+    /// directly, it made every "auto-closes in 30 seconds" popup wait for Enter forever, which is
+    /// how a stale "no signing key" window outlived the successful signing after it (VIBE-200).
+    /// A read still pending when the timeout wins is abandoned on its background thread; the
+    /// console ends it when the process exits.
+    /// </summary>
+    internal static Task<string?> ReadLineInBackground(TextReader input) =>
+        Task.Run(() => input.ReadLineAsync());
 
     /// <summary>
     /// Styled pause line with a live once-per-second countdown, so the popup visibly

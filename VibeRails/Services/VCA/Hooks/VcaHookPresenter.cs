@@ -661,7 +661,9 @@ public sealed class VcaConsoleHookPresenter : IVcaHookPresenter
             _writeLock.Release();
         }
 
-        return await _options.Input.ReadLineAsync();
+        // Off the caller's thread: Console.In's ReadLineAsync blocks, and PauseIfInteractiveAsync
+        // races this read against its auto-close timeout.
+        return await VcaHookProcessHost.ReadLineInBackground(_options.Input);
     }
 
     private async Task WriteRunVerdictAsync(GitPreflightEvent preflightEvent)

@@ -49,6 +49,12 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
         // A signature rule the committed vc.rules.md declares and this commit removes or weakens.
         bool RemovedFromPolicy = false);
 
+    /// <summary>
+    /// A signature rule this commit adds, or raises, that is not in force until the commit lands.
+    /// <paramref name="CommittedEnforcement"/> is the level HEAD declares, or null for a new rule.
+    /// </summary>
+    private sealed record PendingSignatureRule(VcaRuleSnapshot Rule, string? CommittedEnforcement);
+
     private enum RuleValidationState
     {
         Passed,
@@ -141,6 +147,16 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
                     stagedFileCount: 0);
             }
 
+            // Signature rules are decided by the committed text of a changed vc.rules.md, which only
+            // the snapshot carries. The direct MCP reader takes it before reading any policy.
+            if (stagedSnapshot is null && stagedFiles.Any(file => IsAgentFilePath(file.RelativePath)
+                    || (file.PreviousRelativePath is { } previous && IsAgentFilePath(previous))))
+            {
+                var policySnapshot = await snapshotProvider.CaptureAsync(gitRoot, cancellationToken);
+                return await ValidateVcaReportAsync(snapshotProvider, gitRoot, commitMessage, validateCommitMessage,
+                    cancellationToken, policySnapshot, workingTreeScope, signatureVerifier);
+            }
+
             // Find vc.rules.md files
             var agentFiles = stagedSnapshot == null
                 ? await GetAgentFilesFromIndexAsync(gitRoot, indexPaths, cancellationToken)
@@ -158,6 +174,7 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
 
             // Before the "no rule files" answer: a commit that deletes the last vc.rules.md, or stages
             // it as something unreadable, still owes the signatures that file demanded.
+            var pendingSignatureRules = DeferNewSignatureRules(allRules, stagedFiles, gitRoot);
             AddCommittedSignatureRules(allRules, stagedFiles, gitRoot);
 
             if (agentFiles.Count == 0 && allRules.Count == 0)
@@ -167,7 +184,7 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
                     stagedFiles.Count);
             }
 
-            if (allRules.Count == 0)
+            if (allRules.Count == 0 && pendingSignatureRules.Count == 0)
             {
                 return VcaToolValidationReport.Pass(
                     "PASS: No VCA rules defined in vc.rules.md files.",
@@ -327,6 +344,27 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
                             SignatureRequest: validation.SignatureRequest));
                     }
                 }
+            }
+
+            // Reported, never enforced: a warning is the one finding that says "not checked on this commit"
+            // without blocking it.
+            foreach (var pending in pendingSignatureRules.Where(pending => pending.Rule.Enforcement is not ("SKIP" or "DISABLED")))
+            {
+                var rule = pending.Rule;
+                var sourcePath = GetRuleSourcePath(rule.Source.FullPath, gitRoot);
+                var message = pending.CommittedEnforcement is null
+                    ? "New in this commit, so it is not enforced on it. Git Guard enforces it from the next commit."
+                    : $"This commit raises it from {pending.CommittedEnforcement} to {rule.Enforcement}. This commit is checked at "
+                        + $"{pending.CommittedEnforcement}; {rule.Enforcement} applies from the next commit.";
+                warnings.Add($"[WARN] {rule.RuleText}: {message}");
+                findings.Add(new VcaRuleFinding(
+                    VcaRuleFindingKind.Warning,
+                    rule.Enforcement,
+                    rule.RuleText,
+                    message,
+                    sourcePath,
+                    "Signature rules govern the commits after the one that adds them. Removing or weakening a "
+                        + "committed one needs the signature it asks for."));
             }
 
             // Build response
@@ -975,12 +1013,68 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
     }
 
     /// <summary>
+    /// Signature rules take effect with the commit after the one that adds them (VIBE-200). A rule a
+    /// changed vc.rules.md declares but its committed (HEAD) text does not is taken out of this
+    /// commit's policy and returned as pending; one whose level this commit raises is checked at the
+    /// committed level. Otherwise introducing an approval would need its own approval: the commit that
+    /// adds <c>Signed Approval('vc.rules.md', …)</c> always touches vc.rules.md. Nothing is given away.
+    /// Changes staged beside a new rule could have been committed just before it with no rule at all.
+    /// Taking an existing rule away is the other half, <see cref="AddCommittedSignatureRules"/>.
+    /// Unchanged rule files are already committed policy. Added, copied or renamed-to files had no
+    /// policy at that path, and the committed text of a renamed file applies through its old path.
+    /// </summary>
+    private static List<PendingSignatureRule> DeferNewSignatureRules(
+        List<VcaRuleSnapshot> rules,
+        List<StagedFileSnapshot> stagedFiles,
+        string gitRoot)
+    {
+        var committedTextByPath = new Dictionary<string, string?>(GitPathComparer);
+        foreach (var file in stagedFiles)
+        {
+            if (file.ChangeKind != GitStagedChangeKind.Deleted && IsAgentFilePath(file.RelativePath))
+                committedTextByPath[file.RelativePath] = file.ChangeKind == GitStagedChangeKind.Modified ? file.PreviousContent : null;
+        }
+
+        var pending = new List<PendingSignatureRule>();
+        if (committedTextByPath.Count == 0)
+            return pending;
+
+        for (var index = rules.Count - 1; index >= 0; index--)
+        {
+            var rule = rules[index];
+            if (!HumanSignatureRule.IsSignatureRule(rule.RuleText)
+                || !committedTextByPath.TryGetValue(rule.Source.RelativePath, out var committedText))
+                continue;
+
+            var committedLevel = committedText is null
+                ? null
+                : ParseRules(committedText, rule.Source.FullPath)
+                    .Where(committed => IsSameSignatureRule(committed.RuleText, rule.RuleText, rule.Source.FullPath, gitRoot))
+                    .Select(committed => committed.Enforcement)
+                    .MaxBy(EnforcementRank);
+            if (committedLevel is null)
+            {
+                rules.RemoveAt(index);
+                pending.Insert(0, new PendingSignatureRule(rule, null));
+            }
+            else if (EnforcementRank(rule.Enforcement) > EnforcementRank(committedLevel))
+            {
+                pending.Insert(0, new PendingSignatureRule(rule, committedLevel));
+                rules[index] = rule with { Enforcement = committedLevel };
+            }
+        }
+
+        return pending;
+    }
+
+    /// <summary>
     /// Policy is read from the staged vc.rules.md, so without this an agent could delete or weaken a
     /// signature rule in the very commit it wants to land. When a rule file changes, any signature
     /// rule its committed (HEAD) text declared is enforced at the stronger of the two levels, so
-    /// removing or downgrading one needs the same signature it asks for. Other rules keep the
-    /// staged-policy behavior. Only the staged-snapshot path carries the committed text; the direct
-    /// MCP reader defers these rules anyway, so it loses nothing.
+    /// removing or downgrading one needs the same signature it asks for. Rewriting one (another path
+    /// or other approvers) or moving its file counts as removing it. Other rules keep the
+    /// staged-policy behavior. Only the snapshot carries the committed text, so the direct MCP reader
+    /// takes one whenever a vc.rules.md changes.
     /// </summary>
     private static void AddCommittedSignatureRules(
         List<VcaRuleSnapshot> rules,
@@ -1001,13 +1095,37 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
                 if (!HumanSignatureRule.IsSignatureRule(committed.RuleText)) continue;
                 var index = rules.FindIndex(rule =>
                     string.Equals(rule.Source.RelativePath, committedPath, GitPathComparison)
-                    && string.Equals(rule.RuleText.Trim(), committed.RuleText.Trim(), StringComparison.OrdinalIgnoreCase));
+                    && IsSameSignatureRule(rule.RuleText, committed.RuleText, source.FullPath, gitRoot));
                 if (index < 0)
                     rules.Add(new VcaRuleSnapshot(committed.RuleText, committed.Enforcement, source, RemovedFromPolicy: true));
                 else if (EnforcementRank(committed.Enforcement) > EnforcementRank(rules[index].Enforcement))
                     rules[index] = rules[index] with { Enforcement = committed.Enforcement, RemovedFromPolicy = true };
             }
         }
+    }
+
+    /// <summary>
+    /// Whether two lines of one vc.rules.md ask for the same signature: both Human verified, or
+    /// approvals of the same repository path by the same approvers, however the line is spaced,
+    /// quoted or ordered. Anything that does not parse compares as text.
+    /// </summary>
+    private static bool IsSameSignatureRule(string left, string right, string sourceFullPath, string gitRoot)
+    {
+        if (HumanSignatureRule.IsHumanVerified(left) || HumanSignatureRule.IsHumanVerified(right))
+            return HumanSignatureRule.IsHumanVerified(left) && HumanSignatureRule.IsHumanVerified(right);
+
+        if (HumanSignatureRule.TryParseSignedApproval(left, out var leftApproval)
+            && HumanSignatureRule.TryParseSignedApproval(right, out var rightApproval)
+            && PathLockRule.TryResolveRepositoryPath(new PathLockSpecification(PathLockKind.Directory, leftApproval.RelativePath),
+                sourceFullPath, gitRoot, out var leftPath, out _, "approval path")
+            && PathLockRule.TryResolveRepositoryPath(new PathLockSpecification(PathLockKind.Directory, rightApproval.RelativePath),
+                sourceFullPath, gitRoot, out var rightPath, out _, "approval path"))
+        {
+            return string.Equals(leftPath, rightPath, GitPathComparison)
+                && leftApproval.Approvers.ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(rightApproval.Approvers);
+        }
+
+        return string.Equals(left.Trim(), right.Trim(), StringComparison.OrdinalIgnoreCase);
     }
 
     private static int EnforcementRank(string enforcement) => enforcement switch

@@ -158,8 +158,17 @@ public sealed class VcaHookRunner : IVcaHookRunner
         for (var round = 0; round < MaxSignatureRounds; round++)
         {
             var pending = PendingSignatures(summary);
-            if (pending.Count == 0 || _signaturePrompt is null || !invocation.PromptForAcknowledgment)
+            if (pending.Count == 0 || _signaturePrompt is null)
                 break;
+
+            // Said out loud: a silent block is what sent an agent to run the hook by hand (VIBE-200).
+            if (!invocation.PromptForAcknowledgment)
+            {
+                await _presenter.WriteWarningAsync(
+                    $"This commit needs a person's signature, but Git Guard did not open the signing popup: {DescribeMissingSigningPopup()}. "
+                    + "A person can make this commit from their own terminal, VS Code or a Git GUI, where commit-msg opens the popup.");
+                break;
+            }
 
             var otherBlockers = summary.HasError
                 || (summary.Findings ?? []).Any(finding =>
@@ -187,6 +196,22 @@ public sealed class VcaHookRunner : IVcaHookRunner
         }
 
         return (summary, validationOutput);
+    }
+
+    /// <summary>
+    /// Why this commit-msg run cannot ask a person, in terms they can act on. The hook script asks for
+    /// prompts only with a terminal on both stdin and stdout, or with the Git Guard console it requests
+    /// on Windows when both are redirected and no CI variable is set.
+    /// </summary>
+    internal static string DescribeMissingSigningPopup()
+    {
+        if (!OperatingSystem.IsWindows())
+            return "the popup is available on Windows only in this version";
+        if (VcaHookConsoleRespawn.AutomatedEnvironmentVariable() is { } variable)
+            return $"{variable} is set in this commit's environment, and Git Guard never opens a window under CI";
+        if (!Environment.UserInteractive)
+            return "this commit runs without an interactive desktop";
+        return "this hook run has neither a terminal on both its input and output nor a Git Guard console to show the popup from";
     }
 
     // Commit-level (acknowledgment-required) violations are surfaced in the transcript but

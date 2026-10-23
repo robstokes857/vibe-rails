@@ -141,6 +141,79 @@ public class VcaHookProcessHostTests
         Assert.Contains("VCA check blocked the commit (exit code 1).", output.ToString());
     }
 
+    /// <summary>
+    /// VIBE-200: Console.In is a SyncTextReader, whose ReadLineAsync blocks until Enter. The pause
+    /// used to await it directly, so the "auto-closes" popup never closed by itself; a stale
+    /// "no signing key" window stayed up after a later signature succeeded.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PauseForEnterAsync_TimesOutOnAConsoleStyleSynchronousReader(bool ansi)
+    {
+        using var output = new StringWriter();
+        using var blocking = new BlockingTextReader();
+        var input = TextReader.Synchronized(blocking);
+
+        // Task.Run so a regression fails the deadline below instead of hanging the test thread.
+        var pauseTask = Task.Run(() => VcaHookProcessHost.PauseForEnterAsync(
+            output,
+            input,
+            exitCode: 1,
+            timeout: TimeSpan.FromMilliseconds(50),
+            TestContext.Current.CancellationToken,
+            ansi ? VcaConsoleStyle.Ansi : VcaConsoleStyle.Plain), TestContext.Current.CancellationToken);
+        var completed = await Task.WhenAny(
+            pauseTask,
+            Task.Delay(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+
+        Assert.Same(pauseTask, completed);
+        await pauseTask;
+    }
+
+    [Fact]
+    public async Task PresenterReadLine_DoesNotBlockTheCallerOnASynchronousReader()
+    {
+        using var output = new StringWriter();
+        using var blocking = new BlockingTextReader();
+        var presenter = new VcaConsoleHookPresenter(new VcaHookConsoleOptions(
+            output, output, TextReader.Synchronized(blocking), EnableSpinner: false));
+
+        // The call itself has to return a pending read; before the fix it blocked inside the call.
+        Task<string?>? readTask = null;
+        await Task.Run(() => { readTask = presenter.ReadLineAsync("Press Enter"); }, TestContext.Current.CancellationToken)
+            .WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        Assert.False(readTask!.IsCompleted);
+        blocking.Answer("done");
+        Assert.Equal("done", await readTask.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>A reader whose synchronous ReadLine blocks until answered or disposed, like a console.</summary>
+    private sealed class BlockingTextReader : TextReader
+    {
+        private readonly ManualResetEventSlim _ready = new();
+        private string? _line;
+
+        public void Answer(string line)
+        {
+            _line = line;
+            _ready.Set();
+        }
+
+        public override string? ReadLine()
+        {
+            _ready.Wait();
+            return _line;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            _ready.Set();
+            base.Dispose(disposing);
+        }
+    }
+
     private sealed class NeverCompletingTextReader : TextReader
     {
         private readonly TaskCompletionSource<string?> _completion = new(

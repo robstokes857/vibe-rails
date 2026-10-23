@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using VibeRails.DTOs;
+using VibeRails.Services.Board;
 using VibeRails.Services.Git;
 using VibeRails.Services.SigningKeys;
 using VibeRails.Utils;
@@ -56,7 +57,10 @@ public sealed record HumanSignaturePopupRequest(
 public sealed class HumanSignaturePopup
 {
     public const int MaxPasswordAttempts = 3;
-    private const int MaxListedChanges = 15;
+    private const int MaxListedChanges = 25;
+    private const int MaxDescriptionLines = 12;
+    private const int MaxLineChars = 160;
+    private const int MaxListedCards = 3;
 
     private readonly TextWriter _output;
     private readonly IHumanSignatureConsole _console;
@@ -64,14 +68,18 @@ public sealed class HumanSignaturePopup
     private readonly ICommitSignatureVerifier _verifier;
     private readonly VcaConsoleStyle _style;
     private readonly Func<string, string, string, CancellationToken, Task<IReadOnlyList<string>>> _listChanges;
+    private readonly Func<string, string, CancellationToken, Task<IReadOnlyList<string>>> _findCards;
 
+    /// <param name="listChanges">(repository, base tree, tree) → one display line per changed file.</param>
+    /// <param name="findCards">(repository, commit message) → one display line per Board card.</param>
     public HumanSignaturePopup(
         TextWriter output,
         IHumanSignatureConsole console,
         ICommitTreeSigner signer,
         ICommitSignatureVerifier verifier,
         VcaConsoleStyle? style = null,
-        Func<string, string, string, CancellationToken, Task<IReadOnlyList<string>>>? listChanges = null)
+        Func<string, string, string, CancellationToken, Task<IReadOnlyList<string>>>? listChanges = null,
+        Func<string, string, CancellationToken, Task<IReadOnlyList<string>>>? findCards = null)
     {
         _output = output;
         _console = console;
@@ -79,6 +87,7 @@ public sealed class HumanSignaturePopup
         _verifier = verifier;
         _style = style ?? VcaConsoleStyle.Plain;
         _listChanges = listChanges ?? ListChangesWithGitAsync;
+        _findCards = findCards ?? HumanSignatureBoardCards.FindAsync;
     }
 
     public async Task<int> RunAsync(HumanSignaturePopupRequest request, CancellationToken cancellationToken)
@@ -101,23 +110,9 @@ public sealed class HumanSignaturePopup
 
         await WriteSummaryAsync(request, cancellationToken);
 
-        IReadOnlyList<SigningKeyInfo> keys;
-        try
-        {
-            keys = await _signer.ListKeysAsync(cancellationToken);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
-        {
-            await _output.WriteLineAsync($"{s.Red}Could not read your signing keys: {ex.Message}{s.Reset}");
+        var keys = await WaitForSyncedKeysAsync(cancellationToken);
+        if (keys is null)
             return 1;
-        }
-
-        if (keys.Count == 0)
-        {
-            await _output.WriteLineAsync($"{s.Yellow}No signing key on this computer is synced to viberails.ai.{s.Reset}");
-            await _output.WriteLineAsync("Create one in VibeRails Settings > KEYS with your API key saved, sync it, then commit again.");
-            return 1;
-        }
 
         var key = await ChooseKeyAsync(keys, cancellationToken);
         if (key is null)
@@ -159,30 +154,109 @@ public sealed class HumanSignaturePopup
         return 0;
     }
 
+    /// <summary>
+    /// What the person is approving, before any key or password prompt (VIBE-200): the Board card,
+    /// the whole commit message, every changed file with its line counts, then the tree and the
+    /// rules that asked for the signature, last so they sit right above the prompt. The card and the
+    /// message are the committer's own words, possibly an agent's, so every line is stripped of
+    /// control characters (an escape sequence could otherwise repaint this screen) and the person is
+    /// told that the files and the tree are what the signature covers.
+    /// </summary>
     private async Task WriteSummaryAsync(HumanSignaturePopupRequest request, CancellationToken cancellationToken)
     {
         var s = _style;
-        await _output.WriteLineAsync($"  {s.Dim}Repository{s.Reset}  {request.WorkingDirectory}");
-        await _output.WriteLineAsync($"  {s.Dim}Message{s.Reset}     {ReadSubject(request.CommitMessagePath)}");
-        await _output.WriteLineAsync($"  {s.Dim}Tree{s.Reset}        {request.TreeId}");
-        for (var i = 0; i < request.Requirements.Count; i++)
-            await _output.WriteLineAsync($"  {s.Dim}{(i == 0 ? "Required" : string.Empty),-10}{s.Reset}  {request.Requirements[i]}");
+        await WriteFieldAsync("Repository", [request.WorkingDirectory]);
 
+        var message = ReadMessage(request.CommitMessagePath);
+        IReadOnlyList<string> cards;
+        try { cards = await _findCards(request.WorkingDirectory, message, cancellationToken); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { cards = []; }
+        await WriteFieldAsync("Card", cards.Count == 0
+            ? ["(none found)"]
+            : cards.Take(MaxListedCards).Select(card => Clean(card)).ToList());
+
+        var (subject, description, more) = DescribeMessage(message);
+        await WriteFieldAsync("Message", [subject]);
+        if (description.Count > 0)
+            await WriteFieldAsync(string.Empty, more > 0 ? [.. description, $"... and {more} more line(s)"] : description);
+
+        IReadOnlyList<string> changes = [];
         if (request.BaseTree is { } baseTree && CommitSignatureFormat.IsObjectId(baseTree))
         {
-            IReadOnlyList<string> changes;
             try { changes = await _listChanges(request.WorkingDirectory, baseTree, request.TreeId, cancellationToken); }
             catch (Exception ex) when (ex is not OperationCanceledException) { changes = []; }
-            if (changes.Count > 0)
+        }
+        if (changes.Count > 0)
+        {
+            var listed = changes.Take(MaxListedChanges).Select(change => Clean(change)).ToList();
+            if (changes.Count > MaxListedChanges)
+                listed.Add($"... and {changes.Count - MaxListedChanges} more");
+            await WriteFieldAsync("Changes", [$"{changes.Count} file(s)", .. listed.Select(line => "  " + line)]);
+        }
+        else
+        {
+            await WriteFieldAsync("Changes", ["(none listed; the tree below is still what you sign)"]);
+        }
+
+        await WriteFieldAsync("Tree", [request.TreeId]);
+        // Longer bound: an approval names every accepted signer, and a cut list would hide one.
+        await WriteFieldAsync("Required", request.Requirements.Select(requirement => Clean(requirement, 600)).ToList());
+        await _output.WriteLineAsync();
+        await _output.WriteLineAsync(
+            $"{s.Dim}The card and the message are written by whoever made the commit, which may be an agent. "
+            + $"The signature covers the changed files above (the tree), nothing else.{s.Reset}");
+        await _output.WriteLineAsync();
+    }
+
+    private async Task WriteFieldAsync(string label, IReadOnlyList<string> lines)
+    {
+        var s = _style;
+        for (var i = 0; i < lines.Count; i++)
+            await _output.WriteLineAsync($"  {s.Dim}{(i == 0 ? label : string.Empty),-10}{s.Reset}  {lines[i]}");
+    }
+
+    /// <summary>
+    /// Lists the keys that can sign. With none synced, the window waits for the person to create and
+    /// sync one in Settings &gt; KEYS and checks again on Enter, instead of failing and leaving a
+    /// "no signing key" window behind while they set one up for a second attempt (VIBE-200).
+    /// Null means cancelled, timed out or unreadable.
+    /// </summary>
+    private async Task<IReadOnlyList<SigningKeyInfo>?> WaitForSyncedKeysAsync(CancellationToken cancellationToken)
+    {
+        var s = _style;
+        for (var check = 0; ; check++)
+        {
+            IReadOnlyList<SigningKeyInfo> keys;
+            try
             {
-                await _output.WriteLineAsync($"  {s.Dim}Changes{s.Reset}     {changes.Count} file(s)");
-                foreach (var change in changes.Take(MaxListedChanges))
-                    await _output.WriteLineAsync($"                {change}");
-                if (changes.Count > MaxListedChanges)
-                    await _output.WriteLineAsync($"                ... and {changes.Count - MaxListedChanges} more");
+                keys = await _signer.ListKeysAsync(cancellationToken);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                await _output.WriteLineAsync($"{s.Red}Could not read your signing keys: {ex.Message}{s.Reset}");
+                return null;
+            }
+            if (keys.Count > 0)
+                return keys;
+
+            if (check == 0)
+            {
+                await _output.WriteLineAsync($"{s.Yellow}No signing key on this computer is synced to viberails.ai.{s.Reset}");
+                await _output.WriteLineAsync(
+                    "Create one in VibeRails Settings > KEYS with your API key saved and sync it. This window waits; "
+                    + "the commit does not need to be started again.");
+            }
+            else
+            {
+                await _output.WriteLineAsync($"{s.Yellow}Still no synced signing key.{s.Reset}");
+            }
+
+            if (await _console.ReadLineAsync("Press Enter to check again (Esc cancels): ", cancellationToken) is null)
+            {
+                await _output.WriteLineAsync("Cancelled. Nothing was signed.");
+                return null;
             }
         }
-        await _output.WriteLineAsync();
     }
 
     private async Task<SigningKeyInfo?> ChooseKeyAsync(IReadOnlyList<SigningKeyInfo> keys, CancellationToken cancellationToken)
@@ -305,35 +379,85 @@ public sealed class HumanSignaturePopup
         return -1;
     }
 
-    private static string ReadSubject(string path)
+    private static string ReadMessage(string path)
     {
         try
         {
-            foreach (var line in File.ReadLines(path))
-            {
-                var trimmed = line.Trim();
-                if (trimmed.Length > 0 && !trimmed.StartsWith('#'))
-                    return trimmed.Length > 100 ? trimmed[..100] + "..." : trimmed;
-            }
+            var text = File.ReadAllText(path);
+            var scissors = FindScissorsLine(text);
+            return scissors >= 0 ? text[..scissors] : text;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-        return "(empty message)";
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return string.Empty;
+        }
     }
+
+    /// <summary>
+    /// The subject and the body Git will record: comment lines and earlier <c>vibe-signature:</c>
+    /// lines dropped, blank runs collapsed, each line cleaned and bounded.
+    /// </summary>
+    internal static (string Subject, IReadOnlyList<string> Description, int More) DescribeMessage(string message)
+    {
+        var lines = new List<string>();
+        foreach (var raw in message.Split('\n'))
+        {
+            var line = raw.TrimEnd('\r').TrimEnd();
+            if (line.TrimStart().StartsWith('#') || CommitSignatureFormat.TryParseTrailer(line, out _))
+                continue;
+            if (line.Length == 0 && (lines.Count == 0 || lines[^1].Length == 0))
+                continue;
+            lines.Add(line.Length == 0 ? string.Empty : Clean(line));
+        }
+        while (lines.Count > 0 && lines[^1].Length == 0)
+            lines.RemoveAt(lines.Count - 1);
+        if (lines.Count == 0)
+            return ("(empty message)", [], 0);
+
+        var body = lines.Skip(1).SkipWhile(line => line.Length == 0).ToList();
+        var shown = body.Take(MaxDescriptionLines).ToList();
+        return (lines[0], shown, body.Count - shown.Count);
+    }
+
+    /// <summary>One display line with control characters and bidi overrides removed, bounded.</summary>
+    private static string Clean(string text, int maxChars = MaxLineChars) => BoardPromptComposer.SanitizeLine(text, maxChars);
 
     private static async Task<IReadOnlyList<string>> ListChangesWithGitAsync(
         string workingDirectory, string baseTree, string treeId, CancellationToken cancellationToken)
     {
         // Two tree objects, no index: the popup never reads the live index, which may already have
-        // moved, and the trees are exactly what the hook validated.
-        var result = await GitCli.RunAsync(
+        // moved, and the trees are exactly what the hook validated. Paths stay C-quoted by Git, so
+        // both listings name a file identically and an odd path cannot inject control characters.
+        var status = await GitCli.RunAsync(
             workingDirectory,
             ["diff-tree", "-r", "--name-status", "--no-renames", baseTree, treeId],
             cancellationToken,
             maxOutputChars: 64 * 1024);
-        if (!result.Succeeded) return [];
-        return result.StdOut
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(line => line.Replace('\t', ' '))
+        if (!status.Succeeded) return [];
+        var numstat = await GitCli.RunAsync(
+            workingDirectory,
+            ["diff-tree", "-r", "--numstat", "--no-renames", baseTree, treeId],
+            cancellationToken,
+            maxOutputChars: 64 * 1024);
+
+        var counts = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (numstat.Succeeded)
+        {
+            foreach (var line in numstat.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var fields = line.TrimEnd('\r').Split('\t', 3);
+                if (fields.Length == 3)
+                    counts[fields[2]] = fields[0] == "-" ? "binary" : $"+{fields[0]} -{fields[1]}";
+            }
+        }
+
+        return status.StdOut
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.TrimEnd('\r').Split('\t', 2))
+            .Where(fields => fields.Length == 2)
+            .Select(fields => counts.TryGetValue(fields[1], out var count)
+                ? $"{fields[0]} {fields[1]} ({count})"
+                : $"{fields[0]} {fields[1]}")
             .ToList();
     }
 

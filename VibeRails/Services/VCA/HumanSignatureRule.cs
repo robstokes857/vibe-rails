@@ -45,13 +45,14 @@ public static class HumanSignatureRule
         + "signing key registered on viberails.ai. Git Guard verifies the signature with viberails.ai at "
         + "commit-msg. The signature covers the exact staged content, so changing anything after signing "
         + "needs a new signature. Use STOP: at COMMIT an acknowledgment can replace the signature. "
-        + "Removing or weakening this rule needs the same signature.";
+        + "It applies from the commit after the one that adds it. Removing or weakening this rule needs the same signature.";
 
     public const string SignedApprovalDescription =
         "When the file or directory changes, requires a signature from a listed approver. The approver signs "
         + "in the Git Guard popup with a Settings > KEYS key, and viberails.ai must report one of the listed "
         + "emails as the key's verified account email. Format: Signed Approval('path/to/file', 'approver@example.com'). "
-        + "Use STOP: at COMMIT an acknowledgment can replace the approval.";
+        + "Use STOP: at COMMIT an acknowledgment can replace the approval. It applies from the commit after the one that "
+        + "adds it; removing it, or changing its path or approvers, needs a listed approver's signature.";
 
     public static string HumanVerifiedDeferredMessage =>
         "Deferred: a person must sign this commit; checked against the final commit message by commit-msg. "

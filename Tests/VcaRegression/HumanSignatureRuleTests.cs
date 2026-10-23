@@ -299,6 +299,123 @@ public sealed class HumanSignatureRuleTests
         Assert.True(approved.ExitCode == 0, approved.Transcript);
     }
 
+    /// <summary>
+    /// VIBE-200: adding an approval, even one over vc.rules.md and beside a change to its path, needs
+    /// no signature under it. The next commit that touches either path does.
+    /// </summary>
+    [Fact]
+    public async Task NewApprovalTakesEffectFromTheNextCommit()
+    {
+        await using var repo = await VcaRegressionRepository.CreateAsync("signed-approval/introduce");
+        var verifier = Use(repo, FakeCommitSignatureVerifier.ValidFor("owner@example.com"));
+        var prompt = UsePrompt(repo, sign: true);
+
+        var preCommit = await repo.RunPreCommitAndCrossCheckAsync();
+        Assert.True(preCommit.ExitCode == 0, preCommit.Transcript);
+        Assert.Contains("New in this commit", preCommit.Transcript);
+        Assert.DoesNotContain("[DEFERRED]", preCommit.Transcript);
+
+        var introduce = await repo.RunCommitMessageAsync("Add approvals\n", "--prompt-acknowledgment");
+        Assert.True(introduce.ExitCode == 0, introduce.Transcript);
+        Assert.Empty(prompt.Requests);
+        Assert.Empty(verifier.Calls);
+        Assert.False((await repo.ValidateWithMcpToolAsync("Add approvals\n")).HasStopViolation);
+        await repo.GitAsync("commit", "-qm", "Add approvals", "--no-verify");
+
+        await File.WriteAllTextAsync(Path.Combine(repo.RepositoryPath, "db.cs"), "class Db { int Version = 3; }\n",
+            TestContext.Current.CancellationToken);
+        await repo.GitAsync("add", "--", "db.cs");
+        var protectedChange = await repo.RunCommitMessageAsync("Change db\n");
+        Assert.Equal(1, protectedChange.ExitCode);
+        Assert.Contains("Changes to 'db.cs'", protectedChange.Transcript);
+        var signed = await repo.RunCommitMessageAsync($"Change db\n\n{SignatureLine(await StagedTreeAsync(repo))}\n");
+        Assert.True(signed.ExitCode == 0, signed.Transcript);
+        await repo.GitAsync("commit", "-qm", "Change db", "--no-verify");
+
+        // The approval over the policy file now covers edits that leave the db.cs approval alone.
+        var policy = Path.Combine(repo.RepositoryPath, "vc.rules.md");
+        await File.AppendAllTextAsync(policy, "- Package file changes (WARN)\n", TestContext.Current.CancellationToken);
+        await repo.GitAsync("add", "--", "vc.rules.md");
+        var policyEdit = await repo.RunCommitMessageAsync("Add a rule\n");
+        Assert.Equal(1, policyEdit.ExitCode);
+        Assert.Contains("Changes to 'vc.rules.md'", policyEdit.Transcript);
+    }
+
+    [Fact]
+    public async Task NewHumanVerifiedTakesEffectFromTheNextCommit()
+    {
+        await using var repo = await VcaRegressionRepository.CreateAsync("human-verified/introduce");
+        var prompt = UsePrompt(repo, sign: true);
+
+        var introduce = await repo.RunCommitMessageAsync("Require signatures\n", "--prompt-acknowledgment");
+        Assert.True(introduce.ExitCode == 0, introduce.Transcript);
+        Assert.Contains("New in this commit", introduce.Transcript);
+        Assert.Empty(prompt.Requests);
+        await repo.GitAsync("commit", "-qm", "Require signatures", "--no-verify");
+
+        await File.WriteAllTextAsync(Path.Combine(repo.RepositoryPath, "app.txt"), "hello once more\n",
+            TestContext.Current.CancellationToken);
+        await repo.GitAsync("add", "--", "app.txt");
+        var next = await repo.RunCommitMessageAsync("Edit app\n");
+        Assert.Equal(1, next.ExitCode);
+        Assert.Contains("[STOP] " + HumanSignatureRule.HumanVerifiedName, next.Transcript);
+    }
+
+    [Fact]
+    public async Task RaisingALevelAppliesFromTheNextCommit()
+    {
+        await using var repo = await VcaRegressionRepository.CreateAsync("human-verified/raise-level");
+
+        var run = await repo.RunCommitMessageAsync("Make it a gate\n");
+
+        Assert.True(run.ExitCode == 0, run.Transcript);
+        Assert.Contains("raises it from WARN to STOP", run.Transcript);
+        Assert.Contains("needs a person's signature", run.Transcript);
+        Assert.DoesNotContain("[STOP] " + HumanSignatureRule.HumanVerifiedName, run.Transcript);
+    }
+
+    [Fact]
+    public async Task ChangingTheApproversNeedsTheCommittedApprover()
+    {
+        await using var repo = await VcaRegressionRepository.CreateAsync("signed-approval/change-approvers");
+        var tree = await StagedTreeAsync(repo);
+
+        Use(repo, FakeCommitSignatureVerifier.ValidFor("intruder@example.com"));
+        var newApprover = await repo.RunCommitMessageAsync($"Hand over db\n\n{SignatureLine(tree)}\n");
+        Assert.Equal(1, newApprover.ExitCode);
+        Assert.Contains("Removing or weakening the signed approval for 'db.cs'", newApprover.Transcript);
+        Assert.Contains("signed only by intruder@example.com", newApprover.Transcript);
+
+        Use(repo, FakeCommitSignatureVerifier.ValidFor("owner@example.com"));
+        var committedApprover = await repo.RunCommitMessageAsync($"Hand over db\n\n{SignatureLine(tree)}\n");
+        Assert.True(committedApprover.ExitCode == 0, committedApprover.Transcript);
+    }
+
+    [Fact]
+    public async Task RewordingAnApprovalIsNotAChangeToIt()
+    {
+        await using var repo = await VcaRegressionRepository.CreateAsync("signed-approval/reformat-rule");
+
+        var run = await repo.RunCommitMessageAsync("Tidy the policy\n");
+
+        Assert.True(run.ExitCode == 0, run.Transcript);
+        Assert.DoesNotContain("New in this commit", run.Transcript);
+    }
+
+    [Fact]
+    public async Task MovingThePolicyFileNeedsTheApprover()
+    {
+        await using var repo = await VcaRegressionRepository.CreateAsync("signed-approval/move-rule-file");
+
+        var blocked = await repo.RunCommitMessageAsync("Move the policy\n");
+        Assert.Equal(1, blocked.ExitCode);
+        Assert.Contains("Removing or weakening the signed approval for 'db.cs'", blocked.Transcript);
+
+        Use(repo, FakeCommitSignatureVerifier.ValidFor("owner@example.com"));
+        var approved = await repo.RunCommitMessageAsync($"Move the policy\n\n{SignatureLine(await StagedTreeAsync(repo))}\n");
+        Assert.True(approved.ExitCode == 0, approved.Transcript);
+    }
+
     [Fact]
     public async Task MessageOnlyCommitStillNeedsASignature()
     {
@@ -365,6 +482,8 @@ public sealed class HumanSignatureRuleTests
 
         Assert.Equal(1, run.ExitCode);
         Assert.Empty(prompt.Requests);
+        // VIBE-200: the block says why no popup opened, so nobody has to run the hook by hand.
+        Assert.Contains("did not open the signing popup", run.Transcript);
     }
 
     [Fact]

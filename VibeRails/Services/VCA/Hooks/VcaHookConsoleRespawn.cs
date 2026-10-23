@@ -219,7 +219,10 @@ internal static class VcaHookConsoleRespawn
         return success ? processInfo : new PROCESS_INFORMATION();
     }
 
-    private static bool IsAutomatedEnvironment()
+    private static bool IsAutomatedEnvironment() => AutomatedEnvironmentVariable() is not null;
+
+    /// <summary>The first CI-style variable set in this environment (the hook scripts check the same list), or null.</summary>
+    internal static string? AutomatedEnvironmentVariable()
     {
         string[] variables =
         [
@@ -233,7 +236,7 @@ internal static class VcaHookConsoleRespawn
             "APPVEYOR"
         ];
 
-        return variables.Any(variable =>
+        return variables.FirstOrDefault(variable =>
             !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(variable)));
     }
 

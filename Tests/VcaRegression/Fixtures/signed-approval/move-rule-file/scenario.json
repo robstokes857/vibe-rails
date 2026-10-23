@@ -1,0 +1,8 @@
+{
+  "rename": [
+    {
+      "from": "vc.rules.md",
+      "to": "sub/vc.rules.md"
+    }
+  ]
+}

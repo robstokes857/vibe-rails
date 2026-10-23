@@ -231,21 +231,52 @@ to three times, re-running the preflight after each signature. `HumanSignaturePr
 it inside the Git Guard popup console when the hook is already there; otherwise it opens one with
 `--vca-hook sign-commit-msg` through `VcaHookConsoleRespawn` (CREATE_NEW_CONSOLE). It never prompts
 in the terminal that ran `git commit`, which may be an agent's pseudo-terminal. No popup opens in
-CI, without a desktop or off Windows; the commit is blocked with the rule's guidance. It is not
-offered while an unrelated STOP violation, or an unreachable viberails.ai, would block anyway.
-`HumanSignaturePopup` shows the repository, subject, tree and changed files, lists keys synced for
-the current API key, reads the password key by key with echo off (redirected input refused,
-10-minute idle timeout, three attempts), signs with `SigningKeyService.SignCommitTreeAsync`,
-confirms with viberails.ai and appends the trailer above any scissors line. Appending also drops
-trailers over another tree and earlier ones from the same key, so signing rounds do not pile up.
+CI, without a desktop or off Windows; the commit is blocked with the rule's guidance and a line
+saying why no popup opened (the CI variable it found, no desktop, or a hook run with neither a
+terminal on both stdin and stdout nor a Git Guard console; VIBE-200). It is not offered while an
+unrelated STOP violation, or an unreachable viberails.ai, would block anyway.
 
-**Policy from HEAD.** Rules normally come from the staged vc.rules.md. For these two rules only,
-`RulesTool.AddCommittedSignatureRules` also reads the committed text of every modified, renamed or
-deleted vc.rules.md: a rule the commit removes or weakens is enforced at its committed level, and
-removing an approval counts as touching its path. Taking a gate away therefore needs the signature
-the gate asks for. The snapshot provider keeps `PreviousContent` for a committed vc.rules.md whatever
-replaced it (deleted, or staged as binary, oversized or a gitlink), so an unreadable staged policy
-cannot drop the committed one.
+`HumanSignaturePopup` first shows what is being approved (VIBE-200): the repository; the Board card
+(`HumanSignatureBoardCards`: the card of the VibeRails terminal that ran `git commit`, through the
+inherited `VIBERAILS_TOOL_CURRENT_SESSION_ID`, then cards the message names by key or display ID,
+read from board.db within 3 s and silently skipped when it cannot); the whole message minus comments
+and old trailers; every changed file with `+added -deleted` counts from the two tree objects; the
+tree; and the rules that asked. Card and message text is the committer's, possibly an agent's, so
+control characters are stripped before printing and the popup says the signature covers the files
+and tree only. Then it lists keys synced for the current API key. With none, it waits in the same
+window ("press Enter to check again") while the person creates and syncs one, rather than failing
+and leaving a stale "no signing key" window behind a second attempt. It reads the password key by
+key with echo off (redirected input refused, 10-minute idle timeout, three attempts), signs with
+`SigningKeyService.SignCommitTreeAsync`, confirms with viberails.ai and appends the trailer above
+any scissors line. Appending also drops trailers over another tree and earlier ones from the same
+key, so signing rounds do not pile up.
+
+A blocking popup closes itself after `VcaHookProcessHost.ConsolePauseTimeout` (30 s). Before
+VIBE-200 it never did: `Console.In` is a `SyncTextReader`, whose `ReadLineAsync` blocks until Enter,
+so the timeout race never started. Console reads that race a timer go through
+`VcaHookProcessHost.ReadLineInBackground`.
+
+**Policy from HEAD.** Rules normally come from the staged vc.rules.md. These two rules follow the
+committed policy instead, in both directions:
+
+- *A new rule governs the commits after it* (VIBE-200). `RulesTool.DeferNewSignatureRules` takes a
+  signature rule that a changed vc.rules.md declares but its committed text does not out of this
+  commit's policy and reports it as a WARN finding ("New in this commit"). A level raised in this
+  commit is checked at the committed level. Otherwise the commit adding
+  `Signed Approval('vc.rules.md', …)` would need that approval, because it always touches
+  vc.rules.md. Changes staged beside a new rule are not covered; they could equally have been
+  committed just before the rule, so nothing is given away.
+- *Taking a gate away needs the gate's signature.* `RulesTool.AddCommittedSignatureRules` reads the
+  committed text of every modified, renamed or deleted vc.rules.md: a rule the commit removes or
+  weakens is enforced at its committed level, and removing an approval counts as touching its path.
+  Changing an approval's path or approvers counts as removing it, and so does moving the file, which
+  re-scopes it. Rules are compared by meaning (`IsSameSignatureRule`: resolved path, approver set),
+  so re-quoting or re-casing a line is not a change.
+
+The snapshot provider keeps `PreviousContent` for a committed vc.rules.md whatever replaced it
+(deleted, or staged as binary, oversized or a gitlink), so an unreadable staged policy cannot drop
+the committed one. The direct MCP `validate_vca` reader takes a snapshot whenever a vc.rules.md
+changes, because only the snapshot carries that committed text.
 
 **Threat model.** It stops an agent from producing an approval: the key password is never stored,
 the dashboard's Sign message route refuses the commit-approval prefix, no MCP tool signs, and the
@@ -335,6 +366,7 @@ author junk. Reads no longer filter, so hand-edited junk is shown rather than hi
 | `HumanSignatureRule.cs` | Human verified / Signed Approval syntax, the `vibe-signature:` trailer and the signed payload. |
 | `CommitSignatureVerifier.cs` | Commit-signature verification through viberails.ai's public verify endpoint. |
 | `Hooks/HumanSignaturePopup.cs`, `Hooks/HumanSignaturePrompt.cs` | The signing popup and the launcher that decides where it may run. |
+| `Hooks/HumanSignatureBoardCards.cs` | The Board card lines in the popup summary (read-only, bounded). |
 | `../GitPreflight/` | Step pipeline (VCA → MintLint → automated workflows) and its event stream. |
 
 ## Testing
