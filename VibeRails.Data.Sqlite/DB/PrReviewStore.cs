@@ -312,6 +312,7 @@ public sealed partial class PrReviewStore(string connectionString, TimeProvider?
         });
         EnsureAdoptionSchema(connection);
         EnsureDeliverySchema(connection);
+        EnsureRepositorySchema(connection);
         SqliteMigrationRunner.StampGeneration(connection, Generation);
     }
 

@@ -1075,6 +1075,11 @@
                         <p>Off by default. This setting applies to all projects on this machine and saves immediately. When on, completed reviews publish through your signed-in GitHub CLI account. Blockers request changes on GitHub; branch protection determines whether that prevents merging.</p>
                         <p>Turning off stops new review queue/start work and new GitHub posts. A run already in progress can finish and save its local result. A GitHub post already reserved for dispatch may still finish. Existing history is preserved; enabling does not publish past reviews automatically.</p>
                         <p>Reviews run through your existing open backend and Automations. There is no background service. Review history shows local results and GitHub delivery separately, with safe retry/check actions for errors.</p>
+                        <label class="form-label" for="setting-pr-reviewer-repositories">GitHub repositories to watch</label>
+                        <textarea id="setting-pr-reviewer-repositories" class="form-control" rows="5" data-pr-reviewer-repositories
+                            aria-describedby="pr-reviewer-repositories-help" placeholder="owner/repository" disabled></textarea>
+                        <p id="pr-reviewer-repositories-help" class="form-text">One owner/repository per line, up to 50. Leave empty to use each project's GitHub origin. This list applies to all projects on this machine. Access uses your existing GitHub CLI identity; no local checkout of these repositories is needed. Removing a watch preserves its history; add it again to access it.</p>
+                        <button type="button" class="btn btn-primary mb-3" data-pr-reviewer-save-repositories disabled>Save repositories</button>
                         <p role="status" data-pr-reviewer-status>Open this page to load the saved setting.</p>
                         <button type="button" class="btn btn-outline-secondary" data-pr-reviewer-reload>Reload saved setting</button>
                     </section>

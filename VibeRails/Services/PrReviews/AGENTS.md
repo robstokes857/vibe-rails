@@ -1,7 +1,8 @@
 # PR Reviews
 
-The **Reviews** page and six MCP tools track lead reviews of the current project's GitHub pull
-requests: which PRs were reviewed, what each pass found, and which PR to review next. Frontend:
+The **Reviews** page and six MCP tools track lead reviews of configured GitHub repositories
+(or the current project's origin when no watches are configured): which PRs were reviewed, what
+each pass found, and which PR to review next. Frontend:
 `wwwroot/js/modules/pr-reviews-controller.js` (list and detail pages, polling) and
 `pr-reviews-view.js` (wording, list arithmetic and markup; node-tested). Routes:
 `Routes/PrReviewRoutes.cs`, root-only. Storage: `IPrReviewStore` / `PrReviewStore` in
@@ -11,7 +12,12 @@ requests: which PRs were reviewed, what each pass found, and which PR to review 
 - **Settings > PR Reviewer** is a dedicated settings navigation page with an immediate-save
   **Enable PR Reviewer and GitHub publishing** switch, off by default. This machine-wide setting
   lives behind `IPrReviewStore` in `pr_reviews.db` (`pr-review-delivery/1`, additive), shared by
-  root backends and stdio MCP. GET/PUT `/api/v1/pr-reviews/settings` require both dashboard
+  root backends and stdio MCP. The same page edits an optional machine-wide `repositories` list:
+  one GitHub `owner/name` per line, up to 50 entries, validated, lowercased and deduplicated ignoring
+  case before any write. `PrReviewerRepositories` (`pr-review-repositories/1`, additive) stores it
+  in `pr_reviews.db`. Settings saves are atomic; omitting/null `repositories` preserves the list
+  for older clients, while `[]` restores origin fallback. Removing a watch never deletes history;
+  re-add it to access that history. GET/PUT `/api/v1/pr-reviews/settings` require both dashboard
   credentials and no-store responses. Off refuses queue/start operations before GitHub access;
   history, drafts and already running passes remain available. A running pass may finish locally.
   Disabling prevents new POST reservations atomically in SQLite; a POST already reserved may
@@ -22,7 +28,7 @@ requests: which PRs were reviewed, what each pass found, and which PR to review 
   `REQUEST_CHANGES` review; other feedback produces `COMMENT` (including recommend_approve,
   which is a recommendation, not an approval). GitHub branch protection decides whether the
   request changes prevents merging. The user's authenticated `gh` identity authors the review;
-  no VibeRails GitHub token is stored. The repository comes from the project, the PR from the
+  no VibeRails GitHub token is stored. The repository comes from the selected watch (or project origin), the PR from the
   saved pass, and `commit_id` from its full 40-character reviewed SHA. Publishing rechecks the
   PR head and refuses stale/missing SHAs instead of substituting the latest commit. Local
   feedback remains up to 100,000 characters; outbound snapshots cap at 60,000, including marker.
@@ -65,12 +71,24 @@ requests: which PRs were reviewed, what each pass found, and which PR to review 
   to older versions. List polling pauses while an inspection is open. Missing legacy files/tables are rechecked on
   later calls; failures roll back and retry automatically. Schema generation is independently
   guarded at 1 in the dedicated file. No upgrade command or manual backup is needed.
-- **The repository comes from the project.** `PrReviewRepositoryResolver` parses the dashboard
-  project's `origin` remote (`GitHubRepository.TryParseRemote`): github.com only, owner/name
-  checked against GitHub's character rules. Records are keyed by `owner/name` and PR number, so
-  two checkouts of one repository share their history. A project without a GitHub origin lists
-  nothing and says why; every other call answers 409. The remote URL is never echoed: it can
-  embed a credential.
+- **Repository selection is explicit.** With watches configured, list, queue and lifecycle sync
+  cover those repositories without resolving or switching the checkout's origin. Each queue
+  entry, tracked PR, pass and delivery identifies `repository` as `owner/name`; list/queue expose
+  `repositories`, and their legacy singular `repository` is null for multiple targets. Queue ranks
+  apply across all targets, with repository/name and number breaking equal-age ties. A GitHub
+  failure identifies the repository and fails the queue with 502 rather than returning partial
+  success. The existing open-list limit applies per repository.
+  REST single-PR/pass operations accept `?repository=owner%2Fname`; the five corresponding MCP
+  tools accept optional `repository`. It must select a configured repository, or match the origin
+  fallback. Omission works with one target; multiple targets require scope (400) rather than
+  guessing by PR number. Reads, draft/edit/delete, conflict resolution, completion and publish/retry
+  retain repository+PR/pass isolation. Publishing re-resolves the same explicit target, so settings
+  changes cannot retarget a completed result to another watch.
+  Without explicit watches, `PrReviewRepositoryResolver` parses the dashboard project's `origin`
+  (`GitHubRepository.TryParseRemote`): github.com only, GitHub owner/name character rules. Records
+  are keyed by case-insensitive `owner/name` and PR number, so checkouts of the same repository
+  share history. Without a GitHub origin, the list says why and other operations answer 409.
+  Remote URLs are never echoed because they can embed credentials.
 - **The state is derived, never stored** (`PrTrackerStatus.Derive`): an unfinished pass is
   `in_review`; otherwise the newest completed review decides between `blocker` and `complete`;
   no completed review is `not_started`. In review outranks Blocker so an interrupted run stays in
@@ -112,7 +130,9 @@ requests: which PRs were reviewed, what each pass found, and which PR to review 
 MCP tools (both transports, outside the Board auto-grants): `get_pr_review_queue`,
 `get_pr_review`, `start_pr_review`, `save_pr_review_draft`, `complete_pr_review`,
 `retry_pr_review_publish`. Completion/retry are outbound writes when enabled. They resolve
-the project through `IBoardProjectResolver` and take no repository or path argument.
+the fallback project through `IBoardProjectResolver`; repository arguments select only saved
+watches or that origin. No tool accepts a host, path or credential. Configure watches through
+Settings > PR Reviewer (or the authenticated settings API).
 
 Tests: `Tests/DB/PrReviewStoreTests.cs`, `Tests/DB/PrReviewDatabaseIsolationTests.cs`, `Tests/Services/PrReviews/*`,
 `Tests/Routes/PrReviewRoutesTests.cs`, `Tests/Services/Mcp/PrReviewToolTests.cs`,

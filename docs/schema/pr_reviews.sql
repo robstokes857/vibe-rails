@@ -29,6 +29,9 @@ CREATE TABLE PrReviewLegacyIds ( LegacyId INTEGER PRIMARY KEY, ReviewId INTEGER 
 -- table PrReviewPullRequests
 CREATE TABLE PrReviewPullRequests ( Repository TEXT NOT NULL COLLATE NOCASE, Number INTEGER NOT NULL CHECK (Number > 0), Title TEXT NOT NULL, Author TEXT NOT NULL, OpenedUTC TEXT NOT NULL, Summary TEXT NOT NULL DEFAULT '', GitHubState TEXT NOT NULL DEFAULT '', GitHubStateUTC TEXT, GitHubCheckedUTC TEXT, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, PRIMARY KEY (Repository, Number) );
 
+-- table PrReviewerRepositories
+CREATE TABLE PrReviewerRepositories ( Repository TEXT PRIMARY KEY COLLATE NOCASE, Position INTEGER NOT NULL );
+
 -- table PrReviewerSettings
 CREATE TABLE PrReviewerSettings (Id INTEGER PRIMARY KEY CHECK (Id = 1), Enabled INTEGER NOT NULL);
 

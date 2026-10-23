@@ -1,5 +1,5 @@
-// `pr-reviews` view: the lead-review tracker for the current project's GitHub pull requests.
-// Two pages on one view: the list (no data) and one PR's detail ({ number }). The list polls the
+// `pr-reviews` view: the lead-review tracker for watched repositories or the project origin.
+// Two pages on one view: the list (no data) and one PR's detail ({ number, repository }). The list polls the
 // review queue and GitHub lifecycle once a minute while visible; the detail page never polls, so a
 // half-written review is never re-rendered out from under the user.
 import { confirmDialog, escapeHtml } from './utils.js';
@@ -42,6 +42,7 @@ export class PrReviewsController {
         content.appendChild(fragment);
         const number = Number.parseInt(data?.number, 10);
         this.state = this.emptyState(Number.isInteger(number) && number > 0 ? number : null);
+        this.state.repository = data?.repository || null;
         this.abort = new AbortController();
         this.bindEvents();
         this.showPage();
@@ -81,7 +82,8 @@ export class PrReviewsController {
 
     // ------------------------------------------------------------------ data
 
-    request(path, method = 'GET', body = null) {
+    request(path, method = 'GET', body = null, repository = this.state.repository) {
+        if (repository) path += `${path.includes('?') ? '&' : '?'}repository=${encodeURIComponent(repository)}`;
         return this.app.apiCall(API + path, method, body, {
             showLoading: false, preferErrorResponseMessage: true, signal: this.abort?.signal
         });
@@ -116,7 +118,7 @@ export class PrReviewsController {
         try {
             // A failed initial local read must not disable every later refresh.
             if (!this.state.list) await this.loadList(generation);
-            if (!this.isCurrent(generation) || !this.state.list?.repository) return;
+            if (!this.isCurrent(generation) || !(this.state.list?.repositories?.length || this.state.list?.repository)) return;
             const tracked = this.state.list.pullRequests?.length || 0;
             const [queue, sync] = await Promise.allSettled([
                 this.request('/queue'),
@@ -148,6 +150,7 @@ export class PrReviewsController {
             const detail = await this.request(`/${this.state.number}`);
             if (!this.isCurrent(generation)) return;
             this.state.detail = detail;
+            this.state.repository = detail.repository;
             this.state.detailError = '';
         } catch (error) {
             if (error?.name === 'AbortError' || !this.isCurrent(generation)) return;
@@ -182,10 +185,10 @@ export class PrReviewsController {
         }
     }
 
-    async startFromQueue(number) {
+    async startFromQueue(number, repository) {
         if (this.state.starting !== null) return;
         const entries = [...(this.state.queue?.queue || []), ...(this.state.queue?.skipped || [])];
-        const entry = entries.find(item => item.number === number);
+        const entry = entries.find(item => item.number === number && item.repository === repository);
         if (!entry) return;
         const generation = this.generation;
         this.state.starting = number;
@@ -193,8 +196,8 @@ export class PrReviewsController {
         try {
             await this.request(`/${number}/reviews/start`, 'POST', {
                 title: entry.title, author: entry.author, openedAt: entry.openedUtc, headSha: entry.headSha
-            });
-            if (this.isCurrent(generation)) this.app.navigate(VIEW, { number });
+            }, repository);
+            if (this.isCurrent(generation)) this.app.navigate(VIEW, { number, repository });
         } catch (error) {
             if (error?.name !== 'AbortError' && this.isCurrent(generation)) {
                 this.app.showToast('PR Reviews', error?.message || `Could not start a review for #${number}.`, 'error');
@@ -227,10 +230,11 @@ export class PrReviewsController {
         if (repo) {
             repo.innerHTML = list?.repository
                 ? `Lead-review log for ${repositoryLink(list.repositoryUrl, list.repository)}`
+                : list?.repositories?.length ? `Lead-review log for ${list.repositories.map(name => repositoryLink(`https://github.com/${name}`, name)).join(', ')}`
                 : 'Lead-review log for this project\'s GitHub pull requests';
         }
         const problem = this.q('[data-pr-problem]');
-        const available = Boolean(list?.repository);
+        const available = Boolean(list?.repositories?.length || list?.repository);
         if (problem) {
             const message = listError || (list && !available ? list.problem : '');
             problem.hidden = !message;
@@ -400,11 +404,11 @@ export class PrReviewsController {
             return;
         }
         if (target.matches('[data-pr-resolve-legacy]')) {
-            await this.resolveLegacyConflict(Number(target.dataset.prResolveLegacy), target.dataset.useLegacy === 'true');
+            await this.resolveLegacyConflict(Number(target.dataset.prResolveLegacy), target.dataset.useLegacy === 'true', target.dataset.prRepository);
         } else if (target.matches('[data-pr-open]')) {
-            this.app.navigate(VIEW, { number: Number(target.dataset.prOpen) });
+            this.app.navigate(VIEW, { number: Number(target.dataset.prOpen), repository: target.dataset.prRepository });
         } else if (target.matches('[data-pr-start]')) {
-            await this.startFromQueue(Number(target.dataset.prStart));
+            await this.startFromQueue(Number(target.dataset.prStart), target.dataset.prRepository);
         } else if (target.matches('[data-pr-publish]')) {
             await this.mutate(() => this.request(`/${this.state.number}/reviews/${target.dataset.prPublish}/publish`, 'POST'),
                 'GitHub delivery checked. See the delivery status for the confirmed outcome.');
@@ -461,9 +465,9 @@ export class PrReviewsController {
         }
     }
 
-    async resolveLegacyConflict(number, useLegacy) {
+    async resolveLegacyConflict(number, useLegacy, repository) {
         if (this.state.busy) return;
-        const conflict = this.state.list?.legacyConflicts?.find(item => item.number === number);
+        const conflict = this.state.list?.legacyConflicts?.find(item => item.number === number && item.repository === repository);
         if (!conflict) return;
         const generation = this.generation;
         const confirmed = await confirmDialog({
@@ -477,7 +481,7 @@ export class PrReviewsController {
         try {
             await this.request(`/${number}/legacy-conflict/resolve`, 'POST', {
                 sourceHash: conflict.sourceHash, targetHash: conflict.targetHash, useLegacy
-            });
+            }, repository);
         } catch (error) {
             if (error?.name !== 'AbortError' && this.isCurrent(generation))
                 this.app.showToast('PR Reviews', error?.message || 'The histories could not be reconciled.', 'error');

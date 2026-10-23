@@ -221,7 +221,7 @@ public sealed class PrReviewServiceTests : IDisposable
         _github.Setup(g => g.ListOpenAsync(Repo, Project, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new GitHubCliException("Unable to list open pull requests for octo/widgets: offline"));
 
-        await AssertError(502, "Unable to list open pull requests for octo/widgets: offline",
+        await AssertError(502, "octo/widgets: Unable to list open pull requests for octo/widgets: offline",
             () => _service.QueueAsync(Project, _ct));
     }
 
@@ -248,5 +248,136 @@ public sealed class PrReviewServiceTests : IDisposable
         var error = await Assert.ThrowsAsync<PrReviewException>(action);
         Assert.Equal(status, error.StatusCode);
         Assert.Equal(message, error.Message);
+    }
+
+    [Fact]
+    public async Task Watch_list_is_shared_normalized_editable_and_old_switch_writes_preserve_it()
+    {
+        var settings = await _service.SetSettingsAsync(true, _ct, [" Octo/Widgets ", "octo/widgets", "else/tools"]);
+        Assert.Equal(["octo/widgets", "else/tools"], settings.Repositories);
+        var other = new PrReviewStore(_connectionString);
+        Assert.Equal(settings.Repositories, (await other.GetReviewerSettingsAsync(_ct)).Repositories);
+        await other.SetReviewerSettingsAsync(false, _ct); // Older client knows only the switch.
+        Assert.Equal(settings.Repositories, (await _service.GetSettingsAsync(_ct)).Repositories);
+        settings = await _service.SetSettingsAsync(true, _ct, ["else/renamed"]);
+        Assert.Equal(["else/renamed"], settings.Repositories);
+        settings = await _service.SetSettingsAsync(true, _ct, []);
+        Assert.Empty(settings.Repositories!);
+        Assert.Equal(Repo.FullName, (await _service.ListAsync(Project, _ct)).Repository);
+    }
+
+    [Theory]
+    [InlineData("https://github.com/octo/widgets")]
+    [InlineData("octo/widgets/extra")]
+    [InlineData("octo")]
+    [InlineData("bad--owner/widgets")]
+    [InlineData("octo/..")]
+    [InlineData("octo\n/widgets")]
+    [InlineData("--help/widgets")]
+    [InlineData("octo/%2fwidgets")]
+    [InlineData(null)]
+    public async Task Invalid_configuration_cannot_partially_change_the_saved_settings(string? value)
+    {
+        await _service.SetSettingsAsync(true, _ct, [Repo.FullName]);
+        var error = await Assert.ThrowsAsync<PrReviewException>(() => _service.SetSettingsAsync(false, _ct, ["else/tools", value!]));
+        Assert.Equal(400, error.StatusCode);
+        var saved = await _service.GetSettingsAsync(_ct);
+        Assert.True(saved.Enabled);
+        Assert.Equal([Repo.FullName], saved.Repositories);
+        _github.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Multiple_watches_queue_by_reason_and_age_without_colliding_numbers_or_resolving_origin()
+    {
+        var second = new GitHubRepository("else", "tools");
+        await _service.SetSettingsAsync(true, _ct, [Repo.FullName, second.FullName, "OCTO/WIDGETS"]);
+        var first = await _service.StartAsync(Project, 7, NewPr, _ct, Repo.FullName);
+        await _service.StartAsync(Project, 8, NewPr with { HeadSha = "old1234" }, _ct, Repo.FullName);
+        await _service.CompleteAsync(Project, 8, new(Feedback: "done", Verdict: "comments"), _ct, Repo.FullName);
+        await _service.StartAsync(Project, 8, NewPr with { HeadSha = "current1234" }, _ct, second.FullName);
+        await _service.CompleteAsync(Project, 8, new(Feedback: "other repo", Verdict: "comments"), _ct, second.FullName);
+        GitHubPullRequest Open(GitHubRepository repo, int number, int day, string sha = "current1234") =>
+            new(number, repo.FullName, "author", new DateTime(2026, 8, day), null, false, sha, repo.PullRequestUrl(number));
+        _github.Setup(g => g.ListOpenAsync(Repo, Project, It.IsAny<CancellationToken>())).ReturnsAsync([Open(Repo, 7, 30), Open(Repo, 8, 1)]);
+        _github.Setup(g => g.ListOpenAsync(second, Project, It.IsAny<CancellationToken>())).ReturnsAsync([
+            Open(second, 7, 2), Open(second, 8, 1), Open(second, 9, 1) with { IsDraft = true }, Open(second, 10, 1)]);
+
+        var queue = await _service.QueueAsync(Project, _ct);
+
+        Assert.Null(queue.Repository);
+        Assert.Equal([Repo.FullName, second.FullName], queue.Repositories);
+        Assert.Equal(["octo/widgets:7:in_review", "else/tools:10:never_reviewed", "else/tools:7:never_reviewed", "octo/widgets:8:new_commits"],
+            queue.Queue.Select(e => $"{e.Repository}:{e.Number}:{e.Reason}"));
+        Assert.Equal([1, 2, 3, 4], queue.Queue.Select(e => e.Position));
+        Assert.Equal(new PrReviewQueueCounts(6, 4, 1, 1), queue.Counts);
+        Assert.All(queue.Skipped, e => Assert.Equal(second.FullName, e.Repository));
+        var secondStart = await _service.StartAsync(Project, 7, NewPr with { Title = "Second repository" }, _ct, second.FullName);
+        Assert.NotEqual(first.Review!.Id, secondStart.Review!.Id);
+        await _service.DraftAsync(Project, 7, new(Feedback: "second draft"), _ct, second.FullName);
+        Assert.Empty((await _service.GetAsync(Project, 7, _ct, Repo.FullName)).Reviews[0].Feedback);
+        Assert.Equal("second draft", (await _service.GetAsync(Project, 7, _ct, second.FullName)).Reviews[0].Feedback);
+        Assert.Equal(4, (await _service.ListAsync(Project, _ct)).PullRequests.Count);
+        Assert.Equal(404, (await Assert.ThrowsAsync<PrReviewException>(() =>
+            _service.UpdateReviewAsync(Project, first.Review.Id, new(Feedback: "wrong repository"), _ct, second.FullName))).StatusCode);
+        Assert.Equal(404, (await Assert.ThrowsAsync<PrReviewException>(() =>
+            _service.DeleteReviewAsync(Project, first.Review.Id, _ct, second.FullName))).StatusCode);
+        await _service.DeleteAsync(Project, 7, _ct, second.FullName);
+        Assert.Single((await _service.GetAsync(Project, 7, _ct, Repo.FullName)).Reviews);
+        _repositories.Verify(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _github.Verify(g => g.ListOpenAsync(It.IsAny<GitHubRepository>(), Project, It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task Single_watch_needs_no_checkout_and_removing_it_preserves_history()
+    {
+        await _service.SetSettingsAsync(true, _ct, ["else/tools"]);
+        await _service.StartAsync(Project, 7, NewPr, _ct);
+        await _service.SetSettingsAsync(true, _ct, []);
+        Assert.Empty((await _service.ListAsync(Project, _ct)).PullRequests);
+        await _service.SetSettingsAsync(true, _ct, ["else/tools"]);
+        Assert.Single((await _service.GetAsync(Project, 7, _ct)).Reviews);
+    }
+
+    [Fact]
+    public async Task Multiple_watches_require_scope_and_reject_unselected_repositories_before_access()
+    {
+        await _service.SetSettingsAsync(true, _ct, [Repo.FullName, "else/tools"]);
+        var ambiguous = await Assert.ThrowsAsync<PrReviewException>(() => _service.StartAsync(Project, 7, NewPr, _ct));
+        Assert.Equal(400, ambiguous.StatusCode);
+        Assert.Contains("repository is required", ambiguous.Message);
+        Assert.Equal(409, (await Assert.ThrowsAsync<PrReviewException>(() =>
+            _service.StartAsync(Project, 7, NewPr, _ct, "other/private"))).StatusCode);
+        Assert.Equal(400, (await Assert.ThrowsAsync<PrReviewException>(() =>
+            _service.GetAsync(Project, 7, _ct, "https://github.com/octo/widgets"))).StatusCode);
+        _github.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Inaccessible_watch_is_an_identified_failure_not_a_partial_successful_queue()
+    {
+        await _service.SetSettingsAsync(true, _ct, [Repo.FullName, "else/private"]);
+        _github.Setup(g => g.ListOpenAsync(Repo, Project, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        _github.Setup(g => g.ListOpenAsync(new GitHubRepository("else", "private"), Project, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new GitHubCliException("Check gh auth status and repository access."));
+        var error = await Assert.ThrowsAsync<PrReviewException>(() => _service.QueueAsync(Project, _ct));
+        Assert.Equal(502, error.StatusCode);
+        Assert.Contains("else/private", error.Message);
+        Assert.Contains("gh auth status", error.Message);
+    }
+
+    [Fact]
+    public async Task Lifecycle_sync_scopes_the_same_number_to_each_repository()
+    {
+        var second = new GitHubRepository("else", "tools");
+        await _service.SetSettingsAsync(true, _ct, [Repo.FullName, second.FullName]);
+        foreach (var repo in new[] { Repo, second }) await _service.UpsertAsync(Project, NewPr with { Number = 7 }, _ct, repo.FullName);
+        _github.Setup(g => g.GetStatesAsync(Repo, Project, It.IsAny<IReadOnlyList<int>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new(7, "merged", DateTime.UtcNow)]);
+        _github.Setup(g => g.GetStatesAsync(second, Project, It.IsAny<IReadOnlyList<int>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new(7, "open", null)]);
+        Assert.Equal(new PrReviewSyncResponse(2, 2, 2, 1, 1, 0), await _service.SyncAsync(Project, _ct));
+        Assert.Equal("merged", (await _service.GetAsync(Project, 7, _ct, Repo.FullName)).PullRequest.GitHubState);
+        Assert.Equal("open", (await _service.GetAsync(Project, 7, _ct, second.FullName)).PullRequest.GitHubState);
     }
 }

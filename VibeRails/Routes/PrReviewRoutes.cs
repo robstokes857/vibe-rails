@@ -7,7 +7,7 @@ namespace VibeRails.Routes;
 
 /// <summary>
 /// Lead-review records for the current project's GitHub pull requests. Root dashboard only. The
-/// project (and so the repository) is derived from the dashboard root, never from a request.
+/// watch list is shared; single-PR actions select a validated watched repository or origin fallback.
 /// GitHub reviews use the user's own authenticated <c>gh</c>.
 /// </summary>
 public static class PrReviewRoutes
@@ -24,28 +24,28 @@ public static class PrReviewRoutes
         routes.MapGet("/settings", ([FromServices] PrReviewService service, CancellationToken ct) =>
             RunAsync(async () => Results.Ok(await service.GetSettingsAsync(ct))));
         routes.MapPut("/settings", ([FromServices] PrReviewService service, VibeRails.DB.PrReviewerSettings request, CancellationToken ct) =>
-            RunAsync(async () => Results.Ok(await service.SetSettingsAsync(request.Enabled, ct))));
-        routes.MapPost("/{number:int}/reviews/{id:long}/publish", ([FromServices] PrReviewService service, int number, long id, CancellationToken ct) =>
-            RunAsync(async () => Results.Ok(await service.PublishAsync(Project(), number, id, ct))));
+            RunAsync(async () => Results.Ok(await service.SetSettingsAsync(request.Enabled, ct, request.Repositories))));
+        routes.MapPost("/{number:int}/reviews/{id:long}/publish", ([FromServices] PrReviewService service, int number, long id, [FromQuery] string? repository, CancellationToken ct) =>
+            RunAsync(async () => Results.Ok(await service.PublishAsync(Project(), number, id, ct, repository))));
 
         routes.MapGet("", ([FromServices] PrReviewService service, CancellationToken ct) =>
             RunAsync(async () => Results.Ok(await service.ListAsync(Project(), ct))))
             .WithName("ListPrReviews");
 
-        routes.MapPost("", ([FromServices] PrReviewService service, PrReviewRequest request, CancellationToken ct) =>
+        routes.MapPost("", ([FromServices] PrReviewService service, PrReviewRequest request, [FromQuery] string? repository, CancellationToken ct) =>
             RunAsync(async () =>
             {
-                var result = await service.UpsertAsync(Project(), request, ct);
+                var result = await service.UpsertAsync(Project(), request, ct, repository);
                 return result.Created
-                    ? Results.Created($"/api/v1/pr-reviews/{result.PullRequest.Number}", result)
+                    ? Results.Created($"/api/v1/pr-reviews/{result.PullRequest.Number}?repository={Uri.EscapeDataString(result.PullRequest.Repository)}", result)
                     : Results.Ok(result);
             }))
             .WithName("UpsertPrReview");
 
         routes.MapPost("/{number:int}/legacy-conflict/resolve", ([FromServices] PrReviewService service, int number,
-            PrReviewResolveLegacyRequest request, CancellationToken ct) => RunAsync(async () =>
+            PrReviewResolveLegacyRequest request, [FromQuery] string? repository, CancellationToken ct) => RunAsync(async () =>
             {
-                await service.ResolveLegacyConflictAsync(Project(), number, request, ct);
+                await service.ResolveLegacyConflictAsync(Project(), number, request, ct, repository);
                 return Results.Ok(new PrReviewDeleteResponse(number, null));
             }))
             .WithName("ResolvePrReviewLegacyConflict");
@@ -59,49 +59,49 @@ public static class PrReviewRoutes
             RunAsync(async () => Results.Ok(await service.SyncAsync(Project(), ct))))
             .WithName("SyncPrReviewGitHubStates");
 
-        routes.MapGet("/{number:int}", ([FromServices] PrReviewService service, int number, CancellationToken ct) =>
-            RunAsync(async () => Results.Ok(await service.GetAsync(Project(), number, ct))))
+        routes.MapGet("/{number:int}", ([FromServices] PrReviewService service, int number, [FromQuery] string? repository, CancellationToken ct) =>
+            RunAsync(async () => Results.Ok(await service.GetAsync(Project(), number, ct, repository))))
             .WithName("GetPrReview");
 
         routes.MapPut("/{number:int}", ([FromServices] PrReviewService service, int number, PrReviewRequest request,
-            CancellationToken ct) => RunAsync(async () => Results.Ok(await service.UpdateAsync(Project(), number, request, ct))))
+            [FromQuery] string? repository, CancellationToken ct) => RunAsync(async () => Results.Ok(await service.UpdateAsync(Project(), number, request, ct, repository))))
             .WithName("UpdatePrReview");
 
-        routes.MapDelete("/{number:int}", ([FromServices] PrReviewService service, int number, CancellationToken ct) =>
+        routes.MapDelete("/{number:int}", ([FromServices] PrReviewService service, int number, [FromQuery] string? repository, CancellationToken ct) =>
             RunAsync(async () =>
             {
-                await service.DeleteAsync(Project(), number, ct);
+                await service.DeleteAsync(Project(), number, ct, repository);
                 return Results.Ok(new PrReviewDeleteResponse(number, null));
             }))
             .WithName("DeletePrReview");
 
         routes.MapPost("/{number:int}/reviews/start", ([FromServices] PrReviewService service, int number,
-            PrReviewRequest? request, CancellationToken ct) => RunAsync(async () =>
+            PrReviewRequest? request, [FromQuery] string? repository, CancellationToken ct) => RunAsync(async () =>
             {
-                var result = await service.StartAsync(Project(), number, request, ct);
+                var result = await service.StartAsync(Project(), number, request, ct, repository);
                 return result.Created
-                    ? Results.Created($"/api/v1/pr-reviews/{number}", result)
+                    ? Results.Created($"/api/v1/pr-reviews/{number}?repository={Uri.EscapeDataString(result.PullRequest.Repository)}", result)
                     : Results.Ok(result);
             }))
             .WithName("StartPrReview");
 
         routes.MapPost("/{number:int}/reviews/draft", ([FromServices] PrReviewService service, int number,
-            PrReviewRequest? request, CancellationToken ct) =>
-            RunAsync(async () => Results.Ok(await service.DraftAsync(Project(), number, request, ct))))
+            PrReviewRequest? request, [FromQuery] string? repository, CancellationToken ct) =>
+            RunAsync(async () => Results.Ok(await service.DraftAsync(Project(), number, request, ct, repository))))
             .WithName("SavePrReviewDraft");
 
         routes.MapPost("/{number:int}/reviews/complete", ([FromServices] PrReviewService service, int number,
-            PrReviewRequest? request, CancellationToken ct) =>
-            RunAsync(async () => Results.Ok(await service.CompleteAsync(Project(), number, request, ct))))
+            PrReviewRequest? request, [FromQuery] string? repository, CancellationToken ct) =>
+            RunAsync(async () => Results.Ok(await service.CompleteAsync(Project(), number, request, ct, repository))))
             .WithName("CompletePrReview");
 
         routes.MapPut("/reviews/{id:long}", ([FromServices] PrReviewService service, long id, PrReviewRequest request,
-            CancellationToken ct) => RunAsync(async () => Results.Ok(await service.UpdateReviewAsync(Project(), id, request, ct))))
+            [FromQuery] string? repository, CancellationToken ct) => RunAsync(async () => Results.Ok(await service.UpdateReviewAsync(Project(), id, request, ct, repository))))
             .WithName("UpdatePrReviewPass");
 
-        routes.MapDelete("/reviews/{id:long}", ([FromServices] PrReviewService service, long id, CancellationToken ct) =>
+        routes.MapDelete("/reviews/{id:long}", ([FromServices] PrReviewService service, long id, [FromQuery] string? repository, CancellationToken ct) =>
             RunAsync(async () =>
-                Results.Ok(new PrReviewDeleteResponse(await service.DeleteReviewAsync(Project(), id, ct), id))))
+                Results.Ok(new PrReviewDeleteResponse(await service.DeleteReviewAsync(Project(), id, ct, repository), id))))
             .WithName("DeletePrReviewPass");
     }
 

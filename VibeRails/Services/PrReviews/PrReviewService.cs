@@ -57,21 +57,29 @@ public sealed class PrReviewService(IPrReviewStore store, IGitHubPullRequestClie
 
     public async Task<PrReviewListResponse> ListAsync(string projectPath, CancellationToken ct = default)
     {
-        var project = await repositories.ResolveAsync(projectPath, ct);
-        if (project.Repository is not { } repository)
-            return new PrReviewListResponse(null, null, project.Problem, []);
-        var pullRequests = await store.ListAsync(repository.FullName, ct);
-        return new PrReviewListResponse(repository.FullName, repository.Url, null, pullRequests.ToList())
+        var projects = await ResolveProjectsAsync(projectPath, ct);
+        if (projects[0].Repository is null)
+            return new PrReviewListResponse(null, null, projects[0].Problem, []);
+        var pullRequests = new List<PrReviewPullRequest>();
+        var conflicts = new List<PrReviewLegacyConflict>();
+        foreach (var project in projects)
         {
-            LegacyConflicts = (await store.GetLegacyConflictsAsync(repository.FullName, ct)).ToList()
+            pullRequests.AddRange(await store.ListAsync(project.Repository!.FullName, ct));
+            conflicts.AddRange(await store.GetLegacyConflictsAsync(project.Repository.FullName, ct));
+        }
+        return new PrReviewListResponse(projects.Count == 1 ? projects[0].Repository!.FullName : null,
+            projects.Count == 1 ? projects[0].Repository!.Url : null, null,
+            pullRequests.OrderByDescending(pr => pr.UpdatedUtc).ThenBy(pr => pr.Repository).ThenByDescending(pr => pr.Number).ToList())
+        {
+            Repositories = projects.Select(p => p.Repository!.FullName).ToList(), LegacyConflicts = conflicts
         };
     }
 
     /// <summary>Explicitly reconciles inspected histories; concurrent edits require a fresh inspection.</summary>
     public async Task ResolveLegacyConflictAsync(string projectPath, int number, PrReviewResolveLegacyRequest request,
-        CancellationToken ct = default)
+        CancellationToken ct = default, string? repositoryName = null)
     {
-        var repository = await RequireRepositoryNameAsync(projectPath, ct);
+        var repository = await RequireRepositoryNameAsync(projectPath, ct, repositoryName);
         RequireNumber(number);
         if (request.SourceHash?.Length != 64 || request.TargetHash?.Length != 64)
             throw new PrReviewException(400, "Both history version tokens are required.");
@@ -79,9 +87,9 @@ public sealed class PrReviewService(IPrReviewStore store, IGitHubPullRequestClie
             throw new PrReviewException(409, "The histories changed. Refresh Reviews and inspect both copies again before choosing.");
     }
 
-    public async Task<PrReviewDetailResponse> GetAsync(string projectPath, int number, CancellationToken ct = default)
+    public async Task<PrReviewDetailResponse> GetAsync(string projectPath, int number, CancellationToken ct = default, string? repositoryName = null)
     {
-        var repository = (await RequireRepositoryAsync(projectPath, ct)).Repository!;
+        var repository = (await RequireRepositoryAsync(projectPath, ct, repositoryName)).Repository!;
         RequireNumber(number);
         var pullRequest = await store.GetAsync(repository.FullName, number, ct)
             ?? throw new PrReviewException(404, $"PR #{number} was not found.");
@@ -99,34 +107,47 @@ public sealed class PrReviewService(IPrReviewStore store, IGitHubPullRequestClie
     public async Task<PrReviewQueueResponse> QueueAsync(string projectPath, CancellationToken ct = default)
     {
         await RequireEnabledAsync(ct);
-        var project = await RequireRepositoryAsync(projectPath, ct);
-        var repository = project.Repository!;
-        IReadOnlyList<GitHubPullRequest> open;
-        try { open = await github.ListOpenAsync(repository, project.Path, ct); }
-        catch (GitHubCliException ex) { throw new PrReviewException(502, ex.Message); }
-        var tracked = await store.ListAsync(repository.FullName, ct);
-        return PrReviewQueue.Build(repository, open, tracked);
+        var queues = new List<PrReviewQueueResponse>();
+        foreach (var project in await RequireProjectsAsync(projectPath, ct))
+        {
+            var repository = project.Repository!;
+            IReadOnlyList<GitHubPullRequest> open;
+            try { open = await github.ListOpenAsync(repository, project.Path, ct); }
+            catch (GitHubCliException ex) { throw new PrReviewException(502, $"{repository.FullName}: {ex.Message}"); }
+            queues.Add(PrReviewQueue.Build(repository, open, await store.ListAsync(repository.FullName, ct)));
+        }
+        return PrReviewQueue.Combine(queues);
     }
 
-    /// <summary>Refreshes every tracked PR's GitHub lifecycle. Review records are never changed by it.</summary>
+    /// <summary>Refreshes each watched repository independently; review records are never rewritten.</summary>
     public async Task<PrReviewSyncResponse> SyncAsync(string projectPath, CancellationToken ct = default)
     {
-        var project = await RequireRepositoryAsync(projectPath, ct);
-        var repository = project.Repository!;
-        var numbers = await store.ListNumbersAsync(repository.FullName, ct);
-        IReadOnlyList<PrGitHubStateUpdate> states;
-        try { states = await github.GetStatesAsync(repository, project.Path, numbers, ct); }
-        catch (GitHubCliException ex) { throw new PrReviewException(502, ex.Message); }
-        var counts = await store.RecordGitHubStatesAsync(repository.FullName, states, ct);
-        int CountOf(string state) => states.Count(entry => entry.State == state);
-        return new PrReviewSyncResponse(numbers.Count, counts.Recorded, counts.Changed,
+        var tracked = 0;
+        var recorded = 0;
+        var changed = 0;
+        var allStates = new List<PrGitHubStateUpdate>();
+        foreach (var project in await RequireProjectsAsync(projectPath, ct))
+        {
+            var repository = project.Repository!;
+            var numbers = await store.ListNumbersAsync(repository.FullName, ct);
+            IReadOnlyList<PrGitHubStateUpdate> states;
+            try { states = await github.GetStatesAsync(repository, project.Path, numbers, ct); }
+            catch (GitHubCliException ex) { throw new PrReviewException(502, $"{repository.FullName}: {ex.Message}"); }
+            var counts = await store.RecordGitHubStatesAsync(repository.FullName, states, ct);
+            tracked += numbers.Count;
+            recorded += counts.Recorded;
+            changed += counts.Changed;
+            allStates.AddRange(states);
+        }
+        int CountOf(string state) => allStates.Count(entry => entry.State == state);
+        return new PrReviewSyncResponse(tracked, recorded, changed,
             CountOf(PrGitHubState.Open), CountOf(PrGitHubState.Merged), CountOf(PrGitHubState.Closed));
     }
 
     /// <summary>Adds or updates a PR's metadata; the request names the PR by <c>number</c>.</summary>
-    public async Task<PrReviewWriteResponse> UpsertAsync(string projectPath, PrReviewRequest request, CancellationToken ct = default)
+    public async Task<PrReviewWriteResponse> UpsertAsync(string projectPath, PrReviewRequest request, CancellationToken ct = default, string? repositoryName = null)
     {
-        var repository = await RequireRepositoryNameAsync(projectPath, ct);
+        var repository = await RequireRepositoryNameAsync(projectPath, ct, repositoryName);
         RejectManagedTimes(request);
         var number = request.Number ?? throw new PrReviewException(400, "number is required");
         RequireNumber(number);
@@ -136,9 +157,9 @@ public sealed class PrReviewService(IPrReviewStore store, IGitHubPullRequestClie
     }
 
     public async Task<PrReviewPullRequest> UpdateAsync(string projectPath, int number, PrReviewRequest request,
-        CancellationToken ct = default)
+        CancellationToken ct = default, string? repositoryName = null)
     {
-        var repository = await RequireRepositoryNameAsync(projectPath, ct);
+        var repository = await RequireRepositoryNameAsync(projectPath, ct, repositoryName);
         RejectManagedTimes(request);
         RequireNumber(number);
         var result = await store.UpdateAsync(repository, number, ReadPullRequestFields(request), ct);
@@ -147,9 +168,9 @@ public sealed class PrReviewService(IPrReviewStore store, IGitHubPullRequestClie
         return result.PullRequest!;
     }
 
-    public async Task DeleteAsync(string projectPath, int number, CancellationToken ct = default)
+    public async Task DeleteAsync(string projectPath, int number, CancellationToken ct = default, string? repositoryName = null)
     {
-        var repository = await RequireRepositoryNameAsync(projectPath, ct);
+        var repository = await RequireRepositoryNameAsync(projectPath, ct, repositoryName);
         RequireNumber(number);
         if (!await store.DeleteAsync(repository, number, ct))
             throw new PrReviewException(404, $"PR #{number} was not found.");
@@ -157,10 +178,10 @@ public sealed class PrReviewService(IPrReviewStore store, IGitHubPullRequestClie
 
     /// <summary>Idempotent: creates the PR if needed and returns the pending review if one is open.</summary>
     public async Task<PrReviewWriteResponse> StartAsync(string projectPath, int number, PrReviewRequest? request,
-        CancellationToken ct = default)
+        CancellationToken ct = default, string? repositoryName = null)
     {
         await RequireEnabledAsync(ct);
-        var project = await RequireRepositoryAsync(projectPath, ct);
+        var project = await RequireRepositoryAsync(projectPath, ct, repositoryName);
         var repository = project.Repository!.FullName;
         request ??= Empty;
         RejectManagedTimes(request);
@@ -182,9 +203,9 @@ public sealed class PrReviewService(IPrReviewStore store, IGitHubPullRequestClie
 
     /// <summary>Checkpoints partial work so an interrupted run resumes from findings, not from nothing.</summary>
     public async Task<PrReviewWriteResponse> DraftAsync(string projectPath, int number, PrReviewRequest? request,
-        CancellationToken ct = default)
+        CancellationToken ct = default, string? repositoryName = null)
     {
-        var repository = await RequireRepositoryNameAsync(projectPath, ct);
+        var repository = await RequireRepositoryNameAsync(projectPath, ct, repositoryName);
         request ??= Empty;
         RejectManagedTimes(request);
         RequireNumber(number);
@@ -204,9 +225,9 @@ public sealed class PrReviewService(IPrReviewStore store, IGitHubPullRequestClie
     /// blockers gets the default mapping: request_changes is exactly "a blocker was found".
     /// </summary>
     public async Task<PrReviewWriteResponse> CompleteAsync(string projectPath, int number, PrReviewRequest? request,
-        CancellationToken ct = default)
+        CancellationToken ct = default, string? repositoryName = null)
     {
-        var repository = await RequireRepositoryNameAsync(projectPath, ct);
+        var repository = await RequireRepositoryNameAsync(projectPath, ct, repositoryName);
         request ??= Empty;
         RejectManagedTimes(request);
         RequireNumber(number);
@@ -221,7 +242,7 @@ public sealed class PrReviewService(IPrReviewStore store, IGitHubPullRequestClie
         try
         {
             if ((await store.GetReviewerSettingsAsync(ct)).Enabled)
-                delivery = await PublishAsync(projectPath, number, result.Review.Id, ct);
+                delivery = await PublishAsync(projectPath, number, result.Review.Id, ct, repository);
         }
         catch (PrReviewException ex)
         {
@@ -240,7 +261,23 @@ public sealed class PrReviewService(IPrReviewStore store, IGitHubPullRequestClie
     public Task<PrReviewerSettings> GetSettingsAsync(CancellationToken ct = default) => store.GetReviewerSettingsAsync(ct);
 
     /// <summary>Disables new queue/start work and POST reservations; history and running local work survive.</summary>
-    public Task<PrReviewerSettings> SetSettingsAsync(bool enabled, CancellationToken ct = default) => store.SetReviewerSettingsAsync(enabled, ct);
+    public Task<PrReviewerSettings> SetSettingsAsync(bool enabled, CancellationToken ct = default,
+        IReadOnlyList<string>? repositoryNames = null)
+    {
+        List<string>? normalized = null;
+        if (repositoryNames is not null)
+        {
+            if (repositoryNames.Count > 50) throw new PrReviewException(400, "Watch at most 50 GitHub repositories.");
+            normalized = [];
+            foreach (var name in repositoryNames)
+            {
+                if (!GitHubRepository.TryParseName(name, out var repository))
+                    throw new PrReviewException(400, "Each repository must be a GitHub owner/name identifier (for example octo/widgets).");
+                if (!normalized.Contains(repository.FullName, StringComparer.OrdinalIgnoreCase)) normalized.Add(repository.FullName);
+            }
+        }
+        return store.SetReviewerSettingsAsync(enabled, normalized, ct);
+    }
 
     private async Task RequireEnabledAsync(CancellationToken ct)
     {
@@ -249,9 +286,9 @@ public sealed class PrReviewService(IPrReviewStore store, IGitHubPullRequestClie
     }
 
     /// <summary>Retries safe failures or reconciles an uncertain POST without ever resending it.</summary>
-    public async Task<PrReviewDelivery> PublishAsync(string projectPath, int number, long id, CancellationToken ct = default)
+    public async Task<PrReviewDelivery> PublishAsync(string projectPath, int number, long id, CancellationToken ct = default, string? repositoryName = null)
     {
-        var project = await RequireRepositoryAsync(projectPath, ct);
+        var project = await RequireRepositoryAsync(projectPath, ct, repositoryName);
         RequireNumber(number);
         RequireReviewId(id);
         var repository = project.Repository!;
@@ -314,9 +351,9 @@ public sealed class PrReviewService(IPrReviewStore store, IGitHubPullRequestClie
 
     /// <summary>Edits feedback, verdict, blocking or head SHA on any review, including a completed one.</summary>
     public async Task<PrReview> UpdateReviewAsync(string projectPath, long id, PrReviewRequest request,
-        CancellationToken ct = default)
+        CancellationToken ct = default, string? repositoryName = null)
     {
-        var repository = await RequireRepositoryNameAsync(projectPath, ct);
+        var repository = await RequireRepositoryNameAsync(projectPath, ct, repositoryName);
         RejectManagedTimes(request);
         RequireReviewId(id);
         var fields = new PrReviewFields(
@@ -329,24 +366,50 @@ public sealed class PrReviewService(IPrReviewStore store, IGitHubPullRequestClie
     }
 
     /// <summary>Deletes one review and returns the number of the PR it belonged to.</summary>
-    public async Task<int> DeleteReviewAsync(string projectPath, long id, CancellationToken ct = default)
+    public async Task<int> DeleteReviewAsync(string projectPath, long id, CancellationToken ct = default, string? repositoryName = null)
     {
-        var repository = await RequireRepositoryNameAsync(projectPath, ct);
+        var repository = await RequireRepositoryNameAsync(projectPath, ct, repositoryName);
         RequireReviewId(id);
         return await store.DeleteReviewAsync(repository, id, ct)
             ?? throw new PrReviewException(404, $"Review {id} was not found.");
     }
 
-    private async Task<PrReviewProject> RequireRepositoryAsync(string projectPath, CancellationToken ct)
+    private async Task<IReadOnlyList<PrReviewProject>> ResolveProjectsAsync(string projectPath, CancellationToken ct)
     {
-        var project = await repositories.ResolveAsync(projectPath, ct);
-        return project.Repository is null
-            ? throw new PrReviewException(409, project.Problem ?? "This project has no GitHub repository.")
-            : project;
+        var settings = await store.GetReviewerSettingsAsync(ct);
+        if (settings.Repositories is not { Count: > 0 })
+            return [await repositories.ResolveAsync(projectPath, ct)];
+        // Explicit watches require no git checkout and never resolve or change its origin.
+        return settings.Repositories.Select(name => GitHubRepository.TryParseName(name, out var repository)
+            ? new PrReviewProject(string.IsNullOrWhiteSpace(projectPath) ? Environment.CurrentDirectory : projectPath, repository, null)
+            : throw new PrReviewException(400, "An invalid repository is saved. Edit Settings > PR Reviewer."))
+            .DistinctBy(p => p.Repository!.FullName, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    private async Task<string> RequireRepositoryNameAsync(string projectPath, CancellationToken ct) =>
-        (await RequireRepositoryAsync(projectPath, ct)).Repository!.FullName;
+    private async Task<IReadOnlyList<PrReviewProject>> RequireProjectsAsync(string projectPath, CancellationToken ct)
+    {
+        var projects = await ResolveProjectsAsync(projectPath, ct);
+        if (projects[0].Repository is null)
+            throw new PrReviewException(409, projects[0].Problem ?? "This project has no GitHub repository.");
+        return projects;
+    }
+
+    private async Task<PrReviewProject> RequireRepositoryAsync(string projectPath, CancellationToken ct, string? repositoryName)
+    {
+        GitHubRepository? wanted = null;
+        if (repositoryName is not null && !GitHubRepository.TryParseName(repositoryName, out wanted))
+            throw new PrReviewException(400, "repository must be a GitHub owner/name identifier.");
+        var projects = await RequireProjectsAsync(projectPath, ct);
+        if (wanted is not null)
+            return projects.FirstOrDefault(p => string.Equals(p.Repository!.FullName, wanted.FullName, StringComparison.OrdinalIgnoreCase))
+                ?? throw new PrReviewException(409, "This repository is not selected. Add it in Settings > PR Reviewer first.");
+        if (projects.Count != 1)
+            throw new PrReviewException(400, "repository is required when watching multiple repositories. Use owner/name from the queue.");
+        return projects[0];
+    }
+
+    private async Task<string> RequireRepositoryNameAsync(string projectPath, CancellationToken ct, string? repositoryName) =>
+        (await RequireRepositoryAsync(projectPath, ct, repositoryName)).Repository!.FullName;
 
     /// <summary>
     /// Untracked and tracked-but-not-started are different mistakes with different fixes, so they

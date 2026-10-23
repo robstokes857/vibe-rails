@@ -5,6 +5,15 @@ namespace VibeRails.DB;
 
 public sealed partial class PrReviewStore
 {
+    private static void EnsureRepositorySchema(SqliteConnection connection) =>
+        SqliteMigrationRunner.Apply(connection, "pr-review-repositories", 1, MigrationKind.Additive, (db, tx) =>
+            SqliteSchema.Execute(db, tx, """
+                CREATE TABLE PrReviewerRepositories (
+                    Repository TEXT PRIMARY KEY COLLATE NOCASE,
+                    Position INTEGER NOT NULL
+                );
+                """));
+
     private static void EnsureDeliverySchema(SqliteConnection connection) =>
         SqliteMigrationRunner.Apply(connection, "pr-review-delivery", 1, MigrationKind.Additive, (db, tx) =>
         {
@@ -32,18 +41,47 @@ public sealed partial class PrReviewStore
     public async Task<PrReviewerSettings> GetReviewerSettingsAsync(CancellationToken ct = default)
     {
         await using var db = await OpenAsync("", ct);
-        using var command = Command(db, null, "SELECT Enabled FROM PrReviewerSettings WHERE Id = 1;");
-        return new(Convert.ToInt32(command.ExecuteScalar()) != 0);
+        using var tx = db.BeginTransaction(deferred: true);
+        var settings = ReadReviewerSettings(db, tx);
+        tx.Commit();
+        return settings;
     }
 
     /// <inheritdoc />
-    public async Task<PrReviewerSettings> SetReviewerSettingsAsync(bool enabled, CancellationToken ct = default)
+    public Task<PrReviewerSettings> SetReviewerSettingsAsync(bool enabled, CancellationToken ct = default) =>
+        SetReviewerSettingsAsync(enabled, null, ct);
+
+    /// <inheritdoc />
+    public async Task<PrReviewerSettings> SetReviewerSettingsAsync(bool enabled, IReadOnlyList<string>? repositories,
+        CancellationToken ct = default)
     {
         await using var db = await OpenAsync("", ct);
-        using var command = Command(db, null, "UPDATE PrReviewerSettings SET Enabled = $enabled WHERE Id = 1;",
+        using var tx = db.BeginTransaction(deferred: false);
+        using var command = Command(db, tx, "UPDATE PrReviewerSettings SET Enabled = $enabled WHERE Id = 1;",
             ("$enabled", enabled ? 1 : 0));
         await command.ExecuteNonQueryAsync(ct);
-        return new(enabled);
+        if (repositories is not null)
+        {
+            Execute(db, tx, "DELETE FROM PrReviewerRepositories;");
+            var position = 0;
+            foreach (var repository in repositories.Distinct(StringComparer.OrdinalIgnoreCase))
+                Execute(db, tx, "INSERT INTO PrReviewerRepositories (Repository, Position) VALUES ($repository, $position);",
+                    ("$repository", repository), ("$position", position++));
+        }
+        var settings = ReadReviewerSettings(db, tx);
+        tx.Commit();
+        return settings;
+    }
+
+    private static PrReviewerSettings ReadReviewerSettings(SqliteConnection db, SqliteTransaction tx)
+    {
+        using var command = Command(db, tx, "SELECT Enabled FROM PrReviewerSettings WHERE Id = 1;");
+        var enabled = Convert.ToInt32(command.ExecuteScalar()) != 0;
+        using var list = Command(db, tx, "SELECT Repository FROM PrReviewerRepositories ORDER BY Position;");
+        using var reader = list.ExecuteReader();
+        var repositories = new List<string>();
+        while (reader.Read()) repositories.Add(reader.GetString(0));
+        return new(enabled, repositories);
     }
 
     /// <inheritdoc />

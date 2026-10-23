@@ -166,6 +166,11 @@ archive both exact snapshots (`pr-review-adoption/2`) and remain inspectable/res
 the store and Reviews page without blocking repository operations. Version tokens protect an
 explicit choice from concurrent edits, and resolution retains the archives. Unchanged source rows never resurrect new-side
 deletions. No ATTACH, dual writes, destructive cleanup or manual upgrade steps are involved.
+`pr-review-repositories/1` adds `PrReviewerRepositories` (case-insensitive repository key,
+position) in the same dedicated file, alongside the shared enable/publishing switch. Settings
+read consistently and save atomically; old switch-only writes preserve the optional watch list.
+Empty watches restore project-origin fallback. Removing a watch changes configuration only and
+never removes review history, receipts or legacy adoption data. Generation remains 1.
 See the [PR Reviews guide](../../VibeRails/Services/PrReviews/AGENTS.md).
 
 ## Prompt worktree storage

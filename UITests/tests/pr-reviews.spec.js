@@ -5,7 +5,7 @@ function reviewFixture() {
     return {
         repository: 'octo/widgets', url: 'https://github.com/octo/widgets/pull/7',
         pullRequest: {
-            number: 7, title: 'Widgets', author: 'octocat', summary: 'Saved overview', status: 'in_review',
+            repository: 'octo/widgets', number: 7, title: 'Widgets', author: 'octocat', summary: 'Saved overview', status: 'in_review',
             gitHubState: 'open', completedCount: 1, openedUtc: '2026-08-01T00:00:00Z'
         },
         reviews: [
@@ -15,7 +15,7 @@ function reviewFixture() {
     };
 }
 
-async function mount(page, detail, listExtras = {}) {
+async function mount(page, detail, listExtras = {}, queueFixture = null) {
     await page.addInitScript(() => sessionStorage.setItem('viberails_tab', 'reviews-fixture'));
     await page.routeWebSocket('**/api/v1/events/ws*', () => {});
     await page.route('**/api/v1/**', route => {
@@ -31,7 +31,7 @@ async function mount(page, detail, listExtras = {}) {
                 repository: 'octo/widgets', repositoryUrl: 'https://github.com/octo/widgets',
                 problem: null, pullRequests: [detail.pullRequest], ...listExtras
             },
-            '/api/v1/pr-reviews/queue': {
+            '/api/v1/pr-reviews/queue': queueFixture || {
                 repository: 'octo/widgets', next: null, queue: [], skipped: [],
                 counts: { open: 0, eligible: 0, drafts: 0, upToDate: 0 }
             },
@@ -47,11 +47,11 @@ async function mount(page, detail, listExtras = {}) {
 for (const useLegacy of [false, true]) {
     test(`legacy history conflict can be inspected and resolved with ${useLegacy ? 'legacy' : 'current'} history`, async ({ page }) => {
         const detail = reviewFixture();
-        const list = { legacyConflicts: [{ number: 7, sourceHash: 'a'.repeat(64), targetHash: 'b'.repeat(64),
+        const list = { legacyConflicts: [{ repository: 'octo/widgets', number: 7, sourceHash: 'a'.repeat(64), targetHash: 'b'.repeat(64),
             current: { pullRequest: null, reviews: [] }, legacy: { pullRequest: detail.pullRequest, reviews: detail.reviews } }] };
         await mount(page, detail, list);
         let submitted;
-        await page.route('**/api/v1/pr-reviews/7/legacy-conflict/resolve', route => {
+        await page.route('**/api/v1/pr-reviews/7/legacy-conflict/resolve*', route => {
             submitted = route.request().postDataJSON();
             list.legacyConflicts = [];
             return route.fulfill({ json: { number: 7 } });
@@ -71,10 +71,14 @@ for (const useLegacy of [false, true]) {
 
 test('dedicated PR Reviewer settings persist and disclose in-progress behavior', async ({ page }) => {
     await mount(page, reviewFixture());
-    let enabled = false;
-    await page.route('**/api/v1/pr-reviews/settings', route => {
-        if (route.request().method() === 'PUT') enabled = route.request().postDataJSON().enabled;
-        return route.fulfill({ json: { enabled } });
+    let enabled = false, repositories = [];
+    await page.route('**/api/v1/pr-reviews/settings*', route => {
+        if (route.request().method() === 'PUT') {
+            const body = route.request().postDataJSON();
+            enabled = body.enabled;
+            if (body.repositories) repositories = [...new Set(body.repositories.map(s => s.toLowerCase()))];
+        }
+        return route.fulfill({ json: { enabled, repositories } });
     });
     await page.locator('[data-action="navigate-settings"]').click();
     await page.getByRole('tab', { name: 'PR Reviewer', exact: true }).click();
@@ -91,6 +95,19 @@ test('dedicated PR Reviewer settings persist and disclose in-progress behavior',
     await toggle.uncheck();
     await expect(page.locator('[data-pr-reviewer-status]')).toHaveText(/Saved:.*off/);
     expect(enabled).toBe(false);
+    const watches = page.getByRole('textbox', { name: 'GitHub repositories to watch' });
+    await watches.fill('octo/widgets\nelse/tools\nOCTO/WIDGETS');
+    await page.getByRole('button', { name: 'Save repositories', exact: true }).click();
+    await expect(watches).toHaveValue('octo/widgets\nelse/tools');
+    expect(repositories).toEqual(['octo/widgets', 'else/tools']);
+    await watches.fill('else/renamed');
+    await page.getByRole('button', { name: 'Save repositories', exact: true }).click();
+    await expect(page.locator('[data-pr-reviewer-status]')).toHaveText(/Saved repositories/);
+    expect(repositories).toEqual(['else/renamed']);
+    await watches.fill('');
+    await page.getByRole('button', { name: 'Save repositories', exact: true }).click();
+    await expect(watches).toBeEnabled();
+    expect(repositories).toEqual([]);
 });
 
 test('delivery errors stay distinct from local completion and retry checks show confirmed receipts', async ({ page }) => {
@@ -101,7 +118,7 @@ test('delivery errors stay distinct from local completion and retry checks show 
         status: 'unknown', error: 'GitHub delivery is unconfirmed.' }];
     await mount(page, detail);
     await expect(page.getByText('GitHub delivery is unconfirmed.')).toBeVisible();
-    await page.route('**/api/v1/pr-reviews/7/reviews/9/publish', route => {
+    await page.route('**/api/v1/pr-reviews/7/reviews/9/publish*', route => {
         detail.deliveries[0] = { ...detail.deliveries[0], status: 'published', gitHubId: 42, login: 'reviewer', error: null };
         return route.fulfill({ json: detail.deliveries[0] });
     });
@@ -135,7 +152,7 @@ test('a draft save locks inputs and preserves an unrelated history edit', async 
     await mount(page, detail);
     let finishWrite;
     const writeGate = new Promise(resolve => { finishWrite = resolve; });
-    await page.route('**/api/v1/pr-reviews/7/reviews/draft', async route => {
+    await page.route('**/api/v1/pr-reviews/7/reviews/draft*', async route => {
         const body = route.request().postDataJSON();
         await writeGate;
         Object.assign(detail.reviews[0], body);
@@ -160,7 +177,7 @@ test('starting from tracked history requests a current head SHA', async ({ page 
     detail.pullRequest.status = 'complete';
     await mount(page, detail);
     let submitted;
-    await page.route('**/api/v1/pr-reviews/7/reviews/start', route => {
+    await page.route('**/api/v1/pr-reviews/7/reviews/start*', route => {
         submitted = route.request().postDataJSON();
         detail.reviews.unshift({
             id: 11, status: 'in_progress', headSha: 'current-head-123', feedback: '', verdict: null, blocking: false
@@ -178,7 +195,7 @@ test('starting from tracked history requests a current head SHA', async ({ page 
 test('confirming an old delete after navigation cannot remove that review', async ({ page }) => {
     await mount(page, reviewFixture());
     const deleted = [];
-    await page.route('**/api/v1/pr-reviews/reviews/9', route => {
+    await page.route('**/api/v1/pr-reviews/reviews/9*', route => {
         deleted.push(route.request().method());
         return route.fulfill({ json: { number: 7, reviewId: 9 } });
     });
@@ -190,4 +207,40 @@ test('confirming an old delete after navigation cannot remove that review', asyn
     await dialog.getByRole('button', { name: 'Delete review', exact: true }).click();
     await expect(dialog).toHaveCount(0);
     expect(deleted).toEqual([]);
+});
+
+
+test('multiple repositories identify overlapping PR numbers and scope start and detail actions', async ({ page }) => {
+    const detail = reviewFixture();
+    const entry = repository => ({ repository, number: 7, title: repository, author: 'author', reviewCount: 0,
+        openedUtc: '2026-08-01T00:00:00Z', headSha: 'abc1234', url: `https://github.com/${repository}/pull/7`,
+        reason: 'never_reviewed', why: 'Not yet reviewed' });
+    const queue = { repository: null, repositories: ['octo/widgets', 'else/tools'], next: entry('else/tools'),
+        queue: [entry('octo/widgets'), entry('else/tools')], skipped: [], counts: { open: 2, eligible: 2, drafts: 0, upToDate: 0 } };
+    await mount(page, detail, { repository: null, repositories: queue.repositories }, queue);
+    let startRepo, detailRepo, draftRepo;
+    await page.route('**/api/v1/pr-reviews/7/reviews/start*', route => {
+        startRepo = new URL(route.request().url()).searchParams.get('repository');
+        return route.fulfill({ json: {} });
+    });
+    await page.route('**/api/v1/pr-reviews/7?*', route => {
+        detailRepo = new URL(route.request().url()).searchParams.get('repository');
+        return route.fulfill({ json: { ...detail, repository: detailRepo,
+            pullRequest: { ...detail.pullRequest, repository: detailRepo, title: 'Tools' } } });
+    });
+    await page.route('**/api/v1/pr-reviews/7/reviews/draft*', route => {
+        draftRepo = new URL(route.request().url()).searchParams.get('repository');
+        return route.fulfill({ json: {} });
+    });
+    await page.locator('[data-pr-back]').click();
+    await expect(page.locator('[data-pr-open-body]')).toContainText('octo/widgets #7');
+    await expect(page.locator('[data-pr-open-body]')).toContainText('else/tools #7');
+    await page.locator('[data-pr-start="7"][data-pr-repository="else/tools"]').first().click();
+    await expect(page.getByRole('heading', { name: 'Tools', exact: true })).toBeVisible();
+    expect(startRepo).toBe('else/tools');
+    expect(detailRepo).toBe('else/tools');
+    await page.locator('#pr-feedback').fill('Tools draft');
+    await page.locator('[data-pr-save-draft]').click();
+    await expect(page.locator('[data-pr-save-draft]')).toBeEnabled();
+    expect(draftRepo).toBe('else/tools');
 });

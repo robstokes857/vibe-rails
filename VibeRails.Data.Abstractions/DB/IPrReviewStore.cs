@@ -159,6 +159,9 @@ public interface IPrReviewStore
     Task<PrReviewerSettings> GetReviewerSettingsAsync(CancellationToken ct = default);
     /// <summary>Persists the switch without deleting history or deliveries.</summary>
     Task<PrReviewerSettings> SetReviewerSettingsAsync(bool enabled, CancellationToken ct = default);
+
+    /// <summary>Saves the switch and optional watch list atomically; null preserves the saved list.</summary>
+    Task<PrReviewerSettings> SetReviewerSettingsAsync(bool enabled, IReadOnlyList<string>? repositories, CancellationToken ct = default);
     /// <summary>Creates one immutable delivery snapshot per completed pass; never backfills history.</summary>
     Task<PrReviewDelivery> EnsureDeliveryAsync(string repository, long reviewId, CancellationToken ct = default);
     /// <summary>Delivery receipts are distinct from local review state.</summary>

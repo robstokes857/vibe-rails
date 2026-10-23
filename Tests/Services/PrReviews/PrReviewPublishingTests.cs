@@ -41,6 +41,29 @@ public sealed class PrReviewPublishingTests : IDisposable
         _service.CompleteAsync(Project, 7, new(Feedback: "Finding: fix this", Verdict: verdict, Blocking: blocking), _ct);
 
     [Fact]
+    public async Task Completion_and_retry_pin_repository_when_another_watch_has_the_same_number()
+    {
+        var second = new GitHubRepository("else", "tools");
+        await _service.SetSettingsAsync(true, _ct, [Repo.FullName, second.FullName]);
+        _github.Setup(g => g.GetAsync(second, Project, 7, It.IsAny<CancellationToken>())).ReturnsAsync(
+            new GitHubPullRequest(7, "Tools", "author", DateTime.UtcNow, null, false, Sha, second.PullRequestUrl(7)));
+        _github.Setup(g => g.PublishReviewAsync(second, Project,
+            It.Is<PrReviewDelivery>(d => d.Repository == second.FullName && d.PrNumber == 7), It.IsAny<CancellationToken>())).ReturnsAsync(123);
+        foreach (var repo in new[] { Repo, second })
+            await _service.StartAsync(Project, 7, new(Title: "title", Author: "author", OpenedAt: "2026-08-01", HeadSha: Sha), _ct, repo.FullName);
+        var completed = await _service.CompleteAsync(Project, 7, new(Feedback: "Tools feedback", Verdict: "comments"), _ct, second.FullName);
+        Assert.Equal("published", completed.Delivery!.Status);
+        Assert.Equal(second.FullName, completed.Delivery.Repository);
+        Assert.Equal(123, completed.Delivery.GitHubId);
+        Assert.Equal("in_review", (await _service.GetAsync(Project, 7, _ct, Repo.FullName)).PullRequest.Status);
+        Assert.Equal(404, (await Assert.ThrowsAsync<PrReviewException>(() =>
+            _service.PublishAsync(Project, 7, completed.Review!.Id, _ct, Repo.FullName))).StatusCode);
+        Assert.Equal(123, (await _service.PublishAsync(Project, 7, completed.Review!.Id, _ct, second.FullName)).GitHubId);
+        _github.Verify(g => g.PublishReviewAsync(Repo, Project, It.IsAny<PrReviewDelivery>(), It.IsAny<CancellationToken>()), Times.Never);
+        _github.Verify(g => g.PublishReviewAsync(second, Project, It.IsAny<PrReviewDelivery>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task Setting_defaults_off_and_persists_across_instances()
     {
         Assert.False((await _service.GetSettingsAsync(_ct)).Enabled);

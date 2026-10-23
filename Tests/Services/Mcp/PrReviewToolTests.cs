@@ -102,6 +102,23 @@ public sealed class PrReviewToolTests : IDisposable
         Assert.Equal("FAIL: could not read the PR review queue. See the VibeRails log for details.", result);
     }
 
+    [Fact]
+    public async Task Repository_argument_keeps_overlapping_pr_numbers_and_drafts_separate()
+    {
+        var store = new PrReviewStore($"Data Source={_dbPath};Mode=ReadWriteCreate");
+        await store.SetReviewerSettingsAsync(true, ["octo/widgets", "else/tools"], _ct);
+        Assert.StartsWith("FAIL: repository is required", await _tool.StartPrReview(7, cancellationToken: _ct));
+        foreach (var repo in new[] { "octo/widgets", "else/tools" })
+        {
+            var start = Parse(await _tool.StartPrReview(7, repo, "author", "2026-08-01", cancellationToken: _ct, repository: repo));
+            Assert.Equal(repo, start.GetProperty("review").GetProperty("repository").GetString());
+        }
+        Parse(await _tool.SavePrReviewDraft(7, feedback: "tools only", cancellationToken: _ct, repository: "else/tools"));
+        Assert.Equal("", Parse(await _tool.GetPrReview(7, _ct, "octo/widgets")).GetProperty("reviews")[0].GetProperty("feedback").GetString());
+        Assert.Equal("tools only", Parse(await _tool.GetPrReview(7, _ct, "else/tools")).GetProperty("reviews")[0].GetProperty("feedback").GetString());
+        Assert.StartsWith("FAIL: This repository is not selected", await _tool.GetPrReview(7, _ct, "other/private"));
+    }
+
     private static JsonElement Parse(string json)
     {
         Assert.False(json.StartsWith("FAIL:", StringComparison.Ordinal), json);

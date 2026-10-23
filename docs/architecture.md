@@ -499,8 +499,12 @@ before clients can use sign-in; older sites leave the manual API key input usabl
 ### PR review tracker
 
 The **Reviews** page (`pr-reviews` view) and six MCP tools keep a lead-review log for the
-current project's GitHub pull requests, ported from a standalone Node/Express tracker. The
-repository is parsed from the project's `origin` remote; records live in `pr_reviews.db`
+configured GitHub repositories, falling back to the current project's `origin` when the watch
+list is empty. Settings > PR Reviewer edits the machine-wide watch list in `pr_reviews.db`
+(`PrReviewerRepositories`, `pr-review-repositories/1`, additive); no checkout switch is required.
+List, queue and lifecycle sync aggregate watches; each PR/pass/queue entry identifies its
+repository, and single-PR REST/MCP actions require repository scope with multiple targets.
+Identifiers are validated and deduplicated ignoring case; removing watches retains history. Records live in `pr_reviews.db`
 (`pr-reviews/1`) keyed by `owner/name` and PR number. `PrReviewService` owns the rules (derived
 status, server-owned timestamps, idempotent start, draft checkpoints), `PrReviewQueue` picks the
 next PR by rank then age, and `GitHubPullRequestClient` reads open PRs, lifecycle states and a

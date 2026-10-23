@@ -54,6 +54,32 @@ function deferred() {
     return { promise, resolve };
 }
 
+test('overlapping queue numbers start and navigate with their repository and metadata', async () => {
+    const calls = [], navigations = [];
+    const { controller } = harness(async (...args) => { calls.push(args); return {}; });
+    controller.app.navigate = (...args) => navigations.push(args);
+    controller.state = controller.emptyState(null);
+    const entry = repository => ({ repository, number: 7, title: repository, author: repository,
+        openedUtc: '2026-08-01', headSha: repository });
+    controller.state.queue = { queue: [entry('octo/widgets'), entry('else/tools')], skipped: [] };
+    await controller.startFromQueue(7, 'else/tools');
+    assert.equal(calls[0][0], '/api/v1/pr-reviews/7/reviews/start?repository=else%2Ftools');
+    assert.equal(calls[0][2].title, 'else/tools');
+    assert.equal(calls[0][2].headSha, 'else/tools');
+    assert.deepEqual(navigations, [['pr-reviews', { number: 7, repository: 'else/tools' }]]);
+});
+
+test('detail saves, edits and publishing carry repository scope', async () => {
+    const calls = [];
+    const { controller } = harness(async (...args) => { calls.push(args); return { ...detail, repository: 'else/tools' }; });
+    controller.state.repository = 'else/tools';
+    await controller.onClick(click('[data-pr-publish]', { prPublish: '9' }));
+    assert.equal(calls[0][0], '/api/v1/pr-reviews/7/reviews/9/publish?repository=else%2Ftools');
+    assert.equal(calls[1][0], '/api/v1/pr-reviews/7?repository=else%2Ftools');
+    await controller.onClick(click('[data-pr-toggle-blocker]', { prToggleBlocker: '9', blocking: 'true' }));
+    assert.equal(calls[2][0], '/api/v1/pr-reviews/reviews/9?repository=else%2Ftools');
+});
+
 test('editing and cancelling history preserves unsaved pending feedback, summary and blocker', async () => {
     const { controller, body } = harness();
     const draft = form('[data-pr-pending-form]', {

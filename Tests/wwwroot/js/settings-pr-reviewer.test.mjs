@@ -5,9 +5,11 @@ import { PrReviewerSettingsPanel } from '../../../VibeRails/wwwroot/js/modules/s
 function harness(apiCall) {
     const toggle = { checked: false, disabled: true, addEventListener() {} };
     const status = { textContent: '' };
+    const repositories = { value: '', disabled: true };
+    const saveRepositories = { disabled: true, addEventListener() {} };
     const reload = { addEventListener() {} };
-    const root = { querySelector: s => s.includes('enabled') ? toggle : s.includes('status') ? status : reload };
-    return { toggle, status, panel: new PrReviewerSettingsPanel({ apiCall }, root) };
+    const root = { querySelector: s => s.includes('enabled') ? toggle : s.includes('status') ? status : s === '[data-pr-reviewer-repositories]' ? repositories : s.includes('save-repositories') ? saveRepositories : reload };
+    return { toggle, status, repositories, saveRepositories, panel: new PrReviewerSettingsPanel({ apiCall }, root) };
 }
 
 test('reviewer switch loads persisted state and saves changes through its dedicated API', async () => {
@@ -50,4 +52,32 @@ test('unloading ignores late reads and aborts the request', async () => {
     assert.equal(signal.aborted, true);
     assert.equal(h.toggle.checked, false);
     assert.equal(h.toggle.disabled, true);
+});
+
+test('watch list supports adding editing and clearing; switch saves preserve pending repository edits', async () => {
+    let saved = ['octo/widgets'];
+    const writes = [];
+    const h = harness(async (_, method, body) => {
+        if (method === 'PUT') {
+            writes.push(body);
+            if (body.repositories) saved = [...new Set(body.repositories.map(s => s.toLowerCase()))];
+        }
+        return { enabled: true, repositories: saved };
+    });
+    await h.panel.load();
+    assert.equal(h.repositories.value, 'octo/widgets');
+    h.repositories.value = 'octo/widgets\n else/tools \n\nOCTO/WIDGETS';
+    await h.panel.save();
+    assert.deepEqual(writes[0], { enabled: true });
+    assert.match(h.repositories.value, /else\/tools/);
+    await h.panel.save(true);
+    assert.deepEqual(saved, ['octo/widgets', 'else/tools']);
+    assert.equal(h.repositories.value, 'octo/widgets\nelse/tools');
+    h.repositories.value = 'else/renamed';
+    await h.panel.save(true);
+    assert.deepEqual(saved, ['else/renamed']);
+    h.repositories.value = '';
+    await h.panel.save(true);
+    assert.deepEqual(saved, []);
+    assert.equal(h.saveRepositories.disabled, false);
 });

@@ -68,7 +68,7 @@ export function statusMeta(status) {
 export function matchesQuery(pr, query) {
     const needle = String(query || '').trim().toLowerCase();
     if (!needle) return true;
-    return [`#${pr.number}`, String(pr.number), pr.title, pr.author, pr.summary]
+    return [`#${pr.number}`, String(pr.number), pr.repository, pr.title, pr.author, pr.summary]
         .some(field => String(field ?? '').toLowerCase().includes(needle));
 }
 
@@ -185,22 +185,22 @@ export function legacyConflictPanel(conflict) {
             · head <code>${esc(review.headSha || '—')}</code></p>
             <pre class="pr-feedback">${esc(review.feedback)}</pre></article>`).join('')}</details>`;
     return `<section class="pr-card pr-alert" data-tone="warning">
-        <h2 class="pr-section-title">Two histories for PR #${esc(conflict.number)}</h2>
+        <h2 class="pr-section-title">Two histories for ${conflict.repository ? `${esc(conflict.repository)} ` : ''}PR #${esc(conflict.number)}</h2>
         <p>An older VibeRails version changed this PR after the current history was edited.
         Inspect both copies and choose which to continue using. Both copies remain saved.</p>
         ${history('Current history', conflict.current)}${history('Legacy history', conflict.legacy)}
         <div class="pr-form-actions">
-            <button type="button" class="btn btn-outline-secondary" data-pr-resolve-legacy="${esc(conflict.number)}" data-use-legacy="false">Keep current history</button>
-            <button type="button" class="btn btn-outline-warning" data-pr-resolve-legacy="${esc(conflict.number)}" data-use-legacy="true">Use legacy history</button>
+            <button type="button" class="btn btn-outline-secondary" data-pr-resolve-legacy="${esc(conflict.number)}" data-pr-repository="${esc(conflict.repository || '')}" data-use-legacy="false">Keep current history</button>
+            <button type="button" class="btn btn-outline-warning" data-pr-resolve-legacy="${esc(conflict.number)}" data-pr-repository="${esc(conflict.repository || '')}" data-use-legacy="true">Use legacy history</button>
         </div></section>`;
 }
 
 /** One tracked PR in a list. The whole row opens the PR's detail page. */
 export function trackedRow(pr, tone = '') {
     const reviewed = pr.lastReviewedUtc ? ` · reviewed ${esc(formatRelativeTime(pr.lastReviewedUtc))}` : '';
-    return `<button type="button" class="pr-row"${tone ? ` data-tone="${esc(tone)}"` : ''} data-pr-open="${esc(pr.number)}"
+    return `<button type="button" class="pr-row"${tone ? ` data-tone="${esc(tone)}"` : ''} data-pr-open="${esc(pr.number)}" data-pr-repository="${esc(pr.repository || '')}"
         aria-label="Open PR #${esc(pr.number)}: ${esc(pr.title)}">
-        <span class="pr-number">#${esc(pr.number)}</span>
+        <span class="pr-number">${pr.repository ? `${esc(pr.repository)} ` : ''}#${esc(pr.number)}</span>
         <span class="pr-row-main">
             <span class="pr-row-title">${esc(pr.title)}</span>
             <span class="pr-row-meta">@${esc(pr.author)} · ${esc(pr.completedCount)} completed ${pr.completedCount === 1 ? 'pass' : 'passes'}${reviewed}</span>
@@ -217,10 +217,10 @@ export function openRow(entry, starting) {
         ? badge(reason.label, reason.tone, { title: entry.why })
         : badge(SKIP_REASON[entry.skippedBecause] || 'Skipped', 'muted', { title: entry.why });
     const action = tracked
-        ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-pr-open="${esc(entry.number)}">Open</button>`
-        : `<button type="button" class="btn btn-sm btn-primary" data-pr-start="${esc(entry.number)}"${starting ? ' disabled' : ''}>Start review</button>`;
+        ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-pr-open="${esc(entry.number)}" data-pr-repository="${esc(entry.repository || '')}">Open</button>`
+        : `<button type="button" class="btn btn-sm btn-primary" data-pr-start="${esc(entry.number)}" data-pr-repository="${esc(entry.repository || '')}"${starting ? ' disabled' : ''}>Start review</button>`;
     return `<div class="pr-row pr-open-row">
-        <span class="pr-number">#${esc(entry.number)}</span>
+        <span class="pr-number">${entry.repository ? `${esc(entry.repository)} ` : ''}#${esc(entry.number)}</span>
         <span class="pr-row-main">
             ${pullRequestLink(entry.url, entry.title, 'pr-row-title')}
             <span class="pr-row-meta">@${esc(entry.author)} · opened ${esc(formatDate(entry.openedUtc))} · head <code>${esc(shortSha(entry.headSha))}</code></span>
@@ -241,12 +241,12 @@ export function nextUpCard(queue, starting) {
     const reason = QUEUE_REASON[next.reason] || { label: next.reason, tone: 'info' };
     const resuming = next.reason === 'in_review';
     const action = resuming
-        ? `<button type="button" class="btn btn-outline-warning" data-pr-open="${esc(next.number)}">Open review</button>`
-        : `<button type="button" class="btn btn-primary" data-pr-start="${esc(next.number)}"${starting ? ' disabled' : ''}>${starting ? 'Starting…' : 'Start review'}</button>`;
+        ? `<button type="button" class="btn btn-outline-warning" data-pr-open="${esc(next.number)}" data-pr-repository="${esc(next.repository || '')}">Open review</button>`
+        : `<button type="button" class="btn btn-primary" data-pr-start="${esc(next.number)}" data-pr-repository="${esc(next.repository || '')}"${starting ? ' disabled' : ''}>${starting ? 'Starting…' : 'Start review'}</button>`;
     return `<div class="pr-next" data-tone="${esc(reason.tone)}">
         <div class="pr-next-main">
             <span class="pr-eyebrow">Next up · ${esc(counts.eligible)} of ${esc(counts.open)} open PRs waiting</span>
-            <div class="pr-next-title"><span class="pr-number">#${esc(next.number)}</span>
+            <div class="pr-next-title"><span class="pr-number">${next.repository ? `${esc(next.repository)} ` : ''}#${esc(next.number)}</span>
                 ${pullRequestLink(next.url, next.title, 'pr-row-title')} ${badge(reason.label, reason.tone, { title: next.why })}</div>
             <span class="pr-row-meta">@${esc(next.author)} · opened ${esc(formatDate(next.openedUtc))} · head <code>${esc(shortSha(next.headSha))}</code></span>
         </div>
@@ -323,7 +323,7 @@ export function reviewCard(review, { isLatest = false, editing = false } = {}) {
             <div>
                 <div class="pr-row-badges">${verdictBadge(review.verdict)}${review.blocking ? badge('Blocker', 'danger', { icon: 'fa-ban' }) : ''}
                     ${isLatest ? badge('Sets PR status', 'info', { title: 'The newest completed review is the one that sets the PR status.' }) : ''}</div>
-                <span class="pr-muted">Reviewed ${esc(formatDate(review.reviewedUtc, true))}${review.headSha ? ` · head <code>${esc(shortSha(review.headSha))}</code>` : ''}</span>
+                <span class="pr-muted">${review.repository ? `${esc(review.repository)} #${esc(review.prNumber)} · ` : ''}Reviewed ${esc(formatDate(review.reviewedUtc, true))}${review.headSha ? ` · head <code>${esc(shortSha(review.headSha))}</code>` : ''}</span>
             </div>
             <div class="pr-card-actions">
                 ${isLatest ? `<button type="button" class="btn btn-sm ${review.blocking ? 'btn-outline-success' : 'btn-outline-danger'}"
@@ -356,7 +356,7 @@ export function deliveryStatus(review) {
 export function detailHeader(pr, url) {
     return `<section class="pr-card pr-detail-head"${pr.status === 'blocker' && isLive(pr) ? ' data-tone="danger"' : ''}>
         <div class="pr-detail-main">
-            <span class="pr-eyebrow">Pull request #${esc(pr.number)}</span>
+            <span class="pr-eyebrow">${pr.repository ? `${esc(pr.repository)} ` : ''}Pull request #${esc(pr.number)}</span>
             <h2 class="pr-detail-title">${esc(pr.title)}</h2>
             <p class="pr-detail-summary">${pr.summary ? esc(pr.summary) : '<span class="pr-muted">No high-level overview yet.</span>'}</p>
             <span class="pr-row-meta">Opened by <strong>@${esc(pr.author)}</strong> · ${esc(formatDate(pr.openedUtc))} · last write ${esc(formatDate(pr.updatedUtc, true))}</span>

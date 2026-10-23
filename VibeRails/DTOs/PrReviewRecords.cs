@@ -24,8 +24,8 @@ namespace VibeRails.DTOs
         bool UseCurrentHead = false);
 
     /// <summary>
-    /// Every tracked PR in the current project's GitHub repository. Repository is null when the
-    /// project has none (no git checkout, or an origin that is not github.com) and Problem says why.
+    /// Every tracked PR in the selected repositories. Repositories lists all targets; the legacy
+    /// singular Repository is null for multiple targets, or when Problem explains no origin fallback.
     /// </summary>
     public record PrReviewListResponse(
         string? Repository,
@@ -34,6 +34,7 @@ namespace VibeRails.DTOs
         List<PrReviewPullRequest> PullRequests)
     {
         public List<PrReviewLegacyConflict> LegacyConflicts { get; init; } = [];
+        public List<string> Repositories { get; init; } = [];
     }
 
     public record PrReviewResolveLegacyRequest(string SourceHash, string TargetHash, bool UseLegacy);
@@ -91,15 +92,21 @@ namespace VibeRails.DTOs
         int? Rank,
         int? Position,
         string? SkippedBecause,
-        string Why);
+        string Why)
+    {
+        public string Repository { get; init; } = "";
+    }
 
     public record PrReviewQueueCounts(int Open, int Eligible, int Drafts, int UpToDate);
 
     /// <summary>Which open PR to review next. Next is null when nothing is eligible.</summary>
     public record PrReviewQueueResponse(
-        string Repository,
+        string? Repository,
         PrReviewQueueEntry? Next,
         List<PrReviewQueueEntry> Queue,
         List<PrReviewQueueEntry> Skipped,
-        PrReviewQueueCounts Counts);
+        PrReviewQueueCounts Counts)
+    {
+        public List<string> Repositories { get; init; } = [];
+    }
 }

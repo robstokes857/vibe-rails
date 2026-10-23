@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 namespace VibeRails.Services.PrReviews;
 
 /// <summary>
-/// A github.com repository, parsed from a project's <c>origin</c> remote. Owner and name are
+/// A github.com repository from an explicit watch or a project's <c>origin</c> remote. Owner and name are
 /// validated against GitHub's own character rules because they are passed to <c>gh</c> and
 /// rendered into links; nothing else about the remote URL (credentials included) is kept.
 /// </summary>
@@ -17,6 +17,16 @@ public sealed partial record GitHubRepository(string Owner, string Name)
     public string Url => $"https://github.com/{FullName}";
 
     public string PullRequestUrl(int number) => $"{Url}/pull/{number}";
+
+    /// <summary>Accepts only an owner/name identifier, with no URL, credentials or extra segments.</summary>
+    public static bool TryParseName(string? value, out GitHubRepository repository)
+    {
+        repository = null!;
+        var parts = value?.Trim().Split('/');
+        if (parts is not { Length: 2 } || !IsValidOwner(parts[0]) || !IsValidName(parts[1])) return false;
+        repository = new GitHubRepository(parts[0].ToLowerInvariant(), parts[1].ToLowerInvariant());
+        return true;
+    }
 
     /// <summary>
     /// Accepts the remote forms git and GitHub produce: <c>https://github.com/o/r(.git)</c> (with or
@@ -69,9 +79,9 @@ public sealed partial record GitHubRepository(string Owner, string Name)
     [GeneratedRegex(@"^(?:[^@/\s]+@)?(?<host>[A-Za-z0-9.-]+):(?<path>(?!/)[^\s]+)$")]
     private static partial Regex ScpRemote();
 
-    [GeneratedRegex(@"^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$")]
+    [GeneratedRegex(@"\A[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}\z")]
     private static partial Regex OwnerPattern();
 
-    [GeneratedRegex(@"^[A-Za-z0-9._-]{1,100}$")]
+    [GeneratedRegex(@"\A[A-Za-z0-9._-]{1,100}\z")]
     private static partial Regex NamePattern();
 }

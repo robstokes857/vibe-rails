@@ -992,21 +992,28 @@ PRs' open/merged/closed state. All run through `ICliWrapper` as argv with an exp
 stdin closed for reads, prompts and update notices disabled and a
 20-second timeout. Failures use fixed wording chosen by how `gh` ended (not started, timed out,
 not signed in, or its exit code); `gh`'s stderr, which can carry GitHub's error prose, is never
-reflected to the page or MCP. The repository is parsed from the dashboard project's
-`origin` remote and accepted only for github.com with GitHub's owner/name character rules; the
-remote URL itself (which can embed a credential) is never echoed. PR links are built from that
+reflected to the page or MCP. Optional machine-wide watched repositories accept validated GitHub
+`owner/name` identifiers (up to 50, case-insensitive deduplication). With an empty watch list, the repository
+is parsed from the dashboard project's `origin` remote and accepted only for github.com with
+GitHub's owner/name character rules; the remote URL itself (which can embed a credential) is never echoed. PR links are built from that
 parsed repository, never from CLI output. Titles, authors and feedback are untrusted text: the
 page escapes them and the MCP tools return them as JSON data.
 
 The `/api/v1/pr-reviews/**` routes are root-only, require both credentials and return no-store.
-Review operations are project-scoped from the dashboard root.
-Review ids are global, so reads and writes by id also match the current repository and answer
-404 for another project's review. Records live in `pr_reviews.db` (`pr-reviews/1`, additive).
+List, queue and lifecycle sync cover selected watches or the dashboard root's origin fallback.
+Single-PR/pass operations accept a `repository` query argument selecting only a saved watch or
+that origin; multiple watches require it (400 for ambiguous numbers, 409 for unselected repos).
+Review ids are global, so reads and writes by id also match the selected repository and answer
+404 for another repository's review. Explicit watches never require changing a checkout.
+Records live in `pr_reviews.db` (`pr-reviews/1`, additive).
 
 Settings > PR Reviewer explicitly enables reviewer work and outbound publishing together; off
 by default. GET/PUT `/settings` under this group read/write the machine-wide switch through
-`IPrReviewStore` (`pr-review-delivery/1`, additive). Off blocks queue/start and new POST
-reservations, preserving history and allowing in-progress local completion. A reserved POST may
+`IPrReviewStore` (`pr-review-delivery/1`, additive). The optional `repositories` list lives in
+`PrReviewerRepositories` (`pr-review-repositories/1`, additive) in the same file. Settings save
+atomically; omission/null preserves watches for older clients, `[]` restores origin fallback.
+Removing a watch retains its history, accessible again when re-added. Off blocks queue/start and
+new POST reservations, preserving history and allowing in-progress local completion. A reserved POST may
 still finish; this is disclosed on the page. Enabling does not backfill or start a background host.
 
 Completion and `POST /{number}/reviews/{id}/publish` can publish through `gh api --hostname
@@ -1027,7 +1034,9 @@ retry only reconciles the original account's exact receipt, and absence remains 
 Pre-dispatch errors and confirmed 4xx refusals can retry safely. Delivery status/errors remain
 distinct from local verdicts; local edits/deletions never edit/dismiss the remote review, and
 receipts survive local deletion. Publishing/retry MCP tools use normal explicit tool grants on
-both transports, outside Board auto-grants; callers supply no repository, host or credential.
+both transports, outside Board auto-grants; callers may select a configured repository but
+never supply a host, path or credential. Completion/retry remain pinned to that repository, PR
+and immutable delivery snapshot.
 
 ### Complete backups
 

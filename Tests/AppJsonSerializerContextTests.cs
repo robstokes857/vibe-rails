@@ -414,7 +414,7 @@ public sealed class AppJsonSerializerContextTests
             AppJsonSerializerContext.Default.PrReviewQueueResponse);
 
         Assert.Equal(
-            """{"repository":"octo/widgets","next":null,"queue":[],"skipped":[],"counts":{"open":3,"eligible":1,"drafts":1,"upToDate":1}}""",
+            """{"repository":"octo/widgets","next":null,"queue":[],"skipped":[],"counts":{"open":3,"eligible":1,"drafts":1,"upToDate":1},"repositories":[]}""",
             json);
     }
 }

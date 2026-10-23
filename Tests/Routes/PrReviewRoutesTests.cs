@@ -247,6 +247,38 @@ public sealed class PrReviewRoutesTests : IAsyncLifetime
         Assert.Equal(1, json.GetProperty("closed").GetInt32());
     }
 
+    [Fact]
+    public async Task Configured_repositories_round_trip_and_scope_all_pr_and_pass_operations()
+    {
+        using var configured = await Send(HttpMethod.Put, "/api/v1/pr-reviews/settings",
+            """{"enabled":true,"repositories":["Octo/Widgets","else/tools","octo/widgets"]}""");
+        Assert.Equal(HttpStatusCode.OK, configured.StatusCode);
+        Assert.Equal(2, (await Json(configured)).GetProperty("repositories").GetArrayLength());
+        using var ambiguous = await Send(HttpMethod.Post, "/api/v1/pr-reviews/7/reviews/start", "{}");
+        Assert.Equal(HttpStatusCode.BadRequest, ambiguous.StatusCode);
+        const string fields = """{"title":"title","author":"author","openedAt":"2026-08-01"}""";
+        using var first = await Send(HttpMethod.Post, "/api/v1/pr-reviews/7/reviews/start?repository=octo%2Fwidgets", fields);
+        using var second = await Send(HttpMethod.Post, "/api/v1/pr-reviews/7/reviews/start?repository=else%2Ftools", fields);
+        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+        Assert.Equal(HttpStatusCode.Created, second.StatusCode);
+        Assert.Contains("repository=else%2Ftools", second.Headers.Location!.ToString());
+        var firstId = (await Json(first)).GetProperty("review").GetProperty("id").GetInt64();
+        using var wrongId = await Send(HttpMethod.Put, $"/api/v1/pr-reviews/reviews/{firstId}?repository=else%2Ftools", """{"feedback":"wrong"}""");
+        Assert.Equal(HttpStatusCode.NotFound, wrongId.StatusCode);
+        using var saved = await Send(HttpMethod.Post, "/api/v1/pr-reviews/7/reviews/draft?repository=else%2Ftools", """{"feedback":"second draft"}""");
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        using var detail = await Send(HttpMethod.Get, "/api/v1/pr-reviews/7?repository=octo%2Fwidgets");
+        Assert.Equal("", (await Json(detail)).GetProperty("reviews")[0].GetProperty("feedback").GetString());
+        using var list = await Send(HttpMethod.Get, "/api/v1/pr-reviews");
+        Assert.Equal(2, (await Json(list)).GetProperty("pullRequests").GetArrayLength());
+        using var invalid = await Send(HttpMethod.Put, "/api/v1/pr-reviews/settings", """{"enabled":false,"repositories":["https://github.com/o/r"]}""");
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        using var oldClient = await Send(HttpMethod.Put, "/api/v1/pr-reviews/settings", """{"enabled":false}""");
+        Assert.Equal(2, (await Json(oldClient)).GetProperty("repositories").GetArrayLength());
+        Assert.Equal("no-store", list.Headers.CacheControl!.ToString());
+        _repositories.Verify(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     private async Task<HttpResponseMessage> Send(HttpMethod method, string path, string? body = null,
         bool session = true, bool tab = true)
     {

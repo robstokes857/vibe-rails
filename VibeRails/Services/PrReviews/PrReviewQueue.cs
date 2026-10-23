@@ -35,7 +35,8 @@ public static class PrReviewQueue
     public static PrReviewQueueResponse Build(GitHubRepository repository, IReadOnlyList<GitHubPullRequest> open,
         IReadOnlyList<PrReviewPullRequest> tracked)
     {
-        var byNumber = tracked.ToDictionary(pr => pr.Number);
+        var byNumber = tracked.Where(pr => string.Equals(pr.Repository, repository.FullName, StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(pr => pr.Number);
         var queued = new List<PrReviewQueueEntry>();
         var skipped = new List<PrReviewQueueEntry>();
 
@@ -47,7 +48,8 @@ public static class PrReviewQueue
                 pr.HeadSha, pr.Url, record?.Status ?? PrTrackerStatus.NotStarted, record?.ReviewCount ?? 0,
                 record?.CompletedCount ?? 0, record?.ReviewedHeadSha, record?.LastReviewedUtc,
                 Reason: reason, Rank: reason is null ? null : Reasons[reason].Rank, Position: null,
-                SkippedBecause: skip, Why: reason is null ? Skips[skip!] : Reasons[reason].Why);
+                SkippedBecause: skip, Why: reason is null ? Skips[skip!] : Reasons[reason].Why)
+                { Repository = repository.FullName };
             (reason is null ? skipped : queued).Add(entry);
         }
 
@@ -61,7 +63,20 @@ public static class PrReviewQueue
         var drafts = skipped.Count(entry => entry.SkippedBecause == SkipDraft);
 
         return new PrReviewQueueResponse(repository.FullName, ordered.FirstOrDefault(), ordered, skipped,
-            new PrReviewQueueCounts(open.Count, ordered.Count, drafts, skipped.Count - drafts));
+            new PrReviewQueueCounts(open.Count, ordered.Count, drafts, skipped.Count - drafts))
+            { Repositories = [repository.FullName] };
+    }
+
+    /// <summary>Combines repository queues using the same reason/age ranking across all repositories.</summary>
+    public static PrReviewQueueResponse Combine(IReadOnlyList<PrReviewQueueResponse> queues)
+    {
+        var ordered = queues.SelectMany(q => q.Queue).OrderBy(e => e.Rank).ThenBy(e => e.OpenedUtc)
+            .ThenBy(e => e.Repository, StringComparer.OrdinalIgnoreCase).ThenBy(e => e.Number)
+            .Select((entry, index) => entry with { Position = index + 1 }).ToList();
+        return new(queues.Count == 1 ? queues[0].Repository : null, ordered.FirstOrDefault(), ordered,
+            queues.SelectMany(q => q.Skipped).ToList(),
+            new(queues.Sum(q => q.Counts.Open), ordered.Count, queues.Sum(q => q.Counts.Drafts), queues.Sum(q => q.Counts.UpToDate)))
+            { Repositories = queues.SelectMany(q => q.Repositories).ToList() };
     }
 
     /// <summary>
