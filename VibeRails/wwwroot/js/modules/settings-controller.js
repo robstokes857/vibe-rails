@@ -3,6 +3,7 @@ import { SettingsKeysPanel } from './settings-keys.js';
 import { SetupPanel, refreshSetupStatus } from './setup-panel.js';
 import { SetupInstallWindow } from './setup-install-window.js';
 import { getToastTheme, setToastTheme } from './toast-service.js';
+import { PrReviewerSettingsPanel } from './settings-pr-reviewer.js';
 
 export class SettingsController {
     constructor(app) {
@@ -310,6 +311,8 @@ export class SettingsController {
     }
 
     unload() {
+        this._prReviewerPanel?.unload();
+        this._prReviewerPanel = null;
         this._keysPanel?.unload();
         this._keysPanel = null;
         this._setupPanel?.unload();
@@ -604,6 +607,13 @@ export class SettingsController {
                 if (container) {
                     this._setupPanel ??= this._mountSetupPanel(container);
                     void this._setupPanel.activate();
+                }
+            }
+            if (id === 'pr-reviewer') {
+                const container = root.querySelector('[data-settings-pr-reviewer]');
+                if (container) {
+                    this._prReviewerPanel ??= new PrReviewerSettingsPanel(this.app, container);
+                    void this._prReviewerPanel.load();
                 }
             }
         };

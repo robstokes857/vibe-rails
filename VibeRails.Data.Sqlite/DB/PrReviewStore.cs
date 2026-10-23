@@ -168,6 +168,8 @@ public sealed partial class PrReviewStore(string connectionString, TimeProvider?
                 WHERE Id = $id;
                 """, ("$head", headSha), ("$verdict", verdict), ("$blocking", blocking ? 1 : 0),
                 ("$feedback", feedback), ("$now", now), ("$id", pending!.Id));
+            // Completion and its immutable outbound snapshot commit together, even if the caller exits.
+            EnsureDelivery(db, tx, ReadReview(db, tx, repository, pending.Id)!);
             TouchPullRequest(db, tx, repository, number, summary, now);
             return new PrReviewWriteResult(PrReviewWriteOutcome.Saved,
                 ReadPullRequest(db, tx, repository, number), ReadReview(db, tx, repository, pending.Id));
@@ -309,6 +311,7 @@ public sealed partial class PrReviewStore(string connectionString, TimeProvider?
                 """);
         });
         EnsureAdoptionSchema(connection);
+        EnsureDeliverySchema(connection);
         SqliteMigrationRunner.StampGeneration(connection, Generation);
     }
 

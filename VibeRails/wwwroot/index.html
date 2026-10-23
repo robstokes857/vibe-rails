@@ -1059,8 +1059,26 @@
                             aria-controls="settings-panel-keys" aria-selected="false" tabindex="-1" data-settings-tab="keys">KEYS</button>
                         <button type="button" class="settings-tab" role="tab" id="settings-tab-setup"
                             aria-controls="settings-panel-setup" aria-selected="false" tabindex="-1" data-settings-tab="setup">Setup</button>
+                        <button type="button" class="settings-tab" role="tab" id="settings-tab-pr-reviewer"
+                            aria-controls="settings-panel-pr-reviewer" aria-selected="false" tabindex="-1" data-settings-tab="pr-reviewer">PR Reviewer</button>
                     </div>
                 </div>
+            </div>
+            <div class="settings-panel" id="settings-panel-pr-reviewer" role="tabpanel" aria-labelledby="settings-tab-pr-reviewer" tabindex="0" hidden>
+                <div class="row justify-content-center"><div class="col-md-8 col-lg-6">
+                    <section class="sandbox-item-card text-start" data-settings-pr-reviewer>
+                        <h2 class="sandbox-item-name">PR Reviewer</h2>
+                        <div class="form-check form-switch my-3">
+                            <input type="checkbox" role="switch" class="form-check-input" id="setting-pr-reviewer-enabled" data-pr-reviewer-enabled disabled>
+                            <label class="form-check-label" for="setting-pr-reviewer-enabled">Enable PR Reviewer and GitHub publishing</label>
+                        </div>
+                        <p>Off by default. This setting applies to all projects on this machine and saves immediately. When on, completed reviews publish through your signed-in GitHub CLI account. Blockers request changes on GitHub; branch protection determines whether that prevents merging.</p>
+                        <p>Turning off stops new review queue/start work and new GitHub posts. A run already in progress can finish and save its local result. A GitHub post already reserved for dispatch may still finish. Existing history is preserved; enabling does not publish past reviews automatically.</p>
+                        <p>Reviews run through your existing open backend and Automations. There is no background service. Review history shows local results and GitHub delivery separately, with safe retry/check actions for errors.</p>
+                        <p role="status" data-pr-reviewer-status>Open this page to load the saved setting.</p>
+                        <button type="button" class="btn btn-outline-secondary" data-pr-reviewer-reload>Reload saved setting</button>
+                    </section>
+                </div></div>
             </div>
             <div class="settings-panel" id="settings-panel-llm" role="tabpanel" aria-labelledby="settings-tab-llm"
                 tabindex="0" hidden>

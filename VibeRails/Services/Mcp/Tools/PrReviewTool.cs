@@ -11,7 +11,7 @@ namespace VibeRails.Services.Mcp.Tools;
 /// <summary>
 /// The PR review tracker for agents: pick the next PR, record a review pass with checkpoints,
 /// and finish it. Scoped to the project <see cref="IBoardProjectResolver"/> derives; no tool takes
-/// a repository or path argument. Nothing here writes to GitHub.
+/// a repository or path argument. Completion publishes when PR Reviewer is enabled.
 /// </summary>
 [McpServerToolType]
 public sealed class PrReviewTool(PrReviewService reviews, IBoardProjectResolver projects)
@@ -63,7 +63,7 @@ public sealed class PrReviewTool(PrReviewService reviews, IBoardProjectResolver 
             cancellationToken)));
 
     [McpServerTool]
-    [Description("Complete the unfinished review pass and stamp its reviewed time. blocking defaults to verdict == request_changes; pass it explicitly when they differ. A blocking completed review makes the PR a Blocker until a later clean pass. This records the review locally only; it does not post to GitHub.")]
+    [Description("Complete the unfinished review pass and stamp its reviewed time. When Settings > PR Reviewer is enabled, publishes feedback to the project's GitHub PR using the user's authenticated gh identity and the full reviewed commit SHA. Blockers or request_changes publish a real REQUEST_CHANGES review; other feedback publishes COMMENT. GitHub branch protection decides merge enforcement. delivery is separate from the local result: only published confirms a GitHub post. Disabling allows this run to finish locally but prevents a new post reservation. blocking defaults to verdict == request_changes.")]
     public async Task<string> CompletePrReview(
         [Description("The pull request number.")] int number,
         [Description("The full review body.")] string feedback,
@@ -76,6 +76,16 @@ public sealed class PrReviewTool(PrReviewService reviews, IBoardProjectResolver 
             await projects.ResolveAsync(cancellationToken), number,
             new PrReviewRequest(Feedback: feedback, Verdict: verdict, Blocking: blocking, HeadSha: headSha, Summary: summary),
             cancellationToken)));
+
+    [McpServerTool]
+    [Description("Retry delivery for an existing completed review in this project's PR. Requires PR Reviewer to be enabled. Safe failures can retry; unknown outcomes only check GitHub for the original receipt and never resend. Existing history without a delivery is not backfilled. Returns delivery status separately from local results.")]
+    public async Task<string> RetryPrReviewPublish(
+        [Description("The pull request number.")] int number,
+        [Description("The local review pass id returned by completion.")] long reviewId,
+        CancellationToken cancellationToken = default) =>
+        await RunAsync("publish the PR review", async () => JsonSerializer.Serialize(
+            await reviews.PublishAsync(await projects.ResolveAsync(cancellationToken), number, reviewId, cancellationToken),
+            AppJsonSerializerContext.Default.PrReviewDelivery));
 
     private static string Serialize(PrReviewWriteResponse response) =>
         JsonSerializer.Serialize(response, AppJsonSerializerContext.Default.PrReviewWriteResponse);

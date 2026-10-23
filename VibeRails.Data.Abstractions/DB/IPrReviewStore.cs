@@ -155,6 +155,19 @@ public sealed record PrReviewLegacyConflict(int Number, string SourceHash, strin
 /// </summary>
 public interface IPrReviewStore
 {
+    /// <summary>Machine-wide reviewer and outbound publishing switch. Defaults off.</summary>
+    Task<PrReviewerSettings> GetReviewerSettingsAsync(CancellationToken ct = default);
+    /// <summary>Persists the switch without deleting history or deliveries.</summary>
+    Task<PrReviewerSettings> SetReviewerSettingsAsync(bool enabled, CancellationToken ct = default);
+    /// <summary>Creates one immutable delivery snapshot per completed pass; never backfills history.</summary>
+    Task<PrReviewDelivery> EnsureDeliveryAsync(string repository, long reviewId, CancellationToken ct = default);
+    /// <summary>Delivery receipts are distinct from local review state.</summary>
+    Task<IReadOnlyList<PrReviewDelivery>> GetDeliveriesAsync(string repository, int number, CancellationToken ct = default);
+    /// <summary>Atomically reserves a POST only while enabled. Unknown attempts are never resent.</summary>
+    Task<bool> ClaimDeliveryAsync(string repository, long reviewId, string login, CancellationToken ct = default);
+    /// <summary>Records a confirmed receipt, safe failure, or uncertain outcome.</summary>
+    Task SetDeliveryResultAsync(string repository, long reviewId, string status, long? githubId, string? error,
+        CancellationToken ct = default, string? expectedStatus = null);
     /// <summary>Inspectable conflicts; conflicts never block ordinary repository operations.</summary>
     Task<IReadOnlyList<PrReviewLegacyConflict>> GetLegacyConflictsAsync(string repository, CancellationToken ct = default);
 

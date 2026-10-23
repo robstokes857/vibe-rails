@@ -26,7 +26,9 @@ public sealed class PrReviewServiceTests : IDisposable
         _connectionString = $"Data Source={_dbPath};Mode=ReadWriteCreate";
         _repositories.Setup(r => r.ResolveAsync(Project, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PrReviewProject(Project, Repo, null));
-        _service = new PrReviewService(new PrReviewStore(_connectionString), _github.Object, _repositories.Object);
+        var store = new PrReviewStore(_connectionString);
+        store.SetReviewerSettingsAsync(true).GetAwaiter().GetResult();
+        _service = new PrReviewService(store, _github.Object, _repositories.Object);
     }
 
     public void Dispose()

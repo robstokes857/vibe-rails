@@ -1,12 +1,44 @@
 # PR Reviews
 
-The **Reviews** page and five MCP tools track lead reviews of the current project's GitHub pull
+The **Reviews** page and six MCP tools track lead reviews of the current project's GitHub pull
 requests: which PRs were reviewed, what each pass found, and which PR to review next. Frontend:
 `wwwroot/js/modules/pr-reviews-controller.js` (list and detail pages, polling) and
 `pr-reviews-view.js` (wording, list arithmetic and markup; node-tested). Routes:
 `Routes/PrReviewRoutes.cs`, root-only. Storage: `IPrReviewStore` / `PrReviewStore` in
 `~/.vibe_rails/pr_reviews.db` in Debug, Release, root backend and stdio MCP alike, component
-`pr-reviews/1` (additive). Nothing in this feature writes to GitHub.
+`pr-reviews/1` (additive). Completed passes can publish GitHub reviews when enabled below.
+
+- **Settings > PR Reviewer** is a dedicated settings navigation page with an immediate-save
+  **Enable PR Reviewer and GitHub publishing** switch, off by default. This machine-wide setting
+  lives behind `IPrReviewStore` in `pr_reviews.db` (`pr-review-delivery/1`, additive), shared by
+  root backends and stdio MCP. GET/PUT `/api/v1/pr-reviews/settings` require both dashboard
+  credentials and no-store responses. Off refuses queue/start operations before GitHub access;
+  history, drafts and already running passes remain available. A running pass may finish locally.
+  Disabling prevents new POST reservations atomically in SQLite; a POST already reserved may
+  finish. Enabling never backfills old results or starts a scheduler. Existing root/Automation
+  lifecycles apply: no background host, daemon or OS registration is introduced.
+- **Publishing is separate from local completion.** Completion and an immutable delivery snapshot
+  commit together. `blocking=true` or `verdict=request_changes` produces a real GitHub
+  `REQUEST_CHANGES` review; other feedback produces `COMMENT` (including recommend_approve,
+  which is a recommendation, not an approval). GitHub branch protection decides whether the
+  request changes prevents merging. The user's authenticated `gh` identity authors the review;
+  no VibeRails GitHub token is stored. The repository comes from the project, the PR from the
+  saved pass, and `commit_id` from its full 40-character reviewed SHA. Publishing rechecks the
+  PR head and refuses stale/missing SHAs instead of substituting the latest commit. Local
+  feedback remains up to 100,000 characters; outbound snapshots cap at 60,000, including marker.
+- **Receipts and safe retries.** Detail responses expose `deliveries`; completion exposes
+  `delivery`. States are `pending`, `disabled`, `failed`, `unknown`, `published`. Authentication,
+  permissions, stale heads and publishing errors remain visible beside the local completed
+  result. Only a matching positive GitHub id, identity, body, commit and review event confirms
+  publication. A unique marker and a cross-process SQLite reservation prevent duplicate POSTs.
+  Before sending, the reservation durably becomes `unknown`; a crash/timeout/unexpected response
+  cannot authorize another POST. Retry checks the original account's GitHub reviews for its
+  exact snapshot (100/page, at most 20 pages); absence is still unknown, never proof to resend.
+  Definite 4xx refusals can retry, as can failures before dispatch. Use
+  `POST /{number}/reviews/{id}/publish`, the detail page's retry/check action or
+  `retry_pr_review_publish`. Receipts/snapshots survive local deletion. Local edits do not edit,
+  dismiss or republish GitHub reviews; start a new pass for changed findings. Existing history
+  without a delivery is never automatically published, including adopted legacy passes.
 
 - **Automatic legacy adoption.** Before each repository operation, the store reads a consistent
   snapshot of its PRs and passes from legacy `state.db` using a separate read-only connection.
@@ -15,7 +47,7 @@ requests: which PRs were reviewed, what each pass found, and which PR to review 
   dedicated file's writer lock; competing starts cannot duplicate or reorder adoption. Existing
   ids are retained when available; collisions with new passes receive stable mapped ids.
   All stored fields, including draft feedback, verdicts, blocking flags, lifecycle and raw
-  timestamps, carry over. There are currently no persisted feature-owned settings.
+  timestamps, carry over. Reviewer settings and deliveries are new-file-only and never adopted.
 - **Older versions can keep running.** Later legacy changes (including deletions) adopt on the
   next operation if the destination PR has not changed since its last adoption. Unchanged legacy
   rows never overwrite local edits or resurrect local deletions. GitHub lifecycle fields and
@@ -50,7 +82,8 @@ requests: which PRs were reviewed, what each pass found, and which PR to review 
   fields. Untracked (404) and tracked-without-a-pending-pass (409) are different errors.
   The detail page sends `useCurrentHead: true` on start: `gh pr view` reads that number's metadata
   and current SHA before any write, including PRs outside the open-list limit. A failed lookup
-  is a 502 and starts nothing. Explicit SHA starts, including MCP, remain local writes.
+  is a 502 and starts nothing. Explicit SHA starts, including MCP, record the reviewed SHA;
+  completion requires a full current-head SHA to publish safely.
 - **GitHub's lifecycle is separate and never rewrites a review.** `POST github/sync` asks GitHub
   for every tracked PR's open/merged/closed state by number (aliased GraphQL, 50 per call; a
   number that is not a PR here still lets the rest of the batch through). It never moves
@@ -63,9 +96,11 @@ requests: which PRs were reviewed, what each pass found, and which PR to review 
   matches the full head it abbreviates, so a short SHA does not re-queue a PR forever. The queue
   answers 502 when `gh` fails, so "nothing to review" and "cannot see GitHub" never look alike.
 - **`gh` is the user's.** `GitHubPullRequestClient` runs it through `ICliWrapper` (argv, stdin
-  closed, `GH_HOST=github.com`, `GH_PROMPT_DISABLED`, 20 s timeout) with an explicit `-R owner/name` or GraphQL
-  variables. VibeRails stores no GitHub credential. Failure messages are fixed wording keyed on how
-  `gh` ended; its stderr is never reflected. See API_SEC.md, "GitHub pull request reads".
+  closed for reads, `GH_HOST=github.com`, `GH_PROMPT_DISABLED`, 20 s per call) with an explicit
+  `-R owner/name`, GraphQL variables or fixed-host REST paths. Publishing uses JSON on stdin,
+  never feedback in argv/logged command text. VibeRails stores no GitHub credential. Failure
+  messages use fixed wording; stderr/remote error prose is never reflected. See API_SEC.md,
+  "GitHub pull requests and review publishing".
 - **The page** polls queue, sync and list once a minute on the list page only, never while the
   UI is hidden, and never with a second round behind a slow first. The detail page does not poll,
   so a half-written review is not re-rendered away. Each form keeps unsaved values across local
@@ -73,7 +108,8 @@ requests: which PRs were reviewed, what each pass found, and which PR to review 
   the save and re-read. Deletes go through `confirmDialog` and discard superseded confirmations.
 
 MCP tools (both transports, outside the Board auto-grants): `get_pr_review_queue`,
-`get_pr_review`, `start_pr_review`, `save_pr_review_draft`, `complete_pr_review`. They resolve
+`get_pr_review`, `start_pr_review`, `save_pr_review_draft`, `complete_pr_review`,
+`retry_pr_review_publish`. Completion/retry are outbound writes when enabled. They resolve
 the project through `IBoardProjectResolver` and take no repository or path argument.
 
 Tests: `Tests/DB/PrReviewStoreTests.cs`, `Tests/DB/PrReviewDatabaseIsolationTests.cs`, `Tests/Services/PrReviews/*`,

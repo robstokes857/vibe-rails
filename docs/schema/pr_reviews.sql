@@ -2,6 +2,9 @@
 -- Regenerate: set VIBE_RAILS_UPDATE_SCHEMA_SNAPSHOT=1, then: dotnet test Tests --filter SchemaSnapshotTests
 -- Review schema changes under AGENTS.md: compatible additions are automatic; breaking changes require owner authorization.
 
+-- index idx_pr_review_deliveries_pr
+CREATE INDEX idx_pr_review_deliveries_pr ON PrReviewDeliveries (Repository, PrNumber);
+
 -- index idx_pr_review_pull_requests_updated
 CREATE INDEX idx_pr_review_pull_requests_updated ON PrReviewPullRequests (Repository, UpdatedUTC);
 
@@ -10,6 +13,9 @@ CREATE UNIQUE INDEX idx_pr_reviews_one_in_progress ON PrReviews (Repository, PrN
 
 -- index idx_pr_reviews_pr
 CREATE INDEX idx_pr_reviews_pr ON PrReviews (Repository, PrNumber, Status);
+
+-- table PrReviewDeliveries
+CREATE TABLE PrReviewDeliveries ( ReviewId INTEGER PRIMARY KEY, Repository TEXT NOT NULL COLLATE NOCASE, PrNumber INTEGER NOT NULL, HeadSha TEXT NOT NULL, Event TEXT NOT NULL, Body TEXT NOT NULL, Marker TEXT NOT NULL UNIQUE, Status TEXT NOT NULL, Login TEXT, GitHubId INTEGER, Error TEXT );
 
 -- table PrReviewLegacyAdoptions
 CREATE TABLE PrReviewLegacyAdoptions ( Repository TEXT NOT NULL COLLATE NOCASE, Number INTEGER NOT NULL, SourceHash TEXT NOT NULL, TargetHash TEXT NOT NULL, SourceContentHash TEXT, TargetContentHash TEXT, ConflictSourceHash TEXT, PRIMARY KEY (Repository, Number) );
@@ -22,6 +28,9 @@ CREATE TABLE PrReviewLegacyIds ( LegacyId INTEGER PRIMARY KEY, ReviewId INTEGER 
 
 -- table PrReviewPullRequests
 CREATE TABLE PrReviewPullRequests ( Repository TEXT NOT NULL COLLATE NOCASE, Number INTEGER NOT NULL CHECK (Number > 0), Title TEXT NOT NULL, Author TEXT NOT NULL, OpenedUTC TEXT NOT NULL, Summary TEXT NOT NULL DEFAULT '', GitHubState TEXT NOT NULL DEFAULT '', GitHubStateUTC TEXT, GitHubCheckedUTC TEXT, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, PRIMARY KEY (Repository, Number) );
+
+-- table PrReviewerSettings
+CREATE TABLE PrReviewerSettings (Id INTEGER PRIMARY KEY CHECK (Id = 1), Enabled INTEGER NOT NULL);
 
 -- table PrReviews
 CREATE TABLE PrReviews ( Id INTEGER PRIMARY KEY AUTOINCREMENT, Repository TEXT NOT NULL COLLATE NOCASE, PrNumber INTEGER NOT NULL, HeadSha TEXT NOT NULL DEFAULT '', Status TEXT NOT NULL CHECK (Status IN ('in_progress', 'completed')), Verdict TEXT, Blocking INTEGER NOT NULL DEFAULT 0 CHECK (Blocking IN (0, 1)), Feedback TEXT NOT NULL DEFAULT '', StartedUTC TEXT NOT NULL, ReviewedUTC TEXT, UpdatedUTC TEXT NOT NULL, FOREIGN KEY (Repository, PrNumber) REFERENCES PrReviewPullRequests (Repository, Number) ON DELETE CASCADE );

@@ -8,11 +8,23 @@ using VibeRails.Services.Cli;
 namespace VibeRails.Services.PrReviews;
 
 /// <summary>The GitHub CLI could not answer. The message is safe to show and says what to fix.</summary>
-public sealed class GitHubCliException(string message) : Exception(message);
+public sealed class GitHubCliException(string message, bool mayHavePosted = false) : Exception(message)
+{
+    /// <summary>True when dispatch may have reached GitHub and retry must only reconcile.</summary>
+    public bool MayHavePosted { get; } = mayHavePosted;
+}
 
-/// <summary>Read-only pull request queries. Nothing here writes to GitHub.</summary>
+/// <summary>Pull request queries and authenticated, commit-pinned review publishing.</summary>
 public interface IGitHubPullRequestClient
 {
+    /// <summary>The identity that will author an outbound review.</summary>
+    Task<string> GetViewerAsync(string workingDirectory, CancellationToken ct = default);
+    /// <summary>Finds a confirmed receipt for an uncertain attempt; never posts.</summary>
+    Task<long?> FindReviewAsync(GitHubRepository repository, string workingDirectory, PrReviewDelivery delivery,
+        CancellationToken ct = default);
+    /// <summary>Posts one real COMMENT or REQUEST_CHANGES review pinned to the reviewed commit.</summary>
+    Task<long> PublishReviewAsync(GitHubRepository repository, string workingDirectory, PrReviewDelivery delivery,
+        CancellationToken ct = default);
     /// <summary>Reads one PR by number, including its current head, even outside the open-list limit.</summary>
     Task<GitHubPullRequest> GetAsync(GitHubRepository repository, string workingDirectory, int number,
         CancellationToken ct = default);
@@ -34,7 +46,7 @@ public interface IGitHubPullRequestClient
 /// closed, prompts and update notices off. Every call names the repository explicitly, so the
 /// answer never depends on which checkout <c>gh</c> happens to start in.
 /// </summary>
-public sealed class GitHubPullRequestClient(ICliWrapper cli) : IGitHubPullRequestClient
+public sealed partial class GitHubPullRequestClient(ICliWrapper cli) : IGitHubPullRequestClient
 {
     public const int OpenListLimit = 100;
 

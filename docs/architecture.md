@@ -498,17 +498,23 @@ before clients can use sign-in; older sites leave the manual API key input usabl
 
 ### PR review tracker
 
-The **Reviews** page (`pr-reviews` view) and five MCP tools keep a lead-review log for the
+The **Reviews** page (`pr-reviews` view) and six MCP tools keep a lead-review log for the
 current project's GitHub pull requests, ported from a standalone Node/Express tracker. The
 repository is parsed from the project's `origin` remote; records live in `pr_reviews.db`
 (`pr-reviews/1`) keyed by `owner/name` and PR number. `PrReviewService` owns the rules (derived
 status, server-owned timestamps, idempotent start, draft checkpoints), `PrReviewQueue` picks the
 next PR by rank then age, and `GitHubPullRequestClient` reads open PRs, lifecycle states and a
-numbered PR's current head through the user's own `gh`, pinned to github.com and never writing
-to GitHub. Detail-page starts capture that current head; local form drafts survive other detail
+numbered PR's current head through the user's own `gh`, pinned to github.com. Settings > PR
+Reviewer enables new queue/start work and outbound publishing together (off by default, shared
+across projects). Completion atomically captures an immutable delivery snapshot in
+`PrReviewDeliveries` (`pr-review-delivery/1`); blockers publish real REQUEST_CHANGES reviews,
+other feedback COMMENT, using the authenticated user's identity and reviewed full SHA. Delivery
+states/receipts stay separate from local results. SQLite reserves dispatch across processes;
+unknown POSTs only reconcile and never resend. Turning off stops new work/reservations while
+existing local work and reserved posts may finish. Detail-page starts capture the current head; local form drafts survive other detail
 actions, with inputs locked until a save and re-read finish. Routes are root-only under
 `/api/v1/pr-reviews`. Contract: [PR Reviews guide](../VibeRails/Services/PrReviews/AGENTS.md);
-security notes: [API_SEC.md](../API_SEC.md#github-pull-request-reads-pr-reviews).
+security notes: [API_SEC.md](../API_SEC.md#github-pull-requests-and-review-publishing-pr-reviews).
 
 All hosts/configurations use the same dedicated file through `IPrReviewStore`. Automatic
 legacy adoption reads `state.db` without changing it and atomically records per-PR fingerprints

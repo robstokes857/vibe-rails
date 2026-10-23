@@ -181,6 +181,111 @@ public sealed class GitHubPullRequestClientTests
 
     private static CliResult Success(string stdout) => new(0, false, false, stdout, "", TimeSpan.Zero, "gh");
 
+    private static PrReviewDelivery Delivery(string reviewEvent = "COMMENT") => new(1, "octo/widgets", 7,
+        new string('a', 40), reviewEvent, "Finding\n\n<!-- viberails-review:fixture -->", "<!-- viberails-review:fixture -->", "unknown", "reviewer", null, null);
+
+    private static string Receipt(PrReviewDelivery d, string? state = null, string? login = null, string? sha = null) =>
+        new System.Text.Json.Nodes.JsonObject
+        {
+            ["id"] = 42, ["commit_id"] = sha ?? d.HeadSha,
+            ["state"] = state ?? (d.Event == "COMMENT" ? "COMMENTED" : "CHANGES_REQUESTED"),
+            ["body"] = d.Body, ["user"] = new System.Text.Json.Nodes.JsonObject { ["login"] = login ?? d.Login }
+        }.ToJsonString();
+
+    [Theory]
+    [InlineData("COMMENT")]
+    [InlineData("REQUEST_CHANGES")]
+    public async Task Publishing_uses_real_reviews_endpoint_explicit_host_and_json_stdin(string reviewEvent)
+    {
+        var d = Delivery(reviewEvent);
+        CliRequest? sent = null;
+        var id = await new GitHubPullRequestClient(Cli(r => sent = r, Success("HTTP/2.0 201 Created\r\nContent-Type: application/json\r\n\r\n" + Receipt(d))))
+            .PublishReviewAsync(Repo, "C:/work", d, _ct);
+        Assert.Equal(42, id);
+        Assert.Equal(["api", "--hostname", "github.com", "--method", "POST", "repos/octo/widgets/pulls/7/reviews", "--include", "--input", "-"], sent!.Arguments);
+        Assert.Equal("github.com", sent.EnvironmentVariables!["GH_HOST"]);
+        Assert.Equal(TimeSpan.FromSeconds(20), sent.Timeout);
+        using var payload = System.Text.Json.JsonDocument.Parse(sent.StandardInput!);
+        Assert.Equal(d.HeadSha, payload.RootElement.GetProperty("commit_id").GetString());
+        Assert.Equal(d.Body, payload.RootElement.GetProperty("body").GetString());
+        Assert.Equal(reviewEvent, payload.RootElement.GetProperty("event").GetString());
+        Assert.DoesNotContain(d.Body, string.Join(' ', sent.Arguments));
+    }
+
+    [Theory]
+    [InlineData(403, false)]
+    [InlineData(422, false)]
+    [InlineData(503, true)]
+    [InlineData(408, true)]
+    public async Task Refusals_and_uncertain_failures_are_distinct_and_remote_errors_are_not_reflected(int status, bool uncertain)
+    {
+        var cli = Cli(_ => { }, Failed(1, "secret remote error") with { StandardOutput = $"HTTP/2.0 {status} Failed\n\n{{\"message\":\"secret remote error\"}}" });
+        var error = await Assert.ThrowsAsync<GitHubCliException>(() => new GitHubPullRequestClient(cli).PublishReviewAsync(Repo, "C:/work", Delivery(), _ct));
+        Assert.Equal(uncertain, error.MayHavePosted);
+        Assert.DoesNotContain("secret", error.Message);
+    }
+
+    [Fact]
+    public async Task Transport_timeout_remains_uncertain_even_if_cli_output_is_empty()
+    {
+        var cli = Cli(_ => { }, Failed(-1, "secret") with { TimedOut = true });
+        Assert.True((await Assert.ThrowsAsync<GitHubCliException>(() => new GitHubPullRequestClient(cli)
+            .PublishReviewAsync(Repo, "C:/work", Delivery(), _ct))).MayHavePosted);
+    }
+
+    [Theory]
+    [InlineData("APPROVED", "reviewer", null)]
+    [InlineData("COMMENTED", "other-user", null)]
+    [InlineData("COMMENTED", "reviewer", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")]
+    public async Task A_successful_response_requires_the_expected_event_identity_and_commit(string state, string login, string? sha)
+    {
+        var d = Delivery();
+        var cli = Cli(_ => { }, Success("HTTP/2.0 201 Created\n\n" + Receipt(d, state, login, sha)));
+        Assert.True((await Assert.ThrowsAsync<GitHubCliException>(() => new GitHubPullRequestClient(cli)
+            .PublishReviewAsync(Repo, "C:/work", d, _ct))).MayHavePosted);
+    }
+
+    [Fact]
+    public async Task Receipt_reconciliation_reads_reviews_and_requires_the_original_body_and_identity()
+    {
+        CliRequest? sent = null;
+        var d = Delivery("REQUEST_CHANGES");
+        var cli = Cli(r => sent = r, Success("[" + Receipt(d, login: "another") + "," + Receipt(d) + "]"));
+        Assert.Equal(42, await new GitHubPullRequestClient(cli).FindReviewAsync(Repo, "C:/work", d, _ct));
+        Assert.Equal(["api", "--hostname", "github.com", "--method", "GET", "repos/octo/widgets/pulls/7/reviews?per_page=100&page=1"], sent!.Arguments);
+    }
+
+    [Fact]
+    public async Task Reconciliation_finds_a_review_on_later_pages_even_if_it_was_dismissed()
+    {
+        var d = Delivery("REQUEST_CHANGES");
+        var cli = new Mock<ICliWrapper>(MockBehavior.Strict);
+        var first = "[" + string.Join(',', Enumerable.Repeat(Receipt(d, login: "unrelated"), 100)) + "]";
+        cli.SetupSequence(c => c.RunAsync(It.IsAny<CliRequest>(), It.IsAny<Func<CliOutputLine, ValueTask>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Success(first))
+            .ReturnsAsync(Success("[" + Receipt(d, state: "DISMISSED") + "]"));
+        Assert.Equal(42, await new GitHubPullRequestClient(cli.Object).FindReviewAsync(Repo, "C:/work", d, _ct));
+        cli.Verify(c => c.RunAsync(It.Is<CliRequest>(r => r.Arguments.Last().EndsWith("page=2")),
+            It.IsAny<Func<CliOutputLine, ValueTask>?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Viewer_is_read_from_authenticated_github_identity_and_malformed_answers_are_refused()
+    {
+        var client = new GitHubPullRequestClient(Cli(_ => { }, Success("{\"login\":\"octocat\"}")));
+        Assert.Equal("octocat", await client.GetViewerAsync("C:/work", _ct));
+        await Assert.ThrowsAsync<GitHubCliException>(() => new GitHubPullRequestClient(Cli(_ => { }, Success("{}"))).GetViewerAsync("C:/work", _ct));
+    }
+
+    [Fact]
+    public async Task Mismatched_repository_is_refused_before_the_cli_runs()
+    {
+        var cli = new Mock<ICliWrapper>(MockBehavior.Strict);
+        await Assert.ThrowsAsync<GitHubCliException>(() => new GitHubPullRequestClient(cli.Object)
+            .PublishReviewAsync(Repo, "C:/work", Delivery() with { Repository = "other/repo" }, _ct));
+        cli.VerifyNoOtherCalls();
+    }
+
     private static CliResult Failed(int exitCode, string stderr) => new(exitCode, false, false, "", stderr, TimeSpan.Zero, "gh");
 
     private static ICliWrapper Cli(Action<CliRequest> capture, CliResult result)

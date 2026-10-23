@@ -40,7 +40,7 @@ public sealed class PrReviewRepositoryResolver : IPrReviewRepositoryResolver
 /// <summary>
 /// The lead-review tracker: which GitHub PRs were reviewed, what each pass found, and which PR
 /// to review next. The tracker state is derived from reviews, timestamps are server-owned, and
-/// the only GitHub access is read-only. Nothing here writes to GitHub.
+/// delivery to GitHub is tracked separately from local results.
 /// </summary>
 public sealed class PrReviewService(IPrReviewStore store, IGitHubPullRequestClient github,
     IPrReviewRepositoryResolver repositories)
@@ -86,7 +86,10 @@ public sealed class PrReviewService(IPrReviewStore store, IGitHubPullRequestClie
         var pullRequest = await store.GetAsync(repository.FullName, number, ct)
             ?? throw new PrReviewException(404, $"PR #{number} was not found.");
         var reviews = await store.GetReviewsAsync(repository.FullName, number, ct);
-        return new PrReviewDetailResponse(repository.FullName, repository.PullRequestUrl(number), pullRequest, reviews.ToList());
+        return new PrReviewDetailResponse(repository.FullName, repository.PullRequestUrl(number), pullRequest, reviews.ToList())
+        {
+            Deliveries = (await store.GetDeliveriesAsync(repository.FullName, number, ct)).ToList()
+        };
     }
 
     /// <summary>
@@ -95,6 +98,7 @@ public sealed class PrReviewService(IPrReviewStore store, IGitHubPullRequestClie
     /// </summary>
     public async Task<PrReviewQueueResponse> QueueAsync(string projectPath, CancellationToken ct = default)
     {
+        await RequireEnabledAsync(ct);
         var project = await RequireRepositoryAsync(projectPath, ct);
         var repository = project.Repository!;
         IReadOnlyList<GitHubPullRequest> open;
@@ -155,6 +159,7 @@ public sealed class PrReviewService(IPrReviewStore store, IGitHubPullRequestClie
     public async Task<PrReviewWriteResponse> StartAsync(string projectPath, int number, PrReviewRequest? request,
         CancellationToken ct = default)
     {
+        await RequireEnabledAsync(ct);
         var project = await RequireRepositoryAsync(projectPath, ct);
         var repository = project.Repository!.FullName;
         request ??= Empty;
@@ -212,7 +217,86 @@ public sealed class PrReviewService(IPrReviewStore store, IGitHubPullRequestClie
         var summary = ReadText(request.Summary, "summary", MaxSummary);
         var result = await store.CompleteReviewAsync(repository, number, verdict, blocking, feedback, headSha, summary, ct);
         RequireSaved(result, number);
-        return new PrReviewWriteResponse(result.PullRequest!, result.Review, false);
+        var delivery = await store.EnsureDeliveryAsync(repository, result.Review!.Id, ct);
+        if ((await store.GetReviewerSettingsAsync(ct)).Enabled)
+            delivery = await PublishAsync(projectPath, number, result.Review.Id, ct);
+        return new PrReviewWriteResponse(result.PullRequest!, result.Review, false) { Delivery = delivery };
+    }
+
+    /// <summary>Reads the shared reviewer and outbound publishing switch.</summary>
+    public Task<PrReviewerSettings> GetSettingsAsync(CancellationToken ct = default) => store.GetReviewerSettingsAsync(ct);
+
+    /// <summary>Disables new queue/start work and POST reservations; history and running local work survive.</summary>
+    public Task<PrReviewerSettings> SetSettingsAsync(bool enabled, CancellationToken ct = default) => store.SetReviewerSettingsAsync(enabled, ct);
+
+    private async Task RequireEnabledAsync(CancellationToken ct)
+    {
+        if (!(await store.GetReviewerSettingsAsync(ct)).Enabled)
+            throw new PrReviewException(409, "PR Reviewer is off. Enable PR Reviewer and GitHub publishing in Settings > PR Reviewer to start new reviews.");
+    }
+
+    /// <summary>Retries safe failures or reconciles an uncertain POST without ever resending it.</summary>
+    public async Task<PrReviewDelivery> PublishAsync(string projectPath, int number, long id, CancellationToken ct = default)
+    {
+        var project = await RequireRepositoryAsync(projectPath, ct);
+        RequireNumber(number);
+        RequireReviewId(id);
+        var repository = project.Repository!;
+        var delivery = (await store.GetDeliveriesAsync(repository.FullName, number, ct)).FirstOrDefault(d => d.ReviewId == id)
+            ?? throw new PrReviewException(404, "No delivery exists for that review in this project and PR.");
+        if (delivery.Status == "published") return delivery;
+        await RequireEnabledAsync(ct);
+        var claimed = false;
+        try
+        {
+            if (!System.Text.RegularExpressions.Regex.IsMatch(delivery.HeadSha, "^[0-9a-fA-F]{40}$"))
+                throw new GitHubCliException("Publishing requires the full 40-character reviewed commit SHA. Start a new pass at the current head.");
+            if (delivery.Body.Length > 60_000)
+                throw new GitHubCliException("Review feedback exceeds the GitHub publishing limit of 60,000 characters. Start a shorter review pass.");
+            var login = await github.GetViewerAsync(project.Path, ct);
+            if (delivery.Status == "unknown")
+            {
+                if (!string.Equals(login, delivery.Login, StringComparison.OrdinalIgnoreCase))
+                    throw new GitHubCliException("Sign in with the original publishing account to check this unconfirmed review.");
+                var receipt = await github.FindReviewAsync(repository, project.Path, delivery, ct);
+                if (receipt is { } existing)
+                    await store.SetDeliveryResultAsync(repository.FullName, id, "published", existing, null, CancellationToken.None);
+                // Absence cannot prove that a timed-out request will not arrive later.
+            }
+            else
+            {
+                // Recheck the target before dispatch, never substitute today's SHA for the reviewed SHA.
+                var current = await github.GetAsync(repository, project.Path, number, ct);
+                if (current.Number != number || !string.Equals(current.HeadSha, delivery.HeadSha, StringComparison.OrdinalIgnoreCase))
+                    throw new GitHubCliException("The PR head changed since this review. Review the new head in a new pass before publishing.");
+                claimed = await store.ClaimDeliveryAsync(repository.FullName, id, login, ct);
+                if (claimed)
+                {
+                    var receipt = await github.PublishReviewAsync(repository, project.Path, delivery with { Login = login }, ct);
+                    await store.SetDeliveryResultAsync(repository.FullName, id, "published", receipt, null, CancellationToken.None);
+                }
+            }
+        }
+        catch (GitHubCliException ex)
+        {
+            var status = delivery.Status == "unknown" || (claimed && ex.MayHavePosted) ? "unknown" : "failed";
+            await store.SetDeliveryResultAsync(repository.FullName, id, status, null, ex.Message, CancellationToken.None,
+                claimed ? "unknown" : delivery.Status);
+        }
+        catch (OperationCanceledException)
+        {
+            // A cancelled POST may still have reached GitHub; its durable reservation stays unknown.
+            if (!claimed) throw;
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Warning(ex, "[PrReviews] GitHub delivery failed for review {ReviewId}", id);
+            await store.SetDeliveryResultAsync(repository.FullName, id,
+                claimed || delivery.Status == "unknown" ? "unknown" : "failed", null,
+                "GitHub delivery was not confirmed. Check authentication and repository permission, then retry to check delivery.",
+                CancellationToken.None, claimed ? "unknown" : delivery.Status);
+        }
+        return (await store.GetDeliveriesAsync(repository.FullName, number, CancellationToken.None)).Single(d => d.ReviewId == id);
     }
 
     /// <summary>Edits feedback, verdict, blocking or head SHA on any review, including a completed one.</summary>

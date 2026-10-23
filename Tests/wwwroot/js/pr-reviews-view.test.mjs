@@ -4,11 +4,24 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
     summarizePullRequests, retiredBlockerNote, isLive, trackedRow, openRow, nextUpCard, pendingReviewForm,
-    reviewCard, detailAlerts, detailHeader, pullRequestLink, repositoryLink, shortSha, legacyConflictPanel
+    reviewCard, detailAlerts, detailHeader, pullRequestLink, repositoryLink, shortSha, legacyConflictPanel, deliveryStatus
 } from '../../../VibeRails/wwwroot/js/modules/pr-reviews-view.js';
 
 const pr = (number, status, gitHubState = 'open', extra = {}) => ({
     number, status, gitHubState, title: `PR ${number}`, author: 'octocat', summary: '', completedCount: 1, ...extra
+});
+
+test('GitHub delivery is separate from the local result and only confirmed receipts say published', () => {
+    const d = { status: 'unknown', repository: 'octo/widgets', prNumber: 7, headSha: 'abc1234', event: 'REQUEST_CHANGES', error: '<script>error</script>' };
+    assert.match(deliveryStatus({ id: 4, delivery: d }), /Check GitHub receipt/);
+    assert.match(deliveryStatus({ id: 4, delivery: d }), /&lt;script&gt;/);
+    assert.doesNotMatch(deliveryStatus({ id: 4, delivery: d }), />Published/);
+    const posted = deliveryStatus({ id: 4, delivery: { ...d, status: 'published', gitHubId: 42, login: 'reviewer' } });
+    assert.match(posted, /https:\/\/github.com\/octo\/widgets\/pull\/7#pullrequestreview-42/);
+    assert.match(posted, /Published REQUEST_CHANGES/);
+    assert.doesNotMatch(posted, /data-pr-publish/);
+    assert.match(deliveryStatus({ id: 4 }), /local history only/);
+    assert.match(deliveryStatus({ id: 4, delivery: { ...d, status: 'published' } }), /unconfirmed receipt/);
 });
 
 test('legacy conflicts show deleted copies, drafts and escaped history with explicit choices', () => {

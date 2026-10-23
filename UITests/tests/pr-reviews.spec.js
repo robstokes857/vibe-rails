@@ -69,6 +69,47 @@ for (const useLegacy of [false, true]) {
     });
 }
 
+test('dedicated PR Reviewer settings persist and disclose in-progress behavior', async ({ page }) => {
+    await mount(page, reviewFixture());
+    let enabled = false;
+    await page.route('**/api/v1/pr-reviews/settings', route => {
+        if (route.request().method() === 'PUT') enabled = route.request().postDataJSON().enabled;
+        return route.fulfill({ json: { enabled } });
+    });
+    await page.locator('[data-action="navigate-settings"]').click();
+    await page.getByRole('tab', { name: 'PR Reviewer', exact: true }).click();
+    const toggle = page.getByRole('switch', { name: 'Enable PR Reviewer and GitHub publishing' });
+    await expect(toggle).toBeEnabled();
+    await expect(toggle).not.toBeChecked();
+    await expect(page.getByText(/A run already in progress can finish/)).toBeVisible();
+    await toggle.check();
+    await expect(page.locator('[data-pr-reviewer-status]')).toHaveText(/Saved:.*on/);
+    await page.reload();
+    await page.locator('[data-action="navigate-settings"]').click();
+    await page.getByRole('tab', { name: 'PR Reviewer', exact: true }).click();
+    await expect(toggle).toBeChecked();
+    await toggle.uncheck();
+    await expect(page.locator('[data-pr-reviewer-status]')).toHaveText(/Saved:.*off/);
+    expect(enabled).toBe(false);
+});
+
+test('delivery errors stay distinct from local completion and retry checks show confirmed receipts', async ({ page }) => {
+    const detail = reviewFixture();
+    detail.reviews = [detail.reviews[1]];
+    detail.pullRequest.status = 'blocker';
+    detail.deliveries = [{ reviewId: 9, repository: 'octo/widgets', prNumber: 7, headSha: 'abc1234', event: 'REQUEST_CHANGES',
+        status: 'unknown', error: 'GitHub delivery is unconfirmed.' }];
+    await mount(page, detail);
+    await expect(page.getByText('GitHub delivery is unconfirmed.')).toBeVisible();
+    await page.route('**/api/v1/pr-reviews/7/reviews/9/publish', route => {
+        detail.deliveries[0] = { ...detail.deliveries[0], status: 'published', gitHubId: 42, login: 'reviewer', error: null };
+        return route.fulfill({ json: detail.deliveries[0] });
+    });
+    await page.getByRole('button', { name: 'Check GitHub receipt' }).click();
+    await expect(page.getByRole('link', { name: 'Published REQUEST_CHANGES' })).toHaveAttribute('href', 'https://github.com/octo/widgets/pull/7#pullrequestreview-42');
+    await expect(page.getByRole('button', { name: 'Check GitHub receipt' })).toHaveCount(0);
+});
+
 test('pending feedback survives editing and cancelling other forms', async ({ page }) => {
     await mount(page, reviewFixture());
     await page.locator('#pr-feedback').fill('Unsaved finding');

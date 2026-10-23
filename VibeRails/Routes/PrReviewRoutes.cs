@@ -8,7 +8,7 @@ namespace VibeRails.Routes;
 /// <summary>
 /// Lead-review records for the current project's GitHub pull requests. Root dashboard only. The
 /// project (and so the repository) is derived from the dashboard root, never from a request.
-/// GitHub is only ever read, through the user's own <c>gh</c>.
+/// GitHub reviews use the user's own authenticated <c>gh</c>.
 /// </summary>
 public static class PrReviewRoutes
 {
@@ -20,6 +20,13 @@ public static class PrReviewRoutes
             context.HttpContext.Response.Headers.CacheControl = "no-store";
             return next(context);
         });
+
+        routes.MapGet("/settings", ([FromServices] PrReviewService service, CancellationToken ct) =>
+            RunAsync(async () => Results.Ok(await service.GetSettingsAsync(ct))));
+        routes.MapPut("/settings", ([FromServices] PrReviewService service, VibeRails.DB.PrReviewerSettings request, CancellationToken ct) =>
+            RunAsync(async () => Results.Ok(await service.SetSettingsAsync(request.Enabled, ct))));
+        routes.MapPost("/{number:int}/reviews/{id:long}/publish", ([FromServices] PrReviewService service, int number, long id, CancellationToken ct) =>
+            RunAsync(async () => Results.Ok(await service.PublishAsync(Project(), number, id, ct))));
 
         routes.MapGet("", ([FromServices] PrReviewService service, CancellationToken ct) =>
             RunAsync(async () => Results.Ok(await service.ListAsync(Project(), ct))))

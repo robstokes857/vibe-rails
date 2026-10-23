@@ -24,7 +24,9 @@ public sealed class PrReviewToolTests : IDisposable
             .ReturnsAsync(new PrReviewProject(Project, new GitHubRepository("octo", "widgets"), null));
         var projects = new Mock<IBoardProjectResolver>();
         projects.Setup(p => p.ResolveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(Project);
-        var service = new PrReviewService(new PrReviewStore($"Data Source={_dbPath};Mode=ReadWriteCreate"),
+        var store = new PrReviewStore($"Data Source={_dbPath};Mode=ReadWriteCreate");
+        store.SetReviewerSettingsAsync(true).GetAwaiter().GetResult();
+        var service = new PrReviewService(store,
             _github.Object, repositories.Object);
         _tool = new PrReviewTool(service, projects.Object);
     }
@@ -49,6 +51,27 @@ public sealed class PrReviewToolTests : IDisposable
         // The verdict's default replaces the draft's flag when the completion does not say.
         Assert.False(Parse(completed).GetProperty("review").GetProperty("blocking").GetBoolean());
         Assert.Equal("complete", Parse(detail).GetProperty("pullRequest").GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task Completion_and_retry_report_confirmed_github_delivery_separately()
+    {
+        var repo = new GitHubRepository("octo", "widgets");
+        var sha = new string('a', 40);
+        _github.Setup(g => g.GetViewerAsync(Project, It.IsAny<CancellationToken>())).ReturnsAsync("reviewer");
+        _github.Setup(g => g.GetAsync(repo, Project, 7, It.IsAny<CancellationToken>())).ReturnsAsync(
+            new VibeRails.DTOs.GitHubPullRequest(7, "Widgets", "author", DateTime.UtcNow, null, false, sha, repo.PullRequestUrl(7)));
+        _github.Setup(g => g.PublishReviewAsync(repo, Project, It.IsAny<PrReviewDelivery>(), It.IsAny<CancellationToken>())).ReturnsAsync(42);
+        var start = Parse(await _tool.StartPrReview(7, "Widgets", "author", "2026-08-01", sha, cancellationToken: _ct));
+        var id = start.GetProperty("review").GetProperty("id").GetInt64();
+        var completed = Parse(await _tool.CompletePrReview(7, "Blocker", "request_changes", cancellationToken: _ct));
+        Assert.Equal("completed", completed.GetProperty("review").GetProperty("status").GetString());
+        Assert.Equal("published", completed.GetProperty("delivery").GetProperty("status").GetString());
+        Assert.Equal("REQUEST_CHANGES", completed.GetProperty("delivery").GetProperty("event").GetString());
+        var retry = Parse(await _tool.RetryPrReviewPublish(7, id, _ct));
+        Assert.Equal(42, retry.GetProperty("gitHubId").GetInt64());
+        _github.Verify(g => g.PublishReviewAsync(repo, Project, It.IsAny<PrReviewDelivery>(), It.IsAny<CancellationToken>()), Times.Once);
+        Assert.StartsWith("FAIL: No delivery exists", await _tool.RetryPrReviewPublish(8, id, _ct));
     }
 
     [Fact]

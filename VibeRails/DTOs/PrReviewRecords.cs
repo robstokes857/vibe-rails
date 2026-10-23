@@ -42,10 +42,16 @@ namespace VibeRails.DTOs
         string Repository,
         string Url,
         PrReviewPullRequest PullRequest,
-        List<PrReview> Reviews);
+        List<PrReview> Reviews)
+    {
+        public List<PrReviewDelivery> Deliveries { get; init; } = [];
+    }
 
     /// <summary>A write's result. Created is true when a PR (upsert) or a review (start) was new.</summary>
-    public record PrReviewWriteResponse(PrReviewPullRequest PullRequest, PrReview? Review, bool Created);
+    public record PrReviewWriteResponse(PrReviewPullRequest PullRequest, PrReview? Review, bool Created)
+    {
+        public PrReviewDelivery? Delivery { get; init; }
+    }
 
     /// <summary>What a delete removed: a whole PR (ReviewId null) or one review on that PR.</summary>
     public record PrReviewDeleteResponse(int Number, long? ReviewId);

@@ -2163,6 +2163,8 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(PythonScriptSettingsRequest))]
     // PR reviews (PrReviewRecords.cs); the store's records are the wire shape for PRs and reviews.
     [JsonSerializable(typeof(PrReviewRequest))]
+    [JsonSerializable(typeof(VibeRails.DB.PrReviewerSettings))]
+    [JsonSerializable(typeof(VibeRails.DB.PrReviewDelivery))]
     [JsonSerializable(typeof(PrReviewResolveLegacyRequest))]
     [JsonSerializable(typeof(PrReviewListResponse))]
     [JsonSerializable(typeof(PrReviewDetailResponse))]

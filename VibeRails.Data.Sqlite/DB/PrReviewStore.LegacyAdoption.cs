@@ -225,7 +225,8 @@ public sealed partial class PrReviewStore
                 // allocate a new id and the permanent map routes subsequent legacy edits.
                 using var occupied = Command(db, tx, """
                     SELECT 1 FROM PrReviews WHERE Id=$id
-                    UNION ALL SELECT 1 FROM PrReviewLegacyIds WHERE ReviewId=$id;
+                    UNION ALL SELECT 1 FROM PrReviewLegacyIds WHERE ReviewId=$id
+                    UNION ALL SELECT 1 FROM PrReviewDeliveries WHERE ReviewId=$id;
                     """, ("$id", legacyId));
                 if (occupied.ExecuteScalar() is not null) row[0] = DBNull.Value;
             }

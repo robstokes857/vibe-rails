@@ -51,6 +51,7 @@ public class McpServerHttpTests : IAsyncLifetime
         "start_pr_review",
         "save_pr_review_draft",
         "complete_pr_review",
+        "retry_pr_review_publish",
     };
 
     public async ValueTask InitializeAsync()

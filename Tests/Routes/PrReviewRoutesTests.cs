@@ -39,8 +39,10 @@ public sealed class PrReviewRoutesTests : IAsyncLifetime
         // The route derives the project from the dashboard root; the resolver stands in for git.
         _repositories.Setup(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string path, CancellationToken _) => new PrReviewProject(path, Repo, null));
-        builder.Services.AddSingleton<IPrReviewStore>(new PrReviewStore($"Data Source={_dbPath};Mode=ReadWriteCreate",
-            legacyConnectionString: $"Data Source={_dbPath}.legacy;Mode=ReadWriteCreate"));
+        var store = new PrReviewStore($"Data Source={_dbPath};Mode=ReadWriteCreate",
+            legacyConnectionString: $"Data Source={_dbPath}.legacy;Mode=ReadWriteCreate");
+        await store.SetReviewerSettingsAsync(true, Ct);
+        builder.Services.AddSingleton<IPrReviewStore>(store);
         builder.Services.AddSingleton(_github.Object);
         builder.Services.AddSingleton(_repositories.Object);
         builder.Services.AddScoped<PrReviewService>();
@@ -79,6 +81,34 @@ public sealed class PrReviewRoutesTests : IAsyncLifetime
         _repositories.Verify(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [Theory]
+    [InlineData("GET", "/api/v1/pr-reviews/settings", null)]
+    [InlineData("PUT", "/api/v1/pr-reviews/settings", "{\"enabled\":false}")]
+    [InlineData("POST", "/api/v1/pr-reviews/7/reviews/1/publish", null)]
+    public async Task Reviewer_settings_and_publish_require_both_credentials(string method, string path, string? json)
+    {
+        foreach (var (session, tab) in new[] { (false, false), (true, false), (false, true) })
+        {
+            using var response = await Send(new HttpMethod(method), path, json, session: session, tab: tab);
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+    }
+
+    [Fact]
+    public async Task Settings_round_trip_and_disable_new_review_work()
+    {
+        using var save = await Send(HttpMethod.Put, "/api/v1/pr-reviews/settings", "{\"enabled\":false}");
+        Assert.Equal(HttpStatusCode.OK, save.StatusCode);
+        using var read = await Send(HttpMethod.Get, "/api/v1/pr-reviews/settings");
+        using var json = JsonDocument.Parse(await read.Content.ReadAsStringAsync(Ct));
+        Assert.False(json.RootElement.GetProperty("enabled").GetBoolean());
+        Assert.Contains("no-store", read.Headers.CacheControl!.ToString());
+        using var start = await Send(HttpMethod.Post, "/api/v1/pr-reviews/7/reviews/start", "{}");
+        Assert.Equal(HttpStatusCode.Conflict, start.StatusCode);
+        using var queue = await Send(HttpMethod.Get, "/api/v1/pr-reviews/queue");
+        Assert.Equal(HttpStatusCode.Conflict, queue.StatusCode);
+    }
+
     [Fact]
     public async Task A_review_round_trips_through_the_api()
     {
@@ -100,6 +130,9 @@ public sealed class PrReviewRoutesTests : IAsyncLifetime
         Assert.Equal("blocker", detailJson.GetProperty("pullRequest").GetProperty("status").GetString());
         Assert.Equal("https://github.com/octo/widgets/pull/7", detailJson.GetProperty("url").GetString());
         Assert.True(detailJson.GetProperty("reviews")[0].GetProperty("blocking").GetBoolean());
+        Assert.Equal("failed", detailJson.GetProperty("deliveries")[0].GetProperty("status").GetString());
+        Assert.Equal("REQUEST_CHANGES", detailJson.GetProperty("deliveries")[0].GetProperty("event").GetString());
+        Assert.Equal(JsonValueKind.Null, detailJson.GetProperty("deliveries")[0].GetProperty("gitHubId").ValueKind);
         var listJson = await Json(list);
         Assert.Equal("octo/widgets", listJson.GetProperty("repository").GetString());
         Assert.Equal(7, listJson.GetProperty("pullRequests")[0].GetProperty("number").GetInt32());

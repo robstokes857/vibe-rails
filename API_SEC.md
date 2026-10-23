@@ -359,6 +359,8 @@ middleware serves their paths rather than registering individual API endpoints.
 | POST | `/api/v1/pr-reviews` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
 | POST | `/api/v1/pr-reviews/github/sync` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
 | GET | `/api/v1/pr-reviews/queue` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
+| GET | `/api/v1/pr-reviews/settings` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
+| PUT | `/api/v1/pr-reviews/settings` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
 | DELETE | `/api/v1/pr-reviews/reviews/{id}` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
 | PUT | `/api/v1/pr-reviews/reviews/{id}` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
 | DELETE | `/api/v1/pr-reviews/{number}` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
@@ -367,6 +369,7 @@ middleware serves their paths rather than registering individual API endpoints.
 | POST | `/api/v1/pr-reviews/{number}/reviews/complete` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
 | POST | `/api/v1/pr-reviews/{number}/reviews/draft` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
 | POST | `/api/v1/pr-reviews/{number}/reviews/start` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
+| POST | `/api/v1/pr-reviews/{number}/reviews/{id}/publish` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
 | POST | `/api/v1/pr-reviews/{number}/legacy-conflict/resolve` | [PrReviewRoutes.cs](VibeRails/Routes/PrReviewRoutes.cs) |
 | GET | `/api/v1/projects/name` | [ProjectRoutes.cs](VibeRails/Routes/ProjectRoutes.cs) |
 | PUT | `/api/v1/projects/name` | [ProjectRoutes.cs](VibeRails/Routes/ProjectRoutes.cs) |
@@ -544,10 +547,12 @@ context is local process identity, not a per-card server ACL. `HostShellTools` a
 `WebResearchTools` remain unregistered on both transports; Python MCP tools/signing help and
 their exposure routes were removed. Do not restore these capabilities incidentally.
 
-The five PR review tools (`get_pr_review_queue`, `get_pr_review`, `start_pr_review`,
-`save_pr_review_draft`, `complete_pr_review`) are on both transports and outside the Board
+The six PR review tools (`get_pr_review_queue`, `get_pr_review`, `start_pr_review`,
+`save_pr_review_draft`, `complete_pr_review`, `retry_pr_review_publish`) are on both transports and outside the Board
 auto-grants. They resolve the project through `IBoardProjectResolver`, take no repository or
-path argument, write only local `pr_reviews.db` review records and run `gh` read-only, as above.
+path argument, and persist results/settings/deliveries in `pr_reviews.db`. Completion/retry can
+publish commit-pinned reviews through authenticated `gh` when the reviewer switch is on; see
+the outbound contract below. No caller-supplied repository or credential reaches publishing.
 Legacy adoption reads `state.db` through a separate read-only connection. List responses include
 project-scoped conflicting histories, escaped as untrusted text in Reviews. Resolution requires
 both credentials, the current repository, and matching source/target content-version tokens;
@@ -976,15 +981,15 @@ The complete outbound endpoint list (api-version 7.1, comments 7.1-preview.4):
 [AzureDevOpsClient](VibeRails/Services/AzureDevOps/AzureDevOpsClient.cs) and
 [AdoBoardLink](VibeRails/Services/AzureDevOps/AdoBoardLink.cs).
 
-### GitHub pull request reads (PR Reviews)
+### GitHub pull requests and review publishing (PR Reviews)
 
 The [PR review tracker](VibeRails/Services/PrReviews/AGENTS.md) reads GitHub through the user's
-own authenticated `gh` CLI. VibeRails holds no GitHub credential, stores no token and never writes
-to GitHub: the only calls are `gh pr list` (open PRs, at most 100), `gh pr view` (one PR's metadata
+own authenticated `gh` CLI. VibeRails holds no GitHub credential and stores no token.
+Read calls are `gh pr list` (open PRs, at most 100), `gh pr view` (one PR's metadata
 and current head when starting from its detail page), and a `gh api graphql` query for tracked
 PRs' open/merged/closed state. All run through `ICliWrapper` as argv with an explicit
 `-R owner/name` or GraphQL variables, `GH_HOST=github.com` overriding inherited host selection,
-stdin closed, prompts and update notices disabled and a
+stdin closed for reads, prompts and update notices disabled and a
 20-second timeout. Failures use fixed wording chosen by how `gh` ended (not started, timed out,
 not signed in, or its exit code); `gh`'s stderr, which can carry GitHub's error prose, is never
 reflected to the page or MCP. The repository is parsed from the dashboard project's
@@ -993,9 +998,36 @@ remote URL itself (which can embed a credential) is never echoed. PR links are b
 parsed repository, never from CLI output. Titles, authors and feedback are untrusted text: the
 page escapes them and the MCP tools return them as JSON data.
 
-The `/api/v1/pr-reviews/**` routes are root-only and project-scoped from the dashboard root.
+The `/api/v1/pr-reviews/**` routes are root-only, require both credentials and return no-store.
+Review operations are project-scoped from the dashboard root.
 Review ids are global, so reads and writes by id also match the current repository and answer
 404 for another project's review. Records live in `pr_reviews.db` (`pr-reviews/1`, additive).
+
+Settings > PR Reviewer explicitly enables reviewer work and outbound publishing together; off
+by default. GET/PUT `/settings` under this group read/write the machine-wide switch through
+`IPrReviewStore` (`pr-review-delivery/1`, additive). Off blocks queue/start and new POST
+reservations, preserving history and allowing in-progress local completion. A reserved POST may
+still finish; this is disclosed on the page. Enabling does not backfill or start a background host.
+
+Completion and `POST /{number}/reviews/{id}/publish` can publish through `gh api --hostname
+github.com`: `GET user` verifies the authenticated identity; `GET
+repos/{owner}/{name}/pulls/{number}/reviews?per_page=100&page=N` reconciles receipts (20-page cap);
+`POST repos/{owner}/{name}/pulls/{number}/reviews` sends JSON on stdin with the saved full
+40-character `commit_id`, feedback and a stable marker, and `event=REQUEST_CHANGES` for blockers
+or request_changes verdicts, otherwise `COMMENT`. Before dispatch, `gh pr view` rechecks the
+same PR's head; a changed head fails without substituting commits. GitHub decides write
+permission, self-review restrictions and branch-protection enforcement. Command logs never
+contain feedback or credentials. Each call has the existing 20-second deadline; errors use
+fixed local wording, never remote error prose. No listener or auth exemption is added.
+
+The immutable snapshot commits with local completion. SQLite atomically checks enablement and
+reserves each delivery across processes before POST, persisting unknown first. Confirm only a
+matching GitHub id, user, commit, body and submitted event. An uncertain POST is never resent:
+retry only reconciles the original account's exact receipt, and absence remains unknown.
+Pre-dispatch errors and confirmed 4xx refusals can retry safely. Delivery status/errors remain
+distinct from local verdicts; local edits/deletions never edit/dismiss the remote review, and
+receipts survive local deletion. Publishing/retry MCP tools use normal explicit tool grants on
+both transports, outside Board auto-grants; callers supply no repository, host or credential.
 
 ### Complete backups
 

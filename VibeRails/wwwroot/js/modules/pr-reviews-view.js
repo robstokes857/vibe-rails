@@ -332,9 +332,24 @@ export function reviewCard(review, { isLatest = false, editing = false } = {}) {
                 <button type="button" class="btn btn-sm btn-outline-danger" data-pr-delete-review="${esc(review.id)}" aria-label="Delete this review">Delete</button>
             </div>
         </div>
+        ${deliveryStatus(review)}
         <pre class="pr-feedback${long ? ' is-collapsed' : ''}" data-pr-feedback>${esc(review.feedback)}</pre>
         ${long ? '<button type="button" class="btn btn-sm btn-link px-0" data-pr-expand>Show full review</button>' : ''}
     </article>`;
+}
+
+/** Local review edits never silently modify an already captured GitHub review. */
+export function deliveryStatus(review) {
+    const d = review.delivery;
+    if (!d) return '<p class="pr-muted">GitHub: local history only; no delivery queued.</p>';
+    const published = d.status === 'published' && Number.isSafeInteger(d.gitHubId) && d.gitHubId > 0;
+    const url = `https://github.com/${encodeURIComponent(d.repository?.split('/')[0] || '')}/${encodeURIComponent(d.repository?.split('/')[1] || '')}/pull/${Number(d.prNumber)}#pullrequestreview-${Number(d.gitHubId)}`;
+    return `<div class="pr-muted" role="status">GitHub: ${published
+        ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" data-pr-external>Published ${esc(d.event)}</a> as ${esc(d.login)}`
+        : esc(d.status === 'published' ? 'unconfirmed receipt' : d.status)} · commit <code>${esc(shortSha(d.headSha))}</code>
+        ${d.error ? `<p>${esc(d.error)}</p>` : ''}
+        ${!published ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-pr-publish="${esc(review.id)}">${d.status === 'unknown' ? 'Check GitHub receipt' : 'Retry GitHub publishing'}</button>` : ''}
+        <p>Delivery uses the completed review snapshot. Later local edits do not change GitHub. Use a new pass for new findings.</p></div>`;
 }
 
 /** The detail page's summary card: what the PR is, where it stands, and what can be done to it. */
@@ -376,7 +391,8 @@ export function detailAlerts(pr) {
     if (pr.status === 'blocker' && isLive(pr)) {
         return `<div class="pr-alert" data-tone="danger" role="status"><strong>Blocked. Do not merge.</strong>
             The newest completed review found something that must be fixed first. Clearing the blocker flag on that review,
-            or completing a later review with nothing blocking, moves this PR back to Complete.</div>`;
+            or completing a later review with nothing blocking, moves this PR back to Complete locally.
+            Local changes do not dismiss a GitHub request-changes review. GitHub branch protection determines merge enforcement.</div>`;
     }
     if (!isLive(pr)) {
         const meta = GITHUB_STATE[pr.gitHubState] || GITHUB_STATE.unknown;

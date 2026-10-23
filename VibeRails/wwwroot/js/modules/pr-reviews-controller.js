@@ -353,7 +353,8 @@ export class PrReviewsController {
             + reviewArea
             + `<section class="pr-section">${sectionHeading('Newest first', 'Review history', completed.length)}
                 ${completed.length
-                    ? completed.map((review, index) => reviewCard({ ...review, ...this.state.reviewDrafts[review.id] },
+                    ? completed.map((review, index) => reviewCard({ ...review, ...this.state.reviewDrafts[review.id],
+                        delivery: detail.deliveries?.find(d => d.reviewId === review.id) },
                         { isLatest: index === 0, editing: review.id === editingReviewId })).join('')
                     : emptyState('No completed reviews yet.')}
             </section>`;
@@ -404,6 +405,9 @@ export class PrReviewsController {
             this.app.navigate(VIEW, { number: Number(target.dataset.prOpen) });
         } else if (target.matches('[data-pr-start]')) {
             await this.startFromQueue(Number(target.dataset.prStart));
+        } else if (target.matches('[data-pr-publish]')) {
+            await this.mutate(() => this.request(`/${this.state.number}/reviews/${target.dataset.prPublish}/publish`, 'POST'),
+                'GitHub delivery checked. See the delivery status for the confirmed outcome.');
         } else if (target.matches('[data-pr-refresh]')) {
             await this.refreshGitHub(this.generation);
         } else if (target.matches('[data-pr-lifecycle]')) {
