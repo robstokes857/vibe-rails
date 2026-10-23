@@ -110,10 +110,38 @@ public sealed class BackupFilesCredentialTests : IDisposable
         Assert.Equal("TOML redaction work limit exceeded.", captureError.Message);
     }
 
-    [Fact]
-    public async Task OverBudgetTomlIsOmittedWithAnExplicitIssueAndSourcePreserved()
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    public void BlankLinePaddingWithinBudgetKeepsCredentialRedaction(string newline)
     {
-        var text = "model = \"keep\"\nvalue = " + NestedTomlValue(2 * 1024 * 1024, inlineTables: false, multiline: false);
+        var text = "value = " + BlankLinePaddedTomlValue(240 * 1024, newline);
+        var (redacted, error) = RedactWithinResourceBounds(text, 192);
+        Assert.Null(error);
+        Assert.Equal("value = " + new string('[', 64) + "\"--api-key\", \"[redacted]\"" + new string(']', 64) + "\n", redacted);
+    }
+
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    public void BlankLinePaddingAtNestingLimitCannotBypassWorkBudget(string newline)
+    {
+        // Separators are copied by the recursive renderer too, even when every source line is empty.
+        var text = "value = " + BlankLinePaddedTomlValue(2 * 1024 * 1024, newline);
+        var (_, error) = RedactWithinResourceBounds(text, 64);
+        var captureError = Assert.IsAssignableFrom<System.Text.Json.JsonException>(error);
+        Assert.Equal("TOML redaction work limit exceeded.", captureError.Message);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    public async Task OverBudgetTomlIsOmittedWithAnExplicitIssueAndSourcePreserved(string? newline)
+    {
+        var text = "model = \"keep\"\nvalue = " + (newline is null
+            ? NestedTomlValue(2 * 1024 * 1024, inlineTables: false, multiline: false)
+            : BlankLinePaddedTomlValue(2 * 1024 * 1024, newline));
         var path = Path.Combine(root, "config.toml");
         await File.WriteAllTextAsync(path, text, Ct);
         var kept = Path.Combine(root, "other.toml");
@@ -153,6 +181,10 @@ public sealed class BackupFilesCredentialTests : IDisposable
             ? string.Concat(Enumerable.Repeat("{ next = ", 63)) + "{" + whitespace + "api_key = \"private-value\", model = \"keep\" }" + string.Concat(Enumerable.Repeat(" }", 63))
             : new string('[', 64) + whitespace + "\"--api-key\", \"private-value\"" + new string(']', 64);
     }
+
+    private static string BlankLinePaddedTomlValue(int lines, string newline) => new string('[', 64)
+        + new string('\n', lines).Replace("\n", newline, StringComparison.Ordinal)
+        + "\"--api-key\", \"private-value\"" + new string(']', 64);
 
     [Theory]
     // Every credential store observed in real CLI homes: name-based, so the family is caught, not one spelling.

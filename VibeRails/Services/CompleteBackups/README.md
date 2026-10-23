@@ -44,8 +44,9 @@ bounded read if the file grows. Oversized files are omitted with an incomplete-c
 they are never copied without redaction. TOML multiline state is scanned once per line and
 nesting is limited to 64 levels before recursive redaction. A file-wide redaction work budget
 allows 16 Mi character visits, counting each value character once plus once per enclosing
-array or inline table (including whitespace, comments and string bodies). The incremental
-scanner checks this before rendering each value, bounding recursive substring/scan amplification
+array or inline table (including whitespace, comments, string bodies and normalized continuation
+newlines, even for empty lines). The incremental scanner checks this before rendering each value,
+bounding recursive substring/scan amplification
 even for valid input below the byte and nesting limits. An over-budget file is omitted entirely
 with an explicit `TOML redaction work limit exceeded; configuration omitted.` coverage issue;
 the source and existing archives remain untouched.

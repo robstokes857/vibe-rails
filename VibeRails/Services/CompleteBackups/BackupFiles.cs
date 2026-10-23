@@ -432,7 +432,7 @@ public sealed class BackupFiles(IServiceScopeFactory scopes)
             while (state.IsOpen && i + 1 < lines.Length)
             {
                 var next = lines[++i];
-                state.Read(next, ref remainingWork);
+                state.Read(next, ref remainingWork, continuation: true);
                 value.Append('\n').Append(next);
             }
             // Anything that is not a key/value pair is dropped rather than copied unexamined.
@@ -663,8 +663,15 @@ public sealed class BackupFiles(IServiceScopeFactory scopes)
 
         // Each source line is visited once, including multi-line strings and arrays. The budget
         // belongs to the whole file, and is checked before any recursive rendering of this value.
-        public void Read(ReadOnlySpan<char> line, ref int remainingWork)
+        public void Read(ReadOnlySpan<char> line, ref int remainingWork, bool continuation = false)
         {
+            // Split removed the source separator; the caller will insert a normalized '\n'.
+            // Charge it before reading the next line, while its containing depth is still known.
+            if (continuation)
+            {
+                remainingWork -= Math.Max(depth, 0) + 1;
+                if (remainingWork < 0) throw new TomlWorkLimitException();
+            }
             for (var i = 0; i < line.Length; i++)
             {
                 var start = i;
