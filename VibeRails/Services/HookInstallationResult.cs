@@ -29,6 +29,12 @@ namespace VibeRails.Services
         ChmodExecutionFailed,
         ScriptResourceNotFound,
         PartialInstallationFailure,
-        UnknownError
+        UnknownError,
+
+        /// <summary>
+        /// <c>core.hooksPath</c> resolves outside the repository's git directory and the caller
+        /// did not confirm that directory. <see cref="HookInstallationResult.Details"/> holds it.
+        /// </summary>
+        HooksDirectoryOutsideGitDirectory
     }
 }

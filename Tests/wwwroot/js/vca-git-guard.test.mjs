@@ -994,3 +994,52 @@ test('button progress preserves the resting disabled state produced by a status 
     assert.equal(spinner.hidden, true);
     assert.equal(icon.hidden, false);
 });
+
+function hookInstallController(responses) {
+    const calls = [];
+    const toasts = [];
+    const controller = new RuleController({
+        apiCall: async (url, method) => {
+            calls.push({ url, method });
+            return responses.shift();
+        },
+        showToast: (title, message, tone) => toasts.push({ title, message, tone }),
+        showError: message => toasts.push({ title: 'error', message, tone: 'error' })
+    });
+    controller.query = () => null;
+    controller.setButtonBusy = () => {};
+    controller.setHookActionButtonsDisabled = () => {};
+    controller.refreshHookStatus = async () => {};
+    return { controller, calls, toasts };
+}
+
+test('installing into a core.hooksPath outside .git retries only for the confirmed directory', async () => {
+    const hooksPath = 'C:\\Users\\rob\\.githooks & co';
+    const { controller, calls, toasts } = hookInstallController([
+        { success: false, requiresConfirmation: true, hooksPath, message: 'outside' },
+        { success: true, message: 'installed' }
+    ]);
+    const confirmed = [];
+    controller.confirmExternalHooksPath = async path => { confirmed.push(path); return true; };
+
+    await controller.installHooks();
+
+    assert.deepEqual(confirmed, [hooksPath]);
+    assert.deepEqual(calls.map(call => call.url), [
+        '/api/v1/hooks/install',
+        `/api/v1/hooks/install?confirmHooksPath=${encodeURIComponent(hooksPath)}`
+    ]);
+    assert.equal(toasts.at(-1).tone, 'success');
+});
+
+test('declining the outside-.git hooks directory installs nothing', async () => {
+    const { controller, calls, toasts } = hookInstallController([
+        { success: false, requiresConfirmation: true, hooksPath: '/home/rob/.githooks', message: 'outside' }
+    ]);
+    controller.confirmExternalHooksPath = async () => false;
+
+    await controller.installHooks();
+
+    assert.equal(calls.length, 1);
+    assert.equal(toasts.at(-1).title, 'Hook Install Cancelled');
+});

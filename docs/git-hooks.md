@@ -44,6 +44,7 @@ VibeRails includes a sophisticated git hook installation system that automatical
 - **App-versioned health checks** - Installed hooks carry the running VibeRails version (for example `1.9.8`); startup detects missing, disabled, stale/older-version, partial, missing-launcher, or mismatched-launcher hooks and replaces them
 - **Install-tracking launcher** - Hooks record the per-user install (`~/.vibe_rails/vb[.exe]`) whenever it exists, through `InstalledVibeRails.ExecutableForCallbacks`, so a commit from a plain terminal keeps working after an extension update removes the directory the backend ran from; the hook simply runs whatever is installed. Without an install the running binary is recorded, and a framework-dependent build records its dotnet host and entry dll (VB-K5SCD-210)
 - **Git-aware path resolution** - Honors linked worktrees and `core.hooksPath`
+- **Hooks directory ownership** - Writes without asking only inside the repository's common git directory (`git rev-parse --git-common-dir`). A `core.hooksPath` anywhere else, such as a global hooks folder shared by every repository or a checked-in `.githooks`, is never written on startup; the Rules page asks the user to confirm that exact directory, and `POST /api/v1/hooks/install?confirmHooksPath=<dir>` installs only while Git still reports it (VIBE-194)
 - **Safe hook chaining** - Runs before existing shell hooks and preserves non-shell hooks as executable sidecars
 - **Safe uninstallation** - Removes only VibeRails sections, keeps other hooks intact
 
@@ -52,6 +53,9 @@ VibeRails includes a sophisticated git hook installation system that automatical
 ```csharp
 // Install both pre-commit and commit-msg hooks
 Task<HookInstallationResult> InstallHooksAsync(string repoPath, CancellationToken ct);
+
+// Same, also writing into a core.hooksPath outside the git directory when it equals confirmedHooksPath
+Task<HookInstallationResult> InstallHooksAsync(string repoPath, string? confirmedHooksPath, CancellationToken ct);
 
 // Uninstall both hooks
 Task<HookInstallationResult> UninstallHooksAsync(string repoPath, CancellationToken ct);

@@ -89,6 +89,17 @@ public static partial class ShellArgSanitizer
         return ParseArguments(customArgs);
     }
 
+    /// <summary>
+    /// A control character inside a value (a quoted TAB, an ESC) reaches the shell's interactive
+    /// line editor when the launch command is typed into a terminal, where it acts as a key
+    /// (completion, cancel) instead of text. Unquoted whitespace is a separator and never gets here.
+    /// </summary>
+    private static char RequirePrintable(char ch) => char.IsControl(ch)
+        ? throw new ArgumentException(
+            $"CustomArgs contains control character U+{(int)ch:X4}. "
+            + "Only CLI flags and values are allowed (e.g. \"--permission-mode plan\").")
+        : ch;
+
     private static string[] ParseArguments(string customArgs)
     {
         var args = new List<string>();
@@ -102,7 +113,7 @@ public static partial class ShellArgSanitizer
         {
             if (escaping)
             {
-                current.Append(ch);
+                current.Append(RequirePrintable(ch));
                 escaping = false;
                 hasToken = true;
                 continue;
@@ -122,7 +133,7 @@ public static partial class ShellArgSanitizer
                     continue;
                 }
 
-                current.Append(ch);
+                current.Append(RequirePrintable(ch));
                 hasToken = true;
                 continue;
             }
@@ -146,7 +157,7 @@ public static partial class ShellArgSanitizer
                 continue;
             }
 
-            current.Append(ch);
+            current.Append(RequirePrintable(ch));
             hasToken = true;
         }
 

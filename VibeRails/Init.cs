@@ -267,6 +267,18 @@ namespace VibeRails
                     return;
                 }
 
+                if (status.HooksPathOutsideGitDirectory)
+                {
+                    // A global or checked-in hooks folder is not ours to write on startup. The
+                    // Rules page installs there only after the user confirms that directory.
+                    Log.Information(
+                        "[Hooks] Skipping startup hook installation for {RepoPath}: core.hooksPath "
+                        + "points outside the git directory ({HooksPath})",
+                        repoPath,
+                        status.HooksPath);
+                    return;
+                }
+
                 if (status.NeedsRepair)
                 {
                     Log.Information(

@@ -112,7 +112,10 @@ namespace Pty.Net.Linux
 
         internal static void execvpe(string file, string?[] args, IDictionary<string, string> environment)
         {
-            // Set environment
+            // Set environment. This only adds or overwrites: every variable the forked child
+            // inherited from this process survives, so leaving a key out of `environment` does
+            // not remove it. Unlike the Windows provider, which passes a complete block, this
+            // cannot scrub a secret from the child; doing that needs clearenv() first.
             foreach (var environmentVariable in environment)
             {
                 setenv(environmentVariable.Key, environmentVariable.Value, 1);

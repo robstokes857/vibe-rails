@@ -53,6 +53,36 @@ public static class ProjectRoutes
         "/sbin",
         "/var",
         "/tmp",
+        "/Users",
+    ];
+
+    // `git init` stages the whole directory, so a profile root or one of its personal folders
+    // would sweep keys, documents and app data into a commit. Relative to the user's profile.
+    private static readonly string[] ProfileChildFolders =
+    [
+        "Desktop",
+        "Documents",
+        "Downloads",
+        "Pictures",
+        "Music",
+        "Videos",
+        "Movies",
+        "Public",
+        "OneDrive",
+        "Favorites",
+        "Links",
+        "Saved Games",
+        "AppData",
+        "AppData/Local",
+        "AppData/LocalLow",
+        "AppData/Roaming",
+        "Library",
+        ".config",
+        ".local",
+        ".local/share",
+        ".cache",
+        ".ssh",
+        ".vibe_rails",
     ];
 
     public static void Map(WebApplication app, string launchDirectory)
@@ -93,11 +123,10 @@ public static class ProjectRoutes
         app.MapPost("/api/v1/git/init", async (IFileService fileService, IRepository repository, CancellationToken cancellationToken) =>
         {
             // Sanity check: don't allow git init in dangerous directories
-            var normalizedPath = Path.GetFullPath(launchDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-
-            if (IsDangerousDirectory(normalizedPath))
+            if (IsDangerousDirectory(launchDirectory))
             {
-                return Results.BadRequest(new ErrorResponse("Cannot initialize git in a system directory."));
+                return Results.BadRequest(new ErrorResponse(
+                    "Cannot initialize git in a system directory, a user profile folder, or one of its personal folders."));
             }
 
             // Check if git is installed
@@ -294,31 +323,81 @@ public static class ProjectRoutes
         }).WithName("GetProjectName");
     }
 
-    private static bool IsDangerousDirectory(string normalizedPath)
+    private static bool IsDangerousDirectory(string path) =>
+        IsDangerousDirectory(
+            path,
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            GetKnownUserFolders());
+
+    /// <summary>
+    /// True for a system directory, a user profile root (this user's or a sibling such as
+    /// <c>C:\Users\&lt;name&gt;</c>), or a well-known personal folder inside this user's profile.
+    /// Folders below those, such as <c>~/Documents/my-project</c>, stay allowed.
+    /// </summary>
+    internal static bool IsDangerousDirectory(
+        string path,
+        string? userProfile,
+        IEnumerable<string?> knownUserFolders)
     {
+        var comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        var normalizedPath = NormalizeDirectory(path);
+        bool Matches(string candidate) =>
+            string.Equals(normalizedPath, NormalizeDirectory(candidate), comparison);
+
         if (OperatingSystem.IsWindows())
         {
-            foreach (var dangerous in DangerousWindowsPaths)
-            {
-                var normalizedDangerous = Path.GetFullPath(dangerous).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                if (string.Equals(normalizedPath, normalizedDangerous, StringComparison.OrdinalIgnoreCase))
-                    return true;
-            }
-            // Also block anything with path depth < 2 (e.g. C:\foo has depth 1 segment after drive)
+            if (DangerousWindowsPaths.Any(Matches))
+                return true;
+            // Also block a drive root (one segment, e.g. C:\)
             var parts = normalizedPath.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length < 2)
                 return true;
         }
-        else
+        else if (DangerousUnixPaths.Any(Matches))
         {
-            foreach (var dangerous in DangerousUnixPaths)
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(userProfile))
+        {
+            var profile = NormalizeDirectory(userProfile);
+            if (Matches(profile) || ProfileChildFolders.Any(child => Matches(Path.Combine(profile, child))))
+                return true;
+
+            // Any profile next to this user's (C:\Users\Public, /home/other). Skipped when the
+            // profile sits directly under a filesystem root (root's /root), where the siblings
+            // are ordinary top-level directories such as /srv.
+            var usersRoot = Path.GetDirectoryName(profile);
+            if (usersRoot != null
+                && Path.GetDirectoryName(usersRoot) != null
+                && string.Equals(Path.GetDirectoryName(normalizedPath), usersRoot, comparison))
             {
-                if (string.Equals(normalizedPath, dangerous, StringComparison.Ordinal))
-                    return true;
+                return true;
             }
         }
-        return false;
+
+        return knownUserFolders.Any(folder => !string.IsNullOrWhiteSpace(folder) && Matches(folder));
     }
+
+    private static string NormalizeDirectory(string path) =>
+        Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+
+    /// <summary>Personal folders the OS may have redirected out of the profile (OneDrive backup).</summary>
+    private static IEnumerable<string?> GetKnownUserFolders() =>
+    [
+        Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+        Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+        Environment.GetFolderPath(Environment.SpecialFolder.MyPictures),
+        Environment.GetFolderPath(Environment.SpecialFolder.MyMusic),
+        Environment.GetFolderPath(Environment.SpecialFolder.MyVideos),
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        Environment.GetEnvironmentVariable("OneDrive"),
+        Environment.GetEnvironmentVariable("OneDriveConsumer"),
+        Environment.GetEnvironmentVariable("OneDriveCommercial"),
+    ];
 
     /// <summary>A missing git binary surfaces as a failed start inside <see cref="GitCli"/>, never as a thrown exception.</summary>
     private static async Task<bool> IsGitInstalledAsync(string workingDirectory, CancellationToken cancellationToken)

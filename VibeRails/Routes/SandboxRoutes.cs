@@ -130,19 +130,12 @@ public static class SandboxRoutes
                 {
                     // Linux: try common terminal emulators
                     process = null;
-                    var terminals = new[] { "gnome-terminal", "konsole", "xfce4-terminal", "xterm" };
-                    foreach (var term in terminals)
+                    foreach (var term in LinuxTerminalCommandBuilder.Terminals)
                     {
                         try
                         {
                             process = System.Diagnostics.Process.Start(
-                                new System.Diagnostics.ProcessStartInfo
-                                {
-                                    FileName = term,
-                                    Arguments = term == "gnome-terminal" ? $"--working-directory=\"{sandbox.Path}\"" : "",
-                                    WorkingDirectory = sandbox.Path,
-                                    UseShellExecute = true
-                                });
+                                LinuxTerminalCommandBuilder.BuildOpenDirectoryStartInfo(term, sandbox.Path));
                             break;
                         }
                         catch { /* try next */ }

@@ -603,13 +603,15 @@ echo ""Another hook""
         }
 
         [Fact]
-        public async Task InstallHooksAsync_HonorsConfiguredCoreHooksPath()
+        public async Task InstallHooksAsync_HonorsConfiguredCoreHooksPath_OnceThatDirectoryIsConfirmed()
         {
             await RunGitAsync("init");
             await RunGitAsync("config", "core.hooksPath", ".custom-hooks");
+            var customHooks = Path.Combine(_testRepoPath, ".custom-hooks");
 
             var result = await _service.InstallHooksAsync(
                 _testRepoPath,
+                confirmedHooksPath: customHooks,
                 TestContext.Current.CancellationToken);
             var status = await _service.GetStatusAsync(
                 _testRepoPath,
@@ -617,9 +619,107 @@ echo ""Another hook""
 
             Assert.True(result.Success);
             Assert.True(status.IsInstalled);
+            Assert.True(status.HooksPathOutsideGitDirectory);
             Assert.EndsWith(".custom-hooks", status.HooksPath, StringComparison.OrdinalIgnoreCase);
-            Assert.True(File.Exists(Path.Combine(_testRepoPath, ".custom-hooks", "pre-commit")));
-            Assert.True(File.Exists(Path.Combine(_testRepoPath, ".custom-hooks", "commit-msg")));
+            Assert.True(File.Exists(Path.Combine(customHooks, "pre-commit")));
+            Assert.True(File.Exists(Path.Combine(customHooks, "commit-msg")));
+        }
+
+        [Fact]
+        public async Task InstallHooksAsync_RefusesUnconfirmedHooksPathOutsideGitDirectory_WithoutTouchingIt()
+        {
+            // A global or shared core.hooksPath: every repository using it would run, and lose,
+            // whatever VibeRails writes or moves aside there.
+            var sharedHooks = Path.Combine(Path.GetTempPath(), $"vb_shared_hooks_{Guid.NewGuid()}");
+            Directory.CreateDirectory(sharedHooks);
+            const string sharedHook = "#!/usr/bin/env python3\nprint('shared hook')\n";
+            var sharedPreCommit = Path.Combine(sharedHooks, "pre-commit");
+            await File.WriteAllTextAsync(sharedPreCommit, sharedHook, TestContext.Current.CancellationToken);
+            try
+            {
+                await RunGitAsync("init");
+                await RunGitAsync("config", "core.hooksPath", sharedHooks);
+                var optOut = Path.Combine(_testRepoPath, ".git", ".viberails-git-guard-disabled");
+                await File.WriteAllTextAsync(optOut, "disabled\n", TestContext.Current.CancellationToken);
+
+                var unconfirmed = await _service.InstallHooksAsync(
+                    _testRepoPath,
+                    TestContext.Current.CancellationToken);
+                var singleHook = await _service.InstallPreCommitHookAsync(
+                    _testRepoPath,
+                    TestContext.Current.CancellationToken);
+                var wrongConfirmation = await _service.InstallHooksAsync(
+                    _testRepoPath,
+                    confirmedHooksPath: Path.Combine(_testRepoPath, ".git", "hooks"),
+                    TestContext.Current.CancellationToken);
+                var status = await _service.GetStatusAsync(
+                    _testRepoPath,
+                    TestContext.Current.CancellationToken);
+
+                foreach (var refused in new[] { unconfirmed, singleHook, wrongConfirmation })
+                {
+                    Assert.False(refused.Success);
+                    Assert.Equal(HookInstallationError.HooksDirectoryOutsideGitDirectory, refused.ErrorType);
+                    Assert.Equal(Path.GetFullPath(sharedHooks), refused.Details);
+                }
+
+                Assert.True(status.HooksPathOutsideGitDirectory);
+                Assert.False(status.IsInstalled);
+                Assert.Equal([sharedPreCommit], Directory.GetFiles(sharedHooks));
+                Assert.Equal(
+                    sharedHook,
+                    await File.ReadAllTextAsync(sharedPreCommit, TestContext.Current.CancellationToken));
+                Assert.True(File.Exists(optOut), "A refused install must not clear the repository's opt-out.");
+            }
+            finally
+            {
+                Directory.Delete(sharedHooks, recursive: true);
+            }
+        }
+
+        [Fact]
+        public async Task GetStatusAsync_TreatsHooksInsideTheGitDirectoryAsOwned()
+        {
+            await RunGitAsync("init");
+            var defaultStatus = await _service.GetStatusAsync(
+                _testRepoPath,
+                TestContext.Current.CancellationToken);
+            await RunGitAsync("config", "core.hooksPath", ".git/hooks");
+            var explicitStatus = await _service.GetStatusAsync(
+                _testRepoPath,
+                TestContext.Current.CancellationToken);
+            await RunGitAsync("config", "core.hooksPath", ".git/../.git-hooks-escape");
+            var escapedStatus = await _service.GetStatusAsync(
+                _testRepoPath,
+                TestContext.Current.CancellationToken);
+
+            Assert.False(defaultStatus.HooksPathOutsideGitDirectory);
+            Assert.False(explicitStatus.HooksPathOutsideGitDirectory);
+            Assert.True(escapedStatus.HooksPathOutsideGitDirectory);
+        }
+
+        [Fact]
+        public async Task InstallHooksAsync_LinkedWorktreeInstallsIntoTheSharedGitDirectoryWithoutConfirmation()
+        {
+            await RunGitAsync("init");
+            await RunGitAsync(
+                "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false",
+                "commit", "--allow-empty", "-m", "initial");
+            var worktree = Path.Combine(Path.GetTempPath(), $"vb_test_worktree_{Guid.NewGuid()}");
+            await RunGitAsync("worktree", "add", "--detach", worktree);
+            try
+            {
+                var result = await _service.InstallHooksAsync(
+                    worktree,
+                    TestContext.Current.CancellationToken);
+
+                Assert.True(result.Success, result.ErrorMessage);
+                Assert.True(File.Exists(Path.Combine(_hooksDir, "pre-commit")));
+            }
+            finally
+            {
+                await RunGitAsync("worktree", "remove", "--force", worktree);
+            }
         }
 
         [Fact]

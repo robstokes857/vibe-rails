@@ -9,6 +9,16 @@ namespace VibeRails.Services
         Task<HookInstallationResult> InstallPreCommitHookAsync(string repoPath, CancellationToken cancellationToken);
         Task<HookInstallationResult> UninstallPreCommitHookAsync(string repoPath, CancellationToken cancellationToken);
         Task<HookInstallationResult> InstallHooksAsync(string repoPath, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Installs all hooks. When <c>core.hooksPath</c> points outside the repository's git
+        /// directory, installation proceeds only if <paramref name="confirmedHooksPath"/> names
+        /// that exact directory, so a confirmation cannot be replayed against a changed config.
+        /// </summary>
+        Task<HookInstallationResult> InstallHooksAsync(
+            string repoPath,
+            string? confirmedHooksPath,
+            CancellationToken cancellationToken);
         Task<HookInstallationResult> UninstallHooksAsync(string repoPath, CancellationToken cancellationToken);
         Task<GitHooksStatus> GetStatusAsync(string repoPath, CancellationToken cancellationToken);
         Task<bool> IsAutoInstallDisabledAsync(string repoPath, CancellationToken cancellationToken);
@@ -77,8 +87,16 @@ namespace VibeRails.Services
 
         public async Task<HookInstallationResult> InstallPreCommitHookAsync(string repoPath, CancellationToken cancellationToken)
         {
+            return await InstallPreCommitHookAsync(repoPath, confirmedHooksPath: null, cancellationToken);
+        }
+
+        private async Task<HookInstallationResult> InstallPreCommitHookAsync(
+            string repoPath,
+            string? confirmedHooksPath,
+            CancellationToken cancellationToken)
+        {
             _logger.LogInformation("Installing pre-commit hook for repository: {RepoPath}", repoPath);
-            return await InstallHookAsync(repoPath, "pre-commit", PRE_COMMIT_MARKER, "pre-commit-hook.sh", cancellationToken);
+            return await InstallHookAsync(repoPath, "pre-commit", PRE_COMMIT_MARKER, "pre-commit-hook.sh", confirmedHooksPath, cancellationToken);
         }
 
         public async Task<HookInstallationResult> UninstallPreCommitHookAsync(string repoPath, CancellationToken cancellationToken)
@@ -101,13 +119,15 @@ namespace VibeRails.Services
             string repoPath,
             CancellationToken cancellationToken)
         {
-            var hooksPath = await ResolveHooksDirectoryAsync(repoPath, cancellationToken);
+            var location = await ResolveHooksLocationAsync(repoPath, cancellationToken);
+            var hooksPath = location.HooksPath;
             return new GitHooksStatus(
                 Path.GetFullPath(repoPath),
                 hooksPath,
                 InspectHookFile(Path.Combine(hooksPath, "pre-commit"), "pre-commit", PRE_COMMIT_MARKER),
                 InspectHookFile(Path.Combine(hooksPath, "commit-msg"), "commit-msg", COMMIT_MSG_MARKER),
-                InspectHookFile(Path.Combine(hooksPath, "post-commit"), "post-commit", POST_COMMIT_MARKER));
+                InspectHookFile(Path.Combine(hooksPath, "post-commit"), "post-commit", POST_COMMIT_MARKER),
+                HooksPathOutsideGitDirectory: !location.IsInsideGitDirectory);
         }
 
         public async Task<bool> IsAutoInstallDisabledAsync(
@@ -121,9 +141,25 @@ namespace VibeRails.Services
             return File.Exists(preferencePath);
         }
 
-        public async Task<HookInstallationResult> InstallHooksAsync(string repoPath, CancellationToken cancellationToken)
+        public Task<HookInstallationResult> InstallHooksAsync(string repoPath, CancellationToken cancellationToken) =>
+            InstallHooksAsync(repoPath, confirmedHooksPath: null, cancellationToken);
+
+        public async Task<HookInstallationResult> InstallHooksAsync(
+            string repoPath,
+            string? confirmedHooksPath,
+            CancellationToken cancellationToken)
         {
             _logger.LogInformation("Installing all hooks for repository: {RepoPath}", repoPath);
+
+            // Refuse before touching the opt-out preference or any hook, so an unconfirmed
+            // external hooks directory leaves the repository exactly as it was.
+            var unconfirmed = RefuseUnconfirmedHooksDirectory(
+                await ResolveHooksLocationAsync(repoPath, cancellationToken),
+                confirmedHooksPath);
+            if (unconfirmed != null)
+            {
+                return unconfirmed;
+            }
 
             var preferenceResult = await SetAutoInstallDisabledAsync(
                 repoPath,
@@ -155,7 +191,7 @@ namespace VibeRails.Services
 
             try
             {
-                var preCommitResult = await InstallPreCommitHookAsync(repoPath, cancellationToken);
+                var preCommitResult = await InstallPreCommitHookAsync(repoPath, confirmedHooksPath, cancellationToken);
                 if (!preCommitResult.Success)
                 {
                     _logger.LogError("Pre-commit hook installation failed: {Error}", preCommitResult.ErrorMessage);
@@ -171,7 +207,7 @@ namespace VibeRails.Services
                     return preCommitResult;
                 }
 
-                var commitMsgResult = await InstallCommitMsgHookAsync(repoPath, cancellationToken);
+                var commitMsgResult = await InstallCommitMsgHookAsync(repoPath, confirmedHooksPath, cancellationToken);
                 if (!commitMsgResult.Success)
                 {
                     _logger.LogError("Commit-msg hook installation failed: {Error}", commitMsgResult.ErrorMessage);
@@ -195,7 +231,7 @@ namespace VibeRails.Services
                     );
                 }
 
-                var postCommitResult = await InstallPostCommitHookAsync(repoPath, cancellationToken);
+                var postCommitResult = await InstallPostCommitHookAsync(repoPath, confirmedHooksPath, cancellationToken);
                 if (!postCommitResult.Success)
                 {
                     _logger.LogError("Post-commit hook installation failed: {Error}", postCommitResult.ErrorMessage);
@@ -338,10 +374,13 @@ namespace VibeRails.Services
             }
         }
 
-        private async Task<HookInstallationResult> InstallCommitMsgHookAsync(string repoPath, CancellationToken cancellationToken)
+        private async Task<HookInstallationResult> InstallCommitMsgHookAsync(
+            string repoPath,
+            string? confirmedHooksPath,
+            CancellationToken cancellationToken)
         {
             _logger.LogInformation("Installing commit-msg hook for repository: {RepoPath}", repoPath);
-            return await InstallHookAsync(repoPath, "commit-msg", COMMIT_MSG_MARKER, "commit-msg-hook.sh", cancellationToken);
+            return await InstallHookAsync(repoPath, "commit-msg", COMMIT_MSG_MARKER, "commit-msg-hook.sh", confirmedHooksPath, cancellationToken);
         }
 
         private async Task<HookInstallationResult> UninstallCommitMsgHookAsync(string repoPath, CancellationToken cancellationToken)
@@ -350,10 +389,13 @@ namespace VibeRails.Services
             return await UninstallHookAsync(repoPath, "commit-msg", COMMIT_MSG_MARKER, cancellationToken);
         }
 
-        private async Task<HookInstallationResult> InstallPostCommitHookAsync(string repoPath, CancellationToken cancellationToken)
+        private async Task<HookInstallationResult> InstallPostCommitHookAsync(
+            string repoPath,
+            string? confirmedHooksPath,
+            CancellationToken cancellationToken)
         {
             _logger.LogInformation("Installing post-commit hook for repository: {RepoPath}", repoPath);
-            return await InstallHookAsync(repoPath, "post-commit", POST_COMMIT_MARKER, "post-commit-hook.sh", cancellationToken);
+            return await InstallHookAsync(repoPath, "post-commit", POST_COMMIT_MARKER, "post-commit-hook.sh", confirmedHooksPath, cancellationToken);
         }
 
         private async Task<HookInstallationResult> UninstallPostCommitHookAsync(string repoPath, CancellationToken cancellationToken)
@@ -367,6 +409,7 @@ namespace VibeRails.Services
             string hookName,
             string marker,
             string scriptFileName,
+            string? confirmedHooksPath,
             CancellationToken cancellationToken)
         {
             try
@@ -380,7 +423,14 @@ namespace VibeRails.Services
                         launchError);
                 }
 
-                var hooksDir = await ResolveHooksDirectoryAsync(repoPath, cancellationToken);
+                var location = await ResolveHooksLocationAsync(repoPath, cancellationToken);
+                var unconfirmed = RefuseUnconfirmedHooksDirectory(location, confirmedHooksPath);
+                if (unconfirmed != null)
+                {
+                    return unconfirmed;
+                }
+
+                var hooksDir = location.HooksPath;
                 if (_installationCheckpoint != null)
                 {
                     await _installationCheckpoint(hookName, cancellationToken);
@@ -720,14 +770,21 @@ namespace VibeRails.Services
             CancellationToken cancellationToken) =>
             await ResolveGitPathAsync(repoPath, "hooks", cancellationToken);
 
-        private static async Task<string> ResolveGitPathAsync(
+        private static Task<string> ResolveGitPathAsync(
             string repoPath,
             string gitPath,
+            CancellationToken cancellationToken) =>
+            ResolveRevParsePathAsync(repoPath, ["rev-parse", "--git-path", gitPath], Path.Combine(".git", gitPath), cancellationToken);
+
+        private static async Task<string> ResolveRevParsePathAsync(
+            string repoPath,
+            IReadOnlyList<string> arguments,
+            string fallbackRelativePath,
             CancellationToken cancellationToken)
         {
             var fullRepoPath = Path.GetFullPath(repoPath);
             var result = await GitProcessRunner.RunAsync(
-                ["rev-parse", "--git-path", gitPath],
+                arguments,
                 fullRepoPath,
                 GitPathTimeout,
                 cancellationToken);
@@ -744,8 +801,94 @@ namespace VibeRails.Services
             // The fallback keeps unit-test fake repositories useful and preserves behavior when
             // Git itself is temporarily unavailable. Real repositories normally take the path
             // above, including linked worktrees and core.hooksPath configurations.
-            return Path.Combine(fullRepoPath, ".git", gitPath);
+            return Path.Combine(fullRepoPath, fallbackRelativePath);
         }
+
+        /// <summary>
+        /// Where Git runs hooks from, and whether that is inside the repository's common git
+        /// directory (linked worktrees share the main checkout's hooks). Anywhere else, such as
+        /// a global <c>core.hooksPath</c> shared by every repository or a tracked folder in the
+        /// work tree, is a directory VibeRails did not create and does not own.
+        /// </summary>
+        private async Task<HooksLocation> ResolveHooksLocationAsync(
+            string repoPath,
+            CancellationToken cancellationToken)
+        {
+            var hooksPath = await ResolveHooksDirectoryAsync(repoPath, cancellationToken);
+            var gitCommonDirectory = await ResolveRevParsePathAsync(
+                repoPath,
+                ["rev-parse", "--git-common-dir"],
+                ".git",
+                cancellationToken);
+            return new HooksLocation(hooksPath, IsSameOrUnderDirectory(hooksPath, gitCommonDirectory));
+        }
+
+        /// <summary>
+        /// Installing into a hooks directory outside the git directory writes, and moves aside,
+        /// files that other repositories or the team's checked-in hooks may rely on. That needs
+        /// the user's confirmation of that exact directory; startup auto-install never has one.
+        /// </summary>
+        private static HookInstallationResult? RefuseUnconfirmedHooksDirectory(
+            HooksLocation location,
+            string? confirmedHooksPath)
+        {
+            if (location.IsInsideGitDirectory || IsConfirmed(confirmedHooksPath, location.HooksPath))
+            {
+                return null;
+            }
+
+            return HookInstallationResult.Fail(
+                HookInstallationError.HooksDirectoryOutsideGitDirectory,
+                "core.hooksPath points outside this repository's .git directory; confirm that directory before installing",
+                location.HooksPath);
+        }
+
+        // The confirmation arrives from a request; a relative or malformed value never matches.
+        private static bool IsConfirmed(string? confirmedHooksPath, string hooksPath)
+        {
+            if (string.IsNullOrWhiteSpace(confirmedHooksPath) || !Path.IsPathFullyQualified(confirmedHooksPath))
+            {
+                return false;
+            }
+
+            try
+            {
+                return SameDirectory(confirmedHooksPath, hooksPath);
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+        }
+
+        private static StringComparison PathComparison =>
+            OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
+
+        private static bool SameDirectory(string left, string right) =>
+            string.Equals(
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)),
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)),
+                PathComparison);
+
+        private static bool IsSameOrUnderDirectory(string path, string directory)
+        {
+            if (SameDirectory(path, directory))
+            {
+                return true;
+            }
+
+            var fullPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+            var fullDirectory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
+
+            var prefix = Path.EndsInDirectorySeparator(fullDirectory)
+                ? fullDirectory
+                : fullDirectory + Path.DirectorySeparatorChar;
+            return fullPath.StartsWith(prefix, PathComparison);
+        }
+
+        private sealed record HooksLocation(string HooksPath, bool IsInsideGitDirectory);
 
         private GitHookFileStatus InspectHookFile(
             string hookPath,

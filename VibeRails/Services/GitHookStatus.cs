@@ -23,7 +23,8 @@ public sealed record GitHooksStatus(
     string HooksPath,
     GitHookFileStatus PreCommit,
     GitHookFileStatus CommitMessage,
-    GitHookFileStatus PostCommit)
+    GitHookFileStatus PostCommit,
+    bool HooksPathOutsideGitDirectory = false)
 {
     public bool IsInstalled => PreCommit.IsCurrent && CommitMessage.IsCurrent && PostCommit.IsCurrent;
 

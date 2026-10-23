@@ -45,6 +45,11 @@ public static class HookRoutes
                 : status.NeedsRepair
                     ? "Git Guard hooks are stale, disabled, or only partially installed. Repair is recommended."
                     : "VCA and Jobs Git hooks are not installed.";
+            if (!status.IsInstalled && status.HooksPathOutsideGitDirectory)
+            {
+                message += " core.hooksPath points outside this repository's .git directory, "
+                    + "so VibeRails installs there only after you confirm it.";
+            }
 
             return Results.Ok(new HookStatusResponse(
                 InGitRepo: true,
@@ -60,10 +65,14 @@ public static class HookRoutes
                 PostCommit: ToResponse(status.PostCommit)));
         }).WithName("GetHookStatus");
 
-        // POST /api/v1/hooks/install - Install the VCA git hooks
+        // POST /api/v1/hooks/install - Install the VCA git hooks. When core.hooksPath points
+        // outside the git directory the first call writes nothing and asks for confirmation;
+        // the retry names that directory in ?confirmHooksPath= and installs only if it still
+        // matches what Git reports.
         app.MapPost("/api/v1/hooks/install", async (
             IHookInstallationService hookService,
             IGitService gitService,
+            string? confirmHooksPath,
             CancellationToken cancellationToken) =>
         {
             var rootPath = await gitService.GetRootPathAsync(cancellationToken);
@@ -72,7 +81,16 @@ public static class HookRoutes
                 return Results.BadRequest(new HookActionResponse(false, "Not in a git repository"));
             }
 
-            var result = await hookService.InstallHooksAsync(rootPath, cancellationToken);
+            var result = await hookService.InstallHooksAsync(rootPath, confirmHooksPath, cancellationToken);
+            if (result.ErrorType == HookInstallationError.HooksDirectoryOutsideGitDirectory)
+            {
+                return Results.Ok(new HookActionResponse(
+                    false,
+                    $"core.hooksPath points outside this repository's .git directory ({result.Details}). "
+                        + "Nothing was installed.",
+                    RequiresConfirmation: true,
+                    HooksPath: result.Details));
+            }
             var verified = result.Success
                 ? await hookService.GetStatusAsync(rootPath, cancellationToken)
                 : null;

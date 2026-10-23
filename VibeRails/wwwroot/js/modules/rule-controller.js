@@ -17,6 +17,7 @@ import {
     statusTone
 } from './git-guard-preflight.js';
 import { launchProjectHealthFix, mountProjectHealthFixPickers } from './project-health-fix-launcher.js';
+import { confirmDialog } from './utils.js';
 
 function normalizeHookStateToken(value) {
     return String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
@@ -779,7 +780,24 @@ export class RuleController {
         this.setHookActionButtonsDisabled(true);
 
         try {
-            const response = await this.app.apiCall('/api/v1/hooks/install', 'POST', null, { showLoading: false });
+            let response = await this.app.apiCall('/api/v1/hooks/install', 'POST', null, { showLoading: false });
+            if (response?.requiresConfirmation === true && response.hooksPath) {
+                // core.hooksPath is outside .git (a global or checked-in hooks folder). The
+                // server wrote nothing; retry only for the exact directory the user approved.
+                if (!await this.confirmExternalHooksPath(response.hooksPath)) {
+                    this.app.showToast('Hook Install Cancelled', 'No hooks were installed.', 'info');
+                    this.vcaConsole?.report('[info] Hook install cancelled: core.hooksPath is outside .git.', {
+                        tone: 'warning',
+                        state: 'Setup cancelled',
+                        meta: response.hooksPath
+                    });
+                    await this.refreshHookStatus();
+                    return;
+                }
+                response = await this.app.apiCall(
+                    `/api/v1/hooks/install?confirmHooksPath=${encodeURIComponent(response.hooksPath)}`,
+                    'POST', null, { showLoading: false });
+            }
             const succeeded = response?.success === true;
             const responseMessage = response?.message || 'Git hook setup finished.';
             this.app.showToast(
@@ -844,6 +862,17 @@ export class RuleController {
             return;
         }
         await this.installHooks();
+    }
+
+    confirmExternalHooksPath(hooksPath) {
+        return confirmDialog({
+            title: 'Install hooks outside this repository?',
+            message: `Git runs this repository's hooks from ${hooksPath}, which is outside its .git directory. `
+                + 'Other repositories or checked-in hook scripts may use that folder. VibeRails will add its '
+                + 'hooks there and move any hook it cannot combine aside as a .viberails-chain file.',
+            confirmLabel: 'Install there',
+            danger: true
+        });
     }
 
     confirmUninstallHooks() {

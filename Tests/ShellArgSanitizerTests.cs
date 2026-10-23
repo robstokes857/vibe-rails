@@ -5,6 +5,29 @@ namespace Tests;
 
 public class ShellArgSanitizerTests
 {
+    [Theory]
+    [InlineData("--system-prompt \"col\tumn\"")]
+    [InlineData("--system-prompt 'esc\u001b[2Kape'")]
+    [InlineData("--flag\u001b")]
+    [InlineData("--name \"bell\u0007\"")]
+    [InlineData("--name \"del\u007f\"")]
+    public void Validate_RejectsControlCharactersInsideValues(string customArgs)
+    {
+        // A launch command is typed into the terminal's line editor, where TAB completes and
+        // ESC cancels the line instead of being argument text (VIBE-194, scan Info item).
+        var error = ShellArgSanitizer.Validate(customArgs);
+
+        Assert.NotNull(error);
+        Assert.Contains("control character", error);
+        Assert.Throws<ArgumentException>(() => ShellArgSanitizer.ParseAndValidate(customArgs));
+    }
+
+    [Fact]
+    public void ParseAndValidate_StillSplitsOnUnquotedTabs()
+    {
+        Assert.Equal(["--model", "opus", "--verbose"], ShellArgSanitizer.ParseAndValidate("--model\topus \t--verbose"));
+    }
+
     [Fact]
     public void ParseAndValidate_PreservesQuotedValuesWithSpacesAndParentheses()
     {

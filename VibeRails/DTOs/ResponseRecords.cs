@@ -922,9 +922,15 @@ namespace VibeRails.DTOs
         HookFileStatusResponse? PostCommit
     );
 
+    /// <param name="RequiresConfirmation">
+    /// True when <c>core.hooksPath</c> points outside the git directory: nothing was written,
+    /// and the client may retry with <paramref name="HooksPath"/> as the confirmed directory.
+    /// </param>
     public record HookActionResponse(
         bool Success,
-        string Message
+        string Message,
+        bool RequiresConfirmation = false,
+        string? HooksPath = null
     );
 
     public record VcaRuleFindingResponse(

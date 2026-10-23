@@ -28,7 +28,13 @@ namespace Pty.Net.Windows
             return this.StartPseudoConsoleAsync(options, trace, cancellationToken);
         }
 
-        private static string GetAppOnPath(string app, string cwd, IDictionary<string, string> env)
+        /// <summary>
+        /// Resolves the program to an absolute path. A bare name is looked up only on absolute
+        /// PATH entries and is never resolved against <paramref name="cwd"/>: the working
+        /// directory is usually a repository, and a program planted there must not run in place
+        /// of a missing one. Throws <see cref="FileNotFoundException"/> when it is not found.
+        /// </summary>
+        internal static string GetAppOnPath(string app, string cwd, IDictionary<string, string> env)
         {
             bool isWow64 = Environment.GetEnvironmentVariable("PROCESSOR_ARCHITEW6432") != null;
             var windir = Environment.GetEnvironmentVariable("WINDIR") ?? @"C:\Windows";
@@ -86,8 +92,7 @@ namespace Pty.Net.Windows
 
             if (string.IsNullOrWhiteSpace(pathEnvironment))
             {
-                // No PATH environment. Make path absolute to the cwd
-                return Path.Combine(cwd, app);
+                throw new FileNotFoundException($"Terminal app '{app}' was not found: PATH is empty", app);
             }
 
             var paths = new List<string>(pathEnvironment.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries));
@@ -112,12 +117,15 @@ namespace Pty.Net.Windows
 
             // We have a simple file name. We get the path variable from the env
             // and try to find the executable on the path.
-            foreach (string pathEntry in paths)
+            foreach (string rawPathEntry in paths)
             {
-                bool isPathEntryRooted;
+                // A relative entry (".", "bin", "\tools") would search the working directory or
+                // its drive, so only fully qualified entries are searched.
+                string pathEntry = rawPathEntry.Trim().Trim('"');
+                bool isPathEntryAbsolute;
                 try
                 {
-                    isPathEntryRooted = Path.IsPathRooted(pathEntry);
+                    isPathEntryAbsolute = Path.IsPathFullyQualified(pathEntry);
                 }
                 catch (ArgumentException)
                 {
@@ -125,8 +133,12 @@ namespace Pty.Net.Windows
                     continue;
                 }
 
-                // The path entry is absolute.
-                string fullPath = isPathEntryRooted ? Path.Combine(pathEntry, app) : Path.Combine(cwd, pathEntry, app);
+                if (!isPathEntryAbsolute)
+                {
+                    continue;
+                }
+
+                string fullPath = Path.Combine(pathEntry, app);
                 if (File.Exists(fullPath))
                 {
                     return fullPath;
@@ -145,8 +157,7 @@ namespace Pty.Net.Windows
                 }
             }
 
-            // Not found on PATH. Make path absolute to the cwd
-            return Path.Combine(cwd, app);
+            throw new FileNotFoundException($"Terminal app '{app}' was not found on PATH", app);
         }
 
         private static string GetEnvironmentString(IDictionary<string, string> environment)
@@ -182,6 +193,9 @@ namespace Pty.Net.Windows
            TraceSource trace,
            CancellationToken cancellationToken)
         {
+            // Resolve the program first: a missing one throws before any pipe or console exists.
+            string app = GetAppOnPath(options.App, options.Cwd, options.Environment);
+
             // Create the in/out pipes
             if (!CreatePipe(out SafePipeHandle inPipePseudoConsoleSide, out SafePipeHandle inPipeOurSide, null, 0))
             {
@@ -216,7 +230,6 @@ namespace Pty.Net.Windows
             IntPtr lpEnvironment = Marshal.StringToHGlobalUni(GetEnvironmentString(options.Environment));
             try
             {
-                string app = GetAppOnPath(options.App, options.Cwd, options.Environment);
                 string arguments = options.VerbatimCommandLine ?
                     WindowsArguments.FormatVerbatim(options.CommandLine) :
                     WindowsArguments.Format(options.CommandLine);
