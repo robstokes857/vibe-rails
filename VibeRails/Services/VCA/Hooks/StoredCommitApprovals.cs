@@ -22,7 +22,12 @@ public interface IStoredCommitApprovalSource
 /// the ledger is a convenience, so a missing or busy database must never stand between a person and
 /// the popup, and the hook re-verifies every signature it applies from here with viberails.ai.
 /// </summary>
-public sealed class ReviewRequestApprovalSource(IReviewRequestStore store) : IStoredCommitApprovalSource
+/// <remarks>
+/// The store is resolved only when a signature finding is actually pending. Building the hook
+/// runner must not open the database: most hook runs never need the ledger, and a test harness that
+/// swaps the store for a disposable one must be honoured even when it registers late.
+/// </remarks>
+public sealed class ReviewRequestApprovalSource(Func<IReviewRequestStore?> stores) : IStoredCommitApprovalSource
 {
     private static readonly TimeSpan Budget = TimeSpan.FromSeconds(3);
 
@@ -33,6 +38,8 @@ public sealed class ReviewRequestApprovalSource(IReviewRequestStore store) : ISt
         budget.CancelAfter(Budget);
         try
         {
+            var store = stores();
+            if (store is null) return null;
             var approvals = await store.FindVerifiedApprovalsAsync(request.TreeId, budget.Token);
             var row = ReviewRequestService.SelectApproval(approvals, request.Approvers);
             return row is null

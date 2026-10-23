@@ -38,6 +38,9 @@ public sealed record ReviewDecisionRecord(
     DateTime DecidedUTC,
     DateTime? VerifiedUTC);
 
+/// <summary>A stored decision and the request status it produced.</summary>
+public sealed record ReviewDecisionOutcome(ReviewDecisionRecord Decision, string Status);
+
 /// <summary>Durable review requests and decisions in state.db (component <c>review-requests</c>).</summary>
 public interface IReviewRequestStore
 {
@@ -56,8 +59,13 @@ public interface IReviewRequestStore
     /// <summary>Removes the request and its decisions. False when it did not exist.</summary>
     Task<bool> DeleteAsync(string id, CancellationToken ct = default);
 
-    /// <summary>Records a decision and returns it with its assigned id.</summary>
-    Task<ReviewDecisionRecord> AddDecisionAsync(ReviewDecisionRecord decision, CancellationToken ct = default);
+    /// <summary>
+    /// Records a decision and recomputes the request status in one transaction: approved by any
+    /// verified approval, otherwise rejected by any rejection, otherwise open. Null when the request
+    /// is missing or cancelled, in which case nothing is stored: a decision that was still being
+    /// verified when the request was cancelled must not revive it.
+    /// </summary>
+    Task<ReviewDecisionOutcome?> RecordDecisionAsync(ReviewDecisionRecord decision, DateTime updatedUtc, CancellationToken ct = default);
 
     /// <summary>Decisions for one request, oldest first.</summary>
     Task<IReadOnlyList<ReviewDecisionRecord>> GetDecisionsAsync(string requestId, CancellationToken ct = default);

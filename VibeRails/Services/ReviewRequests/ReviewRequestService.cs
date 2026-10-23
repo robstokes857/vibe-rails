@@ -61,7 +61,8 @@ public sealed class ReviewRequestService(
             throw new ReviewRequestException("nothing_staged", "Nothing is staged. Stage the changes to review with git add first.", 409);
 
         var now = _clock.GetUtcNow().UtcDateTime;
-        var bundle = ReviewBundleCapture.FromSnapshot(snapshot, attached, reviewers, cardKey, note, now);
+        var bundle = await ReviewBundleCapture.BuildAsync(snapshot, ReviewBundleCapture.BaseTextReader(snapshot),
+            attached, reviewers, cardKey, note, now, ct);
         var record = new ReviewRequestRecord(
             Guid.NewGuid().ToString("D"),
             projectPath,
@@ -164,11 +165,12 @@ public sealed class ReviewRequestService(
                 throw Invalid("decision must be \"approved\" or \"rejected\".");
         }
 
-        await store.AddDecisionAsync(decision, ct);
+        // One transaction decides: a cancel that landed while the signature was being verified wins,
+        // and nothing is stored, so a cancelled request can never be revived into a hook-eligible approval.
+        var outcome = await store.RecordDecisionAsync(decision, now, ct)
+            ?? throw new ReviewRequestException("not_open", "This review request was cancelled before the decision was recorded.", 409);
         var decisions = await store.GetDecisionsAsync(id, ct);
-        var status = StatusFrom(decisions);
-        await store.UpdateStatusAsync(id, status, now, ct);
-        return Summarize(record with { Status = status, UpdatedUTC = now }, bundle, decisions);
+        return Summarize(record with { Status = outcome.Status, UpdatedUTC = now }, bundle, decisions);
     }
 
     /// <summary>
@@ -187,15 +189,6 @@ public sealed class ReviewRequestService(
             return row;
         }
         return null;
-    }
-
-    internal static string StatusFrom(IReadOnlyList<ReviewDecisionRecord> decisions)
-    {
-        if (decisions.Any(decision => decision.Decision == ReviewDecisionKind.Approved && decision.VerifiedUTC is not null))
-            return ReviewRequestStatus.Approved;
-        return decisions.Any(decision => decision.Decision == ReviewDecisionKind.Rejected)
-            ? ReviewRequestStatus.Rejected
-            : ReviewRequestStatus.Open;
     }
 
     internal static IReadOnlyList<string> NormalizeReviewers(IReadOnlyList<string>? reviewers)

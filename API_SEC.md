@@ -727,9 +727,14 @@ state.db (`review-requests/1`, additive). Bodies are capped at 16 KiB (create) a
 slice leaves the machine: no request is sent, no session is uploaded. The decisions route's only
 outbound call is the existing public signature verification above, with a tree id and no content,
 and an approval is stored only when that verification names a verified signer listed on the
-request. The commit-msg hook applies a stored, verified approval to the message before offering the
-popup and then rechecks it like any other trailer; the ledger read is bounded to three seconds and
-quiet on failure, so it can place a signature but never pass a commit by itself. No MCP tool
+request; the store records it and recomputes the status in one write transaction, so a cancel that
+lands during verification wins and a cancelled request is never revived. Deleted files' base text
+is read from the frozen base tree by path, under the same bounds, never from the working tree. The
+commit-msg hook applies a stored, verified approval to the message before offering the
+popup and then rechecks it like any other trailer; the ledger is resolved only when a signature is
+pending, the read is bounded to three seconds and quiet on failure, so it can place a signature but
+never pass a commit by itself. Hook test harnesses replace the ledger with a per-repository file
+beside their job store, so no test opens the user's state.db. No MCP tool
 creates, decides or signs. Sending requests and sessions to viberails.ai is a later slice with its
 own review here; see [the component contract](VibeRails/Services/ReviewRequests/README.md).
 

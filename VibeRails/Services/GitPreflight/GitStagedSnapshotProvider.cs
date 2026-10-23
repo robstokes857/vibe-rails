@@ -1144,6 +1144,30 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         return new BlobTextResult(content, IsBinary: false);
     }
 
+    /// <summary>
+    /// One path of a frozen tree as text, for consumers that need a baseline the snapshot does not
+    /// carry (a review bundle shows what a deleted file contained). Binary, oversized (over
+    /// <paramref name="maximumBytes"/> or the 5 MiB text cap) and missing paths come back as binary
+    /// with no content; the caller decides how to label them.
+    /// </summary>
+    public static async Task<(bool IsBinary, string? Content)> TryReadTreeTextAsync(
+        string repositoryPath,
+        string treeId,
+        string relativePath,
+        long maximumBytes,
+        CancellationToken cancellationToken)
+    {
+        if (!IsObjectId(treeId) || string.IsNullOrEmpty(relativePath))
+            return (true, null);
+        var blob = await TryReadTextBlobAsync(
+            repositoryPath,
+            $"{treeId}:{relativePath}",
+            knownSize: null,
+            new SnapshotMemoryBudget(maximumBytes),
+            cancellationToken);
+        return (blob.IsBinary, blob.Content);
+    }
+
     private static HashSet<string> CollectGitLinkPaths(IReadOnlyList<GitIndexEntry> entries) =>
         entries
             .Where(entry => entry.Mode == GitLinkMode)

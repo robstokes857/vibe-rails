@@ -640,7 +640,13 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
         }.ToString();
         return VcaHookProcessHost.RunCoreAsync(
             args,
-            services => services.Replace(ServiceDescriptor.Singleton<IJobStore>(_ => new JobStore(connectionString))),
+            services =>
+            {
+                services.Replace(ServiceDescriptor.Singleton<IJobStore>(_ => new JobStore(connectionString)));
+                // The review-approval ledger (VB-50) stays in the same throwaway file.
+                services.Replace(ServiceDescriptor.Singleton<VibeRails.DB.IReviewRequestStore>(_ =>
+                    new VibeRails.Data.Sqlite.ReviewRequestStore(connectionString)));
+            },
             output,
             error,
             input,

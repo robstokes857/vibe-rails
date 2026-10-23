@@ -266,8 +266,12 @@ is appended with `HumanSignaturePopup.AppendSignatureAsync` and the commit is re
 verifies it with viberails.ai like any trailer; the transcript says "Applied the signed approval
 from <email>". This runs whether or not a person can answer the popup, so an agent's commit passes on
 a person's approval and never without one. Each stored signature is applied at most once per run,
-the ledger read is bounded to 3 s and quiet on failure, and a cancelled request's approvals are not
-offered. Contract: [Services/ReviewRequests/README.md](../ReviewRequests/README.md).
+the store is resolved only when a signature is pending (building the runner opens no database),
+the read is bounded to 3 s and quiet on failure, and a cancelled request's approvals are not
+offered. `VcaRegressionRepository` and `VcaHookEndToEndTests` replace `IReviewRequestStore` with
+the per-repository file beside their job store; keep that when adding a hook harness, or the
+hook opens the developer's live state.db. Contract:
+[Services/ReviewRequests/README.md](../ReviewRequests/README.md).
 
 **Policy from HEAD.** Rules normally come from the staged vc.rules.md. These two rules follow the
 committed policy instead, in both directions:

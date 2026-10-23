@@ -90,16 +90,24 @@ public sealed class ReviewRequestStore : IReviewRequestStore
     }
 
     /// <inheritdoc />
-    public async Task<ReviewDecisionRecord> AddDecisionAsync(ReviewDecisionRecord decision, CancellationToken ct = default)
+    public async Task<ReviewDecisionOutcome?> RecordDecisionAsync(ReviewDecisionRecord decision, DateTime updatedUtc, CancellationToken ct = default)
     {
         using var db = SqliteConnectionFactory.Open(_connectionString);
+        // BEGIN IMMEDIATE: the write lock is taken before the status is read, so a cancel that
+        // lands while an approval is being verified is either seen here or waits for this commit.
+        using var transaction = db.BeginTransaction(System.Data.IsolationLevel.Serializable);
         using var command = db.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT Status FROM ReviewRequests WHERE Id = $request;";
+        command.Parameters.AddWithValue("$request", decision.RequestId);
+        if (await command.ExecuteScalarAsync(ct) is not string status || status == "cancelled")
+            return null;
+
         command.CommandText = """
             INSERT INTO ReviewDecisions (RequestId, Reviewer, Decision, Comment, KeyId, Fingerprint, TreeId, SignatureBase64, DecidedUTC, VerifiedUTC)
             VALUES ($request, $reviewer, $decision, $comment, $key, $fingerprint, $tree, $signature, $decided, $verified)
             RETURNING Id;
             """;
-        command.Parameters.AddWithValue("$request", decision.RequestId);
         command.Parameters.AddWithValue("$reviewer", decision.Reviewer);
         command.Parameters.AddWithValue("$decision", decision.Decision);
         command.Parameters.AddWithValue("$comment", (object?)decision.Comment ?? DBNull.Value);
@@ -110,7 +118,20 @@ public sealed class ReviewRequestStore : IReviewRequestStore
         command.Parameters.AddWithValue("$decided", Stamp(decision.DecidedUTC));
         command.Parameters.AddWithValue("$verified", decision.VerifiedUTC is { } verified ? Stamp(verified) : DBNull.Value);
         var id = (long)(await command.ExecuteScalarAsync(ct) ?? throw new InvalidOperationException("The review decision was not stored."));
-        return decision with { Id = id };
+
+        command.CommandText = """
+            SELECT CASE
+                WHEN EXISTS (SELECT 1 FROM ReviewDecisions WHERE RequestId = $request AND Decision = 'approved' AND VerifiedUTC IS NOT NULL) THEN 'approved'
+                WHEN EXISTS (SELECT 1 FROM ReviewDecisions WHERE RequestId = $request AND Decision = 'rejected') THEN 'rejected'
+                ELSE 'open' END;
+            """;
+        var newStatus = (string)(await command.ExecuteScalarAsync(ct) ?? "open");
+        command.CommandText = "UPDATE ReviewRequests SET Status = $status, UpdatedUTC = $updated WHERE Id = $request;";
+        command.Parameters.AddWithValue("$status", newStatus);
+        command.Parameters.AddWithValue("$updated", Stamp(updatedUtc));
+        await command.ExecuteNonQueryAsync(ct);
+        await transaction.CommitAsync(ct);
+        return new ReviewDecisionOutcome(decision with { Id = id }, newStatus);
     }
 
     /// <inheritdoc />

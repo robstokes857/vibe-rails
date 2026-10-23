@@ -114,6 +114,67 @@ public sealed class ReviewRequestServiceTests : IAsyncLifetime
         Assert.DoesNotContain("\"omitted\":null", stored.BundleJson);
     }
 
+    /// <summary>
+    /// Codex review F3: the hook's snapshot has nothing to read for a deleted path and flags it
+    /// binary; the bundle must still show the reviewer what was removed, read from the base tree.
+    /// </summary>
+    [Fact]
+    public async Task DeletedFilesKeepTheirBaseTextAndBinariesStayBinary()
+    {
+        var image = new byte[32];
+        image[0] = 0x89; image[1] = 0x50; image[2] = 0; image[3] = 0x0A;
+        await File.WriteAllBytesAsync(Path.Combine(Repo, "logo.png"), image, Ct);
+        await File.WriteAllTextAsync(Path.Combine(Repo, "deleted.cs"), "class Gone\n{\n}\n", Ct);
+        await Git("add", "--", "logo.png", "deleted.cs");
+        await Git("-c", "core.hooksPath=", "commit", "-q", "-m", "add files");
+        await Git("rm", "-q", "--", "logo.png", "deleted.cs", "other.txt");
+        var service = Service(FakeCommitSignatureVerifier.ValidFor("owner@example.com"));
+
+        var created = await service.CreateAsync(Repo, new CreateReviewRequest(Reviewers: ["owner@example.com"]), null, Ct);
+
+        var files = (await service.GetAsync(Repo, created.Id, Ct)).Bundle.Files;
+        Assert.Equal(["deleted.cs", "logo.png", "other.txt"], files.Select(file => file.Path));
+        Assert.All(files, file => Assert.Equal("deleted", file.Change));
+        Assert.All(files, file => Assert.Null(file.After));
+
+        Assert.False(files[0].Binary);
+        Assert.Equal("class Gone\n{\n}\n", files[0].Before);
+        Assert.Null(files[0].Omitted);
+        Assert.Equal("other\n", files[2].Before);
+        Assert.Null(files[2].Omitted);
+
+        Assert.True(files[1].Binary);
+        Assert.Null(files[1].Before);
+        Assert.Equal(ReviewBundleOmission.Binary, files[1].Omitted);
+    }
+
+    /// <summary>
+    /// Codex review F2: a cancel that lands while an approval is being verified must win. The
+    /// decision is refused and nothing becomes eligible for the commit hook.
+    /// </summary>
+    [Fact]
+    public async Task ApprovalVerifiedAfterCancellationIsRefused()
+    {
+        await StageChangesAsync();
+        var tree = (await Git("write-tree")).Trim();
+        var verifier = new GatedVerifier(new CommitSignatureVerification(CommitSignatureStatus.Valid, "valid", "owner@example.com"));
+        var service = Service(verifier);
+        var created = await service.CreateAsync(Repo, new CreateReviewRequest(Reviewers: ["owner@example.com"]), null, Ct);
+
+        var approving = service.RecordDecisionAsync(Repo, created.Id, new RecordReviewDecisionRequest("approved", Trailer: Trailer(tree)), Ct);
+        await verifier.Started.Task.WaitAsync(TimeSpan.FromSeconds(10), Ct);
+        var cancelled = await service.CancelAsync(Repo, created.Id, Ct);
+        Assert.Equal(ReviewRequestStatus.Cancelled, cancelled.Status);
+        verifier.Release.SetResult();
+
+        var refused = await Assert.ThrowsAsync<ReviewRequestException>(() => approving);
+        Assert.Equal("not_open", refused.Code);
+        var after = await service.GetAsync(Repo, created.Id, Ct);
+        Assert.Equal(ReviewRequestStatus.Cancelled, after.Request.Status);
+        Assert.Empty(after.Request.Decisions);
+        Assert.Empty(await _store.FindVerifiedApprovalsAsync(tree, Ct));
+    }
+
     [Fact]
     public async Task CreateRefusesAnEmptyIndexAndBadInput()
     {
@@ -328,6 +389,20 @@ public sealed class ReviewRequestServiceTests : IAsyncLifetime
         if (result.TimedOut || result.ExitCode != 0)
             throw new InvalidOperationException($"git {string.Join(' ', arguments)} failed: {result.StdErr}");
         return result.StdOut;
+    }
+
+    /// <summary>Signals when verification starts and answers only once released, so a cancel can interleave.</summary>
+    private sealed class GatedVerifier(CommitSignatureVerification answer) : ICommitSignatureVerifier
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<CommitSignatureVerification> VerifyAsync(CommitSignature signature, CancellationToken cancellationToken)
+        {
+            Started.TrySetResult();
+            await Release.Task.WaitAsync(cancellationToken);
+            return answer;
+        }
     }
 
     private sealed class SwitchableVerifier : ICommitSignatureVerifier

@@ -370,9 +370,11 @@ public static class VcaHookProcessHost
         services.AddSingleton<IVcaHookRunner, VcaHookRunner>();
         services.AddSingleton<IVcaHookValidationAnalyzer, VcaHookValidationAnalyzer>();
         services.AddSqliteJobStorage(_ => StatePath());
-        // Approvals a reviewer already gave over the staged tree (VB-50). Same file; read only here.
+        // Approvals a reviewer already gave over the staged tree (VB-50). Same file; read only here,
+        // and resolved only when a signature finding is pending, so building the runner opens nothing.
         services.AddSqliteReviewRequestStorage(_ => StatePath());
-        services.AddSingleton<IStoredCommitApprovalSource, ReviewRequestApprovalSource>();
+        services.AddSingleton<IStoredCommitApprovalSource>(sp =>
+            new ReviewRequestApprovalSource(() => sp.GetService<VibeRails.DB.IReviewRequestStore>()));
         services.AddGitPreflight();
         services.AddSingleton<IVcaHookPresenter>(_ =>
             new VcaConsoleHookPresenter(new VcaHookConsoleOptions(output, error, input, enableSpinner, style)));

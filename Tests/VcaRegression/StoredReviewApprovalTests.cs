@@ -103,16 +103,52 @@ public sealed class StoredReviewApprovalTests
         Assert.Contains("No signature was added", run.Transcript);
     }
 
+    /// <summary>
+    /// Codex review F1: the hook host registers the ledger against the user's state.db; under the
+    /// harness it must resolve to the per-repository file, and only when a signature is pending.
+    /// </summary>
+    [Fact]
+    public async Task HarnessKeepsTheLedgerInsideTheRepository()
+    {
+        await using var repo = await VcaRegressionRepository.CreateAsync("signed-approval/basic");
+        Use(repo, FakeCommitSignatureVerifier.ValidFor("owner@example.com"));
+        var ledger = Path.Combine(repo.RepositoryPath, ".git", "vca-regression-state.db");
+
+        // pre-commit defers signature rules, so nothing pending: the ledger is never opened.
+        var preCommit = await repo.RunPreCommitAsync();
+        Assert.Equal(0, preCommit.ExitCode);
+        Assert.False(TableExists(ledger, "ReviewRequests"));
+
+        // commit-msg has a pending approval, consults the ledger, and finds the harness's file.
+        var run = await repo.RunCommitMessageAsync("Change db\n");
+        Assert.Equal(1, run.ExitCode);
+        Assert.True(TableExists(ledger, "ReviewRequests"));
+    }
+
+    private static bool TableExists(string databasePath, string table)
+    {
+        if (!File.Exists(databasePath)) return false;
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $name;";
+        command.Parameters.AddWithValue("$name", table);
+        return command.ExecuteScalar() is not null;
+    }
+
     private static async Task SeedApprovalAsync(VcaRegressionRepository repo, string tree, string reviewer, string status = "open")
     {
         var store = UseStore(repo);
         var now = DateTime.UtcNow;
         var request = new ReviewRequestRecord(Guid.NewGuid().ToString("D"), repo.RepositoryPath, ReviewScope.Staged, tree, null,
-            null, status, "{}", now, now);
+            null, ReviewRequestStatus.Open, "{}", now, now);
         await store.AddAsync(request, TestContext.Current.CancellationToken);
-        await store.AddDecisionAsync(new ReviewDecisionRecord(0, request.Id, reviewer, ReviewDecisionKind.Approved, null,
+        var outcome = await store.RecordDecisionAsync(new ReviewDecisionRecord(0, request.Id, reviewer, ReviewDecisionKind.Approved, null,
             HumanSignatureRuleTests.KeyId, HumanSignatureRuleTests.Fingerprint, tree, HumanSignatureRuleTests.SignatureBase64, now, now),
-            TestContext.Current.CancellationToken);
+            now, TestContext.Current.CancellationToken);
+        Assert.NotNull(outcome);
+        if (status != ReviewRequestStatus.Open)
+            Assert.True(await store.UpdateStatusAsync(request.Id, status, now, TestContext.Current.CancellationToken));
     }
 
     private static ReviewRequestStore UseStore(VcaRegressionRepository repo)

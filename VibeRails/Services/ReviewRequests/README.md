@@ -13,6 +13,9 @@ that exists (slice A, 2026-10-23: the desktop core) and records the design decis
   attached sessions, the reviewers, an optional Board card key and note. Text is bounded to 256 KiB
   per file and 4 MiB per bundle, in path order; a file over either bound is listed without text and
   says why (`binary`, `oversized`, `bundle-limit`), so the reviewer knows what they are not seeing.
+  The hook's snapshot carries no baseline for a deleted path and flags it binary, so deleted files
+  are read from the frozen base tree (`GitStagedSnapshotProvider.TryReadTreeTextAsync`) under the
+  same bounds: a deleted text file shows what was removed; a deleted binary stays `binary`.
 - **Ledger.** `IReviewRequestStore` / `ReviewRequestStore` in state.db, additive component
   `review-requests/1`: `ReviewRequests` (id, project, scope, tree id, base commit, card key, status,
   bundle JSON, timestamps) and `ReviewDecisions` (reviewer, decision, comment, the verified trailer
@@ -25,16 +28,22 @@ that exists (slice A, 2026-10-23: the desktop core) and records the design decis
   reviewer's `vibe-signature:` line**: it must cover this request's tree, viberails.ai must confirm
   the signature and name the signer's verified email (`ICommitSignatureVerifier`, the hook's
   verifier), and that email must be one of the request's reviewers. Only then is it stored, with
-  the verified time. A request is approved by any verified approval and rejected by a rejection
-  without one.
+  the verified time. The store records the decision and recomputes the status in one `BEGIN
+  IMMEDIATE` transaction (`RecordDecisionAsync`): approved by any verified approval, otherwise
+  rejected by any rejection, otherwise open; a request that was cancelled while an approval was out
+  for verification refuses the decision (`not_open`) and stores nothing, so a cancelled request can
+  never be revived into a hook-eligible approval.
 - **Commit hook.** `VcaHookRunner` (commit-msg) asks `IStoredCommitApprovalSource` for a verified
   approval over the staged tree from one of the rule's approvers (any verified signer for
   `Human verified`) before it offers the signing popup. A hit is appended to the message with the
   popup's own trailer writer and the commit is rechecked, which verifies it with viberails.ai like
   any other trailer. So an agent's commit passes once a person has approved exactly that tree, and
-  never without one. `ReviewRequestApprovalSource` reads the ledger within three seconds and is
-  quiet on any failure: the ledger is a convenience, never a gate. Each stored signature is applied
-  at most once per run, so an unreachable viberails.ai cannot loop.
+  never without one. `ReviewRequestApprovalSource` resolves the store only when a signature finding
+  is pending (building the hook runner opens no database), reads the ledger within three seconds
+  and is quiet on any failure: the ledger is a convenience, never a gate. Each stored signature is
+  applied at most once per run, so an unreachable viberails.ai cannot loop. Both hook test
+  harnesses (`VcaRegressionRepository`, `VcaHookEndToEndTests`) replace the store with the same
+  per-repository file they give the job store, so no hook test opens the user's state.db.
 - **Routes.** `/api/v1/review-requests` on the active root only, both local credentials, no-store:
   `GET` list, `POST` create (16 KiB body: `{ scope?, reviewers, sessions?, cardKey?, note? }`, 201),
   `GET /{id}` detail with the bundle, `POST /{id}/decisions` (32 KiB body:

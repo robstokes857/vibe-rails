@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using VibeRails.Data.Sqlite;
 using VibeRails.DB;
 using VibeRails.Services.Git;
 using VibeRails.Services.Mcp.Tools;
@@ -308,6 +309,9 @@ internal sealed class VcaRegressionRepository : IAsyncDisposable
             services =>
             {
                 services.Replace(ServiceDescriptor.Singleton<IJobStore>(_ => new JobStore(connectionString)));
+                // The review-approval ledger the commit-msg hook consults (VB-50) lives in the same
+                // per-repository file, so no hook run under this harness opens the user's state.db.
+                services.Replace(ServiceDescriptor.Singleton<IReviewRequestStore>(_ => new ReviewRequestStore(connectionString)));
                 ConfigureServices?.Invoke(services);
             },
             transcript,
