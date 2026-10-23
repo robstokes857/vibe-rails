@@ -38,7 +38,9 @@ public sealed class GitHubPullRequestClient(ICliWrapper cli) : IGitHubPullReques
     internal const int StateBatchSize = 50;
 
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(20);
-    private const int MaxErrorDetail = 500;
+
+    /// <summary><c>gh help exit-codes</c>: 4 is "authentication required".</summary>
+    internal const int GhAuthRequiredExitCode = 4;
 
     private static readonly IReadOnlyDictionary<string, string?> GhEnvironment = new Dictionary<string, string?>
     {
@@ -55,7 +57,7 @@ public sealed class GitHubPullRequestClient(ICliWrapper cli) : IGitHubPullReques
              "--limit", OpenListLimit.ToString(CultureInfo.InvariantCulture),
              "--json", "number,title,author,createdAt,updatedAt,isDraft,headRefOid,url"], ct);
         if (!result.IsSuccess)
-            throw new GitHubCliException($"Unable to list open pull requests for {repository.FullName}: {Detail(result)}");
+            throw new GitHubCliException(Failure("list open pull requests", repository, result));
         try
         {
             return ParseOpenPullRequests(result.StandardOutput, repository);
@@ -83,7 +85,9 @@ public sealed class GitHubPullRequestClient(ICliWrapper cli) : IGitHubPullReques
             try { parsed = ParseStates(result.StandardOutput, batch); }
             catch (JsonException) { }
             if (parsed is null)
-                throw new GitHubCliException($"Unable to read pull request states for {repository.FullName}: {Detail(result)}");
+                throw new GitHubCliException(result.IsSuccess
+                    ? "The GitHub CLI returned an unexpected pull request state answer."
+                    : Failure("read pull request states", repository, result));
             states.AddRange(parsed);
         }
         return states;
@@ -151,12 +155,21 @@ public sealed class GitHubPullRequestClient(ICliWrapper cli) : IGitHubPullReques
     private Task<CliResult> RunAsync(string workingDirectory, IReadOnlyList<string> arguments, CancellationToken ct) =>
         cli.RunAsync(new CliRequest("gh", arguments, workingDirectory, GhEnvironment, Timeout), cancellationToken: ct);
 
-    private static string Detail(CliResult result)
-    {
-        var detail = (string.IsNullOrWhiteSpace(result.StandardError) ? result.DescribeFailure() : result.StandardError).Trim();
-        if (detail.Length > MaxErrorDetail) detail = detail[..MaxErrorDetail] + "…";
-        return detail + " Check that the GitHub CLI (gh) is installed and signed in with `gh auth status`.";
-    }
+    /// <summary>
+    /// Fixed wording chosen by how the run ended. gh's stderr can carry GitHub's own error prose and
+    /// this message reaches the page and MCP agents, so stderr is never reflected.
+    /// </summary>
+    internal static string Failure(string action, GitHubRepository repository, CliResult result) =>
+        result.TimedOut
+            ? $"The GitHub CLI (gh) did not answer within {Timeout.TotalSeconds:0} seconds while trying to {action} for {repository.FullName}."
+        : result.Cancelled
+            ? $"The request to {action} for {repository.FullName} was cancelled."
+        : result.ExitCode == TerminalScriptBuilder.LaunchFailedExitCode
+            ? "The GitHub CLI (gh) could not be started. Install it from https://cli.github.com, then sign in with `gh auth login`."
+        : result.ExitCode == GhAuthRequiredExitCode
+            ? "The GitHub CLI (gh) is not signed in. Run `gh auth login`, then try again."
+        : $"Unable to {action} for {repository.FullName} (gh exited with code {result.ExitCode}). "
+            + "Check `gh auth status` and that the signed-in account can read this repository.";
 
     private static string? ReadString(JsonElement element, string property) =>
         element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;

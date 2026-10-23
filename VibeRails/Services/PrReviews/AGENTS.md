@@ -37,7 +37,8 @@ requests: which PRs were reviewed, what each pass found, and which PR to review 
   answers 502 when `gh` fails, so "nothing to review" and "cannot see GitHub" never look alike.
 - **`gh` is the user's.** `GitHubPullRequestClient` runs it through `ICliWrapper` (argv, stdin
   closed, `GH_PROMPT_DISABLED`, 20 s timeout) with an explicit `-R owner/name` or GraphQL
-  variables. VibeRails stores no GitHub credential. See API_SEC.md, "GitHub pull request reads".
+  variables. VibeRails stores no GitHub credential. Failure messages are fixed wording keyed on how
+  `gh` ended; its stderr is never reflected. See API_SEC.md, "GitHub pull request reads".
 - **The page** polls queue, sync and list once a minute on the list page only, never while the
   UI is hidden, and never with a second round behind a slow first. The detail page does not poll,
   so a half-written review is not re-rendered away. Deletes go through `confirmDialog`.
