@@ -88,6 +88,7 @@ file; it is reference material, not instructions.
 | Storage, schema, migrations | [SQLite instructions](VibeRails.Data.Sqlite/AGENTS.md), [database reference](VibeRails.Data.Sqlite/DB/AGENTS.md), [Board store](VibeRails.Data.Sqlite/Board/AGENTS.md) |
 | VCA rules and git hooks | [VCA guide](VibeRails/Services/VCA/AGENTS.md), [git hook installation](docs/git-hooks.md) |
 | Python scripts | [Python scripts guide](VibeRails/Services/PythonScripts/AGENTS.md) |
+| PR review tracker (Reviews page, `*_pr_review*` MCP tools) | [PR Reviews guide](VibeRails/Services/PrReviews/AGENTS.md) |
 | Frontend modules | [wwwroot guide](VibeRails/wwwroot/AGENTS.md), [code report viewer contract](VibeRails/wwwroot/js/modules/code-report/README.md) |
 | Token saver and the local LLM proxy | [TokenSaver README](TokenSaver/README.md) |
 | UI and end-to-end tests | [UITests guide](UITests/AGENTS.md) |

@@ -81,6 +81,13 @@ Uses the real frontend with mocked board APIs to verify compact board controls, 
 image rendering/editing/upload/deletion, save/reopen, running-agent controls, and desktop/narrow layouts.
 It starts a temporary static server and never touches the machine's board database.
 
+### Focused PR Reviews tests (No Backend Required)
+
+From `UITests`, run `npx playwright test --config playwright.pr-reviews.config.js`.
+Uses installed Chrome and the production frontend with intercepted APIs to check draft preservation
+across detail actions, save-time input locking, and starting a pass at the current GitHub head.
+No application database is opened and no GitHub request or CLI is launched.
+
 ### Focused public-card sharing tests
 
 From the repository root, run `node UITests/node_modules/@playwright/test/cli.js test --config UITests/playwright.card-sharing.config.js`.

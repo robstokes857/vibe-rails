@@ -16,6 +16,7 @@ import { SetupAlert } from './js/modules/setup-panel.js';
 import { RemoteAccountLinkPanel } from './js/modules/remote-account-link.js';
 import { VibeRailsAiController } from './js/modules/vibe-rails-ai-controller.js';
 import { McpController } from './js/modules/mcp-controller.js';
+import { PrReviewsController } from './js/modules/pr-reviews-controller.js';
 import { JobController } from './js/modules/jobs-controller.js';
 import { PythonScriptWorkbench } from './js/modules/python-script-workbench.js';
 import { BoardController } from './js/modules/board-controller.js';
@@ -62,6 +63,7 @@ export class VibeControlApp {
         this.setupAlert = new SetupAlert(this);
         this.vibeRailsAiController = new VibeRailsAiController(this);
         this.mcpController = new McpController(this);
+        this.prReviewsController = new PrReviewsController(this);
         this.jobController = new JobController(this);
         this.pythonScriptWorkbench = new PythonScriptWorkbench(this);
         this.boardController = new BoardController(this);
@@ -613,6 +615,7 @@ export class VibeControlApp {
             'terminal-focus',
             'vibe-rails-ai',
             'mcp',
+            'pr-reviews',
             'ai-agents',
             'automations',
             'board'
@@ -853,6 +856,8 @@ export class VibeControlApp {
         // Tear down the MCP Explorer's global listener / xterm instances when navigating away
         // (and before re-entering, which rebuilds them). Idempotent.
         this.mcpController?.unload?.();
+        // Stops the PR Reviews poll and aborts its requests; re-entry rebuilds them.
+        this.prReviewsController?.unload?.();
         this.applyViewLayoutState(view);
         this.queueScrollPageToTop();
         const views = {
@@ -872,6 +877,8 @@ export class VibeControlApp {
             'terminal-focus': () => this.terminalController.loadTerminalFocusView(data),
             'vibe-rails-ai': () => this.vibeRailsAiController.loadView(),
             'mcp': () => this.mcpController.loadView(),
+            // The list, or one PR's detail page when data carries { number }.
+            'pr-reviews': () => this.prReviewsController.loadView(data),
             // One controller serves both pages. 'jobs' stays as the historical id that Board
             // lane links and the VS Code launcher bridge navigate to; it opens the Agents page,
             // which redirects an Automation's edit request to its own page.

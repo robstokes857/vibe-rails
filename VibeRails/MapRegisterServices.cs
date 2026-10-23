@@ -274,6 +274,9 @@ namespace VibeRails
             serviceCollection.AddScoped<IProjectCache, ProjectCache>();
             serviceCollection.AddScoped<IGlobalCache, GlobalCache>();
             serviceCollection.AddScoped<Services.Setup.ISetupStatusService, Services.Setup.SetupStatusService>();
+            // PR review tracker: routes are root-only, the registration is harmless elsewhere.
+            // Storage comes from AddSqliteStorage above.
+            Services.PrReviews.PrReviewServiceCollectionExtensions.AddPrReviews(serviceCollection);
             serviceCollection.AddScoped<IChatHistoryService, ChatHistoryService>();
             serviceCollection.AddSingleton<ISessionOutputParser, SessionParseV4>();
             serviceCollection.AddScoped<IGitService, GitService>();
@@ -341,6 +344,8 @@ namespace VibeRails
                 // Kanban board tools (ctor-injected board services). Registered here AND in
                 // McpStdioHost.ConfigureServices — the two transports must expose the same tools.
                 serviceCollection.AddScoped<BoardTool>();
+                // PR review tools. Registered here AND in McpStdioHost.ConfigureServices.
+                serviceCollection.AddScoped<PrReviewTool>();
                 // run_shell_command (HostShellTools) and web_search/web_fetch (WebResearchTools) are
                 // intentionally not exposed for now (security review 2026-07-02). Classes kept in-tree;
                 // to restore, re-add AddScoped<...>() here, WithTools<...>() in the chain below, and the

@@ -64,6 +64,7 @@ public static class SqliteStorage
         services.TryAddSingleton<IJobStore>(sp => new JobStore(StateConnectionString(sp), sp.GetService<BoardAutomationEventSource>()?.Store, sp.GetService<IReviewRunSnapshotFactory>()));
         services.TryAddSingleton<ITokenSavingsStore>(sp => new TokenSavingsStore(StateConnectionString(sp)));
         services.TryAddSingleton<ICodeAnalyzerIgnoreStore>(sp => new CodeAnalyzerIgnoreStore(StateConnectionString(sp)));
+        services.TryAddSingleton<IPrReviewStore>(sp => new PrReviewStore(StateConnectionString(sp)));
         services.TryAddSingleton<ILlmExchangeLogStore>(sp => new LlmExchangeLogStore(ConnectionString(
             sp.GetRequiredService<SqliteStoragePaths>().ProxyDatabasePath)));
         services.TryAddSingleton<IDatabaseSnapshotStore, SqliteDatabaseSnapshotStore>();
@@ -79,6 +80,17 @@ public static class SqliteStorage
         Func<IServiceProvider, string> statePathFactory)
     {
         services.TryAddSingleton<IBoardStore>(sp => CreateBoardStore(statePathFactory(sp)));
+        return services;
+    }
+
+    /// <summary>
+    /// PR review records alone, for hosts that do not register the full state storage (the
+    /// <c>vb mcp</c> stdio host). The store owns its schema, so no Repository migration pass runs.
+    /// </summary>
+    public static IServiceCollection AddSqlitePrReviewStorage(this IServiceCollection services,
+        Func<IServiceProvider, string> statePathFactory)
+    {
+        services.TryAddSingleton<IPrReviewStore>(sp => new PrReviewStore(ConnectionString(statePathFactory(sp))));
         return services;
     }
 
@@ -117,6 +129,7 @@ public static class SqliteStorage
         {
             TokenSavingsStore.EnsureSchema(connection);
             CodeAnalyzerIgnoreStore.EnsureSchema(connection);
+            PrReviewStore.EnsureSchema(connection);
             CompressionCapturesSchema.EnsureSchema(connection);
         }
         using (var connection = SqliteConnectionFactory.Open(ConnectionString(paths.ProxyDatabasePath)))

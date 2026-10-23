@@ -16,7 +16,7 @@ boards/lanes and a card search, confirms the destination and lane Automation cou
 to replace an editor with unsaved drafts. Dispose it on close/replacement/unload. The existing
 navbar **Sign in** opens the device approval flow when signed out. The top navigation is the
 only application navigation. Quality is third and Rules fourth; they are separate destinations.
-Automation follows Rules, then ENVs, Vibe AI and MCP. The standalone play button opens
+Automation follows Rules, then ENVs, Vibe AI, MCP and Reviews. The standalone play button opens
 Quick actions for automations and signed scripts beside the accessible icon-only Settings cog.
 Its footer offers only **Customize list…**; open Agents and Automations through their top navigation links.
 Rules runs validation only; Quality restores or starts its own cached scan when opened.
@@ -89,6 +89,8 @@ Use microtasks, not short-delay `setTimeout` batching, for webview activity even
 | [js/modules/python-run-window.js](js/modules/python-run-window.js) | The little run window: argument rows + stdin in, exit code / output / return value out, no terminal (see "Python script run window" below) |
 | [js/modules/automation-launcher.js](js/modules/automation-launcher.js) | Nav "Launch" flyout (agents, automations and signed scripts; unsigned or modified scripts omitted) and its order/show-hide customize modal over `/api/v1/automation-nav/preferences`; `openCustomizationFromHost()` serves the VS Code launcher view, and a saved/reset list calls `__viberails_launcherChanged__` |
 | [js/modules/vscode-launcher-bridge.js](js/modules/vscode-launcher-bridge.js) | VS Code Activity Bar launcher view → dashboard commands (`runScript`, `openLauncherCustomize`, `manageAutomations`, `automationQueued`), each routed to the exact call the nav flyout makes; installed before the script-import bridge posts the ready signal that releases queued host messages. Also relays `PythonScriptsController.onStateChange` to `__viberails_launcherChanged__` when a script's id, display name, file name or approval changed (signed, revoked, renamed, edited, imported, deleted), so the view re-sorts; an identical refresh stays quiet |
+| [js/modules/pr-reviews-controller.js](js/modules/pr-reviews-controller.js) | `pr-reviews` view (nav **Reviews**): the PR review list, or one PR's detail page when `data.number` is set. The list polls the queue, GitHub lifecycle sync and list once a minute while visible; the detail page never polls, so an unsaved review is not re-rendered away. See [PR Reviews](../Services/PrReviews/AGENTS.md) |
+| [js/modules/pr-reviews-view.js](js/modules/pr-reviews-view.js) | PR Reviews wording (states, verdicts, queue reasons), list arithmetic (`summarizePullRequests`: live-only working lists, status counts within the lifecycle filter) and escape-first markup; node-tested in `pr-reviews-view.test.mjs` |
 | [js/modules/board-controller.js](js/modules/board-controller.js) | `board` view: the lane board — drag cards between lanes, drag lanes to reorder, filter, and the card editor with comments |
 | [js/modules/board-api.js](js/modules/board-api.js) | Board data layer: a thin client over `/api/v1/board/*` (every call rides `app.apiCall`, so cookie + tab header apply). `BoardApi.attach(app)` once from the controller |
 | [js/modules/board-card-links.js](js/modules/board-card-links.js) | Linked cards rail: project-wide key/title search, immediate link/unlink, and navigation through the card editor's unsaved-edit guard |

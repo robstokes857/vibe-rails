@@ -70,6 +70,8 @@ public static class RouteExtensions
         if (isActiveRootBackend)
             BoardRoutes.Map(app);
         if (isActiveRootBackend) PinRoutes.Map(app);
+        // PR review tracker: reads the dashboard project's git remote and runs `gh`, so root only.
+        if (isActiveRootBackend) PrReviewRoutes.Map(app);
         PushRoutes.Map(app);
         LifecycleRoutes.Map(app);
         app.Services.GetRequiredService<AppEventWebSocketHandler>().MapWebSocket(app);

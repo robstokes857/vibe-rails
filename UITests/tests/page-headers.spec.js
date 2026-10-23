@@ -6,6 +6,7 @@ const VIEWS = [
     ['code-quality', 'Code quality'],
     ['vibe-rails-ai', 'Vibe AI Search'],
     ['mcp', 'MCP Explorer'],
+    ['pr-reviews', 'PR Reviews'],
     ['settings', 'Application Settings']
 ];
 
@@ -24,7 +25,14 @@ test.beforeEach(async ({ page }) => {
             '/api/v1/llm-picker/preferences': { items: [] },
             '/api/v1/hooks/status': { inGitRepo: true, isInstalled: true },
             '/api/v1/mcp/tools': [],
-            '/api/v1/settings/pin/status': { isSet: false }
+            '/api/v1/settings/pin/status': { isSet: false },
+            '/api/v1/pr-reviews': {
+                repository: 'octo/widgets', repositoryUrl: 'https://github.com/octo/widgets', problem: null, pullRequests: []
+            },
+            '/api/v1/pr-reviews/queue': {
+                repository: 'octo/widgets', next: null, queue: [], skipped: [],
+                counts: { open: 0, eligible: 0, drafts: 0, upToDate: 0 }
+            }
         };
         return route.fulfill({ json: payloads[path] || {} });
     });

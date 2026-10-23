@@ -211,6 +211,11 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 | `attach_board_session` | `BoardTool.AttachBoardSession` | Explicitly attach the current VibeRails session to another card in the same project. Idempotent; preserves the original default. Future commit-link calls share with all attachments. No session-id argument or card move. |
 | `complete_board_agent` | `BoardTool.CompleteBoardAgent` | Current linked agent's first final report: required summary (≤ 4,000 characters), outcome `succeeded` / `failed` / `cancelled`, optional card. Does not stop its process or complete remaining workflow actions. |
 | `end_agent_session` | `AgentSessionTool.EndAgentSession` | Last call after all work/reports/handoff/moves and `complete_board_agent`: closes the calling PTY after 30 seconds. No target parameter; exact current session is rechecked at execution. Repeat calls keep the first deadline, recordings remain, and normal workflow continuation does not imply review approval. |
+| `get_pr_review_queue` | `PrReviewTool.GetPrReviewQueue` | Which open GitHub PR in this project's repository to review next and why (JSON: `next`, ranked `queue`, `skipped`, `counts`). Runs the user's `gh` read-only. See [PR Reviews](../PrReviews/AGENTS.md). |
+| `get_pr_review` | `PrReviewTool.GetPrReview` | One tracked PR with its derived status, GitHub lifecycle and review history (JSON). |
+| `start_pr_review` | `PrReviewTool.StartPrReview` | Starts or resumes the PR's single pending review pass; an untracked PR needs title, author and `openedAt`. Idempotent. |
+| `save_pr_review_draft` | `PrReviewTool.SavePrReviewDraft` | Checkpoints supplied findings onto the pending pass without completing it. |
+| `complete_pr_review` | `PrReviewTool.CompletePrReview` | Completes the pending pass with feedback and verdict; `blocking` defaults to `verdict == request_changes`. Local record only; posts nothing to GitHub. |
 | `get_board_agent_status` | `BoardTool.GetBoardAgentStatus` | Poll a card's ten newest agents or a specific linked session, completion reports, latest updates, recorded exits, pending lane entries and twenty recent card-triggered runs. Unknown liveness is explicit. |
 > The wire names are what tool callers use. Calling `SearchHistory` (PascalCase) returns "Unknown tool".
 
