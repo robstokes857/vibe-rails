@@ -89,6 +89,35 @@
         "title": "Manage Automations",
         "category": "VibeRails",
         "icon": "$(list-unordered)"
+      },
+      {
+        "command": "viberails.reviewInbox.refresh",
+        "title": "Refresh Reviews Requested of You",
+        "category": "VibeRails",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "viberails.reviewInbox.open",
+        "title": "Open Reviews Requested of You",
+        "category": "VibeRails"
+      },
+      {
+        "command": "viberails.reviewInbox.read",
+        "title": "Read on viberails.ai",
+        "category": "VibeRails",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "viberails.reviewInbox.approve",
+        "title": "Approve…",
+        "category": "VibeRails",
+        "icon": "$(check)"
+      },
+      {
+        "command": "viberails.reviewInbox.reject",
+        "title": "Reject…",
+        "category": "VibeRails",
+        "icon": "$(close)"
       }
     ],
     "viewsContainers": {
@@ -106,6 +135,11 @@
           "id": "viberails.launcher",
           "name": "Launch",
           "contextualTitle": "VibeRails"
+        },
+        {
+          "id": "viberails.reviewInbox",
+          "name": "Reviews requested of you",
+          "contextualTitle": "VibeRails"
         }
       ]
     },
@@ -114,10 +148,20 @@
         "view": "viberails.launcher",
         "when": "!viberails.dashboardOpen",
         "contents": "Open the VibeRails dashboard to list your automations and scripts.\n[Open Dashboard](command:viberails.open)"
+      },
+      {
+        "view": "viberails.reviewInbox",
+        "when": "!viberails.dashboardOpen",
+        "contents": "Open the VibeRails dashboard to see the changes other people asked you to review.\n[Open Dashboard](command:viberails.open)"
       }
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "viberails.reviewInbox.refresh",
+          "when": "view == viberails.reviewInbox",
+          "group": "navigation@1"
+        },
         {
           "command": "viberails.launcher.refresh",
           "when": "view == viberails.launcher",
@@ -139,11 +183,42 @@
           "command": "viberails.launcher.run",
           "when": "view == viberails.launcher && viewItem == launcherItem",
           "group": "inline"
+        },
+        {
+          "command": "viberails.reviewInbox.approve",
+          "when": "view == viberails.reviewInbox && viewItem == reviewInboxOpenItem",
+          "group": "inline@1"
+        },
+        {
+          "command": "viberails.reviewInbox.reject",
+          "when": "view == viberails.reviewInbox && viewItem == reviewInboxOpenItem",
+          "group": "inline@2"
+        },
+        {
+          "command": "viberails.reviewInbox.read",
+          "when": "view == viberails.reviewInbox && viewItem =~ /^reviewInbox/",
+          "group": "navigation@1"
         }
       ],
       "commandPalette": [
         {
           "command": "viberails.launcher.run",
+          "when": "false"
+        },
+        {
+          "command": "viberails.reviewInbox.open",
+          "when": "false"
+        },
+        {
+          "command": "viberails.reviewInbox.read",
+          "when": "false"
+        },
+        {
+          "command": "viberails.reviewInbox.approve",
+          "when": "false"
+        },
+        {
+          "command": "viberails.reviewInbox.reject",
           "when": "false"
         }
       ],

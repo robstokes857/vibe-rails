@@ -4,7 +4,8 @@ A review step before the commit: the developer asks a named person to look at th
 and the AI sessions that produced them, and to sign off. Unlike a pull request, the reviewer sees
 the whole conversation, not just the diff. This document is the component contract for the parts
 that exist (slice A, 2026-10-23: the desktop core; slice C, 2026-10-24: sending to viberails.ai and
-collecting decisions) and records the design decisions for the rest.
+collecting decisions; slice D, 2026-10-24: the reviewer's desktop and the approval popup) and records
+the design decisions for the rest.
 
 ## What exists
 
@@ -113,6 +114,44 @@ collecting decisions) and records the design decisions for the rest.
   is remembered for the process and not re-verified every pass; an unavailable verifier leaves it
   pending. Landed decisions publish `review_request_updated` (id, status, card key, sent) so the
   card UI (slice E) can refresh.
+- **Reviewer desktop (slice D).** "Reviews requested of you" (view `review-inbox`, reached from the
+  PR Reviews header, and the VS Code view of the same name) lists the requests viberails.ai holds for
+  the account's verified email. `ReviewInboxService` fetches them with the account key from
+  `GET https://viberails.ai/api/v1/review-requests/inbox` on the Board sync cadence
+  (`ReviewInboxState`, `.review-inbox.json` beside state.db: 15 minutes while a listed request is
+  open, doubling to two hours otherwise, never the 60 s tick; "Check now" fetches at once, at most
+  once per 10 s; a key change starts from an empty list) and serves the root-only routes
+  `/api/v1/review-inbox` (`GET` list, `POST /refresh`, `POST /{reference}/reject` with `{ comment }`,
+  `POST /{reference}/approve`). Reject posts `{ rejected, comment }` to the host's decision route
+  under the reviewer's key. Approve only opens the popup:
+  `vb --vca-hook sign-review --review <reference> --workdir <project> --console-window` through
+  `VcaHookConsoleRespawn` (CREATE_NEW_CONSOLE; Windows, interactive desktop, not CI; refused with
+  `popup_unavailable` otherwise), once per reference while it is open; its exit code is the only
+  thing the service learns, and it publishes `review_inbox_updated` when anything changes.
+- **The approval popup.** `ReviewSignaturePopup` (the `HumanSignaturePopup` family; both share
+  `SigningKeyPrompt`) fetches the bundle itself with the account key, shows the repository and the
+  local copy it will use, the requester, card and note (the requester's words, through
+  `HumanSignaturePopup.Clean`), the sessions, every file with its change kind, counts and omission,
+  the tree, the base and the hosted page, then stops before any key prompt when the request is not
+  open, the account is not a listed reviewer, it was already approved, or a file is listed without
+  content ("cannot be approved"). Otherwise `ReviewTreeRebuilder` proves the tree (next bullet) and
+  the popup prints the verdict, lists the synced keys, reads the password with echo off, signs the
+  tree with `SigningKeyService.SignCommitTreeAsync` (the staged-tree statement, so nothing new is
+  signable), confirms the signature with viberails.ai, warns when the key's account is not the saved
+  one, and posts `{ approved, trailer }` to `POST /api/v1/review-requests/{reference}/decisions`.
+  Exit code 0 means the approval was recorded; the window pauses either way so the verdict can be read.
+- **The tree is proven on the reviewer's machine (decision 7).** `ReviewTreeRebuilder.RebuildAsync`
+  runs in the reviewer's repository: the base commit must exist locally and own the bundle's base
+  tree; a temporary index (`GIT_INDEX_FILE`) is loaded with `read-tree <baseTree>`; each listed
+  file's staged text is hashed here from its exact UTF-8 bytes (capture decoded strict UTF-8, so the
+  round trip is byte-exact, byte-order mark and CRLF included) and placed with
+  `update-index --index-info`, a deleted path and a rename's source removed, a changed file keeping
+  its base mode and a new file assumed `100644`; `write-tree --missing-ok` must equal `treeId`. No
+  blob is written and the real index is never touched. Refusals name the reason: a file without
+  content, an unknown change kind, a missing base commit ("git fetch"), a base tree that is not the
+  commit's, or a mismatch, which a new executable also produces: the bundle carries no modes, and the
+  reviewer cannot tell a mode bit from a hidden change, so neither is signed. `GitCli.RunAsync`
+  gained `environment` and `standardInput` for this and is still the one git launch.
 
 The decision route's only outbound call is the existing public signature verification, with a tree
 id and no repository content. The send route and the poller are the only code that transfers a
@@ -151,7 +190,8 @@ bundle or reads hosted decisions; the security contract is
    must carry exact bytes for every changed path (binary and oversized files included) for a
    request to be approvable, and a base commit the reviewer lacks is refused. The ledger and the
    commit hook are unchanged: they check the signature over the tree, which is still the right
-   statement.
+   statement. Implemented in slice D (`ReviewTreeRebuilder`, above); carrying bytes for files
+   listed without content is still open.
 
 ## Slices
 
@@ -160,7 +200,7 @@ bundle or reads hosted decisions; the security contract is
 | A | Desktop core: capture, ledger, decision verification, commit-hook application, routes | Done (this document, VB-50) |
 | B | viberails.ai: request storage and endpoints, reviewer page over the existing session replay viewer and email-audience access | Implemented in VibeRails-Front (VB-OGK99-278, 2026-10-24); contract in its `Services/ReviewRequests/README.md`; cross-repo test `Tests/headless/BoardSync.Integration/ReviewRequestRoundTripTests.cs` |
 | C | Desktop transport: send a request and its sessions (reuse `SessionShareUploads`), poll decisions on the Board sync cadence, land approvals in the ledger | Done (VB-DPGU2-279 / VIBE-207, 2026-10-24; this document) |
-| D | Reviewer desktop: "Reviews requested of you" and a `vb --sign-review` console popup that shows the bundle summary and signs the tree | Backlog, VB-PR2U7-280 |
+| D | Reviewer desktop: "Reviews requested of you" (page, VS Code view) and the `vb --vca-hook sign-review` popup that rebuilds the tree in the reviewer's clone and signs it | Done (VB-PR2U7-280 / VIBE-208, 2026-10-24; this document). Open: bytes for binary, oversized and bundle-limit files, so such requests can be approved |
 | E | UI: Request review from a card (Sessions rail picker, approvers from the rule), status on the card, commit and Rules page; MCP `request_review` that never signs | Backlog, VB-4XXCY-281 |
 | F | Line comments, head-commit scope, VS Code surfacing, reviewer notification, retention | Later, VB-XBVE0-282 |
 
@@ -191,4 +231,23 @@ service's create and poll JSON with `ReviewRequestTransport.ParseStatus`.
 ```bash
 dotnet test Tests/Tests.csproj --filter "FullyQualifiedName~ReviewRequestTransportTests|FullyQualifiedName~ReviewRequestSenderTests|FullyQualifiedName~ReviewRequestPollerTests"
 dotnet test Tests/headless/BoardSync.Integration/BoardSync.Integration.csproj   # needs the sibling VibeRails-Front checkout
+```
+
+Slice D: `ReviewTreeRebuilderTests.cs` (a real repository plays the requester through the real bundle
+capture and a real clone plays the reviewer: CRLF, a byte-order mark, a deletion, a rename and a
+modified executable rebuild; tampered text, a file without content, a missing base commit, a plain
+directory and a new executable are refused; blob ids equal `git hash-object`), `ReviewInboxServiceTests.cs`
+(the 15-minute cadence and two-hour backoff with a fake clock, the persisted list beside state.db, a key
+change, manual-refresh spacing, reject's body and the host's refusals, approve opening the popup once
+and recording its exit), `ReviewInboxTransportTests.cs` (the inbox, bundle and decision calls and their
+validation), `Tests/Services/VCA/ReviewSignaturePopupTests.cs` (the popup with a fake console, key store,
+verifier and host: the order summary → verdict → keys, every refusal before a key prompt, the posted
+trailer), `GitCliTests` (environment and stdin reach git), the node test
+`Tests/wwwroot/js/review-inbox-view.test.mjs`, and the extension's `review-inbox-view.test.ts`. The
+cross-repository round trip now also reads the inbox and bundle projections through the desktop's
+validation and rebuilds the tree in a clone.
+
+```bash
+dotnet test Tests/Tests.csproj --filter "FullyQualifiedName~ReviewTreeRebuilder|FullyQualifiedName~ReviewInbox|FullyQualifiedName~ReviewSignaturePopup"
+node --test Tests/wwwroot/js/review-inbox-view.test.mjs
 ```

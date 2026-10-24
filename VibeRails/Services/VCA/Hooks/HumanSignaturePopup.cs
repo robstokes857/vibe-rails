@@ -63,10 +63,9 @@ public sealed class HumanSignaturePopup
     private const int MaxListedCards = 3;
 
     private readonly TextWriter _output;
-    private readonly IHumanSignatureConsole _console;
-    private readonly ICommitTreeSigner _signer;
     private readonly ICommitSignatureVerifier _verifier;
     private readonly VcaConsoleStyle _style;
+    private readonly SigningKeyPrompt _prompt;
     private readonly Func<string, string, string, CancellationToken, Task<IReadOnlyList<string>>> _listChanges;
     private readonly Func<string, string, CancellationToken, Task<IReadOnlyList<string>>> _findCards;
 
@@ -82,10 +81,9 @@ public sealed class HumanSignaturePopup
         Func<string, string, CancellationToken, Task<IReadOnlyList<string>>>? findCards = null)
     {
         _output = output;
-        _console = console;
-        _signer = signer;
         _verifier = verifier;
         _style = style ?? VcaConsoleStyle.Plain;
+        _prompt = new SigningKeyPrompt(output, console, signer, _style, "the commit does not need to be started again");
         _listChanges = listChanges ?? ListChangesWithGitAsync;
         _findCards = findCards ?? HumanSignatureBoardCards.FindAsync;
     }
@@ -110,18 +108,18 @@ public sealed class HumanSignaturePopup
 
         await WriteSummaryAsync(request, cancellationToken);
 
-        var keys = await WaitForSyncedKeysAsync(cancellationToken);
+        var keys = await _prompt.WaitForSyncedKeysAsync(cancellationToken);
         if (keys is null)
             return 1;
 
-        var key = await ChooseKeyAsync(keys, cancellationToken);
+        var key = await _prompt.ChooseKeyAsync(keys, cancellationToken);
         if (key is null)
         {
             await _output.WriteLineAsync("Cancelled. Nothing was signed.");
             return 1;
         }
 
-        var signature = await SignWithPasswordAsync(key, request.TreeId, cancellationToken);
+        var signature = await _prompt.SignWithPasswordAsync(key, request.TreeId, cancellationToken);
         if (signature is null) return 1;
 
         await _output.WriteLineAsync("Checking the signature with viberails.ai...");
@@ -212,111 +210,6 @@ public sealed class HumanSignaturePopup
         var s = _style;
         for (var i = 0; i < lines.Count; i++)
             await _output.WriteLineAsync($"  {s.Dim}{(i == 0 ? label : string.Empty),-10}{s.Reset}  {lines[i]}");
-    }
-
-    /// <summary>
-    /// Lists the keys that can sign. With none synced, the window waits for the person to create and
-    /// sync one in Settings &gt; KEYS and checks again on Enter, instead of failing and leaving a
-    /// "no signing key" window behind while they set one up for a second attempt (VIBE-200).
-    /// Null means cancelled, timed out or unreadable.
-    /// </summary>
-    private async Task<IReadOnlyList<SigningKeyInfo>?> WaitForSyncedKeysAsync(CancellationToken cancellationToken)
-    {
-        var s = _style;
-        for (var check = 0; ; check++)
-        {
-            IReadOnlyList<SigningKeyInfo> keys;
-            try
-            {
-                keys = await _signer.ListKeysAsync(cancellationToken);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
-            {
-                await _output.WriteLineAsync($"{s.Red}Could not read your signing keys: {ex.Message}{s.Reset}");
-                return null;
-            }
-            if (keys.Count > 0)
-                return keys;
-
-            if (check == 0)
-            {
-                await _output.WriteLineAsync($"{s.Yellow}No signing key on this computer is synced to viberails.ai.{s.Reset}");
-                await _output.WriteLineAsync(
-                    "Create one in VibeRails Settings > KEYS with your API key saved and sync it. This window waits; "
-                    + "the commit does not need to be started again.");
-            }
-            else
-            {
-                await _output.WriteLineAsync($"{s.Yellow}Still no synced signing key.{s.Reset}");
-            }
-
-            if (await _console.ReadLineAsync("Press Enter to check again (Esc cancels): ", cancellationToken) is null)
-            {
-                await _output.WriteLineAsync("Cancelled. Nothing was signed.");
-                return null;
-            }
-        }
-    }
-
-    private async Task<SigningKeyInfo?> ChooseKeyAsync(IReadOnlyList<SigningKeyInfo> keys, CancellationToken cancellationToken)
-    {
-        await _output.WriteLineAsync("Signing keys synced to viberails.ai:");
-        for (var i = 0; i < keys.Count; i++)
-            await _output.WriteLineAsync($"  {i + 1}) {keys[i].Name}  fingerprint {keys[i].Fingerprint[..12]}");
-        if (keys.Count == 1)
-            return keys[0];
-
-        while (true)
-        {
-            var answer = await _console.ReadLineAsync($"Key number [1-{keys.Count}, Enter for 1, Esc cancels]: ", cancellationToken);
-            if (answer is null) return null;
-            answer = answer.Trim();
-            if (answer.Length == 0) return keys[0];
-            if (int.TryParse(answer, out var number) && number >= 1 && number <= keys.Count)
-                return keys[number - 1];
-            await _output.WriteLineAsync($"Enter a number from 1 to {keys.Count}.");
-        }
-    }
-
-    private async Task<CommitSignature?> SignWithPasswordAsync(SigningKeyInfo key, string treeId, CancellationToken cancellationToken)
-    {
-        var s = _style;
-        for (var attempt = 1; attempt <= MaxPasswordAttempts; attempt++)
-        {
-            var password = await _console.ReadSecretAsync($"Password for \"{key.Name}\" (hidden, Esc cancels): ", cancellationToken);
-            if (password is null)
-            {
-                await _output.WriteLineAsync("Cancelled. Nothing was signed.");
-                return null;
-            }
-
-            try
-            {
-                return await _signer.SignAsync(key.Id, password, treeId, cancellationToken);
-            }
-            catch (SigningKeyLockedException ex)
-            {
-                await _output.WriteLineAsync($"{s.Red}{ex.Message}{s.Reset}");
-                return null;
-            }
-            catch (ArgumentException ex)
-            {
-                await _output.WriteLineAsync($"{s.Red}{ex.Message}{s.Reset}");
-                // Only a wrong password is worth another try; every other refusal repeats itself.
-                if (!ex.Message.StartsWith("Incorrect password", StringComparison.Ordinal)
-                    && !ex.Message.StartsWith("Password ", StringComparison.Ordinal))
-                    return null;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or KeyNotFoundException
-                or System.Text.Json.JsonException)
-            {
-                await _output.WriteLineAsync($"{s.Red}Could not use the signing key: {ex.Message}{s.Reset}");
-                return null;
-            }
-        }
-
-        await _output.WriteLineAsync("Too many incorrect passwords. Nothing was signed.");
-        return null;
     }
 
     /// <summary>

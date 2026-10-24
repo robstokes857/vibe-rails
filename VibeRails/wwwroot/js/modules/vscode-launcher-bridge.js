@@ -33,6 +33,10 @@ export function setupVSCodeLauncherBridge(app, host = window) {
             case 'manageAutomations':
                 void settle(app, () => app.navigate?.('jobs'), 'Could not open the Automation page.');
                 return;
+            case 'openReviewInbox':
+                // The Activity Bar "Reviews requested of you" view: a row click lands on the dashboard page.
+                void settle(app, () => app.navigate?.('review-inbox'), 'Could not open Reviews requested of you.');
+                return;
             case 'automationQueued': {
                 const message = typeof data.message === 'string' && data.message ? data.message : 'Queued.';
                 app.showToast?.('Automation', message, 'success');

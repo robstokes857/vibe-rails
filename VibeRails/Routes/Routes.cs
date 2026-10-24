@@ -32,6 +32,8 @@ public static class RouteExtensions
         if (isActiveRootBackend) SessionSharingRoutes.Map(app);
         // Review requests before a commit (VB-50): dashboard-only, reads the project's staged index.
         if (isActiveRootBackend) ReviewRequestRoutes.Map(app);
+        // Reviews requested of this account (VB-50 slice D): the hosted inbox, reject, and the signing popup.
+        if (isActiveRootBackend) ReviewInboxRoutes.Map(app);
         LlmProxyRoutes.Map(app);
         LlmAnthropicProxyRoutes.Map(app);
         LlmZaiProxyRoutes.Map(app);

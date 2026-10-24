@@ -73,6 +73,14 @@ public sealed class BoardSyncScheduler(IServiceScopeFactory scopeFactory) : IBoa
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
                 catch (Exception ex) { Log.Warning(ex, "[ReviewRequests] Scheduled decision poll failed"); }
             }
+            // Requests addressed to this account's verified email (VB-50 slice D) refresh on the same
+            // self-paced cadence, from the same lease holder: 15 minutes while one is open, else backoff.
+            if (scope.ServiceProvider.GetService<ReviewRequests.ReviewInboxService>() is { } inbox)
+            {
+                try { await inbox.RefreshDueAsync(stoppingToken); }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
+                catch (Exception ex) { Log.Warning(ex, "[ReviewInbox] Scheduled refresh failed"); }
+            }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {

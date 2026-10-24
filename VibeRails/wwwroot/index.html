@@ -2998,6 +2998,13 @@
                     <h1 class="vb-page-title">PR Reviews</h1>
                     <p class="pr-subtitle" data-pr-repository>Lead-review log for this project's GitHub pull requests</p>
                 </div>
+                <div class="vb-page-actions">
+                    <!-- Review requests before a commit (VB-50 slice D) live on their own page. -->
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-pr-open-inbox
+                        title="Changes other people asked you to review before they commit">
+                        <i class="fa-solid fa-inbox me-1" aria-hidden="true"></i>Requested of you
+                    </button>
+                </div>
             </header>
 
             <div class="pr-section" data-pr-list-page>
@@ -5341,6 +5348,65 @@
                     <span class="badge" data-session-status></span>
                 </div>
             </div>
+        </div>
+    </template>
+
+    <!-- Reviews requested of you (view 'review-inbox', VB-50 slice D): the review requests viberails.ai
+         holds for this account's verified email, as the root backend last fetched them. Reject posts a
+         comment from here; Approve opens the signing popup in its own console window. review-inbox-controller.js -->
+    <template id="review-inbox-template">
+        <div class="view review-inbox-view" data-view="review-inbox">
+            <style>
+                .review-inbox-view { color: var(--color-text, #e6e6e6); display: grid; gap: 1.25rem; min-width: 0; }
+                .review-inbox-view [hidden] { display: none !important; }
+                .review-inbox-view .ri-muted { color: var(--color-text-muted, #9aa0a6); font-size: 0.85rem; }
+                .review-inbox-view .ri-status { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; }
+                .review-inbox-view .ri-list { display: grid; gap: 0.75rem; }
+                .review-inbox-view .ri-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.75rem 1rem; padding: 0.85rem 1rem;
+                    border: 1px solid var(--color-border, #2d2f36); border-left-width: 4px; border-radius: 8px; background: var(--color-bg-surface, #1b1d23); }
+                .review-inbox-view .ri-row[data-tone="warning"] { border-left-color: var(--color-warning, #f59e0b); }
+                .review-inbox-view .ri-row[data-tone="success"] { border-left-color: var(--color-success, #22c55e); }
+                .review-inbox-view .ri-row[data-tone="danger"] { border-left-color: var(--color-danger, #ef4444); }
+                .review-inbox-view .ri-row[data-tone="info"] { border-left-color: var(--color-accent, #06b6d4); }
+                .review-inbox-view .ri-row-main { display: grid; gap: 0.35rem; min-width: 0; }
+                .review-inbox-view .ri-row-title { font-weight: 600; overflow-wrap: anywhere; }
+                .review-inbox-view .ri-card { font-family: var(--font-mono, ui-monospace, monospace); color: var(--color-primary, #8b5cf6); font-weight: 400; margin-left: 0.35rem; }
+                .review-inbox-view .ri-row-meta { color: var(--color-text-muted, #9aa0a6); font-size: 0.82rem; overflow-wrap: anywhere; }
+                .review-inbox-view .ri-row-badges { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+                .review-inbox-view .ri-badge { display: inline-flex; align-items: center; padding: 0.1rem 0.5rem; border-radius: 999px; border: 1px solid var(--color-border, #2d2f36); font-size: 0.75rem; }
+                .review-inbox-view .ri-badge[data-tone="success"] { color: var(--color-success, #22c55e); border-color: color-mix(in srgb, var(--color-success, #22c55e) 45%, transparent); }
+                .review-inbox-view .ri-badge[data-tone="warning"] { color: var(--color-warning, #f59e0b); border-color: color-mix(in srgb, var(--color-warning, #f59e0b) 45%, transparent); }
+                .review-inbox-view .ri-badge[data-tone="danger"] { color: var(--color-danger, #ef4444); border-color: color-mix(in srgb, var(--color-danger, #ef4444) 45%, transparent); }
+                .review-inbox-view .ri-badge[data-tone="info"] { color: var(--color-accent, #06b6d4); border-color: color-mix(in srgb, var(--color-accent, #06b6d4) 45%, transparent); }
+                .review-inbox-view .ri-row-actions { display: flex; flex-direction: column; align-items: stretch; gap: 0.4rem; min-width: 11rem; }
+                .review-inbox-view .ri-reject-form { display: grid; gap: 0.5rem; margin-top: 0.35rem; }
+                .review-inbox-view .ri-reject-actions { display: flex; gap: 0.5rem; }
+                .review-inbox-view .ri-empty { padding: 1.25rem; border: 1px dashed var(--color-border, #2d2f36); border-radius: 8px; color: var(--color-text-muted, #9aa0a6); }
+                .review-inbox-view .ri-alert { padding: 0.6rem 0.9rem; border-radius: 8px; border: 1px solid var(--color-border, #2d2f36); }
+                .review-inbox-view .ri-alert[data-tone="danger"] { border-color: var(--color-danger, #ef4444); }
+                .review-inbox-view .ri-alert[data-tone="warning"] { border-color: var(--color-warning, #f59e0b); }
+                @media (max-width: 720px) {
+                    .review-inbox-view .ri-row { grid-template-columns: minmax(0, 1fr); }
+                    .review-inbox-view .ri-row-actions { flex-direction: row; flex-wrap: wrap; }
+                }
+            </style>
+            <header class="vb-page-header">
+                <div class="vb-page-heading">
+                    <h1 class="vb-page-title">Reviews requested of you <span class="ri-muted" data-ri-count></span></h1>
+                    <p class="vb-page-description">Changes other people asked you to look at before they commit. Read each one on viberails.ai,
+                        with the sessions that produced it. Approve here: a signing window rebuilds the change from your own copy of the
+                        repository, shows it, and signs it with your key.</p>
+                </div>
+                <div class="vb-page-actions">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-ri-action="back">
+                        <i class="fa-solid fa-code-pull-request me-1" aria-hidden="true"></i>PR Reviews
+                    </button>
+                </div>
+            </header>
+            <div class="ri-status" data-ri-status></div>
+            <div data-ri-problem hidden></div>
+            <p class="ri-muted" data-ri-popup-note hidden>Approving needs the signing popup, which opens only on Windows with an interactive desktop. Rejecting works here.</p>
+            <section class="ri-list" data-ri-list aria-live="polite"></section>
         </div>
     </template>
 

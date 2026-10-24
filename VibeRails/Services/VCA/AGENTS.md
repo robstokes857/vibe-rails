@@ -385,6 +385,7 @@ author junk. Reads no longer filter, so hand-edited junk is shown rather than hi
 | `HumanSignatureRule.cs` | Human verified / Signed Approval syntax, the `vibe-signature:` trailer and the signed payload. |
 | `CommitSignatureVerifier.cs` | Commit-signature verification through viberails.ai's public verify endpoint. |
 | `Hooks/HumanSignaturePopup.cs`, `Hooks/HumanSignaturePrompt.cs` | The signing popup and the launcher that decides where it may run. |
+| `Hooks/ReviewSignaturePopup.cs`, `Hooks/SigningKeyPrompt.cs` | The review approval popup (`--vca-hook sign-review --review <rvw_…>`, VB-50 slice D: fetches the request, proves the tree in the local clone, then signs) and the key-and-password prompt both popups share. Contract: [Services/ReviewRequests/README.md](../ReviewRequests/README.md). |
 | `Hooks/HumanSignatureBoardCards.cs` | The Board card lines in the popup summary (read-only, bounded). |
 | `../GitPreflight/` | Step pipeline (VCA → MintLint → automated workflows) and its event stream. |
 

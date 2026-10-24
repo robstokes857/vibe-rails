@@ -23,17 +23,24 @@ public static class GitCli
     /// <summary>Runs git, optionally retaining only a bounded prefix of each output stream.</summary>
     /// <param name="maxOutputChars">Maximum characters retained per stream; null keeps the full output.
     /// Excess output is drained through a fixed-size buffer so git can exit without blocking.</param>
+    /// <param name="environment">Variables set for this child only (for example <c>GIT_INDEX_FILE</c>
+    /// pointing a plumbing command at a temporary index). Nothing else about the launch changes.</param>
+    /// <param name="standardInput">Bytes written to git's stdin before it is closed, for commands that
+    /// read their input (<c>update-index --index-info</c>, <c>hash-object --stdin</c>). Stdin is closed
+    /// either way, so git always gets EOF.</param>
     public static async Task<GitCliResult> RunAsync(
         string workingDirectory,
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken,
         TimeSpan? timeout = null,
-        int? maxOutputChars = null)
+        int? maxOutputChars = null,
+        IReadOnlyDictionary<string, string>? environment = null,
+        ReadOnlyMemory<byte>? standardInput = null)
     {
         if (maxOutputChars is < 0)
             throw new ArgumentOutOfRangeException(nameof(maxOutputChars));
 
-        using var process = new Process { StartInfo = CreateStartInfo(workingDirectory, arguments) };
+        using var process = new Process { StartInfo = CreateStartInfo(workingDirectory, arguments, environment) };
 
         try
         {
@@ -48,17 +55,19 @@ public static class GitCli
             return new GitCliResult(-1, string.Empty, ex.Message, TimedOut: false);
         }
 
-        // Hand git an immediately-closed stdin. Without redirection the child inherits this process's
-        // stdin, which for the stdio MCP server is the agent's live JSON-RPC pipe (never at EOF); any
-        // git that consults it would block until the kill-on-timeout. An EOF here severs that. VB-14.
-        try { process.StandardInput.Close(); }
-        catch { /* the write end still closes when the process is disposed, so git still gets EOF */ }
-
+        // The output drains start before anything is written to stdin: git can answer while it is
+        // still reading, and once its output pipe fills it stops reading, so a write made before
+        // anyone reads would never finish.
         using var drainCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var stdoutTask = ReadOutputAsync(process.StandardOutput, maxOutputChars, drainCts.Token);
         var stderrTask = ReadOutputAsync(process.StandardError, maxOutputChars, drainCts.Token);
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(timeout ?? DefaultTimeout);
+
+        // Hand git its input, then a closed stdin. Without redirection the child inherits this process's
+        // stdin, which for the stdio MCP server is the agent's live JSON-RPC pipe (never at EOF); any
+        // git that consults it would block until the kill-on-timeout. An EOF here severs that. VB-14.
+        await WriteStandardInputAsync(process, standardInput, timeoutCts.Token);
 
         var timedOut = false;
         try
@@ -131,7 +140,10 @@ public static class GitCli
     /// directory now fails inside git (exit 128, "cannot change to") instead of at process start.
     /// </para>
     /// </remarks>
-    internal static ProcessStartInfo CreateStartInfo(string workingDirectory, IReadOnlyList<string> arguments)
+    internal static ProcessStartInfo CreateStartInfo(
+        string workingDirectory,
+        IReadOnlyList<string> arguments,
+        IReadOnlyDictionary<string, string>? environment = null)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -156,7 +168,38 @@ public static class GitCli
         startInfo.ArgumentList.Add("core.fsmonitor=false");
         foreach (var argument in arguments)
             startInfo.ArgumentList.Add(argument);
+        if (environment is not null)
+        {
+            foreach (var (name, value) in environment)
+                startInfo.Environment[name] = value;
+        }
         return startInfo;
+    }
+
+    /// <summary>
+    /// Writes any explicit input and then always closes stdin. Called after the output drains have
+    /// started. A git that closes its end early (it exited, or the deadline killed it) ends the write
+    /// instead of failing the run; its exit code, stderr or the timeout say why.
+    /// </summary>
+    private static async Task WriteStandardInputAsync(Process process, ReadOnlyMemory<byte>? standardInput, CancellationToken deadline)
+    {
+        try
+        {
+            if (standardInput is { IsEmpty: false } input)
+            {
+                // A pipe write need not observe cancellation once it has started, so the deadline
+                // kills git instead and the broken pipe ends the write.
+                using var killOnDeadline = deadline.Register(static state => TryKill((Process)state!), process);
+                await process.StandardInput.BaseStream.WriteAsync(input, deadline);
+            }
+        }
+        catch (IOException) { /* git closed its end; the exit code says why */ }
+        catch (OperationCanceledException) { /* the deadline killed git; the wait below reports the timeout */ }
+        finally
+        {
+            try { process.StandardInput.Close(); }
+            catch { /* the write end still closes when the process is disposed, so git still gets EOF */ }
+        }
     }
 
     private static async Task<string> ReadOutputAsync(StreamReader reader, int? maxChars, CancellationToken cancellationToken)

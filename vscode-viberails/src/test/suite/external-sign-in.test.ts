@@ -1,7 +1,27 @@
 import * as assert from 'assert/strict';
-import { isAllowedSignInUrl, openExternalSignIn } from '../../external-sign-in';
+import { isAllowedReviewRequestUrl, isAllowedSignInUrl, openExternalSignIn } from '../../external-sign-in';
 
 suite('External sign-in bridge', () => {
+    test('opens a review request page only for the fixed host, path and a strict reference', async () => {
+        const reference = 'rvw_0123456789abcdef0123456789abcdef';
+        const opened: string[] = [];
+        const open = async (url: string) => { opened.push(url); return true; };
+        for (const url of [
+            `https://evil.example/Reviews/requests/${reference}`, `https://viberails.ai.evil.example/Reviews/requests/${reference}`,
+            `https://viberails.ai:443/Reviews/requests/${reference}`, `http://viberails.ai/Reviews/requests/${reference}`,
+            'https://viberails.ai/Reviews/requests/rvw_short', `https://viberails.ai/Reviews/requests/${reference.toUpperCase()}`,
+            `https://viberails.ai/Reviews/requests/${reference}?x=1`, `https://viberails.ai/Reviews/requests/${reference}#x`,
+            `https://viberails.ai/Reviews/requests/${reference}/`, ` https://viberails.ai/Reviews/requests/${reference}`,
+            'https://viberails.ai/Reviews/requests', `https://user:secret@viberails.ai/Reviews/requests/${reference}`]) {
+            assert.equal(isAllowedReviewRequestUrl(url), false, url);
+            assert.equal(await openExternalSignIn(url, open), false, url);
+        }
+        assert.deepEqual(opened, []);
+        assert.equal(await openExternalSignIn(`https://viberails.ai/Reviews/requests/${reference}`, open), true);
+        assert.deepEqual(opened, [`https://viberails.ai/Reviews/requests/${reference}`]);
+        assert.equal(isAllowedSignInUrl(`https://viberails.ai/Reviews/requests/${reference}`), false);
+    });
+
     test('opens only the fixed page and a strict public-code fragment', async () => {
         const opened: string[] = [];
         const open = async (url: string) => { opened.push(url); return true; };

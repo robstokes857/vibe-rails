@@ -25,6 +25,19 @@ export const LAUNCHER_VIEW_ID = 'viberails.launcher';
 /** Context key behind the view's welcome content; true while the dashboard panel exists. */
 export const CONTEXT_DASHBOARD_OPEN = 'viberails.dashboardOpen';
 
+// --- Activity Bar "Reviews requested of you" view (VB-50 slice D) ---------
+
+/** Also hardcoded in the `view ==` clauses of the menu contributions in package.json. */
+export const REVIEW_INBOX_VIEW_ID = 'viberails.reviewInbox';
+export const COMMAND_REVIEW_INBOX_REFRESH = 'viberails.reviewInbox.refresh';
+/** Row click: opens the dashboard's "Reviews requested of you" page. */
+export const COMMAND_REVIEW_INBOX_OPEN = 'viberails.reviewInbox.open';
+/** Opens the request's page on viberails.ai in the browser (the sessions replay there). */
+export const COMMAND_REVIEW_INBOX_READ = 'viberails.reviewInbox.read';
+/** Opens the signing popup for the row's request; nothing in the extension signs. */
+export const COMMAND_REVIEW_INBOX_APPROVE = 'viberails.reviewInbox.approve';
+export const COMMAND_REVIEW_INBOX_REJECT = 'viberails.reviewInbox.reject';
+
 // --- Webview / output -----------------------------------------------------
 
 /**
@@ -60,6 +73,12 @@ export const AUTOMATION_NAV_PREFERENCES_PATH = '/api/v1/automation-nav/preferenc
 /** Queues an automation run for the scheduler, exactly what the dashboard's "Run now" posts. */
 export function jobRunPath(jobId: number): string {
     return `/api/v1/jobs/${encodeURIComponent(String(jobId))}/run`;
+}
+/** The cached list of review requests addressed to the signed-in account (root backend only). */
+export const REVIEW_INBOX_PATH = '/api/v1/review-inbox';
+/** Approve opens the signing popup on the backend's machine; reject posts the comment to viberails.ai. */
+export function reviewInboxActionPath(reference: string, action: 'approve' | 'reject'): string {
+    return `${REVIEW_INBOX_PATH}/${encodeURIComponent(reference)}/${action}`;
 }
 
 // --- Settings -------------------------------------------------------------

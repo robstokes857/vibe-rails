@@ -16,6 +16,7 @@ import { SetupAlert } from './js/modules/setup-panel.js';
 import { RemoteAccountLinkPanel } from './js/modules/remote-account-link.js';
 import { McpController } from './js/modules/mcp-controller.js';
 import { PrReviewsController } from './js/modules/pr-reviews-controller.js';
+import { ReviewInboxController } from './js/modules/review-inbox-controller.js';
 import { JobController } from './js/modules/jobs-controller.js';
 import { PythonScriptWorkbench } from './js/modules/python-script-workbench.js';
 import { BoardController } from './js/modules/board-controller.js';
@@ -62,6 +63,7 @@ export class VibeControlApp {
         this.setupAlert = new SetupAlert(this);
         this.mcpController = new McpController(this);
         this.prReviewsController = new PrReviewsController(this);
+        this.reviewInboxController = new ReviewInboxController(this);
         this.jobController = new JobController(this);
         this.pythonScriptWorkbench = new PythonScriptWorkbench(this);
         this.boardController = new BoardController(this);
@@ -615,6 +617,7 @@ export class VibeControlApp {
             'pr-reviews',
             'ai-agents',
             'automations',
+            'review-inbox',
             'board'
         ]);
 
@@ -855,6 +858,7 @@ export class VibeControlApp {
         this.mcpController?.unload?.();
         // Stops the PR Reviews poll and aborts its requests; re-entry rebuilds them.
         this.prReviewsController?.unload?.();
+        this.reviewInboxController?.unload?.();
         this.applyViewLayoutState(view);
         this.queueScrollPageToTop();
         const views = {
@@ -875,6 +879,8 @@ export class VibeControlApp {
             'mcp': () => this.mcpController.loadView(),
             // The list, or one PR's detail page when data carries { number }.
             'pr-reviews': () => this.prReviewsController.loadView(data),
+            // Reviews requested of this account (VB-50 slice D); reached from the PR Reviews header.
+            'review-inbox': () => this.reviewInboxController.loadView(),
             // One controller serves both pages. 'jobs' stays as the historical id that Board
             // lane links and the VS Code launcher bridge navigate to; it opens the Agents page,
             // which redirects an Automation's edit request to its own page.

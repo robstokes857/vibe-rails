@@ -403,6 +403,10 @@ export class PrReviewsController {
             }
             return;
         }
+        if (target.matches('[data-pr-open-inbox]')) {
+            this.app.navigate('review-inbox');
+            return;
+        }
         if (target.matches('[data-pr-resolve-legacy]')) {
             await this.resolveLegacyConflict(Number(target.dataset.prResolveLegacy), target.dataset.useLegacy === 'true', target.dataset.prRepository);
         } else if (target.matches('[data-pr-open]')) {

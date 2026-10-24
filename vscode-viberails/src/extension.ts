@@ -8,6 +8,10 @@ import { resolveScriptImportTarget } from './script-import';
 import { BackendConnection, requestJson } from './backend-api';
 import { LauncherItem, LauncherNode, LauncherTreeDataProvider, runLauncherItem } from './launcher-view';
 import {
+    ReviewInboxActionDependencies, ReviewInboxRow, ReviewInboxTreeDataProvider,
+    approveReviewRequest, readReviewRequest, rejectReviewRequest
+} from './review-inbox-view';
+import {
     AUTOMATION_NAV_PREFERENCES_PATH,
     BOOTSTRAP_REQUEST_TIMEOUT_MS,
     BOOTSTRAP_RETRY_ATTEMPTS,
@@ -18,6 +22,11 @@ import {
     COMMAND_LAUNCHER_MANAGE,
     COMMAND_LAUNCHER_REFRESH,
     COMMAND_LAUNCHER_RUN,
+    COMMAND_REVIEW_INBOX_APPROVE,
+    COMMAND_REVIEW_INBOX_OPEN,
+    COMMAND_REVIEW_INBOX_READ,
+    COMMAND_REVIEW_INBOX_REFRESH,
+    COMMAND_REVIEW_INBOX_REJECT,
     COMMAND_STOP,
     COMMAND_TEST_CONNECTION_INFO,
     COMMAND_TEST_LAUNCHER_ITEMS,
@@ -33,6 +42,8 @@ import {
     LAUNCHER_VIEW_ID,
     MAX_STARTUP_TIMEOUT_MS,
     MIN_STARTUP_TIMEOUT_MS,
+    REVIEW_INBOX_PATH,
+    REVIEW_INBOX_VIEW_ID,
     SESSION_COOKIE_NAME,
     SMOKE_WORKSPACE_ENV,
     TAB_TOKEN_HEADER,
@@ -64,6 +75,7 @@ let webviewManager: WebviewPanelManager | null = null;
 let statusBarItem: vscode.StatusBarItem | null = null;
 let stopBarItem: vscode.StatusBarItem | null = null;
 let launcherProvider: LauncherTreeDataProvider | null = null;
+let reviewInboxProvider: ReviewInboxTreeDataProvider | null = null;
 let closingPromise: Promise<void> | null = null;
 let openingPromise: Promise<void> | null = null;
 /** Launcher rows with a run in flight (see runLauncherItem). */
@@ -86,6 +98,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(stopBarItem);
 
     registerLauncherView(context);
+    registerReviewInboxView(context);
 
     const openCommand = vscode.commands.registerCommand(COMMAND_OPEN, async () => {
         try {
@@ -133,6 +146,7 @@ async function closeDashboard(showMessage: boolean, shutdownBackend: boolean): P
         stopBarItem?.hide();
         void setDashboardOpenContext(false);
         void launcherProvider?.refresh();
+        void reviewInboxProvider?.refresh();
 
         const manager = backendManager;
         if (manager) {
@@ -228,6 +242,7 @@ async function createDashboard(context: vscode.ExtensionContext, projectFolder?:
         stopBarItem?.show();
         void setDashboardOpenContext(true);
         void launcherProvider?.refresh();
+        void reviewInboxProvider?.refresh();
     });
 }
 
@@ -275,6 +290,52 @@ function registerLauncherView(context: vscode.ExtensionContext): void {
             sendToDashboard(context, { command: 'openLauncherCustomize' }, 'Could not open the launcher customization')),
         vscode.commands.registerCommand(COMMAND_LAUNCHER_MANAGE, () =>
             sendToDashboard(context, { command: 'manageAutomations' }, 'Could not open the Automation page'))
+    );
+}
+
+/**
+ * "Reviews requested of you" (VB-50 slice D): the review requests addressed to the signed-in
+ * account, from the backend's cache. A row opens the dashboard page; Approve asks the backend to
+ * open the signing popup on its machine (the popup shows the request, rebuilds the tree from the
+ * repository and signs it there); Reject asks for a comment here and posts it through the backend.
+ */
+function registerReviewInboxView(context: vscode.ExtensionContext): void {
+    const provider = new ReviewInboxTreeDataProvider({
+        isDashboardOpen,
+        fetchInbox: () => requestJson(getBackendConnection(), 'GET', REVIEW_INBOX_PATH)
+    });
+    reviewInboxProvider = provider;
+
+    const view = vscode.window.createTreeView<ReviewInboxRow>(REVIEW_INBOX_VIEW_ID, {
+        treeDataProvider: provider,
+        showCollapseAll: false
+    });
+    const dependencies: ReviewInboxActionDependencies = {
+        request: (method, route, body) => requestJson(getBackendConnection(), method, route, body),
+        askComment: (row) => vscode.window.showInputBox({
+            title: `Reject the review request from ${row.requestedBy}`,
+            prompt: 'Why are you rejecting it? The requester sees this comment.',
+            placeHolder: 'What has to change before you can approve it',
+            ignoreFocusOut: true,
+            validateInput: (value) => value.trim() ? undefined : 'Say why in a comment when you reject a review.'
+        }),
+        notify: (message) => { vscode.window.setStatusBarMessage(`$(check) ${message}`, LAUNCHER_STATUS_MESSAGE_MS); },
+        notifyError: (message) => { void vscode.window.showErrorMessage(message); },
+        refresh: () => { void provider.refresh(); },
+        openExternal: (url) => vscode.env.openExternal(vscode.Uri.parse(url))
+    };
+
+    context.subscriptions.push(
+        provider,
+        view,
+        provider.onDidChangeTreeData(() => { view.message = provider.getMessage(); }),
+        view.onDidChangeVisibility((event) => { if (event.visible) { void provider.refresh(); } }),
+        vscode.commands.registerCommand(COMMAND_REVIEW_INBOX_REFRESH, () => provider.refresh()),
+        vscode.commands.registerCommand(COMMAND_REVIEW_INBOX_OPEN, () =>
+            sendToDashboard(context, { command: 'openReviewInbox' }, 'Could not open Reviews requested of you')),
+        vscode.commands.registerCommand(COMMAND_REVIEW_INBOX_READ, (row?: ReviewInboxRow) => readReviewRequest(row, dependencies)),
+        vscode.commands.registerCommand(COMMAND_REVIEW_INBOX_APPROVE, (row?: ReviewInboxRow) => approveReviewRequest(row, dependencies)),
+        vscode.commands.registerCommand(COMMAND_REVIEW_INBOX_REJECT, (row?: ReviewInboxRow) => rejectReviewRequest(row, dependencies))
     );
 }
 

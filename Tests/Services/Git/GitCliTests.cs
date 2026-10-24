@@ -115,6 +115,41 @@ public sealed class GitCliTests : IDisposable
     }
 
     [Fact]
+    public async Task RunAsync_WritesStandardInputThenClosesIt()
+    {
+        Assert.True((await GitCli.RunAsync(_root, ["init"], Ct)).Succeeded, "git init");
+
+        var result = await GitCli.RunAsync(_root, ["hash-object", "--stdin"], Ct, timeout: TimeSpan.FromSeconds(5), standardInput: "hello\n"u8.ToArray());
+
+        Assert.True(result.Succeeded, result.StdErr);
+        Assert.False(result.TimedOut);
+        // The blob id of "hello\n": git read the bytes, then saw EOF.
+        Assert.Equal("ce013625030ba8dba906f756967f9e9ca394464a", result.StdOut.Trim());
+    }
+
+    [Fact]
+    public async Task RunAsync_EnvironmentReachesGit()
+    {
+        Assert.True((await GitCli.RunAsync(_root, ["init"], Ct)).Succeeded, "git init");
+        await File.WriteAllTextAsync(Path.Combine(_root, "file.txt"), "hello\n", Ct);
+        Assert.True((await GitCli.RunAsync(_root, ["add", "--", "file.txt"], Ct)).Succeeded, "git add");
+
+        // GIT_INDEX_FILE points the plumbing at a temporary index, so write-tree sees the empty index
+        // read-tree made there, not the staged file. The review tree rebuild depends on exactly this.
+        var temporary = Path.Combine(_root, "temporary.index");
+        var environment = new Dictionary<string, string> { ["GIT_INDEX_FILE"] = temporary };
+        Assert.True((await GitCli.RunAsync(_root, ["read-tree", "--empty"], Ct, environment: environment)).Succeeded, "read-tree --empty");
+        var withTemporary = await GitCli.RunAsync(_root, ["write-tree"], Ct, environment: environment);
+        var withReal = await GitCli.RunAsync(_root, ["write-tree"], Ct);
+
+        Assert.True(withTemporary.Succeeded, withTemporary.StdErr);
+        Assert.Equal("4b825dc642cb6eb9a060e54bf8d69288fbee4904", withTemporary.StdOut.Trim());
+        Assert.True(withReal.Succeeded, withReal.StdErr);
+        Assert.NotEqual(withTemporary.StdOut.Trim(), withReal.StdOut.Trim());
+        Assert.True(File.Exists(temporary));
+    }
+
+    [Fact]
     public void NoSourceLaunchesGitOutsideCreateStartInfo()
     {
         // A git child built by hand skips both guards above: it inherits stdin (the VB-14 hang in

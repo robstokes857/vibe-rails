@@ -132,6 +132,31 @@ public sealed class ReviewRequestRoundTripTests
                 }
             }
 
+            // Slice D: the reviewer's own VibeRails lists the request and reads the bundle with its key (the
+            // hosted projections, through the desktop's validation), then proves in its own clone, which has
+            // the base commit and never saw the staged change, that the files rebuild the tree it would sign.
+            await using (var db = remote.Db(25))
+            {
+                var access = new Hosted.ReviewRequestAccess(db, TimeProvider.System);
+                var inbox = Desktop.ReviewRequestTransport.ParseInbox(JsonSerializer.SerializeToUtf8Bytes(await access.InboxAsync(ct), JsonSerializerOptions.Web));
+                var listed = Assert.Single(inbox.Requests!);
+                Assert.Equal((hosted.Id, "repo", Owner, "open", "VB-OGK99-278", false), (listed.Id, listed.Repository, listed.RequestedBy, listed.Status, listed.CardKey, listed.Decided));
+                var read = Desktop.ReviewRequestTransport.ParseBundle(
+                    JsonSerializer.SerializeToUtf8Bytes(await access.ReadAsync(hosted.Id, ct), JsonSerializerOptions.Web), hosted.Id);
+                Assert.Equal((tree, true, Encoding.UTF8.GetString(CommitSignatureFormat.BuildPayload(tree))), (read.TreeId, read.CanDecide, read.Statement));
+                Assert.Empty(Desktop.ReviewTreeRebuilder.FilesWithoutContent(read.Files!));
+
+                var clone = Path.Combine(root, "reviewer-clone");
+                await Git("clone", "-q", repo, clone);
+                var rebuilt = await Desktop.ReviewTreeRebuilder.RebuildAsync(clone, read.TreeId, read.BaseTree, read.BaseCommit, read.Files!, ct);
+                Assert.True(rebuilt.Matches, rebuilt.Message);
+                Assert.Equal(tree, rebuilt.RebuiltTree);
+                var tampered = read.Files!.Select(f => f.Path == "retry.cs" ? f with { After = f.After!.Replace("Attempts = 3", "Attempts = 30", StringComparison.Ordinal) } : f).ToList();
+                var refused = await Desktop.ReviewTreeRebuilder.RebuildAsync(clone, read.TreeId, read.BaseTree, read.BaseCommit, tampered, ct);
+                Assert.Equal("tree_mismatch", refused.Code);
+                Assert.NotEqual(tree, refused.RebuiltTree);
+            }
+
             // Reviewer answers: a rejection, then an approval signed in the desktop's trailer format.
             var trailer = CommitSignatureFormat.Format(new CommitSignature(remote.KeyId, remote.Fingerprint, tree,
                 Convert.ToBase64String(signer.SignData(CommitSignatureFormat.BuildPayload(tree), HashAlgorithmName.SHA256, RSASignaturePadding.Pss))));

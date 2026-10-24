@@ -135,6 +135,21 @@ namespace VibeRails
                     sp.GetRequiredService<IAppEventBus>(),
                     sp.GetRequiredService<Services.ReviewRequests.ReviewRequestPollState>(),
                     ParserConfigs.GetApiKey));
+                // Slice D: the requests addressed to this account, refreshed by the scheduler on the same
+                // cadence and answered from the "Reviews requested of you" page. The singleton holds the
+                // popup states, so it builds a fresh transport per call from the typed client's factory
+                // registration; the popup launcher is the only path to an approval and this never signs.
+                serviceCollection.AddSingleton(_ => Services.ReviewRequests.ReviewInboxState.BesideStateDatabase());
+                serviceCollection.AddSingleton<Services.ReviewRequests.IReviewSignaturePopupLauncher,
+                    Services.ReviewRequests.ConsoleReviewSignaturePopupLauncher>();
+                serviceCollection.AddSingleton(sp => new Services.ReviewRequests.ReviewInboxService(
+                    () => new Services.ReviewRequests.ReviewRequestTransport(
+                        sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(Services.ReviewRequests.ReviewRequestTransport))),
+                    sp.GetRequiredService<Services.ReviewRequests.ReviewInboxState>(),
+                    ParserConfigs.GetApiKey,
+                    () => ApiKeyStore.GetAccountEmail(Config.LoadFresh()),
+                    sp.GetRequiredService<IAppEventBus>(),
+                    sp.GetRequiredService<Services.ReviewRequests.IReviewSignaturePopupLauncher>()));
             }
 
             // Host filesystem metadata is exposed only by an active root backend. Terminal-tab

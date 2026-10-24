@@ -900,6 +900,41 @@ pass, while an unavailable verifier leaves it pending. Landed decisions publish 
 commit hook is unchanged: it applies a stored verified approval and rechecks the trailer itself.
 Component contract: [Review requests](VibeRails/Services/ReviewRequests/README.md).
 
+### Reviews requested of you (VB-50, slice D)
+
+The reviewer's side. Root-only `/api/v1/review-inbox` (both local credentials, no-store): `GET`
+answers the cached list, `POST /refresh` fetches it now, `POST /{reference}/reject` (32 KiB body,
+`{ comment }`) posts a rejection, `POST /{reference}/approve` opens the signing popup. The list is
+fetched with the saved account key from fixed `https://viberails.ai/api/v1/review-requests/inbox`
+(header `X-Api-Key` only, no redirects or cookies, 30 s, 1 MiB; every item validated: a `rvw_`
+reference, bounded text, a known status, a plausible expiry) on the Board sync cadence persisted in
+`.review-inbox.json` beside state.db (the account fingerprint, due time, backoff and the last list as
+the host gave it: repository names, requester addresses and references, never a key, file text or a
+note): every 15 minutes while a listed request is open, doubling to two hours otherwise, never on the
+60-second tick; "Check now" is a person's click and is answered at most once per 10 seconds. A key
+change starts from an empty list. Rejections and approvals go to the host's own decision route under
+the reviewer's key; the host's refusals keep their code (`not_a_reviewer`, `not_open`,
+`signer_mismatch`, …) and status, and remote prose is never shown or logged.
+
+**No route and no MCP tool signs.** Approve re-launches `vb --vca-hook sign-review --review
+<reference> --workdir <project> --console-window` through `VcaHookConsoleRespawn` (CREATE_NEW_CONSOLE;
+Windows, an interactive desktop, not CI; refused with `popup_unavailable` otherwise), once per
+reference while that window is open, and learns only its exit code. The popup reads the bundle itself
+with the account key (`GET /{reference}/bundle`, 90 s, 25 MiB, validated the way the host validated
+the desktop's bundle: ids, exact paths, change kinds, omissions, the 256 KiB per file and 4 MiB per
+bundle text bounds, at most ten sessions and fifty decisions, and a statement equal to the staged-tree
+statement), shows what is being approved with the requester's text cleaned
+(`HumanSignaturePopup.Clean`), refuses before any key prompt when the request is closed, not addressed
+to the account, already approved or carries a file without content, and signs only after
+`ReviewTreeRebuilder` rebuilt `treeId` from the reviewer's own clone (design decision 7: a temporary
+index, no blob written, the real index untouched, a mismatch for any reason refused). The password is
+read key by key from the popup's own console with redirected input refused, the signature is confirmed
+with the public verify endpoint before the approval is posted, and the statement is the staged-tree
+one the dashboard Sign route and MCP refuse. The VS Code view calls the same local routes; its
+"Read on viberails.ai" opens through the host's external-link allowlist, which admits only the sign-in
+page and `https://viberails.ai/Reviews/requests/rvw_<32 hex>`.
+Component contract: [Review requests](VibeRails/Services/ReviewRequests/README.md).
+
 ### Board sync, sharing and remote Start work
 
 [SYNC.md](VibeRails/Services/Board/SYNC.md) defines the full content and hosted authorization

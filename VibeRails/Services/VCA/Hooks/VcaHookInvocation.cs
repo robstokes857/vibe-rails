@@ -14,7 +14,13 @@ public enum VcaHookKind
     // The Git Guard signing popup: a person picks a signing key, types its password, and the
     // signature for the staged tree is appended to the commit message. Runs only in a popup console
     // window (--console-window-attached), never inline in a terminal an agent may be driving.
-    SignCommitMessage
+    SignCommitMessage,
+
+    // The review-request approval popup (VB-50 slice D): a reviewer approves a request addressed
+    // to them on viberails.ai by signing its tree, after this machine has rebuilt that tree from
+    // the bundle. Same window family and the same rules as SignCommitMessage; the decision is
+    // posted to viberails.ai instead of a commit message.
+    SignReview
 }
 
 public sealed record VcaHookInvocation(
@@ -38,7 +44,10 @@ public sealed record VcaHookInvocation(
     // console reuse the pre-commit pipeline, but must remain previews that do not start agents.
     bool EnqueueAutomatedJobs = false,
     // SignCommitMessage only: what to sign and what to show the person signing it.
-    HumanSignaturePopupArguments? Signing = null);
+    HumanSignaturePopupArguments? Signing = null,
+    // SignReview only: the viberails.ai reference (rvw_…) of the request to approve. The popup
+    // fetches the bundle itself; nothing about its content travels in argv.
+    string? ReviewReference = null);
 
 /// <summary>
 /// Arguments of the signing popup. The tree is computed by the commit-msg hook that opens the popup;

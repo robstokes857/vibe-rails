@@ -121,6 +121,19 @@ public static class VcaHookProcessHost
             return signExitCode;
         }
 
+        // The review approval popup (VB-50 slice D) is the same window family: no store, no preflight.
+        // Nothing waits on this window the way a commit does, so it pauses on success too, long enough
+        // to read that the approval was recorded.
+        if (invocation.Kind == VcaHookKind.SignReview)
+        {
+            var reviewExitCode = await ReviewSignaturePopup.RunInConsoleAsync(invocation, output, style, cancellationToken);
+            if (invocation.ConsoleWindowAttached)
+            {
+                await PauseForEnterAsync(output, input, reviewExitCode, ConsolePauseTimeout, cancellationToken, style);
+            }
+            return reviewExitCode;
+        }
+
         var services = new ServiceCollection();
         ConfigureServices(
             services,
@@ -353,6 +366,7 @@ public static class VcaHookProcessHost
         VcaHookKind.CommitMessage => "Commit Message",
         VcaHookKind.AcknowledgeCommitMessage => "Commit Acknowledgment",
         VcaHookKind.SignCommitMessage => "Human Verification",
+        VcaHookKind.SignReview => "Review Approval",
         VcaHookKind.Preview => "Preview",
         _ => "Pre-Commit"
     };

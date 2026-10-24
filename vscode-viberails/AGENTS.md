@@ -8,6 +8,7 @@ This VS Code extension provides seamless integration with VibeRails, a dashboard
 - **Backend Management**: Automatically starts and stops the VibeRails .NET backend server
 - **Status Bar Integration**: A `$(terminal) VibeRails` button in the bottom left opens the dashboard; a `$(close)` Stop item appears beside it while the backend is running
 - **Activity Bar launcher**: A play icon in the Activity Bar opens the **Launch** view, the side-bar twin of the dashboard's nav Play button. It groups the project's entries under **Agents & automations** and **Scripts**, with counts, runtime labels and theme-colored icons; each group follows the nav launcher's saved order; clicking a row runs it, and the view title offers Refresh, Customize list… and Manage automations. While the dashboard is closed the view shows an Open Dashboard button instead (the backend only runs with the panel open)
+- **Reviews requested of you**: a second view in the same container (VB-50 slice D) lists the review requests viberails.ai holds for the signed-in account, from the backend's cache (`GET /api/v1/review-inbox`). A row opens the dashboard's page; the inline Approve asks the backend to open the signing popup on its machine (the popup shows the request, rebuilds the tree from the repository and signs it there); the inline Reject asks for a comment here and posts it; the row's context menu offers Read on viberails.ai. Nothing in the extension signs or sees a key
 - **Local Context**: Runs in the context of your current workspace folder for project-specific configurations
 
 ## Usage
@@ -37,6 +38,12 @@ This VS Code extension provides seamless integration with VibeRails, a dashboard
   (`viberails.launcher.customize`) and `VibeRails: Manage Automations` (`viberails.launcher.manage`) —
   Launch view title actions. Customize and Manage open the dashboard when needed and hand it the
   flyout footer's actions (`openLauncherCustomize`, `manageAutomations`).
+- `VibeRails: Refresh Reviews Requested of You` (`viberails.reviewInbox.refresh`) — the review inbox
+  view's title action. `viberails.reviewInbox.open` (row click; posts `openReviewInbox` to the
+  dashboard), `viberails.reviewInbox.approve` / `viberails.reviewInbox.reject` (inline on rows that can
+  still be answered; `POST /api/v1/review-inbox/{reference}/approve` and `/reject` with the typed
+  comment) and `viberails.reviewInbox.read` (context menu; opens the request's vetted viberails.ai
+  page) are hidden from the palette because they need the row.
 
 ## Settings
 
@@ -50,6 +57,7 @@ The extension consists of these components plus a shared constants module:
 2. **Backend Manager** (`backend-manager.ts`) - Manages the .NET backend server lifecycle
 3. **Webview Panel Manager** (`webview-panel.ts`) - Handles the VS Code webview panel and content; `postWhenReady` holds host → dashboard messages until the page's bridge is installed
 4. **Launcher view** (`launcher-view.ts`) - `LauncherTreeDataProvider` plus the pure catalog rules (`normalizeLauncherItems`, `isLauncherItemRunnable`, `launcherEmptyMessage`: ports of `wwwroot/js/modules/automation-launcher.js`, keep them in step) and `runLauncherItem`, all driven through injected dependencies so they are unit-tested without a backend
+4b. **Review inbox view** (`review-inbox-view.ts`) - `ReviewInboxTreeDataProvider`, the pure rules (`normalizeReviewInbox`, `reviewInboxMessage`, `canAnswerReviewRequest`, `isReviewRequestPageUrl`; wording kept in step with `wwwroot/js/modules/review-inbox-view.js`) and the `approveReviewRequest` / `rejectReviewRequest` / `readReviewRequest` actions, all through injected dependencies and unit-tested in `review-inbox-view.test.ts`
 5. **Backend API** (`backend-api.ts`) - `requestJson` for authenticated host → backend calls (session + tab headers, `ErrorResponse { error }` surfaced as `BackendRequestError`). Must not import `vscode`. The shutdown ladder keeps its own never-throwing `postShutdown`
 6. **Constants** (`constants.ts`) - Command ids, token header names, backend paths, timeouts. Must not import `vscode`.
 
@@ -93,8 +101,10 @@ double-click time later. `runLauncherItem` keeps the row in its guard set for
 quick run cannot be queued twice; the backend rejects the overlapping run otherwise.
 
 `external-sign-in.ts` accepts only `https://viberails.ai/link`, optionally followed by the strict
-public user-code fragment `#code=ABCD-EFGH`, before calling
-`vscode.env.openExternal`. Reject other schemes, hosts, paths, explicit ports, credentials,
+public user-code fragment `#code=ABCD-EFGH`, and (VB-50 slice D) a review request's own page
+`https://viberails.ai/Reviews/requests/rvw_<32 lowercase hex>`, before calling
+`vscode.env.openExternal`. The review inbox view also posts `{ command: 'openReviewInbox' }` through
+`postWhenReady`, which the dashboard answers by opening its `review-inbox` page. Reject other schemes, hosts, paths, explicit ports, credentials,
 queries and any other fragments. The dashboard stays in its webview; account authentication runs in
 the external browser. The website clears the fragment before login and automatically POSTs the
 public code with its antiforgery token. Users still approve the request; API keys and device secrets

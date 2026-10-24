@@ -45,6 +45,7 @@ public sealed class VcaHookCommandParser : IVcaHookCommandParser
         string? baseTree = null;
         var approvers = new List<string>();
         var requirements = new List<string>();
+        string? reviewReference = null;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -166,6 +167,12 @@ public sealed class VcaHookCommandParser : IVcaHookCommandParser
                 continue;
             }
 
+            if (arg.Equals("--review", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                reviewReference = args[++i];
+                continue;
+            }
+
             if (arg.Equals("--demo-duration-ms", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
             {
                 if (int.TryParse(args[++i], out var ms) && ms > 0)
@@ -194,7 +201,8 @@ public sealed class VcaHookCommandParser : IVcaHookCommandParser
             EnqueueAutomatedJobs: enqueueAutomatedJobs,
             Signing: kind == VcaHookKind.SignCommitMessage
                 ? new HumanSignaturePopupArguments(treeId, baseTree, approvers, requirements)
-                : null);
+                : null,
+            ReviewReference: kind == VcaHookKind.SignReview ? reviewReference : null);
     }
 
     private static VcaHookKind ParseKind(string value)
@@ -213,6 +221,7 @@ public sealed class VcaHookCommandParser : IVcaHookCommandParser
             "acknowledge-commit-message" => VcaHookKind.AcknowledgeCommitMessage,
             "sign-commit-msg" => VcaHookKind.SignCommitMessage,
             "sign-commit-message" => VcaHookKind.SignCommitMessage,
+            "sign-review" => VcaHookKind.SignReview,
             "preview" => VcaHookKind.Preview,
             "demo" => VcaHookKind.Preview,
             _ => VcaHookKind.PreCommit
