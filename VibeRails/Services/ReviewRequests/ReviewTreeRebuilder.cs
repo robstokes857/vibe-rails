@@ -80,11 +80,11 @@ public static class ReviewTreeRebuilder
                 $"{missing.Count} file(s) are listed without their content (binary, oversized or over the bundle limit), so the tree "
                 + "cannot be rebuilt from this request and it cannot be approved.", MissingContent: missing);
         }
-        var unsupported = files.Where(file => file.Change is not ("added" or "modified" or "deleted" or "renamed" or "copied")).Select(file => file.Path).ToList();
+        var unsupported = files.Where(file => file.Change is not ("added" or "modified" or "deleted" or "renamed" or "copied")).ToList();
         if (unsupported.Count > 0)
         {
             return new(false, "unsupported_change",
-                $"{unsupported.Count} file(s) have a change kind this version cannot rebuild ({files.First(f => unsupported.Contains(f.Path)).Change}), so the request cannot be approved.");
+                $"{unsupported.Count} file(s) have a change kind this version cannot rebuild ({unsupported[0].Change}), so the request cannot be approved.");
         }
 
         var format = await GitCli.RunAsync(repositoryPath, ["rev-parse", "--show-object-format"], cancellationToken, GitTimeout, 1024);

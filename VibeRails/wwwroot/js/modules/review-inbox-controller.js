@@ -183,7 +183,8 @@ export class ReviewInboxController {
         const status = this.root.querySelector('[data-ri-status]');
         if (status) {
             const who = view?.email ? ` for ${esc(view.email)}` : '';
-            status.innerHTML = `<span class="ri-muted">${esc(describeRefresh(view))}${who}</span>`
+            const line = view ? describeRefresh(view) : this.error ? 'The list could not be read.' : 'Loading…';
+            status.innerHTML = `<span class="ri-muted">${esc(line)}${who}</span>`
                 + `<button type="button" class="btn btn-sm btn-outline-secondary" data-ri-action="refresh" ${this.busy || !view?.hasApiKey ? 'disabled' : ''}>`
                 + `${this.busy === 'refresh' ? 'Checking…' : 'Check now'}</button>`;
         }
