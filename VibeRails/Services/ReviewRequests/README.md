@@ -132,9 +132,14 @@ the design decisions for the rest.
   `SigningKeyPrompt`) fetches the bundle itself with the account key, shows the repository and the
   local copy it will use, the requester, card and note (the requester's words, through
   `HumanSignaturePopup.Clean`), the sessions, every file with its change kind, counts and omission,
-  the tree, the base and the hosted page, then stops before any key prompt when the request is not
-  open, the account is not a listed reviewer, it was already approved, or a file is listed without
-  content ("cannot be approved"). Otherwise `ReviewTreeRebuilder` proves the tree (next bullet) and
+  the tree, the base and the hosted page (file counts are computed from the carried text, never
+  taken from the requester's `changedLines`), then stops before any key prompt when the request is
+  cancelled or expired, the account is not a listed reviewer, this account already approved it, or a
+  file is listed without content ("cannot be approved"). Another reviewer's approval or rejection
+  does not close it: viberails.ai keeps taking decisions (a rule may name several approvers, and an
+  approval after someone else's rejection is still this reviewer's to give), so the popup, the page
+  and the VS Code view only stop at cancelled or expired (Codex slice D review, F2). Otherwise
+  `ReviewTreeRebuilder` proves the tree (next bullet) and
   the popup prints the verdict, lists the synced keys, reads the password with echo off, signs the
   tree with `SigningKeyService.SignCommitTreeAsync` (the staged-tree statement, so nothing new is
   signable), confirms the signature with viberails.ai, warns when the key's account is not the saved
@@ -147,11 +152,17 @@ the design decisions for the rest.
   round trip is byte-exact, byte-order mark and CRLF included) and placed with
   `update-index --index-info`, a deleted path and a rename's source removed, a changed file keeping
   its base mode and a new file assumed `100644`; `write-tree --missing-ok` must equal `treeId`. No
-  blob is written and the real index is never touched. Refusals name the reason: a file without
-  content, an unknown change kind, a missing base commit ("git fetch"), a base tree that is not the
-  commit's, or a mismatch, which a new executable also produces: the bundle carries no modes, and the
-  reviewer cannot tell a mode bit from a hidden change, so neither is signed. `GitCli.RunAsync`
-  gained `environment` and `standardInput` for this and is still the one git launch.
+  blob is written and the real index is never touched. The base is proven too, because the reviewer
+  read a diff, not a tree: each changed, renamed, copied or deleted file must exist in the base and
+  its shown base text must hash to the base commit's blob at that path, and a file listed as added
+  must be absent from the base (`base_mismatch`; a changed file shown without base text and not
+  marked omitted is `base_text_missing`). Without that, `Before = After` over a real change read as
+  "no text changes" on viberails.ai while the signature still covered the true tree (Codex slice D
+  review, F1). Refusals name the reason: a file without content, an unknown change kind, a missing
+  base commit ("git fetch"), a base tree that is not the commit's, a base disagreement, or a tree
+  mismatch, which a new executable also produces: the bundle carries no modes, and the reviewer
+  cannot tell a mode bit from a hidden change, so neither is signed. `GitCli.RunAsync` gained
+  `environment` and `standardInput` for this and is still the one git launch.
 
 The decision route's only outbound call is the existing public signature verification, with a tree
 id and no repository content. The send route and the poller are the only code that transfers a

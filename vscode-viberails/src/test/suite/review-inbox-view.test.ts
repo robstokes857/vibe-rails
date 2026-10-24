@@ -83,11 +83,18 @@ suite('Review inbox view rules', () => {
     });
 
     test('only open, unanswered rows can be answered, and the description says where a request stands', () => {
-        const state = normalizeReviewInbox(rawView({ requests: [rawRow(), rawRow({ decided: true, status: 'rejected' }), rawRow({ signing: { outcome: 'approved' }, status: 'approved' })] }));
+        // A request approved from this computer is always marked decided by the backend.
+        const state = normalizeReviewInbox(rawView({ requests: [rawRow(), rawRow({ decided: true, status: 'rejected' }), rawRow({ signing: { outcome: 'approved' }, status: 'approved', decided: true })] }));
         assert.equal(canAnswerReviewRequest(state.requests[0], state), true);
         assert.equal(canAnswerReviewRequest(state.requests[1], state), false);
         assert.equal(canAnswerReviewRequest(state.requests[0], { ...state, hasApiKey: false }), false);
+        // Another reviewer's decision does not close the request to this account; cancelled and expired do.
+        assert.equal(canAnswerReviewRequest({ ...state.requests[0], status: 'approved' }, state), true);
+        assert.equal(canAnswerReviewRequest({ ...state.requests[0], status: 'rejected' }, state), true);
+        assert.equal(canAnswerReviewRequest({ ...state.requests[0], status: 'cancelled' }, state), false);
+        assert.equal(canAnswerReviewRequest({ ...state.requests[0], status: 'expired' }, state), false);
         assert.equal(describeReviewRow(state.requests[0]), 'dev@example.test · 2 files · Waiting for your decision');
+        assert.equal(describeReviewRow({ ...state.requests[0], status: 'rejected' }), 'dev@example.test · 2 files · Rejected by another reviewer; your decision is still taken');
         assert.equal(describeReviewRow(state.requests[2]), 'dev@example.test · 2 files · Approved · Approved from this computer');
     });
 

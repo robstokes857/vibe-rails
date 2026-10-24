@@ -100,10 +100,18 @@ public sealed class ReviewSignaturePopup
 
         await WriteSummaryAsync(bundle, request.RepositoryPath);
 
-        if (bundle.Status != ReviewRequestStatus.Open)
+        if (bundle.Status is ReviewRequestStatus.Cancelled or "expired")
         {
             await _output.WriteLineAsync($"{s.Yellow}This request is {bundle.Status} on viberails.ai and no longer takes a decision. Nothing was signed.{s.Reset}");
             return 1;
+        }
+        if (bundle.Status != ReviewRequestStatus.Open)
+        {
+            // viberails.ai keeps taking decisions after the first one: a rule may name several approvers,
+            // and an approval after another reviewer's rejection is still this reviewer's to give.
+            await _output.WriteLineAsync(
+                $"{s.Yellow}Another reviewer already {bundle.Status} this request. viberails.ai still records your decision, "
+                + $"and the requester's commit needs the approvers its rules name.{s.Reset}");
         }
         if (!bundle.CanDecide)
         {
@@ -247,7 +255,11 @@ public sealed class ReviewSignaturePopup
         await _output.WriteLineAsync();
     }
 
-    /// <summary>One file line: change kind, exact path (a rename names both), its line count or why it carries no content.</summary>
+    /// <summary>
+    /// One file line: change kind, exact path (a rename names both), and the line counts of the base and
+    /// staged text as carried, or why it carries no content. The counts are computed from the text the
+    /// rebuild then verifies, never taken from the requester's <c>changedLines</c>.
+    /// </summary>
     internal static string DescribeFile(ReviewBundleFile file)
     {
         var letter = file.Change switch
@@ -257,10 +269,17 @@ public sealed class ReviewSignaturePopup
         var path = HumanSignaturePopup.Clean(file.Path);
         if (file.PreviousPath is { } previous && previous != file.Path)
             path = HumanSignaturePopup.Clean(previous) + " -> " + path;
-        var detail = file.Omitted is { } omitted ? $"no content: {omitted}"
-            : file.ChangedLines is { } lines ? $"{lines.ToString(CultureInfo.InvariantCulture)} line(s) changed"
-            : "content included";
+        var detail = file.Omitted is { } omitted
+            ? $"no content: {omitted}"
+            : $"{LineCount(file.Before).ToString(CultureInfo.InvariantCulture)} -> {LineCount(file.After).ToString(CultureInfo.InvariantCulture)} lines";
         return $"{letter} {path} ({detail})";
+    }
+
+    internal static int LineCount(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return 0;
+        var count = text.Count(c => c == '\n');
+        return text[^1] == '\n' ? count : count + 1;
     }
 
     internal static (IReadOnlyList<string> Lines, int More) NoteLines(string? note)

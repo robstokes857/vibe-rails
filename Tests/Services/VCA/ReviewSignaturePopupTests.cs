@@ -42,7 +42,7 @@ public sealed class ReviewSignaturePopupTests
         Assert.Contains("vibe-rails", transcript);
         Assert.Contains("dev@example.test", transcript);
         Assert.Contains("VIBE-208", transcript);
-        Assert.Contains("M db.cs (1 line(s) changed)", transcript);
+        Assert.Contains("M db.cs (1 -> 1 lines)", transcript);
         Assert.Contains("1) Implementation (codex, ready)", transcript);
         Assert.Contains(Tree, transcript);
         Assert.Contains($"commit {BaseCommit}", transcript);
@@ -117,7 +117,6 @@ public sealed class ReviewSignaturePopupTests
     }
 
     [Theory]
-    [InlineData("approved", true)]
     [InlineData("cancelled", true)]
     [InlineData("expired", true)]
     [InlineData("open", false)]
@@ -134,6 +133,26 @@ public sealed class ReviewSignaturePopupTests
         Assert.Equal(0, signer.ListCalls);
         Assert.Empty(host.Rebuilt);
         Assert.Contains(canDecide ? $"This request is {status}" : "not a listed reviewer", output.ToString());
+    }
+
+    /// <summary>
+    /// Codex review of slice D, F2: viberails.ai keeps taking decisions after the first one (several
+    /// approvers, or an approval after a rejection), so another reviewer's decision does not close the popup.
+    /// </summary>
+    [Theory]
+    [InlineData("approved")]
+    [InlineData("rejected")]
+    public async Task AnotherReviewersDecisionDoesNotCloseTheRequest(string status)
+    {
+        var host = new FakeHost(Bundle() with { Status = status });
+        var output = new StringWriter();
+
+        var exit = await Popup(output, new ScriptedConsole(secrets: ["correct horse battery"]), new FakeSigner(Key("Laptop")), Verifier("me@example.test"), host)
+            .RunAsync(new ReviewSignaturePopupRequest(Reference, Repo), Ct);
+
+        Assert.Equal(0, exit);
+        Assert.Single(host.Posted);
+        Assert.Contains($"Another reviewer already {status} this request", output.ToString());
     }
 
     [Fact]
@@ -229,23 +248,25 @@ public sealed class ReviewSignaturePopupTests
         Assert.Null(invocation.Signing);
     }
 
+    /// <summary>The counts come from the carried text (which the rebuild verifies), never from the requester's changedLines.</summary>
     [Fact]
     public void FileLinesNameRenamesCountsAndOmissions()
     {
-        Assert.Equal("R old.cs -> new.cs (3 line(s) changed)", ReviewSignaturePopup.DescribeFile(new ReviewBundleFile("new.cs", "renamed", false, "old.cs", 3, "a", "b", null)));
+        Assert.Equal("R old.cs -> new.cs (2 -> 3 lines)", ReviewSignaturePopup.DescribeFile(new ReviewBundleFile("new.cs", "renamed", false, "old.cs", 0, "a\nb\n", "a\nb\nc", null)));
         Assert.Equal("A logo.png (no content: binary)", ReviewSignaturePopup.DescribeFile(new ReviewBundleFile("logo.png", "added", true, null, null, null, null, "binary")));
-        Assert.Equal("D gone.md (content included)", ReviewSignaturePopup.DescribeFile(new ReviewBundleFile("gone.md", "deleted", false, null, null, "x", null, null)));
+        Assert.Equal("D gone.md (1 -> 0 lines)", ReviewSignaturePopup.DescribeFile(new ReviewBundleFile("gone.md", "deleted", false, null, 99, "x", null, null)));
+        Assert.Equal("A new.txt (0 -> 2 lines)", ReviewSignaturePopup.DescribeFile(new ReviewBundleFile("new.txt", "added", false, null, null, null, "one\r\ntwo\r\n", null)));
     }
 
     private static ReviewHostedBundle Bundle() => new(
         Reference, "vibe-rails", "dev@example.test", "open", Tree, BaseTree, BaseCommit, "VIBE-208", "Please check the retry path.",
         Created, Created.AddMonths(1), $"VibeRails human-verified commit v1\ntree {Tree}\n", true,
-        [File("db.cs", "modified", after: "class Db { }\n", lines: 1)],
+        [File("db.cs", "modified", after: "class Db { int Version = 2; }\n", before: "class Db { }\n", lines: 1)],
         [new ReviewHostedSession(1, "Implementation", "codex", Created, Created.AddHours(1), "ready")],
         []);
 
-    private static ReviewBundleFile File(string path, string change, string? after = null, int? lines = 1, bool binary = false, string? omitted = null) =>
-        new(path, change, binary, null, omitted is null ? lines : null, null, omitted is null ? after : null, omitted);
+    private static ReviewBundleFile File(string path, string change, string? after = null, string? before = null, int? lines = 1, bool binary = false, string? omitted = null) =>
+        new(path, change, binary, null, omitted is null ? lines : null, omitted is null ? before : null, omitted is null ? after : null, omitted);
 
     private static ReviewSignaturePopup Popup(TextWriter output, IHumanSignatureConsole console, ICommitTreeSigner signer, ICommitSignatureVerifier verifier, FakeHost host) =>
         new(output, console, signer, verifier, host.FetchAsync, host.RebuildAsync, host.PostAsync, "me@example.test", VcaConsoleStyle.Plain);

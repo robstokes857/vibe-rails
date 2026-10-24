@@ -21,13 +21,22 @@ export const SIGNING_WORDING = Object.freeze({
     popup_unavailable: 'The signing popup could not open on this computer'
 });
 
-/** A request can be answered while it is open, unanswered by this account, and a key is saved. */
+/**
+ * viberails.ai keeps taking decisions after the first one (a rule may name several approvers, and an
+ * approval after someone else's rejection is still this reviewer's to give), so only a cancelled or
+ * expired request is closed to this account.
+ */
+export const DECIDABLE_STATUSES = Object.freeze(['open', 'approved', 'rejected']);
+
+/** A request can be answered while viberails.ai still takes decisions, this account has not answered, and a key is saved. */
 export function canAct(item, view) {
-    return Boolean(view?.hasApiKey) && item?.status === 'open' && !item?.decided && item?.signing?.outcome !== 'signing';
+    return Boolean(view?.hasApiKey) && DECIDABLE_STATUSES.includes(item?.status) && !item?.decided && item?.signing?.outcome !== 'signing';
 }
 
 export function describeStatus(item) {
     if (item?.decided && item?.status === 'open') return 'You answered; waiting for others';
+    if (!item?.decided && item?.status === 'approved') return 'Approved by another reviewer; your decision is still taken';
+    if (!item?.decided && item?.status === 'rejected') return 'Rejected by another reviewer; your decision is still taken';
     return STATUS_WORDING[item?.status] || String(item?.status || 'unknown');
 }
 

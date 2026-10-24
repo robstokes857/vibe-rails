@@ -924,10 +924,15 @@ with the account key (`GET /{reference}/bundle`, 90 s, 25 MiB, validated the way
 the desktop's bundle: ids, exact paths, change kinds, omissions, the 256 KiB per file and 4 MiB per
 bundle text bounds, at most ten sessions and fifty decisions, and a statement equal to the staged-tree
 statement), shows what is being approved with the requester's text cleaned
-(`HumanSignaturePopup.Clean`), refuses before any key prompt when the request is closed, not addressed
-to the account, already approved or carries a file without content, and signs only after
+(`HumanSignaturePopup.Clean`; file counts computed from the carried text, never the requester's
+numbers), refuses before any key prompt when the request is cancelled or expired, not addressed to
+the account, already approved by this account or carries a file without content, and signs only after
 `ReviewTreeRebuilder` rebuilt `treeId` from the reviewer's own clone (design decision 7: a temporary
-index, no blob written, the real index untouched, a mismatch for any reason refused). The password is
+index, no blob written, the real index untouched, a mismatch for any reason refused) and bound every
+shown base text to the base commit's own blob (a file listed as added must be absent from the base,
+a changed or deleted one present with exactly that text), so the diff the reviewer read on
+viberails.ai is the real change and not only the signed tree. Another reviewer's decision does not
+close a request to this account, because viberails.ai keeps taking decisions. The password is
 read key by key from the popup's own console with redirected input refused, the signature is confirmed
 with the public verify endpoint before the approval is posted, and the statement is the staged-tree
 one the dashboard Sign route and MCP refuse. The VS Code view calls the same local routes; its

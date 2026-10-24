@@ -133,14 +133,27 @@ export function reviewInboxMessage(state: ReviewInboxState | null): string | und
     return state.fetchedUtc ? REVIEW_INBOX_EMPTY_MESSAGE : REVIEW_INBOX_PENDING_MESSAGE;
 }
 
-/** Open, unanswered by this account, with a key saved, and no popup already open for it. */
+/**
+ * viberails.ai keeps taking decisions after the first one (a rule may name several approvers, and an
+ * approval after someone else's rejection is still this reviewer's to give), so only a cancelled or
+ * expired request is closed to this account.
+ */
+export const DECIDABLE_STATUSES: readonly string[] = ['open', 'approved', 'rejected'];
+
+/** Still decidable, unanswered by this account, with a key saved, and no popup already open for it. */
 export function canAnswerReviewRequest(row: ReviewInboxRow, state: ReviewInboxState): boolean {
-    return state.hasApiKey && row.status === 'open' && !row.decided && row.signing !== 'signing';
+    return state.hasApiKey && DECIDABLE_STATUSES.includes(row.status) && !row.decided && row.signing !== 'signing';
 }
 
 export function describeReviewStatus(row: ReviewInboxRow): string {
     if (row.decided && row.status === 'open') {
         return 'You answered; waiting for others';
+    }
+    if (!row.decided && row.status === 'approved') {
+        return 'Approved by another reviewer; your decision is still taken';
+    }
+    if (!row.decided && row.status === 'rejected') {
+        return 'Rejected by another reviewer; your decision is still taken';
     }
     return STATUS_WORDING[row.status] ?? row.status;
 }

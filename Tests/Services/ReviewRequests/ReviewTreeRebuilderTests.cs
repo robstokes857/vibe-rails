@@ -92,6 +92,68 @@ public sealed class ReviewTreeRebuilderTests : IAsyncLifetime
         Assert.Contains("Do not approve it", result.Message);
     }
 
+    /// <summary>
+    /// Codex review of slice D, F1: with Before set to the staged text the hosted diff reads "no text
+    /// changes" while the tree still matches. The base text is now bound to the base commit's blob.
+    /// </summary>
+    [Fact]
+    public async Task ForgedBaseTextIsRefusedEvenThoughTheTreeWouldMatch()
+    {
+        var (_, bundle) = await CaptureAsync();
+        var forged = bundle.Files
+            .Select(file => file.Path == "crlf.txt" ? file with { Before = file.After, ChangedLines = 0 } : file)
+            .ToList();
+
+        var result = await ReviewTreeRebuilder.RebuildAsync(Clone, bundle.TreeId, bundle.BaseTree, bundle.BaseCommit, forged, Ct);
+
+        Assert.Equal("base_mismatch", result.Code);
+        Assert.Contains("crlf.txt", result.Message);
+        Assert.Contains("not the real change", result.Message);
+        Assert.Null(result.RebuiltTree);
+    }
+
+    [Fact]
+    public async Task AChangedFileListedAsAddedIsRefused()
+    {
+        var (_, bundle) = await CaptureAsync();
+        var misdescribed = bundle.Files
+            .Select(file => file.Path == "crlf.txt" ? file with { Change = "added", Before = null, PreviousPath = null } : file)
+            .ToList();
+
+        var result = await ReviewTreeRebuilder.RebuildAsync(Clone, bundle.TreeId, bundle.BaseTree, bundle.BaseCommit, misdescribed, Ct);
+
+        Assert.Equal("base_mismatch", result.Code);
+        Assert.Contains("listed as added", result.Message);
+    }
+
+    [Fact]
+    public async Task ADeletedFileWithForgedBaseTextIsRefused()
+    {
+        var (_, bundle) = await CaptureAsync();
+        var forged = bundle.Files
+            .Select(file => file.Path == "old.md" ? file with { Before = "# Something harmless\n" } : file)
+            .ToList();
+
+        var result = await ReviewTreeRebuilder.RebuildAsync(Clone, bundle.TreeId, bundle.BaseTree, bundle.BaseCommit, forged, Ct);
+
+        Assert.Equal("base_mismatch", result.Code);
+        Assert.Contains("old.md", result.Message);
+    }
+
+    [Fact]
+    public async Task AChangedFileShownWithoutBaseTextIsRefused()
+    {
+        var (_, bundle) = await CaptureAsync();
+        var blind = bundle.Files
+            .Select(file => file.Path == "crlf.txt" ? file with { Before = null } : file)
+            .ToList();
+
+        var result = await ReviewTreeRebuilder.RebuildAsync(Clone, bundle.TreeId, bundle.BaseTree, bundle.BaseCommit, blind, Ct);
+
+        Assert.Equal("base_text_missing", result.Code);
+        Assert.Contains("crlf.txt", result.Message);
+    }
+
     [Fact]
     public async Task AFileWithoutContentCannotBeApproved()
     {
@@ -173,7 +235,11 @@ public sealed class ReviewTreeRebuilderTests : IAsyncLifetime
             new("tools/run.sh", "modified", false, null, 1, "a\n", "b\n", null),
             new("new.txt", "added", false, null, 1, null, "new\n", null)
         };
-        var modes = new Dictionary<string, string>(StringComparer.Ordinal) { ["keep.cs"] = "100644", ["tools/run.sh"] = "100755" };
+        var modes = new Dictionary<string, ReviewBaseEntry>(StringComparer.Ordinal)
+        {
+            ["keep.cs"] = new("100644", new string('1', 40)),
+            ["tools/run.sh"] = new("100755", new string('2', 40))
+        };
 
         var lines = Encoding.UTF8.GetString(ReviewTreeRebuilder.BuildIndexInfo(files, modes, sha256: false)).Split('\0', StringSplitOptions.RemoveEmptyEntries);
 

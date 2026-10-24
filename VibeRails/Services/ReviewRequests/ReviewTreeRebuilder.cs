@@ -11,7 +11,8 @@ namespace VibeRails.Services.ReviewRequests;
 /// in wording the popup prints as is.
 /// </summary>
 /// <param name="Code"><c>matches</c>, <c>missing_content</c>, <c>unsupported_change</c>, <c>too_many_files</c>,
-/// <c>not_a_repository</c>, <c>base_commit_missing</c>, <c>base_tree_mismatch</c>, <c>tree_mismatch</c>, <c>git_failed</c>.</param>
+/// <c>not_a_repository</c>, <c>base_commit_missing</c>, <c>base_tree_mismatch</c>, <c>base_mismatch</c>,
+/// <c>base_text_missing</c>, <c>tree_mismatch</c>, <c>git_failed</c>.</param>
 /// <param name="MissingContent">The paths listed without their content, for <c>missing_content</c>.</param>
 public sealed record ReviewTreeRebuildResult(
     bool Matches,
@@ -31,11 +32,21 @@ public sealed record ReviewTreeRebuildResult(
 /// prunes it. Every git launch goes through <see cref="GitCli"/>.
 /// </summary>
 /// <remarks>
+/// <para>
+/// Two things are proven, because the reviewer read two things. The tree binds the staged text: an
+/// unlisted or altered file changes <c>write-tree</c>. The base binds the diff the reviewer saw: each
+/// changed file's base text must hash to the base commit's own blob at that path, a file listed as added
+/// must be absent from the base, and a deleted or changed file must exist there. Without the second
+/// check a request could show <c>Before = After</c> ("no text changes") over a real change and still
+/// collect a signature over the true tree (Codex review of slice D, F1).
+/// </para>
+/// <para>
 /// What this cannot know, and therefore refuses rather than guesses: a file listed without content
 /// (binary, oversized, over the bundle limit) has no bytes to hash; a base commit the reviewer does not
 /// have cannot be read; a changed file mode is not in the bundle, so a new file is assumed to be a plain
 /// file (<c>100644</c>) and a changed file keeps the mode its base entry had. A mismatch for any reason
 /// is a refusal: the reviewer cannot tell a hidden change from a mode bit, and must not sign either.
+/// </para>
 /// </remarks>
 public static class ReviewTreeRebuilder
 {
@@ -118,11 +129,13 @@ public static class ReviewTreeRebuilder
             if (!read.Succeeded)
                 return new(false, "git_failed", $"Git could not load the base tree {baseTree} from your repository ({Trim(read.StdErr)}).");
 
-            var baseModes = await ReadBaseModesAsync(repositoryPath, environment, files, cancellationToken);
-            if (baseModes is null)
-                return new(false, "git_failed", "Git could not list the base tree's entries, so the file modes are unknown.");
+            var baseEntries = await ReadBaseEntriesAsync(repositoryPath, environment, files, cancellationToken);
+            if (baseEntries is null)
+                return new(false, "git_failed", "Git could not list the base tree's entries, so the base of each file is unknown.");
+            if (VerifyAgainstBase(files, baseEntries, sha256) is { } refused)
+                return refused;
 
-            var input = BuildIndexInfo(files, baseModes, sha256);
+            var input = BuildIndexInfo(files, baseEntries, sha256);
             var update = await GitCli.RunAsync(repositoryPath, ["update-index", "-z", "--index-info"], cancellationToken, GitTimeout, 4096, environment, input);
             if (!update.Succeeded)
                 return new(false, "git_failed", $"Git could not apply the request's files to the temporary index ({Trim(update.StdErr)}).");
@@ -149,22 +162,22 @@ public static class ReviewTreeRebuilder
     }
 
     /// <summary>
-    /// The modes of the base entries the bundle changes or renames away from, read from the temporary
-    /// index in bounded batches of literal pathspecs. A path the base does not have is simply absent.
+    /// The base entries (mode and blob id) at every path the bundle names, read from the temporary index
+    /// in bounded batches of literal pathspecs: the source of each change, and the new path of an added
+    /// or renamed file so its absence can be checked. A path the base does not have is simply absent.
     /// Null when git failed.
     /// </summary>
-    private static async Task<Dictionary<string, string>?> ReadBaseModesAsync(
+    private static async Task<Dictionary<string, ReviewBaseEntry>?> ReadBaseEntriesAsync(
         string repositoryPath,
         IReadOnlyDictionary<string, string> environment,
         IReadOnlyList<ReviewBundleFile> files,
         CancellationToken cancellationToken)
     {
         var wanted = files
-            .Where(file => file.Change is "modified" or "renamed" or "copied")
-            .Select(file => file.PreviousPath ?? file.Path)
+            .SelectMany(file => file.PreviousPath is { } previous && previous != file.Path ? [previous, file.Path] : new[] { file.Path })
             .Distinct(StringComparer.Ordinal)
             .ToList();
-        var modes = new Dictionary<string, string>(StringComparer.Ordinal);
+        var entries = new Dictionary<string, ReviewBaseEntry>(StringComparer.Ordinal);
         var batch = new List<string>();
         var batchChars = 0;
         foreach (var path in wanted)
@@ -179,7 +192,7 @@ public static class ReviewTreeRebuilder
             batchChars += path.Length + 1;
         }
         if (batch.Count > 0 && !await ListAsync(batch)) return null;
-        return modes;
+        return entries;
 
         async Task<bool> ListAsync(List<string> paths)
         {
@@ -195,10 +208,52 @@ public static class ReviewTreeRebuilder
                 if (tab <= 0) continue;
                 var fields = entry[..tab].Split(' ', StringSplitOptions.RemoveEmptyEntries);
                 if (fields.Length != 3 || fields[2] != "0") continue;
-                modes[entry[(tab + 1)..]] = fields[0];
+                entries[entry[(tab + 1)..]] = new ReviewBaseEntry(fields[0], fields[1]);
             }
             return true;
         }
+    }
+
+    /// <summary>
+    /// Binds what the reviewer read to the base commit: a changed, renamed, copied or deleted file must
+    /// exist in the base and its shown base text must hash to the base blob; a file listed as added must
+    /// not exist there. A file shown without base text, and not marked as omitted, cannot be checked and
+    /// is refused too. Null when every file agrees with the base.
+    /// </summary>
+    internal static ReviewTreeRebuildResult? VerifyAgainstBase(
+        IReadOnlyList<ReviewBundleFile> files, IReadOnlyDictionary<string, ReviewBaseEntry> baseEntries, bool sha256)
+    {
+        foreach (var file in files)
+        {
+            var source = file.PreviousPath ?? file.Path;
+            if (file.Change == "added")
+            {
+                if (baseEntries.ContainsKey(file.Path))
+                {
+                    return new(false, "base_mismatch",
+                        $"{file.Path} is listed as added, but the base commit already has that file, so the request misdescribes the change. Do not approve it.");
+                }
+                continue;
+            }
+            if (!baseEntries.TryGetValue(source, out var entry))
+            {
+                return new(false, "base_mismatch",
+                    $"{source} is listed as {file.Change}, but the base commit has no such file, so the request misdescribes the change. Do not approve it.");
+            }
+            if (file.Before is null)
+            {
+                // Omitted content is shown as omitted; nothing is claimed about the base text.
+                if (file.Omitted is not null) continue;
+                return new(false, "base_text_missing",
+                    $"{source} is shown without its base text, so the change the reviewer read cannot be checked against the base commit. Do not approve it.");
+            }
+            if (BlobId(file.Before, sha256) != entry.ObjectId)
+            {
+                return new(false, "base_mismatch",
+                    $"The base text shown for {source} is not what the base commit contains, so the diff the reviewer read is not the real change. Do not approve it.");
+            }
+        }
+        return null;
     }
 
     /// <summary>
@@ -207,7 +262,7 @@ public static class ReviewTreeRebuilder
     /// its exact bytes. The staged text was decoded as strict UTF-8 by the capture, so encoding it again
     /// gives the staged bytes back, byte-order mark and line endings included.
     /// </summary>
-    internal static byte[] BuildIndexInfo(IReadOnlyList<ReviewBundleFile> files, IReadOnlyDictionary<string, string> baseModes, bool sha256)
+    internal static byte[] BuildIndexInfo(IReadOnlyList<ReviewBundleFile> files, IReadOnlyDictionary<string, ReviewBaseEntry> baseEntries, bool sha256)
     {
         var zero = new string('0', sha256 ? 64 : 40);
         var builder = new MemoryStream();
@@ -227,7 +282,7 @@ public static class ReviewTreeRebuilder
         {
             if (file.Change == "deleted" || file.After is null) continue;
             var mode = file.Change == "added" ? PlainFileMode
-                : baseModes.TryGetValue(file.PreviousPath ?? file.Path, out var known) ? known : PlainFileMode;
+                : baseEntries.TryGetValue(file.PreviousPath ?? file.Path, out var known) ? known.Mode : PlainFileMode;
             Line(mode, BlobId(file.After, sha256), file.Path);
         }
         return builder.ToArray();
@@ -252,3 +307,6 @@ public static class ReviewTreeRebuilder
         return line.Length > 200 ? line[..200] + "..." : line;
     }
 }
+
+/// <summary>One entry of the base tree as the temporary index lists it: its mode and blob id.</summary>
+internal sealed record ReviewBaseEntry(string Mode, string ObjectId);

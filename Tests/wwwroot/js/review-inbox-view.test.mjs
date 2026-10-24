@@ -17,10 +17,14 @@ const view = (extra = {}) => ({
     project: 'C:\\work\\vibe-rails', popupAvailable: true, ...extra
 });
 
-test('only an open, unanswered request with a saved key can be answered, and not while its popup is open', () => {
+test('an unanswered request can be answered while viberails.ai still takes decisions, not while its popup is open', () => {
     assert.equal(canAct(item(), view()), true);
     assert.equal(canAct(item({ decided: true }), view()), false);
-    assert.equal(canAct(item({ status: 'approved' }), view()), false);
+    // Another reviewer's decision does not close the request to this account (F2): several approvers, or an approval after a rejection.
+    assert.equal(canAct(item({ status: 'approved' }), view()), true);
+    assert.equal(canAct(item({ status: 'rejected' }), view()), true);
+    assert.equal(canAct(item({ status: 'cancelled' }), view()), false);
+    assert.equal(canAct(item({ status: 'expired' }), view()), false);
     assert.equal(canAct(item(), view({ hasApiKey: false })), false);
     assert.equal(canAct(item({ signing: { outcome: 'signing' } }), view()), false);
 });
@@ -29,6 +33,8 @@ test('status and signing wording never leak raw codes', () => {
     assert.equal(describeStatus(item()), 'Waiting for your decision');
     assert.equal(describeStatus(item({ status: 'cancelled' })), 'Cancelled by the requester');
     assert.equal(describeStatus(item({ decided: true })), 'You answered; waiting for others');
+    assert.equal(describeStatus(item({ status: 'approved' })), 'Approved by another reviewer; your decision is still taken');
+    assert.equal(describeStatus(item({ status: 'rejected', decided: true })), 'Rejected');
     assert.equal(statusTone(item()), 'warning');
     assert.equal(statusTone(item({ status: 'rejected' })), 'danger');
     assert.equal(describeSigning({ outcome: 'approved' }), 'Approved from this computer');
