@@ -19,3 +19,9 @@ This project is intentionally outside the standard `Tests.csproj` suite because 
 both repositories. It checks the JSON contract, bidirectional edits and comments, notes,
 arrival ordering after offline edits, lost acknowledgements, stable card identities,
 local lane Automation events, the schema-2 complete-content parts upload, and upload boundaries.
+
+`ReviewRequestRoundTripTests` (VB-50 slice B) runs a staged change in a real temporary Git
+repository through the desktop capture, the hosted review-request store, a listed reviewer's
+read, session replay and signed decision, and the desktop ledger landing the polled approval.
+The desktop verifier is bridged to the hosted signature service on the same synthetic database;
+the HTTP transport itself is slice C.

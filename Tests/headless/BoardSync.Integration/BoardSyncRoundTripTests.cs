@@ -30,6 +30,9 @@ public sealed class BoardSyncRoundTripTests : IDisposable
 {
     private const int Owner = 23;
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
+    // The hosted per-account limits (VIBE-71), shared like the singletons Program registers.
+    private static readonly BoardWriteBudget Budget = new();
+    private static readonly BoardSyncAdmission Admission = new();
     private readonly string root = Path.Combine(Path.GetTempPath(), "vb51-coupled-" + Guid.NewGuid().ToString("N"));
     private readonly InMemoryDatabaseRoot remoteRoot = new();
     private readonly string remoteName = "vb51-coupled-" + Guid.NewGuid().ToString("N");
@@ -68,7 +71,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
 
         await using (var db = Db())
         {
-            var hosted = new HostedSync(db, TimeProvider.System);
+            var hosted = new HostedSync(db, TimeProvider.System, Budget);
             var source = Assert.Single(await hosted.ListBoardsAsync(Owner, Ct));
             Assert.Equal(Path.GetFileName(root), source.SourceRepository);
             Assert.Equal(Environment.MachineName, source.SourceComputer);
@@ -125,7 +128,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
         await store.UpdateCardAsync(root, card.Id, new(Title: "Offline desktop title"), Ct);
         await using (var db = Db())
         {
-            var hosted = new HostedSync(db, TimeProvider.System);
+            var hosted = new HostedSync(db, TimeProvider.System, Budget);
             await hosted.EditCardAsync(Owner, remoteId, card.Id, "Owner", Json("""{"title":"Web title","description":"Web description"}"""), Ct);
         }
         await Sync(card);
@@ -165,7 +168,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
             remoteBoard.LanesJson = BoardSyncContract.WriteLanes(lanes);
             remoteBoard.UpdatedUtc = DateTime.UtcNow;
             await db.SaveChangesAsync(Ct);
-            await new HostedSync(db, TimeProvider.System).CreateCardAsync(Owner, remoteId, "Owner", "Remote lane card", remoteLaneId, Ct);
+            await new HostedSync(db, TimeProvider.System, Budget).CreateCardAsync(Owner, remoteId, "Owner", "Remote lane card", remoteLaneId, Ct);
         }
         transport.PushBodies.Clear();
 
@@ -176,7 +179,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
         Assert.Contains(transport.PushBodies, body => Json(body).TryGetProperty("sourceRepository", out _));
         Assert.Contains(await store.GetColumnsAsync(root, Ct, board.Id), lane => lane.Id == remoteLaneId);
         await using var verify = Db();
-        Assert.Equal(2, Assert.Single(await new HostedSync(verify, TimeProvider.System).ListBoardsAsync(Owner, Ct)).CardCount);
+        Assert.Equal(2, Assert.Single(await new HostedSync(verify, TimeProvider.System, Budget).ListBoardsAsync(Owner, Ct)).CardCount);
     }
 
     [Fact]
@@ -219,7 +222,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
         await store.SaveLaneAutomationAsync(root, lanes[1].Id, [20], 0, Ct);
         WebWriteResult created;
         await using (var db = Db())
-            created = await new HostedSync(db, TimeProvider.System).CreateCardAsync(Owner, remoteId, "Owner", "Web created", lanes[0].Id, Ct);
+            created = await new HostedSync(db, TimeProvider.System, Budget).CreateCardAsync(Owner, remoteId, "Owner", "Web created", lanes[0].Id, Ct);
         await Sync(local);
         var pulled = (await store.FindCardAsync(root, created.CardId, Ct))!;
         Assert.Equal(created.Key, pulled.Key);
@@ -228,7 +231,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
         await Sync(local);
         Assert.Single(await store.GetPendingLaneAutomationsAsync(root, pulled.Id, Ct));
         await using (var db = Db())
-            await new HostedSync(db, TimeProvider.System).MoveCardAsync(Owner, remoteId, pulled.Id, "Owner", lanes[1].Id, Ct);
+            await new HostedSync(db, TimeProvider.System, Budget).MoveCardAsync(Owner, remoteId, pulled.Id, "Owner", lanes[1].Id, Ct);
         await Sync(local);
         Assert.Equal(lanes[1].Id, (await store.FindCardAsync(root, pulled.Id, Ct))!.ColumnId);
         var due = Assert.Single(await store.GetDueLaneAutomationsAsync(DateTime.UtcNow.AddMinutes(2), Ct));
@@ -251,7 +254,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
         WebWriteResult web;
         if (!remoteFirst) await Sync(baseline);
         await using (var db = Db())
-            web = await new HostedSync(db, TimeProvider.System).CreateCardAsync(Owner, remoteId, "Owner", "Web", baseline.ColumnId, Ct);
+            web = await new HostedSync(db, TimeProvider.System, Budget).CreateCardAsync(Owner, remoteId, "Owner", "Web", baseline.ColumnId, Ct);
         await Sync(baseline);
         await Sync(baseline); // Delivers a local conflict correction, if one was needed.
         var localAfter = (await store.FindCardAsync(root, local.Id, Ct))!;
@@ -262,7 +265,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
         Assert.Equal("VIBE-1", remoteFirst ? webAfter.DisplayId : localAfter.DisplayId);
         await using (var db = Db())
         {
-            var hosted = new HostedSync(db, TimeProvider.System);
+            var hosted = new HostedSync(db, TimeProvider.System, Budget);
             Assert.Equal(localAfter.DisplayId, (await hosted.GetCardAsync(Owner, remoteId, local.Id, Ct))!.Card.DisplayId);
             Assert.Equal(webAfter.DisplayId, (await hosted.GetCardAsync(Owner, remoteId, web.CardId, Ct))!.Card.DisplayId);
             await hosted.EditCardAsync(Owner, remoteId, web.CardId, "Owner", Json("""{"displayId":"PRETTY-55"}"""), Ct);
@@ -285,7 +288,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
         var secondRemote = await Publish(moved);
         await using (var db = Db())
         {
-            var hosted = new HostedSync(db, TimeProvider.System);
+            var hosted = new HostedSync(db, TimeProvider.System, Budget);
             Assert.True((await hosted.GetCardAsync(Owner, firstRemote, card.Id, Ct))!.Card.Deleted);
             var visible = (await hosted.GetCardAsync(Owner, secondRemote, card.Id, Ct))!;
             Assert.False(visible.Card.Deleted);
@@ -298,7 +301,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
         await Sync(card);
         await using (var db = Db())
         {
-            var visible = (await new HostedSync(db, TimeProvider.System).GetCardAsync(Owner, firstRemote, card.Id, Ct))!;
+            var visible = (await new HostedSync(db, TimeProvider.System, Budget).GetCardAsync(Owner, firstRemote, card.Id, Ct))!;
             Assert.False(visible.Card.Deleted);
             Assert.Equal("Changed away from the first board", visible.Card.Description);
             Assert.Equal("Keep discussion", Assert.Single(visible.Log).Body);
@@ -307,7 +310,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
         await store.DeleteCommentAsync(root, card.Id, comment.Id, BoardAuthor.User(), Ct);
         await Sync(card);
         await using (var db = Db())
-            Assert.Empty((await new HostedSync(db, TimeProvider.System).GetCardAsync(Owner, firstRemote, card.Id, Ct))!.Log);
+            Assert.Empty((await new HostedSync(db, TimeProvider.System, Budget).GetCardAsync(Owner, firstRemote, card.Id, Ct))!.Log);
 
         var target = await LocalCard();
         await store.AddCommentAsync(root, card.Id, BoardAuthor.Agent("Codex", "codex", null), "Merged discussion", Ct);
@@ -315,7 +318,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
         await Sync(target);
         await using (var db = Db())
         {
-            var hosted = new HostedSync(db, TimeProvider.System);
+            var hosted = new HostedSync(db, TimeProvider.System, Budget);
             Assert.True((await hosted.GetCardAsync(Owner, firstRemote, card.Id, Ct))!.Card.Deleted);
             var visible = (await hosted.GetCardAsync(Owner, firstRemote, target.Id, Ct))!;
             Assert.Contains(visible.Log, e => e.Body == "Merged discussion");
@@ -522,7 +525,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
             if (raw.Length > 0) http.Request.ContentLength = raw.Length;
             http.Request.Body = new MemoryStream(raw);
             await using var db = fixture.Db();
-            var controller = new BoardsApiController(new HostedSync(db, TimeProvider.System))
+            var controller = new BoardsApiController(new HostedSync(db, TimeProvider.System, Budget), Admission)
             {
                 ControllerContext = new ControllerContext { HttpContext = http }
             };
@@ -542,7 +545,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
             else if (path[^1] == "activity")
             {
                 Assert.Equal(HttpMethod.Put, request.Method);
-                var activity = new BoardActivityApiController(db)
+                var activity = new BoardActivityApiController(db, Admission, Budget)
                 {
                     ControllerContext = new ControllerContext { HttpContext = http }
                 };

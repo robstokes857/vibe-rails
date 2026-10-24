@@ -86,7 +86,7 @@ existing public signature verification, with a tree id and no repository content
 | Slice | Scope | State |
 | --- | --- | --- |
 | A | Desktop core: capture, ledger, decision verification, commit-hook application, routes | Done (this document, VB-50) |
-| B | viberails.ai: request storage and endpoints, reviewer page over the existing session replay viewer and email-audience access | Backlog, VB-OGK99-278 |
+| B | viberails.ai: request storage and endpoints, reviewer page over the existing session replay viewer and email-audience access | Implemented in VibeRails-Front (VB-OGK99-278, 2026-10-24); contract in its `Services/ReviewRequests/README.md`; cross-repo test `Tests/headless/BoardSync.Integration/ReviewRequestRoundTripTests.cs` |
 | C | Desktop transport: send a request and its sessions (reuse `SessionShareUploads`), poll decisions on the Board sync cadence, land approvals in the ledger | Backlog, VB-DPGU2-279 |
 | D | Reviewer desktop: "Reviews requested of you" and a `vb --sign-review` console popup that shows the bundle summary and signs the tree | Backlog, VB-PR2U7-280 |
 | E | UI: Request review from a card (Sessions rail picker, approvers from the rule), status on the card, commit and Rules page; MCP `request_review` that never signs | Backlog, VB-4XXCY-281 |
