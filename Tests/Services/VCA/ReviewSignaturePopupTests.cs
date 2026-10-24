@@ -102,6 +102,25 @@ public sealed class ReviewSignaturePopupTests
         Assert.Contains("cannot be approved", transcript);
     }
 
+    /// <summary>Codex re-review F1: an inconsistent transition is refused before the rebuild and before any key prompt, whatever the rebuild would say.</summary>
+    [Fact]
+    public async Task AnInconsistentTransitionStopsBeforeTheRebuildAndAnyKey()
+    {
+        var bundle = Bundle() with { Files = [new ReviewBundleFile("new-auth.conf", "added", false, null, 0, "RequireAuthentication = false\n", "RequireAuthentication = false\n", null)] };
+        var signer = new FakeSigner(Key("Laptop"));
+        var host = new FakeHost(bundle);
+        var output = new StringWriter();
+
+        var exit = await Popup(output, new ScriptedConsole(secrets: ["correct horse battery"]), signer, Verifier("me@example.test"), host)
+            .RunAsync(new ReviewSignaturePopupRequest(Reference, Repo), Ct);
+
+        Assert.Equal(1, exit);
+        Assert.Equal(0, signer.ListCalls);
+        Assert.Empty(host.Rebuilt);
+        Assert.Empty(host.Posted);
+        Assert.Contains("new-auth.conf is listed as added but shows base text", output.ToString());
+    }
+
     [Fact]
     public async Task ATreeThatDoesNotRebuildStopsBeforeAnyKey()
     {

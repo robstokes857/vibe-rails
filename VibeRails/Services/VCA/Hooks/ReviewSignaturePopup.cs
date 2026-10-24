@@ -142,6 +142,14 @@ public sealed class ReviewSignaturePopup
             return 1;
         }
 
+        if (ReviewTreeRebuilder.ShapeProblem(bundle.Files!) is { } inconsistent)
+        {
+            await _output.WriteLineAsync(
+                $"{s.Red}The request describes its files inconsistently: {HumanSignaturePopup.Clean(inconsistent)} "
+                + $"A side shown to you would not be a side of the change, so it cannot be approved. Nothing was signed.{s.Reset}");
+            return 1;
+        }
+
         await _output.WriteLineAsync($"Rebuilding the tree from your copy of the repository ({request.RepositoryPath})...");
         ReviewTreeRebuildResult rebuilt;
         try

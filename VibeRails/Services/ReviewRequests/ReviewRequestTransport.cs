@@ -179,6 +179,8 @@ public sealed class ReviewRequestTransport(HttpClient client)
             total += size;
             if (total > ReviewBundleCapture.MaxBundleContentBytes) throw Invalid();
         }
+        // The canonical transition shape: a side the renderer shows must be a side the tree proves.
+        if (ReviewTreeRebuilder.ShapeProblem(files) is not null) throw Invalid();
         var sessions = bundle.Sessions ?? [];
         if (sessions.Count > ReviewRequestService.MaxSessions) throw Invalid();
         foreach (var session in sessions)

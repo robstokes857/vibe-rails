@@ -112,6 +112,88 @@ public sealed class ReviewTreeRebuilderTests : IAsyncLifetime
         Assert.Null(result.RebuiltTree);
     }
 
+    /// <summary>
+    /// Codex re-review of slice D, F1 variants: an added file carrying base text, a deleted file carrying
+    /// staged text, a modified file whose previous path names another base file, and a rename onto an
+    /// existing destination all rendered as "no text changes" while the tree still matched.
+    /// </summary>
+    [Fact]
+    public async Task AnAddedFileCarryingBaseTextIsInconsistent()
+    {
+        var (_, bundle) = await CaptureAsync();
+        var forged = bundle.Files
+            .Select(file => file.Path == "bom.txt" ? file with { Before = file.After, ChangedLines = 0 } : file)
+            .ToList();
+
+        var result = await ReviewTreeRebuilder.RebuildAsync(Clone, bundle.TreeId, bundle.BaseTree, bundle.BaseCommit, forged, Ct);
+
+        Assert.Equal("inconsistent_change", result.Code);
+        Assert.Contains("bom.txt is listed as added but shows base text", result.Message);
+    }
+
+    [Fact]
+    public async Task ADeletedFileCarryingStagedTextIsInconsistent()
+    {
+        var (_, bundle) = await CaptureAsync();
+        var forged = bundle.Files
+            .Select(file => file.Path == "old.md" ? file with { After = file.Before, ChangedLines = 0 } : file)
+            .ToList();
+
+        var result = await ReviewTreeRebuilder.RebuildAsync(Clone, bundle.TreeId, bundle.BaseTree, bundle.BaseCommit, forged, Ct);
+
+        Assert.Equal("inconsistent_change", result.Code);
+        Assert.Contains("old.md is listed as deleted but shows staged text", result.Message);
+    }
+
+    [Fact]
+    public async Task AModifiedFileWhosePreviousPathNamesAnotherBaseFileIsInconsistent()
+    {
+        var (_, bundle) = await CaptureAsync();
+        // crlf.txt's real base is shown as some other base file's content: Before hashes to keep.cs's blob.
+        var forged = bundle.Files
+            .Select(file => file.Path == "crlf.txt" ? file with { PreviousPath = "keep.cs", Before = "class Keep { }\n" } : file)
+            .ToList();
+
+        var result = await ReviewTreeRebuilder.RebuildAsync(Clone, bundle.TreeId, bundle.BaseTree, bundle.BaseCommit, forged, Ct);
+
+        Assert.Equal("inconsistent_change", result.Code);
+        Assert.Contains("crlf.txt is listed as modified but names a previous path", result.Message);
+    }
+
+    [Fact]
+    public async Task ARenameOntoAnExistingDestinationIsRefused()
+    {
+        var (_, bundle) = await CaptureAsync();
+        // The real change deletes old.md and modifies crlf.txt. Listing it as "old.md renamed to crlf.txt"
+        // rebuilds the same tree while hiding what crlf.txt contained before.
+        var crlf = bundle.Files.Single(file => file.Path == "crlf.txt");
+        var forged = bundle.Files
+            .Where(file => file.Path is not ("old.md" or "crlf.txt"))
+            .Append(new ReviewBundleFile("crlf.txt", "renamed", false, "old.md", crlf.ChangedLines, "# Old\n", crlf.After, null))
+            .ToList();
+
+        var result = await ReviewTreeRebuilder.RebuildAsync(Clone, bundle.TreeId, bundle.BaseTree, bundle.BaseCommit, forged, Ct);
+
+        Assert.Equal("base_mismatch", result.Code);
+        Assert.Contains("hides what the destination contained", result.Message);
+    }
+
+    [Fact]
+    public void DuplicateAndOverlappingTransitionsAreInconsistent()
+    {
+        var a = new ReviewBundleFile("a.txt", "modified", false, null, 1, "x\n", "y\n", null);
+        Assert.Equal("a.txt is listed more than once.", ReviewTreeRebuilder.ShapeProblem([a, a]));
+        var renamed = new ReviewBundleFile("b.txt", "renamed", false, "a.txt", 0, "x\n", "x\n", null);
+        Assert.Equal("a.txt is both the source of a rename and a listed file.", ReviewTreeRebuilder.ShapeProblem([renamed, a]));
+        Assert.Equal("a.txt is the source of more than one rename.", ReviewTreeRebuilder.ShapeProblem([renamed, renamed with { Path = "c.txt" }]));
+        Assert.Equal("b.txt is listed as renamed without a distinct previous path.", ReviewTreeRebuilder.ShapeProblem([renamed with { PreviousPath = null }]));
+        // A copy's source legitimately stays and may itself be modified.
+        var copied = new ReviewBundleFile("b.txt", "copied", false, "a.txt", 0, "x\n", "x\n", null);
+        Assert.Null(ReviewTreeRebuilder.ShapeProblem([copied, a]));
+        // A deleted file whose previous path repeats its own path is the capture's own shape.
+        Assert.Null(ReviewTreeRebuilder.ShapeProblem([new ReviewBundleFile("gone.md", "deleted", false, "gone.md", 1, "x\n", null, null)]));
+    }
+
     [Fact]
     public async Task AChangedFileListedAsAddedIsRefused()
     {

@@ -928,10 +928,13 @@ statement), shows what is being approved with the requester's text cleaned
 numbers), refuses before any key prompt when the request is cancelled or expired, not addressed to
 the account, already approved by this account or carries a file without content, and signs only after
 `ReviewTreeRebuilder` rebuilt `treeId` from the reviewer's own clone (design decision 7: a temporary
-index, no blob written, the real index untouched, a mismatch for any reason refused) and bound every
-shown base text to the base commit's own blob (a file listed as added must be absent from the base,
-a changed or deleted one present with exactly that text), so the diff the reviewer read on
-viberails.ai is the real change and not only the signed tree. Another reviewer's decision does not
+index, no blob written, the real index untouched, a mismatch for any reason refused), required the
+canonical transition shape (an added file carries no base text, a deleted file no staged text, only
+a rename or copy names a distinct previous path, no path twice; `ReviewTreeRebuilder.ShapeProblem`,
+also enforced by `ParseBundle` and the hosted contract) and bound every shown base text to the base
+commit's own blob (a file listed as added, or the destination of a rename or copy, must be absent
+from the base; a changed or deleted one present with exactly that text), so the diff the reviewer
+read on viberails.ai is the real change and not only the signed tree. Another reviewer's decision does not
 close a request to this account, because viberails.ai keeps taking decisions. The password is
 read key by key from the popup's own console with redirected input refused, the signature is confirmed
 with the public verify endpoint before the approval is posted, and the statement is the staged-tree

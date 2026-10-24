@@ -11,8 +11,8 @@ namespace VibeRails.Services.ReviewRequests;
 /// in wording the popup prints as is.
 /// </summary>
 /// <param name="Code"><c>matches</c>, <c>missing_content</c>, <c>unsupported_change</c>, <c>too_many_files</c>,
-/// <c>not_a_repository</c>, <c>base_commit_missing</c>, <c>base_tree_mismatch</c>, <c>base_mismatch</c>,
-/// <c>base_text_missing</c>, <c>tree_mismatch</c>, <c>git_failed</c>.</param>
+/// <c>inconsistent_change</c>, <c>not_a_repository</c>, <c>base_commit_missing</c>, <c>base_tree_mismatch</c>,
+/// <c>base_mismatch</c>, <c>base_text_missing</c>, <c>tree_mismatch</c>, <c>git_failed</c>.</param>
 /// <param name="MissingContent">The paths listed without their content, for <c>missing_content</c>.</param>
 public sealed record ReviewTreeRebuildResult(
     bool Matches,
@@ -35,10 +35,12 @@ public sealed record ReviewTreeRebuildResult(
 /// <para>
 /// Two things are proven, because the reviewer read two things. The tree binds the staged text: an
 /// unlisted or altered file changes <c>write-tree</c>. The base binds the diff the reviewer saw: each
-/// changed file's base text must hash to the base commit's own blob at that path, a file listed as added
-/// must be absent from the base, and a deleted or changed file must exist there. Without the second
-/// check a request could show <c>Before = After</c> ("no text changes") over a real change and still
-/// collect a signature over the true tree (Codex review of slice D, F1).
+/// transition has the canonical shape (<see cref="ShapeProblem"/>), each changed file's base text must
+/// hash to the base commit's own blob at its source path, a file listed as added and the destination of
+/// a rename or copy must be absent from the base, and a deleted or changed file must exist there. Without
+/// those checks a request could show <c>Before = After</c> ("no text changes") over a real change, or
+/// point a file's base text at another file, and still collect a signature over the true tree (Codex
+/// review of slice D, F1 and its four variants).
 /// </para>
 /// <para>
 /// What this cannot know, and therefore refuses rather than guesses: a file listed without content
@@ -97,6 +99,8 @@ public static class ReviewTreeRebuilder
             return new(false, "unsupported_change",
                 $"{unsupported.Count} file(s) have a change kind this version cannot rebuild ({unsupported[0].Change}), so the request cannot be approved.");
         }
+        if (ShapeProblem(files) is { } inconsistent)
+            return new(false, "inconsistent_change", $"The request describes its files inconsistently: {inconsistent} It cannot be approved.");
 
         var format = await GitCli.RunAsync(repositoryPath, ["rev-parse", "--show-object-format"], cancellationToken, GitTimeout, 1024);
         if (!format.Succeeded)
@@ -215,25 +219,66 @@ public static class ReviewTreeRebuilder
     }
 
     /// <summary>
-    /// Binds what the reviewer read to the base commit: a changed, renamed, copied or deleted file must
-    /// exist in the base and its shown base text must hash to the base blob; a file listed as added must
-    /// not exist there. A file shown without base text, and not marked as omitted, cannot be checked and
-    /// is refused too. Null when every file agrees with the base.
+    /// The canonical shape of one file transition, as the capture writes it and as the reviewer reads it:
+    /// an added file has no base text and no previous path; a deleted file has no staged text and no
+    /// previous path; a modified file has no previous path; a renamed or copied file names a distinct
+    /// previous path; no path is listed twice and no rename source is also a listed path. Anything else
+    /// lets a side the renderer shows be something other than the transition the tree proves (Codex
+    /// review of slice D, F1: an added file carrying <c>Before = After</c> reads as "no text changes").
+    /// Shared by the desktop parser, the popup and the rebuild; null when the shape is canonical.
+    /// </summary>
+    public static string? ShapeProblem(IReadOnlyList<ReviewBundleFile> files)
+    {
+        var paths = new HashSet<string>(StringComparer.Ordinal);
+        var renameSources = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var file in files)
+        {
+            var previous = file.PreviousPath;
+            if (file.Change is "renamed" or "copied")
+            {
+                if (previous is null || previous == file.Path)
+                    return $"{file.Path} is listed as {file.Change} without a distinct previous path.";
+                if (file.Change == "renamed" && !renameSources.Add(previous))
+                    return $"{previous} is the source of more than one rename.";
+            }
+            else if (previous is not null && previous != file.Path)
+            {
+                return $"{file.Path} is listed as {file.Change} but names a previous path ({previous}).";
+            }
+            if (file.Change == "added" && file.Before is not null)
+                return $"{file.Path} is listed as added but shows base text.";
+            if (file.Change == "deleted" && file.After is not null)
+                return $"{file.Path} is listed as deleted but shows staged text.";
+            if (!paths.Add(file.Path))
+                return $"{file.Path} is listed more than once.";
+        }
+        var overlap = renameSources.FirstOrDefault(paths.Contains);
+        return overlap is null ? null : $"{overlap} is both the source of a rename and a listed file.";
+    }
+
+    /// <summary>
+    /// Binds what the reviewer read to the base commit: a changed, renamed, copied or deleted file's
+    /// source must exist in the base and its shown base text must hash to the base blob; a file listed
+    /// as added, and the destination of a rename or copy, must not exist there (an existing destination
+    /// would be overwritten with its base content never shown). A file shown without base text, and not
+    /// marked as omitted, cannot be checked and is refused too. Null when every file agrees with the base.
     /// </summary>
     internal static ReviewTreeRebuildResult? VerifyAgainstBase(
         IReadOnlyList<ReviewBundleFile> files, IReadOnlyDictionary<string, ReviewBaseEntry> baseEntries, bool sha256)
     {
         foreach (var file in files)
         {
-            var source = file.PreviousPath ?? file.Path;
-            if (file.Change == "added")
+            var moves = file.Change is "renamed" or "copied";
+            var source = moves ? file.PreviousPath! : file.Path;
+            if (file.Change == "added" || moves)
             {
                 if (baseEntries.ContainsKey(file.Path))
                 {
                     return new(false, "base_mismatch",
-                        $"{file.Path} is listed as added, but the base commit already has that file, so the request misdescribes the change. Do not approve it.");
+                        $"{file.Path} is listed as {file.Change}, but the base commit already has that file, so the request misdescribes the change"
+                        + (moves ? " and hides what the destination contained" : string.Empty) + ". Do not approve it.");
                 }
-                continue;
+                if (!moves) continue;
             }
             if (!baseEntries.TryGetValue(source, out var entry))
             {

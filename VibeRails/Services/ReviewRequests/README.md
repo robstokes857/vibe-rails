@@ -153,16 +153,24 @@ the design decisions for the rest.
   `update-index --index-info`, a deleted path and a rename's source removed, a changed file keeping
   its base mode and a new file assumed `100644`; `write-tree --missing-ok` must equal `treeId`. No
   blob is written and the real index is never touched. The base is proven too, because the reviewer
-  read a diff, not a tree: each changed, renamed, copied or deleted file must exist in the base and
-  its shown base text must hash to the base commit's blob at that path, and a file listed as added
-  must be absent from the base (`base_mismatch`; a changed file shown without base text and not
-  marked omitted is `base_text_missing`). Without that, `Before = After` over a real change read as
-  "no text changes" on viberails.ai while the signature still covered the true tree (Codex slice D
-  review, F1). Refusals name the reason: a file without content, an unknown change kind, a missing
-  base commit ("git fetch"), a base tree that is not the commit's, a base disagreement, or a tree
-  mismatch, which a new executable also produces: the bundle carries no modes, and the reviewer
-  cannot tell a mode bit from a hidden change, so neither is signed. `GitCli.RunAsync` gained
-  `environment` and `standardInput` for this and is still the one git launch.
+  read a diff, not a tree. First the shape: every transition must be canonical
+  (`ReviewTreeRebuilder.ShapeProblem`, shared by `ParseBundle`, the popup and the hosted contract):
+  an added file has no base text and no previous path, a deleted file no staged text and no previous
+  path, a modified file no previous path, a renamed or copied file a distinct previous path, no path
+  twice and no rename source also listed (`inconsistent_change`). Then the base: a changed, renamed,
+  copied or deleted file's source must exist in the base and its shown base text must hash to the
+  base commit's blob there, and a file listed as added or the destination of a rename or copy must
+  be absent from the base, or its overwritten content would never be shown (`base_mismatch`; a
+  changed file shown without base text and not marked omitted is `base_text_missing`). Without
+  these, `Before = After` over a real change, an added file carrying base text, a deleted file
+  carrying staged text, a previous path pointing at another base file, or a rename onto an existing
+  file all read as "no text changes" on viberails.ai while the signature still covered the true tree
+  (Codex slice D reviews, F1). Refusals name the reason: a file without content, an unknown change
+  kind, an inconsistent transition, a missing base commit ("git fetch"), a base tree that is not the
+  commit's, a base disagreement, or a tree mismatch, which a new executable also produces: the
+  bundle carries no modes, and the reviewer cannot tell a mode bit from a hidden change, so neither
+  is signed. `GitCli.RunAsync` gained `environment` and `standardInput` for this and is still the
+  one git launch.
 
 The decision route's only outbound call is the existing public signature verification, with a tree
 id and no repository content. The send route and the poller are the only code that transfers a

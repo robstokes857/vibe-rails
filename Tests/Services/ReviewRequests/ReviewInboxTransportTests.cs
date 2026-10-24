@@ -101,6 +101,11 @@ public sealed class ReviewInboxTransportTests
     [InlineData("omitted-with-text")]
     [InlineData("no-files")]
     [InlineData("oversized")]
+    [InlineData("added-with-before")]
+    [InlineData("deleted-with-after")]
+    [InlineData("modified-with-previous")]
+    [InlineData("rename-without-source")]
+    [InlineData("duplicate-path")]
     public void BundleAnswersOutsideTheContractAreInvalid(string shape)
     {
         var body = shape switch
@@ -109,6 +114,12 @@ public sealed class ReviewInboxTransportTests
             "statement" => BundleJson(statement: $"VibeRails human-verified commit v1\ntree {new string('f', 40)}\n"),
             "omitted-with-text" => BundleJson([new { path = "x.bin", change = "added", binary = true, omitted = "binary", after = "text" }]),
             "no-files" => BundleJson([]),
+            // The F1 variants: a side the renderer shows that the tree does not prove.
+            "added-with-before" => BundleJson([new { path = "new.conf", change = "added", binary = false, before = "x\n", after = "x\n" }]),
+            "deleted-with-after" => BundleJson([new { path = "auth.conf", change = "deleted", binary = false, before = "x\n", after = "x\n" }]),
+            "modified-with-previous" => BundleJson([new { path = "auth.conf", change = "modified", binary = false, previousPath = "template.conf", before = "x\n", after = "x\n" }]),
+            "rename-without-source" => BundleJson([new { path = "auth.conf", change = "renamed", binary = false, before = "x\n", after = "y\n" }]),
+            "duplicate-path" => BundleJson([new { path = "db.cs", change = "modified", binary = false, before = "a\n", after = "b\n" }, new { path = "db.cs", change = "added", binary = false, after = "b\n" }]),
             _ => BundleJson([new { path = "big.txt", change = "added", binary = false, after = new string('x', ReviewBundleCapture.MaxFileContentBytes + 1) }])
         };
 
