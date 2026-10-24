@@ -11,6 +11,7 @@ namespace VibeRails.DB;
 /// <param name="SentKeyFingerprint">SHA-256 of the account key the request was sent with; polling, uploads and cancellation stay bound to it.</param>
 /// <param name="ExpiresUTC">The hosted expiry (one month) once sent.</param>
 /// <param name="RemoteCancelledUTC">When the hosted copy confirmed a local cancellation; null until then.</param>
+/// <param name="SessionsQueuedUTC">When every attached session was queued for upload under the sending key; null while a send is still to be finished.</param>
 public sealed record ReviewRequestRecord(
     string Id,
     string ProjectPath,
@@ -26,7 +27,8 @@ public sealed record ReviewRequestRecord(
     string? RemoteId = null,
     string? SentKeyFingerprint = null,
     DateTime? ExpiresUTC = null,
-    DateTime? RemoteCancelledUTC = null);
+    DateTime? RemoteCancelledUTC = null,
+    DateTime? SessionsQueuedUTC = null);
 
 /// <summary>
 /// One reviewer's answer. An approval carries the signature trailer fields it was verified from;
@@ -98,9 +100,14 @@ public interface IReviewRequestStore
     /// <summary>Records that the hosted copy confirmed a local cancellation. False when the request does not exist.</summary>
     Task<bool> MarkRemoteCancelledAsync(string id, DateTime cancelledUtc, CancellationToken ct = default);
 
+    /// <summary>Records that every attached session was queued for upload. False when the request does not exist.</summary>
+    Task<bool> MarkSessionsQueuedAsync(string id, DateTime queuedUtc, CancellationToken ct = default);
+
     /// <summary>
-    /// Sent requests that still need the host, across every project: open ones (their decisions are
-    /// polled) and cancelled ones whose hosted copy has not confirmed the cancellation yet. Oldest first.
+    /// Sent requests that still need the host, across every project: every one that is not cancelled
+    /// (decisions are collected until the hosted expiry, whatever the current status, because the host
+    /// keeps taking them) and cancelled ones whose hosted copy has not confirmed the cancellation yet.
+    /// Oldest first.
     /// </summary>
     Task<IReadOnlyList<ReviewRequestRecord>> ListSentPendingAsync(CancellationToken ct = default);
 

@@ -6,8 +6,9 @@ namespace VibeRails.Data.Sqlite;
 
 /// <summary>
 /// Review requests and decisions in the normal state database (VB-50). Additive component
-/// <c>review-requests/1</c> (the two tables) and <c>/2</c> (the hosted copy's reference, key
-/// fingerprint, expiry and receipts as nullable columns); older versions ignore what they do not know.
+/// <c>review-requests/1</c> (the two tables), <c>/2</c> (the hosted copy's reference, key
+/// fingerprint, expiry and receipts as nullable columns) and <c>/3</c> (the session-queue receipt);
+/// older versions ignore what they do not know.
 /// </summary>
 public sealed class ReviewRequestStore : IReviewRequestStore
 {
@@ -195,6 +196,17 @@ public sealed class ReviewRequestStore : IReviewRequestStore
     }
 
     /// <inheritdoc />
+    public async Task<bool> MarkSessionsQueuedAsync(string id, DateTime queuedUtc, CancellationToken ct = default)
+    {
+        using var db = SqliteConnectionFactory.Open(_connectionString);
+        using var command = db.CreateCommand();
+        command.CommandText = "UPDATE ReviewRequests SET SessionsQueuedUTC = COALESCE(SessionsQueuedUTC, $at) WHERE Id = $id;";
+        command.Parameters.AddWithValue("$id", id);
+        command.Parameters.AddWithValue("$at", Stamp(queuedUtc));
+        return await command.ExecuteNonQueryAsync(ct) == 1;
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<ReviewRequestRecord>> ListSentPendingAsync(CancellationToken ct = default)
     {
         using var db = SqliteConnectionFactory.Open(_connectionString);
@@ -202,7 +214,7 @@ public sealed class ReviewRequestStore : IReviewRequestStore
         command.CommandText = RequestColumns + """
              FROM ReviewRequests
             WHERE RemoteId IS NOT NULL
-              AND (Status = 'open' OR (Status = 'cancelled' AND RemoteCancelledUTC IS NULL))
+              AND (Status <> 'cancelled' OR RemoteCancelledUTC IS NULL)
             ORDER BY SentUTC, Id;
             """;
         using var reader = await command.ExecuteReaderAsync(ct);
@@ -226,7 +238,7 @@ public sealed class ReviewRequestStore : IReviewRequestStore
 
     private const string RequestColumns =
         "SELECT Id, ProjectPath, Scope, TreeId, BaseCommit, CardKey, Status, BundleJson, CreatedUTC, UpdatedUTC, "
-        + "SentUTC, RemoteId, SentKeyFingerprint, ExpiresUTC, RemoteCancelledUTC";
+        + "SentUTC, RemoteId, SentKeyFingerprint, ExpiresUTC, RemoteCancelledUTC, SessionsQueuedUTC";
 
     private const string DecisionColumns =
         "SELECT d.Id, d.RequestId, d.Reviewer, d.Decision, d.Comment, d.KeyId, d.Fingerprint, d.TreeId, d.SignatureBase64, d.DecidedUTC, d.VerifiedUTC, d.RemoteId";
@@ -269,7 +281,8 @@ public sealed class ReviewRequestStore : IReviewRequestStore
         reader.IsDBNull(11) ? null : reader.GetString(11),
         reader.IsDBNull(12) ? null : reader.GetString(12),
         reader.IsDBNull(13) ? null : Parse(reader.GetString(13)),
-        reader.IsDBNull(14) ? null : Parse(reader.GetString(14)));
+        reader.IsDBNull(14) ? null : Parse(reader.GetString(14)),
+        reader.IsDBNull(15) ? null : Parse(reader.GetString(15)));
 
     private static string Stamp(DateTime value) => value.ToUniversalTime().ToString("O");
 

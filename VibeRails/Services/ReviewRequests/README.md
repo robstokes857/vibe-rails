@@ -52,12 +52,13 @@ collecting decisions) and records the design decisions for the rest.
   `GET` list, `POST` create (16 KiB body: `{ scope?, reviewers, sessions?, cardKey?, note? }`, 201),
   `GET /{id}` detail with the bundle, `POST /{id}/decisions` (32 KiB body:
   `{ decision, trailer?, comment?, reviewer? }`), `POST /{id}/cancel` (also cancels the hosted copy
-  of a sent request), `DELETE /{id}` (204),
+  of a sent request), `DELETE /{id}` (204; a sent request's hosted copy is cancelled first, or the
+  delete is refused),
   `GET /{id}/disclosure` (what a send would transfer; no outbound call) and `POST /{id}/send`
   (1 KiB body: `{ confirmed }`, answers `{ request, message }`).
   Refusals are `{ error, code }` with 400 `invalid_request` / `confirmation_required`, 404
   `not_found` / `session_not_found`, 409 `nothing_staged` / `not_a_repository` / `tree_mismatch` /
-  `signature_rejected` / `not_a_reviewer` / `not_open` / `no_api_key`, 503
+  `signature_rejected` / `not_a_reviewer` / `not_open` / `no_api_key` / `remote_pending`, 503
   `verification_unavailable`, and 502 with the transport's code for a send that failed
   (`network_error`, `timeout`, `server_update_required`, `invalid_api_key`, `permission_denied`,
   `rate_limited`, `server_unavailable`, `invalid_response`, `invalid_request`, `request_conflict`,
@@ -82,19 +83,30 @@ collecting decisions) and records the design decisions for the rest.
   (`confirmation_required`), for a request that is not open (`not_open`) and without an account key
   (`no_api_key`), and transfers nothing in those cases. A confirmed send records `SentUTC`, the
   reference, the sending key's SHA-256 fingerprint and the hosted expiry on the ledger row
-  (`review-requests/2`, additive nullable columns), queues each attached session through
-  `ISessionArchiveReader.EnsureSessionShareUploadAsync` under that fingerprint (the existing
-  `SessionShareUploads` queue and `SessionDataDrainJob`; a live session uploads after it ends; no
-  new upload path), publishes `review_request_updated`, and answers the stored request with a fixed
-  message. A second send transfers nothing. A local cancel also cancels the hosted copy when the
-  current key is the one that sent it; otherwise the poller retries the cancellation.
+  (`review-requests/2`, additive nullable columns), brings the next decision check forward to one
+  interval, queues each attached session through `ISessionArchiveReader.EnsureSessionShareUploadAsync`
+  under that fingerprint (the existing `SessionShareUploads` queue and `SessionDataDrainJob`; a live
+  session uploads after it ends; no new upload path), records `SessionsQueuedUTC`
+  (`review-requests/3`), publishes `review_request_updated`, and answers the stored request with a
+  fixed message. A second send transfers nothing; a send interrupted between the hosted confirmation
+  and the queue is finished by the next send call or by the poller, under the key that sent it,
+  without posting the bundle again. A local cancel also cancels the hosted copy when the current key
+  is the one that sent it; otherwise the poller retries the cancellation. **Delete** cancels the
+  hosted copy first: while it cannot (host unreachable, or sent with another account's key) the
+  delete is refused with 409 `remote_pending` and the request stays, cancelled, because its row is
+  the only thing that can still revoke the hosted copy; an expired or already-cancelled hosted copy
+  needs no host. A delete that races a send makes the send cancel its own hosted copy.
 - **Poll.** `ReviewRequestPoller.PollDueAsync` runs from `BoardSyncScheduler` after the card-share
   refresh (the lease-holding root only) and paces itself through `ReviewRequestPollState`
   (`.review-request-poll.json` beside state.db: account fingerprint, next due time and backoff,
   never a key or reference): every 15 minutes while a sent request is open, doubling to a two-hour
-  ceiling while none is or the host is unreachable, never on the 60 s tick. Only requests sent with
+  ceiling while none is or the host is unreachable, never on the 60 s tick. A request that already
+  has a decision is still polled until its expiry, at the backoff cadence, because the host keeps
+  taking decisions until it is cancelled or expires: a later approval after a rejection, or another
+  reviewer's approval for a second rule, still reaches the ledger. Only requests sent with
   the current key's fingerprint are polled; an expired request is polled for seven more days so a
-  late approval is still collected. Each new hosted decision (its hosted id is stored on the
+  late approval is still collected; a sent request whose sessions were never queued has them
+  queued first. Each new hosted decision (its hosted id is stored on the
   decision row, so each lands once) goes through `RecordDecisionAsync` with that id: an approval is
   re-verified with viberails.ai and matched to a listed reviewer, a rejection lands with its
   comment. A decision the ledger refuses (`tree_mismatch`, `signature_rejected`, `not_a_reviewer`)

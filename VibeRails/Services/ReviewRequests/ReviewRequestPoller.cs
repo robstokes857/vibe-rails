@@ -11,16 +11,21 @@ namespace VibeRails.Services.ReviewRequests;
 /// Collects decisions for sent review requests (VB-50, slice C). Runs from the Board sync scheduler
 /// and paces itself through <see cref="ReviewRequestPollState"/>: every 15 minutes while a sent
 /// request is open, doubling to a two-hour ceiling while none is or the host is unreachable, never
-/// on the scheduler's 60-second tick. Every decision lands through
+/// on the scheduler's 60-second tick. A request that already has a decision is still polled until
+/// its expiry, at the backoff cadence, because the host keeps taking decisions until it is cancelled
+/// or expires: a later approval after a rejection, or a second reviewer's approval for another rule,
+/// must still reach the ledger. Every decision lands through
 /// <see cref="ReviewRequestService.RecordDecisionAsync(string, string, RecordReviewDecisionRequest, long?, CancellationToken)"/>,
 /// so an approval is re-verified with viberails.ai and matched to a listed reviewer before the
 /// ledger stores it; a rejection lands with its comment. Cancelled requests whose hosted copy has
-/// not confirmed the cancellation are cancelled again here.
+/// not confirmed the cancellation are cancelled again here, and a send that was interrupted before
+/// its sessions were queued has them queued here under the key that sent it.
 /// </summary>
 public sealed class ReviewRequestPoller(
     IReviewRequestStore store,
     ReviewRequestService reviews,
     ReviewRequestTransport transport,
+    ISessionArchiveReader archives,
     IAppEventBus events,
     ReviewRequestPollState state,
     Func<string?> apiKey,
@@ -62,6 +67,12 @@ public sealed class ReviewRequestPoller(
                     continue;
                 }
                 if (request.ExpiresUTC is { } expires && now > expires + ExpiryGrace) continue;
+                if (request.SessionsQueuedUTC is null)
+                {
+                    // The send was interrupted between the hosted confirmation and the session queue.
+                    await ReviewRequestSender.QueueSessionsAsync(store, archives, request.Id, ReviewRequestService.Bundle(request),
+                        request.SentKeyFingerprint!, now, token);
+                }
                 var (ok, open) = await PollOneAsync(key, request, token);
                 reachable &= ok;
                 anyOpen |= open;
@@ -86,13 +97,13 @@ public sealed class ReviewRequestPoller(
         catch (ReviewRequestTransportException ex) when (ex.IsUnreachable)
         {
             Log.Information("[ReviewRequests] Decisions were not polled this pass ({Code})", ex.Code);
-            return (false, true);
+            return (false, request.Status == ReviewRequestStatus.Open);
         }
         catch (ReviewRequestTransportException ex)
         {
             // A request the host no longer has stops counting toward the 15-minute cadence; it stays open here until the developer cancels it.
             Log.Information("[ReviewRequests] Request {Id} was not polled ({Code})", request.Id, ex.Code);
-            return (true, ex.Code != "not_found");
+            return (true, ex.Code != "not_found" && request.Status == ReviewRequestStatus.Open);
         }
 
         var recorded = await store.GetRemoteDecisionIdsAsync(request.Id, ct);
@@ -113,7 +124,7 @@ public sealed class ReviewRequestPoller(
                 // The signature verifier is viberails.ai too; the approval is still pending and is retried next pass.
                 Log.Information("[ReviewRequests] An approval on request {Id} could not be verified this pass", request.Id);
                 if (changed) Publish(request, status);
-                return (false, true);
+                return (false, status == ReviewRequestStatus.Open);
             }
             catch (ReviewRequestException ex) when (ex.Code == "not_open")
             {
@@ -205,6 +216,24 @@ public sealed class ReviewRequestPollState
                 : TimeSpan.FromTicks(Math.Min(_file.DelayTicks * 2, MaxBackoff.Ticks));
             _file.DelayTicks = delay.Ticks;
             _file.NextDueUtc = _clock() + delay;
+            Save();
+        }
+    }
+
+    /// <summary>
+    /// A request was just sent: its first decision check happens one interval from now rather than
+    /// after the idle backoff, which the send's answer promises. A sooner due time is kept.
+    /// </summary>
+    public void Prompt(string account)
+    {
+        lock (_gate)
+        {
+            Load();
+            Account(account);
+            var due = _clock() + Interval;
+            if (_file.NextDueUtc <= due && _file.DelayTicks == Interval.Ticks) return;
+            _file.NextDueUtc = due < _file.NextDueUtc ? due : _file.NextDueUtc;
+            _file.DelayTicks = Interval.Ticks;
             Save();
         }
     }

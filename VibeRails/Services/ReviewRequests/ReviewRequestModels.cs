@@ -166,7 +166,7 @@ public sealed record ReviewRequestDisclosure(
     bool Sent,
     ReviewRequestRemote? Remote);
 
-/// <summary>Payload of <see cref="ReviewRequestEvents.Updated"/>.</summary>
+/// <summary>Payload of <see cref="ReviewRequestEvents.Updated"/>. <see cref="Status"/> is a request status, or <c>deleted</c> when the request is gone.</summary>
 public sealed record ReviewRequestChanged(string Id, string Status, string? CardKey, bool Sent);
 
 /// <summary>A decision as viberails.ai reports it to the requester's poll.</summary>

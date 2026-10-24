@@ -79,9 +79,11 @@ public static class ReviewRequestRoutes
                 return Results.Json(sent, ReviewRequestJsonContext.Default.ReviewRequestSent);
             }, ct));
 
-        group.MapDelete("/{id:guid}", async (Guid id, ReviewRequestService reviews, CancellationToken ct) =>
+        // The sender deletes: a sent request's hosted copy is cancelled first, or the delete is refused
+        // (409 remote_pending), so reviewers never keep access to a request that is gone locally.
+        group.MapDelete("/{id:guid}", async (Guid id, ReviewRequestSender sender, CancellationToken ct) =>
         {
-            await reviews.DeleteAsync(Project(), id.ToString("D"), ct);
+            await sender.DeleteAsync(Project(), id.ToString("D"), ct);
             return Results.NoContent();
         });
     }

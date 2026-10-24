@@ -2,6 +2,7 @@ using System.Net;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Moq;
 using Tests.Services.ReviewRequests;
 using VibeRails.Data.Sqlite;
 using VibeRails.DB;
@@ -67,8 +68,8 @@ public sealed class StoredReviewApprovalTests
             DateTime.UtcNow, DateTime.UtcNow.AddMonths(1), ct));
         var transport = ReviewRequestTestSupport.Transport(_ => Task.FromResult(ReviewRequestTestSupport.Json(HttpStatusCode.OK,
             ReviewRequestTestSupport.Hosted(created.Id, tree, "approved", decisions: [ReviewRequestTestSupport.Approved(1, "owner@example.com", tree)]))));
-        await new ReviewRequestPoller(store, reviews, transport, new ReviewRequestTestSupport.RecordingEventBus(),
-            new ReviewRequestPollState(), () => key).PollDueAsync(ct);
+        await new ReviewRequestPoller(store, reviews, transport, new Mock<ISessionArchiveReader>().Object,
+            new ReviewRequestTestSupport.RecordingEventBus(), new ReviewRequestPollState(), () => key).PollDueAsync(ct);
         Assert.Equal(ReviewRequestStatus.Approved, (await reviews.GetAsync(repo.RepositoryPath, created.Id, ct)).Request.Status);
         Assert.Equal(1L, Assert.Single(await store.GetDecisionsAsync(created.Id, ct)).RemoteId);
         verifier.Calls.Clear();

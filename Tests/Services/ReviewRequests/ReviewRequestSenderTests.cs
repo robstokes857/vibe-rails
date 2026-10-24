@@ -16,7 +16,8 @@ namespace Tests.Services.ReviewRequests;
 /// <summary>
 /// Sending a review request (VB-50, slice C): the disclosure names everything that leaves, nothing
 /// moves without confirmation or a key, a confirmed send records the hosted copy and queues the
-/// attached sessions under the key that sent it, and a local cancel reaches the hosted copy.
+/// attached sessions under the key that sent it, an interrupted send is finished by a retry, a local
+/// cancel reaches the hosted copy, and a delete never discards a hosted copy that is still readable.
 /// </summary>
 public sealed class ReviewRequestSenderTests : IDisposable
 {
@@ -30,6 +31,7 @@ public sealed class ReviewRequestSenderTests : IDisposable
     private readonly Mock<ISessionStore> _sessions = new(MockBehavior.Strict);
     private readonly RecordingEventBus _events = new();
     private readonly Clock _clock = new(new DateTime(2026, 10, 24, 12, 0, 0, DateTimeKind.Utc));
+    private readonly ReviewRequestPollState _polls;
     private readonly List<HttpRequestMessage> _requests = [];
     private string? _key = ApiKey;
     private Func<HttpRequestMessage, Task<HttpResponseMessage>> _answer;
@@ -43,6 +45,7 @@ public sealed class ReviewRequestSenderTests : IDisposable
         Directory.CreateDirectory(_project);
         _store = new ReviewRequestStore(new SqliteConnectionStringBuilder { DataSource = Path.Combine(_directory, "state.db"), Pooling = false }.ToString());
         _reviews = new ReviewRequestService(_store, Snapshots(_project).Object, FakeCommitSignatureVerifier.ValidFor("lead@example.com"), _clock);
+        _polls = new ReviewRequestPollState(null, () => _clock.Now);
         var started = _clock.Now.AddHours(-1);
         _sessions.Setup(s => s.GetSessionByIdAsync(EndedSession, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SessionResponse(EndedSession, "codex", null, _project, started, started.AddMinutes(20), 0));
@@ -50,7 +53,9 @@ public sealed class ReviewRequestSenderTests : IDisposable
             .ReturnsAsync(new SessionResponse(LiveSession, "claude", null, _project, started, null, null));
         _sessions.Setup(s => s.GetSessionDisplayInfoAsync(EndedSession)).ReturnsAsync(("codex", "Fix the migration"));
         _sessions.Setup(s => s.GetSessionDisplayInfoAsync(LiveSession)).ReturnsAsync(("claude", (string?)null));
-        _answer = request => Task.FromResult(Json(HttpStatusCode.Created, Hosted(RequestIdOf(request), created: _clock.Now)));
+        _answer = request => Task.FromResult(request.Method == HttpMethod.Delete
+            ? new HttpResponseMessage(HttpStatusCode.OK)
+            : Json(HttpStatusCode.Created, Hosted(RequestIdOf(request), created: _clock.Now)));
     }
 
     public void Dispose()
@@ -135,7 +140,7 @@ public sealed class ReviewRequestSenderTests : IDisposable
         Assert.Equal("open", sent.Request.Status);
 
         var stored = await _store.GetAsync(created.Id, Ct);
-        Assert.Equal((Reference, Fingerprint, _clock.Now), (stored!.RemoteId, stored.SentKeyFingerprint, stored.SentUTC));
+        Assert.Equal((Reference, Fingerprint, _clock.Now, _clock.Now), (stored!.RemoteId, stored.SentKeyFingerprint, stored.SentUTC, stored.SessionsQueuedUTC));
         Assert.Equal([(EndedSession, Fingerprint), (LiveSession, Fingerprint)], queued);
 
         var evt = Assert.Single(_events.Events);
@@ -154,6 +159,49 @@ public sealed class ReviewRequestSenderTests : IDisposable
         Assert.True(disclosure.Sent);
         Assert.Equal(Reference, disclosure.Remote!.Id);
         Assert.Equal(_clock.Now.AddMonths(1), disclosure.ExpiresUtc);
+    }
+
+    /// <summary>Review N1: the send's answer promises a check in 15 minutes, so the idle backoff must not apply to it.</summary>
+    [Fact]
+    public async Task ASuccessfulSendBringsTheNextDecisionCheckForward()
+    {
+        var created = await CreateAsync();
+        _archives.Setup(a => a.EnsureSessionShareUploadAsync(It.IsAny<string>(), Fingerprint, It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        for (var pass = 0; pass < 4; pass++) _polls.End(Fingerprint, anyOpen: false, reachable: true); // idle: 15, 30, 60, 120
+        Assert.Equal(_clock.Now.AddHours(2), _polls.NextDueUtc);
+
+        await Sender().SendAsync(_project, created.Id, new SendReviewRequest(true), Ct);
+
+        Assert.Equal(_clock.Now.AddMinutes(15), _polls.NextDueUtc);
+    }
+
+    /// <summary>Review F3: the hosted confirmation is durable before the sessions are queued; a retry finishes the queue without a second transfer.</summary>
+    [Fact]
+    public async Task AnInterruptedSendResumesQueuingOnRetry_UnderThePinnedKey()
+    {
+        var created = await CreateAsync();
+        var calls = 0;
+        _archives.Setup(a => a.EnsureSessionShareUploadAsync(It.IsAny<string>(), Fingerprint, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns((string _, string _, DateTime _, CancellationToken _) =>
+                ++calls == 1 ? throw new InvalidOperationException("database is locked") : Task.FromResult(true));
+        var sender = Sender();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => sender.SendAsync(_project, created.Id, new SendReviewRequest(true), Ct));
+        var stored = await _store.GetAsync(created.Id, Ct);
+        Assert.Equal(Reference, stored!.RemoteId);
+        Assert.Null(stored.SessionsQueuedUTC);
+        Assert.Single(_requests);
+
+        _key = "a-different-account-key"; // the retry still queues under the key that sent the request
+        var retried = await sender.SendAsync(_project, created.Id, new SendReviewRequest(true), Ct);
+
+        Assert.Contains("queued to upload now", retried.Message);
+        Assert.Single(_requests);
+        Assert.Equal(3, calls);
+        Assert.Equal(_clock.Now, (await _store.GetAsync(created.Id, Ct))!.SessionsQueuedUTC);
+        var third = await sender.SendAsync(_project, created.Id, new SendReviewRequest(true), Ct);
+        Assert.Equal("This review request was already sent.", third.Message);
+        Assert.Equal(3, calls);
     }
 
     [Fact]
@@ -201,6 +249,27 @@ public sealed class ReviewRequestSenderTests : IDisposable
         Assert.Empty(_requests);
     }
 
+    /// <summary>Review F1: a delete racing the send would leave a hosted copy nothing local can revoke, so the send revokes it.</summary>
+    [Fact]
+    public async Task ASendRacingADeleteCancelsItsOwnHostedCopy()
+    {
+        var created = await CreateAsync();
+        _answer = async request =>
+        {
+            if (request.Method == HttpMethod.Delete) return new HttpResponseMessage(HttpStatusCode.OK);
+            await _store.DeleteAsync(created.Id, Ct); // the row disappears while the host is answering
+            return Json(HttpStatusCode.Created, Hosted(created.Id, created: _clock.Now));
+        };
+
+        var ex = await Assert.ThrowsAsync<ReviewRequestException>(() => Sender().SendAsync(_project, created.Id, new SendReviewRequest(true), Ct));
+
+        Assert.Equal(("not_found", 404), (ex.Code, ex.Status));
+        Assert.Equal(["POST /api/v1/review-requests", "DELETE /api/v1/review-requests/" + Reference],
+            _requests.Select(r => r.Method + " " + r.RequestUri!.AbsolutePath));
+        _archives.VerifyNoOtherCalls();
+        Assert.Empty(_events.Events);
+    }
+
     [Theory]
     [InlineData("confirmed")]
     [InlineData("host_down")]
@@ -237,11 +306,70 @@ public sealed class ReviewRequestSenderTests : IDisposable
         Assert.Equal("cancelled", evt.Payload.GetProperty("status").GetString());
     }
 
+    /// <summary>Review F1: the row is the only thing that can still cancel the hosted copy, so it stays until the host confirms.</summary>
+    [Theory]
+    [InlineData("host_down")]
+    [InlineData("other_account")]
+    public async Task DeleteIsRefusedWhileTheHostedCopyIsStillReadable_ThenSucceedsOnceItIsCancelled(string variant)
+    {
+        var created = await SentAsync();
+        _requests.Clear();
+        _events.Events.Clear();
+        _answer = _ => Task.FromResult(new HttpResponseMessage(variant == "host_down" ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.OK));
+        if (variant == "other_account") _key = "a-different-account-key";
+
+        var refused = await Assert.ThrowsAsync<ReviewRequestException>(() => Sender().DeleteAsync(_project, created.Id, Ct));
+
+        Assert.Equal(("remote_pending", 409), (refused.Code, refused.Status));
+        Assert.Contains(variant == "other_account" ? "different account key" : "retried automatically", refused.Message);
+        var stored = await _store.GetAsync(created.Id, Ct);
+        Assert.NotNull(stored);
+        Assert.Equal(("cancelled", Reference), (stored.Status, stored.RemoteId));
+        Assert.Null(stored.RemoteCancelledUTC);
+        Assert.Equal(variant == "host_down" ? 1 : 0, _requests.Count(r => r.Method == HttpMethod.Delete));
+        Assert.Equal("cancelled", _events.Events[^1].Payload.GetProperty("status").GetString());
+
+        // The host answers again, or the sending account is back: the hosted copy is cancelled, then the row goes.
+        _answer = _ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+        _key = ApiKey;
+        await Sender().DeleteAsync(_project, created.Id, Ct);
+
+        Assert.EndsWith("/api/v1/review-requests/" + Reference, _requests[^1].RequestUri!.AbsolutePath);
+        Assert.Equal(HttpMethod.Delete, _requests[^1].Method);
+        Assert.Null(await _store.GetAsync(created.Id, Ct));
+        Assert.Equal("deleted", _events.Events[^1].Payload.GetProperty("status").GetString());
+    }
+
+    [Theory]
+    [InlineData("unsent")]
+    [InlineData("expired")]
+    [InlineData("already_cancelled_on_host")]
+    public async Task DeleteNeedsNoHostWhenNothingRemainsReadableThere(string variant)
+    {
+        var created = await CreateAsync();
+        if (variant == "expired")
+            Assert.True(await _store.MarkSentAsync(created.Id, Reference, Fingerprint, _clock.Now.AddDays(-40), _clock.Now.AddDays(-9), Ct));
+        if (variant == "already_cancelled_on_host")
+        {
+            Assert.True(await _store.MarkSentAsync(created.Id, Reference, Fingerprint, _clock.Now, _clock.Now.AddMonths(1), Ct));
+            Assert.True(await _store.MarkRemoteCancelledAsync(created.Id, _clock.Now, Ct));
+        }
+        _key = null; // no key at all: a delete that needed the host would be refused
+
+        await Sender().DeleteAsync(_project, created.Id, Ct);
+
+        Assert.Empty(_requests);
+        Assert.Null(await _store.GetAsync(created.Id, Ct));
+        var evt = Assert.Single(_events.Events);
+        Assert.Equal("deleted", evt.Payload.GetProperty("status").GetString());
+        Assert.Equal(variant != "unsent", evt.Payload.GetProperty("sent").GetBoolean());
+    }
+
     private ReviewRequestSender Sender() => new(_store, _reviews, Transport(request =>
     {
         _requests.Add(request);
         return _answer(request);
-    }), _archives.Object, _events, () => _key, _clock);
+    }), _archives.Object, _events, _polls, () => _key, _clock);
 
     private async Task<ReviewRequestSummary> CreateAsync() => await _reviews.CreateAsync(_project,
         new CreateReviewRequest(Reviewers: ["lead@example.com"], Sessions: [EndedSession, LiveSession], CardKey: "VB-50", Note: "Check the retry bound."),

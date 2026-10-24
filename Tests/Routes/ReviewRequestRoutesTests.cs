@@ -40,6 +40,7 @@ public sealed class ReviewRequestRoutesTests : IAsyncLifetime
     private readonly Mock<ISessionArchiveReader> _archives = new();
     private readonly ReviewRequestTestSupport.RecordingEventBus _events = new();
     private readonly List<HttpRequestMessage> _outbound = [];
+    private HttpStatusCode _hostedDelete = HttpStatusCode.OK;
     private string _project = null!;
     private WebApplication _app = null!;
     private Uri _baseUri = null!;
@@ -77,12 +78,12 @@ public sealed class ReviewRequestRoutesTests : IAsyncLifetime
         var transport = ReviewRequestTestSupport.Transport(request =>
         {
             _outbound.Add(request);
-            if (request.Method == HttpMethod.Delete) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+            if (request.Method == HttpMethod.Delete) return Task.FromResult(new HttpResponseMessage(_hostedDelete));
             using var body = JsonDocument.Parse(request.Content!.ReadAsStream());
             var requestId = body.RootElement.GetProperty("requestId").GetString()!;
             return Task.FromResult(ReviewRequestTestSupport.Json(HttpStatusCode.Created, ReviewRequestTestSupport.Hosted(requestId, Tree)));
         });
-        builder.Services.AddSingleton(new ReviewRequestSender(store, reviews, transport, _archives.Object, _events, () => "routes-fixture-key"));
+        builder.Services.AddSingleton(new ReviewRequestSender(store, reviews, transport, _archives.Object, _events, new ReviewRequestPollState(), () => "routes-fixture-key"));
         builder.Services.ConfigureHttpJsonOptions(options =>
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonSerializerContext.Default));
         _app = builder.Build();
@@ -227,13 +228,30 @@ public sealed class ReviewRequestRoutesTests : IAsyncLifetime
         Assert.Equal((HttpMethod.Post, "routes-fixture-key"), (post.Method, Assert.Single(post.Headers.GetValues("X-Api-Key"))));
         Assert.Equal("review_request_updated", Assert.Single(_events.Events).Type);
 
+        // The host is down: the local cancel succeeds, the hosted cancellation stays pending, and the
+        // row cannot be deleted yet because it is the only thing that can still cancel the hosted copy (review F1).
+        _hostedDelete = HttpStatusCode.ServiceUnavailable;
         using var cancelled = await Send(HttpMethod.Post, $"/api/v1/review-requests/{id}/cancel");
         Assert.Equal(HttpStatusCode.OK, cancelled.StatusCode);
         using var cancelledJson = JsonDocument.Parse(await cancelled.Content.ReadAsStringAsync(Ct));
         Assert.Equal("cancelled", cancelledJson.RootElement.GetProperty("status").GetString());
-        Assert.NotNull(cancelledJson.RootElement.GetProperty("remote").GetProperty("cancelledUtc").GetString());
+        Assert.False(cancelledJson.RootElement.GetProperty("remote").TryGetProperty("cancelledUtc", out _));
         Assert.Equal(HttpMethod.Delete, _outbound[^1].Method);
         Assert.EndsWith("/api/v1/review-requests/" + ReviewRequestTestSupport.Reference, _outbound[^1].RequestUri!.AbsolutePath);
+        using var kept = await Send(HttpMethod.Delete, $"/api/v1/review-requests/{id}");
+        Assert.Equal(HttpStatusCode.Conflict, kept.StatusCode);
+        Assert.Equal("remote_pending", await CodeAsync(kept));
+        using var still = await Send(HttpMethod.Get, $"/api/v1/review-requests/{id}");
+        Assert.Equal(HttpStatusCode.OK, still.StatusCode);
+
+        // The host answers again: the hosted copy is cancelled and the row goes.
+        _hostedDelete = HttpStatusCode.OK;
+        using var deleted = await Send(HttpMethod.Delete, $"/api/v1/review-requests/{id}");
+        Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+        Assert.Equal(HttpMethod.Delete, _outbound[^1].Method);
+        using var gone = await Send(HttpMethod.Get, $"/api/v1/review-requests/{id}");
+        Assert.Equal(HttpStatusCode.NotFound, gone.StatusCode);
+        Assert.Equal("deleted", _events.Events[^1].Payload.GetProperty("status").GetString());
     }
 
     private static async Task<string?> CodeAsync(HttpResponseMessage response)

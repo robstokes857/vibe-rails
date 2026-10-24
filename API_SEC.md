@@ -871,17 +871,25 @@ A confirmed send records the hosted reference, the send time, the hosted expiry 
 fingerprint of the key that sent it (`review-requests/2`, additive nullable columns). Attached
 sessions are queued through the existing `SessionShareUploads` table under that fingerprint and
 uploaded by `SessionDataDrainJob` through the existing session ingest after each session ends: no
-new upload path, the archive stays immutable, and a later account change cannot retarget them.
-Reviewers are always listed email addresses; a request is never a public link. Cancelling locally
-also `DELETE`s the hosted copy under the same key; a failed or deferred hosted cancellation is
-retried by the poller and never blocks the local cancel. The reference is shown to the requester
-as a selector, never a credential: every hosted route checks the caller's key.
+new upload path, the archive stays immutable, and a later account change cannot retarget them. The
+queue is receipted (`SessionsQueuedUTC`, `review-requests/3`), so a send interrupted after the hosted
+confirmation is finished by a retry or by the poller under the original key, never by posting the
+bundle again. Reviewers are always listed email addresses; a request is never a public link.
+Cancelling locally also `DELETE`s the hosted copy under the same key; a failed or deferred hosted
+cancellation is retried by the poller and never blocks the local cancel. A local delete cancels the
+hosted copy first and is refused (409 `remote_pending`) while it cannot, because the row is the only
+thing that can still revoke the hosted copy; the request stays, cancelled, until the host confirms,
+and an expired or already-cancelled hosted copy needs no host. A send that races a delete cancels
+its own hosted copy. The reference is shown to the requester as a selector, never a credential:
+every hosted route checks the caller's key.
 
 Decisions are polled by the root that holds the Board sync lease, from `BoardSyncScheduler`, on a
 self-paced cadence persisted in `.review-request-poll.json` beside state.db (account fingerprint,
 next due time and backoff only): every 15 minutes while a sent request is open, doubling to a
-two-hour ceiling while none is or the host is unreachable, never on the 60-second tick. Only
-requests sent with the current key's fingerprint are polled. Each hosted decision is validated
+two-hour ceiling while none is or the host is unreachable, never on the 60-second tick. A decided
+request is still polled until its expiry at the backoff cadence, because the host keeps taking
+decisions until cancellation or expiry; a successful send brings the next check forward to one
+interval. Only requests sent with the current key's fingerprint are polled. Each hosted decision is validated
 (at most 50, distinct ids, listed kinds, trailer grammar, comment bound) and then lands through
 `ReviewRequestService.RecordDecisionAsync`: an approval's trailer must cover the request's tree and
 is re-verified with the public signature endpoint, and its signer must be a listed reviewer; a

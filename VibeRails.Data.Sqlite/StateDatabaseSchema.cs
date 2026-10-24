@@ -272,6 +272,12 @@ internal static class StateDatabaseSchema
                 ALTER TABLE ReviewDecisions ADD COLUMN RemoteId INTEGER NULL;
                 CREATE INDEX idx_review_requests_sent ON ReviewRequests(Status) WHERE RemoteId IS NOT NULL;
                 """));
+        // Slice C review (F3): the receipt that every attached session was queued, so a send that
+        // was interrupted after the hosted confirmation is finished by a retry or the poller.
+        SqliteMigrationRunner.Apply(connection, "review-requests", 3, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, """
+                ALTER TABLE ReviewRequests ADD COLUMN SessionsQueuedUTC TEXT NULL;
+                """));
         JobStore.EnsureSessionLinkSchema(connection);
         // Every breaking step above has now been applied (or was already), so the file is at this
         // build's generation. Stamping after the fact also covers databases migrated before the

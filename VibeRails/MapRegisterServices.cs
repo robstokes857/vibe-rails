@@ -125,11 +125,13 @@ namespace VibeRails
                     sp.GetRequiredService<Services.ReviewRequests.ReviewRequestTransport>(),
                     sp.GetRequiredService<DB.ISessionArchiveReader>(),
                     sp.GetRequiredService<IAppEventBus>(),
+                    sp.GetRequiredService<Services.ReviewRequests.ReviewRequestPollState>(),
                     ParserConfigs.GetApiKey));
                 serviceCollection.AddScoped(sp => new Services.ReviewRequests.ReviewRequestPoller(
                     sp.GetRequiredService<DB.IReviewRequestStore>(),
                     sp.GetRequiredService<Services.ReviewRequests.ReviewRequestService>(),
                     sp.GetRequiredService<Services.ReviewRequests.ReviewRequestTransport>(),
+                    sp.GetRequiredService<DB.ISessionArchiveReader>(),
                     sp.GetRequiredService<IAppEventBus>(),
                     sp.GetRequiredService<Services.ReviewRequests.ReviewRequestPollState>(),
                     ParserConfigs.GetApiKey));
