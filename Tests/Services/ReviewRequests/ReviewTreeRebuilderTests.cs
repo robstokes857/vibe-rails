@@ -178,6 +178,61 @@ public sealed class ReviewTreeRebuilderTests : IAsyncLifetime
         Assert.Contains("hides what the destination contained", result.Message);
     }
 
+    /// <summary>
+    /// Codex third review of slice D: an added path that collides with a base directory makes
+    /// update-index drop the directory's entries without a word. The honest capture lists those
+    /// deletions; a bundle that omits them rebuilds the same tree and must still be refused.
+    /// </summary>
+    [Fact]
+    public async Task AFileReplacingABaseDirectoryMustListTheDirectorysDeletions()
+    {
+        await Git(Repo, "rm", "-q", "-r", "-f", "--", "tools"); // -f: tools/run.sh already has a staged edit in this fixture.
+        await File.WriteAllTextAsync(Path.Combine(Repo, "tools"), "now a file\n", Ct);
+        await Git(Repo, "add", "--", "tools");
+        var (_, bundle) = await CaptureAsync();
+        Assert.Contains(bundle.Files, file => file.Path == "tools/run.sh" && file.Change == "deleted");
+        Assert.True((await ReviewTreeRebuilder.RebuildAsync(Clone, bundle.TreeId, bundle.BaseTree, bundle.BaseCommit, bundle.Files, Ct)).Matches);
+
+        var forged = bundle.Files.Where(file => file.Path != "tools/run.sh").ToList();
+        var result = await ReviewTreeRebuilder.RebuildAsync(Clone, bundle.TreeId, bundle.BaseTree, bundle.BaseCommit, forged, Ct);
+
+        Assert.Equal("hidden_change", result.Code);
+        Assert.Contains("tools/run.sh", result.Message);
+        Assert.Equal(bundle.TreeId, result.RebuiltTree); // The tree would have matched: the deletion was implicit.
+    }
+
+    [Fact]
+    public async Task ADirectoryReplacingABaseFileMustListTheFilesDeletion()
+    {
+        // old.md is already deleted in the staged change; a directory of that name now holds a new file.
+        Directory.CreateDirectory(Path.Combine(Repo, "old.md"));
+        await File.WriteAllTextAsync(Path.Combine(Repo, "old.md", "new.txt"), "inside\n", Ct);
+        await Git(Repo, "add", "--", "old.md/new.txt");
+        var (_, bundle) = await CaptureAsync();
+        Assert.True((await ReviewTreeRebuilder.RebuildAsync(Clone, bundle.TreeId, bundle.BaseTree, bundle.BaseCommit, bundle.Files, Ct)).Matches);
+
+        var forged = bundle.Files.Where(file => file.Path != "old.md").ToList();
+        var result = await ReviewTreeRebuilder.RebuildAsync(Clone, bundle.TreeId, bundle.BaseTree, bundle.BaseCommit, forged, Ct);
+
+        Assert.Equal("hidden_change", result.Code);
+        Assert.Contains("old.md", result.Message);
+    }
+
+    [Fact]
+    public void HiddenChangesAreTheTouchedPathsTheBundleDoesNotName()
+    {
+        var files = new List<ReviewBundleFile>
+        {
+            new("kept.cs", "renamed", false, "keep.cs", 0, "x\n", "x\n", null),
+            new("tools", "added", false, null, 1, null, "now a file\n", null)
+        };
+        var nameStatus = "D\0keep.cs\0A\0kept.cs\0A\0tools\0D\0tools/run.sh\0D\0nested/hidden-security.txt\0";
+
+        Assert.Equal(["nested/hidden-security.txt", "tools/run.sh"], ReviewTreeRebuilder.HiddenChanges(files, nameStatus));
+        Assert.Empty(ReviewTreeRebuilder.HiddenChanges(files, "D\0keep.cs\0A\0kept.cs\0A\0tools\0"));
+        Assert.Empty(ReviewTreeRebuilder.HiddenChanges(files, string.Empty));
+    }
+
     [Fact]
     public void DuplicateAndOverlappingTransitionsAreInconsistent()
     {

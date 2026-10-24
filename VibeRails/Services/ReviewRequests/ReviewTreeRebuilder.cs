@@ -12,7 +12,7 @@ namespace VibeRails.Services.ReviewRequests;
 /// </summary>
 /// <param name="Code"><c>matches</c>, <c>missing_content</c>, <c>unsupported_change</c>, <c>too_many_files</c>,
 /// <c>inconsistent_change</c>, <c>not_a_repository</c>, <c>base_commit_missing</c>, <c>base_tree_mismatch</c>,
-/// <c>base_mismatch</c>, <c>base_text_missing</c>, <c>tree_mismatch</c>, <c>git_failed</c>.</param>
+/// <c>base_mismatch</c>, <c>base_text_missing</c>, <c>hidden_change</c>, <c>tree_mismatch</c>, <c>git_failed</c>.</param>
 /// <param name="MissingContent">The paths listed without their content, for <c>missing_content</c>.</param>
 public sealed record ReviewTreeRebuildResult(
     bool Matches,
@@ -37,10 +37,12 @@ public sealed record ReviewTreeRebuildResult(
 /// unlisted or altered file changes <c>write-tree</c>. The base binds the diff the reviewer saw: each
 /// transition has the canonical shape (<see cref="ShapeProblem"/>), each changed file's base text must
 /// hash to the base commit's own blob at its source path, a file listed as added and the destination of
-/// a rename or copy must be absent from the base, and a deleted or changed file must exist there. Without
-/// those checks a request could show <c>Before = After</c> ("no text changes") over a real change, or
-/// point a file's base text at another file, and still collect a signature over the true tree (Codex
-/// review of slice D, F1 and its four variants).
+/// a rename or copy must be absent from the base, a deleted or changed file must exist there, and every
+/// path the rebuilt tree changes relative to the base must be listed (<see cref="HiddenChanges"/>).
+/// Without those checks a request could show <c>Before = After</c> ("no text changes") over a real
+/// change, point a file's base text at another file, or add a path that collides with a base directory
+/// or file so that unlisted deletions ride along, and still collect a signature over the true tree
+/// (Codex reviews of slice D, F1 and its variants).
 /// </para>
 /// <para>
 /// What this cannot know, and therefore refuses rather than guesses: a file listed without content
@@ -148,6 +150,25 @@ public static class ReviewTreeRebuilder
             if (!written.Succeeded)
                 return new(false, "git_failed", $"Git could not write the rebuilt tree ({Trim(written.StdErr)}).");
             var rebuilt = written.StdOut.Trim();
+
+            // The complete transition: every path the rebuilt tree changes relative to the base must be
+            // one the request lists. An added path that collides with a base directory or file makes
+            // update-index drop the conflicting base entries without a word (Codex slice D re-review),
+            // and a reviewer who read the listed files never saw those deletions. Trees only; no blob is read.
+            var touched = await GitCli.RunAsync(
+                repositoryPath, ["diff-tree", "-r", "-z", "--name-status", "--no-renames", baseTree, rebuilt],
+                cancellationToken, GitTimeout, null, environment);
+            if (!touched.Succeeded)
+                return new(false, "git_failed", $"Git could not list what the rebuilt tree changes ({Trim(touched.StdErr)}).");
+            var hidden = HiddenChanges(files, touched.StdOut);
+            if (hidden.Count > 0)
+            {
+                var named = string.Join(", ", hidden.Take(5)) + (hidden.Count > 5 ? $" and {hidden.Count - 5} more" : string.Empty);
+                return new(false, "hidden_change",
+                    $"The request's files also change {hidden.Count} path(s) it does not list ({named}), for example a file replaced by a "
+                    + "directory of the same name, so what you read is not the whole change. Do not approve it.", rebuilt);
+            }
+
             if (rebuilt == treeId)
                 return new(true, "matches", $"The files in the request rebuild tree {treeId} from base {baseCommit ?? baseTree}.", rebuilt);
             return new(false, "tree_mismatch",
@@ -299,6 +320,30 @@ public static class ReviewTreeRebuilder
             }
         }
         return null;
+    }
+
+    /// <summary>
+    /// Paths that <c>diff-tree -r -z --name-status --no-renames base rebuilt</c> reports changed and the
+    /// bundle does not list as a path or a rename source: the deletions a path collision caused, or any
+    /// other effect of applying the listed files that the reviewer never saw. Sorted, for the message.
+    /// </summary>
+    internal static IReadOnlyList<string> HiddenChanges(IReadOnlyList<ReviewBundleFile> files, string nameStatusZ)
+    {
+        var listed = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var file in files)
+        {
+            listed.Add(file.Path);
+            if (file.Change == "renamed" && file.PreviousPath is { } source) listed.Add(source);
+        }
+        var fields = nameStatusZ.Split('\0');
+        var hidden = new SortedSet<string>(StringComparer.Ordinal);
+        // "<status>\0<path>\0" pairs; with --no-renames every status has exactly one path.
+        for (var i = 0; i + 1 < fields.Length; i += 2)
+        {
+            var path = fields[i + 1];
+            if (path.Length > 0 && !listed.Contains(path)) hidden.Add(path);
+        }
+        return [.. hidden];
     }
 
     /// <summary>

@@ -161,13 +161,17 @@ the design decisions for the rest.
   copied or deleted file's source must exist in the base and its shown base text must hash to the
   base commit's blob there, and a file listed as added or the destination of a rename or copy must
   be absent from the base, or its overwritten content would never be shown (`base_mismatch`; a
-  changed file shown without base text and not marked omitted is `base_text_missing`). Without
-  these, `Before = After` over a real change, an added file carrying base text, a deleted file
-  carrying staged text, a previous path pointing at another base file, or a rename onto an existing
-  file all read as "no text changes" on viberails.ai while the signature still covered the true tree
-  (Codex slice D reviews, F1). Refusals name the reason: a file without content, an unknown change
-  kind, an inconsistent transition, a missing base commit ("git fetch"), a base tree that is not the
-  commit's, a base disagreement, or a tree mismatch, which a new executable also produces: the
+  changed file shown without base text and not marked omitted is `base_text_missing`). Last the
+  whole transition: `diff-tree --name-status --no-renames` between the base tree and the rebuilt
+  tree must touch only listed paths and rename sources (`hidden_change`), because an added path
+  that collides with a base directory or file makes `update-index` drop the conflicting entries
+  without a word. Without these, `Before = After` over a real change, an added file carrying base
+  text, a deleted file carrying staged text, a previous path pointing at another base file, a
+  rename onto an existing file, or a path collision deleting unlisted files all read as "no text
+  changes" on viberails.ai while the signature still covered the true tree (Codex slice D reviews,
+  F1). Refusals name the reason: a file without content, an unknown change kind, an inconsistent
+  transition, a missing base commit ("git fetch"), a base tree that is not the commit's, a base
+  disagreement, a hidden change, or a tree mismatch, which a new executable also produces: the
   bundle carries no modes, and the reviewer cannot tell a mode bit from a hidden change, so neither
   is signed. `GitCli.RunAsync` gained `environment` and `standardInput` for this and is still the
   one git launch.
