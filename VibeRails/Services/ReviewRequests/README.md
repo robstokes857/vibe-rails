@@ -80,6 +80,17 @@ existing public signature verification, with a tree id and no repository content
    with the session-sharing disclosure (terminal output, prompts, saved code changes), the reviewer
    emails, and the one-month expiry. Review requests are always for listed people, never public.
 6. The security review against API_SEC.md lands with the transport slice.
+7. **The bundle is evidence, not proof of the tree (2026-10-24, Codex review of slice B, High).**
+   The requester supplies both the tree id and the file text, so viberails.ai cannot prove that
+   one makes up the other; a crafted request can show harmless text and collect an approval over
+   a different tree. Rob's decision: the reviewer's VibeRails proves it at signing time (slice D).
+   `vb --sign-review` rebuilds the tree from the reviewer's own copy of the base commit and the
+   bundle (temporary index: read the base tree, write each file's staged content as a blob, apply
+   deletions and renames, `write-tree`) and refuses to sign unless it equals `treeId`. So capture
+   must carry exact bytes for every changed path (binary and oversized files included) for a
+   request to be approvable, and a base commit the reviewer lacks is refused. The ledger and the
+   commit hook are unchanged: they check the signature over the tree, which is still the right
+   statement.
 
 ## Slices
 
