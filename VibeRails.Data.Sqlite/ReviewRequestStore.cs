@@ -6,7 +6,8 @@ namespace VibeRails.Data.Sqlite;
 
 /// <summary>
 /// Review requests and decisions in the normal state database (VB-50). Additive component
-/// <c>review-requests/1</c>; older versions ignore the two tables.
+/// <c>review-requests/1</c> (the two tables) and <c>/2</c> (the hosted copy's reference, key
+/// fingerprint, expiry and receipts as nullable columns); older versions ignore what they do not know.
 /// </summary>
 public sealed class ReviewRequestStore : IReviewRequestStore
 {
@@ -104,8 +105,8 @@ public sealed class ReviewRequestStore : IReviewRequestStore
             return null;
 
         command.CommandText = """
-            INSERT INTO ReviewDecisions (RequestId, Reviewer, Decision, Comment, KeyId, Fingerprint, TreeId, SignatureBase64, DecidedUTC, VerifiedUTC)
-            VALUES ($request, $reviewer, $decision, $comment, $key, $fingerprint, $tree, $signature, $decided, $verified)
+            INSERT INTO ReviewDecisions (RequestId, Reviewer, Decision, Comment, KeyId, Fingerprint, TreeId, SignatureBase64, DecidedUTC, VerifiedUTC, RemoteId)
+            VALUES ($request, $reviewer, $decision, $comment, $key, $fingerprint, $tree, $signature, $decided, $verified, $remote)
             RETURNING Id;
             """;
         command.Parameters.AddWithValue("$reviewer", decision.Reviewer);
@@ -117,6 +118,7 @@ public sealed class ReviewRequestStore : IReviewRequestStore
         command.Parameters.AddWithValue("$signature", (object?)decision.SignatureBase64 ?? DBNull.Value);
         command.Parameters.AddWithValue("$decided", Stamp(decision.DecidedUTC));
         command.Parameters.AddWithValue("$verified", decision.VerifiedUTC is { } verified ? Stamp(verified) : DBNull.Value);
+        command.Parameters.AddWithValue("$remote", (object?)decision.RemoteId ?? DBNull.Value);
         var id = (long)(await command.ExecuteScalarAsync(ct) ?? throw new InvalidOperationException("The review decision was not stored."));
 
         command.CommandText = """
@@ -159,11 +161,75 @@ public sealed class ReviewRequestStore : IReviewRequestStore
         return await ReadDecisionsAsync(command, ct);
     }
 
+    /// <inheritdoc />
+    public async Task<bool> MarkSentAsync(string id, string remoteId, string keyFingerprint, DateTime sentUtc, DateTime expiresUtc, CancellationToken ct = default)
+    {
+        using var db = SqliteConnectionFactory.Open(_connectionString);
+        using var command = db.CreateCommand();
+        // Idempotent for the same reference (a retry of the same send) and refused for a different
+        // one: two roots sending the same request get the same hosted reference back, so a mismatch
+        // means a stale local copy and must not overwrite what the poller is already following.
+        command.CommandText = """
+            UPDATE ReviewRequests
+               SET SentUTC = COALESCE(SentUTC, $sent), RemoteId = $remote, SentKeyFingerprint = $fingerprint,
+                   ExpiresUTC = $expires, UpdatedUTC = $sent
+             WHERE Id = $id AND (RemoteId IS NULL OR RemoteId = $remote);
+            """;
+        command.Parameters.AddWithValue("$id", id);
+        command.Parameters.AddWithValue("$remote", remoteId);
+        command.Parameters.AddWithValue("$fingerprint", keyFingerprint);
+        command.Parameters.AddWithValue("$sent", Stamp(sentUtc));
+        command.Parameters.AddWithValue("$expires", Stamp(expiresUtc));
+        return await command.ExecuteNonQueryAsync(ct) == 1;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> MarkRemoteCancelledAsync(string id, DateTime cancelledUtc, CancellationToken ct = default)
+    {
+        using var db = SqliteConnectionFactory.Open(_connectionString);
+        using var command = db.CreateCommand();
+        command.CommandText = "UPDATE ReviewRequests SET RemoteCancelledUTC = COALESCE(RemoteCancelledUTC, $at) WHERE Id = $id;";
+        command.Parameters.AddWithValue("$id", id);
+        command.Parameters.AddWithValue("$at", Stamp(cancelledUtc));
+        return await command.ExecuteNonQueryAsync(ct) == 1;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ReviewRequestRecord>> ListSentPendingAsync(CancellationToken ct = default)
+    {
+        using var db = SqliteConnectionFactory.Open(_connectionString);
+        using var command = db.CreateCommand();
+        command.CommandText = RequestColumns + """
+             FROM ReviewRequests
+            WHERE RemoteId IS NOT NULL
+              AND (Status = 'open' OR (Status = 'cancelled' AND RemoteCancelledUTC IS NULL))
+            ORDER BY SentUTC, Id;
+            """;
+        using var reader = await command.ExecuteReaderAsync(ct);
+        var result = new List<ReviewRequestRecord>();
+        while (await reader.ReadAsync(ct)) result.Add(ReadRequest(reader));
+        return result;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlySet<long>> GetRemoteDecisionIdsAsync(string requestId, CancellationToken ct = default)
+    {
+        using var db = SqliteConnectionFactory.Open(_connectionString);
+        using var command = db.CreateCommand();
+        command.CommandText = "SELECT RemoteId FROM ReviewDecisions WHERE RequestId = $request AND RemoteId IS NOT NULL;";
+        command.Parameters.AddWithValue("$request", requestId);
+        using var reader = await command.ExecuteReaderAsync(ct);
+        var result = new HashSet<long>();
+        while (await reader.ReadAsync(ct)) result.Add(reader.GetInt64(0));
+        return result;
+    }
+
     private const string RequestColumns =
-        "SELECT Id, ProjectPath, Scope, TreeId, BaseCommit, CardKey, Status, BundleJson, CreatedUTC, UpdatedUTC";
+        "SELECT Id, ProjectPath, Scope, TreeId, BaseCommit, CardKey, Status, BundleJson, CreatedUTC, UpdatedUTC, "
+        + "SentUTC, RemoteId, SentKeyFingerprint, ExpiresUTC, RemoteCancelledUTC";
 
     private const string DecisionColumns =
-        "SELECT d.Id, d.RequestId, d.Reviewer, d.Decision, d.Comment, d.KeyId, d.Fingerprint, d.TreeId, d.SignatureBase64, d.DecidedUTC, d.VerifiedUTC";
+        "SELECT d.Id, d.RequestId, d.Reviewer, d.Decision, d.Comment, d.KeyId, d.Fingerprint, d.TreeId, d.SignatureBase64, d.DecidedUTC, d.VerifiedUTC, d.RemoteId";
 
     private static async Task<IReadOnlyList<ReviewDecisionRecord>> ReadDecisionsAsync(SqliteCommand command, CancellationToken ct)
     {
@@ -182,7 +248,8 @@ public sealed class ReviewRequestStore : IReviewRequestStore
                 reader.IsDBNull(7) ? null : reader.GetString(7),
                 reader.IsDBNull(8) ? null : reader.GetString(8),
                 Parse(reader.GetString(9)),
-                reader.IsDBNull(10) ? null : Parse(reader.GetString(10))));
+                reader.IsDBNull(10) ? null : Parse(reader.GetString(10)),
+                reader.IsDBNull(11) ? null : reader.GetInt64(11)));
         }
         return result;
     }
@@ -197,7 +264,12 @@ public sealed class ReviewRequestStore : IReviewRequestStore
         reader.GetString(6),
         reader.GetString(7),
         Parse(reader.GetString(8)),
-        Parse(reader.GetString(9)));
+        Parse(reader.GetString(9)),
+        reader.IsDBNull(10) ? null : Parse(reader.GetString(10)),
+        reader.IsDBNull(11) ? null : reader.GetString(11),
+        reader.IsDBNull(12) ? null : reader.GetString(12),
+        reader.IsDBNull(13) ? null : Parse(reader.GetString(13)),
+        reader.IsDBNull(14) ? null : Parse(reader.GetString(14)));
 
     private static string Stamp(DateTime value) => value.ToUniversalTime().ToString("O");
 

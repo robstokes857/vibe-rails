@@ -1,8 +1,12 @@
+using System.Net;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Tests.Services.ReviewRequests;
 using VibeRails.Data.Sqlite;
 using VibeRails.DB;
+using VibeRails.Services.GitPreflight;
+using VibeRails.Services.Integrations.VibeCodeRemote;
 using VibeRails.Services.ReviewRequests;
 using VibeRails.Services.VCA;
 using VibeRails.Services.VCA.Hooks;
@@ -37,6 +41,46 @@ public sealed class StoredReviewApprovalTests
         var signature = Assert.Single(CommitSignatureFormat.Parse(message));
         Assert.Equal(tree, signature.TreeId);
         Assert.Equal(tree, Assert.Single(verifier.Calls).TreeId);
+    }
+
+    /// <summary>
+    /// VB-50 slice C: the approval was not pasted locally but collected from viberails.ai by the
+    /// poller, which re-verified it and stored it with its hosted id. The hook applies it like any other.
+    /// </summary>
+    [Fact]
+    public async Task ApprovalThatArrivedThroughPollingIsAppliedByTheHook()
+    {
+        await using var repo = await VcaRegressionRepository.CreateAsync("signed-approval/basic");
+        var verifier = Use(repo, FakeCommitSignatureVerifier.ValidFor("owner@example.com"));
+        var prompt = UseDecliningPrompt(repo);
+        var store = UseStore(repo);
+        var tree = await StagedTreeAsync(repo);
+        var ct = TestContext.Current.CancellationToken;
+
+        // The desktop side: a request captured from this repository's index and sent (the hosted
+        // reference recorded), then one poll pass that finds the reviewer's approval.
+        var reviews = new ReviewRequestService(store, new GitStagedSnapshotProvider(), verifier);
+        var created = await reviews.CreateAsync(repo.RepositoryPath, new CreateReviewRequest(Reviewers: ["owner@example.com"]), null, ct);
+        Assert.Equal(tree, created.TreeId);
+        const string key = "regression-account-key";
+        Assert.True(await store.MarkSentAsync(created.Id, ReviewRequestTestSupport.Reference, SessionSharingService.KeyFingerprint(key),
+            DateTime.UtcNow, DateTime.UtcNow.AddMonths(1), ct));
+        var transport = ReviewRequestTestSupport.Transport(_ => Task.FromResult(ReviewRequestTestSupport.Json(HttpStatusCode.OK,
+            ReviewRequestTestSupport.Hosted(created.Id, tree, "approved", decisions: [ReviewRequestTestSupport.Approved(1, "owner@example.com", tree)]))));
+        await new ReviewRequestPoller(store, reviews, transport, new ReviewRequestTestSupport.RecordingEventBus(),
+            new ReviewRequestPollState(), () => key).PollDueAsync(ct);
+        Assert.Equal(ReviewRequestStatus.Approved, (await reviews.GetAsync(repo.RepositoryPath, created.Id, ct)).Request.Status);
+        Assert.Equal(1L, Assert.Single(await store.GetDecisionsAsync(created.Id, ct)).RemoteId);
+        verifier.Calls.Clear();
+
+        var run = await repo.RunCommitMessageAsync("Change db\n");
+
+        Assert.True(run.ExitCode == 0, run.Transcript);
+        Assert.Contains("Applied the signed approval from owner@example.com", run.Transcript);
+        Assert.Empty(prompt.Requests);
+        var message = await File.ReadAllTextAsync(repo.CommitMessagePath, ct);
+        Assert.Equal(tree, Assert.Single(CommitSignatureFormat.Parse(message)).TreeId);
+        Assert.Equal(tree, Assert.Single(verifier.Calls).TreeId); // the hook's own recheck
     }
 
     [Fact]

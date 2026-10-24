@@ -7,6 +7,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
+using Tests.Services.ReviewRequests;
 using Tests.VcaRegression;
 using VibeRails.Auth;
 using VibeRails.Data.Sqlite;
@@ -36,6 +37,9 @@ public sealed class ReviewRequestRoutesTests : IAsyncLifetime
     private readonly string _originalRootPath = ParserConfigs.GetRootPath();
     private readonly bool _originalIsInGit = ParserConfigs.GetIsInGit();
     private readonly FakeCommitSignatureVerifier _verifier = FakeCommitSignatureVerifier.ValidFor("lead@example.com");
+    private readonly Mock<ISessionArchiveReader> _archives = new();
+    private readonly ReviewRequestTestSupport.RecordingEventBus _events = new();
+    private readonly List<HttpRequestMessage> _outbound = [];
     private string _project = null!;
     private WebApplication _app = null!;
     private Uri _baseUri = null!;
@@ -66,7 +70,19 @@ public sealed class ReviewRequestRoutesTests : IAsyncLifetime
         auth.Setup(service => service.ValidateTabToken(It.IsAny<string?>())).Returns((string? token) => token == "test-tab");
         builder.Services.AddSingleton(auth.Object);
         builder.Services.AddSingleton(sessions.Object);
-        builder.Services.AddSingleton(new ReviewRequestService(new ReviewRequestStore(connection), snapshots.Object, _verifier));
+        var store = new ReviewRequestStore(connection);
+        var reviews = new ReviewRequestService(store, snapshots.Object, _verifier);
+        builder.Services.AddSingleton(reviews);
+        // Slice C: the sender behind disclosure/send/cancel, with viberails.ai intercepted.
+        var transport = ReviewRequestTestSupport.Transport(request =>
+        {
+            _outbound.Add(request);
+            if (request.Method == HttpMethod.Delete) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+            using var body = JsonDocument.Parse(request.Content!.ReadAsStream());
+            var requestId = body.RootElement.GetProperty("requestId").GetString()!;
+            return Task.FromResult(ReviewRequestTestSupport.Json(HttpStatusCode.Created, ReviewRequestTestSupport.Hosted(requestId, Tree)));
+        });
+        builder.Services.AddSingleton(new ReviewRequestSender(store, reviews, transport, _archives.Object, _events, () => "routes-fixture-key"));
         builder.Services.ConfigureHttpJsonOptions(options =>
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonSerializerContext.Default));
         _app = builder.Build();
@@ -92,7 +108,8 @@ public sealed class ReviewRequestRoutesTests : IAsyncLifetime
         (HttpMethod Method, string Path)[] routes = [
             (HttpMethod.Get, "/api/v1/review-requests"), (HttpMethod.Post, "/api/v1/review-requests"),
             (HttpMethod.Get, $"/api/v1/review-requests/{id}"), (HttpMethod.Post, $"/api/v1/review-requests/{id}/decisions"),
-            (HttpMethod.Post, $"/api/v1/review-requests/{id}/cancel"), (HttpMethod.Delete, $"/api/v1/review-requests/{id}")];
+            (HttpMethod.Post, $"/api/v1/review-requests/{id}/cancel"), (HttpMethod.Delete, $"/api/v1/review-requests/{id}"),
+            (HttpMethod.Get, $"/api/v1/review-requests/{id}/disclosure"), (HttpMethod.Post, $"/api/v1/review-requests/{id}/send")];
         foreach (var (method, path) in routes)
         foreach (var credentials in new[] { 0, 1, 2 })
         {
@@ -171,6 +188,52 @@ public sealed class ReviewRequestRoutesTests : IAsyncLifetime
         Assert.Equal("not_found", await CodeAsync(gone));
         using var unknown = await Send(HttpMethod.Get, $"/api/v1/review-requests/{Guid.NewGuid()}");
         Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
+    }
+
+    /// <summary>Slice C: nothing leaves without the confirmed send; the send records the hosted copy; cancel reaches the host.</summary>
+    [Fact]
+    public async Task DisclosureThenConfirmedSendThenCancelRoundTrip()
+    {
+        using var created = await Send(HttpMethod.Post, "/api/v1/review-requests", "{\"reviewers\":[\"lead@example.com\"],\"cardKey\":\"VB-50\"}");
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        using var createdJson = JsonDocument.Parse(await created.Content.ReadAsStringAsync(Ct));
+        var id = createdJson.RootElement.GetProperty("id").GetGuid();
+        Assert.False(createdJson.RootElement.TryGetProperty("remote", out _));
+
+        using var disclosure = await Send(HttpMethod.Get, $"/api/v1/review-requests/{id}/disclosure");
+        Assert.Equal(HttpStatusCode.OK, disclosure.StatusCode);
+        Assert.True(disclosure.Headers.CacheControl?.NoStore);
+        using var disclosureJson = JsonDocument.Parse(await disclosure.Content.ReadAsStringAsync(Ct));
+        Assert.Equal("https://viberails.ai", disclosureJson.RootElement.GetProperty("destination").GetString());
+        Assert.Equal("email", disclosureJson.RootElement.GetProperty("audience").GetString());
+        Assert.Equal("db.cs", Assert.Single(disclosureJson.RootElement.GetProperty("files").EnumerateArray()).GetProperty("path").GetString());
+        Assert.Equal("lead@example.com", Assert.Single(disclosureJson.RootElement.GetProperty("reviewers").EnumerateArray()).GetString());
+        Assert.False(disclosureJson.RootElement.GetProperty("sent").GetBoolean());
+        Assert.Empty(_outbound);
+
+        using var unconfirmed = await Send(HttpMethod.Post, $"/api/v1/review-requests/{id}/send", "{}");
+        Assert.Equal(HttpStatusCode.BadRequest, unconfirmed.StatusCode);
+        Assert.Equal("confirmation_required", await CodeAsync(unconfirmed));
+        using var oversized = await Send(HttpMethod.Post, $"/api/v1/review-requests/{id}/send", "{\"confirmed\":true,\"pad\":\"" + new string('x', ReviewRequestRoutes.MaxSendBodyBytes) + "\"}");
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, oversized.StatusCode);
+        Assert.Empty(_outbound);
+
+        using var sent = await Send(HttpMethod.Post, $"/api/v1/review-requests/{id}/send", "{\"confirmed\":true}");
+        Assert.Equal(HttpStatusCode.OK, sent.StatusCode);
+        using var sentJson = JsonDocument.Parse(await sent.Content.ReadAsStringAsync(Ct));
+        Assert.Equal(ReviewRequestTestSupport.Reference, sentJson.RootElement.GetProperty("request").GetProperty("remote").GetProperty("id").GetString());
+        Assert.Contains("Decisions are checked every 15 minutes", sentJson.RootElement.GetProperty("message").GetString());
+        var post = Assert.Single(_outbound);
+        Assert.Equal((HttpMethod.Post, "routes-fixture-key"), (post.Method, Assert.Single(post.Headers.GetValues("X-Api-Key"))));
+        Assert.Equal("review_request_updated", Assert.Single(_events.Events).Type);
+
+        using var cancelled = await Send(HttpMethod.Post, $"/api/v1/review-requests/{id}/cancel");
+        Assert.Equal(HttpStatusCode.OK, cancelled.StatusCode);
+        using var cancelledJson = JsonDocument.Parse(await cancelled.Content.ReadAsStringAsync(Ct));
+        Assert.Equal("cancelled", cancelledJson.RootElement.GetProperty("status").GetString());
+        Assert.NotNull(cancelledJson.RootElement.GetProperty("remote").GetProperty("cancelledUtc").GetString());
+        Assert.Equal(HttpMethod.Delete, _outbound[^1].Method);
+        Assert.EndsWith("/api/v1/review-requests/" + ReviewRequestTestSupport.Reference, _outbound[^1].RequestUri!.AbsolutePath);
     }
 
     private static async Task<string?> CodeAsync(HttpResponseMessage response)

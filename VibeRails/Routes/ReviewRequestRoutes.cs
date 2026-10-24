@@ -8,9 +8,10 @@ namespace VibeRails.Routes;
 
 /// <summary>
 /// Review requests before a commit (VB-50). Active root only; CookieAuthMiddleware requires both
-/// process and tab credentials. Everything here stays on this computer: no route contacts
-/// viberails.ai except the decision route, which verifies a submitted approval signature with the
-/// same public endpoint the commit hook uses.
+/// process and tab credentials. Two routes contact viberails.ai: the decision route verifies a
+/// submitted approval signature with the same public endpoint the commit hook uses, and the send
+/// route transfers the bundle after the caller confirmed the disclosure (slice C). Cancel also
+/// asks the host to cancel a sent request's copy.
 /// </summary>
 public static class ReviewRequestRoutes
 {
@@ -19,6 +20,9 @@ public static class ReviewRequestRoutes
 
     /// <summary>A trailer (under 1 KiB), a comment (4,000 characters) and a reviewer address.</summary>
     internal const int MaxDecisionBodyBytes = 32 * 1024;
+
+    /// <summary><c>{ "confirmed": true }</c> and nothing else.</summary>
+    internal const int MaxSendBodyBytes = 1024;
 
     public static void Map(WebApplication app)
     {
@@ -59,8 +63,21 @@ public static class ReviewRequestRoutes
                 return Results.Json(updated, ReviewRequestJsonContext.Default.ReviewRequestSummary);
             }, ct));
 
-        group.MapPost("/{id:guid}/cancel", async (Guid id, ReviewRequestService reviews, CancellationToken ct) =>
-            Results.Json(await reviews.CancelAsync(Project(), id.ToString("D"), ct), ReviewRequestJsonContext.Default.ReviewRequestSummary));
+        group.MapPost("/{id:guid}/cancel", async (Guid id, ReviewRequestSender sender, CancellationToken ct) =>
+            Results.Json(await sender.CancelAsync(Project(), id.ToString("D"), ct), ReviewRequestJsonContext.Default.ReviewRequestSummary));
+
+        // Slice C: what a send would transfer, and the send itself. The disclosure is read-only and
+        // contacts nothing; the send refuses without "confirmed": true so nothing leaves unseen.
+        group.MapGet("/{id:guid}/disclosure", async (Guid id, ReviewRequestSender sender, ISessionStore sessions, CancellationToken ct) =>
+            Results.Json(await sender.DisclosureAsync(Project(), id.ToString("D"), sessions, ct), ReviewRequestJsonContext.Default.ReviewRequestDisclosure));
+
+        group.MapPost("/{id:guid}/send", async Task<IResult> (Guid id, HttpContext context, ReviewRequestSender sender, CancellationToken ct) =>
+            await WithJson(context, MaxSendBodyBytes, async bytes =>
+            {
+                var body = JsonSerializer.Deserialize(bytes, ReviewRequestJsonContext.Default.SendReviewRequest);
+                var sent = await sender.SendAsync(Project(), id.ToString("D"), body, ct);
+                return Results.Json(sent, ReviewRequestJsonContext.Default.ReviewRequestSent);
+            }, ct));
 
         group.MapDelete("/{id:guid}", async (Guid id, ReviewRequestService reviews, CancellationToken ct) =>
         {

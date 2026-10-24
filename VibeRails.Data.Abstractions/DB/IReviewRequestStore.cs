@@ -6,6 +6,11 @@ namespace VibeRails.DB;
 /// stored as JSON because its shape belongs to the application, not the database.
 /// </summary>
 /// <param name="Status">One of <c>open</c>, <c>approved</c>, <c>rejected</c>, <c>cancelled</c>.</param>
+/// <param name="SentUTC">When viberails.ai confirmed the request; null while it exists only on this computer.</param>
+/// <param name="RemoteId">The hosted reference (<c>rvw_</c> plus 32 hex characters) once sent.</param>
+/// <param name="SentKeyFingerprint">SHA-256 of the account key the request was sent with; polling, uploads and cancellation stay bound to it.</param>
+/// <param name="ExpiresUTC">The hosted expiry (one month) once sent.</param>
+/// <param name="RemoteCancelledUTC">When the hosted copy confirmed a local cancellation; null until then.</param>
 public sealed record ReviewRequestRecord(
     string Id,
     string ProjectPath,
@@ -16,7 +21,12 @@ public sealed record ReviewRequestRecord(
     string Status,
     string BundleJson,
     DateTime CreatedUTC,
-    DateTime UpdatedUTC);
+    DateTime UpdatedUTC,
+    DateTime? SentUTC = null,
+    string? RemoteId = null,
+    string? SentKeyFingerprint = null,
+    DateTime? ExpiresUTC = null,
+    DateTime? RemoteCancelledUTC = null);
 
 /// <summary>
 /// One reviewer's answer. An approval carries the signature trailer fields it was verified from;
@@ -25,6 +35,7 @@ public sealed record ReviewRequestRecord(
 /// before the recheck.
 /// </summary>
 /// <param name="Decision"><c>approved</c> or <c>rejected</c>.</param>
+/// <param name="RemoteId">The hosted decision id when the decision arrived through polling, so a later poll does not record it twice.</param>
 public sealed record ReviewDecisionRecord(
     long Id,
     string RequestId,
@@ -36,7 +47,8 @@ public sealed record ReviewDecisionRecord(
     string? TreeId,
     string? SignatureBase64,
     DateTime DecidedUTC,
-    DateTime? VerifiedUTC);
+    DateTime? VerifiedUTC,
+    long? RemoteId = null);
 
 /// <summary>A stored decision and the request status it produced.</summary>
 public sealed record ReviewDecisionOutcome(ReviewDecisionRecord Decision, string Status);
@@ -75,4 +87,23 @@ public interface IReviewRequestStore
     /// request that is not cancelled. The commit hook filters these by the rule's approvers.
     /// </summary>
     Task<IReadOnlyList<ReviewDecisionRecord>> FindVerifiedApprovalsAsync(string treeId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Records that viberails.ai accepted the request: the hosted reference, the fingerprint of the
+    /// key it was sent with, the send time and the hosted expiry. False when the request does not
+    /// exist or was already sent with a different reference, in which case nothing changes.
+    /// </summary>
+    Task<bool> MarkSentAsync(string id, string remoteId, string keyFingerprint, DateTime sentUtc, DateTime expiresUtc, CancellationToken ct = default);
+
+    /// <summary>Records that the hosted copy confirmed a local cancellation. False when the request does not exist.</summary>
+    Task<bool> MarkRemoteCancelledAsync(string id, DateTime cancelledUtc, CancellationToken ct = default);
+
+    /// <summary>
+    /// Sent requests that still need the host, across every project: open ones (their decisions are
+    /// polled) and cancelled ones whose hosted copy has not confirmed the cancellation yet. Oldest first.
+    /// </summary>
+    Task<IReadOnlyList<ReviewRequestRecord>> ListSentPendingAsync(CancellationToken ct = default);
+
+    /// <summary>Hosted decision ids already recorded for one request, so polling records each decision once.</summary>
+    Task<IReadOnlySet<long>> GetRemoteDecisionIdsAsync(string requestId, CancellationToken ct = default);
 }

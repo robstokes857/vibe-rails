@@ -74,6 +74,9 @@ CREATE INDEX idx_review_decisions_tree ON ReviewDecisions(TreeId) WHERE Verified
 -- index idx_review_requests_project
 CREATE INDEX idx_review_requests_project ON ReviewRequests(ProjectPath, CreatedUTC DESC);
 
+-- index idx_review_requests_sent
+CREATE INDEX idx_review_requests_sent ON ReviewRequests(Status) WHERE RemoteId IS NOT NULL;
+
 -- index idx_review_requests_tree
 CREATE INDEX idx_review_requests_tree ON ReviewRequests(TreeId);
 
@@ -177,10 +180,10 @@ CREATE TABLE ManagedWorktrees ( Id TEXT PRIMARY KEY, Path TEXT NOT NULL UNIQUE, 
 CREATE TABLE ProjectCache ( ProjectPath TEXT NOT NULL, Key TEXT NOT NULL, Value TEXT NOT NULL DEFAULT '', UpdatedUTC TEXT NOT NULL, PRIMARY KEY (ProjectPath, Key) );
 
 -- table ReviewDecisions
-CREATE TABLE ReviewDecisions ( Id INTEGER PRIMARY KEY AUTOINCREMENT, RequestId TEXT NOT NULL REFERENCES ReviewRequests(Id) ON DELETE CASCADE, Reviewer TEXT NOT NULL, Decision TEXT NOT NULL, Comment TEXT NULL, KeyId TEXT NULL, Fingerprint TEXT NULL, TreeId TEXT NULL, SignatureBase64 TEXT NULL, DecidedUTC TEXT NOT NULL, VerifiedUTC TEXT NULL );
+CREATE TABLE ReviewDecisions ( Id INTEGER PRIMARY KEY AUTOINCREMENT, RequestId TEXT NOT NULL REFERENCES ReviewRequests(Id) ON DELETE CASCADE, Reviewer TEXT NOT NULL, Decision TEXT NOT NULL, Comment TEXT NULL, KeyId TEXT NULL, Fingerprint TEXT NULL, TreeId TEXT NULL, SignatureBase64 TEXT NULL, DecidedUTC TEXT NOT NULL, VerifiedUTC TEXT NULL , RemoteId INTEGER NULL);
 
 -- table ReviewRequests
-CREATE TABLE ReviewRequests ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Scope TEXT NOT NULL, TreeId TEXT NOT NULL, BaseCommit TEXT NULL, CardKey TEXT NULL, Status TEXT NOT NULL, BundleJson TEXT NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL );
+CREATE TABLE ReviewRequests ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Scope TEXT NOT NULL, TreeId TEXT NOT NULL, BaseCommit TEXT NULL, CardKey TEXT NULL, Status TEXT NOT NULL, BundleJson TEXT NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL , SentUTC TEXT NULL, RemoteId TEXT NULL, SentKeyFingerprint TEXT NULL, ExpiresUTC TEXT NULL, RemoteCancelledUTC TEXT NULL);
 
 -- table Sandboxes
 CREATE TABLE Sandboxes ( Id INTEGER PRIMARY KEY AUTOINCREMENT, Name TEXT NOT NULL, Path TEXT NOT NULL, ProjectPath TEXT NOT NULL, Branch TEXT NOT NULL DEFAULT '', CommitHash TEXT, RemoteUrl TEXT, SourceBranch TEXT, CreatedUTC TEXT NOT NULL, EnvironmentId INTEGER, UNIQUE(Name, ProjectPath) );

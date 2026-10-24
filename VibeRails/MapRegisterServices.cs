@@ -112,6 +112,27 @@ namespace VibeRails
                     sp.GetRequiredService<DB.IReviewRequestStore>(),
                     sp.GetRequiredService<Services.GitPreflight.IGitStagedSnapshotProvider>(),
                     sp.GetRequiredService<Services.VCA.ICommitSignatureVerifier>()));
+                // Slice C: the fixed-origin transport (no redirects, no cookies), the sender behind the
+                // disclosure/send/cancel routes, and the decision poller the Board sync scheduler paces.
+                // The sender and poller are scoped because the session archive queue is the scoped repository.
+                serviceCollection.AddHttpClient<Services.ReviewRequests.ReviewRequestTransport>(client =>
+                        client.Timeout = Services.ReviewRequests.ReviewRequestTransport.SendDeadline)
+                    .ConfigurePrimaryHttpMessageHandler(Services.ReviewRequests.ReviewRequestTransport.CreateHandler);
+                serviceCollection.AddSingleton(_ => Services.ReviewRequests.ReviewRequestPollState.BesideStateDatabase());
+                serviceCollection.AddScoped(sp => new Services.ReviewRequests.ReviewRequestSender(
+                    sp.GetRequiredService<DB.IReviewRequestStore>(),
+                    sp.GetRequiredService<Services.ReviewRequests.ReviewRequestService>(),
+                    sp.GetRequiredService<Services.ReviewRequests.ReviewRequestTransport>(),
+                    sp.GetRequiredService<DB.ISessionArchiveReader>(),
+                    sp.GetRequiredService<IAppEventBus>(),
+                    ParserConfigs.GetApiKey));
+                serviceCollection.AddScoped(sp => new Services.ReviewRequests.ReviewRequestPoller(
+                    sp.GetRequiredService<DB.IReviewRequestStore>(),
+                    sp.GetRequiredService<Services.ReviewRequests.ReviewRequestService>(),
+                    sp.GetRequiredService<Services.ReviewRequests.ReviewRequestTransport>(),
+                    sp.GetRequiredService<IAppEventBus>(),
+                    sp.GetRequiredService<Services.ReviewRequests.ReviewRequestPollState>(),
+                    ParserConfigs.GetApiKey));
             }
 
             // Host filesystem metadata is exposed only by an active root backend. Terminal-tab

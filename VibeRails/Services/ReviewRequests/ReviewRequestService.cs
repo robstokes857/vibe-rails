@@ -8,6 +8,8 @@ namespace VibeRails.Services.ReviewRequests;
 /// <summary>
 /// Review requests before a commit (VB-50, slice A): capture the staged changes as a bundle, keep
 /// the request and its decisions in state.db, and accept a decision only after it is verified.
+/// Sending a request and collecting its hosted decisions is <see cref="ReviewRequestSender"/> and
+/// <see cref="ReviewRequestPoller"/> (slice C); both land decisions through this class.
 /// </summary>
 /// <remarks>
 /// An approval is accepted exactly the way the commit hook would accept it: the trailer must cover
@@ -110,10 +112,23 @@ public sealed class ReviewRequestService(
         await store.DeleteAsync(id, ct);
     }
 
+    public Task<ReviewRequestSummary> RecordDecisionAsync(
+        string projectPath,
+        string id,
+        RecordReviewDecisionRequest? request,
+        CancellationToken ct) => RecordDecisionAsync(projectPath, id, request, null, ct);
+
+    /// <summary>
+    /// Records a decision. <paramref name="remoteDecisionId"/> is the hosted decision id when the
+    /// decision arrived through polling (slice C); it is stored with the row so a later poll skips it.
+    /// A polled approval takes exactly the same path as one pasted locally: tree match, viberails.ai
+    /// verification, listed reviewer, one transaction with the status.
+    /// </summary>
     public async Task<ReviewRequestSummary> RecordDecisionAsync(
         string projectPath,
         string id,
         RecordReviewDecisionRequest? request,
+        long? remoteDecisionId,
         CancellationToken ct)
     {
         var record = await RequireAsync(projectPath, id, ct);
@@ -133,7 +148,7 @@ public sealed class ReviewRequestService(
                 if (!bundle.Reviewers.Contains(reviewer, StringComparer.OrdinalIgnoreCase))
                     throw new ReviewRequestException("not_a_reviewer", $"{reviewer} is not a reviewer on this request.", 409);
                 decision = new ReviewDecisionRecord(0, id, reviewer, ReviewDecisionKind.Rejected, comment,
-                    null, null, null, null, now, null);
+                    null, null, null, null, now, null, remoteDecisionId);
                 break;
             }
             case ReviewDecisionKind.Approved:
@@ -158,7 +173,7 @@ public sealed class ReviewRequestService(
                     throw new ReviewRequestException("not_a_reviewer",
                         $"The approval was signed by {signer}, who is not a reviewer on this request.", 409);
                 decision = new ReviewDecisionRecord(0, id, signer, ReviewDecisionKind.Approved, comment,
-                    signature.KeyId, signature.Fingerprint, signature.TreeId, signature.SignatureBase64, now, now);
+                    signature.KeyId, signature.Fingerprint, signature.TreeId, signature.SignatureBase64, now, now, remoteDecisionId);
                 break;
             }
             default:
@@ -229,7 +244,14 @@ public sealed class ReviewRequestService(
         return result;
     }
 
-    private async Task<ReviewRequestRecord> RequireAsync(string projectPath, string id, CancellationToken ct)
+    /// <summary>The request as stored, with its decisions; for callers that changed the row and answer with it.</summary>
+    internal async Task<ReviewRequestSummary> SummaryAsync(string id, CancellationToken ct)
+    {
+        var record = await store.GetAsync(id, ct) ?? throw new ReviewRequestException("not_found", "Review request not found.", 404);
+        return Summarize(record, Bundle(record), await store.GetDecisionsAsync(id, ct));
+    }
+
+    internal async Task<ReviewRequestRecord> RequireAsync(string projectPath, string id, CancellationToken ct)
     {
         var record = Guid.TryParseExact(id, "D", out _) ? await store.GetAsync(id, ct) : null;
         if (record is null || !string.Equals(record.ProjectPath, NormalizeProject(projectPath), StringComparison.OrdinalIgnoreCase))
@@ -245,14 +267,17 @@ public sealed class ReviewRequestService(
         return trimmed.Length == 0 ? full : trimmed;
     }
 
-    private static ReviewBundle Bundle(ReviewRequestRecord record) =>
+    internal static ReviewBundle Bundle(ReviewRequestRecord record) =>
         JsonSerializer.Deserialize(record.BundleJson, ReviewRequestJsonContext.Default.ReviewBundle)
         ?? throw new ReviewRequestException("corrupt", "The stored review bundle could not be read.", 500);
 
     private static ReviewRequestSummary Summarize(ReviewRequestRecord record, ReviewBundle bundle, IReadOnlyList<ReviewDecisionRecord> decisions) =>
         new(record.Id, record.Scope, record.TreeId, record.BaseCommit, record.Status, bundle.Reviewers, record.CardKey,
             bundle.Files.Count, bundle.Sessions.Count, record.CreatedUTC, record.UpdatedUTC,
-            decisions.Select(ToDto).ToList());
+            decisions.Select(ToDto).ToList(),
+            record.RemoteId is { } remote
+                ? new ReviewRequestRemote(remote, record.SentUTC ?? record.UpdatedUTC, record.ExpiresUTC, record.RemoteCancelledUTC)
+                : null);
 
     private static ReviewDecisionDto ToDto(ReviewDecisionRecord decision) =>
         new(decision.Id, decision.Reviewer, decision.Decision, decision.Comment,

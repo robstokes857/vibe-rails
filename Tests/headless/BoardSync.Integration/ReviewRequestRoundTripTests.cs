@@ -89,6 +89,10 @@ public sealed class ReviewRequestRoundTripTests
                 hosted = request;
             }
             Assert.Equal((tree, Guid.Parse(local.Id), "open"), (hosted.TreeId, hosted.RequestId, hosted.Status));
+            // Slice C: the desktop transport accepts the create answer for exactly this request and tree.
+            var accepted = Desktop.ReviewRequestTransport.ParseStatus(JsonSerializer.SerializeToUtf8Bytes(hosted, JsonSerializerOptions.Web), local.Id, tree, null);
+            Assert.Equal((hosted.Id, hosted.ExpiresUtc), (accepted.Id, accepted.ExpiresUtc));
+            Assert.True(Desktop.ReviewRequestTransport.IsReference(hosted.Id));
             await using (var db = remote.Db(23)) // An exact retry of the same send stores nothing new.
                 Assert.False((await Service(db).CreateAsync(JsonSerializer.Deserialize<Hosted.CreateReviewRequestBody>(body, JsonSerializerOptions.Web), ct)).Created);
 
@@ -148,6 +152,12 @@ public sealed class ReviewRequestRoundTripTests
             Assert.Equal(trailer, polledTrailer);
             Assert.True(CommitSignatureFormat.TryParseTrailer(polledTrailer!, out var polledSignature));
             Assert.Equal(tree, polledSignature.TreeId);
+            // Slice C: the same JSON through the desktop transport's validation, bound to this reference.
+            var polled = Desktop.ReviewRequestTransport.ParseStatus(Encoding.UTF8.GetBytes(pollJson), null, null, hosted.Id);
+            Assert.Equal("approved", polled.Status);
+            Assert.Equal(["rejected", "approved"], polled.Decisions!.Select(d => d.Decision));
+            Assert.Equal(polledTrailer, polled.Decisions[1].Trailer);
+            Assert.Equal(Reviewer, polled.Decisions[1].Reviewer, ignoreCase: true);
 
             // The approval lands in the desktop ledger, re-verified there, so the commit hook can place it.
             var landed = await ledger.RecordDecisionAsync(repo, local.Id, new Desktop.RecordReviewDecisionRequest(Decision: "approved", Trailer: polledTrailer), ct);

@@ -533,7 +533,8 @@ boundary and the independent generation-1 schema.
 
 A review step earlier than a pull request: the developer asks a named person to look at the
 staged changes and the AI sessions that produced them, and to sign off. Slice A (2026-10-23) is
-the desktop core. `ReviewBundleCapture` reads the staged snapshot into a bounded bundle (tree id,
+the desktop core; slice C (2026-10-24) sends a request to viberails.ai and collects its decisions.
+`ReviewBundleCapture` reads the staged snapshot into a bounded bundle (tree id,
 base, files with base/staged text, attached sessions, reviewers); `ReviewRequestService` stores
 requests and decisions in state.db (`review-requests/1`, additive, `IReviewRequestStore`) and
 accepts an approval only as a `vibe-signature:` trailer over the request's tree that viberails.ai
@@ -541,8 +542,13 @@ verifies to a listed reviewer's verified email. The commit-msg hook (`IStoredCom
 places such an approval in the message before offering the signing popup and rechecks it like any
 trailer, so an agent's commit can pass on a person's approval. Routes are root-only under
 `/api/v1/review-requests`. The signed statement is the existing staged-tree statement, so the
-`Signed Approval` rule is the gate and no new rule exists. Transport to viberails.ai, the reviewer
-page and the card UI are later slices. Contract and decisions:
+`Signed Approval` rule is the gate and no new rule exists. `ReviewRequestSender` transfers a
+request only after its disclosure was confirmed (`ReviewRequestTransport`: fixed origin,
+`X-Api-Key`, bounded, validated answers) and queues the attached sessions through the existing
+`SessionShareUploads` path under the sending key's fingerprint; `ReviewRequestPoller` runs from
+`BoardSyncScheduler` on a persisted 15-minute cadence that backs off to two hours and lands hosted
+decisions through the same verification, publishing `review_request_updated`. The reviewer desktop
+and the card UI are later slices. Contract and decisions:
 [Review requests](../VibeRails/Services/ReviewRequests/README.md); security notes:
 [API_SEC.md](../API_SEC.md#review-requests-before-a-commit-vb-50-slice-a).
 

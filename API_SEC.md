@@ -396,6 +396,8 @@ middleware serves their paths rather than registering individual API endpoints.
 | GET | `/api/v1/review-requests/{id:guid}` | [ReviewRequestRoutes.cs](VibeRails/Routes/ReviewRequestRoutes.cs) |
 | POST | `/api/v1/review-requests/{id:guid}/cancel` | [ReviewRequestRoutes.cs](VibeRails/Routes/ReviewRequestRoutes.cs) |
 | POST | `/api/v1/review-requests/{id:guid}/decisions` | [ReviewRequestRoutes.cs](VibeRails/Routes/ReviewRequestRoutes.cs) |
+| GET | `/api/v1/review-requests/{id:guid}/disclosure` | [ReviewRequestRoutes.cs](VibeRails/Routes/ReviewRequestRoutes.cs) |
+| POST | `/api/v1/review-requests/{id:guid}/send` | [ReviewRequestRoutes.cs](VibeRails/Routes/ReviewRequestRoutes.cs) |
 | GET | `/api/v1/rules` | [RulesRoutes.cs](VibeRails/Routes/RulesRoutes.cs) |
 | GET | `/api/v1/rules/details` | [RulesRoutes.cs](VibeRails/Routes/RulesRoutes.cs) |
 | GET | `/api/v1/sandboxes` | [SandboxRoutes.cs](VibeRails/Routes/SandboxRoutes.cs) |
@@ -723,10 +725,9 @@ the project's staged index through the hook's snapshot reader (project derived s
 from the request), bounds text at 256 KiB per file and 4 MiB per bundle, validates reviewer emails
 (at most ten) and attached session ids (at most ten, looked up locally), and stores the bundle in
 state.db (`review-requests/1`, additive). Bodies are capped at 16 KiB (create) and 32 KiB
-(decisions); refusals carry fixed local wording and a code, never exception text. Nothing in this
-slice leaves the machine: no request is sent, no session is uploaded. The decisions route's only
-outbound call is the existing public signature verification above, with a tree id and no content,
-and an approval is stored only when that verification names a verified signer listed on the
+(decisions); refusals carry fixed local wording and a code, never exception text. Of these routes
+only the decisions route calls out, to the existing public signature verification above with a
+tree id and no content, and an approval is stored only when that verification names a verified signer listed on the
 request; the store records it and recomputes the status in one write transaction, so a cancel that
 lands during verification wins and a cancelled request is never revived. Deleted files' base text
 is read from the frozen base tree by path, under the same bounds, never from the working tree. The
@@ -735,8 +736,9 @@ popup and then rechecks it like any other trailer; the ledger is resolved only w
 pending, the read is bounded to three seconds and quiet on failure, so it can place a signature but
 never pass a commit by itself. Hook test harnesses replace the ledger with a per-repository file
 beside their job store, so no test opens the user's state.db. No MCP tool
-creates, decides or signs. Sending requests and sessions to viberails.ai is a later slice with its
-own review here; see [the component contract](VibeRails/Services/ReviewRequests/README.md).
+creates, decides, sends or signs. Sending a request to viberails.ai and collecting its decisions is
+[Review requests sent to viberails.ai](#review-requests-sent-to-viberailsai-vb-50-slice-c) below;
+see [the component contract](VibeRails/Services/ReviewRequests/README.md).
 
 ## Outbound services and credentials
 
@@ -843,6 +845,52 @@ public version until its links expire or are revoked. All capture is saved conte
 whole-publication rejection bound. Archive queues preserve pending backoff, and card revocation
 ends all reads through that link without independent session sharing links. See
 [the card-sharing contract](VibeRails/Services/Board/Sharing/README.md).
+
+### Review requests sent to viberails.ai (VB-50, slice C)
+
+Sending is explicit and root-only. `GET /api/v1/review-requests/{id}/disclosure` (both credentials,
+no-store, no outbound call) lists exactly what a send transfers: the destination, every changed
+file with its change kind, line count and omission reason, the tree and base ids, each attached
+session by name with the session-sharing disclosure (terminal output, prompts, saved code changes)
+and whether it is still live, the reviewer addresses and the expiry. `POST /{id}/send` (1 KiB
+body) refuses without `{ "confirmed": true }` (400 `confirmation_required`), for a request that is
+not open (409 `not_open`) and without a saved API key (409 `no_api_key`), and transfers nothing in
+those cases. `ReviewRequestTransport` posts the stored bundle bytes as `{ requestId, bundle }` to
+fixed `https://viberails.ai/api/v1/review-requests` with header `X-Api-Key` only, no redirects or
+cookies, a 90-second deadline (30 seconds for polls and cancels) and a 1-MiB response bound; the
+answer must name this request id and tree, a well-formed `rvw_` reference, a known status and a
+plausible expiry before anything is recorded. There is no separate capability probe: a host
+without the review-request update answers the create 404/405/501, reported as
+`server_update_required`, and nothing is recorded as sent or queued for upload until the host has
+confirmed the request by reference, so an older server receives nothing it could mishandle.
+Failures carry fixed local wording selected by the HTTP status and a bounded JSON `code`; remote
+prose, headers, redirect targets and exception text are never reflected or logged. Transport
+failures answer 502 with the transport's code.
+
+A confirmed send records the hosted reference, the send time, the hosted expiry and the SHA-256
+fingerprint of the key that sent it (`review-requests/2`, additive nullable columns). Attached
+sessions are queued through the existing `SessionShareUploads` table under that fingerprint and
+uploaded by `SessionDataDrainJob` through the existing session ingest after each session ends: no
+new upload path, the archive stays immutable, and a later account change cannot retarget them.
+Reviewers are always listed email addresses; a request is never a public link. Cancelling locally
+also `DELETE`s the hosted copy under the same key; a failed or deferred hosted cancellation is
+retried by the poller and never blocks the local cancel. The reference is shown to the requester
+as a selector, never a credential: every hosted route checks the caller's key.
+
+Decisions are polled by the root that holds the Board sync lease, from `BoardSyncScheduler`, on a
+self-paced cadence persisted in `.review-request-poll.json` beside state.db (account fingerprint,
+next due time and backoff only): every 15 minutes while a sent request is open, doubling to a
+two-hour ceiling while none is or the host is unreachable, never on the 60-second tick. Only
+requests sent with the current key's fingerprint are polled. Each hosted decision is validated
+(at most 50, distinct ids, listed kinds, trailer grammar, comment bound) and then lands through
+`ReviewRequestService.RecordDecisionAsync`: an approval's trailer must cover the request's tree and
+is re-verified with the public signature endpoint, and its signer must be a listed reviewer; a
+rejection must name a listed reviewer. The hosted decision id is stored with the row so a decision
+lands once; a decision the ledger refuses is remembered for the process and not re-verified every
+pass, while an unavailable verifier leaves it pending. Landed decisions publish the local
+`review_request_updated` app event (id, status, card key, sent); no content leaves through it. The
+commit hook is unchanged: it applies a stored verified approval and rechecks the trailer itself.
+Component contract: [Review requests](VibeRails/Services/ReviewRequests/README.md).
 
 ### Board sync, sharing and remote Start work
 

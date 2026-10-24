@@ -2,8 +2,9 @@
 
 A review step before the commit: the developer asks a named person to look at the staged changes
 and the AI sessions that produced them, and to sign off. Unlike a pull request, the reviewer sees
-the whole conversation, not just the diff. This document is the component contract for the part
-that exists (slice A, 2026-10-23: the desktop core) and records the design decisions for the rest.
+the whole conversation, not just the diff. This document is the component contract for the parts
+that exist (slice A, 2026-10-23: the desktop core; slice C, 2026-10-24: sending to viberails.ai and
+collecting decisions) and records the design decisions for the rest.
 
 ## What exists
 
@@ -50,14 +51,61 @@ that exists (slice A, 2026-10-23: the desktop core) and records the design decis
 - **Routes.** `/api/v1/review-requests` on the active root only, both local credentials, no-store:
   `GET` list, `POST` create (16 KiB body: `{ scope?, reviewers, sessions?, cardKey?, note? }`, 201),
   `GET /{id}` detail with the bundle, `POST /{id}/decisions` (32 KiB body:
-  `{ decision, trailer?, comment?, reviewer? }`), `POST /{id}/cancel`, `DELETE /{id}` (204).
-  Refusals are `{ error, code }` with 400 `invalid_request`, 404 `not_found` / `session_not_found`,
-  409 `nothing_staged` / `not_a_repository` / `tree_mismatch` / `signature_rejected` /
-  `not_a_reviewer` / `not_open`, and 503 `verification_unavailable`. The project is derived
-  server-side; a request made for another project is not found.
+  `{ decision, trailer?, comment?, reviewer? }`), `POST /{id}/cancel` (also cancels the hosted copy
+  of a sent request), `DELETE /{id}` (204),
+  `GET /{id}/disclosure` (what a send would transfer; no outbound call) and `POST /{id}/send`
+  (1 KiB body: `{ confirmed }`, answers `{ request, message }`).
+  Refusals are `{ error, code }` with 400 `invalid_request` / `confirmation_required`, 404
+  `not_found` / `session_not_found`, 409 `nothing_staged` / `not_a_repository` / `tree_mismatch` /
+  `signature_rejected` / `not_a_reviewer` / `not_open` / `no_api_key`, 503
+  `verification_unavailable`, and 502 with the transport's code for a send that failed
+  (`network_error`, `timeout`, `server_update_required`, `invalid_api_key`, `permission_denied`,
+  `rate_limited`, `server_unavailable`, `invalid_response`, `invalid_request`, `request_conflict`,
+  `too_large`, `unexpected_redirect`, `server_error`). The project is derived server-side; a
+  request made for another project is not found.
+- **Transport (slice C).** `ReviewRequestTransport` sends a stored request's bundle bytes as
+  `{ requestId, bundle }` to fixed `https://viberails.ai/api/v1/review-requests` (header
+  `X-Api-Key` only, no redirects or cookies, 90 s to send, 30 s to poll or cancel, 1 MiB answers),
+  polls `GET /{reference}/decisions` and cancels with `DELETE /{reference}`. Every answer is
+  validated before use: this request's id and tree, a `rvw_` reference, a known status, a
+  plausible expiry, at most 50 well-formed decisions (distinct ids, listed kinds, trailer grammar,
+  comment bound). Failures are fixed local wording with a stable code and never carry remote text.
+  There is no capability probe: a host without slice B answers the create 404/405/501
+  (`server_update_required`), and nothing is recorded or queued until the host has confirmed the
+  request by reference, so the first POST is the probe and the client fails closed. The hosted
+  contract is `VibeRails-Front/Services/ReviewRequests/README.md`.
+- **Send is explicit.** `ReviewRequestSender.DisclosureAsync` lists what leaves the machine: the
+  destination, the audience (`email`: always listed people, never a public link), every file with
+  its change kind, line count and omission reason, the text bytes, tree and base ids, each session
+  by name with the sharing disclosure and whether it is still live, the reviewers, card key, note
+  and the expiry (one month after the send). `SendAsync` refuses without `{ "confirmed": true }`
+  (`confirmation_required`), for a request that is not open (`not_open`) and without an account key
+  (`no_api_key`), and transfers nothing in those cases. A confirmed send records `SentUTC`, the
+  reference, the sending key's SHA-256 fingerprint and the hosted expiry on the ledger row
+  (`review-requests/2`, additive nullable columns), queues each attached session through
+  `ISessionArchiveReader.EnsureSessionShareUploadAsync` under that fingerprint (the existing
+  `SessionShareUploads` queue and `SessionDataDrainJob`; a live session uploads after it ends; no
+  new upload path), publishes `review_request_updated`, and answers the stored request with a fixed
+  message. A second send transfers nothing. A local cancel also cancels the hosted copy when the
+  current key is the one that sent it; otherwise the poller retries the cancellation.
+- **Poll.** `ReviewRequestPoller.PollDueAsync` runs from `BoardSyncScheduler` after the card-share
+  refresh (the lease-holding root only) and paces itself through `ReviewRequestPollState`
+  (`.review-request-poll.json` beside state.db: account fingerprint, next due time and backoff,
+  never a key or reference): every 15 minutes while a sent request is open, doubling to a two-hour
+  ceiling while none is or the host is unreachable, never on the 60 s tick. Only requests sent with
+  the current key's fingerprint are polled; an expired request is polled for seven more days so a
+  late approval is still collected. Each new hosted decision (its hosted id is stored on the
+  decision row, so each lands once) goes through `RecordDecisionAsync` with that id: an approval is
+  re-verified with viberails.ai and matched to a listed reviewer, a rejection lands with its
+  comment. A decision the ledger refuses (`tree_mismatch`, `signature_rejected`, `not_a_reviewer`)
+  is remembered for the process and not re-verified every pass; an unavailable verifier leaves it
+  pending. Landed decisions publish `review_request_updated` (id, status, card key, sent) so the
+  card UI (slice E) can refresh.
 
-Nothing in this slice sends a request anywhere. The decision route's only outbound call is the
-existing public signature verification, with a tree id and no repository content.
+The decision route's only outbound call is the existing public signature verification, with a tree
+id and no repository content. The send route and the poller are the only code that transfers a
+bundle or reads hosted decisions; the security contract is
+[API_SEC.md](../../../API_SEC.md#review-requests-sent-to-viberailsai-vb-50-slice-c).
 
 ## Design decisions (settled 2026-10-23)
 
@@ -79,7 +127,8 @@ existing public signature verification, with a tree id and no repository content
    each file with its counts (and which are listed without text), the tree id, each session by name
    with the session-sharing disclosure (terminal output, prompts, saved code changes), the reviewer
    emails, and the one-month expiry. Review requests are always for listed people, never public.
-6. The security review against API_SEC.md lands with the transport slice.
+6. The security review against API_SEC.md landed with the transport slice (2026-10-24):
+   [Review requests sent to viberails.ai](../../../API_SEC.md#review-requests-sent-to-viberailsai-vb-50-slice-c).
 7. **The bundle is evidence, not proof of the tree (2026-10-24, Codex review of slice B, High).**
    The requester supplies both the tree id and the file text, so viberails.ai cannot prove that
    one makes up the other; a crafted request can show harmless text and collect an approval over
@@ -98,7 +147,7 @@ existing public signature verification, with a tree id and no repository content
 | --- | --- | --- |
 | A | Desktop core: capture, ledger, decision verification, commit-hook application, routes | Done (this document, VB-50) |
 | B | viberails.ai: request storage and endpoints, reviewer page over the existing session replay viewer and email-audience access | Implemented in VibeRails-Front (VB-OGK99-278, 2026-10-24); contract in its `Services/ReviewRequests/README.md`; cross-repo test `Tests/headless/BoardSync.Integration/ReviewRequestRoundTripTests.cs` |
-| C | Desktop transport: send a request and its sessions (reuse `SessionShareUploads`), poll decisions on the Board sync cadence, land approvals in the ledger | Backlog, VB-DPGU2-279 |
+| C | Desktop transport: send a request and its sessions (reuse `SessionShareUploads`), poll decisions on the Board sync cadence, land approvals in the ledger | Done (VB-DPGU2-279 / VIBE-207, 2026-10-24; this document) |
 | D | Reviewer desktop: "Reviews requested of you" and a `vb --sign-review` console popup that shows the bundle summary and signs the tree | Backlog, VB-PR2U7-280 |
 | E | UI: Request review from a card (Sessions rail picker, approvers from the rule), status on the card, commit and Rules page; MCP `request_review` that never signs | Backlog, VB-4XXCY-281 |
 | F | Line comments, head-commit scope, VS Code surfacing, reviewer notification, retention | Later, VB-XBVE0-282 |
@@ -112,6 +161,22 @@ dotnet test Tests/Tests.csproj --filter "FullyQualifiedName~ReviewRequest|FullyQ
 `Tests/Services/ReviewRequests/ReviewRequestServiceTests.cs` runs the service against a real Git
 repository, the real snapshot reader and a temporary state.db. `Tests/Routes/ReviewRequestRoutesTests.cs`
 runs the routes through the real middleware (it joins the `ProcessEnvIsolation` collection because
-the project comes from `ParserConfigs`). `Tests/VcaRegression/StoredReviewApprovalTests.cs` runs the
-real commit-msg hook host with a seeded ledger, a fake verifier and a popup that never signs.
-`Tests/DB/SchemaSnapshotTests.cs` holds the two tables in `docs/schema/state.sql`.
+the project comes from `ParserConfigs`), with viberails.ai intercepted for disclosure, send and
+cancel. `Tests/VcaRegression/StoredReviewApprovalTests.cs` runs the real commit-msg hook host with
+a seeded ledger, a fake verifier and a popup that never signs, including an approval that arrived
+through the poller. `Tests/DB/SchemaSnapshotTests.cs` holds the two tables in `docs/schema/state.sql`.
+
+Slice C, all against an intercepted `HttpMessageHandler` (`ReviewRequestTestSupport`):
+`ReviewRequestTransportTests.cs` (what is sent, what is accepted, fixed wording with no remote text,
+reference and decision validation, timeouts), `ReviewRequestSenderTests.cs` (the disclosure,
+confirmation and key gates, the recorded hosted copy, sessions queued under the pinned fingerprint,
+the event, cancel reaching the host) and `ReviewRequestPollerTests.cs` (the 15-minute cadence and
+two-hour backoff with a fake clock, decisions landing once with re-verification, refused and
+unavailable decisions, the key pin, expiry grace, the persisted next due time). The cross-repository
+round trip (`Tests/headless/BoardSync.Integration/ReviewRequestRoundTripTests.cs`) parses the hosted
+service's create and poll JSON with `ReviewRequestTransport.ParseStatus`.
+
+```bash
+dotnet test Tests/Tests.csproj --filter "FullyQualifiedName~ReviewRequestTransportTests|FullyQualifiedName~ReviewRequestSenderTests|FullyQualifiedName~ReviewRequestPollerTests"
+dotnet test Tests/headless/BoardSync.Integration/BoardSync.Integration.csproj   # needs the sibling VibeRails-Front checkout
+```

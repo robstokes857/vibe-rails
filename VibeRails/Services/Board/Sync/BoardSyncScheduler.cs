@@ -65,6 +65,14 @@ public sealed class BoardSyncScheduler(IServiceScopeFactory scopeFactory) : IBoa
                 // desktop's own wording or runtime text, never a remote body, a link or the API key.
                 catch (Exception ex) { Log.Warning(ex, "[CardSharing] Scheduled refresh failed"); }
             }
+            // Review-request decisions (VB-50 slice C) pace themselves the same way: every 15 minutes
+            // while a sent request is open, backing off to two hours otherwise, never this 60 s tick.
+            if (scope.ServiceProvider.GetService<ReviewRequests.ReviewRequestPoller>() is { } reviews)
+            {
+                try { await reviews.PollDueAsync(stoppingToken); }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
+                catch (Exception ex) { Log.Warning(ex, "[ReviewRequests] Scheduled decision poll failed"); }
+            }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {

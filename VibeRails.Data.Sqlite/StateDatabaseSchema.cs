@@ -259,6 +259,19 @@ internal static class StateDatabaseSchema
                 CREATE INDEX idx_review_decisions_request ON ReviewDecisions(RequestId, DecidedUTC);
                 CREATE INDEX idx_review_decisions_tree ON ReviewDecisions(TreeId) WHERE VerifiedUTC IS NOT NULL;
                 """));
+        // VB-50 slice C: the hosted copy of a request (sent time, reference, the key it was sent
+        // with, its expiry, cancellation receipt) and the hosted id of a polled decision. Nullable
+        // columns only; a slice A binary keeps reading and writing both tables.
+        SqliteMigrationRunner.Apply(connection, "review-requests", 2, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, """
+                ALTER TABLE ReviewRequests ADD COLUMN SentUTC TEXT NULL;
+                ALTER TABLE ReviewRequests ADD COLUMN RemoteId TEXT NULL;
+                ALTER TABLE ReviewRequests ADD COLUMN SentKeyFingerprint TEXT NULL;
+                ALTER TABLE ReviewRequests ADD COLUMN ExpiresUTC TEXT NULL;
+                ALTER TABLE ReviewRequests ADD COLUMN RemoteCancelledUTC TEXT NULL;
+                ALTER TABLE ReviewDecisions ADD COLUMN RemoteId INTEGER NULL;
+                CREATE INDEX idx_review_requests_sent ON ReviewRequests(Status) WHERE RemoteId IS NOT NULL;
+                """));
         JobStore.EnsureSessionLinkSchema(connection);
         // Every breaking step above has now been applied (or was already), so the file is at this
         // build's generation. Stamping after the fact also covers databases migrated before the

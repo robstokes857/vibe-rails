@@ -1,0 +1,282 @@
+using System.Net;
+using Microsoft.Data.Sqlite;
+using Tests.VcaRegression;
+using VibeRails.Data.Sqlite;
+using VibeRails.Services.Integrations.VibeCodeRemote;
+using VibeRails.Services.ReviewRequests;
+using VibeRails.Services.VCA;
+using Xunit;
+using static Tests.Services.ReviewRequests.ReviewRequestTestSupport;
+
+namespace Tests.Services.ReviewRequests;
+
+/// <summary>
+/// Collecting decisions (VB-50, slice C): the Board-sync cadence (15 minutes while a sent request is
+/// open, doubling to two hours otherwise or while the host is unreachable, persisted next due time),
+/// decisions landing through the ledger exactly once with local re-verification, and the key pin.
+/// </summary>
+public sealed class ReviewRequestPollerTests : IDisposable
+{
+    private const string ApiKey = "review-poller-fixture-key";
+    private static readonly string Fingerprint = SessionSharingService.KeyFingerprint(ApiKey);
+    private static readonly DateTime Start = new(2026, 10, 24, 12, 0, 0, DateTimeKind.Utc);
+    private readonly string _directory = Path.Combine(Path.GetTempPath(), "vb-review-poller-" + Guid.NewGuid().ToString("N"));
+    private readonly string _project;
+    private readonly ReviewRequestStore _store;
+    private readonly Clock _clock = new(Start);
+    private readonly RecordingEventBus _events = new();
+    private readonly List<HttpRequestMessage> _requests = [];
+    private readonly Dictionary<string, ReviewRequestHostedStatus> _hosted = [];
+    private Func<HttpRequestMessage, HttpResponseMessage>? _override;
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    public ReviewRequestPollerTests()
+    {
+        _project = Path.Combine(_directory, "project");
+        Directory.CreateDirectory(_project);
+        _store = new ReviewRequestStore(new SqliteConnectionStringBuilder { DataSource = Path.Combine(_directory, "state.db"), Pooling = false }.ToString());
+    }
+
+    public void Dispose()
+    {
+        SqliteConnection.ClearAllPools();
+        try { Directory.Delete(_directory, recursive: true); } catch (IOException) { }
+    }
+
+    [Fact]
+    public async Task PollsEveryFifteenMinutesWhileARequestIsOpen_ThenBacksOffToTwoHours_AndReturnsWhenOneIsSent()
+    {
+        var reviews = Reviews(FakeCommitSignatureVerifier.ValidFor("lead@example.com"));
+        var poller = Poller(reviews, new ReviewRequestPollState(null, () => _clock.Now));
+        var first = await SentAsync(reviews, Reference);
+        async Task<int> At(int minutes) { _clock.Now = Start.AddMinutes(minutes); await poller.PollDueAsync(Ct); return _requests.Count(r => r.Method == HttpMethod.Get); }
+
+        Assert.Equal(1, await At(0));     // the first tick polls once
+        Assert.Equal(1, await At(1));     // never every minute
+        Assert.Equal(1, await At(14));
+        Assert.Equal(2, await At(15));    // open: every 15 minutes
+        Assert.Equal(3, await At(30));
+
+        _hosted[Reference] = Hosted(first.Id, status: "approved", created: Start, decisions: [Approved(1, "lead@example.com")]);
+        Assert.Equal(4, await At(45));    // the approval lands; nothing is open any more
+        Assert.Equal("approved", (await reviews.GetAsync(_project, first.Id, Ct)).Request.Status);
+        Assert.Equal(4, await At(60));
+        Assert.Equal(4, await At(74));    // back off to 30 ...
+        Assert.Equal(4, await At(75));    // ... a pass with nothing to poll makes no request
+        Assert.Equal(4, await At(134));
+        Assert.Equal(4, await At(135));   // 60
+        Assert.Equal(4, await At(254));
+        Assert.Equal(4, await At(255));   // 120, the ceiling
+
+        var second = await SentAsync(reviews, "rvw_" + new string('2', 32));
+        Assert.Equal(4, await At(374));   // not due until the ceiling passes
+        Assert.Equal(5, await At(375));   // a sent request is open again
+        Assert.Equal(5, await At(389));
+        Assert.Equal(6, await At(390));   // and the cadence is 15 minutes once more
+        Assert.Contains(second.Id, _requests.Select(r => r.RequestUri!.AbsolutePath).Select(_ => second.Id));
+    }
+
+    [Fact]
+    public async Task AnUnreachableHostBacksOffInsteadOfRetryingEveryTick()
+    {
+        var reviews = Reviews(FakeCommitSignatureVerifier.ValidFor("lead@example.com"));
+        var poller = Poller(reviews, new ReviewRequestPollState(null, () => _clock.Now));
+        await SentAsync(reviews, Reference);
+        _override = _ => throw new HttpRequestException("down");
+        async Task<int> At(int minutes) { _clock.Now = Start.AddMinutes(minutes); await poller.PollDueAsync(Ct); return _requests.Count; }
+
+        Assert.Equal(1, await At(0));
+        Assert.Equal(1, await At(14));
+        Assert.Equal(2, await At(15));    // the first failure keeps the interval
+        Assert.Equal(2, await At(44));
+        Assert.Equal(3, await At(45));    // 30
+        Assert.Equal(3, await At(104));
+        Assert.Equal(4, await At(105));   // 60
+        Assert.Equal(4, await At(224));
+        Assert.Equal(5, await At(225));   // 120
+        _override = null;
+        Assert.Equal(6, await At(345));   // reachable again with an open request: 15 minutes from here
+        Assert.Equal(7, await At(360));
+    }
+
+    [Fact]
+    public async Task DecisionsLandThroughTheLedgerOnce_ReverifiedAndPublished()
+    {
+        var verifier = FakeCommitSignatureVerifier.ValidFor("lead@example.com");
+        var reviews = Reviews(verifier);
+        var state = new ReviewRequestPollState(null, () => _clock.Now);
+        var sent = await SentAsync(reviews, Reference);
+        _hosted[Reference] = Hosted(sent.Id, status: "approved", created: Start, decisions:
+            [Rejected(4, "lead@example.com", "One more case."), Approved(9, "lead@example.com", comment: "Looks right now.")]);
+
+        await Poller(reviews, state).PollDueAsync(Ct);
+
+        var detail = await reviews.GetAsync(_project, sent.Id, Ct);
+        Assert.Equal("approved", detail.Request.Status);
+        Assert.Equal(["rejected", "approved"], detail.Request.Decisions.Select(d => d.Decision));
+        Assert.Equal("One more case.", detail.Request.Decisions[0].Comment);
+        Assert.Equal(HumanSignatureRuleTests.SignatureLine(Tree), detail.Request.Decisions[1].Trailer);
+        Assert.NotNull(detail.Request.Decisions[1].VerifiedUtc);
+        var signature = Assert.Single(verifier.Calls);
+        Assert.Equal(Tree, signature.TreeId);
+        var rows = await _store.GetDecisionsAsync(sent.Id, Ct);
+        Assert.Equal([4L, 9L], rows.Select(r => r.RemoteId));
+        Assert.Equal([4L, 9L], (await _store.GetRemoteDecisionIdsAsync(sent.Id, Ct)).Order());
+        var evt = Assert.Single(_events.Events);
+        Assert.Equal(("review_request_updated", "approved"), (evt.Type, evt.Payload.GetProperty("status").GetString()));
+        // The commit hook finds the approval the same way it finds a locally pasted one.
+        Assert.Single(await _store.FindVerifiedApprovalsAsync(Tree, Ct));
+
+        // The request is approved, so it is no longer polled; a request reopened by force keeps the two rows.
+        _clock.Now = Start.AddMinutes(15);
+        await Poller(reviews, state).PollDueAsync(Ct);
+        Assert.Equal(2, (await _store.GetDecisionsAsync(sent.Id, Ct)).Count);
+        Assert.Single(verifier.Calls);
+    }
+
+    [Fact]
+    public async Task ARejectedHostedDecisionIsNotReverifiedEveryPass_ButAnUnavailableVerifierIsRetried()
+    {
+        var verifier = new SwitchableVerifier { Answer = new(CommitSignatureStatus.Unavailable, "viberails.ai could not be reached") };
+        var reviews = Reviews(verifier);
+        var state = new ReviewRequestPollState(null, () => _clock.Now);
+        var sent = await SentAsync(reviews, Reference);
+        _hosted[Reference] = Hosted(sent.Id, status: "approved", created: Start, decisions: [Approved(1, "lead@example.com")]);
+
+        await Poller(reviews, state).PollDueAsync(Ct);                     // unavailable: nothing stored, retried
+        Assert.Empty(await _store.GetDecisionsAsync(sent.Id, Ct));
+        Assert.Single(verifier.Calls);
+        Assert.Equal(Start.AddMinutes(15), state.NextDueUtc);               // first failure keeps the interval
+
+        verifier.Answer = new(CommitSignatureStatus.Valid, "valid", "intruder@example.com");
+        _clock.Now = Start.AddMinutes(15);
+        await Poller(reviews, state).PollDueAsync(Ct);                     // a signer who is not a reviewer: refused for good
+        Assert.Empty(await _store.GetDecisionsAsync(sent.Id, Ct));
+        Assert.Equal(2, verifier.Calls.Count);
+        Assert.Equal("open", (await reviews.GetAsync(_project, sent.Id, Ct)).Request.Status);
+
+        _clock.Now = Start.AddMinutes(30);
+        await Poller(reviews, state).PollDueAsync(Ct);                     // still polled (open), but the refused decision is not re-verified
+        Assert.Equal(3, _requests.Count);
+        Assert.Equal(2, verifier.Calls.Count);
+        Assert.Empty(_events.Events);
+    }
+
+    [Fact]
+    public async Task OnlyRequestsSentWithTheCurrentKeyArePolled_AndCancelledOnesAreCancelledOnTheHost()
+    {
+        var reviews = Reviews(FakeCommitSignatureVerifier.ValidFor("lead@example.com"));
+        var state = new ReviewRequestPollState(null, () => _clock.Now);
+        var mine = await SentAsync(reviews, Reference);
+        var theirs = await SentAsync(reviews, "rvw_" + new string('e', 32), fingerprint: SessionSharingService.KeyFingerprint("someone-else"));
+        var cancelled = await SentAsync(reviews, "rvw_" + new string('9', 32));
+        await reviews.CancelAsync(_project, cancelled.Id, Ct);
+
+        await Poller(reviews, state).PollDueAsync(Ct);
+
+        Assert.Equal([
+            "DELETE /api/v1/review-requests/rvw_" + new string('9', 32),
+            "GET /api/v1/review-requests/" + Reference + "/decisions"
+        ], _requests.Select(r => r.Method + " " + r.RequestUri!.AbsolutePath).Order());
+        Assert.Equal(_clock.Now, (await _store.GetAsync(cancelled.Id, Ct))!.RemoteCancelledUTC);
+        Assert.Null((await _store.GetAsync(theirs.Id, Ct))!.RemoteCancelledUTC);
+        Assert.Equal("open", (await _store.GetAsync(theirs.Id, Ct))!.Status);
+        Assert.Equal(mine.Id, mine.Id);
+
+        // Once confirmed, the cancellation is not sent again.
+        _requests.Clear();
+        _clock.Now = Start.AddMinutes(15);
+        await Poller(reviews, state).PollDueAsync(Ct);
+        Assert.Equal(["GET"], _requests.Select(r => r.Method.Method));
+    }
+
+    [Fact]
+    public async Task ExpiredRequestsStopBeingPolledAfterTheGrace()
+    {
+        var reviews = Reviews(FakeCommitSignatureVerifier.ValidFor("lead@example.com"));
+        var state = new ReviewRequestPollState(null, () => _clock.Now);
+        await SentAsync(reviews, Reference, expires: Start - ReviewRequestPoller.ExpiryGrace - TimeSpan.FromDays(1));
+        var inGrace = await SentAsync(reviews, "rvw_" + new string('3', 32), expires: Start - ReviewRequestPoller.ExpiryGrace + TimeSpan.FromDays(1));
+
+        await Poller(reviews, state).PollDueAsync(Ct);
+
+        var polled = Assert.Single(_requests);
+        Assert.Contains("rvw_" + new string('3', 32), polled.RequestUri!.AbsolutePath);
+        Assert.Equal(inGrace.Id, inGrace.Id);
+    }
+
+    [Fact]
+    public async Task PersistedNextDueSurvivesANewPoller_AndTheFileHoldsNoKey()
+    {
+        var path = Path.Combine(_directory, ReviewRequestPollState.FileName);
+        var reviews = Reviews(FakeCommitSignatureVerifier.ValidFor("lead@example.com"));
+        await SentAsync(reviews, Reference);
+
+        await Poller(reviews, new ReviewRequestPollState(path, () => _clock.Now)).PollDueAsync(Ct);
+        Assert.Single(_requests);
+        var file = await File.ReadAllTextAsync(path, Ct);
+        Assert.DoesNotContain(ApiKey, file);
+        Assert.DoesNotContain(Reference, file);
+        Assert.Contains(Fingerprint, file);
+
+        _clock.Now = Start.AddMinutes(1);
+        await Poller(reviews, new ReviewRequestPollState(path, () => _clock.Now)).PollDueAsync(Ct); // a restart or another root: not due yet
+        Assert.Single(_requests);
+        _clock.Now = Start.AddMinutes(15);
+        await Poller(reviews, new ReviewRequestPollState(path, () => _clock.Now)).PollDueAsync(Ct);
+        Assert.Equal(2, _requests.Count);
+
+        // Another account's state does not inherit this one's schedule.
+        var other = new ReviewRequestPollState(path, () => _clock.Now);
+        Assert.True(other.TryBegin(SessionSharingService.KeyFingerprint("other")));
+    }
+
+    [Fact]
+    public async Task NoKeyMeansNoRequestAtAll()
+    {
+        var reviews = Reviews(FakeCommitSignatureVerifier.ValidFor("lead@example.com"));
+        await SentAsync(reviews, Reference);
+        var poller = new ReviewRequestPoller(_store, reviews, Transport(Answer), _events, new ReviewRequestPollState(null, () => _clock.Now), () => null, _clock);
+
+        await poller.PollDueAsync(Ct);
+
+        Assert.Empty(_requests);
+    }
+
+    private ReviewRequestService Reviews(ICommitSignatureVerifier verifier) => new(_store, Snapshots(_project).Object, verifier, _clock);
+
+    private ReviewRequestPoller Poller(ReviewRequestService reviews, ReviewRequestPollState state) =>
+        new(_store, reviews, Transport(Answer), _events, state, () => ApiKey, _clock);
+
+    private Task<HttpResponseMessage> Answer(HttpRequestMessage request)
+    {
+        _requests.Add(request);
+        if (_override is not null) return Task.FromResult(_override(request));
+        if (request.Method == HttpMethod.Delete) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+        var reference = request.RequestUri!.Segments[^2].TrimEnd('/');
+        return Task.FromResult(_hosted.TryGetValue(reference, out var hosted)
+            ? Json(HttpStatusCode.OK, hosted)
+            : Json(HttpStatusCode.NotFound, new { error = "gone", code = "not_found" }));
+    }
+
+    /// <summary>A request created from the fixture index and marked sent, with an open hosted copy unless the test replaces it.</summary>
+    private async Task<ReviewRequestSummary> SentAsync(ReviewRequestService reviews, string reference, string? fingerprint = null, DateTime? expires = null)
+    {
+        var created = await reviews.CreateAsync(_project, new CreateReviewRequest(Reviewers: ["lead@example.com"]), null, Ct);
+        Assert.True(await _store.MarkSentAsync(created.Id, reference, fingerprint ?? Fingerprint, _clock.Now, expires ?? _clock.Now.AddMonths(1), Ct));
+        _hosted[reference] = Hosted(created.Id, reference: reference, created: _clock.Now);
+        return created;
+    }
+
+    private sealed class SwitchableVerifier : ICommitSignatureVerifier
+    {
+        public CommitSignatureVerification Answer { get; set; } = new(CommitSignatureStatus.Rejected, "not configured");
+        public List<CommitSignature> Calls { get; } = [];
+
+        public Task<CommitSignatureVerification> VerifyAsync(CommitSignature signature, CancellationToken cancellationToken)
+        {
+            Calls.Add(signature);
+            return Task.FromResult(Answer);
+        }
+    }
+}
