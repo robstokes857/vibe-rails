@@ -158,16 +158,17 @@ public sealed class ReviewSignaturePopup
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            await _output.WriteLineAsync($"{s.Red}Could not rebuild the tree: {ex.Message}. Nothing was signed.{s.Reset}");
+            await _output.WriteLineAsync($"{s.Red}Could not rebuild the tree: {HumanSignaturePopup.Clean(ex.Message)}. Nothing was signed.{s.Reset}");
             return 1;
         }
+        // The verdict names request paths, which are the requester's text: cleaned like the summary.
         if (!rebuilt.Matches)
         {
-            await _output.WriteLineAsync($"{s.Red}{rebuilt.Message}{s.Reset}");
+            await _output.WriteLineAsync($"{s.Red}{HumanSignaturePopup.Clean(rebuilt.Message)}{s.Reset}");
             await _output.WriteLineAsync($"{s.Red}Nothing was signed.{s.Reset}");
             return 1;
         }
-        await _output.WriteLineAsync($"{s.Green}Verified. {rebuilt.Message}{s.Reset}");
+        await _output.WriteLineAsync($"{s.Green}Verified. {HumanSignaturePopup.Clean(rebuilt.Message)}{s.Reset}");
         await _output.WriteLineAsync();
 
         var keys = await _prompt.WaitForSyncedKeysAsync(cancellationToken);

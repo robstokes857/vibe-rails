@@ -206,8 +206,28 @@ export class ReviewInboxController {
         }
         const summary = summarizeInbox(view);
         this.setCount(summary);
+        // A render replaces every row, and the poll renders while the person may be typing a rejection:
+        // keep each open form and its text across the replacement.
+        const drafts = new Map();
+        for (const form of list.querySelectorAll('[data-ri-reject-form]:not([hidden])')) {
+            const reference = form.closest('[data-ri-row]')?.dataset.riRow;
+            if (reference) drafts.set(reference, form.querySelector('[data-ri-comment]')?.value ?? '');
+        }
+        const focused = document.activeElement?.matches?.('[data-ri-comment]') ? document.activeElement.closest('[data-ri-row]')?.dataset.riRow : null;
         list.innerHTML = requests.map(item => requestRow(item, view)).join('')
             + (summary.more ? `<p class="ri-muted mt-2">viberails.ai lists the newest 100; open it to see the rest.</p>` : '');
+        for (const [reference, text] of drafts) {
+            const row = list.querySelector(`[data-ri-row="${CSS.escape(reference)}"]`);
+            const form = row?.querySelector('[data-ri-reject-form]');
+            const comment = form?.querySelector('[data-ri-comment]');
+            if (!form || !comment) continue;
+            form.hidden = false;
+            comment.value = text;
+            if (reference === focused) {
+                comment.focus();
+                comment.setSelectionRange(text.length, text.length);
+            }
+        }
         if (this.busy) {
             for (const button of list.querySelectorAll('button')) button.disabled = true;
         } else {

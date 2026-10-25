@@ -122,17 +122,22 @@ public sealed class ReviewSignaturePopupTests
     }
 
     [Fact]
-    public async Task ATreeThatDoesNotRebuildStopsBeforeAnyKey()
+    public async Task ATreeThatDoesNotRebuildStopsBeforeAnyKeyAndItsVerdictIsCleaned()
     {
         var signer = new FakeSigner(Key("Laptop"));
-        var host = new FakeHost(Bundle()) { Rebuild = new ReviewTreeRebuildResult(false, "tree_mismatch", "The files in the request do not rebuild the tree it asks you to sign.", new string('1', 40)) };
+        // The verdict names request paths, which can carry terminal controls like any requester text.
+        var host = new FakeHost(Bundle()) { Rebuild = new ReviewTreeRebuildResult(false, "hidden_change", "The change differs in 1 path(s): evil\u001b[2J.txt (deleted, not listed).", new string('1', 40)) };
+        var output = new StringWriter();
 
-        var exit = await Popup(new StringWriter(), new ScriptedConsole(secrets: ["correct horse battery"]), signer, Verifier("me@example.test"), host)
+        var exit = await Popup(output, new ScriptedConsole(secrets: ["correct horse battery"]), signer, Verifier("me@example.test"), host)
             .RunAsync(new ReviewSignaturePopupRequest(Reference, Repo), Ct);
 
         Assert.Equal(1, exit);
         Assert.Equal(0, signer.ListCalls);
         Assert.Empty(host.Posted);
+        var transcript = output.ToString();
+        Assert.DoesNotContain('\u001b', transcript);
+        Assert.Contains(@"evil\u001B[2J.txt (deleted, not listed)", transcript);
     }
 
     [Theory]
