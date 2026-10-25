@@ -9,7 +9,7 @@ function harness(apiCall) {
     const saveRepositories = { disabled: true, addEventListener() {} };
     const reload = { addEventListener() {} };
     const root = { querySelector: s => s.includes('enabled') ? toggle : s.includes('status') ? status : s === '[data-pr-reviewer-repositories]' ? repositories : s.includes('save-repositories') ? saveRepositories : reload };
-    return { toggle, status, repositories, saveRepositories, panel: new PrReviewerSettingsPanel({ apiCall }, root) };
+    return { toggle, status, repositories, saveRepositories, panel: new PrReviewerSettingsPanel({ apiCall, updatePrReviewerNav() {} }, root) };
 }
 
 test('reviewer switch loads persisted state and saves changes through its dedicated API', async () => {

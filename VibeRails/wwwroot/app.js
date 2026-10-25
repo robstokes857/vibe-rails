@@ -105,11 +105,12 @@ export class VibeControlApp {
         // it off the serial cold-start path. The controller falls back to canonical
         // defaults if the request fails, so a failure never blocks startup either.
         const llmPickerPreferencesReady = this.llmPickerController.loadPreferences();
+        const prReviewerSettingsReady = this.loadPrReviewerSettings();
         await this.fetchConfigs();
         this.applyDocumentTitle();
         await this.applyInitialSettings();
         this.updateAccountNav();
-        await llmPickerPreferencesReady;
+        await Promise.all([llmPickerPreferencesReady, prReviewerSettingsReady]);
         this.terminalController.bindSessionEvents(this.appEventClient);
 
         // Persistent proxy/token-compression indicator. It intentionally listens to the dedicated proxy
@@ -1160,6 +1161,21 @@ export class VibeControlApp {
         }
         for (const action of document.querySelectorAll('[data-account-settings-action]')) {
             action.textContent = hasKey ? 'Switch account' : 'Sign in';
+        }
+    }
+
+    async loadPrReviewerSettings() {
+        try {
+            const settings = await this.apiCall('/api/v1/pr-reviews/settings', 'GET', null, { showLoading: false });
+            this.updatePrReviewerNav(settings);
+        } catch (error) {
+            console.error('Failed to fetch PR Reviewer settings:', error);
+        }
+    }
+
+    updatePrReviewerNav(settings) {
+        for (const link of document.querySelectorAll('.app-subnav-link[data-view="pr-reviews"]')) {
+            link.hidden = settings.enabled !== true;
         }
     }
 

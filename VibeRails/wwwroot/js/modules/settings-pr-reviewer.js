@@ -28,6 +28,7 @@ export class PrReviewerSettingsPanel {
             const settings = await this.request('GET');
             if (this.abort.signal.aborted) return;
             this.toggle.checked = settings.enabled === true;
+            this.app.updatePrReviewerNav(settings);
             this.repositories.value = (settings.repositories || []).join('\n');
             this.setDisabled(false);
             this.status.textContent = settings.enabled ? 'PR Reviewer and GitHub publishing are on.' : 'PR Reviewer and GitHub publishing are off.';
@@ -47,6 +48,7 @@ export class PrReviewerSettingsPanel {
             const settings = await this.request('PUT', body);
             if (this.abort.signal.aborted) return;
             this.toggle.checked = settings.enabled === true;
+            this.app.updatePrReviewerNav(settings);
             this.setDisabled(false);
             if (includeRepositories) this.repositories.value = (settings.repositories || []).join('\n');
             this.status.textContent = includeRepositories ? 'Saved repositories. Open Reviews to load their queues.' : settings.enabled ? 'Saved: PR Reviewer and GitHub publishing are on.' : 'Saved: PR Reviewer and GitHub publishing are off.';

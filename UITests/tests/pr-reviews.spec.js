@@ -78,6 +78,8 @@ for (const useLegacy of [false, true]) {
 
 test('dedicated PR Reviewer settings persist and disclose in-progress behavior', async ({ page }) => {
     await mount(page, reviewFixture());
+    const reviewsNav = page.locator('.app-subnav-link[data-view="pr-reviews"]');
+    await expect(reviewsNav).toBeHidden();
     let enabled = false, repositories = [];
     await page.route('**/api/v1/pr-reviews/settings*', route => {
         if (route.request().method() === 'PUT') {
@@ -92,15 +94,19 @@ test('dedicated PR Reviewer settings persist and disclose in-progress behavior',
     const toggle = page.getByRole('switch', { name: 'Enable PR Reviewer and GitHub publishing' });
     await expect(toggle).toBeEnabled();
     await expect(toggle).not.toBeChecked();
+    await expect(reviewsNav).toBeHidden();
     await expect(page.getByText(/A run already in progress can finish/)).toBeVisible();
     await toggle.check();
     await expect(page.locator('[data-pr-reviewer-status]')).toHaveText(/Saved:.*on/);
+    await expect(reviewsNav).toBeVisible();
     await page.reload();
+    await expect(reviewsNav).toBeVisible();
     await page.locator('[data-action="navigate-settings"]').click();
     await page.getByRole('tab', { name: 'PR Reviewer', exact: true }).click();
     await expect(toggle).toBeChecked();
     await toggle.uncheck();
     await expect(page.locator('[data-pr-reviewer-status]')).toHaveText(/Saved:.*off/);
+    await expect(reviewsNav).toBeHidden();
     expect(enabled).toBe(false);
     const watches = page.getByRole('textbox', { name: 'GitHub repositories to watch' });
     await watches.fill('octo/widgets\nelse/tools\nOCTO/WIDGETS');
@@ -115,6 +121,9 @@ test('dedicated PR Reviewer settings persist and disclose in-progress behavior',
     await page.getByRole('button', { name: 'Save repositories', exact: true }).click();
     await expect(watches).toBeEnabled();
     expect(repositories).toEqual([]);
+    await page.reload();
+    await expect(reviewsNav).toBeHidden();
+    await expect(page.locator('[data-action="navigate-settings"]')).toBeVisible();
 });
 
 test('delivery errors stay distinct from local completion and retry checks show confirmed receipts', async ({ page }) => {
