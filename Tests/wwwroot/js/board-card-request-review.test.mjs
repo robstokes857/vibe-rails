@@ -66,9 +66,6 @@ test('statuses say who approved or rejected and whether an open request was sent
     assert.equal(formatFileChange({ changedLines: 4, textIncluded: false, omitted: 'binary', bytesIncluded: true }), '±4 · no text (binary), bytes sent');
     assert.equal(formatFileChange({ textIncluded: false }), 'no text (omitted), not approvable');
     assert.equal(describeCounts({ files: [{}, {}], filesWithText: 1, filesWithoutText: 1, textBytes: 2048 }), '2 staged files: 1 with text (2.0 KiB), 1 without');
-});
-
-test('badges and rows escape server text and offer Send only for an open unsent request, Copy only with an approval', () => {
     // VIBE-211: files listed without text may travel as exact bytes; the counts say so.
     assert.equal(describeCounts({ files: [{}, {}, {}], filesWithText: 1, filesWithoutText: 2, textBytes: 2048, filesWithBytes: 1, carriedBytes: 3072 }),
         '3 staged files: 1 with text (2.0 KiB), 2 without text, 1 of them as exact bytes (3.0 KiB)');
@@ -87,6 +84,9 @@ test('the disclosure says when the bytes of files listed without text travel too
     const none = describeDisclosure({ ...base, files: [{ path: 'huge.bin', textIncluded: false, omitted: 'oversized' }] });
     assert.match(none, /1 listed without text \(oversized\): huge\.bin\./);
     assert.doesNotMatch(none, /exact bytes/);
+});
+
+test('badges and rows escape server text and offer Send only for an open unsent request, Copy only with an approval', () => {
     const badge = reviewStatusBadge([rejected, approved], card);
     assert.match(badge, /text-bg-success/);
     assert.match(badge, /Review approved by lead@example\.test/);

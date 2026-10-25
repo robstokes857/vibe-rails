@@ -1,6 +1,6 @@
 import { mountEnvironmentEditor, environmentField } from './environment-editor.js';
 import { parseCliArguments } from './cli-arguments.js';
-import { codexModelSupportsSpeed, normalizeLlmModel, renderLlmModelOptions } from './llm-model-catalog.js';
+import { codexModelSupportsSpeed, codexModelSupportsEffort, normalizeCodexModelEffort, normalizeLlmModel, renderLlmModelOptions } from './llm-model-catalog.js';
 import { isConfirmDialogOpen } from './utils.js';
 import { hasStartingMessage } from './launch-kind.js';
 import {
@@ -461,12 +461,11 @@ export class EnvironmentController {
 
         const syncOptionsForModel = () => {
             const model = this.normalizeCodexModel(modelSelect.value);
-            const supportsMax = this.codexModelSupportsMaxEffort(model);
-            maxOption.disabled = !supportsMax;
-
-            if (!supportsMax && effortSelect.value === 'max') {
-                effortSelect.value = this.normalizeCodexEffort(model, effortSelect.value);
+            for (const level of ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']) {
+                const option = effortSelect.querySelector(`option[value="${level}"]`);
+                if (option) option.disabled = !codexModelSupportsEffort(model, level);
             }
+            effortSelect.value = this.normalizeCodexEffort(model, effortSelect.value);
 
             if (ultrafastOption) {
                 ultrafastOption.disabled = !this.codexModelSupportsUltrafast(model);
@@ -573,15 +572,11 @@ export class EnvironmentController {
     }
 
     codexModelSupportsMaxEffort(model) {
-        return this.normalizeCodexModel(model).toLowerCase() !== 'gpt-5.5';
+        return codexModelSupportsEffort(model, 'max');
     }
 
     normalizeCodexEffort(model, effort) {
-        const normalizedEffort = (effort || '').trim();
-        if (!this.codexModelSupportsMaxEffort(model) && normalizedEffort.toLowerCase() === 'max') {
-            return 'xhigh';
-        }
-        return normalizedEffort;
+        return normalizeCodexModelEffort(model, effort);
     }
 
     renderCodexModelOptions(selectedModel) {
@@ -1219,13 +1214,13 @@ export class EnvironmentController {
                     <label class="form-label">Effort</label>
                     <select class="form-select" id="codex-effort">
                         <option value="" ${codexEffort === '' ? 'selected' : ''}>Default</option>
-                        <option value="minimal" ${codexEffort === 'minimal' ? 'selected' : ''}>Minimal</option>
+                        <option value="minimal" ${codexEffort === 'minimal' ? 'selected' : ''} ${codexModelSupportsEffort(codexModel, 'minimal') ? '' : 'disabled'}>Minimal</option>
                         <option value="low" ${codexEffort === 'low' ? 'selected' : ''}>Low</option>
                         <option value="medium" ${codexEffort === 'medium' ? 'selected' : ''}>Medium</option>
                         <option value="high" ${codexEffort === 'high' ? 'selected' : ''}>High</option>
                         <option value="xhigh" ${codexEffort === 'xhigh' ? 'selected' : ''}>XHigh</option>
                         <option value="max" ${codexEffort === 'max' ? 'selected' : ''} ${codexMaxEffortDisabled ? 'disabled' : ''}>Max</option>
-                        <option value="ultra" ${codexEffort === 'ultra' ? 'selected' : ''}>Ultra</option>
+                        <option value="ultra" ${codexEffort === 'ultra' ? 'selected' : ''} ${codexModelSupportsEffort(codexModel, 'ultra') ? '' : 'disabled'}>Ultra</option>
                         ${this.renderCustomEffortOption(codexEffort, ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'])}
                     </select>
                     <small class="form-text text-muted">Passed as <code>-c model_reasoning_effort=&lt;level&gt;</code></small>

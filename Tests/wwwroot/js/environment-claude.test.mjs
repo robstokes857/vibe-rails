@@ -31,9 +31,10 @@ const PINNED_CLAUDE_MODELS = [
     'claude-opus-5-5[1m]',
     'claude-opus-5[1m]',
     'claude-sonnet-5-5[1m]',
-    'claude-sonnet-5[1m]'
+    'claude-sonnet-5[1m]',
+    'claude-haiku-5-5[1m]'
 ];
-const CLAUDE_MODEL_LABELS = ['Default (Claude recommended)', 'Fable 5.1', 'Fable 5', 'Opus 5.5', 'Opus 5', 'Sonnet 5.5', 'Sonnet 5'];
+const CLAUDE_MODEL_LABELS = ['Default (Claude recommended)', 'Fable 5.1', 'Fable 5', 'Opus 5.5', 'Opus 5', 'Sonnet 5.5', 'Sonnet 5', 'Haiku 5.5'];
 
 // Visible <option> text only; values legitimately carry the [1m] launch suffix.
 function optionTexts(html) {

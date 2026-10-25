@@ -557,6 +557,28 @@ model = ""gpt-5.6-terra""
         Assert.Contains("service_tier = \"flex\"", _mockFileService.GetWrittenContent());
     }
 
+    [Theory]
+    [InlineData("gpt-6-luna", "ultra", "max")]
+    [InlineData("gpt-5.6-luna", "ultra", "max")]
+    [InlineData("gpt-6-sol", "minimal", "low")]
+    public async Task SaveSettings_UsesSupportedModelEffort_AndKeepsFast(string model, string effort, string expected)
+    {
+        _mockFileService.SetFileExists(true);
+        _mockFileService.SetFileContent("approval_policy = \"on-request\"\n");
+        await _service.SaveSettings("test-env", new CodexSettingsDto
+        {
+            Model = model, Effort = effort, FastMode = true
+        }, CancellationToken.None);
+        var written = _mockFileService.GetWrittenContent();
+        Assert.Contains($"model_reasoning_effort = \"{expected}\"", written);
+        Assert.Contains("approval_policy = \"on-request\"", written);
+        _mockFileService.SetFileContent(written);
+        var reread = await _service.GetSettings("test-env", CancellationToken.None);
+        Assert.Equal(model, reread.Model);
+        Assert.Equal(expected, reread.Effort);
+        Assert.True(reread.FastMode);
+    }
+
     private class MockFileService : IFileService
     {
         private bool _fileExists;

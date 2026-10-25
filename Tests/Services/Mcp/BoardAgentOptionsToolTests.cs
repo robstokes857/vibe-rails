@@ -62,9 +62,10 @@ public sealed class BoardAgentOptionsToolTests
         Assert.Contains("Effort: default, minimal, low, medium, high, xhigh, max, ultra", result);
         Assert.DoesNotContain("Start mode:", result);
         Assert.Contains("gpt-6-astra: default, fast, ultrafast", result);
-        Assert.Contains("gpt-6.1-sol: default, fast, ultrafast\n", result);
-        foreach (var removed in new[] { "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5" })
-            Assert.DoesNotContain($"- {removed}:", result);
+        Assert.Contains("gpt-6.1-sol: default, fast, ultrafast; effort: default, low, medium, high, xhigh, max, ultra\n", result);
+        Assert.DoesNotContain("- gpt-5.5:", result);
+        foreach (var luna in new[] { "gpt-6-luna", "gpt-5.6-luna" })
+            Assert.Contains($"- {luna}: default, fast; effort: default, low, medium, high, xhigh, max\n", result);
         foreach (var model in CodexModelCapabilities.Models)
             Assert.Contains($"- {model}:", result);
         Assert.Contains("baseLlmOptions cannot override it", result);

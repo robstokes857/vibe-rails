@@ -3,24 +3,39 @@ using System.Text.Json;
 namespace VibeRails.Services.LlmClis;
 
 // The browser imports the same JSON that is embedded here for AOT and stdio launches.
-// Speed tiers verified against Codex's model metadata and speed guide, 2026-10-17.
-// Only Astra and GPT-6.1 Sol are pinned (owner request, 2026-10-17).
+// Model, speed and effort metadata verified against Codex CLI 0.164.0, 2026-10-25.
 internal static class CodexModelCapabilities
 {
-    private static readonly IReadOnlyDictionary<string, string[]> Speeds = LoadSpeeds();
+    private sealed record Capability(string[] Speeds, string[] Efforts);
+    private static readonly IReadOnlyDictionary<string, Capability> Catalog = Load();
 
-    public static IEnumerable<string> Models => Speeds.Keys;
+    public static IEnumerable<string> Models => Catalog.Keys;
 
     public static bool SupportsSpeed(string? model, string speed) =>
-        Speeds.TryGetValue(model?.Trim() ?? "", out var speeds) && speeds.Contains(speed);
+        Catalog.TryGetValue(model?.Trim() ?? "", out var capability) && capability.Speeds.Contains(speed);
 
-    private static IReadOnlyDictionary<string, string[]> LoadSpeeds()
+    public static IEnumerable<string> Efforts(string model) => Catalog[model].Efforts;
+
+    public static string NormalizeEffort(string? model, string effort)
+    {
+        if (Catalog.TryGetValue(model?.Trim() ?? "", out var capability))
+        {
+            if (effort == "minimal") return capability.Efforts[0];
+            if (effort == "ultra" && !capability.Efforts.Contains(effort)) return capability.Efforts[^1];
+        }
+        return string.Equals(model?.Trim(), "gpt-5.5", StringComparison.OrdinalIgnoreCase) && effort == "max"
+            ? "xhigh" : effort;
+    }
+
+    private static IReadOnlyDictionary<string, Capability> Load()
     {
         using var stream = typeof(CodexModelCapabilities).Assembly.GetManifestResourceStream("CodexModelCapabilities.json")
             ?? throw new InvalidOperationException("The Codex model capability resource is missing.");
         using var document = JsonDocument.Parse(stream);
         return document.RootElement.EnumerateObject().ToDictionary(entry => entry.Name,
-            entry => entry.Value.EnumerateArray().Select(value => value.GetString()!).ToArray(),
+            entry => new Capability(
+                entry.Value.GetProperty("speeds").EnumerateArray().Select(value => value.GetString()!).ToArray(),
+                entry.Value.GetProperty("efforts").EnumerateArray().Select(value => value.GetString()!).ToArray()),
             StringComparer.OrdinalIgnoreCase);
     }
 }

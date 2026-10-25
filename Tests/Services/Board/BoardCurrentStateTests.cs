@@ -29,12 +29,17 @@ public sealed class BoardCurrentStateTests : IDisposable
     }
 
     [Theory]
-    [InlineData("gpt-6-astra")]
-    [InlineData("gpt-6.1-sol")]
-    public async Task LaunchUsesTheReadCardSnapshot_WithoutRewritingLaterEdits(string model)
+    [InlineData("gpt-6-astra", "ultrafast")]
+    [InlineData("gpt-6.1-sol", "ultrafast")]
+    [InlineData("gpt-6-sol", "fast")]
+    [InlineData("gpt-6-luna", "fast")]
+    [InlineData("gpt-5.6-sol", "fast")]
+    [InlineData("gpt-5.6-terra", "fast")]
+    [InlineData("gpt-5.6-luna", "fast")]
+    public async Task LaunchUsesTheReadCardSnapshot_WithoutRewritingLaterEdits(string model, string speed)
     {
         var card = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "Ship", Description: "original", Assignee: "base:codex",
-            BaseLlmOptions: new BaseLlmOptions(model, "high", "plan", Yolo: true, Speed: "ultrafast")), Ct);
+            BaseLlmOptions: new BaseLlmOptions(model, "high", "plan", Yolo: true, Speed: speed)), Ct);
         var session = Guid.NewGuid().ToString();
         _tabs.SetupGet(t => t.MaxTabs).Returns(8);
         _tabs.Setup(t => t.ListTabsAsync(It.IsAny<CancellationToken>())).ReturnsAsync([]);
@@ -54,7 +59,7 @@ public sealed class BoardCurrentStateTests : IDisposable
         // Codex has no startup mode, so the stored "plan" is dropped rather than reaching the CLI.
         Assert.Equal("", captured.BaseLlmOptions!.Mode);
         Assert.True(captured.BaseLlmOptions.Yolo);
-        Assert.Equal("ultrafast", captured.BaseLlmOptions.Speed);
+        Assert.Equal(speed, captured.BaseLlmOptions.Speed);
         Assert.True(captured.AuthorizeBoardTools);
         Assert.Equal("edited during startup", (await _store.FindCardAsync(_project, card.Id, Ct))!.Description);
         Assert.Equal("PROJ-1 · Ship", BoardKeyText.Short(Assert.Single((await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Sessions).DisplayName));

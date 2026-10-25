@@ -12,6 +12,11 @@ public sealed class BaseLlmOptionsTests
     [InlineData("gpt-6-astra", "ultrafast")]
     [InlineData("gpt-6.1-sol", "fast")]
     [InlineData("gpt-6.1-sol", "ultrafast")]
+    [InlineData("gpt-6-sol", "fast")]
+    [InlineData("gpt-6-luna", "fast")]
+    [InlineData("gpt-5.6-sol", "fast")]
+    [InlineData("gpt-5.6-terra", "fast")]
+    [InlineData("gpt-5.6-luna", "fast")]
     public void CodexSpeedBecomesSessionArguments(string model, string speed) =>
         Assert.Equal(["--model", model, "-c", "model_reasoning_effort=high", "-c", $"service_tier={speed}", "-c", "features.fast_mode=true"],
             BaseLlmOptionsBuilder.BuildArguments(LLM.Codex, new(model, "high", Speed: speed)));
@@ -19,11 +24,11 @@ public sealed class BaseLlmOptionsTests
     [Theory]
     [InlineData(LLM.Codex, "", "fast")]
     [InlineData(LLM.Codex, "custom-model", "fast")]
-    [InlineData(LLM.Codex, "gpt-6-sol", "fast")]
-    [InlineData(LLM.Codex, "gpt-6-luna", "fast")]
-    [InlineData(LLM.Codex, "gpt-5.6-sol", "fast")]
-    [InlineData(LLM.Codex, "gpt-5.6-terra", "fast")]
-    [InlineData(LLM.Codex, "gpt-5.6-luna", "fast")]
+    [InlineData(LLM.Codex, "gpt-6-sol", "ultrafast")]
+    [InlineData(LLM.Codex, "gpt-6-luna", "ultrafast")]
+
+    [InlineData(LLM.Codex, "gpt-5.6-terra", "ultrafast")]
+    [InlineData(LLM.Codex, "gpt-5.6-luna", "ultrafast")]
     [InlineData(LLM.Codex, "gpt-5.5", "fast")]
     [InlineData(LLM.Codex, "gpt-5.6-sol", "ultrafast")]
     [InlineData(LLM.Codex, "gpt-6-astra", "turbo")]
@@ -31,6 +36,17 @@ public sealed class BaseLlmOptionsTests
     [InlineData(LLM.Claude, "gpt-6-astra", "fast")]
     public void UnsupportedSpeedsAreRejected(LLM cli, string model, string speed) =>
         Assert.Throws<ArgumentException>(() => BaseLlmOptionsBuilder.BuildArguments(cli, new(model, Speed: speed)));
+
+    [Theory]
+    [InlineData("gpt-6-luna", "ultra", "max")]
+    [InlineData("gpt-5.6-luna", "ultra", "max")]
+    [InlineData("gpt-6-luna", "max", "max")]
+    [InlineData("gpt-6-astra", "ultra", "ultra")]
+    [InlineData("gpt-6.1-sol", "minimal", "low")]
+    [InlineData("custom", "ultra", "ultra")]
+    public void CodexEffortUsesModelCapabilities(string model, string effort, string expected) =>
+        Assert.Equal(["--model", model, "-c", $"model_reasoning_effort={expected}"],
+            BaseLlmOptionsBuilder.BuildArguments(LLM.Codex, new(model, effort)));
 
     [Fact]
     public void DefaultSpeedKeepsExistingConfigAndLegacyOptions()

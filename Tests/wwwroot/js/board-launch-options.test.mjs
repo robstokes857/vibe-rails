@@ -42,7 +42,7 @@ test('model lists come from the exact same catalog as the environment editor', (
         assert.equal(controller[method](''), renderLlmModelOptions(cli));
         for (const [model] of LLM_MODEL_OPTIONS[cli]) assert.ok(renderBoardLaunchOptions(`base:${cli}`).includes(`value="${model}"`), `${cli}: ${model}`);
     }
-    assert.deepEqual(LLM_MODEL_OPTIONS.codex.map(([model]) => model), ['', 'gpt-6-astra', 'gpt-6.1-sol']);
+    assert.deepEqual(LLM_MODEL_OPTIONS.codex.map(([model]) => model), ['', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']);
 });
 
 test('OpenCode-backed providers display fixed models and omit unsupported effort', () => {
@@ -76,7 +76,7 @@ test('Grok model is selectable and effort is low/medium/high/xhigh', () => {
 test('Codex max effort normalizes when selecting gpt-5.5', () => {
     assert.equal(normalizeBoardLaunchOptions('base:codex', { model: 'gpt-5.5', effort: 'max' }).effort, 'xhigh');
     const max = { disabled: false };
-    const effort = { value: 'max', querySelector: () => max };
+    const effort = { value: 'max', querySelector: selector => selector.includes('"max"') ? max : null };
     const model = { value: 'gpt-5.5', addEventListener() {}, removeEventListener() {} };
     bindBoardLaunchOptions({ querySelector: selector => selector.includes('model') ? model : selector.includes('effort') ? effort : null }, 'base:codex')();
     assert.equal(effort.value, 'xhigh');
@@ -90,11 +90,15 @@ test('saved/custom model text is escaped before becoming dropdown markup', () =>
 });
 
 test('Codex speeds follow model capabilities and round-trip through the form', () => {
+    for (const model of ['gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']) {
+        assert.equal(normalizeBoardLaunchOptions('base:codex', { model, speed: 'fast' }).speed, 'fast');
+        assert.equal(normalizeBoardLaunchOptions('base:codex', { model, speed: 'ultrafast' }).speed, '');
+    }
     for (const model of ['gpt-6-astra', 'gpt-6.1-sol']) {
         assert.equal(normalizeBoardLaunchOptions('base:codex', { model, speed: 'fast' }).speed, 'fast');
         assert.equal(normalizeBoardLaunchOptions('base:codex', { model, speed: 'ultrafast' }).speed, 'ultrafast');
     }
-    for (const model of ['', 'unknown-model', 'constructor', '__proto__', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5']) {
+    for (const model of ['', 'unknown-model', 'constructor', '__proto__', 'gpt-5.5']) {
         for (const speed of ['fast', 'ultrafast', 'turbo']) {
             assert.equal(normalizeBoardLaunchOptions('base:codex', { model, speed }).speed, '');
         }
@@ -126,7 +130,7 @@ test('changing the Codex model clears unsupported speeds and disposes the listen
     listener();
     assert.equal(speed.value, '');
     assert.equal(ultrafast.disabled, true);
-    assert.equal(fast.disabled, true);
+    assert.equal(fast.disabled, false);
     speed.value = 'fast';
     model.value = '';
     listener();
@@ -134,4 +138,25 @@ test('changing the Codex model clears unsupported speeds and disposes the listen
     assert.equal(fast.disabled, true);
     dispose();
     assert.equal(listener, null);
+});
+
+test('both Luna models constrain Ultra to Max across Board and saved setups', () => {
+    const controller = new EnvironmentController({ escapeHtml: value => String(value) });
+    for (const model of ['gpt-6-luna', 'gpt-5.6-luna']) {
+        assert.equal(normalizeBoardLaunchOptions('base:codex', { model, effort: 'ultra' }).effort, 'max');
+        assert.equal(controller.normalizeCodexEffort(model, 'ultra'), 'max');
+        assert.equal(controller.normalizeCodexEffort(model, 'minimal'), 'low');
+        assert.equal(controller.buildCodexCustomArgs({ model, effort: 'ultra', fastMode: true }),
+            `--model ${model} -c model_reasoning_effort=max -c service_tier=fast -c features.fast_mode=true`);
+        assert.match(controller.buildCliSettingsHtml('codex', { model }), /value="ultra"\s+disabled/);
+        assert.match(controller.buildCliSettingsHtml('codex', { model }), /value="minimal"\s+disabled/);
+        const ultra = { disabled: false }, max = { disabled: false };
+        const effort = { value: 'ultra', querySelector: selector => selector.includes('"ultra"') ? ultra : selector.includes('"max"') ? max : null };
+        bindBoardLaunchOptions({ querySelector: selector => selector.includes('model')
+            ? { value: model, addEventListener() {}, removeEventListener() {} }
+            : selector.includes('effort') ? effort : null }, 'base:codex')();
+        assert.equal(effort.value, 'max');
+        assert.equal(ultra.disabled, true);
+        assert.equal(max.disabled, false);
+    }
 });

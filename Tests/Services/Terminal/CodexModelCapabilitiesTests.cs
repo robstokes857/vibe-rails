@@ -17,7 +17,8 @@ public sealed class CodexModelCapabilitiesTests
         Assert.Equal(browser.RootElement.GetRawText(), embedded.RootElement.GetRawText());
         foreach (var model in embedded.RootElement.EnumerateObject())
         {
-            var supported = model.Value.EnumerateArray().Select(value => value.GetString()).ToArray();
+            Assert.Equal(model.Value.GetProperty("efforts").EnumerateArray().Select(value => value.GetString()), CodexModelCapabilities.Efforts(model.Name));
+            var supported = model.Value.GetProperty("speeds").EnumerateArray().Select(value => value.GetString()).ToArray();
             foreach (var speed in new[] { "fast", "ultrafast", "turbo" })
                 Assert.Equal(supported.Contains(speed), CodexModelCapabilities.SupportsSpeed($" {model.Name.ToUpperInvariant()} ", speed));
         }

@@ -1,5 +1,5 @@
 import { escapeHtml } from './utils.js';
-import { codexModelSupportsSpeed, normalizeLlmModel, renderLlmModelOptions } from './llm-model-catalog.js';
+import { codexModelSupportsSpeed, codexModelSupportsEffort, normalizeCodexModelEffort, normalizeLlmModel, renderLlmModelOptions } from './llm-model-catalog.js';
 
 const pinnedModels = Object.freeze({
     'glm-5.2': 'zai/glm-5.2', 'glm-5.3': 'zai-coding-plan/glm-5.3',
@@ -25,7 +25,7 @@ export function normalizeBoardLaunchOptions(selection, options = {}) {
     if (!cli) return null;
     const model = pinnedModels[cli] ? '' : normalizeLlmModel(cli, options?.model);
     let effort = (efforts[cli] || []).includes(options?.effort) ? options.effort : '';
-    if (cli === 'codex' && model.toLowerCase() === 'gpt-5.5' && effort === 'max') effort = 'xhigh';
+    if (cli === 'codex') effort = normalizeCodexModelEffort(model, effort);
     return {
         model,
         effort,
@@ -86,10 +86,11 @@ export function bindBoardLaunchOptions(container, selection) {
     const speed = container.querySelector('[data-board-launch-speed]');
     const synchronize = () => {
         if (baseCli(selection) !== 'codex') return;
-        const max = effort?.querySelector('option[value="max"]');
-        const unsupported = model?.value.toLowerCase() === 'gpt-5.5';
-        if (max) max.disabled = unsupported;
-        if (unsupported && effort?.value === 'max') effort.value = 'xhigh';
+        for (const level of efforts.codex) {
+            const option = effort?.querySelector(`option[value="${level}"]`);
+            if (option) option.disabled = !codexModelSupportsEffort(model?.value, level);
+        }
+        if (effort) effort.value = normalizeCodexModelEffort(model?.value, effort.value);
         if (speed) {
             for (const tier of ['fast', 'ultrafast']) {
                 const option = speed.querySelector(`option[value="${tier}"]`);

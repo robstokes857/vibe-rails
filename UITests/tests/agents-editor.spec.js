@@ -340,12 +340,12 @@ test('standalone Agents have an Enabled switch that persists through reload and 
     expect(state.jobs.filter(job => job.environmentId === 44)).toHaveLength(1);
 });
 
-async function openSetupForm(page, name) {
+async function openSetupForm(page, name, variant = 'agent') {
     // The saved CLI setup behind an Agent is edited in the shared form (environment-editor.js). The
     // Agents page opens it for a setup without an Automation, the picker's "Manage quick launches"
     // for a Quick Launch; a setup behind an Automation is reached through the controller here.
     await expect.poll(() => page.evaluate(() => window.app.data.environments.map(env => env.name))).toContain(name);
-    await page.evaluate(([name, variant]) => window.app.environmentController.editEnvironment(name, { variant }), [name, 'agent']);
+    await page.evaluate(([name, variant]) => window.app.environmentController.editEnvironment(name, { variant }), [name, variant]);
     await expect(page.locator('#env-form')).toBeVisible({ timeout: 10_000 });
 }
 
@@ -459,7 +459,7 @@ test.describe('Agents editor', () => {
         await expect(page.locator('#env-form')).toBeVisible();
         await page.locator('#env-name').fill('Sol speed');
         expect(await page.locator('#codex-model option').evaluateAll(options => options.map(option => option.value)))
-            .toEqual(['', 'gpt-6-astra', 'gpt-6.1-sol']);
+            .toEqual(['', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']);
         const speed = page.getByLabel('Speed', { exact: true });
         const model = page.locator('#codex-model');
         const ultrafast = speed.locator('option[value="ultrafast"]');
@@ -948,4 +948,58 @@ test.describe('Agents editor', () => {
         expect(await page.evaluate(() => document.documentElement.scrollWidth))
             .toBeLessThanOrEqual(320);
     });
+});
+
+for (const [cli, models] of [
+    ['codex', ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']],
+    ['claude', ['claude-haiku-5-5[1m]']],
+    ['copilot', ['claude-fable-5.1', 'claude-opus-5.5', 'claude-sonnet-5.5', 'claude-haiku-5.5', 'gpt-6.1-sol', 'gemini-4-argon', 'gemini-3.8-flash', 'grok-4.7']],
+    ['opencode', ['anthropic/claude-haiku-5-5', 'openai/gpt-6-luna', 'google/gemini-4-argon', 'zai/glm-5.3', 'moonshotai/kimi-k3.1-pro', 'xai/grok-4.7']]
+]) {
+    test(`refreshed ${cli} models are pinned in a new setup and save/reopen exactly`, async ({ page }) => {
+        const { writes } = await installStatefulApi(page);
+        await openApp(page);
+        for (const [index, model] of models.entries()) {
+            const name = `Catalog ${cli} ${index}`;
+            await page.evaluate(() => window.app.environmentController.createEnvironment({ variant: 'quick-launch' }));
+            await page.locator('#env-name').fill(name);
+            await page.locator('#env-cli').evaluate((el, value) => el.tomselect.setValue(value), cli);
+            const picker = page.locator(`#${cli}-model`);
+            await expect(picker.locator('option', { hasText: model }).filter({ hasText: '(custom)' })).toHaveCount(0);
+            await picker.selectOption(model);
+            await page.locator('#env-form button[type="submit"]').click();
+            await expect(page.locator('#env-form')).toHaveCount(0);
+            expect(writes.environmentCreates.at(-1).body.customArgs).toBe(`--model ${model}`);
+            await openSetupForm(page, name, 'quick-launch');
+            await expect(picker).toHaveValue(model);
+            await expect(picker.locator('option:checked')).not.toContainText('(custom)');
+            await page.locator('#modal-container [data-action="close-modal"]').click();
+        }
+    });
+}
+
+test('Luna restores Fast and constrains Ultra effort before a setup save', async ({ page }) => {
+    const { writes } = await installStatefulApi(page);
+    await openApp(page);
+    await page.evaluate(() => window.app.environmentController.createEnvironment({ variant: 'quick-launch' }));
+    await page.locator('#env-name').fill('Luna settings');
+    const model = page.locator('#codex-model'), effort = page.locator('#codex-effort');
+    const speed = page.locator('#codex-speed');
+    await model.selectOption('gpt-6-astra');
+    await effort.selectOption('ultra');
+    await speed.selectOption('ultrafast');
+    await model.selectOption('gpt-6-luna');
+    await expect(effort).toHaveValue('max');
+    await expect(effort.locator('option[value="ultra"]')).toBeDisabled();
+    await expect(speed).toHaveValue('');
+    await expect(speed.locator('option[value="ultrafast"]')).toBeDisabled();
+    await speed.selectOption('fast');
+    await page.locator('#env-form button[type="submit"]').click();
+    await expect(page.locator('#env-form')).toHaveCount(0);
+    expect(writes.environmentCreates.at(-1).body.customArgs).toBe('--model gpt-6-luna -c model_reasoning_effort=max -c service_tier=fast -c features.fast_mode=true');
+    expect(writes.settings.at(-1).body).toMatchObject({ model: 'gpt-6-luna', effort: 'max', fastMode: true, ultrafastMode: false });
+    await openSetupForm(page, 'Luna settings', 'quick-launch');
+    await expect(model).toHaveValue('gpt-6-luna');
+    await expect(effort).toHaveValue('max');
+    await expect(speed).toHaveValue('fast');
 });

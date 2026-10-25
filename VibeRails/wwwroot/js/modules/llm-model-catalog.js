@@ -1,15 +1,37 @@
 import { escapeHtml } from './utils.js';
-import codexSpeeds from './codex-model-capabilities.json' with { type: 'json' };
+import codexCapabilities from './codex-model-capabilities.json' with { type: 'json' };
 
-// Speed tiers verified against Codex's model metadata and speed guide, 2026-10-17.
-// Only Astra and GPT-6.1 Sol are pinned (owner request, 2026-10-17).
+// Model, speed and effort metadata verified against Codex CLI 0.164.0, 2026-10-25.
 // CodexModelCapabilities embeds this same data for backend validation.
-Object.values(codexSpeeds).forEach(Object.freeze);
-Object.freeze(codexSpeeds);
+Object.values(codexCapabilities).forEach(capability => {
+    Object.values(capability).forEach(Object.freeze);
+    Object.freeze(capability);
+});
+Object.freeze(codexCapabilities);
+
+function codexCapability(model) {
+    const key = String(model || '').trim().toLowerCase();
+    return Object.hasOwn(codexCapabilities, key) ? codexCapabilities[key] : null;
+}
 
 export function codexModelSupportsSpeed(model, speed) {
-    const key = String(model || '').trim().toLowerCase();
-    return Object.hasOwn(codexSpeeds, key) && codexSpeeds[key].includes(speed);
+    return codexCapability(model)?.speeds.includes(speed) || false;
+}
+
+export function codexModelSupportsEffort(model, effort) {
+    if (!effort) return true;
+    const levels = codexCapability(model)?.efforts;
+    if (levels) return levels.includes(effort);
+    return !(String(model || '').trim().toLowerCase() === 'gpt-5.5' && effort === 'max');
+}
+
+// Keep unlisted saved effort values; constrain only known, unsupported combinations.
+export function normalizeCodexModelEffort(model, effort) {
+    const value = String(effort || '').trim();
+    const levels = codexCapability(model)?.efforts;
+    if (levels && value === 'minimal') return levels[0];
+    if (levels && value === 'ultra' && !levels.includes(value)) return levels.at(-1);
+    return !codexModelSupportsEffort(model, value) && value === 'max' ? 'xhigh' : value;
 }
 
 // Shared pinned catalog for Environments and board launch options.
@@ -17,7 +39,12 @@ export const LLM_MODEL_OPTIONS = Object.freeze({
     'codex': [
         ['', 'Default (Codex recommended)'],
         ['gpt-6-astra', 'gpt-6-astra'],
-        ['gpt-6.1-sol', 'gpt-6.1-sol']
+        ['gpt-6.1-sol', 'gpt-6.1-sol'],
+        ['gpt-6-sol', 'gpt-6-sol'],
+        ['gpt-6-luna', 'gpt-6-luna'],
+        ['gpt-5.6-sol', 'gpt-5.6-sol'],
+        ['gpt-5.6-terra', 'gpt-5.6-terra'],
+        ['gpt-5.6-luna', 'gpt-5.6-luna']
     ],
     // "[1m]" is Claude Code's 1M-context marker on a full model ID. Behind the VibeRails LLM
     // proxy (a custom ANTHROPIC_BASE_URL) Claude Code budgeted a 200K window for the bare ID
@@ -32,39 +59,35 @@ export const LLM_MODEL_OPTIONS = Object.freeze({
         ['claude-opus-5-5[1m]', 'Opus 5.5'],
         ['claude-opus-5[1m]', 'Opus 5'],
         ['claude-sonnet-5-5[1m]', 'Sonnet 5.5'],
-        ['claude-sonnet-5[1m]', 'Sonnet 5']
+        ['claude-sonnet-5[1m]', 'Sonnet 5'],
+        ['claude-haiku-5-5[1m]', 'Haiku 5.5']
     ],
     'copilot': [
         ['', 'Default (auto)'],
+        ['claude-fable-5.1', 'claude-fable-5.1'],
         ['claude-fable-5', 'claude-fable-5'],
+        ['claude-opus-5.5', 'claude-opus-5.5'],
         ['claude-opus-5', 'claude-opus-5'],
+        ['claude-sonnet-5.5', 'claude-sonnet-5.5'],
         ['claude-sonnet-5', 'claude-sonnet-5'],
-        ['claude-sonnet-4.6', 'claude-sonnet-4.6'],
-        ['claude-sonnet-4.5', 'claude-sonnet-4.5'],
+        ['claude-haiku-5.5', 'claude-haiku-5.5'],
         ['claude-haiku-4.5', 'claude-haiku-4.5'],
         ['claude-opus-4.8', 'claude-opus-4.8'],
         ['claude-opus-4.8-fast', 'claude-opus-4.8-fast'],
-        ['claude-opus-4.7', 'claude-opus-4.7'],
-        ['claude-opus-4.6', 'claude-opus-4.6'],
-        ['claude-opus-4.5', 'claude-opus-4.5'],
+        ['claude-sonnet-4.6', 'claude-sonnet-4.6'],
+        ['gpt-6-astra', 'gpt-6-astra'],
+        ['gpt-6.1-sol', 'gpt-6.1-sol'],
+        ['gpt-6-sol', 'gpt-6-sol'],
+        ['gpt-6-luna', 'gpt-6-luna'],
         ['gpt-5.6-sol', 'gpt-5.6-sol'],
         ['gpt-5.6-terra', 'gpt-5.6-terra'],
         ['gpt-5.6-luna', 'gpt-5.6-luna'],
-        ['gpt-5.5', 'gpt-5.5'],
-        ['gpt-5.4', 'gpt-5.4'],
-        ['gpt-5.4-mini', 'gpt-5.4-mini'],
-        ['gpt-5.4-nano', 'gpt-5.4-nano'],
         ['gpt-5.3-codex', 'gpt-5.3-codex'],
-        ['gpt-5-mini', 'gpt-5-mini'],
-        ['gemini-3.7-flash', 'gemini-3.7-flash'],
-        ['gemini-3.6-flash', 'gemini-3.6-flash'],
-        ['gemini-3.5-flash', 'gemini-3.5-flash'],
-        ['gemini-3.1-pro', 'gemini-3.1-pro'],
+        ['gemini-4-argon', 'gemini-4-argon'],
+        ['gemini-3.8-flash', 'gemini-3.8-flash'],
         ['mai-code-1.1-flash', 'mai-code-1.1-flash'],
-        ['mai-code-1-flash', 'mai-code-1-flash'],
-        ['raptor-mini', 'raptor-mini'],
-        ['kimi-k2.7-code', 'kimi-k2.7-code'],
         ['kimi-k3', 'kimi-k3'],
+        ['grok-4.7', 'grok-4.7'],
         ['grok-4.6', 'grok-4.6'],
         ['grok-4.5', 'grok-4.5'],
     ],
@@ -81,20 +104,39 @@ export const LLM_MODEL_OPTIONS = Object.freeze({
     ],
     'opencode': [
         ['', 'Default (OpenCode recommended)'],
+        ['anthropic/claude-fable-5-1', 'anthropic/claude-fable-5-1'],
+        ['anthropic/claude-fable-5', 'anthropic/claude-fable-5'],
+        ['anthropic/claude-opus-5-5', 'anthropic/claude-opus-5-5'],
         ['anthropic/claude-opus-5', 'anthropic/claude-opus-5'],
+        ['anthropic/claude-sonnet-5-5', 'anthropic/claude-sonnet-5-5'],
         ['anthropic/claude-sonnet-5', 'anthropic/claude-sonnet-5'],
+        ['anthropic/claude-haiku-5-5', 'anthropic/claude-haiku-5-5'],
         ['anthropic/claude-opus-4-5', 'anthropic/claude-opus-4-5'],
         ['anthropic/claude-sonnet-4-5', 'anthropic/claude-sonnet-4-5'],
+        ['openai/gpt-6-astra', 'openai/gpt-6-astra'],
+        ['openai/gpt-6.1-sol', 'openai/gpt-6.1-sol'],
+        ['openai/gpt-6-sol', 'openai/gpt-6-sol'],
+        ['openai/gpt-6-luna', 'openai/gpt-6-luna'],
+        ['openai/gpt-5.6-sol', 'openai/gpt-5.6-sol'],
+        ['openai/gpt-5.6-terra', 'openai/gpt-5.6-terra'],
+        ['openai/gpt-5.6-luna', 'openai/gpt-5.6-luna'],
         ['openai/gpt-5.6', 'openai/gpt-5.6'],
         ['openai/gpt-5.5', 'openai/gpt-5.5'],
         ['openai/gpt-5.2', 'openai/gpt-5.2'],
-        ['openai/gpt-5.1-codex', 'openai/gpt-5.1-codex'],
-        ['google/gemini-3-pro', 'google/gemini-3-pro'],
+        ['google/gemini-4-argon', 'google/gemini-4-argon'],
+        ['google/gemini-3.8-flash', 'google/gemini-3.8-flash'],
+        ['zai/glm-5.3', 'zai/glm-5.3'],
         ['zai/glm-5.2', 'zai/glm-5.2'],
         ['zai-coding-plan/glm-5.3', 'zai-coding-plan/glm-5.3'],
         ['deepseek/deepseek-v4-pro', 'deepseek/deepseek-v4-pro'],
+        ['moonshotai/kimi-k3.1-pro', 'moonshotai/kimi-k3.1-pro'],
+        ['moonshotai/kimi-k3.1-pro-highspeed', 'moonshotai/kimi-k3.1-pro-highspeed'],
         ['moonshotai/kimi-k3', 'moonshotai/kimi-k3'],
+        ['xai/grok-4.7', 'xai/grok-4.7'],
         ['xai/grok-4.6', 'xai/grok-4.6'],
+        ['opencode/gpt-6-astra', 'opencode/gpt-6-astra (Zen)'],
+        ['opencode/gpt-6.1-sol', 'opencode/gpt-6.1-sol (Zen)'],
+        ['opencode/gpt-6-luna', 'opencode/gpt-6-luna (Zen)'],
         ['opencode/gpt-5.1-codex', 'opencode/gpt-5.1-codex (Zen)'],
     ],
     'grok': [

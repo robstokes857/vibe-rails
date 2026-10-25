@@ -109,7 +109,7 @@ namespace VibeRails.Services.LlmClis
             existingContent = RemoveTomlValue(existingContent, "prompt");
 
             existingContent = SetTomlValue(existingContent, "model", NormalizeModel(settings.Model));
-            existingContent = SetTomlValue(existingContent, "model_reasoning_effort", NormalizeEffort(settings.Effort));
+            existingContent = SetTomlValue(existingContent, "model_reasoning_effort", CodexModelCapabilities.NormalizeEffort(settings.Model, NormalizeEffort(settings.Effort)));
             var serviceTier = settings.UltrafastMode
                 && CodexModelCapabilities.SupportsSpeed(settings.Model, "ultrafast")
                     ? "ultrafast" : settings.FastMode ? "fast" : "";

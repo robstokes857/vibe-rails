@@ -43,7 +43,7 @@ public static partial class BaseLlmOptionsBuilder
             _ => []
         };
         if (effort.Length > 0 && !efforts.Contains(effort)) throw new ArgumentException("Unsupported effort for this CLI.");
-        if (llm == LLM.Codex && model.Equals("gpt-5.5", StringComparison.OrdinalIgnoreCase) && effort == "max") effort = "xhigh";
+        if (llm == LLM.Codex) effort = CodexModelCapabilities.NormalizeEffort(model, effort);
         string[] modes = llm switch
         {
             LLM.Antigravity => ["accept-edits", "plan"],
