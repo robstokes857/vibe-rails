@@ -216,11 +216,16 @@ the design decisions for the rest.
   `AgentCredentialService.Allows` admits it to exactly `POST /api/v1/review-requests` and
   `GET /{id}/disclosure`, and the routes refuse (403 `forbidden`) a contact that names any session
   but its own or reads a request that does not attach it (Codex slice E review, F1).
-- **A send that races a delete (Codex slice E review, F2, slice C code).** When the hosted copy of a
-  request deleted mid-send cannot be cancelled, `SendAsync` puts the row back, cancelled, with the
-  reference, the sending key's fingerprint and the expiry, prompts the poller and answers 409
-  `remote_pending`; the poller's cancellation pass retries it and Delete waits for the host. The
-  caller is never told the copy was cancelled when it was not.
+- **A send that races a delete (Codex slice E review, F2, slice C code).** When the host confirms a
+  request whose row a concurrent Delete already removed, `SendAsync` first puts the row back with
+  its own token (open, then marked sent with the reference, the sending key's fingerprint and the
+  expiry, then cancelled; each step is recoverable if the process dies between them), and only then
+  asks the host to cancel the copy, on the transport's own 30-second deadline, never the caller's
+  token. A confirmed cancellation deletes the row again and answers 404 `not_found`; a failed or
+  timed-out one leaves the row, prompts the poller and answers 409 `remote_pending`, so the poller's
+  cancellation pass retries it and Delete waits for the host. A caller that disconnects mid-way
+  cannot take the only revocation record with it, and is never told the copy was cancelled when it
+  was not.
 
 The decision route's only outbound call is the existing public signature verification, with a tree
 id and no repository content. The send route and the poller are the only code that transfers a

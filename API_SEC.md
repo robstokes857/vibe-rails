@@ -898,9 +898,11 @@ cancellation is retried by the poller and never blocks the local cancel. A local
 hosted copy first and is refused (409 `remote_pending`) while it cannot, because the row is the only
 thing that can still revoke the hosted copy; the request stays, cancelled, until the host confirms,
 and an expired or already-cancelled hosted copy needs no host. A send that races a delete cancels
-its own hosted copy; when that cancellation fails, the row is put back, cancelled, with the
-reference, the sending key's fingerprint and the expiry, so the poller retries and a later delete
-waits for the host (409 `remote_pending`), and the caller is never told the copy was cancelled
+its own hosted copy: the row is first put back, cancelled, with the reference, the sending key's
+fingerprint and the expiry, under a token the caller cannot cancel, and only then is the hosted
+copy cancelled on the transport's own deadline; a failed or timed-out cancellation leaves that
+row for the poller's retry and a later delete waits for the host (409 `remote_pending`), while a
+confirmed one deletes it again. The caller is never told the copy was cancelled when it was not
 (Codex slice E review, F2). The reference is shown to the requester as a selector, never a credential:
 every hosted route checks the caller's key.
 

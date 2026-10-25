@@ -309,6 +309,50 @@ public sealed class ReviewRequestSenderTests : IDisposable
         Assert.Null(await _store.GetAsync(created.Id, Ct));
     }
 
+    /// <summary>
+    /// Codex slice E re-review, F2 continued: the caller's HTTP request is aborted while the compensating
+    /// hosted DELETE is in flight. The reference was made durable before that call, with its own token,
+    /// so the retry survives whether the host then answers or not.
+    /// </summary>
+    [Theory]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    [InlineData(HttpStatusCode.OK)]
+    public async Task ACallerCancellationDuringTheCompensatingCancelNeverLosesTheHostedReference(HttpStatusCode hostedDelete)
+    {
+        var created = await CreateAsync();
+        using var caller = new CancellationTokenSource();
+        _answer = async request =>
+        {
+            if (request.Method == HttpMethod.Delete)
+            {
+                caller.Cancel(); // the request that started the send disconnects while the hosted DELETE is in flight
+                return new HttpResponseMessage(hostedDelete);
+            }
+            await _store.DeleteAsync(created.Id, Ct);
+            return Json(HttpStatusCode.Created, Hosted(created.Id, created: _clock.Now));
+        };
+
+        var ex = await Assert.ThrowsAsync<ReviewRequestException>(() => Sender().SendAsync(_project, created.Id, new SendReviewRequest(true), caller.Token));
+
+        Assert.Equal(["POST /api/v1/review-requests", "DELETE /api/v1/review-requests/" + Reference],
+            _requests.Select(r => r.Method + " " + r.RequestUri!.AbsolutePath));
+        if (hostedDelete == HttpStatusCode.OK)
+        {
+            Assert.Equal(("not_found", 404), (ex.Code, ex.Status));
+            Assert.Null(await _store.GetAsync(created.Id, Ct));
+            Assert.DoesNotContain(await _store.ListSentPendingAsync(Ct), row => row.Id == created.Id);
+        }
+        else
+        {
+            Assert.Equal(("remote_pending", 409), (ex.Code, ex.Status));
+            var kept = await _store.GetAsync(created.Id, Ct);
+            Assert.Equal(("cancelled", Reference, Fingerprint), (kept!.Status, kept.RemoteId, kept.SentKeyFingerprint));
+            Assert.Null(kept.RemoteCancelledUTC);
+            Assert.Contains(await _store.ListSentPendingAsync(Ct), row => row.Id == created.Id);
+        }
+        _archives.VerifyNoOtherCalls();
+    }
+
     [Theory]
     [InlineData("confirmed")]
     [InlineData("host_down")]

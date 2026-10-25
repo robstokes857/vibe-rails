@@ -111,28 +111,28 @@ public sealed class ReviewRequestSender(
         {
             if (await store.GetAsync(record.Id, ct) is null)
             {
-                // Deleted while the send was in flight. No local row can revoke the hosted copy later,
-                // so revoke it now, before anyone is told about it.
-                try { await transport.CancelAsync(key, remote.Id!, ct); }
-                catch (ReviewRequestTransportException ex)
+                // Deleted while the send was in flight: the hosted copy exists and nothing local points
+                // at it. The reference is made durable first, with its own token, so a caller that
+                // disconnects now cannot take the only revocation record with it (Codex slice E review,
+                // F2); only then is the hosted copy cancelled, on the transport's own bounded deadline.
+                await RestoreForRevocationAsync(record, remote, fingerprint, now);
+                try
                 {
-                    // The hosted copy is alive and nothing local points at it. Put the row back,
-                    // cancelled, carrying the reference, the sending key's fingerprint and the expiry:
-                    // the poller retries the cancellation and Delete refuses until the host confirms
-                    // (Codex slice E review, F2). Nothing is queued for upload for it.
+                    await transport.CancelAsync(key, remote.Id!, CancellationToken.None);
+                }
+                catch (Exception ex) when (ex is ReviewRequestTransportException or OperationCanceledException)
+                {
+                    // The poller retries the cancellation and Delete refuses until the host confirms.
                     Log.Warning("[ReviewRequests] Request {Id} was deleted during its send and its hosted copy could not be cancelled yet ({Code}); keeping it cancelled for the retry",
-                        record.Id, ex.Code);
-                    // AddAsync writes the request columns; the hosted columns go through the same
-                    // marks a normal send uses, so the row reads exactly like a sent-then-cancelled one.
-                    await store.AddAsync(record with { Status = ReviewRequestStatus.Cancelled, UpdatedUTC = now }, ct);
-                    await store.MarkSentAsync(record.Id, remote.Id!, fingerprint, now, remote.ExpiresUtc, ct);
-                    await store.MarkSessionsQueuedAsync(record.Id, now, ct);
+                        record.Id, (ex as ReviewRequestTransportException)?.Code ?? "timeout");
                     polls.Prompt(fingerprint);
                     Publish(record.Id, ReviewRequestStatus.Cancelled, record.CardKey, true);
                     throw new ReviewRequestException("remote_pending",
                         "This review request was deleted while it was being sent, and its copy on viberails.ai is not cancelled yet. "
                         + "The request is kept here, cancelled, and the cancellation is retried automatically; delete it again once viberails.ai confirms.", 409);
                 }
+                await store.MarkRemoteCancelledAsync(record.Id, _clock.GetUtcNow().UtcDateTime, CancellationToken.None);
+                await store.DeleteAsync(record.Id, CancellationToken.None);
                 throw new ReviewRequestException("not_found", "This review request was deleted while it was being sent. Its hosted copy was cancelled.", 404);
             }
             // Another root sent this request first and recorded a different reference. The host
@@ -218,6 +218,22 @@ public sealed class ReviewRequestSender(
         }
         await store.MarkSessionsQueuedAsync(requestId, now, ct);
         return (queued, missing);
+    }
+
+    /// <summary>
+    /// Puts a deleted request's row back so its hosted copy can still be revoked: open first, then
+    /// marked sent with the reference, the sending key's fingerprint and the expiry, then cancelled.
+    /// Each step leaves a recoverable state if the process dies between them: an open unsent request
+    /// the host answers with the same stored reference on its next send, or a sent one the poller
+    /// follows. Nothing is queued for upload. Never cancelled by the caller.
+    /// </summary>
+    private async Task RestoreForRevocationAsync(ReviewRequestRecord record, ReviewRequestHostedStatus remote, string fingerprint, DateTime now)
+    {
+        var none = CancellationToken.None;
+        await store.AddAsync(record with { Status = ReviewRequestStatus.Open, UpdatedUTC = now }, none);
+        await store.MarkSentAsync(record.Id, remote.Id!, fingerprint, now, remote.ExpiresUtc, none);
+        await store.MarkSessionsQueuedAsync(record.Id, now, none);
+        await store.UpdateStatusAsync(record.Id, ReviewRequestStatus.Cancelled, now, none);
     }
 
     /// <summary>Null when the hosted copy is cancelled (now or before); otherwise why not: a transport code or <c>other_account</c>.</summary>
