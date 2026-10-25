@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using Serilog;
 using VibeRails.DB;
@@ -19,7 +20,10 @@ namespace VibeRails.Services.ReviewRequests;
 /// so an approval is re-verified with viberails.ai and matched to a listed reviewer before the
 /// ledger stores it; a rejection lands with its comment and line comments. Cancelled requests whose hosted copy has
 /// not confirmed the cancellation are cancelled again here, and a send that was interrupted before
-/// its sessions were queued has them queued here under the key that sent it.
+/// its sessions were queued has them queued here under the key that sent it. A send whose answer
+/// was lost (VIBE-212) is reconciled first: the stored bundle is posted again under the pinned key,
+/// the recovered reference is stored, and the copy is cancelled when the request was cancelled
+/// meanwhile, so nothing hosted stays unreferenced.
 /// </summary>
 public sealed class ReviewRequestPoller(
     IReviewRequestStore store,
@@ -56,7 +60,11 @@ public sealed class ReviewRequestPoller(
         var anyOpen = false;
         try
         {
-            foreach (var request in await store.ListSentPendingAsync(token))
+            // Sends whose answer was lost come first: once their reference is known they are ordinary
+            // sent requests, which the pass below polls (or they were revoked just now).
+            reachable = await ReconcileSendAttemptsAsync(key, account, token);
+            var pending = reachable ? await store.ListSentPendingAsync(token) : Array.Empty<ReviewRequestRecord>();
+            foreach (var request in pending)
             {
                 // Sent with another account's key: that account polls and cancels it, never this one.
                 if (!string.Equals(request.SentKeyFingerprint, account, StringComparison.Ordinal)) continue;
@@ -87,6 +95,67 @@ public sealed class ReviewRequestPoller(
         {
             if (!ct.IsCancellationRequested) state.End(account, anyOpen, reachable);
         }
+    }
+
+    /// <summary>
+    /// Sends whose answer was lost (VIBE-212): the stored bundle is posted again under the pinned key.
+    /// The host answers an exact retry with the stored request (or creates it, if the first POST never
+    /// landed), so the reference becomes known and is stored. A request cancelled meanwhile has its
+    /// hosted copy cancelled at once; an open one joins the decision pass that follows. A refusal
+    /// decided by the content or the route clears the attempt; a refused key, a rate limit, an
+    /// unreadable answer or a server error keeps it for the next pass. Returns whether the host was
+    /// reachable.
+    /// </summary>
+    private async Task<bool> ReconcileSendAttemptsAsync(string key, string account, CancellationToken ct)
+    {
+        foreach (var request in await store.ListSendAttemptsPendingAsync(ct))
+        {
+            // Pinned to another account's key: only that account may post it again or clear it.
+            if (!string.Equals(request.SentKeyFingerprint, account, StringComparison.Ordinal)) continue;
+            ReviewRequestHostedStatus remote;
+            try { remote = await transport.SendAsync(key, request.Id, request.TreeId, Encoding.UTF8.GetBytes(request.BundleJson), ct); }
+            catch (ReviewRequestTransportException ex) when (ex.IsUnreachable)
+            {
+                Log.Information("[ReviewRequests] The unconfirmed send of request {Id} was not reconciled this pass ({Code})", request.Id, ex.Code);
+                return false;
+            }
+            catch (ReviewRequestTransportException ex) when (ReviewRequestSender.RefutesEarlierDelivery(ex))
+            {
+                // The host refuses this bundle, so the first POST never landed either: unsent again.
+                Log.Warning("[ReviewRequests] viberails.ai refused the unconfirmed send of request {Id} ({Code}); the request is unsent", request.Id, ex.Code);
+                await store.ClearSendAttemptAsync(request.Id, _clock.GetUtcNow().UtcDateTime, ct);
+                Publish(request, request.Status, sent: false);
+                continue;
+            }
+            catch (ReviewRequestTransportException ex)
+            {
+                // A refused key or permission, a rate limit, an unreadable answer or a server error: the
+                // first POST may still have landed, so the attempt stays for the next pass.
+                Log.Information("[ReviewRequests] The unconfirmed send of request {Id} is still unsettled ({Code})", request.Id, ex.Code);
+                if (ex.Code == "rate_limited") return true; // stop posting this pass; the rest waits for the next
+                continue;
+            }
+            var now = _clock.GetUtcNow().UtcDateTime;
+            if (!await store.MarkSentAsync(request.Id, remote.Id!, account, now, remote.ExpiresUtc, ct))
+            {
+                // Removed or referenced otherwise meanwhile (the sender refuses to delete such a row; only a direct store call can).
+                Log.Warning("[ReviewRequests] Request {Id} changed while its unconfirmed send was reconciled; keeping what is stored", request.Id);
+                continue;
+            }
+            Log.Information("[ReviewRequests] Recovered the hosted reference of request {Id} from an unconfirmed send", request.Id);
+            if (request.Status == ReviewRequestStatus.Cancelled)
+            {
+                // Cancelled, or deletion was asked, while delivery was unknown: revoke the copy now, and
+                // never queue uploads for it. A failed cancel is retried by the cancellation pass.
+                await store.MarkSessionsQueuedAsync(request.Id, now, ct);
+                var cancelled = await CancelRemoteAsync(key, request with { RemoteId = remote.Id }, ct);
+                Publish(request, request.Status);
+                if (!cancelled) return false;
+                continue;
+            }
+            Publish(request, request.Status);
+        }
+        return true;
     }
 
     /// <summary>Returns whether the host was reachable and whether the request is still open afterwards.</summary>
@@ -161,8 +230,8 @@ public sealed class ReviewRequestPoller(
         }
     }
 
-    private void Publish(ReviewRequestRecord request, string status) =>
-        events.Publish(ReviewRequestEvents.Updated, new ReviewRequestChanged(request.Id, status, request.CardKey, true),
+    private void Publish(ReviewRequestRecord request, string status, bool sent = true) =>
+        events.Publish(ReviewRequestEvents.Updated, new ReviewRequestChanged(request.Id, status, request.CardKey, sent),
             ReviewRequestJsonContext.Default.ReviewRequestChanged);
 }
 

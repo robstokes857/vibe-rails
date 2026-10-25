@@ -918,6 +918,26 @@ confirmed one deletes it again. The caller is never told the copy was cancelled 
 (Codex slice E review, F2). The reference is shown to the requester as a selector, never a credential:
 every hosted route checks the caller's key.
 
+A send whose answer is lost cannot orphan the hosted copy (Codex VIBE-209 fourth-pass review, F2;
+VIBE-212). Before the bundle leaves, the sender claims the attempt on the ledger row
+(`SendAttemptedUTC`, `review-requests/5`, nullable) together with the sending key's fingerprint; the
+claim is refused for a request already sent or pinned to another key's fingerprint (409
+`send_pending`), so a second send under a different account can never create a second hosted copy.
+A refusal the host confirmed (any 4xx) clears the attempt and the request is unsent again; a lost,
+unreadable or redirected answer and any 5xx keep it, because the host may hold the request. While
+an attempt is unsettled the request is neither sent nor unsent: its summary carries
+`sendAttemptedUtc` without a `remote`, Delete cancels it locally, keeps the row and refuses with 409
+`send_pending` (the row is the only thing that can still find the copy), and Cancel keeps the attempt.
+A retry with the same key posts the same bytes again, which the host answers with the stored request
+(exact retries are idempotent, 200). The poller settles the rest before it polls decisions, for
+attempts pinned to the current key only: it posts the stored bundle again, stores the recovered
+reference, cancels the hosted copy at once when the request was cancelled meanwhile, and otherwise
+polls it as an ordinary sent request. On that retry only a refusal decided by the content or the
+route (400, 404/405/501, 409, 413, 422) proves the first POST never landed and clears the attempt; a
+refused key or permission, a rate limit, an unreadable answer or a server error keeps it for the next
+pass. Attempts are rows, so they survive restarts. Nothing new leaves the machine for this: the
+re-POST carries exactly the bytes the person confirmed, under the key they confirmed them with.
+
 Decisions are polled by the root that holds the Board sync lease, from `BoardSyncScheduler`, on a
 self-paced cadence persisted in `.review-request-poll.json` beside state.db (account fingerprint,
 next due time and backoff only): every 15 minutes while a sent request is open, doubling to a

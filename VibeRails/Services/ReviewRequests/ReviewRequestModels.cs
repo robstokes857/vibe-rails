@@ -150,7 +150,8 @@ public sealed record ReviewRequestSummary(
     DateTime CreatedUtc,
     DateTime UpdatedUtc,
     IReadOnlyList<ReviewDecisionDto> Decisions,
-    ReviewRequestRemote? Remote = null);
+    ReviewRequestRemote? Remote = null,
+    DateTime? SendAttemptedUtc = null);
 
 public sealed record ReviewRequestDetail(ReviewRequestSummary Request, ReviewBundle Bundle);
 

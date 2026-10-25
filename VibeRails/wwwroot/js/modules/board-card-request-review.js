@@ -93,7 +93,10 @@ export function describeRequestStatus(request) {
         if (!last) return 'Rejected';
         return `Rejected by ${last.reviewer}${last.comment ? `: ${last.comment}` : ''}`;
     }
-    return request?.remote ? 'Sent, awaiting decisions' : 'Open, not sent yet';
+    if (request?.remote) return 'Sent, awaiting decisions';
+    // A send began and viberails.ai's answer was lost (VIBE-212): neither sent nor unsent until the automatic check settles it.
+    if (request?.sendAttemptedUtc) return 'Send not confirmed yet; checked automatically';
+    return 'Open, not sent yet';
 }
 
 export function requestTone(request) {

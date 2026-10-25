@@ -217,11 +217,15 @@ public sealed class ReviewRequestSenderTests : IDisposable
         Assert.NotNull(sent.Request.Remote);
     }
 
+    /// <summary>A 4xx is the host saying it did not take the bundle: nothing hosted can exist, so the attempt is cleared (VIBE-212) and the request is an unsent one.</summary>
     [Theory]
     [InlineData(404, "server_update_required")]
     [InlineData(401, "invalid_api_key")]
-    [InlineData(503, "server_unavailable")]
-    public async Task ARefusedOrFailedSendRecordsNothingAndQueuesNothing(int status, string code)
+    [InlineData(403, "permission_denied")]
+    [InlineData(400, "invalid_request")]
+    [InlineData(413, "too_large")]
+    [InlineData(429, "rate_limited")]
+    public async Task ARefusalTheHostConfirmedRecordsNothingAndQueuesNothing_AndTheRequestIsDeletableWithoutTheHost(int status, string code)
     {
         var created = await CreateAsync();
         _answer = _ => Task.FromResult(new HttpResponseMessage((HttpStatusCode)status));
@@ -229,12 +233,164 @@ public sealed class ReviewRequestSenderTests : IDisposable
         var ex = await Assert.ThrowsAsync<ReviewRequestException>(() => Sender().SendAsync(_project, created.Id, new SendReviewRequest(true), Ct));
 
         Assert.Equal((code, 502), (ex.Code, ex.Status));
+        Assert.DoesNotContain(ReviewRequestSender.UnconfirmedSendNote, ex.Message);
         var stored = await _store.GetAsync(created.Id, Ct);
         Assert.Null(stored!.RemoteId);
         Assert.Null(stored.SentUTC);
         Assert.Null(stored.SentKeyFingerprint);
+        Assert.Null(stored.SendAttemptedUTC);
+        Assert.False(stored.SendUncertain);
+        Assert.Empty(await _store.ListSendAttemptsPendingAsync(Ct));
         Assert.Empty(_events.Events);
         _archives.VerifyNoOtherCalls();
+
+        // Nothing hosted can exist, so the request goes without the host (no key at all here).
+        _key = null;
+        await Sender().DeleteAsync(_project, created.Id, Ct);
+        Assert.Single(_requests);
+        Assert.Null(await _store.GetAsync(created.Id, Ct));
+    }
+
+    /// <summary>
+    /// Codex VIBE-209 fourth-pass review, F2 (VIBE-212): the host commits the POST and the answer is lost
+    /// (a reset, the deadline, a truncated 201 body, a gateway 502, a redirect). Before this fix the request
+    /// looked unsent, Delete removed the row without the host, and the hosted copy stayed readable until
+    /// expiry. The attempt and the pinned fingerprint are written before the POST, so the row stays.
+    /// </summary>
+    [Theory]
+    [InlineData("network_error")]
+    [InlineData("timeout")]
+    [InlineData("invalid_response")]
+    [InlineData("server_unavailable")]
+    [InlineData("unexpected_redirect")]
+    public async Task AnAcceptedPostWhoseAnswerIsLostKeepsThePinnedAttempt_AndDeleteIsRefused(string variant)
+    {
+        var created = await CreateAsync();
+        for (var pass = 0; pass < 4; pass++) _polls.End(Fingerprint, anyOpen: false, reachable: true); // idle backoff at the two-hour ceiling
+        _answer = request =>
+        {
+            if (request.Method == HttpMethod.Delete) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+            return variant switch
+            {
+                "network_error" => throw new HttpRequestException("connection reset after the hosted commit"),
+                "timeout" => throw new OperationCanceledException("the transport deadline passed after the hosted commit"),
+                "invalid_response" => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Created)
+                    { Content = new StringContent("{\"id\":\"rvw_", System.Text.Encoding.UTF8, "application/json") }),
+                "server_unavailable" => Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadGateway)),
+                _ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Found))
+            };
+        };
+
+        var ex = await Assert.ThrowsAsync<ReviewRequestException>(() => Sender().SendAsync(_project, created.Id, new SendReviewRequest(true), Ct));
+
+        Assert.Equal((variant, 502), (ex.Code, ex.Status));
+        Assert.EndsWith(ReviewRequestSender.UnconfirmedSendNote, ex.Message);
+        var stored = await _store.GetAsync(created.Id, Ct);
+        Assert.Equal((null, _clock.Now, Fingerprint, "open"), (stored!.RemoteId, stored.SendAttemptedUTC, stored.SentKeyFingerprint, stored.Status));
+        Assert.True(stored.SendUncertain);
+        Assert.Equal([created.Id], (await _store.ListSendAttemptsPendingAsync(Ct)).Select(r => r.Id));
+        Assert.DoesNotContain(await _store.ListSentPendingAsync(Ct), r => r.Id == created.Id);
+        Assert.Equal(_clock.Now.AddMinutes(15), _polls.NextDueUtc); // the poller reconciles it within one interval
+        var evt = Assert.Single(_events.Events);
+        Assert.Equal(("open", false), (evt.Payload.GetProperty("status").GetString(), evt.Payload.GetProperty("sent").GetBoolean()));
+        var summary = (await _reviews.GetAsync(_project, created.Id, Ct)).Request;
+        Assert.Null(summary.Remote);
+        Assert.Equal(_clock.Now, summary.SendAttemptedUtc);
+        _archives.VerifyNoOtherCalls();
+
+        // The reviewer's probe step: Delete used to remove the row without the host. It is refused and the row stays, cancelled.
+        _requests.Clear();
+        var refused = await Assert.ThrowsAsync<ReviewRequestException>(() => Sender().DeleteAsync(_project, created.Id, Ct));
+        Assert.Equal(("send_pending", 409), (refused.Code, refused.Status));
+        Assert.Contains("answer from viberails.ai was lost", refused.Message);
+        Assert.DoesNotContain("different account key", refused.Message);
+        Assert.Empty(_requests);
+        var kept = await _store.GetAsync(created.Id, Ct);
+        Assert.Equal(("cancelled", Fingerprint, _clock.Now), (kept!.Status, kept.SentKeyFingerprint, kept.SendAttemptedUTC));
+        Assert.Null(kept.RemoteId);
+        Assert.Contains(await _store.ListSendAttemptsPendingAsync(Ct), r => r.Id == created.Id);
+        Assert.Equal("cancelled", _events.Events[^1].Payload.GetProperty("status").GetString());
+
+        var again = await Assert.ThrowsAsync<ReviewRequestException>(() => Sender().DeleteAsync(_project, created.Id, Ct));
+        Assert.Equal("send_pending", again.Code);
+        Assert.NotNull(await _store.GetAsync(created.Id, Ct));
+    }
+
+    /// <summary>VIBE-212: Send pressed again after a lost answer posts the same bytes under the same key; the host answers an exact retry with the stored request and the reference lands.</summary>
+    [Fact]
+    public async Task ARetryUnderTheSameKeyRecoversTheReferenceFromAnUnconfirmedSend()
+    {
+        var created = await CreateAsync();
+        var posts = 0;
+        _answer = request => ++posts == 1
+            ? throw new HttpRequestException("connection reset after the hosted commit")
+            : Task.FromResult(Json(HttpStatusCode.OK, Hosted(RequestIdOf(request), created: _clock.Now))); // 200: the stored request
+        _archives.Setup(a => a.EnsureSessionShareUploadAsync(It.IsAny<string>(), Fingerprint, It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        var sender = Sender();
+        await Assert.ThrowsAsync<ReviewRequestException>(() => sender.SendAsync(_project, created.Id, new SendReviewRequest(true), Ct));
+        Assert.True((await _store.GetAsync(created.Id, Ct))!.SendUncertain);
+
+        var sent = await sender.SendAsync(_project, created.Id, new SendReviewRequest(true), Ct);
+
+        Assert.Equal(2, _requests.Count(r => r.Method == HttpMethod.Post));
+        Assert.StartsWith("Sent.", sent.Message);
+        Assert.Equal(Reference, sent.Request.Remote!.Id);
+        var stored = await _store.GetAsync(created.Id, Ct);
+        Assert.Equal((Reference, Fingerprint, _clock.Now), (stored!.RemoteId, stored.SentKeyFingerprint, stored.SendAttemptedUTC));
+        Assert.False(stored.SendUncertain);
+        Assert.NotNull(stored.SessionsQueuedUTC);
+        Assert.Empty(await _store.ListSendAttemptsPendingAsync(Ct));
+        Assert.Contains(await _store.ListSentPendingAsync(Ct), r => r.Id == created.Id);
+        _archives.Verify(a => a.EnsureSessionShareUploadAsync(It.IsAny<string>(), Fingerprint, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    /// <summary>VIBE-212 (VIBE-207 D1): the attempt pins the account. Another key may neither post the bundle nor clear the attempt, so a second hosted copy cannot arise.</summary>
+    [Fact]
+    public async Task ARetryUnderAnotherKeyIsRefusedWhileTheAttemptIsPinned()
+    {
+        var created = await CreateAsync();
+        _answer = _ => throw new HttpRequestException("connection reset after the hosted commit");
+        await Assert.ThrowsAsync<ReviewRequestException>(() => Sender().SendAsync(_project, created.Id, new SendReviewRequest(true), Ct));
+        _requests.Clear();
+        _events.Events.Clear();
+        _key = "a-different-account-key";
+
+        var refused = await Assert.ThrowsAsync<ReviewRequestException>(() => Sender().SendAsync(_project, created.Id, new SendReviewRequest(true), Ct));
+
+        Assert.Equal(("send_pending", 409), (refused.Code, refused.Status));
+        Assert.Contains("different account key", refused.Message);
+        Assert.Empty(_requests);
+        var stored = await _store.GetAsync(created.Id, Ct);
+        Assert.Equal((Fingerprint, _clock.Now, "open"), (stored!.SentKeyFingerprint, stored.SendAttemptedUTC, stored.Status));
+        Assert.Empty(_events.Events);
+
+        // Delete under the other key is refused too, and names the account that can settle it.
+        var delete = await Assert.ThrowsAsync<ReviewRequestException>(() => Sender().DeleteAsync(_project, created.Id, Ct));
+        Assert.Equal("send_pending", delete.Code);
+        Assert.Contains("different account key", delete.Message);
+        Assert.Empty(_requests);
+        Assert.Equal("cancelled", (await _store.GetAsync(created.Id, Ct))!.Status);
+        _archives.VerifyNoOtherCalls();
+    }
+
+    /// <summary>VIBE-212: Cancel on an unconfirmed send cancels locally and leaves the attempt to the poller, which revokes the copy once the reference is known.</summary>
+    [Fact]
+    public async Task CancelOnAnUnconfirmedSendKeepsTheAttemptForThePoller()
+    {
+        var created = await CreateAsync();
+        _answer = _ => throw new HttpRequestException("connection reset after the hosted commit");
+        await Assert.ThrowsAsync<ReviewRequestException>(() => Sender().SendAsync(_project, created.Id, new SendReviewRequest(true), Ct));
+        _requests.Clear();
+
+        var summary = await Sender().CancelAsync(_project, created.Id, Ct);
+
+        Assert.Equal("cancelled", summary.Status);
+        Assert.Null(summary.Remote);
+        Assert.Equal(_clock.Now, summary.SendAttemptedUtc);
+        Assert.Empty(_requests); // no reference to cancel yet; the poller recovers it first
+        Assert.Contains(await _store.ListSendAttemptsPendingAsync(Ct), r => r.Id == created.Id);
+        var refused = await Assert.ThrowsAsync<ReviewRequestException>(() => Sender().DeleteAsync(_project, created.Id, Ct));
+        Assert.Equal("send_pending", refused.Code);
     }
 
     [Fact]

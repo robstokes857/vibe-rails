@@ -34,6 +34,8 @@ export interface ReviewRequestRow {
     createdUtc: string;
     /** True once viberails.ai holds a copy. */
     sent: boolean;
+    /** A send began and the answer was lost; the backend recovers or clears it, and refuses to delete it meanwhile (VIBE-212). */
+    sendPending: boolean;
     decisions: ReviewRequestDecision[];
 }
 
@@ -81,6 +83,8 @@ function normalizeRow(entry: unknown): ReviewRequestRow | null {
         sessionCount: Math.max(0, Number(item.sessionCount) || 0),
         createdUtc: text(item.createdUtc, 64),
         sent: Boolean(item.remote && typeof item.remote === 'object'),
+        // A send began and viberails.ai's answer was lost (VIBE-212); the backend settles it automatically.
+        sendPending: !item.remote && typeof item.sendAttemptedUtc === 'string' && item.sendAttemptedUtc.length > 0,
         decisions: decisions.map((raw): ReviewRequestDecision | null => {
             const decision = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
             const kind = text(decision.decision, 16);
@@ -127,7 +131,10 @@ export function describeReviewRequestStatus(row: ReviewRequestRow): string {
         }
         return `Rejected by ${last.reviewer}${last.comment ? `: ${last.comment}` : ''}`;
     }
-    return row.sent ? 'Sent, awaiting decisions' : 'Open, not sent yet';
+    if (row.sent) {
+        return 'Sent, awaiting decisions';
+    }
+    return row.sendPending ? 'Send not confirmed yet; checked automatically' : 'Open, not sent yet';
 }
 
 /** How many line comments the request's decisions carry altogether. */

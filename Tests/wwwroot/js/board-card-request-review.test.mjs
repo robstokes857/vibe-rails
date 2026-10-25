@@ -52,6 +52,9 @@ test('reviewers parse, cards match by key, display id and short key, and the car
 test('statuses say who approved or rejected and whether an open request was sent', () => {
     assert.equal(describeRequestStatus(request()), 'Open, not sent yet');
     assert.equal(describeRequestStatus(request({ remote: { id: 'rvw_x' } })), 'Sent, awaiting decisions');
+    // VIBE-212: a send whose answer was lost is neither sent nor unsent; a reference wins once it is known.
+    assert.equal(describeRequestStatus(request({ sendAttemptedUtc: '2026-10-25T05:00:00Z' })), 'Send not confirmed yet; checked automatically');
+    assert.equal(describeRequestStatus(request({ sendAttemptedUtc: '2026-10-25T05:00:00Z', remote: { id: 'rvw_x' } })), 'Sent, awaiting decisions');
     assert.equal(describeRequestStatus(approved), 'Approved by lead@example.test');
     assert.equal(describeRequestStatus(rejected), 'Rejected by lead@example.test: <b>needs tests</b>');
     assert.equal(describeRequestStatus(request({ status: 'cancelled' })), 'Cancelled');

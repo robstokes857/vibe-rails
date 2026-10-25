@@ -284,6 +284,15 @@ internal static class StateDatabaseSchema
             SqliteSchema.Execute(db, transaction, """
                 ALTER TABLE ReviewDecisions ADD COLUMN LineCommentsJson TEXT NULL;
                 """));
+        // VIBE-212 (Codex VIBE-209 fourth pass, F2): when a send was attempted, written together
+        // with the sending key's fingerprint BEFORE the hosted POST, so a request whose answer was
+        // lost (the host may hold a copy) is never mistaken for an unsent one: Delete refuses it and
+        // the poller re-posts the stored bundle idempotently to recover the reference. Nullable; an
+        // older version keeps reading and writing the row without it.
+        SqliteMigrationRunner.Apply(connection, "review-requests", 5, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, """
+                ALTER TABLE ReviewRequests ADD COLUMN SendAttemptedUTC TEXT NULL;
+                """));
         JobStore.EnsureSessionLinkSchema(connection);
         // Every breaking step above has now been applied (or was already), so the file is at this
         // build's generation. Stamping after the fact also covers databases migrated before the

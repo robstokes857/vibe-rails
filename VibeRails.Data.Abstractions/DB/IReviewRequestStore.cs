@@ -12,6 +12,13 @@ namespace VibeRails.DB;
 /// <param name="ExpiresUTC">The hosted expiry (one month) once sent.</param>
 /// <param name="RemoteCancelledUTC">When the hosted copy confirmed a local cancellation; null until then.</param>
 /// <param name="SessionsQueuedUTC">When every attached session was queued for upload under the sending key; null while a send is still to be finished.</param>
+/// <param name="SendAttemptedUTC">
+/// When the first hosted POST of this request began, written with <paramref name="SentKeyFingerprint"/> before the
+/// transfer (VIBE-212). Set without a <paramref name="RemoteId"/>, it means the host may hold a copy whose
+/// reference was never received: the request is not deleted, and the poller re-posts the stored bundle
+/// (an exact retry the host answers with the stored request) under that fingerprint to recover it. Null
+/// again after the host confirmed it refused the bundle.
+/// </param>
 public sealed record ReviewRequestRecord(
     string Id,
     string ProjectPath,
@@ -28,7 +35,12 @@ public sealed record ReviewRequestRecord(
     string? SentKeyFingerprint = null,
     DateTime? ExpiresUTC = null,
     DateTime? RemoteCancelledUTC = null,
-    DateTime? SessionsQueuedUTC = null);
+    DateTime? SessionsQueuedUTC = null,
+    DateTime? SendAttemptedUTC = null)
+{
+    /// <summary>A send began and its answer never arrived: the host may hold a copy nothing here references yet.</summary>
+    public bool SendUncertain => RemoteId is null && SendAttemptedUTC is not null;
+}
 
 /// <summary>
 /// One reviewer's answer. An approval carries the signature trailer fields it was verified from;
@@ -104,6 +116,28 @@ public interface IReviewRequestStore
 
     /// <summary>Records that every attached session was queued for upload. False when the request does not exist.</summary>
     Task<bool> MarkSessionsQueuedAsync(string id, DateTime queuedUtc, CancellationToken ct = default);
+
+    /// <summary>
+    /// Claims a send before the hosted POST (VIBE-212): records when the first attempt began (an
+    /// earlier time is kept) and pins the fingerprint of the key it is made with. False, changing
+    /// nothing, when the request does not exist, already has a hosted reference, or is pinned to a
+    /// different fingerprint: only the account that began a send may retry or clear it, so a second
+    /// send under another key cannot create a second hosted copy.
+    /// </summary>
+    Task<bool> MarkSendAttemptAsync(string id, string keyFingerprint, DateTime attemptedUtc, CancellationToken ct = default);
+
+    /// <summary>
+    /// Forgets a send attempt after the host confirmed it refused the bundle, so the request is an
+    /// unsent one again. False when the request does not exist or already has a hosted reference.
+    /// </summary>
+    Task<bool> ClearSendAttemptAsync(string id, DateTime updatedUtc, CancellationToken ct = default);
+
+    /// <summary>
+    /// Requests whose send began but never received a hosted reference, across every project and
+    /// whatever their status, oldest attempt first. The poller re-posts each one under its pinned
+    /// fingerprint; <see cref="ListSentPendingAsync"/> cannot see them because they have no reference.
+    /// </summary>
+    Task<IReadOnlyList<ReviewRequestRecord>> ListSendAttemptsPendingAsync(CancellationToken ct = default);
 
     /// <summary>
     /// Sent requests that still need the host, across every project: every one that is not cancelled

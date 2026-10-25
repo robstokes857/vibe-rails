@@ -48,9 +48,14 @@ suite('Review requests view rules', () => {
         assert.equal(rows[1].fileCount, 0);
         assert.equal(rows[1].cardKey, null);
         assert.equal(rows[1].sent, false);
+        assert.equal(rows[1].sendPending, false);
         assert.deepEqual(rows[1].reviewers, ['a@example.test']);
         assert.deepEqual(rows[1].decisions, []);
         assert.deepEqual(normalizeReviewRequests(undefined), []);
+        // VIBE-212: an attempted send without a reference is pending; a reference wins over the attempt stamp.
+        const [pending, settled] = normalizeReviewRequests({ requests: [rawRow({ sendAttemptedUtc: '2026-10-25T05:00:00Z' }),
+            rawRow({ id: other, sendAttemptedUtc: '2026-10-25T05:00:00Z', remote: { id: 'rvw_' + '1'.repeat(32), sentUtc: '2026-10-25T05:01:00Z' } })] });
+        assert.deepEqual([pending.sent, pending.sendPending, settled.sent, settled.sendPending], [false, true, true, false]);
     });
 
     test('status wording matches the card: sent or not, who approved, who rejected and why', () => {
@@ -58,6 +63,7 @@ suite('Review requests view rules', () => {
         assert.equal(describeReviewRequestStatus(row), 'Rejected by lead@example.test: Rename the column first.');
         assert.equal(describeReviewRequestStatus({ ...row, status: 'open', sent: false }), 'Open, not sent yet');
         assert.equal(describeReviewRequestStatus({ ...row, status: 'open', sent: true }), 'Sent, awaiting decisions');
+        assert.equal(describeReviewRequestStatus({ ...row, status: 'open', sent: false, sendPending: true }), 'Send not confirmed yet; checked automatically');
         assert.equal(describeReviewRequestStatus({ ...row, status: 'cancelled' }), 'Cancelled');
         assert.equal(describeReviewRequestStatus({ ...row, status: 'approved', decisions: [{ reviewer: 'a@example.test', decision: 'approved', comment: null, lineComments: 0 },
             { reviewer: 'a@example.test', decision: 'approved', comment: null, lineComments: 0 }] }), 'Approved by a@example.test');

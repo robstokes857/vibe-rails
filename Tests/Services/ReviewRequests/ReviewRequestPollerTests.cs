@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Moq;
 using Tests.VcaRegression;
@@ -307,6 +308,118 @@ public sealed class ReviewRequestPollerTests : IDisposable
         Assert.Empty(_requests);
     }
 
+    /// <summary>
+    /// VIBE-212 (Codex VIBE-209 fourth-pass review, F2): a send whose answer was lost is reconciled before decisions
+    /// are polled. The stored bundle is posted again under the pinned key, the host answers an exact retry with the
+    /// stored request, the reference lands, and the request is polled as an ordinary sent one in the same pass. A
+    /// request cancelled meanwhile has its hosted copy revoked at once, so a later Delete needs no host.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AnUnconfirmedSendIsReconciledBeforeDecisionsArePolled_AndRevokedWhenTheRequestWasCancelled(bool cancelledMeanwhile)
+    {
+        var reviews = Reviews(FakeCommitSignatureVerifier.ValidFor("lead@example.com"));
+        var state = new ReviewRequestPollState(null, () => _clock.Now);
+        var created = await reviews.CreateAsync(_project, new CreateReviewRequest(Reviewers: ["lead@example.com"]), null, Ct);
+        Assert.True(await _store.MarkSendAttemptAsync(created.Id, Fingerprint, Start.AddMinutes(-5), Ct)); // the POST was made; its answer never arrived
+        if (cancelledMeanwhile) await reviews.CancelAsync(_project, created.Id, Ct);
+        _hosted[Reference] = Hosted(created.Id, created: Start.AddMinutes(-5), decisions: [Approved(1, "lead@example.com")]);
+
+        await Poller(reviews, state).PollDueAsync(Ct);
+
+        var calls = _requests.Select(r => r.Method + " " + r.RequestUri!.AbsolutePath).ToList();
+        var stored = await _store.GetAsync(created.Id, Ct);
+        Assert.Equal((Reference, Fingerprint), (stored!.RemoteId, stored.SentKeyFingerprint));
+        Assert.False(stored.SendUncertain);
+        Assert.Empty(await _store.ListSendAttemptsPendingAsync(Ct));
+        if (cancelledMeanwhile)
+        {
+            Assert.Equal(["POST /api/v1/review-requests", "DELETE /api/v1/review-requests/" + Reference], calls);
+            Assert.Equal(("cancelled", _clock.Now), (stored.Status, stored.RemoteCancelledUTC));
+            Assert.Empty(await _store.GetDecisionsAsync(created.Id, Ct));
+            Assert.NotNull(stored.SessionsQueuedUTC);
+            Assert.DoesNotContain(await _store.ListSentPendingAsync(Ct), r => r.Id == created.Id); // nothing left for the host
+        }
+        else
+        {
+            Assert.Equal(["POST /api/v1/review-requests", "GET /api/v1/review-requests/" + Reference + "/decisions"], calls);
+            Assert.Equal("approved", stored.Status); // polled in the same pass
+            Assert.Equal(_clock.Now, stored.SessionsQueuedUTC);
+            Assert.Single(await _store.FindVerifiedApprovalsAsync(Tree, Ct));
+        }
+        Assert.Contains(_events.Events, e => e.Payload.GetProperty("id").GetString() == created.Id && e.Payload.GetProperty("sent").GetBoolean());
+
+        // The next pass has nothing left to reconcile.
+        _requests.Clear();
+        _clock.Now = Start.AddMinutes(15);
+        await Poller(reviews, state).PollDueAsync(Ct);
+        Assert.DoesNotContain(_requests, r => r.Method == HttpMethod.Post);
+    }
+
+    /// <summary>
+    /// VIBE-212: on the retry, only a refusal decided by the content or the route proves the first POST never landed.
+    /// A key the host now rejects, a missing permission, a rate limit or a server error refuses the call, not the
+    /// bundle, so the attempt stays for the next pass.
+    /// </summary>
+    [Theory]
+    [InlineData(400, true)]
+    [InlineData(404, true)]
+    [InlineData(413, true)]
+    [InlineData(401, false)]
+    [InlineData(403, false)]
+    [InlineData(429, false)]
+    [InlineData(500, false)]
+    public async Task AReconciliationRefusedByContentClearsTheAttempt_ButARefusedKeyOrRateLimitKeepsIt(int status, bool cleared)
+    {
+        var reviews = Reviews(FakeCommitSignatureVerifier.ValidFor("lead@example.com"));
+        var state = new ReviewRequestPollState(null, () => _clock.Now);
+        var created = await reviews.CreateAsync(_project, new CreateReviewRequest(Reviewers: ["lead@example.com"]), null, Ct);
+        Assert.True(await _store.MarkSendAttemptAsync(created.Id, Fingerprint, _clock.Now, Ct));
+        _override = request => request.Method == HttpMethod.Post
+            ? new HttpResponseMessage((HttpStatusCode)status)
+            : throw new InvalidOperationException("unexpected " + request.Method);
+
+        await Poller(reviews, state).PollDueAsync(Ct);
+
+        Assert.Equal(["POST"], _requests.Select(r => r.Method.Method));
+        var stored = await _store.GetAsync(created.Id, Ct);
+        Assert.Null(stored!.RemoteId);
+        Assert.Equal(!cleared, stored.SendUncertain);
+        Assert.Equal(cleared ? null : Fingerprint, stored.SentKeyFingerprint);
+        Assert.Equal(cleared ? 0 : 1, (await _store.ListSendAttemptsPendingAsync(Ct)).Count);
+        Assert.Equal(cleared, _events.Events.Any(e => e.Payload.GetProperty("id").GetString() == created.Id && !e.Payload.GetProperty("sent").GetBoolean()));
+        Assert.Equal(Start.AddMinutes(15), state.NextDueUtc); // the host answered, so this is not a backoff
+    }
+
+    /// <summary>VIBE-212: an attempt pinned to another account's key is never posted under this one, and an unreachable host leaves every attempt for the next pass.</summary>
+    [Fact]
+    public async Task OnlyAttemptsPinnedToTheCurrentKeyAreReconciled_AndAnUnreachableHostLeavesThemForTheNextPass()
+    {
+        var reviews = Reviews(FakeCommitSignatureVerifier.ValidFor("lead@example.com"));
+        var state = new ReviewRequestPollState(null, () => _clock.Now);
+        var theirs = await reviews.CreateAsync(_project, new CreateReviewRequest(Reviewers: ["lead@example.com"]), null, Ct);
+        Assert.True(await _store.MarkSendAttemptAsync(theirs.Id, SessionSharingService.KeyFingerprint("someone-else"), _clock.Now, Ct));
+        var mine = await reviews.CreateAsync(_project, new CreateReviewRequest(Reviewers: ["lead@example.com"]), null, Ct);
+        Assert.True(await _store.MarkSendAttemptAsync(mine.Id, Fingerprint, _clock.Now, Ct));
+        _hosted[Reference] = Hosted(mine.Id, created: _clock.Now);
+        _override = _ => throw new HttpRequestException("down");
+
+        await Poller(reviews, state).PollDueAsync(Ct);
+
+        Assert.Equal(["POST"], _requests.Select(r => r.Method.Method)); // mine, once; theirs is never posted under this key
+        Assert.Equal(2, (await _store.ListSendAttemptsPendingAsync(Ct)).Count);
+        Assert.Equal(Start.AddMinutes(15), state.NextDueUtc); // the first failure keeps the interval, then backs off as usual
+        Assert.Empty(_events.Events);
+
+        _override = null;
+        _clock.Now = Start.AddMinutes(15);
+        await Poller(reviews, state).PollDueAsync(Ct);
+        Assert.Equal(Reference, (await _store.GetAsync(mine.Id, Ct))!.RemoteId);
+        Assert.Null((await _store.GetAsync(theirs.Id, Ct))!.RemoteId);
+        Assert.Single(await _store.ListSendAttemptsPendingAsync(Ct));
+    }
+
     private ReviewRequestService Reviews(ICommitSignatureVerifier verifier) => new(_store, Snapshots(_project).Object, verifier, _clock);
 
     private ReviewRequestPoller Poller(ReviewRequestService reviews, ReviewRequestPollState state) =>
@@ -317,10 +430,25 @@ public sealed class ReviewRequestPollerTests : IDisposable
         _requests.Add(request);
         if (_override is not null) return Task.FromResult(_override(request));
         if (request.Method == HttpMethod.Delete) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+        if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath.EndsWith("/review-requests", StringComparison.Ordinal))
+        {
+            // The create route as the host answers it: an exact retry gets the stored request (200, VIBE-212); a first send is created (201).
+            var requestId = RequestIdOf(request);
+            var stored = _hosted.Values.FirstOrDefault(h => h.RequestId?.ToString("D") == requestId);
+            return Task.FromResult(stored is not null
+                ? Json(HttpStatusCode.OK, stored)
+                : Json(HttpStatusCode.Created, Hosted(requestId, reference: "rvw_" + new string('c', 32), created: _clock.Now)));
+        }
         var reference = request.RequestUri!.Segments[^2].TrimEnd('/');
         return Task.FromResult(_hosted.TryGetValue(reference, out var hosted)
             ? Json(HttpStatusCode.OK, hosted)
             : Json(HttpStatusCode.NotFound, new { error = "gone", code = "not_found" }));
+    }
+
+    private static string RequestIdOf(HttpRequestMessage request)
+    {
+        using var body = JsonDocument.Parse(request.Content!.ReadAsStream());
+        return body.RootElement.GetProperty("requestId").GetString()!;
     }
 
     /// <summary>A request created from the fixture index (no sessions) and marked sent, with an open hosted copy unless the test replaces it.</summary>

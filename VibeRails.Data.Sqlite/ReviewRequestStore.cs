@@ -7,8 +7,9 @@ namespace VibeRails.Data.Sqlite;
 /// <summary>
 /// Review requests and decisions in the normal state database (VB-50). Additive component
 /// <c>review-requests/1</c> (the two tables), <c>/2</c> (the hosted copy's reference, key
-/// fingerprint, expiry and receipts as nullable columns), <c>/3</c> (the session-queue receipt) and
-/// <c>/4</c> (a decision's line comments as JSON); older versions ignore what they do not know.
+/// fingerprint, expiry and receipts as nullable columns), <c>/3</c> (the session-queue receipt),
+/// <c>/4</c> (a decision's line comments as JSON) and <c>/5</c> (when a send was attempted, written
+/// before the hosted POST); older versions ignore what they do not know.
 /// </summary>
 public sealed class ReviewRequestStore : IReviewRequestStore
 {
@@ -208,6 +209,57 @@ public sealed class ReviewRequestStore : IReviewRequestStore
     }
 
     /// <inheritdoc />
+    public async Task<bool> MarkSendAttemptAsync(string id, string keyFingerprint, DateTime attemptedUtc, CancellationToken ct = default)
+    {
+        using var db = SqliteConnectionFactory.Open(_connectionString);
+        using var command = db.CreateCommand();
+        // One statement claims the attempt: the first attempt's time is kept, the fingerprint is
+        // pinned, and a request already sent or pinned to another fingerprint is left alone (VIBE-212).
+        // A same-key retry matches its own pin and may post the stored bundle again.
+        command.CommandText = """
+            UPDATE ReviewRequests
+               SET SendAttemptedUTC = COALESCE(SendAttemptedUTC, $at), SentKeyFingerprint = $fingerprint
+             WHERE Id = $id AND RemoteId IS NULL AND (SentKeyFingerprint IS NULL OR SentKeyFingerprint = $fingerprint);
+            """;
+        command.Parameters.AddWithValue("$id", id);
+        command.Parameters.AddWithValue("$fingerprint", keyFingerprint);
+        command.Parameters.AddWithValue("$at", Stamp(attemptedUtc));
+        return await command.ExecuteNonQueryAsync(ct) == 1;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> ClearSendAttemptAsync(string id, DateTime updatedUtc, CancellationToken ct = default)
+    {
+        using var db = SqliteConnectionFactory.Open(_connectionString);
+        using var command = db.CreateCommand();
+        // Never touches a sent request: a concurrent same-key retry may have recorded the reference meanwhile.
+        command.CommandText = """
+            UPDATE ReviewRequests
+               SET SendAttemptedUTC = NULL, SentKeyFingerprint = NULL, UpdatedUTC = $updated
+             WHERE Id = $id AND RemoteId IS NULL;
+            """;
+        command.Parameters.AddWithValue("$id", id);
+        command.Parameters.AddWithValue("$updated", Stamp(updatedUtc));
+        return await command.ExecuteNonQueryAsync(ct) == 1;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ReviewRequestRecord>> ListSendAttemptsPendingAsync(CancellationToken ct = default)
+    {
+        using var db = SqliteConnectionFactory.Open(_connectionString);
+        using var command = db.CreateCommand();
+        command.CommandText = RequestColumns + """
+             FROM ReviewRequests
+            WHERE SendAttemptedUTC IS NOT NULL AND RemoteId IS NULL
+            ORDER BY SendAttemptedUTC, Id;
+            """;
+        using var reader = await command.ExecuteReaderAsync(ct);
+        var result = new List<ReviewRequestRecord>();
+        while (await reader.ReadAsync(ct)) result.Add(ReadRequest(reader));
+        return result;
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<ReviewRequestRecord>> ListSentPendingAsync(CancellationToken ct = default)
     {
         using var db = SqliteConnectionFactory.Open(_connectionString);
@@ -239,7 +291,7 @@ public sealed class ReviewRequestStore : IReviewRequestStore
 
     private const string RequestColumns =
         "SELECT Id, ProjectPath, Scope, TreeId, BaseCommit, CardKey, Status, BundleJson, CreatedUTC, UpdatedUTC, "
-        + "SentUTC, RemoteId, SentKeyFingerprint, ExpiresUTC, RemoteCancelledUTC, SessionsQueuedUTC";
+        + "SentUTC, RemoteId, SentKeyFingerprint, ExpiresUTC, RemoteCancelledUTC, SessionsQueuedUTC, SendAttemptedUTC";
 
     private const string DecisionColumns =
         "SELECT d.Id, d.RequestId, d.Reviewer, d.Decision, d.Comment, d.KeyId, d.Fingerprint, d.TreeId, d.SignatureBase64, d.DecidedUTC, d.VerifiedUTC, d.RemoteId, d.LineCommentsJson";
@@ -284,7 +336,8 @@ public sealed class ReviewRequestStore : IReviewRequestStore
         reader.IsDBNull(12) ? null : reader.GetString(12),
         reader.IsDBNull(13) ? null : Parse(reader.GetString(13)),
         reader.IsDBNull(14) ? null : Parse(reader.GetString(14)),
-        reader.IsDBNull(15) ? null : Parse(reader.GetString(15)));
+        reader.IsDBNull(15) ? null : Parse(reader.GetString(15)),
+        reader.IsDBNull(16) ? null : Parse(reader.GetString(16)));
 
     private static string Stamp(DateTime value) => value.ToUniversalTime().ToString("O");
 

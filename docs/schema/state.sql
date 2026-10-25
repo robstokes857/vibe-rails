@@ -183,7 +183,7 @@ CREATE TABLE ProjectCache ( ProjectPath TEXT NOT NULL, Key TEXT NOT NULL, Value 
 CREATE TABLE ReviewDecisions ( Id INTEGER PRIMARY KEY AUTOINCREMENT, RequestId TEXT NOT NULL REFERENCES ReviewRequests(Id) ON DELETE CASCADE, Reviewer TEXT NOT NULL, Decision TEXT NOT NULL, Comment TEXT NULL, KeyId TEXT NULL, Fingerprint TEXT NULL, TreeId TEXT NULL, SignatureBase64 TEXT NULL, DecidedUTC TEXT NOT NULL, VerifiedUTC TEXT NULL , RemoteId INTEGER NULL, LineCommentsJson TEXT NULL);
 
 -- table ReviewRequests
-CREATE TABLE ReviewRequests ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Scope TEXT NOT NULL, TreeId TEXT NOT NULL, BaseCommit TEXT NULL, CardKey TEXT NULL, Status TEXT NOT NULL, BundleJson TEXT NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL , SentUTC TEXT NULL, RemoteId TEXT NULL, SentKeyFingerprint TEXT NULL, ExpiresUTC TEXT NULL, RemoteCancelledUTC TEXT NULL, SessionsQueuedUTC TEXT NULL);
+CREATE TABLE ReviewRequests ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Scope TEXT NOT NULL, TreeId TEXT NOT NULL, BaseCommit TEXT NULL, CardKey TEXT NULL, Status TEXT NOT NULL, BundleJson TEXT NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL , SentUTC TEXT NULL, RemoteId TEXT NULL, SentKeyFingerprint TEXT NULL, ExpiresUTC TEXT NULL, RemoteCancelledUTC TEXT NULL, SessionsQueuedUTC TEXT NULL, SendAttemptedUTC TEXT NULL);
 
 -- table Sandboxes
 CREATE TABLE Sandboxes ( Id INTEGER PRIMARY KEY AUTOINCREMENT, Name TEXT NOT NULL, Path TEXT NOT NULL, ProjectPath TEXT NOT NULL, Branch TEXT NOT NULL DEFAULT '', CommitHash TEXT, RemoteUrl TEXT, SourceBranch TEXT, CreatedUTC TEXT NOT NULL, EnvironmentId INTEGER, UNIQUE(Name, ProjectPath) );

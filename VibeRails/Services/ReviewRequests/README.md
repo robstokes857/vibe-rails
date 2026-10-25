@@ -73,7 +73,7 @@ the design decisions for the rest.
   (1 KiB body: `{ confirmed }`, answers `{ request, message }`).
   Refusals are `{ error, code }` with 400 `invalid_request` / `confirmation_required`, 404
   `not_found` / `session_not_found`, 409 `nothing_staged` / `not_a_repository` / `tree_mismatch` /
-  `signature_rejected` / `not_a_reviewer` / `not_open` / `no_api_key` / `remote_pending`, 503
+  `signature_rejected` / `not_a_reviewer` / `not_open` / `no_api_key` / `remote_pending` / `send_pending`, 503
   `verification_unavailable`, and 502 with the transport's code for a send that failed
   (`network_error`, `timeout`, `server_update_required`, `invalid_api_key`, `permission_denied`,
   `rate_limited`, `server_unavailable`, `invalid_response`, `invalid_request`, `request_conflict`,
@@ -112,7 +112,11 @@ the design decisions for the rest.
   hosted copy first: while it cannot (host unreachable, or sent with another account's key) the
   delete is refused with 409 `remote_pending` and the request stays, cancelled, because its row is
   the only thing that can still revoke the hosted copy; an expired or already-cancelled hosted copy
-  needs no host. A delete that races a send makes the send cancel its own hosted copy.
+  needs no host. A delete that races a send makes the send cancel its own hosted copy. A send
+  whose answer was lost is neither sent nor unsent: the attempt and the sending key's fingerprint
+  were written before the POST (`SendAttemptedUTC`, `review-requests/5`), Delete refuses it with
+  409 `send_pending`, and the poller recovers or refutes the hosted copy (see **A send whose answer
+  is lost** below).
 - **Poll.** `ReviewRequestPoller.PollDueAsync` runs from `BoardSyncScheduler` after the card-share
   refresh (the lease-holding root only) and paces itself through `ReviewRequestPollState`
   (`.review-request-poll.json` beside state.db: account fingerprint, next due time and backoff,
@@ -256,6 +260,33 @@ the design decisions for the rest.
   cancellation pass retries it and Delete waits for the host. A caller that disconnects mid-way
   cannot take the only revocation record with it, and is never told the copy was cancelled when it
   was not.
+- **A send whose answer is lost (Codex VIBE-209 fourth-pass review, F2; VIBE-212).** The host
+  can commit the POST and the answer still be lost: a reset connection, the 90-second deadline, a
+  truncated or unreadable 201 body, a redirect, a 5xx from a gateway in front of the host. Before
+  the bundle leaves, `SendAsync` claims the attempt on the ledger row
+  (`IReviewRequestStore.MarkSendAttemptAsync`: `SendAttemptedUTC`, `review-requests/5`, written
+  together with `SentKeyFingerprint`); the claim is refused for a request already sent or pinned to
+  another key's fingerprint, so a second send under a different account answers 409 `send_pending`
+  and can never create a second hosted copy. A refusal the host confirmed (any 4xx:
+  `server_update_required`, `invalid_api_key`, `permission_denied`, `invalid_request`, `too_large`,
+  `rate_limited`, `request_conflict`) clears the attempt (`ClearSendAttemptAsync`) and answers 502
+  as before; anything else (`network_error`, `timeout`, `invalid_response`, `server_error`,
+  `server_unavailable`, `unexpected_redirect`) keeps it, prompts the poller and answers 502 with the
+  transport's wording plus a note that the send may have arrived and is settled automatically. The
+  request's summary carries `sendAttemptedUtc` without a `remote`, which the card and the VS Code
+  view show as `Send not confirmed yet; checked automatically`; its Send button stays, and pressing
+  it posts the same bytes again under the same key (the host answers an exact retry with the
+  stored request, 200), which is the inline recovery. **Delete** of such a request cancels it
+  locally, keeps the row and refuses with 409 `send_pending`; **Cancel** keeps the attempt. The
+  poller's pass (`ReviewRequestPoller.PollDueAsync`) reconciles pending attempts pinned to the
+  current key before it polls decisions (`ListSendAttemptsPendingAsync`): it posts the stored
+  bundle again, stores the recovered reference with `MarkSentAsync`, cancels the hosted copy at
+  once when the request was cancelled meanwhile (a later Delete then needs no host), and otherwise
+  lets the same pass queue the sessions and poll it as an ordinary sent request. On that retry only
+  a refusal decided by the content or the route (400, 404/405/501, 409, 413, 422) proves the first
+  POST never landed and clears the attempt; a refused key or permission, a rate limit, an
+  unreadable answer or a server error keeps it for the next pass, and an unreachable host backs
+  off as usual. Attempts survive restarts because they are rows, not memory.
 
 The decision route's only outbound call is the existing public signature verification, with a tree
 id and no repository content. The send route and the poller are the only code that transfers a
@@ -356,9 +387,13 @@ Slice C, all against an intercepted `HttpMessageHandler` (`ReviewRequestTestSupp
 `ReviewRequestTransportTests.cs` (what is sent, what is accepted, fixed wording with no remote text,
 reference and decision validation, timeouts), `ReviewRequestSenderTests.cs` (the disclosure,
 confirmation and key gates, the recorded hosted copy, sessions queued under the pinned fingerprint,
-the event, cancel reaching the host) and `ReviewRequestPollerTests.cs` (the 15-minute cadence and
+the event, cancel reaching the host, and VIBE-212: an accepted POST whose answer is lost keeps the
+pinned attempt and Delete refuses it, a confirmed refusal clears it, a same-key retry recovers the
+reference, an other-key retry is refused) and `ReviewRequestPollerTests.cs` (the 15-minute cadence and
 two-hour backoff with a fake clock, decisions landing once with re-verification, refused and
-unavailable decisions, the key pin, expiry grace, the persisted next due time). The cross-repository
+unavailable decisions, the key pin, expiry grace, the persisted next due time, and VIBE-212: the
+reconciliation pass recovers a lost reference and revokes it for a cancelled request, clears an
+attempt the host refuses by content, keeps one a refused key or rate limit left open). The cross-repository
 round trip (`Tests/headless/BoardSync.Integration/ReviewRequestRoundTripTests.cs`) parses the hosted
 service's create and poll JSON with `ReviewRequestTransport.ParseStatus`.
 

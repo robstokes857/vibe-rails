@@ -546,7 +546,10 @@ public sealed class ReviewRequestService(
             decisions.Select(ToDto).ToList(),
             record.RemoteId is { } remote
                 ? new ReviewRequestRemote(remote, record.SentUTC ?? record.UpdatedUTC, record.ExpiresUTC, record.RemoteCancelledUTC)
-                : null);
+                : null,
+            // Without a reference this says a send began and its answer was lost (VIBE-212): the card
+            // shows the request as unconfirmed rather than unsent, and Delete refuses it meanwhile.
+            record.SendAttemptedUTC);
 
     private static ReviewDecisionDto ToDto(ReviewDecisionRecord decision) =>
         new(decision.Id, decision.Reviewer, decision.Decision, decision.Comment,
