@@ -1,9 +1,13 @@
 using System.Text.Json;
 using VibeRails.DB;
+using VibeRails.Services.Git;
 using VibeRails.Services.GitPreflight;
 using VibeRails.Services.VCA;
 
 namespace VibeRails.Services.ReviewRequests;
+
+/// <summary>The tree id of each commit the checkout has, keyed by the sha as it was asked (a full id or a prefix).</summary>
+public delegate Task<IReadOnlyDictionary<string, string>> CommitTreeResolver(string projectPath, IReadOnlyList<string> shas, CancellationToken cancellationToken);
 
 /// <summary>
 /// Review requests before a commit (VB-50, slice A): capture the staged changes as a bundle, keep
@@ -21,7 +25,8 @@ public sealed class ReviewRequestService(
     IReviewRequestStore store,
     IGitStagedSnapshotProvider snapshots,
     ICommitSignatureVerifier verifier,
-    TimeProvider? clock = null)
+    TimeProvider? clock = null,
+    CommitTreeResolver? commitTrees = null)
 {
     public const int MaxReviewers = 10;
     public const int MaxSessions = 10;
@@ -30,7 +35,11 @@ public sealed class ReviewRequestService(
     public const int MaxCardKeyChars = 64;
     public const int ListLimit = 100;
 
+    /// <summary>Commits one card can ask about in a single lookup; the card rail shows at most 30.</summary>
+    public const int MaxCommitLookups = 50;
+
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
+    private readonly CommitTreeResolver _commitTrees = commitTrees ?? ResolveCommitTreesAsync;
 
     public async Task<ReviewRequestSummary> CreateAsync(
         string projectPath,
@@ -46,21 +55,7 @@ public sealed class ReviewRequestService(
         var cardKey = Bounded(request?.CardKey, MaxCardKeyChars, "cardKey");
         var note = Bounded(request?.Note, MaxNoteChars, "note");
         var attached = await ResolveSessionsAsync(request?.Sessions, sessions, ct);
-
-        GitStagedSnapshot snapshot;
-        try
-        {
-            snapshot = await snapshots.CaptureAsync(projectPath, ct);
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
-        {
-            throw new ReviewRequestException("not_a_repository",
-                "VibeRails could not read the staged changes of this project. Check that it is a Git repository.", 409);
-        }
-        if (snapshot.StagedIdentity is null || !CommitSignatureFormat.IsObjectId(snapshot.StagedIdentity.StagedTree))
-            throw new ReviewRequestException("not_a_repository", "VibeRails could not determine the staged tree of this project.", 409);
-        if (snapshot.Files.Count == 0)
-            throw new ReviewRequestException("nothing_staged", "Nothing is staged. Stage the changes to review with git add first.", 409);
+        var snapshot = await CaptureStagedAsync(projectPath, ct);
 
         var now = _clock.GetUtcNow().UtcDateTime;
         var bundle = await ReviewBundleCapture.BuildAsync(snapshot, ReviewBundleCapture.BaseTextReader(snapshot),
@@ -79,6 +74,174 @@ public sealed class ReviewRequestService(
         await store.AddAsync(record, ct);
         return Summarize(record, bundle, []);
     }
+
+    /// <summary>
+    /// What a request made now would capture (slice E): the staged files with their line counts and
+    /// omissions, the tree id, the <c>Signed Approval</c> rules the staged paths touch (their approvers
+    /// are the suggested reviewers) and the fixed disclosure a send shows. Reads the index the way
+    /// <see cref="CreateAsync"/> does and stores nothing; the same refusals apply when nothing is staged.
+    /// </summary>
+    public async Task<ReviewStagedPreview> PreviewAsync(string projectPath, CancellationToken ct)
+    {
+        projectPath = NormalizeProject(projectPath);
+        var snapshot = await CaptureStagedAsync(projectPath, ct);
+        var now = _clock.GetUtcNow().UtcDateTime;
+        var bundle = await ReviewBundleCapture.BuildAsync(snapshot, ReviewBundleCapture.BaseTextReader(snapshot), [], [], null, null, now, ct);
+
+        var files = new List<ReviewStagedFile>(bundle.Files.Count);
+        long textBytes = 0;
+        var withText = 0;
+        foreach (var file in bundle.Files)
+        {
+            ct.ThrowIfCancellationRequested();
+            var included = file.Omitted is null;
+            if (included) withText++;
+            textBytes += Utf8(file.Before) + Utf8(file.After);
+            var counts = included ? ReviewLineDiff.Count(file.Before, file.After) : null;
+            files.Add(new ReviewStagedFile(file.Path, file.Change, file.PreviousPath, file.ChangedLines,
+                counts?.Added, counts?.Removed, included, file.Omitted));
+        }
+
+        var rules = MatchApprovalRules(snapshot);
+        var suggested = rules.SelectMany(rule => rule.Approvers)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(MaxReviewers)
+            .ToList();
+        return new ReviewStagedPreview(bundle.Repository, bundle.TreeId, bundle.BaseTree, bundle.BaseCommit, files, withText,
+            files.Count - withText, textBytes, suggested, rules, ReviewRequestTransport.Destination, ReviewRequestSender.Audience,
+            ReviewRequestSender.SessionDisclosure, now.AddMonths(1));
+    }
+
+    /// <summary>
+    /// The <c>Signed Approval</c> rules of the staged <c>vc.rules.md</c> files whose path one of the
+    /// staged files touches, resolved and matched exactly as the hook resolves and matches them
+    /// (<see cref="PathLockRule"/>, path relative to the declaring file, the declaring file itself
+    /// ordinary content). Unparsable or unresolvable rules are skipped: they suggest nobody.
+    /// </summary>
+    internal static IReadOnlyList<ReviewApprovalRule> MatchApprovalRules(GitStagedSnapshot snapshot)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var result = new List<ReviewApprovalRule>();
+        foreach (var agentFile in snapshot.AgentFiles.OrderBy(file => file.RelativePath, StringComparer.Ordinal))
+        {
+            var sourceFullPath = Path.Combine(snapshot.RepositoryPath, agentFile.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+            foreach (var line in AgentRuleSectionReader.Read(agentFile.Content))
+            {
+                if (line.Enforcement is "SKIP" or "DISABLED") continue;
+                if (!HumanSignatureRule.TryParseSignedApproval(line.RuleText, out var approval)) continue;
+                var specification = new PathLockSpecification(PathLockKind.Directory, approval.RelativePath);
+                if (!PathLockRule.TryResolveRepositoryPath(specification, sourceFullPath, snapshot.RepositoryPath,
+                        out var approvalPath, out _, "approval path"))
+                    continue;
+                var matched = snapshot.Files
+                    .Where(file => PathLockRule.Matches(specification, approvalPath, file.RelativePath, file.PreviousRelativePath,
+                        sourceAgentRepositoryPath: string.Empty, comparison))
+                    .Select(file => file.RelativePath)
+                    .Distinct(comparer)
+                    .Order(StringComparer.Ordinal)
+                    .ToList();
+                if (matched.Count == 0) continue;
+                result.Add(new ReviewApprovalRule(line.RuleText, agentFile.RelativePath, approvalPath, approval.Approvers, matched));
+            }
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// For each linked commit, the verified approvals over its tree, found exactly as the commit hook
+    /// finds them (<see cref="IReviewRequestStore.FindVerifiedApprovalsAsync"/>): one entry per
+    /// reviewer, newest first. A sha the checkout does not have answers with no tree and no approvals.
+    /// </summary>
+    public async Task<ReviewCommitApprovals> CommitApprovalsAsync(string projectPath, IReadOnlyList<string> shas, CancellationToken ct)
+    {
+        projectPath = NormalizeProject(projectPath);
+        var requested = new List<string>();
+        foreach (var raw in shas)
+        {
+            var sha = raw?.Trim().ToLowerInvariant() ?? string.Empty;
+            if (sha.Length is < 7 or > 64 || !sha.All(character => character is (>= '0' and <= '9') or (>= 'a' and <= 'f')))
+                throw Invalid("Each sha is 7 to 64 hexadecimal characters.");
+            if (!requested.Contains(sha, StringComparer.Ordinal)) requested.Add(sha);
+        }
+        if (requested.Count > MaxCommitLookups)
+            throw Invalid($"Ask about at most {MaxCommitLookups} commits at a time.");
+
+        var trees = requested.Count == 0
+            ? new Dictionary<string, string>(StringComparer.Ordinal)
+            : await _commitTrees(projectPath, requested, ct);
+        var byTree = new Dictionary<string, IReadOnlyList<ReviewCommitApproval>>(StringComparer.Ordinal);
+        var entries = new List<ReviewCommitApprovalEntry>(requested.Count);
+        foreach (var sha in requested)
+        {
+            if (!trees.TryGetValue(sha, out var tree) || !CommitSignatureFormat.IsObjectId(tree))
+            {
+                entries.Add(new ReviewCommitApprovalEntry(sha, null, []));
+                continue;
+            }
+            if (!byTree.TryGetValue(tree, out var approvals))
+            {
+                var rows = await store.FindVerifiedApprovalsAsync(tree, ct);
+                approvals = rows
+                    .Where(row => row.SignatureBase64 is not null)
+                    .GroupBy(row => row.Reviewer, StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.First())
+                    .Select(row => new ReviewCommitApproval(row.Reviewer, row.RequestId, row.VerifiedUTC ?? row.DecidedUTC))
+                    .ToList();
+                byTree[tree] = approvals;
+            }
+            entries.Add(new ReviewCommitApprovalEntry(sha, tree, approvals));
+        }
+        return new ReviewCommitApprovals(entries);
+    }
+
+    /// <summary>
+    /// The default <see cref="CommitTreeResolver"/>: one <c>git log --no-walk</c> through
+    /// <see cref="GitCli"/> (argv only, bounded output), <c>--ignore-missing</c> so a sha the checkout
+    /// lacks is simply absent from the answer. A git failure answers an empty map: no approval is shown
+    /// rather than a wrong one.
+    /// </summary>
+    public static async Task<IReadOnlyDictionary<string, string>> ResolveCommitTreesAsync(string projectPath, IReadOnlyList<string> shas, CancellationToken ct)
+    {
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (shas.Count == 0) return result;
+        var arguments = new List<string> { "--no-pager", "log", "--no-walk=unsorted", "--ignore-missing", "--format=%H %T" };
+        arguments.AddRange(shas);
+        arguments.Add("--");
+        var run = await GitCli.RunAsync(projectPath, arguments, ct, maxOutputChars: 64 * 1024);
+        if (!run.Succeeded) return result;
+        foreach (var line in run.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length != 2 || !CommitSignatureFormat.IsObjectId(parts[0]) || !CommitSignatureFormat.IsObjectId(parts[1])) continue;
+            foreach (var sha in shas)
+            {
+                if (parts[0].StartsWith(sha, StringComparison.Ordinal)) result.TryAdd(sha, parts[1]);
+            }
+        }
+        return result;
+    }
+
+    private async Task<GitStagedSnapshot> CaptureStagedAsync(string projectPath, CancellationToken ct)
+    {
+        GitStagedSnapshot snapshot;
+        try
+        {
+            snapshot = await snapshots.CaptureAsync(projectPath, ct);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            throw new ReviewRequestException("not_a_repository",
+                "VibeRails could not read the staged changes of this project. Check that it is a Git repository.", 409);
+        }
+        if (snapshot.StagedIdentity is null || !CommitSignatureFormat.IsObjectId(snapshot.StagedIdentity.StagedTree))
+            throw new ReviewRequestException("not_a_repository", "VibeRails could not determine the staged tree of this project.", 409);
+        if (snapshot.Files.Count == 0)
+            throw new ReviewRequestException("nothing_staged", "Nothing is staged. Stage the changes to review with git add first.", 409);
+        return snapshot;
+    }
+
+    private static int Utf8(string? text) => text is null ? 0 : System.Text.Encoding.UTF8.GetByteCount(text);
 
     public async Task<ReviewRequestList> ListAsync(string projectPath, CancellationToken ct)
     {

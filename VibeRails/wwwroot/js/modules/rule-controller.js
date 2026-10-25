@@ -230,12 +230,17 @@ export function buildCodeAnalyzerSummary(response = {}) {
 
 function normalizeVcaFinding(finding = {}) {
     const status = String(finding?.status || '').trim().toLowerCase();
-    const presentation = {
-        blocked: { label: 'STOP', tone: 'danger' },
-        acknowledgment_required: { label: 'COMMIT', tone: 'warning' },
-        warning: { label: 'WARN', tone: 'warning' },
-        deferred: { label: 'LATER', tone: 'info' }
-    }[status] || { label: String(finding?.enforcement || 'INFO').toUpperCase(), tone: 'info' };
+    // approvedBy (VB-50 slice E): a deferred signature finding a reviewer already approved through a
+    // review request over the staged tree. The commit hook applies that approval, so it reads as resolved.
+    const approvedBy = typeof finding?.approvedBy === 'string' && finding.approvedBy.trim() ? finding.approvedBy.trim() : null;
+    const presentation = (status === 'deferred' && approvedBy)
+        ? { label: 'APPROVED', tone: 'success' }
+        : {
+            blocked: { label: 'STOP', tone: 'danger' },
+            acknowledgment_required: { label: 'COMMIT', tone: 'warning' },
+            warning: { label: 'WARN', tone: 'warning' },
+            deferred: { label: 'LATER', tone: 'info' }
+        }[status] || { label: String(finding?.enforcement || 'INFO').toUpperCase(), tone: 'info' };
 
     return {
         status,
@@ -246,8 +251,16 @@ function normalizeVcaFinding(finding = {}) {
         reason: String(finding?.reason || 'The rule did not pass.'),
         sourcePath: String(finding?.sourcePath || ''),
         guidance: String(finding?.guidance || 'Review this finding before committing.'),
-        acknowledgment: finding?.acknowledgment ? String(finding.acknowledgment) : null
+        acknowledgment: finding?.acknowledgment ? String(finding.acknowledgment) : null,
+        approvedBy: status === 'deferred' ? approvedBy : null
     };
+}
+
+/** The line a finding shows when a review request already carries its approval. */
+export function describeStoredApproval(finding) {
+    return finding?.approvedBy
+        ? `Approved by ${finding.approvedBy} through a review request over the staged tree; Git Guard applies that signature at commit.`
+        : '';
 }
 
 export function buildVcaExplanationViewModel(response = {}) {
@@ -335,7 +348,8 @@ export function buildVcaExplanationViewModel(response = {}) {
             finding.sourcePath ? `Rule source: ${finding.sourcePath}` : null,
             `Why it failed: ${finding.reason}`,
             `What to do next: ${finding.guidance}`,
-            finding.acknowledgment ? `Acknowledgment: ${finding.acknowledgment} Reason: <explain why this is acceptable>` : null
+            finding.acknowledgment ? `Acknowledgment: ${finding.acknowledgment} Reason: <explain why this is acceptable>` : null,
+            finding.approvedBy ? describeStoredApproval(finding) : null
         ].filter(Boolean))
     ];
 
@@ -1703,6 +1717,12 @@ export class RuleController {
         reason.className = 'vca-finding-reason';
         reason.textContent = finding.reason;
         summaryCopy.appendChild(reason);
+        if (finding.approvedBy) {
+            const approved = document.createElement('span');
+            approved.className = 'vca-finding-approved';
+            approved.textContent = describeStoredApproval(finding);
+            summaryCopy.appendChild(approved);
+        }
 
         const chevron = document.createElement('i');
         chevron.className = 'fa-solid fa-chevron-down vca-finding-chevron';

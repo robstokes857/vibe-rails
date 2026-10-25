@@ -32,6 +32,7 @@ public sealed class ReviewRequestRoutesTests : IAsyncLifetime
 {
     private static readonly HttpClient SharedClient = new();
     private static readonly string Tree = new('b', 40);
+    private static readonly string ApprovedCommit = new('e', 40);
 
     private readonly string _root = Path.Combine(Path.GetTempPath(), $"viberails-review-routes-{Guid.NewGuid():N}");
     private readonly string _originalRootPath = ParserConfigs.GetRootPath();
@@ -72,7 +73,11 @@ public sealed class ReviewRequestRoutesTests : IAsyncLifetime
         builder.Services.AddSingleton(auth.Object);
         builder.Services.AddSingleton(sessions.Object);
         var store = new ReviewRequestStore(connection);
-        var reviews = new ReviewRequestService(store, snapshots.Object, _verifier);
+        // Slice E: the commit-approvals route resolves commit trees through this fake instead of git.
+        var reviews = new ReviewRequestService(store, snapshots.Object, _verifier, commitTrees: (_, shas, _) =>
+            Task.FromResult<IReadOnlyDictionary<string, string>>(shas
+                .Where(sha => ApprovedCommit.StartsWith(sha, StringComparison.Ordinal))
+                .ToDictionary(sha => sha, _ => Tree, StringComparer.Ordinal)));
         builder.Services.AddSingleton(reviews);
         // Slice C: the sender behind disclosure/send/cancel, with viberails.ai intercepted.
         var transport = ReviewRequestTestSupport.Transport(request =>
@@ -110,7 +115,8 @@ public sealed class ReviewRequestRoutesTests : IAsyncLifetime
             (HttpMethod.Get, "/api/v1/review-requests"), (HttpMethod.Post, "/api/v1/review-requests"),
             (HttpMethod.Get, $"/api/v1/review-requests/{id}"), (HttpMethod.Post, $"/api/v1/review-requests/{id}/decisions"),
             (HttpMethod.Post, $"/api/v1/review-requests/{id}/cancel"), (HttpMethod.Delete, $"/api/v1/review-requests/{id}"),
-            (HttpMethod.Get, $"/api/v1/review-requests/{id}/disclosure"), (HttpMethod.Post, $"/api/v1/review-requests/{id}/send")];
+            (HttpMethod.Get, $"/api/v1/review-requests/{id}/disclosure"), (HttpMethod.Post, $"/api/v1/review-requests/{id}/send"),
+            (HttpMethod.Get, "/api/v1/review-requests/staged"), (HttpMethod.Get, $"/api/v1/review-requests/commit-approvals?sha={ApprovedCommit}")];
         foreach (var (method, path) in routes)
         foreach (var credentials in new[] { 0, 1, 2 })
         {
@@ -189,6 +195,58 @@ public sealed class ReviewRequestRoutesTests : IAsyncLifetime
         Assert.Equal("not_found", await CodeAsync(gone));
         using var unknown = await Send(HttpMethod.Get, $"/api/v1/review-requests/{Guid.NewGuid()}");
         Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
+    }
+
+    /// <summary>Slice E: the card's preview reads the staged index without storing anything, and a linked commit's approval is read from the ledger.</summary>
+    [Fact]
+    public async Task StagedPreviewStoresNothingAndCommitApprovalsReadTheLedger()
+    {
+        using var preview = await Send(HttpMethod.Get, "/api/v1/review-requests/staged");
+        Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+        Assert.True(preview.Headers.CacheControl?.NoStore);
+        using var previewJson = JsonDocument.Parse(await preview.Content.ReadAsStringAsync(Ct));
+        Assert.Equal(Tree, previewJson.RootElement.GetProperty("treeId").GetString());
+        var file = Assert.Single(previewJson.RootElement.GetProperty("files").EnumerateArray());
+        Assert.Equal("db.cs", file.GetProperty("path").GetString());
+        Assert.Equal(1, file.GetProperty("added").GetInt32());
+        Assert.Equal(1, file.GetProperty("removed").GetInt32());
+        Assert.True(file.GetProperty("textIncluded").GetBoolean());
+        Assert.Equal("email", previewJson.RootElement.GetProperty("audience").GetString());
+        Assert.Empty(previewJson.RootElement.GetProperty("suggestedReviewers").EnumerateArray());
+        using var list = await Send(HttpMethod.Get, "/api/v1/review-requests");
+        using var listJson = JsonDocument.Parse(await list.Content.ReadAsStringAsync(Ct));
+        Assert.Empty(listJson.RootElement.GetProperty("requests").EnumerateArray());
+
+        using var none = await Send(HttpMethod.Get, $"/api/v1/review-requests/commit-approvals?sha={ApprovedCommit}");
+        Assert.Equal(HttpStatusCode.OK, none.StatusCode);
+        using var noneJson = JsonDocument.Parse(await none.Content.ReadAsStringAsync(Ct));
+        var pending = Assert.Single(noneJson.RootElement.GetProperty("commits").EnumerateArray());
+        Assert.Equal(Tree, pending.GetProperty("treeId").GetString());
+        Assert.Empty(pending.GetProperty("approvals").EnumerateArray());
+
+        using var created = await Send(HttpMethod.Post, "/api/v1/review-requests", "{\"reviewers\":[\"lead@example.com\"],\"cardKey\":\"VB-50\"}");
+        var id = JsonDocument.Parse(await created.Content.ReadAsStringAsync(Ct)).RootElement.GetProperty("id").GetString();
+        using var approved = await Send(HttpMethod.Post, $"/api/v1/review-requests/{id}/decisions",
+            JsonSerializer.Serialize(new { decision = "approved", trailer = HumanSignatureRuleTests.SignatureLine(Tree) }));
+        Assert.Equal(HttpStatusCode.OK, approved.StatusCode);
+
+        using var found = await Send(HttpMethod.Get, $"/api/v1/review-requests/commit-approvals?sha={ApprovedCommit[..12]},{new string('0', 40)}");
+        Assert.Equal(HttpStatusCode.OK, found.StatusCode);
+        using var foundJson = JsonDocument.Parse(await found.Content.ReadAsStringAsync(Ct));
+        var commits = foundJson.RootElement.GetProperty("commits").EnumerateArray().ToList();
+        Assert.Equal(2, commits.Count);
+        var approval = Assert.Single(commits[0].GetProperty("approvals").EnumerateArray());
+        Assert.Equal("lead@example.com", approval.GetProperty("reviewer").GetString());
+        Assert.Equal(id, approval.GetProperty("requestId").GetString());
+        // Null properties are omitted by the context's WhenWritingNull option.
+        Assert.False(commits[1].TryGetProperty("treeId", out var missingTree) && missingTree.ValueKind != JsonValueKind.Null);
+        Assert.Empty(commits[1].GetProperty("approvals").EnumerateArray());
+
+        using var invalid = await Send(HttpMethod.Get, "/api/v1/review-requests/commit-approvals?sha=not-hex");
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        Assert.Equal("invalid_request", await CodeAsync(invalid));
+        using var deleted = await Send(HttpMethod.Delete, $"/api/v1/review-requests/{id}");
+        Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
     }
 
     /// <summary>Slice C: nothing leaves without the confirmed send; the send records the hosted copy; cancel reaches the host.</summary>

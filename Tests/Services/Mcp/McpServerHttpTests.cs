@@ -44,6 +44,7 @@ public class McpServerHttpTests : IAsyncLifetime
         "resume_token_saver",
         "get_token_saver_status",
         "create_session_share_link",
+        "request_review",
         "add_jira_comment",
         "add_ado_comment",
         "get_pr_review_queue",
@@ -68,6 +69,7 @@ public class McpServerHttpTests : IAsyncLifetime
         builder.Services.AddScoped<TokenSaverTool>();
         builder.Services.AddAgentSessionMcp();
         builder.Services.AddSessionSharingMcp();
+        builder.Services.AddReviewRequestMcp();
         builder.Services.AddBoardAgentLaunchMcp();
         builder.Services.AddSingleton(Mock.Of<IBoardService>());
         builder.Services.AddSingleton(Mock.Of<IBoardProjectResolver>());
@@ -312,6 +314,24 @@ public class McpServerHttpTests : IAsyncLifetime
             ["displayName"] = "Fix bug", ["emails"] = "not an address" // Audience validation also runs before any request.
         }, ct);
         Assert.Contains("FAIL: Enter valid email addresses", result.Text);
+    }
+
+    [Fact]
+    public async Task RequestReviewToolExposesReviewersNoteAndCardOnlyAndValidatesBeforeAnyCall()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var client = await ConnectAsync(ct);
+        var tool = Assert.Single(await client.GetAvailableToolsAsync(ct), t => t.Name == "request_review");
+        var properties = tool.JsonSchema.GetProperty("properties");
+        // Reviewers, a note and a card: never a session id (only the calling terminal is attached), never a send or a signature.
+        Assert.Equal(new[] { "cardKey", "note", "reviewers" }, properties.EnumerateObject().Select(p => p.Name).OrderBy(n => n).ToArray());
+        Assert.Contains("Nothing is sent by this tool", tool.Description);
+        Assert.Contains("cannot sign", tool.Description);
+        var result = await client.CallToolAsync("request_review", new Dictionary<string, object?>
+        {
+            ["reviewers"] = "not-an-address" // Validation runs before the root is contacted.
+        }, ct);
+        Assert.Contains("FAIL: 'not-an-address' is not an email address.", result.Text);
     }
 
     [Fact]

@@ -189,6 +189,7 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 |------------------------|--------|-------------|
 | `validate_vca` | `RulesTool.ValidateVca` | Validates the staged Git index snapshot against `- [ENFORCEMENT] …` rules from the indexed vc.rules.md files. |
 | `create_session_share_link` | `SessionSharingTool.CreateSessionShareLink` | Creates a public replay link for the calling terminal's inherited session, with a required `displayName` (1–160 characters). Returns upload status, expiry and a ready-to-copy `vibe-share:<url>` commit line. Anyone with the link can view terminal output, prompts and saved code changes. |
+| `request_review` | `ReviewRequestTool.RequestReview` | Creates a review request for the calling terminal's project from the staged index (VB-50 slice E) through the root's `/api/v1/review-requests` with the inherited root credentials, attaching only the calling session: `reviewers` (1–10 emails), optional `note` and `cardKey`. Returns the request id, tree, files, sessions and exactly what a send would transfer. Never sends, decides or signs: a person sends from the card after reading the disclosure. Not a Board auto-grant. |
 | `add_jira_comment` | `BoardTool.AddJiraComment` | Explicitly posts text and optional public `sessionLinks` to the card's connected Jira issue, then saves a Board receipt. Uses saved credentials; no Board auto-grant or automatic retry. See [Jira comments](../Jira/Comments.md). |
 | `add_ado_comment` | `BoardTool.AddAdoComment` | Explicitly posts text and optional public `sessionLinks` to the card's linked Azure DevOps work item, then saves a Board receipt (`syncToJira:false`). Uses the saved personal access token; returns `FAIL:`/`UNCONFIRMED:`; no Board auto-grant or automatic retry. See [Azure DevOps comments](../AzureDevOps/Comments.md). |
 | `search_history` | `SessionSearchTool.SearchHistory` | Semantic + keyword search over the developer's captured agent history. |
@@ -354,6 +355,21 @@ link for later commits from the same session. Active sessions can create links i
 the replay is available only after completion and upload; keep the root open for upload. The tool
 description and response disclose the public-read capability and expiration. See
 [SessionSharing.md](../Integrations/VibeCodeRemote/SessionSharing.md).
+
+### `request_review` — a review request that a person still has to send
+
+`ReviewRequestTool` (VB-50 slice E) uses the same inherited `VIBERAILS_TOOL_API_BASE`,
+`VIBERAILS_TOOL_SESSION_TOKEN`, `VIBERAILS_TOOL_TAB_TOKEN` and `VIBERAILS_TOOL_CURRENT_SESSION_ID`
+as session sharing to call the root-only `POST /api/v1/review-requests` (reviewers, the calling
+session, an optional note and card key) and then `GET /{id}/disclosure`. The answer is the request
+id, the staged tree, each file with its change kind and omission, the attached session, and the
+fixed statement of what leaves the computer when a person presses Send on the card; the tool itself
+transfers nothing, and it cannot decide or sign. An older root (404/405) is reported as needing an
+update; the root's own refusals (`nothing_staged`, `not_a_repository`, `session_not_found`, …) keep
+their code and wording; other failures report only the HTTP status. Both transports register it
+(`AddReviewRequestMcp`, `.WithTools<ReviewRequestTool>()`); it is not in the Board auto-grants.
+Contract: [Review requests](../ReviewRequests/README.md); security:
+[API_SEC.md](../../../API_SEC.md#request-review-from-a-card-and-request_review-vb-50-slice-e).
 
 ### `search_history` — the real search
 

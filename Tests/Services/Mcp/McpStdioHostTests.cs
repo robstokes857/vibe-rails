@@ -79,6 +79,7 @@ public class McpStdioHostTests
 
         Assert.Contains(services, d => d.ServiceType == typeof(TokenSaverTool));
         Assert.Contains(services, d => d.ServiceType == typeof(SessionSharingTool));
+        Assert.Contains(services, d => d.ServiceType == typeof(ReviewRequestTool));
         Assert.Contains(services, d => d.ServiceType == typeof(BoardAgentLaunchTool));
         Assert.Contains(services, d => d.ServiceType == typeof(BoardAgentOptionsTool));
         Assert.Contains(services, d => d.ServiceType == typeof(DesktopMcpActivityTracker));

@@ -130,6 +130,7 @@ public static class McpStdioHost
         services.AddTokenSaverMcp();
         services.AddAgentSessionMcp();
         services.AddSessionSharingMcp();
+        services.AddReviewRequestMcp();
         services.AddBoardAgentLaunchMcp();
         services.AddDesktopMcpActivity(stdio: true);
         services.AddJiraClients();

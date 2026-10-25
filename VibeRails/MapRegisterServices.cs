@@ -135,6 +135,10 @@ namespace VibeRails
                     sp.GetRequiredService<IAppEventBus>(),
                     sp.GetRequiredService<Services.ReviewRequests.ReviewRequestPollState>(),
                     ParserConfigs.GetApiKey));
+                // Slice E: the Rules page reads the ledger the commit hook reads, through the same quiet,
+                // bounded source (resolved only when a signature finding is deferred). Read-only.
+                serviceCollection.AddSingleton<Services.VCA.Hooks.IStoredCommitApprovalSource>(sp =>
+                    new Services.VCA.Hooks.ReviewRequestApprovalSource(() => sp.GetService<DB.IReviewRequestStore>()));
                 // Slice D: the requests addressed to this account, refreshed by the scheduler on the same
                 // cadence and answered from the "Reviews requested of you" page. The singleton holds the
                 // popup states, so it builds a fresh transport per call from the typed client's factory
@@ -383,6 +387,7 @@ namespace VibeRails
                 serviceCollection.AddTokenSaverMcp();
                 serviceCollection.AddAgentSessionMcp();
                 serviceCollection.AddSessionSharingMcp();
+                serviceCollection.AddReviewRequestMcp();
                 serviceCollection.AddBoardAgentLaunchMcp();
                 serviceCollection.AddDesktopMcpActivity(stdio: false);
                 // Kanban board tools (ctor-injected board services). Registered here AND in

@@ -19,6 +19,7 @@ const {
     buildCodeAnalyzerSummary,
     buildProjectHealthFixPrompt,
     buildVcaExplanationViewModel,
+    describeStoredApproval,
     normalizeHookStatus
 } = await import(pathToFileURL(controllerModule).href);
 const { mountProjectHealthFixPickers, launchProjectHealthFix } = await import(
@@ -300,6 +301,39 @@ test('VCA STOP findings explain why the commit is blocked and how to fix it', ()
     assert.match(model.findings[0].reason, /without a matching test/i);
     assert.match(model.fixBrief, /what to do next: add or update/i);
     assert.deepEqual(model.stats.map(stat => stat.value), [2, 3, 1]);
+});
+
+test('a deferred signature finding with a stored approval reads as approved by that reviewer', () => {
+    const model = buildVcaExplanationViewModel({
+        success: true,
+        validation: {
+            outcome: 'passed',
+            stagedFileCount: 1,
+            applicableRuleCount: 2,
+            deferredCount: 2,
+            findings: [
+                { status: 'deferred', enforcement: 'STOP', rule: "Signed Approval('db.cs', 'lead@example.test')",
+                    reason: 'Deferred: changes need a signed approval.', sourcePath: 'vc.rules.md', guidance: 'Sign in the popup.',
+                    approvedBy: ' lead@example.test ' },
+                { status: 'deferred', enforcement: 'STOP', rule: 'Human verified', reason: 'Deferred.', sourcePath: 'vc.rules.md', guidance: 'Sign.' },
+                { status: 'warning', enforcement: 'WARN', rule: 'Other', reason: 'Nope.', approvedBy: 'ignored@example.test' }
+            ]
+        }
+    });
+
+    const byRule = rule => model.findings.find(finding => finding.rule === rule);
+    const approved = byRule("Signed Approval('db.cs', 'lead@example.test')");
+    const deferred = byRule('Human verified');
+    const warning = byRule('Other');
+    assert.equal(warning.approvedBy, null, 'only a deferred finding carries a stored approval');
+    assert.equal(deferred.label, 'LATER');
+    assert.equal(deferred.approvedBy, null);
+    assert.equal(approved.label, 'APPROVED');
+    assert.equal(approved.tone, 'success');
+    assert.equal(approved.approvedBy, 'lead@example.test');
+    assert.equal(describeStoredApproval(approved), 'Approved by lead@example.test through a review request over the staged tree; Git Guard applies that signature at commit.');
+    assert.equal(describeStoredApproval(deferred), '');
+    assert.match(model.fixBrief, /Approved by lead@example\.test through a review request/);
 });
 
 test('VCA action queue puts blockers before acknowledgments and warnings', () => {

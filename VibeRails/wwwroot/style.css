@@ -12392,6 +12392,16 @@ body.vb-board-active #app-content {
 .vca-finding[data-tone="danger"] { --vca-finding-tone: var(--color-danger); }
 .vca-finding[data-tone="warning"] { --vca-finding-tone: var(--color-warning); }
 .vca-finding[data-tone="info"] { --vca-finding-tone: var(--color-primary); }
+/* A deferred signature finding a reviewer already approved through a review request (VB-50 slice E). */
+.vca-finding[data-tone="success"] { --vca-finding-tone: var(--color-success); }
+
+.vca-finding-approved {
+    display: block;
+    color: var(--color-success);
+    font-size: 0.72rem;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
 
 .vca-finding-summary {
     display: grid;

@@ -51,6 +51,7 @@ import { BoardSearch } from './board-search.js';
 import { openLocalCardEditor } from './board-local-card.js';
 import { cardAutomationControls, bindCardAutomations } from './board-card-automations.js';
 import { cardSharingSection, bindCardSharing } from './board-card-sharing.js';
+import { requestReviewSection, bindRequestReview, commitApprovalBadge } from './board-card-request-review.js';
 import { contextSectionMarkup, bindCardContext } from './board-card-context.js';
 import { cardDisplayId, cardLabel } from './board-card-label.js';
 import { agentMadeSummary, agentProvenanceHtml, bindAgentProvenance } from './board-agent-provenance.js';
@@ -484,6 +485,8 @@ export class BoardController {
         this.cardAutomations = null;
         this.cardSharing?.dispose();
         this.cardSharing = null;
+        this.cardRequestReview?.dispose();
+        this.cardRequestReview = null;
         try { this.launchOptionsDispose?.(); } catch { /* already torn down */ }
         this.launchOptionsDispose = null;
         try { this.assigneePickerDispose?.(); } catch { /* already torn down */ }
@@ -1571,6 +1574,7 @@ export class BoardController {
                         <div class="board-side-list" data-board-automations></div>
                     </section>
 
+                    ${requestReviewSection(Boolean(card))}
                     ${cardSharingSection(Boolean(card))}
 
                     ${card ? `<section class="board-side-section"><details data-board-advanced>
@@ -1759,6 +1763,16 @@ export class BoardController {
         const assigneeSelect = editor.querySelector('#board-card-assignee');
         this.cardChecks = bindCardChecks(editor, card, this.app);
         this.cardSharing = bindCardSharing(editor, card, { app: this.app, hasDraft: () => this.cardHasDraft(editor) });
+        // Request review (VB-50 slice E). Approvals over linked commits' trees decorate the Commits rail.
+        this.cardRequestReview?.dispose();
+        this.cardRequestReview = bindRequestReview(editor, card, {
+            app: this.app,
+            hasDraft: () => this.cardHasDraft(editor),
+            onCommitApprovals: approvals => {
+                card.reviewApprovals = approvals;
+                if (editor.isConnected) this.renderCommitsPanel(editor, card);
+            }
+        });
         bindAgentProvenance(editor.querySelector('[data-board-agent-provenance]'),
             (sessionId, seekToUtc) => this.openSessionReplay({ id: sessionId }, { seekToUtc }));
         this.cardAutomations = bindCardAutomations(editor, card, {
@@ -2336,7 +2350,7 @@ export class BoardController {
                     title="${escapeHtml(commit.message)} — ${escapeHtml(commit.author)}">
                     <i class="fa-solid fa-code-branch board-side-icon" aria-hidden="true"></i>
                     <span class="board-side-text">
-                        <span class="board-sha">${escapeHtml(commit.shortSha)}</span>
+                        <span class="board-sha">${escapeHtml(commit.shortSha)}</span>${commitApprovalBadge(card?.reviewApprovals?.[String(commit.sha || '').toLowerCase()])}
                         <span class="board-side-sub">${escapeHtml(commit.message)}</span>
                     </span>
                 </button>

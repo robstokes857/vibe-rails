@@ -4184,6 +4184,44 @@
                     min-width: 0;
                 }
 
+                /* Request review (VB-50 slice E): the staged file list and the project's requests. */
+                .board-review-files {
+                    list-style: none;
+                    margin: 0.25rem 0;
+                    padding: 0;
+                    font-size: 0.78rem;
+                    max-height: 14rem;
+                    overflow-y: auto;
+                }
+                .board-review-files li {
+                    display: flex;
+                    justify-content: space-between;
+                    gap: 0.5rem;
+                    min-width: 0;
+                    padding: 0.1rem 0;
+                }
+                .board-review-path {
+                    font-family: var(--font-mono, ui-monospace, monospace);
+                    overflow-wrap: anywhere;
+                    min-width: 0;
+                }
+                .board-review-counts {
+                    flex-shrink: 0;
+                    color: var(--color-text-muted, #94a3b8);
+                    font-variant-numeric: tabular-nums;
+                }
+                .board-review-counts.is-omitted { color: var(--color-warning, #f59e0b); }
+                .board-card-review-request {
+                    padding: 0.4rem 0;
+                    border-top: 1px solid var(--color-border, #334155);
+                }
+                .board-card-review-request:first-child { border-top: 0; }
+                .board-review-approved {
+                    margin-left: 0.35rem;
+                    font-weight: 500;
+                }
+                .board-review-status-badge { font-weight: 500; white-space: nowrap; }
+
                 .board-link-picker > summary {
                     color: var(--color-primary, #3b82f6);
                     cursor: pointer;

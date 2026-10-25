@@ -3815,6 +3815,136 @@ for (const width of [1440, 390]) {
     });
 }
 
+test('Request review shows the staged preview, creates and sends after the disclosure, and marks approvals on the header and commits', async ({ page }, testInfo) => {
+    const errors = []; page.on('pageerror', error => errors.push(error.message));
+    await page.addInitScript(() => { window.confirm = () => { throw new Error('window.confirm is banned; use confirmDialog'); }; });
+    await page.route('https://viberails.ai/**', route => route.abort());
+    const tree = 'b'.repeat(40), commitSha = 'e'.repeat(40);
+    const trailer = `vibe-signature: v1 key=6f1a2b3c-4d5e-4f60-8a9b-0c1d2e3f4a5b fp=${'f'.repeat(64)} tree=${tree} sig=${'A'.repeat(344)}`;
+    const requests = await openBoard(page, { onCard: card => {
+        card.commits = [{ sha: commitSha, shortSha: 'eeeeeee', author: 'Dev', message: 'Approved change', committedAt: '2026-10-24T12:00:00Z', linkedAt: '2026-10-24T12:05:00Z' }];
+    } });
+    const approved = { id: '11111111-1111-4111-8111-111111111111', scope: 'staged', treeId: tree, status: 'approved', reviewers: ['lead@example.test', '<img src=x onerror="window.reviewInjected=true">'],
+        cardKey: 'VB-1', fileCount: 1, sessionCount: 1, createdUtc: '2026-10-23T12:00:00Z', updatedUtc: '2026-10-23T13:00:00Z',
+        decisions: [{ id: 1, reviewer: 'lead@example.test', decision: 'approved', trailer, decidedUtc: '2026-10-23T13:00:00Z', verifiedUtc: '2026-10-23T13:00:00Z' }],
+        remote: { id: 'rvw_' + '0'.repeat(32), sentUtc: '2026-10-23T12:30:00Z', expiresUtc: '2026-11-23T12:30:00Z' } };
+    const stale = { ...approved, id: '22222222-2222-4222-8222-222222222222', status: 'open', decisions: [], remote: null, cardKey: 'VB-9', createdUtc: '2026-10-22T12:00:00Z' };
+    let list = [approved, stale];
+    const bodies = { create: [], send: [], cancel: [], deleted: [] };
+    await page.route('**/api/v1/review-requests**', async route => {
+        const request = route.request(), method = request.method(), path = new URL(request.url()).pathname;
+        expect(request.headers().viberails_tab).toBe('board-fixture');
+        if (path === '/api/v1/review-requests' && method === 'GET') return route.fulfill({ json: { requests: list } });
+        if (path === '/api/v1/review-requests/staged') return route.fulfill({ json: {
+            repository: 'board-fixture', treeId: tree, baseTree: 'd'.repeat(40), baseCommit: 'c'.repeat(40),
+            files: [{ path: 'db.cs', change: 'modified', changedLines: 1, added: 1, removed: 1, textIncluded: true },
+                { path: 'logo.png', change: 'added', textIncluded: false, omitted: 'binary' }],
+            filesWithText: 1, filesWithoutText: 1, textBytes: 44, suggestedReviewers: ['lead@example.test'],
+            rules: [{ rule: "Signed Approval('db.cs', 'lead@example.test')", sourcePath: 'vc.rules.md', path: 'db.cs', approvers: ['lead@example.test'], matchedFiles: ['db.cs'] }],
+            destination: 'https://viberails.ai', audience: 'email', sessionDisclosure: 'Each attached session uploads to your viberails.ai account after it ends.', expiresUtc: '2026-11-24T12:00:00Z' } });
+        if (path === '/api/v1/review-requests/commit-approvals') return route.fulfill({ json: { commits: [{ sha: commitSha, treeId: tree, approvals: [{ reviewer: 'lead@example.test', requestId: approved.id, decidedUtc: '2026-10-23T13:00:00Z' }] }] } });
+        if (path === '/api/v1/review-requests' && method === 'POST') {
+            const body = request.postDataJSON(); bodies.create.push(body);
+            const created = { ...stale, id: '33333333-3333-4333-8333-333333333333', cardKey: body.cardKey, reviewers: body.reviewers, sessionCount: body.sessions.length, createdUtc: '2026-10-24T14:00:00Z' };
+            list = [created, ...list];
+            return route.fulfill({ status: 201, json: created });
+        }
+        const match = path.match(/^\/api\/v1\/review-requests\/([^/]+)(?:\/(disclosure|send|cancel))?$/);
+        const target = list.find(item => item.id === match?.[1]);
+        if (match?.[2] === 'disclosure') return route.fulfill({ json: { id: target.id, destination: 'https://viberails.ai', audience: 'email', repository: 'board-fixture', treeId: tree,
+            baseTree: 'd'.repeat(40), files: [{ path: 'db.cs', change: 'modified', changedLines: 1, textIncluded: true }], filesWithText: 1, filesWithoutText: 0, textBytes: 44,
+            sessions: [{ id: 'session_test', name: 'Codex session', cli: 'codex', startedUtc: '2026-10-24T12:00:00Z', live: true }],
+            sessionDisclosure: 'Each attached session uploads to your viberails.ai account after it ends.', reviewers: target.reviewers, cardKey: target.cardKey, note: 'Check the migration',
+            expiresUtc: '2026-11-24T14:00:00Z', sent: false } });
+        if (match?.[2] === 'send') {
+            bodies.send.push(request.postDataJSON());
+            if (target.cardKey !== 'VB-1') return route.fulfill({ status: 502, json: { error: 'viberails.ai does not support review requests yet. Nothing was sent; try again after the service is updated.', code: 'server_update_required' } });
+            target.remote = { id: 'rvw_' + '1'.repeat(32), sentUtc: '2026-10-24T14:10:00Z', expiresUtc: '2026-11-24T14:10:00Z' };
+            return route.fulfill({ json: { request: target, message: 'Sent. Attached sessions upload after they end; keep VibeRails open until they do. Decisions are checked every 15 minutes.' } });
+        }
+        if (match?.[2] === 'cancel') { bodies.cancel.push(target.id); target.status = 'cancelled'; return route.fulfill({ json: target }); }
+        if (method === 'DELETE') { bodies.deleted.push(target.id); list = list.filter(item => item !== target); return route.fulfill({ status: 204 }); }
+        return route.fulfill({ status: 404, json: { error: 'Review request not found.', code: 'not_found' } });
+    });
+
+    await page.getByText('Description images', { exact: true }).click();
+    const editor = page.locator('[data-board-card-editor]');
+    await expect(editor).toBeVisible();
+    // Header and commit rail read the ledger as soon as the card opens, without expanding the section.
+    const headerBadge = page.locator('#modal-container .modal-header [data-board-review-status]');
+    await expect(headerBadge).toHaveText('Review approved by lead@example.test');
+    await expect(editor.locator('[data-board-commits] .board-review-approved')).toHaveText('Approved by lead@example.test');
+    expect(await page.evaluate(() => window.reviewInjected)).toBeUndefined();
+
+    const panel = editor.locator('[data-card-review-request]');
+    await panel.locator('summary').click();
+    await expect(panel.locator('[data-card-review-files]')).toContainText('modified db.cs');
+    await expect(panel.locator('[data-card-review-files]')).toContainText('+1 −1');
+    await expect(panel.locator('[data-card-review-files]')).toContainText('no text (binary)');
+    await expect(panel.locator('[data-card-review-counts]')).toContainText('tree bbbbbbbbbbbb');
+    await expect(panel.locator('[data-card-review-rules]')).toContainText('db.cs');
+    await expect(panel.locator('[data-card-review-reviewers]')).toHaveValue('lead@example.test');
+    await expect(panel.locator('[data-card-review-session][value="session_test"]')).toBeChecked();
+    await expect(panel.locator('[data-card-review-id]')).toHaveCount(2);
+    await expect(panel.locator('[data-card-review-id]').first()).toContainText('Approved by lead@example.test');
+    await expect(panel.locator('[data-card-review-id]').first().locator('[data-card-review-trailer]')).toHaveValue(trailer);
+    await expect(panel.locator('[data-card-review-id]').first().getByRole('button', { name: 'Copy approval' })).toBeVisible();
+
+    await editor.locator('#board-card-title').fill('Keep my unsaved title');
+    await panel.getByRole('button', { name: 'Create request', exact: true }).click();
+    await expect(panel.locator('[role="status"]')).toContainText('drafts are still here');
+    expect(bodies.create).toEqual([]);
+    await editor.locator('#board-card-title').fill('Description images');
+    await panel.locator('[data-card-review-note]').fill('Check the migration');
+    await panel.getByRole('button', { name: 'Create request', exact: true }).click();
+    await expect(panel.locator('[role="status"]')).toContainText('Nothing has been sent');
+    expect(bodies.create).toEqual([{ scope: 'staged', reviewers: ['lead@example.test'], sessions: ['session_test'], cardKey: 'VB-1', note: 'Check the migration' }]);
+    await expect(panel.locator('[data-card-review-id]')).toHaveCount(3);
+    const created = panel.locator('[data-card-review-id="33333333-3333-4333-8333-333333333333"]');
+    await expect(created.locator('[data-card-review-status]')).toHaveText('Open, not sent yet');
+
+    // Send asks first, with what leaves the computer; cancelling the dialog sends nothing.
+    await created.getByRole('button', { name: 'Send…', exact: true }).click();
+    const dialog = page.getByRole('alertdialog');
+    await expect(dialog).toContainText('readable only by lead@example.test');
+    await expect(dialog).toContainText('db.cs');
+    await expect(dialog).toContainText('Codex session (still running: uploads after it ends)');
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(panel.locator('[role="status"]')).toHaveText('Not sent.');
+    expect(bodies.send).toEqual([]);
+    await created.getByRole('button', { name: 'Send…', exact: true }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(panel.locator('[role="status"]')).toContainText('Decisions are checked every 15 minutes');
+    expect(bodies.send).toEqual([{ confirmed: true }]);
+    await expect(created.locator('[data-card-review-status]')).toHaveText('Sent, awaiting decisions');
+    await expect(created.getByRole('button', { name: 'Send…', exact: true })).toHaveCount(0);
+
+    // An older viberails.ai refuses the send; the fixed wording and code reach the person and the request stays open.
+    const other = panel.locator('[data-card-review-id="22222222-2222-4222-8222-222222222222"]');
+    await other.getByRole('button', { name: 'Send…', exact: true }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(panel.locator('[role="status"]')).toContainText('does not support review requests yet');
+    await expect(other.locator('[data-card-review-status]')).toHaveText('Open, not sent yet');
+
+    await panel.scrollIntoViewIfNeeded();
+    expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath('card-request-review.png') });
+
+    await other.getByRole('button', { name: 'Cancel request', exact: true }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel request', exact: true }).click();
+    await expect(other.locator('[data-card-review-status]')).toHaveText('Cancelled');
+    expect(bodies.cancel).toEqual(['22222222-2222-4222-8222-222222222222']);
+    await other.getByRole('button', { name: 'Delete', exact: true }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(panel.locator('[data-card-review-id]')).toHaveCount(2);
+    expect(bodies.deleted).toEqual(['22222222-2222-4222-8222-222222222222']);
+    expect(await page.evaluate(() => window.reviewInjected)).toBeUndefined();
+    expect(errors).toEqual([]);
+    expect(requests.filter(r => r.method === 'PUT' && r.path === '/api/v1/board/cards/card_test')).toEqual([]);
+    await page.evaluate(() => window.app.closeModal());
+    await expect(page.locator('[data-board-review-status]')).toHaveCount(0);
+});
+
 test('Public card links reconcile uncertain creation once and ignore a result after closing', async ({ page }) => {
     await openBoard(page);
     let creations = 0, links = [], release;

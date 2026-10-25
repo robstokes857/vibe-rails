@@ -169,6 +169,59 @@ public sealed record ReviewRequestDisclosure(
 /// <summary>Payload of <see cref="ReviewRequestEvents.Updated"/>. <see cref="Status"/> is a request status, or <c>deleted</c> when the request is gone.</summary>
 public sealed record ReviewRequestChanged(string Id, string Status, string? CardKey, bool Sent);
 
+/// <summary>
+/// One staged file as the card shows it before a request exists (slice E): its change kind, the
+/// line counts (<see cref="Added"/> and <see cref="Removed"/> are null when the text is omitted or
+/// the edit is too large to count within the bound) and why its text would not be in the bundle.
+/// </summary>
+public sealed record ReviewStagedFile(
+    string Path,
+    string Change,
+    string? PreviousPath,
+    int? ChangedLines,
+    int? Added,
+    int? Removed,
+    bool TextIncluded,
+    string? Omitted);
+
+/// <summary>A <c>Signed Approval</c> rule whose path a staged file touches; its approvers are the suggested reviewers.</summary>
+public sealed record ReviewApprovalRule(
+    string Rule,
+    string SourcePath,
+    string Path,
+    IReadOnlyList<string> Approvers,
+    IReadOnlyList<string> MatchedFiles);
+
+/// <summary>
+/// What a request made now would capture, read from the staged index without storing anything:
+/// the files with their counts and omissions, the tree id, the rules the staged paths match and
+/// the fixed disclosure a later send shows. Nothing here contacts viberails.ai.
+/// </summary>
+public sealed record ReviewStagedPreview(
+    string Repository,
+    string TreeId,
+    string BaseTree,
+    string? BaseCommit,
+    IReadOnlyList<ReviewStagedFile> Files,
+    int FilesWithText,
+    int FilesWithoutText,
+    long TextBytes,
+    IReadOnlyList<string> SuggestedReviewers,
+    IReadOnlyList<ReviewApprovalRule> Rules,
+    string Destination,
+    string Audience,
+    string SessionDisclosure,
+    DateTime ExpiresUtc);
+
+/// <summary>A verified approval over a linked commit's tree, as the commit hook would find it.</summary>
+public sealed record ReviewCommitApproval(string Reviewer, string RequestId, DateTime DecidedUtc);
+
+/// <summary>One linked commit: its tree (null when the checkout does not have the commit) and the approvals over that tree.</summary>
+public sealed record ReviewCommitApprovalEntry(string Sha, string? TreeId, IReadOnlyList<ReviewCommitApproval> Approvals);
+
+/// <summary>Answer to <c>GET /api/v1/review-requests/commit-approvals</c>, in the order the shas were asked.</summary>
+public sealed record ReviewCommitApprovals(IReadOnlyList<ReviewCommitApprovalEntry> Commits);
+
 /// <summary>A decision as viberails.ai reports it to the requester's poll.</summary>
 public sealed record ReviewRequestHostedDecision(
     long Id,
@@ -226,6 +279,8 @@ public sealed class ReviewRequestException(string code, string message, int stat
 [JsonSerializable(typeof(ReviewRequestSent))]
 [JsonSerializable(typeof(ReviewRequestDisclosure))]
 [JsonSerializable(typeof(ReviewRequestChanged))]
+[JsonSerializable(typeof(ReviewStagedPreview))]
+[JsonSerializable(typeof(ReviewCommitApprovals))]
 [JsonSerializable(typeof(ReviewRequestHostedStatus))]
 [JsonSerializable(typeof(ReviewRequestHostedError))]
 [JsonSerializable(typeof(ReviewRequestPollFile))]

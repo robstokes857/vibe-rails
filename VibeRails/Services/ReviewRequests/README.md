@@ -176,6 +176,44 @@ the design decisions for the rest.
   is signed. `GitCli.RunAsync` gained `environment` and `standardInput` for this and is still the
   one git launch.
 
+- **Request review from a card (slice E).** The saved card editor has a **Request review** section
+  beside Share card (`board-card-request-review.js`, the `board-card-sharing.js` pattern). Opening
+  it reads `GET /api/v1/review-requests/staged` (`ReviewRequestService.PreviewAsync`): what a
+  request made now would capture, from the same staged capture as create but storing nothing: each
+  file with its change kind, `+added −removed` (`ReviewLineDiff`, Myers edit distance over lines,
+  null beyond 20,000 edits so the snapshot's single count is shown instead) and omission reason, the
+  tree id, the text bytes, the `Signed Approval` rules of the staged `vc.rules.md` files whose path a
+  staged file touches (resolved and matched as the hook does; their approvers prefill the reviewers
+  unless the person already typed some), the fixed destination, audience and session disclosure.
+  Sessions come from the card's Sessions rail (never Automation or review recordings; checked by
+  default up to ten), the note is optional, and Create posts to the existing create route with the
+  card key. Below, the project's requests (this card's first) show their status (`Open, not sent
+  yet` / `Sent, awaiting decisions` / `Approved by x` / `Rejected by x: comment` / `Cancelled`), the
+  approval trailer with Copy, Send… (reads the disclosure and shows it in `confirmDialog`; only a
+  confirmed answer posts `{ confirmed: true }`; the backend's refusal wording, including
+  `server_update_required`, is shown as is), Cancel and Delete (both through `confirmDialog`; a
+  409 `remote_pending` refusal is shown). The list refreshes on `review_request_updated`. The card
+  header carries this card's newest request as a badge (`Review approved by x` and so on) and the
+  Commits rail marks a linked commit whose tree a reviewer approved (`GET
+  /api/v1/review-requests/commit-approvals?sha=…`, at most 50 shas of 7 to 64 hex characters:
+  one `git log --no-walk=unsorted --ignore-missing --format=%H %T` through `GitCli`, then the
+  hook's `FindVerifiedApprovalsAsync` per distinct tree). The Rules page shows `APPROVED` with
+  "Approved by x through a review request over the staged tree" on a deferred `Signed Approval`
+  or `Human verified` finding when `IStoredCommitApprovalSource` (the root registers the hook's
+  `ReviewRequestApprovalSource`) finds a verified approval over the staged tree (`git write-tree`)
+  from one of the rule's approvers: `HookRoutes.WithStoredApprovalsAsync`, read-only, quiet when
+  the ledger, the tree or a hit is missing.
+- **MCP `request_review` (slice E).** `ReviewRequestTool` on both transports (not in the Board
+  auto-grants): `reviewers` (1 to 10 emails), optional `note` and `cardKey`. It calls the root's
+  create route with the inherited tool credentials (loopback only, no redirects, like
+  `create_session_share_link`), attaches only the calling session, then reads the disclosure and
+  answers with the request id, tree, files, sessions and exactly what a send would transfer. It
+  never sends, decides or signs: the tool description and the answer both say that a person sends
+  from the card after reading the disclosure, and that an older viberails.ai answers
+  `server_update_required` with nothing transferred. An older root (404/405 on create) is reported
+  as needing an update; the root's own refusals keep their code and wording; unparsed errors report
+  only the status.
+
 The decision route's only outbound call is the existing public signature verification, with a tree
 id and no repository content. The send route and the poller are the only code that transfers a
 bundle or reads hosted decisions; the security contract is
@@ -224,7 +262,7 @@ bundle or reads hosted decisions; the security contract is
 | B | viberails.ai: request storage and endpoints, reviewer page over the existing session replay viewer and email-audience access | Implemented in VibeRails-Front (VB-OGK99-278, 2026-10-24); contract in its `Services/ReviewRequests/README.md`; cross-repo test `Tests/headless/BoardSync.Integration/ReviewRequestRoundTripTests.cs` |
 | C | Desktop transport: send a request and its sessions (reuse `SessionShareUploads`), poll decisions on the Board sync cadence, land approvals in the ledger | Done (VB-DPGU2-279 / VIBE-207, 2026-10-24; this document) |
 | D | Reviewer desktop: "Reviews requested of you" (page, VS Code view) and the `vb --vca-hook sign-review` popup that rebuilds the tree in the reviewer's clone and signs it | Done (VB-PR2U7-280 / VIBE-208, 2026-10-24; this document). Open: bytes for binary, oversized and bundle-limit files, so such requests can be approved |
-| E | UI: Request review from a card (Sessions rail picker, approvers from the rule), status on the card, commit and Rules page; MCP `request_review` that never signs | Backlog, VB-4XXCY-281 |
+| E | UI: Request review from a card (Sessions rail picker, approvers from the rule), status on the card, commit and Rules page; MCP `request_review` that never signs | Done (VB-4XXCY-281 / VIBE-209, 2026-10-24; this document) |
 | F | Line comments, head-commit scope, VS Code surfacing, reviewer notification, retention | Later, VB-XBVE0-282 |
 
 ## Tests
@@ -273,4 +311,23 @@ validation and rebuilds the tree in a clone.
 ```bash
 dotnet test Tests/Tests.csproj --filter "FullyQualifiedName~ReviewTreeRebuilder|FullyQualifiedName~ReviewInbox|FullyQualifiedName~ReviewSignaturePopup"
 node --test Tests/wwwroot/js/review-inbox-view.test.mjs
+```
+
+Slice E: `ReviewLineDiffTests.cs` (numstat-like counts, added and deleted files, the edit bound),
+`ReviewRequestServiceTests` (`PreviewListsStagedFiles…`: a real repository with a staged
+`vc.rules.md`, the counts, the matched rule and suggested reviewers, nothing stored, `nothing_staged`;
+`CommitApprovalsMatchTheCommittedTree…`: a committed approved tree found by full sha and prefix, an
+unknown sha, the sha and count bounds), `ReviewRequestRoutesTests` (both routes behind both
+credentials, the preview, approvals read from the ledger with a fake tree resolver),
+`HookRoutesVcaOverviewTests.WithStoredApprovals…` (only deferred signature findings, with the rule's
+approvers, quiet without a ledger or tree), `Tests/Services/Mcp/ReviewRequestToolTests.cs` (no call
+without the inherited credentials or with invalid input, the create body with the calling session,
+the disclosure in the answer, an older root, the root's refusals, unparsed errors, cancellation) and
+the HTTP and stdio registration tests; the node tests `board-card-request-review.test.mjs` and the
+Rules page case in `vca-git-guard.test.mjs`; the Playwright case "Request review …" in
+`UITests/tests/board-ux.spec.js` (`npx playwright test --config playwright.board.config.js`).
+
+```bash
+dotnet test Tests/Tests.csproj --filter "FullyQualifiedName~ReviewLineDiff|FullyQualifiedName~ReviewRequestTool|FullyQualifiedName~HookRoutesVcaOverview|FullyQualifiedName~ReviewRequestRoutes|FullyQualifiedName~ReviewRequestServiceTests"
+node --test Tests/wwwroot/js/board-card-request-review.test.mjs Tests/wwwroot/js/vca-git-guard.test.mjs
 ```

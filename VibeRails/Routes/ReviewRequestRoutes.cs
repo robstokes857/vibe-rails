@@ -52,6 +52,20 @@ public static class ReviewRequestRoutes
                 return Results.Json(created, ReviewRequestJsonContext.Default.ReviewRequestSummary, statusCode: StatusCodes.Status201Created);
             }, ct));
 
+        // Slice E: what a request made now would capture (read-only, nothing stored or sent), and which
+        // linked commits already carry a tree a reviewer approved. Both are literal segments, so they
+        // never collide with the {id:guid} routes below.
+        group.MapGet("/staged", async (ReviewRequestService reviews, CancellationToken ct) =>
+            Results.Json(await reviews.PreviewAsync(Project(), ct), ReviewRequestJsonContext.Default.ReviewStagedPreview));
+
+        group.MapGet("/commit-approvals", async (HttpContext context, ReviewRequestService reviews, CancellationToken ct) =>
+        {
+            var shas = new List<string>();
+            foreach (var value in context.Request.Query["sha"])
+                shas.AddRange((value ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+            return Results.Json(await reviews.CommitApprovalsAsync(Project(), shas, ct), ReviewRequestJsonContext.Default.ReviewCommitApprovals);
+        });
+
         group.MapGet("/{id:guid}", async (Guid id, ReviewRequestService reviews, CancellationToken ct) =>
             Results.Json(await reviews.GetAsync(Project(), id.ToString("D"), ct), ReviewRequestJsonContext.Default.ReviewRequestDetail));
 

@@ -392,6 +392,8 @@ middleware serves their paths rather than registering individual API endpoints.
 | POST | `/api/v1/python-scripts/settings` | [PythonScriptRoutes.cs](VibeRails/Routes/PythonScriptRoutes.cs) |
 | GET | `/api/v1/review-requests` | [ReviewRequestRoutes.cs](VibeRails/Routes/ReviewRequestRoutes.cs) |
 | POST | `/api/v1/review-requests` | [ReviewRequestRoutes.cs](VibeRails/Routes/ReviewRequestRoutes.cs) |
+| GET | `/api/v1/review-requests/commit-approvals` | [ReviewRequestRoutes.cs](VibeRails/Routes/ReviewRequestRoutes.cs) |
+| GET | `/api/v1/review-requests/staged` | [ReviewRequestRoutes.cs](VibeRails/Routes/ReviewRequestRoutes.cs) |
 | DELETE | `/api/v1/review-requests/{id:guid}` | [ReviewRequestRoutes.cs](VibeRails/Routes/ReviewRequestRoutes.cs) |
 | GET | `/api/v1/review-requests/{id:guid}` | [ReviewRequestRoutes.cs](VibeRails/Routes/ReviewRequestRoutes.cs) |
 | POST | `/api/v1/review-requests/{id:guid}/cancel` | [ReviewRequestRoutes.cs](VibeRails/Routes/ReviewRequestRoutes.cs) |
@@ -566,6 +568,15 @@ project-scoped conflicting histories, escaped as untrusted text in Reviews. Reso
 both credentials, the current repository, and matching source/target content-version tokens;
 stale choices return 409. Both snapshots remain archived locally. No paths or SQL are returned.
 
+`request_review` (VB-50 slice E, both transports, outside the Board auto-grants) takes reviewer
+emails, an optional note and card key, never a session id, a path or a credential. It calls only
+the root's `POST /api/v1/review-requests` and `GET /{id}/disclosure` with the inherited
+`VIBERAILS_TOOL_*` credentials over loopback (no redirects, cookies or proxies; 60 s; 64 KiB and
+1 MiB response bounds), attaches the calling session only, and never sends, decides or signs:
+nothing leaves the computer until a person confirms the disclosure on the card. The root's refusals
+are relayed with their code; unparsed answers report only the status; exception text is never
+relayed. See [Request review from a card](#request-review-from-a-card-and-request_review-vb-50-slice-e).
+
 Board Start work and Board-triggered Workers use the exact per-tool grants in
 [BoardMcpAuthorization](VibeRails/Services/Terminal/Commands/BoardMcpAuthorization.cs).
 Other launches default off; card text/environment names cannot grant tools. No server wildcard,
@@ -735,8 +746,9 @@ commit-msg hook applies a stored, verified approval to the message before offeri
 popup and then rechecks it like any other trailer; the ledger is resolved only when a signature is
 pending, the read is bounded to three seconds and quiet on failure, so it can place a signature but
 never pass a commit by itself. Hook test harnesses replace the ledger with a per-repository file
-beside their job store, so no test opens the user's state.db. No MCP tool
-creates, decides, sends or signs. Sending a request to viberails.ai and collecting its decisions is
+beside their job store, so no test opens the user's state.db. One MCP tool, `request_review`,
+creates a request through this route with the inherited root credentials (slice E, below); no MCP
+tool decides, sends or signs. Sending a request to viberails.ai and collecting its decisions is
 [Review requests sent to viberails.ai](#review-requests-sent-to-viberailsai-vb-50-slice-c) below;
 see [the component contract](VibeRails/Services/ReviewRequests/README.md).
 
@@ -944,6 +956,33 @@ one the dashboard Sign route and MCP refuse. The VS Code view calls the same loc
 "Read on viberails.ai" opens through the host's external-link allowlist, which admits only the sign-in
 page and `https://viberails.ai/Reviews/requests/rvw_<32 hex>`.
 Component contract: [Review requests](VibeRails/Services/ReviewRequests/README.md).
+
+### Request review from a card and `request_review` (VB-50, slice E)
+
+Two read-only root routes join the group (both credentials, no-store, no outbound call, nothing
+stored). `GET /api/v1/review-requests/staged` captures the staged index exactly as create does and
+answers what a request would carry: each file's change kind, `+added −removed` line counts
+(`ReviewLineDiff`, a Myers edit-distance pass bounded at 20,000 edits), omission reason, the tree,
+base and text-byte totals, the `Signed Approval` rules of the staged `vc.rules.md` files whose path
+a staged file touches (their approvers are the suggested reviewers; the matching is the hook's
+`PathLockRule` matching) and the fixed disclosure text; the same `nothing_staged` /
+`not_a_repository` refusals apply. `GET /api/v1/review-requests/commit-approvals?sha=…` takes at
+most 50 shas of 7 to 64 hexadecimal characters (anything else is 400 `invalid_request`), resolves
+their trees with one `git log --no-walk=unsorted --ignore-missing --format=%H %T` through
+`GitCli` (argv only, 64 KiB output bound; a git failure answers no trees) and reads verified
+approvals per tree through the ledger's `FindVerifiedApprovalsAsync`, the commit hook's lookup. It
+returns reviewer addresses, request ids and decision times, never signatures. The Rules page's
+`POST /api/v1/hooks/preview` marks a deferred `Signed Approval` / `Human verified` finding with
+`approvedBy` from `IStoredCommitApprovalSource` over the staged tree (`git write-tree`) with the
+rule's approvers; the source is the hook's bounded, quiet `ReviewRequestApprovalSource`, resolved
+only when such a finding exists, and its absence (tab children, tests) leaves the findings unchanged.
+
+The card UI sends only through the existing send route after showing the disclosure in
+`confirmDialog`; the backend's refusal wording (including `server_update_required` from an older
+viberails.ai) is shown as the server gave it. Cancel and Delete also confirm through `confirmDialog`
+(`window.confirm` remains banned). Every server string is escaped before it reaches markup. The MCP
+tool is described under [MCP and agent launches](#mcp-and-agent-launches): it creates through the
+root and never sends.
 
 ### Board sync, sharing and remote Start work
 

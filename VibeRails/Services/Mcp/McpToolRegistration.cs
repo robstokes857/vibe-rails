@@ -27,6 +27,7 @@ public static class McpToolRegistration
         .WithTools<TokenSaverTool>(SerializerOptions)
         .WithTools<AgentSessionTool>(SerializerOptions)
         .WithTools<SessionSharingTool>(SerializerOptions)
+        .WithTools<ReviewRequestTool>(SerializerOptions)
         .WithTools<BoardAgentLaunchTool>(SerializerOptions)
         .WithTools<BoardAgentOptionsTool>(SerializerOptions)
         .WithTools<BoardTool>(SerializerOptions)
@@ -72,6 +73,21 @@ public static class McpToolRegistration
                 AllowAutoRedirect = false, UseProxy = false, UseCookies = false
             });
         services.AddScoped<SessionSharingTool>();
+        return services;
+    }
+
+    /// <summary>
+    /// <c>request_review</c> (VB-50 slice E) calls only the inherited root API, like session sharing:
+    /// no redirects, cookies or system proxies, and nothing leaves this computer through it.
+    /// </summary>
+    public static IServiceCollection AddReviewRequestMcp(this IServiceCollection services)
+    {
+        services.AddHttpClient(ReviewRequestTool.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(60))
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+            {
+                AllowAutoRedirect = false, UseProxy = false, UseCookies = false
+            });
+        services.AddScoped<ReviewRequestTool>();
         return services;
     }
 

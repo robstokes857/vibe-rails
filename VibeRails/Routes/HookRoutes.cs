@@ -4,7 +4,9 @@ using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services;
+using VibeRails.Services.Git;
 using VibeRails.Services.GitPreflight;
+using VibeRails.Services.VCA;
 using VibeRails.Services.VCA.Hooks;
 
 namespace VibeRails.Routes;
@@ -245,6 +247,7 @@ public static class HookRoutes
         // anything is staged. Git Guard's commit-time validation keeps using the exact
         // staged index via /api/v1/git/preflight/stream and the real hooks.
         app.MapPost("/api/v1/hooks/preview", async (
+            HttpContext context,
             IGitWorkingTreeSnapshotProvider snapshotProvider,
             IEnumerable<IGitPreflightStep> preflightSteps,
             IGitService gitService,
@@ -300,6 +303,14 @@ public static class HookRoutes
                     HasCommitViolations: result.Status == GitPreflightStepStatus.Warning,
                     RequiredAcknowledgments: [],
                     StagedFileCount: snapshot.Files.Count);
+                // Slice E: a deferred signature finding names the reviewer who already approved the
+                // staged tree, from the ledger the commit hook reads. Optional: a process without the
+                // ledger (tests, tab children) shows the finding as before.
+                var overview = await WithStoredApprovalsAsync(
+                    BuildVcaValidationOverview(validationSummary),
+                    token => StagedTreeAsync(rootPath, token),
+                    context.RequestServices.GetService<IStoredCommitApprovalSource>(),
+                    cancellationToken);
 
                 return Results.Ok(new HookPreviewResponse(
                     Success: succeeded,
@@ -309,7 +320,7 @@ public static class HookRoutes
                     Output: output,
                     StartedUtc: startedUtc,
                     DurationMs: (long)(DateTime.UtcNow - startedUtc).TotalMilliseconds,
-                    Validation: BuildVcaValidationOverview(validationSummary)));
+                    Validation: overview));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -765,6 +776,70 @@ public static class HookRoutes
             warningCount,
             deferredCount,
             findings);
+    }
+
+    /// <summary>
+    /// Marks each deferred <c>Human verified</c> / <c>Signed Approval</c> finding with the reviewer whose
+    /// verified approval over the staged tree the commit hook will apply (VB-50 slice E): the same
+    /// <see cref="IStoredCommitApprovalSource"/> lookup, over the same tree id, with the rule's approvers.
+    /// Read-only and quiet: without a source, a staged tree or a hit, the findings are unchanged.
+    /// </summary>
+    internal static async Task<VcaValidationOverviewResponse> WithStoredApprovalsAsync(
+        VcaValidationOverviewResponse overview,
+        Func<CancellationToken, Task<string?>> stagedTree,
+        IStoredCommitApprovalSource? approvals,
+        CancellationToken cancellationToken)
+    {
+        if (approvals is null || !overview.Findings.Any(IsDeferredSignatureFinding))
+            return overview;
+        string? tree;
+        try
+        {
+            tree = await stagedTree(cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception) { return overview; }
+        if (!CommitSignatureFormat.IsObjectId(tree))
+            return overview;
+
+        var findings = new List<VcaRuleFindingResponse>(overview.Findings.Count);
+        foreach (var finding in overview.Findings)
+        {
+            if (!IsDeferredSignatureFinding(finding) || !TryApprovers(finding.Rule, out var approvers))
+            {
+                findings.Add(finding);
+                continue;
+            }
+            var stored = await approvals.FindAsync(new HumanSignatureRequest(tree!, null, approvers), cancellationToken);
+            findings.Add(stored is null ? finding : finding with { ApprovedBy = stored.SignerEmail });
+        }
+        return overview with { Findings = findings };
+    }
+
+    private static bool IsDeferredSignatureFinding(VcaRuleFindingResponse finding) =>
+        finding.Status == "deferred" && HumanSignatureRule.IsSignatureRule(finding.Rule);
+
+    private static bool TryApprovers(string rule, out IReadOnlyList<string> approvers)
+    {
+        if (HumanSignatureRule.IsHumanVerified(rule))
+        {
+            approvers = [];
+            return true;
+        }
+        if (HumanSignatureRule.TryParseSignedApproval(rule, out var specification))
+        {
+            approvers = specification.Approvers;
+            return true;
+        }
+        approvers = [];
+        return false;
+    }
+
+    /// <summary>The staged index tree, as the hook signs it; null when git cannot write one (unmerged paths, not a repository).</summary>
+    private static async Task<string?> StagedTreeAsync(string rootPath, CancellationToken cancellationToken)
+    {
+        var result = await GitCli.RunAsync(rootPath, ["write-tree"], cancellationToken, maxOutputChars: 256);
+        return result.Succeeded ? result.StdOut.Trim() : null;
     }
 
     private static string ToWireFindingKind(VcaRuleFindingKind kind) => kind switch

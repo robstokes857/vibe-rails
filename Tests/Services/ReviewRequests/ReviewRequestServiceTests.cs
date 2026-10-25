@@ -385,6 +385,89 @@ public sealed class ReviewRequestServiceTests : IAsyncLifetime
         Assert.Empty(await _store.FindVerifiedApprovalsAsync(tree, Ct));
     }
 
+    /// <summary>
+    /// Slice E: the card shows what a request would capture before one exists, and suggests the
+    /// approvers of the <c>Signed Approval</c> rules the staged paths touch. Nothing is stored.
+    /// </summary>
+    [Fact]
+    public async Task PreviewListsStagedFilesWithLineCountsAndSuggestsApproversOfMatchedRules()
+    {
+        await StageChangesAsync();
+        await File.WriteAllTextAsync(Path.Combine(Repo, "vc.rules.md"),
+            "## Vibe Rails Rules\n- [STOP] Signed Approval('db.cs', 'Lead@Example.com, second@example.com')\n"
+            + "- [WARN] Signed Approval('other.txt', 'nobody@example.com')\n", Ct);
+        await Git("add", "--", "vc.rules.md");
+        var tree = (await Git("write-tree")).Trim();
+        var service = Service(FakeCommitSignatureVerifier.ValidFor("owner@example.com"));
+
+        var preview = await service.PreviewAsync(Repo, Ct);
+
+        Assert.Equal(tree, preview.TreeId);
+        Assert.Equal("repo", preview.Repository);
+        Assert.Equal(["db.cs", "vc.rules.md"], preview.Files.Select(file => file.Path));
+        var db = preview.Files[0];
+        Assert.Equal("modified", db.Change);
+        Assert.Equal((1, 1), (db.Added, db.Removed));
+        Assert.True(db.TextIncluded);
+        var rules = preview.Files[1];
+        Assert.Equal("added", rules.Change);
+        Assert.Equal((3, 0), (rules.Added, rules.Removed)); // the heading and two rule lines
+        Assert.Equal(2, preview.FilesWithText);
+        Assert.Equal(0, preview.FilesWithoutText);
+        Assert.True(preview.TextBytes > 0);
+        // other.txt is not staged, so its rule suggests nobody; the approvers keep the rule's lowercase spelling.
+        var rule = Assert.Single(preview.Rules);
+        Assert.Equal("db.cs", rule.Path);
+        Assert.Equal("vc.rules.md", rule.SourcePath);
+        Assert.Equal(["db.cs"], rule.MatchedFiles);
+        Assert.Equal(["lead@example.com", "second@example.com"], preview.SuggestedReviewers);
+        Assert.Equal("email", preview.Audience);
+        Assert.Contains("terminal output", preview.SessionDisclosure);
+        Assert.Empty((await service.ListAsync(Repo, Ct)).Requests);
+
+        await Git("reset", "-q", "--", "db.cs", "vc.rules.md");
+        await Git("checkout", "-q", "--", "db.cs");
+        var nothing = await Assert.ThrowsAsync<ReviewRequestException>(() => service.PreviewAsync(Repo, Ct));
+        Assert.Equal("nothing_staged", nothing.Code);
+    }
+
+    /// <summary>Slice E: a linked commit whose tree a reviewer approved shows that approval, found the way the hook finds it.</summary>
+    [Fact]
+    public async Task CommitApprovalsMatchTheCommittedTreeOfAnApprovedRequest()
+    {
+        await StageChangesAsync();
+        var tree = (await Git("write-tree")).Trim();
+        var service = Service(FakeCommitSignatureVerifier.ValidFor("lead@example.com"));
+        var created = await service.CreateAsync(Repo, new CreateReviewRequest(Reviewers: ["lead@example.com"]), null, Ct);
+        await service.RecordDecisionAsync(Repo, created.Id, new RecordReviewDecisionRequest("approved", Trailer(tree)), Ct);
+        await Git("-c", "core.hooksPath=", "commit", "-q", "-m", "approved change");
+        var head = (await Git("rev-parse", "HEAD")).Trim();
+        var baseline = (await Git("rev-parse", "HEAD~1")).Trim();
+
+        var result = await service.CommitApprovalsAsync(Repo, [head, head[..10].ToUpperInvariant(), baseline, "0123456"], Ct);
+
+        Assert.Equal(4, result.Commits.Count);
+        Assert.Equal(tree, result.Commits[0].TreeId);
+        var approval = Assert.Single(result.Commits[0].Approvals);
+        Assert.Equal("lead@example.com", approval.Reviewer);
+        Assert.Equal(created.Id, approval.RequestId);
+        // A prefix resolves to the same commit; a commit of another tree has no approval; an unknown sha has no tree.
+        Assert.Equal(head[..10], result.Commits[1].Sha);
+        Assert.Equal(tree, result.Commits[1].TreeId);
+        Assert.Single(result.Commits[1].Approvals);
+        Assert.NotNull(result.Commits[2].TreeId);
+        Assert.Empty(result.Commits[2].Approvals);
+        Assert.Null(result.Commits[3].TreeId);
+        Assert.Empty(result.Commits[3].Approvals);
+
+        var invalid = await Assert.ThrowsAsync<ReviewRequestException>(() => service.CommitApprovalsAsync(Repo, ["not-a-sha"], Ct));
+        Assert.Equal("invalid_request", invalid.Code);
+        var tooMany = await Assert.ThrowsAsync<ReviewRequestException>(() => service.CommitApprovalsAsync(Repo,
+            Enumerable.Range(0, ReviewRequestService.MaxCommitLookups + 1).Select(i => i.ToString("x7")).ToList(), Ct));
+        Assert.Equal("invalid_request", tooMany.Code);
+        Assert.Empty((await service.CommitApprovalsAsync(Repo, [], Ct)).Commits);
+    }
+
     private async Task AssertInvalidAsync(ReviewRequestService service, CreateReviewRequest request)
     {
         var error = await Assert.ThrowsAsync<ReviewRequestException>(() => service.CreateAsync(Repo, request, null, Ct));

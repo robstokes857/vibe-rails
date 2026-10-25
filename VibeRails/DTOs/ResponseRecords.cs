@@ -933,6 +933,8 @@ namespace VibeRails.DTOs
         string? HooksPath = null
     );
 
+    // ApprovedBy (VB-50 slice E): for a deferred signature finding, the reviewer whose verified
+    // approval over the staged tree the commit hook will apply, read from the review-request ledger.
     public record VcaRuleFindingResponse(
         string Status,
         string Enforcement,
@@ -940,7 +942,8 @@ namespace VibeRails.DTOs
         string Reason,
         string SourcePath,
         string Guidance,
-        string? Acknowledgment
+        string? Acknowledgment,
+        string? ApprovedBy = null
     );
 
     public record VcaValidationOverviewResponse(
