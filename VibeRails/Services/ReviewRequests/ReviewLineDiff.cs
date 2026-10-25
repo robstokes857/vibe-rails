@@ -5,8 +5,9 @@ namespace VibeRails.Services.ReviewRequests;
 /// file list (slice E). Only the length of the shortest edit script is computed (Myers' greedy
 /// forward pass over lines, O((N+M)·D)); with the counts of both sides that is enough:
 /// <c>added − removed = M − N</c> and <c>added + removed = D</c>. The pass stops at
-/// <see cref="MaxEdits"/> so one huge rewrite cannot stall the preview; the caller then shows the
-/// snapshot's single changed-line count instead.
+/// <see cref="MaxEdits"/> or after <see cref="MaxWork"/> steps, so one huge rewrite cannot stall the
+/// preview (it runs for every text file on each staged read); the caller then shows the snapshot's
+/// single changed-line count instead.
 /// </summary>
 public static class ReviewLineDiff
 {
@@ -14,10 +15,18 @@ public static class ReviewLineDiff
     public const int MaxEdits = 20_000;
 
     /// <summary>
-    /// Null when neither side has text or the edit is larger than <paramref name="maxEdits"/>.
-    /// A side without text (an added or deleted file) counts every line of the other side.
+    /// Diagonal and line-compare steps one file may take. The pass is O(D²) in diagonals alone, so the
+    /// edit bound by itself still allowed about 2×10⁸ steps per file per preview (VIBE-213 item 8);
+    /// this caps a file at a few milliseconds, about 2,800 changed lines of a full rewrite.
     /// </summary>
-    public static (int Added, int Removed)? Count(string? before, string? after, int maxEdits = MaxEdits)
+    public const long MaxWork = 4_000_000;
+
+    /// <summary>
+    /// Null when neither side has text or the edit is larger than <paramref name="maxEdits"/> or
+    /// needs more than <paramref name="maxWork"/> steps. A side without text (an added or deleted
+    /// file) counts every line of the other side.
+    /// </summary>
+    public static (int Added, int Removed)? Count(string? before, string? after, int maxEdits = MaxEdits, long maxWork = MaxWork)
     {
         if (before is null && after is null) return null;
         var a = Lines(before);
@@ -41,13 +50,13 @@ public static class ReviewLineDiff
         if (n == 0) return (m, 0);
         if (m == 0) return (0, n);
 
-        var distance = EditDistance(a, b, start, n, m, Math.Min(maxEdits, n + m));
+        var distance = EditDistance(a, b, start, n, m, Math.Min(maxEdits, n + m), maxWork);
         if (distance < 0) return null;
         var added = (distance + (m - n)) / 2;
         return (added, distance - added);
     }
 
-    private static int EditDistance(string[] a, string[] b, int start, int n, int m, int maxEdits)
+    private static int EditDistance(string[] a, string[] b, int start, int n, int m, int maxEdits, long work)
     {
         // V[k] is the furthest x reached on diagonal k after the previous step; k ranges -d..d, so
         // the array is offset by maxEdits + 1 and never indexed outside it while d <= maxEdits.
@@ -58,6 +67,7 @@ public static class ReviewLineDiff
         {
             for (var k = -d; k <= d; k += 2)
             {
+                if (--work < 0) return -1;
                 int x;
                 if (k == -d || (k != d && v[offset + k - 1] < v[offset + k + 1]))
                     x = v[offset + k + 1];
@@ -66,6 +76,7 @@ public static class ReviewLineDiff
                 var y = x - k;
                 while (x < n && y < m && a[start + x] == b[start + y])
                 {
+                    if (--work < 0) return -1;
                     x++;
                     y++;
                 }

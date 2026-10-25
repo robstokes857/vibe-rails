@@ -802,6 +802,24 @@ public sealed class GitStagedSnapshotProviderTests : IAsyncLifetime
         Assert.Equal("pre-timeout", Encoding.UTF8.GetString(result.Bytes));
     }
 
+    // VIBE-213 item 12: without the separate type check, `cat-file blob` still refuses a directory and a gitlink.
+    [Fact]
+    public async Task TryReadTreeBytesAsync_ReadsBlobsAndRefusesEverythingElse()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        Directory.CreateDirectory(Path.Combine(_repository, "folder"));
+        await File.WriteAllBytesAsync(Path.Combine(_repository, "folder", "image.bin"), [0, 1, 2, 255], ct);
+        await GitAsync("add", "folder/image.bin");
+        await GitAsync("update-index", "--add", "--cacheinfo", "160000,1111111111111111111111111111111111111111,PyBridge");
+        var tree = (await VibeRails.Services.Git.GitCli.RunAsync(_repository, ["write-tree"], ct, maxOutputChars: 256)).StdOut.Trim();
+
+        Assert.Equal([0, 1, 2, 255], await GitStagedSnapshotProvider.TryReadTreeBytesAsync(_repository, tree, "folder/image.bin", 1024, ct));
+        Assert.Null(await GitStagedSnapshotProvider.TryReadTreeBytesAsync(_repository, tree, "folder/image.bin", 3, ct));
+        Assert.Null(await GitStagedSnapshotProvider.TryReadTreeBytesAsync(_repository, tree, "folder", 1024 * 1024, ct));
+        Assert.Null(await GitStagedSnapshotProvider.TryReadTreeBytesAsync(_repository, tree, "PyBridge", 1024, ct));
+        Assert.Null(await GitStagedSnapshotProvider.TryReadTreeBytesAsync(_repository, tree, "missing.bin", 1024, ct));
+    }
+
     private async Task ConfigureUpstreamAtHeadAsync()
     {
         await GitAsync("branch", "upstream-base", "HEAD");

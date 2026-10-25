@@ -80,7 +80,8 @@ export function lineCommentsHtml(decision) {
     </li>`).join('')}</ul>`;
 }
 
-export function describeRequestStatus(request) {
+/** The request's state in words; `comment: false` leaves out a rejection's comment (up to 4,000 characters) for short labels. */
+export function describeRequestStatus(request, { comment = true } = {}) {
     const status = String(request?.status || '');
     if (status === 'cancelled') return 'Cancelled';
     if (status === 'approved') {
@@ -91,7 +92,7 @@ export function describeRequestStatus(request) {
         const rejected = decisions(request, 'rejected');
         const last = rejected[rejected.length - 1];
         if (!last) return 'Rejected';
-        return `Rejected by ${last.reviewer}${last.comment ? `: ${last.comment}` : ''}`;
+        return `Rejected by ${last.reviewer}${comment && last.comment ? `: ${last.comment}` : ''}`;
     }
     if (request?.remote) return 'Sent, awaiting decisions';
     // A send began and viberails.ai's answer was lost (VIBE-212): neither sent nor unsent until the automatic check settles it.
@@ -143,7 +144,9 @@ export function reviewStatusBadge(requests, card) {
     const own = orderRequests(requests, card).filter(request => isForCard(request, card) && request.status !== 'cancelled');
     if (!own.length) return '';
     const request = own[0];
-    const label = request.status === 'open' ? (request.remote ? 'Review requested' : 'Review request not sent') : `Review ${describeRequestStatus(request).replace(/^./, c => c.toLowerCase())}`;
+    // The label stays short (VIBE-213 item 14); the tooltip keeps the whole status, rejection comment included.
+    const label = request.status === 'open' ? (request.remote ? 'Review requested' : 'Review request not sent')
+        : `Review ${describeRequestStatus(request, { comment: false }).replace(/^./, c => c.toLowerCase())}`;
     return `<span class="badge text-bg-${requestTone(request)} board-review-status-badge" data-board-review-status title="${escapeHtml(describeRequestStatus(request))}">${escapeHtml(label)}</span>`;
 }
 
@@ -376,11 +379,13 @@ export function bindRequestReview(editor, card, { app, hasDraft = () => false, o
         }
     }
     async function mutate(id, action) {
+        // Busy before the confirmation, as send does, so a second click cannot start a second mutation (VIBE-213 item 13).
+        setBusy(true);
         const confirmed = await confirmDialog(action === 'cancel'
             ? { title: 'Cancel review request', message: 'The request takes no more decisions. If it was sent, reviewers lose access to it on viberails.ai.', confirmLabel: 'Cancel request' }
             : { title: 'Delete review request', message: 'Remove the request and its decisions from this computer. A sent copy is cancelled on viberails.ai first; a copy that cannot be cancelled yet keeps the request here, cancelled, until it is.', confirmLabel: 'Delete', danger: true });
-        if (!current() || !confirmed) return;
-        setBusy(true);
+        if (!current()) return;
+        if (!confirmed) { setBusy(false); return; }
         say(action === 'cancel' ? 'Cancelling…' : 'Deleting…');
         try {
             if (action === 'cancel') await call(`/${encodeURIComponent(id)}/cancel`, 'POST');

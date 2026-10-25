@@ -1201,9 +1201,8 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         if (!IsObjectId(treeId) || string.IsNullOrEmpty(relativePath) || maximumBytes <= 0)
             return null;
         var objectSpec = $"{treeId}:{relativePath}";
-        var typeResult = await RunTextGitAsync(repositoryPath, ["cat-file", "-t", objectSpec], cancellationToken);
-        if (typeResult.ExitCode != 0 || typeResult.TimedOut || typeResult.StdOut.Trim() != "blob")
-            return null;
+        // No separate type check (VIBE-213 item 12): `cat-file blob` itself refuses a tree entry that is
+        // not a blob (a directory, or a gitlink whose commit is not here), so two launches per file suffice.
         var sizeResult = await RunTextGitAsync(repositoryPath, ["cat-file", "-s", objectSpec], cancellationToken);
         if (sizeResult.ExitCode != 0 || sizeResult.TimedOut
             || !long.TryParse(sizeResult.StdOut.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var size)

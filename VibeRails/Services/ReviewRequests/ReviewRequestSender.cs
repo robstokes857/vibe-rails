@@ -39,9 +39,11 @@ public sealed class ReviewRequestSender(
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
 
     /// <summary>The manifest of a send. Live sessions are re-read so the disclosure says whether each one still waits to end.</summary>
-    public async Task<ReviewRequestDisclosure> DisclosureAsync(string projectPath, string id, ISessionStore? sessions, CancellationToken ct)
+    public async Task<ReviewRequestDisclosure> DisclosureAsync(string projectPath, string id, ISessionStore? sessions, CancellationToken ct,
+        ReviewRequestDetail? detail = null)
     {
-        var detail = await reviews.GetAsync(projectPath, id, ct);
+        // A caller that already read the request (the route's tool-contact check) passes it, so the stored bundle is parsed once.
+        detail ??= await reviews.GetAsync(projectPath, id, ct);
         var bundle = detail.Bundle;
         var files = new List<ReviewDisclosureFile>(bundle.Files.Count);
         long textBytes = 0, carriedBytes = 0;
@@ -58,7 +60,7 @@ public sealed class ReviewRequestSender(
                 withBytes++;
                 carriedBytes += ReviewBundleCapture.DecodedLength(file.AfterBytes);
             }
-            textBytes += Utf8(file.Before) + Utf8(file.After);
+            textBytes += ReviewBundleCapture.Utf8Length(file.Before) + ReviewBundleCapture.Utf8Length(file.After);
             files.Add(new ReviewDisclosureFile(file.Path, file.Change, file.PreviousPath, file.ChangedLines, included, file.Omitted, bytesIncluded));
         }
         var attached = new List<ReviewDisclosureSession>(bundle.Sessions.Count);
@@ -409,5 +411,4 @@ public sealed class ReviewRequestSender(
     private void Publish(string id, string status, string? cardKey, bool sent) =>
         events.Publish(ReviewRequestEvents.Updated, new ReviewRequestChanged(id, status, cardKey, sent), ReviewRequestJsonContext.Default.ReviewRequestChanged);
 
-    private static int Utf8(string? text) => text is null ? 0 : Encoding.UTF8.GetByteCount(text);
 }

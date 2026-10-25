@@ -224,10 +224,34 @@ public static class ReviewBundleCapture
         return (long)base64.Length / 4 * 3 - padding;
     }
 
-    private static int Utf8Length(string? text) => text is null ? 0 : Encoding.UTF8.GetByteCount(text);
+    /// <summary>A text's UTF-8 length; the one helper the review-request byte counts share (VIBE-213 item 20).</summary>
+    internal static int Utf8Length(string? text) => text is null ? 0 : Encoding.UTF8.GetByteCount(text);
 
-    /// <summary>The bytes a JSON string field costs on the wire with the desktop's serializer: escaped, with its quotes.</summary>
-    internal static long WireSize(string? text) => text is null ? 0 : JsonEncodedText.Encode(text).EncodedUtf8Bytes.Length + 2L;
+    /// <summary>
+    /// The bytes a JSON string field costs on the wire with the desktop's serializer: escaped, with its quotes.
+    /// Counted without building the escaped copy (up to six times the text, per side per file per preview;
+    /// VIBE-213 item 18): each ASCII character costs what the default encoder makes of it, read once from
+    /// the encoder itself, and every other UTF-16 unit is a six-byte <c>\uXXXX</c>, since the default
+    /// encoder allows only Basic Latin. <c>WireSizeMatchesTheEscapedEncoding</c> holds the two together.
+    /// </summary>
+    internal static long WireSize(string? text)
+    {
+        if (text is null) return 0;
+        var size = 2L;
+        foreach (var character in text)
+            size += character < AsciiWireLengths.Length ? AsciiWireLengths[character] : 6;
+        return size;
+    }
+
+    private static readonly byte[] AsciiWireLengths = BuildAsciiWireLengths();
+
+    private static byte[] BuildAsciiWireLengths()
+    {
+        var lengths = new byte[128];
+        for (var character = 0; character < lengths.Length; character++)
+            lengths[character] = (byte)JsonEncodedText.Encode(((char)character).ToString()).EncodedUtf8Bytes.Length;
+        return lengths;
+    }
 
     private static string RepositoryName(string repositoryPath)
     {

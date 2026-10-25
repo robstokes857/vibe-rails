@@ -99,13 +99,14 @@ public static class ReviewRequestRoutes
         group.MapGet("/{id:guid}/disclosure", async Task<IResult> (Guid id, HttpContext context, ReviewRequestSender sender, ReviewRequestService reviews, ISessionStore sessions, CancellationToken ct) =>
         {
             // A tool contact reads only a request that attaches its own session (the one request_review made).
+            ReviewRequestDetail? detail = null;
             if (ToolContact(context) is { } contact)
             {
-                var detail = await reviews.GetAsync(Project(), id.ToString("D"), ct);
+                detail = await reviews.GetAsync(Project(), id.ToString("D"), ct);
                 if (contact.SessionId is null || !detail.Bundle.Sessions.Any(session => string.Equals(session.Id, contact.SessionId, StringComparison.OrdinalIgnoreCase)))
                     return Forbidden("A terminal's tool credentials can read only a review request that attaches that terminal's session.");
             }
-            return Results.Json(await sender.DisclosureAsync(Project(), id.ToString("D"), sessions, ct), ReviewRequestJsonContext.Default.ReviewRequestDisclosure);
+            return Results.Json(await sender.DisclosureAsync(Project(), id.ToString("D"), sessions, ct, detail), ReviewRequestJsonContext.Default.ReviewRequestDisclosure);
         });
 
         group.MapPost("/{id:guid}/send", async Task<IResult> (Guid id, HttpContext context, ReviewRequestSender sender, CancellationToken ct) =>

@@ -227,7 +227,7 @@ the design decisions for the rest.
   it reads `GET /api/v1/review-requests/staged` (`ReviewRequestService.PreviewAsync`): what a
   request made now would capture, from the same staged capture as create but storing nothing: each
   file with its change kind, `+added −removed` (`ReviewLineDiff`, Myers edit distance over lines,
-  null beyond 20,000 edits so the snapshot's single count is shown instead) and omission reason, the
+  null beyond 20,000 edits or 4 million steps per file, so the snapshot's single count is shown instead) and omission reason, the
   tree id, the text bytes, the `Signed Approval` rules of the staged `vc.rules.md` files whose path a
   staged file touches (resolved and matched as the hook does; their approvers prefill the reviewers
   unless the person already typed some), the fixed destination, audience and session disclosure.

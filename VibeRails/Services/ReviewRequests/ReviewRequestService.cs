@@ -116,7 +116,7 @@ public sealed class ReviewRequestService(
                 withBytes++;
                 carriedBytes += ReviewBundleCapture.DecodedLength(file.AfterBytes);
             }
-            textBytes += Utf8(file.Before) + Utf8(file.After);
+            textBytes += ReviewBundleCapture.Utf8Length(file.Before) + ReviewBundleCapture.Utf8Length(file.After);
             var counts = included ? ReviewLineDiff.Count(file.Before, file.After) : null;
             files.Add(new ReviewStagedFile(file.Path, file.Change, file.PreviousPath, file.ChangedLines,
                 counts?.Added, counts?.Removed, included, file.Omitted, bytesIncluded));
@@ -261,7 +261,6 @@ public sealed class ReviewRequestService(
         return snapshot;
     }
 
-    private static int Utf8(string? text) => text is null ? 0 : Encoding.UTF8.GetByteCount(text);
 
     public async Task<ReviewRequestList> ListAsync(string projectPath, CancellationToken ct)
     {

@@ -151,7 +151,7 @@ namespace VibeRails
                         sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(Services.ReviewRequests.ReviewRequestTransport))),
                     sp.GetRequiredService<Services.ReviewRequests.ReviewInboxState>(),
                     ParserConfigs.GetApiKey,
-                    () => ApiKeyStore.GetAccountEmail(Config.LoadFresh()),
+                    ApiKeyStore.CachedAccountEmail(ParserConfigs.GetApiKey, Config.LoadFresh),
                     sp.GetRequiredService<IAppEventBus>(),
                     sp.GetRequiredService<Services.ReviewRequests.IReviewSignaturePopupLauncher>()));
             }

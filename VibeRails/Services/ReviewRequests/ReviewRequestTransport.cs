@@ -190,7 +190,7 @@ public sealed class ReviewRequestTransport(HttpClient client)
             if (file.Omitted is not null and not (ReviewBundleOmission.Binary or ReviewBundleOmission.Oversized or ReviewBundleOmission.BundleLimit)) throw Invalid();
             if (file.Binary && file.Omitted != ReviewBundleOmission.Binary) throw Invalid();
             if (file.Omitted is not null && (file.Before is not null || file.After is not null)) throw Invalid();
-            var size = Utf8(file.Before) + Utf8(file.After);
+            var size = ReviewBundleCapture.Utf8Length(file.Before) + ReviewBundleCapture.Utf8Length(file.After);
             if (size > ReviewBundleCapture.MaxFileContentBytes) throw Invalid();
             total += size;
             if (total > ReviewBundleCapture.MaxBundleContentBytes) throw Invalid();
@@ -241,7 +241,6 @@ public sealed class ReviewRequestTransport(HttpClient client)
     /// <summary>Git paths are exact: 1 to 4,096 characters, anything but NUL.</summary>
     private static bool IsPath(string? path) => path is { Length: > 0 and <= 4096 } && !path.Contains('\0');
 
-    private static int Utf8(string? text) => text is null ? 0 : Encoding.UTF8.GetByteCount(text);
 
     private static ReviewRequestTransportException NotAddressed() => new("not_found",
         "viberails.ai has no open review request with this reference for your account. It may have been cancelled or expired, or it is not addressed to your verified email.", 404);

@@ -95,6 +95,12 @@ test('badges and rows escape server text and offer Send only for an open unsent 
     assert.match(reviewStatusBadge([request({ remote: {} })], card), /Review requested/);
     const other = reviewStatusBadge([rejected], card);
     assert.equal(other, '', 'another card\'s request is not this card\'s status');
+    // VIBE-213 item 14: a rejection's comment (up to 4,000 characters) stays in the tooltip, not the label.
+    const long = 'x'.repeat(4_000);
+    const rejectedHere = reviewStatusBadge([request({ status: 'rejected', decisions: [{ id: 3, reviewer: 'lead@example.test', decision: 'rejected', comment: long }] })], card);
+    assert.match(rejectedHere, />Review rejected by lead@example\.test<\/span>$/);
+    assert.match(rejectedHere, new RegExp(`title="Rejected by lead@example\\.test: ${long}"`));
+    assert.equal(describeRequestStatus(rejected, { comment: false }), 'Rejected by lead@example.test');
     const commit = commitApprovalBadge([{ reviewer: '<img src=x onerror=alert(1)>', requestId: 'x' }, { reviewer: 'lead@example.test' }]);
     assert.doesNotMatch(commit, /<img/);
     assert.match(commit, /Approved by &lt;img src=x onerror=alert\(1\)&gt;, lead@example\.test/);

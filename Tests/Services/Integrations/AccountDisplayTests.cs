@@ -67,6 +67,30 @@ public sealed class AccountDisplayTests : IDisposable
         Assert.Equal("second@example.com", ApiKeyStore.GetAccountEmail(store.LoadFresh()));
     }
 
+    // VIBE-213 item 17: the inbox asks on every poll; config.json is re-read only when the key changes.
+    [Fact]
+    public void CachedAccountEmailRereadsSettingsOnlyWhenTheKeyChanges()
+    {
+        Assert.True(keys.TrySave("first-private-key", "", "first@example.com"));
+        var key = "first-private-key";
+        var reads = 0;
+        var email = ApiKeyStore.CachedAccountEmail(() => key, () => { reads++; return store.LoadFresh(); });
+
+        Assert.Equal("first@example.com", email());
+        Assert.Equal("first@example.com", email());
+        Assert.Equal(1, reads);
+
+        // A key the file does not hold yet is not cached: the next ask reads again.
+        key = "second-private-key";
+        Assert.Null(email());
+        Assert.Null(email());
+        Assert.Equal(3, reads);
+        Assert.True(keys.TrySave("second-private-key", "first-private-key", "second@example.com"));
+        Assert.Equal("second@example.com", email());
+        Assert.Equal("second@example.com", email());
+        Assert.Equal(4, reads);
+    }
+
     public void Dispose()
     {
         store.Dispose();
