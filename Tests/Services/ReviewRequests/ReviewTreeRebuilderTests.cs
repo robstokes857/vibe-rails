@@ -218,19 +218,51 @@ public sealed class ReviewTreeRebuilderTests : IAsyncLifetime
         Assert.Contains("old.md", result.Message);
     }
 
+    /// <summary>
+    /// Codex fifth review: a path listed as modified while an overlapping addition deletes it rebuilds the
+    /// true tree and names every touched path, yet shows a modification where the tree has a deletion.
+    /// </summary>
     [Fact]
-    public void HiddenChangesAreTheTouchedPathsTheBundleDoesNotName()
+    public async Task AModificationHiddenByAnOverlappingAdditionIsRefused()
+    {
+        await Git(Repo, "rm", "-q", "-f", "--", "crlf.txt");
+        Directory.CreateDirectory(Path.Combine(Repo, "crlf.txt"));
+        await File.WriteAllTextAsync(Path.Combine(Repo, "crlf.txt", "new.txt"), "inside\n", Ct);
+        await Git(Repo, "add", "--", "crlf.txt/new.txt");
+        var (_, bundle) = await CaptureAsync();
+        Assert.True((await ReviewTreeRebuilder.RebuildAsync(Clone, bundle.TreeId, bundle.BaseTree, bundle.BaseCommit, bundle.Files, Ct)).Matches);
+
+        var forged = bundle.Files
+            .Select(file => file.Path == "crlf.txt" && file.Change == "deleted"
+                ? file with { Change = "modified", After = file.Before + "# harmless\r\n", ChangedLines = 1 }
+                : file)
+            .ToList();
+        var result = await ReviewTreeRebuilder.RebuildAsync(Clone, bundle.TreeId, bundle.BaseTree, bundle.BaseCommit, forged, Ct);
+
+        Assert.Equal("hidden_change", result.Code);
+        Assert.Contains("crlf.txt (listed as modified, actually deleted)", result.Message);
+        Assert.Equal(bundle.TreeId, result.RebuiltTree); // Every path was listed and the tree matched; only the kind lied.
+    }
+
+    [Fact]
+    public void TransitionMismatchesNameWhatDiffersFromTheListedChanges()
     {
         var files = new List<ReviewBundleFile>
         {
             new("kept.cs", "renamed", false, "keep.cs", 0, "x\n", "x\n", null),
-            new("tools", "added", false, null, 1, null, "now a file\n", null)
+            new("tools", "added", false, null, 1, null, "now a file\n", null),
+            new("same.txt", "modified", false, null, 0, "same\n", "same\n", null) // Unchanged text: nothing expected.
         };
-        var nameStatus = "D\0keep.cs\0A\0kept.cs\0A\0tools\0D\0tools/run.sh\0D\0nested/hidden-security.txt\0";
 
-        Assert.Equal(["nested/hidden-security.txt", "tools/run.sh"], ReviewTreeRebuilder.HiddenChanges(files, nameStatus));
-        Assert.Empty(ReviewTreeRebuilder.HiddenChanges(files, "D\0keep.cs\0A\0kept.cs\0A\0tools\0"));
-        Assert.Empty(ReviewTreeRebuilder.HiddenChanges(files, string.Empty));
+        Assert.Empty(ReviewTreeRebuilder.TransitionMismatches(files, "D\0keep.cs\0A\0kept.cs\0A\0tools\0"));
+        Assert.Equal(["nested/hidden-security.txt (deleted, not listed)", "tools/run.sh (deleted, not listed)"],
+            ReviewTreeRebuilder.TransitionMismatches(files, "D\0keep.cs\0A\0kept.cs\0A\0tools\0D\0tools/run.sh\0D\0nested/hidden-security.txt\0"));
+        Assert.Equal(["tools (listed as added, actually deleted)"],
+            ReviewTreeRebuilder.TransitionMismatches(files, "D\0keep.cs\0A\0kept.cs\0D\0tools\0"));
+        Assert.Equal(["kept.cs (listed as added, unchanged)", "tools (listed as added, unchanged)"],
+            ReviewTreeRebuilder.TransitionMismatches(files, "D\0keep.cs\0"));
+        Assert.Equal(["keep.cs (listed as deleted, unchanged)", "kept.cs (listed as added, unchanged)", "tools (listed as added, unchanged)"],
+            ReviewTreeRebuilder.TransitionMismatches(files, string.Empty));
     }
 
     [Fact]

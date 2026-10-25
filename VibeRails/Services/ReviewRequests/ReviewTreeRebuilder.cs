@@ -37,8 +37,9 @@ public sealed record ReviewTreeRebuildResult(
 /// unlisted or altered file changes <c>write-tree</c>. The base binds the diff the reviewer saw: each
 /// transition has the canonical shape (<see cref="ShapeProblem"/>), each changed file's base text must
 /// hash to the base commit's own blob at its source path, a file listed as added and the destination of
-/// a rename or copy must be absent from the base, a deleted or changed file must exist there, and every
-/// path the rebuilt tree changes relative to the base must be listed (<see cref="HiddenChanges"/>).
+/// a rename or copy must be absent from the base, a deleted or changed file must exist there, and the
+/// per-path transition the rebuilt tree makes relative to the base must equal the listed one
+/// (<see cref="TransitionMismatches"/>).
 /// Without those checks a request could show <c>Before = After</c> ("no text changes") over a real
 /// change, point a file's base text at another file, or add a path that collides with a base directory
 /// or file so that unlisted deletions ride along, and still collect a signature over the true tree
@@ -151,22 +152,24 @@ public static class ReviewTreeRebuilder
                 return new(false, "git_failed", $"Git could not write the rebuilt tree ({Trim(written.StdErr)}).");
             var rebuilt = written.StdOut.Trim();
 
-            // The complete transition: every path the rebuilt tree changes relative to the base must be
-            // one the request lists. An added path that collides with a base directory or file makes
-            // update-index drop the conflicting base entries without a word (Codex slice D re-review),
-            // and a reviewer who read the listed files never saw those deletions. Trees only; no blob is read.
+            // The complete transition: what the rebuilt tree changes relative to the base, path by path and
+            // kind by kind, must be what the request lists. An added path that collides with a base
+            // directory or file makes update-index drop the conflicting base entries without a word (Codex
+            // slice D re-reviews), turning an unlisted file, or one listed as modified, into a deletion the
+            // reviewer never saw. Trees only; no blob is read.
             var touched = await GitCli.RunAsync(
                 repositoryPath, ["diff-tree", "-r", "-z", "--name-status", "--no-renames", baseTree, rebuilt],
                 cancellationToken, GitTimeout, null, environment);
             if (!touched.Succeeded)
                 return new(false, "git_failed", $"Git could not list what the rebuilt tree changes ({Trim(touched.StdErr)}).");
-            var hidden = HiddenChanges(files, touched.StdOut);
-            if (hidden.Count > 0)
+            var mismatches = TransitionMismatches(files, touched.StdOut);
+            if (mismatches.Count > 0)
             {
-                var named = string.Join(", ", hidden.Take(5)) + (hidden.Count > 5 ? $" and {hidden.Count - 5} more" : string.Empty);
+                var named = string.Join("; ", mismatches.Take(5)) + (mismatches.Count > 5 ? $"; and {mismatches.Count - 5} more" : string.Empty);
                 return new(false, "hidden_change",
-                    $"The request's files also change {hidden.Count} path(s) it does not list ({named}), for example a file replaced by a "
-                    + "directory of the same name, so what you read is not the whole change. Do not approve it.", rebuilt);
+                    $"The change the request's files make differs from the one they describe in {mismatches.Count} path(s): {named}. "
+                    + "A path can be deleted by an addition that overlaps it, or changed without being listed, so what you read is not "
+                    + "the whole change. Do not approve it.", rebuilt);
             }
 
             if (rebuilt == treeId)
@@ -323,28 +326,53 @@ public static class ReviewTreeRebuilder
     }
 
     /// <summary>
-    /// Paths that <c>diff-tree -r -z --name-status --no-renames base rebuilt</c> reports changed and the
-    /// bundle does not list as a path or a rename source: the deletions a path collision caused, or any
-    /// other effect of applying the listed files that the reviewer never saw. Sorted, for the message.
+    /// Where the transition the rebuilt tree makes differs from the one the bundle lists: a touched path
+    /// the bundle does not name (the deletions a path collision caused), a listed path the rebuild left
+    /// unchanged, or a path whose kind of change differs (listed as modified, actually deleted, because
+    /// an overlapping addition removed it). Compares <c>diff-tree -r -z --name-status --no-renames base
+    /// rebuilt</c> with what the listed kinds imply: a rename is a deletion and an addition, a copy an
+    /// addition, a modification whose text is unchanged nothing. Sorted, for the message.
     /// </summary>
-    internal static IReadOnlyList<string> HiddenChanges(IReadOnlyList<ReviewBundleFile> files, string nameStatusZ)
+    internal static IReadOnlyList<string> TransitionMismatches(IReadOnlyList<ReviewBundleFile> files, string nameStatusZ)
     {
-        var listed = new HashSet<string>(StringComparer.Ordinal);
+        var expected = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var file in files)
         {
-            listed.Add(file.Path);
-            if (file.Change == "renamed" && file.PreviousPath is { } source) listed.Add(source);
+            switch (file.Change)
+            {
+                case "added": expected[file.Path] = "A"; break;
+                case "deleted": expected[file.Path] = "D"; break;
+                case "modified": if (file.Before != file.After) expected[file.Path] = "M"; break;
+                case "renamed": expected[file.PreviousPath!] = "D"; expected[file.Path] = "A"; break;
+                case "copied": expected[file.Path] = "A"; break;
+            }
         }
+        var actual = new Dictionary<string, string>(StringComparer.Ordinal);
         var fields = nameStatusZ.Split('\0');
-        var hidden = new SortedSet<string>(StringComparer.Ordinal);
         // "<status>\0<path>\0" pairs; with --no-renames every status has exactly one path.
         for (var i = 0; i + 1 < fields.Length; i += 2)
         {
-            var path = fields[i + 1];
-            if (path.Length > 0 && !listed.Contains(path)) hidden.Add(path);
+            if (fields[i + 1].Length > 0) actual[fields[i + 1]] = fields[i].Length > 0 ? fields[i][..1] : "?";
         }
-        return [.. hidden];
+        var problems = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var (path, status) in actual)
+        {
+            if (!expected.TryGetValue(path, out var listed))
+                problems.Add($"{path} ({DescribeStatus(status)}, not listed)");
+            else if (listed != status)
+                problems.Add($"{path} (listed as {DescribeStatus(listed)}, actually {DescribeStatus(status)})");
+        }
+        foreach (var (path, listed) in expected)
+        {
+            if (!actual.ContainsKey(path)) problems.Add($"{path} (listed as {DescribeStatus(listed)}, unchanged)");
+        }
+        return [.. problems];
     }
+
+    private static string DescribeStatus(string status) => status switch
+    {
+        "A" => "added", "D" => "deleted", "M" => "modified", "T" => "type changed", _ => "changed"
+    };
 
     /// <summary>
     /// The <c>update-index --index-info</c> input: a removal (mode 0) for every deleted path and every

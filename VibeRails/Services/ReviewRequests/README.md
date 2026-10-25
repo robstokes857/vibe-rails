@@ -163,13 +163,15 @@ the design decisions for the rest.
   be absent from the base, or its overwritten content would never be shown (`base_mismatch`; a
   changed file shown without base text and not marked omitted is `base_text_missing`). Last the
   whole transition: `diff-tree --name-status --no-renames` between the base tree and the rebuilt
-  tree must touch only listed paths and rename sources (`hidden_change`), because an added path
-  that collides with a base directory or file makes `update-index` drop the conflicting entries
-  without a word. Without these, `Before = After` over a real change, an added file carrying base
-  text, a deleted file carrying staged text, a previous path pointing at another base file, a
-  rename onto an existing file, or a path collision deleting unlisted files all read as "no text
-  changes" on viberails.ai while the signature still covered the true tree (Codex slice D reviews,
-  F1). Refusals name the reason: a file without content, an unknown change kind, an inconsistent
+  tree must equal, path by path and kind by kind, what the listed changes imply (a rename is a
+  deletion and an addition, a copy an addition, an unchanged modification nothing): no unlisted
+  path, no listed path left unchanged, no kind that differs (`hidden_change`), because an added
+  path that collides with a base directory or file makes `update-index` drop the conflicting
+  entries without a word, deleting an unlisted file or one listed as modified. Without these,
+  `Before = After` over a real change, an added file carrying base text, a deleted file carrying
+  staged text, a previous path pointing at another base file, a rename onto an existing file, or a
+  path collision deleting unlisted or misdescribed files all read as "no text changes" on
+  viberails.ai while the signature still covered the true tree (Codex slice D reviews, F1). Refusals name the reason: a file without content, an unknown change kind, an inconsistent
   transition, a missing base commit ("git fetch"), a base tree that is not the commit's, a base
   disagreement, a hidden change, or a tree mismatch, which a new executable also produces: the
   bundle carries no modes, and the reviewer cannot tell a mode bit from a hidden change, so neither
