@@ -212,7 +212,15 @@ the design decisions for the rest.
   from the card after reading the disclosure, and that an older viberails.ai answers
   `server_update_required` with nothing transferred. An older root (404/405 on create) is reported
   as needing an update; the root's own refusals keep their code and wording; unparsed errors report
-  only the status.
+  only the status. The inherited credentials are a scoped tool contact, so
+  `AgentCredentialService.Allows` admits it to exactly `POST /api/v1/review-requests` and
+  `GET /{id}/disclosure`, and the routes refuse (403 `forbidden`) a contact that names any session
+  but its own or reads a request that does not attach it (Codex slice E review, F1).
+- **A send that races a delete (Codex slice E review, F2, slice C code).** When the hosted copy of a
+  request deleted mid-send cannot be cancelled, `SendAsync` puts the row back, cancelled, with the
+  reference, the sending key's fingerprint and the expiry, prompts the poller and answers 409
+  `remote_pending`; the poller's cancellation pass retries it and Delete waits for the host. The
+  caller is never told the copy was cancelled when it was not.
 
 The decision route's only outbound call is the existing public signature verification, with a tree
 id and no repository content. The send route and the poller are the only code that transfers a

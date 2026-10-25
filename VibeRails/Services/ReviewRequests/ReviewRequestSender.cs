@@ -116,8 +116,22 @@ public sealed class ReviewRequestSender(
                 try { await transport.CancelAsync(key, remote.Id!, ct); }
                 catch (ReviewRequestTransportException ex)
                 {
-                    Log.Warning("[ReviewRequests] Request {Id} was deleted during its send and its hosted copy could not be cancelled ({Code}); it expires {Expires:u}",
-                        record.Id, ex.Code, remote.ExpiresUtc);
+                    // The hosted copy is alive and nothing local points at it. Put the row back,
+                    // cancelled, carrying the reference, the sending key's fingerprint and the expiry:
+                    // the poller retries the cancellation and Delete refuses until the host confirms
+                    // (Codex slice E review, F2). Nothing is queued for upload for it.
+                    Log.Warning("[ReviewRequests] Request {Id} was deleted during its send and its hosted copy could not be cancelled yet ({Code}); keeping it cancelled for the retry",
+                        record.Id, ex.Code);
+                    // AddAsync writes the request columns; the hosted columns go through the same
+                    // marks a normal send uses, so the row reads exactly like a sent-then-cancelled one.
+                    await store.AddAsync(record with { Status = ReviewRequestStatus.Cancelled, UpdatedUTC = now }, ct);
+                    await store.MarkSentAsync(record.Id, remote.Id!, fingerprint, now, remote.ExpiresUtc, ct);
+                    await store.MarkSessionsQueuedAsync(record.Id, now, ct);
+                    polls.Prompt(fingerprint);
+                    Publish(record.Id, ReviewRequestStatus.Cancelled, record.CardKey, true);
+                    throw new ReviewRequestException("remote_pending",
+                        "This review request was deleted while it was being sent, and its copy on viberails.ai is not cancelled yet. "
+                        + "The request is kept here, cancelled, and the cancellation is retried automatically; delete it again once viberails.ai confirms.", 409);
                 }
                 throw new ReviewRequestException("not_found", "This review request was deleted while it was being sent. Its hosted copy was cancelled.", 404);
             }

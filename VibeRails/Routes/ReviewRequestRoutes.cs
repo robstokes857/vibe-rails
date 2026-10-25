@@ -1,4 +1,5 @@
 using System.Text.Json;
+using VibeRails.Auth;
 using VibeRails.DB;
 using VibeRails.Services.Integrations.VibeCodeRemote;
 using VibeRails.Services.ReviewRequests;
@@ -48,6 +49,15 @@ public static class ReviewRequestRoutes
             await WithJson(context, MaxCreateBodyBytes, async bytes =>
             {
                 var body = JsonSerializer.Deserialize(bytes, ReviewRequestJsonContext.Default.CreateReviewRequest);
+                // A terminal's tool contact (request_review, slice E) may attach only its own session,
+                // and always does: the middleware admits the contact, this decides what it may say.
+                if (ToolContact(context) is { } contact)
+                {
+                    var own = contact.SessionId;
+                    if (own is null || (body?.Sessions ?? []).Any(id => !string.Equals(id?.Trim(), own, StringComparison.OrdinalIgnoreCase)))
+                        return Forbidden("A terminal's tool credentials can attach only that terminal's own session to a review request.");
+                    body = (body ?? new CreateReviewRequest()) with { Sessions = [own] };
+                }
                 var created = await reviews.CreateAsync(Project(), body, sessions, ct);
                 return Results.Json(created, ReviewRequestJsonContext.Default.ReviewRequestSummary, statusCode: StatusCodes.Status201Created);
             }, ct));
@@ -82,8 +92,17 @@ public static class ReviewRequestRoutes
 
         // Slice C: what a send would transfer, and the send itself. The disclosure is read-only and
         // contacts nothing; the send refuses without "confirmed": true so nothing leaves unseen.
-        group.MapGet("/{id:guid}/disclosure", async (Guid id, ReviewRequestSender sender, ISessionStore sessions, CancellationToken ct) =>
-            Results.Json(await sender.DisclosureAsync(Project(), id.ToString("D"), sessions, ct), ReviewRequestJsonContext.Default.ReviewRequestDisclosure));
+        group.MapGet("/{id:guid}/disclosure", async Task<IResult> (Guid id, HttpContext context, ReviewRequestSender sender, ReviewRequestService reviews, ISessionStore sessions, CancellationToken ct) =>
+        {
+            // A tool contact reads only a request that attaches its own session (the one request_review made).
+            if (ToolContact(context) is { } contact)
+            {
+                var detail = await reviews.GetAsync(Project(), id.ToString("D"), ct);
+                if (contact.SessionId is null || !detail.Bundle.Sessions.Any(session => string.Equals(session.Id, contact.SessionId, StringComparison.OrdinalIgnoreCase)))
+                    return Forbidden("A terminal's tool credentials can read only a review request that attaches that terminal's session.");
+            }
+            return Results.Json(await sender.DisclosureAsync(Project(), id.ToString("D"), sessions, ct), ReviewRequestJsonContext.Default.ReviewRequestDisclosure);
+        });
 
         group.MapPost("/{id:guid}/send", async Task<IResult> (Guid id, HttpContext context, ReviewRequestSender sender, CancellationToken ct) =>
             await WithJson(context, MaxSendBodyBytes, async bytes =>
@@ -103,6 +122,13 @@ public static class ReviewRequestRoutes
     }
 
     private static string Project() => ParserConfigs.GetRootPath();
+
+    /// <summary>The scoped tool contact the middleware admitted (a CLI's <c>VIBERAILS_TOOL_*</c> pair), or null for the dashboard credentials.</summary>
+    private static AgentCredentialService.Contact? ToolContact(HttpContext context) =>
+        context.Items[typeof(AgentCredentialService.Contact)] as AgentCredentialService.Contact;
+
+    private static IResult Forbidden(string message) =>
+        Results.Json(new ReviewRequestError(message, "forbidden"), ReviewRequestJsonContext.Default.ReviewRequestError, statusCode: StatusCodes.Status403Forbidden);
 
     /// <summary>Bounded JSON body (including chunked bodies); the action deserializes with a source-generated type.</summary>
     private static async Task<IResult> WithJson(HttpContext context, int maxBytes, Func<byte[], Task<IResult>> action, CancellationToken ct)

@@ -28,7 +28,10 @@ does not allow arbitrary inline scripts, and browser connections are restricted 
 CLI descendants receive separate random credential pairs, never the dashboard pair.
 Root tool contacts rotate on each accepted tab launch, bind to the resulting session, and require its
 tab to remain active and reachable. They permit only GET picker/sharing capabilities, POST
-current-project card launch, and POST sharing links for an owned session. They cannot reach
+current-project card launch, POST sharing links for an owned session, and (VB-50 slice E) POST
+`/api/v1/review-requests` attaching only the contact's own session plus GET
+`/api/v1/review-requests/{id}/disclosure` for a request that attaches it, both refused 403 otherwise;
+never the request list, staged preview, detail, send, decisions, cancel or delete. They cannot reach
 Settings, terminal input/start, shutdown, WebSockets or HTTP MCP. Proxy/control pairs rotate
 per PTY session and are revoked on exit; they permit only the five proxy trees and the exact
 token-saver/self-completion controls. Both values must belong to the same contact.
@@ -573,7 +576,10 @@ emails, an optional note and card key, never a session id, a path or a credentia
 the root's `POST /api/v1/review-requests` and `GET /{id}/disclosure` with the inherited
 `VIBERAILS_TOOL_*` credentials over loopback (no redirects, cookies or proxies; 60 s; 64 KiB and
 1 MiB response bounds), attaches the calling session only, and never sends, decides or signs:
-nothing leaves the computer until a person confirms the disclosure on the card. The root's refusals
+nothing leaves the computer until a person confirms the disclosure on the card. Those two
+operations are the only review-request routes a tool contact may reach (`AgentCredentialService.Allows`),
+and the route itself refuses (403 `forbidden`) a contact that names any other session or reads a
+request that does not attach its own session (Codex slice E review, F1). The root's refusals
 are relayed with their code; unparsed answers report only the status; exception text is never
 relayed. See [Request review from a card](#request-review-from-a-card-and-request_review-vb-50-slice-e).
 
@@ -892,7 +898,10 @@ cancellation is retried by the poller and never blocks the local cancel. A local
 hosted copy first and is refused (409 `remote_pending`) while it cannot, because the row is the only
 thing that can still revoke the hosted copy; the request stays, cancelled, until the host confirms,
 and an expired or already-cancelled hosted copy needs no host. A send that races a delete cancels
-its own hosted copy. The reference is shown to the requester as a selector, never a credential:
+its own hosted copy; when that cancellation fails, the row is put back, cancelled, with the
+reference, the sending key's fingerprint and the expiry, so the poller retries and a later delete
+waits for the host (409 `remote_pending`), and the caller is never told the copy was cancelled
+(Codex slice E review, F2). The reference is shown to the requester as a selector, never a credential:
 every hosted route checks the caller's key.
 
 Decisions are polled by the root that holds the Board sync lease, from `BoardSyncScheduler`, on a

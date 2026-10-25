@@ -17,6 +17,7 @@ using VibeRails.Middleware;
 using VibeRails.Routes;
 using VibeRails.Services.GitPreflight;
 using VibeRails.Services.ReviewRequests;
+using VibeRails.Services.Terminal;
 using VibeRails.Services.VCA;
 using VibeRails.Utils;
 using Xunit;
@@ -33,6 +34,10 @@ public sealed class ReviewRequestRoutesTests : IAsyncLifetime
     private static readonly HttpClient SharedClient = new();
     private static readonly string Tree = new('b', 40);
     private static readonly string ApprovedCommit = new('e', 40);
+    /// <summary>The session a CLI's tool contact is bound to (request_review, slice E).</summary>
+    private static readonly string ToolSession = Guid.NewGuid().ToString("D");
+    private readonly AgentCredentialService _credentials = new();
+    private AgentCredentialService.Contact _contact = null!;
 
     private readonly string _root = Path.Combine(Path.GetTempPath(), $"viberails-review-routes-{Guid.NewGuid():N}");
     private readonly string _originalRootPath = ParserConfigs.GetRootPath();
@@ -63,6 +68,17 @@ public sealed class ReviewRequestRoutesTests : IAsyncLifetime
             [],
             StagedIdentity: new GitStagedSnapshotIdentity(new string('c', 40), new string('d', 40), Tree)));
         var sessions = new Mock<ISessionStore>(MockBehavior.Strict);
+        var started = new DateTime(2026, 10, 24, 12, 0, 0, DateTimeKind.Utc);
+        sessions.Setup(s => s.GetSessionByIdAsync(ToolSession, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SessionResponse(ToolSession, "codex", null, _project, started, null, null));
+        sessions.Setup(s => s.GetSessionDisplayInfoAsync(ToolSession)).ReturnsAsync(("codex", "Tool session"));
+        // The contact a VibeRails-launched CLI inherits as VIBERAILS_TOOL_*: bound to its live session,
+        // which the middleware confirms through the terminal session service (the native path).
+        _contact = _credentials.ForTools(ToolSession);
+        _credentials.BindSession(ToolSession, ToolSession);
+        var terminal = new Mock<ITerminalSessionService>();
+        terminal.SetupGet(t => t.HasActiveSession).Returns(true);
+        terminal.SetupGet(t => t.ActiveSessionId).Returns(ToolSession);
 
         var builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
@@ -72,6 +88,8 @@ public sealed class ReviewRequestRoutesTests : IAsyncLifetime
         auth.Setup(service => service.ValidateTabToken(It.IsAny<string?>())).Returns((string? token) => token == "test-tab");
         builder.Services.AddSingleton(auth.Object);
         builder.Services.AddSingleton(sessions.Object);
+        builder.Services.AddSingleton(_credentials);
+        builder.Services.AddSingleton(terminal.Object);
         var store = new ReviewRequestStore(connection);
         // Slice E: the commit-approvals route resolves commit trees through this fake instead of git.
         var reviews = new ReviewRequestService(store, snapshots.Object, _verifier, commitTrees: (_, shas, _) =>
@@ -197,6 +215,67 @@ public sealed class ReviewRequestRoutesTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
     }
 
+    /// <summary>
+    /// Slice E (Codex review F1): a CLI's tool contact reaches exactly create and disclosure through
+    /// the real middleware, may attach only its own session, reads only a request that attaches it,
+    /// and can never list, preview, send, decide, cancel or delete.
+    /// </summary>
+    [Fact]
+    public async Task AToolContactCreatesWithItsOwnSessionOnlyAndReadsOnlyItsOwnDisclosure()
+    {
+        using var created = await SendAs(_contact, HttpMethod.Post, "/api/v1/review-requests",
+            $"{{\"reviewers\":[\"lead@example.com\"],\"sessions\":[\"{ToolSession}\"],\"cardKey\":\"VB-50\",\"note\":\"from the tool\"}}");
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        using var createdJson = JsonDocument.Parse(await created.Content.ReadAsStringAsync(Ct));
+        var id = createdJson.RootElement.GetProperty("id").GetString();
+        Assert.Equal(1, createdJson.RootElement.GetProperty("sessionCount").GetInt32());
+
+        // No sessions named: the contact's own session is attached anyway. Another session: refused.
+        using var implicitSession = await SendAs(_contact, HttpMethod.Post, "/api/v1/review-requests", "{\"reviewers\":[\"lead@example.com\"]}");
+        Assert.Equal(HttpStatusCode.Created, implicitSession.StatusCode);
+        var implicitId = JsonDocument.Parse(await implicitSession.Content.ReadAsStringAsync(Ct)).RootElement.GetProperty("id").GetString();
+        using var implicitDetail = await Send(HttpMethod.Get, $"/api/v1/review-requests/{implicitId}");
+        Assert.Equal(ToolSession, Assert.Single(JsonDocument.Parse(await implicitDetail.Content.ReadAsStringAsync(Ct)).RootElement
+            .GetProperty("bundle").GetProperty("sessions").EnumerateArray()).GetProperty("id").GetString());
+        using var foreign = await SendAs(_contact, HttpMethod.Post, "/api/v1/review-requests",
+            $"{{\"reviewers\":[\"lead@example.com\"],\"sessions\":[\"{ToolSession}\",\"{Guid.NewGuid():D}\"]}}");
+        Assert.Equal(HttpStatusCode.Forbidden, foreign.StatusCode);
+        Assert.Equal("forbidden", await CodeAsync(foreign));
+
+        using var disclosure = await SendAs(_contact, HttpMethod.Get, $"/api/v1/review-requests/{id}/disclosure");
+        Assert.Equal(HttpStatusCode.OK, disclosure.StatusCode);
+        using var disclosureJson = JsonDocument.Parse(await disclosure.Content.ReadAsStringAsync(Ct));
+        Assert.Equal(ToolSession, Assert.Single(disclosureJson.RootElement.GetProperty("sessions").EnumerateArray()).GetProperty("id").GetString());
+        Assert.Equal("from the tool", disclosureJson.RootElement.GetProperty("note").GetString());
+
+        // A request the dashboard made without this session is not the contact's to read.
+        using var dashboard = await Send(HttpMethod.Post, "/api/v1/review-requests", "{\"reviewers\":[\"lead@example.com\"]}");
+        var otherId = JsonDocument.Parse(await dashboard.Content.ReadAsStringAsync(Ct)).RootElement.GetProperty("id").GetString();
+        using var notOwned = await SendAs(_contact, HttpMethod.Get, $"/api/v1/review-requests/{otherId}/disclosure");
+        Assert.Equal(HttpStatusCode.Forbidden, notOwned.StatusCode);
+        Assert.Equal("forbidden", await CodeAsync(notOwned));
+        using var unknown = await SendAs(_contact, HttpMethod.Get, $"/api/v1/review-requests/{Guid.NewGuid():D}/disclosure");
+        Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
+
+        // Everything that transfers, decides or removes stays with the dashboard credentials.
+        (HttpMethod Method, string Path)[] denied = [
+            (HttpMethod.Get, "/api/v1/review-requests"), (HttpMethod.Get, "/api/v1/review-requests/staged"),
+            (HttpMethod.Get, $"/api/v1/review-requests/commit-approvals?sha={ApprovedCommit}"), (HttpMethod.Get, $"/api/v1/review-requests/{id}"),
+            (HttpMethod.Post, $"/api/v1/review-requests/{id}/send"), (HttpMethod.Post, $"/api/v1/review-requests/{id}/decisions"),
+            (HttpMethod.Post, $"/api/v1/review-requests/{id}/cancel"), (HttpMethod.Delete, $"/api/v1/review-requests/{id}")];
+        foreach (var (method, path) in denied)
+        {
+            using var refused = await SendAs(_contact, method, path, "{\"confirmed\":true}");
+            Assert.Equal(HttpStatusCode.Unauthorized, refused.StatusCode);
+        }
+        Assert.Empty(_outbound);
+        foreach (var requestId in new[] { id, implicitId, otherId })
+        {
+            using var deleted = await Send(HttpMethod.Delete, $"/api/v1/review-requests/{requestId}");
+            Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+        }
+    }
+
     /// <summary>Slice E: the card's preview reads the staged index without storing anything, and a linked commit's approval is read from the ledger.</summary>
     [Fact]
     public async Task StagedPreviewStoresNothingAndCommitApprovalsReadTheLedger()
@@ -316,6 +395,16 @@ public sealed class ReviewRequestRoutesTests : IAsyncLifetime
     {
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Ct));
         return json.RootElement.GetProperty("code").GetString();
+    }
+
+    /// <summary>A request with a CLI's scoped tool contact instead of the dashboard pair.</summary>
+    private async Task<HttpResponseMessage> SendAs(AgentCredentialService.Contact contact, HttpMethod method, string path, string? json = null)
+    {
+        using var request = new HttpRequestMessage(method, new Uri(_baseUri, path));
+        request.Headers.Add("viberails_session", contact.Session);
+        request.Headers.Add("viberails_tab", contact.Tab);
+        if (json is not null) request.Content = new StringContent(json, Encoding.UTF8, "application/json");
+        return await SharedClient.SendAsync(request, Ct);
     }
 
     private async Task<HttpResponseMessage> Send(HttpMethod method, string path, string? json = null, int credentials = 3,

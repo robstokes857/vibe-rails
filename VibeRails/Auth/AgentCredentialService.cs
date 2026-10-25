@@ -110,12 +110,23 @@ public sealed class AgentCredentialService
                 || (HttpMethods.IsGet(request.Method) && path == "/llm/control/token-saver/status");
 
         if (HttpMethods.IsGet(request.Method))
-            return path is "/api/v1/llm-picker/preferences" or "/api/v1/session-sharing/capabilities";
+        {
+            if (path is "/api/v1/llm-picker/preferences" or "/api/v1/session-sharing/capabilities") return true;
+            // request_review (VB-50 slice E) reads the disclosure of a request that attaches the
+            // contact's own session; the route checks that ownership. Never the list, the staged
+            // preview, the detail with the bundle, or any decision.
+            var parts = path.Split('/');
+            return parts.Length == 6 && parts[1] == "api" && parts[2] == "v1" && parts[3] == "review-requests"
+                && Guid.TryParseExact(parts[4], "D", out _) && parts[5] == "disclosure";
+        }
         if (!HttpMethods.IsPost(request.Method)) return false;
         var segments = path.Split('/');
         if (segments.Length == 6 && segments[1] == "api" && segments[2] == "v1"
             && segments[3] == "sessions" && Guid.TryParseExact(segments[4], "D", out _)
             && segments[5] == "sharing-links") return true;
+        // request_review creates a request attaching only the contact's own session (the route
+        // enforces it); send, decisions, cancel and delete stay with the dashboard credentials.
+        if (segments.Length == 4 && segments[1] == "api" && segments[2] == "v1" && segments[3] == "review-requests") return true;
         return segments.Length == 7 && segments[1] == "api" && segments[2] == "v1"
             && segments[3] == "board" && segments[4] == "cards"
             && segments[5].Length is > 0 and <= 256 && segments[5].All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_')

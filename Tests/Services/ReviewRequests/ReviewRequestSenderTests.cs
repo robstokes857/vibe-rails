@@ -270,6 +270,45 @@ public sealed class ReviewRequestSenderTests : IDisposable
         Assert.Empty(_events.Events);
     }
 
+    /// <summary>
+    /// Codex slice E review, F2: when the hosted copy of a request deleted mid-send cannot be
+    /// cancelled, the reference must survive locally so the poller retries and Delete waits for the
+    /// host; the caller is never told the copy was cancelled.
+    /// </summary>
+    [Fact]
+    public async Task ASendRacingADeleteKeepsACancelledRowWhenTheHostedCopyCannotBeCancelledYet()
+    {
+        var created = await CreateAsync();
+        var hostedDelete = HttpStatusCode.ServiceUnavailable;
+        _answer = async request =>
+        {
+            if (request.Method == HttpMethod.Delete) return new HttpResponseMessage(hostedDelete);
+            await _store.DeleteAsync(created.Id, Ct);
+            return Json(HttpStatusCode.Created, Hosted(created.Id, created: _clock.Now));
+        };
+
+        var ex = await Assert.ThrowsAsync<ReviewRequestException>(() => Sender().SendAsync(_project, created.Id, new SendReviewRequest(true), Ct));
+
+        Assert.Equal(("remote_pending", 409), (ex.Code, ex.Status));
+        Assert.DoesNotContain("was cancelled", ex.Message);
+        var kept = await _store.GetAsync(created.Id, Ct);
+        Assert.NotNull(kept);
+        Assert.Equal(("cancelled", Reference, Fingerprint), (kept!.Status, kept.RemoteId, kept.SentKeyFingerprint));
+        Assert.Null(kept.RemoteCancelledUTC);
+        Assert.NotNull(kept.SessionsQueuedUTC);
+        Assert.Contains(await _store.ListSentPendingAsync(Ct), row => row.Id == created.Id);
+        _archives.VerifyNoOtherCalls();
+        var evt = Assert.Single(_events.Events);
+        Assert.Equal(("cancelled", true), (evt.Payload.GetProperty("status").GetString(), evt.Payload.GetProperty("sent").GetBoolean()));
+
+        // Once the host answers, the kept row lets Delete finish the revocation and go.
+        hostedDelete = HttpStatusCode.OK;
+        _requests.Clear();
+        await Sender().DeleteAsync(_project, created.Id, Ct);
+        Assert.Equal(["DELETE /api/v1/review-requests/" + Reference], _requests.Select(r => r.Method + " " + r.RequestUri!.AbsolutePath));
+        Assert.Null(await _store.GetAsync(created.Id, Ct));
+    }
+
     [Theory]
     [InlineData("confirmed")]
     [InlineData("host_down")]

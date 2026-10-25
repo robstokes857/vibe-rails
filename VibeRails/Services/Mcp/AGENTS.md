@@ -366,7 +366,9 @@ id, the staged tree, each file with its change kind and omission, the attached s
 fixed statement of what leaves the computer when a person presses Send on the card; the tool itself
 transfers nothing, and it cannot decide or sign. An older root (404/405) is reported as needing an
 update; the root's own refusals (`nothing_staged`, `not_a_repository`, `session_not_found`, …) keep
-their code and wording; other failures report only the HTTP status. Both transports register it
+their code and wording; other failures report only the HTTP status. The tool contact is admitted
+to exactly these two routes (`AgentCredentialService.Allows`), and the routes refuse a contact that
+names another session or reads a request not attaching its own (403 `forbidden`). Both transports register it
 (`AddReviewRequestMcp`, `.WithTools<ReviewRequestTool>()`); it is not in the Board auto-grants.
 Contract: [Review requests](../ReviewRequests/README.md); security:
 [API_SEC.md](../../../API_SEC.md#request-review-from-a-card-and-request_review-vb-50-slice-e).
