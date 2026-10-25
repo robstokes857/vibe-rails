@@ -34,10 +34,16 @@ public sealed class ReviewRequestService(
     public const int MaxSessions = 10;
     public const int MaxNoteChars = 2000;
     public const int MaxCommentChars = 4000;
-    /// <summary>Per-line comments on one decision (slice F): how many, how long each, and the largest line number.</summary>
+    /// <summary>
+    /// Per-line comments on one decision (slice F): how many, how long each, the largest line number, and the
+    /// total of path and text characters across the decision. The total is what keeps a maximal decision within
+    /// the decision body bounds and fifty of them within <see cref="ReviewRequestTransport.MaxResponseBytes"/>
+    /// once the host escapes every non-ASCII or HTML-sensitive character as six bytes (Codex slice F review, F1).
+    /// </summary>
     public const int MaxLineComments = 50;
     public const int MaxLineCommentChars = 1000;
     public const int MaxLineCommentLine = 1_000_000;
+    public const int MaxLineCommentTotalChars = 16_000;
     public const int MaxCardKeyChars = 64;
     public const int ListLimit = 100;
 
@@ -371,17 +377,33 @@ public sealed class ReviewRequestService(
     internal static IReadOnlyList<ReviewLineComment>? NormalizeLineComments(IReadOnlyList<ReviewLineComment>? comments)
     {
         if (comments is null || comments.Count == 0) return null;
-        if (comments.Count > MaxLineComments) throw Invalid($"A decision carries at most {MaxLineComments} line comments.");
+        if (LineCommentsProblem(comments) is { } problem) throw Invalid(problem);
         var result = new List<ReviewLineComment>(comments.Count);
         foreach (var comment in comments)
-        {
-            if (LineCommentProblem(comment) is { } problem) throw Invalid(problem);
-            result.Add(comment! with { Side = comment.Side.ToLowerInvariant(), Text = CleanLineCommentText(comment.Text) });
-        }
+            result.Add(comment with { Side = comment.Side.ToLowerInvariant(), Text = CleanLineCommentText(comment.Text) });
         return result;
     }
 
-    /// <summary>Why a line comment is not acceptable, or null. The transport refuses a hosted answer that carries one.</summary>
+    /// <summary>
+    /// Why a decision's line comments are not acceptable as a whole, or null: more than <see cref="MaxLineComments"/>,
+    /// one of them malformed (<see cref="LineCommentProblem"/>), or more than <see cref="MaxLineCommentTotalChars"/>
+    /// characters of paths and text together. The transport refuses a hosted answer that carries such a list.
+    /// </summary>
+    internal static string? LineCommentsProblem(IReadOnlyList<ReviewLineComment?> comments)
+    {
+        if (comments.Count > MaxLineComments) return $"A decision carries at most {MaxLineComments} line comments.";
+        long total = 0;
+        foreach (var comment in comments)
+        {
+            if (LineCommentProblem(comment) is { } problem) return problem;
+            total += comment!.Path.Length + comment.Text.Length;
+        }
+        return total > MaxLineCommentTotalChars
+            ? $"A decision's line comments hold at most {MaxLineCommentTotalChars} characters of paths and text together."
+            : null;
+    }
+
+    /// <summary>Why one line comment is not acceptable, or null.</summary>
     internal static string? LineCommentProblem(ReviewLineComment? comment)
     {
         if (comment is null) return "A line comment is missing.";

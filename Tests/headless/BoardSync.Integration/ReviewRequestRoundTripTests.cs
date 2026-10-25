@@ -164,28 +164,43 @@ public sealed class ReviewRequestRoundTripTests
             await using (var db = remote.Db(25))
                 await Service(db).DecideAsync(hosted.Id, new("rejected", null, "One more retry case.",
                     [new Hosted.ReviewLineComment("retry.cs", 1, "After", "Bound the attempts.\r\n\u0007"), new Hosted.ReviewLineComment("old.md", 1, "before", "Keep a stub.")]), "roundtrip", ct);
+            // Slice F review F1: a maximal rejection (fifty comments filling the shared total budget with HTML-sensitive
+            // text) is legitimate on the host; fifty of them, escaped the way the host's serializer escapes them, must
+            // still fit what the desktop reads per poll.
+            await using (var db = remote.Db(25))
+                await Service(db).DecideAsync(hosted.Id, new("rejected", null, new string('<', Hosted.ReviewRequestContract.MaxCommentLength),
+                    Enumerable.Range(1, Hosted.ReviewRequestContract.MaxLineComments).Select(i => new Hosted.ReviewLineComment(new string('<', 100), i, "after",
+                        new string('<', Hosted.ReviewRequestContract.MaxLineCommentTotalChars / Hosted.ReviewRequestContract.MaxLineComments - 100))).ToList()), "roundtrip", ct);
             await using (var db = remote.Db(25))
                 Assert.True((await Service(db).DecideAsync(hosted.Id, new("approved", trailer, "Looks right now."), "roundtrip", ct)).Created);
 
-            // Desktop poll: the decisions route's JSON, read the way the desktop would.
-            string pollJson;
+            // Desktop poll: the decisions route's JSON, serialized with the web defaults MVC uses (which escape every
+            // non-ASCII or HTML-sensitive character), read the way the desktop would.
+            Hosted.ReviewRequestStatusDto pollDto;
             await using (var db = remote.Db(23))
-                pollJson = JsonSerializer.Serialize(await Service(db).DecisionsAsync(hosted.Id, ct), JsonSerializerOptions.Web);
+                pollDto = (await Service(db).DecisionsAsync(hosted.Id, ct))!;
+            var pollJson = JsonSerializer.Serialize(pollDto, JsonSerializerOptions.Web);
             using var poll = JsonDocument.Parse(pollJson);
             Assert.Equal("approved", poll.RootElement.GetProperty("status").GetString());
             var decisions = poll.RootElement.GetProperty("decisions").EnumerateArray().ToList();
-            Assert.Equal(["rejected", "approved"], decisions.Select(d => d.GetProperty("decision").GetString()));
+            Assert.Equal(["rejected", "rejected", "approved"], decisions.Select(d => d.GetProperty("decision").GetString()));
             Assert.Equal(["retry.cs", "old.md"], decisions[0].GetProperty("lineComments").EnumerateArray().Select(c => c.GetProperty("path").GetString()));
-            var polledTrailer = decisions[1].GetProperty("trailer").GetString();
+            var polledTrailer = decisions[2].GetProperty("trailer").GetString();
             Assert.Equal(trailer, polledTrailer);
             Assert.True(CommitSignatureFormat.TryParseTrailer(polledTrailer!, out var polledSignature));
             Assert.Equal(tree, polledSignature.TreeId);
+            // Slice F review F1: the maximal decision, escaped, times the host's decision limit fits the desktop's poll bound.
+            var maximalBytes = JsonSerializer.SerializeToUtf8Bytes(pollDto.Decisions[1], JsonSerializerOptions.Web).Length;
+            Assert.Contains("\\u003C", pollJson);
+            Assert.True((long)maximalBytes * Hosted.ReviewRequestContract.MaxDecisionsPerRequest <= Desktop.ReviewRequestTransport.MaxResponseBytes,
+                $"{maximalBytes} escaped bytes per maximal decision; {Hosted.ReviewRequestContract.MaxDecisionsPerRequest} of them exceed the desktop poll bound");
             // Slice C: the same JSON through the desktop transport's validation, bound to this reference.
             var polled = Desktop.ReviewRequestTransport.ParseStatus(Encoding.UTF8.GetBytes(pollJson), null, null, hosted.Id);
             Assert.Equal("approved", polled.Status);
-            Assert.Equal(["rejected", "approved"], polled.Decisions!.Select(d => d.Decision));
-            Assert.Equal(polledTrailer, polled.Decisions[1].Trailer);
-            Assert.Equal(Reviewer, polled.Decisions[1].Reviewer, ignoreCase: true);
+            Assert.Equal(["rejected", "rejected", "approved"], polled.Decisions!.Select(d => d.Decision));
+            Assert.Equal(Hosted.ReviewRequestContract.MaxLineComments, polled.Decisions[1].LineComments!.Count);
+            Assert.Equal(polledTrailer, polled.Decisions[2].Trailer);
+            Assert.Equal(Reviewer, polled.Decisions[2].Reviewer, ignoreCase: true);
             Assert.Equal([new Desktop.ReviewLineComment("retry.cs", 1, "after", "Bound the attempts."), new Desktop.ReviewLineComment("old.md", 1, "before", "Keep a stub.")],
                 polled.Decisions[0].LineComments);
             await using (var db = remote.Db(25)) // The reviewer sees their own line comments on the page.
@@ -214,7 +229,7 @@ public sealed class ReviewRequestRoundTripTests
                     NullLogger<SessionEnvelopeReadService>.Instance).OpenReviewReplayPayloadAsync(hosted.Id, 1, ct)).Status);
             }
             await using (var db = remote.Db(23))
-                Assert.Equal(2, (await Service(db).DecisionsAsync(hosted.Id, ct))!.Decisions.Count);
+                Assert.Equal(3, (await Service(db).DecisionsAsync(hosted.Id, ct))!.Decisions.Count);
         }
         finally
         {

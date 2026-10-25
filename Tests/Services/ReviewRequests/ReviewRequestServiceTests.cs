@@ -335,6 +335,10 @@ public sealed class ReviewRequestServiceTests : IAsyncLifetime
         var blank = await Assert.ThrowsAsync<ReviewRequestException>(() => service.RecordDecisionAsync(Repo, created.Id,
             new RecordReviewDecisionRequest("rejected", Reviewer: "second@example.com", LineComments: [new ReviewLineComment("db.cs", 1, "after", " \u0007 ")]), Ct));
         Assert.Equal("invalid_request", blank.Code);
+        var tooLong = await Assert.ThrowsAsync<ReviewRequestException>(() => service.RecordDecisionAsync(Repo, created.Id,
+            new RecordReviewDecisionRequest("rejected", Reviewer: "second@example.com", LineComments: Enumerable.Range(1, ReviewRequestService.MaxLineComments)
+                .Select(i => new ReviewLineComment("db.cs", i, "after", new string('x', ReviewRequestService.MaxLineCommentTotalChars / ReviewRequestService.MaxLineComments))).ToList()), Ct));
+        Assert.Equal("invalid_request", tooLong.Code);
         Assert.Empty((await service.GetAsync(Repo, created.Id, Ct)).Request.Decisions);
 
         var rejected = await service.RecordDecisionAsync(Repo, created.Id,

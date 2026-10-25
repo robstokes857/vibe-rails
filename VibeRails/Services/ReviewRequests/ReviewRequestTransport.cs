@@ -33,10 +33,13 @@ public sealed class ReviewRequestTransport(HttpClient client)
     internal static readonly TimeSpan Deadline = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// Fifty decisions with 4,000-character comments, trailers and fifty 1,000-character line comments each
-    /// (slice F) fit comfortably once escaped; anything larger is not an answer.
+    /// The poll answer bound. Fifty decisions, each with a 4,000-character comment, a trailer and line comments
+    /// holding up to <see cref="ReviewRequestService.MaxLineCommentTotalChars"/> characters of paths and text,
+    /// serialize to about 6.5 MB once the host's default encoder escapes every non-ASCII or HTML-sensitive
+    /// character as six bytes, so a maximal legitimate answer fits; anything larger is not an answer. The
+    /// previous 4 MiB refused answers the hosted contract permits (Codex slice F review, F1).
     /// </summary>
-    internal const int MaxResponseBytes = 4 * 1024 * 1024;
+    public const int MaxResponseBytes = 8 * 1024 * 1024;
     private const int MaxErrorBodyBytes = 16 * 1024;
     public const int MaxDecisions = 50;
     private const string ReferencePrefix = "rvw_";
@@ -82,8 +85,11 @@ public sealed class ReviewRequestTransport(HttpClient client)
 
     // ---- The reviewer's side (VB-50 slice D): the key's account as a listed reviewer. ----
 
-    /// <summary>A bundle holds up to 4 MiB of text, which the host's default JSON encoder can escape to six times that.</summary>
-    internal const int MaxBundleResponseBytes = 25 * 1024 * 1024;
+    /// <summary>
+    /// A bundle holds up to 4 MiB of text, which the host's default JSON encoder can escape to six times that,
+    /// plus this account's decisions with their line comments (about 6.5 MB at most, see <see cref="MaxResponseBytes"/>).
+    /// </summary>
+    internal const int MaxBundleResponseBytes = 32 * 1024 * 1024;
     internal static readonly TimeSpan BundleDeadline = TimeSpan.FromSeconds(90);
     /// <summary>The host lists at most 100 and says whether there are more; anything beyond this is not an answer.</summary>
     public const int MaxInboxItems = 200;
@@ -277,8 +283,8 @@ public sealed class ReviewRequestTransport(HttpClient client)
 
     /// <summary>
     /// A hosted decision within the desktop's own bounds: a listed kind, an email, a parsable trailer on an
-    /// approval, a bounded comment, and at most <see cref="ReviewRequestService.MaxLineComments"/> well-formed
-    /// line comments (slice F; <see cref="ReviewRequestService.LineCommentProblem"/>).
+    /// approval, a bounded comment, and line comments within the desktop's count, size and total bounds
+    /// (slice F; <see cref="ReviewRequestService.LineCommentsProblem"/>).
     /// </summary>
     private static void ValidateDecision(ReviewRequestHostedDecision? decision)
     {
@@ -289,14 +295,7 @@ public sealed class ReviewRequestTransport(HttpClient client)
         if (decision.Trailer is { } trailer && (trailer.Length > 1024 || !CommitSignatureFormat.TryParseTrailer(trailer, out _))) throw Invalid();
         if (decision.Decision == ReviewDecisionKind.Approved && decision.Trailer is null) throw Invalid();
         if (decision.DecidedUtc == default) throw Invalid();
-        if (decision.LineComments is { } comments)
-        {
-            if (comments.Count > ReviewRequestService.MaxLineComments) throw Invalid();
-            foreach (var comment in comments)
-            {
-                if (ReviewRequestService.LineCommentProblem(comment) is not null) throw Invalid();
-            }
-        }
+        if (decision.LineComments is { } comments && ReviewRequestService.LineCommentsProblem(comments) is not null) throw Invalid();
     }
 
     private sealed record Answer(HttpStatusCode Status, byte[] Body, string? Code);

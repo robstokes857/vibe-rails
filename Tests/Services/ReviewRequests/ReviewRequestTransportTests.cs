@@ -191,6 +191,7 @@ public sealed class ReviewRequestTransportTests
     [InlineData("line_comment_long_text")]
     [InlineData("line_comment_blank_text")]
     [InlineData("line_comment_empty_path")]
+    [InlineData("line_comments_total")]
     public async Task PollRefusesMalformedDecisions(string variant)
     {
         var transport = Transport(_ =>
@@ -211,6 +212,8 @@ public sealed class ReviewRequestTransportTests
                 "line_comment_long_text" => [ok with { LineComments = [new ReviewLineComment("a.cs", 1, "after", new string('x', ReviewRequestService.MaxLineCommentChars + 1))] }],
                 "line_comment_blank_text" => [ok with { LineComments = [new ReviewLineComment("a.cs", 1, "after", " \u200b\u0007 ")] }],
                 "line_comment_empty_path" => [ok with { LineComments = [new ReviewLineComment("", 1, "after", "x")] }],
+                "line_comments_total" => [ok with { LineComments = Enumerable.Range(1, ReviewRequestService.MaxLineComments)
+                    .Select(i => new ReviewLineComment("a.cs", i, "after", new string('x', ReviewRequestService.MaxLineCommentTotalChars / ReviewRequestService.MaxLineComments + 1))).ToList() }],
                 _ => [ok]
             };
             var hosted = Hosted(RequestId, reference: variant == "other_reference" ? "rvw_" + new string('f', 32) : Reference, decisions: decisions);
@@ -219,6 +222,35 @@ public sealed class ReviewRequestTransportTests
 
         var ex = await Assert.ThrowsAsync<ReviewRequestTransportException>(() => transport.PollAsync(ApiKey, Reference, Ct));
         Assert.Equal("invalid_response", ex.Code);
+    }
+
+    /// <summary>
+    /// Codex slice F review, F1: fifty maximal decisions, escaped the way the host's default serializer escapes
+    /// HTML-sensitive text (six bytes a character), must fit the poll answer bound and land through PollAsync.
+    /// </summary>
+    [Fact]
+    public async Task PollAcceptsFiftyMaximalDecisionsAsTheHostEscapesThem()
+    {
+        var perComment = ReviewRequestService.MaxLineCommentTotalChars / ReviewRequestService.MaxLineComments;
+        var comments = Enumerable.Range(1, ReviewRequestService.MaxLineComments)
+            .Select(i => new ReviewLineComment(new string('<', 100), i, "after", new string('<', perComment - 100))).ToList();
+        var decisions = Enumerable.Range(1, ReviewRequestTransport.MaxDecisions)
+            .Select(i => Rejected(i, "lead@example.com", new string('<', ReviewRequestService.MaxCommentChars)) with { LineComments = comments }).ToArray();
+        var body = JsonSerializer.SerializeToUtf8Bytes(Hosted(RequestId, decisions: decisions), new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.True(body.Length <= ReviewRequestTransport.MaxResponseBytes, $"{body.Length} bytes escaped exceed the poll bound");
+        Assert.Contains("\\u003C", Encoding.UTF8.GetString(body)); // The default encoder escaped the text, as the host's does.
+
+        var transport = Transport(_ =>
+        {
+            var content = new ByteArrayContent(body);
+            content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+        });
+        var remote = await transport.PollAsync(ApiKey, Reference, Ct);
+
+        Assert.Equal(ReviewRequestTransport.MaxDecisions, remote.Decisions!.Count);
+        Assert.Equal(ReviewRequestService.MaxLineComments, remote.Decisions[^1].LineComments!.Count);
+        Assert.Equal(new string('<', perComment - 100), remote.Decisions[^1].LineComments![0].Text);
     }
 
     [Fact]

@@ -67,7 +67,7 @@ the design decisions for the rest.
   request made for another project is not found.
 - **Transport (slice C).** `ReviewRequestTransport` sends a stored request's bundle bytes as
   `{ requestId, bundle }` to fixed `https://viberails.ai/api/v1/review-requests` (header
-  `X-Api-Key` only, no redirects or cookies, 90 s to send, 30 s to poll or cancel, 4 MiB answers),
+  `X-Api-Key` only, no redirects or cookies, 90 s to send, 30 s to poll or cancel, 8 MiB answers),
   polls `GET /{reference}/decisions` and cancels with `DELETE /{reference}`. Every answer is
   validated before use: this request's id and tree, a `rvw_` reference, a known status, a
   plausible expiry, at most 50 well-formed decisions (distinct ids, listed kinds, trailer grammar,
@@ -285,7 +285,10 @@ bundle or reads hosted decisions; the security contract is
 - **Line comments (slice F).** A decision may carry `lineComments: [{ path, line, side, text }]`, the
   shape a pull-request review carries: the path as the bundle lists it, the 1-based line on `before`
   (base text) or `after` (staged text), and the text. Bounds on both sides: at most 50 per decision,
-  text 1 to 1,000 characters, path 1 to 4,096 characters without NUL, line 1 to 1,000,000; CRLF
+  text 1 to 1,000 characters, path 1 to 4,096 characters without NUL, line 1 to 1,000,000, and at
+  most 16,000 characters of paths and text together per decision (the total is what keeps fifty
+  maximal decisions inside the poll answer bound once the host escapes HTML-sensitive text as six
+  bytes a character; Codex slice F review, F1); CRLF
   becomes LF and every other control, format or separator character becomes a space before storage,
   so a remark cannot repaint a screen or hide text where it is shown. The path is not checked against
   the bundle (hosted decisions never load bundle text); it is shown as text. The hosted reviewer page
@@ -295,8 +298,10 @@ bundle or reads hosted decisions; the security contract is
   line comments exceed these bounds (`ReviewRequestService.LineCommentProblem`), the poller passes them
   into `RecordDecisionAsync`, which cleans and stores them as JSON on the decision row
   (`review-requests/4`, nullable), and `ReviewDecisionDto.lineComments` carries them to the card,
-  where the request row shows them grouped by file under the decision. The desktop decision route
-  body grew to 128 KiB, the hosted one to 64 KiB, and the poll answer bound to 4 MiB.
+  where the request row shows them grouped by file under the decision. The decision route bodies grew
+  to 256 KiB on both sides, the poll answer bound to 8 MiB and the bundle answer bound to 32 MiB;
+  `ReviewRequestTransportTests.PollAcceptsFiftyMaximalDecisionsAsTheHostEscapesThem` and the round
+  trip hold the escaped maximum inside those bounds.
 - **VS Code "Review requests" (slice F).** The extension's Activity Bar gained a second review view
   beside "Reviews requested of you": this project's own requests from `GET /api/v1/review-requests`
   with the card's status wording (`review-requests-view.ts`; a row opens its card on the dashboard

@@ -741,11 +741,12 @@ Root-only `/api/v1/review-requests` requires both credentials and answers no-sto
 the project's staged index through the hook's snapshot reader (project derived server-side, never
 from the request), bounds text at 256 KiB per file and 4 MiB per bundle, validates reviewer emails
 (at most ten) and attached session ids (at most ten, looked up locally), and stores the bundle in
-state.db (`review-requests/1`, additive). Bodies are capped at 16 KiB (create) and 128 KiB
+state.db (`review-requests/1`, additive). Bodies are capped at 16 KiB (create) and 256 KiB
 (decisions: a trailer, a 4,000-character comment and, since slice F, up to 50 line comments of
-1,000 characters, each `{ path, line, side, text }` with the path 1 to 4,096 characters without NUL,
-the line 1 to 1,000,000, the side `before` or `after`, and the text cleaned of control, format and
-separator characters before storage); refusals carry fixed local wording and a code, never exception text. Of these routes
+1,000 characters holding at most 16,000 characters of paths and text together, each
+`{ path, line, side, text }` with the path 1 to 4,096 characters without NUL, the line 1 to
+1,000,000, the side `before` or `after`, and the text cleaned of control, format and separator
+characters before storage); refusals carry fixed local wording and a code, never exception text. Of these routes
 only the decisions route calls out, to the existing public signature verification above with a
 tree id and no content, and an approval is stored only when that verification names a verified signer listed on the
 request; the store records it and recomputes the status in one write transaction, so a cancel that
@@ -919,7 +920,9 @@ request is still polled until its expiry at the backoff cadence, because the hos
 decisions until cancellation or expiry; a successful send brings the next check forward to one
 interval. Only requests sent with the current key's fingerprint are polled. Each hosted decision is validated
 (at most 50, distinct ids, listed kinds, trailer grammar, comment bound, and since slice F at most 50
-line comments each within the bounds above; the poll answer is bounded at 4 MiB) and then lands through
+line comments each within the bounds above, 16,000 characters of paths and text together; the poll
+answer is bounded at 8 MiB, which holds fifty maximal decisions once the host escapes HTML-sensitive
+text as six bytes a character, and the bundle answer at 32 MiB) and then lands through
 `ReviewRequestService.RecordDecisionAsync`: an approval's trailer must cover the request's tree and
 is re-verified with the public signature endpoint, and its signer must be a listed reviewer; a
 rejection must name a listed reviewer; line comments are cleaned and stored as JSON on the decision
