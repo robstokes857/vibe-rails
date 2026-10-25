@@ -154,6 +154,10 @@ This builds the .NET backend, stages the bundled binaries, compiles the TypeScri
 
 For an interactive loop, open `vscode-viberails/` in VS Code and press **F5** to launch an Extension Development Host.
 
+### Dependency overrides
+
+`package.json` carries an npm `overrides` entry pinning `@azure/msal-node` to `^7.1.0` (VIBE-217, GHSA-xcx6-jx8p-x3h5, Dependabot alert #42). It exists only because every `@azure/identity` release still declares the vulnerable `^6` line, so no `npm update` can reach the patched version on its own. npm records nothing in the lockfile when an override goes stale, and `npm ls` shows no `invalid` marker, so nothing will flag it. Drop the override once `@azure/identity` (reached through `@vscode/vsce`) allows msal-node >= 7.1 by itself; tracked on VIBE-218.
+
 ## Agent Management
 
 The extension integrates with VibeRails agent system:
