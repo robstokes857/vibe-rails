@@ -61,8 +61,13 @@ public sealed class ReviewRequestRoundTripTests
             await Git("-c", "core.hooksPath=", "commit", "-q", "-m", "baseline");
             await File.WriteAllTextAsync(Path.Combine(repo, "retry.cs"), "class Retry { int Attempts = 3; /* <backoff> & 'jitter' */ }\n", ct);
             await File.WriteAllTextAsync(Path.Combine(repo, "added.cs"), "class Added { }\n", ct);
+            // VIBE-211: a binary file travels as bytes and a new executable as its mode, so this request is approvable.
+            byte[] logo = [0x89, 0x50, 0x4E, 0x47, 0x00, 0x00, .. Enumerable.Range(0, 256).Select(i => (byte)i), 0xFF];
+            await File.WriteAllBytesAsync(Path.Combine(repo, "logo.png"), logo, ct);
+            await File.WriteAllTextAsync(Path.Combine(repo, "run.sh"), "#!/bin/sh\necho run\n", ct);
             await Git("rm", "-q", "--", "old.md");
-            await Git("add", "--", "retry.cs", "added.cs");
+            await Git("add", "--", "retry.cs", "added.cs", "logo.png", "run.sh");
+            await Git("update-index", "--chmod=+x", "run.sh");
             var tree = (await Git("write-tree")).Trim();
 
             var state = $"Data Source={Path.Combine(root, "state.db")};Pooling=False";
@@ -78,6 +83,13 @@ public sealed class ReviewRequestRoundTripTests
                 Reviewers: ["Reviewer@Example.test"], Sessions: [sessionId], CardKey: "VB-OGK99-278", Note: "Check the retry bound."), sessions, ct);
             Assert.Equal(tree, local.TreeId);
             var bundle = (await ledger.GetAsync(repo, local.Id, ct)).Bundle;
+            var capturedLogo = bundle.Files.Single(f => f.Path == "logo.png");
+            Assert.Equal(("binary", null, Convert.ToBase64String(logo), "100644"), (capturedLogo.Omitted, capturedLogo.After, capturedLogo.AfterBytes, capturedLogo.Mode));
+            Assert.Equal("100755", bundle.Files.Single(f => f.Path == "run.sh").Mode);
+            // The disclosure the person confirms says that the bytes travel.
+            var disclosure = await new Desktop.ReviewRequestSender(new ReviewRequestStore(state), ledger, null!, null!, null!, null!, () => null)
+                .DisclosureAsync(repo, local.Id, sessions, ct);
+            Assert.Equal((1, (long)logo.Length, true), (disclosure.FilesWithBytes, disclosure.CarriedBytes, disclosure.Files.Single(f => f.Path == "logo.png").BytesIncluded));
 
             // Hosted store: the desktop's own JSON for the bundle, bound the way MVC binds the route body.
             var body = $"{{\"requestId\":\"{local.Id}\",\"bundle\":{JsonSerializer.Serialize(bundle, Desktop.ReviewRequestJsonContext.Default.ReviewBundle)}}}";
@@ -118,9 +130,12 @@ public sealed class ReviewRequestRoundTripTests
                 Assert.NotNull(view);
                 Assert.Equal(("open", Owner, "Check the retry bound.", true), (view.Status, view.RequestedBy, view.Note, view.CanDecide));
                 Assert.Equal(Encoding.UTF8.GetString(CommitSignatureFormat.BuildPayload(tree)), view.Statement);
-                Assert.Equal(bundle.Files.Select(f => (f.Path, f.Change, f.Before, f.After, f.Omitted)),
-                    view.Files.Select(f => (f.Path, f.Change, f.Before, f.After, f.Omitted)));
+                Assert.Equal(bundle.Files.Select(f => (f.Path, f.Change, f.Before, f.After, f.Omitted, f.Mode, f.PreviousMode)),
+                    view.Files.Select(f => (f.Path, f.Change, f.Before, f.After, f.Omitted, f.Mode, f.PreviousMode)));
                 Assert.Equal("# Removed later\n", view.Files.Single(f => f.Path == "old.md").Before); // Deleted text from the base tree.
+                // VIBE-211: the page learns the bytes travel and how many, never the base64 itself.
+                var pageLogo = view.Files.Single(f => f.Path == "logo.png");
+                Assert.Equal((null, (long)logo.Length), (pageLogo.AfterBytes, pageLogo.CarriedBytes));
                 Assert.Equal("ready", Assert.Single(view.Sessions).Status);
                 var replay = await new SessionEnvelopeReadService(db, new Storage(blob), NullLogger<SessionEnvelopeReadService>.Instance)
                     .OpenReviewReplayPayloadAsync(hosted.Id, 1, ct);
@@ -141,10 +156,15 @@ public sealed class ReviewRequestRoundTripTests
                 var inbox = Desktop.ReviewRequestTransport.ParseInbox(JsonSerializer.SerializeToUtf8Bytes(await access.InboxAsync(ct), JsonSerializerOptions.Web));
                 var listed = Assert.Single(inbox.Requests!);
                 Assert.Equal((hosted.Id, "repo", Owner, "open", "VB-OGK99-278", false), (listed.Id, listed.Repository, listed.RequestedBy, listed.Status, listed.CardKey, listed.Decided));
+                // The key projection carries the bytes (VIBE-211); without them the binary file would make the request unapprovable.
                 var read = Desktop.ReviewRequestTransport.ParseBundle(
-                    JsonSerializer.SerializeToUtf8Bytes(await access.ReadAsync(hosted.Id, ct), JsonSerializerOptions.Web), hosted.Id);
+                    JsonSerializer.SerializeToUtf8Bytes(await access.ReadAsync(hosted.Id, includeBytes: true, ct), JsonSerializerOptions.Web), hosted.Id);
                 Assert.Equal((tree, true, Encoding.UTF8.GetString(CommitSignatureFormat.BuildPayload(tree))), (read.TreeId, read.CanDecide, read.Statement));
+                Assert.Equal(Convert.ToBase64String(logo), read.Files!.Single(f => f.Path == "logo.png").AfterBytes);
                 Assert.Empty(Desktop.ReviewTreeRebuilder.FilesWithoutContent(read.Files!));
+                var pageOnly = Desktop.ReviewRequestTransport.ParseBundle(
+                    JsonSerializer.SerializeToUtf8Bytes(await access.ReadAsync(hosted.Id, ct), JsonSerializerOptions.Web), hosted.Id);
+                Assert.Equal(["logo.png"], Desktop.ReviewTreeRebuilder.FilesWithoutContent(pageOnly.Files!));
 
                 var clone = Path.Combine(root, "reviewer-clone");
                 await Git("clone", "-q", repo, clone);

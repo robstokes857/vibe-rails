@@ -872,9 +872,15 @@ ends all reads through that link without independent session sharing links. See
 
 Sending is explicit and root-only. `GET /api/v1/review-requests/{id}/disclosure` (both credentials,
 no-store, no outbound call) lists exactly what a send transfers: the destination, every changed
-file with its change kind, line count and omission reason, the tree and base ids, each attached
+file with its change kind, line count and omission reason, whether its exact staged bytes travel in
+place of text (VIBE-211: a binary, oversized or bundle-limit file carries base64 `afterBytes`, at
+most 4 MiB per file and 8 MiB per bundle, so the reviewer's machine can rebuild the tree; the
+disclosure counts them as `filesWithBytes` / `carriedBytes` and the card's confirm text names them)
+and its git mode, the tree and base ids, each attached
 session by name with the session-sharing disclosure (terminal output, prompts, saved code changes)
-and whether it is still live, the reviewer addresses and the expiry. `POST /{id}/send` (1 KiB
+and whether it is still live, the reviewer addresses and the expiry. The capture also measures the
+escaped size of every carried field and keeps the bundle under 20 MiB on the wire, inside the hosted
+24 MiB body bound. `POST /{id}/send` (1 KiB
 body) refuses without `{ "confirmed": true }` (400 `confirmation_required`), for a request that is
 not open (409 `not_open`) and without a saved API key (409 `no_api_key`), and transfers nothing in
 those cases. `ReviewRequestTransport` posts the stored bundle bytes as `{ requestId, bundle }` to
@@ -1067,6 +1073,14 @@ origin's `/link`. The dashboard/VS Code bridge permits only `https://viberails.a
 its optional strict `#code=ABCD-EFGH` public-code fragment. The hosted page removes that fragment
 before Auth0, retains it in same-tab storage for at most ten minutes, and requires explicit
 approval with fresh antiforgery.
+The owner's explicit host-wins policy permits automatic replacement of a **proven conflicting**
+remote copy: validated history must contradict local acknowledgements, and the authenticated
+descriptor must confirm ownership of the exact board before the existing owner-only DELETE.
+The durable `BoardSyncRebuilds` intent pins the board and destination fingerprint; interruption
+resumes delete confirmation, idempotent publication, then local-history upload. Imported boards,
+ordinary 409 contention, network/auth failures and malformed responses never authorize deletion.
+Replacement discards that remote board's content and sharing identity; local rows are retained.
+
 
 Serialize/throttle the root's single in-memory attempt; cancellation/replacement invalidates late
 responses. Compare the original saved key before replacement so manual changes win. Account

@@ -207,6 +207,13 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
 
             changedLines.TryGetValue(entry.RelativePath, out var lineCount);
             var addedCode = ResolveAddedCode(entry, content, addedCodeByPath);
+            // The modes come from the same frozen trees as the content, so a review bundle can
+            // carry them without another git call (VIBE-211).
+            var previousMode = entry.Kind is GitStagedChangeKind.Modified or GitStagedChangeKind.Renamed
+                    or GitStagedChangeKind.Copied or GitStagedChangeKind.Deleted
+                && baseByPath.TryGetValue(previousPath, out var baseModeEntry)
+                ? baseModeEntry.Mode
+                : null;
             files.Add(new GitStagedFileSnapshot(
                 entry.RelativePath,
                 ToFullPath(repositoryPath, entry.RelativePath),
@@ -218,7 +225,9 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
                 entry.PreviousRelativePath,
                 previousContent,
                 addedCode?.Content,
-                addedCode?.SourceLineNumbers));
+                addedCode?.SourceLineNumbers,
+                existsInIndex ? stagedTreeEntry!.Mode : null,
+                previousMode));
         }
 
         var agentFiles = new List<GitIndexTextFile>();
@@ -1173,6 +1182,41 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
             new SnapshotMemoryBudget(Math.Max(size, 1)),
             cancellationToken);
         return (blob.IsBinary, false, blob.Content);
+    }
+
+    /// <summary>
+    /// One blob of a frozen tree as its exact bytes, for a review bundle that must carry a file it
+    /// cannot show as text (binary or over the text bound) so the reviewer's machine can rebuild the
+    /// tree (VIBE-211). Null when the path is missing, is not a blob (a gitlink has no readable
+    /// content), is larger than <paramref name="maximumBytes"/>, or git fails: the caller lists the
+    /// file without content, as before.
+    /// </summary>
+    public static async Task<byte[]?> TryReadTreeBytesAsync(
+        string repositoryPath,
+        string treeId,
+        string relativePath,
+        long maximumBytes,
+        CancellationToken cancellationToken)
+    {
+        if (!IsObjectId(treeId) || string.IsNullOrEmpty(relativePath) || maximumBytes <= 0)
+            return null;
+        var objectSpec = $"{treeId}:{relativePath}";
+        var typeResult = await RunTextGitAsync(repositoryPath, ["cat-file", "-t", objectSpec], cancellationToken);
+        if (typeResult.ExitCode != 0 || typeResult.TimedOut || typeResult.StdOut.Trim() != "blob")
+            return null;
+        var sizeResult = await RunTextGitAsync(repositoryPath, ["cat-file", "-s", objectSpec], cancellationToken);
+        if (sizeResult.ExitCode != 0 || sizeResult.TimedOut
+            || !long.TryParse(sizeResult.StdOut.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var size)
+            || size > maximumBytes)
+            return null;
+        var result = await RunBinaryGitAsync(
+            repositoryPath,
+            ["cat-file", "blob", objectSpec],
+            cancellationToken,
+            (int)Math.Min(maximumBytes, int.MaxValue));
+        if (result.ExitCode != 0 || result.TimedOut || result.OutputLimitExceeded || result.Bytes.LongLength != size)
+            return null;
+        return result.Bytes;
     }
 
     private static HashSet<string> CollectGitLinkPaths(IReadOnlyList<GitIndexEntry> entries) =>

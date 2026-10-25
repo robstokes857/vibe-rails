@@ -265,8 +265,9 @@ public sealed class ReviewSignaturePopup
     }
 
     /// <summary>
-    /// One file line: change kind, exact path (a rename names both), and the line counts of the base and
-    /// staged text as carried, or why it carries no content. The counts are computed from the text the
+    /// One file line: change kind, exact path (a rename names both), the line counts of the base and
+    /// staged text as carried, or why it carries no text and whether its exact bytes came instead, and
+    /// the mode where it is not a plain unchanged file. The counts are computed from the text the
     /// rebuild then verifies, never taken from the requester's <c>changedLines</c>.
     /// </summary>
     internal static string DescribeFile(ReviewBundleFile file)
@@ -279,9 +280,21 @@ public sealed class ReviewSignaturePopup
         if (file.PreviousPath is { } previous && previous != file.Path)
             path = HumanSignaturePopup.Clean(previous) + " -> " + path;
         var detail = file.Omitted is { } omitted
-            ? $"no content: {omitted}"
+            ? file.AfterBytes is { } bytes
+                ? $"no text: {omitted}; {ReviewBundleCapture.DecodedLength(bytes).ToString("N0", CultureInfo.InvariantCulture)} bytes carried for the rebuild"
+                : $"no content: {omitted}"
             : $"{LineCount(file.Before).ToString(CultureInfo.InvariantCulture)} -> {LineCount(file.After).ToString(CultureInfo.InvariantCulture)} lines";
+        if (ModeNote(file) is { } mode)
+            detail += ", " + mode;
         return $"{letter} {path} ({detail})";
+    }
+
+    /// <summary>A mode change as <c>mode 100644 -> 100755</c>, otherwise the word for a non-plain mode (executable, symlink), otherwise null.</summary>
+    internal static string? ModeNote(ReviewBundleFile file)
+    {
+        if (file.PreviousMode is { } previous && file.Mode is { } current && previous != current)
+            return $"mode {previous} -> {current}";
+        return ReviewFileMode.Describe(file.Mode ?? file.PreviousMode);
     }
 
     internal static int LineCount(string? text)

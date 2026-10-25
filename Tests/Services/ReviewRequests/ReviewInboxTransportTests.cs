@@ -106,6 +106,14 @@ public sealed class ReviewInboxTransportTests
     [InlineData("modified-with-previous")]
     [InlineData("rename-without-source")]
     [InlineData("duplicate-path")]
+    [InlineData("bytes-with-text")]
+    [InlineData("bytes-on-deleted")]
+    [InlineData("bytes-not-base64")]
+    [InlineData("bytes-over-file-bound")]
+    [InlineData("bytes-over-bundle-bound")]
+    [InlineData("unknown-mode")]
+    [InlineData("mode-on-deleted")]
+    [InlineData("base-mode-on-added")]
     public void BundleAnswersOutsideTheContractAreInvalid(string shape)
     {
         var body = shape switch
@@ -120,11 +128,42 @@ public sealed class ReviewInboxTransportTests
             "modified-with-previous" => BundleJson([new { path = "auth.conf", change = "modified", binary = false, previousPath = "template.conf", before = "x\n", after = "x\n" }]),
             "rename-without-source" => BundleJson([new { path = "auth.conf", change = "renamed", binary = false, before = "x\n", after = "y\n" }]),
             "duplicate-path" => BundleJson([new { path = "db.cs", change = "modified", binary = false, before = "a\n", after = "b\n" }, new { path = "db.cs", change = "added", binary = false, after = "b\n" }]),
+            // VIBE-211: carried bytes only stand in for text that is not shown, decode within the desktop's bounds, and modes are git's.
+            "bytes-with-text" => BundleJson([new { path = "db.cs", change = "modified", binary = false, before = "a\n", after = "b\n", afterBytes = Base64(3) }]),
+            "bytes-on-deleted" => BundleJson([new { path = "x.bin", change = "deleted", binary = true, omitted = "binary", afterBytes = Base64(3) }]),
+            "bytes-not-base64" => BundleJson([new { path = "x.bin", change = "added", binary = true, omitted = "binary", afterBytes = "not base64!" }]),
+            "bytes-over-file-bound" => BundleJson([new { path = "x.bin", change = "added", binary = true, omitted = "binary", afterBytes = Base64(ReviewBundleCapture.MaxFileBytes + 1) }]),
+            "bytes-over-bundle-bound" => BundleJson(Enumerable.Range(0, 3).Select(i => (object)new { path = $"x{i}.bin", change = "added", binary = true, omitted = "binary", afterBytes = Base64(ReviewBundleCapture.MaxFileBytes) }).ToArray()),
+            "unknown-mode" => BundleJson([new { path = "db.cs", change = "modified", binary = false, before = "a\n", after = "b\n", mode = "100600" }]),
+            "mode-on-deleted" => BundleJson([new { path = "db.cs", change = "deleted", binary = false, before = "a\n", mode = "100644" }]),
+            "base-mode-on-added" => BundleJson([new { path = "db.cs", change = "added", binary = false, after = "b\n", previousMode = "100644" }]),
             _ => BundleJson([new { path = "big.txt", change = "added", binary = false, after = new string('x', ReviewBundleCapture.MaxFileContentBytes + 1) }])
         };
 
         var ex = Assert.Throws<ReviewRequestTransportException>(() => ReviewRequestTransport.ParseBundle(Bytes(body), Reference));
         Assert.Equal("invalid_response", ex.Code);
+    }
+
+    private static string Base64(int length) => Convert.ToBase64String(new byte[length]);
+
+    /// <summary>VIBE-211: a file listed without text may carry its exact bytes and every file its modes; both reach the popup intact.</summary>
+    [Fact]
+    public void BundleBytesAndModesAreAcceptedWithinTheBounds()
+    {
+        var logo = Convert.ToBase64String([0x89, 0x50, 0x4E, 0x47, 0x00, 0xFF]);
+        var bundle = ReviewRequestTransport.ParseBundle(Bytes(BundleJson(
+        [
+            new { path = "db.cs", change = "modified", binary = false, changedLines = 1, before = "a\n", after = "b\n", mode = "100755", previousMode = "100644" },
+            new { path = "logo.png", change = "added", binary = true, omitted = "binary", afterBytes = logo, mode = "100644" },
+            new { path = "big.txt", change = "modified", binary = false, omitted = "oversized", afterBytes = Base64(ReviewBundleCapture.MaxFileBytes), mode = "100644", previousMode = "100644" },
+            new { path = "gone.bin", change = "deleted", binary = true, omitted = "binary", previousMode = "100755" }
+        ])), Reference);
+
+        Assert.Equal(["db.cs", "logo.png", "big.txt", "gone.bin"], bundle.Files!.Select(file => file.Path));
+        Assert.Equal((logo, "100644", null), (bundle.Files[1].AfterBytes, bundle.Files[1].Mode, bundle.Files[1].PreviousMode));
+        Assert.Equal(("100755", "100644"), (bundle.Files[0].Mode, bundle.Files[0].PreviousMode));
+        Assert.Equal((null, "100755"), (bundle.Files[3].Mode, bundle.Files[3].PreviousMode));
+        Assert.Empty(ReviewTreeRebuilder.FilesWithoutContent(bundle.Files));
     }
 
     [Fact]

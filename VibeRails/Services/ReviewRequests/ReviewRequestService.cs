@@ -71,7 +71,7 @@ public sealed class ReviewRequestService(
 
         var now = _clock.GetUtcNow().UtcDateTime;
         var bundle = await ReviewBundleCapture.BuildAsync(snapshot, ReviewBundleCapture.BaseTextReader(snapshot),
-            attached, reviewers, cardKey, note, now, ct);
+            ReviewBundleCapture.StagedBytesReader(snapshot), attached, reviewers, cardKey, note, now, ct);
         var record = new ReviewRequestRecord(
             Guid.NewGuid().ToString("D"),
             projectPath,
@@ -98,20 +98,28 @@ public sealed class ReviewRequestService(
         projectPath = NormalizeProject(projectPath);
         var snapshot = await CaptureStagedAsync(projectPath, ct);
         var now = _clock.GetUtcNow().UtcDateTime;
-        var bundle = await ReviewBundleCapture.BuildAsync(snapshot, ReviewBundleCapture.BaseTextReader(snapshot), [], [], null, null, now, ct);
+        var bundle = await ReviewBundleCapture.BuildAsync(snapshot, ReviewBundleCapture.BaseTextReader(snapshot),
+            ReviewBundleCapture.StagedBytesReader(snapshot), [], [], null, null, now, ct);
 
         var files = new List<ReviewStagedFile>(bundle.Files.Count);
-        long textBytes = 0;
+        long textBytes = 0, carriedBytes = 0;
         var withText = 0;
+        var withBytes = 0;
         foreach (var file in bundle.Files)
         {
             ct.ThrowIfCancellationRequested();
             var included = file.Omitted is null;
+            var bytesIncluded = file.AfterBytes is not null;
             if (included) withText++;
+            if (bytesIncluded)
+            {
+                withBytes++;
+                carriedBytes += ReviewBundleCapture.DecodedLength(file.AfterBytes);
+            }
             textBytes += Utf8(file.Before) + Utf8(file.After);
             var counts = included ? ReviewLineDiff.Count(file.Before, file.After) : null;
             files.Add(new ReviewStagedFile(file.Path, file.Change, file.PreviousPath, file.ChangedLines,
-                counts?.Added, counts?.Removed, included, file.Omitted));
+                counts?.Added, counts?.Removed, included, file.Omitted, bytesIncluded));
         }
 
         var rules = MatchApprovalRules(snapshot);
@@ -121,7 +129,7 @@ public sealed class ReviewRequestService(
             .ToList();
         return new ReviewStagedPreview(bundle.Repository, bundle.TreeId, bundle.BaseTree, bundle.BaseCommit, files, withText,
             files.Count - withText, textBytes, suggested, rules, ReviewRequestTransport.Destination, ReviewRequestSender.Audience,
-            ReviewRequestSender.SessionDisclosure, now.AddMonths(1));
+            ReviewRequestSender.SessionDisclosure, now.AddMonths(1), withBytes, carriedBytes);
     }
 
     /// <summary>

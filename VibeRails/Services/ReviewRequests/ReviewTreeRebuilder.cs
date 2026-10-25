@@ -46,11 +46,14 @@ public sealed record ReviewTreeRebuildResult(
 /// (Codex reviews of slice D, F1 and its variants).
 /// </para>
 /// <para>
-/// What this cannot know, and therefore refuses rather than guesses: a file listed without content
-/// (binary, oversized, over the bundle limit) has no bytes to hash; a base commit the reviewer does not
-/// have cannot be read; a changed file mode is not in the bundle, so a new file is assumed to be a plain
-/// file (<c>100644</c>) and a changed file keeps the mode its base entry had. A mismatch for any reason
-/// is a refusal: the reviewer cannot tell a hidden change from a mode bit, and must not sign either.
+/// A file listed without text carries its exact staged bytes instead (<see cref="ReviewBundleFile.AfterBytes"/>,
+/// VIBE-211), hashed here like text; each file's staged mode places a new executable or a symlink as the
+/// requester staged it, and a carried base mode must be the base commit's. What this cannot know, and
+/// therefore refuses rather than guesses: a file listed without content and without bytes has nothing to
+/// hash; a base commit the reviewer does not have cannot be read; a submodule entry names a commit this
+/// repository may not have; a bundle from an older VibeRails carries no modes, so a new file is assumed to
+/// be a plain file (<c>100644</c>) and a changed file keeps the mode its base entry had. A mismatch for any
+/// reason is a refusal: the reviewer cannot tell a hidden change from a mode bit, and must not sign either.
 /// </para>
 /// </remarks>
 public static class ReviewTreeRebuilder
@@ -69,9 +72,27 @@ public static class ReviewTreeRebuilder
     private const int PathsPerListing = 200;
     private const int CharsPerListing = 24_000;
 
-    /// <summary>Files whose staged content is not in the bundle. A deleted file needs none: it has no staged content.</summary>
+    /// <summary>
+    /// Files whose staged content is in the bundle neither as text nor as bytes. A deleted file needs
+    /// none: it has no staged content. Carried bytes that are not readable base64 count as absent.
+    /// </summary>
     public static IReadOnlyList<string> FilesWithoutContent(IReadOnlyList<ReviewBundleFile> files) =>
-        files.Where(file => file.Change != "deleted" && file.After is null).Select(file => file.Path).ToList();
+        files.Where(file => file.Change != "deleted" && !TryStagedBytes(file, out _)).Select(file => file.Path).ToList();
+
+    /// <summary>
+    /// The exact staged bytes of a file: its text as UTF-8 (capture decoded strict UTF-8, so the round trip
+    /// is byte-exact, byte-order mark and CRLF included) or its carried bytes decoded. False for a file
+    /// listed without either, or whose bytes are not base64 within the per-file bound.
+    /// </summary>
+    internal static bool TryStagedBytes(ReviewBundleFile file, out byte[] bytes)
+    {
+        if (file.After is not null)
+        {
+            bytes = Encoding.UTF8.GetBytes(file.After);
+            return true;
+        }
+        return ReviewBundleCapture.TryDecodeBytes(file.AfterBytes, ReviewBundleCapture.MaxFileBytes, out bytes);
+    }
 
     public static async Task<ReviewTreeRebuildResult> RebuildAsync(
         string repositoryPath,
@@ -101,6 +122,12 @@ public static class ReviewTreeRebuilder
         {
             return new(false, "unsupported_change",
                 $"{unsupported.Count} file(s) have a change kind this version cannot rebuild ({unsupported[0].Change}), so the request cannot be approved.");
+        }
+        var submodules = files.Where(file => file.Mode == ReviewFileMode.GitLink || file.PreviousMode == ReviewFileMode.GitLink).ToList();
+        if (submodules.Count > 0)
+        {
+            return new(false, "unsupported_change",
+                $"{submodules.Count} file(s) are submodule entries ({submodules[0].Path}), which name a commit this repository may not have, so the tree cannot be rebuilt from this request and it cannot be approved.");
         }
         if (ShapeProblem(files) is { } inconsistent)
             return new(false, "inconsistent_change", $"The request describes its files inconsistently: {inconsistent} It cannot be approved.");
@@ -162,7 +189,7 @@ public static class ReviewTreeRebuilder
                 cancellationToken, GitTimeout, null, environment);
             if (!touched.Succeeded)
                 return new(false, "git_failed", $"Git could not list what the rebuilt tree changes ({Trim(touched.StdErr)}).");
-            var mismatches = TransitionMismatches(files, touched.StdOut);
+            var mismatches = TransitionMismatches(files, touched.StdOut, file => ModifiedStatus(file, baseEntries, sha256));
             if (mismatches.Count > 0)
             {
                 var named = string.Join("; ", mismatches.Take(5)) + (mismatches.Count > 5 ? $"; and {mismatches.Count - 5} more" : string.Empty);
@@ -174,10 +201,13 @@ public static class ReviewTreeRebuilder
 
             if (rebuilt == treeId)
                 return new(true, "matches", $"The files in the request rebuild tree {treeId} from base {baseCommit ?? baseTree}.", rebuilt);
+            var modes = files.Any(file => file.Mode is not null)
+                ? "Either the request does not show everything in that tree, or something differs that the bundle does not carry."
+                : "Either the request does not show everything in that tree, or it was captured by an older VibeRails that carries no file modes, "
+                  + "so a new executable or a symlink cannot be placed as it was staged.";
             return new(false, "tree_mismatch",
                 $"The files in the request do not rebuild the tree it asks you to sign (rebuilt {rebuilt}, requested {treeId}). "
-                + "Either the request does not show everything in that tree, or something the bundle cannot carry differs, such as a file "
-                + "mode. Do not approve it; ask the requester to send it again.", rebuilt);
+                + modes + " Do not approve it; ask the requester to send it again.", rebuilt);
         }
         finally
         {
@@ -273,6 +303,19 @@ public static class ReviewTreeRebuilder
                 return $"{file.Path} is listed as added but shows base text.";
             if (file.Change == "deleted" && file.After is not null)
                 return $"{file.Path} is listed as deleted but shows staged text.";
+            // Carried bytes stand in for text that is not shown, never beside it (VIBE-211).
+            if (file.AfterBytes is not null && file.Omitted is null)
+                return $"{file.Path} carries staged bytes but is not listed without text.";
+            if (file.AfterBytes is not null && file.Change == "deleted")
+                return $"{file.Path} is listed as deleted but carries staged bytes.";
+            if (file.Mode is not null && !ReviewFileMode.IsKnown(file.Mode))
+                return $"{file.Path} carries an unknown mode ({file.Mode}).";
+            if (file.PreviousMode is not null && !ReviewFileMode.IsKnown(file.PreviousMode))
+                return $"{file.Path} carries an unknown base mode ({file.PreviousMode}).";
+            if (file.Change == "deleted" && file.Mode is not null)
+                return $"{file.Path} is listed as deleted but carries a staged mode.";
+            if (file.Change == "added" && file.PreviousMode is not null)
+                return $"{file.Path} is listed as added but carries a base mode.";
             if (!paths.Add(file.Path))
                 return $"{file.Path} is listed more than once.";
         }
@@ -309,6 +352,11 @@ public static class ReviewTreeRebuilder
                 return new(false, "base_mismatch",
                     $"{source} is listed as {file.Change}, but the base commit has no such file, so the request misdescribes the change. Do not approve it.");
             }
+            if (file.PreviousMode is { } shownMode && shownMode != entry.Mode)
+            {
+                return new(false, "base_mismatch",
+                    $"The base mode shown for {source} ({shownMode}) is not the base commit's ({entry.Mode}), so the change the reviewer read is not the real one. Do not approve it.");
+            }
             if (file.Before is null)
             {
                 // Omitted content is shown as omitted; nothing is claimed about the base text.
@@ -331,10 +379,13 @@ public static class ReviewTreeRebuilder
     /// unchanged, or a path whose kind of change differs (listed as modified, actually deleted, because
     /// an overlapping addition removed it). Compares <c>diff-tree -r -z --name-status --no-renames base
     /// rebuilt</c> with what the listed kinds imply: a rename is a deletion and an addition, a copy an
-    /// addition, a modification whose text is unchanged nothing. Sorted, for the message.
+    /// addition, a modification what <paramref name="modifiedStatus"/> says (null for an unchanged file;
+    /// by default <c>M</c> when the shown text differs). Sorted, for the message.
     /// </summary>
-    internal static IReadOnlyList<string> TransitionMismatches(IReadOnlyList<ReviewBundleFile> files, string nameStatusZ)
+    internal static IReadOnlyList<string> TransitionMismatches(
+        IReadOnlyList<ReviewBundleFile> files, string nameStatusZ, Func<ReviewBundleFile, string?>? modifiedStatus = null)
     {
+        modifiedStatus ??= file => file.Before != file.After ? "M" : null;
         var expected = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var file in files)
         {
@@ -342,7 +393,7 @@ public static class ReviewTreeRebuilder
             {
                 case "added": expected[file.Path] = "A"; break;
                 case "deleted": expected[file.Path] = "D"; break;
-                case "modified": if (file.Before != file.After) expected[file.Path] = "M"; break;
+                case "modified": if (modifiedStatus(file) is { } status) expected[file.Path] = status; break;
                 case "renamed": expected[file.PreviousPath!] = "D"; expected[file.Path] = "A"; break;
                 case "copied": expected[file.Path] = "A"; break;
             }
@@ -375,10 +426,33 @@ public static class ReviewTreeRebuilder
     };
 
     /// <summary>
+    /// What <c>diff-tree --name-status</c> reports for a file listed as modified once its staged bytes and
+    /// mode are placed over the base entry: nothing when blob and mode are the base's, <c>T</c> when the
+    /// entry changes type (a file becoming a symlink), otherwise <c>M</c>, which covers a mode-only change.
+    /// A file whose base entry or bytes are unknown is expected to show as modified; the base and content
+    /// checks before this have already refused it.
+    /// </summary>
+    internal static string? ModifiedStatus(ReviewBundleFile file, IReadOnlyDictionary<string, ReviewBaseEntry> baseEntries, bool sha256)
+    {
+        if (!baseEntries.TryGetValue(file.Path, out var entry) || !TryStagedBytes(file, out var bytes)) return "M";
+        var mode = file.Mode ?? entry.Mode;
+        if (EntryType(mode) != EntryType(entry.Mode)) return "T";
+        return mode != entry.Mode || BlobId(bytes, sha256) != entry.ObjectId ? "M" : null;
+    }
+
+    private static string EntryType(string mode) => mode switch
+    {
+        ReviewFileMode.Symlink => "symlink",
+        ReviewFileMode.GitLink => "gitlink",
+        _ => "file"
+    };
+
+    /// <summary>
     /// The <c>update-index --index-info</c> input: a removal (mode 0) for every deleted path and every
     /// rename source, then an entry for every path with staged content whose blob id is the hash of
-    /// its exact bytes. The staged text was decoded as strict UTF-8 by the capture, so encoding it again
-    /// gives the staged bytes back, byte-order mark and line endings included.
+    /// its exact bytes: the staged text encoded again (capture decoded strict UTF-8, so byte-order mark
+    /// and line endings come back), or the carried bytes decoded. The mode is the carried staged mode;
+    /// a bundle without modes places a new file as plain and keeps a changed file's base mode.
     /// </summary>
     internal static byte[] BuildIndexInfo(IReadOnlyList<ReviewBundleFile> files, IReadOnlyDictionary<string, ReviewBaseEntry> baseEntries, bool sha256)
     {
@@ -398,18 +472,21 @@ public static class ReviewTreeRebuilder
         }
         foreach (var file in files)
         {
-            if (file.Change == "deleted" || file.After is null) continue;
-            var mode = file.Change == "added" ? PlainFileMode
-                : baseEntries.TryGetValue(file.PreviousPath ?? file.Path, out var known) ? known.Mode : PlainFileMode;
-            Line(mode, BlobId(file.After, sha256), file.Path);
+            if (file.Change == "deleted" || !TryStagedBytes(file, out var bytes)) continue;
+            var mode = file.Mode
+                ?? (file.Change == "added" ? PlainFileMode
+                    : baseEntries.TryGetValue(file.PreviousPath ?? file.Path, out var known) ? known.Mode : PlainFileMode);
+            Line(mode, BlobId(bytes, sha256), file.Path);
         }
         return builder.ToArray();
     }
 
+    /// <summary>The id git gives a blob with this exact text as UTF-8.</summary>
+    internal static string BlobId(string content, bool sha256) => BlobId(Encoding.UTF8.GetBytes(content), sha256);
+
     /// <summary>The id git gives a blob with this exact content: the hash of <c>blob &lt;length&gt;\0</c> and the bytes.</summary>
-    internal static string BlobId(string content, bool sha256)
+    internal static string BlobId(ReadOnlySpan<byte> bytes, bool sha256)
     {
-        var bytes = Encoding.UTF8.GetBytes(content);
         var header = Encoding.ASCII.GetBytes("blob " + bytes.Length.ToString(System.Globalization.CultureInfo.InvariantCulture) + "\0");
         using IncrementalHash hash = sha256
             ? IncrementalHash.CreateHash(HashAlgorithmName.SHA256)

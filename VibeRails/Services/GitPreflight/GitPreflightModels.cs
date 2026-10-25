@@ -56,7 +56,13 @@ public sealed record GitStagedFileSnapshot(
     string? AddedContent = null,
     // One entry per line in AddedContent, mapping the fragment line back to its line in
     // Content. MintLint scores the fragment while its report still links to the full file.
-    IReadOnlyList<int>? AddedLineNumbers = null);
+    IReadOnlyList<int>? AddedLineNumbers = null,
+    // The staged tree entry's mode (100644, 100755, 120000, 160000) and the base tree's mode at the
+    // change's source path. Staged-index scope only; null elsewhere and for a deleted path's
+    // staged side or an added path's base side. A review bundle carries them so the reviewer's
+    // rebuild places a new executable or a symlink as the requester staged it (VIBE-211).
+    string? StagedMode = null,
+    string? PreviousMode = null);
 
 public sealed record GitCheckSnapshotIdentity(string BaseCommit, string HeadCommit);
 

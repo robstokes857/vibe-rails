@@ -104,12 +104,16 @@ export function requestTone(request) {
     return request?.remote ? 'info' : 'warning';
 }
 
-/** "+3 −1", "±4" when only the snapshot's count is known, with the omission reason when the text is not sent. */
+/**
+ * "+3 −1", "±4" when only the snapshot's count is known, with the omission reason when the text is not
+ * sent and whether the file's exact bytes are sent instead (VIBE-211), because a file without either
+ * cannot be approved.
+ */
 export function formatFileChange(file) {
     const parts = [];
     if (Number.isInteger(file?.added) && Number.isInteger(file?.removed)) parts.push(`+${file.added} −${file.removed}`);
     else if (Number.isInteger(file?.changedLines)) parts.push(`±${file.changedLines}`);
-    if (file?.textIncluded === false) parts.push(`no text (${file.omitted || 'omitted'})`);
+    if (file?.textIncluded === false) parts.push(`no text (${file.omitted || 'omitted'})${file.bytesIncluded ? ', bytes sent' : ', not approvable'}`);
     return parts.join(' · ');
 }
 
@@ -120,7 +124,15 @@ function kib(bytes) {
 
 export function describeCounts(preview) {
     const files = Array.isArray(preview?.files) ? preview.files.length : 0;
-    return `${files} staged file${files === 1 ? '' : 's'}: ${preview?.filesWithText ?? 0} with text (${kib(preview?.textBytes)}), ${preview?.filesWithoutText ?? 0} without`;
+    return `${files} staged file${files === 1 ? '' : 's'}: ${preview?.filesWithText ?? 0} with text (${kib(preview?.textBytes)}), ${describeWithout(preview)}`;
+/** "N without" grows into "N without text, M of them as bytes (x KiB)" when bytes travel for files listed without text. */
+function describeWithout(counts) {
+    const without = counts?.filesWithoutText ?? 0;
+    const withBytes = counts?.filesWithBytes ?? 0;
+    if (!without || !withBytes) return `${without} without`;
+    return `${without} without text, ${withBytes} of ${withBytes === 1 ? 'them' : 'those'} as exact bytes (${kib(counts?.carriedBytes)})`;
+}
+
 }
 
 /** The header badge for this card: its newest request's state, or nothing. */
@@ -216,7 +228,12 @@ export function describeDisclosure(disclosure) {
     const omitted = files.filter(file => file.textIncluded === false);
     const lines = [
         `To ${disclosure.destination}, readable only by ${(disclosure.reviewers || []).join(', ')} after signing in with that verified email, until ${new Date(disclosure.expiresUtc).toLocaleDateString()}.`,
-        `${files.length} file${files.length === 1 ? '' : 's'} of tree ${String(disclosure.treeId || '').slice(0, 12)} with their text (${kib(disclosure.textBytes)})${omitted.length ? `; ${omitted.length} listed without text (${[...new Set(omitted.map(file => file.omitted))].join(', ')})` : ''}: ${files.map(file => file.path).join(', ')}.`,
+        `${files.length} file${files.length === 1 ? '' : 's'} of tree ${String(disclosure.treeId || '').slice(0, 12)} with their text (${kib(disclosure.textBytes)})${omitted.length ? `; ${omitted.length} listed without text (${[...new Set(omitted.map(file => file.omitted))].join(', ')})${bytesNote}` : ''}: ${files.map(file => file.path).join(', ')}.`,
+    const asBytes = omitted.filter(file => file.bytesIncluded);
+    // Bytes travel for files the reviewer cannot read as text (VIBE-211): they are what lets the reviewer's VibeRails rebuild the tree.
+    const bytesNote = asBytes.length
+        ? `, ${asBytes.length === omitted.length ? (asBytes.length === 1 ? 'its' : 'their') : `${asBytes.length} of them with their`} exact bytes (${kib(disclosure.carriedBytes)}) so the reviewer's VibeRails can rebuild the tree`
+        : '';
         sessions.length ? `${sessions.length} session${sessions.length === 1 ? '' : 's'}: ${sessions.map(session => `${session.name}${session.live ? ' (still running: uploads after it ends)' : ''}`).join(', ')}. ${disclosure.sessionDisclosure || ''}` : 'No sessions attached.',
         disclosure.note ? `Note: ${disclosure.note}` : ''
     ];

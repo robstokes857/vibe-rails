@@ -19,6 +19,20 @@ the design decisions for the rest.
   are read from the frozen base tree (`GitStagedSnapshotProvider.TryReadTreeTextAsync`) under the
   same bounds: a deleted text file shows what was removed; a deleted binary stays `binary`; a
   deleted text file over the per-file bound is `oversized` and is not read at all.
+  **Bytes and modes (VIBE-211).** A non-deleted file listed without text still carries its exact
+  staged bytes as base64 `afterBytes` (read from the frozen staged tree,
+  `GitStagedSnapshotProvider.TryReadTreeBytesAsync`), within 4 MiB per file and 8 MiB per bundle,
+  so the reviewer's rebuild has content for every path and the request can be approved; a file
+  whose bytes do not fit stays listed without content and the request is not approvable, as before.
+  Every non-deleted file carries the staged tree entry's `mode` (`100644`, `100755`, `120000`) and
+  every file with a source in the base its `previousMode`, from the snapshot's own frozen trees
+  (`GitStagedFileSnapshot.StagedMode` / `PreviousMode`, staged scope only; no extra git call). A
+  gitlink (`160000`) is listed binary without bytes and stays unapprovable. Besides the text and byte
+  budgets the capture measures the escaped JSON size of every carried field as the desktop's
+  serializer writes it (non-ASCII, HTML-sensitive characters and the `+` of base64 become six bytes)
+  and keeps it under 20 MiB (`MaxBundleWireBytes`), so the hosted 24 MiB body bound holds by
+  construction; a text file that fits the content bounds but not the wire budget is `bundle-limit`.
+  The schema stays 1: the fields are optional, and an older reader sees today's behaviour.
 - **Ledger.** `IReviewRequestStore` / `ReviewRequestStore` in state.db, additive component
   `review-requests/1`: `ReviewRequests` (id, project, scope, tree id, base commit, card key, status,
   bundle JSON, timestamps) and `ReviewDecisions` (reviewer, decision, comment, the verified trailer
@@ -78,7 +92,9 @@ the design decisions for the rest.
   contract is `VibeRails-Front/Services/ReviewRequests/README.md`.
 - **Send is explicit.** `ReviewRequestSender.DisclosureAsync` lists what leaves the machine: the
   destination, the audience (`email`: always listed people, never a public link), every file with
-  its change kind, line count and omission reason, the text bytes, tree and base ids, each session
+  its change kind, line count and omission reason and whether its exact bytes travel instead
+  (`bytesIncluded`, with `filesWithBytes` and `carriedBytes` totals; the card's confirm text and the
+  staged preview say the same), the text bytes, tree and base ids, each session
   by name with the sharing disclosure and whether it is still live, the reviewers, card key, note
   and the expiry (one month after the send). `SendAsync` refuses without `{ "confirmed": true }`
   (`confirmation_required`), for a request that is not open (`not_open`) and without an account key
@@ -131,11 +147,13 @@ the design decisions for the rest.
 - **The approval popup.** `ReviewSignaturePopup` (the `HumanSignaturePopup` family; both share
   `SigningKeyPrompt`) fetches the bundle itself with the account key, shows the repository and the
   local copy it will use, the requester, card and note (the requester's words, through
-  `HumanSignaturePopup.Clean`), the sessions, every file with its change kind, counts and omission,
-  the tree, the base and the hosted page (file counts are computed from the carried text, never
-  taken from the requester's `changedLines`), then stops before any key prompt when the request is
-  cancelled or expired, the account is not a listed reviewer, this account already approved it, or a
-  file is listed without content ("cannot be approved"). Another reviewer's approval or rejection
+  `HumanSignaturePopup.Clean`), the sessions, every file with its change kind, counts and omission
+  (and, since VIBE-211, how many bytes it carries instead of text, and its mode where it is not a
+  plain unchanged file), the tree, the base and the hosted page (file counts are computed from the
+  carried text, never taken from the requester's `changedLines`), then stops before any key prompt
+  when the request is cancelled or expired, the account is not a listed reviewer, this account
+  already approved it, or a file is listed without content and without bytes ("cannot be
+  approved"). Another reviewer's approval or rejection
   does not close it: viberails.ai keeps taking decisions (a rule may name several approvers, and an
   approval after someone else's rejection is still this reviewer's to give), so the popup, the page
   and the VS Code view only stop at cancelled or expired (Codex slice D review, F2). Otherwise
@@ -148,35 +166,43 @@ the design decisions for the rest.
 - **The tree is proven on the reviewer's machine (decision 7).** `ReviewTreeRebuilder.RebuildAsync`
   runs in the reviewer's repository: the base commit must exist locally and own the bundle's base
   tree; a temporary index (`GIT_INDEX_FILE`) is loaded with `read-tree <baseTree>`; each listed
-  file's staged text is hashed here from its exact UTF-8 bytes (capture decoded strict UTF-8, so the
-  round trip is byte-exact, byte-order mark and CRLF included) and placed with
-  `update-index --index-info`, a deleted path and a rename's source removed, a changed file keeping
-  its base mode and a new file assumed `100644`; `write-tree --missing-ok` must equal `treeId`. No
+  file's staged content is hashed here from its exact bytes (the text as UTF-8, since capture
+  decoded strict UTF-8 the round trip is byte-exact, byte-order mark and CRLF included; or the
+  carried `afterBytes` decoded, VIBE-211) and placed with `update-index --index-info` under its
+  carried `mode`, a deleted path and a rename's source removed; a bundle from an older VibeRails
+  carries no modes, so there a changed file keeps its base mode and a new file is assumed `100644`;
+  `write-tree --missing-ok` must equal `treeId`. No
   blob is written and the real index is never touched. The base is proven too, because the reviewer
   read a diff, not a tree. First the shape: every transition must be canonical
   (`ReviewTreeRebuilder.ShapeProblem`, shared by `ParseBundle`, the popup and the hosted contract):
   an added file has no base text and no previous path, a deleted file no staged text and no previous
   path, a modified file no previous path, a renamed or copied file a distinct previous path, no path
-  twice and no rename source also listed (`inconsistent_change`). Then the base: a changed, renamed,
-  copied or deleted file's source must exist in the base and its shown base text must hash to the
-  base commit's blob there, and a file listed as added or the destination of a rename or copy must
+  twice and no rename source also listed; bytes only beside an omission and never on a deleted file,
+  modes git's own (`100644`, `100755`, `120000`, `160000`), no staged mode on a deleted file and no
+  base mode on an added one (`inconsistent_change`). Then the base: a changed, renamed,
+  copied or deleted file's source must exist in the base, its shown base text must hash to the
+  base commit's blob there and its shown `previousMode` must be that entry's mode, and a file
+  listed as added or the destination of a rename or copy must
   be absent from the base, or its overwritten content would never be shown (`base_mismatch`; a
   changed file shown without base text and not marked omitted is `base_text_missing`). Last the
   whole transition: `diff-tree --name-status --no-renames` between the base tree and the rebuilt
   tree must equal, path by path and kind by kind, what the listed changes imply (a rename is a
-  deletion and an addition, a copy an addition, an unchanged modification nothing): no unlisted
+  deletion and an addition, a copy an addition, a modification `M` when its staged blob id or mode
+  differs from the base entry's, `T` when it changes type (a file becoming a symlink), nothing when
+  both are the base's): no unlisted
   path, no listed path left unchanged, no kind that differs (`hidden_change`), because an added
   path that collides with a base directory or file makes `update-index` drop the conflicting
   entries without a word, deleting an unlisted file or one listed as modified. Without these,
   `Before = After` over a real change, an added file carrying base text, a deleted file carrying
   staged text, a previous path pointing at another base file, a rename onto an existing file, or a
   path collision deleting unlisted or misdescribed files all read as "no text changes" on
-  viberails.ai while the signature still covered the true tree (Codex slice D reviews, F1). Refusals name the reason: a file without content, an unknown change kind, an inconsistent
-  transition, a missing base commit ("git fetch"), a base tree that is not the commit's, a base
-  disagreement, a hidden change, or a tree mismatch, which a new executable also produces: the
-  bundle carries no modes, and the reviewer cannot tell a mode bit from a hidden change, so neither
-  is signed. `GitCli.RunAsync` gained `environment` and `standardInput` for this and is still the
-  one git launch.
+  viberails.ai while the signature still covered the true tree (Codex slice D reviews, F1). Refusals name the reason: a file without content
+  (neither text nor bytes), an unknown change kind or a submodule entry (`unsupported_change`), an
+  inconsistent transition, a missing base commit ("git fetch"), a base tree that is not the
+  commit's, a base disagreement, a hidden change, or a tree mismatch, which a bundle from an older
+  VibeRails also produces for a new executable or a symlink: it carries no modes, and the reviewer
+  cannot tell a mode bit from a hidden change, so neither is signed. `GitCli.RunAsync` gained
+  `environment` and `standardInput` for this and is still the one git launch.
 
 - **Request review from a card (slice E).** The saved card editor has a **Request review** section
   beside Share card (`board-card-request-review.js`, the `board-card-sharing.js` pattern). Opening
@@ -268,8 +294,8 @@ bundle or reads hosted decisions; the security contract is
    must carry exact bytes for every changed path (binary and oversized files included) for a
    request to be approvable, and a base commit the reviewer lacks is refused. The ledger and the
    commit hook are unchanged: they check the signature over the tree, which is still the right
-   statement. Implemented in slice D (`ReviewTreeRebuilder`, above); carrying bytes for files
-   listed without content is still open.
+   statement. Implemented in slice D (`ReviewTreeRebuilder`, above); capture carries the bytes of
+   files listed without text, and every file's modes, since VIBE-211 (VB-5YPSZ-283, 2026-10-25).
 
 ## Slices
 
@@ -278,7 +304,7 @@ bundle or reads hosted decisions; the security contract is
 | A | Desktop core: capture, ledger, decision verification, commit-hook application, routes | Done (this document, VB-50) |
 | B | viberails.ai: request storage and endpoints, reviewer page over the existing session replay viewer and email-audience access | Implemented in VibeRails-Front (VB-OGK99-278, 2026-10-24); contract in its `Services/ReviewRequests/README.md`; cross-repo test `Tests/headless/BoardSync.Integration/ReviewRequestRoundTripTests.cs` |
 | C | Desktop transport: send a request and its sessions (reuse `SessionShareUploads`), poll decisions on the Board sync cadence, land approvals in the ledger | Done (VB-DPGU2-279 / VIBE-207, 2026-10-24; this document) |
-| D | Reviewer desktop: "Reviews requested of you" (page, VS Code view) and the `vb --vca-hook sign-review` popup that rebuilds the tree in the reviewer's clone and signs it | Done (VB-PR2U7-280 / VIBE-208, 2026-10-24; this document). Open: bytes for binary, oversized and bundle-limit files, so such requests can be approved |
+| D | Reviewer desktop: "Reviews requested of you" (page, VS Code view) and the `vb --vca-hook sign-review` popup that rebuilds the tree in the reviewer's clone and signs it | Done (VB-PR2U7-280 / VIBE-208, 2026-10-24; this document). Bytes for binary, oversized and bundle-limit files and per-file modes: VB-5YPSZ-283 / VIBE-211, 2026-10-25 (Capture, above) |
 | E | UI: Request review from a card (Sessions rail picker, approvers from the rule), status on the card, commit and Rules page; MCP `request_review` that never signs | Done (VB-4XXCY-281 / VIBE-209, 2026-10-24; this document) |
 | F | Line comments on a decision and the VS Code "Review requests" view | Done (VB-XBVE0-282 / VIBE-210, 2026-10-25; this document). Deferred to Rob, not implemented: head-commit scope (`scope: "head"`), reviewer notification by email or web push, and any expiry or pruning of the ledger |
 
@@ -342,13 +368,16 @@ dotnet test Tests/headless/BoardSync.Integration/BoardSync.Integration.csproj   
 ```
 
 Slice D: `ReviewTreeRebuilderTests.cs` (a real repository plays the requester through the real bundle
-capture and a real clone plays the reviewer: CRLF, a byte-order mark, a deletion, a rename and a
-modified executable rebuild; tampered text, a file without content, a missing base commit, a plain
-directory and a new executable are refused; blob ids equal `git hash-object`), `ReviewInboxServiceTests.cs`
+capture and a real clone plays the reviewer: CRLF, a byte-order mark, a deletion, a rename, a
+modified executable, a binary file carried as bytes, an oversized text file carried as bytes, a new
+executable and a mode change rebuild; tampered text or bytes, a file without content or bytes, a
+forged base mode, a bundle stripped of modes, a submodule entry, a missing base commit and a plain
+directory are refused; blob ids of text and bytes equal `git hash-object`; `ModifiedStatus` follows
+blob and mode against the base), `ReviewInboxServiceTests.cs`
 (the 15-minute cadence and two-hour backoff with a fake clock, the persisted list beside state.db, a key
 change, manual-refresh spacing, reject's body and the host's refusals, approve opening the popup once
 and recording its exit), `ReviewInboxTransportTests.cs` (the inbox, bundle and decision calls and their
-validation), `Tests/Services/VCA/ReviewSignaturePopupTests.cs` (the popup with a fake console, key store,
+validation, including the carried-bytes and mode bounds), `Tests/Services/VCA/ReviewSignaturePopupTests.cs` (the popup with a fake console, key store,
 verifier and host: the order summary → verdict → keys, every refusal before a key prompt, the posted
 trailer), `GitCliTests` (environment and stdin reach git), the node test
 `Tests/wwwroot/js/review-inbox-view.test.mjs`, and the extension's `review-inbox-view.test.ts`. The

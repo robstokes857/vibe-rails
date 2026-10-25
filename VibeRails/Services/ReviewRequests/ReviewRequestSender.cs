@@ -44,14 +44,22 @@ public sealed class ReviewRequestSender(
         var detail = await reviews.GetAsync(projectPath, id, ct);
         var bundle = detail.Bundle;
         var files = new List<ReviewDisclosureFile>(bundle.Files.Count);
-        long textBytes = 0;
+        long textBytes = 0, carriedBytes = 0;
         var withText = 0;
+        var withBytes = 0;
         foreach (var file in bundle.Files)
         {
             var included = file.Omitted is null;
+            // A file listed without text may still send its exact bytes (VIBE-211); the person sees that too.
+            var bytesIncluded = file.AfterBytes is not null;
             if (included) withText++;
+            if (bytesIncluded)
+            {
+                withBytes++;
+                carriedBytes += ReviewBundleCapture.DecodedLength(file.AfterBytes);
+            }
             textBytes += Utf8(file.Before) + Utf8(file.After);
-            files.Add(new ReviewDisclosureFile(file.Path, file.Change, file.PreviousPath, file.ChangedLines, included, file.Omitted));
+            files.Add(new ReviewDisclosureFile(file.Path, file.Change, file.PreviousPath, file.ChangedLines, included, file.Omitted, bytesIncluded));
         }
         var attached = new List<ReviewDisclosureSession>(bundle.Sessions.Count);
         foreach (var session in bundle.Sessions)
@@ -66,7 +74,8 @@ public sealed class ReviewRequestSender(
         var expires = remote?.ExpiresUtc ?? _clock.GetUtcNow().UtcDateTime.AddMonths(1);
         return new ReviewRequestDisclosure(detail.Request.Id, ReviewRequestTransport.Destination, Audience, bundle.Repository,
             bundle.TreeId, bundle.BaseTree, bundle.BaseCommit, files, withText, files.Count - withText, textBytes,
-            attached, SessionDisclosure, bundle.Reviewers, bundle.CardKey, bundle.Note, expires, remote is not null, remote);
+            attached, SessionDisclosure, bundle.Reviewers, bundle.CardKey, bundle.Note, expires, remote is not null, remote,
+            withBytes, carriedBytes);
     }
 
     /// <summary>

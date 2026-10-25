@@ -86,8 +86,10 @@ public sealed class ReviewRequestTransport(HttpClient client)
     // ---- The reviewer's side (VB-50 slice D): the key's account as a listed reviewer. ----
 
     /// <summary>
-    /// A bundle holds up to 4 MiB of text, which the host's default JSON encoder can escape to six times that,
-    /// plus this account's decisions with their line comments (about 6.5 MB at most, see <see cref="MaxResponseBytes"/>).
+    /// A bundle holds up to 4 MiB of text and 8 MiB of carried bytes (about 10.7 MiB as base64, VIBE-211); the host
+    /// serializes with minimal escaping, so that is about 15 MiB, plus this account's decisions with their line
+    /// comments (about 6.5 MB at most, see <see cref="MaxResponseBytes"/>). The bound leaves room for a host that
+    /// escapes more than it does today.
     /// </summary>
     internal const int MaxBundleResponseBytes = 32 * 1024 * 1024;
     internal static readonly TimeSpan BundleDeadline = TimeSpan.FromSeconds(90);
@@ -174,7 +176,7 @@ public sealed class ReviewRequestTransport(HttpClient client)
 
         var files = bundle.Files ?? [];
         if (files.Count is 0 or > ReviewTreeRebuilder.MaxFiles) throw Invalid();
-        long total = 0;
+        long total = 0, totalBytes = 0;
         foreach (var file in files)
         {
             if (file is null || !IsPath(file.Path) || (file.PreviousPath is not null && !IsPath(file.PreviousPath))) throw Invalid();
@@ -187,6 +189,16 @@ public sealed class ReviewRequestTransport(HttpClient client)
             if (size > ReviewBundleCapture.MaxFileContentBytes) throw Invalid();
             total += size;
             if (total > ReviewBundleCapture.MaxBundleContentBytes) throw Invalid();
+            // Carried bytes (VIBE-211): only for a file listed without text, well-formed base64 within the desktop's own bounds.
+            if (file.AfterBytes is not null)
+            {
+                if (file.Omitted is null || file.Change == "deleted") throw Invalid();
+                if (!ReviewBundleCapture.TryDecodeBytes(file.AfterBytes, ReviewBundleCapture.MaxFileBytes, out var carried)) throw Invalid();
+                totalBytes += carried.Length;
+                if (totalBytes > ReviewBundleCapture.MaxBundleBytes) throw Invalid();
+            }
+            if (file.Mode is not null && !ReviewFileMode.IsKnown(file.Mode)) throw Invalid();
+            if (file.PreviousMode is not null && !ReviewFileMode.IsKnown(file.PreviousMode)) throw Invalid();
         }
         // The canonical transition shape: a side the renderer shows must be a side the tree proves.
         if (ReviewTreeRebuilder.ShapeProblem(files) is not null) throw Invalid();

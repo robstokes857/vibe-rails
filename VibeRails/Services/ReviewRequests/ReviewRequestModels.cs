@@ -55,8 +55,36 @@ public static class ReviewRequestEvents
 }
 
 /// <summary>
+/// Git tree entry modes a bundle may carry (VIBE-211). A gitlink (<c>160000</c>) names a commit the
+/// reviewer's repository may not have, so it is never carried and such a file stays unapprovable.
+/// </summary>
+public static class ReviewFileMode
+{
+    public const string Plain = "100644";
+    public const string Executable = "100755";
+    public const string Symlink = "120000";
+    public const string GitLink = "160000";
+
+    /// <summary>The modes a bundle may name. A gitlink may be named (so it can be shown) but never rebuilt.</summary>
+    public static bool IsKnown(string? mode) => mode is Plain or Executable or Symlink or GitLink;
+
+    /// <summary>A short word for a mode where one is shown next to a file; null for a plain file or no mode.</summary>
+    public static string? Describe(string? mode) => mode switch
+    {
+        Executable => "executable",
+        Symlink => "symlink",
+        GitLink => "submodule",
+        _ => null
+    };
+}
+
+/// <summary>
 /// One changed file as the reviewer sees it. <see cref="Before"/> and <see cref="After"/> are the
-/// base and staged text; both are null when <see cref="Omitted"/> says why.
+/// base and staged text; both are null when <see cref="Omitted"/> says why. A file listed without
+/// text may still carry its exact staged bytes in <see cref="AfterBytes"/> (base64, VIBE-211) so the
+/// reviewer's machine can rebuild the tree; <see cref="Mode"/> is the staged entry's mode and
+/// <see cref="PreviousMode"/> the base entry's at the change's source. All three are absent on a
+/// bundle an older VibeRails captured.
 /// </summary>
 public sealed record ReviewBundleFile(
     string Path,
@@ -66,7 +94,10 @@ public sealed record ReviewBundleFile(
     int? ChangedLines,
     string? Before,
     string? After,
-    string? Omitted);
+    string? Omitted,
+    string? AfterBytes = null,
+    string? Mode = null,
+    string? PreviousMode = null);
 
 /// <summary>A terminal session the developer attached so the reviewer can see how the change was made.</summary>
 public sealed record ReviewBundleSession(string Id, string Name, string Cli, DateTime StartedUtc, DateTime? EndedUtc);
@@ -151,8 +182,11 @@ public sealed record SendReviewRequest(bool? Confirmed = null);
 /// <summary>Answer to a send: the request as stored, and what happens next in fixed local wording.</summary>
 public sealed record ReviewRequestSent(ReviewRequestSummary Request, string Message);
 
-/// <summary>One file as the disclosure lists it: what the reviewer gets, or why its text is not included.</summary>
-public sealed record ReviewDisclosureFile(string Path, string Change, string? PreviousPath, int? ChangedLines, bool TextIncluded, string? Omitted);
+/// <summary>
+/// One file as the disclosure lists it: what the reviewer gets, or why its text is not included, and
+/// whether its exact staged bytes travel instead (<see cref="BytesIncluded"/>, VIBE-211).
+/// </summary>
+public sealed record ReviewDisclosureFile(string Path, string Change, string? PreviousPath, int? ChangedLines, bool TextIncluded, string? Omitted, bool BytesIncluded = false);
 
 /// <summary>One attached session as the disclosure lists it. A live session uploads only after it ends.</summary>
 public sealed record ReviewDisclosureSession(string Id, string Name, string Cli, DateTime StartedUtc, DateTime? EndedUtc, bool Live);
@@ -182,7 +216,9 @@ public sealed record ReviewRequestDisclosure(
     string? Note,
     DateTime ExpiresUtc,
     bool Sent,
-    ReviewRequestRemote? Remote);
+    ReviewRequestRemote? Remote,
+    int FilesWithBytes = 0,
+    long CarriedBytes = 0);
 
 /// <summary>Payload of <see cref="ReviewRequestEvents.Updated"/>. <see cref="Status"/> is a request status, or <c>deleted</c> when the request is gone.</summary>
 public sealed record ReviewRequestChanged(string Id, string Status, string? CardKey, bool Sent);
@@ -190,7 +226,8 @@ public sealed record ReviewRequestChanged(string Id, string Status, string? Card
 /// <summary>
 /// One staged file as the card shows it before a request exists (slice E): its change kind, the
 /// line counts (<see cref="Added"/> and <see cref="Removed"/> are null when the text is omitted or
-/// the edit is too large to count within the bound) and why its text would not be in the bundle.
+/// the edit is too large to count within the bound), why its text would not be in the bundle, and
+/// whether its exact bytes would travel instead (<see cref="BytesIncluded"/>, VIBE-211).
 /// </summary>
 public sealed record ReviewStagedFile(
     string Path,
@@ -200,7 +237,8 @@ public sealed record ReviewStagedFile(
     int? Added,
     int? Removed,
     bool TextIncluded,
-    string? Omitted);
+    string? Omitted,
+    bool BytesIncluded = false);
 
 /// <summary>A <c>Signed Approval</c> rule whose path a staged file touches; its approvers are the suggested reviewers.</summary>
 public sealed record ReviewApprovalRule(
@@ -229,7 +267,9 @@ public sealed record ReviewStagedPreview(
     string Destination,
     string Audience,
     string SessionDisclosure,
-    DateTime ExpiresUtc);
+    DateTime ExpiresUtc,
+    int FilesWithBytes = 0,
+    long CarriedBytes = 0);
 
 /// <summary>A verified approval over a linked commit's tree, as the commit hook would find it.</summary>
 public sealed record ReviewCommitApproval(string Reviewer, string RequestId, DateTime DecidedUtc);
