@@ -33,7 +33,7 @@ test('legacy conflicts show deleted copies, drafts and escaped history with expl
     assert.match(html, /Keep current history/);
     assert.match(html, /Use legacy history/);
     assert.match(html, /&lt;script&gt;/);
-    assert.doesNotMatch(html, /<script>|<svg|<img/);
+    assert.doesNotMatch(html, /<script|<svg|<img/i);
 });
 
 test('unsynced PRs are live; only merged and closed retire a PR', () => {

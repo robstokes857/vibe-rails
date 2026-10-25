@@ -73,7 +73,7 @@ suite('Webview credential boundary', () => {
             assert.ok(!html.includes('{{VIBERAILS_CSP_NONCE}}'));
             const nonce = html.match(/<script nonce="([^"]+)"/)?.[1];
             assert.ok(nonce);
-            for (const script of html.matchAll(/<script([^>]*)>/g)) assert.ok(script[1].includes(`nonce="${nonce}"`));
+            for (const script of html.matchAll(/<script([^>]*)>/gi)) assert.ok(script[1].includes(`nonce="${nonce}"`));
             const injection = html.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)?.[1];
             assert.ok(injection);
             const fetched: Array<{ input: unknown; init?: RequestInit }> = [];
