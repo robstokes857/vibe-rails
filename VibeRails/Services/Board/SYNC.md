@@ -292,7 +292,7 @@ and other entries must each retain their insertion order. A retried change may h
 sequence than a newly queued creation sent ahead of it, so those two groups may interleave.
 An exact replay can return an old sequence, and `LastSeq` can include unrelated web writes.
 Invalid acknowledgements leave the whole batch queued; they never advance the pull cursor.
-For a locally owned board, **local state is authoritative when hosted history conflicts**.
+For a locally owned board, **the owner's local host is authoritative when hosted history conflicts**.
 A conflicting receipt or regressed high-water mark triggers a bounded, validated history read.
 Recovery retries a rate-limited page after the bounded standard `Retry-After` delay, preserving
 the history already read; cancellation and repeated refusal leave local receipts untouched.
@@ -300,12 +300,24 @@ The actual hosted history must corroborate a conflicting receipt; a malformed ac
 alone never resets the ledger. `IBoardStore.ReconcileOwnedSyncHistoryAsync` proves the fork and
 atomically remaps ordinary receipts by immutable entry identity, requeues missing local events,
 and appends fresh current-state baselines plus final local field/liveness corrections. Existing
-content, rejected entries, protected fields and local-only metadata remain stored. No schema
-change or startup backfill is involved. The repaired cursor skips the restored historical
-projection, and the local layout is republished. Normal pull waits until the outbox drains, so
-recovery resumes safely over bounded ticks or after interruption. Subsequent new web events
-retain the ordinary push/pull contract. Imported collaborator boards never use owner recovery.
-If validation fails, status identifies the conflict and leaves entries queued.
+content, rejected entries and local-only metadata remain stored. When the server confirms the
+exact board's owner, the desktop records replacement intent, deletes that conflicting remote
+board, and publishes a fresh copy from the local host. `board-sync-rebuild/1` adds the resumable
+`BoardSyncRebuilds` ledger automatically; it does not rewrite existing application data at startup.
+Delete, publish and upload progress survives interruption. An uncertain deletion is checked with
+the existing authenticated read API; a lost publication response retries the same local board
+identity. The local link, receipt reset and final current-state snapshots commit atomically.
+Old creation rows for current cards stay local and fresh creations preserve those cards' original
+creation times, including cards whose old creation was rejected. Departure history for cards
+moved to another board retains its original creation and deletion. Discussion/history is replayed, followed by final local values and
+liveness; local-only metadata stays local. Normal pull waits until the outbox drains.
+
+Replacement creates a new remote board identity and URL. Remote-only content, invitations and
+collaborator contributions on the discarded copy are not retained; this is the owner's explicit
+host-wins recovery policy, not an ordinary merge. Imported/shared boards never delete or replace
+their owner's remote. Older servers without owner descriptors retain the in-place recovery path.
+Authentication failures, malformed history, changed accounts and unproven conflicts never
+authorize deletion. Subsequent new web events retain the ordinary push/pull contract.
 Progress is persisted as it is made (the layout hash after a batch, the cursor after each pull
 page), and a failure records its error on the stored link, so a bad page never rewinds the
 cursor past pages that were already applied.
@@ -317,7 +329,9 @@ the outbox. The same bounded parser recognises three other codes, each reported 
 own wording: `invalid_request` (400) keeps entries queued and asks the user to check board and
 lane names; `board_not_found` (404) pauses an owned board's sync and preserves local history and
 unsent changes. Explicitly turning sync back on republishes it and restarts delivery if its remote
-identity changed. `write_conflict` (409) simply retries on the next tick.
+identity changed. `write_conflict` (409) normally retries on the next tick. A validated remote
+counter below this device's acknowledged history instead enters the same proven owner recovery,
+so a persistent sequence collision cannot keep retrying forever.
 The sync status API retains a rejected-entry count and the latest 50 identities even
 after subsequent syncs succeed. Comments and notes appear in Comments; field changes
 remain in History. Rejected creation entries keep that card and its dependent edits local; create

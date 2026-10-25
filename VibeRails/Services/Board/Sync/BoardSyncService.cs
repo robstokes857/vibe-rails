@@ -56,7 +56,7 @@ public interface IBoardSyncService
 /// are resolved on the server by arrival order; locally a field with an unsent edit is left alone,
 /// because that edit reaches the server after the web one and wins there.
 /// </summary>
-public sealed class BoardSyncService(
+public sealed partial class BoardSyncService(
     IBoardStore store,
     IBoardSyncClient client,
     BoardSyncLock syncLock,
@@ -105,6 +105,12 @@ public sealed class BoardSyncService(
         var projectPath = board.ProjectPath;
         var boardId = board.Id;
         var existing = await store.GetSyncLinkAsync(projectPath, boardId, cancellationToken);
+        if (existing is not null && await store.GetPendingSyncRebuildAsync(boardId, cancellationToken) is { } rebuild)
+        {
+            if (client.IsConfigured && client.DestinationKey != rebuild.DestinationKey)
+                throw new BoardValidationException("A hosted-copy rebuild belongs to the previous account. Local work is retained; reconnect that account to finish it.");
+            return existing;
+        }
         if (existing is { Imported: true })
         {
             if (client.IsConfigured && existing.DestinationKey != client.DestinationKey)
@@ -255,8 +261,21 @@ public sealed class BoardSyncService(
 
     private async Task<BoardSyncLinkRecord> SyncOnceAsync(BoardSyncLinkRecord link, CancellationToken cancellationToken, bool forceActivity)
     {
+        if (await store.GetPendingSyncRebuildAsync(link.BoardId, cancellationToken) is { } pending)
+            link = await ContinueOwnedRebuildAsync(link, pending, cancellationToken);
         try
         {
+            link = await PushAsync(link, cancellationToken);
+        }
+        catch (BoardSyncClientException ex) when (!link.Imported && ex.Code == BoardSyncWire.CodeWriteConflict)
+        {
+            // Ordinary contention retries normally. Only a validated regressed remote counter
+            // establishes the restore/corruption case that authorizes owner-copy replacement.
+            var known = Math.Max(link.Cursor, await store.GetMaxAcknowledgedSequenceAsync(link.BoardId, cancellationToken));
+            var probe = await client.PullAsync(link.RemoteBoardId, 0, 1, cancellationToken, link.DestinationKey);
+            ValidatePullPage(probe, 0, 1);
+            if (probe.LastSeq >= known) throw;
+            link = await RecoverOwnedHistoryAsync(link, new(null, probe.LastSeq), cancellationToken);
             link = await PushAsync(link, cancellationToken);
         }
         catch (BoardSyncHistoryConflictException conflict) when (!link.Imported)
@@ -270,6 +289,14 @@ public sealed class BoardSyncService(
         // reading the hosted projection, including after a restart or a lost acknowledgement.
         if (!link.Imported && await store.HasPendingSyncRecoveryAsync(link.BoardId, cancellationToken))
             return link;
+        if (await store.GetPendingSyncRebuildAsync(link.BoardId, cancellationToken) is { Phase: "upload" } completed
+            && await store.CountUnsentLogEntriesAsync(link.BoardId, cancellationToken) == 0)
+        {
+            await store.CompleteSyncRebuildAsync(completed.Id, cancellationToken);
+            featureLog.Write(FeatureName, "rebuild", "Rebuilt the hosted copy from the local owner's board.",
+                link.BoardId, link.RemoteBoardId, "ok");
+            forceActivity = true;
+        }
         link = await RefreshLayoutAsync(link, cancellationToken);
         link = await PullAsync(link, cancellationToken);
         link = await RefreshLayoutAsync(link, cancellationToken);
@@ -421,12 +448,19 @@ public sealed class BoardSyncService(
                     throw conflict;
                 if (client.DestinationKey != link.DestinationKey)
                     throw new BoardValidationException("The account changed during recovery; entries remain queued.");
+                var remote = await client.DescribeAsync(link.RemoteBoardId, ct, link.DestinationKey);
+                if (remote is not null) RequireRebuildOwner(link, remote);
                 var current = await store.GetSyncLinkAsync(link.ProjectPath, link.BoardId, ct) ?? throw conflict;
                 var repaired = await store.ReconcileOwnedSyncHistoryAsync(current, history, boundary.Value, ct)
                     ?? throw conflict;
                 featureLog.Write(FeatureName, "recover", "Reconciled restored hosted history; queued current local values as authoritative.",
                     link.BoardId, link.RemoteBoardId, "ok", LogLevel.Warning);
-                return repaired;
+                // Servers predating owner descriptors retain the existing in-place repair;
+                // deletion requires explicit confirmation of the exact remote board's owner.
+                if (remote is null) return repaired;
+                var rebuild = await store.BeginSyncRebuildAsync(repaired, ct)
+                    ?? throw new BoardValidationException("The board changed during recovery; local work is retained.");
+                return await ContinueOwnedRebuildAsync(repaired, rebuild, ct);
             }
         }
         throw new BoardValidationException("Hosted history exceeds the automatic recovery limit; entries remain queued.");

@@ -1,5 +1,13 @@
 # Board persistence
 
+`board-sync-rebuild/1` adds the `BoardSyncRebuilds` ledger for owner-authorized replacement of a
+conflicting hosted copy. Intent precedes remote deletion; delete/publish/upload phases survive
+restarts. Binding the replacement, resetting portable receipts and appending current host snapshots
+commit together. Keep original local rows and local-only entries; retire old creation deliveries
+and use fresh baselines, including for previously rejected creations. Completed receipts remain
+until explicit board deletion. No startup backfill or manual upgrade step is required. See
+[the sync contract](../../VibeRails/Services/Board/SYNC.md#ordering-retry-and-identity).
+
 `board-post-processing/1` (VIBE-185) adds `BoardCards.PostProcessed INTEGER NOT NULL DEFAULT 1`,
 nullable `GhostReason` and `IX_BoardCards_PostProcessPending` (`WHERE PostProcessed = 0`). The
 default is the no-backfill rule: every card that existed before the migration, and every card an

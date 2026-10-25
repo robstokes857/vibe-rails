@@ -1168,6 +1168,10 @@ public sealed partial class BoardSyncServiceTests : IDisposable
         public string? DestinationKey { get; set; } = "server-and-account";
         public int Calls;
         public bool LoseNextAck, BadAck, Reject, RejectUnknownEntry;
+        public bool SupportsOwnedRebuild, RemoteIsOwner = true, RemoteExists = true;
+        public bool LoseDeleteAck, LosePublishAck, PushConflictUntilDelete;
+        public int RemoteDeletes;
+        public BoardSyncPublishRequest? PublishedLayout;
         public string? RejectEntryId;
         public BoardSyncClientException? PushError;
         public Func<BoardSyncPushResponse, BoardSyncPushResponse>? TransformAck;
@@ -1206,11 +1210,52 @@ public sealed partial class BoardSyncServiceTests : IDisposable
             Calls++;
             Publications++;
             BeforePublish?.Invoke();
+            if (SupportsOwnedRebuild && !RemoteExists)
+            {
+                RemoteId = Guid.NewGuid();
+                RemoteExists = true;
+            }
+            PublishedLayout = request;
+            if (LosePublishAck)
+            {
+                LosePublishAck = false;
+                throw new BoardSyncClientException("Lost publish acknowledgement", "network");
+            }
             return Task.FromResult(new BoardSyncPublishResponse(RemoteId, request.Name, Entries.Count));
+        }
+        public Task<BoardRemoteDescriptor?> DescribeAsync(string boardId, CancellationToken ct, string? destination = null)
+        {
+            if (!SupportsOwnedRebuild) return Task.FromResult<BoardRemoteDescriptor?>(null);
+            Assert.Equal(DestinationKey, destination);
+            if (!RemoteExists || boardId != RemoteId.ToString("D"))
+                throw new BoardSyncClientException("Missing", BoardSyncWire.CodeBoardNotFound, 404);
+            var layout = PublishedLayout!;
+            return Task.FromResult<BoardRemoteDescriptor?>(new(boardId, layout.Name, layout.KeyPrefix, layout.DisplayPrefix,
+                layout.Lanes.Select(l => new BoardRemoteLane(l.Id, l.Name, l.Color, l.Position)).ToList(), RemoteIsOwner,
+                AdvertisedLastSeq ?? Entries.Count));
+        }
+        public Task DeleteRemoteBoardAsync(string boardId, CancellationToken ct, string destination)
+        {
+            Assert.Equal(DestinationKey, destination);
+            Assert.True(RemoteIsOwner);
+            Assert.Equal(RemoteId.ToString("D"), boardId);
+            RemoteDeletes++;
+            RemoteExists = false;
+            PushConflictUntilDelete = false;
+            Entries.Clear();
+            Activity.Clear();
+            if (LoseDeleteAck)
+            {
+                LoseDeleteAck = false;
+                throw new BoardSyncClientException("Lost delete acknowledgement", "network");
+            }
+            return Task.CompletedTask;
         }
         public Task<BoardSyncPushResponse> PushAsync(string boardId, BoardSyncPushRequest request, CancellationToken ct, string? expectedDestination = null)
         {
             Calls++;
+            if (PushConflictUntilDelete)
+                throw new BoardSyncClientException("Write conflict", BoardSyncWire.CodeWriteConflict, 409);
             if (PushError is { } pushError) throw pushError;
             if (Reject) throw new BoardSyncClientException("Rejected", "invalid_entry");
             if (RejectUnknownEntry) throw new BoardSyncClientException("Rejected", "invalid_entry", 400, "log_other_board");
@@ -1236,6 +1281,8 @@ public sealed partial class BoardSyncServiceTests : IDisposable
         public async Task<BoardSyncPullResponse> PullAsync(string boardId, long after, int limit, CancellationToken ct, string? expectedDestination = null)
         {
             Calls++;
+            if (SupportsOwnedRebuild && (!RemoteExists || boardId != RemoteId.ToString("D")))
+                throw new BoardSyncClientException("Missing", BoardSyncWire.CodeBoardNotFound, 404);
             if (limit == 200 && RateLimitedRecoveryPulls > 0)
             {
                 RateLimitedRecoveryPulls--;

@@ -40,6 +40,10 @@ public sealed record BoardSyncOutboundEntry(BoardCommentRecord Entry, string Car
 /// <summary>Validated hosted history identity used to rebuild an owned board's sync receipts.</summary>
 public sealed record BoardSyncHistoryEntry(string EntryId, string CardId, string Kind, long Seq);
 
+/// <summary>A durable, owner-authorized replacement of a conflicting hosted copy.</summary>
+public sealed record BoardSyncRebuildRecord(string Id, string BoardId, string RemoteBoardId,
+    string DestinationKey, string Phase, string? ReplacementRemoteBoardId);
+
 /// <summary>A server sequence disagrees with a previously recorded sync receipt.</summary>
 public sealed class BoardSyncHistoryConflictException(string? entryId, long sequence) : BoardValidationException(
     "The server returned an invalid sync acknowledgement; entries remain queued. " +

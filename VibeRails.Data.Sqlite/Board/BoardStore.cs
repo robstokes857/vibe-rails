@@ -2012,6 +2012,8 @@ public sealed partial class BoardStore : IBoardStore
         // (BoardStore.PostProcessing.cs). PostProcessed defaults to 1, so every card that already
         // exists, and every card an older binary inserts, counts as processed with no backfill;
         // only this binary's inserts write 0. GhostReason is nullable and local-only.
+        SqliteMigrationRunner.Apply(connection, "board-sync-rebuild", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, SyncRebuildSchemaSql));
         SqliteMigrationRunner.Apply(connection, "board-post-processing", 1, MigrationKind.Additive, (db, transaction) =>
         {
             SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardCards ADD COLUMN PostProcessed INTEGER NOT NULL DEFAULT 1");

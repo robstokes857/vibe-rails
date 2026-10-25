@@ -107,6 +107,9 @@ CREATE INDEX IX_BoardReviews_Card ON BoardReviews(CardId, CreatedUTC DESC);
 -- index IX_BoardReviews_Session
 CREATE INDEX IX_BoardReviews_Session ON BoardReviews(json_extract(RecordJson, '$.sessionId'));
 
+-- index IX_BoardSyncRebuilds_Pending
+CREATE UNIQUE INDEX IX_BoardSyncRebuilds_Pending ON BoardSyncRebuilds(BoardId) WHERE CompletedUTC IS NULL;
+
 -- index IX_Boards_Project
 CREATE INDEX IX_Boards_Project ON Boards(ProjectPath, Position);
 
@@ -250,6 +253,9 @@ CREATE TABLE BoardStarterWorkflows ( ColumnId TEXT PRIMARY KEY REFERENCES BoardC
 
 -- table BoardSyncLinks
 CREATE TABLE BoardSyncLinks ( BoardId TEXT PRIMARY KEY REFERENCES Boards(Id) ON DELETE CASCADE, RemoteBoardId TEXT NOT NULL, Cursor INTEGER NOT NULL DEFAULT 0, Enabled INTEGER NOT NULL DEFAULT 1, LayoutHash TEXT, LastSyncUTC TEXT, LastError TEXT, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL , DestinationKey TEXT, ActivitySchema INTEGER NOT NULL DEFAULT 0, ActivityAfter TEXT);
+
+-- table BoardSyncRebuilds
+CREATE TABLE BoardSyncRebuilds ( Id TEXT PRIMARY KEY, BoardId TEXT NOT NULL REFERENCES Boards(Id) ON DELETE CASCADE, RemoteBoardId TEXT NOT NULL, DestinationKey TEXT NOT NULL, Phase TEXT NOT NULL, ReplacementRemoteBoardId TEXT, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, CompletedUTC TEXT );
 
 -- table BoardSyncRejectedFields
 CREATE TABLE BoardSyncRejectedFields ( EntryId TEXT NOT NULL REFERENCES BoardComments(Id) ON DELETE CASCADE, Field TEXT NOT NULL, PRIMARY KEY (EntryId, Field) );

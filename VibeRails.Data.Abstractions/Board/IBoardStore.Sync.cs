@@ -114,6 +114,22 @@ public partial interface IBoardStore
     /// <summary>True while durable local recovery snapshots are still queued, across ticks and restarts.</summary>
     Task<bool> HasPendingSyncRecoveryAsync(string boardId, CancellationToken cancellationToken = default);
 
+    /// <summary>Reads the unfinished hosted-copy replacement, if any; completed receipts remain stored.</summary>
+    Task<BoardSyncRebuildRecord?> GetPendingSyncRebuildAsync(string boardId, CancellationToken cancellationToken = default);
+
+    /// <summary>Records replacement intent only for the unchanged, enabled, locally owned sync link.</summary>
+    Task<BoardSyncRebuildRecord?> BeginSyncRebuildAsync(BoardSyncLinkRecord expected, CancellationToken cancellationToken = default);
+
+    /// <summary>Records a confirmed remote deletion before publishing its replacement.</summary>
+    Task ConfirmSyncRebuildDeletedAsync(string rebuildId, CancellationToken cancellationToken = default);
+
+    /// <summary>Atomically binds the replacement and queues retained history plus final local snapshots.</summary>
+    Task<BoardSyncLinkRecord?> PrepareSyncRebuildUploadAsync(BoardSyncRebuildRecord expected,
+        string replacementRemoteBoardId, CancellationToken cancellationToken = default);
+
+    /// <summary>Retains a completion receipt after the rebuilt copy's outbox has drained.</summary>
+    Task CompleteSyncRebuildAsync(string rebuildId, CancellationToken cancellationToken = default);
+
     /// <summary>True when a Card Log row with this id exists, whatever its kind or card.</summary>
     Task<bool> HasLogEntryAsync(string entryId, CancellationToken cancellationToken = default);
 

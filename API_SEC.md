@@ -1073,6 +1073,14 @@ before the outbound request, retaining local cards/history even when the remote 
 Missing owned remote boards also pause background sync; only explicit re-enabling republishes them.
 These protections apply to updated clients; older running versions may ignore the pause switch.
 
+The owner's explicit host-wins policy permits automatic replacement of a **proven conflicting**
+remote copy: validated history must contradict local acknowledgements, and the authenticated
+descriptor must confirm ownership of the exact board before the existing owner-only DELETE.
+The durable `BoardSyncRebuilds` intent pins the board and destination fingerprint; interruption
+resumes delete confirmation, idempotent publication, then local-history upload. Imported boards,
+ordinary 409 contention, network/auth failures and malformed responses never authorize deletion.
+Replacement discards that remote board's content and sharing identity; local rows are retained.
+
 Remote Start work is outbound polling by an open root backend, only for its own project's
 published, non-imported boards. Requests carry opaque board/card IDs and a required sync sequence,
 never executable/path/argv/launch overrides. Sync and recheck destination/project/membership and
@@ -1093,14 +1101,6 @@ origin's `/link`. The dashboard/VS Code bridge permits only `https://viberails.a
 its optional strict `#code=ABCD-EFGH` public-code fragment. The hosted page removes that fragment
 before Auth0, retains it in same-tab storage for at most ten minutes, and requires explicit
 approval with fresh antiforgery.
-The owner's explicit host-wins policy permits automatic replacement of a **proven conflicting**
-remote copy: validated history must contradict local acknowledgements, and the authenticated
-descriptor must confirm ownership of the exact board before the existing owner-only DELETE.
-The durable `BoardSyncRebuilds` intent pins the board and destination fingerprint; interruption
-resumes delete confirmation, idempotent publication, then local-history upload. Imported boards,
-ordinary 409 contention, network/auth failures and malformed responses never authorize deletion.
-Replacement discards that remote board's content and sharing identity; local rows are retained.
-
 
 Serialize/throttle the root's single in-memory attempt; cancellation/replacement invalidates late
 responses. Compare the original saved key before replacement so manual changes win. Account
