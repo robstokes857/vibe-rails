@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-    canAct, describeRefresh, describeSigning, describeStatus, emptyMessage, isReviewPageUrl, requestRow, statusTone, summarizeInbox
+    canAct, chosenClone, cloneChoice, cloneWarning, clonesOf, describeRefresh, describeSigning, describeStatus, emptyMessage, folderName,
+    isReviewPageUrl, requestRow, statusTone, summarizeInbox
 } from '../../../VibeRails/wwwroot/js/modules/review-inbox-view.js';
 
 const reference = 'rvw_0123456789abcdef0123456789abcdef';
@@ -79,4 +80,51 @@ test('rows are escape-first and only link the hosted reviewer page for a well-fo
     assert.match(answered, /data-ri-action="approve" disabled/);
     assert.match(answered, /data-ri-action="reject" disabled/);
     assert.match(requestRow(item({ signing: { outcome: 'signing' } }), view()), /Signing popup open on this computer/);
+});
+
+// VIBE-213 item 7 (Rob, 2026-10-25): warn when the requester's repository name differs from the chosen
+// clone's folder, never refuse; with more than one root open, pick the clone beside the requester's name.
+const here = { path: 'C:\\work\\vibe-rails', name: 'vibe-rails', current: true };
+const other = { path: 'D:\\src\\VibeRails-Front', name: 'VibeRails-Front', current: false };
+const review = { path: 'D:\\src\\vibe-rails-review', name: 'vibe-rails-review', current: false };
+
+test('the clone defaults to one named like the requester\'s folder, this window first, and keeps the reviewer\'s pick', () => {
+    assert.equal(folderName('C:\\work\\vibe-rails\\'), 'vibe-rails');
+    assert.equal(folderName('/home/dev/vibe-rails'), 'vibe-rails');
+    assert.deepEqual(clonesOf(view()), [here]);
+    const several = view({ clones: [here, other, review] });
+    assert.equal(chosenClone(item(), several).path, here.path);
+    assert.equal(chosenClone(item({ repository: 'VIBERAILS-FRONT' }), several).path, other.path);
+    assert.equal(chosenClone(item({ repository: 'unknown' }), several).path, here.path);
+    assert.equal(chosenClone(item(), several, review.path).path, review.path);
+    assert.equal(chosenClone(item(), several, 'C:\\gone').path, here.path);
+});
+
+test('a different folder name is a warning before the launch, and the picker shows only with several roots open', () => {
+    assert.equal(cloneWarning(item(), here), '');
+    assert.match(cloneWarning(item({ repository: 'payments' }), here), /made in a folder named "payments".*your "vibe-rails" folder \(C:\\work\\vibe-rails\)/);
+
+    const single = requestRow(item({ repository: 'payments' }), view());
+    assert.doesNotMatch(single, /data-ri-clone[ >]/);
+    assert.match(single, /role="note">This request was made in a folder named &quot;payments&quot;/);
+    assert.match(single, /data-ri-action="approve"(?![^>]*disabled)/);
+
+    const picked = requestRow(item(), view({ clones: [here, other, review] }), review.path);
+    assert.match(picked, /<select class="form-select form-select-sm" data-ri-clone>/);
+    assert.match(picked, /requested from vibe-rails/);
+    assert.match(picked, /<option value="D:\\src\\vibe-rails-review"[^>]*selected>vibe-rails-review<\/option>/);
+    assert.match(picked, /vibe-rails \(this window\)/);
+    assert.match(picked, /folder named &quot;vibe-rails&quot;.*your &quot;vibe-rails-review&quot; folder/);
+
+    // Only a row that can still be approved offers a choice.
+    assert.doesNotMatch(requestRow(item({ decided: true }), view({ clones: [here, other] })), /ri-clone-choice/);
+    assert.doesNotMatch(requestRow(item(), view({ clones: [here, other], popupAvailable: false })), /ri-clone-choice/);
+});
+
+test('the requester\'s repository and local paths are escaped in the picker and the warning', () => {
+    const hostile = item({ repository: '<img src=x onerror=alert(1)>' });
+    const markup = cloneChoice(hostile, view({ clones: [here, { path: 'D:\\a"<b>', name: 'a"<b>', current: false }] }));
+    assert.doesNotMatch(markup, /<img src=x|<b>/);
+    assert.match(markup, /requested from &lt;img src=x onerror=alert\(1\)&gt;/);
+    assert.match(markup, /value="D:\\a&quot;&lt;b&gt;"/);
 });

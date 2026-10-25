@@ -149,12 +149,19 @@ the design decisions for the rest.
   open, doubling to two hours otherwise, never the 60 s tick; "Check now" fetches at once, at most
   once per 10 s; a key change starts from an empty list) and serves the root-only routes
   `/api/v1/review-inbox` (`GET` list, `POST /refresh`, `POST /{reference}/reject` with `{ comment }`,
-  `POST /{reference}/approve`). Reject posts `{ rejected, comment }` to the host's decision route
-  under the reviewer's key. Approve only opens the popup:
-  `vb --vca-hook sign-review --review <reference> --workdir <project> --console-window` through
+  `POST /{reference}/approve` with an optional `{ repositoryPath }`). Reject posts `{ rejected, comment }`
+  to the host's decision route under the reviewer's key. Approve only opens the popup:
+  `vb --vca-hook sign-review --review <reference> --workdir <clone> --console-window` through
   `VcaHookConsoleRespawn` (CREATE_NEW_CONSOLE; Windows, interactive desktop, not CI; refused with
   `popup_unavailable` otherwise), once per reference while it is open; its exit code is the only
   thing the service learns, and it publishes `review_inbox_updated` when anything changes.
+  `<clone>` is this root's project unless the page picked another (VIBE-213 item 7): the list
+  carries `clones`, this project first and then every project another open root has (the Jobs
+  scheduler's `JobProjectRoots` presence rows), and approve accepts only one of those, by listed
+  spelling (400 `invalid_request` for any other folder). The page shows the picker beside the
+  requester's repository name when more than one root is open, defaults to a clone whose folder name
+  matches, and warns before the launch when the names differ. The requester's `repository` is their
+  clone's folder name, so a mismatch is never a refusal.
 - **The approval popup.** `ReviewSignaturePopup` (the `HumanSignaturePopup` family; both share
   `SigningKeyPrompt`) fetches the bundle itself with the account key, shows the repository and the
   local copy it will use, the requester, card and note (the requester's words, through
@@ -422,7 +429,8 @@ directory are refused; blob ids of text and bytes equal `git hash-object`; `Modi
 blob and mode against the base), `ReviewInboxServiceTests.cs`
 (the 15-minute cadence and two-hour backoff with a fake clock, the persisted list beside state.db, a key
 change, manual-refresh spacing, reject's body and the host's refusals, approve opening the popup once
-and recording its exit), `ReviewInboxTransportTests.cs` (the inbox, bundle and decision calls and their
+and recording its exit, the clone list and approve's clone check), `Tests/Routes/ReviewInboxRoutesTests.cs`
+(the clones in the list and approve's optional body), `ReviewInboxTransportTests.cs` (the inbox, bundle and decision calls and their
 validation, including the carried-bytes and mode bounds), `Tests/Services/VCA/ReviewSignaturePopupTests.cs` (the popup with a fake console, key store,
 verifier and host: the order summary → verdict → keys, every refusal before a key prompt, the posted
 trailer), `GitCliTests` (environment and stdin reach git), the node test

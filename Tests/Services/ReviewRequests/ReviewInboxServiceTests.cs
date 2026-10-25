@@ -221,6 +221,46 @@ public sealed class ReviewInboxServiceTests : IDisposable
         Assert.Null((await WaitForOutcomeAsync(service, "popup_unavailable")).ExitCode);
     }
 
+    // VIBE-213 item 7 (Rob, 2026-10-25): with more than one root open the page picks the clone to rebuild in.
+    [Fact]
+    public void ClonesListThisProjectFirstThenEachOtherOpenRootOnce()
+    {
+        var here = Path.Combine(_directory, "vibe-rails");
+        var zeta = Path.Combine(_directory, "src", "zeta");
+        var alpha = Path.Combine(_directory, "src", "Alpha");
+        var clones = ReviewInboxService.Clones(here, [here + Path.DirectorySeparatorChar, zeta, alpha, zeta + Path.DirectorySeparatorChar, " "]);
+
+        Assert.Equal([(here, "vibe-rails", true), (alpha, "Alpha", false), (zeta, "zeta", false)],
+            clones.Select(clone => (clone.Path, clone.Name, clone.Current)));
+        Assert.Equal([(here, "vibe-rails", true)], ReviewInboxService.Clones(here, null).Select(c => (c.Path, c.Name, c.Current)));
+        if (OperatingSystem.IsWindows())
+            Assert.Equal(3, ReviewInboxService.Clones(here, [zeta, alpha, zeta.ToUpperInvariant()]).Count);
+        Assert.Equal(3, Service(new ReviewInboxState()).View(here, [zeta, alpha]).Clones!.Count);
+    }
+
+    [Fact]
+    public async Task ApproveRebuildsInTheChosenOpenCloneAndRefusesAnyOtherFolder()
+    {
+        var service = Service(new ReviewInboxState());
+        await service.RefreshDueAsync(Ct);
+        var review = Path.Combine(_directory, "vibe-rails-review");
+        IReadOnlyList<string> open = [review];
+
+        var refused = Assert.Throws<ReviewRequestException>(() =>
+            service.BeginApprove(Reference, Project, Path.Combine(_directory, "elsewhere"), open));
+        Assert.Equal(("invalid_request", 400), (refused.Code, refused.Status));
+        Assert.Empty(_launcher.Launched);
+
+        // The listed spelling is what reaches argv, whatever trailing separator (or, on Windows, case) the page sent.
+        service.BeginApprove(Reference, Project, (OperatingSystem.IsWindows() ? review.ToUpperInvariant() : review) + Path.DirectorySeparatorChar, open);
+        Assert.Equal((Reference, review), Assert.Single(_launcher.Launched));
+        _launcher.Finish(1);
+        await WaitForOutcomeAsync(service, "not_approved");
+
+        service.BeginApprove(Reference, Project, null, open);
+        Assert.Equal((Reference, Project), _launcher.Launched[^1]);
+    }
+
     [Fact]
     public async Task ApproveRefusesWithoutAPopupOrAKey()
     {

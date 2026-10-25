@@ -96,6 +96,8 @@ public sealed record ReviewInboxItem(
 /// What the "Reviews requested of you" page reads. <see cref="Email"/> is the account's verified email
 /// (null when no key is saved or the key's identity is unknown); <see cref="PopupAvailable"/> says
 /// whether this machine can open the signing popup (Windows, an interactive desktop, not CI).
+/// <see cref="Clones"/> lists where Approve may rebuild the tree: this root's project first, then the
+/// project of every other open root (VIBE-213 item 7).
 /// </summary>
 public sealed record ReviewInboxView(
     bool HasApiKey,
@@ -108,10 +110,21 @@ public sealed record ReviewInboxView(
     IReadOnlyList<ReviewInboxItem> Requests,
     bool More,
     string Project,
-    bool PopupAvailable);
+    bool PopupAvailable,
+    IReadOnlyList<ReviewInboxClone>? Clones = null);
+
+/// <summary>
+/// A local clone open in a VibeRails root, which Approve may rebuild in. <see cref="Name"/> is its folder
+/// name, the counterpart of the requester's <see cref="ReviewInboxItem.Repository"/>; the two can
+/// legitimately differ, so the page warns on a mismatch and never refuses on it.
+/// </summary>
+public sealed record ReviewInboxClone(string Path, string Name, bool Current);
 
 /// <summary>Body of <c>POST /api/v1/review-inbox/{reference}/reject</c>.</summary>
 public sealed record ReviewInboxRejectRequest(string? Comment = null);
+
+/// <summary>Optional body of <c>POST /api/v1/review-inbox/{reference}/approve</c>: one of the view's clones; none means this root's project.</summary>
+public sealed record ReviewInboxApproveRequest(string? RepositoryPath = null);
 
 /// <summary>Answer to reject and approve: the entry's status afterwards and, for approve, the popup's state.</summary>
 public sealed record ReviewInboxActionResult(string Reference, string Status, string Message, ReviewInboxSigning? Signing = null);
@@ -129,6 +142,7 @@ public sealed record ReviewInboxChanged(DateTime AtUtc);
 [JsonSerializable(typeof(ReviewInboxFile))]
 [JsonSerializable(typeof(ReviewInboxView))]
 [JsonSerializable(typeof(ReviewInboxRejectRequest))]
+[JsonSerializable(typeof(ReviewInboxApproveRequest))]
 [JsonSerializable(typeof(ReviewInboxActionResult))]
 [JsonSerializable(typeof(ReviewInboxChanged))]
 [JsonSerializable(typeof(ReviewRequestError))]

@@ -2,10 +2,10 @@
 // viberails.ai holds for the signed-in account's verified email, as the root backend last fetched
 // them on the Board sync cadence; Check now asks viberails.ai at once. Reject posts a comment
 // from here; Approve only opens the signing popup in its own console window, which shows the
-// request, rebuilds the tree from this project's repository and signs it. Nothing on this page
-// signs, and no password is ever typed into it.
+// request, rebuilds the tree from the chosen clone (this project's unless another open root is
+// picked) and signs it. Nothing on this page signs, and no password is ever typed into it.
 import { escapeHtml } from './utils.js';
-import { canAct, describeRefresh, emptyMessage, emptyState, requestRow, summarizeInbox } from './review-inbox-view.js';
+import { canAct, chosenClone, cloneNote, describeRefresh, emptyMessage, emptyState, requestRow, summarizeInbox } from './review-inbox-view.js';
 
 const esc = escapeHtml;
 const API = '/api/v1/review-inbox';
@@ -23,6 +23,8 @@ export class ReviewInboxController {
         this.error = '';
         this.busy = '';
         this.generation = 0;
+        /** The clone picked per request; renders replace the rows, so the choice lives here. */
+        this.clones = new Map();
     }
 
     async loadView() {
@@ -105,13 +107,15 @@ export class ReviewInboxController {
         }
     }
 
-    /** Opens the signing popup for one request. The popup, not this page, shows the request and signs. */
+    /** Opens the signing popup for one request in the chosen clone. The popup, not this page, shows the request and signs. */
     async approve(reference) {
         if (this.busy) return;
+        const item = this.view?.requests?.find(candidate => candidate.id === reference);
+        const repositoryPath = item ? chosenClone(item, this.view, this.clones.get(reference))?.path : null;
         this.busy = reference;
         this.render();
         try {
-            const result = await this.request(`/${encodeURIComponent(reference)}/approve`, 'POST', {});
+            const result = await this.request(`/${encodeURIComponent(reference)}/approve`, 'POST', repositoryPath ? { repositoryPath } : {});
             this.app.showToast('Review request', result?.message || 'The signing popup opened in its own window.', 'info');
             await this.load(this.generation);
         } catch (error) {
@@ -142,6 +146,16 @@ export class ReviewInboxController {
     // -------------------------------------------------------------------- ui
 
     bindEvents() {
+        this.root?.addEventListener('change', (event) => {
+            const select = event.target.closest?.('[data-ri-clone]');
+            const row = select?.closest('[data-ri-row]');
+            const item = this.view?.requests?.find(candidate => candidate.id === row?.dataset.riRow);
+            if (!item) return;
+            this.clones.set(item.id, select.value);
+            // Only the note changes; re-rendering the row would take the focus away from the picker.
+            const note = row.querySelector('[data-ri-clone-note]');
+            if (note) note.innerHTML = cloneNote(item, chosenClone(item, this.view, select.value));
+        });
         this.root?.addEventListener('click', (event) => {
             const external = event.target.closest('a[data-ri-external]');
             if (external && this.root?.contains(external) && typeof window.__viberails_openExternal__ === 'function') {
@@ -214,7 +228,7 @@ export class ReviewInboxController {
             if (reference) drafts.set(reference, form.querySelector('[data-ri-comment]')?.value ?? '');
         }
         const focused = document.activeElement?.matches?.('[data-ri-comment]') ? document.activeElement.closest('[data-ri-row]')?.dataset.riRow : null;
-        list.innerHTML = requests.map(item => requestRow(item, view)).join('')
+        list.innerHTML = requests.map(item => requestRow(item, view, this.clones.get(item.id))).join('')
             + (summary.more ? `<p class="ri-muted mt-2">viberails.ai lists the newest 100; open it to see the rest.</p>` : '');
         for (const [reference, text] of drafts) {
             const row = list.querySelector(`[data-ri-row="${CSS.escape(reference)}"]`);

@@ -83,8 +83,59 @@ export function badge(text, tone) {
     return `<span class="ri-badge" data-tone="${esc(tone)}">${esc(text)}</span>`;
 }
 
+/** A path's last folder, for either separator; the counterpart of the requester's repository name. */
+export function folderName(path) {
+    const parts = String(path || '').split(/[\\/]+/).filter(Boolean);
+    return parts.length ? parts[parts.length - 1] : '';
+}
+
+/** The clones Approve may rebuild in (this window's project first); an older backend sends only `project`. */
+export function clonesOf(view) {
+    if (Array.isArray(view?.clones) && view.clones.length) return view.clones;
+    return view?.project ? [{ path: view.project, name: folderName(view.project), current: true }] : [];
+}
+
+/** The requester's repository is their clone's folder name, so a different name is a warning, never a refusal. */
+export function sameRepository(item, clone) {
+    return String(item?.repository || '').toLowerCase() === String(clone?.name || '').toLowerCase();
+}
+
+/** The reviewer's pick if it is still open, else a clone named like the requester's (this window's first), else this window's. */
+export function chosenClone(item, view, selectedPath) {
+    const clones = clonesOf(view);
+    return clones.find(clone => clone.path === selectedPath)
+        || clones.find(clone => clone.current && sameRepository(item, clone))
+        || clones.find(clone => sameRepository(item, clone))
+        || clones.find(clone => clone.current) || clones[0] || null;
+}
+
+/** Shown before the launch when the names differ (VIBE-213 item 7); the reviewer can still approve. */
+export function cloneWarning(item, clone) {
+    if (!clone || sameRepository(item, clone)) return '';
+    return `This request was made in a folder named "${item.repository}". Approve rebuilds it in your "${clone.name}" folder (${clone.path}), `
+        + 'so continue only if that is a clone of the same repository.';
+}
+
+export function cloneNote(item, clone) {
+    const warning = cloneWarning(item, clone);
+    return warning ? `<div class="ri-alert" data-tone="warning" role="note">${esc(warning)}</div>` : '';
+}
+
+/** The clone picker (only when more than one root is open, beside the requester's name) and the mismatch note. */
+export function cloneChoice(item, view, selectedPath) {
+    const clones = clonesOf(view);
+    const chosen = chosenClone(item, view, selectedPath);
+    const picker = clones.length > 1
+        ? `<label class="ri-clone"><span class="ri-muted">Rebuild in</span>
+            <select class="form-select form-select-sm" data-ri-clone>${clones.map(clone =>
+                `<option value="${esc(clone.path)}" title="${esc(clone.path)}" ${clone.path === chosen?.path ? 'selected' : ''}>${esc(clone.name)}${clone.current ? ' (this window)' : ''}</option>`).join('')}</select>
+            <span class="ri-muted">requested from ${esc(item.repository)}</span></label>`
+        : '';
+    return `<div class="ri-clone-choice">${picker}<div data-ri-clone-note>${cloneNote(item, chosen)}</div></div>`;
+}
+
 /** One request row. The reference is the only identity the buttons carry; the row never embeds a URL from the server except as a vetted link. */
-export function requestRow(item, view) {
+export function requestRow(item, view, selectedPath) {
     const tone = statusTone(item);
     const signing = describeSigning(item.signing);
     const acting = canAct(item, view);
@@ -99,6 +150,7 @@ export function requestRow(item, view) {
             <div class="ri-row-meta">Requested by ${esc(item.requestedBy)} · ${esc(formatRelativeTime(item.createdUtc))} · ${esc(counts)}
                 · expires ${esc(formatRelativeTime(item.expiresUtc))}</div>
             <div class="ri-row-badges">${badge(describeStatus(item), tone)}${signing ? badge(signing, item.signing.outcome === 'approved' ? 'success' : item.signing.outcome === 'signing' ? 'info' : 'warning') : ''}</div>
+            ${acting && view.popupAvailable ? cloneChoice(item, view, selectedPath) : ''}
             <div class="ri-reject-form" data-ri-reject-form hidden>
                 <label class="form-label small mb-1" for="ri-comment-${esc(item.id)}">Why are you rejecting it? The requester sees this comment.</label>
                 <textarea class="form-control form-control-sm" id="ri-comment-${esc(item.id)}" rows="3" maxlength="4000" data-ri-comment></textarea>

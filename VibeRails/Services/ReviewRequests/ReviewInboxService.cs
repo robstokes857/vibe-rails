@@ -77,7 +77,7 @@ public sealed class ReviewInboxService(
     }
 
     /// <summary>The page's "Check now": fetches at once (a repeat within <see cref="ManualRefreshSpacing"/> only re-reads the cache).</summary>
-    public async Task<ReviewInboxView> RefreshNowAsync(string project, CancellationToken ct)
+    public async Task<ReviewInboxView> RefreshNowAsync(string project, CancellationToken ct, IReadOnlyList<string>? openRoots = null)
     {
         var key = apiKey();
         if (!string.IsNullOrWhiteSpace(key))
@@ -86,11 +86,14 @@ public sealed class ReviewInboxService(
             if (state.TryBeginManual(account, Now, ManualRefreshSpacing))
                 await FetchAsync(key, account, ct);
         }
-        return View(project);
+        return View(project, openRoots);
     }
 
-    /// <summary>The cached list for the current key's account, with this root's signing states.</summary>
-    public ReviewInboxView View(string project)
+    /// <summary>
+    /// The cached list for the current key's account, with this root's signing states and the clones
+    /// Approve may rebuild in (<paramref name="openRoots"/>: the projects other open roots have).
+    /// </summary>
+    public ReviewInboxView View(string project, IReadOnlyList<string>? openRoots = null)
     {
         var key = apiKey();
         var hasKey = !string.IsNullOrWhiteSpace(key);
@@ -110,8 +113,26 @@ public sealed class ReviewInboxService(
             items,
             snapshot.More,
             project,
-            popups.Available);
+            popups.Available,
+            Clones(project, openRoots));
     }
+
+    /// <summary>This root's project first, then each other open root's project once, by folder name.</summary>
+    public static IReadOnlyList<ReviewInboxClone> Clones(string project, IReadOnlyList<string>? openRoots)
+    {
+        var others = new List<ReviewInboxClone>();
+        foreach (var root in openRoots ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(root) || ProjectPathComparer.Matches(root, project)
+                || others.Any(clone => ProjectPathComparer.Matches(clone.Path, root))) continue;
+            others.Add(new ReviewInboxClone(root, FolderName(root), false));
+        }
+        others.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.Name, b.Name) is var byName and not 0
+            ? byName : StringComparer.OrdinalIgnoreCase.Compare(a.Path, b.Path));
+        return [new ReviewInboxClone(project, FolderName(project), true), .. others];
+    }
+
+    private static string FolderName(string path) => Path.GetFileName(Path.TrimEndingDirectorySeparator(path));
 
     /// <summary>Where the reviewer reads the request: the hosted page, which also replays the attached sessions.</summary>
     public static string ReadUrl(string reference) => ReviewRequestTransport.Destination + "/Reviews/requests/" + reference;
@@ -136,10 +157,18 @@ public sealed class ReviewInboxService(
     /// <summary>
     /// Opens the signing popup for one request and returns at once; the popup's outcome lands in the
     /// list's signing state. A popup that is still open for the same request is not opened twice.
+    /// <paramref name="chosenPath"/> picks one of <see cref="Clones"/> to rebuild in (none means this
+    /// root's project); a folder no open root has is refused, so the page cannot name an arbitrary path.
     /// </summary>
-    public ReviewInboxActionResult BeginApprove(string reference, string repositoryPath)
+    public ReviewInboxActionResult BeginApprove(string reference, string project, string? chosenPath = null,
+        IReadOnlyList<string>? openRoots = null)
     {
         RequireReference(reference);
+        var repositoryPath = string.IsNullOrWhiteSpace(chosenPath) ? project
+            : Clones(project, openRoots).FirstOrDefault(clone => ProjectPathComparer.Matches(clone.Path, chosenPath))?.Path
+              ?? throw new ReviewRequestException("invalid_request",
+                  "That folder is not open in VibeRails. Choose one of the listed clones, or open the clone in VibeRails first.",
+                  StatusCodes.Status400BadRequest);
         var key = RequireKey();
         if (!popups.Available)
         {

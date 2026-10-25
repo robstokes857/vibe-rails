@@ -967,7 +967,8 @@ Component contract: [Review requests](VibeRails/Services/ReviewRequests/README.m
 
 The reviewer's side. Root-only `/api/v1/review-inbox` (both local credentials, no-store): `GET`
 answers the cached list, `POST /refresh` fetches it now, `POST /{reference}/reject` (32 KiB body,
-`{ comment }`) posts a rejection, `POST /{reference}/approve` opens the signing popup. The list is
+`{ comment }`) posts a rejection, `POST /{reference}/approve` (optional 16 KiB `{ repositoryPath }`)
+opens the signing popup. The list is
 fetched with the saved account key from fixed `https://viberails.ai/api/v1/review-requests/inbox`
 (header `X-Api-Key` only, no redirects or cookies, 30 s, 1 MiB; every item validated: a `rvw_`
 reference, bounded text, a known status, a plausible expiry) on the Board sync cadence persisted in
@@ -980,7 +981,10 @@ the reviewer's key; the host's refusals keep their code (`not_a_reviewer`, `not_
 `signer_mismatch`, …) and status, and remote prose is never shown or logged.
 
 **No route and no MCP tool signs.** Approve re-launches `vb --vca-hook sign-review --review
-<reference> --workdir <project> --console-window` through `VcaHookConsoleRespawn` (CREATE_NEW_CONSOLE;
+<reference> --workdir <clone> --console-window`, where `<clone>` is this root's project or, when the
+body names one, a project another open root has (`JobProjectRoots` presence, VIBE-213 item 7), passed
+as the listed spelling; any other folder is refused 400 before a launch, so the page cannot point the
+popup at an arbitrary path. Through `VcaHookConsoleRespawn` (CREATE_NEW_CONSOLE;
 Windows, an interactive desktop, not CI; refused with `popup_unavailable` otherwise), once per
 reference while that window is open, and learns only its exit code. The popup reads the bundle itself
 with the account key (`GET /{reference}/bundle`, 90 s, 25 MiB, validated the way the host validated
