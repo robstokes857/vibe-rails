@@ -102,14 +102,19 @@ public sealed class ReviewRequestSender(
         // actually received the request, even if Settings change while this call is in flight.
         var fingerprint = SessionSharingService.KeyFingerprint(key);
 
+        // The person confirmed: from here the transfer, its persistence and any recovery run to
+        // completion on the transport's own deadlines, never the caller's token. A browser that
+        // disconnects after the host accepted the bundle must not leave a hosted copy nothing local
+        // points at (Codex slice E review, F2: the window between the hosted success and MarkSent).
+        var none = CancellationToken.None;
         ReviewRequestHostedStatus remote;
-        try { remote = await transport.SendAsync(key, record.Id, record.TreeId, Encoding.UTF8.GetBytes(record.BundleJson), ct); }
+        try { remote = await transport.SendAsync(key, record.Id, record.TreeId, Encoding.UTF8.GetBytes(record.BundleJson), none); }
         catch (ReviewRequestTransportException ex) { throw new ReviewRequestException(ex.Code, ex.Message, 502); }
 
         var now = _clock.GetUtcNow().UtcDateTime;
-        if (!await store.MarkSentAsync(record.Id, remote.Id!, fingerprint, now, remote.ExpiresUtc, ct))
+        if (!await store.MarkSentAsync(record.Id, remote.Id!, fingerprint, now, remote.ExpiresUtc, none))
         {
-            if (await store.GetAsync(record.Id, ct) is null)
+            if (await store.GetAsync(record.Id, none) is null)
             {
                 // Deleted while the send was in flight: the hosted copy exists and nothing local points
                 // at it. The reference is made durable first, with its own token, so a caller that
@@ -139,12 +144,12 @@ public sealed class ReviewRequestSender(
             // answers an exact retry with the stored request, so this cannot happen for one account;
             // follow what is stored rather than overwrite what the poller is already following.
             Log.Warning("[ReviewRequests] Request {Id} was already sent under another reference; keeping the stored one", record.Id);
-            return new ReviewRequestSent(await reviews.SummaryAsync(record.Id, ct), "This review request was already sent.");
+            return new ReviewRequestSent(await reviews.SummaryAsync(record.Id, none), "This review request was already sent.");
         }
         // The first decision check happens one interval from now, not after the idle backoff.
         polls.Prompt(fingerprint);
 
-        var (queued, missing) = await QueueSessionsAsync(store, archives, record.Id, bundle, fingerprint, now, ct);
+        var (queued, missing) = await QueueSessionsAsync(store, archives, record.Id, bundle, fingerprint, now, none);
         events.Publish(ReviewRequestEvents.Updated, new ReviewRequestChanged(record.Id, record.Status, record.CardKey, true),
             ReviewRequestJsonContext.Default.ReviewRequestChanged);
         var message = missing > 0
@@ -152,7 +157,7 @@ public sealed class ReviewRequestSender(
             : queued > 0
                 ? "Sent. Attached sessions upload after they end; keep VibeRails open until they do. Decisions are checked every 15 minutes."
                 : "Sent. Decisions are checked every 15 minutes.";
-        return new ReviewRequestSent(await reviews.SummaryAsync(record.Id, ct), message);
+        return new ReviewRequestSent(await reviews.SummaryAsync(record.Id, none), message);
     }
 
     /// <summary>

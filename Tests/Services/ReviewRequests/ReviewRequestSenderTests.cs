@@ -353,6 +353,50 @@ public sealed class ReviewRequestSenderTests : IDisposable
         _archives.VerifyNoOtherCalls();
     }
 
+    /// <summary>
+    /// Codex slice E third review, F2 continued: the caller disconnects the moment the host has
+    /// accepted the bundle, before anything was persisted. The send runs on, so the reference lands
+    /// (or, after a raced delete, the revocation row does) and nothing hosted is left unreferenced.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ACallerCancellationRightAfterTheHostedSuccessStillPersistsTheReference(bool deletedDuringSend)
+    {
+        var created = await CreateAsync();
+        using var caller = new CancellationTokenSource();
+        _archives.Setup(a => a.EnsureSessionShareUploadAsync(It.IsAny<string>(), Fingerprint, It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _answer = async request =>
+        {
+            if (request.Method == HttpMethod.Delete) return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+            if (deletedDuringSend) await _store.DeleteAsync(created.Id, Ct);
+            caller.Cancel(); // the browser is gone as the host answers 201; nothing has been stored yet
+            return Json(HttpStatusCode.Created, Hosted(created.Id, created: _clock.Now));
+        };
+
+        if (deletedDuringSend)
+        {
+            var ex = await Assert.ThrowsAsync<ReviewRequestException>(() => Sender().SendAsync(_project, created.Id, new SendReviewRequest(true), caller.Token));
+            Assert.Equal(("remote_pending", 409), (ex.Code, ex.Status));
+            var kept = await _store.GetAsync(created.Id, Ct);
+            Assert.Equal(("cancelled", Reference, Fingerprint), (kept!.Status, kept.RemoteId, kept.SentKeyFingerprint));
+            Assert.Contains(await _store.ListSentPendingAsync(Ct), row => row.Id == created.Id);
+            Assert.Equal(["POST /api/v1/review-requests", "DELETE /api/v1/review-requests/" + Reference],
+                _requests.Select(r => r.Method + " " + r.RequestUri!.AbsolutePath));
+            _archives.Verify(a => a.EnsureSessionShareUploadAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+        else
+        {
+            var sent = await Sender().SendAsync(_project, created.Id, new SendReviewRequest(true), caller.Token);
+            Assert.Equal(Reference, sent.Request.Remote!.Id);
+            var stored = await _store.GetAsync(created.Id, Ct);
+            Assert.Equal((Reference, Fingerprint), (stored!.RemoteId, stored.SentKeyFingerprint));
+            Assert.NotNull(stored.SessionsQueuedUTC);
+            Assert.Equal(["POST /api/v1/review-requests"], _requests.Select(r => r.Method + " " + r.RequestUri!.AbsolutePath));
+            _archives.Verify(a => a.EnsureSessionShareUploadAsync(It.IsAny<string>(), Fingerprint, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+        }
+    }
+
     [Theory]
     [InlineData("confirmed")]
     [InlineData("host_down")]
