@@ -123,6 +123,12 @@ public partial interface IBoardStore
     /// <summary>Records a confirmed remote deletion before publishing its replacement.</summary>
     Task ConfirmSyncRebuildDeletedAsync(string rebuildId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Ends a replacement that has not deleted anything yet, keeping its receipt as 'abandoned'. Used when
+    /// the host no longer confirms this account's ownership, so re-enabling sync publishes afresh.
+    /// </summary>
+    Task AbandonSyncRebuildAsync(string rebuildId, CancellationToken cancellationToken = default);
+
     /// <summary>Atomically binds the replacement and queues retained history plus final local snapshots.</summary>
     Task<BoardSyncLinkRecord?> PrepareSyncRebuildUploadAsync(BoardSyncRebuildRecord expected,
         string replacementRemoteBoardId, CancellationToken cancellationToken = default);

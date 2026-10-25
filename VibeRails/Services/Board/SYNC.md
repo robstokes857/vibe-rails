@@ -316,6 +316,11 @@ Replacement creates a new remote board identity and URL. Remote-only content, in
 collaborator contributions on the discarded copy are not retained; this is the owner's explicit
 host-wins recovery policy, not an ordinary merge. Imported/shared boards never delete or replace
 their owner's remote. Older servers without owner descriptors retain the in-place recovery path.
+When the descriptor names another owner or another board for an owned link, the refusal is terminal
+(VIBE-213): neither the in-place repair nor deletion runs, sync pauses so the background tick stops
+retrying, a replacement that has not deleted anything is marked `abandoned`, and the board's sync status
+says the account no longer owns the hosted copy (import it as a shared board, or turn sync back on to
+publish this account's own copy). The feature log records it once at Warning.
 Authentication failures, malformed history, changed accounts and unproven conflicts never
 authorize deletion. Subsequent new web events retain the ordinary push/pull contract.
 Progress is persisted as it is made (the layout hash after a batch, the cursor after each pull

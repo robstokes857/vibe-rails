@@ -1169,6 +1169,7 @@ public sealed partial class BoardSyncServiceTests : IDisposable
         public int Calls;
         public bool LoseNextAck, BadAck, Reject, RejectUnknownEntry;
         public bool SupportsOwnedRebuild, RemoteIsOwner = true, RemoteExists = true;
+        public string? DescribedRemoteId;
         public bool LoseDeleteAck, LosePublishAck, PushConflictUntilDelete;
         public int RemoteDeletes;
         public BoardSyncPublishRequest? PublishedLayout;
@@ -1230,7 +1231,7 @@ public sealed partial class BoardSyncServiceTests : IDisposable
             if (!RemoteExists || boardId != RemoteId.ToString("D"))
                 throw new BoardSyncClientException("Missing", BoardSyncWire.CodeBoardNotFound, 404);
             var layout = PublishedLayout!;
-            return Task.FromResult<BoardRemoteDescriptor?>(new(boardId, layout.Name, layout.KeyPrefix, layout.DisplayPrefix,
+            return Task.FromResult<BoardRemoteDescriptor?>(new(DescribedRemoteId ?? boardId, layout.Name, layout.KeyPrefix, layout.DisplayPrefix,
                 layout.Lanes.Select(l => new BoardRemoteLane(l.Id, l.Name, l.Color, l.Position)).ToList(), RemoteIsOwner,
                 AdvertisedLastSeq ?? Entries.Count));
         }

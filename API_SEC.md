@@ -1076,6 +1076,8 @@ These protections apply to updated clients; older running versions may ignore th
 The owner's explicit host-wins policy permits automatic replacement of a **proven conflicting**
 remote copy: validated history must contradict local acknowledgements, and the authenticated
 descriptor must confirm ownership of the exact board before the existing owner-only DELETE.
+A descriptor naming another owner or board pauses that board's sync and runs neither repair nor
+deletion; only the owner's explicit re-enable publishes again.
 The durable `BoardSyncRebuilds` intent pins the board and destination fingerprint; interruption
 resumes delete confirmation, idempotent publication, then local-history upload. Imported boards,
 ordinary 409 contention, network/auth failures and malformed responses never authorize deletion.

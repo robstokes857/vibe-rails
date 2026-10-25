@@ -2,7 +2,8 @@
 
 `board-sync-rebuild/1` adds the `BoardSyncRebuilds` ledger for owner-authorized replacement of a
 conflicting hosted copy. Intent precedes remote deletion; delete/publish/upload phases survive
-restarts. Binding the replacement, resetting portable receipts and appending current host snapshots
+restarts. A replacement still in its delete phase can end as `abandoned` (no deletion made) when the
+host no longer confirms ownership. Binding the replacement, resetting portable receipts and appending current host snapshots
 commit together. Keep original local rows and local-only entries; retire old creation deliveries
 and use fresh baselines, including for previously rejected creations. Completed receipts remain
 until explicit board deletion. No startup backfill or manual upgrade step is required. See

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using VibeRails.Services.Board;
 using VibeRails.Services.Board.Sync;
 using VibeRails.Services.Diagnostics;
@@ -101,15 +102,97 @@ public sealed partial class BoardSyncServiceTests
         Assert.Equal("Local host wins", (await store.FindCardAsync(root, card.Id, Ct))!.Title);
     }
 
-    [Fact]
-    public async Task NonOwnerCannotReplaceAConflictingRemote()
+    // VIBE-213 item 6 (Rob, 2026-10-25): the refusal is terminal. Sync pauses, so the 60-second tick
+    // stops retrying, the in-place repair never runs, and the reason is logged and shown once.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LostOwnershipPausesSyncOnceWithoutRepairOrDeletion(bool otherIdentity)
     {
         var card = await ConflictingOwnedBoard();
-        client.RemoteIsOwner = false;
-        var status = await service.SyncNowAsync(root, card.BoardId, Ct);
-        Assert.Contains("Only the local owner", status!.LastError);
+        var log = new UploadFeatureLogRecorder();
+        var watched = new BoardSyncService(store, client, new BoardSyncLock(Path.Combine(root, "sync.lock")), log, activityCache);
+        if (otherIdentity) client.DescribedRemoteId = Guid.NewGuid().ToString("D");
+        else client.RemoteIsOwner = false;
+
+        var status = await watched.SyncNowAsync(root, card.BoardId, Ct);
+        Assert.Equal(BoardSyncService.OwnershipLostMessage, status!.LastError);
+        Assert.False(status.Enabled);
         Assert.Equal(0, client.RemoteDeletes);
         Assert.Null(await store.GetPendingSyncRebuildAsync(card.BoardId, Ct));
+        Assert.DoesNotContain(log.Entries, e => e.Event == "recover");
+
+        var calls = client.Calls;
+        await watched.SyncDueAsync(Ct);
+        await watched.SyncDueAsync(Ct);
+        Assert.Equal(calls, client.Calls);
+        var logged = Assert.Single(log.Entries, e => e.Message == BoardSyncService.OwnershipLostMessage);
+        Assert.Equal(LogLevel.Warning, logged.Level);
+        Assert.Equal(BoardSyncService.OwnershipLostMessage, (await watched.GetStatusAsync(root, card.BoardId, Ct))!.LastError);
+
+        // Turning sync back on is the explicit re-link: it publishes this account's own copy.
+        HostCreatesTheAccountsOwnCopyOnPublish();
+        var relinked = await watched.SetPublishedAsync(root, card.BoardId, true, Ct);
+        Assert.Null(relinked!.LastError);
+        Assert.True(relinked.Enabled);
+        Assert.Equal(client.RemoteId.ToString("D"), relinked.RemoteBoardId);
+        Assert.Equal(0, relinked.Unsent);
+        Assert.Equal(0, client.RemoteDeletes);
+    }
+
+    [Fact]
+    public async Task LostOwnershipAbandonsAReplacementThatHasNotDeletedAnything()
+    {
+        var card = await ConflictingOwnedBoard();
+        var link = (await store.GetSyncLinkAsync(root, card.BoardId, Ct))!;
+        var pending = (await store.BeginSyncRebuildAsync(link, Ct))!;
+        client.RemoteIsOwner = false;
+
+        var status = await service.SyncNowAsync(root, card.BoardId, Ct);
+        Assert.Equal(BoardSyncService.OwnershipLostMessage, status!.LastError);
+        Assert.False(status.Enabled);
+        Assert.Equal(0, client.RemoteDeletes);
+        Assert.Null(await store.GetPendingSyncRebuildAsync(card.BoardId, Ct));
+        Assert.Equal("abandoned", await RebuildPhaseAsync(pending.Id));
+
+        // Without the abandoned journal, re-enabling would resume the deletion and refuse again.
+        HostCreatesTheAccountsOwnCopyOnPublish();
+        var relinked = await service.SetPublishedAsync(root, card.BoardId, true, Ct);
+        Assert.Null(relinked!.LastError);
+        Assert.Equal(client.RemoteId.ToString("D"), relinked.RemoteBoardId);
+        Assert.Equal(0, client.RemoteDeletes);
+        Assert.Null(await store.GetPendingSyncRebuildAsync(card.BoardId, Ct));
+    }
+
+    [Fact]
+    public async Task AbandonLeavesAReplacementPastItsDeletionAlone()
+    {
+        var card = await ConflictingOwnedBoard();
+        var link = (await store.GetSyncLinkAsync(root, card.BoardId, Ct))!;
+        var pending = (await store.BeginSyncRebuildAsync(link, Ct))!;
+        await store.ConfirmSyncRebuildDeletedAsync(pending.Id, Ct);
+        await store.AbandonSyncRebuildAsync(pending.Id, Ct);
+        Assert.Equal("publish", (await store.GetPendingSyncRebuildAsync(card.BoardId, Ct))!.Phase);
+    }
+
+    /// <summary>Publishing keys the hosted board by account and local board, so another account's board is never returned.</summary>
+    private void HostCreatesTheAccountsOwnCopyOnPublish()
+    {
+        client.Entries.Clear();
+        client.Activity.Clear();
+        client.RemoteExists = false;
+        client.RemoteIsOwner = true;
+        client.DescribedRemoteId = null;
+    }
+
+    private async Task<string?> RebuildPhaseAsync(string rebuildId)
+    {
+        await using var db = new Microsoft.Data.Sqlite.SqliteConnection(cs);
+        await db.OpenAsync(Ct);
+        await using var command = db.CreateCommand();
+        command.CommandText = "SELECT Phase FROM BoardSyncRebuilds WHERE Id=$id;";
+        command.Parameters.AddWithValue("$id", rebuildId);
+        return await command.ExecuteScalarAsync(Ct) as string;
     }
 
     [Fact]

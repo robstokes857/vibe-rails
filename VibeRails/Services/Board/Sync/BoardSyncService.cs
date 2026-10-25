@@ -449,7 +449,7 @@ public sealed partial class BoardSyncService(
                 if (client.DestinationKey != link.DestinationKey)
                     throw new BoardValidationException("The account changed during recovery; entries remain queued.");
                 var remote = await client.DescribeAsync(link.RemoteBoardId, ct, link.DestinationKey);
-                if (remote is not null) RequireRebuildOwner(link, remote);
+                if (remote is not null) await RequireRebuildOwnerAsync(link, remote);
                 var current = await store.GetSyncLinkAsync(link.ProjectPath, link.BoardId, ct) ?? throw conflict;
                 var repaired = await store.ReconcileOwnedSyncHistoryAsync(current, history, boundary.Value, ct)
                     ?? throw conflict;

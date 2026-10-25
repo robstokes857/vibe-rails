@@ -2,11 +2,29 @@ namespace VibeRails.Services.Board.Sync;
 
 public sealed partial class BoardSyncService
 {
-    private static void RequireRebuildOwner(BoardSyncLinkRecord link, BoardRemoteDescriptor remote)
+    /// <summary>The board's sync status when viberails.ai says this account no longer owns the linked hosted board.</summary>
+    internal const string OwnershipLostMessage =
+        "viberails.ai says this account no longer owns this board's hosted copy, so sync is paused and nothing is sent or repaired there; "
+        + "local work is retained. To keep working on the hosted board, ask its owner to share it with you and import it as a shared board. "
+        + "To publish this board under this account again, turn sync back on.";
+
+    /// <summary>
+    /// Repair and rebuild act only on the local owner's exact hosted board. When the host reports another
+    /// owner or another identity for an owner's link, the refusal is terminal (Rob, 2026-10-25, VIBE-213
+    /// item 6): sync is paused, as for a hosted board that no longer exists, so the 60-second tick stops
+    /// retrying it and the in-place repair never runs for a board this account does not own. A replacement
+    /// still waiting to delete is abandoned with it, so turning sync back on publishes this account's own
+    /// copy instead of resuming that deletion. The failure path records the reason on the link's status and
+    /// in the feature log once.
+    /// </summary>
+    private async Task RequireRebuildOwnerAsync(BoardSyncLinkRecord link, BoardRemoteDescriptor remote, string? pendingRebuildId = null)
     {
-        if (link.Imported || !remote.IsOwner
-            || !string.Equals(remote.RemoteBoardId, link.RemoteBoardId, StringComparison.OrdinalIgnoreCase))
+        if (link.Imported)
             throw new BoardValidationException("Only the local owner's exact hosted board can be rebuilt; local work is retained.");
+        if (remote.IsOwner && string.Equals(remote.RemoteBoardId, link.RemoteBoardId, StringComparison.OrdinalIgnoreCase)) return;
+        if (pendingRebuildId is not null) await store.AbandonSyncRebuildAsync(pendingRebuildId, CancellationToken.None);
+        await store.SetBoardSyncEnabledAsync(link.ProjectPath, link.BoardId, false, CancellationToken.None);
+        throw new BoardValidationException(OwnershipLostMessage);
     }
 
     private async Task<BoardSyncLinkRecord> ContinueOwnedRebuildAsync(BoardSyncLinkRecord link,
@@ -29,7 +47,7 @@ public sealed partial class BoardSyncService
             catch (BoardSyncClientException ex) when (ex.Code == BoardSyncWire.CodeBoardNotFound) { remote = null; }
             if (remote is not null)
             {
-                RequireRebuildOwner(link, remote);
+                await RequireRebuildOwnerAsync(link, remote, rebuild.Id);
                 await client.DeleteRemoteBoardAsync(rebuild.RemoteBoardId, ct, rebuild.DestinationKey);
             }
             else

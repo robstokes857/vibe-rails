@@ -86,6 +86,18 @@ public sealed partial class BoardStore
     }
 
     /// <inheritdoc />
+    public async Task AbandonSyncRebuildAsync(string rebuildId, CancellationToken cancellationToken = default)
+    {
+        await using var db = await OpenAsync(cancellationToken);
+        await using var tx = db.BeginTransaction(IsolationLevel.Serializable);
+        await ExecuteSharingAsync(db, tx, """
+            UPDATE BoardSyncRebuilds SET Phase='abandoned', CompletedUTC=$now, UpdatedUTC=$now
+            WHERE Id=$id AND Phase='delete' AND CompletedUTC IS NULL;
+            """, cancellationToken, ("$id", rebuildId), ("$now", ToDb(DateTime.UtcNow)));
+        await tx.CommitAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
     public async Task<BoardSyncLinkRecord?> PrepareSyncRebuildUploadAsync(BoardSyncRebuildRecord expected,
         string replacementRemoteBoardId, CancellationToken cancellationToken = default)
     {
