@@ -278,6 +278,12 @@ internal static class StateDatabaseSchema
             SqliteSchema.Execute(db, transaction, """
                 ALTER TABLE ReviewRequests ADD COLUMN SessionsQueuedUTC TEXT NULL;
                 """));
+        // Slice F (VIBE-210): a reviewer's per-line comments, as JSON beside the decision's comment.
+        // Nullable; an older version keeps reading and writing the row without it.
+        SqliteMigrationRunner.Apply(connection, "review-requests", 4, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, """
+                ALTER TABLE ReviewDecisions ADD COLUMN LineCommentsJson TEXT NULL;
+                """));
         JobStore.EnsureSessionLinkSchema(connection);
         // Every breaking step above has now been applied (or was already), so the file is at this
         // build's generation. Stamping after the fact also covers databases migrated before the

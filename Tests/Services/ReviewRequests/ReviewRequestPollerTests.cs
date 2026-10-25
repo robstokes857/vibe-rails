@@ -114,7 +114,8 @@ public sealed class ReviewRequestPollerTests : IDisposable
         var state = new ReviewRequestPollState(null, () => _clock.Now);
         var sent = await SentAsync(reviews, Reference);
         _hosted[Reference] = Hosted(sent.Id, status: "approved", created: Start, decisions:
-            [Rejected(4, "lead@example.com", "One more case."), Approved(9, "lead@example.com", comment: "Looks right now.")]);
+            [Rejected(4, "lead@example.com", "One more case.") with { LineComments = [new ReviewLineComment("db.cs", 2, "AFTER", "Bound this.\r\nAnd\u0007that.")] },
+             Approved(9, "lead@example.com", comment: "Looks right now.")]);
 
         await Poller(reviews, state).PollDueAsync(Ct);
 
@@ -122,6 +123,9 @@ public sealed class ReviewRequestPollerTests : IDisposable
         Assert.Equal("approved", detail.Request.Status);
         Assert.Equal(["rejected", "approved"], detail.Request.Decisions.Select(d => d.Decision));
         Assert.Equal("One more case.", detail.Request.Decisions[0].Comment);
+        // Slice F: the rejection's line comments land with it, cleaned the way a local decision is.
+        Assert.Equal(new ReviewLineComment("db.cs", 2, "after", "Bound this.\nAnd that."), Assert.Single(detail.Request.Decisions[0].LineComments!));
+        Assert.Null(detail.Request.Decisions[1].LineComments);
         Assert.Equal(HumanSignatureRuleTests.SignatureLine(Tree), detail.Request.Decisions[1].Trailer);
         Assert.NotNull(detail.Request.Decisions[1].VerifiedUtc);
         var signature = Assert.Single(verifier.Calls);

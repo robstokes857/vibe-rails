@@ -37,6 +37,10 @@ export const COMMAND_REVIEW_INBOX_READ = 'viberails.reviewInbox.read';
 /** Opens the signing popup for the row's request; nothing in the extension signs. */
 export const COMMAND_REVIEW_INBOX_APPROVE = 'viberails.reviewInbox.approve';
 export const COMMAND_REVIEW_INBOX_REJECT = 'viberails.reviewInbox.reject';
+/** "Review requests" (VB-50 slice F): this project's own requests and their decisions. */
+export const REVIEW_REQUESTS_VIEW_ID = 'viberails.reviewRequests';
+export const COMMAND_REVIEW_REQUESTS_REFRESH = 'viberails.reviewRequests.refresh';
+export const COMMAND_REVIEW_REQUESTS_OPEN = 'viberails.reviewRequests.open';
 
 // --- Webview / output -----------------------------------------------------
 
@@ -80,6 +84,9 @@ export const REVIEW_INBOX_PATH = '/api/v1/review-inbox';
 export function reviewInboxActionPath(reference: string, action: 'approve' | 'reject'): string {
     return `${REVIEW_INBOX_PATH}/${encodeURIComponent(reference)}/${action}`;
 }
+
+/** This project's own review requests with their decisions (root backend only), as a card's Request review section lists them. */
+export const REVIEW_REQUESTS_PATH = '/api/v1/review-requests';
 
 // --- Settings -------------------------------------------------------------
 

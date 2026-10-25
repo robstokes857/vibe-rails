@@ -11,6 +11,7 @@ import {
     ReviewInboxActionDependencies, ReviewInboxRow, ReviewInboxTreeDataProvider,
     approveReviewRequest, readReviewRequest, rejectReviewRequest
 } from './review-inbox-view';
+import { ReviewRequestRow, ReviewRequestsTreeDataProvider } from './review-requests-view';
 import {
     AUTOMATION_NAV_PREFERENCES_PATH,
     BOOTSTRAP_REQUEST_TIMEOUT_MS,
@@ -27,6 +28,8 @@ import {
     COMMAND_REVIEW_INBOX_READ,
     COMMAND_REVIEW_INBOX_REFRESH,
     COMMAND_REVIEW_INBOX_REJECT,
+    COMMAND_REVIEW_REQUESTS_OPEN,
+    COMMAND_REVIEW_REQUESTS_REFRESH,
     COMMAND_STOP,
     COMMAND_TEST_CONNECTION_INFO,
     COMMAND_TEST_LAUNCHER_ITEMS,
@@ -44,6 +47,8 @@ import {
     MIN_STARTUP_TIMEOUT_MS,
     REVIEW_INBOX_PATH,
     REVIEW_INBOX_VIEW_ID,
+    REVIEW_REQUESTS_PATH,
+    REVIEW_REQUESTS_VIEW_ID,
     SESSION_COOKIE_NAME,
     SMOKE_WORKSPACE_ENV,
     TAB_TOKEN_HEADER,
@@ -76,6 +81,7 @@ let statusBarItem: vscode.StatusBarItem | null = null;
 let stopBarItem: vscode.StatusBarItem | null = null;
 let launcherProvider: LauncherTreeDataProvider | null = null;
 let reviewInboxProvider: ReviewInboxTreeDataProvider | null = null;
+let reviewRequestsProvider: ReviewRequestsTreeDataProvider | null = null;
 let closingPromise: Promise<void> | null = null;
 let openingPromise: Promise<void> | null = null;
 /** Launcher rows with a run in flight (see runLauncherItem). */
@@ -99,6 +105,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     registerLauncherView(context);
     registerReviewInboxView(context);
+    registerReviewRequestsView(context);
 
     const openCommand = vscode.commands.registerCommand(COMMAND_OPEN, async () => {
         try {
@@ -147,6 +154,7 @@ async function closeDashboard(showMessage: boolean, shutdownBackend: boolean): P
         void setDashboardOpenContext(false);
         void launcherProvider?.refresh();
         void reviewInboxProvider?.refresh();
+        void reviewRequestsProvider?.refresh();
 
         const manager = backendManager;
         if (manager) {
@@ -237,12 +245,14 @@ async function createDashboard(context: vscode.ExtensionContext, projectFolder?:
 
         webviewManager.onCloseRequested(() => { void closeDashboard(true, false); });
         webviewManager.onLauncherChanged(() => { void launcherProvider?.refresh(); });
+        webviewManager.onReviewRequestChanged((change) => { void reviewRequestsProvider?.handleChange(change); });
 
         await webviewManager.create(port, sessionToken, tabToken);
         stopBarItem?.show();
         void setDashboardOpenContext(true);
         void launcherProvider?.refresh();
         void reviewInboxProvider?.refresh();
+        void reviewRequestsProvider?.refresh();
     });
 }
 
@@ -336,6 +346,45 @@ function registerReviewInboxView(context: vscode.ExtensionContext): void {
         vscode.commands.registerCommand(COMMAND_REVIEW_INBOX_READ, (row?: ReviewInboxRow) => readReviewRequest(row, dependencies)),
         vscode.commands.registerCommand(COMMAND_REVIEW_INBOX_APPROVE, (row?: ReviewInboxRow) => approveReviewRequest(row, dependencies)),
         vscode.commands.registerCommand(COMMAND_REVIEW_INBOX_REJECT, (row?: ReviewInboxRow) => rejectReviewRequest(row, dependencies))
+    );
+}
+
+/**
+ * "Review requests" (VB-50 slice F): this project's own requests as a Board card's Request review
+ * section lists them, from the root backend. A row opens its card on the dashboard Board. The
+ * dashboard relays review_request_updated over the webview bridge; the view reloads and shows a
+ * notification when a decision arrived. Nothing here creates, sends, decides or signs.
+ */
+function registerReviewRequestsView(context: vscode.ExtensionContext): void {
+    const openCard = 'Open card';
+    const provider = new ReviewRequestsTreeDataProvider({
+        isDashboardOpen,
+        fetchRequests: () => requestJson(getBackendConnection(), 'GET', REVIEW_REQUESTS_PATH),
+        notify: (message, change) => {
+            void vscode.window.showInformationMessage(message, ...(change.cardKey ? [openCard] : [])).then((choice) => {
+                if (choice === openCard) void vscode.commands.executeCommand(COMMAND_REVIEW_REQUESTS_OPEN, change);
+            });
+        }
+    });
+    reviewRequestsProvider = provider;
+
+    const view = vscode.window.createTreeView<ReviewRequestRow>(REVIEW_REQUESTS_VIEW_ID, {
+        treeDataProvider: provider,
+        showCollapseAll: false
+    });
+
+    context.subscriptions.push(
+        provider,
+        view,
+        provider.onDidChangeTreeData(() => { view.message = provider.getMessage(); }),
+        view.onDidChangeVisibility((event) => { if (event.visible) { void provider.refresh(); } }),
+        vscode.commands.registerCommand(COMMAND_REVIEW_REQUESTS_REFRESH, () => provider.refresh()),
+        vscode.commands.registerCommand(COMMAND_REVIEW_REQUESTS_OPEN, (target?: { id?: string; cardKey?: string | null }) =>
+            sendToDashboard(context, {
+                command: 'openReviewRequest',
+                id: typeof target?.id === 'string' ? target.id : null,
+                cardKey: typeof target?.cardKey === 'string' && target.cardKey ? target.cardKey : null
+            }, 'Could not open the review request'))
     );
 }
 

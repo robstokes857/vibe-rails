@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using VibeRails.DB;
 using VibeRails.Services.Git;
@@ -32,6 +34,10 @@ public sealed class ReviewRequestService(
     public const int MaxSessions = 10;
     public const int MaxNoteChars = 2000;
     public const int MaxCommentChars = 4000;
+    /// <summary>Per-line comments on one decision (slice F): how many, how long each, and the largest line number.</summary>
+    public const int MaxLineComments = 50;
+    public const int MaxLineCommentChars = 1000;
+    public const int MaxLineCommentLine = 1_000_000;
     public const int MaxCardKeyChars = 64;
     public const int ListLimit = 100;
 
@@ -241,7 +247,7 @@ public sealed class ReviewRequestService(
         return snapshot;
     }
 
-    private static int Utf8(string? text) => text is null ? 0 : System.Text.Encoding.UTF8.GetByteCount(text);
+    private static int Utf8(string? text) => text is null ? 0 : Encoding.UTF8.GetByteCount(text);
 
     public async Task<ReviewRequestList> ListAsync(string projectPath, CancellationToken ct)
     {
@@ -299,6 +305,9 @@ public sealed class ReviewRequestService(
             throw new ReviewRequestException("not_open", "This review request was cancelled, so it takes no decisions.", 409);
         var bundle = Bundle(record);
         var comment = Bounded(request?.Comment, MaxCommentChars, "comment");
+        var lineComments = NormalizeLineComments(request?.LineComments);
+        var lineCommentsJson = lineComments is null ? null
+            : JsonSerializer.Serialize(lineComments, ReviewRequestJsonContext.Default.IReadOnlyListReviewLineComment);
         var now = _clock.GetUtcNow().UtcDateTime;
 
         ReviewDecisionRecord decision;
@@ -311,7 +320,7 @@ public sealed class ReviewRequestService(
                 if (!bundle.Reviewers.Contains(reviewer, StringComparer.OrdinalIgnoreCase))
                     throw new ReviewRequestException("not_a_reviewer", $"{reviewer} is not a reviewer on this request.", 409);
                 decision = new ReviewDecisionRecord(0, id, reviewer, ReviewDecisionKind.Rejected, comment,
-                    null, null, null, null, now, null, remoteDecisionId);
+                    null, null, null, null, now, null, remoteDecisionId, lineCommentsJson);
                 break;
             }
             case ReviewDecisionKind.Approved:
@@ -336,7 +345,7 @@ public sealed class ReviewRequestService(
                     throw new ReviewRequestException("not_a_reviewer",
                         $"The approval was signed by {signer}, who is not a reviewer on this request.", 409);
                 decision = new ReviewDecisionRecord(0, id, signer, ReviewDecisionKind.Approved, comment,
-                    signature.KeyId, signature.Fingerprint, signature.TreeId, signature.SignatureBase64, now, now, remoteDecisionId);
+                    signature.KeyId, signature.Fingerprint, signature.TreeId, signature.SignatureBase64, now, now, remoteDecisionId, lineCommentsJson);
                 break;
             }
             default:
@@ -349,6 +358,73 @@ public sealed class ReviewRequestService(
             ?? throw new ReviewRequestException("not_open", "This review request was cancelled before the decision was recorded.", 409);
         var decisions = await store.GetDecisionsAsync(id, ct);
         return Summarize(record with { Status = outcome.Status, UpdatedUTC = now }, bundle, decisions);
+    }
+
+    /// <summary>
+    /// Validates and cleans a decision's line comments (slice F): at most <see cref="MaxLineComments"/>,
+    /// each naming a Git path, a line from 1 to <see cref="MaxLineCommentLine"/> on <c>before</c> or
+    /// <c>after</c>, and text of 1 to <see cref="MaxLineCommentChars"/> characters. The text is kept as
+    /// typed except that CRLF becomes LF and every other control, format or separator character becomes
+    /// a space (newline and tab stay), so a reviewer's remark cannot repaint a screen or hide text
+    /// wherever it is shown. Null when there are none.
+    /// </summary>
+    internal static IReadOnlyList<ReviewLineComment>? NormalizeLineComments(IReadOnlyList<ReviewLineComment>? comments)
+    {
+        if (comments is null || comments.Count == 0) return null;
+        if (comments.Count > MaxLineComments) throw Invalid($"A decision carries at most {MaxLineComments} line comments.");
+        var result = new List<ReviewLineComment>(comments.Count);
+        foreach (var comment in comments)
+        {
+            if (LineCommentProblem(comment) is { } problem) throw Invalid(problem);
+            result.Add(comment! with { Side = comment.Side.ToLowerInvariant(), Text = CleanLineCommentText(comment.Text) });
+        }
+        return result;
+    }
+
+    /// <summary>Why a line comment is not acceptable, or null. The transport refuses a hosted answer that carries one.</summary>
+    internal static string? LineCommentProblem(ReviewLineComment? comment)
+    {
+        if (comment is null) return "A line comment is missing.";
+        if (comment.Path is not { Length: > 0 and <= 4096 } || comment.Path.Contains('\0'))
+            return "A line comment names a file path of 1 to 4096 characters.";
+        if (comment.Line is < 1 or > MaxLineCommentLine)
+            return $"A line comment names a line from 1 to {MaxLineCommentLine}.";
+        if (comment.Side is null
+            || !(comment.Side.Equals(ReviewLineCommentSide.Before, StringComparison.OrdinalIgnoreCase)
+                 || comment.Side.Equals(ReviewLineCommentSide.After, StringComparison.OrdinalIgnoreCase)))
+            return "A line comment's side is \"before\" or \"after\".";
+        if (comment.Text is not { Length: <= MaxLineCommentChars } || CleanLineCommentText(comment.Text).Length == 0)
+            return $"A line comment has text of 1 to {MaxLineCommentChars} characters.";
+        return null;
+    }
+
+    /// <summary>CRLF to LF; every other control, format or separator character becomes a space (newline and tab stay); trimmed.</summary>
+    internal static string CleanLineCommentText(string text)
+    {
+        var builder = new StringBuilder(text.Length);
+        foreach (var c in text.Replace("\r\n", "\n", StringComparison.Ordinal))
+        {
+            if (c is '\n' or '\t') builder.Append(c);
+            else if (char.IsControl(c) || CharUnicodeInfo.GetUnicodeCategory(c) is UnicodeCategory.Format
+                     or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator) builder.Append(' ');
+            else builder.Append(c);
+        }
+        return builder.ToString().Trim();
+    }
+
+    /// <summary>The stored line comments of a decision row, or null for a row without any or one this build cannot read.</summary>
+    internal static IReadOnlyList<ReviewLineComment>? ReadLineComments(string? json)
+    {
+        if (string.IsNullOrEmpty(json)) return null;
+        try
+        {
+            var list = JsonSerializer.Deserialize(json, ReviewRequestJsonContext.Default.IReadOnlyListReviewLineComment);
+            return list is { Count: > 0 } ? list : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -447,7 +523,7 @@ public sealed class ReviewRequestService(
             decision is { KeyId: { } key, Fingerprint: { } fingerprint, TreeId: { } tree, SignatureBase64: { } signature }
                 ? CommitSignatureFormat.Format(new CommitSignature(key, fingerprint, tree, signature))
                 : null,
-            decision.DecidedUTC, decision.VerifiedUTC);
+            decision.DecidedUTC, decision.VerifiedUTC, ReadLineComments(decision.LineCommentsJson));
 
     private static string? NormalizeEmail(string? value)
     {

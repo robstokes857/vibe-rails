@@ -19,8 +19,8 @@ public static class ReviewRequestRoutes
     /// <summary>Reviewers, session ids, a card key and a note; the bundle itself is captured server-side.</summary>
     internal const int MaxCreateBodyBytes = 16 * 1024;
 
-    /// <summary>A trailer (under 1 KiB), a comment (4,000 characters) and a reviewer address.</summary>
-    internal const int MaxDecisionBodyBytes = 32 * 1024;
+    /// <summary>A trailer (under 1 KiB), a comment (4,000 characters), a reviewer address and up to 50 line comments of 1,000 characters (slice F).</summary>
+    internal const int MaxDecisionBodyBytes = 128 * 1024;
 
     /// <summary><c>{ "confirmed": true }</c> and nothing else.</summary>
     internal const int MaxSendBodyBytes = 1024;

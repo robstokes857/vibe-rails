@@ -160,8 +160,10 @@ public sealed class ReviewRequestRoundTripTests
             // Reviewer answers: a rejection, then an approval signed in the desktop's trailer format.
             var trailer = CommitSignatureFormat.Format(new CommitSignature(remote.KeyId, remote.Fingerprint, tree,
                 Convert.ToBase64String(signer.SignData(CommitSignatureFormat.BuildPayload(tree), HashAlgorithmName.SHA256, RSASignaturePadding.Pss))));
+            // Slice F: the rejection carries line comments; the host bounds and cleans them.
             await using (var db = remote.Db(25))
-                await Service(db).DecideAsync(hosted.Id, new("rejected", null, "One more retry case."), "roundtrip", ct);
+                await Service(db).DecideAsync(hosted.Id, new("rejected", null, "One more retry case.",
+                    [new Hosted.ReviewLineComment("retry.cs", 1, "After", "Bound the attempts.\r\n\u0007"), new Hosted.ReviewLineComment("old.md", 1, "before", "Keep a stub.")]), "roundtrip", ct);
             await using (var db = remote.Db(25))
                 Assert.True((await Service(db).DecideAsync(hosted.Id, new("approved", trailer, "Looks right now."), "roundtrip", ct)).Created);
 
@@ -173,6 +175,7 @@ public sealed class ReviewRequestRoundTripTests
             Assert.Equal("approved", poll.RootElement.GetProperty("status").GetString());
             var decisions = poll.RootElement.GetProperty("decisions").EnumerateArray().ToList();
             Assert.Equal(["rejected", "approved"], decisions.Select(d => d.GetProperty("decision").GetString()));
+            Assert.Equal(["retry.cs", "old.md"], decisions[0].GetProperty("lineComments").EnumerateArray().Select(c => c.GetProperty("path").GetString()));
             var polledTrailer = decisions[1].GetProperty("trailer").GetString();
             Assert.Equal(trailer, polledTrailer);
             Assert.True(CommitSignatureFormat.TryParseTrailer(polledTrailer!, out var polledSignature));
@@ -183,12 +186,23 @@ public sealed class ReviewRequestRoundTripTests
             Assert.Equal(["rejected", "approved"], polled.Decisions!.Select(d => d.Decision));
             Assert.Equal(polledTrailer, polled.Decisions[1].Trailer);
             Assert.Equal(Reviewer, polled.Decisions[1].Reviewer, ignoreCase: true);
+            Assert.Equal([new Desktop.ReviewLineComment("retry.cs", 1, "after", "Bound the attempts."), new Desktop.ReviewLineComment("old.md", 1, "before", "Keep a stub.")],
+                polled.Decisions[0].LineComments);
+            await using (var db = remote.Db(25)) // The reviewer sees their own line comments on the page.
+                Assert.Equal(2, (await new Hosted.ReviewRequestAccess(db, TimeProvider.System).ReadAsync(hosted.Id, ct))!.YourDecisions[0].LineComments!.Count);
 
-            // The approval lands in the desktop ledger, re-verified there, so the commit hook can place it.
+            // Both decisions land in the desktop ledger as the poller lands them: the rejection with its line
+            // comments, the approval re-verified there so the commit hook can place it.
+            var landedRejection = await ledger.RecordDecisionAsync(repo, local.Id, new Desktop.RecordReviewDecisionRequest(Decision: "rejected",
+                Comment: polled.Decisions[0].Comment, Reviewer: polled.Decisions[0].Reviewer, LineComments: polled.Decisions[0].LineComments), ct);
+            Assert.Equal(Desktop.ReviewRequestStatus.Rejected, landedRejection.Status);
+            Assert.Equal(polled.Decisions[0].LineComments, Assert.Single(landedRejection.Decisions).LineComments);
             var landed = await ledger.RecordDecisionAsync(repo, local.Id, new Desktop.RecordReviewDecisionRequest(Decision: "approved", Trailer: polledTrailer), ct);
             Assert.Equal(Desktop.ReviewRequestStatus.Approved, landed.Status);
-            Assert.Equal(Reviewer, Assert.Single(landed.Decisions).Reviewer, ignoreCase: true);
-            Assert.Equal(polledTrailer, landed.Decisions[0].Trailer);
+            Assert.Equal(2, landed.Decisions.Count);
+            Assert.Equal(Reviewer, landed.Decisions[1].Reviewer, ignoreCase: true);
+            Assert.Equal(polledTrailer, landed.Decisions[1].Trailer);
+            Assert.Null(landed.Decisions[1].LineComments);
 
             // Cancelling ends the reviewer's access; the requester keeps the record.
             await using (var db = remote.Db(23))

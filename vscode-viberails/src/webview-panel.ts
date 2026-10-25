@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { DASHBOARD_MESSAGE_TIMEOUT_MS, WEBVIEW_VIEW_TYPE } from './constants';
 import { openExternalSignIn } from './external-sign-in';
+import { ReviewRequestChange, reviewRequestChangeFromMessage } from './review-requests-view';
 
 export class WebviewPanelManager {
     private panel: vscode.WebviewPanel | null = null;
@@ -28,6 +29,9 @@ export class WebviewPanelManager {
     private _onLauncherChanged: vscode.EventEmitter<void> = new vscode.EventEmitter<void>();
     /** The dashboard saved or reset the launcher's order and visibility, or its catalog changed. */
     public readonly onLauncherChanged: vscode.Event<void> = this._onLauncherChanged.event;
+    private _onReviewRequestChanged: vscode.EventEmitter<ReviewRequestChange> = new vscode.EventEmitter<ReviewRequestChange>();
+    /** The dashboard relayed a `review_request_updated` event: a review request was sent, cancelled, deleted or decided (VB-50 slice F). */
+    public readonly onReviewRequestChanged: vscode.Event<ReviewRequestChange> = this._onReviewRequestChanged.event;
 
     constructor(wwwrootPath: string) {
         this.wwwrootPath = wwwrootPath;
@@ -152,6 +156,10 @@ export class WebviewPanelManager {
                 this.finishImport(typeof message.error === 'string' ? message.error : undefined);
             } else if (message.command === 'launcherChanged') {
                 this._onLauncherChanged.fire();
+            } else if (message.command === 'reviewRequestChanged') {
+                // Only the typed, bounded shape travels on; the view re-reads the list from the backend itself.
+                const change = reviewRequestChangeFromMessage(message.payload);
+                if (change) this._onReviewRequestChanged.fire(change);
             } else if (message.command === 'close') {
                 this._onCloseRequested.fire();
             } else if (message.command === 'openFile' && typeof message.path === 'string') {
@@ -351,6 +359,7 @@ export class WebviewPanelManager {
             vscode.postMessage({ command: 'scriptImportReceived', requestId: requestId, error: error });
         };
         window.__viberails_launcherChanged__ = function() { vscode.postMessage({ command: 'launcherChanged' }); };
+        window.__viberails_reviewRequestChanged__ = function(payload) { vscode.postMessage({ command: 'reviewRequestChanged', payload: payload }); };
         ${fetchPatch}
         })();
     </script>`;

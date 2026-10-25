@@ -19518,6 +19518,14 @@ body.performance-mode .brand-text-sm {
 [data-board-reviews] { min-width: 0; overflow-wrap: anywhere; }
 [data-board-reviews] .d-flex { flex-wrap: wrap; }
 [data-board-reviews] .ts-wrapper { min-width: 0; flex: 1 1 180px; }
+
+/* Request review (VB-50 slice F): a decision's line comments on the card, grouped by file. */
+.board-review-decision-comments { margin: .25rem 0; font-size: .85rem; }
+.board-review-line-comments { list-style: none; margin: .15rem 0 0; padding: 0; }
+.board-review-line-comments > li { margin: .15rem 0; }
+.board-review-line-comments ul { list-style: none; margin: 0; padding: 0 0 0 .75rem; border-left: 2px solid var(--bs-border-color, #dee2e6); }
+.board-review-line-comments code { font-size: .8em; }
+.board-review-line-comment-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 /* A pending lane entry remains visible until its Automation can accept it. */
 .board-automation-waiting {
     display: block;

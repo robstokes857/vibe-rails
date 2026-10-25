@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
     approvalTrailer, bindRequestReview, cardKeySet, commitApprovalBadge, describeCounts, describeDisclosure, describeRequestStatus,
-    formatFileChange, isForCard, orderRequests, parseReviewers, pickableSessions, previewHtml, requestReviewSection, requestRowHtml,
-    requestTone, reviewStatusBadge
+    formatFileChange, groupLineComments, isForCard, lineCommentsHtml, orderRequests, parseReviewers, pickableSessions, previewHtml,
+    requestReviewSection, requestRowHtml, requestTone, reviewStatusBadge
 } from '../../../VibeRails/wwwroot/js/modules/board-card-request-review.js';
 
 const turn = () => new Promise(resolve => setImmediate(resolve));
@@ -110,6 +110,27 @@ test('badges and rows escape server text and offer Send only for an open unsent 
     assert.match(text, /2 files of tree bbbbbbbbbbbb with their text \(12 B\); 1 listed without text \(binary\): db\.cs, logo\.png\./);
     assert.match(text, /Codex session \(still running: uploads after it ends\)\. Each attached session uploads…/);
     assert.match(text, /Note: look here/);
+});
+
+test('line comments are grouped by file, ordered by side and line, escaped, and shown under the decision on the row', () => {
+    const comments = [{ path: 'b.cs', line: 7, side: 'after', text: 'late' }, { path: 'a.cs', line: 12, side: 'after', text: '<b>x</b>' },
+        { path: 'a.cs', line: 3, side: 'before', text: 'old' }, { path: 'a.cs', line: 5, side: 'after', text: 'new' }, { path: '', line: 1, side: 'after', text: 'dropped' }];
+    assert.deepEqual(groupLineComments(comments).map(group => [group.path, group.comments.map(comment => `${comment.side}:${comment.line}`)]),
+        [['a.cs', ['before:3', 'after:5', 'after:12']], ['b.cs', ['after:7']]]);
+    assert.deepEqual(groupLineComments(null), []);
+    assert.equal(lineCommentsHtml({ lineComments: [] }), '');
+    assert.equal(lineCommentsHtml(null), '');
+    const html = lineCommentsHtml({ lineComments: comments });
+    assert.doesNotMatch(html, /<b>x<\/b>/);
+    assert.match(html, /&lt;b&gt;x&lt;\/b&gt;/);
+    assert.match(html, /−L3/);
+    assert.match(html, /\+L5/);
+    const withComments = request({ status: 'rejected', decisions: [{ id: 3, reviewer: 'lead@example.test', decision: 'rejected', comment: 'see lines', lineComments: comments.slice(0, 4), decidedUtc: '2026-10-25T13:00:00Z' }] });
+    const row = requestRowHtml(withComments, card);
+    assert.match(row, /Rejected by lead@example\.test · 4 line comments/);
+    assert.match(row, /data-card-review-line-comments/);
+    assert.doesNotMatch(requestRowHtml(rejected, card), /data-card-review-line-comments/, 'a decision without line comments adds nothing');
+    assert.doesNotMatch(requestRowHtml(request({ decisions: [{ id: 4, reviewer: 'x@example.test', decision: 'rejected', lineComments: null }] }), card), /data-card-review-line-comments/);
 });
 
 test('binding lists the project\'s requests and asks which linked commits carry an approved tree', async () => {

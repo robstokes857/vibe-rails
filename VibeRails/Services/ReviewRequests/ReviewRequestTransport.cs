@@ -32,8 +32,11 @@ public sealed class ReviewRequestTransport(HttpClient client)
     internal static readonly TimeSpan SendDeadline = TimeSpan.FromSeconds(90);
     internal static readonly TimeSpan Deadline = TimeSpan.FromSeconds(30);
 
-    /// <summary>Fifty decisions with 4,000-character comments and trailers fit comfortably; anything larger is not an answer.</summary>
-    internal const int MaxResponseBytes = 1024 * 1024;
+    /// <summary>
+    /// Fifty decisions with 4,000-character comments, trailers and fifty 1,000-character line comments each
+    /// (slice F) fit comfortably once escaped; anything larger is not an answer.
+    /// </summary>
+    internal const int MaxResponseBytes = 4 * 1024 * 1024;
     private const int MaxErrorBodyBytes = 16 * 1024;
     public const int MaxDecisions = 50;
     private const string ReferencePrefix = "rvw_";
@@ -272,7 +275,11 @@ public sealed class ReviewRequestTransport(HttpClient client)
         return remote with { Decisions = decisions };
     }
 
-    /// <summary>A hosted decision within the desktop's own bounds: a listed kind, an email, a parsable trailer on an approval, a bounded comment.</summary>
+    /// <summary>
+    /// A hosted decision within the desktop's own bounds: a listed kind, an email, a parsable trailer on an
+    /// approval, a bounded comment, and at most <see cref="ReviewRequestService.MaxLineComments"/> well-formed
+    /// line comments (slice F; <see cref="ReviewRequestService.LineCommentProblem"/>).
+    /// </summary>
     private static void ValidateDecision(ReviewRequestHostedDecision? decision)
     {
         if (decision is null || decision.Id <= 0) throw Invalid();
@@ -282,6 +289,14 @@ public sealed class ReviewRequestTransport(HttpClient client)
         if (decision.Trailer is { } trailer && (trailer.Length > 1024 || !CommitSignatureFormat.TryParseTrailer(trailer, out _))) throw Invalid();
         if (decision.Decision == ReviewDecisionKind.Approved && decision.Trailer is null) throw Invalid();
         if (decision.DecidedUtc == default) throw Invalid();
+        if (decision.LineComments is { } comments)
+        {
+            if (comments.Count > ReviewRequestService.MaxLineComments) throw Invalid();
+            foreach (var comment in comments)
+            {
+                if (ReviewRequestService.LineCommentProblem(comment) is not null) throw Invalid();
+            }
+        }
     }
 
     private sealed record Answer(HttpStatusCode Status, byte[] Body, string? Code);

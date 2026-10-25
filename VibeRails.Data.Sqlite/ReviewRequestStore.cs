@@ -7,8 +7,8 @@ namespace VibeRails.Data.Sqlite;
 /// <summary>
 /// Review requests and decisions in the normal state database (VB-50). Additive component
 /// <c>review-requests/1</c> (the two tables), <c>/2</c> (the hosted copy's reference, key
-/// fingerprint, expiry and receipts as nullable columns) and <c>/3</c> (the session-queue receipt);
-/// older versions ignore what they do not know.
+/// fingerprint, expiry and receipts as nullable columns), <c>/3</c> (the session-queue receipt) and
+/// <c>/4</c> (a decision's line comments as JSON); older versions ignore what they do not know.
 /// </summary>
 public sealed class ReviewRequestStore : IReviewRequestStore
 {
@@ -106,8 +106,8 @@ public sealed class ReviewRequestStore : IReviewRequestStore
             return null;
 
         command.CommandText = """
-            INSERT INTO ReviewDecisions (RequestId, Reviewer, Decision, Comment, KeyId, Fingerprint, TreeId, SignatureBase64, DecidedUTC, VerifiedUTC, RemoteId)
-            VALUES ($request, $reviewer, $decision, $comment, $key, $fingerprint, $tree, $signature, $decided, $verified, $remote)
+            INSERT INTO ReviewDecisions (RequestId, Reviewer, Decision, Comment, KeyId, Fingerprint, TreeId, SignatureBase64, DecidedUTC, VerifiedUTC, RemoteId, LineCommentsJson)
+            VALUES ($request, $reviewer, $decision, $comment, $key, $fingerprint, $tree, $signature, $decided, $verified, $remote, $lineComments)
             RETURNING Id;
             """;
         command.Parameters.AddWithValue("$reviewer", decision.Reviewer);
@@ -120,6 +120,7 @@ public sealed class ReviewRequestStore : IReviewRequestStore
         command.Parameters.AddWithValue("$decided", Stamp(decision.DecidedUTC));
         command.Parameters.AddWithValue("$verified", decision.VerifiedUTC is { } verified ? Stamp(verified) : DBNull.Value);
         command.Parameters.AddWithValue("$remote", (object?)decision.RemoteId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$lineComments", (object?)decision.LineCommentsJson ?? DBNull.Value);
         var id = (long)(await command.ExecuteScalarAsync(ct) ?? throw new InvalidOperationException("The review decision was not stored."));
 
         command.CommandText = """
@@ -241,7 +242,7 @@ public sealed class ReviewRequestStore : IReviewRequestStore
         + "SentUTC, RemoteId, SentKeyFingerprint, ExpiresUTC, RemoteCancelledUTC, SessionsQueuedUTC";
 
     private const string DecisionColumns =
-        "SELECT d.Id, d.RequestId, d.Reviewer, d.Decision, d.Comment, d.KeyId, d.Fingerprint, d.TreeId, d.SignatureBase64, d.DecidedUTC, d.VerifiedUTC, d.RemoteId";
+        "SELECT d.Id, d.RequestId, d.Reviewer, d.Decision, d.Comment, d.KeyId, d.Fingerprint, d.TreeId, d.SignatureBase64, d.DecidedUTC, d.VerifiedUTC, d.RemoteId, d.LineCommentsJson";
 
     private static async Task<IReadOnlyList<ReviewDecisionRecord>> ReadDecisionsAsync(SqliteCommand command, CancellationToken ct)
     {
@@ -261,7 +262,8 @@ public sealed class ReviewRequestStore : IReviewRequestStore
                 reader.IsDBNull(8) ? null : reader.GetString(8),
                 Parse(reader.GetString(9)),
                 reader.IsDBNull(10) ? null : Parse(reader.GetString(10)),
-                reader.IsDBNull(11) ? null : reader.GetInt64(11)));
+                reader.IsDBNull(11) ? null : reader.GetInt64(11),
+                reader.IsDBNull(12) ? null : reader.GetString(12)));
         }
         return result;
     }

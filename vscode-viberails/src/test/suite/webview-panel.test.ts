@@ -49,6 +49,10 @@ suite('Webview HTML', () => {
                 assert.equal(typeof launcherChanged, 'function');
                 launcherChanged();
                 assert.equal(JSON.stringify(messages[1]), JSON.stringify({ command: 'launcherChanged' }));
+                const reviewRequestChanged = globals.__viberails_reviewRequestChanged__ as (payload: unknown) => void;
+                assert.equal(typeof reviewRequestChanged, 'function');
+                reviewRequestChanged({ id: 'r1', status: 'approved' });
+                assert.equal(JSON.stringify(messages[2]), JSON.stringify({ command: 'reviewRequestChanged', payload: { id: 'r1', status: 'approved' } }));
             } finally {
                 manager.dispose();
                 fs.rmSync(directory, { recursive: true, force: true });

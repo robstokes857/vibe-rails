@@ -191,12 +191,30 @@ public sealed class ReviewRequestRoutesTests : IAsyncLifetime
         Assert.Equal("tree_mismatch", await CodeAsync(wrongTree));
         Assert.Empty(_verifier.Calls);
 
+        // Slice F: a rejection with line comments is stored and answered with them, grouped as sent.
+        using var rejected = await Send(HttpMethod.Post, $"/api/v1/review-requests/{id}/decisions",
+            JsonSerializer.Serialize(new { decision = "rejected", reviewer = "lead@example.com", comment = "one more case",
+                lineComments = new[] { new { path = "db.cs", line = 1, side = "after", text = "Rename this." } } }));
+        Assert.Equal(HttpStatusCode.OK, rejected.StatusCode);
+        using var rejectedJson = JsonDocument.Parse(await rejected.Content.ReadAsStringAsync(Ct));
+        Assert.Equal("rejected", rejectedJson.RootElement.GetProperty("status").GetString());
+        var lineComment = Assert.Single(Assert.Single(rejectedJson.RootElement.GetProperty("decisions").EnumerateArray()).GetProperty("lineComments").EnumerateArray());
+        Assert.Equal(("db.cs", 1, "after", "Rename this."), (lineComment.GetProperty("path").GetString(), lineComment.GetProperty("line").GetInt32(),
+            lineComment.GetProperty("side").GetString(), lineComment.GetProperty("text").GetString()));
+        using var tooManyLines = await Send(HttpMethod.Post, $"/api/v1/review-requests/{id}/decisions",
+            JsonSerializer.Serialize(new { decision = "rejected", reviewer = "lead@example.com",
+                lineComments = Enumerable.Range(1, ReviewRequestService.MaxLineComments + 1).Select(i => new { path = "db.cs", line = i, side = "after", text = "x" }).ToArray() }));
+        Assert.Equal(HttpStatusCode.BadRequest, tooManyLines.StatusCode);
+        Assert.Equal("invalid_request", await CodeAsync(tooManyLines));
+
         using var approved = await Send(HttpMethod.Post, $"/api/v1/review-requests/{id}/decisions",
             JsonSerializer.Serialize(new { decision = "approved", trailer = HumanSignatureRuleTests.SignatureLine(Tree), comment = "fine" }));
         Assert.Equal(HttpStatusCode.OK, approved.StatusCode);
         using var approvedJson = JsonDocument.Parse(await approved.Content.ReadAsStringAsync(Ct));
         Assert.Equal("approved", approvedJson.RootElement.GetProperty("status").GetString());
-        var decision = Assert.Single(approvedJson.RootElement.GetProperty("decisions").EnumerateArray());
+        Assert.Equal(2, approvedJson.RootElement.GetProperty("decisions").GetArrayLength());
+        var decision = approvedJson.RootElement.GetProperty("decisions").EnumerateArray().Single(d => d.GetProperty("decision").GetString() == "approved");
+        Assert.False(decision.TryGetProperty("lineComments", out _));
         Assert.Equal("lead@example.com", decision.GetProperty("reviewer").GetString());
         Assert.Equal(HumanSignatureRuleTests.SignatureLine(Tree), decision.GetProperty("trailer").GetString());
         Assert.Single(_verifier.Calls);

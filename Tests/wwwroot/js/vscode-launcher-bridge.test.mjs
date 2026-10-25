@@ -43,6 +43,16 @@ test('each host command reaches the same code path the nav flyout uses', async (
     assert.deepEqual(f.errors, []);
 });
 
+test('a review request row opens its card on the Board, or the Board alone without a card', async () => {
+    const f = fixture();
+    f.send({ command: 'openReviewRequest', id: 'r1', cardKey: 'VB-ABC12-7' });
+    f.send({ command: 'openReviewRequest', id: 'r2', cardKey: null });
+    f.send({ command: 'openReviewRequest', id: 'r3', cardKey: 7 });
+    await settled();
+    assert.deepEqual(f.navigations, [['board', { openCardId: 'VB-ABC12-7' }], ['board', {}], ['board', {}]]);
+    assert.deepEqual(f.errors, []);
+});
+
 test('malformed and unrelated messages are ignored; failures become the usual error toast', async () => {
     const f = fixture({
         run: async () => { throw new Error('PIN required'); },

@@ -161,7 +161,8 @@ public sealed class ReviewRequestTransportTests
             Assert.Equal("https://viberails.ai/api/v1/review-requests/" + Reference + "/decisions", request.RequestUri!.AbsoluteUri);
             Assert.Equal(ApiKey, Assert.Single(request.Headers.GetValues("X-Api-Key")));
             return Task.FromResult(Json(HttpStatusCode.OK, Hosted(RequestId, status: "approved", decisions:
-                [Rejected(4, "lead@example.com", "One more case."), Approved(9, "lead@example.com", comment: "Looks right now.")])));
+                [Rejected(4, "lead@example.com", "One more case.") with { LineComments = [new ReviewLineComment("retry.cs", 3, "after", "Bound this.")] },
+                 Approved(9, "lead@example.com", comment: "Looks right now.")])));
         });
 
         var remote = await transport.PollAsync(ApiKey, Reference, Ct);
@@ -170,6 +171,9 @@ public sealed class ReviewRequestTransportTests
         Assert.Equal([4L, 9L], remote.Decisions!.Select(d => d.Id));
         Assert.Equal(HumanSignatureRuleTests.SignatureLine(Tree), remote.Decisions[1].Trailer);
         Assert.Equal("One more case.", remote.Decisions[0].Comment);
+        // Slice F: line comments travel with the decision, within the desktop's bounds.
+        Assert.Equal(new ReviewLineComment("retry.cs", 3, "after", "Bound this."), Assert.Single(remote.Decisions[0].LineComments!));
+        Assert.Null(remote.Decisions[1].LineComments);
     }
 
     [Theory]
@@ -181,6 +185,12 @@ public sealed class ReviewRequestTransportTests
     [InlineData("reviewer_not_an_email")]
     [InlineData("other_reference")]
     [InlineData("long_comment")]
+    [InlineData("too_many_line_comments")]
+    [InlineData("line_comment_bad_side")]
+    [InlineData("line_comment_zero_line")]
+    [InlineData("line_comment_long_text")]
+    [InlineData("line_comment_blank_text")]
+    [InlineData("line_comment_empty_path")]
     public async Task PollRefusesMalformedDecisions(string variant)
     {
         var transport = Transport(_ =>
@@ -195,6 +205,12 @@ public sealed class ReviewRequestTransportTests
                 "unknown_kind" => [ok with { Decision = "maybe" }],
                 "reviewer_not_an_email" => [ok with { Reviewer = "lead" }],
                 "long_comment" => [ok with { Comment = new string('c', ReviewRequestService.MaxCommentChars + 1) }],
+                "too_many_line_comments" => [ok with { LineComments = Enumerable.Range(1, ReviewRequestService.MaxLineComments + 1).Select(i => new ReviewLineComment("a.cs", i, "after", "x")).ToList() }],
+                "line_comment_bad_side" => [ok with { LineComments = [new ReviewLineComment("a.cs", 1, "left", "x")] }],
+                "line_comment_zero_line" => [ok with { LineComments = [new ReviewLineComment("a.cs", 0, "after", "x")] }],
+                "line_comment_long_text" => [ok with { LineComments = [new ReviewLineComment("a.cs", 1, "after", new string('x', ReviewRequestService.MaxLineCommentChars + 1))] }],
+                "line_comment_blank_text" => [ok with { LineComments = [new ReviewLineComment("a.cs", 1, "after", " \u200b\u0007 ")] }],
+                "line_comment_empty_path" => [ok with { LineComments = [new ReviewLineComment("", 1, "after", "x")] }],
                 _ => [ok]
             };
             var hosted = Hosted(RequestId, reference: variant == "other_reference" ? "rvw_" + new string('f', 32) : Reference, decisions: decisions);

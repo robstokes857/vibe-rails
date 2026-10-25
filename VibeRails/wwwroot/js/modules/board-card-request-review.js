@@ -2,8 +2,9 @@
 // index would send (files with +/− counts and omissions, the tree id, the sharing disclosure),
 // reviewers prefilled from the Signed Approval rules the staged paths touch, the card's Sessions rail
 // as a picker, an optional note, and Create. Below it, the project's requests with their status, the
-// approval trailer (Copy), Send (after the disclosure is confirmed), Cancel and Delete. Nothing here
-// signs or decides; Send is the only step that transfers anything, and it asks first.
+// approval trailer (Copy), Send (after the disclosure is confirmed), Cancel and Delete, and under a
+// decision the reviewer's line comments grouped by file (slice F). Nothing here signs or decides;
+// Send is the only step that transfers anything, and it asks first.
 //
 // Routes: /api/v1/review-requests (list, create), /staged (preview), /{id}/disclosure, /{id}/send,
 // /{id}/cancel, DELETE /{id}, /commit-approvals?sha=… (which linked commits carry an approved tree).
@@ -52,6 +53,31 @@ function decisions(request, kind) {
 export function approvalTrailer(request) {
     const approved = decisions(request, 'approved').filter(decision => typeof decision.trailer === 'string' && decision.trailer);
     return approved.length ? approved[approved.length - 1].trailer : null;
+}
+
+/** Line comments grouped by file in path order, each file's comments by side (before, then after) and line. */
+export function groupLineComments(comments) {
+    const groups = new Map();
+    for (const comment of Array.isArray(comments) ? comments : []) {
+        if (!comment || typeof comment.path !== 'string' || !comment.path) continue;
+        if (!groups.has(comment.path)) groups.set(comment.path, []);
+        groups.get(comment.path).push(comment);
+    }
+    const sideOrder = side => side === 'before' ? 0 : 1;
+    return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([path, list]) => ({
+        path,
+        comments: list.sort((a, b) => (sideOrder(a.side) - sideOrder(b.side)) || ((Number(a.line) || 0) - (Number(b.line) || 0)))
+    }));
+}
+
+/** A decision's line comments grouped by file, every string escaped; empty when there are none. */
+export function lineCommentsHtml(decision) {
+    const groups = groupLineComments(decision?.lineComments);
+    if (!groups.length) return '';
+    return `<ul class="board-review-line-comments" data-card-review-line-comments>${groups.map(group => `<li>
+        <span class="board-review-path" title="${escapeHtml(group.path)}">${escapeHtml(group.path)}</span>
+        <ul>${group.comments.map(comment => `<li><code title="${comment.side === 'before' ? 'Base text' : 'Staged text'}, line ${escapeHtml(String(comment.line))}">${comment.side === 'before' ? '−' : '+'}L${escapeHtml(String(comment.line))}</code> <span class="board-review-line-comment-text">${escapeHtml(comment.text)}</span></li>`).join('')}</ul>
+    </li>`).join('')}</ul>`;
 }
 
 export function describeRequestStatus(request) {
@@ -159,6 +185,7 @@ export function requestRowHtml(request, card) {
     const status = describeRequestStatus(request);
     const trailer = approvalTrailer(request);
     const rejections = decisions(request, 'rejected');
+    const commented = (Array.isArray(request.decisions) ? request.decisions : []).filter(decision => Array.isArray(decision?.lineComments) && decision.lineComments.length);
     const created = request.createdUtc ? new Date(request.createdUtc).toLocaleString() : '';
     const meta = [created, `${Number(request.fileCount) || 0} file${request.fileCount === 1 ? '' : 's'}`, `${Number(request.sessionCount) || 0} session${request.sessionCount === 1 ? '' : 's'}`,
         request.cardKey ? (isForCard(request, card) ? 'this card' : `card ${request.cardKey}`) : 'no card',
@@ -171,6 +198,7 @@ export function requestRowHtml(request, card) {
         </div>
         <p class="board-side-empty text-break mb-1">Reviewers: ${escapeHtml((request.reviewers || []).join(', '))} · tree <code title="${escapeHtml(request.treeId || '')}">${escapeHtml(String(request.treeId || '').slice(0, 12))}</code></p>
         ${rejections.length && request.status !== 'rejected' ? `<p class="board-side-empty text-break mb-1">${rejections.map(decision => `Rejected by ${escapeHtml(decision.reviewer)}${decision.comment ? `: ${escapeHtml(decision.comment)}` : ''}`).join('; ')}</p>` : ''}
+        ${commented.map(decision => `<div class="board-review-decision-comments"><span class="board-side-sub">${decision.decision === 'approved' ? 'Approved' : 'Rejected'} by ${escapeHtml(decision.reviewer)} · ${decision.lineComments.length} line comment${decision.lineComments.length === 1 ? '' : 's'}</span>${lineCommentsHtml(decision)}</div>`).join('')}
         ${trailer ? `<input class="form-control form-control-sm mt-1" aria-label="Approval trailer" readonly value="${escapeHtml(trailer)}" data-card-review-trailer>` : ''}
         <div class="d-flex flex-wrap gap-2 mt-2">
             ${trailer ? '<button type="button" class="btn btn-sm btn-outline-secondary" data-review-action="copy">Copy approval</button>' : ''}

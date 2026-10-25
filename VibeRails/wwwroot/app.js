@@ -27,6 +27,7 @@ import { TerminalTokenCompressionMeter, getTokenSaverEnabledSources } from './js
 import { openFileExplorer } from './js/modules/file-explorer.js';
 import { setupVSCodeScriptImport } from './js/modules/vscode-script-import.js';
 import { setupVSCodeLauncherBridge } from './js/modules/vscode-launcher-bridge.js';
+import { setupVSCodeReviewBridge } from './js/modules/vscode-review-bridge.js';
 import { UiVisibility } from './js/modules/ui-visibility.js';
 import { showAppToast } from './js/modules/toast-service.js';
 import { getLlmName, getProjectNameFromPath, formatRelativeTime, getCliBrand, escapeHtml } from './js/modules/utils.js';
@@ -144,6 +145,7 @@ export class VibeControlApp {
         // The launcher bridge must listen before script import posts the ready signal that
         // releases messages the extension queued while this page was loading.
         setupVSCodeLauncherBridge(this);
+        setupVSCodeReviewBridge(this);
         setupVSCodeScriptImport(this);
         this.startLifecycleHeartbeat();
     }

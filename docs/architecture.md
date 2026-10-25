@@ -548,7 +548,8 @@ request only after its disclosure was confirmed (`ReviewRequestTransport`: fixed
 `SessionShareUploads` path under the sending key's fingerprint; `ReviewRequestPoller` runs from
 `BoardSyncScheduler` on a persisted 15-minute cadence that backs off to two hours and lands hosted
 decisions through the same verification, publishing `review_request_updated`. The reviewer desktop
-and the card UI are later slices. Contract and decisions:
+(slice D), the card UI (slice E) and line comments with the VS Code "Review requests" view (slice F,
+`review-requests/4`) followed. Contract and decisions:
 [Review requests](../VibeRails/Services/ReviewRequests/README.md); security notes:
 [API_SEC.md](../API_SEC.md#review-requests-before-a-commit-vb-50-slice-a).
 

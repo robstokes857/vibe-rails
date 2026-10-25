@@ -741,8 +741,11 @@ Root-only `/api/v1/review-requests` requires both credentials and answers no-sto
 the project's staged index through the hook's snapshot reader (project derived server-side, never
 from the request), bounds text at 256 KiB per file and 4 MiB per bundle, validates reviewer emails
 (at most ten) and attached session ids (at most ten, looked up locally), and stores the bundle in
-state.db (`review-requests/1`, additive). Bodies are capped at 16 KiB (create) and 32 KiB
-(decisions); refusals carry fixed local wording and a code, never exception text. Of these routes
+state.db (`review-requests/1`, additive). Bodies are capped at 16 KiB (create) and 128 KiB
+(decisions: a trailer, a 4,000-character comment and, since slice F, up to 50 line comments of
+1,000 characters, each `{ path, line, side, text }` with the path 1 to 4,096 characters without NUL,
+the line 1 to 1,000,000, the side `before` or `after`, and the text cleaned of control, format and
+separator characters before storage); refusals carry fixed local wording and a code, never exception text. Of these routes
 only the decisions route calls out, to the existing public signature verification above with a
 tree id and no content, and an approval is stored only when that verification names a verified signer listed on the
 request; the store records it and recomputes the status in one write transaction, so a cancel that
@@ -898,9 +901,11 @@ cancellation is retried by the poller and never blocks the local cancel. A local
 hosted copy first and is refused (409 `remote_pending`) while it cannot, because the row is the only
 thing that can still revoke the hosted copy; the request stays, cancelled, until the host confirms,
 and an expired or already-cancelled hosted copy needs no host. A send that races a delete cancels
-its own hosted copy: the row is first put back, cancelled, with the reference, the sending key's
-fingerprint and the expiry, under a token the caller cannot cancel, and only then is the hosted
-copy cancelled on the transport's own deadline; a failed or timed-out cancellation leaves that
+its own hosted copy: the confirmed transfer, its persistence and any recovery run on the
+transport's own deadlines, never the caller's request token, so a disconnect after the host
+accepted the bundle cannot lose the reference; the row is first put back, cancelled, with the
+reference, the sending key's fingerprint and the expiry, and only then is the hosted copy
+cancelled; a failed or timed-out cancellation leaves that
 row for the poller's retry and a later delete waits for the host (409 `remote_pending`), while a
 confirmed one deletes it again. The caller is never told the copy was cancelled when it was not
 (Codex slice E review, F2). The reference is shown to the requester as a selector, never a credential:
@@ -913,13 +918,19 @@ two-hour ceiling while none is or the host is unreachable, never on the 60-secon
 request is still polled until its expiry at the backoff cadence, because the host keeps taking
 decisions until cancellation or expiry; a successful send brings the next check forward to one
 interval. Only requests sent with the current key's fingerprint are polled. Each hosted decision is validated
-(at most 50, distinct ids, listed kinds, trailer grammar, comment bound) and then lands through
+(at most 50, distinct ids, listed kinds, trailer grammar, comment bound, and since slice F at most 50
+line comments each within the bounds above; the poll answer is bounded at 4 MiB) and then lands through
 `ReviewRequestService.RecordDecisionAsync`: an approval's trailer must cover the request's tree and
 is re-verified with the public signature endpoint, and its signer must be a listed reviewer; a
-rejection must name a listed reviewer. The hosted decision id is stored with the row so a decision
+rejection must name a listed reviewer; line comments are cleaned and stored as JSON on the decision
+row (`review-requests/4`, nullable) and shown as text on the card, grouped by the path the reviewer
+named (the host does not check it against the bundle). The hosted decision id is stored with the row so a decision
 lands once; a decision the ledger refuses is remembered for the process and not re-verified every
 pass, while an unavailable verifier leaves it pending. Landed decisions publish the local
-`review_request_updated` app event (id, status, card key, sent); no content leaves through it. The
+`review_request_updated` app event (id, status, card key, sent); no content leaves through it. In VS
+Code the dashboard relays those four fields to the extension host over the webview `postMessage`
+bridge (`__viberails_reviewRequestChanged__`, slice F), which re-reads the list from the root backend
+with the inherited credentials and shows a notification; nothing travels back over that bridge. The
 commit hook is unchanged: it applies a stored verified approval and rechecks the trailer itself.
 Component contract: [Review requests](VibeRails/Services/ReviewRequests/README.md).
 

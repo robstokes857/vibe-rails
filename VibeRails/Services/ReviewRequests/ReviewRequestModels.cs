@@ -24,6 +24,22 @@ public static class ReviewDecisionKind
     public const string Rejected = "rejected";
 }
 
+/// <summary>Which side of a file's diff a line comment points at: the base text or the staged text.</summary>
+public static class ReviewLineCommentSide
+{
+    public const string Before = "before";
+    public const string After = "after";
+}
+
+/// <summary>
+/// A reviewer's remark on one line of one file (slice F), the shape a pull-request review carries:
+/// the path as the bundle lists it, the 1-based line on <see cref="Side"/>, and the text. Stored
+/// with the decision; the requester's card shows them grouped by file. Neither side checks that the
+/// path is in the bundle (hosted decisions never load bundle text), so a path is shown as the
+/// reviewer named it, as text.
+/// </summary>
+public sealed record ReviewLineComment(string Path, int Line, string Side, string Text);
+
 /// <summary>Why a file's content is not in the bundle: it is binary, over the per-file limit, or the bundle limit was reached.</summary>
 public static class ReviewBundleOmission
 {
@@ -73,7 +89,7 @@ public sealed record ReviewBundle(
     string? Note,
     DateTime CreatedUtc);
 
-/// <summary>A recorded decision. <see cref="Trailer"/> is the approval's commit-message line, ready to paste.</summary>
+/// <summary>A recorded decision. <see cref="Trailer"/> is the approval's commit-message line, ready to paste; <see cref="LineComments"/> is absent when there are none.</summary>
 public sealed record ReviewDecisionDto(
     long Id,
     string Reviewer,
@@ -81,7 +97,8 @@ public sealed record ReviewDecisionDto(
     string? Comment,
     string? Trailer,
     DateTime DecidedUtc,
-    DateTime? VerifiedUtc);
+    DateTime? VerifiedUtc,
+    IReadOnlyList<ReviewLineComment>? LineComments = null);
 
 /// <summary>
 /// The hosted copy of a sent request: its viberails.ai reference (a selector, never a credential),
@@ -119,13 +136,14 @@ public sealed record CreateReviewRequest(
 /// <summary>
 /// Body of <c>POST /api/v1/review-requests/{id}/decisions</c>. An approval is the reviewer's
 /// <c>vibe-signature:</c> line (the reviewer is whoever viberails.ai says signed it); a rejection
-/// names the reviewer and carries no signature.
+/// names the reviewer and carries no signature. Either may carry line comments (slice F).
 /// </summary>
 public sealed record RecordReviewDecisionRequest(
     string? Decision = null,
     string? Trailer = null,
     string? Comment = null,
-    string? Reviewer = null);
+    string? Reviewer = null,
+    IReadOnlyList<ReviewLineComment>? LineComments = null);
 
 /// <summary>Body of <c>POST /api/v1/review-requests/{id}/send</c>. Nothing leaves the computer unless <see cref="Confirmed"/> is true.</summary>
 public sealed record SendReviewRequest(bool? Confirmed = null);
@@ -222,7 +240,7 @@ public sealed record ReviewCommitApprovalEntry(string Sha, string? TreeId, IRead
 /// <summary>Answer to <c>GET /api/v1/review-requests/commit-approvals</c>, in the order the shas were asked.</summary>
 public sealed record ReviewCommitApprovals(IReadOnlyList<ReviewCommitApprovalEntry> Commits);
 
-/// <summary>A decision as viberails.ai reports it to the requester's poll.</summary>
+/// <summary>A decision as viberails.ai reports it to the requester's poll. <see cref="LineComments"/> arrived with slice F; an older host sends none.</summary>
 public sealed record ReviewRequestHostedDecision(
     long Id,
     string? Reviewer,
@@ -230,7 +248,8 @@ public sealed record ReviewRequestHostedDecision(
     string? Comment,
     string? Trailer,
     DateTime DecidedUtc,
-    DateTime? VerifiedUtc);
+    DateTime? VerifiedUtc,
+    IReadOnlyList<ReviewLineComment>? LineComments = null);
 
 /// <summary>
 /// viberails.ai's answer to create, poll and cancel. <see cref="Status"/> adds <c>expired</c> to the
@@ -285,4 +304,5 @@ public sealed class ReviewRequestException(string code, string message, int stat
 [JsonSerializable(typeof(ReviewRequestHostedError))]
 [JsonSerializable(typeof(ReviewRequestPollFile))]
 [JsonSerializable(typeof(ReviewRequestError))]
+[JsonSerializable(typeof(IReadOnlyList<ReviewLineComment>))]
 public sealed partial class ReviewRequestJsonContext : JsonSerializerContext;

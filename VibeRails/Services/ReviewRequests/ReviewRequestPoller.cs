@@ -17,7 +17,7 @@ namespace VibeRails.Services.ReviewRequests;
 /// must still reach the ledger. Every decision lands through
 /// <see cref="ReviewRequestService.RecordDecisionAsync(string, string, RecordReviewDecisionRequest, long?, CancellationToken)"/>,
 /// so an approval is re-verified with viberails.ai and matched to a listed reviewer before the
-/// ledger stores it; a rejection lands with its comment. Cancelled requests whose hosted copy has
+/// ledger stores it; a rejection lands with its comment and line comments. Cancelled requests whose hosted copy has
 /// not confirmed the cancellation are cancelled again here, and a send that was interrupted before
 /// its sessions were queued has them queued here under the key that sent it.
 /// </summary>
@@ -115,7 +115,7 @@ public sealed class ReviewRequestPoller(
             try
             {
                 var summary = await reviews.RecordDecisionAsync(request.ProjectPath, request.Id,
-                    new RecordReviewDecisionRequest(decision.Decision, decision.Trailer, decision.Comment, decision.Reviewer), decision.Id, ct);
+                    new RecordReviewDecisionRequest(decision.Decision, decision.Trailer, decision.Comment, decision.Reviewer, decision.LineComments), decision.Id, ct);
                 status = summary.Status;
                 changed = true;
             }

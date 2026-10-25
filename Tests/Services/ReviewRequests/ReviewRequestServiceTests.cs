@@ -324,17 +324,34 @@ public sealed class ReviewRequestServiceTests : IAsyncLifetime
             service.RecordDecisionAsync(Repo, created.Id, new RecordReviewDecisionRequest("maybe"), Ct));
         Assert.Equal("invalid_request", unknownKind.Code);
 
+        // Slice F: line comments are bounded and cleaned, then stored with the decision.
+        var tooMany = await Assert.ThrowsAsync<ReviewRequestException>(() => service.RecordDecisionAsync(Repo, created.Id,
+            new RecordReviewDecisionRequest("rejected", Reviewer: "second@example.com", Comment: "no",
+                LineComments: Enumerable.Range(1, ReviewRequestService.MaxLineComments + 1).Select(i => new ReviewLineComment("db.cs", i, "after", "x")).ToList()), Ct));
+        Assert.Equal("invalid_request", tooMany.Code);
+        var badSide = await Assert.ThrowsAsync<ReviewRequestException>(() => service.RecordDecisionAsync(Repo, created.Id,
+            new RecordReviewDecisionRequest("rejected", Reviewer: "second@example.com", LineComments: [new ReviewLineComment("db.cs", 1, "left", "x")]), Ct));
+        Assert.Equal("invalid_request", badSide.Code);
+        var blank = await Assert.ThrowsAsync<ReviewRequestException>(() => service.RecordDecisionAsync(Repo, created.Id,
+            new RecordReviewDecisionRequest("rejected", Reviewer: "second@example.com", LineComments: [new ReviewLineComment("db.cs", 1, "after", " \u0007 ")]), Ct));
+        Assert.Equal("invalid_request", blank.Code);
+        Assert.Empty((await service.GetAsync(Repo, created.Id, Ct)).Request.Decisions);
+
         var rejected = await service.RecordDecisionAsync(Repo, created.Id,
-            new RecordReviewDecisionRequest("rejected", Reviewer: "Second@Example.com", Comment: "Rename the column first."), Ct);
+            new RecordReviewDecisionRequest("rejected", Reviewer: "Second@Example.com", Comment: "Rename the column first.",
+                LineComments: [new ReviewLineComment("db.cs", 1, "Before", "Old name.\r\n\u202eStill"), new ReviewLineComment("db.cs", 1, "after", "New name.")]), Ct);
         Assert.Equal(ReviewRequestStatus.Rejected, rejected.Status);
         var decision = Assert.Single(rejected.Decisions);
         Assert.Equal("Second@Example.com", decision.Reviewer);
         Assert.Null(decision.Trailer);
         Assert.Null(decision.VerifiedUtc);
+        Assert.Equal([new ReviewLineComment("db.cs", 1, "before", "Old name.\n Still"), new ReviewLineComment("db.cs", 1, "after", "New name.")], decision.LineComments);
+        Assert.Equal(decision.LineComments, Assert.Single((await service.GetAsync(Repo, created.Id, Ct)).Request.Decisions).LineComments);
 
         var approved = await service.RecordDecisionAsync(Repo, created.Id, new RecordReviewDecisionRequest("approved", Trailer: Trailer(tree)), Ct);
         Assert.Equal(ReviewRequestStatus.Approved, approved.Status);
         Assert.Equal(2, approved.Decisions.Count);
+        Assert.Null(approved.Decisions[1].LineComments);
         Assert.Equal(ReviewRequestStatus.Approved, Assert.Single((await service.ListAsync(Repo, Ct)).Requests).Status);
     }
 

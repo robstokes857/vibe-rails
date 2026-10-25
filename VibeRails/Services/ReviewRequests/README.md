@@ -22,8 +22,8 @@ the design decisions for the rest.
 - **Ledger.** `IReviewRequestStore` / `ReviewRequestStore` in state.db, additive component
   `review-requests/1`: `ReviewRequests` (id, project, scope, tree id, base commit, card key, status,
   bundle JSON, timestamps) and `ReviewDecisions` (reviewer, decision, comment, the verified trailer
-  fields, decided and verified times). Statuses: `open`, `approved`, `rejected`, `cancelled`. Older
-  versions ignore both tables.
+  fields, decided and verified times; since `review-requests/4` also `LineCommentsJson`, slice F).
+  Statuses: `open`, `approved`, `rejected`, `cancelled`. Older versions ignore both tables.
 - **Service.** `ReviewRequestService` creates a request from the project's staged index (at least one
   reviewer email, at most ten; at most ten attached session ids, each looked up through
   `ISessionStore` and named), lists and reads requests for one project, cancels and deletes them, and
@@ -67,7 +67,7 @@ the design decisions for the rest.
   request made for another project is not found.
 - **Transport (slice C).** `ReviewRequestTransport` sends a stored request's bundle bytes as
   `{ requestId, bundle }` to fixed `https://viberails.ai/api/v1/review-requests` (header
-  `X-Api-Key` only, no redirects or cookies, 90 s to send, 30 s to poll or cancel, 1 MiB answers),
+  `X-Api-Key` only, no redirects or cookies, 90 s to send, 30 s to poll or cancel, 4 MiB answers),
   polls `GET /{reference}/decisions` and cancels with `DELETE /{reference}`. Every answer is
   validated before use: this request's id and tree, a `rvw_` reference, a known status, a
   plausible expiry, at most 50 well-formed decisions (distinct ids, listed kinds, trailer grammar,
@@ -218,12 +218,14 @@ the design decisions for the rest.
   `AgentCredentialService.Allows` admits it to exactly `POST /api/v1/review-requests` and
   `GET /{id}/disclosure`, and the routes refuse (403 `forbidden`) a contact that names any session
   but its own or reads a request that does not attach it (Codex slice E review, F1).
-- **A send that races a delete (Codex slice E review, F2, slice C code).** When the host confirms a
-  request whose row a concurrent Delete already removed, `SendAsync` first puts the row back with
-  its own token (open, then marked sent with the reference, the sending key's fingerprint and the
-  expiry, then cancelled; each step is recoverable if the process dies between them), and only then
-  asks the host to cancel the copy, on the transport's own 30-second deadline, never the caller's
-  token. A confirmed cancellation deletes the row again and answers 404 `not_found`; a failed or
+- **A send that races a delete (Codex slice E review, F2, slice C code).** Once the person has
+  confirmed, the transfer, its persistence and any recovery run to completion on the transport's
+  own deadlines (90 s to send, 30 s to cancel), never on the caller's request token: a browser that
+  disconnects after the host accepted the bundle cannot leave a hosted copy nothing local points
+  at. When the host confirms a request whose row a concurrent Delete already removed, `SendAsync`
+  first puts the row back (open, then marked sent with the reference, the sending key's fingerprint
+  and the expiry, then cancelled; each step is recoverable if the process dies between them), and
+  only then asks the host to cancel the copy. A confirmed cancellation deletes the row again and answers 404 `not_found`; a failed or
   timed-out one leaves the row, prompts the poller and answers 409 `remote_pending`, so the poller's
   cancellation pass retries it and Delete waits for the host. A caller that disconnects mid-way
   cannot take the only revocation record with it, and is never told the copy was cancelled when it
@@ -249,7 +251,7 @@ bundle or reads hosted decisions; the security contract is
    never leave the desktop, the dashboard Sign route and MCP refuse the commit statement by design,
    so the reviewer signs in a console popup of the same family as the commit popup. The reviewer
    needs a viberails.ai account with a verified email (the approver match) and a synced key.
-4. **Reject** is a decision plus a comment. Line comments are a later card.
+4. **Reject** is a decision plus a comment. Line comments arrived with slice F (below).
 5. **Privacy.** Before anything is sent, the developer sees exactly what will leave the machine:
    each file with its counts (and which are listed without text), the tree id, each session by name
    with the session-sharing disclosure (terminal output, prompts, saved code changes), the reviewer
@@ -278,7 +280,32 @@ bundle or reads hosted decisions; the security contract is
 | C | Desktop transport: send a request and its sessions (reuse `SessionShareUploads`), poll decisions on the Board sync cadence, land approvals in the ledger | Done (VB-DPGU2-279 / VIBE-207, 2026-10-24; this document) |
 | D | Reviewer desktop: "Reviews requested of you" (page, VS Code view) and the `vb --vca-hook sign-review` popup that rebuilds the tree in the reviewer's clone and signs it | Done (VB-PR2U7-280 / VIBE-208, 2026-10-24; this document). Open: bytes for binary, oversized and bundle-limit files, so such requests can be approved |
 | E | UI: Request review from a card (Sessions rail picker, approvers from the rule), status on the card, commit and Rules page; MCP `request_review` that never signs | Done (VB-4XXCY-281 / VIBE-209, 2026-10-24; this document) |
-| F | Line comments, head-commit scope, VS Code surfacing, reviewer notification, retention | Later, VB-XBVE0-282 |
+| F | Line comments on a decision and the VS Code "Review requests" view | Done (VB-XBVE0-282 / VIBE-210, 2026-10-25; this document). Deferred to Rob, not implemented: head-commit scope (`scope: "head"`), reviewer notification by email or web push, and any expiry or pruning of the ledger |
+
+- **Line comments (slice F).** A decision may carry `lineComments: [{ path, line, side, text }]`, the
+  shape a pull-request review carries: the path as the bundle lists it, the 1-based line on `before`
+  (base text) or `after` (staged text), and the text. Bounds on both sides: at most 50 per decision,
+  text 1 to 1,000 characters, path 1 to 4,096 characters without NUL, line 1 to 1,000,000; CRLF
+  becomes LF and every other control, format or separator character becomes a space before storage,
+  so a remark cannot repaint a screen or hide text where it is shown. The path is not checked against
+  the bundle (hosted decisions never load bundle text); it is shown as text. The hosted reviewer page
+  opens a comment box on any diff row (a removed row comments on the base text, every other row on
+  the staged text); the comments typed there go with whichever answer is given and the viewer's stored
+  ones are shown under their rows. `ReviewRequestTransport.ParseStatus` refuses a hosted answer whose
+  line comments exceed these bounds (`ReviewRequestService.LineCommentProblem`), the poller passes them
+  into `RecordDecisionAsync`, which cleans and stores them as JSON on the decision row
+  (`review-requests/4`, nullable), and `ReviewDecisionDto.lineComments` carries them to the card,
+  where the request row shows them grouped by file under the decision. The desktop decision route
+  body grew to 128 KiB, the hosted one to 64 KiB, and the poll answer bound to 4 MiB.
+- **VS Code "Review requests" (slice F).** The extension's Activity Bar gained a second review view
+  beside "Reviews requested of you": this project's own requests from `GET /api/v1/review-requests`
+  with the card's status wording (`review-requests-view.ts`; a row opens its card on the dashboard
+  Board through the launcher bridge's `openReviewRequest`). The dashboard relays
+  `review_request_updated` to the host through `__viberails_reviewRequestChanged__`
+  (`vscode-review-bridge.js`, the `__viberails_launcherChanged__` pattern; four typed, bounded fields,
+  nothing from the host comes back that way); the view reloads and shows a notification naming the
+  decision, with an "Open card" action when the request has a card. Sends, cancels and deletes only
+  refresh the view.
 
 ## Tests
 
@@ -345,4 +372,21 @@ Rules page case in `vca-git-guard.test.mjs`; the Playwright case "Request review
 ```bash
 dotnet test Tests/Tests.csproj --filter "FullyQualifiedName~ReviewLineDiff|FullyQualifiedName~ReviewRequestTool|FullyQualifiedName~HookRoutesVcaOverview|FullyQualifiedName~ReviewRequestRoutes|FullyQualifiedName~ReviewRequestServiceTests"
 node --test Tests/wwwroot/js/board-card-request-review.test.mjs Tests/wwwroot/js/vca-git-guard.test.mjs
+```
+
+Slice F: the line-comment cases in `ReviewRequestTransportTests` (`PollReadsStatusAndDecisions…`, the
+`line_comment_*` and `too_many_line_comments` variants of `PollRefusesMalformedDecisions`),
+`ReviewRequestPollerTests.DecisionsLandThroughTheLedgerOnce…` (a rejection's line comments land,
+cleaned), `ReviewRequestServiceTests.RejectionNeedsAListedReviewer…` (bounds, cleaning, storage and
+read-back), `ReviewRequestRoutesTests` (the decision route with line comments and the count bound),
+the node tests `board-card-request-review.test.mjs` (grouping, escaping, the row), `vscode-review-bridge.test.mjs`
+and the `openReviewRequest` case in `vscode-launcher-bridge.test.mjs`, the extension's
+`review-requests-view.test.ts` and the bridge global in `webview-panel.test.ts`; the cross-repository
+round trip now rejects with line comments and lands them in the ledger beside the approval. Hosted:
+`ReviewRequestContractTests.LineComments_AreBoundedAndCleaned`, the line-comment cases in
+`ReviewRequestHttpTests.ReviewRequests_DecisionsVerifyTheSignature…` and the node test
+`tests/wwwroot/review-line-comments.test.mjs`.
+
+```bash
+node --test Tests/wwwroot/js/vscode-review-bridge.test.mjs Tests/wwwroot/js/vscode-launcher-bridge.test.mjs
 ```

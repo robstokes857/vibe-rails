@@ -9,7 +9,9 @@
  * The other direction, dashboard → host, is `__viberails_launcherChanged__` (installed by the
  * extension on `window`): the launcher's save/reset and the Automation catalog reload call it
  * themselves, and this module relays the scripts controller's state updates to it, so a script
- * that was signed, revoked, renamed, edited, imported or deleted re-sorts the view.
+ * that was signed, revoked, renamed, edited, imported or deleted re-sorts the view. The review
+ * request views (VB-50 slices D and F) share this host → dashboard listener; their dashboard → host
+ * relay is vscode-review-bridge.js.
  *
  * Install this BEFORE setupVSCodeScriptImport: that call posts the ready signal which releases
  * messages the extension queued while the page was still loading.
@@ -36,6 +38,11 @@ export function setupVSCodeLauncherBridge(app, host = window) {
             case 'openReviewInbox':
                 // The Activity Bar "Reviews requested of you" view: a row click lands on the dashboard page.
                 void settle(app, () => app.navigate?.('review-inbox'), 'Could not open Reviews requested of you.');
+                return;
+            case 'openReviewRequest':
+                // The Activity Bar "Review requests" view (slice F): a row click opens the request's card on
+                // the Board, where its Request review section lists the decisions, or the Board itself.
+                void settle(app, () => app.navigate?.('board', typeof data.cardKey === 'string' && data.cardKey ? { openCardId: data.cardKey } : {}), 'Could not open the Board.');
                 return;
             case 'automationQueued': {
                 const message = typeof data.message === 'string' && data.message ? data.message : 'Queued.';

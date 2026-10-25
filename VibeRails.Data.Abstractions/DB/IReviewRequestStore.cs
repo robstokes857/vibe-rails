@@ -38,6 +38,7 @@ public sealed record ReviewRequestRecord(
 /// </summary>
 /// <param name="Decision"><c>approved</c> or <c>rejected</c>.</param>
 /// <param name="RemoteId">The hosted decision id when the decision arrived through polling, so a later poll does not record it twice.</param>
+/// <param name="LineCommentsJson">The reviewer's per-line comments as JSON (<c>[{ path, line, side, text }]</c>), or null when there are none (VB-50 slice F).</param>
 public sealed record ReviewDecisionRecord(
     long Id,
     string RequestId,
@@ -50,7 +51,8 @@ public sealed record ReviewDecisionRecord(
     string? SignatureBase64,
     DateTime DecidedUTC,
     DateTime? VerifiedUTC,
-    long? RemoteId = null);
+    long? RemoteId = null,
+    string? LineCommentsJson = null);
 
 /// <summary>A stored decision and the request status it produced.</summary>
 public sealed record ReviewDecisionOutcome(ReviewDecisionRecord Decision, string Status);
