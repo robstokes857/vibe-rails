@@ -88,7 +88,10 @@ public sealed class ReviewRequestSender(
     /// confirmed (a 4xx answer) clears them, while a lost or unreadable answer keeps them, so the
     /// request is not deletable until the poller has recovered or refuted the hosted copy; a retry
     /// with the same key posts again (the host answers an exact retry with the stored request) and
-    /// one with another key is refused (409 <c>send_pending</c>).
+    /// one with another key is refused (409 <c>send_pending</c>). On such a retry only a refusal that
+    /// also refutes the first POST (<see cref="RefutesEarlierDelivery"/>) clears the attempt. A request
+    /// cancelled while its bundle was in flight keeps the reference only to revoke the hosted copy,
+    /// and nothing is queued for upload.
     /// </summary>
     public async Task<ReviewRequestSent> SendAsync(string projectPath, string id, SendReviewRequest? body, CancellationToken ct)
     {
@@ -113,6 +116,10 @@ public sealed class ReviewRequestSender(
         // points at (Codex slice E review, F2: the window between the hosted success and MarkSent).
         var none = CancellationToken.None;
         var now = _clock.GetUtcNow().UtcDateTime;
+        // A row that already carries an attempt is a retry of a send whose answer was lost: that first
+        // POST may have landed, so a refusal of this one proves nothing about it unless the content or
+        // the route decided it, the poller's rule (VIBE-213, item 1).
+        var earlierAttempt = record.SendAttemptedUTC;
         // The attempt is durable before the bundle leaves (VIBE-212, Codex VIBE-209 fourth pass F2): a
         // POST the host commits but whose answer is lost would otherwise look unsent, be deletable without
         // the host, and stay readable by its reviewers until expiry. The claim also pins the account: a
@@ -129,25 +136,26 @@ public sealed class ReviewRequestSender(
         }
         ReviewRequestHostedStatus remote;
         try { remote = await transport.SendAsync(key, record.Id, record.TreeId, Encoding.UTF8.GetBytes(record.BundleJson), none); }
-        catch (ReviewRequestTransportException ex) when (IsConfirmedRefusal(ex))
+        catch (ReviewRequestTransportException ex) when (earlierAttempt is null ? IsConfirmedRefusal(ex) : RefutesEarlierDelivery(ex))
         {
-            // The host answered and did not take the bundle: the request is an unsent one again.
-            await store.ClearSendAttemptAsync(record.Id, _clock.GetUtcNow().UtcDateTime, none);
-            throw new ReviewRequestException(ex.Code, ex.Message, 502);
+            // The host answered and did not take the bundle: the request is an unsent one again. Only
+            // the attempt this call answered for is cleared; one another send claimed first stays.
+            if (await store.ClearSendAttemptAsync(record.Id, fingerprint, earlierAttempt ?? now, _clock.GetUtcNow().UtcDateTime, none))
+                throw new ReviewRequestException(ex.Code, ex.Message, 502);
+            throw Unconfirmed(record, fingerprint, ex);
         }
         catch (ReviewRequestTransportException ex)
         {
-            // No answer, an unreadable one, a redirect or a server error: the host may hold the request.
-            // The attempt stays, Delete refuses until it is settled, and the poller posts the stored
-            // bundle again under this fingerprint to recover the reference (or learns it was refused).
-            Log.Information("[ReviewRequests] The send of request {Id} was not confirmed ({Code}); keeping the attempt for reconciliation", record.Id, ex.Code);
-            polls.Prompt(fingerprint);
-            Publish(record.Id, record.Status, record.CardKey, false);
-            throw new ReviewRequestException(ex.Code, ex.Message + " " + UnconfirmedSendNote, 502);
+            // No answer, an unreadable one, a redirect or a server error, or a retry the host refused for
+            // the call rather than the content: the host may hold the request. The attempt stays, Delete
+            // refuses until it is settled, and the poller posts the stored bundle again under this
+            // fingerprint to recover the reference (or learns it was refused).
+            throw Unconfirmed(record, fingerprint, ex);
         }
 
         now = _clock.GetUtcNow().UtcDateTime;
-        if (!await store.MarkSentAsync(record.Id, remote.Id!, fingerprint, now, remote.ExpiresUtc, none))
+        var status = await store.MarkSentAsync(record.Id, remote.Id!, fingerprint, now, remote.ExpiresUtc, none);
+        if (status is null)
         {
             if (await store.GetAsync(record.Id, none) is null)
             {
@@ -181,12 +189,12 @@ public sealed class ReviewRequestSender(
             Log.Warning("[ReviewRequests] Request {Id} was already sent under another reference; keeping the stored one", record.Id);
             return new ReviewRequestSent(await reviews.SummaryAsync(record.Id, none), "This review request was already sent.");
         }
+        if (status == ReviewRequestStatus.Cancelled) return await RevokeCancelledInFlightAsync(record, remote, key, fingerprint, now);
         // The first decision check happens one interval from now, not after the idle backoff.
         polls.Prompt(fingerprint);
 
         var (queued, missing) = await QueueSessionsAsync(store, archives, record.Id, bundle, fingerprint, now, none);
-        events.Publish(ReviewRequestEvents.Updated, new ReviewRequestChanged(record.Id, record.Status, record.CardKey, true),
-            ReviewRequestJsonContext.Default.ReviewRequestChanged);
+        Publish(record.Id, status, record.CardKey, true);
         var message = missing > 0
             ? "Sent. Some attached sessions are no longer on this computer and cannot upload; reviewers see them as not uploaded. Decisions are checked every 15 minutes."
             : queued > 0
@@ -240,7 +248,8 @@ public sealed class ReviewRequestSender(
             Publish(record.Id, ReviewRequestStatus.Cancelled, record.CardKey, false);
             throw new ReviewRequestException("send_pending",
                 "This review request was sent but the answer from viberails.ai was lost, so it may hold a copy. The request is kept here, "
-                + "cancelled, until viberails.ai confirms whether it does; a copy is then cancelled automatically. Delete it again after that."
+                + "cancelled, until viberails.ai confirms whether it does; a copy is then cancelled automatically. Delete it again after that. "
+                + CancelledApprovalNote
                 + (sameAccount ? "" : " The send was made with a different account key; sign in with that account so the check can run."), 409);
         }
         if (record is { RemoteId: not null, RemoteCancelledUTC: null } && !(record.ExpiresUTC is { } expires && expires <= now))
@@ -255,12 +264,20 @@ public sealed class ReviewRequestSender(
                         + "Sign in with that account to cancel it; the request is kept here, cancelled, until then.",
                     _ => "The copy on viberails.ai is not cancelled yet, so the request is kept here, cancelled, and the cancellation "
                         + "is retried automatically. Delete it again once viberails.ai confirms."
-                }, 409);
+                } + " " + CancelledApprovalNote, 409);
             }
         }
         await reviews.DeleteAsync(projectPath, id, ct);
         Publish(record.Id, DeletedStatus, record.CardKey, record.RemoteId is not null);
     }
+
+    /// <summary>
+    /// Appended to a refused Delete (409 <c>remote_pending</c> or <c>send_pending</c>): the request is
+    /// cancelled locally before the host is asked, and the commit hook never applies an approval from
+    /// a cancelled request (Rob's decision, 2026-10-25, VIBE-213 item 5).
+    /// </summary>
+    internal const string CancelledApprovalNote =
+        "It is cancelled here, so any approval it received no longer applies to commits.";
 
     /// <summary>Appended to the transport's wording when a send's answer was lost, so the person knows the request is neither sent nor unsent yet.</summary>
     internal const string UnconfirmedSendNote =
@@ -283,6 +300,45 @@ public sealed class ReviewRequestSender(
     /// </summary>
     internal static bool RefutesEarlierDelivery(ReviewRequestTransportException ex) =>
         ex.HttpStatus is 400 or 404 or 405 or 409 or 413 or 422 or 501;
+
+    /// <summary>The send may have landed: the attempt stays for the poller, which is prompted, and the person is told so.</summary>
+    private ReviewRequestException Unconfirmed(ReviewRequestRecord record, string fingerprint, ReviewRequestTransportException ex)
+    {
+        Log.Information("[ReviewRequests] The send of request {Id} was not confirmed ({Code}); keeping the attempt for reconciliation", record.Id, ex.Code);
+        polls.Prompt(fingerprint);
+        Publish(record.Id, record.Status, record.CardKey, false);
+        return new ReviewRequestException(ex.Code, ex.Message + " " + UnconfirmedSendNote, 502);
+    }
+
+    /// <summary>
+    /// The request was cancelled while its bundle was in flight (VIBE-213, item 3). The reference is
+    /// already stored, so the hosted copy is revoked now, and no session is ever queued: the person
+    /// cancelled before anything was confirmed. A cancellation the host does not confirm is retried
+    /// by the poller, and Delete waits for it.
+    /// </summary>
+    private async Task<ReviewRequestSent> RevokeCancelledInFlightAsync(ReviewRequestRecord record, ReviewRequestHostedStatus remote,
+        string key, string fingerprint, DateTime now)
+    {
+        var none = CancellationToken.None;
+        await store.MarkSessionsQueuedAsync(record.Id, now, none);
+        string message;
+        try
+        {
+            await transport.CancelAsync(key, remote.Id!, none);
+            await store.MarkRemoteCancelledAsync(record.Id, _clock.GetUtcNow().UtcDateTime, none);
+            message = "This review request was cancelled while it was being sent. Its copy on viberails.ai was cancelled, and no session uploads.";
+        }
+        catch (Exception ex) when (ex is ReviewRequestTransportException or OperationCanceledException)
+        {
+            Log.Warning("[ReviewRequests] Request {Id} was cancelled during its send and its hosted copy could not be cancelled yet ({Code}); the poller retries",
+                record.Id, (ex as ReviewRequestTransportException)?.Code ?? "timeout");
+            polls.Prompt(fingerprint);
+            message = "This review request was cancelled while it was being sent. Its copy on viberails.ai is not cancelled yet; "
+                + "the cancellation is retried automatically. No session uploads.";
+        }
+        Publish(record.Id, ReviewRequestStatus.Cancelled, record.CardKey, true);
+        return new ReviewRequestSent(await reviews.SummaryAsync(record.Id, none), message);
+    }
 
     /// <summary>
     /// Already sent: never post the bundle again. A send interrupted between the hosted confirmation and

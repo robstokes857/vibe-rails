@@ -64,7 +64,7 @@ public sealed class StoredReviewApprovalTests
         var created = await reviews.CreateAsync(repo.RepositoryPath, new CreateReviewRequest(Reviewers: ["owner@example.com"]), null, ct);
         Assert.Equal(tree, created.TreeId);
         const string key = "regression-account-key";
-        Assert.True(await store.MarkSentAsync(created.Id, ReviewRequestTestSupport.Reference, SessionSharingService.KeyFingerprint(key),
+        Assert.NotNull(await store.MarkSentAsync(created.Id, ReviewRequestTestSupport.Reference, SessionSharingService.KeyFingerprint(key),
             DateTime.UtcNow, DateTime.UtcNow.AddMonths(1), ct));
         var transport = ReviewRequestTestSupport.Transport(_ => Task.FromResult(ReviewRequestTestSupport.Json(HttpStatusCode.OK,
             ReviewRequestTestSupport.Hosted(created.Id, tree, "approved", decisions: [ReviewRequestTestSupport.Approved(1, "owner@example.com", tree)]))));

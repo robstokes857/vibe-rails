@@ -95,7 +95,12 @@ public sealed class ReviewRequestTransport(HttpClient client)
     internal static readonly TimeSpan BundleDeadline = TimeSpan.FromSeconds(90);
     /// <summary>The host lists at most 100 and says whether there are more; anything beyond this is not an answer.</summary>
     public const int MaxInboxItems = 200;
-    private const int MaxDecisionBodyBytes = 16 * 1024;
+    /// <summary>
+    /// The hosted decision route's own body bound (<c>ReviewRequestContract.MaxDecisionBodyBytes</c>). The
+    /// inbox serializer escapes non-ASCII and HTML-sensitive characters as six bytes each, so a legal
+    /// 4,000-character comment can reach 24 KB on the wire; a tighter local bound refused it (VIBE-213, item 2).
+    /// </summary>
+    internal const int MaxDecisionBodyBytes = 256 * 1024;
 
     /// <summary>Requests addressed to the key's account (its verified email), newest first, without bundle text or other reviewers.</summary>
     public async Task<ReviewInboxHosted> InboxAsync(string apiKey, CancellationToken ct)

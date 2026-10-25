@@ -241,6 +241,10 @@ public sealed class ReviewRequestPollerTests : IDisposable
 
         var polled = Assert.Single(_requests);
         Assert.Contains("rvw_" + new string('3', 32), polled.RequestUri!.AbsolutePath);
+        // VIBE-213, item 11: past the grace the row is not even loaded (each one carries its whole bundle).
+        var loaded = await _store.ListSentPendingAsync(Start - ReviewRequestPoller.ExpiryGrace, Ct);
+        Assert.Equal(["rvw_" + new string('3', 32)], loaded.Select(r => r.RemoteId));
+        Assert.Equal(2, (await _store.ListSentPendingAsync(DateTime.MinValue, Ct)).Count);
     }
 
     /// <summary>Review F3: a send interrupted after the hosted confirmation still gets its sessions queued, under the key that sent it.</summary>
@@ -255,7 +259,7 @@ public sealed class ReviewRequestPollerTests : IDisposable
             .ReturnsAsync(new SessionResponse(session, "codex", null, _project, Start.AddHours(-1), Start.AddMinutes(-30), 0));
         sessions.Setup(s => s.GetSessionDisplayInfoAsync(session)).ReturnsAsync(("codex", "Fix the migration"));
         var created = await reviews.CreateAsync(_project, new CreateReviewRequest(Reviewers: ["lead@example.com"], Sessions: [session]), sessions.Object, Ct);
-        Assert.True(await _store.MarkSentAsync(created.Id, Reference, Fingerprint, _clock.Now, _clock.Now.AddMonths(1), Ct)); // sent, sessions never queued
+        Assert.NotNull(await _store.MarkSentAsync(created.Id, Reference, Fingerprint, _clock.Now, _clock.Now.AddMonths(1), Ct)); // sent, sessions never queued
         _hosted[Reference] = Hosted(created.Id, created: _clock.Now);
         _archives.Setup(a => a.EnsureSessionShareUploadAsync(session, Fingerprint, It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
@@ -339,7 +343,7 @@ public sealed class ReviewRequestPollerTests : IDisposable
             Assert.Equal(("cancelled", _clock.Now), (stored.Status, stored.RemoteCancelledUTC));
             Assert.Empty(await _store.GetDecisionsAsync(created.Id, Ct));
             Assert.NotNull(stored.SessionsQueuedUTC);
-            Assert.DoesNotContain(await _store.ListSentPendingAsync(Ct), r => r.Id == created.Id); // nothing left for the host
+            Assert.DoesNotContain(await _store.ListSentPendingAsync(DateTime.MinValue, Ct), r => r.Id == created.Id); // nothing left for the host
         }
         else
         {
@@ -455,7 +459,7 @@ public sealed class ReviewRequestPollerTests : IDisposable
     private async Task<ReviewRequestSummary> SentAsync(ReviewRequestService reviews, string reference, string? fingerprint = null, DateTime? expires = null)
     {
         var created = await reviews.CreateAsync(_project, new CreateReviewRequest(Reviewers: ["lead@example.com"]), null, Ct);
-        Assert.True(await _store.MarkSentAsync(created.Id, reference, fingerprint ?? Fingerprint, _clock.Now, expires ?? _clock.Now.AddMonths(1), Ct));
+        Assert.NotNull(await _store.MarkSentAsync(created.Id, reference, fingerprint ?? Fingerprint, _clock.Now, expires ?? _clock.Now.AddMonths(1), Ct));
         Assert.True(await _store.MarkSessionsQueuedAsync(created.Id, _clock.Now, Ct));
         _hosted[reference] = Hosted(created.Id, reference: reference, created: _clock.Now);
         return created;

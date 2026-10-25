@@ -179,17 +179,26 @@ public sealed class ReviewInboxService(
             exit = null;
         }
         var outcome = exit switch { 0 => "approved", null => "popup_unavailable", _ => "not_approved" };
+        try
+        {
+            // The list entry first, then the signing outcome: a View between the two must never show an
+            // approved popup on an entry that still reads open (VIBE-213, item 4).
+            if (exit == 0) state.MarkDecided(account, reference, ReviewRequestStatus.Approved);
+        }
+        catch (Exception ex)
+        {
+            // Nothing awaits this task; the signing outcome below is still recorded, so only the bookkeeping is lost.
+            Log.Warning(ex, "[ReviewInbox] Could not record the popup outcome for {Reference}", reference);
+        }
         var started = _signing.TryGetValue(reference, out var current) ? current.StartedUtc : Now;
         _signing[reference] = new ReviewInboxSigning(reference, started, Now, exit, outcome);
         try
         {
-            if (exit == 0) state.MarkDecided(account, reference, ReviewRequestStatus.Approved);
             Publish();
         }
         catch (Exception ex)
         {
-            // Nothing awaits this task; the signing state above is already final, so only the bookkeeping is lost.
-            Log.Warning(ex, "[ReviewInbox] Could not record the popup outcome for {Reference}", reference);
+            Log.Warning(ex, "[ReviewInbox] Could not publish the popup outcome for {Reference}", reference);
         }
     }
 

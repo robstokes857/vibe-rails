@@ -289,7 +289,7 @@ public sealed class ReviewRequestSenderTests : IDisposable
         Assert.Equal((null, _clock.Now, Fingerprint, "open"), (stored!.RemoteId, stored.SendAttemptedUTC, stored.SentKeyFingerprint, stored.Status));
         Assert.True(stored.SendUncertain);
         Assert.Equal([created.Id], (await _store.ListSendAttemptsPendingAsync(Ct)).Select(r => r.Id));
-        Assert.DoesNotContain(await _store.ListSentPendingAsync(Ct), r => r.Id == created.Id);
+        Assert.DoesNotContain(await _store.ListSentPendingAsync(DateTime.MinValue, Ct), r => r.Id == created.Id);
         Assert.Equal(_clock.Now.AddMinutes(15), _polls.NextDueUtc); // the poller reconciles it within one interval
         var evt = Assert.Single(_events.Events);
         Assert.Equal(("open", false), (evt.Payload.GetProperty("status").GetString(), evt.Payload.GetProperty("sent").GetBoolean()));
@@ -303,6 +303,7 @@ public sealed class ReviewRequestSenderTests : IDisposable
         var refused = await Assert.ThrowsAsync<ReviewRequestException>(() => Sender().DeleteAsync(_project, created.Id, Ct));
         Assert.Equal(("send_pending", 409), (refused.Code, refused.Status));
         Assert.Contains("answer from viberails.ai was lost", refused.Message);
+        Assert.Contains(ReviewRequestSender.CancelledApprovalNote, refused.Message);
         Assert.DoesNotContain("different account key", refused.Message);
         Assert.Empty(_requests);
         var kept = await _store.GetAsync(created.Id, Ct);
@@ -340,7 +341,7 @@ public sealed class ReviewRequestSenderTests : IDisposable
         Assert.False(stored.SendUncertain);
         Assert.NotNull(stored.SessionsQueuedUTC);
         Assert.Empty(await _store.ListSendAttemptsPendingAsync(Ct));
-        Assert.Contains(await _store.ListSentPendingAsync(Ct), r => r.Id == created.Id);
+        Assert.Contains(await _store.ListSentPendingAsync(DateTime.MinValue, Ct), r => r.Id == created.Id);
         _archives.Verify(a => a.EnsureSessionShareUploadAsync(It.IsAny<string>(), Fingerprint, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
@@ -391,6 +392,118 @@ public sealed class ReviewRequestSenderTests : IDisposable
         Assert.Contains(await _store.ListSendAttemptsPendingAsync(Ct), r => r.Id == created.Id);
         var refused = await Assert.ThrowsAsync<ReviewRequestException>(() => Sender().DeleteAsync(_project, created.Id, Ct));
         Assert.Equal("send_pending", refused.Code);
+    }
+
+    /// <summary>
+    /// VIBE-213, item 1: Send pressed again after a lost answer is a retry, and the first POST may have landed. A
+    /// refused key, a missing permission or a rate limit refuse the call, not the content, so the attempt stays (the
+    /// poller's rule); before the fix any 4xx cleared it, the request read unsent, Delete went without the host and
+    /// the hosted copy stayed readable. A refusal decided by the content or the route still clears it.
+    /// </summary>
+    [Theory]
+    [InlineData(401, "invalid_api_key", false)]
+    [InlineData(403, "permission_denied", false)]
+    [InlineData(429, "rate_limited", false)]
+    [InlineData(400, "invalid_request", true)]
+    [InlineData(409, "request_conflict", true)]
+    [InlineData(413, "too_large", true)]
+    public async Task ASameKeyRetryClearsTheAttemptOnlyWhenItsRefusalAlsoRefutesTheFirstPost(int status, string code, bool refutes)
+    {
+        var created = await CreateAsync();
+        var firstAttempt = _clock.Now;
+        var posts = 0;
+        _answer = _ => ++posts == 1
+            ? throw new HttpRequestException("connection reset after the hosted commit")
+            : Task.FromResult(new HttpResponseMessage((HttpStatusCode)status));
+        var sender = Sender();
+        await Assert.ThrowsAsync<ReviewRequestException>(() => sender.SendAsync(_project, created.Id, new SendReviewRequest(true), Ct));
+        _clock.Now = firstAttempt.AddMinutes(3);
+
+        var ex = await Assert.ThrowsAsync<ReviewRequestException>(() => sender.SendAsync(_project, created.Id, new SendReviewRequest(true), Ct));
+
+        Assert.Equal((code, 502), (ex.Code, ex.Status));
+        Assert.Equal(2, posts);
+        var stored = await _store.GetAsync(created.Id, Ct);
+        Assert.Null(stored!.RemoteId);
+        if (refutes)
+        {
+            Assert.DoesNotContain(ReviewRequestSender.UnconfirmedSendNote, ex.Message);
+            Assert.Equal((null, null), (stored.SendAttemptedUTC, stored.SentKeyFingerprint));
+            Assert.Empty(await _store.ListSendAttemptsPendingAsync(Ct));
+        }
+        else
+        {
+            Assert.EndsWith(ReviewRequestSender.UnconfirmedSendNote, ex.Message);
+            Assert.Equal((firstAttempt, Fingerprint), (stored.SendAttemptedUTC, stored.SentKeyFingerprint));
+            Assert.True(stored.SendUncertain);
+            var refused = await Assert.ThrowsAsync<ReviewRequestException>(() => sender.DeleteAsync(_project, created.Id, Ct));
+            Assert.Equal("send_pending", refused.Code);
+            Assert.NotNull(await _store.GetAsync(created.Id, Ct));
+        }
+        _archives.VerifyNoOtherCalls();
+    }
+
+    /// <summary>VIBE-213, item 9: a refusal clears only the attempt it answered; another root's pin, or another key's, survives.</summary>
+    [Fact]
+    public async Task ClearingASendAttemptNeedsTheAttemptItAnswered()
+    {
+        var created = await CreateAsync();
+        Assert.True(await _store.MarkSendAttemptAsync(created.Id, Fingerprint, _clock.Now, Ct));
+
+        Assert.False(await _store.ClearSendAttemptAsync(created.Id, Fingerprint, _clock.Now.AddSeconds(1), _clock.Now, Ct));
+        Assert.False(await _store.ClearSendAttemptAsync(created.Id, "another-fingerprint", _clock.Now, _clock.Now, Ct));
+        Assert.True((await _store.GetAsync(created.Id, Ct))!.SendUncertain);
+
+        Assert.True(await _store.ClearSendAttemptAsync(created.Id, Fingerprint, _clock.Now, _clock.Now, Ct));
+        Assert.False((await _store.GetAsync(created.Id, Ct))!.SendUncertain);
+    }
+
+    /// <summary>
+    /// VIBE-213, item 3: the person cancels while the bundle is in flight (the POST may take 90 s). Before the fix
+    /// the request was marked sent regardless, its terminal recordings were queued for upload, and the event said
+    /// "open". The reference is still stored, because it is the only way to revoke the hosted copy, but nothing
+    /// uploads, the hosted copy is cancelled at once, and a cancellation the host does not confirm is retried.
+    /// </summary>
+    [Theory]
+    [InlineData(HttpStatusCode.OK)]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    public async Task ACancelDuringTheSendRevokesTheHostedCopyAndQueuesNoUpload(HttpStatusCode hostedDelete)
+    {
+        var created = await CreateAsync();
+        _answer = async request =>
+        {
+            if (request.Method == HttpMethod.Delete) return new HttpResponseMessage(hostedDelete);
+            await _reviews.CancelAsync(_project, created.Id, Ct); // cancelled while the host is answering
+            return Json(HttpStatusCode.Created, Hosted(RequestIdOf(request), created: _clock.Now));
+        };
+
+        var sent = await Sender().SendAsync(_project, created.Id, new SendReviewRequest(true), Ct);
+
+        Assert.Contains("cancelled while it was being sent", sent.Message);
+        Assert.Equal("cancelled", sent.Request.Status);
+        Assert.Equal(["POST /api/v1/review-requests", "DELETE /api/v1/review-requests/" + Reference],
+            _requests.Select(r => r.Method + " " + r.RequestUri!.AbsolutePath));
+        var stored = await _store.GetAsync(created.Id, Ct);
+        Assert.Equal(("cancelled", Reference, Fingerprint), (stored!.Status, stored.RemoteId, stored.SentKeyFingerprint));
+        Assert.NotNull(stored.SessionsQueuedUTC); // marked done so neither a retry nor the poller ever queues them
+        _archives.VerifyNoOtherCalls();
+        var evt = Assert.Single(_events.Events);
+        Assert.Equal(("cancelled", true), (evt.Payload.GetProperty("status").GetString(), evt.Payload.GetProperty("sent").GetBoolean()));
+        if (hostedDelete == HttpStatusCode.OK)
+        {
+            Assert.Equal(_clock.Now, stored.RemoteCancelledUTC);
+            Assert.DoesNotContain(await _store.ListSentPendingAsync(DateTime.MinValue, Ct), r => r.Id == created.Id);
+            await Sender().DeleteAsync(_project, created.Id, Ct); // nothing hosted is readable, so no host is needed
+            Assert.Null(await _store.GetAsync(created.Id, Ct));
+        }
+        else
+        {
+            Assert.Contains("retried automatically", sent.Message);
+            Assert.Null(stored.RemoteCancelledUTC);
+            Assert.Contains(await _store.ListSentPendingAsync(DateTime.MinValue, Ct), r => r.Id == created.Id);
+            var refused = await Assert.ThrowsAsync<ReviewRequestException>(() => Sender().DeleteAsync(_project, created.Id, Ct));
+            Assert.Equal("remote_pending", refused.Code);
+        }
     }
 
     [Fact]
@@ -452,7 +565,7 @@ public sealed class ReviewRequestSenderTests : IDisposable
         Assert.Equal(("cancelled", Reference, Fingerprint), (kept!.Status, kept.RemoteId, kept.SentKeyFingerprint));
         Assert.Null(kept.RemoteCancelledUTC);
         Assert.NotNull(kept.SessionsQueuedUTC);
-        Assert.Contains(await _store.ListSentPendingAsync(Ct), row => row.Id == created.Id);
+        Assert.Contains(await _store.ListSentPendingAsync(DateTime.MinValue, Ct), row => row.Id == created.Id);
         _archives.VerifyNoOtherCalls();
         var evt = Assert.Single(_events.Events);
         Assert.Equal(("cancelled", true), (evt.Payload.GetProperty("status").GetString(), evt.Payload.GetProperty("sent").GetBoolean()));
@@ -496,7 +609,7 @@ public sealed class ReviewRequestSenderTests : IDisposable
         {
             Assert.Equal(("not_found", 404), (ex.Code, ex.Status));
             Assert.Null(await _store.GetAsync(created.Id, Ct));
-            Assert.DoesNotContain(await _store.ListSentPendingAsync(Ct), row => row.Id == created.Id);
+            Assert.DoesNotContain(await _store.ListSentPendingAsync(DateTime.MinValue, Ct), row => row.Id == created.Id);
         }
         else
         {
@@ -504,7 +617,7 @@ public sealed class ReviewRequestSenderTests : IDisposable
             var kept = await _store.GetAsync(created.Id, Ct);
             Assert.Equal(("cancelled", Reference, Fingerprint), (kept!.Status, kept.RemoteId, kept.SentKeyFingerprint));
             Assert.Null(kept.RemoteCancelledUTC);
-            Assert.Contains(await _store.ListSentPendingAsync(Ct), row => row.Id == created.Id);
+            Assert.Contains(await _store.ListSentPendingAsync(DateTime.MinValue, Ct), row => row.Id == created.Id);
         }
         _archives.VerifyNoOtherCalls();
     }
@@ -536,7 +649,7 @@ public sealed class ReviewRequestSenderTests : IDisposable
             Assert.Equal(("remote_pending", 409), (ex.Code, ex.Status));
             var kept = await _store.GetAsync(created.Id, Ct);
             Assert.Equal(("cancelled", Reference, Fingerprint), (kept!.Status, kept.RemoteId, kept.SentKeyFingerprint));
-            Assert.Contains(await _store.ListSentPendingAsync(Ct), row => row.Id == created.Id);
+            Assert.Contains(await _store.ListSentPendingAsync(DateTime.MinValue, Ct), row => row.Id == created.Id);
             Assert.Equal(["POST /api/v1/review-requests", "DELETE /api/v1/review-requests/" + Reference],
                 _requests.Select(r => r.Method + " " + r.RequestUri!.AbsolutePath));
             _archives.Verify(a => a.EnsureSessionShareUploadAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -605,6 +718,8 @@ public sealed class ReviewRequestSenderTests : IDisposable
 
         Assert.Equal(("remote_pending", 409), (refused.Code, refused.Status));
         Assert.Contains(variant == "other_account" ? "different account key" : "retried automatically", refused.Message);
+        // Rob's decision (VIBE-213, item 5): the local cancel stays, and the refusal says what it costs.
+        Assert.EndsWith(ReviewRequestSender.CancelledApprovalNote, refused.Message);
         var stored = await _store.GetAsync(created.Id, Ct);
         Assert.NotNull(stored);
         Assert.Equal(("cancelled", Reference), (stored.Status, stored.RemoteId));
@@ -631,10 +746,10 @@ public sealed class ReviewRequestSenderTests : IDisposable
     {
         var created = await CreateAsync();
         if (variant == "expired")
-            Assert.True(await _store.MarkSentAsync(created.Id, Reference, Fingerprint, _clock.Now.AddDays(-40), _clock.Now.AddDays(-9), Ct));
+            Assert.NotNull(await _store.MarkSentAsync(created.Id, Reference, Fingerprint, _clock.Now.AddDays(-40), _clock.Now.AddDays(-9), Ct));
         if (variant == "already_cancelled_on_host")
         {
-            Assert.True(await _store.MarkSentAsync(created.Id, Reference, Fingerprint, _clock.Now, _clock.Now.AddMonths(1), Ct));
+            Assert.NotNull(await _store.MarkSentAsync(created.Id, Reference, Fingerprint, _clock.Now, _clock.Now.AddMonths(1), Ct));
             Assert.True(await _store.MarkRemoteCancelledAsync(created.Id, _clock.Now, Ct));
         }
         _key = null; // no key at all: a delete that needed the host would be refused

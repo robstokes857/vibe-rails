@@ -165,25 +165,29 @@ public sealed class ReviewRequestStore : IReviewRequestStore
     }
 
     /// <inheritdoc />
-    public async Task<bool> MarkSentAsync(string id, string remoteId, string keyFingerprint, DateTime sentUtc, DateTime expiresUtc, CancellationToken ct = default)
+    public async Task<string?> MarkSentAsync(string id, string remoteId, string keyFingerprint, DateTime sentUtc, DateTime expiresUtc, CancellationToken ct = default)
     {
         using var db = SqliteConnectionFactory.Open(_connectionString);
         using var command = db.CreateCommand();
         // Idempotent for the same reference (a retry of the same send) and refused for a different
         // one: two roots sending the same request get the same hosted reference back, so a mismatch
-        // means a stale local copy and must not overwrite what the poller is already following.
+        // means a stale local copy and must not overwrite what the poller is already following. The
+        // reference is stored whatever the status, because a request cancelled during its send still
+        // needs it to revoke the hosted copy; the status comes back in the same statement so the
+        // caller never queues uploads for one (VIBE-213, item 3).
         command.CommandText = """
             UPDATE ReviewRequests
                SET SentUTC = COALESCE(SentUTC, $sent), RemoteId = $remote, SentKeyFingerprint = $fingerprint,
                    ExpiresUTC = $expires, UpdatedUTC = $sent
-             WHERE Id = $id AND (RemoteId IS NULL OR RemoteId = $remote);
+             WHERE Id = $id AND (RemoteId IS NULL OR RemoteId = $remote)
+            RETURNING Status;
             """;
         command.Parameters.AddWithValue("$id", id);
         command.Parameters.AddWithValue("$remote", remoteId);
         command.Parameters.AddWithValue("$fingerprint", keyFingerprint);
         command.Parameters.AddWithValue("$sent", Stamp(sentUtc));
         command.Parameters.AddWithValue("$expires", Stamp(expiresUtc));
-        return await command.ExecuteNonQueryAsync(ct) == 1;
+        return await command.ExecuteScalarAsync(ct) as string;
     }
 
     /// <inheritdoc />
@@ -228,17 +232,21 @@ public sealed class ReviewRequestStore : IReviewRequestStore
     }
 
     /// <inheritdoc />
-    public async Task<bool> ClearSendAttemptAsync(string id, DateTime updatedUtc, CancellationToken ct = default)
+    public async Task<bool> ClearSendAttemptAsync(string id, string keyFingerprint, DateTime attemptedUtc, DateTime updatedUtc, CancellationToken ct = default)
     {
         using var db = SqliteConnectionFactory.Open(_connectionString);
         using var command = db.CreateCommand();
         // Never touches a sent request: a concurrent same-key retry may have recorded the reference meanwhile.
+        // Only the attempt the refusal answered is cleared: another root sharing state.db, or a concurrent
+        // send that claimed first, keeps its own pin (VIBE-213, item 9).
         command.CommandText = """
             UPDATE ReviewRequests
                SET SendAttemptedUTC = NULL, SentKeyFingerprint = NULL, UpdatedUTC = $updated
-             WHERE Id = $id AND RemoteId IS NULL;
+             WHERE Id = $id AND RemoteId IS NULL AND SendAttemptedUTC = $attempted AND SentKeyFingerprint = $fingerprint;
             """;
         command.Parameters.AddWithValue("$id", id);
+        command.Parameters.AddWithValue("$fingerprint", keyFingerprint);
+        command.Parameters.AddWithValue("$attempted", Stamp(attemptedUtc));
         command.Parameters.AddWithValue("$updated", Stamp(updatedUtc));
         return await command.ExecuteNonQueryAsync(ct) == 1;
     }
@@ -260,16 +268,19 @@ public sealed class ReviewRequestStore : IReviewRequestStore
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<ReviewRequestRecord>> ListSentPendingAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<ReviewRequestRecord>> ListSentPendingAsync(DateTime expiresAfterUtc, CancellationToken ct = default)
     {
         using var db = SqliteConnectionFactory.Open(_connectionString);
         using var command = db.CreateCommand();
+        // Stamps are fixed-width round-trip UTC text, so the text comparison orders like the times.
         command.CommandText = RequestColumns + """
              FROM ReviewRequests
             WHERE RemoteId IS NOT NULL
               AND (Status <> 'cancelled' OR RemoteCancelledUTC IS NULL)
+              AND (ExpiresUTC IS NULL OR ExpiresUTC >= $expiresAfter)
             ORDER BY SentUTC, Id;
             """;
+        command.Parameters.AddWithValue("$expiresAfter", Stamp(expiresAfterUtc));
         using var reader = await command.ExecuteReaderAsync(ct);
         var result = new List<ReviewRequestRecord>();
         while (await reader.ReadAsync(ct)) result.Add(ReadRequest(reader));

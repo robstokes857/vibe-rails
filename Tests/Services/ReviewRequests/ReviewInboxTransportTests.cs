@@ -200,6 +200,32 @@ public sealed class ReviewInboxTransportTests
         Assert.Contains($"\"trailer\":\"{trailer}\"", bodies[1]);
     }
 
+    /// <summary>
+    /// VIBE-213, item 2: the inbox serializer escapes non-ASCII and HTML-sensitive characters as six bytes
+    /// each, so a legal 4,000-character comment in CJK (or full of quotes) is about 24 KB on the wire. A
+    /// 16 KiB local bound refused it as "larger than viberails.ai accepts" though the host takes 256 KiB.
+    /// </summary>
+    [Theory]
+    [InlineData('審')]
+    [InlineData('"')]
+    public async Task AMaximalRejectionCommentReachesTheHostWhateverItsCharacters(char filler)
+    {
+        var comment = new string(filler, ReviewInboxService.MaxCommentChars);
+        var posted = 0;
+        var transport = ReviewRequestTestSupport.Transport(async request =>
+        {
+            posted = (await request.Content!.ReadAsByteArrayAsync()).Length;
+            return ReviewRequestTestSupport.Json(HttpStatusCode.Created,
+                new { id = 7, reviewer = "me@example.test", decision = "rejected", comment, decidedUtc = Created });
+        });
+
+        var recorded = await transport.DecideAsync("key-1", Reference, new ReviewInboxDecisionBody("rejected", null, comment), Ct);
+
+        Assert.Equal(comment, recorded.Comment);
+        Assert.True(posted > 16 * 1024, $"the escaped comment is {posted} bytes, the size the old bound refused");
+        Assert.True(posted <= ReviewRequestTransport.MaxDecisionBodyBytes);
+    }
+
     [Fact]
     public void DecisionAnswersAreValidated()
     {

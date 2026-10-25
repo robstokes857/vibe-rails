@@ -106,10 +106,12 @@ public interface IReviewRequestStore
 
     /// <summary>
     /// Records that viberails.ai accepted the request: the hosted reference, the fingerprint of the
-    /// key it was sent with, the send time and the hosted expiry. False when the request does not
-    /// exist or was already sent with a different reference, in which case nothing changes.
+    /// key it was sent with, the send time and the hosted expiry. The reference is stored whatever the
+    /// status, so a request cancelled while its send was in flight can still revoke the hosted copy.
+    /// Returns the request's status as of that write, or null when the request does not exist or was
+    /// already sent with a different reference, in which case nothing changes.
     /// </summary>
-    Task<bool> MarkSentAsync(string id, string remoteId, string keyFingerprint, DateTime sentUtc, DateTime expiresUtc, CancellationToken ct = default);
+    Task<string?> MarkSentAsync(string id, string remoteId, string keyFingerprint, DateTime sentUtc, DateTime expiresUtc, CancellationToken ct = default);
 
     /// <summary>Records that the hosted copy confirmed a local cancellation. False when the request does not exist.</summary>
     Task<bool> MarkRemoteCancelledAsync(string id, DateTime cancelledUtc, CancellationToken ct = default);
@@ -128,9 +130,12 @@ public interface IReviewRequestStore
 
     /// <summary>
     /// Forgets a send attempt after the host confirmed it refused the bundle, so the request is an
-    /// unsent one again. False when the request does not exist or already has a hosted reference.
+    /// unsent one again. Only the attempt the refusal answered is cleared: the stored attempt time and
+    /// pinned fingerprint must still be <paramref name="attemptedUtc"/> and <paramref name="keyFingerprint"/>.
+    /// False, changing nothing, when the request does not exist, already has a hosted reference, or
+    /// carries another attempt.
     /// </summary>
-    Task<bool> ClearSendAttemptAsync(string id, DateTime updatedUtc, CancellationToken ct = default);
+    Task<bool> ClearSendAttemptAsync(string id, string keyFingerprint, DateTime attemptedUtc, DateTime updatedUtc, CancellationToken ct = default);
 
     /// <summary>
     /// Requests whose send began but never received a hosted reference, across every project and
@@ -143,9 +148,10 @@ public interface IReviewRequestStore
     /// Sent requests that still need the host, across every project: every one that is not cancelled
     /// (decisions are collected until the hosted expiry, whatever the current status, because the host
     /// keeps taking them) and cancelled ones whose hosted copy has not confirmed the cancellation yet.
-    /// Oldest first.
+    /// A request whose hosted expiry is before <paramref name="expiresAfterUtc"/> is left out: nothing
+    /// there can still take a decision or be read. Oldest first.
     /// </summary>
-    Task<IReadOnlyList<ReviewRequestRecord>> ListSentPendingAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<ReviewRequestRecord>> ListSentPendingAsync(DateTime expiresAfterUtc, CancellationToken ct = default);
 
     /// <summary>Hosted decision ids already recorded for one request, so polling records each decision once.</summary>
     Task<IReadOnlySet<long>> GetRemoteDecisionIdsAsync(string requestId, CancellationToken ct = default);

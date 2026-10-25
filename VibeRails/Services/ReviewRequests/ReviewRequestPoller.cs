@@ -63,7 +63,8 @@ public sealed class ReviewRequestPoller(
             // Sends whose answer was lost come first: once their reference is known they are ordinary
             // sent requests, which the pass below polls (or they were revoked just now).
             reachable = await ReconcileSendAttemptsAsync(key, account, token);
-            var pending = reachable ? await store.ListSentPendingAsync(token) : Array.Empty<ReviewRequestRecord>();
+            // A request past its expiry and the grace is not even loaded: nothing hosted can answer for it.
+            var pending = reachable ? await store.ListSentPendingAsync(now - ExpiryGrace, token) : Array.Empty<ReviewRequestRecord>();
             foreach (var request in pending)
             {
                 // Sent with another account's key: that account polls and cancels it, never this one.
@@ -74,7 +75,6 @@ public sealed class ReviewRequestPoller(
                     if (!reachable) break;
                     continue;
                 }
-                if (request.ExpiresUTC is { } expires && now > expires + ExpiryGrace) continue;
                 if (request.SessionsQueuedUTC is null)
                 {
                     // The send was interrupted between the hosted confirmation and the session queue.
@@ -123,7 +123,7 @@ public sealed class ReviewRequestPoller(
             {
                 // The host refuses this bundle, so the first POST never landed either: unsent again.
                 Log.Warning("[ReviewRequests] viberails.ai refused the unconfirmed send of request {Id} ({Code}); the request is unsent", request.Id, ex.Code);
-                await store.ClearSendAttemptAsync(request.Id, _clock.GetUtcNow().UtcDateTime, ct);
+                await store.ClearSendAttemptAsync(request.Id, account, request.SendAttemptedUTC!.Value, _clock.GetUtcNow().UtcDateTime, ct);
                 Publish(request, request.Status, sent: false);
                 continue;
             }
@@ -136,24 +136,24 @@ public sealed class ReviewRequestPoller(
                 continue;
             }
             var now = _clock.GetUtcNow().UtcDateTime;
-            if (!await store.MarkSentAsync(request.Id, remote.Id!, account, now, remote.ExpiresUtc, ct))
+            if (await store.MarkSentAsync(request.Id, remote.Id!, account, now, remote.ExpiresUtc, ct) is not { } status)
             {
                 // Removed or referenced otherwise meanwhile (the sender refuses to delete such a row; only a direct store call can).
                 Log.Warning("[ReviewRequests] Request {Id} changed while its unconfirmed send was reconciled; keeping what is stored", request.Id);
                 continue;
             }
             Log.Information("[ReviewRequests] Recovered the hosted reference of request {Id} from an unconfirmed send", request.Id);
-            if (request.Status == ReviewRequestStatus.Cancelled)
+            if (status == ReviewRequestStatus.Cancelled)
             {
                 // Cancelled, or deletion was asked, while delivery was unknown: revoke the copy now, and
                 // never queue uploads for it. A failed cancel is retried by the cancellation pass.
                 await store.MarkSessionsQueuedAsync(request.Id, now, ct);
                 var cancelled = await CancelRemoteAsync(key, request with { RemoteId = remote.Id }, ct);
-                Publish(request, request.Status);
+                Publish(request, status);
                 if (!cancelled) return false;
                 continue;
             }
-            Publish(request, request.Status);
+            Publish(request, status);
         }
         return true;
     }

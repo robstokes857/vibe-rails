@@ -112,7 +112,13 @@ the design decisions for the rest.
   hosted copy first: while it cannot (host unreachable, or sent with another account's key) the
   delete is refused with 409 `remote_pending` and the request stays, cancelled, because its row is
   the only thing that can still revoke the hosted copy; an expired or already-cancelled hosted copy
-  needs no host. A delete that races a send makes the send cancel its own hosted copy. A send
+  needs no host. The local cancel is deliberate (Rob, 2026-10-25, VIBE-213), so the refusal says
+  what it costs: the request is cancelled here and any approval it received no longer applies to
+  commits (`ReviewRequestSender.CancelledApprovalNote`, also on `send_pending`). A delete that
+  races a send makes the send cancel its own hosted copy. A cancel that races a send leaves the
+  reference stored, because only it can revoke the hosted copy (`MarkSentAsync` stores it whatever
+  the status and answers the status it wrote over), and the send then cancels that copy at once and
+  queues no session; a cancellation the host does not confirm is retried by the poller. A send
   whose answer was lost is neither sent nor unsent: the attempt and the sending key's fingerprint
   were written before the POST (`SendAttemptedUTC`, `review-requests/5`), Delete refuses it with
   409 `send_pending`, and the poller recovers or refutes the hosted copy (see **A send whose answer
@@ -126,7 +132,8 @@ the design decisions for the rest.
   taking decisions until it is cancelled or expires: a later approval after a rejection, or another
   reviewer's approval for a second rule, still reaches the ledger. Only requests sent with
   the current key's fingerprint are polled; an expired request is polled for seven more days so a
-  late approval is still collected; a sent request whose sessions were never queued has them
+  late approval is still collected, and after that it is not loaded at all
+  (`ListSentPendingAsync(expiresAfterUtc)`); a sent request whose sessions were never queued has them
   queued first. Each new hosted decision (its hosted id is stored on the
   decision row, so each lands once) goes through `RecordDecisionAsync` with that id: an approval is
   re-verified with viberails.ai and matched to a listed reviewer, a rejection lands with its
@@ -267,10 +274,14 @@ the design decisions for the rest.
   (`IReviewRequestStore.MarkSendAttemptAsync`: `SendAttemptedUTC`, `review-requests/5`, written
   together with `SentKeyFingerprint`); the claim is refused for a request already sent or pinned to
   another key's fingerprint, so a second send under a different account answers 409 `send_pending`
-  and can never create a second hosted copy. A refusal the host confirmed (any 4xx:
+  and can never create a second hosted copy. On a first attempt a refusal the host confirmed (any 4xx:
   `server_update_required`, `invalid_api_key`, `permission_denied`, `invalid_request`, `too_large`,
   `rate_limited`, `request_conflict`) clears the attempt (`ClearSendAttemptAsync`) and answers 502
-  as before; anything else (`network_error`, `timeout`, `invalid_response`, `server_error`,
+  as before. A send of a row that already carries an attempt is a retry, and its refusal clears the
+  attempt only under the poller's rule below (content or route; VIBE-213): a refused key, a missing
+  permission or a rate limit on the retry keeps it. A clear names the attempt it answered (the
+  attempt time and the pinned fingerprint), so another root's pin, or a concurrent send that claimed
+  first, survives. Anything else (`network_error`, `timeout`, `invalid_response`, `server_error`,
   `server_unavailable`, `unexpected_redirect`) keeps it, prompts the poller and answers 502 with the
   transport's wording plus a note that the send may have arrived and is settled automatically. The
   request's summary carries `sendAttemptedUtc` without a `remote`, which the card and the VS Code
