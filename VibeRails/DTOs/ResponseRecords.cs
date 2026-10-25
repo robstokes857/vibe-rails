@@ -1438,13 +1438,20 @@ namespace VibeRails.DTOs
         bool SaverEnabled = true
     );
 
-    // Payload for the periodic token-savings publish job (POST /api/v1/token-savings).
+    // Legacy v1 payload (POST /api/v1/token-savings).
     // The total is an absolute cumulative value, not a delta — reposting upserts the record
     // keyed by API key + computer name.
     public record TokenSavingsPostDto(
         string ComputerName,
         long TotalTokensSaved
     );
+
+    /// <summary>One idempotent incremental report sent to the hosted v2 endpoint.</summary>
+    public record TokenSavingsIncrementDto(
+        string ReportId, string ComputerId, string ComputerName, long TokensSaved);
+
+    /// <summary>Receipt confirming the whole incremental report was persisted.</summary>
+    public record TokenSavingsReceiptDto(string ReportId, long TokensSaved, DateTimeOffset ReceivedUtc);
 
     // Compression DTOs — served by /api/v1/compression/*.
     //
@@ -2006,6 +2013,8 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(TokenSavingsDto))]
     [JsonSerializable(typeof(TokenSaverPausePayload))]
     [JsonSerializable(typeof(TokenSavingsPostDto))]
+    [JsonSerializable(typeof(TokenSavingsIncrementDto))]
+    [JsonSerializable(typeof(TokenSavingsReceiptDto))]
     // Compression DTOs
     [JsonSerializable(typeof(CompressionStageTraceResponse))]
     [JsonSerializable(typeof(List<CompressionStageTraceResponse>))]

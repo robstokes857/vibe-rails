@@ -206,6 +206,9 @@ CREATE TABLE TerminalSessionLogs ( Id INTEGER PRIMARY KEY AUTOINCREMENT, Session
 -- table TokenSavings
 CREATE TABLE TokenSavings ( Day TEXT NOT NULL, Provider TEXT NOT NULL, Requests INTEGER NOT NULL DEFAULT 0, RewrittenRequests INTEGER NOT NULL DEFAULT 0, BytesBefore INTEGER NOT NULL DEFAULT 0, BytesAfter INTEGER NOT NULL DEFAULT 0, UpdatedUTC TEXT NOT NULL, PRIMARY KEY (Day, Provider) );
 
+-- table TokenSavingsPublishState
+CREATE TABLE TokenSavingsPublishState ( Id INTEGER PRIMARY KEY CHECK (Id = 1), ComputerId TEXT NOT NULL, AcknowledgedTokens INTEGER NOT NULL, PendingReportId TEXT, PendingComputerName TEXT, PendingTokens INTEGER, PendingThroughTokens INTEGER );
+
 -- table UserInputSearchDocuments
 CREATE TABLE UserInputSearchDocuments ( UserInputId INTEGER PRIMARY KEY REFERENCES UserInputs(Id) ON DELETE CASCADE, InputText TEXT NOT NULL );
 

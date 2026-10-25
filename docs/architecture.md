@@ -1,5 +1,21 @@
 # VibeRails architecture reference
 
+## Incremental token-savings publishing (VIBE-215)
+
+The existing byte-based `TokenSavings` tally remains unchanged. While a root backend is open,
+`TokenSavingsPublishJob` sends increments to hosted `POST /api/v2/token-savings`, using the
+configured API key. `ITokenSavingsPublishStore` keeps a stable random computer identifier,
+acknowledged token position and one pending report in `state.db`. Its additive schema is
+automatic and compatible with old versions.
+
+First activation baselines existing local history. Each subsequent batch is at most 100 million
+tokens and is persisted before sending. Only a matching report-id/amount receipt advances the
+checkpoint. A failed request, restart, key rotation or rename retries that exact report, including
+its original name; later savings form a later batch. Root processes share a cross-process publish
+lock. A decreased/reset tally rebaselines after any pending report completes. Old clients keep
+using v1; this client never falls back to reposting lifetime totals. Cloned state, mixed old/new
+binaries and exact historical attribution are not reconciled.
+
 ## Session sharing (VIBE-35)
 
 Terminal Share creates a public replay link through the protected root API. The existing drain

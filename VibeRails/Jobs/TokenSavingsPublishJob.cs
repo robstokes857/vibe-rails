@@ -1,4 +1,6 @@
 using System.Net.Http.Json;
+using System.Net;
+using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Serilog;
 using VibeRails.DB;
@@ -9,10 +11,9 @@ using VibeRails.Utils;
 namespace VibeRails.Jobs;
 
 /// <summary>
-/// Periodically POSTs the cumulative lifetime tokens-saved total to the VibeRails endpoint so
-/// aggregate savings can be reported across machines. The value is an absolute total (not a
-/// delta); reposting upserts the record keyed by API key + computer name. A failed post never
-/// crashes, slows, or spams the main app — <see cref="JobBase"/> isolates per-tick exceptions,
+/// Periodically POSTs persisted increments to the VibeRails v2 endpoint. A durable checkpoint
+/// and pending report keep key changes, renames and retries from replaying lifetime history.
+/// A failed post never crashes, slows, or spams the main app — <see cref="JobBase"/> isolates per-tick exceptions,
 /// and this job additionally swallows non-success responses, unusable configuration, and every
 /// transient request failure (including HttpClient timeouts, which arrive as
 /// <see cref="TaskCanceledException"/> with the caller's token unsignalled).
@@ -20,7 +21,7 @@ namespace VibeRails.Jobs;
 public sealed class TokenSavingsPublishJob(
     ILogger<TokenSavingsPublishJob> logger,
     ISystemResourceService resources,
-    ITokenSavingsStore store,
+    ITokenSavingsPublishStore store,
     IHttpClientFactory httpClientFactory,
     IConfiguration configuration) : JobBase(logger, resources)
 {
@@ -33,7 +34,7 @@ public sealed class TokenSavingsPublishJob(
     internal const string HttpClientName = "token-savings";
     internal const string LockFileName = ".token-savings-publish.lock";
 
-    private const string DefaultEndpoint = "https://viberails.ai/api/v1/token-savings";
+    private const string DefaultEndpoint = "https://viberails.ai/api/v2/token-savings";
     private const int DefaultIntervalMinutes = 15;
     private const bool DefaultEnabled = true;
 
@@ -73,8 +74,7 @@ public sealed class TokenSavingsPublishJob(
         try
         {
             // More than one supported root backend can run at once (for example the browser app
-            // and VS Code). Serialize the refresh + absolute upsert across all of them so a slow,
-            // stale request can never arrive after and overwrite a newer total.
+            // and VS Code). Serialize preparing, sending and acknowledging one pending report.
             using var publishLock = CrossProcessFileLock.TryAcquire(
                 CrossProcessFileLock.BesideStateDatabase(
                     ParserConfigs.GetStatePath(),
@@ -86,24 +86,26 @@ public sealed class TokenSavingsPublishJob(
                 return;
             }
 
-            // The savings that matter are recorded by terminal-tab children, never in this
-            // process (see ITokenSavingsStore), so refresh the shared persisted total while the
-            // cross-process lock is held before constructing the absolute upsert.
-            await store.RefreshAsync();
-            var total = store.GetTotals().TokensSaved;
-            var computerName = ComputerNameFormatter.Machine();
+            // The store reads the shared persisted tally, not this process's in-memory total.
+            var report = await store.PrepareAsync(ComputerNameFormatter.Machine(), cancellationToken);
+            if (report is null)
+                return;
 
             using var request = new HttpRequestMessage(HttpMethod.Post, _endpoint);
             request.Headers.Add("X-Api-Key", apiKey);
             request.Content = JsonContent.Create(
-                new TokenSavingsPostDto(computerName, total),
-                AppJsonSerializerContext.Default.TokenSavingsPostDto);
+                new TokenSavingsIncrementDto(report.ReportId, report.ComputerId, report.ComputerName, report.TokensSaved),
+                AppJsonSerializerContext.Default.TokenSavingsIncrementDto);
 
-            using var response = await httpClientFactory
-                .CreateClient(HttpClientName)
-                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            var client = httpClientFactory.CreateClient(HttpClientName);
+            // ResponseHeadersRead ends HttpClient's timeout at the headers. Bound the entire
+            // exchange, including the receipt body, so a stalled response releases the lock.
+            using var requestTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            requestTimeout.CancelAfter(client.Timeout);
+            using var response = await client.SendAsync(
+                request, HttpCompletionOption.ResponseHeadersRead, requestTimeout.Token);
 
-            if (!response.IsSuccessStatusCode)
+            if (response.StatusCode != HttpStatusCode.OK)
             {
                 Log.Warning(
                     "[TokenSavingsPublishJob] Non-success status {Status} from {Endpoint}",
@@ -112,10 +114,18 @@ public sealed class TokenSavingsPublishJob(
                 return;
             }
 
+            var receipt = await ReadReceiptAsync(response.Content, requestTimeout.Token);
+            if (receipt is null || receipt.ReportId != report.ReportId ||
+                receipt.TokensSaved != report.TokensSaved || receipt.ReceivedUtc == default)
+            {
+                Log.Warning("[TokenSavingsPublishJob] Missing or mismatched receipt; retaining pending report.");
+                return;
+            }
+            await store.AcknowledgeAsync(report.ReportId, cancellationToken);
+
             Log.Information(
-                "[TokenSavingsPublishJob] Published total={Total} computer={Computer}",
-                total,
-                computerName);
+                "[TokenSavingsPublishJob] Published increment={TokensSaved}",
+                report.TokensSaved);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -147,6 +157,27 @@ public sealed class TokenSavingsPublishJob(
                 _endpoint,
                 ex.GetType().Name);
         }
+    }
+
+    private static async Task<TokenSavingsReceiptDto?> ReadReceiptAsync(
+        HttpContent content, CancellationToken cancellationToken)
+    {
+        // The response is a tiny receipt. Never buffer an unbounded error/proxy response.
+        const int maximumBytes = 4096;
+        if (content.Headers.ContentLength > maximumBytes)
+            return null;
+        using var stream = await content.ReadAsStreamAsync(cancellationToken);
+        var buffer = new byte[maximumBytes + 1];
+        var length = 0;
+        while (length < buffer.Length)
+        {
+            var read = await stream.ReadAsync(buffer.AsMemory(length), cancellationToken);
+            if (read == 0)
+                break;
+            length += read;
+        }
+        return length > maximumBytes ? null : JsonSerializer.Deserialize(
+            buffer.AsSpan(0, length), AppJsonSerializerContext.Default.TokenSavingsReceiptDto);
     }
 
     private static Uri? ParseHttpsEndpoint(string? configuredValue) =>

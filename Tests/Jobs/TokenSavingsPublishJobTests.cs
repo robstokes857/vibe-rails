@@ -2,6 +2,7 @@ using System.Net;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -44,7 +45,6 @@ public sealed class TokenSavingsPublishJobTests : IDisposable
     public async Task ExecuteJob_WithApiKey_PostsCorrectPayload()
     {
         ParserConfigs.SetApiKey("test-api-key");
-        // TokensSaved = (8000 - 0) / 4 = 2000
         var store = CreateStore(tokensSaved: 2000);
         var handler = new CapturingHandler();
         var job = CreateJob(handler, store);
@@ -60,7 +60,11 @@ public sealed class TokenSavingsPublishJobTests : IDisposable
         Assert.Equal(ComputerNameFormatter.Machine(),
             payload.RootElement.GetProperty("computerName").GetString());
         Assert.Equal(2000,
-            payload.RootElement.GetProperty("totalTokensSaved").GetInt64());
+            payload.RootElement.GetProperty("tokensSaved").GetInt64());
+        Assert.Equal("tsr_test", payload.RootElement.GetProperty("reportId").GetString());
+        Assert.Equal("cmp_test", payload.RootElement.GetProperty("computerId").GetString());
+        Assert.Equal("/api/v2/token-savings", handler.RequestUri!.AbsolutePath);
+        store.Verify(s => s.AcknowledgeAsync("tsr_test", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -83,23 +87,14 @@ public sealed class TokenSavingsPublishJobTests : IDisposable
     }
 
     [Fact]
-    public async Task ExecuteJob_RefreshesStoreBeforeReadingTotals()
+    public async Task ExecuteJob_NoPendingIncrement_DoesNotSend()
     {
-        // The savings are written by tab children, so an unrefreshed read publishes a stale
-        // absolute total that overwrites a newer remote one with a lower number.
         ParserConfigs.SetApiKey("test-api-key");
-        var calls = new List<string>();
-        var store = new Mock<ITokenSavingsStore>();
-        store.Setup(s => s.RefreshAsync())
-            .Callback(() => calls.Add("refresh"))
-            .Returns(Task.CompletedTask);
-        store.Setup(s => s.GetTotals())
-            .Callback(() => calls.Add("getTotals"))
-            .Returns(new TokenSavingsTotals(8000, 0));
-
-        await InvokeExecuteJobAsync(CreateJob(new CapturingHandler(), store));
-
-        Assert.Equal(["refresh", "getTotals"], calls);
+        var store = new Mock<ITokenSavingsPublishStore>();
+        var handler = new CapturingHandler();
+        await InvokeExecuteJobAsync(CreateJob(handler, store));
+        Assert.Equal(0, handler.RequestCount);
+        store.Verify(s => s.PrepareAsync(ComputerNameFormatter.Machine(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -171,10 +166,10 @@ public sealed class TokenSavingsPublishJobTests : IDisposable
     }
 
     [Fact]
-    public async Task ExecuteJob_ReadsTotalFromStore()
+    public async Task ExecuteJob_ReadsPendingIncrementFromStore()
     {
         ParserConfigs.SetApiKey("test-api-key");
-        // A different store value must produce a different posted total.
+        // The payload must use the persisted pending amount.
         var store = CreateStore(tokensSaved: 500_000);
         var handler = new CapturingHandler();
         var job = CreateJob(handler, store);
@@ -185,14 +180,14 @@ public sealed class TokenSavingsPublishJobTests : IDisposable
         Assert.NotNull(handler.RequestBody);
         using var payload = JsonDocument.Parse(handler.RequestBody!);
         Assert.Equal(500_000,
-            payload.RootElement.GetProperty("totalTokensSaved").GetInt64());
+            payload.RootElement.GetProperty("tokensSaved").GetInt64());
     }
 
     [Fact]
     public async Task ExecuteJob_EndpointUrl_FromConfig()
     {
         ParserConfigs.SetApiKey("test-api-key");
-        const string customUrl = "https://localhost:5164/api/v1/token-savings";
+        const string customUrl = "https://localhost:5164/api/v2/token-savings";
         var handler = new CapturingHandler();
         var job = CreateJob(handler, configuration: BuildConfiguration(endpointUrl: customUrl));
 
@@ -200,6 +195,20 @@ public sealed class TokenSavingsPublishJobTests : IDisposable
 
         Assert.Equal(1, handler.RequestCount);
         Assert.Equal(customUrl, handler.RequestUri?.AbsoluteUri);
+    }
+
+    [Fact]
+    public async Task ExecuteJob_ShippedConfiguration_UsesV2Endpoint()
+    {
+        ParserConfigs.SetApiKey("test-api-key");
+        var configuration = new ConfigurationBuilder()
+            .AddJsonFile(Path.Combine(AppContext.BaseDirectory, "appsettings.json"))
+            .Build();
+        var handler = new CapturingHandler();
+
+        await InvokeExecuteJobAsync(CreateJob(handler, configuration: configuration));
+
+        Assert.Equal("https://viberails.ai/api/v2/token-savings", handler.RequestUri?.AbsoluteUri);
     }
 
     [Fact]
@@ -295,7 +304,128 @@ public sealed class TokenSavingsPublishJobTests : IDisposable
         await InvokeExecuteJobAsync(job);
 
         Assert.Equal(0, handler.RequestCount);
-        store.Verify(s => s.RefreshAsync(), Times.Never);
+        store.Verify(s => s.PrepareAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(404, "")]
+    [InlineData(409, "")]
+    [InlineData(500, "")]
+    [InlineData(201, "{}")]
+    [InlineData(200, "not json")]
+    [InlineData(200, "{}")]
+    [InlineData(200, "{\"reportId\":\"tsr_test\",\"tokensSaved\":1000}")]
+    [InlineData(200, "{\"reportId\":\"other\",\"tokensSaved\":1000,\"receivedUtc\":\"2026-10-25T00:00:00Z\"}")]
+    [InlineData(200, "{\"reportId\":\"tsr_test\",\"tokensSaved\":999,\"receivedUtc\":\"2026-10-25T00:00:00Z\"}")]
+    public async Task ExecuteJob_UnconfirmedReceipt_DoesNotAdvance(int status, string body)
+    {
+        ParserConfigs.SetApiKey("test-api-key");
+        var store = CreateStore(1000);
+        var handler = new CapturingHandler(() => new HttpResponseMessage((HttpStatusCode)status)
+        { Content = new StringContent(body) });
+        await InvokeExecuteJobAsync(CreateJob(handler, store));
+        store.Verify(s => s.AcknowledgeAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteJob_LostAcknowledgement_RestartAndKeyRotationRetryDurableBatch()
+    {
+        ParserConfigs.SetApiKey("first-key");
+        var connectionString = new SqliteConnectionStringBuilder
+        { DataSource = ParserConfigs.GetStatePath(), Pooling = false }.ToString();
+        var measurement = new TokenSavingsStore(connectionString);
+        measurement.Record("test", 4000, 0);
+        await measurement.LastPersist;
+        var store = new TokenSavingsPublishStore(connectionString);
+        var initial = new CapturingHandler();
+        await InvokeExecuteJobAsync(CreatePersistentJob(initial, store));
+        Assert.Equal(0, initial.RequestCount); // First activation does not replay history.
+
+        measurement.Record("test", 400, 0);
+        await measurement.LastPersist;
+        var lost = new CapturingHandler(() => throw new HttpRequestException("response lost"));
+        await InvokeExecuteJobAsync(CreatePersistentJob(lost, store));
+        var pending = Assert.IsType<TokenSavingsPendingReport>(
+            await new TokenSavingsPublishStore(connectionString).PrepareAsync("renamed", TestContext.Current.CancellationToken));
+        Assert.Equal(100, pending.TokensSaved);
+        Assert.Equal(ComputerNameFormatter.Machine(), pending.ComputerName);
+
+        measurement.Record("test", 300, 0);
+        await measurement.LastPersist;
+        ParserConfigs.SetApiKey("replacement-key");
+        var retry = new CapturingHandler();
+        var restarted = new TokenSavingsPublishStore(connectionString);
+        await InvokeExecuteJobAsync(CreatePersistentJob(retry, restarted));
+        Assert.Equal(lost.RequestBody, retry.RequestBody);
+        Assert.Equal("replacement-key", retry.ApiKey);
+        var later = Assert.IsType<TokenSavingsPendingReport>(
+            await restarted.PrepareAsync("renamed", TestContext.Current.CancellationToken));
+        Assert.Equal(75, later.TokensSaved);
+        Assert.Equal(pending.ComputerId, later.ComputerId);
+        Assert.NotEqual(pending.ReportId, later.ReportId);
+        Assert.Equal("renamed", later.ComputerName);
+    }
+
+    [Fact]
+    public async Task ExecuteJob_SharedKey_IndependentStoresPublishIndependentIncrements()
+    {
+        ParserConfigs.SetApiKey("shared-key");
+        var handlers = new List<CapturingHandler>();
+        foreach (var tokens in new[] { 100, 200 })
+        {
+            var connectionString = new SqliteConnectionStringBuilder
+            { DataSource = Path.Combine(_testRoot, $"computer-{tokens}.db"), Pooling = false }.ToString();
+            var store = new TokenSavingsPublishStore(connectionString);
+            Assert.Null(await store.PrepareAsync("same-name", TestContext.Current.CancellationToken));
+            var measurement = new TokenSavingsStore(connectionString);
+            measurement.Record("test", tokens * 4, 0);
+            await measurement.LastPersist;
+            var handler = new CapturingHandler();
+            await InvokeExecuteJobAsync(CreatePersistentJob(handler, store));
+            handlers.Add(handler);
+            Assert.Null(await store.PrepareAsync("same-name", TestContext.Current.CancellationToken));
+        }
+
+        using var first = JsonDocument.Parse(handlers[0].RequestBody!);
+        using var second = JsonDocument.Parse(handlers[1].RequestBody!);
+        Assert.All(handlers, handler => Assert.Equal("shared-key", handler.ApiKey));
+        Assert.Equal(100, first.RootElement.GetProperty("tokensSaved").GetInt64());
+        Assert.Equal(200, second.RootElement.GetProperty("tokensSaved").GetInt64());
+        Assert.NotEqual(first.RootElement.GetProperty("computerId").GetString(),
+            second.RootElement.GetProperty("computerId").GetString());
+    }
+
+    [Fact]
+    public async Task ExecuteJob_OversizedReceipt_DoesNotAdvance()
+    {
+        ParserConfigs.SetApiKey("test-api-key");
+        var store = CreateStore(1000);
+        var handler = new CapturingHandler(() => new HttpResponseMessage(HttpStatusCode.OK)
+        { Content = new StringContent(new string('x', 5000)) });
+        await InvokeExecuteJobAsync(CreateJob(handler, store));
+        store.Verify(s => s.AcknowledgeAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteJob_StalledReceipt_TimesOutWithoutAdvancingAndReleasesLock()
+    {
+        ParserConfigs.SetApiKey("test-api-key");
+        var store = CreateStore(1000);
+        var stalled = new StalledReadStream();
+        var handler = new CapturingHandler(() => new HttpResponseMessage(HttpStatusCode.OK)
+        { Content = new StreamContent(stalled) });
+        using var factory = new StubHttpClientFactory(handler);
+        factory.CreateClient(TokenSavingsPublishJob.HttpClientName).Timeout = TimeSpan.FromMilliseconds(100);
+
+        await InvokeExecuteJobAsync(CreateJob(factory, store))
+            .WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        Assert.True(stalled.ReadStarted);
+        store.Verify(s => s.AcknowledgeAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        var retry = new CapturingHandler();
+        await InvokeExecuteJobAsync(CreateJob(retry, store));
+        Assert.Equal(handler.RequestBody, retry.RequestBody);
+        store.Verify(s => s.AcknowledgeAsync("tsr_test", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     public void Dispose()
@@ -327,25 +457,29 @@ public sealed class TokenSavingsPublishJobTests : IDisposable
         return new ConfigurationBuilder().AddInMemoryCollection(dict).Build();
     }
 
-    private static Mock<ITokenSavingsStore> CreateStore(long tokensSaved)
+    private static Mock<ITokenSavingsPublishStore> CreateStore(long tokensSaved)
     {
-        // TokensSaved = (BytesBefore - BytesAfter) / 4
-        var store = new Mock<ITokenSavingsStore>();
-        store.Setup(s => s.RefreshAsync()).Returns(Task.CompletedTask);
-        store.Setup(s => s.GetTotals())
-            .Returns(new TokenSavingsTotals(tokensSaved * 4, 0));
+        var store = new Mock<ITokenSavingsPublishStore>();
+        store.Setup(s => s.PrepareAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string name, CancellationToken _) =>
+                new TokenSavingsPendingReport("tsr_test", "cmp_test", name, tokensSaved));
         return store;
     }
 
     private static TokenSavingsPublishJob CreateJob(
         CapturingHandler handler,
-        Mock<ITokenSavingsStore>? store = null,
+        Mock<ITokenSavingsPublishStore>? store = null,
         IConfiguration? configuration = null) =>
         CreateJob(new StubHttpClientFactory(handler), store, configuration);
 
+    private static TokenSavingsPublishJob CreatePersistentJob(
+        CapturingHandler handler, ITokenSavingsPublishStore store) => new(
+            NullLogger<TokenSavingsPublishJob>.Instance,
+            Mock.Of<ISystemResourceService>(), store, new StubHttpClientFactory(handler), BuildConfiguration());
+
     private static TokenSavingsPublishJob CreateJob(
         IHttpClientFactory httpClientFactory,
-        Mock<ITokenSavingsStore>? store = null,
+        Mock<ITokenSavingsPublishStore>? store = null,
         IConfiguration? configuration = null)
     {
         return new TokenSavingsPublishJob(
@@ -396,6 +530,27 @@ public sealed class TokenSavingsPublishJobTests : IDisposable
         public void Dispose() => _client.Dispose();
     }
 
+    private sealed class StalledReadStream : Stream
+    {
+        public bool ReadStarted { get; private set; }
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            ReadStarted = true;
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override void Flush() => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
     private sealed class CapturingHandler : HttpMessageHandler
     {
         private readonly Func<HttpResponseMessage>? _responder;
@@ -424,7 +579,18 @@ public sealed class TokenSavingsPublishJobTests : IDisposable
                 ? null
                 : await request.Content.ReadAsStringAsync(cancellationToken);
 
-            return _responder?.Invoke() ?? new HttpResponseMessage(HttpStatusCode.OK);
+            if (_responder is not null)
+                return _responder.Invoke();
+            using var payload = JsonDocument.Parse(RequestBody!);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(new
+                {
+                    reportId = payload.RootElement.GetProperty("reportId").GetString(),
+                    tokensSaved = payload.RootElement.GetProperty("tokensSaved").GetInt64(),
+                    receivedUtc = DateTimeOffset.UtcNow
+                }))
+            };
         }
     }
 }

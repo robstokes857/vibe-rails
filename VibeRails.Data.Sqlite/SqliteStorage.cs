@@ -65,6 +65,7 @@ public static class SqliteStorage
         services.TryAddSingleton<IBoardStore>(sp => CreateBoardStore(sp.GetRequiredService<SqliteStoragePaths>().StatePath));
         services.TryAddSingleton<IJobStore>(sp => new JobStore(StateConnectionString(sp), sp.GetService<BoardAutomationEventSource>()?.Store, sp.GetService<IReviewRunSnapshotFactory>()));
         services.TryAddSingleton<ITokenSavingsStore>(sp => new TokenSavingsStore(StateConnectionString(sp)));
+        services.TryAddSingleton<ITokenSavingsPublishStore>(sp => new TokenSavingsPublishStore(StateConnectionString(sp)));
         services.TryAddSingleton<ICodeAnalyzerIgnoreStore>(sp => new CodeAnalyzerIgnoreStore(StateConnectionString(sp)));
         services.TryAddSingleton<IPrReviewStore>(sp => CreatePrReviewStore(sp.GetRequiredService<SqliteStoragePaths>().StatePath));
         services.TryAddSingleton<ILlmExchangeLogStore>(sp => new LlmExchangeLogStore(ConnectionString(
@@ -146,6 +147,7 @@ public static class SqliteStorage
         using (var connection = SqliteConnectionFactory.Open(state))
         {
             TokenSavingsStore.EnsureSchema(connection);
+            TokenSavingsPublishStore.EnsureSchema(connection);
             CodeAnalyzerIgnoreStore.EnsureSchema(connection);
             CompressionCapturesSchema.EnsureSchema(connection);
         }
