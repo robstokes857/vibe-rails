@@ -8,8 +8,14 @@ using Xunit;
 
 namespace Tests.Services.Integrations;
 
+// ApiKeyStore and the settings route also update process-wide runtime settings.
+[Collection("ProcessEnvIsolation")]
 public sealed class AccountDisplayTests : IDisposable
 {
+    private readonly string originalApiKey = ParserConfigs.GetApiKey();
+    private readonly bool originalRemoteAccess = ParserConfigs.GetRemoteAccess();
+    private readonly bool originalUseVsCodeTheme = ParserConfigs.GetUseVsCodeTheme();
+    private readonly bool originalRouteThroughVibeRailsAi = ParserConfigs.GetRouteThroughVibeRailsAi();
     private readonly string directory = Path.Combine(Path.GetTempPath(), "viberails-account-tests", Guid.NewGuid().ToString("N"));
     private readonly SettingsFile store;
     private readonly ApiKeyStore keys;
@@ -93,6 +99,10 @@ public sealed class AccountDisplayTests : IDisposable
 
     public void Dispose()
     {
+        ParserConfigs.SetApiKey(originalApiKey);
+        ParserConfigs.SetRemoteAccess(originalRemoteAccess);
+        ParserConfigs.SetUseVsCodeTheme(originalUseVsCodeTheme);
+        ParserConfigs.SetRouteThroughVibeRailsAi(originalRouteThroughVibeRailsAi);
         store.Dispose();
         Directory.Delete(directory, recursive: true);
     }
