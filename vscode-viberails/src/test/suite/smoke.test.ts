@@ -3,12 +3,16 @@ import * as http from 'http';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { WebviewPanelManager } from '../../webview-panel';
+import { BackendManager } from '../../backend-manager';
+import { deactivate } from '../../extension';
 
 interface TestConnectionInfo {
     port: number | null;
     sessionToken: string | null;
     tabToken: string | null;
     webviewVisible: boolean;
+    webviewOpen: boolean;
+    backendReady: boolean;
 }
 
 interface TerminalTabStatusResponse {
@@ -24,7 +28,7 @@ interface UserInputRecord {
 }
 
 interface LauncherViewSnapshot {
-    dashboardOpen: boolean;
+    backendReady: boolean;
     items: Array<{ key: string; kind: string; label: string }>;
     message: string | null;
 }
@@ -135,7 +139,7 @@ function requestJson<T extends JsonValue = JsonObject>(
     });
 }
 
-async function getConnectionInfo(): Promise<TestConnectionInfo> {
+async function getConnectionInfo(requireVisible = true): Promise<TestConnectionInfo> {
     return await poll<TestConnectionInfo>(
         async () => {
             const info = await vscode.commands.executeCommand<TestConnectionInfo>('viberails._test.getConnectionInfo');
@@ -143,7 +147,7 @@ async function getConnectionInfo(): Promise<TestConnectionInfo> {
                 return null;
             }
 
-            if (!info.port || !info.sessionToken || !info.tabToken || !info.webviewVisible) {
+            if (!info.backendReady || !info.port || !info.sessionToken || !info.tabToken || (requireVisible && !info.webviewVisible)) {
                 return null;
             }
 
@@ -151,7 +155,7 @@ async function getConnectionInfo(): Promise<TestConnectionInfo> {
         },
         60000,
         500,
-        'Timed out waiting for the VibeRails dashboard to open.'
+        'Timed out waiting for VibeRails to be ready.'
     );
 }
 
@@ -283,6 +287,128 @@ suite('VibeRails VS Code Smoke', function () {
         } catch {
             // Best-effort cleanup only.
         }
+    });
+
+    test('warms the backend and sidebar without a panel, then reuses it across dashboard opens', async () => {
+        connectionInfo = await getConnectionInfo(false);
+        assert.equal(connectionInfo.webviewOpen, false, 'Automatic startup must not create a dashboard panel.');
+        const warm = { ...connectionInfo };
+        const sidebar = await vscode.commands.executeCommand<LauncherViewSnapshot>('viberails._test.getLauncherItems');
+        assert.equal(sidebar?.backendReady, true);
+        const catalog = await requestJson(connectionInfo, 'GET', '/api/v1/automation-nav/preferences');
+        assert.ok(Array.isArray(catalog.items), 'The hidden backend must already accept authenticated sidebar calls.');
+
+        await Promise.all([
+            vscode.commands.executeCommand('viberails.open'),
+            vscode.commands.executeCommand('viberails.open')
+        ]);
+        connectionInfo = await getConnectionInfo();
+        assert.equal(connectionInfo.port, warm.port);
+        assert.equal(connectionInfo.sessionToken, warm.sessionToken);
+        assert.equal(connectionInfo.tabToken, warm.tabToken);
+
+        await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+        const hidden = await poll(async () => {
+            const info = await vscode.commands.executeCommand<TestConnectionInfo>('viberails._test.getConnectionInfo');
+            return info && !info.webviewOpen ? info : null;
+        }, 10000, 50, 'Dashboard panel did not close.');
+        assert.equal(hidden.backendReady, true, 'Closing the editor must leave the sidebar backend running.');
+        assert.equal(hidden.sessionToken, warm.sessionToken);
+        const stillReady = await vscode.commands.executeCommand<LauncherViewSnapshot>('viberails._test.getLauncherItems');
+        assert.equal(stillReady?.backendReady, true);
+
+        await vscode.commands.executeCommand('viberails.open');
+        connectionInfo = await getConnectionInfo();
+        assert.equal(connectionInfo.port, warm.port);
+        assert.equal(connectionInfo.sessionToken, warm.sessionToken);
+    });
+
+    test('Stop cancels pending startup and prevents its delayed continuation from launching', async () => {
+        await vscode.commands.executeCommand('viberails.stop');
+        const originalStart = BackendManager.prototype.start;
+        let release!: () => void;
+        let entered!: () => void;
+        const gate = new Promise<void>(resolve => { release = resolve; });
+        const starting = new Promise<void>(resolve => { entered = resolve; });
+        let finish!: () => void;
+        const finished = new Promise<void>(resolve => { finish = resolve; });
+        BackendManager.prototype.start = async function (...args) {
+            entered();
+            await gate;
+            try { return await originalStart.apply(this, args); }
+            finally { finish(); }
+        };
+        try {
+            const open = vscode.commands.executeCommand('viberails.open');
+            await starting;
+            const stop = vscode.commands.executeCommand('viberails.stop');
+            await Promise.race([
+                stop,
+                sleep(4500).then(() => { throw new Error('Stop waited for the blocked startup.'); })
+            ]);
+            release();
+            await Promise.all([open, finished]);
+            const info = await vscode.commands.executeCommand<TestConnectionInfo>('viberails._test.getConnectionInfo');
+            assert.equal(info?.backendReady, false);
+            assert.equal(info?.port, null);
+            assert.equal(info?.sessionToken, null);
+            assert.equal(info?.webviewOpen, false);
+        } finally {
+            release();
+            BackendManager.prototype.start = originalStart;
+        }
+    });
+
+    test('automatic startup can be disabled and enabled without stopping a running backend', async () => {
+        const config = vscode.workspace.getConfiguration('viberails');
+        const previous = config.inspect<boolean>('autoStart')?.globalValue;
+        try {
+            await config.update('autoStart', false, vscode.ConfigurationTarget.Global);
+            const stopped = await vscode.commands.executeCommand<TestConnectionInfo>('viberails._test.getConnectionInfo');
+            assert.equal(stopped?.port, null);
+            await config.update('autoStart', true, vscode.ConfigurationTarget.Global);
+            connectionInfo = await getConnectionInfo(false);
+            assert.equal(connectionInfo.webviewOpen, false);
+            await config.update('autoStart', false, vscode.ConfigurationTarget.Global);
+            const running = await vscode.commands.executeCommand<TestConnectionInfo>('viberails._test.getConnectionInfo');
+            assert.equal(running?.backendReady, true);
+            assert.equal(running?.sessionToken, connectionInfo.sessionToken);
+        } finally {
+            await config.update('autoStart', previous, vscode.ConfigurationTarget.Global);
+        }
+    });
+
+    test('a failed bootstrap stops the partial backend and a later open can retry', async () => {
+        const originalBootstrap = BackendManager.prototype.getBootstrapUrl;
+        BackendManager.prototype.getBootstrapUrl = () => 'not-a-valid-bootstrap-url';
+        try {
+            await vscode.commands.executeCommand('viberails.open');
+            const failed = await vscode.commands.executeCommand<TestConnectionInfo>('viberails._test.getConnectionInfo');
+            assert.equal(failed?.port, null);
+            assert.equal(failed?.backendReady, false);
+            assert.equal(failed?.webviewOpen, false);
+        } finally {
+            BackendManager.prototype.getBootstrapUrl = originalBootstrap;
+        }
+        await vscode.commands.executeCommand('viberails.open');
+        connectionInfo = await getConnectionInfo();
+    });
+
+    test('a backend exit clears the sidebar and a later open obtains a fresh connection', async () => {
+        await vscode.commands.executeCommand('viberails.open');
+        connectionInfo = await getConnectionInfo();
+        const oldToken = connectionInfo.sessionToken;
+        await requestJson(connectionInfo, 'POST', '/api/v1/shutdown');
+        await poll(async () => {
+            const info = await vscode.commands.executeCommand<TestConnectionInfo>('viberails._test.getConnectionInfo');
+            return info && !info.backendReady && !info.webviewOpen ? info : null;
+        }, 15000, 100, 'Backend exit did not clear the extension state.');
+        const sidebar = await vscode.commands.executeCommand<LauncherViewSnapshot>('viberails._test.getLauncherItems');
+        assert.equal(sidebar?.backendReady, false);
+        assert.deepEqual(sidebar?.items, []);
+        await vscode.commands.executeCommand('viberails.open');
+        connectionInfo = await getConnectionInfo();
+        assert.notEqual(connectionInfo.sessionToken, oldToken);
     });
 
     test('code report loads real data under the installed webview CSP and disposes on navigation', async () => {
@@ -464,14 +590,14 @@ suite('VibeRails VS Code Smoke', function () {
         }
     });
 
-    test('the Activity Bar launcher view lists the nav flyout catalog and empties when the dashboard closes', async () => {
+    test('the Activity Bar launcher view lists the nav flyout catalog and empties when VibeRails stops', async () => {
         await vscode.commands.executeCommand('viberails.open');
         connectionInfo = await getConnectionInfo();
 
         await vscode.commands.executeCommand('viberails.launcher.refresh');
         const shown = await vscode.commands.executeCommand<LauncherViewSnapshot>('viberails._test.getLauncherItems');
         assert.ok(shown, 'The launcher test command returned nothing.');
-        assert.equal(shown.dashboardOpen, true);
+        assert.equal(shown.backendReady, true);
 
         // Read-only on purpose: the suite runs against the user's real state.db, so the
         // catalog is compared with what the view shows, never run, customized or reset.
@@ -490,8 +616,60 @@ suite('VibeRails VS Code Smoke', function () {
         await vscode.commands.executeCommand('viberails.stop');
         connectionInfo = null;
         const closed = await vscode.commands.executeCommand<LauncherViewSnapshot>('viberails._test.getLauncherItems');
-        assert.equal(closed?.dashboardOpen, false);
+        assert.equal(closed?.backendReady, false);
         assert.deepEqual(closed?.items, []);
         assert.equal(closed?.message, null);
+    });
+
+    // Last in this suite: actual deactivation permanently disables further launches.
+    test('deactivation stops a live backend before the host deadline even while startup stays blocked', async () => {
+        await vscode.commands.executeCommand('viberails.stop');
+        const originalStart = BackendManager.prototype.start;
+        let release!: () => void;
+        let entered!: (port: number) => void;
+        let finish!: () => void;
+        const gate = new Promise<void>(resolve => { release = resolve; });
+        const starting = new Promise<number>(resolve => { entered = resolve; });
+        const finished = new Promise<void>(resolve => { finish = resolve; });
+        BackendManager.prototype.start = async function (...args) {
+            try {
+                const port = await originalStart.apply(this, args);
+                entered(port);
+                await gate;
+                return port;
+            } finally { finish(); }
+        };
+        let open: Thenable<unknown> | undefined;
+        try {
+            open = vscode.commands.executeCommand('viberails.open');
+            const port = await starting;
+            const began = Date.now();
+            await Promise.race([
+                deactivate(),
+                sleep(4500).then(() => { throw new Error('Deactivation exceeded the extension-host deadline.'); })
+            ]);
+            // Keep the startup continuation blocked past the real five-second host
+            // deadline. It must not be needed to stop the already-running process.
+            await sleep(Math.max(0, 5500 - (Date.now() - began)));
+            const status = await new Promise<number | null>(resolve => {
+                const request = http.get({ host: '127.0.0.1', port, path: '/health' }, response => {
+                    response.resume();
+                    resolve(response.statusCode ?? null);
+                });
+                request.on('error', () => resolve(null));
+                request.setTimeout(1000, () => { request.destroy(); resolve(null); });
+            });
+            assert.equal(status, null, 'The owned backend was still listening after window deactivation.');
+            release();
+            await Promise.all([open, finished]);
+            const info = await vscode.commands.executeCommand<TestConnectionInfo>('viberails._test.getConnectionInfo');
+            assert.equal(info?.port, null);
+            assert.equal(info?.backendReady, false);
+            assert.equal(info?.webviewOpen, false);
+        } finally {
+            release();
+            BackendManager.prototype.start = originalStart;
+            await Promise.allSettled([open, deactivate()]);
+        }
     });
 });

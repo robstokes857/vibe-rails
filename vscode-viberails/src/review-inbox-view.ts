@@ -168,8 +168,8 @@ export function describeReviewRow(row: ReviewInboxRow): string {
 }
 
 export interface ReviewInboxProviderDependencies {
-    /** True while the dashboard panel exists, which is the only time the backend is reachable. */
-    isDashboardOpen(): boolean;
+    /** True once the backend is authenticated and healthy, with or without a dashboard panel. */
+    isBackendReady(): boolean;
     /** Resolves the body of `GET /api/v1/review-inbox`. */
     fetchInbox(): Promise<unknown>;
 }
@@ -247,7 +247,7 @@ export class ReviewInboxTreeDataProvider implements vscode.TreeDataProvider<Revi
     }
 
     private async load(): Promise<void> {
-        if (!this.dependencies.isDashboardOpen()) {
+        if (!this.dependencies.isBackendReady()) {
             this.apply(null, undefined);
             return;
         }
@@ -259,8 +259,8 @@ export class ReviewInboxTreeDataProvider implements vscode.TreeDataProvider<Revi
             state = null;
         }
 
-        // The dashboard may have closed while the request was in flight.
-        if (!this.dependencies.isDashboardOpen()) {
+        // The backend may have stopped while the request was in flight.
+        if (!this.dependencies.isBackendReady()) {
             this.apply(null, undefined);
             return;
         }

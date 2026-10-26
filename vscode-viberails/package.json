@@ -59,7 +59,7 @@
       },
       {
         "command": "viberails.stop",
-        "title": "VibeRails: Stop Dashboard"
+        "title": "VibeRails: Stop"
       },
       {
         "command": "viberails.addScript",
@@ -162,18 +162,18 @@
     "viewsWelcome": [
       {
         "view": "viberails.launcher",
-        "when": "!viberails.dashboardOpen",
-        "contents": "Open the VibeRails dashboard to list your automations and scripts.\n[Open Dashboard](command:viberails.open)"
+        "when": "!viberails.backendReady",
+        "contents": "Start VibeRails to list your automations and scripts.\n[Open Dashboard](command:viberails.open)"
       },
       {
         "view": "viberails.reviewInbox",
-        "when": "!viberails.dashboardOpen",
-        "contents": "Open the VibeRails dashboard to see the changes other people asked you to review.\n[Open Dashboard](command:viberails.open)"
+        "when": "!viberails.backendReady",
+        "contents": "Start VibeRails to see the changes other people asked you to review.\n[Open Dashboard](command:viberails.open)"
       },
       {
         "view": "viberails.reviewRequests",
-        "when": "!viberails.dashboardOpen",
-        "contents": "Open the VibeRails dashboard to see this project's review requests and their decisions.\n[Open Dashboard](command:viberails.open)"
+        "when": "!viberails.backendReady",
+        "contents": "Start VibeRails to see this project's review requests and their decisions.\n[Open Dashboard](command:viberails.open)"
       }
     ],
     "menus": {
@@ -277,6 +277,11 @@
     "configuration": {
       "title": "VibeRails",
       "properties": {
+        "viberails.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Start VibeRails in the background when a trusted workspace opens, so the sidebar is ready and the dashboard opens faster. Closing the dashboard tab keeps VibeRails and scheduled automations running until you stop VibeRails or close this VS Code window. Disable this to start only when you open the dashboard."
+        },
         "viberails.startupTimeoutMs": {
           "type": "number",
           "default": 30000,

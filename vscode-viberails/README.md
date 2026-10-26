@@ -116,6 +116,11 @@ nav Play button, in the order you chose there. Click an automation to queue it o
 to open its run window, and use the view's title buttons to refresh, customize the list, or open
 the Automation page.
 
+The backend starts quietly when VS Code opens a trusted workspace, so the Launch view is ready
+without opening the dashboard. Closing the dashboard tab keeps VibeRails and scheduled Automations
+running. Use **VibeRails: Stop**, the status bar's close button, or the dashboard's **Exit** button
+to stop it; closing the VS Code window also stops it.
+
 ## Get Started
 
 1. Install the extension from the VS Code Marketplace.
@@ -146,6 +151,7 @@ The extension ships the whole VibeRails backend inside the VSIX — there is **n
 
 | Setting | Default | Description |
 |---|---|---|
+| `viberails.autoStart` | `true` | Start quietly when a trusted workspace opens. Disable to start only when you open the dashboard; use Stop to end a running backend. |
 | `viberails.startupTimeoutMs` | `30000` | How long to wait for the backend to start before giving up. Raise it if a cold first launch on a slow machine times out. |
 
 ## Troubleshooting
@@ -156,7 +162,7 @@ The extension ships the whole VibeRails backend inside the VSIX — there is **n
 
 **Startup times out on first launch.** The first run of the native binary is the slowest (antivirus scanning, cold file cache). Raise `viberails.startupTimeoutMs`.
 
-**Port already in use.** Ports are allocated dynamically per launch, so this normally resolves itself — run `VibeRails: Stop Dashboard`, then open it again. If a previous backend was force-killed and is still holding the port, end any stray `vb` process and retry.
+**Port already in use.** Ports are allocated dynamically per launch, so this normally resolves itself — run `VibeRails: Stop`, then open it again. If a previous backend was force-killed and is still holding the port, end any stray `vb` process and retry.
 
 **Windows SmartScreen / antivirus prompt.** The bundled `vb.exe` is a freshly built native binary, so it can trip reputation-based scanners on first run. Allowing it once is enough.
 

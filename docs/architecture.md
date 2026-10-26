@@ -289,13 +289,14 @@ vb
 vb --vs-code-v1 [--parent-pid <pid>]
 ```
 - Internal mode used by the VS Code extension and terminal-tab child processes
-- Prints a one-time bootstrap URL for the extension host
+- The extension starts its root backend after a trusted workspace opens (`viberails.autoStart`, default true), without creating a dashboard panel. The sidebar uses backend readiness independently of panel visibility. Closing the panel preserves the backend; Stop, dashboard Exit, and extension shutdown stop it. No OS service or startup registration is installed.
+- Prints a one-time bootstrap URL for the extension host; automatic and manual starts share its immediate token exchange and health check
 - Uses the same authenticated web/API backend as browser mode
 - The Explorer/editor-tab **Add to VibeRails Scripts…** command hands a selected `.ps1`,
   `.sh` or `.py` path to the dashboard after a readiness/receipt handshake. The shared
   `PythonScriptsController.importScript` shows the existing registration form and calls the
   authenticated root-only import route. It opens existing visible entries by ID and leaves new
-  entries unsigned. A cold start uses the selected file's workspace folder; an open dashboard
+  entries unsigned. A cold backend start uses the selected file's workspace folder; a running backend
   keeps its project and offers Global scope for files outside it.
 
 #### 3. Environment Bootstrap Mode

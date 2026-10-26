@@ -78,6 +78,8 @@ export class BackendManager {
     private outputChannel: vscode.OutputChannel;
     private _onPortDetected: vscode.EventEmitter<number> = new vscode.EventEmitter<number>();
     public readonly onPortDetected: vscode.Event<number> = this._onPortDetected.event;
+    private readonly _onDidStop = new vscode.EventEmitter<void>();
+    public readonly onDidStop: vscode.Event<void> = this._onDidStop.event;
 
     constructor(private readonly exePath: string) {
         this.outputChannel = vscode.window.createOutputChannel(OUTPUT_CHANNEL_NAME);
@@ -121,11 +123,15 @@ export class BackendManager {
 
     public async start(
         targetProjectFolder: string | null,
-        startupTimeoutMs: number = DEFAULT_STARTUP_TIMEOUT_MS
+        startupTimeoutMs: number = DEFAULT_STARTUP_TIMEOUT_MS,
+        signal?: AbortSignal
     ): Promise<number> {
+        signal?.throwIfAborted();
         if (this.stopPromise) {
             await this.stopPromise;
         }
+        signal?.throwIfAborted();
+        if (this.disposed) throw new Error('The VibeRails backend manager has been shut down.');
 
         if (this.isRunning()) {
             return this.port!;
@@ -387,12 +393,14 @@ export class BackendManager {
             return;
         }
 
+        const wasRunning = this.process !== null;
         this.process = null;
         this.port = null;
         this.host = null;
         this.bootstrapUrl = null;
         this.sessionToken = null;
         this.tabToken = null;
+        if (wasRunning) this._onDidStop.fire();
     }
 
     /**
@@ -414,6 +422,7 @@ export class BackendManager {
         if (this.disposed) { return; }
         this.disposed = true;
         this._onPortDetected.dispose();
+        this._onDidStop.dispose();
         this.outputChannel.dispose();
     }
 

@@ -26,6 +26,9 @@ export class WebviewPanelManager {
 
     private _onCloseRequested: vscode.EventEmitter<void> = new vscode.EventEmitter<void>();
     public readonly onCloseRequested: vscode.Event<void> = this._onCloseRequested.event;
+    private readonly _onDidClose = new vscode.EventEmitter<void>();
+    /** Closing the editor tab leaves the extension-owned backend running. */
+    public readonly onDidClose: vscode.Event<void> = this._onDidClose.event;
     private _onLauncherChanged: vscode.EventEmitter<void> = new vscode.EventEmitter<void>();
     /** The dashboard saved or reset the launcher's order and visibility, or its catalog changed. */
     public readonly onLauncherChanged: vscode.Event<void> = this._onLauncherChanged.event;
@@ -194,7 +197,7 @@ export class WebviewPanelManager {
             this.finishImport('The VibeRails dashboard was closed.');
             this.dropPendingMessages();
             this.panel = null;
-            this._onCloseRequested.fire();
+            this._onDidClose.fire();
         });
 
         this.panel.webview.html = this.buildHtml(this.panel.webview, port, sessionToken, tabToken);

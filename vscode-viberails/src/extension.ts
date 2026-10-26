@@ -34,8 +34,9 @@ import {
     COMMAND_TEST_CONNECTION_INFO,
     COMMAND_TEST_LAUNCHER_ITEMS,
     CONFIG_SECTION,
+    CONFIG_AUTO_START,
     CONFIG_STARTUP_TIMEOUT_MS,
-    CONTEXT_DASHBOARD_OPEN,
+    CONTEXT_BACKEND_READY,
     DEFAULT_STARTUP_TIMEOUT_MS,
     HEALTH_CHECK_ATTEMPTS,
     HEALTH_CHECK_DELAY_MS,
@@ -65,6 +66,8 @@ interface TestConnectionInfo {
     sessionToken: string | null;
     tabToken: string | null;
     webviewVisible: boolean;
+    webviewOpen: boolean;
+    backendReady: boolean;
 }
 
 /** Marks a bootstrap failure that came back as an HTTP response — never worth retrying. */
@@ -84,10 +87,15 @@ let reviewInboxProvider: ReviewInboxTreeDataProvider | null = null;
 let reviewRequestsProvider: ReviewRequestsTreeDataProvider | null = null;
 let closingPromise: Promise<void> | null = null;
 let openingPromise: Promise<void> | null = null;
+let startingPromise: Promise<BackendConnection> | null = null;
+let startupAbort: AbortController | null = null;
+let backendReady = false;
+let deactivating = false;
 /** Launcher rows with a run in flight (see runLauncherItem). */
 const runningLauncherKeys = new Set<string>();
 
 export function activate(context: vscode.ExtensionContext) {
+    deactivating = false;
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 1000);
     statusBarItem.text = "$(terminal) VibeRails";
     statusBarItem.tooltip = "Open VibeRails Dashboard";
@@ -111,6 +119,7 @@ export function activate(context: vscode.ExtensionContext) {
         try {
             await openDashboard(context);
         } catch (error) {
+            if (closingPromise || deactivating) return;
             const message = error instanceof Error ? error.message : String(error);
             vscode.window.showErrorMessage(`Failed to open VibeRails Dashboard: ${message}`);
         }
@@ -136,8 +145,29 @@ export function activate(context: vscode.ExtensionContext) {
     registerTestCommands(context);
     context.subscriptions.push({
         dispose: () => {
+            deactivating = true;
             void closeDashboard(false, true);
         }
+    });
+    context.subscriptions.push(
+        vscode.workspace.onDidGrantWorkspaceTrust(() => autoStartBackend(context)),
+        vscode.workspace.onDidChangeWorkspaceFolders(() => autoStartBackend(context)),
+        vscode.workspace.onDidChangeConfiguration(event => {
+            if (event.affectsConfiguration(`${CONFIG_SECTION}.${CONFIG_AUTO_START}`)) autoStartBackend(context);
+        })
+    );
+    autoStartBackend(context);
+}
+
+/** Warm the API without creating a webview or delaying extension activation. */
+function autoStartBackend(context: vscode.ExtensionContext): void {
+    if (deactivating || closingPromise || !vscode.workspace.isTrusted || !getCurrentWorkspaceFolder(context)
+        || !vscode.workspace.getConfiguration(CONFIG_SECTION).get<boolean>(CONFIG_AUTO_START, true)) return;
+
+    void startBackend(context).catch(error => {
+        if (deactivating || closingPromise) return;
+        const message = error instanceof Error ? error.message : String(error);
+        void vscode.window.showWarningMessage(`VibeRails could not start automatically: ${message}. Open the dashboard to retry.`);
     });
 }
 
@@ -147,29 +177,33 @@ async function closeDashboard(showMessage: boolean, shutdownBackend: boolean): P
         return;
     }
 
-    closingPromise = (async () => {
-        webviewManager?.dispose();
-        webviewManager = null;
-        stopBarItem?.hide();
-        void setDashboardOpenContext(false);
-        void launcherProvider?.refresh();
-        void reviewInboxProvider?.refresh();
-        void reviewRequestsProvider?.refresh();
+    // Publish the stop first, then cancel startup and begin shutdown immediately.
+    // VS Code allows only five seconds for deactivation; startup may never finish.
+    closingPromise = Promise.resolve().then(async () => {
+        startupAbort?.abort();
+        disposeDashboardPanel();
+        backendReady = false;
+        refreshBackendViews();
 
         const manager = backendManager;
+        let stopping: Promise<void> | undefined;
         if (manager) {
             if (shutdownBackend) {
                 if (backendManager === manager) { backendManager = null; }
-                await manager.shutdown();
+                stopping = manager.shutdown();
             } else {
-                await manager.stop();
+                stopping = manager.stop();
             }
         }
+        // Startup is abortable even if an underlying launch/HTTP continuation is
+        // delayed. Those continuations also check the signal before mutating state.
+        await Promise.allSettled([startingPromise, openingPromise]);
+        await stopping;
 
         if (showMessage) {
             vscode.window.showInformationMessage('VibeRails closed');
         }
-    })();
+    });
 
     try {
         await closingPromise;
@@ -180,6 +214,7 @@ async function closeDashboard(showMessage: boolean, shutdownBackend: boolean): P
 
 async function openDashboard(context: vscode.ExtensionContext, projectFolder?: string): Promise<void> {
     if (closingPromise) await closingPromise;
+    if (deactivating) return;
     if (openingPromise) return openingPromise;
     openingPromise = createDashboard(context, projectFolder);
     try {
@@ -196,64 +231,109 @@ async function createDashboard(context: vscode.ExtensionContext, projectFolder?:
     }
 
     const bundledAssets = resolveBundledAssets(context);
-    const targetProjectFolder = projectFolder ?? getCurrentWorkspaceFolder(context);
-    const manager = await ensureBackendManager(bundledAssets.exePath);
-
     await vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
         title: 'Starting VibeRails...',
         cancellable: false
     }, async (progress) => {
-        if (!manager.isRunning()) {
-            progress.report({ message: 'Starting backend server...' });
-            await manager.start(targetProjectFolder, getStartupTimeoutMs());
-        }
-
-        const port = manager.getPort();
-        if (!port) {
-            throw new Error('Backend started but port not available');
-        }
-        const host = manager.getHost();
-        if (!host) {
-            throw new Error('Backend started but loopback host was not available');
-        }
-
-        const bootstrapUrl = manager.getBootstrapUrl();
-        if (!bootstrapUrl) {
-            throw new Error('Backend started but bootstrap URL was not available');
-        }
-
-        // Tokens are instance-wide and stay valid for the whole backend process lifetime,
-        // so reuse them whenever the backend is already up. The bootstrap code embedded in
-        // the URL is single-use: re-fetching against a still-running backend would spend an
-        // already-consumed code and lock the dashboard out with a 403.
-        let { sessionToken, tabToken } = manager.getAuthTokens();
-        if (!sessionToken || !tabToken) {
-            // Bootstrap before probing health — the one-time code expires two minutes after
-            // it is minted, so it must not sit waiting behind anything.
-            const fetched = await fetchTokensWithRetry(bootstrapUrl);
-            sessionToken = fetched.sessionToken;
-            tabToken = fetched.tabToken;
-            manager.setAuthTokens(sessionToken, tabToken);
-        }
-
-        progress.report({ message: 'Waiting for backend to respond...' });
-        await waitForHealthy(host, port);
+        progress.report({ message: 'Preparing backend...' });
+        const { port, sessionToken, tabToken } = await startBackend(context, projectFolder);
+        if (closingPromise || deactivating) return;
 
         progress.report({ message: 'Creating dashboard...' });
-        webviewManager = new WebviewPanelManager(bundledAssets.wwwrootPath);
+        const panel = new WebviewPanelManager(bundledAssets.wwwrootPath);
+        webviewManager = panel;
 
-        webviewManager.onCloseRequested(() => { void closeDashboard(true, false); });
-        webviewManager.onLauncherChanged(() => { void launcherProvider?.refresh(); });
-        webviewManager.onReviewRequestChanged((change) => { void reviewRequestsProvider?.handleChange(change); });
+        panel.onCloseRequested(() => { void closeDashboard(true, false); });
+        panel.onDidClose(() => { if (webviewManager === panel) disposeDashboardPanel(); });
+        panel.onLauncherChanged(() => { void launcherProvider?.refresh(); });
+        panel.onReviewRequestChanged((change) => { void reviewRequestsProvider?.handleChange(change); });
 
-        await webviewManager.create(port, sessionToken, tabToken);
-        stopBarItem?.show();
-        void setDashboardOpenContext(true);
-        void launcherProvider?.refresh();
-        void reviewInboxProvider?.refresh();
-        void reviewRequestsProvider?.refresh();
+        await panel.create(port, sessionToken, tabToken);
     });
+}
+
+function disposeDashboardPanel(): void {
+    const panel = webviewManager;
+    webviewManager = null;
+    panel?.dispose();
+}
+
+/** Share the complete start/bootstrap/health handshake with every caller. */
+function startBackend(context: vscode.ExtensionContext, projectFolder?: string): Promise<BackendConnection> {
+    if (closingPromise || deactivating) return Promise.reject(new Error('VibeRails is stopping.'));
+    if (startingPromise) return startingPromise;
+    if (isBackendReady()) return Promise.resolve(getBackendConnection());
+
+    const controller = new AbortController();
+    startupAbort = controller;
+    const { signal } = controller;
+    const startup = (async () => {
+        if (!vscode.workspace.isTrusted) throw new Error('Trust this workspace before starting VibeRails.');
+        const assets = resolveBundledAssets(context);
+        const manager = await ensureBackendManager(assets.exePath);
+        try {
+            signal.throwIfAborted();
+            await manager.start(projectFolder ?? getCurrentWorkspaceFolder(context), getStartupTimeoutMs(), signal);
+            signal.throwIfAborted();
+            const port = manager.getPort();
+            const host = manager.getHost();
+            const bootstrapUrl = manager.getBootstrapUrl();
+            if (!port || !host || !bootstrapUrl) throw new Error('Backend did not provide a loopback connection.');
+
+            // Consume the expiring, single-use code immediately, even if no panel will
+            // be opened for hours. All later callers reuse these process-lifetime tokens.
+            let { sessionToken, tabToken } = manager.getAuthTokens();
+            if (!sessionToken || !tabToken) {
+                const fetched = await fetchTokensWithRetry(bootstrapUrl, signal);
+                signal.throwIfAborted();
+                sessionToken = fetched.sessionToken;
+                tabToken = fetched.tabToken;
+                manager.setAuthTokens(sessionToken, tabToken);
+            }
+            await waitForHealthy(host, port, signal);
+            signal.throwIfAborted();
+            if (!manager.isRunning()) throw new Error('VibeRails stopped during startup.');
+            backendReady = true;
+            if (!closingPromise && !deactivating) refreshBackendViews();
+            return { host, port, sessionToken, tabToken };
+        } catch (error) {
+            // A failed/ambiguous bootstrap cannot reuse its one-time code on retry.
+            // Close owns cleanup after cancellation. A late continuation must not
+            // stop a newer launch that reused the manager after an explicit Stop.
+            if (!signal.aborted) {
+                backendReady = false;
+                await manager.stop();
+                refreshBackendViews();
+            }
+            throw error;
+        }
+    })();
+    startingPromise = abortableStartup(startup, signal).finally(() => {
+        if (startupAbort === controller) startupAbort = null;
+        startingPromise = null;
+    });
+    return startingPromise;
+}
+
+/** Stop waiting immediately while still observing any late launch rejection. */
+function abortableStartup<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+    return new Promise((resolve, reject) => {
+        const aborted = () => reject(signal.reason);
+        signal.addEventListener('abort', aborted, { once: true });
+        work.then(resolve, reject).finally(() => signal.removeEventListener('abort', aborted));
+        if (signal.aborted) aborted();
+    });
+}
+
+function refreshBackendViews(): void {
+    const ready = isBackendReady();
+    if (ready) stopBarItem?.show();
+    else stopBarItem?.hide();
+    void vscode.commands.executeCommand('setContext', CONTEXT_BACKEND_READY, ready);
+    void launcherProvider?.refresh();
+    void reviewInboxProvider?.refresh();
+    void reviewRequestsProvider?.refresh();
 }
 
 // --- Activity Bar launcher view -------------------------------------------
@@ -263,10 +343,10 @@ async function createDashboard(context: vscode.ExtensionContext, projectFolder?:
  * running, customizing and managing behave like the flyout's rows and footer.
  */
 function registerLauncherView(context: vscode.ExtensionContext): void {
-    void setDashboardOpenContext(false);
+    void vscode.commands.executeCommand('setContext', CONTEXT_BACKEND_READY, false);
 
     const provider = new LauncherTreeDataProvider({
-        isDashboardOpen,
+        isBackendReady,
         fetchItems: () => requestJson(getBackendConnection(), 'GET', AUTOMATION_NAV_PREFERENCES_PATH)
     });
     launcherProvider = provider;
@@ -311,7 +391,7 @@ function registerLauncherView(context: vscode.ExtensionContext): void {
  */
 function registerReviewInboxView(context: vscode.ExtensionContext): void {
     const provider = new ReviewInboxTreeDataProvider({
-        isDashboardOpen,
+        isBackendReady,
         fetchInbox: () => requestJson(getBackendConnection(), 'GET', REVIEW_INBOX_PATH)
     });
     reviewInboxProvider = provider;
@@ -358,7 +438,7 @@ function registerReviewInboxView(context: vscode.ExtensionContext): void {
 function registerReviewRequestsView(context: vscode.ExtensionContext): void {
     const openCard = 'Open card';
     const provider = new ReviewRequestsTreeDataProvider({
-        isDashboardOpen,
+        isBackendReady,
         fetchRequests: () => requestJson(getBackendConnection(), 'GET', REVIEW_REQUESTS_PATH),
         notify: (message, change) => {
             void vscode.window.showInformationMessage(message, ...(change.cardKey ? [openCard] : [])).then((choice) => {
@@ -388,9 +468,9 @@ function registerReviewRequestsView(context: vscode.ExtensionContext): void {
     );
 }
 
-/** The backend only runs while the panel exists, so this also means "the API is reachable". */
-function isDashboardOpen(): boolean {
-    if (!webviewManager?.hasPanel() || !backendManager?.isRunning()) {
+/** Readiness belongs to the backend; the dashboard panel is optional. */
+function isBackendReady(): boolean {
+    if (!backendReady || !backendManager?.isRunning()) {
         return false;
     }
     const { sessionToken, tabToken } = backendManager.getAuthTokens();
@@ -403,13 +483,9 @@ function getBackendConnection(): BackendConnection {
     const port = manager?.getPort();
     const tokens = manager?.getAuthTokens();
     if (!manager?.isRunning() || !host || !port || !tokens?.sessionToken || !tokens.tabToken) {
-        throw new Error('The VibeRails dashboard is closed.');
+        throw new Error('VibeRails is stopped. Open the dashboard to start it.');
     }
     return { host, port, sessionToken: tokens.sessionToken, tabToken: tokens.tabToken };
-}
-
-function setDashboardOpenContext(open: boolean): Thenable<unknown> {
-    return vscode.commands.executeCommand('setContext', CONTEXT_DASHBOARD_OPEN, open);
 }
 
 /** Opens the dashboard when needed, brings it forward and hands it one bridge command. */
@@ -440,7 +516,16 @@ async function ensureBackendManager(exePath: string): Promise<BackendManager> {
         await stale.shutdown();
     }
 
-    backendManager ??= new BackendManager(exePath);
+    if (!backendManager) {
+        const manager = new BackendManager(exePath);
+        backendManager = manager;
+        manager.onDidStop(() => {
+            if (backendManager !== manager) return;
+            backendReady = false;
+            disposeDashboardPanel();
+            refreshBackendViews();
+        });
+    }
     return backendManager;
 }
 
@@ -536,12 +621,13 @@ function getSupportedExtensionTarget(): string {
  * Timeouts, resets, and HTTP responses are all potentially post-consumption: the bootstrap
  * code is single-use, so retrying any of those can only turn an ambiguous success into a 403.
  */
-async function fetchTokensWithRetry(bootstrapUrl: string): Promise<{ sessionToken: string, tabToken: string }> {
+async function fetchTokensWithRetry(bootstrapUrl: string, signal: AbortSignal): Promise<{ sessionToken: string, tabToken: string }> {
     let lastError: unknown;
 
     for (let attempt = 1; attempt <= BOOTSTRAP_RETRY_ATTEMPTS; attempt++) {
+        signal.throwIfAborted();
         try {
-            return await fetchTokens(bootstrapUrl);
+            return await fetchTokens(bootstrapUrl, signal);
         } catch (error) {
             lastError = error;
 
@@ -563,7 +649,7 @@ export function isRetryableBootstrapError(error: unknown): boolean {
         && (error as NodeJS.ErrnoException).code === 'ECONNREFUSED';
 }
 
-function fetchTokens(bootstrapUrl: string): Promise<{ sessionToken: string, tabToken: string }> {
+function fetchTokens(bootstrapUrl: string, signal: AbortSignal): Promise<{ sessionToken: string, tabToken: string }> {
     return new Promise((resolve, reject) => {
         const rejectWithStatus = (message: string) => {
             const error = new Error(message);
@@ -571,7 +657,7 @@ function fetchTokens(bootstrapUrl: string): Promise<{ sessionToken: string, tabT
             reject(error);
         };
 
-        const req = http.get(bootstrapUrl, (res) => {
+        const req = http.get(bootstrapUrl, { signal }, (res) => {
             res.resume();
 
             const statusCode = res.statusCode ?? 0;
@@ -637,12 +723,13 @@ export function parseSessionTokenFromSetCookie(setCookie: string[] | undefined):
  * requests are actually served on a cold AOT start. Probe the unauthenticated /health
  * endpoint so a slow start surfaces here rather than as a blank dashboard.
  */
-async function waitForHealthy(host: string, port: number): Promise<void> {
+async function waitForHealthy(host: string, port: number, signal: AbortSignal): Promise<void> {
     let lastError: unknown;
 
     for (let attempt = 1; attempt <= HEALTH_CHECK_ATTEMPTS; attempt++) {
+        signal.throwIfAborted();
         try {
-            await probeHealth(host, port);
+            await probeHealth(host, port, signal);
             return;
         } catch (error) {
             lastError = error;
@@ -656,9 +743,9 @@ async function waitForHealthy(host: string, port: number): Promise<void> {
     throw new Error(`Backend did not become ready on port ${port}: ${detail}`);
 }
 
-function probeHealth(host: string, port: number): Promise<void> {
+function probeHealth(host: string, port: number, signal: AbortSignal): Promise<void> {
     return new Promise((resolve, reject) => {
-        const req = http.get({ host, port, path: HEALTH_PATH }, (res) => {
+        const req = http.get({ host, port, path: HEALTH_PATH, signal }, (res) => {
             res.resume();
             const statusCode = res.statusCode ?? 0;
             if (statusCode >= 200 && statusCode < 300) {
@@ -683,6 +770,7 @@ function escapeRegExp(value: string): string {
 }
 
 export async function deactivate(): Promise<void> {
+    deactivating = true;
     await closeDashboard(false, true);
     webviewManager = null;
     backendManager = null;
@@ -699,7 +787,9 @@ function registerTestCommands(context: vscode.ExtensionContext): void {
             port: backendManager?.getPort() ?? null,
             sessionToken: backendManager?.getAuthTokens().sessionToken ?? null,
             tabToken: backendManager?.getAuthTokens().tabToken ?? null,
-            webviewVisible: webviewManager?.isVisible() ?? false
+            webviewVisible: webviewManager?.isVisible() ?? false,
+            webviewOpen: webviewManager?.hasPanel() ?? false,
+            backendReady: isBackendReady()
         })
     );
 
@@ -709,7 +799,7 @@ function registerTestCommands(context: vscode.ExtensionContext): void {
     context.subscriptions.push(vscode.commands.registerCommand(COMMAND_TEST_LAUNCHER_ITEMS, async () => {
         await launcherProvider?.refresh();
         return {
-            dashboardOpen: isDashboardOpen(),
+            backendReady: isBackendReady(),
             items: launcherProvider?.getItems() ?? [],
             message: launcherProvider?.getMessage() ?? null
         };

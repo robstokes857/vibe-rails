@@ -5,9 +5,9 @@ This VS Code extension provides seamless integration with VibeRails, a dashboard
 ## Features
 
 - **Embedded Dashboard**: Opens the VibeRails dashboard directly inside VS Code as a webview panel
-- **Backend Management**: Automatically starts and stops the VibeRails .NET backend server
+- **Backend Management**: Starts the VibeRails .NET backend quietly after VS Code opens a trusted workspace (disable with `viberails.autoStart`). The root backend belongs to that VS Code window; closing the dashboard tab leaves it running, while Stop, the dashboard Exit button, and extension shutdown stop it
 - **Status Bar Integration**: A `$(terminal) VibeRails` button in the bottom left opens the dashboard; a `$(close)` Stop item appears beside it while the backend is running
-- **Activity Bar launcher**: A play icon in the Activity Bar opens the **Launch** view, the side-bar twin of the dashboard's nav Play button. It groups the project's entries under **Agents & automations** and **Scripts**, with counts, runtime labels and theme-colored icons; each group follows the nav launcher's saved order; clicking a row runs it, and the view title offers Refresh, Customize list… and Manage automations. While the dashboard is closed the view shows an Open Dashboard button instead (the backend only runs with the panel open)
+- **Activity Bar launcher**: A play icon in the Activity Bar opens the **Launch** view, the side-bar twin of the dashboard's nav Play button. It groups the project's entries under **Agents & automations** and **Scripts**, with counts, runtime labels and theme-colored icons; each group follows the nav launcher's saved order; clicking a row runs it, and the view title offers Refresh, Customize list… and Manage automations. It works without an open dashboard tab once the backend is ready. When the backend is stopped the view shows an Open Dashboard button
 - **Reviews requested of you**: a second view in the same container (VB-50 slice D) lists the review requests viberails.ai holds for the signed-in account, from the backend's cache (`GET /api/v1/review-inbox`). A row opens the dashboard's page; the inline Approve asks the backend to open the signing popup on its machine (the popup shows the request, rebuilds the tree from the repository and signs it there); the inline Reject asks for a comment here and posts it; the row's context menu offers Read on viberails.ai. Nothing in the extension signs or sees a key
 - **Local Context**: Runs in the context of your current workspace folder for project-specific configurations
 
@@ -16,16 +16,16 @@ This VS Code extension provides seamless integration with VibeRails, a dashboard
 1. Click the **"VibeRails"** button in the status bar (bottom left), or press `Ctrl+Alt+V` (`Cmd+Alt+V` on macOS)
 2. The dashboard will open in a new VS Code panel
 3. Manage your agents, environments, and rules directly from VS Code
-4. Stop the backend by clicking the `$(close)` status bar item, running `VibeRails: Stop Dashboard`, clicking the dashboard's own **Exit** button, or closing the panel — all four stop the backend server
+4. Closing the dashboard tab keeps the sidebar and scheduled Automations available. Stop the backend with the `$(close)` status bar item, `VibeRails: Stop`, the dashboard's **Exit** button, or by closing the VS Code window
 
 ## Commands
 
 - `VibeRails: Open Dashboard` (`viberails.open`) — starts the backend if needed and opens the dashboard panel
-- `VibeRails: Stop Dashboard` (`viberails.stop`) — closes the panel and stops the backend
+- `VibeRails: Stop` (`viberails.stop`) — closes the panel and stops the backend
 - `Add to VibeRails Scripts…` (`viberails.addScript`) — Explorer and editor-tab context menu
   for local `.ps1`, `.sh` and `.py` files; the command palette uses the active editor.
-  Opens the existing registration form with that path. A cold launch uses the selected file's
-  workspace folder (or its containing folder outside a workspace). An already open dashboard
+  Opens the existing registration form with that path. A cold backend launch uses the selected file's
+  workspace folder (or its containing folder outside a workspace). An already running backend
   stays in its current project; external files offer Global scope and explain how to use Repo.
   Existing visible registrations open by ID. Adding never signs or runs a script.
 - `VibeRails: Run now` (`viberails.launcher.run`) — tree-row click and inline play icon in the
@@ -47,6 +47,7 @@ This VS Code extension provides seamless integration with VibeRails, a dashboard
 
 ## Settings
 
+- `viberails.autoStart` (default `true`) — start quietly in a trusted workspace, without opening the dashboard. Disabling affects future automatic starts; it does not stop a running backend. Explicit Stop remains stopped until the user opens the dashboard, enables auto-start again, changes workspace folders, or reloads the window.
 - `viberails.startupTimeoutMs` (default `30000`) — how long to wait for the backend to start before giving up
 
 ## Architecture
@@ -61,7 +62,7 @@ The extension consists of these components plus a shared constants module:
 5. **Backend API** (`backend-api.ts`) - `requestJson` for authenticated host → backend calls (session + tab headers, `ErrorResponse { error }` surfaced as `BackendRequestError`). Must not import `vscode`. The shutdown ladder keeps its own never-throwing `postShutdown`
 6. **Constants** (`constants.ts`) - Command ids, token header names, backend paths, timeouts. Must not import `vscode`.
 
-The Launch view only ever lists items while the dashboard panel exists: the backend starts in `createDashboard` and stops when the panel closes, and the `viberails.dashboardOpen` context key (set in `createDashboard` / `closeDashboard`) switches the view between its welcome content and the tree. The tree re-reads the catalog when the dashboard opens, when the view becomes visible, on Refresh, after a 404 on run, and whenever the dashboard posts `launcherChanged`.
+The Launch and review views depend on `viberails.backendReady`, independent of the dashboard panel. `startBackend` coalesces automatic and manual starts through the entire bootstrap/health handshake and immediately exchanges the expiring bootstrap code for process-lifetime tokens. Stop cancels startup, closes the panel and immediately begins backend shutdown. Cancellation releases in-flight callers and guards late startup continuations, including launches deferred past the extension host's five-second deactivation deadline. Backend exit clears readiness and sidebar data; opening the dashboard retries with a new process. Closing only the editor tab preserves the backend. Trees refresh on backend readiness, visibility, Refresh, and their existing dashboard notifications. No OS service or startup registration is involved. In a multi-folder workspace, automatic startup chooses the active editor's folder, falling back to the first workspace folder; the running backend retains that project until stopped.
 
 ### Webview bridge
 

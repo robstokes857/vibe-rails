@@ -22,8 +22,8 @@ export const COMMAND_LAUNCHER_CUSTOMIZE = 'viberails.launcher.customize';
 export const COMMAND_LAUNCHER_MANAGE = 'viberails.launcher.manage';
 /** Also hardcoded in the `view ==` clauses of the menu contributions in package.json. */
 export const LAUNCHER_VIEW_ID = 'viberails.launcher';
-/** Context key behind the view's welcome content; true while the dashboard panel exists. */
-export const CONTEXT_DASHBOARD_OPEN = 'viberails.dashboardOpen';
+/** Context key behind the views' welcome content; true once the backend is authenticated and ready. */
+export const CONTEXT_BACKEND_READY = 'viberails.backendReady';
 
 // --- Activity Bar "Reviews requested of you" view (VB-50 slice D) ---------
 
@@ -91,6 +91,7 @@ export const REVIEW_REQUESTS_PATH = '/api/v1/review-requests';
 // --- Settings -------------------------------------------------------------
 
 export const CONFIG_SECTION = 'viberails';
+export const CONFIG_AUTO_START = 'autoStart';
 export const CONFIG_STARTUP_TIMEOUT_MS = 'startupTimeoutMs';
 
 // --- Test hooks -----------------------------------------------------------

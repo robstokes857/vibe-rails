@@ -159,8 +159,8 @@ export function reviewRequestNotification(change: ReviewRequestChange, row: Revi
 }
 
 export interface ReviewRequestsProviderDependencies {
-    /** True while the dashboard panel exists, which is the only time the backend is reachable. */
-    isDashboardOpen(): boolean;
+    /** True once the backend is authenticated and healthy, with or without a dashboard panel. */
+    isBackendReady(): boolean;
     /** Resolves the body of `GET /api/v1/review-requests`. */
     fetchRequests(): Promise<unknown>;
     /** Shows a decision that just arrived. */
@@ -248,7 +248,7 @@ export class ReviewRequestsTreeDataProvider implements vscode.TreeDataProvider<R
     }
 
     private async load(): Promise<void> {
-        if (!this.dependencies.isDashboardOpen()) {
+        if (!this.dependencies.isBackendReady()) {
             this.apply([], undefined);
             return;
         }
@@ -260,8 +260,8 @@ export class ReviewRequestsTreeDataProvider implements vscode.TreeDataProvider<R
             rows = null;
         }
 
-        // The dashboard may have closed while the request was in flight.
-        if (!this.dependencies.isDashboardOpen()) {
+        // The backend may have stopped while the request was in flight.
+        if (!this.dependencies.isBackendReady()) {
             this.apply([], undefined);
             return;
         }

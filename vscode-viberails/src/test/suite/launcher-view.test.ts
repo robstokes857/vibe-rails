@@ -89,7 +89,7 @@ suite('Launcher view catalog rules', () => {
 
 suite('Launcher view provider', () => {
     test('rows run on click and carry the flyout icon, title and inline-action context', () => {
-        const provider = new LauncherTreeDataProvider({ isDashboardOpen: () => true, fetchItems: async () => ({ items: [] }) });
+        const provider = new LauncherTreeDataProvider({ isBackendReady: () => true, fetchItems: async () => ({ items: [] }) });
         try {
             const item = automation(7, 'Nightly review', 0);
             const node = provider.getTreeItem(item);
@@ -110,13 +110,13 @@ suite('Launcher view provider', () => {
         }
     });
 
-    test('shows nothing while the dashboard is closed and the flyout texts otherwise', async () => {
+    test('shows nothing while the backend is stopped and the flyout texts otherwise', async () => {
         let open = false;
         let fail = false;
         let calls = 0;
         let response: unknown = { items: [] };
         const provider = new LauncherTreeDataProvider({
-            isDashboardOpen: () => open,
+            isBackendReady: () => open,
             fetchItems: async () => {
                 calls += 1;
                 if (fail) { throw new Error('boom'); }
@@ -156,7 +156,7 @@ suite('Launcher view provider', () => {
             assert.deepEqual(provider.getChildren(), []);
             assert.equal(provider.getMessage(), LAUNCHER_LOAD_FAILED_MESSAGE);
 
-            // A dashboard that closed while the request was in flight leaves no stale rows.
+            // A backend that stopped while the request was in flight leaves no stale rows.
             fail = false;
             let release: () => void = () => undefined;
             response = new Promise<unknown>((resolve) => { release = () => resolve({ items: [{ key: 'job:1', kind: 'automation', label: 'A', jobId: 1, enabled: true, order: 0 }] }); });
@@ -177,7 +177,7 @@ suite('Launcher view provider', () => {
         let release: () => void = () => undefined;
         let calls = 0;
         const provider = new LauncherTreeDataProvider({
-            isDashboardOpen: () => true,
+            isBackendReady: () => true,
             fetchItems: () => {
                 calls += 1;
                 return new Promise<unknown>((resolve) => { release = () => resolve({ items: [] }); });

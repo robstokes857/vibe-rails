@@ -110,7 +110,7 @@ suite('Review inbox tree', () => {
     test('shows rows while the dashboard is open, with inline actions only on answerable rows', async () => {
         let open = true;
         const provider = new ReviewInboxTreeDataProvider({
-            isDashboardOpen: () => open,
+            isBackendReady: () => open,
             fetchInbox: async () => rawView({ requests: [rawRow(), rawRow({ id: 'rvw_' + 'a'.repeat(32), status: 'approved', decided: true })] })
         });
         try {
@@ -139,7 +139,7 @@ suite('Review inbox tree', () => {
         let calls = 0;
         let fail = true;
         const provider = new ReviewInboxTreeDataProvider({
-            isDashboardOpen: () => true,
+            isBackendReady: () => true,
             fetchInbox: async () => { calls += 1; await tick(); if (fail) { throw new BackendRequestError(500, 'boom'); } return rawView(); }
         });
         try {

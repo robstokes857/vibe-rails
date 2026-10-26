@@ -92,7 +92,7 @@ suite('Review requests tree', () => {
     test('shows rows while the dashboard is open, with the card wording and an open command', async () => {
         let open = true;
         const provider = new ReviewRequestsTreeDataProvider({
-            isDashboardOpen: () => open,
+            isBackendReady: () => open,
             fetchRequests: async () => ({ requests: [rejected, rawRow({ id: other, cardKey: null })] }),
             notify: () => { assert.fail('a plain refresh notifies nobody'); }
         });
@@ -126,7 +126,7 @@ suite('Review requests tree', () => {
         let calls = 0;
         let answer: () => unknown = () => { throw new BackendRequestError(500, 'boom'); };
         const provider = new ReviewRequestsTreeDataProvider({
-            isDashboardOpen: () => true,
+            isBackendReady: () => true,
             fetchRequests: async () => { calls += 1; await tick(); return answer(); },
             notify: () => undefined
         });
@@ -152,7 +152,7 @@ suite('Review requests tree', () => {
         const notices: [string, ReviewRequestChange][] = [];
         let calls = 0;
         const provider = new ReviewRequestsTreeDataProvider({
-            isDashboardOpen: () => true,
+            isBackendReady: () => true,
             fetchRequests: async () => { calls += 1; return { requests: [rejected] }; },
             notify: (message, change) => { notices.push([message, change]); }
         });
