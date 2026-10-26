@@ -40,7 +40,7 @@ import { boardBrandLogo, boardTracker, cardTracker, trackerLabel } from './board
 import { BoardLaneAgents } from './board-lane-agents.js';
 import { BoardCardAssign, ASSIGN_ACTION } from './board-card-assign.js';
 import { BOARD_SELECTION_STORAGE_KEY } from './board-selection.js';
-import { boardContextSection, laneAutomationSection, mountBoardContext, mountLaneAutomation, boardSettingsNavigation, newBoardNavigation, mountBoardSettingsNavigation, boardSyncSection, mountBoardSync } from './board-settings.js';
+import { everyContextSection, mountEveryContext, boardContextSection, laneAutomationSection, mountBoardContext, mountLaneAutomation, boardSettingsNavigation, newBoardNavigation, mountBoardSettingsNavigation, boardSyncSection, mountBoardSync } from './board-settings.js';
 import { boardJiraSection, BoardJiraPanel } from './board-jira.js';
 import { boardAdoSection, BoardAdoPanel } from './board-ado.js';
 import { cardOrganizeSection, bindCardOrganization } from './board-card-organize.js';
@@ -922,6 +922,11 @@ export class BoardController {
                     <div class="board-card-top">
                         <span class="board-key${ghost ? ' has-ghost' : ''}"${ghost ? ` title="${escapeHtml(ghost)}"` : ''}>${ghostKeyHtml(`${card.flagged ? '<i class="fa-solid fa-flag board-attention-flag" title="Needs your attention" aria-hidden="true"></i> ' : ''}${card.agentMade ? `<i class="fa-solid fa-robot board-agent-mark" title="${escapeHtml(agentMadeSummary(card))}" aria-label="${escapeHtml(agentMadeSummary(card))}"></i> ` : ''}${escapeHtml(cardDisplayId(card))}`, card)}</span>
                         <span class="board-card-top-right">
+                            <button type="button" class="board-icon-btn board-card-pin${card.pinned ? ' is-pinned' : ''}" data-board-action="toggle-pin"
+                                aria-label="${card.pinned ? 'Unpin' : 'Pin'} ${id}" aria-pressed="${Boolean(card.pinned)}"
+                                title="${card.pinned ? 'Unpin: allow activity to move this card' : 'Pin this card in place'}">
+                                <i class="fa-solid fa-thumbtack" aria-hidden="true"></i>
+                            </button>
                             <span class="board-type-chip" data-type="${escapeHtml(type.value)}"
                                 title="${escapeHtml(type.label)}">${escapeHtml(type.label)}</span>
                             ${card.workflowMode === 'agent' ? '<span class="board-workflow-chip" title="A manager coordinates this card through the pipeline"><i class="fa-solid fa-diagram-project" aria-hidden="true"></i> Agent</span>' : ''}
@@ -1248,6 +1253,11 @@ export class BoardController {
         }
 
         switch (action) {
+            case 'toggle-pin': {
+                event.stopPropagation();
+                if (cardEl) void this.toggleCardPin(cardEl.dataset.cardId, trigger);
+                break;
+            }
             case 'start-work':
                 event.stopPropagation();
                 if (cardEl) void this.startWorkFromFace(cardEl.dataset.cardId);
@@ -2899,6 +2909,25 @@ export class BoardController {
         }
     }
 
+    async toggleCardPin(cardId, button) {
+        const card = this.state.cards.find(item => item.id === cardId);
+        if (!card || button.disabled) return;
+        button.disabled = true;
+        try {
+            const saved = await BoardApi.setBoardCardPinnedAsync(card.id, !card.pinned);
+            if (!this.root?.isConnected) return;
+            card.pinned = saved.pinned;
+            button.classList.toggle('is-pinned', Boolean(card.pinned));
+            button.setAttribute('aria-pressed', String(Boolean(card.pinned)));
+            button.setAttribute('aria-label', `${card.pinned ? 'Unpin' : 'Pin'} ${cardDisplayId(card)}`);
+            button.title = card.pinned ? 'Unpin: allow activity to move this card' : 'Pin this card in place';
+        } catch (error) {
+            this.app.showToast('Board', error?.message || 'Could not change the card pin.', 'error');
+        } finally {
+            button.disabled = false;
+        }
+    }
+
     async deleteCurrentCard(editor) {
         const cardId = this.cardIdFromEditor(editor);
         if (!cardId) return;
@@ -2953,6 +2982,7 @@ export class BoardController {
                 ${board ? `
                     <section id="board-settings-jira" role="tabpanel" aria-labelledby="board-settings-tab-jira" data-board-settings-panel="jira" hidden>${boardJiraSection()}</section>
                     <section id="board-settings-ado" role="tabpanel" aria-labelledby="board-settings-tab-ado" data-board-settings-panel="ado" hidden>${boardAdoSection()}</section>
+                    <section id="board-settings-every-context" role="tabpanel" aria-labelledby="board-settings-tab-every-context" data-board-settings-panel="every-context" hidden>${everyContextSection()}</section>
                     <section id="board-settings-context" role="tabpanel" aria-labelledby="board-settings-tab-context" data-board-settings-panel="context" hidden>${boardContextSection()}</section>
                     <section id="board-settings-history" role="tabpanel" aria-labelledby="board-settings-tab-history" data-board-settings-panel="history" hidden>${historySection()}</section>
                 ` : source ? `
@@ -2966,6 +2996,7 @@ export class BoardController {
         const editor = container?.querySelector('[data-board-board-editor]');
         if (!editor) return;
         if (board) {
+            const disposeEveryContext = mountEveryContext(this.app, editor.querySelector('[data-every-context]'), board.id);
             const disposeContext = mountBoardContext(this.app, editor.querySelector('[data-board-context]'), board.id);
             const disposeHistory = mountHistory(editor.querySelector('[data-board-history-view]'), board.id);
             const header = container.querySelector('.modal-header');
@@ -3024,6 +3055,7 @@ export class BoardController {
                 navigation.dispose();
                 disposeSync();
                 trackers.forEach(({ panel }) => panel.dispose());
+                disposeEveryContext();
                 disposeContext();
                 disposeHistory();
             };

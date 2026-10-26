@@ -244,9 +244,9 @@ rewrites it when a card is flagged or unflagged. Stored story points stay on the
 not shown. Search and filters share a second
 row on the same surface. Lane headers retain their card counts. There are no lane-bottom entry
 fields: **New card** opens the editor, whose Lane selector chooses the destination.
-The settings modal has General, Jira Cloud, Azure DevOps, Agent context and History tabs
+The settings modal has General, Jira Cloud, Azure DevOps, Every Context, Agent context and History tabs
 (VIBE-103, VIBE-165) for local boards. A dedicated tracker board combines the board settings and
-its own tracker's controls in **General**, followed by Agent context and History, with that
+its own tracker's controls in **General**, followed by Every Context, Agent context and History, with that
 tracker's logo beside the board name in the modal header; the other tracker's tab is hidden, so a
 Jira board shows no Azure DevOps tab and an Azure DevOps board no Jira tab.
 The sync status's `remoteProvider` (`isJiraBoard` for older responses) determines this layout and
@@ -316,8 +316,15 @@ own board. Delivery status reads `remoteDeliveries` and the ten-second poll re-r
 discussion when they change. The origin filter offers Jira and Azure DevOps; Human-made excludes both.
 Token entry uses a text input with autocomplete, spellcheck, autocapitalization and autocorrection off.
 The header wraps whole labels so the display ID, work type and priority stay readable in narrow lanes.
-Lane cards have a 10rem minimum height and keep activity and assignment at the bottom; longer content grows the card.
-The settings modal also includes **Agent context**: a default message plus default-only,
+Lane cards have an 11rem minimum height and keep activity and assignment at the bottom; longer content grows the card.
+The thumbtack button pins a card's slot during automatic activity promotion. Its narrow save
+preserves other fields, focus and the open editor; failures keep the previous pin state. Explicit
+dragging still moves pinned cards, and ordinary polling reads the saved marker from card summaries.
+The settings modal includes **Every Context** before **Agent context**. Every Context edits one
+per-board message through GET/PUT `/api/v1/board/boards/{boardId}/every-context`; its independent,
+revision-checked save preserves Agent context drafts. New CLI launches prepend it when their built-in/saved-environment Nudge switch
+is on, even for Agents, Board work, Automations and continuations. The editor is abortable and
+escapes saved text. Agent context remains per board: a default message plus default-only,
 type-only, or combined messages for each card type. `board-settings.js` owns these asynchronous,
 abortable editors and revision-checked saves. Context is sent for both Start work and Chat with
 agent. **Save context** is independent of **Save name**.

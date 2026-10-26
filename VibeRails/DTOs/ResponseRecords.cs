@@ -373,6 +373,8 @@ namespace VibeRails.DTOs
         public string? RemoteIssueUrl { get; init; }
         /// <summary>Why post-processing marked this finished card a ghost (<c>no-code</c>, <c>not-landed</c>), or null (VIBE-185).</summary>
         public string? GhostReason { get; init; }
+        /// <summary>Keep the card's slot during automatic activity promotion.</summary>
+        public bool Pinned { get; init; }
     }
     public record BoardCardListResponse(List<BoardCardSummaryResponse> Cards)
     {
@@ -451,6 +453,8 @@ namespace VibeRails.DTOs
         public IReadOnlyList<BoardFileReference> FileCandidates { get; init; } = [];
         /// <summary>Why post-processing marked this finished card a ghost, or null (VIBE-185).</summary>
         public string? GhostReason { get; init; }
+        /// <summary>Keep the card's slot during automatic activity promotion.</summary>
+        public bool Pinned { get; init; }
     }
     public record BoardJiraDeliveryDto(string SourceId, string Kind, string Status, string? Message);
     public record CreateBoardCardRequest(
@@ -493,6 +497,7 @@ namespace VibeRails.DTOs
     // SkipAutomations (VB-34): move without recording a lane entry for the destination lane's
     // Automations. Per request, never sticky; the skip is recorded as a comment by the user.
     public record MoveBoardCardRequest(string? ColumnId = null, int? Position = null, bool SkipAutomations = false);
+    public record SetBoardCardPinRequest(bool Pinned);
     public record MergeBoardCardsRequest(string? TargetCard = null);
     // SyncToRemote is the provider-neutral name: false keeps the comment off a linked Jira issue or
     // Azure DevOps work item. SyncToJira stays as an alias; SyncToRemote wins when both are sent.
@@ -1210,7 +1215,8 @@ namespace VibeRails.DTOs
         string? ResumeSummary = null,
         BaseLlmOptions? BaseLlmOptions = null,
         [property: JsonIgnore] bool AuthorizeBoardTools = false,
-        int? EnvironmentId = null
+        int? EnvironmentId = null,
+        string? ContextBoardId = null
     )
     {
         /// <summary>Server-only review scope decision. Browser input cannot bypass workspace resolution.</summary>
@@ -2003,6 +2009,9 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(UpdateInfo))]
     [JsonSerializable(typeof(AppSettingsDto))]
     [JsonSerializable(typeof(UpdateComputerNameDto))]
+    [JsonSerializable(typeof(BoardEveryContextSettingsRecord))]
+    [JsonSerializable(typeof(UpdateBoardEveryContextRequest))]
+    [JsonSerializable(typeof(SetBoardCardPinRequest))]
     [JsonSerializable(typeof(Services.HttpRelay.HttpRelayBody))]
     [JsonSerializable(typeof(Services.HttpRelay.HttpRelayRequest))]
     [JsonSerializable(typeof(Services.HttpRelay.HttpRelayResponse))]

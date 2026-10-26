@@ -7,6 +7,55 @@ namespace VibeRails.Services.Board;
 
 public sealed partial class BoardStore
 {
+    /// <inheritdoc />
+    public async Task<BoardEveryContextSettingsRecord?> GetEveryContextSettingsAsync(string projectPath, string boardId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        return await ReadEveryContextAsync(connection, null, NormalizeProjectPath(projectPath), boardId, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<BoardEveryContextSettingsRecord?> SaveEveryContextSettingsAsync(string projectPath, string boardId, string message, int expectedRevision, CancellationToken cancellationToken = default)
+    {
+        var project = NormalizeProjectPath(projectPath);
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
+        var current = await ReadEveryContextAsync(connection, transaction, project, boardId, cancellationToken);
+        if (current is null) return null;
+        if (current.Revision != expectedRevision)
+            throw new BoardConflictException("Every Context changed while you were editing. Reopen settings to load the latest version; your draft has not been saved.");
+        var updated = new BoardEveryContextSettingsRecord(message, checked(current.Revision + 1));
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO BoardContextSettings (BoardId, ContextJson, Revision, EveryContextMessage, EveryContextRevision)
+            VALUES ($id, $empty, 0, $message, $revision)
+            ON CONFLICT(BoardId) DO UPDATE SET EveryContextMessage = excluded.EveryContextMessage, EveryContextRevision = excluded.EveryContextRevision;
+            """;
+        command.Parameters.AddWithValue("$id", boardId.Trim());
+        command.Parameters.AddWithValue("$empty", JsonSerializer.Serialize(BoardContextSettings.Empty, StorageJsonSerializerContext.Default.BoardContextSettings));
+        command.Parameters.AddWithValue("$message", message);
+        command.Parameters.AddWithValue("$revision", updated.Revision);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return updated;
+    }
+
+    private static async Task<BoardEveryContextSettingsRecord?> ReadEveryContextAsync(SqliteConnection connection, SqliteTransaction? transaction, string project, string boardId, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = $"""
+            SELECT COALESCE(s.EveryContextMessage, ''), COALESCE(s.EveryContextRevision, 0)
+            FROM Boards b LEFT JOIN BoardContextSettings s ON s.BoardId = b.Id
+            WHERE b.ProjectPath = $project{ProjectPathCollation} AND b.Id = $id;
+            """;
+        command.Parameters.AddWithValue("$project", project);
+        command.Parameters.AddWithValue("$id", boardId.Trim());
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? new(reader.GetString(0), reader.GetInt32(1)) : null;
+    }
+
     public async Task<BoardContextSettingsRecord?> GetContextSettingsAsync(string projectPath, string boardId, CancellationToken cancellationToken = default)
     {
         var project = NormalizeProjectPath(projectPath);

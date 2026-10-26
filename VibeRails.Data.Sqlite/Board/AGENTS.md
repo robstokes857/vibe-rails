@@ -1,5 +1,11 @@
 # Board persistence
 
+`board-every-context/1` adds nullable message/revision columns to BoardContextSettings, independent
+of the existing Agent context JSON/revision. Older Agent context writers omit and preserve them.
+`board-card-pins/1` adds nullable BoardCards.Pinned; old rows read as false. Automatic promotion
+keeps pinned slots within attention groups; explicit moves retain the marker. Both migrations are
+automatic, additive and have no backfill. Pin writes and context reads/writes stay behind IBoardStore.
+
 `board-sync-rebuild/1` adds the `BoardSyncRebuilds` ledger for owner-authorized replacement of a
 conflicting hosted copy. Intent precedes remote deletion; delete/publish/upload phases survive
 restarts. A replacement still in its delete phase can end as `abandoned` (no deletion made) when the

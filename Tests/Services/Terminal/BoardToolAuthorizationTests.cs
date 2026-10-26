@@ -43,7 +43,7 @@ public sealed class BoardToolAuthorizationTests
         var command = new Mock<ICommandService>(MockBehavior.Strict);
         var reachedPreparation = new ReachedPreparation();
         command.Setup(c => c.PrepareSessionAsync(LLM.Claude, "saved-environment", It.IsAny<string[]>(), "card prompt", "",
-                "board-authorization-session", authorized))
+                "board-authorization-session", authorized, null))
             .ThrowsAsync(reachedPreparation);
         var lease = new Mock<IDisposable>();
         var worktrees = new Mock<IManagedWorktreeService>(MockBehavior.Strict);

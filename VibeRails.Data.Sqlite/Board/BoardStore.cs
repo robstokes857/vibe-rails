@@ -721,7 +721,7 @@ public sealed partial class BoardStore : IBoardStore
             StoredDisplayId = displayId,
             ColumnId = columnId,
             BoardId = boardId,
-            Position = position,
+            Position = moving ? position : existing.Position,
             Title = patch.Title ?? existing.Title,
             Description = description,
             Assignee = patch.ClearAssignee ? null : (patch.Assignee ?? existing.Assignee),
@@ -771,8 +771,21 @@ public sealed partial class BoardStore : IBoardStore
         if (patch.ClearBaseLlmOptions || patch.BaseLlmOptions is not null)
             await WriteBaseLlmOptionsAsync(connection, transaction, updated.Id, updated.BaseLlmOptions, cancellationToken);
         if (moving)
+        {
             await RenumberColumnAsync(connection, transaction, existing.ColumnId, cancellationToken);
-        await PromoteCardAsync(connection, transaction, updated.Id, cancellationToken);
+            // A lane chosen in the editor is an explicit move, including for a pinned card.
+            var destination = await ReadColumnCardIdsAsync(connection, transaction, updated.ColumnId, cancellationToken);
+            destination.Remove(updated.Id);
+            destination.Insert(0, updated.Id);
+            await WriteCardPositionsAsync(connection, transaction, destination, cancellationToken);
+        }
+        else
+        {
+            if (existing.Flagged != updated.Flagged)
+                await RenumberColumnAsync(connection, transaction, updated.ColumnId, cancellationToken);
+            await PromoteCardAsync(connection, transaction, updated.Id, cancellationToken);
+        }
+        updated = (await ReadCardAsync(connection, transaction, project, updated.Id, cancellationToken, includeDeleted: stamp is not null))!;
         await TransferCardLogAsync(connection, transaction, existing, updated, author, cancellationToken);
         await LogCardChangedAsync(connection, transaction, existing, updated, fromLaneName, toLaneName,
             author, cancellationToken, stamp);
@@ -1347,7 +1360,7 @@ public sealed partial class BoardStore : IBoardStore
                (SELECT a.WorkItemId FROM BoardAdoLinks a WHERE a.CardId = c.Id ORDER BY a.LastPulledUTC DESC, a.rowid DESC LIMIT 1),
                (SELECT j.SiteId FROM BoardJiraLinks j WHERE j.CardId = c.Id ORDER BY j.LastPulledUTC DESC, j.rowid DESC LIMIT 1),
                (SELECT a.ConnectionId FROM BoardAdoLinks a WHERE a.CardId = c.Id ORDER BY a.LastPulledUTC DESC, a.rowid DESC LIMIT 1),
-               c.GhostReason
+               c.GhostReason, COALESCE(c.Pinned, 0)
         FROM BoardCards c
         {CardPrefixJoinSql}
         """;
@@ -1547,7 +1560,7 @@ public sealed partial class BoardStore : IBoardStore
         AdoWorkItemId: reader.IsDBNull(29) ? null : reader.GetInt32(29),
         JiraConnectionId: reader.IsDBNull(30) ? null : reader.GetString(30),
         AdoConnectionId: reader.IsDBNull(31) ? null : reader.GetString(31),
-        GhostReason: reader.IsDBNull(32) ? null : reader.GetString(32));
+        GhostReason: reader.IsDBNull(32) ? null : reader.GetString(32)) { Pinned = reader.GetInt32(33) != 0 };
 
     private static async Task<IReadOnlyList<BoardCommentRecord>> ReadCommentsAsync(SqliteConnection connection, string cardId, CancellationToken cancellationToken)
     {
@@ -1785,9 +1798,26 @@ public sealed partial class BoardStore : IBoardStore
         if (await column.ExecuteScalarAsync(cancellationToken) is not string columnId)
             return;
         var ids = await ReadColumnCardIdsAsync(connection, transaction, columnId, cancellationToken);
-        ids.Remove(cardId);
-        ids.Insert(0, cardId);
-        await WriteCardPositionsAsync(connection, transaction, ids, cancellationToken);
+        var pins = new Dictionary<int, string>();
+        await using (var pinned = connection.CreateCommand())
+        {
+            pinned.Transaction = transaction;
+            pinned.CommandText = "SELECT Id, Position FROM BoardCards WHERE ColumnId = $column AND DeletedUTC IS NULL AND Pinned = 1 ORDER BY Position, Number;";
+            pinned.Parameters.AddWithValue("$column", columnId);
+            await using var reader = await pinned.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                if (reader.GetString(0) == cardId) return;
+                pins[reader.GetInt32(1)] = reader.GetString(0);
+            }
+        }
+        var pinnedIds = pins.Values.ToHashSet(StringComparer.Ordinal);
+        var movable = ids.Where(id => id != cardId && !pinnedIds.Contains(id)).ToList();
+        movable.Insert(0, cardId);
+        var next = 0;
+        var ordered = Enumerable.Range(0, ids.Count)
+            .Select(index => pins.TryGetValue(index, out var pin) ? pin : movable[next++]).ToList();
+        await WriteCardPositionsAsync(connection, transaction, ordered, cancellationToken);
     }
 
     private static async Task<long> ScalarLongAsync(SqliteConnection connection, SqliteTransaction? transaction, string sql, (string Name, object Value) parameter, CancellationToken cancellationToken, params (string Name, object Value)[] more)
@@ -2008,6 +2038,13 @@ public sealed partial class BoardStore : IBoardStore
             SqliteSchema.Execute(db, transaction, AdoDeliverySchemaSql));
         SqliteMigrationRunner.Apply(connection, "board-code-links", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, CodeLinksSchemaSql));
+        SqliteMigrationRunner.Apply(connection, "board-every-context", 1, MigrationKind.Additive, (db, transaction) =>
+        {
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardContextSettings ADD COLUMN EveryContextMessage TEXT");
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardContextSettings ADD COLUMN EveryContextRevision INTEGER");
+        });
+        SqliteMigrationRunner.Apply(connection, "board-card-pins", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardCards ADD COLUMN Pinned INTEGER"));
         // board-post-processing/1 (VIBE-185): the run-once card pass and the ghost it can set
         // (BoardStore.PostProcessing.cs). PostProcessed defaults to 1, so every card that already
         // exists, and every card an older binary inserts, counts as processed with no backfill;

@@ -79,6 +79,54 @@ public partial class CommandServiceTests
     }
 
     [Theory]
+    [MemberData(nameof(IndependentNudgeLaunches))]
+    public async Task EveryContext_AccompaniesTasksAndSummariesOnlyWhenTheLaunchNudgeIsEnabled(
+        LLM llm, string? envName, bool baseEnabled, bool customEnabled)
+    {
+        const string context = "Keep the user's \"quoted\" path; preserve $value, `literal`, and\nnew lines.";
+        const string task = "Implement this task";
+        const string summary = "Continue the previous work";
+        var service = CreateService(storyTrackingSettings: () => new Settings
+        {
+            CreateVibeStoryTracking = baseEnabled,
+            CreateVibeStoryTrackingCustomEnvs = customEnabled
+        });
+        var enabled = string.IsNullOrEmpty(envName) ? baseEnabled : customEnabled;
+        foreach (var continuation in new[] { "", summary })
+        {
+            var prepared = await service.PrepareSessionAsync(llm, envName, null, initialPrompt: task, summary: continuation,
+                resolveEveryContext: () => { Assert.True(enabled); return Task.FromResult<string?>(" \n" + context + "\n "); });
+            var ownPrompt = continuation.Length > 0 ? summary : task;
+            var expected = enabled ? "VibeRails Every Context:\n" + context + "\n\n" + ownPrompt : ownPrompt;
+            var expectedArg = llm switch
+            {
+                LLM.Copilot => "--interactive=" + expected,
+                LLM.Antigravity => "--prompt-interactive=" + expected,
+                LLM.OpenCode or LLM.Glm52 or LLM.Glm53 or LLM.DeepSeekV4Pro or LLM.KimiK3 => "--prompt=" + expected,
+                _ => expected
+            };
+            Assert.Equal(expectedArg, prepared.Argv![^1]);
+            Assert.DoesNotContain("This message is not a task.", prepared.LaunchCommand);
+            Assert.DoesNotContain(prepared.Argv, arg => arg.Contains(".approval_mode=") || arg.StartsWith("--allowedTools")
+                || arg.StartsWith("--allow-tool") || arg.StartsWith("--allow="));
+            Assert.False(prepared.Environment.ContainsKey("OPENCODE_PERMISSION"));
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(StoryTrackingLaunches))]
+    public async Task EveryContext_EmptyLaunchStillReceivesReadyOnlyGuidance(LLM llm, string? envName)
+    {
+        var prepared = await CreateService(storyTrackingSettings: () => new Settings
+        {
+            CreateVibeStoryTrackingCustomEnvs = true
+        }).PrepareSessionAsync(llm, envName, null, resolveEveryContext: () => Task.FromResult<string?>("Shared instructions"));
+
+        Assert.EndsWith("VibeRails Every Context:\nShared instructions\n\n" + VibeStoryTrackingPrompt.Guidance, prepared.Argv![^1]);
+        Assert.Contains("tell the user you're ready to help", prepared.LaunchCommand);
+    }
+
+    [Theory]
     [MemberData(nameof(StoryTrackingLaunches))]
     public async Task StoryTracking_PreservesTheInitialTaskAndUsesTheProviderPromptArgument(LLM llm, string? envName)
     {

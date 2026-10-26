@@ -197,6 +197,9 @@ middleware serves their paths rather than registering individual API endpoints.
 | POST | `/api/v1/board/boards/{boardId}/ado/test` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | GET | `/api/v1/board/boards/{boardId}/context` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | PUT | `/api/v1/board/boards/{boardId}/context` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/boards/{boardId}/every-context` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| PUT | `/api/v1/board/boards/{boardId}/every-context` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| PUT | `/api/v1/board/cards/{card}/pin` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | GET | `/api/v1/board/boards/{boardId}/history` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | DELETE | `/api/v1/board/boards/{boardId}/jira` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | GET | `/api/v1/board/boards/{boardId}/jira` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |

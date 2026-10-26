@@ -101,7 +101,7 @@ public class CommandService : ICommandService
 
     public async Task<PreparedTerminalSession> PrepareSessionAsync(
         LLM llm, string? envName, string[]? extraArgs, string? initialPrompt = null, string summary = "",
-        string? sessionId = null, bool authorizeBoardTools = false)
+        string? sessionId = null, bool authorizeBoardTools = false, Func<Task<string?>>? resolveEveryContext = null)
     {
         if (Environment.GetEnvironmentVariable("VIBERAILS_TEST_FAKE_CLI") == "1")
         {
@@ -183,16 +183,17 @@ public class CommandService : ICommandService
         var prompt = !string.IsNullOrWhiteSpace(summary)
             ? summary
             : initialPrompt;
-        // Story tracking is the default prompt only. Explicit tasks (including Board and
-        // Automation prompts) and continuation summaries already own their instructions.
-        if (string.IsNullOrWhiteSpace(prompt))
+        var settings = _storyTrackingSettings();
+        var nudgeEnabled = string.IsNullOrEmpty(envName)
+            ? settings.CreateVibeStoryTracking
+            : settings.CreateVibeStoryTrackingCustomEnvs;
+        if (nudgeEnabled)
         {
-            var settings = _storyTrackingSettings();
-            var nudgeEnabled = string.IsNullOrEmpty(envName)
-                ? settings.CreateVibeStoryTracking
-                : settings.CreateVibeStoryTrackingCustomEnvs;
-            if (nudgeEnabled)
+            // Story tracking remains a fallback, so its ready-only instruction never
+            // displaces a task. Every Context accompanies tasks and continuations too.
+            if (string.IsNullOrWhiteSpace(prompt))
                 prompt = VibeStoryTrackingPrompt.Guidance;
+            prompt = EveryContextPrompt.Prefix(resolveEveryContext is null ? null : await resolveEveryContext()) + prompt;
         }
 
         if (!string.IsNullOrWhiteSpace(prompt))

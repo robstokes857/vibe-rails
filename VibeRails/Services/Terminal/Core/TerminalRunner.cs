@@ -59,6 +59,7 @@ public class TerminalRunner
     private readonly IHostApplicationLifetime? _appLifetime;
     private readonly IManagedWorktreeService? _worktrees;
     private readonly VibeRails.Auth.AgentCredentialService? _agentCredentials;
+    private readonly VibeRails.Services.Board.IBoardStore? _boardStore;
 
     public TerminalRunner(
         ITerminalStateService stateService,
@@ -71,7 +72,8 @@ public class TerminalRunner
         IAppEventBus appEventBus,
         IHostApplicationLifetime? appLifetime = null,
         IManagedWorktreeService? worktrees = null,
-        VibeRails.Auth.AgentCredentialService? agentCredentials = null)
+        VibeRails.Auth.AgentCredentialService? agentCredentials = null,
+        VibeRails.Services.Board.IBoardStore? boardStore = null)
     {
         _stateService = stateService;
         _commandService = commandService;
@@ -84,6 +86,7 @@ public class TerminalRunner
         _appLifetime = appLifetime;
         _worktrees = worktrees;
         _agentCredentials = agentCredentials;
+        _boardStore = boardStore;
     }
 
     /// <summary>
@@ -105,7 +108,9 @@ public class TerminalRunner
         string? initialUserInput = null,
         string? jobRunId = null,
         bool requireDirectCli = false,
-        bool authorizeBoardTools = false)
+        bool authorizeBoardTools = false,
+        string? contextBoardId = null,
+        string? contextProjectPath = null)
     {
         // Plain shell sessions are shared remotely like any other session when remote is
         // enabled. A remote viewer of an agent session can already Ctrl+C out of the prompt
@@ -152,8 +157,13 @@ public class TerminalRunner
 
             var sessionTitle = ResolveSessionTitle(workDir, title);
             _agentCredentials?.BeginSession(sessionId);
+            var boardProject = contextProjectPath;
+            if (string.IsNullOrWhiteSpace(boardProject)) boardProject = ParserConfigs.GetRootPath();
+            if (string.IsNullOrWhiteSpace(boardProject)) boardProject = workDir;
             var preparedSession = await _commandService.PrepareSessionAsync(
-                llm, envName, extraArgs, initialPrompt, summary, sessionId, authorizeBoardTools: authorizeBoardTools);
+                llm, envName, extraArgs, initialPrompt, summary, sessionId, authorizeBoardTools: authorizeBoardTools,
+                resolveEveryContext: _boardStore is null ? null : () => EveryContextPrompt.ResolveMessageAsync(_boardStore,
+                    boardProject, contextBoardId, ct));
             foreach (var kvp in _toolApiContext.BuildEnvironment(sessionId))
             {
                 preparedSession.Environment[kvp.Key] = kvp.Value;
@@ -960,7 +970,8 @@ public class TerminalRunner
         LLM llm, string workDir, string? envName, string[]? extraArgs,
         ITerminalSessionService sessionService, bool makeRemote = false, CancellationToken ct = default,
         string? initialUserInput = null, string? initialPrompt = null, string? jobRunId = null,
-        Action<string>? onSessionCreated = null, bool authorizeBoardTools = false)
+        Action<string>? onSessionCreated = null, bool authorizeBoardTools = false,
+        string? contextBoardId = null, string? contextProjectPath = null)
     {
         var (terminal, sessionId, remoteConn) = await CreateSessionAsync(
             llm,
@@ -974,6 +985,8 @@ public class TerminalRunner
             initialUserInput: initialUserInput,
             jobRunId: jobRunId,
             authorizeBoardTools: authorizeBoardTools,
+            contextBoardId: contextBoardId,
+            contextProjectPath: contextProjectPath,
             onRemoteTakeoverAuthorized: trigger =>
             {
                 // Native CLI coexists with remote viewer — both can run concurrently.

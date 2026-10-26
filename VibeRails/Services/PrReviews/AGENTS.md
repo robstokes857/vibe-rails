@@ -13,8 +13,9 @@ each pass found, and which PR to review next. Frontend:
   **Enable PR Reviewer and GitHub publishing** switch, off by default. This machine-wide setting
   lives behind `IPrReviewStore` in `pr_reviews.db` (`pr-review-delivery/1`, additive), shared by
   root backends and stdio MCP. The same page edits an optional machine-wide `repositories` list:
-  one GitHub `owner/name` per line, up to 50 entries, validated, lowercased and deduplicated ignoring
-  case before any write. `PrReviewerRepositories` (`pr-review-repositories/1`, additive) stores it
+  one GitHub `owner/name` per row with immediate-save Add/Remove actions, up to 50 entries,
+  validated, lowercased and deduplicated ignoring case before any write.
+  `PrReviewerRepositories` (`pr-review-repositories/1`, additive) stores it
   in `pr_reviews.db`. Settings saves are atomic; omitting/null `repositories` preserves the list
   for older clients, while `[]` restores origin fallback. Removing a watch never deletes history;
   re-add it to access that history. GET/PUT `/api/v1/pr-reviews/settings` require both dashboard

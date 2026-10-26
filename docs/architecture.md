@@ -72,6 +72,12 @@ preserve the stored one, startup leaves it unchanged, and responses always repor
 
 ## Optional Vibe Story tracking
 
+Board tiles use an 11rem minimum height and 252px lane floor. Their thumbtack button saves a
+local `BoardCards.Pinned` marker through `PUT /api/v1/board/cards/{card}/pin`. Activity promotion
+fills only unpinned slots, so edits, comments and updates to other cards preserve pins. Explicit
+dragging and editor lane changes still move pinned cards; attention grouping remains authoritative.
+`board-card-pins/1` adds the nullable marker automatically, preserving older writers and stored data.
+
 General Settings exposes **Vibe Board nudge — built-in CLIs** (on by default) and
 **Vibe Board nudge — Quick Launches** for saved setups launched without a message of their own (off by default). The existing
 `CreateVibeStoryTracking` setting keeps the base choice; `CreateVibeStoryTrackingCustomEnvs` is
@@ -79,8 +85,17 @@ independent and defaults off in new and older settings files. Nullable API updat
 each saved choice when an older client omits its field.
 For managed LLM launches with no nonblank initial message or continuation summary, `CommandService`
 reads the shared settings file and uses optional Board tracking guidance as the default prompt.
-Each launch uses only its corresponding switch; explicit task, Board, Automation and continuation
-prompts pass through unchanged. Existing task/summary precedence and provider argv conventions
+Board settings' **Every Context** tab edits a separate message for each board, independently of
+**Agent context**. Authenticated project-scoped GET/PUT
+`/api/v1/board/boards/{boardId}/every-context` use a separate revision. Nullable columns in
+BoardContextSettings are added automatically (`board-every-context/1`); existing Agent context
+writers preserve them. The message defaults empty and is limited to 4,000 characters.
+Every managed CLI launch whose corresponding nudge switch is on prepends it to the starting prompt,
+including explicit tasks, Agents, Board work, Automations and continuation summaries. Browser
+launches carry the selected board; card launches use the card's board. Native launches without a
+selection use the first existing project board. The ready-only tracking guidance remains a fallback
+for sessions without a task. Board context estimates and launch samples include Every Context using
+the selected launch's nudge switch. Existing task/summary precedence and provider argv conventions
 are preserved. The guidance asks agents to use their discretion, reuse an existing story and
 record progress/results and session history when useful. A guidance-only launch replies only that
 the agent is ready to help, without tools, work, or an invented request, then waits for a user task.
@@ -516,7 +531,8 @@ before clients can use sign-in; older sites leave the manual API key input usabl
 
 The **Reviews** page (`pr-reviews` view) and six MCP tools keep a lead-review log for the
 configured GitHub repositories, falling back to the current project's `origin` when the watch
-list is empty. Settings > PR Reviewer edits the machine-wide watch list in `pr_reviews.db`
+list is empty. Settings > PR Reviewer edits the machine-wide watch list one repository at a
+time with immediate-save Add/Remove actions in `pr_reviews.db`
 (`PrReviewerRepositories`, `pr-review-repositories/1`, additive); no checkout switch is required.
 List, queue and lifecycle sync aggregate watches; each PR/pass/queue entry identifies its
 repository, and single-PR REST/MCP actions require repository scope with multiple targets.

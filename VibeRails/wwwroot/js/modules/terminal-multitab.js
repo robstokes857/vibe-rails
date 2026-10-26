@@ -1,4 +1,5 @@
 import { ChatHistorySidebar } from './chat-history-sidebar.js';
+import { BOARD_SELECTION_STORAGE_KEY } from './board-selection.js';
 import {
     buildLlmSelectionValue,
     parseLlmSelection,
@@ -1565,6 +1566,8 @@ export class TerminalManager {
             workingDirectory: workingDirectory || null,
             title: sessionTitle
         };
+        const contextBoardId = this.getContextBoardId();
+        if (contextBoardId && lower(meta.cli) !== 'shell') body.contextBoardId = contextBoardId;
         if (meta.environmentName) {
             body.environmentName = meta.environmentName;
             body.environmentId = meta.envId;
@@ -1706,6 +1709,9 @@ export class TerminalManager {
         if (promptResolution.initialPrompt != null) {
             body.initialPrompt = promptResolution.initialPrompt;
         }
+
+        const contextBoardId = options.contextBoardId || this.getContextBoardId();
+        if (contextBoardId && body.cli !== 'shell') body.contextBoardId = contextBoardId;
 
         const started = await tab.instance.startSession(body);
         if (!started) {
@@ -1920,6 +1926,13 @@ export class TerminalManager {
             environmentName: parsed.environmentName,
             displayName: parsed.displayName
         };
+    }
+
+    getContextBoardId() {
+        const selected = this.app.boardController?.state?.boardId;
+        if (selected) return selected;
+        try { return globalThis.localStorage?.getItem(BOARD_SELECTION_STORAGE_KEY) || null; }
+        catch { return null; }
     }
 
     getDefaultWorkingDirectory() {

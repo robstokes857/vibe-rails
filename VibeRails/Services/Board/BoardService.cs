@@ -35,6 +35,8 @@ public partial interface IBoardService
 
     Task<BoardCardListResponse> GetCardsAsync(string projectPath, CancellationToken cancellationToken = default, string? boardId = null);
     Task<BoardCardResponse?> GetCardAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
+    /// <summary>Updates only the local pin marker, preserving the card's current position.</summary>
+    Task<BoardCardResponse?> SetCardPinnedAsync(string projectPath, string idOrKey, bool pinned, CancellationToken cancellationToken = default);
     // The author signs the Card Log entry the write appends; null means the local user.
     Task<BoardCardResponse> CreateCardAsync(string projectPath, CreateBoardCardRequest request, CancellationToken cancellationToken = default, BoardAuthor? author = null);
     Task<BoardCardResponse?> UpdateCardAsync(string projectPath, string idOrKey, UpdateBoardCardRequest request, CancellationToken cancellationToken = default, BoardAuthor? author = null);
@@ -339,6 +341,11 @@ public sealed partial class BoardService(
                 result.TryAdd(id(connection), connection);
         return result;
     }
+
+    /// <inheritdoc />
+    public async Task<BoardCardResponse?> SetCardPinnedAsync(string projectPath, string idOrKey, bool pinned, CancellationToken cancellationToken = default) =>
+        await store.SetCardPinnedAsync(projectPath, idOrKey, pinned, cancellationToken)
+            ? await GetCardAsync(projectPath, idOrKey, cancellationToken) : null;
 
     public async Task<BoardCardResponse?> GetCardAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default)
     {
@@ -708,6 +715,7 @@ public sealed partial class BoardService(
             },
             CodeLinks = detail.CodeLinks,
             GhostReason = detail.Card.GhostReason,
+            Pinned = detail.Card.Pinned,
             LinkedCards = detail.LinkedCards.Select(card => ToDto(card, detail.Card.ProjectPath)).ToList(),
             PreviousWork = BoardHandoffService.WithFileStatus(detail.PreviousWork, detail.Card.ProjectPath),
             FileCandidates = detail.PreviousWork is null && detail.Commits.Count > 0
@@ -787,7 +795,8 @@ public sealed partial class BoardService(
         // Jira first, as the Jira fields always have been; a card is linked to one tracker in practice.
         RemoteProvider = card.JiraIssueKey is not null ? TrackerProviders.Jira : card.AdoWorkItemId is not null ? TrackerProviders.Ado : null,
         RemoteIssueKey = card.JiraIssueKey ?? (card.AdoWorkItemId is int id ? AzureDevOps.AdoFieldMapping.Key(id) : null),
-        GhostReason = card.GhostReason
+        GhostReason = card.GhostReason,
+        Pinned = card.Pinned
     };
 
     private static bool IsWorkflowAgent(string origin, bool agentWorkflow) => agentWorkflow

@@ -3,6 +3,7 @@ using Serilog;
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services.Mcp.Tools;
+using VibeRails.Services.Terminal;
 using VibeRails.Utils;
 
 namespace VibeRails.Services.Board;
@@ -31,7 +32,8 @@ public interface IBoardContextEstimator
 public sealed class BoardContextEstimator(
     IBoardService service,
     IBoardStore store,
-    IRepository repository) : IBoardContextEstimator
+    IRepository repository,
+    Func<Settings>? launchSettings = null) : IBoardContextEstimator
 {
     public async Task<BoardContextEstimateResponse?> EstimateAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default)
     {
@@ -41,7 +43,7 @@ public sealed class BoardContextEstimator(
         var isManaged = card.WorkflowMode == "agent";
         var assignee = await ResolveAssigneeAsync(projectPath, isManaged ? card.ManagerSelection : card.Assignee, cancellationToken);
         var prompt = await BoardLaunchService.ComposePromptAsync(store, projectPath, card, assignee.Label, assignee.EnvironmentPrompt, isManaged ? "manager" : "work", cancellationToken);
-        var measurement = await MeasureAsync(projectPath, card, prompt, cancellationToken);
+        var measurement = await MeasureAsync(projectPath, card, prompt, isManaged ? card.ManagerSelection : card.Assignee, cancellationToken);
         var last = await store.GetLatestContextSampleAsync(projectPath, card.Id, cancellationToken);
         return new BoardContextEstimateResponse(card.Id, card.Key, measurement.Tokens, measurement.Chars, ContextTokenEstimator.Method, DateTime.UtcNow,
             measurement.Sources, measurement.Contents, measurement.Extras, last is null ? null : ToDto(last));
@@ -50,7 +52,7 @@ public sealed class BoardContextEstimator(
     public async Task<BoardContextSampleRecord?> RecordLaunchAsync(string projectPath, BoardCardRecord card, BoardLaunchPrompt prompt, string intent,
         string? sessionId, string? cli, string? selection, CancellationToken cancellationToken = default)
     {
-        var measurement = await MeasureAsync(projectPath, card, prompt, cancellationToken);
+        var measurement = await MeasureAsync(projectPath, card, prompt, selection, cancellationToken);
         var breakdown = JsonSerializer.Serialize(new BoardContextBreakdown(measurement.Sources, measurement.Contents, measurement.Extras),
             AppJsonSerializerContext.Default.BoardContextBreakdown);
         var sample = new NewBoardContextSample(sessionId, intent, cli, selection, measurement.Tokens, measurement.Chars,
@@ -65,18 +67,22 @@ public sealed class BoardContextEstimator(
     private sealed record Measurement(int Tokens, int Chars, int PromptTokens, int CardReadTokens,
         List<BoardContextPartDto> Sources, List<BoardContextPartDto> Contents, List<BoardContextPartDto> Extras);
 
-    private async Task<Measurement> MeasureAsync(string projectPath, BoardCardRecord card, BoardLaunchPrompt prompt, CancellationToken cancellationToken)
+    private async Task<Measurement> MeasureAsync(string projectPath, BoardCardRecord card, BoardLaunchPrompt prompt, string? selection, CancellationToken cancellationToken)
     {
         var detail = await service.GetCardAsync(projectPath, card.Id, cancellationToken)
             ?? throw new BoardValidationException("The card was deleted while its context was being measured.");
         var render = await BoardTool.RenderCardAsync(service, store, projectPath, detail, BoardTool.CardReadOptions.Default, cancellationToken);
         var lanes = await BoardTool.RenderLanesAsync(service, store, projectPath, prompt.BoardId, prompt.BoardName, cancellationToken);
         var promptParts = BoardPromptComposer.Measure(prompt.Prompt, card, prompt.EnvironmentPrompt, prompt.BoardContext, prompt.Intent);
+        var settings = (launchSettings ?? Config.LoadFresh)();
+        var custom = BoardSelection.TryParse(selection, out var parsed) && parsed?.IsEnvironment == true;
+        var enabled = custom ? settings.CreateVibeStoryTrackingCustomEnvs : settings.CreateVibeStoryTracking;
+        var everyContext = enabled ? EveryContextPrompt.Prefix(await EveryContextPrompt.ResolveMessageAsync(store, projectPath, prompt.BoardId, cancellationToken)) : "";
         var stats = render.Stats;
 
         var sources = new List<BoardContextPartDto>
         {
-            Part("prompt", "Launch prompt", prompt.Prompt.Length),
+            Part("prompt", "Launch prompt", everyContext.Length + prompt.Prompt.Length),
             Part("cardRead", "get_board_card", render.Text.Length),
             Part("lanes", "list_board_columns", lanes.Length),
         };
@@ -96,6 +102,8 @@ public sealed class BoardContextEstimator(
             contents.Add(Part("attachments", "Attachment names", stats.AttachmentsChars, detail.Attachments.Count));
         if (promptParts.BoardContextChars > 0)
             contents.Add(Part("boardContext", "Board context", promptParts.BoardContextChars));
+        if (everyContext.Length > 0)
+            contents.Add(Part("everyContext", "Every Context", everyContext.Length));
         if (promptParts.EnvironmentPromptChars > 0)
             contents.Add(Part("environmentPrompt", "Environment initial message", promptParts.EnvironmentPromptChars));
         contents.Add(Part("guidance", "Card fields, lane list and tool guidance", promptParts.GuidanceChars + stats.OtherChars + lanes.Length));

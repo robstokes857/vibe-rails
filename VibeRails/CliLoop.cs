@@ -157,6 +157,8 @@ public static class CliLoop
         var runPurpose = jobRun?.Purpose ?? "work";
         var workerPrompt = jobRun?.ReviewLaunch is {} frozen ? frozen.WorkerPrompt + "\n" + environment?.CustomPrompt : environment?.CustomPrompt;
         var managedWorkflow = false;
+        string? contextBoardId = null;
+        var contextProjectPath = jobRun?.ProjectPath ?? workingDirectory;
         if (boardCardKey is not null)
         {
             // A review may run in its explicit checkout. Resolve ownership from the originating
@@ -164,6 +166,7 @@ public static class CliLoop
             var card = await scopedServices.GetRequiredService<Services.Board.IBoardStore>()
                 .FindCardAsync(jobRun?.ProjectPath ?? workingDirectory, boardCardKey, cancellationToken);
             managedWorkflow = card?.WorkflowMode == Services.Board.BoardWorkflowModes.Agent;
+            contextBoardId = card?.BoardId;
         }
         var promptTemplate = boardCardKey is null
             ? jobRun is null ? workerPrompt : Services.Board.BoardPromptComposer.ComposeStandaloneAutomationPrompt(workerPrompt)
@@ -195,7 +198,9 @@ public static class CliLoop
             initialPrompt: initialPrompt,
             jobRunId: jobRunId,
             onSessionCreated: onSessionCreated,
-            authorizeBoardTools: boardCardKey is not null);
+            authorizeBoardTools: boardCardKey is not null,
+            contextBoardId: contextBoardId,
+            contextProjectPath: contextProjectPath);
         Environment.ExitCode = exitCode;
         return exitCode;
     }

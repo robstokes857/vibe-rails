@@ -1,5 +1,14 @@
 # Working on Vibe Board
 
+Board settings' **Every Context** is per board and independent of **Agent context**. CLI launches
+with their corresponding Nudge switch enabled prepend it, including launches with an explicit task.
+Browser launches use the selected board and card launches their owning board. Both editors save
+with separate revisions behind `IBoardStore`; ordinary Agent context writes preserve Every Context.
+
+Cards have a local pin toggle. Pins preserve their slots during automatic activity promotion,
+including when another card is promoted; explicit dragging still moves a pinned card. Existing
+attention grouping remains authoritative. Pin writes are scoped and do not themselves promote cards.
+
 ## Agent workflow (VIBE-52)
 
 Cards default to Manual. Agent mode has a separate manager picker/settings and keeps Assignee

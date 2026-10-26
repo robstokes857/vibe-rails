@@ -207,6 +207,7 @@ public sealed partial class BoardSettingsTests : IDisposable
                 DROP TABLE BoardPendingAutomations;
                 DROP TABLE BoardLaneAutomations;
                 DROP TABLE BoardContextSettings;
+                DELETE FROM SchemaMigrations WHERE Component = 'board-every-context';
                 DELETE FROM SchemaMigrations WHERE Component = 'board' AND Version = 6;
                 """;
             await command.ExecuteNonQueryAsync(Ct);

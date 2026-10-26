@@ -156,7 +156,7 @@ CREATE TABLE BoardCardSequences ( ProjectPath TEXT PRIMARY KEY COLLATE NOCASE, L
 CREATE TABLE BoardCardSessions ( SessionId TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, TabId TEXT NULL, Selection TEXT NOT NULL, Cli TEXT NOT NULL, DisplayName TEXT NOT NULL, Origin TEXT NOT NULL, CreatedUTC TEXT NOT NULL );
 
 -- table BoardCards
-CREATE TABLE BoardCards ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Number INTEGER NOT NULL, ColumnId TEXT NOT NULL REFERENCES BoardColumns(Id), Position INTEGER NOT NULL, Title TEXT NOT NULL, Description TEXT NOT NULL DEFAULT '', Assignee TEXT NULL, Priority TEXT NOT NULL DEFAULT 'medium', Type TEXT NOT NULL DEFAULT 'task', Points INTEGER NULL, Tags TEXT NOT NULL DEFAULT '[]', Blocked INTEGER NOT NULL DEFAULT 0, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, Flagged INTEGER NOT NULL DEFAULT 0, CardKey TEXT, DeletedUTC TEXT, DisplayId TEXT, AgentMade INTEGER NOT NULL DEFAULT 0, AgentMadeBy TEXT, AgentMadeSessionId TEXT, WorkflowMode TEXT, ManagerSelection TEXT, ManagerOptionsJson TEXT, PostProcessed INTEGER NOT NULL DEFAULT 1, GhostReason TEXT, UNIQUE(ProjectPath, Number) );
+CREATE TABLE BoardCards ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Number INTEGER NOT NULL, ColumnId TEXT NOT NULL REFERENCES BoardColumns(Id), Position INTEGER NOT NULL, Title TEXT NOT NULL, Description TEXT NOT NULL DEFAULT '', Assignee TEXT NULL, Priority TEXT NOT NULL DEFAULT 'medium', Type TEXT NOT NULL DEFAULT 'task', Points INTEGER NULL, Tags TEXT NOT NULL DEFAULT '[]', Blocked INTEGER NOT NULL DEFAULT 0, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, Flagged INTEGER NOT NULL DEFAULT 0, CardKey TEXT, DeletedUTC TEXT, DisplayId TEXT, AgentMade INTEGER NOT NULL DEFAULT 0, AgentMadeBy TEXT, AgentMadeSessionId TEXT, WorkflowMode TEXT, ManagerSelection TEXT, ManagerOptionsJson TEXT, Pinned INTEGER, PostProcessed INTEGER NOT NULL DEFAULT 1, GhostReason TEXT, UNIQUE(ProjectPath, Number) );
 
 -- table BoardChecks
 CREATE TABLE BoardChecks ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, RunId TEXT NOT NULL, ActionId TEXT NOT NULL, StartedUTC TEXT NOT NULL, EndedUTC TEXT NULL, SummaryJson TEXT NOT NULL, ResultJson TEXT NULL, UNIQUE(CardId, RunId, ActionId) );
@@ -180,7 +180,7 @@ CREATE TABLE BoardCommits ( CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DE
 CREATE TABLE BoardContextSamples ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, SessionId TEXT NULL, MeasuredUTC TEXT NOT NULL, Intent TEXT NOT NULL, Cli TEXT NULL, Selection TEXT NULL, Tokens INTEGER NOT NULL, Chars INTEGER NOT NULL, PromptTokens INTEGER NOT NULL, CardReadTokens INTEGER NOT NULL, Breakdown TEXT NOT NULL );
 
 -- table BoardContextSettings
-CREATE TABLE BoardContextSettings ( BoardId TEXT PRIMARY KEY REFERENCES Boards(Id) ON DELETE CASCADE, ContextJson TEXT NOT NULL, Revision INTEGER NOT NULL );
+CREATE TABLE BoardContextSettings ( BoardId TEXT PRIMARY KEY REFERENCES Boards(Id) ON DELETE CASCADE, ContextJson TEXT NOT NULL, Revision INTEGER NOT NULL , EveryContextMessage TEXT, EveryContextRevision INTEGER);
 
 -- table BoardDeletedComments
 CREATE TABLE BoardDeletedComments ( CommentId TEXT PRIMARY KEY REFERENCES BoardComments(Id) ON DELETE CASCADE, DeletedUTC TEXT NOT NULL );

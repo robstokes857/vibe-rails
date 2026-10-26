@@ -79,6 +79,8 @@ public sealed record BoardCardRecord(
     // JiraConnectionId and AdoConnectionId belong to the same link rows as JiraIssueKey and
     // AdoWorkItemId, so a lane tile can build the issue link without a per-card lookup (VIBE-171).
     // GhostReason (VIBE-185) is set once by post-processing and only ever cleared by the user.
+    /// <summary>Keep this card's slot during automatic activity promotion.</summary>
+    public bool Pinned { get; init; }
 
     /// <summary>The stored <c>PREFIX-RRRRR-n</c> key (cards created since board/14), else the
     /// computed legacy <c>PREFIX-n</c>.</summary>

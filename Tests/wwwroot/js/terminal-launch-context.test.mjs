@@ -96,6 +96,19 @@ test('other terminal views keep the normal launch defaults', async () => {
     assert.deepEqual(requests, [{ cli: 'codex', workingDirectory: '/project', title: 'codex Terminal' }]);
 });
 
+test('new CLI launches carry the currently selected board and shells do not', async () => {
+    const { manager, requests } = createLauncher();
+    manager.app.boardController = { state: { boardId: 'board-first' } };
+    await manager.startFromSelection('base:codex');
+    manager.app.boardController.state.boardId = 'board-second';
+    await manager.startFromSelection('base:codex');
+    assert.deepEqual(requests.map(body => body.contextBoardId), ['board-first', 'board-second']);
+    const shell = createLauncher({ cli: 'shell' });
+    shell.manager.app.boardController = manager.app.boardController;
+    await shell.manager.startFromSelection('base:shell');
+    assert.equal(Object.hasOwn(shell.requests[0], 'contextBoardId'), false);
+});
+
 test('a canceled environment prompt or detached manager cannot start a contextual session', async () => {
     for (const detached of [false, true]) {
         const { manager, requests } = createLauncher({

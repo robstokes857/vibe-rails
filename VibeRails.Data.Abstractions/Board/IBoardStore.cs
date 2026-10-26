@@ -7,6 +7,8 @@ namespace VibeRails.Services.Board;
 /// </summary>
 public partial interface IBoardStore
 {
+    /// <summary>Pin or unpin a project-scoped card without promoting it.</summary>
+    Task<bool> SetCardPinnedAsync(string projectPath, string cardId, bool pinned, CancellationToken cancellationToken = default);
     /// <summary>Reads saved GitHub PR and commit references for a live card.</summary>
     Task<IReadOnlyList<BoardCodeLink>> GetCodeLinksAsync(string projectPath, string cardId, CancellationToken cancellationToken = default);
     /// <summary>Validates and idempotently adds a GitHub reference to a live card.</summary>

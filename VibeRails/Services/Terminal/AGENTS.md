@@ -153,7 +153,12 @@ controls custom environments; older settings files retain the base choice and de
 When a managed LLM launch has no
 nonblank initial message or continuation summary, `CommandService` reads the shared settings file
 and uses optional story-tracking guidance as its default prompt only if that launch's switch is on.
-Explicit tasks, Board, Automation and continuation prompts pass through unchanged. The default guidance
+The per-board **Every Context** message in Board settings is prepended to every managed CLI launch
+whose corresponding nudge switch is on, including explicit tasks, Board work, Agents, Automations
+and continuation summaries. It is stored behind `IBoardStore` in board.db, with its own revision. Browser launches carry the
+currently selected board; card launches carry the card's board. Native launches without a board
+selection use the project's first existing board. Empty defaults preserve existing launches.
+Board-specific Agent context and task/summary precedence are preserved. The default tracking guidance
 tells the agent to reply only that it is ready to help (no tools, work, or invented request) and
 then wait for a user task; story creation stays discretionary, and an existing story
 should be reused. This uses the normal provider prompt argv, never TUI input or rewritten provider

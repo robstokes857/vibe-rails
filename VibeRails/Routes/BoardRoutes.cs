@@ -141,6 +141,18 @@ public static partial class BoardRoutes
             RunAsync(async () => OkOrNotFound(await board.SaveContextSettingsAsync(Project(), boardId, request, cancellationToken), "Board")))
             .WithName("SaveBoardContext");
 
+        app.MapPut("/api/v1/board/cards/{card}/pin", (IBoardService board, string card, SetBoardCardPinRequest request, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(await board.SetCardPinnedAsync(Project(), card, request.Pinned, cancellationToken), "Card")))
+            .WithName("SetBoardCardPin");
+
+        app.MapGet("/api/v1/board/boards/{boardId}/every-context", (IBoardService board, string boardId, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(await board.GetEveryContextSettingsAsync(Project(), boardId, cancellationToken), "Board")))
+            .WithName("GetBoardEveryContext");
+
+        app.MapPut("/api/v1/board/boards/{boardId}/every-context", (IBoardService board, string boardId, UpdateBoardEveryContextRequest request, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(await board.SaveEveryContextSettingsAsync(Project(), boardId, request, cancellationToken), "Board")))
+            .WithName("SaveBoardEveryContext");
+
         app.MapGet("/api/v1/board/columns", (IBoardService board, string? boardId, CancellationToken cancellationToken) =>
             RunAsync(async () => Results.Ok(await board.GetColumnsAsync(Project(), cancellationToken, boardId))))
             .WithName("GetBoardColumns");

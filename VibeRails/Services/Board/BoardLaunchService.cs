@@ -210,7 +210,7 @@ public sealed class BoardLaunchService(
                     Title: title,
                     InitialPrompt: prompt,
                     BaseLlmOptions: launchOptions,
-                    AuthorizeBoardTools: true) { PreserveWorkingDirectory = routingSnapshot is not null },
+                    AuthorizeBoardTools: true, ContextBoardId: card.BoardId) { PreserveWorkingDirectory = routingSnapshot is not null },
                 cancellationToken);
 
             if (!string.IsNullOrWhiteSpace(session.SessionId))

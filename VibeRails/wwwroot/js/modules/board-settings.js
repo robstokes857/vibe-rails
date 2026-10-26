@@ -5,7 +5,7 @@ import { jobLaunchKind } from './launch-kind.js';
 
 // A dedicated board's tracker connection sits under General; a local board offers each as a tab.
 const TRACKER_TABS = [['jira', 'Jira Cloud'], ['ado', 'Azure DevOps']];
-const SECTION_ORDER = ['general', ...TRACKER_TABS.map(([id]) => id), 'context', 'history'];
+const SECTION_ORDER = ['general', ...TRACKER_TABS.map(([id]) => id), 'every-context', 'context', 'history'];
 
 const navigation = (name, sections) => `
     <nav class="nav nav-pills board-settings-nav gap-2 mb-3" aria-label="${name}" role="tablist">
@@ -16,7 +16,7 @@ const navigation = (name, sections) => `
     </nav>`;
 
 export const boardSettingsNavigation = () =>
-    navigation('Board settings', [['general', 'General'], ...TRACKER_TABS, ['context', 'Agent context'], ['history', 'History']]);
+    navigation('Board settings', [['general', 'General'], ...TRACKER_TABS, ['every-context', 'Every Context'], ['context', 'Agent context'], ['history', 'History']]);
 
 /** The New board dialog: a local board (the General section), or one connected to a tracker. */
 export const newBoardNavigation = () => navigation('Board type', [['general', 'Local'], ...TRACKER_TABS]);
@@ -122,6 +122,13 @@ const TYPES = [
     ['task', 'Task'], ['bug', 'Bug'], ['feature', 'Feature'],
     ['research-spike', 'Research spike'], ['chore', 'Chore / tech debt']
 ];
+
+export const everyContextSection = () => `
+    <section class="mt-3 border-top pt-3" data-every-context>
+        <h6>Every Context</h6>
+        <p class="board-editor-muted">Sent before the starting message of every new CLI session on this board whose Vibe Board nudge is enabled in Settings. Launches outside a card use the currently selected board. Includes Agents, Board work, Automations and continuations. Up to 4,000 characters.</p>
+        <div data-board-settings-content>Loading context…</div>
+    </section>`;
 
 export const boardContextSection = () => `
     <section class="mt-3 border-top pt-3" data-board-context>
@@ -267,6 +274,19 @@ function mountSettings(app, element, { load, render, read, save, savedMessage, o
     element.addEventListener('click', click);
     void reload();
     return () => { disposed = true; abort.abort(); element.removeEventListener('click', click); };
+}
+
+export function mountEveryContext(app, element, boardId) {
+    return mountSettings(app, element, {
+        load: extra => BoardApi.getBoardEveryContextAsync(boardId, extra),
+        render: ({ message }) => `
+            <label class="board-editor-label" for="every-context-message">Every Context message</label>
+            <textarea id="every-context-message" class="form-control form-control-sm mb-3" rows="6" maxlength="4000" placeholder="Context for every Nudge-enabled CLI…" spellcheck="true">${escapeHtml(message || '')}</textarea>
+            <button type="button" class="btn btn-sm btn-outline-primary" data-settings-save>Save Every Context</button>`,
+        read: root => ({ message: root.querySelector('#every-context-message').value }),
+        save: payload => BoardApi.saveBoardEveryContextAsync(boardId, payload),
+        savedMessage: 'Every Context saved for this board.'
+    });
 }
 
 export function mountBoardContext(app, element, boardId) {

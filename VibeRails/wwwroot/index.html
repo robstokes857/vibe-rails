@@ -1072,14 +1072,16 @@
                             <input type="checkbox" role="switch" class="form-check-input" id="setting-pr-reviewer-enabled" data-pr-reviewer-enabled disabled>
                             <label class="form-check-label" for="setting-pr-reviewer-enabled">Enable PR Reviewer and GitHub publishing</label>
                         </div>
-                        <p>Off by default. This setting applies to all projects on this machine and saves immediately. When on, completed reviews publish through your signed-in GitHub CLI account. Blockers request changes on GitHub; branch protection determines whether that prevents merging.</p>
-                        <p>Turning off stops new review queue/start work and new GitHub posts. A run already in progress can finish and save its local result. A GitHub post already reserved for dispatch may still finish. Existing history is preserved; enabling does not publish past reviews automatically.</p>
-                        <p>Reviews run through your existing open backend and Automations. There is no background service. Review history shows local results and GitHub delivery separately, with safe retry/check actions for errors.</p>
-                        <label class="form-label" for="setting-pr-reviewer-repositories">GitHub repositories to watch</label>
-                        <textarea id="setting-pr-reviewer-repositories" class="form-control" rows="5" data-pr-reviewer-repositories
-                            aria-describedby="pr-reviewer-repositories-help" placeholder="owner/repository" disabled></textarea>
-                        <p id="pr-reviewer-repositories-help" class="form-text">One owner/repository per line, up to 50. Leave empty to use each project's GitHub origin. This list applies to all projects on this machine. Access uses your existing GitHub CLI identity; no local checkout of these repositories is needed. Removing a watch preserves its history; add it again to access it.</p>
-                        <button type="button" class="btn btn-primary mb-3" data-pr-reviewer-save-repositories disabled>Save repositories</button>
+                        <p>Review PRs and publish results through your GitHub CLI account while VibeRails is open. Blockers request changes on GitHub.</p>
+                        <p class="form-text">Off by default. Saves immediately for all projects on this machine. Turning off preserves history; work already in progress may finish.</p>
+                        <label class="form-label" for="setting-pr-reviewer-repository">GitHub repository to watch</label>
+                        <form class="d-flex gap-2 mb-2" data-pr-reviewer-repository-form>
+                            <input type="text" id="setting-pr-reviewer-repository" class="form-control" data-pr-reviewer-repository
+                                aria-describedby="pr-reviewer-repositories-help" placeholder="owner/repository" autocomplete="off" spellcheck="false" autocapitalize="none" disabled>
+                            <button type="submit" class="btn btn-primary flex-shrink-0" data-pr-reviewer-add-repository disabled>Add</button>
+                        </form>
+                        <p id="pr-reviewer-repositories-help" class="form-text">Up to 50. Empty uses each project's GitHub origin. Changes save immediately.</p>
+                        <ul class="list-unstyled mb-3" aria-label="Watched repositories" data-pr-reviewer-repositories hidden></ul>
                         <p role="status" data-pr-reviewer-status>Open this page to load the saved setting.</p>
                         <button type="button" class="btn btn-outline-secondary" data-pr-reviewer-reload>Reload saved setting</button>
                     </section>
@@ -1343,7 +1345,9 @@
                                 </div>
                                 <small class="form-text text-muted">When a built-in CLI starts with no message of its own, open with the Vibe Board prompt:
                                     consider tracking this work as a Vibe Story (the agent decides). Agents always start with their own
-                                    message, so this never applies to them. On by default; applies to new sessions.</small>
+                                    message, so this tracking prompt never applies to them. Also include Every Context from the
+                                    selected board's settings on every built-in CLI launch, even with a starting message.
+                                    On by default; applies to new sessions.</small>
                             </div>
                             <div class="mb-4">
                                 <div class="form-check form-switch">
@@ -1351,7 +1355,8 @@
                                     <label class="form-check-label" for="setting-create-vibe-story-tracking-custom-envs">Vibe Board nudge — Quick Launches</label>
                                 </div>
                                 <small class="form-text text-muted">The same opening prompt for a Quick Launch started with no message or continuation summary.
-                                    Off by default; applies to new sessions.</small>
+                                    Also include Every Context from the selected board's settings on every saved setup launch,
+                                    including Agents with a starting message. Off by default; applies to new sessions.</small>
                             </div>
                             <div class="mb-4">
                                 <label class="form-label" for="setting-api-key">API Key</label>
@@ -3457,10 +3462,9 @@
                     display: flex;
                     flex-direction: column;
                     flex: 1 1 0;
-                    /* Floor, not a target: lanes share the width evenly and only
-                       start scrolling sideways once they cannot all fit. Five lanes
-                       fit a 1280px-wide content area without a scrollbar. */
-                    min-width: 232px;
+                    /* Lanes share the width evenly, with room for the card actions.
+                       Scroll sideways when the available space is below this floor. */
+                    min-width: 252px;
                     min-height: 0;
                     height: 100%;
                     border: 1px solid var(--color-border, #334155);
@@ -3601,7 +3605,7 @@
                 .board-view .board-card {
                     display: grid;
                     grid-template-columns: 3px 1fr;
-                    min-height: 10rem;
+                    min-height: 11rem;
                     overflow: hidden;
                     border: 1px solid var(--color-border, #334155);
                     border-radius: 6px;
@@ -3609,6 +3613,11 @@
                     cursor: pointer;
                     user-select: none;
                 }
+
+                .board-view .board-card-pin { opacity: .55; flex-shrink: 0; }
+                .board-view .board-card-pin:hover,
+                .board-view .board-card-pin:focus-visible,
+                .board-view .board-card-pin.is-pinned { opacity: 1; color: var(--color-primary, #3b82f6); }
 
                 .board-view .board-card:hover,
                 .board-view .board-card:focus-visible {
@@ -3760,7 +3769,7 @@
                     display: flex;
                     flex-direction: column;
                     min-width: 0;
-                    padding: 0.65rem 0.7rem 0.6rem;
+                    padding: 0.8rem 0.85rem 0.75rem;
                 }
 
                 .board-view .board-card-top {

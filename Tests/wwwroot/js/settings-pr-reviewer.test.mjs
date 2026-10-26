@@ -5,11 +5,15 @@ import { PrReviewerSettingsPanel } from '../../../VibeRails/wwwroot/js/modules/s
 function harness(apiCall) {
     const toggle = { checked: false, disabled: true, addEventListener() {} };
     const status = { textContent: '' };
-    const repositories = { value: '', disabled: true };
-    const saveRepositories = { disabled: true, addEventListener() {} };
+    const repositoryInput = { value: '', disabled: true, focus() {} };
+    const repositoryList = { hidden: true, innerHTML: '', addEventListener() {}, querySelectorAll: () => [] };
+    const addButton = { disabled: true };
+    const form = { addEventListener() {} };
     const reload = { addEventListener() {} };
-    const root = { querySelector: s => s.includes('enabled') ? toggle : s.includes('status') ? status : s === '[data-pr-reviewer-repositories]' ? repositories : s.includes('save-repositories') ? saveRepositories : reload };
-    return { toggle, status, repositories, saveRepositories, panel: new PrReviewerSettingsPanel({ apiCall, updatePrReviewerNav() {} }, root) };
+    const fields = { enabled: toggle, status, repositories: repositoryList, repository: repositoryInput,
+        'add-repository': addButton, 'repository-form': form, reload };
+    const root = { querySelector: s => fields[s.slice('[data-pr-reviewer-'.length, -1)] };
+    return { toggle, status, repositoryInput, repositoryList, addButton, panel: new PrReviewerSettingsPanel({ apiCall, updatePrReviewerNav() {} }, root) };
 }
 
 test('reviewer switch loads persisted state and saves changes through its dedicated API', async () => {
@@ -54,7 +58,7 @@ test('unloading ignores late reads and aborts the request', async () => {
     assert.equal(h.toggle.disabled, true);
 });
 
-test('watch list supports adding editing and clearing; switch saves preserve pending repository edits', async () => {
+test('watch list adds and removes one repository at a time; switch saves preserve the typed entry', async () => {
     let saved = ['octo/widgets'];
     const writes = [];
     const h = harness(async (_, method, body) => {
@@ -65,19 +69,48 @@ test('watch list supports adding editing and clearing; switch saves preserve pen
         return { enabled: true, repositories: saved };
     });
     await h.panel.load();
-    assert.equal(h.repositories.value, 'octo/widgets');
-    h.repositories.value = 'octo/widgets\n else/tools \n\nOCTO/WIDGETS';
+    assert.match(h.repositoryList.innerHTML, /octo\/widgets/);
+    h.repositoryInput.value = ' else/tools ';
     await h.panel.save();
     assert.deepEqual(writes[0], { enabled: true });
-    assert.match(h.repositories.value, /else\/tools/);
-    await h.panel.save(true);
+    assert.equal(h.repositoryInput.value, ' else/tools ');
+    await h.panel.addRepository();
     assert.deepEqual(saved, ['octo/widgets', 'else/tools']);
-    assert.equal(h.repositories.value, 'octo/widgets\nelse/tools');
-    h.repositories.value = 'else/renamed';
-    await h.panel.save(true);
-    assert.deepEqual(saved, ['else/renamed']);
-    h.repositories.value = '';
-    await h.panel.save(true);
+    assert.equal(h.repositoryInput.value, '');
+    h.repositoryInput.value = 'OCTO/WIDGETS';
+    await h.panel.addRepository();
+    assert.match(h.status.textContent, /already in the list/);
+    h.repositoryInput.value = 'https://github.com/else/tools';
+    await h.panel.addRepository();
+    assert.match(h.status.textContent, /owner\/repository/);
+    assert.equal(writes.length, 2, 'duplicates and invalid input do not write settings');
+    await h.panel.removeRepository(0);
+    assert.deepEqual(saved, ['else/tools']);
+    await h.panel.removeRepository(0);
     assert.deepEqual(saved, []);
-    assert.equal(h.saveRepositories.disabled, false);
+    assert.equal(h.repositoryList.hidden, true);
+    assert.equal(h.addButton.disabled, false);
+});
+
+test('an unconfirmed add preserves the saved list and typed repository until reload', async () => {
+    let rejectWrite;
+    const h = harness(async (_, method) => {
+        if (method === 'PUT') return new Promise((_, reject) => { rejectWrite = reject; });
+        return { enabled: true, repositories: ['octo/widgets'] };
+    });
+    await h.panel.load();
+    h.repositoryInput.value = 'else/tools';
+    const pending = h.panel.addRepository();
+    assert.equal(h.toggle.disabled, true);
+    assert.equal(h.addButton.disabled, true);
+    await h.panel.removeRepository(0);
+    rejectWrite(Error('Connection lost.'));
+    await pending;
+    assert.deepEqual(h.panel.repositories, ['octo/widgets']);
+    assert.equal(h.repositoryInput.value, 'else/tools');
+    assert.equal(h.repositoryInput.disabled, true);
+    assert.match(h.status.textContent, /Connection lost.*Reload/);
+    await h.panel.load();
+    assert.equal(h.repositoryInput.disabled, false);
+    assert.equal(h.repositoryInput.value, 'else/tools');
 });

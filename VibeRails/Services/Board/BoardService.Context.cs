@@ -6,11 +6,23 @@ public partial interface IBoardService
 {
     Task<BoardContextSettingsRecord?> GetContextSettingsAsync(string projectPath, string boardId, CancellationToken cancellationToken = default);
     Task<BoardContextSettingsRecord?> SaveContextSettingsAsync(string projectPath, string boardId, UpdateBoardContextRequest request, CancellationToken cancellationToken = default);
+    Task<BoardEveryContextSettingsRecord?> GetEveryContextSettingsAsync(string projectPath, string boardId, CancellationToken cancellationToken = default);
+    Task<BoardEveryContextSettingsRecord?> SaveEveryContextSettingsAsync(string projectPath, string boardId, UpdateBoardEveryContextRequest request, CancellationToken cancellationToken = default);
 }
 
 public sealed partial class BoardService
 {
     public const int MaxContextMessageLength = 4_000;
+
+    public Task<BoardEveryContextSettingsRecord?> GetEveryContextSettingsAsync(string projectPath, string boardId, CancellationToken cancellationToken = default) =>
+        store.GetEveryContextSettingsAsync(projectPath, boardId, cancellationToken);
+
+    public Task<BoardEveryContextSettingsRecord?> SaveEveryContextSettingsAsync(string projectPath, string boardId, UpdateBoardEveryContextRequest request, CancellationToken cancellationToken = default)
+    {
+        if (request.ExpectedRevision is null or < 0)
+            throw new BoardValidationException("The expected context revision is required.");
+        return store.SaveEveryContextSettingsAsync(projectPath, boardId, NormalizeContextMessage(request.Message), request.ExpectedRevision.Value, cancellationToken);
+    }
 
     public Task<BoardContextSettingsRecord?> GetContextSettingsAsync(string projectPath, string boardId, CancellationToken cancellationToken = default) =>
         store.GetContextSettingsAsync(projectPath, boardId, cancellationToken);

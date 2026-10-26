@@ -133,6 +133,18 @@ async function getBoardHistoryAsync(boardId, { card = null, offset = 0, signal }
     return call(`/boards/${enc(boardId)}/history?offset=${enc(offset)}${card ? `&card=${enc(card)}` : ''}`, 'GET', null, { signal });
 }
 
+async function getBoardEveryContextAsync(boardId, extra = {}) {
+    return call(`/boards/${enc(boardId)}/every-context`, 'GET', null, extra);
+}
+
+async function saveBoardEveryContextAsync(boardId, payload) {
+    return call(`/boards/${enc(boardId)}/every-context`, 'PUT', payload);
+}
+
+async function setBoardCardPinnedAsync(cardId, pinned) {
+    return call(`/cards/${enc(cardId)}/pin`, 'PUT', { pinned });
+}
+
 async function getBoardContextAsync(boardId, extra = {}) {
     return call(`/boards/${enc(boardId)}/context`, 'GET', null, extra);
 }
@@ -459,6 +471,9 @@ export const BoardApi = {
     syncBoardNowAsync,
     getBoardContextAsync,
     saveBoardContextAsync,
+    getBoardEveryContextAsync,
+    saveBoardEveryContextAsync,
+    setBoardCardPinnedAsync,
     getLaneAutomationAsync,
     getLaneRunningAgentsAsync,
     saveLaneAutomationAsync,

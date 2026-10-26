@@ -95,7 +95,7 @@ test('dedicated PR Reviewer settings persist and disclose in-progress behavior',
     await expect(toggle).toBeEnabled();
     await expect(toggle).not.toBeChecked();
     await expect(reviewsNav).toBeHidden();
-    await expect(page.getByText(/A run already in progress can finish/)).toBeVisible();
+    await expect(page.getByText(/work already in progress may finish/)).toBeVisible();
     await toggle.check();
     await expect(page.locator('[data-pr-reviewer-status]')).toHaveText(/Saved:.*on/);
     await expect(reviewsNav).toBeVisible();
@@ -108,22 +108,59 @@ test('dedicated PR Reviewer settings persist and disclose in-progress behavior',
     await expect(page.locator('[data-pr-reviewer-status]')).toHaveText(/Saved:.*off/);
     await expect(reviewsNav).toBeHidden();
     expect(enabled).toBe(false);
-    const watches = page.getByRole('textbox', { name: 'GitHub repositories to watch' });
-    await watches.fill('octo/widgets\nelse/tools\nOCTO/WIDGETS');
-    await page.getByRole('button', { name: 'Save repositories', exact: true }).click();
-    await expect(watches).toHaveValue('octo/widgets\nelse/tools');
+    const repository = page.getByRole('textbox', { name: 'GitHub repository to watch' });
+    const watches = page.getByRole('list', { name: 'Watched repositories' });
+    await repository.fill('octo/widgets');
+    await page.getByRole('button', { name: 'Add', exact: true }).click();
+    await expect(watches.getByRole('listitem')).toHaveText(['octo/widgets Remove']);
+    await expect(repository).toBeEmpty();
+    await repository.fill(' else/tools ');
+    await repository.press('Enter');
+    await expect(watches.getByRole('listitem')).toHaveText(['octo/widgets Remove', 'else/tools Remove']);
     expect(repositories).toEqual(['octo/widgets', 'else/tools']);
-    await watches.fill('else/renamed');
-    await page.getByRole('button', { name: 'Save repositories', exact: true }).click();
-    await expect(page.locator('[data-pr-reviewer-status]')).toHaveText(/Saved repositories/);
-    expect(repositories).toEqual(['else/renamed']);
-    await watches.fill('');
-    await page.getByRole('button', { name: 'Save repositories', exact: true }).click();
-    await expect(watches).toBeEnabled();
+    await repository.fill('OCTO/WIDGETS');
+    await page.getByRole('button', { name: 'Add', exact: true }).click();
+    await expect(page.locator('[data-pr-reviewer-status]')).toHaveText('That repository is already in the list.');
+    expect(repositories).toEqual(['octo/widgets', 'else/tools']);
+    await page.reload();
+    await page.locator('[data-action="navigate-settings"]').click();
+    await page.getByRole('tab', { name: 'PR Reviewer', exact: true }).click();
+    await expect(watches.getByRole('listitem')).toHaveCount(2);
+    await watches.getByRole('button', { name: 'Remove octo/widgets', exact: true }).click();
+    await expect(watches.getByRole('listitem')).toHaveText(['else/tools Remove']);
+    expect(repositories).toEqual(['else/tools']);
+    await watches.getByRole('button', { name: 'Remove else/tools', exact: true }).click();
+    await expect(watches).toBeHidden();
+    await expect(repository).toBeFocused();
     expect(repositories).toEqual([]);
     await page.reload();
     await expect(reviewsNav).toBeHidden();
     await expect(page.locator('[data-action="navigate-settings"]')).toBeVisible();
+});
+
+test('repository rows wrap long names and keep Add and Remove usable on narrow screens', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await mount(page, reviewFixture());
+    const longRepository = `${'o'.repeat(39)}/${'r'.repeat(100)}`;
+    let repositories = [longRepository];
+    await page.route('**/api/v1/pr-reviews/settings*', route => {
+        if (route.request().method() === 'PUT') repositories = route.request().postDataJSON().repositories;
+        return route.fulfill({ json: { enabled: false, repositories } });
+    });
+    await page.locator('[data-action="navigate-settings"]').click();
+    await page.getByRole('tab', { name: 'PR Reviewer', exact: true }).click();
+    const panel = page.locator('[data-settings-pr-reviewer]');
+    const remove = panel.getByRole('button', { name: `Remove ${longRepository}`, exact: true });
+    await expect(remove).toBeVisible();
+    for (const control of [panel.getByRole('button', { name: 'Add', exact: true }), remove]) {
+        const bounds = await control.boundingBox();
+        expect(bounds.x).toBeGreaterThanOrEqual(0);
+        expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
+    }
+    await page.screenshot({ path: testInfo.outputPath('pr-reviewer-narrow.png'), fullPage: true });
+    await remove.click();
+    await expect(panel.getByRole('list', { name: 'Watched repositories' })).toBeHidden();
+    expect(repositories).toEqual([]);
 });
 
 test('delivery errors stay distinct from local completion and retry checks show confirmed receipts', async ({ page }) => {

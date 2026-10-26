@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BoardApi } from '../../../VibeRails/wwwroot/js/modules/board-api.js';
-import { boardSettingsNavigation, mountBoardContext, mountBoardSettingsNavigation, mountBoardSync, mountLaneAutomation, newBoardNavigation } from '../../../VibeRails/wwwroot/js/modules/board-settings.js';
+import { boardSettingsNavigation, everyContextSection, mountEveryContext, mountBoardContext, mountBoardSettingsNavigation, mountBoardSync, mountLaneAutomation, newBoardNavigation } from '../../../VibeRails/wwwroot/js/modules/board-settings.js';
 
 test('failed publication reloads the saved sync choice', async () => {
     const listeners = new Map();
@@ -56,7 +56,7 @@ test('closing settings suppresses a late board-status callback', async () => {
     assert.equal(content.innerHTML, 'loading');
 });
 
-for (const mount of [mountBoardContext, mountLaneAutomation]) {
+for (const mount of [mountEveryContext, mountBoardContext, mountLaneAutomation]) {
     test(`${mount.name} aborts on close and ignores a late response`, async () => {
         let finish;
         let signal;
@@ -115,7 +115,7 @@ function settingsEditor() {
     };
     let focused = null;
     const order = [];
-    const ids = ['general', 'jira', 'ado', 'context', 'history'];
+    const ids = ['general', 'jira', 'ado', 'every-context', 'context', 'history'];
     const tabs = ids.map(id => node({ id: `board-settings-tab-${id}`, dataset: { boardSettingsTab: id } }));
     tabs[0].classes.add('active');
     const panels = ids.map(id => {
@@ -143,7 +143,7 @@ test('settings navigation follows the board provider without replacing any panel
     const [general, jira, ado] = panels;
     const selections = [];
     const navigation = mountBoardSettingsNavigation(editor, (tab, tracker) => selections.push([tab, tracker]));
-    assert.deepEqual(visibleTabs(), ['general', 'jira', 'ado', 'context', 'history']);
+    assert.deepEqual(visibleTabs(), ['general', 'jira', 'ado', 'every-context', 'context', 'history']);
     tabs[2].listeners.click();
     assert.deepEqual(selections.at(-1), ['ado', 'ado']);
     assert.equal(ado.hidden, false);
@@ -152,7 +152,7 @@ test('settings navigation follows the board provider without replacing any panel
 
     // An Azure DevOps board: its connection joins General and both tracker tabs go.
     navigation.followProvider('ado');
-    assert.deepEqual(visibleTabs(), ['general', 'context', 'history']);
+    assert.deepEqual(visibleTabs(), ['general', 'every-context', 'context', 'history']);
     assert.equal(ado.parent, general);
     assert.equal(ado.hidden, false);
     assert.equal(ado.attributes['aria-label'], 'Azure DevOps');
@@ -163,7 +163,7 @@ test('settings navigation follows the board provider without replacing any panel
     assert.deepEqual(selections.at(-1), ['general', 'ado']);
     const arrow = { key: 'ArrowRight', preventDefault() {} };
     tabs[0].listeners.keydown(arrow);
-    assert.equal(activeTab(), 'context', 'keyboard navigation skips hidden tabs');
+    assert.equal(activeTab(), 'every-context', 'keyboard navigation skips hidden tabs');
     tabs[3].listeners.keydown({ key: 'ArrowLeft', preventDefault() {} });
     assert.equal(activeTab(), 'general');
     const before = selections.length;
@@ -172,26 +172,26 @@ test('settings navigation follows the board provider without replacing any panel
 
     // Unlinked: the panel returns to its own tab, which is selected so the result stays visible.
     navigation.followProvider(null);
-    assert.deepEqual(visibleTabs(), ['general', 'jira', 'ado', 'context', 'history']);
+    assert.deepEqual(visibleTabs(), ['general', 'jira', 'ado', 'every-context', 'context', 'history']);
     assert.equal(ado.parent, null);
     assert.equal(ado.dataset.boardSettingsPanel, 'ado');
     assert.equal(ado.attributes.role, 'tabpanel');
     assert.equal(ado.attributes['aria-labelledby'], 'board-settings-tab-ado');
     assert.equal('aria-label' in ado.attributes, false);
     assert.ok(!ado.classes.has('board-settings-tracker-combined'));
-    assert.deepEqual(panelOrder(), ['general', 'jira', 'ado', 'context', 'history']);
+    assert.deepEqual(panelOrder(), ['general', 'jira', 'ado', 'every-context', 'context', 'history']);
     assert.equal(activeTab(), 'ado');
     assert.deepEqual(selections.at(-1), ['ado', 'ado']);
 
     // A Jira board while the Azure DevOps tab is open: General takes over and shows Jira.
     navigation.followProvider('jira');
-    assert.deepEqual(visibleTabs(), ['general', 'context', 'history']);
+    assert.deepEqual(visibleTabs(), ['general', 'every-context', 'context', 'history']);
     assert.equal(jira.parent, general);
     assert.equal(ado.hidden, true);
     assert.deepEqual(selections.at(-1), ['general', 'jira']);
     navigation.followProvider('github');
     assert.equal(jira.parent, null, 'an unknown provider is a local board');
-    assert.deepEqual(panelOrder(), ['general', 'jira', 'ado', 'context', 'history']);
+    assert.deepEqual(panelOrder(), ['general', 'jira', 'ado', 'every-context', 'context', 'history']);
 
     navigation.dispose();
     navigation.followProvider('ado');
@@ -204,6 +204,47 @@ test('the New board dialog offers a local board or one connected to Jira or Azur
     assert.match(newBoardNavigation(), /aria-label="Board type" role="tablist"/);
     assert.match(newBoardNavigation(), /id="board-settings-tab-ado" aria-controls="board-settings-ado" aria-selected="false"/);
     assert.deepEqual(tabs(boardSettingsNavigation()), [['general', 'General'], ['jira', 'Jira Cloud'], ['ado', 'Azure DevOps'],
-        ['context', 'Agent context'], ['history', 'History']]);
+        ['every-context', 'Every Context'], ['context', 'Agent context'], ['history', 'History']]);
     assert.match(boardSettingsNavigation(), /aria-label="Board settings" role="tablist"/);
+});
+
+test('Every Context loads escaped text and saves its board message with its revision', async () => {
+    const listeners = new Map();
+    const content = { innerHTML: '' };
+    const input = { value: 'Updated shared context' };
+    const button = { disabled: false };
+    const element = {
+        isConnected: true,
+        querySelector: selector => selector === '[data-board-settings-content]' ? content : input,
+        querySelectorAll: () => [],
+        addEventListener: (name, listener) => listeners.set(name, listener),
+        removeEventListener: name => listeners.delete(name)
+    };
+    const calls = [];
+    let finishSave;
+    const toasts = [];
+    const app = {
+        apiCall: (path, method, body) => {
+            calls.push({ path, method, body });
+            return method === 'GET' ? Promise.resolve({ message: '</textarea><script>bad()</script>', revision: 3 })
+                : new Promise(resolve => { finishSave = resolve; });
+        },
+        showToast: (...args) => toasts.push(args)
+    };
+    BoardApi.attach(app);
+    const dispose = mountEveryContext(app, element, 'board-a');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.match(content.innerHTML, /&lt;\/textarea&gt;&lt;script&gt;/);
+    assert.match(everyContextSection(), /currently selected board/);
+    const event = { target: { closest: selector => selector === '[data-settings-save]' ? button : null } };
+    const saving = listeners.get('click')(event);
+    await listeners.get('click')(event);
+    assert.equal(button.disabled, true);
+    assert.equal(calls.length, 2, 'duplicate saves are suppressed');
+    assert.deepEqual(calls[1], { path: '/api/v1/board/boards/board-a/every-context', method: 'PUT', body: { message: input.value, expectedRevision: 3 } });
+    finishSave({ message: input.value, revision: 4 });
+    await saving;
+    assert.equal(button.disabled, false);
+    assert.equal(toasts[0][2], 'success');
+    dispose();
 });
