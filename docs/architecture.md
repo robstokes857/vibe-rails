@@ -54,13 +54,18 @@ retrieval budgets, incremental indexing and launch behavior.
 
 ## Complete backups (VIBE-29, October 2, 2026)
 
-The root-host `CompleteBackupJob` independently drains versioned Board, state, proxy and
-configuration archives through cancellable SQLite snapshots, private durable staging and
-verified part/manifest receipts. Session exports and bounded Board sync continue separately.
-The [component contract](../VibeRails/Services/CompleteBackups/README.md) defines cadence,
-freshness, exact file/credential exclusions, retry behavior, size limits and rollout ordering.
-General Settings displays per-dataset coverage. Restore/inspection instructions live in
-`vibe-books/vibe-data/docs/complete-backups.md`; no source retention policy changes.
+Automatic whole-installation Azure snapshots were retired on October 20; existing archives
+and their [read/restore contract](../VibeRails/Services/CompleteBackups/README.md) remain.
+Session exports and the hosted Board UI sync continue independently.
+
+`BoardDataBackupJob` now captures every retained Board table through `IBoardStore` and
+uploads queryable row revisions plus deduplicated full-content parts to the independent
+PostgreSQL `BoardDataBackups` and `BoardDataBackupSnapshots` tables. It includes unpublished
+boards and deleted cards and is independent of the hosted UI's deletion lifecycle. It runs
+only in an open root backend, with account-scoped staging, retries and verified complete
+snapshot receipts. It does not write to Azure or restart the retired whole-installation job.
+See the [Board data-backup contract](../VibeRails/Services/Board/DataBackup/README.md) for exact
+coverage, fifteen-minute capture cadence, retention, SQL access and server-first rollout.
 
 ## Vibe AI navigation
 

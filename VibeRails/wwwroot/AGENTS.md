@@ -560,7 +560,7 @@ foreign card's title, description, and comment, plus the board's agent-context m
 Descriptions always open as editable source, with no preview pane or Edit/Preview controls.
 Markdown is always enabled for rendered comments; the retired browser preference is ignored.
 Previous work remains available as a collapsed sidebar section for saved handoffs and file entry
-points. Checks (Code quality and VCA) also live in the sidebar. The main column flows from
+points. Checks (Code quality and VCA) live inside the sidebar's collapsed Advanced section. The main column flows from
 Description to uploads to Comments.
 
 The description textarea grows in normal document flow. Do not make the new-card description
@@ -592,7 +592,7 @@ renders without rewriting stored text. Navigation uses existing replay/diff/unsa
 guards. Abort and generation checks prevent stale results or asynchronous selections from
 overwriting edited text.
 
-The card keeps the latest Checks summary and optional saved report. Run checks, Earlier results
+The card keeps the latest Checks summary and optional saved report under Advanced. Run checks, Earlier results
 and the Code reviews panel are unmounted; evidence and review APIs remain available. Lane Agents
 lists the originating lane’s running agents (including cards outside loaded pages), and offers
 VCA/Code quality choices with explicit scope as ordinary one-action Automations. These choices
@@ -1424,7 +1424,7 @@ Card labels use `displayId || key` through `board-card-label.js`; `key` remains 
 identity. Board settings edit `displayPrefix` for future cards (only a changed value is sent; an
 emptied field sends `''`, which returns the board to the repository default). A saved card's
 collapsed **Advanced** section (formerly Card settings) edits the individual display ID, shows the
-permanent key, and holds the Agent context measurement and History. Both IDs remain searchable,
+permanent key, and holds Checks, the Agent context measurement and History. Both IDs remain searchable,
 including in chat history, which shows the display ID and keeps the key in the tooltip. New-card links live on the editor's draft card
 and are sent as `linkedCardIds` only on Create; link search and disposal retain generation guards.
 

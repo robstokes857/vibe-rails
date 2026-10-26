@@ -551,6 +551,16 @@ missing/corrupt original attachment content must not become a successful incompl
 must support schema 2 before desktop rollout. Existing archives and retired full-backup staging
 remain stored; automatic full-snapshot scheduling is removed. See [SYNC.md](SYNC.md).
 
+## Independent PostgreSQL data backup (VB-BSS1H-294)
+
+The root-only `BoardDataBackupJob` archives every retained Board table through
+`IBoardStore.ReadDataBackupAsync`, including unpublished boards, deleted cards and full
+original content. It is separate from hosted UI sync and writes to independent PostgreSQL
+backup tables, not Azure. Keep those tables free of UI board/card foreign keys and deletion
+or expiry paths. A snapshot is complete only after every referenced row and content part is
+verified. Preserve original values and never apply preview limits. See
+[the data-backup contract](DataBackup/README.md). No new SQLite schema is required.
+
 ## Storage changes
 
 Read [database migration instructions](../../../VibeRails.Data.Sqlite/DB/AGENTS.md).

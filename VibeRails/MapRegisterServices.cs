@@ -486,6 +486,7 @@ namespace VibeRails
                         .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
                     serviceCollection.AddHostedService<TokenSavingsPublishJob>();
                     serviceCollection.AddHostedService<SessionDataDrainJob>();
+                    serviceCollection.AddHostedService<BoardDataBackupJob>();
                     // Full snapshot scheduling retired; session drain and Board content sync remain active.
                     serviceCollection.AddHostedService<DataRetentionJob>();
                     serviceCollection.AddHostedService<SearchIndexMaintenanceJob>();
@@ -516,6 +517,11 @@ namespace VibeRails
 
             serviceCollection.AddSingleton<Services.Backups.BackupFiles>();
             serviceCollection.AddSingleton<Services.Backups.CompleteBackupService>();
+            serviceCollection.AddSingleton<Services.Board.Backup.BoardBackupTransport>();
+            serviceCollection.AddSingleton<Services.Board.Backup.BoardDataBackupService>();
+            serviceCollection.AddHttpClient(Services.Board.Backup.BoardBackupTransport.ClientName, client =>
+                client.Timeout = TimeSpan.FromMinutes(2))
+                .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
             // A named client, not AddHttpClient<BackupTransport>: the transient typed client would be captured
             // once by the singleton CompleteBackupService and its handler never rotated (see TokenSavingsPublishJob).
             serviceCollection.AddSingleton<Services.Backups.BackupTransport>();

@@ -1535,7 +1535,6 @@ export class BoardController {
                     </section>` : ''}
 
 
-                    ${card ? cardChecksSection() : ''}
                     <div data-board-previous-work>${previousWorkHtml(card)}</div>
                     ${card ? cardOrganizeSection() : ''}
                     ${renderCardLinksSection(card)}
@@ -1593,6 +1592,7 @@ export class BoardController {
                         <label class="board-editor-label mt-2" for="board-card-display-id">Display ID</label>
                         <input class="form-control form-control-sm" id="board-card-display-id" maxlength="32" spellcheck="false" value="${escapeHtml(cardDisplayId(card))}">
                         <p class="board-editor-muted mt-2">Permanent ID: <code>${escapeHtml(card.key)}</code></p>
+                        ${cardChecksSection()}
                         ${contextSectionMarkup()}${historySection()}
                     </details></section>` : ''}
 

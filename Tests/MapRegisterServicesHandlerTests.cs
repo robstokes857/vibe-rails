@@ -84,6 +84,7 @@ public sealed class MapRegisterServicesHandlerTests
     [InlineData("IRemoteStateService")]
     [InlineData("IPushNotificationService")]
     [InlineData("conversation-titles")]
+    [InlineData("board-data-backup")]
     public void CredentialFrontTypedClients_UseTheNoRedirectPrimaryHandler(string clientName)
     {
         var services = new ServiceCollection();

@@ -1,6 +1,7 @@
 # Card checks
 
-Every saved card exposes the latest Checks summary without starting analysis on save. VIBE-34
+Every saved card exposes the latest Checks summary inside its collapsed Advanced section,
+without starting analysis on save. VIBE-34
 removes Run checks, Earlier results and the Code reviews panel from the card. Evidence and APIs
 remain intact. The lane **Agents** dropdown can create a VCA or Code quality Automation with an
 explicit scope and select it for future lane entry; setup never starts a run. Existing multi-action

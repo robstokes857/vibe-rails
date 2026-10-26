@@ -1156,7 +1156,7 @@ test('posting a comment clears its live preview along with the input', async ({ 
 });
 
 for (const width of [1440, 390]) {
-    test(`card Checks preserve scope, history and safe reports at ${width}px`, async ({ page }, testInfo) => {
+    test(`card Checks stay under Advanced and preserve scope and safe reports at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 950 });
         await openBoard(page);
         const check = { id: 'check-1', tool: 'Code quality', status: 'Skipped/not applicable', scope: 'working-tree',
@@ -1180,6 +1180,10 @@ for (const width of [1440, 390]) {
         });
         await page.getByText('Description images', { exact: true }).click();
         const panel = page.locator('[data-board-checks]');
+        await expect(page.locator('[data-board-advanced] [data-board-checks]')).toHaveCount(1);
+        await expect(panel).not.toBeVisible();
+        await page.locator('[data-board-advanced] > summary').click();
+        await expect(panel).toBeVisible();
         await expect(panel.locator('[data-check-summary]')).toContainText('Not run');
         expect(runs).toBe(0);
         await expect(panel.locator('[data-check-run-options]')).toHaveCount(0);
@@ -3567,7 +3571,7 @@ for (const width of [1440, 390]) {
         const editor = page.locator('[data-board-card-editor]');
         await expect(editor.locator('[data-board-reviews]')).toHaveCount(0);
         await expect(editor.locator('[data-check-run-options], [data-check-history]')).toHaveCount(0);
-        await expect(editor.locator('[data-board-checks]')).toBeVisible();
+        await expect(editor.locator('[data-board-checks]')).not.toBeVisible();
         await expect(editor.locator('[data-board-sessions] [data-session-id]')).toHaveCount(1);
         await expect(editor.locator('[data-board-automations] [data-session-id="review-session"]')).toHaveCount(1);
         await editor.locator('#board-card-title').fill('Keep this unsaved draft');
