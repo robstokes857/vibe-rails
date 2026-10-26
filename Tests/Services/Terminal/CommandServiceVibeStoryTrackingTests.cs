@@ -123,7 +123,8 @@ public partial class CommandServiceTests
         }).PrepareSessionAsync(llm, envName, null, resolveEveryContext: () => Task.FromResult<string?>("Shared instructions"));
 
         Assert.EndsWith("VibeRails Every Context:\nShared instructions\n\n" + VibeStoryTrackingPrompt.Guidance, prepared.Argv![^1]);
-        Assert.Contains("tell the user you're ready to help", prepared.LaunchCommand);
+        // Inspect the actual argv: the display command shell-escapes apostrophes on Unix.
+        Assert.Contains("tell the user you're ready to help", prepared.Argv[^1]);
     }
 
     [Theory]

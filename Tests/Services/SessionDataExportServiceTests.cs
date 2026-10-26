@@ -660,9 +660,11 @@ public sealed class SessionDataExportServiceTests : IDisposable
         using var services = BuildServices(repository.Object);
         using var handler = new ChunkUploadHandler(sourceId);
         using var client = new HttpClient(handler);
-        var result = await CreateService(client, services).ExportSessionAsync(sessionId, TestContext.Current.CancellationToken);
+        var logger = new Mock<ILogger<SessionDataExportService>>();
+        var result = await CreateService(client, services, logger.Object).ExportSessionAsync(sessionId, TestContext.Current.CancellationToken);
 
-        Assert.Equal(SessionDataExportStatus.Success, result.Status);
+        Assert.True(result.Status == SessionDataExportStatus.Success,
+            $"{result}\n{string.Join("\n", logger.Invocations.Select(call => call.ToString()))}");
         Assert.All(handler.Requests, request => Assert.Equal(schemaVersion.ToString(), request.SchemaVersion));
         Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(frozen)), result.Sha256);
         if (!chunked) Assert.Equal(frozen, Assert.Single(handler.Requests).Body);
@@ -836,12 +838,13 @@ public sealed class SessionDataExportServiceTests : IDisposable
 
     private SessionDataExportService CreateService(
         HttpClient client,
-        ServiceProvider services)
+        ServiceProvider services,
+        ILogger<SessionDataExportService>? logger = null)
     {
         return new SessionDataExportService(
             client,
             services.GetRequiredService<IServiceScopeFactory>(),
-            NullLogger<SessionDataExportService>.Instance,
+            logger ?? NullLogger<SessionDataExportService>.Instance,
             () => ComputerName,
             _featureLog);
     }

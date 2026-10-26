@@ -45,6 +45,9 @@ public sealed class ReviewTreeRebuilderTests : IAsyncLifetime
         File.Move(Path.Combine(Repo, "keep.cs"), Path.Combine(Repo, "kept.cs"));
         File.Delete(Path.Combine(Repo, "old.md"));
         await Git(Repo, "add", "-A", "--", ".");
+        // Linux git add refreshes the mode from the non-executable fixture on disk.
+        // This staged fixture represents a content edit that retains its executable bit.
+        await Git(Repo, "update-index", "--chmod=+x", "tools/run.sh");
     }
 
     /// <summary>A binary file: NUL bytes, every byte value, and base64 that needs padding and contains '+' and '/'.</summary>
