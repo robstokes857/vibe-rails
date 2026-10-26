@@ -315,7 +315,8 @@ local-card editor's `syncToRemote` field send `syncToRemote`; "Not sent to …" 
 own board. Delivery status reads `remoteDeliveries` and the ten-second poll re-renders the
 discussion when they change. The origin filter offers Jira and Azure DevOps; Human-made excludes both.
 Token entry uses a text input with autocomplete, spellcheck, autocapitalization and autocorrection off.
-The header wraps whole labels so the display ID, work type and priority stay readable in narrow lanes.
+The header keeps the display ID on the left and the pin at the far right. Work type, workflow mode
+and priority wrap together at the lower left, opposite activity and comments, above the assignment footer.
 Lane cards have an 11rem minimum height and keep activity and assignment at the bottom; longer content grows the card.
 The thumbtack button pins a card's slot during automatic activity promotion. Its narrow save
 preserves other fields, focus and the open editor; failures keep the previous pin state. Explicit

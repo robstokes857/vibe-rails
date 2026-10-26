@@ -396,6 +396,10 @@ middleware serves their paths rather than registering individual API endpoints.
 | GET | `/api/v1/python-scripts/run/terminal/ws` | [PythonScriptRoutes.cs](VibeRails/Routes/PythonScriptRoutes.cs) |
 | GET | `/api/v1/python-scripts/runs` | [PythonScriptRoutes.cs](VibeRails/Routes/PythonScriptRoutes.cs) |
 | POST | `/api/v1/python-scripts/settings` | [PythonScriptRoutes.cs](VibeRails/Routes/PythonScriptRoutes.cs) |
+| GET | `/api/v1/review-inbox` | [ReviewInboxRoutes.cs](VibeRails/Routes/ReviewInboxRoutes.cs) |
+| POST | `/api/v1/review-inbox/refresh` | [ReviewInboxRoutes.cs](VibeRails/Routes/ReviewInboxRoutes.cs) |
+| POST | `/api/v1/review-inbox/{reference}/approve` | [ReviewInboxRoutes.cs](VibeRails/Routes/ReviewInboxRoutes.cs) |
+| POST | `/api/v1/review-inbox/{reference}/reject` | [ReviewInboxRoutes.cs](VibeRails/Routes/ReviewInboxRoutes.cs) |
 | GET | `/api/v1/review-requests` | [ReviewRequestRoutes.cs](VibeRails/Routes/ReviewRequestRoutes.cs) |
 | POST | `/api/v1/review-requests` | [ReviewRequestRoutes.cs](VibeRails/Routes/ReviewRequestRoutes.cs) |
 | GET | `/api/v1/review-requests/commit-approvals` | [ReviewRequestRoutes.cs](VibeRails/Routes/ReviewRequestRoutes.cs) |

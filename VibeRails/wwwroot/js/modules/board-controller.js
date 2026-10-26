@@ -921,23 +921,23 @@ export class BoardController {
                 <div class="board-card-body">
                     <div class="board-card-top">
                         <span class="board-key${ghost ? ' has-ghost' : ''}"${ghost ? ` title="${escapeHtml(ghost)}"` : ''}>${ghostKeyHtml(`${card.flagged ? '<i class="fa-solid fa-flag board-attention-flag" title="Needs your attention" aria-hidden="true"></i> ' : ''}${card.agentMade ? `<i class="fa-solid fa-robot board-agent-mark" title="${escapeHtml(agentMadeSummary(card))}" aria-label="${escapeHtml(agentMadeSummary(card))}"></i> ` : ''}${escapeHtml(cardDisplayId(card))}`, card)}</span>
-                        <span class="board-card-top-right">
-                            <button type="button" class="board-icon-btn board-card-pin${card.pinned ? ' is-pinned' : ''}" data-board-action="toggle-pin"
-                                aria-label="${card.pinned ? 'Unpin' : 'Pin'} ${id}" aria-pressed="${Boolean(card.pinned)}"
-                                title="${card.pinned ? 'Unpin: allow activity to move this card' : 'Pin this card in place'}">
-                                <i class="fa-solid fa-thumbtack" aria-hidden="true"></i>
-                            </button>
-                            <span class="board-type-chip" data-type="${escapeHtml(type.value)}"
-                                title="${escapeHtml(type.label)}">${escapeHtml(type.label)}</span>
-                            ${card.workflowMode === 'agent' ? '<span class="board-workflow-chip" title="A manager coordinates this card through the pipeline"><i class="fa-solid fa-diagram-project" aria-hidden="true"></i> Agent</span>' : ''}
-                            <span class="board-priority-chip" data-priority="${escapeHtml(card.priority)}">${escapeHtml(card.priority)}</span>
-                        </span>
+                        <button type="button" class="board-icon-btn board-card-pin${card.pinned ? ' is-pinned' : ''}" data-board-action="toggle-pin"
+                            aria-label="${card.pinned ? 'Unpin' : 'Pin'} ${id}" aria-pressed="${Boolean(card.pinned)}"
+                            title="${card.pinned ? 'Unpin: allow activity to move this card' : 'Pin this card in place'}">
+                            <i class="fa-solid fa-thumbtack" aria-hidden="true"></i>
+                        </button>
                     </div>
                     ${cardTracker(card) ? `<div class="board-card-origin">${this.remoteBadge(card)}</div>` : ''}
                     <h3 class="board-card-title">${escapeHtml(card.title)}</h3>
                     ${card.hasWaitingAutomation ? this.waitingAutomationIndicator() : ''}
                     ${excerpt ? `<p class="board-card-excerpt">${escapeHtml(excerpt)}</p>` : ''}
                     <div class="board-card-meta">
+                        <span class="board-card-badges">
+                            <span class="board-type-chip" data-type="${escapeHtml(type.value)}"
+                                title="${escapeHtml(type.label)}">${escapeHtml(type.label)}</span>
+                            ${card.workflowMode === 'agent' ? '<span class="board-workflow-chip" title="A manager coordinates this card through the pipeline"><i class="fa-solid fa-diagram-project" aria-hidden="true"></i> Agent</span>' : ''}
+                            <span class="board-priority-chip" data-priority="${escapeHtml(card.priority)}">${escapeHtml(card.priority)}</span>
+                        </span>
                         <div class="board-card-aside">
                             ${card.hasActiveAutomation ? this.automationIndicator() : ''}
                             ${live}

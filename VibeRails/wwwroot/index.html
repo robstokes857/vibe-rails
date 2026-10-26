@@ -3614,7 +3614,7 @@
                     user-select: none;
                 }
 
-                .board-view .board-card-pin { opacity: .55; flex-shrink: 0; }
+                .board-view .board-card-pin { opacity: .55; flex-shrink: 0; margin-left: auto; }
                 .board-view .board-card-pin:hover,
                 .board-view .board-card-pin:focus-visible,
                 .board-view .board-card-pin.is-pinned { opacity: 1; color: var(--color-primary, #3b82f6); }
@@ -3774,7 +3774,6 @@
 
                 .board-view .board-card-top {
                     display: flex;
-                    flex-wrap: wrap;
                     align-items: center;
                     justify-content: space-between;
                     gap: 0.25rem 0.5rem;
@@ -3786,6 +3785,7 @@
                     font-family: 'JetBrains Mono', 'Fira Code', monospace;
                     font-size: 0.68rem;
                     white-space: nowrap;
+                    min-width: 0;
                     max-width: 100%;
                     overflow: hidden;
                     text-overflow: ellipsis;
@@ -3814,15 +3814,14 @@
                     letter-spacing: -0.01em;
                 }
 
-                .board-view .board-card-top-right {
+                .board-view .board-card-badges {
                     display: inline-flex;
+                    flex: 1;
                     flex-wrap: wrap;
                     align-items: center;
-                    justify-content: flex-end;
                     gap: 0.3rem;
                     min-width: 0;
                     max-width: 100%;
-                    margin-left: auto;
                 }
 
                 .board-view .board-type-chip {
@@ -3958,8 +3957,8 @@
 
                 .board-view .board-card-meta {
                     display: flex;
+                    flex-wrap: wrap;
                     align-items: center;
-                    justify-content: flex-end;
                     gap: 0.5rem;
                     margin-top: auto;
                 }
@@ -3969,6 +3968,7 @@
                     align-items: center;
                     gap: 0.35rem;
                     flex: none;
+                    margin-left: auto;
                 }
 
                 .board-view .board-blocked {
