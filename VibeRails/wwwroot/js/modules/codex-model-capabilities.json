@@ -27,6 +27,19 @@
       "ultra"
     ]
   },
+  "gpt-6.1-terra": {
+    "speeds": [
+      "fast"
+    ],
+    "efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra"
+    ]
+  },
   "gpt-6-sol": {
     "speeds": [
       "fast"

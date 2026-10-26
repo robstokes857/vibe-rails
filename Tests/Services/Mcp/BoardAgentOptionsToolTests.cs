@@ -63,6 +63,7 @@ public sealed class BoardAgentOptionsToolTests
         Assert.DoesNotContain("Start mode:", result);
         Assert.Contains("gpt-6-astra: default, fast, ultrafast", result);
         Assert.Contains("gpt-6.1-sol: default, fast, ultrafast; effort: default, low, medium, high, xhigh, max, ultra\n", result);
+        Assert.Contains("gpt-6.1-terra: default, fast; effort: default, low, medium, high, xhigh, max, ultra\n", result);
         Assert.DoesNotContain("- gpt-5.5:", result);
         foreach (var luna in new[] { "gpt-6-luna", "gpt-5.6-luna" })
             Assert.Contains($"- {luna}: default, fast; effort: default, low, medium, high, xhigh, max\n", result);

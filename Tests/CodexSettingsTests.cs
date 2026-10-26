@@ -479,6 +479,8 @@ model = ""gpt-5.6-terra""
     [InlineData("gpt-6-astra", true, "ultrafast")]
     [InlineData("gpt-6.1-sol", false, "ultrafast")]
     [InlineData("gpt-6.1-sol", true, "ultrafast")]
+    [InlineData("gpt-6.1-terra", false, "")]
+    [InlineData("gpt-6.1-terra", true, "fast")]
     [InlineData("gpt-6-sol", false, "")]
     [InlineData("gpt-6-sol", true, "fast")]
     [InlineData("", false, "")]
@@ -561,6 +563,8 @@ model = ""gpt-5.6-terra""
     [InlineData("gpt-6-luna", "ultra", "max")]
     [InlineData("gpt-5.6-luna", "ultra", "max")]
     [InlineData("gpt-6-sol", "minimal", "low")]
+    [InlineData("gpt-6.1-terra", "minimal", "low")]
+    [InlineData("gpt-6.1-terra", "ultra", "ultra")]
     public async Task SaveSettings_UsesSupportedModelEffort_AndKeepsFast(string model, string effort, string expected)
     {
         _mockFileService.SetFileExists(true);

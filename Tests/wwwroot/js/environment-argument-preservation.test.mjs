@@ -90,7 +90,7 @@ test('Codex speed overrides replace copied settings and the last tier wins', () 
 
 test('Codex refuses to emit Ultrafast for unsupported models and preserves unmanaged tiers', () => {
     const controller = createController();
-    for (const model of ['', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'custom-model']) {
+    for (const model of ['', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'custom-model']) {
         assert.doesNotMatch(controller.buildCodexCustomArgs({ model, ultrafastMode: true }), /service_tier|fast_mode/);
         assert.match(controller.buildCliSettingsHtml('codex', { model, ultrafastMode: true }), /value="ultrafast"\s+disabled/);
     }

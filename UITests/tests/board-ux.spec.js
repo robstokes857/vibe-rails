@@ -2950,7 +2950,7 @@ for (const width of [1440, 390]) {
         const speed = page.getByRole('combobox', { name: 'Speed', exact: true });
         await expect(speed.locator('option[value="fast"]')).toBeDisabled();
         expect(await model.locator('option').evaluateAll(options => options.map(option => option.value)))
-            .toEqual(['', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']);
+            .toEqual(['', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']);
         await model.selectOption('gpt-6.1-sol');
         for (const tier of ['ultrafast', 'fast', '']) {
             await speed.selectOption(tier);
@@ -2967,6 +2967,22 @@ for (const width of [1440, 390]) {
         await expect(speed).toHaveValue('ultrafast');
         await expect(speed.locator('option[value="ultrafast"]')).toBeEnabled();
         await page.locator('[data-board-launch-effort]').selectOption('ultra');
+        await model.selectOption('gpt-6.1-terra');
+        await expect(speed).toHaveValue('');
+        await expect(speed.locator('option[value="ultrafast"]')).toBeDisabled();
+        await expect(page.locator('[data-board-launch-effort]')).toHaveValue('ultra');
+        await expect(page.locator('[data-board-launch-effort] option[value="ultra"]')).toBeEnabled();
+        await speed.selectOption('fast');
+        await page.locator('[data-board-save-card]').click();
+        await expect(page.locator('[data-board-card-editor]')).toHaveCount(0);
+        expect(requests.filter(request => request.method === 'PUT' && request.path.endsWith('/card_test')).at(-1).body.baseLlmOptions)
+            .toMatchObject({ model: 'gpt-6.1-terra', effort: 'ultra', speed: 'fast' });
+        await page.getByText('Description images', { exact: true }).click();
+        await expect(model).toHaveValue('gpt-6.1-terra');
+        await expect(speed).toHaveValue('fast');
+        await expect(page.locator('[data-board-launch-effort]')).toHaveValue('ultra');
+        await model.selectOption('gpt-6-astra');
+        await speed.selectOption('ultrafast');
         await model.selectOption('gpt-6-luna');
         await expect(speed).toHaveValue('');
         await expect(speed.locator('option[value="fast"]')).toBeEnabled();

@@ -31,6 +31,7 @@ public sealed class BoardCurrentStateTests : IDisposable
     [Theory]
     [InlineData("gpt-6-astra", "ultrafast")]
     [InlineData("gpt-6.1-sol", "ultrafast")]
+    [InlineData("gpt-6.1-terra", "fast")]
     [InlineData("gpt-6-sol", "fast")]
     [InlineData("gpt-6-luna", "fast")]
     [InlineData("gpt-5.6-sol", "fast")]

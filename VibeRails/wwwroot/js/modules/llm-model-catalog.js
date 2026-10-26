@@ -2,6 +2,7 @@ import { escapeHtml } from './utils.js';
 import codexCapabilities from './codex-model-capabilities.json' with { type: 'json' };
 
 // Model, speed and effort metadata verified against Codex CLI 0.164.0, 2026-10-25.
+// GPT-6.1 Terra: refreshed Codex model cache and official speed docs, 2026-10-26.
 // CodexModelCapabilities embeds this same data for backend validation.
 Object.values(codexCapabilities).forEach(capability => {
     Object.values(capability).forEach(Object.freeze);
@@ -40,6 +41,7 @@ export const LLM_MODEL_OPTIONS = Object.freeze({
         ['', 'Default (Codex recommended)'],
         ['gpt-6-astra', 'gpt-6-astra'],
         ['gpt-6.1-sol', 'gpt-6.1-sol'],
+        ['gpt-6.1-terra', 'gpt-6.1-terra'],
         ['gpt-6-sol', 'gpt-6-sol'],
         ['gpt-6-luna', 'gpt-6-luna'],
         ['gpt-5.6-sol', 'gpt-5.6-sol'],

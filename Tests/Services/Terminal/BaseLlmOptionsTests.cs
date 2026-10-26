@@ -12,6 +12,7 @@ public sealed class BaseLlmOptionsTests
     [InlineData("gpt-6-astra", "ultrafast")]
     [InlineData("gpt-6.1-sol", "fast")]
     [InlineData("gpt-6.1-sol", "ultrafast")]
+    [InlineData("gpt-6.1-terra", "fast")]
     [InlineData("gpt-6-sol", "fast")]
     [InlineData("gpt-6-luna", "fast")]
     [InlineData("gpt-5.6-sol", "fast")]
@@ -24,6 +25,7 @@ public sealed class BaseLlmOptionsTests
     [Theory]
     [InlineData(LLM.Codex, "", "fast")]
     [InlineData(LLM.Codex, "custom-model", "fast")]
+    [InlineData(LLM.Codex, "gpt-6.1-terra", "ultrafast")]
     [InlineData(LLM.Codex, "gpt-6-sol", "ultrafast")]
     [InlineData(LLM.Codex, "gpt-6-luna", "ultrafast")]
 
@@ -43,6 +45,8 @@ public sealed class BaseLlmOptionsTests
     [InlineData("gpt-6-luna", "max", "max")]
     [InlineData("gpt-6-astra", "ultra", "ultra")]
     [InlineData("gpt-6.1-sol", "minimal", "low")]
+    [InlineData("gpt-6.1-terra", "minimal", "low")]
+    [InlineData("gpt-6.1-terra", "ultra", "ultra")]
     [InlineData("custom", "ultra", "ultra")]
     public void CodexEffortUsesModelCapabilities(string model, string effort, string expected) =>
         Assert.Equal(["--model", model, "-c", $"model_reasoning_effort={expected}"],

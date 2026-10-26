@@ -4,6 +4,7 @@ namespace VibeRails.Services.LlmClis;
 
 // The browser imports the same JSON that is embedded here for AOT and stdio launches.
 // Model, speed and effort metadata verified against Codex CLI 0.164.0, 2026-10-25.
+// GPT-6.1 Terra: refreshed Codex model cache and official speed docs, 2026-10-26.
 internal static class CodexModelCapabilities
 {
     private sealed record Capability(string[] Speeds, string[] Efforts);

@@ -26,6 +26,7 @@ test.describe('Codex environment form – Model field', () => {
             '',
             'gpt-6-astra',
             'gpt-6.1-sol',
+            'gpt-6.1-terra',
             'gpt-6-sol',
             'gpt-6-luna',
             'gpt-5.6-sol',
@@ -34,7 +35,7 @@ test.describe('Codex environment form – Model field', () => {
         ]);
     });
 
-    for (const model of ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']) {
+    for (const model of ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']) {
         test(`${model} saves the exact launch value and reopens as a pinned model`, async ({ page }) => {
             let savedEnvironment = null;
             let savedSettings = {};
@@ -97,7 +98,7 @@ test.describe('Codex environment form – Model field', () => {
         const maxOption = effortSelect.locator('option[value="max"]');
 
         await effortSelect.selectOption('max');
-        for (const model of ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']) {
+        for (const model of ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']) {
             await modelSelect.selectOption(model);
             await expect(maxOption).toBeEnabled();
             await expect(effortSelect).toHaveValue('max');
