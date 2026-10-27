@@ -209,12 +209,16 @@ public class TerminalRunner
             if (requireDirectCli && preparedSession.Executable is null)
                 throw new InvalidOperationException("This CLI cannot accept a startup mode safely.");
             var spawnCliDirectly = (jobRunId is not null || requireDirectCli) && preparedSession.Executable is not null;
-            if (spawnCliDirectly)
+            // macOS starts in canonical tty mode. Sending a long command before zsh enters its
+            // line editor can lose input/Enter; shell parsing also used a flattened prompt. Pass
+            // the real argv at spawn instead. Jobs retain their exit-with-CLI semantics, while
+            // ordinary macOS tabs return to an interactive shell as before.
+            var spawnInteractiveMac = OperatingSystem.IsMacOS() && preparedSession.Executable is not null;
+            if (spawnCliDirectly || spawnInteractiveMac)
             {
-                var (app, argv) = CliSpawnCommandBuilder.Build(
-                    preparedSession.Executable!,
-                    preparedSession.Argv ?? [],
-                    preparedSession.SetupCommands);
+                var (app, argv) = spawnCliDirectly
+                    ? CliSpawnCommandBuilder.Build(preparedSession.Executable!, preparedSession.Argv ?? [], preparedSession.SetupCommands)
+                    : CliSpawnCommandBuilder.BuildInteractivePosix(preparedSession.Executable!, preparedSession.Argv ?? [], preparedSession.SetupCommands);
                 terminal = await Terminal.CreateAsync(
                     workDir,
                     preparedSession.Environment,
@@ -647,7 +651,7 @@ public class TerminalRunner
             // Send the CLI command to the shell. Plain shell sessions have no command,
             // so we leave the shell at its prompt rather than typing a stray newline.
             // Direct-spawn sessions already ARE the CLI — there is no shell to type into.
-            if (!spawnCliDirectly && !string.IsNullOrWhiteSpace(preparedSession.Command))
+            if (!spawnCliDirectly && !spawnInteractiveMac && !string.IsNullOrWhiteSpace(preparedSession.Command))
                 await terminal.SendCommandAsync(preparedSession.Command, ct);
 
             if (activeRemoteConn != null)

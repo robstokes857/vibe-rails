@@ -1,0 +1,30 @@
+name: macOS launch regressions
+
+on:
+  pull_request:
+    paths:
+      - 'VibeRails/Services/Terminal/**'
+      - 'VibeRails/Services/LlmClis/**'
+      - 'Pty.Net/**'
+      - 'Tests/Services/LlmClis/**'
+      - 'Tests/Services/Terminal/**'
+      - '.github/workflows/macos-launch-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  launch:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.103'
+      - name: Verify real zsh argv, native PTY and Board bootstrap prompts
+        run: >-
+          dotnet test Tests/Tests.csproj
+          --filter 'FullyQualifiedName~MacCliLaunchTests|FullyQualifiedName~CommandServiceTests|FullyQualifiedName~CliSpawnCommandBuilderTests'

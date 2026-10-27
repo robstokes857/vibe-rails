@@ -280,6 +280,17 @@ namespace VibeRails.Services.LlmClis
         private static string? GetRootTomlValue(string content, string key)
             => GetTomlValue(SplitRootTable(content).Root, key);
 
+        // A selected profile can define its own provider. Leave resolution to Codex, just as
+        // CommandService does for --profile. Merely defining an unused provider is not selection.
+        internal static bool HasOwnProviderConfiguration(string content)
+        {
+            var provider = GetRootTomlValue(content, "model_provider");
+            return (!string.IsNullOrWhiteSpace(provider) && provider != "openai")
+                || !string.IsNullOrWhiteSpace(GetRootTomlValue(content, "profile"))
+                || !string.IsNullOrWhiteSpace(GetRootTomlValue(content, "openai_base_url"))
+                || !string.IsNullOrWhiteSpace(GetRootTomlValue(content, "chatgpt_base_url"));
+        }
+
         private static bool? GetRootTomlBoolValue(string content, string key)
         {
             var value = GetRootTomlValue(content, key);

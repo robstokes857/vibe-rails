@@ -147,6 +147,8 @@ export class BackendManager {
         this.logLine(`Working directory: ${cwd}`);
         this.logLine(`Extension host PID: ${process.pid}`);
         this.logLine(`Launch args: ${launchArgs.join(' ')}`);
+        // Presence only: Finder-launched VS Code may not inherit the shell's credentials.
+        this.logLine(`OPENAI_API_KEY in extension host: ${process.env.OPENAI_API_KEY !== undefined ? 'present' : 'absent'}`);
 
         // Ensure a crash dump location exists so native crashes (0xC0000005 etc.)
         // produce a minidump we can actually debug. The .NET runtime writes

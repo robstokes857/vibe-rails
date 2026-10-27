@@ -34,6 +34,26 @@ namespace VibeRails.Services.LlmClis;
 /// </summary>
 internal static class CliSpawnCommandBuilder
 {
+    /// <summary>
+    /// Starts a macOS interactive launch without typing a command through the PTY's line editor.
+    /// The login shell loads the user's PATH/credentials, runs setup, and invokes positional argv
+    /// verbatim. A fresh interactive shell keeps the tab usable after the CLI exits.
+    /// </summary>
+    internal static (string App, string[] Argv) BuildInteractivePosix(
+        string cliExecutable,
+        IReadOnlyList<string> argv,
+        IReadOnlyList<string> setupCommands)
+    {
+        var shell = ShellDefaults.GetUnixCommandShellPath();
+        var program = new StringBuilder();
+        foreach (var setupCommand in setupCommands)
+            program.Append(RequireSingleStatement(setupCommand)).Append("; ");
+        program.Append("\"$@\"; _viberails_cli_exit=$?; ");
+        program.Append("if [ \"$_viberails_cli_exit\" -ne 0 ]; then printf '[VibeRails] CLI exited (exit %s).\\n' \"$_viberails_cli_exit\" >&2; fi; ");
+        program.Append("exec ").Append(QuotePosixSingleQuoted(shell)).Append(" -i");
+        return (shell, ["-lic", program.ToString(), "viberails-cli", cliExecutable, .. argv]);
+    }
+
     public static (string App, string[] Argv) Build(
         string cliExecutable,
         IReadOnlyList<string> argv,

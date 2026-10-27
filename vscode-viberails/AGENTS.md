@@ -74,6 +74,11 @@ an arbitrary startup delay.
 
 ### Webview bridge
 
+Backend startup logs only whether `OPENAI_API_KEY` exists in the extension host environment;
+never log its value. The backend inherits that environment. The embedded terminal's login
+shell can additionally load shell-profile variables, so this diagnostic alone does not prove
+whether the eventual CLI has a credential or whether it can authenticate.
+
 The dashboard and the extension talk through injected globals, not DOM structure:
 `__viberails_VSCODE__`, `__viberails_close__`, `__viberails_setTitle__`, and
 `__viberails_openFile__` (opens a path in an editor tab beside the panel — the Python

@@ -361,7 +361,20 @@ gate state); the Claude/Codex proxy URL/auth env vars are built inside `CommandS
    - wires remote resize -> PTY resize
    - wires remote replay request -> send replay buffer
    - tracks remote connection in `TerminalStateService`
-5. Sends final CLI command to shell.
+5. On macOS, managed CLI launches pass executable + argv to a login zsh wrapper at PTY
+   creation; nothing types a startup command or Enter into the shell. The wrapper runs MCP
+   setup, invokes `"$@"`, reports a nonzero CLI exit, and leaves an interactive shell after it.
+   Windows/Linux interactive launches retain their existing command-submission path. Jobs keep
+   their separate exit-with-CLI wrapper. Never send long bootstrap commands into macOS's initial
+   canonical tty: input can arrive before zsh's line editor is ready.
+
+Codex preserves a custom provider or profile selected in its effective `CODEX_HOME/config.toml`
+(including saved environments), just as it preserves an explicit launch override. These launches
+do not replace the user's provider, gateway, credentials or websocket settings with the local
+proxy. Config inspection is read-only; failures defer to Codex's own configuration handling.
+MCP registration remains non-blocking, with a distinct failure warning before startup continues.
+`MacCliLaunchTests` checks literal argv and the macOS PTY with slow profile loading, plus separate
+registration/CLI failures. `.github/workflows/macos-launch-tests.yml` runs those on real zsh.
 
 `RunCliAsync(...)`
 - Creates session, subscribes `ConsoleOutputConsumer`, starts read loop, runs console input loop through `TerminalIoRouter`.

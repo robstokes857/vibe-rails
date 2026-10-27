@@ -157,7 +157,8 @@ public class CommandService : ICommandService
         // One fresh snapshot for the whole prepare so the enabled/mode fields can't tear across a
         // concurrent settings save and the launch hits the disk once, not once per field.
         var proxySettings = _llmProxySettings.GetSettings();
-        var launchArgs = BuildLaunchArgs(llm, extraArgs, proxySettings, sessionId);
+        var useCodexProxy = await ShouldUseCodexProxyAsync(llm, envName, extraArgs, proxySettings);
+        var launchArgs = BuildLaunchArgs(extraArgs, proxySettings, useCodexProxy, sessionId);
         if (llm == LLM.Codex && !string.IsNullOrEmpty(envName))
             launchArgs = await SkipMissingCodexDesktopBridgeAsync(envName, launchArgs);
         if (llm == LLM.Codex && !string.IsNullOrWhiteSpace(sessionId))
@@ -266,7 +267,7 @@ public class CommandService : ICommandService
         // Codex reads proxy auth headers from environment variables named in its generated
         // provider config. Use process-local credentials here; the VIBERAILS_TOOL_* variables
         // added by TerminalRunner intentionally continue to target the root agent-tool API.
-        if (ShouldUseCodexProxy(llm, extraArgs, proxySettings))
+        if (useCodexProxy)
         {
             AddProxyContactDetails(environment, LlmProxyProvider.Codex, sessionId);
         }
@@ -512,9 +513,9 @@ public class CommandService : ICommandService
     };
 
     private string[] BuildLaunchArgs(
-        LLM llm, string[]? extraArgs, LlmProxySettings proxySettings, string? sessionId = null)
+        string[]? extraArgs, LlmProxySettings proxySettings, bool useCodexProxy, string? sessionId = null)
     {
-        if (!ShouldUseCodexProxy(llm, extraArgs, proxySettings))
+        if (!useCodexProxy)
             return extraArgs ?? [];
 
         var proxyArgs = LlmProxyCodexConfig.BuildCodexProxyArgs(
@@ -550,14 +551,41 @@ public class CommandService : ICommandService
         return result;
     }
 
-    private static bool ShouldUseCodexProxy(
+    private async Task<bool> ShouldUseCodexProxyAsync(
         LLM llm,
+        string? envName,
         string[]? extraArgs,
-        LlmProxySettings proxySettings) =>
-        proxySettings.CodexLlmProxyEnabled
-        && llm == LLM.Codex
-        && !ShouldSkipCodexProxy(extraArgs)
-        && !KeepsOwnApiBase(OpenAiBaseUrlVariable, proxySettings.CodexEnterpriseNetworkProxy);
+        LlmProxySettings proxySettings)
+    {
+        if (!proxySettings.CodexLlmProxyEnabled || llm != LLM.Codex
+            || ShouldSkipCodexProxy(extraArgs)
+            || KeepsOwnApiBase(OpenAiBaseUrlVariable, proxySettings.CodexEnterpriseNetworkProxy))
+            return false;
+
+        // A provider selected in config.toml is as intentional as a -c model_provider override.
+        // Replacing it loses the gateway, env_key and transport options (e.g. websockets=false).
+        // Inspect only the effective config home; never copy, edit or log its contents.
+        var home = !string.IsNullOrEmpty(envName)
+            ? _envService.GetEnvironmentVariables(envName, LLM.Codex)["CODEX_HOME"]
+            : Environment.GetEnvironmentVariable("CODEX_HOME");
+        if (string.IsNullOrWhiteSpace(home))
+            home = Path.Combine(_fileService.GetUserProfilePath(), ".codex");
+        try
+        {
+            var path = Path.Combine(home, "config.toml");
+            if (_fileService.FileExists(path)
+                && CodexLlmCliEnvironment.HasOwnProviderConfiguration(await _fileService.ReadAllTextAsync(path, CancellationToken.None)))
+                return false;
+        }
+        catch (Exception)
+        {
+            // Let Codex report its own config error. Guessing a replacement provider here could
+            // send a corporate session to an unintended endpoint. Do not log exception contents.
+            Log.Warning("[Codex] Could not inspect provider selection; preserving the CLI configuration");
+            return false;
+        }
+        return true;
+    }
 
     // Codex's built-in OpenAI provider reads this. Routing replaces that provider, so an
     // inherited value would otherwise be ignored.
@@ -658,10 +686,18 @@ public class CommandService : ICommandService
             return [];
         }
 
-        return removeCommand is null
-            ? [addCommand]
-            : [removeCommand, addCommand];
+        if (llm == LLM.Codex)
+        {
+            // Keep the existing non-blocking setup policy, but distinguish registration errors
+            // from the subsequent CLI's authentication/model errors. No argument or env values.
+            addCommand = ReportCodexMcpFailure(addCommand, OperatingSystem.IsWindows());
+        }
+        return removeCommand is null ? [addCommand] : [removeCommand, addCommand];
     }
+
+    internal static string ReportCodexMcpFailure(string command, bool isWindows) => command + (isWindows
+        ? "; if (-not $?) { Write-Warning '[VibeRails] Codex MCP registration failed; continuing to Codex.' }"
+        : " || { _viberails_mcp_exit=$?; printf '[VibeRails] Codex MCP registration failed (exit %s); continuing to Codex.\\n' \"$_viberails_mcp_exit\" >&2; }");
 
     // Returns the optional remove command and required add command for a supported CLI, or
     // (null, null) when unsupported. Keep the supported set in sync with <see cref="McpClis"/>.
