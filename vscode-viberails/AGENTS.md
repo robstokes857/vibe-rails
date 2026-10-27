@@ -64,6 +64,14 @@ The extension consists of these components plus a shared constants module:
 
 The Launch and review views depend on `viberails.backendReady`, independent of the dashboard panel. `startBackend` coalesces automatic and manual starts through the entire bootstrap/health handshake and immediately exchanges the expiring bootstrap code for process-lifetime tokens. Stop cancels startup, closes the panel and immediately begins backend shutdown. Cancellation releases in-flight callers and guards late startup continuations, including launches deferred past the extension host's five-second deactivation deadline. Backend exit clears readiness and sidebar data; opening the dashboard retries with a new process. Closing only the editor tab preserves the backend. Trees refresh on backend readiness, visibility, Refresh, and their existing dashboard notifications. No OS service or startup registration is involved. In a multi-folder workspace, automatic startup chooses the active editor's folder, falling back to the first workspace folder; the running backend retains that project until stopped.
 
+`sidebar-tree-view.ts` binds trees only when the workbench's command registry contains
+the contributed `<viewId>.focus` command. An extension update can restart its host with
+new code while the window retains the previous manifest's views. Calling `createTreeView`
+for a new view then produces an asynchronous VS Code error notification, even though the
+new manifest on disk is correct. Keep providers and commands available, skip that tree's
+binding until the next window reload, and do not replace this check with a try/catch or
+an arbitrary startup delay.
+
 ### Webview bridge
 
 The dashboard and the extension talk through injected globals, not DOM structure:

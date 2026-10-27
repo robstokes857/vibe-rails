@@ -5,7 +5,7 @@ import { jobLaunchKind } from './launch-kind.js';
 
 // A dedicated board's tracker connection sits under General; a local board offers each as a tab.
 const TRACKER_TABS = [['jira', 'Jira Cloud'], ['ado', 'Azure DevOps']];
-const SECTION_ORDER = ['general', ...TRACKER_TABS.map(([id]) => id), 'every-context', 'context', 'history'];
+const SECTION_ORDER = ['general', ...TRACKER_TABS.map(([id]) => id), 'context', 'history'];
 
 const navigation = (name, sections) => `
     <nav class="nav nav-pills board-settings-nav gap-2 mb-3" aria-label="${name}" role="tablist">
@@ -16,7 +16,7 @@ const navigation = (name, sections) => `
     </nav>`;
 
 export const boardSettingsNavigation = () =>
-    navigation('Board settings', [['general', 'General'], ...TRACKER_TABS, ['every-context', 'Every Context'], ['context', 'Agent context'], ['history', 'History']]);
+    navigation('Board settings', [['general', 'General'], ...TRACKER_TABS, ['context', 'App context'], ['history', 'History']]);
 
 /** The New board dialog: a local board (the General section), or one connected to a tracker. */
 export const newBoardNavigation = () => navigation('Board type', [['general', 'Local'], ...TRACKER_TABS]);
@@ -124,18 +124,22 @@ const TYPES = [
 ];
 
 export const everyContextSection = () => `
-    <section class="mt-3 border-top pt-3" data-every-context>
-        <h6>Every Context</h6>
-        <p class="board-editor-muted">Sent before the starting message of every new CLI session on this board whose Vibe Board nudge is enabled in Settings. Launches outside a card use the currently selected board. Includes Agents, Board work, Automations and continuations. Up to 4,000 characters.</p>
-        <div data-board-settings-content>Loading context…</div>
-    </section>`;
+    <details class="mb-3" data-every-context open>
+        <summary>Every Context</summary>
+        <div class="mt-3">
+            <p class="board-editor-muted">Sent before the starting message of every new CLI session on this board whose Vibe Board nudge is enabled in Settings. Launches outside a card use the currently selected board. Includes Agents, Board work, Automations and continuations. Up to 4,000 characters.</p>
+            <div data-board-settings-content>Loading context…</div>
+        </div>
+    </details>`;
 
 export const boardContextSection = () => `
-    <section class="mt-3 border-top pt-3" data-board-context>
-        <h6>Agent context</h6>
-        <p class="board-editor-muted">Sent to every agent opened from a card on this board, for work or discussion. Each message can contain up to 4,000 characters.</p>
-        <div data-board-settings-content>Loading context…</div>
-    </section>`;
+    <details class="mb-3" data-board-context>
+        <summary>Agent context</summary>
+        <div class="mt-3">
+            <p class="board-editor-muted">Sent to every agent opened from a card on this board, for work or discussion. Each message can contain up to 4,000 characters.</p>
+            <div data-board-settings-content>Loading context…</div>
+        </div>
+    </details>`;
 
 export const laneAutomationSection = () => `
     <section class="mt-3 border-top pt-3" data-lane-automation>

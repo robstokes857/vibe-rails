@@ -16,10 +16,10 @@ function controller() {
     return instance;
 }
 
-test('a ghost tile wraps the key and robot mark and runs a ghost across them', () => {
+test('a ghost tile keeps a permanent marker outside the animated key and robot mark', () => {
     const html = controller().renderCard(card({ agentMade: true, ghostReason: 'no-code' }));
     assert.match(html, /<span class="board-key has-ghost" title="Ghost: an agent worked on this card, but no commit or GitHub link was linked">/);
-    assert.match(html, /<span class="board-key-label"><i class="fa-solid fa-robot board-agent-mark"[^>]*><\/i> VIBE-1<\/span>/);
+    assert.match(html, /<i class="fa-solid fa-ghost board-ghost-mark" aria-hidden="true"><\/i><span class="board-ghost-stage"><span class="board-key-label"><i class="fa-solid fa-robot board-agent-mark"[^>]*><\/i> VIBE-1<\/span>/);
     assert.match(html, /<span class="board-ghost-runner" aria-hidden="true"><i class="fa-solid fa-ghost"><\/i><\/span>/);
     assert.match(html, /aria-label="VIBE-1: Work — Made by an agent — Ghost: an agent worked on this card/);
 });
@@ -93,6 +93,6 @@ test('the ghost animation lives in the board template and stops for reduced moti
         assert.match(css, new RegExp(`@keyframes ${name} \\{`));
     // The card already uses .is-ghost for the drag placeholder; the run must not reuse it.
     assert.doesNotMatch(css, /\.board-key\.is-ghost|has-ghost\.is-ghost/);
-    const reduced = css.slice(css.indexOf('Without motion the key stays put'));
-    assert.match(reduced, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.board-ghost-runner \{[\s\S]*position: static;[\s\S]*animation: none;/);
+    const reduced = css.slice(css.indexOf('Without motion the key and permanent ghost stay put'));
+    assert.match(reduced, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.board-ghost-runner \{[\s\S]*display: none;[\s\S]*animation: none;/);
 });

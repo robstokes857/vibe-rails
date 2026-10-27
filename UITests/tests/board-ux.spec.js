@@ -54,6 +54,61 @@ async function expectAnimatedStyle(locator, property) {
 }
 
 for (const width of [1440, 390]) {
+    test(`ghost cards keep their marker visible and animation contained at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        const columns = ['Backlog', 'Build', 'Review', 'Done'].map((name, position) => ({
+            id: position ? `col_${position}` : 'col_ready', name, position, boardId: 'brd_main', color: '#64748b'
+        }));
+        await openBoard(page, { columns, onCard: card => {
+            card.ghostReason = 'no-code';
+            card.agentMade = true;
+            card.displayId = width === 390 ? 'PROJECT-WITH-A-LONG-CARD-KEY-123' : 'VIBE-185';
+        } });
+        const tile = page.locator('.board-card');
+        const marker = tile.locator('.board-ghost-mark');
+        const stage = tile.locator('.board-ghost-stage');
+        const runner = tile.locator('.board-ghost-runner');
+        const label = tile.locator('.board-key-label');
+        await expect(marker).toBeVisible();
+        await expect(stage).toHaveCSS('overflow', 'hidden');
+        await expectAnimatedStyle(runner, 'left');
+        for (const time of [0, 2100, 3500, 5740, 7000, 13900]) {
+            await tile.evaluate((element, currentTime) => {
+                for (const animation of element.getAnimations({ subtree: true })) {
+                    animation.pause();
+                    animation.currentTime = currentTime;
+                }
+            }, time);
+            await expect(marker).toBeVisible();
+            await expect(marker).toHaveCSS('opacity', '1');
+            const [markerBounds, stageBounds, pinBounds, titleBounds] = await Promise.all([
+                marker.boundingBox(), stage.boundingBox(), tile.locator('.board-card-pin').boundingBox(),
+                tile.locator('.board-card-title').boundingBox()
+            ]);
+            expect(markerBounds.x + markerBounds.width).toBeLessThanOrEqual(stageBounds.x);
+            expect(stageBounds.x + stageBounds.width).toBeLessThanOrEqual(pinBounds.x);
+            expect(stageBounds.y + stageBounds.height).toBeLessThanOrEqual(titleBounds.y);
+            if (time === 3500) {
+                await expect(label).toHaveCSS('opacity', '0');
+                await expect(runner).toHaveCSS('opacity', '1');
+                const ghostBounds = await runner.locator('i').boundingBox();
+                expect(ghostBounds.height).toBeGreaterThan(16);
+                expect(ghostBounds.y).toBeGreaterThan(stageBounds.y + 1);
+                expect(ghostBounds.y + ghostBounds.height).toBeLessThan(stageBounds.y + stageBounds.height - 1);
+                await tile.screenshot({ path: testInfo.outputPath(`ghost-animated-${width}.png`) });
+            }
+        }
+        expect(await tile.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+        await page.emulateMedia({ reducedMotion: 'reduce' });
+        await expect(runner).toBeHidden();
+        await expect(marker).toBeVisible();
+        await expect(label).toHaveCSS('opacity', '1');
+        await expect(label).toHaveCSS('animation-name', 'none');
+        await tile.screenshot({ path: testInfo.outputPath(`ghost-still-${width}.png`) });
+    });
+}
+
+for (const width of [1440, 390]) {
     test(`Jira boards combine General and Jira settings at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 950 });
         await openBoard(page, { onCard: card => {
@@ -85,7 +140,7 @@ for (const width of [1440, 390]) {
         await expect(page.locator('[data-board-sync]')).toBeHidden();
         await expect(page.getByLabel('Sync this board with viberails.ai')).toHaveCount(0);
         await expect(page.getByRole('tab', { name: 'Jira Cloud', exact: true })).toHaveCount(0);
-        await expect(page.getByRole('tab')).toHaveText(['General', 'Every Context', 'Agent context', 'History']);
+        await expect(page.getByRole('tab')).toHaveText(['General', 'App context', 'History']);
         await expect(page.getByRole('tab', { name: 'General', exact: true })).toHaveAttribute('aria-selected', 'true');
         await expect(page.getByLabel('Board name', { exact: true })).toBeVisible();
         await expect(page.getByLabel('Jira board link')).toHaveValue('https://example.atlassian.net/jira/software/projects/TEST/boards/1');
@@ -97,7 +152,7 @@ for (const width of [1440, 390]) {
         await page.getByLabel('API token', { exact: true }).fill('unsaved-test-token');
         await page.getByRole('tab', { name: 'General', exact: true }).focus();
         await page.keyboard.press('ArrowRight');
-        await expect(page.getByRole('tab', { name: 'Every Context', exact: true })).toBeFocused();
+        await expect(page.getByRole('tab', { name: 'App context', exact: true })).toBeFocused();
         await expect(page.getByLabel('Jira board link')).toBeHidden();
         await expect(page.locator('.modal-header [data-jira-heading]')).toBeHidden();
         await page.keyboard.press('Home');
@@ -115,12 +170,12 @@ for (const width of [1440, 390]) {
         await page.getByRole('button', { name: 'Board settings', exact: true }).click();
         await expect(page.getByLabel('Sync this board with viberails.ai')).toBeChecked();
         await expect(page.getByRole('button', { name: 'Sync now', exact: true })).toBeVisible();
-        await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Azure DevOps', 'Every Context', 'Agent context', 'History']);
+        await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Azure DevOps', 'App context', 'History']);
         // A saved legacy connection and retained imported cards do not override the board type.
         await page.getByRole('tab', { name: 'Jira Cloud', exact: true }).click();
         await expect(page.getByLabel('Jira board link')).toHaveValue('https://example.atlassian.net/jira/software/projects/TEST/boards/1');
         await expect(page.locator('.modal-title img')).toHaveCount(0);
-        await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Azure DevOps', 'Every Context', 'Agent context', 'History']);
+        await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Azure DevOps', 'App context', 'History']);
         await page.getByRole('tab', { name: 'General', exact: true }).click();
         await expect(page.getByLabel('Sync this board with viberails.ai')).toBeVisible();
     });
@@ -173,7 +228,7 @@ for (const width of [1440, 390]) {
         await page.getByRole('alertdialog').getByRole('button', { name: 'Unlink Jira', exact: true }).click();
         await expect(panel.locator('[data-jira-report]')).toContainText('Jira unlinked');
         await expect(icon).toHaveCount(0);
-        await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Azure DevOps', 'Every Context', 'Agent context', 'History']);
+        await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Azure DevOps', 'App context', 'History']);
         await expect(unlink).toBeHidden();
         await expect(panel.getByRole('button', { name: 'Pull now', exact: true })).toBeDisabled();
         await expect(panel.getByLabel('API token', { exact: true })).toHaveValue('');
@@ -187,7 +242,7 @@ for (const width of [1440, 390]) {
     });
 }
 
-for (const selected of ['Jira Cloud', 'Agent context', 'Jira input']) {
+for (const selected of ['Jira Cloud', 'App context', 'Jira input']) {
     test(`delayed Jira board status preserves drafts and the selected ${selected} section`, async ({ page }) => {
         await openBoard(page);
         let releaseStatus;
@@ -213,7 +268,7 @@ for (const selected of ['Jira Cloud', 'Agent context', 'Jira input']) {
         }
         releaseStatus();
         await expect(page.getByRole('tab', { name: 'Jira Cloud', exact: true })).toHaveCount(0);
-        const active = selected === 'Agent context' ? selected : 'General';
+        const active = selected === 'App context' ? selected : 'General';
         await expect(page.getByRole('tab', { name: active, exact: true })).toHaveAttribute('aria-selected', 'true');
         if (selected === 'Jira input') {
             await expect(token).toBeFocused();
@@ -270,7 +325,7 @@ test('Connect selects its dedicated Jira board and preserves other settings draf
     await expect(panel.locator('[data-jira-report]')).toHaveText('Connected as Ada.');
     await expect.poll(() => calls.filter(call => call === 'GET /api/v1/board/boards/brd_main/sync').length).toBe(2);
     await expect(page.locator('.modal-title img')).toHaveCount(0);
-    await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Azure DevOps', 'Every Context', 'Agent context', 'History']);
+    await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Azure DevOps', 'App context', 'History']);
     await expect(page.locator('.board-picker-control .ts-control img')).toHaveAttribute('src', 'assets/img/jira.svg');
     await panel.getByRole('button', { name: 'Pull now' }).click();
     await expect(panel.locator('[data-jira-report]')).toHaveText('Pull complete');
@@ -418,7 +473,7 @@ for (const width of [1440, 390]) {
         await expect(page.locator('.modal-title').getByRole('img', { name: 'Azure DevOps board', exact: true })).toBeVisible();
         await expect(page.locator('[data-board-sync]')).toBeHidden();
         await expect(page.getByLabel('Sync this board with viberails.ai')).toHaveCount(0);
-        await expect(page.getByRole('tab')).toHaveText(['General', 'Every Context', 'Agent context', 'History']);
+        await expect(page.getByRole('tab')).toHaveText(['General', 'App context', 'History']);
         await expect(page.getByRole('tab', { name: 'General', exact: true })).toHaveAttribute('aria-selected', 'true');
         await expect(page.getByLabel('Azure DevOps board or query link')).toHaveValue(ADO_LINK);
         await expect(page.getByLabel('Jira board link')).toBeHidden();
@@ -435,7 +490,7 @@ for (const width of [1440, 390]) {
         await token.fill('unsaved-test-token');
         await page.getByRole('tab', { name: 'General', exact: true }).focus();
         await page.keyboard.press('ArrowRight');
-        await expect(page.getByRole('tab', { name: 'Every Context', exact: true })).toBeFocused();
+        await expect(page.getByRole('tab', { name: 'App context', exact: true })).toBeFocused();
         await expect(page.locator('.modal-header [data-ado-heading]')).toBeHidden();
         await page.keyboard.press('Home');
         await expect(page.getByLabel('Board name', { exact: true })).toHaveValue('Keep this draft');
@@ -451,7 +506,7 @@ for (const width of [1440, 390]) {
         provider = null;
         await page.getByRole('button', { name: 'Board settings', exact: true }).click();
         await expect(page.getByLabel('Sync this board with viberails.ai')).toBeChecked();
-        await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Azure DevOps', 'Every Context', 'Agent context', 'History']);
+        await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Azure DevOps', 'App context', 'History']);
         await page.getByRole('tab', { name: 'Azure DevOps', exact: true }).click();
         await expect(page.getByLabel('Azure DevOps board or query link')).toHaveValue(ADO_LINK);
         await expect(page.locator('.modal-header [data-ado-heading]')).toBeVisible();
@@ -511,7 +566,7 @@ test('Connect selects its dedicated Azure DevOps board and preserves other setti
     expect(calls).toContain('POST /api/v1/board/boards/brd_ado/ado/test');
     expect(calls).not.toContain('POST /api/v1/board/boards/brd_main/ado/test');
     await expect(page.locator('.modal-title img')).toHaveCount(0);
-    await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Azure DevOps', 'Every Context', 'Agent context', 'History']);
+    await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Azure DevOps', 'App context', 'History']);
     await expect(page.locator('.board-picker-control .ts-control img')).toHaveAttribute('src', 'assets/img/azure-devops.svg');
     await panel.getByRole('button', { name: 'Pull now' }).click();
     await expect(panel.locator('[data-ado-report]')).toHaveText('Pull complete');
@@ -568,7 +623,7 @@ test('Connect on a board nothing else uses makes it the Azure DevOps board, keep
     await expect(page.locator('[data-board-select]')).toHaveValue('brd_main');
     // The open board is now the Azure DevOps board: its connection moves under General.
     await expect(page.locator('.modal-title img')).toHaveAttribute('src', 'assets/img/azure-devops.svg');
-    await expect(page.getByRole('tab')).toHaveText(['General', 'Every Context', 'Agent context', 'History']);
+    await expect(page.getByRole('tab')).toHaveText(['General', 'App context', 'History']);
     await expect(page.getByRole('tab', { name: 'General', exact: true })).toHaveAttribute('aria-selected', 'true');
     await expect(panel).toBeVisible();
     await expect(panel.getByLabel('Azure DevOps board or query link')).toHaveValue(ADO_LINK);
@@ -693,7 +748,7 @@ test('Azure DevOps unlink confirms, handles failure and keeps settings drafts', 
     await page.getByRole('alertdialog').getByRole('button', { name: 'Unlink Azure DevOps', exact: true }).click();
     await expect(panel.locator('[data-ado-report]')).toHaveText('Azure DevOps unlinked. The board and its cards have been kept.');
     await expect(icon).toHaveCount(0);
-    await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Azure DevOps', 'Every Context', 'Agent context', 'History']);
+    await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Azure DevOps', 'App context', 'History']);
     await expect(page.getByRole('tab', { name: 'Azure DevOps', exact: true })).toHaveAttribute('aria-selected', 'true');
     await expect(unlink).toBeHidden();
     await expect(panel.getByRole('button', { name: 'Pull now', exact: true })).toBeDisabled();
@@ -706,7 +761,7 @@ test('Azure DevOps unlink confirms, handles failure and keeps settings drafts', 
     expect(attempts).toBe(2);
 });
 
-for (const selected of ['Azure DevOps', 'Agent context', 'Azure DevOps input']) {
+for (const selected of ['Azure DevOps', 'App context', 'Azure DevOps input']) {
     test(`delayed Azure DevOps board status preserves drafts and the selected ${selected} section`, async ({ page }) => {
         await openBoard(page);
         let releaseStatus;
@@ -733,7 +788,7 @@ for (const selected of ['Azure DevOps', 'Agent context', 'Azure DevOps input']) 
         releaseStatus();
         await expect(page.getByRole('tab', { name: 'Azure DevOps', exact: true })).toHaveCount(0);
         await expect(page.getByRole('tab', { name: 'Jira Cloud', exact: true })).toHaveCount(0);
-        const active = selected === 'Agent context' ? selected : 'General';
+        const active = selected === 'App context' ? selected : 'General';
         await expect(page.getByRole('tab', { name: active, exact: true })).toHaveAttribute('aria-selected', 'true');
         if (selected === 'Azure DevOps input') {
             await expect(token).toBeFocused();
@@ -1463,7 +1518,7 @@ const SUMMARY_FIELDS = ['id', 'key', 'columnId', 'position', 'title', 'descripti
     'tags', 'blocked', 'commentCount', 'activeSessionId', 'activeTabId', 'createdAt', 'updatedAt', 'baseLlmOptions',
     'type', 'boardId', 'flagged', 'hasActiveAutomation', 'displayId', 'agentMade', 'hasWaitingAutomation', 'agentMadeBy',
     'agentMadeSessionId', 'jiraIssueKey', 'workflowMode', 'managerSelection', 'managerBaseLlmOptions',
-    'hasActiveDesktopAgent', 'remoteProvider', 'remoteIssueKey', 'remoteIssueUrl', 'pinned'];
+    'hasActiveDesktopAgent', 'remoteProvider', 'remoteIssueKey', 'remoteIssueUrl', 'pinned', 'ghostReason'];
 const cardSummary = card => Object.fromEntries(SUMMARY_FIELDS.filter(field => field in card).map(field => [field, card[field]]));
 
 async function openBoard(page, { active = false, assignee = null, relatedCards = false, empty = false,
@@ -1844,30 +1899,53 @@ for (const width of [1440, 390]) {
         }));
         const open = async () => {
             await page.getByRole('button', { name: 'Board settings', exact: true }).click();
-            await page.getByRole('tab', { name: 'Every Context', exact: true }).click();
+            await page.getByRole('tab', { name: 'App context', exact: true }).click();
+            await expect(page.getByRole('tab', { name: 'App context', exact: true })).toHaveAttribute('aria-selected', 'true');
+            await expect(page.getByRole('tab', { name: 'App context', exact: true })).toHaveClass(/\bactive\b/);
+            await expect(page.getByRole('tab', { name: 'General', exact: true })).toHaveAttribute('aria-selected', 'false');
         };
         await open();
+        await expect(page.getByRole('tab', { name: 'Every Context', exact: true })).toHaveCount(0);
+        await expect(page.getByRole('tab', { name: 'Agent context', exact: true })).toHaveCount(0);
+        const contextPanel = page.locator('#board-settings-context');
+        const every = contextPanel.locator('[data-every-context]');
+        const agent = contextPanel.locator('[data-board-context]');
+        await expect(contextPanel.locator(':scope > details > summary')).toHaveText(['Every Context', 'Agent context']);
+        await expect(every).toHaveAttribute('open', '');
+        await expect(agent).not.toHaveAttribute('open');
         const message = page.getByLabel('Every Context message', { exact: true });
         await expect(message).toHaveValue('');
         await expect(message).toHaveAttribute('maxlength', '4000');
         await expect(page.locator('[data-every-context]')).toContainText('currently selected board');
-        await page.getByRole('tab', { name: 'Agent context', exact: true }).click();
+        await agent.locator(':scope > summary').click();
         await page.getByLabel('Default message', { exact: true }).fill('Unsaved Board context draft');
-        await page.getByRole('tab', { name: 'Every Context', exact: true }).click();
+        await agent.locator(':scope > summary').click();
         const text = 'Use project conventions.\n</textarea><img src=x onerror="window.__everyContextXss=1">';
         await message.fill(text);
+        await every.locator(':scope > summary').click();
+        await page.getByRole('tab', { name: 'General', exact: true }).click();
+        await page.getByRole('tab', { name: 'App context', exact: true }).click();
+        await expect(every).not.toHaveAttribute('open');
+        await every.locator(':scope > summary').click();
+        await expect(message).toHaveValue(text);
         await page.getByRole('button', { name: 'Save Every Context', exact: true }).click();
         await expect.poll(() => saved.message).toBe(text);
         expect(Object.keys(writes[0])).toEqual(['message', 'expectedRevision']);
-        await page.getByRole('tab', { name: 'Agent context', exact: true }).click();
+        await agent.locator(':scope > summary').click();
         await expect(page.getByLabel('Default message', { exact: true })).toHaveValue('Unsaved Board context draft');
+        await agent.locator(':scope > summary').click();
+        await every.locator(':scope > summary').focus();
+        await page.keyboard.press('Enter');
+        await expect(every).not.toHaveAttribute('open');
+        await page.keyboard.press('Space');
+        await expect(every).toHaveAttribute('open', '');
         await page.evaluate(() => window.app.closeModal());
         await open();
         await expect(message).toHaveValue(text);
         expect(await page.evaluate(() => window.__everyContextXss)).toBeUndefined();
         const panel = page.locator('[data-board-board-editor]');
         expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
-        await page.screenshot({ path: testInfo.outputPath('every-context.png') });
+        await page.screenshot({ path: testInfo.outputPath('every-context.png'), animations: 'disabled' });
         failSave = true;
         await message.fill('Preserve this draft after failure');
         await page.getByRole('button', { name: 'Save Every Context', exact: true }).click();
@@ -1883,7 +1961,7 @@ for (const width of [1440, 390]) {
     });
 }
 
-test('board context settings persist default and per-type choices and preserve a conflicted draft', async ({ page }) => {
+test('board context settings persist default and per-type choices and preserve a conflicted draft', async ({ page }, testInfo) => {
     await openBoard(page);
     let saved = { revision: 0, context: { defaultMessage: '', typeOverrides: [] } };
     let conflict = false;
@@ -1897,7 +1975,8 @@ test('board context settings persist default and per-type choices and preserve a
         return route.fulfill({ json: saved });
     });
     await page.getByRole('button', { name: 'Board settings', exact: true }).click();
-    await page.getByRole('tab', { name: 'Agent context', exact: true }).click();
+    await page.getByRole('tab', { name: 'App context', exact: true }).click();
+    await page.locator('[data-board-context] > summary').click();
     await page.getByLabel('Default message', { exact: true }).fill('Read project conventions. <img src=x onerror="window.__contextXss=1">');
     await page.locator('[data-board-context] summary').filter({ hasText: /^Bug$/ }).click();
     await page.getByLabel('Bug context', { exact: true }).selectOption('append');
@@ -1907,12 +1986,13 @@ test('board context settings persist default and per-type choices and preserve a
     expect(saved.context.typeOverrides.find(item => item.type === 'bug')).toEqual({ type: 'bug', mode: 'append', message: 'Reproduce before changing code.' });
     await page.locator('#modal-container [data-action="close-modal"]').first().click();
     await page.getByRole('button', { name: 'Board settings', exact: true }).click();
-    await page.getByRole('tab', { name: 'Agent context', exact: true }).click();
+    await page.getByRole('tab', { name: 'App context', exact: true }).click();
+    await page.locator('[data-board-context] > summary').click();
     await expect(page.getByLabel('Default message', { exact: true })).toHaveValue(saved.context.defaultMessage);
     await page.locator('[data-board-context] summary').filter({ hasText: /^Bug$/ }).click();
     await expect(page.getByLabel('Bug context', { exact: true })).toHaveValue('append');
     expect(await page.evaluate(() => window.__contextXss)).toBeUndefined();
-    await page.screenshot({ path: '../.codex-test-artifacts/vb16-context.png' });
+    await page.screenshot({ path: testInfo.outputPath('board-context.png') });
     conflict = true;
     await page.getByLabel('Default message', { exact: true }).fill('Keep my draft');
     await page.getByRole('button', { name: 'Save context', exact: true }).click();
@@ -2772,6 +2852,8 @@ for (const width of [1440, 390]) {
         } else {
             // A narrow lane: Start work takes its own row at the right rather than truncating the name.
             expect(startBounds.y).toBeGreaterThanOrEqual(chipBounds.y + chipBounds.height);
+            const footerBounds = await tile.locator('.board-card-foot').boundingBox();
+            expect(Math.abs(startBounds.x + startBounds.width - footerBounds.x - footerBounds.width)).toBeLessThan(1);
         }
         expect(startBounds.x + startBounds.width).toBeLessThanOrEqual(tileBounds.x + tileBounds.width);
         expect(await tile.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
@@ -2836,6 +2918,34 @@ for (const width of [1440, 390]) {
         await go.click();
         await expect.poll(() => page.evaluate(() => window.__faceTabs)).toEqual(['tab_work']);
         expect(launches).toHaveLength(1);
+    });
+}
+
+for (const { assignee, active, action } of [
+    { assignee: 'base:claude', active: true, action: 'Go to agent on VB-1' },
+    { assignee: null, active: false, action: 'Start work on VB-1' }
+]) {
+    test(`${action} shares a row with a short assignee when leftover space remains`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width: 1440, height: 900 });
+        const columns = ['Backlog', 'Ready'].map((name, position) => ({
+            id: position ? `col_${position}` : 'col_ready', name, position, boardId: 'brd_main', color: '#64748b'
+        }));
+        await openBoard(page, { assignee, active, columns, onCard: card => {
+            if (active) card.activeTabId = 'agent_tab';
+        } });
+        const tile = page.locator('.board-card');
+        const chip = tile.locator('.board-assignee-chip');
+        const start = tile.getByRole('button', { name: action, exact: true });
+        await expect(chip).toContainText(assignee ? 'Claude' : 'Unassigned');
+        const [chipBounds, startBounds, tileBounds] = await Promise.all([
+            chip.boundingBox(), start.boundingBox(), tile.boundingBox()
+        ]);
+        expect(chipBounds.x + chipBounds.width).toBeLessThanOrEqual(startBounds.x);
+        expect(startBounds.x - (chipBounds.x + chipBounds.width)).toBeGreaterThan(8);
+        expect(Math.abs(chipBounds.y + chipBounds.height / 2 - startBounds.y - startBounds.height / 2)).toBeLessThan(1);
+        expect(startBounds.x + startBounds.width).toBeLessThanOrEqual(tileBounds.x + tileBounds.width);
+        expect(await tile.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+        await page.screenshot({ path: testInfo.outputPath(`board-face-lineup-${active ? 'go-to-agent' : 'start-work'}.png`) });
     });
 }
 

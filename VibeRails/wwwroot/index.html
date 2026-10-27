@@ -3691,21 +3691,37 @@
                     font-size: 0.72rem;
                 }
 
-                /* Post-processing ghost (VIBE-185): an agent worked on this finished card but no
-                   code landed. Every 14s the key and robot mark drop out, a ghost runs across the
-                   row (clipped by .board-key's overflow), and the key comes back. The runner moves
-                   by left (0 to 100% of the row) while its own translate goes -120% to 0, so it
-                   enters fully hidden on the left and leaves fully hidden on the right. */
+                /* Keep a permanent ghost beside a clipped animation stage. The stage has room
+                   for the larger runner's bob and glow without bleeding into the card title,
+                   permanent marker or pin. Every 14s it scoots across as the key fades out. */
                 .board-view .board-key.has-ghost {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.4rem;
+                }
+
+                .board-view .board-ghost-mark {
+                    flex: none;
+                    color: var(--color-text, #e2e8f0);
+                    font-size: 1rem;
+                }
+
+                .board-view .board-ghost-stage {
                     position: relative;
+                    display: grid;
+                    align-items: center;
+                    min-width: 0;
+                    min-height: 2rem;
+                    padding: 0.35rem 0.4rem;
+                    overflow: hidden;
+                    isolation: isolate;
                 }
 
                 .board-view .board-key.has-ghost .board-key-label {
-                    display: inline-block;
+                    min-width: 0;
                     max-width: 100%;
                     overflow: hidden;
                     text-overflow: ellipsis;
-                    vertical-align: bottom;
                     animation: board-ghost-key 14s ease-in-out infinite;
                 }
 
@@ -3713,45 +3729,45 @@
                     position: absolute;
                     top: 50%;
                     left: 0;
-                    color: #e2e8f0;
-                    font-size: 0.72rem;
+                    color: var(--color-text, #e2e8f0);
+                    font-size: 1.1rem;
                     line-height: 1;
                     opacity: 0;
                     pointer-events: none;
-                    filter: drop-shadow(0 0 3px rgba(165, 180, 252, 0.75));
+                    filter: drop-shadow(0 0 1.5px rgba(165, 180, 252, 0.55));
                     animation: board-ghost-run 14s linear infinite;
                 }
 
                 .board-view .board-ghost-runner i {
                     display: inline-block;
-                    animation: board-ghost-bob 0.4s ease-in-out infinite alternate;
+                    animation: board-ghost-bob 0.55s ease-in-out infinite alternate;
                 }
 
                 @keyframes board-ghost-key {
-                    0%, 8% { opacity: 1; transform: translateY(0); filter: blur(0); }
-                    12%, 44% { opacity: 0; transform: translateY(0.7em); filter: blur(2px); }
-                    50%, 100% { opacity: 1; transform: translateY(0); filter: blur(0); }
+                    0%, 8% { opacity: 1; transform: translateY(0); }
+                    12%, 44% { opacity: 0; transform: translateY(0.25rem); }
+                    50%, 100% { opacity: 1; transform: translateY(0); }
                 }
 
                 @keyframes board-ghost-run {
-                    0%, 10% { left: 0; opacity: 0; transform: translate(-120%, -50%); }
-                    13%, 41% { opacity: 1; }
-                    45%, 100% { left: 100%; opacity: 0; transform: translate(0, -50%); }
+                    0%, 10% { left: 0; opacity: 0; transform: translate(-150%, -50%); }
+                    14%, 41% { opacity: 1; }
+                    25% { left: 45%; transform: translate(-50%, -50%); }
+                    30% { left: 52%; transform: translate(-50%, -50%); }
+                    45%, 100% { left: 100%; opacity: 0; transform: translate(150%, -50%); }
                 }
 
                 @keyframes board-ghost-bob {
-                    from { transform: translateY(-1px) rotate(-8deg); }
-                    to { transform: translateY(1px) rotate(8deg); }
+                    from { transform: translateY(-2px) rotate(-10deg); }
+                    to { transform: translateY(2px) rotate(10deg); }
                 }
 
-                /* Without motion the key stays put and a still ghost follows it. */
+                /* Without motion the key and permanent ghost stay put; no duplicate runner. */
                 @media (prefers-reduced-motion: reduce) {
                     .board-view .board-key.has-ghost .board-key-label,
                     .board-view .board-ghost-runner i { animation: none; }
                     .board-view .board-ghost-runner {
-                        position: static;
-                        margin-left: 0.3rem;
-                        opacity: 0.85;
+                        display: none;
                         animation: none;
                     }
                 }
@@ -3889,13 +3905,14 @@
                     font-size: 0.7rem;
                 }
 
-                /* Card footer: assignment on the left, Start work on the right. When both do not
-                   fit, Start work drops to its own row instead of squeezing the LLM's name to
-                   "Cl…"; the name only ellipsizes once it is wider than the whole card. */
+                /* Card footer: assignment on the left, Start work / Go to agent on the right.
+                   Keep both on one row when they fit. Otherwise wrap the action without
+                   squeezing the assignee name, and keep it right-aligned on its own row. */
                 .board-view .board-card-foot {
                     display: flex;
                     flex-wrap: wrap;
                     align-items: center;
+                    justify-content: space-between;
                     gap: 0.3rem;
                     margin-top: 0.45rem;
                     padding-top: 0.4rem;
@@ -3908,7 +3925,7 @@
                     flex: none;
                     align-items: center;
                     gap: 0.3rem;
-                    margin-left: auto;
+                    margin-inline-start: auto;
                     padding: 0.2rem 0.45rem;
                     font-size: 0.7rem;
                     white-space: nowrap;

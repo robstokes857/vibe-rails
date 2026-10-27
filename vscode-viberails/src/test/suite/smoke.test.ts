@@ -621,6 +621,14 @@ suite('VibeRails VS Code Smoke', function () {
         assert.equal(closed?.message, null);
     });
 
+    test('the current manifest registers focus commands for all three sidebar views', async () => {
+        const commands = new Set(await vscode.commands.getCommands(true));
+        for (const id of ['viberails.launcher', 'viberails.reviewInbox', 'viberails.reviewRequests']) {
+            assert.ok(commands.has(`${id}.focus`), `The workbench did not register ${id}.`);
+            await vscode.commands.executeCommand(`${id}.focus`);
+        }
+    });
+
     // Last in this suite: actual deactivation permanently disables further launches.
     test('deactivation stops a live backend before the host deadline even while startup stays blocked', async () => {
         await vscode.commands.executeCommand('viberails.stop');

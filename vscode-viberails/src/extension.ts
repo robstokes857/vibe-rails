@@ -12,6 +12,7 @@ import {
     approveReviewRequest, readReviewRequest, rejectReviewRequest
 } from './review-inbox-view';
 import { ReviewRequestRow, ReviewRequestsTreeDataProvider } from './review-requests-view';
+import { bindSidebarTreeView } from './sidebar-tree-view';
 import {
     AUTOMATION_NAV_PREFERENCES_PATH,
     BOOTSTRAP_REQUEST_TIMEOUT_MS,
@@ -94,8 +95,10 @@ let deactivating = false;
 /** Launcher rows with a run in flight (see runLauncherItem). */
 const runningLauncherKeys = new Set<string>();
 
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
     deactivating = false;
+    const registeredCommands = new Set(await vscode.commands.getCommands(true));
+    if (deactivating) return;
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 1000);
     statusBarItem.text = "$(terminal) VibeRails";
     statusBarItem.tooltip = "Open VibeRails Dashboard";
@@ -111,9 +114,9 @@ export function activate(context: vscode.ExtensionContext) {
     stopBarItem.color = '#c084fc';
     context.subscriptions.push(stopBarItem);
 
-    registerLauncherView(context);
-    registerReviewInboxView(context);
-    registerReviewRequestsView(context);
+    registerLauncherView(context, registeredCommands);
+    registerReviewInboxView(context, registeredCommands);
+    registerReviewRequestsView(context, registeredCommands);
 
     const openCommand = vscode.commands.registerCommand(COMMAND_OPEN, async () => {
         try {
@@ -342,7 +345,7 @@ function refreshBackendViews(): void {
  * The side-bar twin of the dashboard's nav Play button. The tree lists the same catalog;
  * running, customizing and managing behave like the flyout's rows and footer.
  */
-function registerLauncherView(context: vscode.ExtensionContext): void {
+function registerLauncherView(context: vscode.ExtensionContext, registeredCommands: ReadonlySet<string>): void {
     void vscode.commands.executeCommand('setContext', CONTEXT_BACKEND_READY, false);
 
     const provider = new LauncherTreeDataProvider({
@@ -351,18 +354,11 @@ function registerLauncherView(context: vscode.ExtensionContext): void {
     });
     launcherProvider = provider;
 
-    const view = vscode.window.createTreeView<LauncherNode>(LAUNCHER_VIEW_ID, {
-        treeDataProvider: provider,
-        showCollapseAll: false
-    });
-
     context.subscriptions.push(
         provider,
-        view,
-        provider.onDidChangeTreeData(() => { view.message = provider.getMessage(); }),
         // The flyout re-reads the catalog on every open; the view does so whenever it comes
         // back on screen, which also catches automations edited while it was hidden.
-        view.onDidChangeVisibility((event) => { if (event.visible) { void provider.refresh(); } }),
+        ...bindSidebarTreeView<LauncherNode>(LAUNCHER_VIEW_ID, provider, registeredCommands),
         vscode.commands.registerCommand(COMMAND_LAUNCHER_REFRESH, () => provider.refresh()),
         vscode.commands.registerCommand(COMMAND_LAUNCHER_RUN, (item?: LauncherItem) => runLauncherItem(item, {
             request: (method, route) => requestJson(getBackendConnection(), method, route),
@@ -389,17 +385,13 @@ function registerLauncherView(context: vscode.ExtensionContext): void {
  * open the signing popup on its machine (the popup shows the request, rebuilds the tree from the
  * repository and signs it there); Reject asks for a comment here and posts it through the backend.
  */
-function registerReviewInboxView(context: vscode.ExtensionContext): void {
+function registerReviewInboxView(context: vscode.ExtensionContext, registeredCommands: ReadonlySet<string>): void {
     const provider = new ReviewInboxTreeDataProvider({
         isBackendReady,
         fetchInbox: () => requestJson(getBackendConnection(), 'GET', REVIEW_INBOX_PATH)
     });
     reviewInboxProvider = provider;
 
-    const view = vscode.window.createTreeView<ReviewInboxRow>(REVIEW_INBOX_VIEW_ID, {
-        treeDataProvider: provider,
-        showCollapseAll: false
-    });
     const dependencies: ReviewInboxActionDependencies = {
         request: (method, route, body) => requestJson(getBackendConnection(), method, route, body),
         askComment: (row) => vscode.window.showInputBox({
@@ -417,9 +409,7 @@ function registerReviewInboxView(context: vscode.ExtensionContext): void {
 
     context.subscriptions.push(
         provider,
-        view,
-        provider.onDidChangeTreeData(() => { view.message = provider.getMessage(); }),
-        view.onDidChangeVisibility((event) => { if (event.visible) { void provider.refresh(); } }),
+        ...bindSidebarTreeView<ReviewInboxRow>(REVIEW_INBOX_VIEW_ID, provider, registeredCommands),
         vscode.commands.registerCommand(COMMAND_REVIEW_INBOX_REFRESH, () => provider.refresh()),
         vscode.commands.registerCommand(COMMAND_REVIEW_INBOX_OPEN, () =>
             sendToDashboard(context, { command: 'openReviewInbox' }, 'Could not open Reviews requested of you')),
@@ -435,7 +425,7 @@ function registerReviewInboxView(context: vscode.ExtensionContext): void {
  * dashboard relays review_request_updated over the webview bridge; the view reloads and shows a
  * notification when a decision arrived. Nothing here creates, sends, decides or signs.
  */
-function registerReviewRequestsView(context: vscode.ExtensionContext): void {
+function registerReviewRequestsView(context: vscode.ExtensionContext, registeredCommands: ReadonlySet<string>): void {
     const openCard = 'Open card';
     const provider = new ReviewRequestsTreeDataProvider({
         isBackendReady,
@@ -448,16 +438,9 @@ function registerReviewRequestsView(context: vscode.ExtensionContext): void {
     });
     reviewRequestsProvider = provider;
 
-    const view = vscode.window.createTreeView<ReviewRequestRow>(REVIEW_REQUESTS_VIEW_ID, {
-        treeDataProvider: provider,
-        showCollapseAll: false
-    });
-
     context.subscriptions.push(
         provider,
-        view,
-        provider.onDidChangeTreeData(() => { view.message = provider.getMessage(); }),
-        view.onDidChangeVisibility((event) => { if (event.visible) { void provider.refresh(); } }),
+        ...bindSidebarTreeView<ReviewRequestRow>(REVIEW_REQUESTS_VIEW_ID, provider, registeredCommands),
         vscode.commands.registerCommand(COMMAND_REVIEW_REQUESTS_REFRESH, () => provider.refresh()),
         vscode.commands.registerCommand(COMMAND_REVIEW_REQUESTS_OPEN, (target?: { id?: string; cardKey?: string | null }) =>
             sendToDashboard(context, {

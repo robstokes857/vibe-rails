@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Updating the extension no longer tries to create review sidebar views absent from the current VS Code window's view registry, preventing "No view is registered" notifications. Newly contributed views appear after the window reloads.
 - Logging after the backend manager is disposed no longer risks throwing on a disposed output channel.
 - The `VIBERAILS_SMOKE_WORKSPACE` test fallback is now ignored in production installs.
 

@@ -1,6 +1,7 @@
 # Working on Vibe Board
 
-Board settings' **Every Context** is per board and independent of **Agent context**. CLI launches
+Board settings' **App context** tab puts the collapsible **Every Context** editor first and
+**Agent context** second. Every Context is per board and independent of Agent context. CLI launches
 with their corresponding Nudge switch enabled prepend it, including launches with an explicit task.
 Browser launches use the selected board and card launches their owning board. Both editors save
 with separate revisions behind `IBoardStore`; ordinary Agent context writes preserve Every Context.

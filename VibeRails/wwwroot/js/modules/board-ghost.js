@@ -20,12 +20,12 @@ export function ghostSummary(card) {
 }
 
 /**
- * The tile's key row. Without a ghost it is the label unchanged. With one, the key and robot mark
- * fade out, the ghost runs across the row, then the key comes back (CSS `board-ghost-*`).
+ * The tile's key row. A permanent ghost marks the card while a larger ghost occasionally runs
+ * across the key and robot mark in a separate, clipped stage (CSS `board-ghost-*`).
  */
 export function ghostKeyHtml(labelHtml, card) {
     if (!ghostSummary(card)) return labelHtml;
-    return `<span class="board-key-label">${labelHtml}</span><span class="board-ghost-runner" aria-hidden="true"><i class="fa-solid fa-ghost"></i></span>`;
+    return `<i class="fa-solid fa-ghost board-ghost-mark" aria-hidden="true"></i><span class="board-ghost-stage"><span class="board-key-label">${labelHtml}</span><span class="board-ghost-runner" aria-hidden="true"><i class="fa-solid fa-ghost"></i></span></span>`;
 }
 
 /** The Advanced section's checkbox; unchecking it and saving clears the ghost. Empty without one. */

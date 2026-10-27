@@ -244,16 +244,16 @@ rewrites it when a card is flagged or unflagged. Stored story points stay on the
 not shown. Search and filters share a second
 row on the same surface. Lane headers retain their card counts. There are no lane-bottom entry
 fields: **New card** opens the editor, whose Lane selector chooses the destination.
-The settings modal has General, Jira Cloud, Azure DevOps, Every Context, Agent context and History tabs
+The settings modal has General, Jira Cloud, Azure DevOps, App context and History tabs
 (VIBE-103, VIBE-165) for local boards. A dedicated tracker board combines the board settings and
-its own tracker's controls in **General**, followed by Every Context, Agent context and History, with that
+its own tracker's controls in **General**, followed by App context and History, with that
 tracker's logo beside the board name in the modal header; the other tracker's tab is hidden, so a
 Jira board shows no Azure DevOps tab and an Azure DevOps board no Jira tab.
 The sync status's `remoteProvider` (`isJiraBoard` for older responses) determines this layout and
 logo from the current dedicated connection, never past links or imported-card badges.
 `mountBoardSettingsNavigation(...).followProvider(provider)` moves the panels; its `onSelect`
 callback names the tracker whose controls are visible, so the matching heading sits in the header. Moving a legacy connection to its dedicated
-board refreshes the source settings status while preserving General/Agent context drafts. Move
+board refreshes the source settings status while preserving General/App context drafts. Move
 existing controls without replacing drafts or interrupting the selected section when status arrives.
 Each tab has a thin button border, with a filled active tab. Jira controls (`board-jira.js`) target
 the explicit board being edited. The Jira Cloud connection status sits at the right of the modal
@@ -321,7 +321,10 @@ Lane cards have an 11rem minimum height and keep activity and assignment at the 
 The thumbtack button pins a card's slot during automatic activity promotion. Its narrow save
 preserves other fields, focus and the open editor; failures keep the previous pin state. Explicit
 dragging still moves pinned cards, and ordinary polling reads the saved marker from card summaries.
-The settings modal includes **Every Context** before **Agent context**. Every Context edits one
+The settings modal's **App context** tab contains two collapsible sections: **Every Context**
+first (initially expanded), then **Agent context** (initially collapsed). Card-type overrides
+remain nested inside Agent context. Toggling sections and navigating tabs preserve both drafts.
+Every Context edits one
 per-board message through GET/PUT `/api/v1/board/boards/{boardId}/every-context`; its independent,
 revision-checked save preserves Agent context drafts. New CLI launches prepend it when their built-in/saved-environment Nudge switch
 is on, even for Agents, Board work, Automations and continuations. The editor is abortable and
@@ -713,9 +716,10 @@ button replays that session seeked to the creation moment; all three are escaped
 which is why those two controls stop propagation before the card's own open handler runs.
 
 A card with `ghostReason` (VIBE-185, set once by server post-processing) wraps its key row in
-`.board-key.has-ghost`: every 14 s the key and robot mark drop out, a Font Awesome ghost runs
-across the row, and the key returns (`board-ghost-*` keyframes in the board template; reduced
-motion shows a still ghost after the key). Never name it `is-ghost`: that class is Sortable's drag
+`.board-key.has-ghost`: a permanent ghost stays beside a clipped animation stage. Every 14 s
+the key and robot mark fade out, a larger Font Awesome ghost bobs across the stage, and the key
+returns (`board-ghost-*` keyframes in the board template). Reduced motion keeps the permanent
+ghost and key still and hides the runner. Never name it `is-ghost`: that class is Sortable's drag
 placeholder on `.board-card`. Clearing is the Advanced checkbox plus Save, which sends
 `clearGhost: true`; the browser never sets a ghost.
 
