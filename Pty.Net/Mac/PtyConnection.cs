@@ -4,6 +4,7 @@
 namespace Pty.Net.Mac
 {
     using System.Diagnostics;
+    using System.Runtime.InteropServices;
     using static Pty.Net.Mac.NativeMethods;
 
     /// <summary>
@@ -24,7 +25,11 @@ namespace Pty.Net.Mac
         /// <inheritdoc/>
         protected override bool Kill(int fd)
         {
-            return ioctl(fd, TIOCSIG, SIGHUP) != -1;
+            // ioctl is variadic on Darwin/arm64; passing its signal as a fixed P/Invoke
+            // argument can produce EINVAL. Match the Unix process-based hangup instead.
+            // Disposal can follow an observed exit, so an already-gone child is success.
+            if (this.WaitForExit(0)) return true;
+            return kill(this.Pid, SIGHUP) != -1 || Marshal.GetLastWin32Error() == 3; // ESRCH
         }
 
         /// <inheritdoc/>

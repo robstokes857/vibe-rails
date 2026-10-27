@@ -8,6 +8,7 @@ using TerminalPty = VibeRails.Services.Terminal.Terminal;
 
 namespace Tests.Services.LlmClis;
 
+[Collection("ProcessEnvIsolation")]
 public class MacCliLaunchTests
 {
     [Fact]
@@ -106,7 +107,14 @@ public class MacCliLaunchTests
                 var consumer = new ShellReadyConsumer();
                 terminal.Subscribe(consumer);
                 terminal.StartReadLoop();
-                await consumer.Ready.Task.WaitAsync(timeout.Token);
+                try
+                {
+                    await consumer.Ready.Task.WaitAsync(timeout.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    Assert.Fail("The interactive shell did not become ready. PTY output: " + consumer.Output);
+                }
                 Assert.Equal(arguments, ReadArgv(capture));
                 Assert.Equal(setupArgs, ReadArgv(setupCapture));
                 Assert.False(File.Exists(marker));
