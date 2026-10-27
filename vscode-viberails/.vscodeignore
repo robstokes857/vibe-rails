@@ -14,6 +14,9 @@ dist/**
 *.vsix
 .vscodeignore.backup
 
+# Local logs (e.g. the git-ignored Chromium crashpad debug.log)
+**/*.log
+
 # Compiled tests — never needed at runtime, and they ship the smoke harness otherwise
 out/test/**
 
