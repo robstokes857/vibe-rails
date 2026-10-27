@@ -54,8 +54,8 @@ import { cardSharingSection, bindCardSharing } from './board-card-sharing.js';
 import { requestReviewSection, bindRequestReview, commitApprovalBadge } from './board-card-request-review.js';
 import { contextSectionMarkup, bindCardContext } from './board-card-context.js';
 import { cardDisplayId, cardLabel } from './board-card-label.js';
-import { agentMadeSummary, agentProvenanceHtml, bindAgentProvenance } from './board-agent-provenance.js';
-import { ghostKeyHtml, ghostSettingHtml, ghostSummary, readGhostField } from './board-ghost.js';
+import { agentMadeSummary, bindAgentProvenance } from './board-agent-provenance.js';
+import { cardIdentityHtml, ghostKeyHtml, ghostSettingHtml, ghostSummary, readGhostField } from './board-ghost.js';
 import { renderCommentHtml, wrapSelectionAsCode, toPlainPreview } from './board-text.js';
 import { historySection, mountHistory } from './board-history.js';
 import { bindBoardReferences, canonicalSessionId } from './board-references.js';
@@ -79,7 +79,7 @@ const FILTERS_STORAGE_KEY = 'viberails.board.filters.v1';
 const BOARD_STORAGE_KEY = BOARD_SELECTION_STORAGE_KEY;
 const RASTER_DATA_URL_RE = /^data:image\/(?:png|jpeg|gif|webp);base64,/i;
 
-const emptyFilters = () => ({ q: '', assignee: '', type: '', priority: '', origin: '' });
+const emptyFilters = () => ({ q: '', assignee: '', type: '', priority: '', origin: '', ghost: '' });
 // Task-key namespace for the terminal tab that works a card (see wwwroot/AGENTS.md).
 const CARD_TASK_KEY = cardId => `board-card:${cardId}`;
 
@@ -94,7 +94,7 @@ function cardType(value) {
 }
 
 function cardActivitySnapshot(card) {
-    return JSON.stringify([card?.comments, card?.notes, card?.sessions, card?.attachments, card?.commits, card?.codeLinks]);
+    return JSON.stringify([card?.comments, card?.notes, card?.sessions, card?.attachments, card?.commits, card?.codeLinks, card?.ghostReason]);
 }
 
 // Outbound activity to the card's tracker. Older responses carry only the Jira list.
@@ -435,6 +435,7 @@ export class BoardController {
                 if (attachmentsChanged) this.renderAttachmentsPanel(editor, card);
                 if (commitsChanged) this.renderCommitsPanel(editor, card);
                 if (codeLinksChanged) renderCodeLinks(editor, card);
+                if (card.ghostReason !== detail.ghostReason) this.updateGhostState(editor, detail);
                 if (discussionChanged) {
                     this.renderCardDiscussion(editor, card);
                     editor.querySelectorAll('[data-board-composer]').forEach(composer => composer._refreshPreview?.());
@@ -640,6 +641,8 @@ export class BoardController {
         if (filters.assignee && canonicalLlmSelection(card.assignee) !== canonicalLlmSelection(filters.assignee)) return false;
         if (filters.type && cardType(card.type).value !== filters.type) return false;
         if (filters.priority && card.priority !== filters.priority) return false;
+        if (filters.ghost === 'true' && !card.ghostReason) return false;
+        if (filters.ghost === 'false' && card.ghostReason) return false;
         if (filters.origin === 'agent' && !card.agentMade) return false;
         // Human-made excludes cards imported from either tracker.
         if (filters.origin === 'human' && (card.agentMade || cardTracker(card))) return false;
@@ -669,8 +672,8 @@ export class BoardController {
     }
 
     hasActiveFilters() {
-        const { q, assignee, type, priority, origin } = this.state.filters;
-        return Boolean(q.trim() || assignee || type || priority || origin);
+        const { q, assignee, type, priority, origin, ghost } = this.state.filters;
+        return Boolean(q.trim() || assignee || type || priority || origin || ghost);
     }
 
     stats() {
@@ -759,6 +762,7 @@ export class BoardController {
         bindSelect('[data-board-filter-type]', 'type');
         bindSelect('[data-board-filter-priority]', 'priority');
         bindSelect('[data-board-filter-origin]', 'origin');
+        bindSelect('[data-board-filter-ghost]', 'ghost');
 
         const picker = this.query('[data-board-select]');
         picker?.addEventListener('change', () => this.switchBoard(picker.value));
@@ -824,6 +828,8 @@ export class BoardController {
 
         const origin = this.query('[data-board-filter-origin]');
         if (origin) origin.value = this.state.filters.origin || '';
+        const ghost = this.query('[data-board-filter-ghost]');
+        if (ghost) ghost.value = this.state.filters.ghost || '';
 
         const search = this.query('[data-board-search]');
         if (search && document.activeElement !== search) search.value = this.state.filters.q;
@@ -1469,6 +1475,7 @@ export class BoardController {
 
                 <aside class="board-editor-side">
                     <div class="board-side-scroll">
+                    ${cardIdentityHtml(card)}
                     <div class="board-side-fields">
                         <div>
                             <label class="board-editor-label" for="board-card-type">Type</label>
@@ -1508,7 +1515,6 @@ export class BoardController {
                             </div>
                         </div>
                         <div data-board-worker-launch-options data-board-launch-options></div>
-                        ${agentProvenanceHtml(card)}
                         <div class="form-check">
                             <input class="form-check-input" type="checkbox" id="board-card-flagged"
                                 data-board-flagged${card?.flagged ? ' checked' : ''}>
@@ -1588,10 +1594,7 @@ export class BoardController {
 
                     ${card ? `<section class="board-side-section"><details data-board-advanced>
                         <summary class="board-side-label">Advanced</summary>
-                        ${ghostSettingHtml(card)}
-                        <label class="board-editor-label mt-2" for="board-card-display-id">Display ID</label>
-                        <input class="form-control form-control-sm" id="board-card-display-id" maxlength="32" spellcheck="false" value="${escapeHtml(cardDisplayId(card))}">
-                        <p class="board-editor-muted mt-2">Permanent ID: <code>${escapeHtml(card.key)}</code></p>
+                        <div data-board-ghost-controls>${ghostSettingHtml(card)}</div>
                         ${cardChecksSection()}
                         ${contextSectionMarkup()}${historySection()}
                     </details></section>` : ''}
@@ -1785,6 +1788,7 @@ export class BoardController {
         });
         bindAgentProvenance(editor.querySelector('[data-board-agent-provenance]'),
             (sessionId, seekToUtc) => this.openSessionReplay({ id: sessionId }, { seekToUtc }));
+        editor.querySelector('[data-board-recheck-ghost]')?.addEventListener('click', () => void this.recheckCardGhost(editor));
         this.cardAutomations = bindCardAutomations(editor, card, {
             app: this.app,
             onQueued: () => void this.refreshSessionActivity()
@@ -2331,6 +2335,7 @@ export class BoardController {
             if (!editor.isConnected) return;
             Object.assign(editor._boardCard, { codeLinks: card.codeLinks });
             renderCodeLinks(editor, card);
+            await this.reloadEditingCard(editor);
             editor._boardContext?.refresh();
         } catch (error) {
             this.app.showToast('Board', error?.message || 'Could not save the GitHub link.', 'error');
@@ -2622,10 +2627,47 @@ export class BoardController {
             Object.assign(editor._boardCard, {
                 comments: card.comments, notes: card.notes, sessions: card.sessions, commits: card.commits, codeLinks: card.codeLinks, attachments: card.attachments
             });
+            this.updateGhostState(editor, card);
             if (codeLinksChanged) renderCodeLinks(editor, editor._boardCard);
         }
         editor._boardContext?.refresh();
         return card;
+    }
+
+    updateGhostState(editor, card) {
+        if (!editor._boardCard) return;
+        const wasDismissed = editor.querySelector('[data-board-ghost]')?.checked === false;
+        editor._boardCard.ghostReason = card.ghostReason;
+        const controls = editor.querySelector('[data-board-ghost-controls]');
+        if (controls) {
+            controls.innerHTML = ghostSettingHtml(card);
+            const checkbox = controls.querySelector('[data-board-ghost]');
+            if (checkbox && wasDismissed) checkbox.checked = false;
+            if (editor._boardFormBaseline) {
+                if (checkbox) editor._boardFormBaseline.clearGhost = false;
+                else delete editor._boardFormBaseline.clearGhost;
+            }
+        }
+        const status = editor.querySelector('[data-board-ghost-status]');
+        if (status) status.textContent = ghostSummary(card);
+    }
+
+    async recheckCardGhost(editor) {
+        const button = editor.querySelector('[data-board-recheck-ghost]');
+        if (!button || button.disabled) return;
+        const status = editor.querySelector('[data-board-ghost-status]');
+        button.disabled = true;
+        if (status) status.textContent = 'Checking code landing…';
+        try {
+            const result = await BoardApi.recheckCardGhostAsync(this.cardIdFromEditor(editor));
+            if (!editor.isConnected) return;
+            await this.reloadEditingCard(editor);
+            if (editor.isConnected && status) status.textContent = result.message;
+        } catch (error) {
+            if (editor.isConnected && status) status.textContent = error?.message || 'Could not verify code landing. Try again.';
+        } finally {
+            if (editor.isConnected) button.disabled = false;
+        }
     }
 
     readCardForm(editor) {

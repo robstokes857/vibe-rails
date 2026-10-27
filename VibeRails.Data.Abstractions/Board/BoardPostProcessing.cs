@@ -19,7 +19,16 @@ public sealed record BoardPostProcessingCandidate(
     DateTime UpdatedUtc,
     int SessionCount,
     int CodeLinkCount,
-    IReadOnlyList<string> CommitShas);
+    IReadOnlyList<string> CommitShas)
+{
+    public IReadOnlyList<BoardCodeLink> CodeLinks { get; init; } = [];
+}
+
+/// <summary>A coherent snapshot for a targeted check, independent of the run-once queue.</summary>
+public sealed record BoardGhostCheck(BoardPostProcessingCandidate Card, string? GhostReason, bool IsFinished);
+
+/// <summary>The result of an explicit, single-card landing check.</summary>
+public sealed record BoardGhostCheckResponse(string Status, string Message, string? GhostReason);
 
 /// <summary>What a card's post-processing pass decided; applied together with marking it processed.</summary>
 public sealed record BoardPostProcessingResult(string? GhostReason = null);

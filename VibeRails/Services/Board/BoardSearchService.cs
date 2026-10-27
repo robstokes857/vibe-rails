@@ -60,6 +60,7 @@ public sealed partial class BoardSearchService(ISearchIndexStore store, Func<IBe
                     || !string.Equals(assigned!.Key, assignee, StringComparison.OrdinalIgnoreCase))
                 || type is not null && document.Type != type
                 || priority is not null && document.Priority != priority
+                || filters?.Ghost is bool ghost && (document.GhostReason is not null) != ghost
                 || origin is not null && !(origin switch
                 {
                     "agent" => document.AgentMade,
@@ -76,7 +77,8 @@ public sealed partial class BoardSearchService(ISearchIndexStore store, Func<IBe
                 document.BoardId, document.BoardName, document.ColumnId, document.ColumnName, document.ProjectPath,
                 current, Snippet(match.Text, words), exact > 0 ? "exact" : match.Lexical > 0 && match.Semantic > 0 ? "keyword+semantic"
                     : match.Lexical > 0 ? "keyword" : match.Semantic > 0 ? "semantic" : "recent", 0,
-                document.Type, document.Priority, document.Assignee, document.Blocked, document.Flagged);
+                document.Type, document.Priority, document.Assignee, document.Blocked, document.Flagged)
+                { GhostReason = document.GhostReason };
             candidates.Add(new(hit, exact, match.Lexical, match.Semantic, document.UpdatedUtc));
         }
 

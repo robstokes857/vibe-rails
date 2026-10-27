@@ -261,7 +261,10 @@ namespace VibeRails
             // Run-once card post-processing (VIBE-185). Each IBoardCardPostProcessor registration is
             // one rule; the job below runs them on active roots only.
             serviceCollection.AddSingleton<Services.Board.PostProcessing.IBoardDefaultBranchCheck, Services.Board.PostProcessing.GitDefaultBranchCheck>();
-            serviceCollection.AddSingleton<Services.Board.PostProcessing.IBoardCardPostProcessor, Services.Board.PostProcessing.GhostCardPostProcessor>();
+            serviceCollection.AddSingleton<Services.Board.PostProcessing.IBoardCodeLinkLandingCheck, Services.Board.PostProcessing.GitHubCodeLinkLandingCheck>();
+            serviceCollection.AddSingleton<Services.Board.PostProcessing.GhostCardPostProcessor>();
+            serviceCollection.AddSingleton<Services.Board.PostProcessing.IBoardCardPostProcessor>(sp => sp.GetRequiredService<Services.Board.PostProcessing.GhostCardPostProcessor>());
+            serviceCollection.AddSingleton<Services.Board.PostProcessing.BoardGhostService>();
             serviceCollection.AddSingleton<Services.Board.PostProcessing.BoardCardPostProcessingService>();
             // Singleton: it holds the ten-second repo file-list cache behind the composer's `@` typeahead.
             serviceCollection.AddSingleton<Services.Board.IBoardFileIndexService, Services.Board.BoardFileIndexService>();

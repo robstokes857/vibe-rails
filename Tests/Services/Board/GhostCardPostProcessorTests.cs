@@ -47,7 +47,6 @@ public sealed class GhostCardPostProcessorTests : IDisposable
         {
             Card(type: BoardCardTypes.ResearchSpike),
             Card(sessions: 0),
-            Card(codeLinks: 1, shas: ["abc1234"]),
             Card(lane: "Canceled"),
             Card(board: "Not Doing")
         })
@@ -158,6 +157,27 @@ public sealed class GhostCardPostProcessorTests : IDisposable
         var result = await GitCli.RunAsync(directory, args, Ct, TimeSpan.FromSeconds(30));
         Assert.True(result.Succeeded, result.StdErr);
         return result.StdOut;
+    }
+
+    [Theory]
+    [InlineData(BoardCommitLanding.Failed, BoardCommitLanding.Unverifiable, null, true)]
+    [InlineData(BoardCommitLanding.Failed, BoardCommitLanding.Landed, null, false)]
+    [InlineData(BoardCommitLanding.NotLanded, BoardCommitLanding.Unverifiable, null, false)]
+    [InlineData(BoardCommitLanding.NotLanded, BoardCommitLanding.Failed, null, true)]
+    [InlineData(BoardCommitLanding.NotLanded, BoardCommitLanding.NotLanded, BoardGhostReasons.NotLanded, false)]
+    public async Task UnavailableLinkVerificationNeverCancelsARetryableGitFailure(
+        BoardCommitLanding commits, BoardCommitLanding links, string? ghost, bool defer)
+    {
+        var outcome = await new GhostCardPostProcessor(new FixedCheck(commits), new FixedLinks(links))
+            .ProcessAsync(Card(codeLinks: 1, shas: ["abc1234"]), Ct);
+        Assert.Equal(ghost, outcome.GhostReason);
+        Assert.Equal(defer, outcome.Defer);
+    }
+
+    private sealed class FixedLinks(BoardCommitLanding answer) : IBoardCodeLinkLandingCheck
+    {
+        public Task<BoardCommitLanding> CheckAsync(string projectPath, IReadOnlyList<BoardCodeLink> links, CancellationToken cancellationToken) =>
+            Task.FromResult(answer);
     }
 
     private sealed class FixedCheck(BoardCommitLanding answer) : IBoardDefaultBranchCheck

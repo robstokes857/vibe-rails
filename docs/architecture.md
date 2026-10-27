@@ -982,6 +982,10 @@ defaults to 7 days; accepted overrides are 7–36500 days or `never`. The root-o
 `WorktreeCleanupJob` checks every ten minutes while VibeRails is open; there is no separate host.
 `BoardCardPostProcessingJob` follows the same pattern for the Board's run-once card pass (VIBE-185),
 every five minutes on root backends; see the [Board guide](../VibeRails/Services/Board/AGENTS.md#card-post-processing-and-the-ghost-vibe-185).
+Ghost code-landing checks also run for one card on an explicit recheck and after adding evidence
+to a marked card. They run outside write transactions and conditionally save only the annotation;
+completed cards never reenter the pending queue. Local default-branch commits count before push,
+while GitHub PRs require a verified merge into the origin repository's default branch.
 Overdue work is picked up after reopening. Expiry is age-based, independent of merges, and
 removes uncommitted, untracked and ignored files too. Branches are retained.
 

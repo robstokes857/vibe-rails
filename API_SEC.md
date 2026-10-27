@@ -233,6 +233,7 @@ middleware serves their paths rather than registering individual API endpoints.
 | DELETE | `/api/v1/board/cards/{card}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | GET | `/api/v1/board/cards/{card}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | PUT | `/api/v1/board/cards/{card}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/cards/{card}/ghost/recheck` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | POST | `/api/v1/board/cards/{card}/attachments` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | DELETE | `/api/v1/board/cards/{card}/attachments/{attachmentId}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | GET | `/api/v1/board/cards/{card}/attachments/{attachmentId}/content` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |

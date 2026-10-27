@@ -10,7 +10,8 @@ public sealed record BoardCardPageQuery(
     string? Priority = null,
     string? Tag = null,
     string? ContinuationToken = null,
-    string? Origin = null);
+    string? Origin = null,
+    bool? Ghost = null);
 
 public sealed record BoardCardLanePage(
     string ColumnId,

@@ -54,6 +54,40 @@ async function expectAnimatedStyle(locator, property) {
 }
 
 for (const width of [1440, 390]) {
+    test(`card identity and ghost recheck preserve drafts at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        let stored;
+        const requests = await openBoard(page, { onCard: card => {
+            stored = card;
+            Object.assign(card, { displayId: 'VIBE-225', key: 'VB-NW72V-297', ghostReason: 'no-code',
+                agentMade: true, agentMadeBy: 'Claude Opus 5.5' });
+        } });
+        let checks = 0;
+        await page.route('**/api/v1/board/cards/card_test/ghost/recheck', route => {
+            checks++;
+            stored.ghostReason = null;
+            return route.fulfill({ json: { status: 'clear', message: 'No ghost: code has landed.', ghostReason: null } });
+        });
+        await page.locator('.board-card').click();
+        const editor = page.locator('[data-board-card-editor]');
+        const identity = editor.locator('.board-card-identity');
+        await expect(identity.getByText('Permanent ID: VB-NW72V-297')).toBeVisible();
+        await expect(identity.getByText('Made by Claude Opus 5.5')).toBeVisible();
+        await expect(identity.locator('#board-card-display-id')).toHaveValue('VIBE-225');
+        expect(checks).toBe(0);
+        await editor.locator('#board-card-title').fill('Keep this unsaved title');
+        await identity.locator('#board-card-display-id').fill('CUSTOM-225');
+        await identity.getByRole('button', { name: "Recheck this card's code landing" }).click();
+        await expect(identity.locator('[role=status]')).toHaveText('No ghost: code has landed.');
+        await expect(editor.locator('#board-card-title')).toHaveValue('Keep this unsaved title');
+        await expect(identity.locator('#board-card-display-id')).toHaveValue('CUSTOM-225');
+        expect(checks).toBe(1);
+        expect(requests.some(request => request.method === 'PUT')).toBe(false);
+        await identity.screenshot({ path: testInfo.outputPath(`card-identity-${width}.png`) });
+    });
+}
+
+for (const width of [1440, 390]) {
     test(`ghost cards keep their marker visible and animation contained at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 950 });
         const columns = ['Backlog', 'Build', 'Review', 'Done'].map((name, position) => ({

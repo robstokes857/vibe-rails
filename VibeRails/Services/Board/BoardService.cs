@@ -57,7 +57,7 @@ public partial interface IBoardService
     Task<BoardSessionOutcomeRecord?> FindSessionOutcomeAsync(string sessionId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAttachmentAsync(string projectPath, string idOrKey, string attachmentId, CancellationToken cancellationToken = default);
 
-    /// <summary>Links a GitHub PR or commit URL without fetching remote content.</summary>
+    /// <summary>Saves a GitHub reference, then checks landing evidence if the card carries a ghost.</summary>
     Task<BoardCodeLink?> LinkCodeAsync(string projectPath, string idOrKey, string url, CancellationToken cancellationToken = default);
     /// <summary>Unlinks a saved GitHub reference from this card.</summary>
     Task<bool> UnlinkCodeAsync(string projectPath, string idOrKey, string linkId, CancellationToken cancellationToken = default);
@@ -85,7 +85,8 @@ public sealed partial class BoardService(
     IBoardStore store,
     IBoardCommitService commits,
     IBoardLiveSessionProbe liveSessions,
-    BoardSearchService? searchService = null) : IBoardService
+    BoardSearchService? searchService = null,
+    PostProcessing.BoardGhostService? ghosts = null) : IBoardService
 {
     // Raised 2026-09-17 (description 20k→100k, comment 10k→50k, attachments 12→40 per card): the
     // first agents to work cards split multi-part reports across comments and hit the old caps.
@@ -557,7 +558,10 @@ public sealed partial class BoardService(
     public async Task<BoardCodeLink?> LinkCodeAsync(string projectPath, string idOrKey, string url, CancellationToken cancellationToken = default)
     {
         var card = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
-        return card is null ? null : await store.AddCodeLinkAsync(projectPath, card.Id, url, cancellationToken);
+        if (card is null) return null;
+        var link = await store.AddCodeLinkAsync(projectPath, card.Id, url, cancellationToken);
+        if (link is not null && ghosts is not null) await ghosts.RecheckAfterLinkAsync(projectPath, card.Id, cancellationToken);
+        return link;
     }
 
     /// <inheritdoc />
@@ -589,7 +593,11 @@ public sealed partial class BoardService(
         var snapshot = new SandboxDiffResponse(
             diff.Files.Select(f => new SandboxDiffFileResponse(f.FileName, f.Language, f.OriginalContent, f.ModifiedContent)).ToList(),
             diff.TotalChanges);
-        var record = await store.AddCommitAsync(projectPath, existing.Id, info.Sha, info.Author, info.Message, info.CommittedUtc, snapshot, cancellationToken, sessionId);
+        var result = await store.AddCommitWithTargetsAsync(projectPath, existing.Id, info.Sha, info.Author, info.Message, info.CommittedUtc, snapshot, cancellationToken, sessionId);
+        var record = result?.Commit;
+        if (record is not null && ghosts is not null)
+            foreach (var cardId in result!.CardIds)
+                await ghosts.RecheckAfterLinkAsync(projectPath, cardId, cancellationToken);
         return record is null ? null : ToDto(record);
     }
 

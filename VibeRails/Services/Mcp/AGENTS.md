@@ -17,6 +17,11 @@ environment (Workers and hidden environments fall back to `base:<cli>`). The rep
 Desktop clients and CLIs VibeRails did not launch stay unassigned. `assignee: ""` creates the card
 unassigned. A bare provider name such as `claude` is shorthand for `base:claude` on create and
 update. `get_board_card` prints a `Ghost:` line when post-processing marked the finished card.
+Tool descriptions and replies explain missing/unlanded code to clients in any project.
+`list_board_cards(ghost=true|false)` filters the saved marker; `recheck_board_ghost` checks one
+card's evidence on demand. Local unpushed default-branch commits count; PR links need verified
+merges into the owning repository's default branch. No historical-card polling is started.
+`update_board_card(clearGhost=true)` dismisses the marker explicitly, preserving evidence.
 
 `start_board_agent(card)` calls the same root route as Start work: Agent cards launch the saved
 manager by default. `intent=worker` launches the saved worker, with optional `selection` and

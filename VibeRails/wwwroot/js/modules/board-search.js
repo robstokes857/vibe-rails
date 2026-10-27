@@ -66,7 +66,7 @@ export class BoardSearch {
         const query = String(value || '').trim();
         const boardId = this.currentBoardId();
         const currentFilters = this.getFilters();
-        const filters = Object.fromEntries(['assignee', 'type', 'priority', 'origin']
+        const filters = Object.fromEntries(['assignee', 'type', 'priority', 'origin', 'ghost']
             .map(key => [key, currentFilters[key] || '']));
         const filterKey = JSON.stringify(filters);
         if (this.disposed || !this.host || (!force && query === this.query && boardId === this.boardId && filterKey === this.filterKey)) return;

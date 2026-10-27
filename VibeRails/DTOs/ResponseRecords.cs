@@ -2059,6 +2059,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(BoardSummaryResponse))]
     [JsonSerializable(typeof(List<BoardSummaryResponse>))]
     [JsonSerializable(typeof(BoardListResponse))]
+    [JsonSerializable(typeof(BoardGhostCheckResponse))]
     [JsonSerializable(typeof(CreateBoardRequest))]
     [JsonSerializable(typeof(UpdateBoardRequest))]
     [JsonSerializable(typeof(ReorderBoardsRequest))]

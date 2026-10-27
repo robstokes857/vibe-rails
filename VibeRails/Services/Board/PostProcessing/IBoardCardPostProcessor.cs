@@ -26,4 +26,6 @@ public sealed record BoardCardPostProcessorOutcome(bool Defer = false, string? G
     public static BoardCardPostProcessorOutcome Nothing { get; } = new();
     public static BoardCardPostProcessorOutcome Ghost(string reason) => new(GhostReason: reason);
     public static BoardCardPostProcessorOutcome Later(string why) => new(Defer: true, Note: why);
+    /// <summary>No conclusion is available; finish the initial pass without scheduling retries.</summary>
+    public static BoardCardPostProcessorOutcome Unverified(string why) => new(Note: why);
 }

@@ -88,7 +88,8 @@ test('card prose asks the browser for spell check and identifiers do not', () =>
     assert.match(composer, /data-board-composer-input[^>]*spellcheck="true"/);
     assert.match(open, /name="sha"[^>]*spellcheck="false"/);
     assert.match(open, /name="displayName"[^>]*spellcheck="false"/);
-    assert.match(open, /id="board-card-display-id"[^>]*spellcheck="false"/);
+    const identity = readFileSync('VibeRails/wwwroot/js/modules/board-ghost.js', 'utf8');
+    assert.match(identity, /id="board-card-display-id"[^>]*spellcheck="false"/);
     const html = readFileSync(indexPath, 'utf8');
     assert.match(html, /data-board-search[^>]*spellcheck="false"/);
 

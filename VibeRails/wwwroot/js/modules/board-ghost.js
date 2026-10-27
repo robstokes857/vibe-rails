@@ -1,9 +1,29 @@
 // The post-processing ghost (VIBE-185). Once a card settles in its board's last lane, the server's
 // run-once pass sets `ghostReason` when an agent session worked on it but no code reached the
 // default branch: `no-code` (no commit or GitHub link at all) or `not-landed` (linked commits, none
-// on the default branch). The lane tile animates a ghost across the key row; the editor's Advanced
-// section offers the only way to clear it. Nothing in the browser ever sets one.
+// on the default branch). Recheck code verifies one card; Advanced offers explicit dismissal.
+// Opening an editor never triggers a check. Nothing in the browser ever sets a ghost.
 import { escapeHtml } from './utils.js';
+import { cardDisplayId } from './board-card-label.js';
+import { agentProvenanceHtml } from './board-agent-provenance.js';
+
+/** Saved identity stays visible above the card's sidebar fields. */
+export function cardIdentityHtml(card) {
+    if (!card?.id) return '';
+    return `<section class="board-card-identity" aria-label="Card identity and code status">
+        <label class="board-editor-label" for="board-card-display-id">Display ID</label>
+        <input class="form-control form-control-sm" id="board-card-display-id" maxlength="32" spellcheck="false" value="${escapeHtml(cardDisplayId(card))}">
+        <p class="board-editor-muted board-permanent-id">Permanent ID: <code>${escapeHtml(card.key)}</code></p>
+        <div class="board-card-identity-actions">
+            <button type="button" class="board-ghost-recheck" data-board-recheck-ghost title="Recheck this card's code landing" aria-label="Recheck this card's code landing">
+                <span class="board-ghost-buster" aria-hidden="true"><i class="fa-solid fa-ghost"></i><i class="fa-solid fa-ban"></i></span>
+                <span>Recheck code</span>
+            </button>
+            ${agentProvenanceHtml(card)}
+        </div>
+        <p class="board-editor-muted board-ghost-status" data-board-ghost-status role="status">${escapeHtml(ghostSummary(card))}</p>
+    </section>`;
+}
 
 /** One readable sentence for a tooltip, accessible name or the editor note; empty without a ghost. */
 export function ghostSummary(card) {
@@ -13,7 +33,7 @@ export function ghostSummary(card) {
         case '':
             return '';
         case 'not-landed':
-            return 'Ghost: an agent worked on this card, but none of its linked commits is on the default branch';
+            return 'Ghost: an agent worked on this card, but its linked code has not been verified on the default branch';
         default:
             return 'Ghost: an agent worked on this card, but no commit or GitHub link was linked';
     }

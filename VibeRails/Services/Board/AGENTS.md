@@ -8,7 +8,9 @@ with separate revisions behind `IBoardStore`; ordinary Agent context writes pres
 
 Cards have a local pin toggle. Pins preserve their slots during automatic activity promotion,
 including when another card is promoted; explicit dragging still moves a pinned card. Existing
-attention grouping remains authoritative. Pin writes are scoped and do not themselves promote cards.
+attention grouping remains authoritative. Automatic promotion fills only unpinned slots in the
+touched card's attention group, using the displayed order rather than raw Position values.
+Pin writes are scoped and do not themselves promote cards.
 
 ## Agent workflow (VIBE-52)
 
@@ -216,22 +218,37 @@ outcome. To add a rule, implement the interface, register it beside `GhostCardPo
 No existing card is ever processed (no backfill): see `board-post-processing/1` below.
 
 The first rule, `GhostCardPostProcessor`, sets `GhostReason` when an agent worked on a finished card
-but no code landed. Owner rules (2026-10-22):
+but no code landed. Owner rules (updated 2026-10-27):
 - **Never a ghost:** Research Spikes; a last lane or board whose name means "not done" (Canceled,
-  Not Doing, Won't Do and similar; letters-only match); no linked session; a GitHub PR or commit link.
+  Not Doing, Won't Do and similar; letters-only match); no linked session; verified landed code.
 - **Ghost:** `no-code` when nothing is linked at all. `not-landed` when commits are linked but none
-  is on the project's default branch.
+  is on the project's default branch, or a linked PR has not merged into the owning repository's default branch.
 
 `GitDefaultBranchCheck` reads local refs only: the branch `origin/HEAD` names, else `main`, else
 `master`, both the local branch and `origin/<name>`. It never fetches, so it makes no network call
 and raises no credential prompt. A commit counts when it is an ancestor of either ref, or when
 `git cherry` finds an equivalent patch there (a rebase or the PR bot's amend). A squash of several
-commits is not detected; a GitHub PR link on the card covers that case. No checkout, not a
-repository, or no default branch means unverifiable, which is not a ghost.
+commits is not detected; a verified merged GitHub PR covers that case. Local unpushed default-branch
+commits count as landed. `GitHubCodeLinkLandingCheck` matches URLs to the checkout's origin,
+checks commit URLs through the local checker, and reads linked PRs in one noninteractive `gh`
+query (20-second timeout). A URL alone or a PR merged into another branch/repository does not count.
+Unavailable verification finishes the initial pass without a new marker and preserves the marker
+during an explicit check. Existing transient Git failures retain their bounded initial retries;
+missing GitHub access never schedules PR polling. No automatic fetch is added.
 
-The tile animates the ghost; the editor's Advanced "Ghost" checkbox clears it (`ClearGhost` on the
-update request). Clearing never re-queues the pass. `get_board_card` states the ghost; no MCP tool
-sets or clears it. The ghost and its History entries are local-only and never synced.
+The tile animates the ghost. The editor's sidebar starts with Display ID, permanent ID, a
+Ghostbusters-style **Recheck code** button and maker/session provenance. The button and
+`recheck_board_ghost` call `BoardGhostService` for exactly one card. Commit/PR link writes recheck
+only affected cards already carrying a ghost, after the link transaction; commit fan-out carries
+the exact affected IDs from that transaction. A failed follow-up cannot undo or report failure
+for a committed link. Checks condition their annotation write on the snapshot, preserve drafts,
+and never reset `PostProcessed`, move the card or start monitoring. A later merge is discovered
+by an explicit recheck or link event, not a scan of completed cards.
+Advanced's "Ghost" checkbox and `update_board_card(clearGhost=true)` explicitly dismiss it.
+The toolbar and `list_board_cards(ghost=true|false)` filter by ghost; paging counts and indexed
+search apply the filter before limits. Tool descriptions and ghost replies explain the meaning
+and resolution without requiring consuming projects to read this repository. The ghost and its
+History entries are local-only and never synced. No schema or historical-data conversion is needed.
 
 ## Agent-made cards are assigned to their maker (VIBE-185)
 
@@ -256,7 +273,8 @@ their saved behavior; new Agents use the ordinary editor without a special switc
 
 The **GitHub links** rail saves PR and commit URLs independently of local commit snapshots.
 `link_board_code` provides the same operation to agents; `get_board_card` returns the references.
-They are not fetched from GitHub. `board-code-links/1` is additive. Card publication includes
+The rail stores references; ghost landing checks may read PR merge status from GitHub.
+`board-code-links/1` is additive. Card publication includes
 these references; session archive export captures links from all currently attached live cards.
 Previously frozen/uploaded session archives are not rewritten when card links change later.
 Board sync activity does not yet transfer this local rail between collaborators.

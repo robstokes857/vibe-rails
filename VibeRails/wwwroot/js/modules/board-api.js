@@ -247,9 +247,13 @@ async function getBoardCardAsync(cardId, extra = {}) {
     return call(`/cards/${enc(cardId)}`, 'GET', null, extra);
 }
 
+async function recheckCardGhostAsync(cardId) {
+    return call(`/cards/${enc(cardId)}/ghost/recheck`, 'POST');
+}
+
 /** Search every local board. Ownership labels and ordering come from the server. */
 async function searchBoardCardsAsync(query, { filters = {}, ...extra } = {}) {
-    const params = ['assignee', 'type', 'priority', 'origin']
+    const params = ['assignee', 'type', 'priority', 'origin', 'ghost']
         .filter(key => filters[key]).map(key => `${key}=${enc(filters[key])}`);
     const response = await call(`/cards/search?q=${enc(query)}${params.length ? '&' + params.join('&') : ''}`, 'GET', null, extra);
     return response?.cards || [];
@@ -492,6 +496,7 @@ export const BoardApi = {
     getBoardCardActivityAsync,
     getBoardCardPageAsync,
     getBoardCardAsync,
+    recheckCardGhostAsync,
     searchBoardCardsAsync,
     getLocalBoardCardAsync,
     updateLocalBoardCardAsync,

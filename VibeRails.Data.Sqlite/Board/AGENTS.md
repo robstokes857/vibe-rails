@@ -3,7 +3,12 @@
 `board-every-context/1` adds nullable message/revision columns to BoardContextSettings, independent
 of the existing Agent context JSON/revision. Older Agent context writers omit and preserve them.
 `board-card-pins/1` adds nullable BoardCards.Pinned; old rows read as false. Automatic promotion
-keeps pinned slots within attention groups; explicit moves retain the marker. Both migrations are
+keeps pinned slots within attention groups, using the displayed order even when older writers
+left interleaved Position values. Promote only unpinned cards in the touched card's group;
+placing pins across the whole lane and regrouping afterward shifts them. New cards initially
+have Position=0; allocate their extra unpinned slot at the group end before promotion so the
+insertion itself does not redefine existing pin slots. Explicit moves retain
+the marker. Both migrations are
 automatic, additive and have no backfill. Pin writes and context reads/writes stay behind IBoardStore.
 
 `board-sync-rebuild/1` adds the `BoardSyncRebuilds` ledger for owner-authorized replacement of a

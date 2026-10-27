@@ -27,7 +27,7 @@ public interface IBoardDefaultBranchCheck
 /// network call and can never raise a credential prompt. A commit counts when it is an ancestor of
 /// either ref, or when <c>git cherry</c> finds an equivalent patch there (a rebase or the PR bot's
 /// amend gives the landed commit a new SHA). A squash of several commits is not detected; a GitHub
-/// PR link on the card covers that case.
+/// PR verified as merged into the owning repository's default branch covers that case.
 /// </summary>
 public sealed partial class GitDefaultBranchCheck : IBoardDefaultBranchCheck
 {

@@ -193,7 +193,7 @@ navigation, manufacture a tab, or alter Automation status.
 **Local search (VIBE-6).** Typing in Board search switches from lanes to ranked results across
 every local board, including other projects; clearing it restores lanes and their filters.
 `board-search.js` owns debouncing, cancellation, escaped snippets and ownership labels.
-Type, assignee, priority and origin filters stay enabled during global search and apply before
+Type, assignee, priority, origin and ghost filters stay enabled during global search and apply before
 the result limit. Search includes full descriptions, visible comments/notes and saved handoffs;
 assignee choices also include agents on search results. Search cards separate IDs, titles and
 locations, highlight literal matches and show two-line previews. Header counts reflect search
@@ -206,6 +206,14 @@ cards use `board-local-card.js` through explicit authenticated `local-cards` rou
 resolved on the server: fields, lane, comments and links can be edited without changing the open
 repository. It never sends a project path or invokes that repository's launch/file/session APIs.
 Both editors preserve drafts during discussion/link activity and send only edited card fields.
+
+The saved card's sidebar begins with Display ID, permanent ID, **Recheck code** (a ghost with a
+red prohibition circle), and the agent-maker/session block. Identity is no longer tucked inside
+Advanced. Recheck calls only that card's authenticated POST `/ghost/recheck`, then refreshes its
+annotation without saving form drafts; stale/unavailable results remain explicit. Link changes
+refresh the same annotation. Advanced retains manual Ghost dismissal. Neither opening the editor
+nor ordinary UI polling runs a landing check. The ghost filter uses `ghost=true|false` across
+server paging/counts and indexed search; no filter is applied only to loaded tiles.
 
 Read the cross-layer [Board contributor guide](../Services/Board/AGENTS.md) and
 [architecture/review](../Services/Board/ARCHITECTURE.md) for API/storage contracts and open
@@ -715,7 +723,7 @@ mark's tooltip and the editor's provenance block (`board-agent-provenance.js`) n
 button replays that session seeked to the creation moment; all three are escaped card data. Clicking a card's tag or avatar toggles that filter,
 which is why those two controls stop propagation before the card's own open handler runs.
 
-A card with `ghostReason` (VIBE-185, set once by server post-processing) wraps its key row in
+A card with `ghostReason` (VIBE-185, initially set by server post-processing) wraps its key row in
 `.board-key.has-ghost`: a permanent ghost stays beside a clipped animation stage. Every 14 s
 the key and robot mark fade out, a larger Font Awesome ghost bobs across the stage, and the key
 returns (`board-ghost-*` keyframes in the board template). Reduced motion keeps the permanent
@@ -1433,8 +1441,8 @@ those retired fields so stored values survive; YOLO remains an explicit checkbox
 Card labels use `displayId || key` through `board-card-label.js`; `key` remains the immutable
 identity. Board settings edit `displayPrefix` for future cards (only a changed value is sent; an
 emptied field sends `''`, which returns the board to the repository default). A saved card's
-collapsed **Advanced** section (formerly Card settings) edits the individual display ID, shows the
-permanent key, and holds Checks, the Agent context measurement and History. Both IDs remain searchable,
+sidebar identity section edits the individual display ID and shows the permanent key.
+Advanced holds Checks, the Agent context measurement and History. Both IDs remain searchable,
 including in chat history, which shows the display ID and keeps the key in the tooltip. New-card links live on the editor's draft card
 and are sent as `linkedCardIds` only on Create; link search and disposal retain generation guards.
 

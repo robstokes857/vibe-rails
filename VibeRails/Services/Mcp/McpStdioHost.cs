@@ -145,6 +145,10 @@ public static class McpStdioHost
         services.AddSingleton<VibeRails.Services.Board.IBoardCommitService, VibeRails.Services.Board.BoardCommitService>();
         services.AddSingleton<VibeRails.Services.Board.IBoardLiveSessionProbe, VibeRails.Services.Board.NullBoardLiveSessionProbe>();
         services.AddScoped<VibeRails.Services.Board.IBoardService, VibeRails.Services.Board.BoardService>();
+        services.AddSingleton<VibeRails.Services.Board.PostProcessing.IBoardDefaultBranchCheck, VibeRails.Services.Board.PostProcessing.GitDefaultBranchCheck>();
+        services.AddSingleton<VibeRails.Services.Board.PostProcessing.IBoardCodeLinkLandingCheck, VibeRails.Services.Board.PostProcessing.GitHubCodeLinkLandingCheck>();
+        services.AddSingleton<VibeRails.Services.Board.PostProcessing.GhostCardPostProcessor>();
+        services.AddSingleton<VibeRails.Services.Board.PostProcessing.BoardGhostService>();
         services.AddScoped<VibeRails.Services.Board.BoardReviewService>();
         services.AddScoped<VibeRails.Services.Board.BoardWorkflowService>();
         VibeRails.Services.GitPreflight.GitPreflightServiceCollectionExtensions.AddGitSnapshots(services);

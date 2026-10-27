@@ -218,6 +218,9 @@ public sealed record BoardCommitRecord(
     public string ShortSha => Sha.Length > 7 ? Sha[..7] : Sha;
 }
 
+/// <summary>A commit write receipt with the exact cards affected in that transaction.</summary>
+public sealed record BoardCommitLinkResult(BoardCommitRecord Commit, IReadOnlyList<string> CardIds);
+
 /// <summary>
 /// <see cref="BoardId"/> picks the board whose left-most lane takes the card when
 /// <see cref="ColumnId"/> is omitted; null means the project's default (first) board.

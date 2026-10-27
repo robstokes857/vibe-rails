@@ -26,6 +26,37 @@ public sealed class BoardSearchTests : IDisposable
     }
 
     private BoardSearchService Search() => new(SearchTestIndex.Build(store, root, embedder.Object), new ExpandedModel(embedder.Object), NullLogger<BoardSearchService>.Instance);
+
+    [Fact]
+    public async Task GhostFilterUsesIndexedMetadataBeforeTheResultLimit()
+    {
+        var plain = await Card("needle plain");
+        var ghost = await Card("needle ghost");
+        await using (var connection = new SqliteConnection(connectionString))
+        {
+            await connection.OpenAsync(Ct);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE BoardCards SET GhostReason='no-code' WHERE Id=$id;";
+            command.Parameters.AddWithValue("$id", ghost.Id);
+            await command.ExecuteNonQueryAsync(Ct);
+        }
+        var documents = await store.GetSearchDocumentsAsync(0, Ct);
+        Assert.Equal("no-code", documents.Single(document => document.Id == ghost.Id).GhostReason);
+        var index = SearchTestIndex.Build(store, root, embedder.Object);
+        await using (var db = new SqliteConnection($"Data Source={Path.Combine(root, "search.db")}"))
+        {
+            await db.OpenAsync(Ct);
+            await using var diagnostics = db.CreateCommand();
+            diagnostics.CommandText = "SELECT Error FROM SearchCheckpoints WHERE Kind='board';";
+            var error = await diagnostics.ExecuteScalarAsync(Ct);
+            Assert.True(error is null or DBNull, error?.ToString());
+        }
+        var search = new BoardSearchService(index, new ExpandedModel(embedder.Object), NullLogger<BoardSearchService>.Instance);
+        var match = Assert.Single(await search.SearchAsync(root, "needle", 1, ct: Ct, filters: new(Ghost: true)));
+        Assert.Equal(ghost.Id, match.Id);
+        Assert.Equal("no-code", match.GhostReason);
+        Assert.Equal(plain.Id, Assert.Single(await search.SearchAsync(root, "needle", 1, ct: Ct, filters: new(Ghost: false))).Id);
+    }
     private async Task<BoardCardRecord> Card(string title = "Task", string description = "", string? project = null)
     {
         project ??= root;

@@ -15,6 +15,7 @@ public sealed partial class BoardStore
         AND ($assignee = '' OR replace(lower(c.Assignee), ':grok-4.6', ':grok') = $assignee)
         AND ($type = '' OR c.Type = $type)
         AND ($priority = '' OR c.Priority = $priority)
+        AND ($ghost IS NULL OR (c.GhostReason IS NOT NULL) = $ghost)
         AND ($tag = '' OR EXISTS (SELECT 1 FROM json_each(c.Tags) WHERE value = $tag))
         AND ($origin = '' OR ($origin = 'agent' AND c.AgentMade <> 0)
             OR ($origin = 'human' AND c.AgentMade = 0 AND NOT EXISTS (SELECT 1 FROM BoardJiraLinks j WHERE j.CardId = c.Id)
@@ -124,6 +125,7 @@ public sealed partial class BoardStore
         command.Parameters.AddWithValue("$priority", query.Priority ?? "");
         command.Parameters.AddWithValue("$tag", query.Tag ?? "");
         command.Parameters.AddWithValue("$origin", query.Origin ?? "");
+        command.Parameters.AddWithValue("$ghost", (object?)query.Ghost ?? DBNull.Value);
     }
 
     private static async Task<string> ReadContinuationTokenAsync(SqliteConnection connection, SqliteTransaction transaction,

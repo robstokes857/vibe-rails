@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { BoardController } from '../../../VibeRails/wwwroot/js/modules/board-controller.js';
-import { ghostSettingHtml, ghostSummary, readGhostField } from '../../../VibeRails/wwwroot/js/modules/board-ghost.js';
+import { cardIdentityHtml, ghostSettingHtml, ghostSummary, readGhostField } from '../../../VibeRails/wwwroot/js/modules/board-ghost.js';
 
 function card(overrides) {
     return { id: 'card', key: 'VB-1', displayId: 'VIBE-1', title: 'Work', description: '', type: 'task',
@@ -16,6 +16,29 @@ function controller() {
     return instance;
 }
 
+test('saved cards always show editable identity, the recheck button and maker together', () => {
+    assert.equal(cardIdentityHtml(null), '');
+    const html = cardIdentityHtml(card({ agentMade: true, agentMadeBy: 'Codex', key: 'VB-NW72V-297', displayId: 'VIBE-225' }));
+    assert.match(html, /id="board-card-display-id"[^>]*value="VIBE-225"/);
+    assert.match(html, /Permanent ID: <code>VB-NW72V-297<\/code>/);
+    assert.match(html, /data-board-recheck-ghost/);
+    assert.match(html, /fa-ghost.*fa-ban/);
+    assert.match(html, /Made by <strong>Codex<\/strong>/);
+    const human = cardIdentityHtml(card());
+    assert.match(human, /data-board-recheck-ghost/);
+    assert.doesNotMatch(human, /data-board-agent-provenance/);
+});
+
+test('the ghost filter matches both reasons and excludes unmarked cards', () => {
+    const board = controller();
+    board.state.cards = [card({ id: 'missing', ghostReason: 'no-code' }), card({ id: 'branch', ghostReason: 'not-landed' }), card({ id: 'clear' })];
+    board.state.filters.ghost = 'true';
+    assert.equal(board.hasActiveFilters(), true);
+    assert.deepEqual(board.filteredCards().map(card => card.id), ['missing', 'branch']);
+    board.state.filters.ghost = 'false';
+    assert.deepEqual(board.filteredCards().map(card => card.id), ['clear']);
+});
+
 test('a ghost tile keeps a permanent marker outside the animated key and robot mark', () => {
     const html = controller().renderCard(card({ agentMade: true, ghostReason: 'no-code' }));
     assert.match(html, /<span class="board-key has-ghost" title="Ghost: an agent worked on this card, but no commit or GitHub link was linked">/);
@@ -25,7 +48,7 @@ test('a ghost tile keeps a permanent marker outside the animated key and robot m
 });
 
 test('the not-landed ghost names the default branch', () => {
-    assert.match(ghostSummary(card({ ghostReason: 'not-landed' })), /none of its linked commits is on the default branch/);
+    assert.match(ghostSummary(card({ ghostReason: 'not-landed' })), /linked code has not been verified on the default branch/);
     assert.match(controller().renderCard(card({ ghostReason: 'not-landed' })), /board-ghost-runner/);
 });
 

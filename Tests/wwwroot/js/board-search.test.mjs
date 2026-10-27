@@ -21,7 +21,7 @@ function searchHarness() {
         classList: { toggle(name, on) { if (on) classes.add(name); else classes.delete(name); } }
     };
     const calls = [];
-    const filters = { assignee: '', type: '', priority: '', origin: '' };
+    const filters = { assignee: '', type: '', priority: '', origin: '', ghost: '' };
     const search = new BoardSearch(root, { currentBoardId: () => 'board-current', openCard() {},
         filters: () => filters,
         search(query, { signal, filters }) { const request = deferred(); calls.push({ query, signal, filters, ...request }); return request.promise; } });
@@ -58,7 +58,7 @@ test('changing filters reruns the same full-text query and ignores unfiltered re
     Object.assign(h.filters, { type: 'bug', assignee: 'base:codex', priority: 'high', origin: 'agent' });
     const filtered = h.search.setQuery('deep comment', { immediate: true });
     assert.equal(h.calls[0].signal.aborted, true);
-    assert.deepEqual(h.calls[0].filters, { type: '', assignee: '', priority: '', origin: '' });
+    assert.deepEqual(h.calls[0].filters, { type: '', assignee: '', priority: '', origin: '', ghost: '' });
     assert.deepEqual(h.calls[1].filters, h.filters);
     h.calls[1].resolve([{ id: 'matched', title: 'Matched description' }]);
     await filtered;

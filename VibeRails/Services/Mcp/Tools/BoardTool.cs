@@ -60,6 +60,7 @@ public sealed partial class BoardTool(
         "Older name for syncToRemote; it applies to Jira and Azure DevOps alike. syncToRemote wins when both are given.";
 
     private const string NotSentToRemote = " Not sent to Jira or Azure DevOps.";
+    private const string GhostGuidance = "Ghost means completed agent work has no linked code verified on the project's default branch. Local, unpushed default-branch commits count. Link real evidence with link_board_commit or link_board_code; links trigger a check only for the affected ghost card. After a later merge, use recheck_board_ghost. To dismiss a ghost explicitly, use update_board_card(clearGhost=true); the UI also offers Advanced > Ghost. There is no recurring polling of completed cards.";
 
     /// <summary><c>syncToRemote ?? syncToJira ?? true</c>. Storage keeps the <c>syncToJira</c> key for both trackers.</summary>
     internal static bool ResolveRemoteSync(bool? syncToRemote, bool? syncToJira) => syncToRemote ?? syncToJira ?? true;
@@ -147,13 +148,14 @@ public sealed partial class BoardTool(
         return builder.ToString().TrimEnd();
     }
 
-    [McpServerTool, Description("List cards on a local VibeRails board: permanent key, lane, type, priority, title, assignee, comments and open session. Select any local board with board=<id> from list_boards; omitted board stays current. Optional filters by lane, assignee and type.")]
+    [McpServerTool, Description("List cards on a local VibeRails board: permanent key, lane, type, priority, title, assignee, comments, ghost and open session. Select any local board with board=<id> from list_boards. Optional filters by lane, assignee, type and ghost. " + GhostGuidance)]
     public async Task<string> ListBoardCards(
         [Description("Only cards in this lane (name or id). Optional.")] string? column = null,
         [Description("Only cards assigned to this LLM picker key, e.g. base:claude or env:7:codex. Optional.")] string? assignee = null,
         [Description("Only cards of this type: task | bug | feature | research-spike | chore. Optional.")] string? type = null,
         [Description(BoardArgumentHelp)] string? board = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        [Description("true: only ghost cards; false: exclude ghost cards; omitted: all cards.")] bool? ghost = null)
     {
         try
         {
@@ -182,6 +184,7 @@ public sealed partial class BoardTool(
             }
 
             var rows = cards.OrderBy(c => columns.TryGetValue(c.ColumnId, out var lane) ? lane.Position : int.MaxValue).ThenBy(c => c.Position).ToList();
+            if (ghost is bool onlyGhosts) rows = rows.Where(card => (card.GhostReason is not null) == onlyGhosts).ToList();
             var builder = new StringBuilder();
             if (outsideProject)
                 builder.Append("Other local project: ").Append(project).Append(" (board ").Append(target.BoardName).Append(", id ").Append(target.BoardId).Append(")\n");
@@ -195,12 +198,14 @@ public sealed partial class BoardTool(
                 if (!string.IsNullOrWhiteSpace(card.Assignee)) builder.Append(" — assignee ").Append(card.Assignee);
                 if (card.Blocked) builder.Append(" — BLOCKED");
                 if (card.Flagged) builder.Append(" — FLAGGED: needs your attention");
+                if (card.GhostReason is not null) builder.Append(" — GHOST: ").Append(card.GhostReason == BoardGhostReasons.NoCode ? "no linked code" : "linked code has not landed on the default branch");
                 if (card.AgentMade) builder.Append(" — agent-made").Append(card.AgentMadeBy is { } madeBy ? " by " + madeBy : "");
                 if (card.CommentCount > 0) builder.Append(" — ").Append(card.CommentCount).Append(" comment").Append(card.CommentCount == 1 ? "" : "s");
                 if (!string.IsNullOrWhiteSpace(card.ActiveTabId)) builder.Append(" — session open");
                 if (outsideProject) builder.Append(" — id ").Append(card.Id);
                 builder.Append('\n');
             }
+            if (rows.Any(card => card.GhostReason is not null)) builder.Append('\n').Append(GhostGuidance);
             return builder.ToString().TrimEnd();
         }
         catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
@@ -479,7 +484,8 @@ public sealed partial class BoardTool(
         [Description("manual | agent. Omitted preserves the card's workflow.")] string? workflowMode = null,
         [Description("Manager picker key. Empty clears it when switching to manual; omitted preserves it. Changing manager clears its old base settings.")] string? managerSelection = null,
         [Description("Replace all saved manager base CLI settings; saved environments reject overrides.")] BaseLlmOptions? managerBaseLlmOptions = null,
-        [Description("Clear saved manager base CLI options. Cannot be combined with managerBaseLlmOptions.")] bool clearManagerBaseLlmOptions = false)
+        [Description("Clear saved manager base CLI options. Cannot be combined with managerBaseLlmOptions.")] bool clearManagerBaseLlmOptions = false,
+        [Description("Explicitly dismiss this card's ghost marker. This does not verify code landing or delete linked evidence. To verify after a merge, use recheck_board_ghost instead.")] bool clearGhost = false)
     {
         try
         {
@@ -518,7 +524,7 @@ public sealed partial class BoardTool(
                 Blocked: blocked,
                 Type: type, Flagged: flagged, FlagReason: flagReason,
                 WorkflowMode: workflowMode, ManagerSelection: managerSelection, ManagerBaseLlmOptions: managerBaseLlmOptions,
-                ClearManagerBaseLlmOptions: clearManagerBaseLlmOptions);
+                ClearManagerBaseLlmOptions: clearManagerBaseLlmOptions, ClearGhost: clearGhost);
             var updated = await service.UpdateCardAsync(target.Project, target.CardId!, request, cancellationToken, author);
             if (updated is null)
                 return $"FAIL: card not found: {card}";
@@ -526,9 +532,10 @@ public sealed partial class BoardTool(
             await TrackDesktopActivityAsync(server, target.Project, updated.Id, author.Label, cancellationToken);
             if (descriptionAppend is not null && title is null && priority is null && points is null && tags is null && blocked is null && type is null && flagged is null
                 && assignee is null && baseLlmOptions is null && !clearBaseLlmOptions
-                && workflowMode is null && managerSelection is null && managerBaseLlmOptions is null && !clearManagerBaseLlmOptions)
+                && workflowMode is null && managerSelection is null && managerBaseLlmOptions is null && !clearManagerBaseLlmOptions && !clearGhost)
                 return $"Appended to the description of {updated.Key}.";
             return $"Updated {updated.Key}: {updated.Title} ({updated.Priority}{(updated.Blocked ? ", blocked" : "")}{(updated.Flagged ? ", needs your attention" : "")})"
+                + (clearGhost ? "\nGhost dismissed. Linked code and the original completion check are retained." : "")
                 + (assignee is not null || baseLlmOptions is not null || clearBaseLlmOptions
                     ? "\n" + DescribeAgentSettings(updated.Assignee, updated.BaseLlmOptions) + "\nApplies to the next launch; running agents are unchanged." : "")
                 + (workflowMode is not null || managerSelection is not null || managerBaseLlmOptions is not null || clearManagerBaseLlmOptions
@@ -714,7 +721,7 @@ public sealed partial class BoardTool(
         }
     }
 
-    [McpServerTool, Description("Link a GitHub pull request or commit URL to a Board card. Saves an external reference, without fetching GitHub or creating a local diff. Included in card publications and the next export of attached sessions. Safe to repeat. Use link_board_commit to also save a local commit diff.")]
+    [McpServerTool, Description("Link a GitHub pull request or commit URL to a Board card. Saves an external reference without creating a local diff. A ghost card gets one landing check, including a read-only GitHub lookup for PRs; an open PR alone does not clear its ghost. Included in card publications and the next export of attached sessions. Safe to repeat. Use link_board_commit to also save a local commit diff.")]
     public async Task<string> LinkBoardCode(
         [Description("HTTPS GitHub URL, e.g. https://github.com/owner/repo/pull/123 or /commit/<sha>.")] string url,
         [Description(CardArgumentHelp)] string? card = null,
@@ -1069,9 +1076,9 @@ public sealed partial class BoardTool(
         if (card.GhostReason is { } ghost)
             builder.Append("Ghost: agent sessions worked on this finished card, but ")
                 .Append(ghost == BoardGhostReasons.NotLanded
-                    ? "none of its linked commits is on the default branch"
+                    ? "its linked code has not been verified on the default branch"
                     : "no commit or GitHub link was linked")
-                .Append(". The owner clears this under Advanced.\n");
+                .Append(". ").Append(GhostGuidance).Append('\n');
         if (!string.IsNullOrWhiteSpace(card.Assignee))
             builder.Append(DescribeAgentSettings(card.Assignee, card.BaseLlmOptions)).Append('\n');
         if (card.WorkflowMode == BoardWorkflowModes.Agent)

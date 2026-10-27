@@ -17,6 +17,7 @@ public static class BoardMcpAuthorization
         "list_board_cards",
         "search_board_cards",
         "get_board_card",
+        "recheck_board_ghost",
         "save_board_handoff",
         "read_board_session",
         "read_board_check",

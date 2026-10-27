@@ -633,7 +633,7 @@ public sealed partial class BoardStore : IBoardStore
             insert.Parameters.AddWithValue("$updated", ToDb(now));
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
-        await PromoteCardAsync(connection, transaction, id, cancellationToken);
+        await PromoteCardAsync(connection, transaction, id, cancellationToken, isNewCard: true);
         await WriteBaseLlmOptionsAsync(connection, transaction, id, card.BaseLlmOptions, cancellationToken);
 
         var created = new BoardCardRecord(id, project, number, column.Id, position, card.Title, card.Description,
@@ -1240,6 +1240,10 @@ public sealed partial class BoardStore : IBoardStore
     }
 
     public async Task<BoardCommitRecord?> AddCommitAsync(string projectPath, string cardId, string sha, string author, string message, DateTime committedUtc, SandboxDiffResponse snapshot, CancellationToken cancellationToken = default, string? sessionId = null)
+        => (await AddCommitWithTargetsAsync(projectPath, cardId, sha, author, message, committedUtc, snapshot, cancellationToken, sessionId))?.Commit;
+
+    /// <inheritdoc />
+    public async Task<BoardCommitLinkResult?> AddCommitWithTargetsAsync(string projectPath, string cardId, string sha, string author, string message, DateTime committedUtc, SandboxDiffResponse snapshot, CancellationToken cancellationToken = default, string? sessionId = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         var snapshotJson = JsonSerializer.Serialize(snapshot, StorageJsonSerializerContext.Default.SandboxDiffResponse);
@@ -1260,7 +1264,7 @@ public sealed partial class BoardStore : IBoardStore
                 allowExisting: !string.IsNullOrWhiteSpace(sessionId), cancellationToken);
         var record = (await ReadCommitsAsync(connection, card.Id, cancellationToken, transaction)).Single(c => c.Sha == sha);
         await transaction.CommitAsync(cancellationToken);
-        return record;
+        return new(record, targets.ToArray());
     }
 
     private static async Task WriteCommitAsync(SqliteConnection connection, SqliteTransaction transaction,
@@ -1590,9 +1594,10 @@ public sealed partial class BoardStore : IBoardStore
         return comments;
     }
 
-    private static async Task<IReadOnlyList<BoardSessionRecord>> ReadSessionsAsync(SqliteConnection connection, string cardId, CancellationToken cancellationToken, int limit = int.MaxValue, bool newestFirst = false)
+    private static async Task<IReadOnlyList<BoardSessionRecord>> ReadSessionsAsync(SqliteConnection connection, string cardId, CancellationToken cancellationToken, int limit = int.MaxValue, bool newestFirst = false, SqliteTransaction? transaction = null)
     {
         await using var command = connection.CreateCommand();
+        if (transaction is not null) command.Transaction = transaction;
         command.CommandText = SessionSelectSql + " WHERE s.CardId = $card ORDER BY s.CreatedUTC" + (newestFirst ? " DESC" : "") + ", s.SessionId LIMIT $limit;";
         command.Parameters.AddWithValue("$card", cardId);
         command.Parameters.AddWithValue("$limit", limit);
@@ -1789,7 +1794,7 @@ public sealed partial class BoardStore : IBoardStore
 
     // Card activity belongs at the top of its attention group, while explicit drag positions use
     // WriteCardPositionsAsync directly. Only the touched card's timestamp changes.
-    private static async Task PromoteCardAsync(SqliteConnection connection, SqliteTransaction transaction, string cardId, CancellationToken cancellationToken)
+    private static async Task PromoteCardAsync(SqliteConnection connection, SqliteTransaction transaction, string cardId, CancellationToken cancellationToken, bool isNewCard = false)
     {
         await using var column = connection.CreateCommand();
         column.Transaction = transaction;
@@ -1797,26 +1802,35 @@ public sealed partial class BoardStore : IBoardStore
         column.Parameters.AddWithValue("$id", cardId);
         if (await column.ExecuteScalarAsync(cancellationToken) is not string columnId)
             return;
-        var ids = await ReadColumnCardIdsAsync(connection, transaction, columnId, cancellationToken);
-        var pins = new Dictionary<int, string>();
-        await using (var pinned = connection.CreateCommand())
+        // Pin slots belong to the displayed attention group, not to raw Position values.
+        // Promoting across both groups and sorting by Flagged afterward shifts those slots.
+        var cards = new List<(string Id, bool Flagged, bool Pinned)>();
+        await using (var read = connection.CreateCommand())
         {
-            pinned.Transaction = transaction;
-            pinned.CommandText = "SELECT Id, Position FROM BoardCards WHERE ColumnId = $column AND DeletedUTC IS NULL AND Pinned = 1 ORDER BY Position, Number;";
-            pinned.Parameters.AddWithValue("$column", columnId);
-            await using var reader = await pinned.ExecuteReaderAsync(cancellationToken);
+            read.Transaction = transaction;
+            read.CommandText = "SELECT Id, Flagged, COALESCE(Pinned, 0) FROM BoardCards WHERE ColumnId = $column AND DeletedUTC IS NULL ORDER BY Flagged DESC, Position, Number;";
+            read.Parameters.AddWithValue("$column", columnId);
+            await using var reader = await read.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
-            {
-                if (reader.GetString(0) == cardId) return;
-                pins[reader.GetInt32(1)] = reader.GetString(0);
-            }
+                cards.Add((reader.GetString(0), reader.GetBoolean(1), reader.GetBoolean(2)));
         }
-        var pinnedIds = pins.Values.ToHashSet(StringComparer.Ordinal);
-        var movable = ids.Where(id => id != cardId && !pinnedIds.Contains(id)).ToList();
-        movable.Insert(0, cardId);
-        var next = 0;
-        var ordered = Enumerable.Range(0, ids.Count)
-            .Select(index => pins.TryGetValue(index, out var pin) ? pin : movable[next++]).ToList();
+        var targetIndex = cards.FindIndex(card => card.Id == cardId);
+        if (targetIndex < 0 || cards[targetIndex].Pinned) return;
+        var flagged = cards[targetIndex].Flagged;
+        if (isNewCard)
+        {
+            // Inserts start at Position=0. Restore the pre-insert slots before allocating the
+            // extra unpinned slot at the group's end, or the insertion itself displaces pins.
+            var inserted = cards[targetIndex];
+            cards.RemoveAt(targetIndex);
+            var groupEnd = flagged ? cards.FindIndex(card => !card.Flagged) : cards.Count;
+            cards.Insert(groupEnd < 0 ? cards.Count : groupEnd, inserted);
+        }
+        var movable = new Queue<string>(cards
+            .Where(card => card.Flagged == flagged && !card.Pinned && card.Id != cardId)
+            .Select(card => card.Id).Prepend(cardId));
+        var ordered = cards.Select(card => card.Flagged == flagged && !card.Pinned
+            ? movable.Dequeue() : card.Id).ToList();
         await WriteCardPositionsAsync(connection, transaction, ordered, cancellationToken);
     }
 

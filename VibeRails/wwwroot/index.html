@@ -4163,6 +4163,23 @@
                     flex-direction: column;
                     gap: 0.7rem;
                 }
+                .board-card-identity {
+                    margin-bottom: 1rem;
+                    padding-bottom: 0.85rem;
+                    border-bottom: 1px solid var(--border-color, #3b3b3b);
+                }
+                .board-permanent-id { margin: 0.45rem 0 0.75rem; overflow-wrap: anywhere; }
+                .board-card-identity-actions { display: flex; align-items: flex-start; gap: 0.75rem; flex-wrap: wrap; }
+                .board-card-identity-actions .board-agent-provenance { min-width: 0; overflow-wrap: anywhere; }
+                .board-ghost-recheck { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0.55rem; color: inherit; background: transparent; border: 1px solid #657082; border-radius: 0.4rem; font-size: 0.8rem; }
+                .board-ghost-recheck:hover { background: #ffffff10; }
+                .board-ghost-recheck:focus-visible { outline: 2px solid #47c9df; outline-offset: 2px; }
+                .board-ghost-recheck:disabled { opacity: 0.6; cursor: wait; }
+                .board-ghost-buster { position: relative; display: inline-grid; place-items: center; width: 1.5rem; height: 1.5rem; }
+                .board-ghost-buster .fa-ghost { font-size: 1rem; }
+                .board-ghost-buster .fa-ban { position: absolute; inset: 0; color: #f15c64; font-size: 1.5rem; }
+                .board-ghost-status { margin: 0.6rem 0 0; }
+                .board-ghost-status:empty { display: none; }
 
                 /* Commits / sessions rail -------------------------------- */
                 .board-card-modal-dialog .modal-title {
@@ -5363,6 +5380,11 @@
                         <option value="ado">Azure DevOps</option>
                         <option value="agent">Agent-made</option>
                         <option value="human">Human-made</option>
+                    </select>
+                    <select class="board-control" data-board-filter-ghost aria-label="Filter by ghost status">
+                        <option value="">Any ghost status</option>
+                        <option value="true">Ghost cards</option>
+                        <option value="false">No ghost</option>
                     </select>
                     <button type="button" class="board-clear-filters" data-board-clear-filters
                         data-board-action="clear-filters" hidden>

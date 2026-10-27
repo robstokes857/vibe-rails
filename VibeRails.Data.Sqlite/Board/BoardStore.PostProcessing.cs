@@ -78,7 +78,8 @@ public sealed partial class BoardStore
             await using var reader = await commits.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
                 shas.Add(reader.GetString(0));
-            rows[i] = rows[i] with { CommitShas = shas };
+            rows[i] = rows[i] with { CommitShas = shas,
+                CodeLinks = await ReadCodeLinksAsync(connection, null, rows[i].CardId, cancellationToken) };
         }
         return rows;
     }
@@ -129,6 +130,70 @@ public sealed partial class BoardStore
         }
         await LogGhostChangedAsync(connection, transaction, candidate.CardId, previousGhost, ghost, PostProcessingAuthor,
             DateTime.UtcNow, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return true;
+    }
+
+    /// <inheritdoc />
+    public async Task<BoardGhostCheck?> GetGhostCheckAsync(string projectPath, string cardId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = connection.BeginTransaction(deferred: true);
+        var card = await ReadCardAsync(connection, transaction, NormalizeProjectPath(projectPath), cardId, cancellationToken);
+        if (card is null) return null;
+        var lanes = await ReadColumnsAsync(connection, transaction, card.ProjectPath, card.BoardId, cancellationToken);
+        var lane = lanes.Single(c => c.Id == card.ColumnId);
+        var boards = await ReadBoardsAsync(connection, transaction, card.ProjectPath, cancellationToken);
+        var board = boards.Single(b => b.Id == card.BoardId);
+        var commits = await ReadCommitsAsync(connection, card.Id, cancellationToken, transaction);
+        var links = await ReadCodeLinksAsync(connection, transaction, card.Id, cancellationToken);
+        var sessions = await ReadSessionsAsync(connection, card.Id, cancellationToken, transaction: transaction);
+        var snapshot = new BoardPostProcessingCandidate(card.Id, card.ProjectPath, card.Key, card.Type,
+            card.BoardId, board.Name, card.ColumnId, lane.Name, card.UpdatedUtc, sessions.Count, links.Count,
+            commits.Select(c => c.Sha).ToArray()) { CodeLinks = links };
+        return new(snapshot, card.GhostReason, lanes.Count > 1 && lanes[^1].Id == card.ColumnId);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> ApplyGhostCheckAsync(BoardGhostCheck check, string? ghostReason, CancellationToken cancellationToken = default)
+    {
+        var card = check.Card;
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
+        // Compared as instants, like CompletePostProcessingAsync: the stored text need not be in
+        // the exact round-trip spelling ToDb produces for the snapshot to still be current.
+        await using (var read = connection.CreateCommand())
+        {
+            read.Transaction = transaction;
+            read.CommandText = "SELECT UpdatedUTC FROM BoardCards WHERE Id = $id;";
+            read.Parameters.AddWithValue("$id", card.CardId);
+            if (await read.ExecuteScalarAsync(cancellationToken) is not string stored || ParseDb(stored) != card.UpdatedUtc)
+                return false;
+        }
+        await using var update = connection.CreateCommand();
+        update.Transaction = transaction;
+        // Explicit dismissal, new evidence, lane edits and concurrent checks invalidate this result.
+        update.CommandText = $"""
+            UPDATE BoardCards SET GhostReason = $ghost
+            WHERE Id = $id AND ProjectPath = $project{ProjectPathCollation} AND DeletedUTC IS NULL
+              AND GhostReason IS $before AND ColumnId = $column AND Type = $type
+              AND EXISTS (SELECT 1 FROM BoardColumns k JOIN Boards b ON b.Id = k.BoardId
+                WHERE k.Id = $column AND k.Name = $lane AND b.Id = $board AND b.Name = $boardName
+                  AND ({LastOfSeveralLanesSql}) = $finished);
+            """;
+        update.Parameters.AddWithValue("$ghost", (object?)ghostReason ?? DBNull.Value);
+        update.Parameters.AddWithValue("$before", (object?)check.GhostReason ?? DBNull.Value);
+        update.Parameters.AddWithValue("$id", card.CardId);
+        update.Parameters.AddWithValue("$project", card.ProjectPath);
+        update.Parameters.AddWithValue("$column", card.ColumnId);
+        update.Parameters.AddWithValue("$type", card.Type);
+        update.Parameters.AddWithValue("$lane", card.LaneName);
+        update.Parameters.AddWithValue("$board", card.BoardId);
+        update.Parameters.AddWithValue("$boardName", card.BoardName);
+        update.Parameters.AddWithValue("$finished", check.IsFinished);
+        if (await update.ExecuteNonQueryAsync(cancellationToken) == 0) return false;
+        await LogGhostChangedAsync(connection, transaction, card.CardId, check.GhostReason, ghostReason,
+            PostProcessingAuthor, DateTime.UtcNow, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return true;
     }

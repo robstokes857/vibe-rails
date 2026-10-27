@@ -141,10 +141,11 @@ test('reloading the editing card re-measures its context', async () => {
     assert.equal(refreshed, 1);
 });
 
-test('the Advanced section holds the display ID, the agent context and History; a new card has none', () => {
+test('identity is above the fields while Advanced holds agent context and History', () => {
     const source = readFileSync(controllerPath, 'utf8');
     const open = source.slice(source.indexOf('async openCardEditor'), source.indexOf('bindCardEditor(editor, card)'));
-    assert.match(open, /<summary class="board-side-label">Advanced<\/summary>[\s\S]*board-card-display-id[\s\S]*\$\{contextSectionMarkup\(\)\}\$\{historySection\(\)\}/);
+    assert.match(open, /\$\{cardIdentityHtml\(card\)\}[\s\S]*board-side-fields/);
+    assert.match(open, /<summary class="board-side-label">Advanced<\/summary>[\s\S]*\$\{contextSectionMarkup\(\)\}\$\{historySection\(\)\}/);
     assert.doesNotMatch(open, /Card settings/);
     assert.equal((open.match(/contextSectionMarkup\(/g) || []).length, 1);
     assert.match(readFileSync(apiPath, 'utf8'), /getCardContextAsync[\s\S]*\/context`, 'GET'/);

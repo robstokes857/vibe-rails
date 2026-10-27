@@ -7,6 +7,12 @@ namespace VibeRails.Services.Board;
 /// </summary>
 public partial interface IBoardStore
 {
+    /// <summary>Reads one card and its evidence for an explicit ghost check; never queues work.</summary>
+    Task<BoardGhostCheck?> GetGhostCheckAsync(string projectPath, string cardId, CancellationToken cancellationToken = default);
+    /// <summary>Links a commit and returns its exact transactional targets for follow-up checks.</summary>
+    Task<BoardCommitLinkResult?> AddCommitWithTargetsAsync(string projectPath, string cardId, string sha, string author, string message, DateTime committedUtc, SandboxDiffResponse snapshot, CancellationToken cancellationToken = default, string? sessionId = null);
+    /// <summary>Applies a targeted result only while its card/evidence snapshot remains current.</summary>
+    Task<bool> ApplyGhostCheckAsync(BoardGhostCheck check, string? ghostReason, CancellationToken cancellationToken = default);
     /// <summary>Pin or unpin a project-scoped card without promoting it.</summary>
     Task<bool> SetCardPinnedAsync(string projectPath, string cardId, bool pinned, CancellationToken cancellationToken = default);
     /// <summary>Reads saved GitHub PR and commit references for a live card.</summary>

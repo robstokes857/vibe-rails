@@ -207,10 +207,10 @@ public static partial class BoardRoutes
 
         app.MapGet("/api/v1/board/cards", (IBoardService board, string? boardId, int? pageSize, string? columnId,
             int? offset, string? continuationToken, string? q, string? assignee, string? type, string? priority, string? tag,
-            string? origin, CancellationToken cancellationToken) =>
+            string? origin, bool? ghost, CancellationToken cancellationToken) =>
             RunAsync(async () => Results.Ok(pageSize is int size
                 ? await board.GetCardsPageAsync(Project(), new BoardCardPageQuery(size, columnId, offset ?? 0,
-                    q, assignee, type, priority, tag, continuationToken, origin), cancellationToken, boardId)
+                    q, assignee, type, priority, tag, continuationToken, origin, ghost), cancellationToken, boardId)
                 : await board.GetCardsAsync(Project(), cancellationToken, boardId))))
             .WithName("GetBoardCards");
 
@@ -229,6 +229,10 @@ public static partial class BoardRoutes
         app.MapPut("/api/v1/board/cards/{card}", (IBoardService board, string card, UpdateBoardCardRequest request, CancellationToken cancellationToken) =>
             RunAsync(async () => OkOrNotFound(await board.UpdateCardAsync(Project(), card, request, cancellationToken), "Card")))
             .WithName("UpdateBoardCard");
+
+        app.MapPost("/api/v1/board/cards/{card}/ghost/recheck", (IBoardService board, string card, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(await board.RecheckGhostAsync(Project(), card, cancellationToken), "Card")))
+            .WithName("RecheckBoardGhost");
 
         app.MapDelete("/api/v1/board/cards/{card}", (IBoardService board, string card, CancellationToken cancellationToken) =>
             RunAsync(async () => await board.DeleteCardAsync(Project(), card, cancellationToken)
