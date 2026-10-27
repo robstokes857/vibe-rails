@@ -53,12 +53,17 @@ public static class LlmAnthropicProxyRoutes
             // through the proxy is recorded, including requests the saver declines.
             var exchangeSink = context.RequestServices.GetRequiredService<ILlmProxyExchangeSink>();
 
-            var target = LlmProxyRelay.BuildTarget(context.Request, UpstreamHost, PathPrefix);
+            var events = context.RequestServices.GetRequiredService<ILlmProxyEventSink>();
+            var target = await LlmProxyRelay.ApplyEnterpriseGatewayAsync(
+                context, events, "Claude proxy", LlmProxyRelay.BuildTarget(context.Request, UpstreamHost, PathPrefix),
+                settings.ClaudeEnterpriseNetworkProxy, "/v1");
+            if (target is null)
+                return;
             await LlmProxyRelay.HandleAsync(
                 context,
                 context.RequestServices.GetRequiredService<IHttpClientFactory>(),
                 context.RequestServices.GetRequiredService<ILlmProxyAuthGate>(),
-                context.RequestServices.GetRequiredService<ILlmProxyEventSink>(),
+                events,
                 target,
                 "anthropic",
                 "Claude proxy",

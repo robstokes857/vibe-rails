@@ -52,12 +52,17 @@ public static class LlmCliChatProxyRoutes
             var exchangeSink = context.RequestServices.GetRequiredService<ILlmProxyExchangeSink>();
 
             var upstreamHost = LlmProxyCliChatConfig.ResolveUpstreamHost(settings.GrokLlmProxyMode);
-            var target = LlmProxyRelay.BuildTarget(context.Request, upstreamHost, PathPrefix);
+            var events = context.RequestServices.GetRequiredService<ILlmProxyEventSink>();
+            var target = await LlmProxyRelay.ApplyEnterpriseGatewayAsync(
+                context, events, "Grok proxy", LlmProxyRelay.BuildTarget(context.Request, upstreamHost, PathPrefix),
+                settings.GrokEnterpriseNetworkProxy, LlmProxyCliChatConfig.UpstreamApiPath);
+            if (target is null)
+                return;
             await LlmProxyRelay.HandleAsync(
                 context,
                 context.RequestServices.GetRequiredService<IHttpClientFactory>(),
                 context.RequestServices.GetRequiredService<ILlmProxyAuthGate>(),
-                context.RequestServices.GetRequiredService<ILlmProxyEventSink>(),
+                events,
                 target,
                 "cli-chat",
                 "Grok proxy",

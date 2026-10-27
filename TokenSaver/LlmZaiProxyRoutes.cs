@@ -52,12 +52,17 @@ public static class LlmZaiProxyRoutes
             // Exchange logging is an invariant of using the proxy, not a setting.
             var exchangeSink = context.RequestServices.GetRequiredService<ILlmProxyExchangeSink>();
 
-            var target = LlmProxyRelay.BuildTarget(context.Request, UpstreamHost, PathPrefix);
+            var events = context.RequestServices.GetRequiredService<ILlmProxyEventSink>();
+            var target = await LlmProxyRelay.ApplyEnterpriseGatewayAsync(
+                context, events, "OpenCode proxy", LlmProxyRelay.BuildTarget(context.Request, UpstreamHost, PathPrefix),
+                settings.OpenCodeEnterpriseNetworkProxy, LlmProxyZaiConfig.UpstreamApiPath);
+            if (target is null)
+                return;
             await LlmProxyRelay.HandleAsync(
                 context,
                 context.RequestServices.GetRequiredService<IHttpClientFactory>(),
                 context.RequestServices.GetRequiredService<ILlmProxyAuthGate>(),
-                context.RequestServices.GetRequiredService<ILlmProxyEventSink>(),
+                events,
                 target,
                 "zai",
                 "OpenCode proxy",

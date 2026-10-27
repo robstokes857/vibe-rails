@@ -34,6 +34,15 @@ public sealed record LlmProxySettings(
     string GrokLlmProxyMode = CodexLlmProxySettings.ModeSubscription,
     bool GrokTokenSaverEnabled = false)
 {
+    /// <summary>Optional Codex API gateway base URL, including its API path.</summary>
+    public string CodexEnterpriseNetworkProxy { get; init; } = string.Empty;
+    /// <summary>Optional Claude API gateway base URL, including its API path (usually /v1).</summary>
+    public string ClaudeEnterpriseNetworkProxy { get; init; } = string.Empty;
+    /// <summary>Optional shared API gateway base URL for OpenCode's Z.AI and xAI providers.</summary>
+    public string OpenCodeEnterpriseNetworkProxy { get; init; } = string.Empty;
+    /// <summary>Optional native Grok API gateway base URL, including its API path.</summary>
+    public string GrokEnterpriseNetworkProxy { get; init; } = string.Empty;
+
     /// <summary>
     /// The persisted setting that controls whether a newly launched OpenCode process receives the
     /// local proxy configuration. <see cref="OpenCodeLlmProxyEnabled"/> may remain true for an

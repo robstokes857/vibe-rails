@@ -27,7 +27,7 @@ public sealed class LlmProxySettingsServiceTests
     };
 
     [Fact]
-    public void Resolve_GrokSaverTurnsOnWithoutOpenCodeProxy()
+    public void Resolve_LegacyProxySwitchDoesNotDisableOpenCodeSaver()
     {
         var settings = new Settings
         {
@@ -40,7 +40,7 @@ public sealed class LlmProxySettingsServiceTests
         var resolved = LlmProxySettingsService.Resolve(settings);
 
         Assert.True(resolved.GrokTokenSaverEnabled);
-        Assert.False(resolved.OpenCodeTokenSaverEnabled);
+        Assert.True(resolved.OpenCodeTokenSaverEnabled);
     }
 
     [Fact]
@@ -93,14 +93,14 @@ public sealed class LlmProxySettingsServiceTests
     }
 
     [Fact]
-    public void Resolve_EnablesEachSaverOnlyWithItsProviderProxy()
+    public void Resolve_LegacyProxySwitchDoesNotDisableClaudeSaver()
     {
         var settings = ProxyOn();
         settings.ClaudeLlmProxyEnabled = false;
 
         var resolved = LlmProxySettingsService.Resolve(settings);
 
-        Assert.False(resolved.ClaudeTokenSaverEnabled);
+        Assert.True(resolved.ClaudeTokenSaverEnabled);
         Assert.True(resolved.CodexTokenSaverEnabled);
         Assert.True(resolved.OpenCodeTokenSaverEnabled);
     }
@@ -299,15 +299,25 @@ public sealed class LlmProxySettingsServiceTests
     }
 
     [Fact]
-    public void Resolve_ActiveOpenCodeSessionKeepsProxyAndSaverEnabledAfterLaunchToggleTurnsOff()
+    public void Resolve_LegacySwitchesCannotDisableCurrentOrFutureRouting()
     {
         var settings = ProxyOn();
+        settings.ClaudeLlmProxyEnabled = false;
+        settings.CodexLlmProxyEnabled = false;
         settings.OpenCodeLlmProxyEnabled = false;
+        settings.GrokLlmProxyEnabled = false;
 
-        var resolved = LlmProxySettingsService.Resolve(settings, openCodeProxyActive: true);
+        var resolved = LlmProxySettingsService.Resolve(settings);
 
+        Assert.True(resolved.ClaudeLlmProxyEnabled);
+        Assert.True(resolved.CodexLlmProxyEnabled);
         Assert.True(resolved.OpenCodeLlmProxyEnabled);
-        Assert.False(resolved.OpenCodeLlmProxyLaunchEnabled);
+        Assert.True(resolved.GrokLlmProxyEnabled);
+        Assert.True(resolved.OpenCodeLlmProxyLaunchEnabled);
+        Assert.True(resolved.GrokLlmProxyLaunchEnabled);
+        Assert.True(resolved.ClaudeTokenSaverEnabled);
+        Assert.True(resolved.CodexTokenSaverEnabled);
         Assert.True(resolved.OpenCodeTokenSaverEnabled);
+        Assert.True(resolved.GrokTokenSaverEnabled);
     }
 }

@@ -349,14 +349,14 @@ still there for unit tests; no host registers an implementation.
 ## Settings
 
 **On/off per LLM is the whole user-facing surface** (2026-07-18): one switch each for
-Claude, Codex, and OpenCode in the settings UI. When a provider's saver is on (and
-that provider's proxy is on), the pipeline runs `CompressionCatalog.DefaultSelection`
+Claude, Codex, OpenCode, and Grok in the settings UI. Local proxy routing is always on;
+when a provider's saver is on, the pipeline runs `CompressionCatalog.DefaultSelection`
 — the curated set in the table above. The per-stage picker UI is gone.
 
-- `ClaudeTokenSaverEnabled` / `CodexTokenSaverEnabled` / `OpenCodeTokenSaverEnabled`
-  in `settings.json` are the three switches. The Codex/OpenCode keys are **nullable**:
+- `ClaudeTokenSaverEnabled` / `CodexTokenSaverEnabled` / `OpenCodeTokenSaverEnabled` /
+  `GrokTokenSaverEnabled` in `settings.json` are the four switches. The Codex/OpenCode/Grok keys are **nullable**:
   a pre-split file has only `ClaudeTokenSaverEnabled` (which used to be the master
-  kill switch for every provider), and an absent key inherits its value — so an old
+  kill switch for every provider), and absent Codex/OpenCode keys inherit its value (Grok inherits OpenCode) — so an old
   "everything off" choice stays off after upgrading. Saving from the UI writes
   explicit values and severs the inheritance.
 - `TokenSaverStageOverride` is a hand-edit escape hatch with no UI: a non-null list of
@@ -373,11 +373,45 @@ that provider's proxy is on), the pipeline runs `CompressionCatalog.DefaultSelec
   eligible for rewriting.
 
 The per-tab toggle that used to sit on each terminal tab was removed 2026-07-19 (the tab action
-strip was overcrowded, and per-LLM is the granularity that matters). The three settings switches
+strip was overcrowded, and per-LLM is the granularity that matters). The four settings switches
 are now the only gates.
 
 Settings are read in **one fresh snapshot per request** (`ILlmProxySettingsService`)
 so a concurrent save can't tear a single body's rewrite in half.
+
+### Enterprise Network Proxy
+
+Each provider has an optional enterprise **API gateway base URL**, such as
+`https://genai.example.test/v1`. The request path is CLI → VibeRails local proxy
+(and Token Saver, when enabled) → enterprise gateway → the gateway's chosen backend.
+The gateway must accept the provider's API format and existing CLI credentials; it owns any
+translation/routing to Bedrock or another service. This setting is not an HTTP CONNECT proxy.
+
+`CodexEnterpriseNetworkProxy`, `ClaudeEnterpriseNetworkProxy`,
+`OpenCodeEnterpriseNetworkProxy`, and `GrokEnterpriseNetworkProxy` live in settings.json.
+Blank uses the normal provider destination. A supplied base replaces the provider API root,
+including its API path: `/v1/responses`, `/backend-api/codex/responses`, and
+`/api/paas/v4/chat/completions` become `<base>/responses` or `<base>/chat/completions`.
+Claude likewise uses `<base>/messages`, so include `/v1` in the gateway base when required.
+OpenCode's setting covers both Z.AI and xAI. Query strings and endpoint suffixes are preserved.
+Changes apply on the next request, without interrupting an in-flight response.
+
+Only absolute HTTP/HTTPS URLs without embedded credentials, queries or fragments are accepted.
+Pointing a gateway at a new host needs the same PIN or dashboard-code confirmation as the
+relay toggle, because the gateway receives that CLI's prompts and credentials; clearing one
+does not. Provider authentication is forwarded; local VibeRails credentials and cookies are
+stripped, redirects stay disabled, and TLS verification stays enabled. A manually edited URL
+that does not validate fails closed with a plain-text 502 naming the setting; it never falls
+back to the public provider. Retired `*LlmProxyEnabled` values remain stored for older
+versions, but cannot disable routing in the current version.
+
+**A base URL the CLI already has wins while the gateway is blank.** If VibeRails inherits
+`OPENAI_BASE_URL` (Codex) or `ANTHROPIC_BASE_URL` (Claude) and that provider's gateway is
+blank, the launch leaves the CLI's own setting alone and skips the relay (no Token Saver),
+because routing would otherwise send the work to the public provider instead of the
+user's gateway. Setting the gateway is the opt-in to route through VibeRails to it. A loopback
+`/llm/...` URL inherited from an enclosing VibeRails tab does not count. Not yet covered: a
+Codex `model_provider` chosen in `config.toml` (outside a `--profile`) is still replaced.
 
 ### Pausing — the agent's escape hatch
 

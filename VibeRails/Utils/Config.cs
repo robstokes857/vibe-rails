@@ -37,16 +37,24 @@ public class Settings
     // Retained for settings.json/API compatibility. MCP registration is always on.
     public bool McpEnabled { get; set; } = true;
     public string ComputerName { get; set; } = string.Empty;
-    public bool CodexLlmProxyEnabled { get; set; } = false;
+    // Retired proxy switches are preserved for older writers. Runtime routing is always on.
+    public bool CodexLlmProxyEnabled { get; set; } = true;
     public string CodexLlmProxyMode { get; set; } = "subscription";
-    public bool ClaudeLlmProxyEnabled { get; set; } = false;
+    public bool ClaudeLlmProxyEnabled { get; set; } = true;
     // OpenCode (zai/Z.AI GLM + xai/Grok) LLM proxy. Routes OpenCode's zai and xai provider
     // traffic through the local token-saver proxy via the OPENCODE_CONFIG_CONTENT env var
-    // (see LlmProxyZaiConfig / LlmProxyXaiConfig). Off by default, like the Claude/Codex
-    // proxy toggles. Launch-flag-only — no opencode.json is written.
-    public bool OpenCodeLlmProxyEnabled { get; set; } = false;
-    public bool GrokLlmProxyEnabled { get; set; } = false;
+    // (see LlmProxyZaiConfig / LlmProxyXaiConfig). Always on at runtime; no opencode.json is written.
+    public bool OpenCodeLlmProxyEnabled { get; set; } = true;
+    public bool GrokLlmProxyEnabled { get; set; } = true;
     public string GrokLlmProxyMode { get; set; } = "subscription";
+    /// <summary>Optional enterprise API base URL for Codex; blank uses the provider default.</summary>
+    public string CodexEnterpriseNetworkProxy { get; set; } = string.Empty;
+    /// <summary>Optional enterprise API base URL for Claude, including its API path.</summary>
+    public string ClaudeEnterpriseNetworkProxy { get; set; } = string.Empty;
+    /// <summary>Optional enterprise API base URL for OpenCode's Z.AI and xAI providers.</summary>
+    public string OpenCodeEnterpriseNetworkProxy { get; set; } = string.Empty;
+    /// <summary>Optional enterprise API base URL for native Grok.</summary>
+    public string GrokEnterpriseNetworkProxy { get; set; } = string.Empty;
     // ---- Token saver: on/off per LLM is the whole user-facing surface (2026-07-18). ----
     // When a provider's saver is on (and that provider's proxy is on), the pipeline runs
     // CompressionCatalog.DefaultSelection — the curated safe set. The per-stage picker is gone.

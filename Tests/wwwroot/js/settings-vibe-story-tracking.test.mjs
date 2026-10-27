@@ -51,8 +51,8 @@ test('story tracking restores the saved choice and defaults on for older respons
 test('saving story tracking sends explicit on and off choices without shifting other settings', async () => {
     for (const enabled of [true, false]) {
         const { controller, calls } = fixture();
-        await controller.saveSettings(false, '', false, true, '', false, 'subscription', false, false,
-            false, 'subscription', true, true, true, true, false, enabled);
+        await controller.saveSettings(false, '', false, true, '', '', 'subscription', '', '',
+            '', 'subscription', true, true, true, true, false, enabled);
         assert.equal(calls.length, 1);
         assert.equal(calls[0].url, '/api/v1/settings');
         assert.equal(calls[0].method, 'POST');

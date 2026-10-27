@@ -1334,13 +1334,11 @@ namespace VibeRails.DTOs
         bool UseVsCodeTheme,
         bool McpEnabled,
         string? ComputerName,
-        // Nullable so a stale client that omits these keys leaves the stored values untouched
-        // (see AppSettingsRoutes) instead of resetting an enabled proxy to false/subscription.
+        // Retired enable fields are ignored on writes and always report true. Modes remain editable.
         bool? CodexLlmProxyEnabled,
         string? CodexLlmProxyMode,
         bool? ClaudeLlmProxyEnabled,
-        // OpenCode (zai/Z.AI GLM) proxy toggle. Nullable for the same stale-client guard as the
-        // other proxy fields — a client that omits it leaves the stored value untouched.
+        // Retired OpenCode enable field, retained for older clients.
         bool? OpenCodeLlmProxyEnabled,
         // Per-LLM token saver on/off — the whole saver surface since 2026-07-18 (the stage
         // selection is fixed to the catalog's curated set; the old TokenSaverStages field is
@@ -1383,7 +1381,12 @@ namespace VibeRails.DTOs
         bool? CreateVibeStoryTracking = null,
         // Independent saved/custom-environment nudge, default off. Omitted requests preserve it.
         bool? CreateVibeStoryTrackingCustomEnvs = null,
-        string? PresenceProof = null
+        string? PresenceProof = null,
+        // Omitted values preserve saved routes; an empty value clears the enterprise override.
+        string? CodexEnterpriseNetworkProxy = null,
+        string? ClaudeEnterpriseNetworkProxy = null,
+        string? OpenCodeEnterpriseNetworkProxy = null,
+        string? GrokEnterpriseNetworkProxy = null
     );
     // Append new fields at the END of this record, with a default. Inserting one in the middle
     // shifts every positional argument after it: call sites only fail to compile when the types

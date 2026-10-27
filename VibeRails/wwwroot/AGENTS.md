@@ -853,6 +853,12 @@ or selected.
 
 ## Token Saver Integration
 
+Local provider proxies are always enabled. In Settings → LLMs, each provider instead exposes
+an optional **Enterprise Network Proxy** API gateway base URL (including `/v1` when required);
+empty uses the provider default. These text fields participate in dirty tracking, Save and
+saved-value restoration. Token Saver switches remain independent. Gateway edits apply to the
+next request; auth-mode edits apply to newly launched terminals. See `TokenSaver/README.md`.
+
 The token-savings meter sits at the far right of the terminal controls bar and is owned by
 `terminal-token-compression.js`. The per-LLM on/off switches live in Settings (Claude, Codex,
 OpenCode); the per-tab compression toggle that used to sit on each tab was removed 2026-07-19.

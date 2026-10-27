@@ -33,6 +33,9 @@ public static class AppSettingsRoutes
             context.Response.Headers.CacheControl = "no-store";
             using var lease = Config.Store.AcquireWriteLock();
             var settings = Config.LoadFresh();
+            // Refuse an invalid gateway before presence so a typo never consumes a confirmation.
+            if (!EnterpriseNetworkProxiesAreValid(settingsDto))
+                return Results.BadRequest(new ErrorResponse(EnterpriseNetworkProxy.InvalidMessage));
             if (RequiresPresence(settingsDto, settings) && !presence.Verify(settingsDto.PresenceProof, settings))
                 return Results.Json(new ErrorResponse("Confirm this change with your current PIN or a fresh dashboard code."), statusCode: 403);
             var result = UpdateSettings(settingsDto, Config.Store, app.Services.GetService<IRemoteHttpRelayClient>());
@@ -57,12 +60,39 @@ public static class AppSettingsRoutes
         request.RemoteAccess != settings.RemoteAccess
         || request.RouteThroughVibeRailsAi.HasValue && request.RouteThroughVibeRailsAi.Value != settings.RouteThroughVibeRailsAi
         || request.ClearApiKey == true && !string.IsNullOrEmpty(settings.ApiKey)
-        || !string.IsNullOrWhiteSpace(request.ApiKey) && !request.ApiKey.Contains('•') && request.ApiKey != settings.ApiKey;
+        || !string.IsNullOrWhiteSpace(request.ApiKey) && !request.ApiKey.Contains('•') && request.ApiKey != settings.ApiKey
+        || PointsGatewayElsewhere(request.CodexEnterpriseNetworkProxy, settings.CodexEnterpriseNetworkProxy)
+        || PointsGatewayElsewhere(request.ClaudeEnterpriseNetworkProxy, settings.ClaudeEnterpriseNetworkProxy)
+        || PointsGatewayElsewhere(request.OpenCodeEnterpriseNetworkProxy, settings.OpenCodeEnterpriseNetworkProxy)
+        || PointsGatewayElsewhere(request.GrokEnterpriseNetworkProxy, settings.GrokEnterpriseNetworkProxy);
+
+    // A gateway receives that CLI's prompts, code and provider credentials, so pointing one at a
+    // new host needs the same confirmation as the relay toggle. Clearing it restores the fixed
+    // provider destination and does not. Both sides are normalized, so a hand-edited spelling of
+    // the saved gateway that the client echoes back is not a change. An invalid value counts as
+    // one; the route refuses it before asking.
+    private static bool PointsGatewayElsewhere(string? requested, string saved) =>
+        !string.IsNullOrWhiteSpace(requested)
+        && (!EnterpriseNetworkProxy.TryNormalize(requested, out var normalized)
+            || !string.Equals(normalized,
+                EnterpriseNetworkProxy.TryNormalize(saved, out var savedNormalized) ? savedNormalized : saved,
+                StringComparison.Ordinal));
+
+    internal static bool EnterpriseNetworkProxiesAreValid(AppSettingsDto request) =>
+        EnterpriseNetworkProxy.TryNormalize(request.CodexEnterpriseNetworkProxy, out _)
+        && EnterpriseNetworkProxy.TryNormalize(request.ClaudeEnterpriseNetworkProxy, out _)
+        && EnterpriseNetworkProxy.TryNormalize(request.OpenCodeEnterpriseNetworkProxy, out _)
+        && EnterpriseNetworkProxy.TryNormalize(request.GrokEnterpriseNetworkProxy, out _);
 
     // The internal store parameter is solely for isolated regression fixtures. Production calls
     // always use Config.Store and therefore the normal application settings path.
     internal static AppSettingsDto UpdateSettings(AppSettingsDto settingsDto, SettingsFile store, IRemoteHttpRelayClient? relay = null)
     {
+        // Validate every supplied URL before changing or saving any settings.
+        var codexProxy = settingsDto.CodexEnterpriseNetworkProxy is null ? null : EnterpriseNetworkProxy.Normalize(settingsDto.CodexEnterpriseNetworkProxy);
+        var claudeProxy = settingsDto.ClaudeEnterpriseNetworkProxy is null ? null : EnterpriseNetworkProxy.Normalize(settingsDto.ClaudeEnterpriseNetworkProxy);
+        var openCodeProxy = settingsDto.OpenCodeEnterpriseNetworkProxy is null ? null : EnterpriseNetworkProxy.Normalize(settingsDto.OpenCodeEnterpriseNetworkProxy);
+        var grokProxy = settingsDto.GrokEnterpriseNetworkProxy is null ? null : EnterpriseNetworkProxy.Normalize(settingsDto.GrokEnterpriseNetworkProxy);
         using (store.AcquireWriteLock())
         {
             // LoadFresh, not Load: this handler writes the WHOLE Settings object back, including
@@ -107,21 +137,16 @@ public static class AppSettingsRoutes
             // at use (push notification) — never persisted — so a blank value keeps
             // tracking the live machine name and the field stays clearable.
             settings.ComputerName = NormalizeComputerName(settingsDto.ComputerName ?? settings.ComputerName);
-            // Only overwrite proxy settings the client actually sent. A stale client (older cached
-            // app.js) that omits these keys must not silently reset an enabled proxy — the DTO
-            // fields are nullable for exactly this reason (mirrors ComputerName's stale-client guard).
-            if (settingsDto.CodexLlmProxyEnabled.HasValue)
-                settings.CodexLlmProxyEnabled = settingsDto.CodexLlmProxyEnabled.Value;
+            // Local relays are always on. Preserve retired switch values for older versions and
+            // ignore switch fields sent by a cached client. Authentication modes remain editable.
             if (settingsDto.CodexLlmProxyMode is not null)
                 settings.CodexLlmProxyMode = CodexLlmProxySettings.NormalizeMode(settingsDto.CodexLlmProxyMode);
-            if (settingsDto.ClaudeLlmProxyEnabled.HasValue)
-                settings.ClaudeLlmProxyEnabled = settingsDto.ClaudeLlmProxyEnabled.Value;
-            if (settingsDto.OpenCodeLlmProxyEnabled.HasValue)
-                settings.OpenCodeLlmProxyEnabled = settingsDto.OpenCodeLlmProxyEnabled.Value;
-            if (settingsDto.GrokLlmProxyEnabled.HasValue)
-                settings.GrokLlmProxyEnabled = settingsDto.GrokLlmProxyEnabled.Value;
             if (settingsDto.GrokLlmProxyMode is not null)
                 settings.GrokLlmProxyMode = LlmProxyCliChatConfig.NormalizeMode(settingsDto.GrokLlmProxyMode);
+            if (codexProxy is not null) settings.CodexEnterpriseNetworkProxy = codexProxy;
+            if (claudeProxy is not null) settings.ClaudeEnterpriseNetworkProxy = claudeProxy;
+            if (openCodeProxy is not null) settings.OpenCodeEnterpriseNetworkProxy = openCodeProxy;
+            if (grokProxy is not null) settings.GrokEnterpriseNetworkProxy = grokProxy;
             // Per-LLM saver toggles, same stale-client guard. Writing an explicit Codex/OpenCode
             // value deliberately severs the pre-split inheritance from the legacy master switch
             // (see Settings) — from then on each LLM stands on its own value.
@@ -209,10 +234,10 @@ public static class AppSettingsRoutes
             settings.UseVsCodeTheme,
             true,
             NormalizeComputerName(settings.ComputerName),
-            settings.CodexLlmProxyEnabled,
+            true,
             CodexLlmProxySettings.NormalizeMode(settings.CodexLlmProxyMode),
-            settings.ClaudeLlmProxyEnabled,
-            settings.OpenCodeLlmProxyEnabled,
+            true,
+            true,
             settings.ClaudeTokenSaverEnabled,
             // The effective values: an absent per-LLM key inherits the legacy master switch,
             // exactly as LlmProxySettingsService.Resolve does, so the UI shows what actually runs.
@@ -227,13 +252,17 @@ public static class AppSettingsRoutes
             RemoveCoAuthorTrailers: true,
             RouteThroughVibeRailsAi: settings.RouteThroughVibeRailsAi,
             ShowVibeAiUi: true,
-            settings.GrokLlmProxyEnabled,
+            true,
             LlmProxyCliChatConfig.NormalizeMode(settings.GrokLlmProxyMode),
             settings.GrokTokenSaverEnabled ?? settings.OpenCodeTokenSaverEnabled ?? settings.ClaudeTokenSaverEnabled,
             DataExportOptIn: true,
             RemoteAccountEmail: ApiKeyStore.GetAccountEmail(settings),
             CreateVibeStoryTracking: settings.CreateVibeStoryTracking,
-            CreateVibeStoryTrackingCustomEnvs: settings.CreateVibeStoryTrackingCustomEnvs
+            CreateVibeStoryTrackingCustomEnvs: settings.CreateVibeStoryTrackingCustomEnvs,
+            CodexEnterpriseNetworkProxy: settings.CodexEnterpriseNetworkProxy,
+            ClaudeEnterpriseNetworkProxy: settings.ClaudeEnterpriseNetworkProxy,
+            OpenCodeEnterpriseNetworkProxy: settings.OpenCodeEnterpriseNetworkProxy,
+            GrokEnterpriseNetworkProxy: settings.GrokEnterpriseNetworkProxy
         );
     }
 

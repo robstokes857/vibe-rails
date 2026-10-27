@@ -52,12 +52,17 @@ public static class LlmProxyRoutes
             // deliberately not configurable: if the proxy handles it, the exchange log records it.
             var exchangeSink = context.RequestServices.GetRequiredService<ILlmProxyExchangeSink>();
 
-            var target = BuildOpenAiUri(context.Request, settings.CodexLlmProxyMode);
+            var events = context.RequestServices.GetRequiredService<ILlmProxyEventSink>();
+            var target = await LlmProxyRelay.ApplyEnterpriseGatewayAsync(
+                context, events, "Codex proxy", BuildOpenAiUri(context.Request, settings.CodexLlmProxyMode),
+                settings.CodexEnterpriseNetworkProxy, OpenAiApiPath(settings.CodexLlmProxyMode));
+            if (target is null)
+                return;
             await LlmProxyRelay.HandleAsync(
                 context,
                 context.RequestServices.GetRequiredService<IHttpClientFactory>(),
                 context.RequestServices.GetRequiredService<ILlmProxyAuthGate>(),
-                context.RequestServices.GetRequiredService<ILlmProxyEventSink>(),
+                events,
                 target,
                 "openai",
                 "Codex proxy",
@@ -79,4 +84,13 @@ public static class LlmProxyRoutes
 
         return LlmProxyRelay.BuildTarget(request, targetHost, PathPrefix);
     }
+
+    /// <summary>
+    /// The provider API base an enterprise gateway replaces for the given auth mode; the endpoint
+    /// suffix after it (for example <c>/responses</c>) and the query are kept.
+    /// </summary>
+    internal static string OpenAiApiPath(string mode) =>
+        CodexLlmProxySettings.NormalizeMode(mode) == CodexLlmProxySettings.ModeApi
+            ? "/v1"
+            : "/backend-api/codex";
 }

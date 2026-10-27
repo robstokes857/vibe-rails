@@ -82,15 +82,15 @@ No `/llm/**` path may return to the skip list. The CLIs already carry both crede
 ### LLM proxy details
 
 The five main-host catch-all trees are `/llm/anthropic`, `/llm/openai`, `/llm/zai`,
-`/llm/xai` and `/llm/cli-chat`. All pass through session middleware; enabled operations
-also require both **headers** through [ILlmProxyAuthGate](TokenSaver/ILlmProxyAuthGate.cs).
+`/llm/xai` and `/llm/cli-chat`. Local proxy routing is always enabled in the application.
+All pass through session middleware and require both **headers** through [ILlmProxyAuthGate](TokenSaver/ILlmProxyAuthGate.cs).
 
 The middleware's tab check matches paths containing `/api/`, MCP paths and WebSocket
 handshakes. Normal Z.AI paths (`/llm/zai/api/paas/v4/...`) therefore require both credentials
 in middleware. Other normal proxy paths, and nonstandard Z.AI catch-all paths without `/api/`,
 require only the session there. All five handlers check their two-header gate before feature
-state, including OPTIONS. Missing or incomplete credentials receive 401 regardless of whether
-the proxy is enabled. Only an authenticated caller can see a disabled 404. `/llm/**` auth
+state, including OPTIONS. Missing or incomplete credentials receive 401. Retired proxy enable
+settings cannot disable routing; Token Saver remains independently gated per provider. `/llm/**` auth
 failures are plain-text status responses, never the browser HTML auth page.
 
 `viberails_terminal_session` is correlation metadata, not a credential; spoofing it can
@@ -99,6 +99,18 @@ before the provider hop. Native Grok's `Authorization` / `X-XAI-Token-Auth` are 
 credentials and are forwarded. `/llm/cli-chat` targets `cli-chat-proxy.grok.com` or `api.x.ai`
 according to `GrokLlmProxyMode`; `/llm/xai` serves OpenCode's xAI provider. Neither is the
 rejected `/llm/grok` sidecar. See [TokenSaver](TokenSaver/README.md).
+
+The authenticated Settings API also accepts an optional Enterprise Network Proxy API base URL
+per provider. This explicitly selects the enterprise gateway that receives that provider's
+requests, including its provider credentials, after the local Token Saver step. Blank retains
+the fixed provider destination; a configured base replaces the provider API root without allowing
+request paths to replace its origin. HTTP/HTTPS only, no URL credentials, query or fragment;
+invalid values are refused atomically on save, before any confirmation is requested. A stored
+value that does not validate (hand-edited) fails closed with 502 after the two-header gate and
+never falls back to a public provider. Pointing a gateway at a new host requires presence
+(below); clearing it does not. The gateway owns downstream routing/API translation. Existing
+local-header/cookie stripping, TLS validation, no-redirect transport and the frozen listener
+topology are unchanged.
 
 ## Listener topology and discovery (FROZEN — review gate)
 
@@ -635,7 +647,8 @@ incident below. Ordinary authenticated terminal-input routes remain their own ca
 ### Repository access, scripts and local reads
 
 Settings writes and all remote-PIN routes are root-only. Account-key replacement/removal,
-Remote Access and relay toggle changes, and PIN set/clear require the current PIN. Without
+Remote Access and relay toggle changes, pointing an Enterprise Network Proxy at a new host,
+and PIN set/clear require the current PIN. Without
 a configured PIN, the dashboard shows a random confirmation code that expires after two
 minutes and is consumed once. Five failed proofs impose a five-minute process-wide cooldown;
 issuing another challenge does not reset it. Scoped CLI credentials cannot obtain a challenge

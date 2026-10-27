@@ -80,6 +80,32 @@ internal static class LlmProxyRelay
     }
 
     /// <summary>
+    /// Replaces <paramref name="providerTarget"/> with the configured enterprise gateway, or writes
+    /// the fail-closed 502 and returns null when the saved gateway does not validate. The request
+    /// is never sent to the provider default instead: that may be a destination the organization
+    /// does not allow, and a silent fallback would hide the misconfiguration.
+    /// </summary>
+    internal static async Task<Uri?> ApplyEnterpriseGatewayAsync(
+        HttpContext context,
+        ILlmProxyEventSink events,
+        string activitySource,
+        Uri providerTarget,
+        string? gatewayBaseUrl,
+        string providerApiPath)
+    {
+        if (EnterpriseNetworkProxy.TryBuildTarget(providerTarget, gatewayBaseUrl, providerApiPath, out var target))
+            return target;
+
+        events.Diagnostic(activitySource, "saved Enterprise Network Proxy is not a valid API base URL; request refused.");
+        context.Response.StatusCode = StatusCodes.Status502BadGateway;
+        context.Response.ContentType = "text/plain; charset=utf-8";
+        await context.Response.WriteAsync(
+            "VibeRails: the saved Enterprise Network Proxy for this CLI is not a valid HTTP or HTTPS API base URL. Correct or clear it in Settings.",
+            context.RequestAborted);
+        return null;
+    }
+
+    /// <summary>
     /// Authenticates the proxy request (session + tab tokens) then relays it to <paramref name="target"/>.
     /// The caller has already confirmed the feature is enabled and built the provider-specific target.
     /// <paramref name="provider"/> is the stable exchange-log key; it must not depend on whether a

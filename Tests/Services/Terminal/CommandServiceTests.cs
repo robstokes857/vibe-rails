@@ -33,6 +33,8 @@ public partial class CommandServiceTests : IDisposable
     private readonly string? _originalOpenCodeConfig;
     private readonly string? _originalOpenCodePermission;
     private readonly string? _originalGrokProxyUrl;
+    private readonly string? _originalOpenAiBaseUrl;
+    private readonly string? _originalAnthropicBaseUrl;
     private readonly string _originalEnvPath;
 
     public CommandServiceTests()
@@ -49,6 +51,11 @@ public partial class CommandServiceTests : IDisposable
         Environment.SetEnvironmentVariable(LlmProxyZaiConfig.ConfigContentVariable, null);
         Environment.SetEnvironmentVariable(BoardMcpOpenCodeAuthorization.PermissionVariable, null);
         Environment.SetEnvironmentVariable(LlmProxyGrokConfig.ChatProxyBaseUrlVariable, null);
+        // A developer's own gateway variables would make routing defer to them.
+        _originalOpenAiBaseUrl = Environment.GetEnvironmentVariable("OPENAI_BASE_URL");
+        _originalAnthropicBaseUrl = Environment.GetEnvironmentVariable(LlmProxyClaudeConfig.BaseUrlVariable);
+        Environment.SetEnvironmentVariable("OPENAI_BASE_URL", null);
+        Environment.SetEnvironmentVariable(LlmProxyClaudeConfig.BaseUrlVariable, null);
 
         // The env-name launch tests resolve GetEnvironmentVariables -> ParserConfigs.GetEnvPath(),
         // a process-global that is empty unless startup set it. Pin it to a temp root here so those
@@ -69,6 +76,8 @@ public partial class CommandServiceTests : IDisposable
         Environment.SetEnvironmentVariable(
             LlmProxyGrokConfig.ChatProxyBaseUrlVariable,
             _originalGrokProxyUrl);
+        Environment.SetEnvironmentVariable("OPENAI_BASE_URL", _originalOpenAiBaseUrl);
+        Environment.SetEnvironmentVariable(LlmProxyClaudeConfig.BaseUrlVariable, _originalAnthropicBaseUrl);
         ParserConfigs.SetEnvPath(_originalEnvPath);
     }
 
@@ -858,7 +867,9 @@ public partial class CommandServiceTests : IDisposable
         string codexLlmProxyMode = CodexLlmProxySettings.ModeSubscription,
         ILlmProxySessionState? sessionState = null,
         Action<Mock<IFileService>>? configureFiles = null,
-        Func<Settings>? storyTrackingSettings = null)
+        Func<Settings>? storyTrackingSettings = null,
+        string codexEnterpriseNetworkProxy = "",
+        string claudeEnterpriseNetworkProxy = "")
     {
         var fileService = new Mock<IFileService>();
         fileService.Setup(x => x.GetUserProfilePath()).Returns(Path.Combine(Path.GetTempPath(), "viberails-grok-tests"));
@@ -898,7 +909,9 @@ public partial class CommandServiceTests : IDisposable
                 GrokLlmProxyEnabled: grokLlmProxyEnabled,
                 GrokLlmProxyMode: grokLlmProxyMode)
             {
-                GrokLlmProxyLaunchEnabled = grokLlmProxyEnabled
+                GrokLlmProxyLaunchEnabled = grokLlmProxyEnabled,
+                CodexEnterpriseNetworkProxy = codexEnterpriseNetworkProxy,
+                ClaudeEnterpriseNetworkProxy = claudeEnterpriseNetworkProxy
             });
         return new CommandService(
             envService,

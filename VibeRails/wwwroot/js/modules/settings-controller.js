@@ -43,12 +43,12 @@ export class SettingsController {
             createVibeStoryTrackingCustomEnvs: false,
             mcpEnabled: true,
             computerName: '',
-            codexLlmProxyEnabled: false,
+            codexEnterpriseNetworkProxy: '',
             codexLlmProxyMode: 'subscription',
-            claudeLlmProxyEnabled: false,
-            openCodeLlmProxyEnabled: false,
-            // Per-LLM saver toggles — the whole saver surface. Default on: the saver only acts
-            // when that LLM's proxy is also enabled.
+            claudeEnterpriseNetworkProxy: '',
+            openCodeEnterpriseNetworkProxy: '',
+            grokEnterpriseNetworkProxy: '',
+            // Per-LLM saver toggles independently control compression; local routing is always on.
             claudeTokenSaverEnabled: true,
             codexTokenSaverEnabled: true,
             openCodeTokenSaverEnabled: true,
@@ -102,12 +102,12 @@ export class SettingsController {
             const createVibeStoryTrackingCustomEnvsToggle = root.querySelector('#setting-create-vibe-story-tracking-custom-envs');
             const mcpEnabledToggle = root.querySelector('#setting-enable-mcp');
             const computerNameInput = root.querySelector('#setting-computer-name');
-            const codexLlmProxyEnabledToggle = root.querySelector('#setting-codex-llm-proxy-enabled');
+            const codexEnterpriseNetworkProxyInput = root.querySelector('#setting-codex-enterprise-network-proxy');
             const codexLlmProxyModeSubscription = root.querySelector('#setting-codex-llm-proxy-mode-subscription');
             const codexLlmProxyModeApi = root.querySelector('#setting-codex-llm-proxy-mode-api');
-            const claudeLlmProxyEnabledToggle = root.querySelector('#setting-claude-llm-proxy-enabled');
-            const opencodeLlmProxyEnabledToggle = root.querySelector('#setting-opencode-llm-proxy-enabled');
-            const grokLlmProxyEnabledToggle = root.querySelector('#setting-grok-llm-proxy-enabled');
+            const claudeEnterpriseNetworkProxyInput = root.querySelector('#setting-claude-enterprise-network-proxy');
+            const opencodeEnterpriseNetworkProxyInput = root.querySelector('#setting-opencode-enterprise-network-proxy');
+            const grokEnterpriseNetworkProxyInput = root.querySelector('#setting-grok-enterprise-network-proxy');
             const grokLlmProxyModeSubscription = root.querySelector('#setting-grok-llm-proxy-mode-subscription');
             const grokLlmProxyModeApi = root.querySelector('#setting-grok-llm-proxy-mode-api');
             const claudeTokenSaverToggle = root.querySelector('#setting-token-saver-claude');
@@ -159,20 +159,20 @@ export class SettingsController {
                 // surface it as the placeholder so the default is visible.
                 if (settings.machineName) computerNameInput.placeholder = settings.machineName;
             }
-            if (codexLlmProxyEnabledToggle) {
-                codexLlmProxyEnabledToggle.checked = settings.codexLlmProxyEnabled === true;
+            if (codexEnterpriseNetworkProxyInput) {
+                codexEnterpriseNetworkProxyInput.value = settings.codexEnterpriseNetworkProxy || '';
             }
             const codexLlmProxyMode = settings.codexLlmProxyMode === 'api' ? 'api' : 'subscription';
             if (codexLlmProxyModeSubscription) codexLlmProxyModeSubscription.checked = codexLlmProxyMode === 'subscription';
             if (codexLlmProxyModeApi) codexLlmProxyModeApi.checked = codexLlmProxyMode === 'api';
-            if (claudeLlmProxyEnabledToggle) {
-                claudeLlmProxyEnabledToggle.checked = settings.claudeLlmProxyEnabled === true;
+            if (claudeEnterpriseNetworkProxyInput) {
+                claudeEnterpriseNetworkProxyInput.value = settings.claudeEnterpriseNetworkProxy || '';
             }
-            if (opencodeLlmProxyEnabledToggle) {
-                opencodeLlmProxyEnabledToggle.checked = settings.openCodeLlmProxyEnabled === true;
+            if (opencodeEnterpriseNetworkProxyInput) {
+                opencodeEnterpriseNetworkProxyInput.value = settings.openCodeEnterpriseNetworkProxy || '';
             }
-            if (grokLlmProxyEnabledToggle) {
-                grokLlmProxyEnabledToggle.checked = settings.grokLlmProxyEnabled === true;
+            if (grokEnterpriseNetworkProxyInput) {
+                grokEnterpriseNetworkProxyInput.value = settings.grokEnterpriseNetworkProxy || '';
             }
             const grokLlmProxyMode = settings.grokLlmProxyMode === 'api' ? 'api' : 'subscription';
             if (grokLlmProxyModeSubscription) grokLlmProxyModeSubscription.checked = grokLlmProxyMode === 'subscription';
@@ -226,11 +226,11 @@ export class SettingsController {
                             useVsCodeThemeToggle?.checked || false,
                             true,
                             computerNameInput?.value || '',
-                            codexLlmProxyEnabledToggle?.checked || false,
+                            codexEnterpriseNetworkProxyInput?.value.trim() || '',
                             this._getCodexLlmProxyMode(root),
-                            claudeLlmProxyEnabledToggle?.checked || false,
-                            opencodeLlmProxyEnabledToggle?.checked || false,
-                            grokLlmProxyEnabledToggle?.checked || false,
+                            claudeEnterpriseNetworkProxyInput?.value.trim() || '',
+                            opencodeEnterpriseNetworkProxyInput?.value.trim() || '',
+                            grokEnterpriseNetworkProxyInput?.value.trim() || '',
                             this._getGrokLlmProxyMode(root),
                             claudeTokenSaverToggle?.checked ?? true,
                             codexTokenSaverToggle?.checked ?? true,
@@ -272,11 +272,18 @@ export class SettingsController {
         }
     }
 
-    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, openCodeLlmProxyEnabled, grokLlmProxyEnabled, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, clearApiKey = false, createVibeStoryTracking = true, createVibeStoryTrackingCustomEnvs = false) {
+    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexEnterpriseNetworkProxy, codexLlmProxyMode, claudeEnterpriseNetworkProxy, openCodeEnterpriseNetworkProxy, grokEnterpriseNetworkProxy, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, clearApiKey = false, createVibeStoryTracking = true, createVibeStoryTrackingCustomEnvs = false) {
         try {
             const previous = this.app.appSettings || {};
+            // A new gateway receives that CLI's traffic and credentials; clearing one does not
+            // need confirmation. The server makes the same decision on normalized values.
+            const pointsGatewayElsewhere = (value, saved) => !!value && value !== (saved || '');
             const sensitive = remoteAccess !== (previous.remoteAccess ?? false) || clearApiKey
-                || (apiKey && !apiKey.includes('•') && apiKey !== previous.apiKey);
+                || (apiKey && !apiKey.includes('•') && apiKey !== previous.apiKey)
+                || pointsGatewayElsewhere(codexEnterpriseNetworkProxy, previous.codexEnterpriseNetworkProxy)
+                || pointsGatewayElsewhere(claudeEnterpriseNetworkProxy, previous.claudeEnterpriseNetworkProxy)
+                || pointsGatewayElsewhere(openCodeEnterpriseNetworkProxy, previous.openCodeEnterpriseNetworkProxy)
+                || pointsGatewayElsewhere(grokEnterpriseNetworkProxy, previous.grokEnterpriseNetworkProxy);
             const presenceProof = sensitive ? await this._requestPresenceProof() : null;
             if (sensitive && presenceProof === null) return null;
             const savedSettings = await this.app.apiCall('/api/v1/settings', 'POST', {
@@ -286,11 +293,11 @@ export class SettingsController {
                 useVsCodeTheme: useVsCodeTheme,
                 mcpEnabled: mcpEnabled,
                 computerName: computerName,
-                codexLlmProxyEnabled: codexLlmProxyEnabled,
+                codexEnterpriseNetworkProxy: codexEnterpriseNetworkProxy,
                 codexLlmProxyMode: codexLlmProxyMode,
-                claudeLlmProxyEnabled: claudeLlmProxyEnabled,
-                openCodeLlmProxyEnabled: openCodeLlmProxyEnabled,
-                grokLlmProxyEnabled: grokLlmProxyEnabled,
+                claudeEnterpriseNetworkProxy: claudeEnterpriseNetworkProxy,
+                openCodeEnterpriseNetworkProxy: openCodeEnterpriseNetworkProxy,
+                grokEnterpriseNetworkProxy: grokEnterpriseNetworkProxy,
                 grokLlmProxyMode: grokLlmProxyMode,
                 claudeTokenSaverEnabled: claudeTokenSaverEnabled,
                 codexTokenSaverEnabled: codexTokenSaverEnabled,
@@ -402,11 +409,11 @@ export class SettingsController {
             '#setting-create-vibe-story-tracking',
             '#setting-create-vibe-story-tracking-custom-envs',
             '#setting-computer-name',
-            '#setting-codex-llm-proxy-enabled',
+            '#setting-codex-enterprise-network-proxy',
             'input[name="setting-codex-llm-proxy-mode"]',
-            '#setting-claude-llm-proxy-enabled',
-            '#setting-opencode-llm-proxy-enabled',
-            '#setting-grok-llm-proxy-enabled',
+            '#setting-claude-enterprise-network-proxy',
+            '#setting-opencode-enterprise-network-proxy',
+            '#setting-grok-enterprise-network-proxy',
             'input[name="setting-grok-llm-proxy-mode"]',
             '#setting-token-saver-claude',
             '#setting-token-saver-codex',
@@ -426,11 +433,11 @@ export class SettingsController {
             createVibeStoryTracking: isChecked('#setting-create-vibe-story-tracking'),
             createVibeStoryTrackingCustomEnvs: isChecked('#setting-create-vibe-story-tracking-custom-envs'),
             computerName: valueOf('#setting-computer-name'),
-            codexLlmProxyEnabled: isChecked('#setting-codex-llm-proxy-enabled'),
+            codexEnterpriseNetworkProxy: (root.querySelector('#setting-codex-enterprise-network-proxy')?.value || '').trim(),
             codexLlmProxyMode: this._getCodexLlmProxyMode(root),
-            claudeLlmProxyEnabled: isChecked('#setting-claude-llm-proxy-enabled'),
-            openCodeLlmProxyEnabled: isChecked('#setting-opencode-llm-proxy-enabled'),
-            grokLlmProxyEnabled: isChecked('#setting-grok-llm-proxy-enabled'),
+            claudeEnterpriseNetworkProxy: (root.querySelector('#setting-claude-enterprise-network-proxy')?.value || '').trim(),
+            openCodeEnterpriseNetworkProxy: (root.querySelector('#setting-opencode-enterprise-network-proxy')?.value || '').trim(),
+            grokEnterpriseNetworkProxy: (root.querySelector('#setting-grok-enterprise-network-proxy')?.value || '').trim(),
             grokLlmProxyMode: this._getGrokLlmProxyMode(root),
             claudeTokenSaverEnabled: isChecked('#setting-token-saver-claude'),
             codexTokenSaverEnabled: isChecked('#setting-token-saver-codex'),
@@ -515,12 +522,12 @@ export class SettingsController {
         const createVibeStoryTrackingToggle = root.querySelector('#setting-create-vibe-story-tracking');
         const createVibeStoryTrackingCustomEnvsToggle = root.querySelector('#setting-create-vibe-story-tracking-custom-envs');
         const computerNameInput = root.querySelector('#setting-computer-name');
-        const codexLlmProxyEnabledToggle = root.querySelector('#setting-codex-llm-proxy-enabled');
+        const codexEnterpriseNetworkProxyInput = root.querySelector('#setting-codex-enterprise-network-proxy');
         const codexLlmProxyModeSubscription = root.querySelector('#setting-codex-llm-proxy-mode-subscription');
         const codexLlmProxyModeApi = root.querySelector('#setting-codex-llm-proxy-mode-api');
-        const claudeLlmProxyEnabledToggle = root.querySelector('#setting-claude-llm-proxy-enabled');
-        const opencodeLlmProxyEnabledToggle = root.querySelector('#setting-opencode-llm-proxy-enabled');
-        const grokLlmProxyEnabledToggle = root.querySelector('#setting-grok-llm-proxy-enabled');
+        const claudeEnterpriseNetworkProxyInput = root.querySelector('#setting-claude-enterprise-network-proxy');
+        const opencodeEnterpriseNetworkProxyInput = root.querySelector('#setting-opencode-enterprise-network-proxy');
+        const grokEnterpriseNetworkProxyInput = root.querySelector('#setting-grok-enterprise-network-proxy');
         const grokLlmProxyModeSubscription = root.querySelector('#setting-grok-llm-proxy-mode-subscription');
         const grokLlmProxyModeApi = root.querySelector('#setting-grok-llm-proxy-mode-api');
 
@@ -536,14 +543,14 @@ export class SettingsController {
             computerNameInput.value = settings.computerName || '';
             if (settings.machineName) computerNameInput.placeholder = settings.machineName;
         }
-        if (codexLlmProxyEnabledToggle) codexLlmProxyEnabledToggle.checked = settings.codexLlmProxyEnabled === true;
+        if (codexEnterpriseNetworkProxyInput) codexEnterpriseNetworkProxyInput.value = settings.codexEnterpriseNetworkProxy || '';
 
         const codexLlmProxyMode = settings.codexLlmProxyMode === 'api' ? 'api' : 'subscription';
         if (codexLlmProxyModeSubscription) codexLlmProxyModeSubscription.checked = codexLlmProxyMode === 'subscription';
         if (codexLlmProxyModeApi) codexLlmProxyModeApi.checked = codexLlmProxyMode === 'api';
-        if (claudeLlmProxyEnabledToggle) claudeLlmProxyEnabledToggle.checked = settings.claudeLlmProxyEnabled === true;
-        if (opencodeLlmProxyEnabledToggle) opencodeLlmProxyEnabledToggle.checked = settings.openCodeLlmProxyEnabled === true;
-        if (grokLlmProxyEnabledToggle) grokLlmProxyEnabledToggle.checked = settings.grokLlmProxyEnabled === true;
+        if (claudeEnterpriseNetworkProxyInput) claudeEnterpriseNetworkProxyInput.value = settings.claudeEnterpriseNetworkProxy || '';
+        if (opencodeEnterpriseNetworkProxyInput) opencodeEnterpriseNetworkProxyInput.value = settings.openCodeEnterpriseNetworkProxy || '';
+        if (grokEnterpriseNetworkProxyInput) grokEnterpriseNetworkProxyInput.value = settings.grokEnterpriseNetworkProxy || '';
         const grokLlmProxyMode = settings.grokLlmProxyMode === 'api' ? 'api' : 'subscription';
         if (grokLlmProxyModeSubscription) grokLlmProxyModeSubscription.checked = grokLlmProxyMode === 'subscription';
         if (grokLlmProxyModeApi) grokLlmProxyModeApi.checked = grokLlmProxyMode === 'api';

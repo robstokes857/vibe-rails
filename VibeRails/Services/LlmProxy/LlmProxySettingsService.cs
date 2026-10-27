@@ -15,10 +15,7 @@ public sealed class LlmProxySettingsService(
 {
     public LlmProxySettings GetSettings()
     {
-        return Resolve(
-            Config.LoadFresh(),
-            proxySessionState.OpenCodeProxyActive,
-            tokenSaverPauseState.IsPaused);
+        return Resolve(Config.LoadFresh(), tokenSaverPauseState.IsPaused);
     }
 
     /// <summary>
@@ -35,10 +32,7 @@ public sealed class LlmProxySettingsService(
     /// </summary>
     public bool IsConfiguredOn()
     {
-        var configured = Resolve(
-            Config.LoadFresh(),
-            proxySessionState.OpenCodeProxyActive,
-            tokenSaverPaused: false);
+        var configured = Resolve(Config.LoadFresh(), tokenSaverPaused: false);
 
         return IsConfiguredOn(configured, proxySessionState.ActiveProvider);
     }
@@ -66,7 +60,6 @@ public sealed class LlmProxySettingsService(
 
     internal static LlmProxySettings Resolve(
         Settings settings,
-        bool openCodeProxyActive = false,
         bool tokenSaverPaused = false)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -83,31 +76,32 @@ public sealed class LlmProxySettingsService(
         var codexSaver = settings.CodexTokenSaverEnabled ?? settings.ClaudeTokenSaverEnabled;
         var openCodeSaver = settings.OpenCodeTokenSaverEnabled ?? settings.ClaudeTokenSaverEnabled;
         var grokSaver = settings.GrokTokenSaverEnabled ?? openCodeSaver;
-        // Launch injection is a per-session decision. Once an OpenCode terminal has received the
-        // local base URL, keep its authenticated relay alive until that terminal exits even if the
-        // global launch toggle changes in the meantime. A later terminal still reads the new value.
-        var openCodeProxyEnabled = settings.OpenCodeLlmProxyEnabled || openCodeProxyActive;
-        var grokProxyEnabled = settings.GrokLlmProxyEnabled || openCodeProxyActive;
+        // Every supported launch uses the local relay. Legacy proxy switches remain on disk for
+        // older versions, but cannot disable routing or a provider's independently selected saver.
 
         // A pause suppresses only the saver, never the relay: the proxy must keep routing,
         // authenticating and exchange-logging exactly as before, and a paused request is simply
         // forwarded with its bodies untouched. Applying it here rather than in each provider route
         // is what makes one gate cover Claude, Codex, OpenCode and anything added later.
         return new LlmProxySettings(
-            CodexLlmProxyEnabled: settings.CodexLlmProxyEnabled,
+            CodexLlmProxyEnabled: true,
             CodexLlmProxyMode: CodexLlmProxySettings.NormalizeMode(settings.CodexLlmProxyMode),
-            ClaudeLlmProxyEnabled: settings.ClaudeLlmProxyEnabled,
-            OpenCodeLlmProxyEnabled: openCodeProxyEnabled,
-            ClaudeTokenSaverEnabled: !tokenSaverPaused && settings.ClaudeLlmProxyEnabled && claudeSaver,
-            CodexTokenSaverEnabled: !tokenSaverPaused && settings.CodexLlmProxyEnabled && codexSaver,
-            OpenCodeTokenSaverEnabled: !tokenSaverPaused && openCodeProxyEnabled && openCodeSaver,
+            ClaudeLlmProxyEnabled: true,
+            OpenCodeLlmProxyEnabled: true,
+            ClaudeTokenSaverEnabled: !tokenSaverPaused && claudeSaver,
+            CodexTokenSaverEnabled: !tokenSaverPaused && codexSaver,
+            OpenCodeTokenSaverEnabled: !tokenSaverPaused && openCodeSaver,
             TokenSaverPlan: plan,
-            GrokLlmProxyEnabled: grokProxyEnabled,
+            GrokLlmProxyEnabled: true,
             GrokLlmProxyMode: LlmProxyCliChatConfig.NormalizeMode(settings.GrokLlmProxyMode),
-            GrokTokenSaverEnabled: !tokenSaverPaused && grokProxyEnabled && grokSaver)
+            GrokTokenSaverEnabled: !tokenSaverPaused && grokSaver)
         {
-            OpenCodeLlmProxyLaunchEnabled = settings.OpenCodeLlmProxyEnabled,
-            GrokLlmProxyLaunchEnabled = settings.GrokLlmProxyEnabled
+            OpenCodeLlmProxyLaunchEnabled = true,
+            GrokLlmProxyLaunchEnabled = true,
+            CodexEnterpriseNetworkProxy = settings.CodexEnterpriseNetworkProxy,
+            ClaudeEnterpriseNetworkProxy = settings.ClaudeEnterpriseNetworkProxy,
+            OpenCodeEnterpriseNetworkProxy = settings.OpenCodeEnterpriseNetworkProxy,
+            GrokEnterpriseNetworkProxy = settings.GrokEnterpriseNetworkProxy
         };
     }
 }

@@ -277,12 +277,14 @@ public class CommandService : ICommandService
         // Skip if the selected environment already points Claude somewhere (base URL OR custom
         // headers): respect the user's explicit Anthropic config instead of clobbering it — the
         // proxy owns both variables together, so a partial overwrite would drop their headers.
+        // An inherited ANTHROPIC_BASE_URL is kept too unless a Claude gateway is configured.
         // The same bundle carries ENABLE_TOOL_SEARCH=true: a custom base URL otherwise makes
         // Claude Code load every MCP tool schema up front (see LlmProxyClaudeConfig).
         if (proxySettings.ClaudeLlmProxyEnabled
             && llm == LLM.Claude
             && !environment.ContainsKey(LlmProxyClaudeConfig.BaseUrlVariable)
-            && !environment.ContainsKey(LlmProxyClaudeConfig.CustomHeadersVariable))
+            && !environment.ContainsKey(LlmProxyClaudeConfig.CustomHeadersVariable)
+            && !KeepsOwnApiBase(LlmProxyClaudeConfig.BaseUrlVariable, proxySettings.ClaudeEnterpriseNetworkProxy))
         {
             var claudeProxyEnv = LlmProxyClaudeConfig.BuildClaudeProxyEnvironment(
                 _llmProxyContext.ApiBaseUrl,
@@ -553,7 +555,33 @@ public class CommandService : ICommandService
         LlmProxySettings proxySettings) =>
         proxySettings.CodexLlmProxyEnabled
         && llm == LLM.Codex
-        && !ShouldSkipCodexProxy(extraArgs);
+        && !ShouldSkipCodexProxy(extraArgs)
+        && !KeepsOwnApiBase(OpenAiBaseUrlVariable, proxySettings.CodexEnterpriseNetworkProxy);
+
+    // Codex's built-in OpenAI provider reads this. Routing replaces that provider, so an
+    // inherited value would otherwise be ignored.
+    private const string OpenAiBaseUrlVariable = "OPENAI_BASE_URL";
+
+    /// <summary>
+    /// True when this process's environment already points the CLI at its own API base (a
+    /// corporate gateway, typically) and no Enterprise Network Proxy is set for that provider.
+    /// Routing would replace that base with the provider default, sending the work somewhere
+    /// the user did not choose, so the CLI keeps its own setting and bypasses the relay. A
+    /// configured gateway is the explicit opt-in to route through VibeRails to it instead.
+    /// A VibeRails relay URL inherited from an enclosing managed tab does not count.
+    /// </summary>
+    private static bool KeepsOwnApiBase(string variable, string enterpriseNetworkProxy)
+    {
+        if (!string.IsNullOrWhiteSpace(enterpriseNetworkProxy))
+            return false;
+        var inherited = Environment.GetEnvironmentVariable(variable);
+        return !string.IsNullOrWhiteSpace(inherited) && !IsVibeRailsRelay(inherited);
+    }
+
+    private static bool IsVibeRailsRelay(string baseUrl) =>
+        LlmProxyBaseUrl.TryNormalizeLoopback(baseUrl, out var normalized)
+        && Uri.TryCreate(normalized, UriKind.Absolute, out var uri)
+        && uri.AbsolutePath.StartsWith("/llm/", StringComparison.OrdinalIgnoreCase);
 
     private static bool ShouldSkipCodexProxy(string[]? extraArgs)
     {

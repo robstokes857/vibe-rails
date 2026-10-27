@@ -102,11 +102,11 @@ test('saving settings omits retired options and preserves following arguments', 
         /* useVsCodeTheme */ false,
         /* mcpEnabled */ true,
         /* computerName */ '',
-        /* codexLlmProxyEnabled */ false,
+        /* codexEnterpriseNetworkProxy */ 'https://genai.example.test/v1',
         /* codexLlmProxyMode */ 'subscription',
-        /* claudeLlmProxyEnabled */ false,
-        /* openCodeLlmProxyEnabled */ false,
-        /* grokLlmProxyEnabled */ false,
+        /* claudeEnterpriseNetworkProxy */ '',
+        /* openCodeEnterpriseNetworkProxy */ '',
+        /* grokEnterpriseNetworkProxy */ '',
         /* grokLlmProxyMode */ 'subscription',
         /* claudeTokenSaverEnabled */ true,
         /* codexTokenSaverEnabled */ true,
@@ -122,13 +122,15 @@ test('saving settings omits retired options and preserves following arguments', 
     assert.equal(calls[0].body.removeCoAuthorTrailers, undefined);
     assert.equal(calls[0].body.showVibeAiUi, undefined);
     assert.equal(calls[0].body.routeThroughVibeRailsAi, undefined);
+    assert.equal(calls[0].body.codexEnterpriseNetworkProxy, 'https://genai.example.test/v1');
+    assert.equal(calls[0].body.codexLlmProxyEnabled, undefined);
     assert.equal(calls[0].body.clearApiKey, true);
     assert.equal(calls[0].body.createVibeStoryTracking, false);
     assert.equal(calls[0].body.createVibeStoryTrackingCustomEnvs, true);
     assert.equal(calls[0].body.dataExportOptIn, true);
 
-    await controller.saveSettings(false, '', false, true, '', false, 'subscription',
-        false, false, false, 'subscription', true, true, true, true, false);
+    await controller.saveSettings(false, '', false, true, '', '', 'subscription',
+        '', '', '', 'subscription', true, true, true, true, false);
     assert.equal(calls[1].body.clearApiKey, false);
     assert.equal(calls[1].body.createVibeStoryTracking, true);
     assert.equal(calls[1].body.createVibeStoryTrackingCustomEnvs, false);
