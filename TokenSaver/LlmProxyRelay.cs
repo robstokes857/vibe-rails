@@ -91,9 +91,10 @@ internal static class LlmProxyRelay
         string activitySource,
         Uri providerTarget,
         string? gatewayBaseUrl,
-        string providerApiPath)
+        string providerApiPath,
+        bool addMissingApiPath = false)
     {
-        if (EnterpriseNetworkProxy.TryBuildTarget(providerTarget, gatewayBaseUrl, providerApiPath, out var target))
+        if (EnterpriseNetworkProxy.TryBuildTarget(providerTarget, gatewayBaseUrl, providerApiPath, out var target, addMissingApiPath))
             return target;
 
         events.Diagnostic(activitySource, "saved Enterprise Network Proxy is not a valid API base URL; request refused.");

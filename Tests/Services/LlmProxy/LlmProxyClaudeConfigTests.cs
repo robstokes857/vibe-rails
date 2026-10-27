@@ -130,6 +130,17 @@ public class LlmProxyClaudeConfigTests : IDisposable
     }
 
     [Fact]
+    public void BuildClaudeProxyEnvironment_LeavesToolSearchToClaudeBehindAnEnterpriseGateway()
+    {
+        // A gateway that translates for Bedrock or similar may reject tool_reference blocks.
+        var env = LlmProxyClaudeConfig.BuildClaudeProxyEnvironment(
+            "http://127.0.0.1:4321", "session-abc", "tab-xyz", enterpriseGateway: true);
+
+        Assert.False(env.ContainsKey(LlmProxyClaudeConfig.ToolSearchVariable));
+        Assert.Equal("http://127.0.0.1:4321/llm/anthropic", env[LlmProxyClaudeConfig.BaseUrlVariable]);
+    }
+
+    [Fact]
     public async Task PrepareSession_Claude_RoutesThroughAnthropicProxy()
     {
         var service = CreateService(claudeLlmProxyEnabled: true);

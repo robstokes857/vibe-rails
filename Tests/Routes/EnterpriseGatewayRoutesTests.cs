@@ -46,8 +46,17 @@ public sealed class EnterpriseGatewayRoutesTests
         await Exercise(provider, path, "unused", "session", "tab", storedGateway: "genai.example.test/v1");
     }
 
+    [Fact]
+    public async Task ClaudeGatewayGivenWithoutV1StillReachesMessages()
+    {
+        // The form ANTHROPIC_BASE_URL takes; Claude Code itself appends /v1.
+        await Exercise("anthropic", "/llm/anthropic/v1/messages", "messages", "session", "tab",
+            claudeGateway: "https://claude.gateway.example");
+    }
+
     private static async Task Exercise(
-        string provider, string path, string endpoint, string? session, string? tab, string? storedGateway = null)
+        string provider, string path, string endpoint, string? session, string? tab, string? storedGateway = null,
+        string? claudeGateway = null)
     {
         var builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
@@ -63,6 +72,8 @@ public sealed class EnterpriseGatewayRoutesTests
             OpenCodeEnterpriseNetworkProxy = "https://opencode.gateway.example/v1",
             GrokEnterpriseNetworkProxy = "https://grok.gateway.example/v1"
         };
+        if (claudeGateway is not null)
+            settings.ClaudeEnterpriseNetworkProxy = claudeGateway;
         if (storedGateway is not null)
         {
             settings.CodexEnterpriseNetworkProxy = settings.ClaudeEnterpriseNetworkProxy = storedGateway;

@@ -865,7 +865,11 @@ Local provider proxies are always enabled. In Settings → LLMs, each provider i
 an optional **Enterprise Network Proxy** API gateway base URL (including `/v1` when required);
 empty uses the provider default. These text fields participate in dirty tracking, Save and
 saved-value restoration. Token Saver switches remain independent. Gateway edits apply to the
-next request; auth-mode edits apply to newly launched terminals. See `TokenSaver/README.md`.
+next request; auth-mode edits apply to newly launched terminals. Each field's **Test** button
+(`data-enterprise-proxy-test`) posts the entered value to
+`/api/v1/settings/enterprise-network-proxy/test` without the loading overlay; its result line
+clears on edit, and a suggested corrected URL is applied as an ordinary (dirty) edit. Saving
+shows the server's validation message. See `TokenSaver/README.md`.
 
 The token-savings meter sits at the far right of the terminal controls bar and is owned by
 `terminal-token-compression.js`. The per-LLM on/off switches live in Settings (Claude, Codex,

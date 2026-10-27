@@ -391,10 +391,22 @@ translation/routing to Bedrock or another service. This setting is not an HTTP C
 `OpenCodeEnterpriseNetworkProxy`, and `GrokEnterpriseNetworkProxy` live in settings.json.
 Blank uses the normal provider destination. A supplied base replaces the provider API root,
 including its API path: `/v1/responses`, `/backend-api/codex/responses`, and
-`/api/paas/v4/chat/completions` become `<base>/responses` or `<base>/chat/completions`.
-Claude likewise uses `<base>/messages`, so include `/v1` in the gateway base when required.
-OpenCode's setting covers both Z.AI and xAI. Query strings and endpoint suffixes are preserved.
-Changes apply on the next request, without interrupting an in-flight response.
+`/api/paas/v4/chat/completions` become `<base>/responses` or `<base>/chat/completions`, so
+OpenAI-style bases are used exactly as `OPENAI_BASE_URL` would be (usually ending in `/v1`).
+Claude's gateway works either way it is handed out: `https://gw.example` (what
+`ANTHROPIC_BASE_URL` takes) gets `/v1` added, and `https://gw.example/v1` is used as is; both
+send `/v1/messages`. OpenCode's setting covers both Z.AI and xAI. Query strings and endpoint
+suffixes are preserved. Changes apply on the next request, without interrupting an in-flight
+response.
+
+Each field has a **Test** button (`EnterpriseNetworkProxyProbe`). It sends one `{}` POST with
+no credentials to the provider's real endpoint under the entered URL, saved or not, through the
+relay's own `llm-proxy` client, so it crosses the same corporate proxy, TLS trust and
+no-redirect transport as CLI traffic. 401/403 (credentials requested) or 400/422 (the endpoint
+validated the empty body) mean the URL is right; 404 means a wrong path, and for an
+OpenAI-style base without `/v1` the probe tries once more with it and offers the corrected URL.
+DNS, TLS, proxy (407), redirect and timeout failures are named. The CLI's key is never read.
+With a Claude gateway configured, launches leave `ENABLE_TOOL_SEARCH` unset (see below).
 
 Only absolute HTTP/HTTPS URLs without embedded credentials, queries or fragments are accepted.
 Pointing a gateway at a new host needs the same PIN or dashboard-code confirmation as the
@@ -546,10 +558,12 @@ smudge byte-exact fixtures on a fresh Windows checkout and you'll get failures w
   disables MCP tool search behind a non-first-party base URL and sends every MCP tool schema
   in the first request (about 40k tokens per session, measured 2026-09-27), and it budgets a
   200K window for natively-1M models unless the `--model` ID carries `[1m]`. The proxy
-  therefore always ships `ENABLE_TOOL_SEARCH=true` next to the base URL
+  therefore ships `ENABLE_TOOL_SEARCH=true` next to the base URL
   (`LlmProxyClaudeConfig.BuildClaudeProxyEnvironment`); the relay copies `tool_reference`
-  blocks through verbatim, which is what that opt-in requires. The window half is the
-  launcher's job: the Board and Environment catalogs offer `[1m]` model IDs.
+  blocks through verbatim, which is what that opt-in requires. The exception is a configured
+  Claude Enterprise Network Proxy: a gateway that translates for Bedrock or similar may reject
+  those blocks, so the launch leaves Claude Code's own default (tool search off) in place.
+  The window half is the launcher's job: the Board and Environment catalogs offer `[1m]` model IDs.
 - **`token_saving_plan.md` does not exist, and nothing points at it any more.** It was
   deleted; the comments that cited its `§2`/`§3`/`§5`/`§6` were rewritten (2026-07-15) to
   state the rule they rely on, or to point here. The invariants were always real — only

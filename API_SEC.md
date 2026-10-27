@@ -110,7 +110,18 @@ value that does not validate (hand-edited) fails closed with 502 after the two-h
 never falls back to a public provider. Pointing a gateway at a new host requires presence
 (below); clearing it does not. The gateway owns downstream routing/API translation. Existing
 local-header/cookie stripping, TLS validation, no-redirect transport and the frozen listener
-topology are unchanged.
+topology are unchanged. Claude's base may be given with or without `/v1`; `/v1` is added when
+missing, because Claude Code appends it to `ANTHROPIC_BASE_URL` itself.
+
+Root-only `POST /api/v1/settings/enterprise-network-proxy/test` is a deliberate, bounded
+outbound probe of a user-entered URL (saved or not, so it does not change routing and needs
+no presence). It validates the URL as above, then sends one `{}` JSON POST with no
+credentials, cookies or local headers to the provider endpoint under it (`/responses`,
+`/messages` or `/chat/completions`) through the relay's `llm-proxy` client, with a 10-second
+deadline and no redirects; on a 404 for an OpenAI-style base without `/v1` it repeats once with
+`/v1`. It never reads a CLI credential and never reads or returns a response body: the no-store
+reply is a status class, the tested URL, the HTTP code and an optional corrected base. Scoped
+CLI credentials cannot reach it.
 
 ## Listener topology and discovery (FROZEN — review gate)
 
@@ -453,6 +464,7 @@ middleware serves their paths rather than registering individual API endpoints.
 | GET | `/api/v1/settings/security-challenge` | [AppSettingsRoutes.cs](VibeRails/Routes/AppSettingsRoutes.cs) |
 | GET | `/api/v1/settings/backups` | [DataExportRoutes.cs](VibeRails/Routes/DataExportRoutes.cs) |
 | POST | `/api/v1/settings/computer-name` | [AppSettingsRoutes.cs](VibeRails/Routes/AppSettingsRoutes.cs) |
+| POST | `/api/v1/settings/enterprise-network-proxy/test` | [AppSettingsRoutes.cs](VibeRails/Routes/AppSettingsRoutes.cs) |
 | GET | `/api/v1/settings/keys` | [SigningKeyRoutes.cs](VibeRails/Routes/SigningKeyRoutes.cs) |
 | POST | `/api/v1/settings/keys` | [SigningKeyRoutes.cs](VibeRails/Routes/SigningKeyRoutes.cs) |
 | POST | `/api/v1/settings/keys/{id:guid}/export` | [SigningKeyRoutes.cs](VibeRails/Routes/SigningKeyRoutes.cs) |

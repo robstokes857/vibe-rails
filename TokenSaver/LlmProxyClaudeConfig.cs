@@ -15,6 +15,8 @@ public static class LlmProxyClaudeConfig
 {
     public const string AnthropicProxyPath = "/llm/anthropic";
     public const string UpstreamHost = "api.anthropic.com";
+    /// <summary>The API path Claude Code appends to its base URL (it posts to /v1/messages).</summary>
+    public const string UpstreamApiPath = "/v1";
 
     // Same header names the proxy auth-gate checks. Shared with the Codex path so the proxy
     // validates one contract regardless of which CLI is calling.
@@ -65,16 +67,22 @@ public static class LlmProxyClaudeConfig
     /// <summary>
     /// The env vars that point Claude Code at the proxy, plus the tool-search opt-in that the
     /// custom base URL would otherwise switch off. Merged into the prepared-session environment
-    /// at the <c>CommandService</c> seam.
+    /// at the <c>CommandService</c> seam. The opt-in is left out when an enterprise gateway
+    /// receives the traffic: tool search needs <c>tool_reference</c> blocks to survive, and a
+    /// gateway that translates for Bedrock or similar may reject them. Claude Code then keeps its
+    /// own safe default for a non-first-party base URL.
     /// </summary>
     public static IReadOnlyDictionary<string, string> BuildClaudeProxyEnvironment(
-        string apiBaseUrl, string sessionToken, string tabToken, string? terminalSessionId = null)
+        string apiBaseUrl, string sessionToken, string tabToken, string? terminalSessionId = null,
+        bool enterpriseGateway = false)
     {
-        return new Dictionary<string, string>
+        var environment = new Dictionary<string, string>
         {
             [BaseUrlVariable] = BuildAnthropicBaseUrl(apiBaseUrl),
-            [CustomHeadersVariable] = BuildCustomHeaders(sessionToken, tabToken, terminalSessionId),
-            [ToolSearchVariable] = ToolSearchEnabledValue
+            [CustomHeadersVariable] = BuildCustomHeaders(sessionToken, tabToken, terminalSessionId)
         };
+        if (!enterpriseGateway)
+            environment[ToolSearchVariable] = ToolSearchEnabledValue;
+        return environment;
     }
 }

@@ -290,7 +290,8 @@ public class CommandService : ICommandService
                 _llmProxyContext.ApiBaseUrl,
                 _llmProxyContext.SessionToken,
                 _llmProxyContext.TabToken,
-                sessionId);
+                sessionId,
+                enterpriseGateway: !string.IsNullOrWhiteSpace(proxySettings.ClaudeEnterpriseNetworkProxy));
             foreach (var kvp in claudeProxyEnv)
                 environment[kvp.Key] = kvp.Value;
             AddProxyContactDetails(environment, LlmProxyProvider.Claude, sessionId);

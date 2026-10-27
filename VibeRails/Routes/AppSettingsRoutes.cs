@@ -2,6 +2,7 @@ using TokenSaver;
 using VibeRails.DTOs;
 using VibeRails.Services;
 using VibeRails.Services.HttpRelay;
+using VibeRails.Services.LlmProxy;
 using VibeRails.Services.Integrations.VibeCodeRemote;
 using VibeRails.Utils;
 using VibeRails.Auth;
@@ -26,6 +27,18 @@ public static class AppSettingsRoutes
             context.Response.Headers.CacheControl = "no-store";
             return Results.Ok(presence.Challenge(RemoteConfig.IsPinConfigured));
         });
+
+        // POST /api/v1/settings/enterprise-network-proxy/test - one credential-free request to the
+        // entered gateway URL (saved or not) through the relay's transport. Reports only the status
+        // class; see EnterpriseNetworkProxyProbe and API_SEC.md.
+        app.MapPost("/api/v1/settings/enterprise-network-proxy/test", async (
+            EnterpriseNetworkProxyTestRequest request, HttpContext context, EnterpriseNetworkProxyProbe probe) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            if (!EnterpriseNetworkProxyProbe.IsKnownProvider(request.Provider))
+                return Results.BadRequest(new ErrorResponse("Unknown provider."));
+            return Results.Ok(await probe.TestAsync(request.Provider!, request.Url, context.RequestAborted));
+        }).WithName("TestEnterpriseNetworkProxy");
 
         // POST /api/v1/settings - Update app settings
         app.MapPost("/api/v1/settings", (AppSettingsDto settingsDto, HttpContext context, SettingsPresenceService presence) =>

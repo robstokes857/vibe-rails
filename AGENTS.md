@@ -146,8 +146,10 @@ file; it is reference material, not instructions.
   of the supported surface. Use the Web UI, the VS Code extension, or the REST API.
 - **Claude launches go through the TokenSaver proxy** (`ANTHROPIC_BASE_URL`). That disables
   Claude Code's MCP tool search and makes it budget a 200K window for a bare model ID, so the
-  proxy env always carries `ENABLE_TOOL_SEARCH=true` and the model catalogs offer `[1m]` IDs.
-  Keep those together; see the [TokenSaver README](TokenSaver/README.md#things-that-will-bite-you).
+  proxy env carries `ENABLE_TOOL_SEARCH=true` and the model catalogs offer `[1m]` IDs. Keep
+  those together. The one exception is a configured Claude Enterprise Network Proxy, where a
+  translating gateway may reject `tool_reference` blocks; see the
+  [TokenSaver README](TokenSaver/README.md#things-that-will-bite-you).
 
 ## Build and test
 

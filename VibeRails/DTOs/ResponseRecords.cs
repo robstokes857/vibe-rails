@@ -1397,6 +1397,17 @@ namespace VibeRails.DTOs
     // the full settings object from a possibly-stale client cache.
     public record UpdateComputerNameDto(string? ComputerName);
 
+    /// <summary>Settings → LLMs "Test" for one provider's Enterprise Network Proxy field (saved or not).</summary>
+    public record EnterpriseNetworkProxyTestRequest(string? Provider, string? Url);
+
+    /// <summary>
+    /// The outcome of one credential-free request to the gateway. <c>Ok</c> means the gateway was
+    /// reached and answered at the API path; <c>SuggestedUrl</c> is a corrected base that answered
+    /// when the entered one did not.
+    /// </summary>
+    public record EnterpriseNetworkProxyTestResponse(
+        bool Ok, string Status, string Message, string? TestedUrl, int? StatusCode, string? SuggestedUrl);
+
     // Display-only ping for the proxy/token-saver meter (see terminal-token-compression.js).
     // Only the authenticated Claude/Codex proxy routes publish this event; ordinary terminal or
     // app activity must not light it. Never include secrets, request bodies, or query strings.
@@ -2012,6 +2023,8 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(UpdateInfo))]
     [JsonSerializable(typeof(AppSettingsDto))]
     [JsonSerializable(typeof(UpdateComputerNameDto))]
+    [JsonSerializable(typeof(EnterpriseNetworkProxyTestRequest))]
+    [JsonSerializable(typeof(EnterpriseNetworkProxyTestResponse))]
     [JsonSerializable(typeof(BoardEveryContextSettingsRecord))]
     [JsonSerializable(typeof(UpdateBoardEveryContextRequest))]
     [JsonSerializable(typeof(SetBoardCardPinRequest))]

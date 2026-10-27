@@ -58,6 +58,17 @@ public partial class CommandServiceTests
             .PrepareSessionAsync(LLM.Claude, envName: null, extraArgs: null);
 
         Assert.StartsWith("http://127.0.0.1:4321/", prepared.Environment[LlmProxyClaudeConfig.BaseUrlVariable]);
+        // A translating gateway may reject tool_reference blocks; Claude keeps its own default.
+        Assert.False(prepared.Environment.ContainsKey(LlmProxyClaudeConfig.ToolSearchVariable));
+    }
+
+    [Fact]
+    public async Task PrepareSession_Claude_KeepsToolSearchWithoutAGateway()
+    {
+        var prepared = await CreateService(claudeLlmProxyEnabled: true)
+            .PrepareSessionAsync(LLM.Claude, envName: null, extraArgs: null);
+
+        Assert.Equal("true", prepared.Environment[LlmProxyClaudeConfig.ToolSearchVariable]);
     }
 
     [Theory]

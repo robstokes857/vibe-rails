@@ -257,6 +257,7 @@ export class SettingsController {
             }
 
             this._initSettingsDirtyTracking(root);
+            this._initEnterpriseProxyTests(root);
 
         }
 
@@ -307,7 +308,7 @@ export class SettingsController {
                 createVibeStoryTracking: createVibeStoryTracking,
                 createVibeStoryTrackingCustomEnvs: createVibeStoryTrackingCustomEnvs,
                 dataExportOptIn: true
-            });
+            }, { preferErrorResponseMessage: true });
             this.app.setAppSettings(savedSettings);
             this.app.showToast('Settings', 'Settings saved successfully', 'success');
             return savedSettings;
@@ -339,6 +340,63 @@ export class SettingsController {
         this._settingsSaving = false;
         this._settingsSnapshot = '';
         this._settingsRoot = null;
+    }
+
+    _initEnterpriseProxyTests(root) {
+        root.querySelectorAll('[data-enterprise-proxy-test]').forEach((button) => {
+            const provider = button.dataset.enterpriseProxyTest;
+            const input = root.querySelector(`#setting-${provider}-enterprise-network-proxy`);
+            const output = root.querySelector(`#setting-${provider}-enterprise-network-proxy-result`);
+            if (!input || !output) return;
+            // A result describes the URL it tested; editing the field retires it.
+            input.addEventListener('input', () => {
+                output.hidden = true;
+                output.textContent = '';
+            });
+            button.addEventListener('click', () => this._runEnterpriseProxyTest(provider, input, output, button));
+        });
+    }
+
+    /**
+     * Tests the gateway URL as entered, saved or not: the server sends one request without
+     * credentials through the relay's own transport and reports whether the gateway answers. When
+     * it finds a corrected base (usually a missing /v1), the result offers to use it.
+     */
+    async _runEnterpriseProxyTest(provider, input, output, button) {
+        const show = (message, state) => {
+            output.hidden = false;
+            output.className = `small mt-1 ${state === 'ok' ? 'text-success' : state === 'busy' ? 'text-muted' : 'text-danger'}`;
+            output.textContent = message;
+        };
+        const url = input.value.trim();
+        if (!url) {
+            show("Enter a gateway URL to test. Blank uses the provider's own endpoint.", 'fail');
+            return;
+        }
+        button.disabled = true;
+        show('Testing…', 'busy');
+        try {
+            const result = await this.app.apiCall('/api/v1/settings/enterprise-network-proxy/test', 'POST',
+                { provider, url }, { showLoading: false, preferErrorResponseMessage: true });
+            if (input.value.trim() !== url) return;
+            show(result.message, result.ok ? 'ok' : 'fail');
+            if (result.suggestedUrl) {
+                const use = document.createElement('button');
+                use.type = 'button';
+                use.className = 'btn btn-link btn-sm p-0 ms-1 align-baseline';
+                use.textContent = `Use ${result.suggestedUrl}`;
+                use.addEventListener('click', () => {
+                    input.value = result.suggestedUrl;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    show('Updated. Save to apply it.', 'ok');
+                });
+                output.append(' ', use);
+            }
+        } catch (error) {
+            if (input.value.trim() === url) show(`Test failed: ${error.message}`, 'fail');
+        } finally {
+            button.disabled = false;
+        }
     }
 
     _initSettingsDirtyTracking(root) {

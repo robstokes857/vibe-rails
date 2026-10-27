@@ -56,7 +56,7 @@ public static class LlmAnthropicProxyRoutes
             var events = context.RequestServices.GetRequiredService<ILlmProxyEventSink>();
             var target = await LlmProxyRelay.ApplyEnterpriseGatewayAsync(
                 context, events, "Claude proxy", LlmProxyRelay.BuildTarget(context.Request, UpstreamHost, PathPrefix),
-                settings.ClaudeEnterpriseNetworkProxy, "/v1");
+                settings.ClaudeEnterpriseNetworkProxy, LlmProxyClaudeConfig.UpstreamApiPath, addMissingApiPath: true);
             if (target is null)
                 return;
             await LlmProxyRelay.HandleAsync(

@@ -39,6 +39,28 @@ public sealed class EnterpriseNetworkProxyTests
         Assert.Equal("https://genai.example.test/tenant/v1/" + endpoint + "?stream=true", target.AbsoluteUri);
     }
 
+    [Theory]
+    [InlineData("https://genai.example.test", "https://genai.example.test/v1/messages")]
+    [InlineData("https://genai.example.test/", "https://genai.example.test/v1/messages")]
+    [InlineData("https://genai.example.test/v1", "https://genai.example.test/v1/messages")]
+    [InlineData("https://gw.example/anthropic", "https://gw.example/anthropic/v1/messages")]
+    [InlineData("https://gw.example/anthropic/V1/", "https://gw.example/anthropic/V1/messages")]
+    public void ClaudeGatewayWorksWithOrWithoutV1(string gateway, string expected)
+    {
+        Assert.True(EnterpriseNetworkProxy.TryBuildTarget(new Uri("https://api.anthropic.com/v1/messages"),
+            gateway, "/v1", out var target, addMissingApiPath: true));
+        Assert.Equal(expected, target.AbsoluteUri);
+    }
+
+    [Fact]
+    public void OpenAiStyleBasesAreUsedAsEntered()
+    {
+        // Matches OPENAI_BASE_URL: a base without /v1 is not second-guessed at request time.
+        Assert.True(EnterpriseNetworkProxy.TryBuildTarget(new Uri("https://api.openai.com/v1/responses"),
+            "https://gateway.example/openai", "/v1", out var target));
+        Assert.Equal("https://gateway.example/openai/responses", target.AbsoluteUri);
+    }
+
     [Fact]
     public void BuildTarget_BlankKeepsExactProviderUrl()
     {

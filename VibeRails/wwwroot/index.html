@@ -1097,10 +1097,15 @@
                         </div>
                         <div class="mb-4">
                             <label class="form-label" for="setting-codex-enterprise-network-proxy">Enterprise Network Proxy</label>
-                            <input class="form-control" type="url" id="setting-codex-enterprise-network-proxy"
-                                placeholder="https://genai.company.com/v1" autocomplete="off" spellcheck="false"
-                                aria-describedby="setting-codex-enterprise-network-proxy-help">
-                            <small id="setting-codex-enterprise-network-proxy-help" class="form-text text-muted">Optional enterprise API base URL, including its API path (for example, /v1). Leave blank to use the provider’s default. Requests use the CLI’s existing credentials.</small>
+                            <div class="input-group">
+                                <input class="form-control" type="url" id="setting-codex-enterprise-network-proxy"
+                                    placeholder="https://genai.company.com/v1" autocomplete="off" spellcheck="false"
+                                    aria-describedby="setting-codex-enterprise-network-proxy-help setting-codex-enterprise-network-proxy-result">
+                                <button class="btn btn-outline-secondary" type="button" data-enterprise-proxy-test="codex"
+                                    title="Send one request without credentials through your network proxy and check that the gateway answers">Test</button>
+                            </div>
+                            <small id="setting-codex-enterprise-network-proxy-help" class="form-text text-muted">Optional enterprise API base URL: the value you would give <code>OPENAI_BASE_URL</code>, usually ending in <code>/v1</code>. Leave blank to use the provider’s default. Requests use the CLI’s existing credentials.</small>
+                            <div id="setting-codex-enterprise-network-proxy-result" class="small mt-1" role="status" aria-live="polite" hidden></div>
                         </div>
                         <div class="mb-3">
                             <div class="form-label mb-2">Codex auth type</div>
@@ -1133,10 +1138,15 @@
                         </div>
                         <div class="mb-4">
                             <label class="form-label" for="setting-claude-enterprise-network-proxy">Enterprise Network Proxy</label>
-                            <input class="form-control" type="url" id="setting-claude-enterprise-network-proxy"
-                                placeholder="https://genai.company.com/v1" autocomplete="off" spellcheck="false"
-                                aria-describedby="setting-claude-enterprise-network-proxy-help">
-                            <small id="setting-claude-enterprise-network-proxy-help" class="form-text text-muted">Optional enterprise API base URL, including its API path (for example, /v1). Leave blank to use the provider’s default. Requests use the CLI’s existing credentials.</small>
+                            <div class="input-group">
+                                <input class="form-control" type="url" id="setting-claude-enterprise-network-proxy"
+                                    placeholder="https://genai.company.com/v1" autocomplete="off" spellcheck="false"
+                                    aria-describedby="setting-claude-enterprise-network-proxy-help setting-claude-enterprise-network-proxy-result">
+                                <button class="btn btn-outline-secondary" type="button" data-enterprise-proxy-test="claude"
+                                    title="Send one request without credentials through your network proxy and check that the gateway answers">Test</button>
+                            </div>
+                            <small id="setting-claude-enterprise-network-proxy-help" class="form-text text-muted">Optional enterprise gateway URL, with or without <code>/v1</code>; both forms work. Leave blank to use the provider’s default. Requests use Claude’s existing credentials (set <code>ANTHROPIC_AUTH_TOKEN</code> when the gateway expects a Bearer key).</small>
+                            <div id="setting-claude-enterprise-network-proxy-result" class="small mt-1" role="status" aria-live="polite" hidden></div>
                         </div>
                         <small class="form-text text-muted">Gateway changes apply to the next request.</small>
                     </div>
@@ -1150,10 +1160,15 @@
                         </div>
                         <div class="mb-4">
                             <label class="form-label" for="setting-opencode-enterprise-network-proxy">Enterprise Network Proxy</label>
-                            <input class="form-control" type="url" id="setting-opencode-enterprise-network-proxy"
-                                placeholder="https://genai.company.com/v1" autocomplete="off" spellcheck="false"
-                                aria-describedby="setting-opencode-enterprise-network-proxy-help">
+                            <div class="input-group">
+                                <input class="form-control" type="url" id="setting-opencode-enterprise-network-proxy"
+                                    placeholder="https://genai.company.com/v1" autocomplete="off" spellcheck="false"
+                                    aria-describedby="setting-opencode-enterprise-network-proxy-help setting-opencode-enterprise-network-proxy-result">
+                                <button class="btn btn-outline-secondary" type="button" data-enterprise-proxy-test="opencode"
+                                    title="Send one request without credentials through your network proxy and check that the gateway answers">Test</button>
+                            </div>
                             <small id="setting-opencode-enterprise-network-proxy-help" class="form-text text-muted">Optional enterprise API base URL, including its API path (for example, /v1). Leave blank to use the provider’s default. Applies to OpenCode’s Z.AI and xAI providers. Requests use the CLI’s existing credentials.</small>
+                            <div id="setting-opencode-enterprise-network-proxy-result" class="small mt-1" role="status" aria-live="polite" hidden></div>
                         </div>
                         <small class="form-text text-muted">Gateway changes apply to the next request.</small>
                     </div>
@@ -1167,10 +1182,15 @@
                         </div>
                         <div class="mb-4">
                             <label class="form-label" for="setting-grok-enterprise-network-proxy">Enterprise Network Proxy</label>
-                            <input class="form-control" type="url" id="setting-grok-enterprise-network-proxy"
-                                placeholder="https://genai.company.com/v1" autocomplete="off" spellcheck="false"
-                                aria-describedby="setting-grok-enterprise-network-proxy-help">
+                            <div class="input-group">
+                                <input class="form-control" type="url" id="setting-grok-enterprise-network-proxy"
+                                    placeholder="https://genai.company.com/v1" autocomplete="off" spellcheck="false"
+                                    aria-describedby="setting-grok-enterprise-network-proxy-help setting-grok-enterprise-network-proxy-result">
+                                <button class="btn btn-outline-secondary" type="button" data-enterprise-proxy-test="grok"
+                                    title="Send one request without credentials through your network proxy and check that the gateway answers">Test</button>
+                            </div>
                             <small id="setting-grok-enterprise-network-proxy-help" class="form-text text-muted">Optional enterprise API base URL, including its API path (for example, /v1). Leave blank to use the provider’s default. Requests use the CLI’s existing credentials.</small>
+                            <div id="setting-grok-enterprise-network-proxy-result" class="small mt-1" role="status" aria-live="polite" hidden></div>
                         </div>
                         <div class="mb-3">
                             <div class="form-label mb-2">Grok auth type</div>

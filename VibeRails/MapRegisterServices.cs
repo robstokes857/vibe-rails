@@ -191,6 +191,8 @@ namespace VibeRails
             serviceCollection.AddSingleton<ILocalLlmProxyContext>(sp =>
                 new LocalLlmProxyContext(localApiBaseUrl, sp.GetRequiredService<IAuthService>(), sp.GetRequiredService<AgentCredentialService>()));
             serviceCollection.AddHttpClient("llm-proxy").ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
+            // The Settings gateway Test button; it shares the relay's transport on purpose.
+            serviceCollection.AddSingleton<EnterpriseNetworkProxyProbe>();
             serviceCollection.AddSingleton<ILlmProxySessionState, LlmProxySessionState>();
             // Singleton, and ungated: the pause must outlive request scopes, and it is the terminal
             // tab child — not the root — that hosts the proxy an agent is asking to pause. In the

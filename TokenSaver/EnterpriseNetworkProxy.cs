@@ -45,12 +45,16 @@ public static class EnterpriseNetworkProxy
     /// <see cref="BuildTarget"/> for a stored value: false when the saved gateway does not
     /// validate (settings saves validate, so a hand-edited settings.json). Callers fail closed
     /// and never fall back to the provider default, a destination the organization may forbid.
+    /// With <paramref name="addMissingApiPath"/>, a base given without the API path gets it (see
+    /// <see cref="WithApiPath"/>).
     /// </summary>
-    public static bool TryBuildTarget(Uri providerTarget, string? gatewayBaseUrl, string providerApiPath, out Uri target)
+    public static bool TryBuildTarget(Uri providerTarget, string? gatewayBaseUrl, string providerApiPath, out Uri target,
+        bool addMissingApiPath = false)
     {
         target = providerTarget;
         if (!TryNormalize(gatewayBaseUrl, out var normalized)) return false;
         if (normalized.Length == 0) return true;
+        if (addMissingApiPath) normalized = WithApiPath(normalized, providerApiPath);
         var suffix = providerTarget.AbsolutePath;
         if (suffix.Equals(providerApiPath, StringComparison.OrdinalIgnoreCase)
             || suffix.StartsWith(providerApiPath + "/", StringComparison.OrdinalIgnoreCase))
@@ -61,4 +65,14 @@ public static class EnterpriseNetworkProxy
         target = builder.Uri;
         return true;
     }
+
+    /// <summary>
+    /// Appends <paramref name="apiPath"/> unless the normalized base already ends with it. Claude
+    /// Code adds /v1 to ANTHROPIC_BASE_URL itself, so Claude gateways are handed out both ways:
+    /// https://gw.example (what that variable takes) and https://gw.example/v1. Both must work.
+    /// </summary>
+    public static string WithApiPath(string normalizedBase, string apiPath) =>
+        normalizedBase.EndsWith(apiPath, StringComparison.OrdinalIgnoreCase)
+            ? normalizedBase
+            : normalizedBase + apiPath;
 }
