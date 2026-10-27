@@ -63,6 +63,9 @@ each request once; the desktop also suppresses repeat IDs. Only result acknowled
 Lost results become unknown, never success or an automatic second launch. The website polls
 status every two seconds while waiting and keeps the user on the Board.
 
+When the card's agent is already running, the `busy` result carries that session id (VIBE-104)
+so the website offers Go to agent instead of a second launch.
+
 The companion Front release is required. Its process-local live registry expires desktops after
 35 seconds and requests after ten minutes; outstanding results become unknown after two minutes.
 Requests are interactive, not durable offline jobs. Multi-instance hosted deployments need
@@ -225,8 +228,22 @@ labels. The snapshot never reads the current checkout or follows a file referenc
 bytes use the existing completed-session upload pipeline; the website enables replay only when
 that same owner's uploaded session is available. These rails are read-only on the hosted board.
 
-Launch options, tab IDs, project paths, environment definitions/IDs, lane Automation definitions
-and agent-context settings remain local. `@path` travels as text; no referenced file is read or
+Tab IDs, project paths, environment definitions/IDs, lane Automation definitions and
+agent-context settings remain local.
+
+**Launch settings (VIBE-104).** The worker's base CLI settings sync as the portable `launchOptions`
+field: model, effort, start mode and Codex speed, written by the Card Log on create and when they
+change. YOLO is a permission choice made on this machine: it is never written, pushed or read, so a
+YOLO-only change writes no entry and a pulled change keeps this machine's own YOLO flag. Pushes copy
+only the four keys and only values the hosted contract accepts. Pulled values become CLI arguments
+here, so they are never trusted as sent: `BaseLlmOptionsBuilder.Normalize` re-validates them for the
+card's resulting base CLI (model shape, per-CLI effort and mode, per-model Codex speed and effort),
+and anything it refuses is dropped while the card keeps its settings. Dropping is not skipping: the
+entry still applies its other fields and never blocks sync or remote launch. A pulled assignee change
+without settings clears the old CLI's settings (as a local change does), and a protected local
+assignee or settings edit protects them from an older remote change. Manager launch settings stay
+local. The web board's catalog is a copy of `llm-model-catalog.js`; see the vibe-books runbook
+`custom_envs/CLI_OPTIONS.md`. An older desktop stores the field without applying it. `@path` travels as text; no referenced file is read or
 uploaded by sync. User-written text and saved code can themselves contain private information.
 
 VIBE-13 replaces the old publication and linked-activity switches. Existing paused or text-only

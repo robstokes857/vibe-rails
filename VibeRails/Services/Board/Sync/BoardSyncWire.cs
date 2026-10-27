@@ -25,6 +25,8 @@ public static class BoardSyncWire
     public const string FieldPriority = "priority";
     public const string FieldPoints = "points";
     public const string FieldAssignee = "assignee";
+    /// <summary>VIBE-104: model, effort, start mode and Codex speed for a base assignee; never YOLO.</summary>
+    public const string FieldLaunchOptions = "launchOptions";
     public const string FieldTags = "tags";
     public const string FieldBlocked = "blocked";
     public const string FieldFlagged = "flagged";

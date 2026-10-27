@@ -93,6 +93,9 @@ public static partial class BaseLlmOptionsBuilder
         return args.ToArray();
     }
 
+    /// <summary>A model name this builder could pass as one argv value (the shape check of <see cref="Normalize"/>).</summary>
+    public static bool IsValidModelName(string model) => model.Length is > 0 and <= 200 && ModelPattern().IsMatch(model);
+
     public static string? PinnedModel(LLM llm) => llm switch
     {
         LLM.Glm52 => "zai/glm-5.2", LLM.Glm53 => "zai-coding-plan/glm-5.3",

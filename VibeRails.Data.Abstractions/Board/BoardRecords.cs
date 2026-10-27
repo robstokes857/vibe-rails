@@ -6,7 +6,11 @@ namespace VibeRails.Services.Board;
 public class BoardValidationException(string message) : Exception(message);
 
 /// <summary>A conflicting board operation (deleting the last lane, duplicate link). Maps to 409.</summary>
-public sealed class BoardConflictException(string message) : Exception(message);
+public sealed class BoardConflictException(string message, string? sessionId = null) : Exception(message)
+{
+    /// <summary>The card's running agent session when that is the conflict, so a caller can open it.</summary>
+    public string? SessionId { get; } = sessionId;
+}
 
 /// <summary>
 /// One board of a project: a named set of lanes (a sprint, a sub-project, a release). Every

@@ -59,7 +59,8 @@ public sealed class BoardRemoteLaunchService(IBoardStore store, IBoardSyncClient
             var result = await launch.LaunchAsync(project, card.Id, null, ct);
             return result is null ? Result("unavailable") : Result("started", result.SessionId);
         }
-        catch (BoardConflictException) { return Result("busy"); }
+        // VIBE-104: the web offers "Go to agent" for the agent already running instead of a second launch.
+        catch (BoardConflictException ex) { return Result("busy", ex.SessionId); }
         catch (BoardValidationException) { return Result("failed"); }
     }
 }

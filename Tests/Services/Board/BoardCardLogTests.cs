@@ -174,7 +174,7 @@ public sealed partial class BoardCardLogTests : IDisposable
     }
 
     [Fact]
-    public async Task ReorderNoOpAndLaunchOptions_WriteNoEntry()
+    public async Task ReorderNoOpAndYoloOnly_WriteNoEntry()
     {
         await _store.EnsureDefaultColumnsAsync(_project, Ct);
         var lanes = await _store.GetColumnsAsync(_project, Ct);
@@ -183,10 +183,35 @@ public sealed partial class BoardCardLogTests : IDisposable
 
         await _store.MoveCardAsync(_project, first.Id, lanes[0].Id, 1, Ct);
         await _store.UpdateCardAsync(_project, first.Id, new BoardCardPatch(Title: "First", Priority: "medium"), Ct);
-        await _store.UpdateCardAsync(_project, first.Id, new BoardCardPatch(BaseLlmOptions: new BaseLlmOptions(Model: "opus")), Ct);
+        // YOLO is a permission choice made on this machine and never syncs (VIBE-104).
+        await _store.UpdateCardAsync(_project, first.Id, new BoardCardPatch(BaseLlmOptions: new BaseLlmOptions(Yolo: true)), Ct);
 
         var history = (await _store.GetCardHistoryAsync(_project, first.Id, Ct));
         Assert.Equal([BoardCommentKinds.Created], history.Select(e => e.Kind).ToArray());
+    }
+
+    [Fact]
+    public async Task LaunchSettings_WritePortableEntriesWithoutYolo()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var card = await _store.CreateCardAsync(_project, NewCard("Agent") with
+        {
+            Assignee = "base:codex",
+            BaseLlmOptions = new BaseLlmOptions("gpt-6-astra", "xhigh", null, Yolo: true, "fast"),
+        }, Ct);
+        await _store.UpdateCardAsync(_project, card.Id, new BoardCardPatch(BaseLlmOptions: new BaseLlmOptions("gpt-6-luna", "max", null, Yolo: true)), Ct);
+        await _store.UpdateCardAsync(_project, card.Id, new BoardCardPatch(ClearBaseLlmOptions: true), Ct);
+
+        var history = await _store.GetCardHistoryAsync(_project, card.Id, Ct);
+        Assert.Equal([BoardCommentKinds.Created, BoardCommentKinds.Change, BoardCommentKinds.Change], history.Select(e => e.Kind).ToArray());
+        Assert.All(history, entry => Assert.DoesNotContain("yolo", entry.Changes!, StringComparison.OrdinalIgnoreCase));
+        Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(System.Text.Json.Nodes.JsonNode.Parse("""{"model":"gpt-6-astra","effort":"xhigh","speed":"fast"}"""),
+            System.Text.Json.Nodes.JsonNode.Parse(history[0].Changes!)!["launchOptions"]!["to"]));
+        var changed = System.Text.Json.Nodes.JsonNode.Parse(history[1].Changes!)!["launchOptions"]!;
+        Assert.Equal("gpt-6-astra", changed["from"]!["model"]!.GetValue<string>());
+        Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(System.Text.Json.Nodes.JsonNode.Parse("""{"model":"gpt-6-luna","effort":"max"}"""), changed["to"]));
+        Assert.Contains("Launch settings: gpt-6-astra · xhigh · fast → gpt-6-luna · max", history[1].Body);
+        Assert.Null(System.Text.Json.Nodes.JsonNode.Parse(history[2].Changes!)!["launchOptions"]!["to"]);
     }
 
     [Fact]

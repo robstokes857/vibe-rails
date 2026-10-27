@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using VibeRails.DTOs;
 
 namespace VibeRails.Services.Board;
 
@@ -193,6 +194,7 @@ public sealed partial class BoardStore
             WriteTo("priority", w => w.WriteStringValue(card.Priority));
             WriteTo("points", w => WritePoints(w, card.Points));
             WriteTo("assignee", w => WriteNullableString(w, card.Assignee));
+            WriteTo(LaunchOptionsField, w => WriteLaunchOptions(w, card.BaseLlmOptions));
             WriteTo("tags", w => WriteTags(w, card.Tags));
             WriteTo("blocked", w => w.WriteBooleanValue(card.Blocked));
             WriteTo("flagged", w => w.WriteBooleanValue(card.Flagged));
@@ -237,6 +239,11 @@ public sealed partial class BoardStore
             {
                 WriteFromTo("assignee", w => WriteNullableString(w, before.Assignee), w => WriteNullableString(w, after.Assignee));
                 _summary.Add($"Assignee: {Show(before.Assignee)} → {Show(after.Assignee)}");
+            }
+            if (!SamePortableOptions(before.BaseLlmOptions, after.BaseLlmOptions))
+            {
+                WriteFromTo(LaunchOptionsField, w => WriteLaunchOptions(w, before.BaseLlmOptions), w => WriteLaunchOptions(w, after.BaseLlmOptions));
+                _summary.Add($"Launch settings: {Show(before.BaseLlmOptions)} → {Show(after.BaseLlmOptions)}");
             }
             if (!before.Tags.SequenceEqual(after.Tags, StringComparer.Ordinal))
             {
@@ -329,6 +336,30 @@ public sealed partial class BoardStore
             if (value is null) writer.WriteNullValue();
             else writer.WriteStringValue(value);
         }
+
+        // VIBE-104: the assignee's model, effort, start mode and Codex speed sync with viberails.ai.
+        // YOLO is a permission choice made on this machine; it is never written, so changing only
+        // YOLO writes no entry and a pulled change can never turn it on.
+        private const string LaunchOptionsField = "launchOptions";
+
+        private static (string Name, string? Value)[] PortableOptions(BaseLlmOptions? options) =>
+            [("model", options?.Model), ("effort", options?.Effort), ("mode", options?.Mode), ("speed", options?.Speed)];
+
+        private static bool SamePortableOptions(BaseLlmOptions? before, BaseLlmOptions? after) =>
+            PortableOptions(before).Zip(PortableOptions(after)).All(pair => (pair.First.Value ?? "") == (pair.Second.Value ?? ""));
+
+        private static void WriteLaunchOptions(Utf8JsonWriter writer, BaseLlmOptions? options)
+        {
+            var values = PortableOptions(options).Where(option => !string.IsNullOrEmpty(option.Value)).ToArray();
+            if (values.Length == 0) { writer.WriteNullValue(); return; }
+            writer.WriteStartObject();
+            foreach (var (name, value) in values) writer.WriteString(name, value);
+            writer.WriteEndObject();
+        }
+
+        private static string Show(BaseLlmOptions? options) =>
+            PortableOptions(options).Where(option => !string.IsNullOrEmpty(option.Value)).Select(option => option.Value!).ToArray() is { Length: > 0 } values
+                ? string.Join(" · ", values) : "defaults";
 
         private static void WriteTags(Utf8JsonWriter writer, IReadOnlyList<string> tags)
         {

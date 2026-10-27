@@ -188,7 +188,7 @@ public sealed class BoardLaunchService(
         }
         else if ((!isReview || isWorker) && existingTab is not null)
             throw new BoardConflictException(isManager ? "A manager is already running on this card. Open it from Sessions."
-                : "A worker is already running on this card. Wait for its session to finish or open it from Sessions.");
+                : "A worker is already running on this card. Wait for its session to finish or open it from Sessions.", existingTab.SessionId);
         if (tabs.Count >= tabHost.MaxTabs)
             throw new BoardConflictException($"All {tabHost.MaxTabs} terminal tabs are in use. Close one first.");
 

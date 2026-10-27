@@ -3,6 +3,8 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging;
+using VibeRails.DTOs;
+using VibeRails.Services.LlmClis;
 using VibeRails.Services.Board.Tracker;
 using VibeRails.Services.Diagnostics;
 using VibeRails.Utils;
@@ -588,7 +590,7 @@ public sealed partial class BoardSyncService(
                 {
                     // The store checks for later local edits inside the same transaction as the
                     // write. The complete remote log entry survives even when no field changes.
-                    var patch = PatchFrom(entry.Changes, columns);
+                    var patch = await WithRemoteLaunchOptionsAsync(link.ProjectPath, entry.CardId, entry.Changes, PatchFrom(entry.Changes, columns), cancellationToken);
                     applied = await store.UpdateSyncedCardAsync(link.ProjectPath, entry.CardId, patch, author, stamp, cancellationToken) is not null;
                     break;
                 }
@@ -667,7 +669,7 @@ public sealed partial class BoardSyncService(
         // "context" is not a card field: it is the agent-context sample a launch records (VB-63,
         // BoardStore.ContextSamples.cs). The hosted contract stores unknown change fields verbatim
         // and never applies them, so the numbers reach viberails.ai without a server change.
-        foreach (var field in new[] { "displayId", "title", "description", "type", "priority", "points", "assignee", "tags", "blocked", "flagged", "lane", "deletedComment", BoardStore.ContextChangeField, BoardAttention.ChangeField, BoardCommentPurpose.ChangeField })
+        foreach (var field in new[] { "displayId", "title", "description", "type", "priority", "points", "assignee", BoardSyncWire.FieldLaunchOptions, "tags", "blocked", "flagged", "lane", "deletedComment", BoardStore.ContextChangeField, BoardAttention.ChangeField, BoardCommentPurpose.ChangeField })
         {
             if (source[field] is not JsonObject values) continue;
             var copy = new JsonObject();
@@ -680,12 +682,80 @@ public sealed partial class BoardSyncService(
                     var text = value.GetValue<string>();
                     copy[name] = BoardSelection.TryParse(text, out var selection) ? "base:" + selection!.Cli : null;
                 }
+                else if (field == BoardSyncWire.FieldLaunchOptions) copy[name] = PortableLaunchOptions(value);
                 else copy[name] = value?.DeepClone();
             }
             portable[field] = copy;
         }
         using var document = JsonDocument.Parse(portable.ToJsonString());
         return document.RootElement.Clone();
+    }
+
+    /// <summary>
+    /// Only the four portable settings, and only values the hosted contract accepts: an older local
+    /// value it would refuse is left out rather than failing the whole push. YOLO never leaves.
+    /// </summary>
+    private static JsonNode? PortableLaunchOptions(JsonNode? value)
+    {
+        if (value is not JsonObject source) return null;
+        var portable = new JsonObject();
+        foreach (var name in new[] { "model", "effort", "mode", "speed" })
+        {
+            if (source[name] is not JsonValue option || !option.TryGetValue<string>(out var text) || text.Length == 0) continue;
+            var accepted = name switch
+            {
+                "model" => BaseLlmOptionsBuilder.IsValidModelName(text),
+                "effort" => text is "none" or "minimal" or "low" or "medium" or "high" or "xhigh" or "max" or "ultra",
+                "mode" => text is "plan" or "interactive" or "autopilot" or "accept-edits" or "build",
+                _ => text is "fast" or "ultrafast"
+            };
+            if (accepted) portable[name] = text;
+        }
+        return portable.Count == 0 ? null : portable;
+    }
+
+    /// <summary>
+    /// Pulled launch settings (VIBE-104) become CLI arguments on this machine, so they are never
+    /// trusted as sent. Only model, effort, mode and speed are read; <see cref="BaseLlmOptionsBuilder.Normalize"/>
+    /// re-validates them for the card's base CLI; anything it refuses is dropped and the card keeps
+    /// its settings. Dropping is not skipping: sync and launches continue. YOLO is never read from
+    /// the server; <paramref name="keepYolo"/> carries this machine's own choice forward.
+    /// </summary>
+    private static (bool Apply, BaseLlmOptions? Options) RemoteLaunchOptions(string? assignee, JsonElement to, bool keepYolo)
+    {
+        if (!BoardSelection.TryParse(assignee, out var selection) || selection!.IsEnvironment)
+            return (to.ValueKind == JsonValueKind.Null, null); // Saved environments use their own settings.
+        if (to.ValueKind is not (JsonValueKind.Null or JsonValueKind.Object)) return (false, null);
+        string? Read(string name) => to.ValueKind == JsonValueKind.Object && to.TryGetProperty(name, out var value)
+            && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        try
+        {
+            return (true, BaseLlmOptionsBuilder.Normalize(selection.Llm,
+                new BaseLlmOptions(Read("model"), Read("effort"), Read("mode"), keepYolo, Read("speed"))));
+        }
+        catch (ArgumentException)
+        {
+            return (false, null);
+        }
+    }
+
+    /// <summary>
+    /// Adds a pulled change's launch settings to its patch, resolved against the card's resulting
+    /// assignee. A new assignee without settings starts from the CLI defaults, as a local change does.
+    /// </summary>
+    private async Task<BoardCardPatch> WithRemoteLaunchOptionsAsync(string project, string cardId, JsonElement? changes,
+        BoardCardPatch patch, CancellationToken cancellationToken)
+    {
+        var options = BoardSyncWire.FieldTo(changes, BoardSyncWire.FieldLaunchOptions);
+        if (options is null && !patch.ClearAssignee && patch.Assignee is null) return patch;
+        var card = await store.FindCardAsync(project, cardId, cancellationToken);
+        if (card is null) return patch; // The store reports the missing card.
+        var assignee = patch.ClearAssignee ? null : patch.Assignee ?? card.Assignee;
+        var sameAssignee = string.Equals(assignee, card.Assignee, StringComparison.Ordinal);
+        var resolved = options is { } to ? RemoteLaunchOptions(assignee, to, sameAssignee && card.BaseLlmOptions?.Yolo == true) : (Apply: false, Options: null);
+        if (resolved.Apply)
+            return patch with { BaseLlmOptions = resolved.Options, ClearBaseLlmOptions = resolved.Options is null };
+        return sameAssignee ? patch : patch with { ClearBaseLlmOptions = card.BaseLlmOptions is not null };
     }
 
     private static BoardAuthor ToAuthor(BoardSyncAuthorWire author)
@@ -712,7 +782,8 @@ public sealed partial class BoardSyncService(
         var tags = TagsFrom(changes) ?? [];
         var blocked = BoardSyncWire.FieldTo(changes, BoardSyncWire.FieldBlocked) is { ValueKind: JsonValueKind.True };
         var flagged = BoardSyncWire.FieldTo(changes, BoardSyncWire.FieldFlagged) is { ValueKind: JsonValueKind.True };
-        return new NewBoardCard(column.Id, title, description, assignee, priority, points, tags, blocked, null, type, boardId, flagged, DisplayId: TryString(changes, "displayId", value => BoardDisplayIds.Normalize(value!)));
+        var options = BoardSyncWire.FieldTo(changes, BoardSyncWire.FieldLaunchOptions) is { } to ? RemoteLaunchOptions(assignee, to, keepYolo: false).Options : null;
+        return new NewBoardCard(column.Id, title, description, assignee, priority, points, tags, blocked, options, type, boardId, flagged, DisplayId: TryString(changes, "displayId", value => BoardDisplayIds.Normalize(value!)));
     }
 
     /// <summary>

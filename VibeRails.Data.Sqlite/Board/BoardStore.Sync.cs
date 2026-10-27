@@ -689,7 +689,10 @@ public sealed partial class BoardStore
         Tags = locked.Contains("tags") ? null : patch.Tags,
         Blocked = locked.Contains("blocked") ? null : patch.Blocked,
         Flagged = locked.Contains("flagged") ? null : patch.Flagged,
-        ColumnId = locked.Contains("lane") ? null : patch.ColumnId
+        ColumnId = locked.Contains("lane") ? null : patch.ColumnId,
+        // Pulled settings were resolved for the remote assignee, so a protected assignee protects them too.
+        BaseLlmOptions = locked.Contains("launchOptions") || locked.Contains("assignee") ? null : patch.BaseLlmOptions,
+        ClearBaseLlmOptions = !locked.Contains("launchOptions") && !locked.Contains("assignee") && patch.ClearBaseLlmOptions
     };
 
     /// <summary>The trailing number of <c>PREFIX-RRRRR-n</c> or <c>PREFIX-n</c>; 0 when the key has none.</summary>

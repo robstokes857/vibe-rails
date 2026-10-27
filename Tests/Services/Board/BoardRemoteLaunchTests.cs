@@ -59,6 +59,17 @@ public sealed class BoardRemoteLaunchTests
         Assert.Equal("busy", (await Run()).Status);
     }
 
+    [Fact]
+    public async Task BusyNamesTheAgentAlreadyRunning()
+    {
+        Setup();
+        var running = Guid.NewGuid().ToString();
+        launch.Setup(x => x.LaunchAsync(Project, "card", null, Ct, "work"))
+            .ThrowsAsync(new BoardConflictException("A worker is already running", running));
+        var result = await Run();
+        Assert.Equal(("busy", running), (result.Status, result.SessionId));
+    }
+
     private Task<BoardLaunchResult> Run() => new BoardRemoteLaunchService(store.Object, client.Object, sync.Object, launch.Object)
         .LaunchAsync(Project, instance, new(Guid.NewGuid(), remote, "card", 12), Destination, Ct);
 

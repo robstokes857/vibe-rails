@@ -1,4 +1,5 @@
 using System.Text.Json;
+using VibeRails.DTOs;
 using VibeRails.Services.Board;
 using VibeRails.Services.Board.Sync;
 using VibeRails.Services.Diagnostics;
@@ -965,6 +966,70 @@ public sealed partial class BoardSyncServiceTests : IDisposable
         Assert.Equal("VB-ABCDE-99", imported.Key);
         Assert.Contains("\"future\":[1,2]", Assert.Single((await store.GetHistoryAsync(root, card.BoardId, imported.Id, 0, Ct))!).Changes);
         Assert.Equal(0, retried.Unsent);
+    }
+
+    [Fact]
+    public async Task LaunchSettingsPushWithoutYoloAndOnlyHostedValues()
+    {
+        await store.EnsureDefaultColumnsAsync(root, Ct);
+        var card = await store.CreateCardAsync(root, new(null, "Agent", "", "base:claude", "medium", null, [], false,
+            new BaseLlmOptions("claude-opus-5-5[1m]", "max", "plan", Yolo: true)), Ct);
+        await service.SetPublishedAsync(root, card.BoardId, true, Ct);
+        await service.SyncNowAsync(root, card.BoardId, Ct);
+        var created = client.Entries.Single(e => e.CardId == card.Id && e.Kind == "created");
+        Assert.Equal("""{"model":"claude-opus-5-5[1m]","effort":"max","mode":"plan"}""",
+            created.Changes!.Value.GetProperty("launchOptions").GetProperty("to").GetRawText());
+        Assert.DoesNotContain(client.Entries, e => e.Changes?.GetRawText().Contains("yolo", StringComparison.OrdinalIgnoreCase) == true);
+    }
+
+    [Fact]
+    public async Task PulledLaunchSettingsAreRevalidatedAndNeverTurnOnYolo()
+    {
+        await store.EnsureDefaultColumnsAsync(root, Ct);
+        var card = await store.CreateCardAsync(root, new(null, "Agent", "", "base:claude", "medium", null, [], false,
+            new BaseLlmOptions(Yolo: true)), Ct);
+        await service.SetPublishedAsync(root, card.BoardId, true, Ct);
+        await service.SyncNowAsync(root, card.BoardId, Ct);
+        async Task<BaseLlmOptions?> Pull(string changes)
+        {
+            client.Web(card, "change", "Changed", changes);
+            var status = await service.SyncNowAsync(root, card.BoardId, Ct);
+            Assert.Null(status!.LastError);
+            Assert.Empty(status.SkippedEntries ?? []); // Refused settings are dropped, never a stuck entry.
+            return (await store.FindCardAsync(root, card.Id, Ct))!.BaseLlmOptions;
+        }
+
+        // Web settings apply; this machine's own YOLO choice stays as it was.
+        Assert.Equal(new BaseLlmOptions("claude-opus-5-5[1m]", "max", "plan", Yolo: true, ""),
+            await Pull("""{"launchOptions":{"to":{"model":"claude-opus-5-5[1m]","effort":"max","mode":"plan"}}}"""));
+        // A value the desktop would not pass as an argument is refused; the card keeps its settings.
+        foreach (var refused in new[]
+        {
+            """{"launchOptions":{"to":{"model":"--dangerously-skip-permissions"}}}""",
+            """{"launchOptions":{"to":{"model":"opus; rm -rf ~"}}}""",
+            """{"launchOptions":{"to":{"effort":"ultra"}}}""",
+            """{"launchOptions":{"to":{"speed":"fast"}}}""",
+            """{"launchOptions":{"to":"gpt-6-astra"}}""",
+        })
+            Assert.Equal(new BaseLlmOptions("claude-opus-5-5[1m]", "max", "plan", Yolo: true, ""), await Pull(refused));
+        // Unknown keys such as yolo are never read.
+        Assert.Equal(new BaseLlmOptions("", "low", "", Yolo: true, ""),
+            await Pull("""{"launchOptions":{"to":{"effort":"low","yolo":false,"permissionMode":"bypass"}}}"""));
+
+        // A new assignee starts from its CLI defaults (and without the old YOLO), unless settings came with it.
+        Assert.Null(await Pull("""{"assignee":{"from":"base:claude","to":"base:codex"}}"""));
+        Assert.Equal(new BaseLlmOptions("gpt-6-luna", "max", "", Yolo: false, ""),
+            await Pull("""{"assignee":{"from":"base:codex","to":"base:copilot"},"launchOptions":{"to":{"model":"gpt-6-luna","effort":"max"}}}"""));
+        Assert.Equal(new BaseLlmOptions("gpt-6-luna", "max", "", Yolo: false, ""),
+            await Pull("""{"launchOptions":{"to":{"model":"gpt-6-luna","effort":"ultra","yolo":true}}}"""));
+        Assert.Null(await Pull("""{"launchOptions":{"to":null}}"""));
+
+        // A web-created card takes resolved settings for its own assignee, never YOLO.
+        client.Web(card, "created", "Created", $$$$"""{"title":{"to":"Remote"},"lane":{"to":"{{{{card.ColumnId}}}}"},"assignee":{"to":"base:codex"},"launchOptions":{"to":{"model":"gpt-6-luna","effort":"ultra","speed":"fast","yolo":true}}}""");
+        var entry = client.Entries[^1] with { CardId = "card_000000000097", CardKey = "VB-ABCDE-97" };
+        client.Entries[^1] = entry;
+        Assert.Null((await service.SyncNowAsync(root, card.BoardId, Ct))!.LastError);
+        Assert.Equal(new BaseLlmOptions("gpt-6-luna", "max", "", Yolo: false, "fast"), (await store.FindCardAsync(root, entry.CardId, Ct))!.BaseLlmOptions);
     }
 
     [Fact]
