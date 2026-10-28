@@ -159,6 +159,13 @@ public class CommandService : ICommandService
         var proxySettings = _llmProxySettings.GetSettings();
         var useCodexProxy = await ShouldUseCodexProxyAsync(llm, envName, extraArgs, proxySettings);
         var launchArgs = BuildLaunchArgs(extraArgs, proxySettings, useCodexProxy, sessionId);
+        if (llm == LLM.Codex)
+        {
+            // Trust our MCP server for app-managed sessions, including first-run installs.
+            // Keep this launch-local and before custom args so explicit CLI overrides win;
+            // Codex also preserves per-tool overrides over this server default.
+            launchArgs = ["--config", $"mcp_servers.{VibeRailsMcpServerName}.default_tools_approval_mode=\"approve\"", .. launchArgs];
+        }
         if (llm == LLM.Codex && !string.IsNullOrEmpty(envName))
             launchArgs = await SkipMissingCodexDesktopBridgeAsync(envName, launchArgs);
         if (llm == LLM.Codex && !string.IsNullOrWhiteSpace(sessionId))

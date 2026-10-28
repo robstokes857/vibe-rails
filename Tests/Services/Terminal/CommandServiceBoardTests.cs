@@ -12,20 +12,21 @@ public partial class CommandServiceTests
     [InlineData("saved-board-env", false)]
     [InlineData(null, true)]
     [InlineData("saved-board-env", true)]
-    public async Task BoardLaunch_CodexGrantsOnlyBoardToolsInLaunchArguments(string? environmentName, bool proxyEnabled)
+    public async Task BoardLaunch_CodexAddsExplicitBoardGrantsAlongsideServerDefault(string? environmentName, bool proxyEnabled)
     {
         var service = CreateService(codexLlmProxyEnabled: proxyEnabled);
         var prepared = await service.PrepareSessionAsync(LLM.Codex, environmentName,
             ["--config", "approval_policy=\"on-request\"", "--config", "sandbox_mode=\"workspace-write\""],
             initialPrompt: "Read VB-7", sessionId: "board-session", authorizeBoardTools: true);
 
-        var grants = prepared.Argv!.Where(argument => argument.Contains("approval_mode=")).ToArray();
+        var grants = prepared.Argv!.Where(argument => argument.Contains(".approval_mode=")).ToArray();
         Assert.Equal(BoardMcpAuthorization.ToolNames.Select(tool =>
             $"mcp_servers.viberails-mcp.tools.{tool}.approval_mode=\"approve\""), grants);
         Assert.Contains("mcp_servers.viberails-mcp.tools.get_board_card.approval_mode=\"approve\"", grants);
         Assert.Contains("mcp_servers.viberails-mcp.tools.update_board_card.approval_mode=\"approve\"", grants);
         Assert.Contains("mcp_servers.viberails-mcp.tools.list_boards.approval_mode=\"approve\"", grants);
-        Assert.DoesNotContain(prepared.Argv!, arg => arg.Contains("default_tools_approval_mode") || arg.Contains('*'));
+        Assert.Contains("mcp_servers.viberails-mcp.default_tools_approval_mode=\"approve\"", prepared.Argv!);
+        Assert.DoesNotContain(prepared.Argv!, arg => arg.Contains('*'));
         // The launch keeps its existing approval policy and sandbox settings.
         Assert.DoesNotContain(prepared.Argv!, arg => arg.StartsWith("approval_policy=\"never\"") || arg.Contains("mcp_servers.") && !arg.Contains("mcp_servers.viberails-mcp."));
         Assert.Contains("approval_policy=\"on-request\"", prepared.Argv!);

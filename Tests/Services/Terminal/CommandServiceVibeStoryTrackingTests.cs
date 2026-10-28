@@ -251,13 +251,13 @@ public partial class CommandServiceTests
             var enabled = await service.PrepareSessionAsync(LLM.Codex, null, null);
             Assert.Contains("create_board_card", enabled.Argv![^1]);
             var customDisabled = await service.PrepareSessionAsync(LLM.Codex, "saved-tracking-env", null);
-            Assert.Empty(customDisabled.Argv!);
+            Assert.Equal(new[] { "--config", VibeRailsMcpApproval }, customDisabled.Argv);
 
             // A separate root saves the setting after this service has already launched a CLI.
             using var otherRoot = new SettingsFile(Path.Combine(directory, "settings.json"));
             otherRoot.Save(new Settings { CreateVibeStoryTracking = false, CreateVibeStoryTrackingCustomEnvs = true });
             var disabled = await service.PrepareSessionAsync(LLM.Codex, null, null);
-            Assert.Empty(disabled.Argv!);
+            Assert.Equal(new[] { "--config", VibeRailsMcpApproval }, disabled.Argv);
             Assert.DoesNotContain("create_board_card", disabled.LaunchCommand);
             var customEnabled = await service.PrepareSessionAsync(LLM.Codex, "saved-tracking-env", null);
             Assert.Contains("create_board_card", customEnabled.Argv![^1]);

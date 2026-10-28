@@ -619,8 +619,9 @@ relayed. See [Request review from a card](#request-review-from-a-card-and-reques
 
 Board Start work and Board-triggered Workers use the exact per-tool grants in
 [BoardMcpAuthorization](VibeRails/Services/Terminal/Commands/BoardMcpAuthorization.cs).
-Other launches default off; card text/environment names cannot grant tools. No server wildcard,
-unrelated tool, shared-config permission change or sandbox bypass comes from this grant path.
+These explicit Board grants default off on other launches; card text/environment names cannot
+grant tools. No server wildcard, unrelated tool, shared-config permission change or sandbox bypass
+comes from this grant path.
 Native policy/deny rules still apply; Antigravity has prompt-only authorization because a narrow
 native grant is unverified. The explicit, default-off base-CLI YOLO option is a separate user
 choice; saved environments retain their own arguments. Resolve environments by ID and project
@@ -629,6 +630,16 @@ visibility, with no name fallback. Launch options use argv and `ShellArgSanitize
 root-to-tab-child request carries the server's decision in a private header. CLI contacts
 cannot call that child start route. Positional Claude/Codex/Grok prompts follow `--`; CLIs
 with named prompt options reject initial messages whose first non-whitespace character is `-`.
+
+VIBE-237 separately sets `mcp_servers.viberails-mcp.default_tools_approval_mode="approve"`
+for every app-managed Codex launch, including base terminals and saved environments. This is a
+session-only default for all tools on VibeRails' own MCP server, including non-Board tools;
+it does not extend the exact Board allowlist or alter other providers' grants. Codex per-tool
+overrides and disabled tools still apply, and explicit custom CLI arguments can override the
+server default. No permission is persisted, no other MCP server is approved, and neither the
+global approval policy nor sandbox mode changes. Tool-side authentication, scope checks and
+requirements for explicit user instructions still apply. See the
+[Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
 
 Board MCP assignment parity (2026-10-10): create/update accept the UI's typed base launch
 options. `list_board_agent_options` and `start_board_agent` use inherited root tool API

@@ -38,9 +38,8 @@ public partial class CommandServiceTests
 
         var prepared = await service.PrepareSessionAsync(LLM.Codex, "worker", ["--", "original prompt"]);
 
-        Assert.Equal("--config", prepared.Argv![0]);
-        Assert.Equal(DisableNodeRepl, prepared.Argv[1]);
-        Assert.Equal(new[] { "--", "original prompt" }, prepared.Argv.Skip(2));
+        Assert.Equal(new[] { "--config", DisableNodeRepl, "--config", VibeRailsMcpApproval,
+            "--", "original prompt" }, prepared.Argv);
         Assert.Contains(DisableNodeRepl, prepared.LaunchCommand);
         Assert.EndsWith(prepared.LaunchCommand, prepared.Command);
         Assert.StartsWith("codex mcp add viberails-mcp -- ", Assert.Single(prepared.SetupCommands));
@@ -104,7 +103,7 @@ public partial class CommandServiceTests
         var prepared = await CreateDesktopMcpService(DesktopMcpConfig())
             .PrepareSessionAsync(LLM.Codex, "worker", args);
 
-        Assert.Equal(args, prepared.Argv);
+        Assert.Equal(new[] { "--config", VibeRailsMcpApproval }.Concat(args), prepared.Argv);
     }
 
     [Fact]
@@ -119,7 +118,8 @@ public partial class CommandServiceTests
 
         var prepared = await service.PrepareSessionAsync(LLM.Codex, "worker", null);
 
-        Assert.Equal("codex", prepared.LaunchCommand);
+        Assert.Equal("codex", prepared.Executable);
+        Assert.Equal(new[] { "--config", VibeRailsMcpApproval }, prepared.Argv);
     }
 
     private static CommandService CreateDesktopMcpService(

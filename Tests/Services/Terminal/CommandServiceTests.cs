@@ -214,7 +214,8 @@ public partial class CommandServiceTests : IDisposable
 
         var prepared = await service.PrepareSessionAsync(LLM.Codex, envName: null, extraArgs: null);
 
-        Assert.Equal("codex", prepared.LaunchCommand);
+        Assert.Equal("codex", prepared.Executable);
+        Assert.Equal(new[] { "--config", VibeRailsMcpApproval }, prepared.Argv);
         Assert.DoesNotContain(LlmProxyCodexConfig.OpenAiProviderName, prepared.Command);
         Assert.DoesNotContain("llm/openai", prepared.Command);
     }

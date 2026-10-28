@@ -210,7 +210,12 @@ argv-only prompts and the existing narrow tool grants.
 The OpenCode helper preserves unrelated inherited rules and proxy configuration, and
 conservatively skips grants covered by inherited `OPENCODE_PERMISSION` deny rules. Native
 configuration precedence still applies. Selected modes and managed provider
-policies can still restrict calls. These narrow Board-tool grants remain the default. A separate,
+policies can still restrict calls. Independently of the Board marker, every app-managed Codex
+launch receives `--config mcp_servers.viberails-mcp.default_tools_approval_mode="approve"`
+(VIBE-237), so fresh installs approve VibeRails MCP calls in ordinary terminals too. The default
+is prepended before custom arguments and applies to all tools on that server; explicit CLI
+defaults, per-tool policies and disabled tools still take precedence. It is session-local and
+does not change other MCP servers, global approvals, sandbox settings or config files. A separate,
 default-off card YOLO checkbox explicitly selects the base provider's global bypass/auto-approve
 launch flag; saved environments keep their own arguments. Neither path is a granular permission
 editor or physical CLI configuration write. Validation used help, documentation and regression

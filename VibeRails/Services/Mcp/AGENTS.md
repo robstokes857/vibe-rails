@@ -321,13 +321,19 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
 - **Board launch authorization (2026-09-14)**: Start work sets the typed, false-by-default
   `AuthorizeBoardTools` marker for that session and explicitly authorizes the Board workflow in
   the prompt for every provider. `Terminal/Commands/BoardMcpAuthorization.cs` grants only the
-  28 Board tools for that session through an explicit `ToolNames` allowlist. No server
-  wildcard or unrelated MCP tool is authorized. Tests pin both the reviewed allowlist and exact
+  Board tools for that session through an explicit `ToolNames` allowlist. This grant path adds no
+  server wildcard or unrelated MCP tool. Tests pin both the reviewed allowlist and exact
   provider grants.
   Antigravity receives only the narrow authorization prompt because its native switch is a global
   bypass. See
   [Terminal launch authorization](../Terminal/AGENTS.md#board-launch-options-and-input-sequences-2026-09-14).
-  The exact Board grants remain the default. The card's separate, default-off YOLO checkbox can
+  Separately, VIBE-237 gives every app-managed Codex launch (base or saved environment) the
+  session-local `mcp_servers.viberails-mcp.default_tools_approval_mode="approve"` default for
+  all VibeRails MCP tools. Per-tool overrides and disabled tools still apply, and explicit
+  custom CLI arguments can override this default. Other servers, global approvals, sandbox
+  settings and on-disk permissions are unchanged. See the
+  [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
+  The card's separate, default-off YOLO checkbox can
   explicitly add the selected base provider's global bypass/auto-approve launch flag; saved
   environments keep their own arguments. Neither path rewrites physical CLI config, and selected
   provider modes or managed policies can still restrict calls. Validation used CLI help,
