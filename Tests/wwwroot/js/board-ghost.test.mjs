@@ -16,17 +16,28 @@ function controller() {
     return instance;
 }
 
-test('saved cards always show editable identity, the recheck button and maker together', () => {
+test('saved cards keep their identity and maker but hide recheck without a ghost', () => {
     assert.equal(cardIdentityHtml(null), '');
     const html = cardIdentityHtml(card({ agentMade: true, agentMadeBy: 'Codex', key: 'VB-NW72V-297', displayId: 'VIBE-225' }));
     assert.match(html, /id="board-card-display-id"[^>]*value="VIBE-225"/);
     assert.match(html, /Permanent ID: <code>VB-NW72V-297<\/code>/);
-    assert.match(html, /data-board-recheck-ghost/);
-    assert.match(html, /fa-ghost.*fa-ban/);
+    assert.match(html, /data-board-recheck-ghost hidden/);
     assert.match(html, /Made by <strong>Codex<\/strong>/);
     const human = cardIdentityHtml(card());
-    assert.match(human, /data-board-recheck-ghost/);
+    assert.match(human, /data-board-recheck-ghost hidden/);
     assert.doesNotMatch(human, /data-board-agent-provenance/);
+});
+
+test('recheck is visible only for ghost cards and uses a single refresh icon', () => {
+    for (const ghostReason of [undefined, null, '']) {
+        assert.match(cardIdentityHtml(card({ ghostReason })), /data-board-recheck-ghost hidden/);
+    }
+    for (const ghostReason of ['no-code', 'not-landed']) {
+        const html = cardIdentityHtml(card({ ghostReason }));
+        assert.match(html, /data-board-recheck-ghost title=/);
+        assert.match(html, /fa-rotate-right/);
+        assert.doesNotMatch(html, /fa-ban|board-ghost-buster/);
+    }
 });
 
 test('the ghost filter matches both reasons and excludes unmarked cards', () => {

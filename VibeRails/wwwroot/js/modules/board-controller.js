@@ -2648,13 +2648,16 @@ export class BoardController {
                 else delete editor._boardFormBaseline.clearGhost;
             }
         }
+        const summary = ghostSummary(card);
+        const button = editor.querySelector('[data-board-recheck-ghost]');
+        if (button) button.hidden = !summary;
         const status = editor.querySelector('[data-board-ghost-status]');
-        if (status) status.textContent = ghostSummary(card);
+        if (status) status.textContent = summary;
     }
 
     async recheckCardGhost(editor) {
         const button = editor.querySelector('[data-board-recheck-ghost]');
-        if (!button || button.disabled) return;
+        if (!button || button.hidden || button.disabled) return;
         const status = editor.querySelector('[data-board-ghost-status]');
         button.disabled = true;
         if (status) status.textContent = 'Checking code landing…';

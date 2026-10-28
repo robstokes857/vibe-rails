@@ -10,18 +10,19 @@ import { agentProvenanceHtml } from './board-agent-provenance.js';
 /** Saved identity stays visible above the card's sidebar fields. */
 export function cardIdentityHtml(card) {
     if (!card?.id) return '';
+    const summary = ghostSummary(card);
     return `<section class="board-card-identity" aria-label="Card identity and code status">
         <label class="board-editor-label" for="board-card-display-id">Display ID</label>
         <input class="form-control form-control-sm" id="board-card-display-id" maxlength="32" spellcheck="false" value="${escapeHtml(cardDisplayId(card))}">
         <p class="board-editor-muted board-permanent-id">Permanent ID: <code>${escapeHtml(card.key)}</code></p>
         <div class="board-card-identity-actions">
-            <button type="button" class="board-ghost-recheck" data-board-recheck-ghost title="Recheck this card's code landing" aria-label="Recheck this card's code landing">
-                <span class="board-ghost-buster" aria-hidden="true"><i class="fa-solid fa-ghost"></i><i class="fa-solid fa-ban"></i></span>
+            ${agentProvenanceHtml(card)}
+            <button type="button" class="btn btn-sm btn-outline-secondary board-ghost-recheck" data-board-recheck-ghost${summary ? '' : ' hidden'} title="Recheck this card's code landing" aria-label="Recheck this card's code landing">
+                <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
                 <span>Recheck code</span>
             </button>
-            ${agentProvenanceHtml(card)}
         </div>
-        <p class="board-editor-muted board-ghost-status" data-board-ghost-status role="status">${escapeHtml(ghostSummary(card))}</p>
+        <p class="board-editor-muted board-ghost-status" data-board-ghost-status role="status">${escapeHtml(summary)}</p>
     </section>`;
 }
 

@@ -4201,15 +4201,12 @@
                     border-bottom: 1px solid var(--border-color, #3b3b3b);
                 }
                 .board-permanent-id { margin: 0.45rem 0 0.75rem; overflow-wrap: anywhere; }
-                .board-card-identity-actions { display: flex; align-items: flex-start; gap: 0.75rem; flex-wrap: wrap; }
+                .board-card-identity-actions { display: flex; flex-direction: column; align-items: flex-start; gap: 0.6rem; }
                 .board-card-identity-actions .board-agent-provenance { min-width: 0; overflow-wrap: anywhere; }
-                .board-ghost-recheck { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0.55rem; color: inherit; background: transparent; border: 1px solid #657082; border-radius: 0.4rem; font-size: 0.8rem; }
-                .board-ghost-recheck:hover { background: #ffffff10; }
+                .board-ghost-recheck { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.75rem; }
+                .board-ghost-recheck[hidden] { display: none; }
                 .board-ghost-recheck:focus-visible { outline: 2px solid #47c9df; outline-offset: 2px; }
-                .board-ghost-recheck:disabled { opacity: 0.6; cursor: wait; }
-                .board-ghost-buster { position: relative; display: inline-grid; place-items: center; width: 1.5rem; height: 1.5rem; }
-                .board-ghost-buster .fa-ghost { font-size: 1rem; }
-                .board-ghost-buster .fa-ban { position: absolute; inset: 0; color: #f15c64; font-size: 1.5rem; }
+                .board-ghost-recheck:disabled { cursor: wait; }
                 .board-ghost-status { margin: 0.6rem 0 0; }
                 .board-ghost-status:empty { display: none; }
 

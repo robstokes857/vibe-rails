@@ -59,7 +59,7 @@ for (const width of [1440, 390]) {
         let stored;
         const requests = await openBoard(page, { onCard: card => {
             stored = card;
-            Object.assign(card, { displayId: 'VIBE-225', key: 'VB-NW72V-297', ghostReason: 'no-code',
+            Object.assign(card, { displayId: 'VIBE-225', key: 'VB-NW72V-297', ghostReason: null,
                 agentMade: true, agentMadeBy: 'Claude Opus 5.5' });
         } });
         let checks = 0;
@@ -74,11 +74,19 @@ for (const width of [1440, 390]) {
         await expect(identity.getByText('Permanent ID: VB-NW72V-297')).toBeVisible();
         await expect(identity.getByText('Made by Claude Opus 5.5')).toBeVisible();
         await expect(identity.locator('#board-card-display-id')).toHaveValue('VIBE-225');
+        const recheck = identity.locator('[data-board-recheck-ghost]');
+        await expect(recheck).toBeHidden();
         expect(checks).toBe(0);
         await editor.locator('#board-card-title').fill('Keep this unsaved title');
         await identity.locator('#board-card-display-id').fill('CUSTOM-225');
-        await identity.getByRole('button', { name: "Recheck this card's code landing" }).click();
+        stored.ghostReason = 'no-code';
+        await page.evaluate(() => window.app.boardController.refreshSessionActivity());
+        await expect(recheck).toBeVisible();
+        await expect(recheck).toHaveAccessibleName("Recheck this card's code landing");
+        await identity.screenshot({ path: testInfo.outputPath(`card-identity-ghost-${width}.png`) });
+        await recheck.click();
         await expect(identity.locator('[role=status]')).toHaveText('No ghost: code has landed.');
+        await expect(recheck).toBeHidden();
         await expect(editor.locator('#board-card-title')).toHaveValue('Keep this unsaved title');
         await expect(identity.locator('#board-card-display-id')).toHaveValue('CUSTOM-225');
         expect(checks).toBe(1);

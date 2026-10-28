@@ -241,8 +241,9 @@ Unavailable verification finishes the initial pass without a new marker and pres
 during an explicit check. Existing transient Git failures retain their bounded initial retries;
 missing GitHub access never schedules PR polling. No automatic fetch is added.
 
-The tile animates the ghost. The editor's sidebar starts with Display ID, permanent ID, a
-Ghostbusters-style **Recheck code** button and maker/session provenance. The button and
+The tile animates the ghost. The editor's sidebar starts with Display ID, permanent ID and
+maker/session provenance. A compact **Recheck code** button with a refresh icon appears only
+while the card has a ghost, and hides when a refresh clears it. The button and
 `recheck_board_ghost` call `BoardGhostService` for exactly one card. Commit/PR link writes recheck
 only affected cards already carrying a ghost, after the link transaction; commit fan-out carries
 the exact affected IDs from that transaction. A failed follow-up cannot undo or report failure

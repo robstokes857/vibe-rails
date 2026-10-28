@@ -207,9 +207,10 @@ resolved on the server: fields, lane, comments and links can be edited without c
 repository. It never sends a project path or invokes that repository's launch/file/session APIs.
 Both editors preserve drafts during discussion/link activity and send only edited card fields.
 
-The saved card's sidebar begins with Display ID, permanent ID, **Recheck code** (a ghost with a
-red prohibition circle), and the agent-maker/session block. Identity is no longer tucked inside
-Advanced. Recheck calls only that card's authenticated POST `/ghost/recheck`, then refreshes its
+The saved card's sidebar begins with Display ID, permanent ID and the agent-maker/session block.
+A compact outline **Recheck code** button with a refresh icon appears on its own line only while
+the card has a ghost; refreshing the annotation also updates its visibility. Identity is no longer
+tucked inside Advanced. Recheck calls only that card's authenticated POST `/ghost/recheck`, then refreshes its
 annotation without saving form drafts; stale/unavailable results remain explicit. Link changes
 refresh the same annotation. Advanced retains manual Ghost dismissal. Neither opening the editor
 nor ordinary UI polling runs a landing check. The ghost filter uses `ghost=true|false` across
