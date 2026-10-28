@@ -1,16 +1,40 @@
 param(
     [string]$GithubRepo = "robstokes857/vibe-rails",
-    [string]$Ref = "main",
+    # The commit that last changed VibeRails/Models/BertV2. Update it together with the
+    # hashes below; ReleaseSupplyChainTests checks the hashes against the checked-in files.
+    [string]$Ref = "d0422f76545206eb9181dd546ff20d0b2ebd669c",
     [switch]$Force
 )
 
 # Downloads and extracts the BertV2 model assets used by semantic search.
+# Manual fallback only: release packages bundle these files.
 $ErrorActionPreference = "Stop"
 
 $modelsDir = Join-Path $HOME ".vibe_rails\models\bertv2"
 $modelPath = Join-Path $modelsDir "model.onnx"
 $vocabPath = Join-Path $modelsDir "vocab.txt"
 $baseUrl = "https://raw.githubusercontent.com/$GithubRepo/$Ref/VibeRails/Models/BertV2"
+
+# SHA-256 of the git blobs (vocab.txt is LF in the blob even where a checkout uses CRLF).
+$expectedSha256 = @{
+    "vocab.txt"      = "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3"
+    "model.onnx.zip" = "bf820f09f11cff84a7995f158acf279e6803791e15c5de4439318fd133fbc476"
+}
+
+function Assert-DownloadHash {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
+    if ($actual -ne $expectedSha256[$Name]) {
+        throw "SHA-256 mismatch for $Name from ${baseUrl}: expected $($expectedSha256[$Name]), got $actual. Nothing was installed from it."
+    }
+}
 
 if (-not (Test-Path $modelsDir)) {
     New-Item -ItemType Directory -Path $modelsDir -Force | Out-Null
@@ -36,6 +60,7 @@ try {
         $vocabDownloadPath = Join-Path $tempDir "vocab.txt"
         Write-Host "Downloading BertV2 vocab..."
         Invoke-WebRequest -Uri "$baseUrl/vocab.txt" -OutFile $vocabDownloadPath -UseBasicParsing
+        Assert-DownloadHash -Path $vocabDownloadPath -Name "vocab.txt"
         Copy-Item -Path $vocabDownloadPath -Destination $vocabPath -Force
         Write-Host "  -> $vocabPath"
     } else {
@@ -49,6 +74,7 @@ try {
 
         Write-Host "Downloading BertV2 model archive..."
         Invoke-WebRequest -Uri "$baseUrl/model.onnx.zip" -OutFile $zipPath -UseBasicParsing
+        Assert-DownloadHash -Path $zipPath -Name "model.onnx.zip"
 
         Write-Host "Extracting BertV2 model..."
         Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force

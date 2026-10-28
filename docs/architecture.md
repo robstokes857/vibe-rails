@@ -1593,6 +1593,22 @@ An Ubuntu 26 build remains a separate, deliberate decision about newer tools and
 minimum supported user environment. Revisit the runner/image pins only with that decision;
 update the measured baseline and verification ceiling together if the floor is raised.
 
+### Release supply chain
+
+Every workflow action is pinned to a commit SHA with a version comment. The release token
+is read-only except in the `upload` job. Signing (`build`) and Marketplace publishing
+(`publish_extension`) run in the `release-signing` and `vscode-marketplace` environments,
+which the owner can gate with reviewers and environment-scoped secrets.
+`Tests/Deployment/ReleaseSupplyChainTests.cs` enforces the pins and the write scope.
+
+A release carries a `.sha256` for every archive, the Windows Setup EXE and each VSIX, plus `install.ps1` and
+`install.sh` with that release's tag stamped into `$ReleaseTag` / `RELEASE_TAG`. A stamped
+installer installs exactly its own release. The copies on `main` keep the tag empty and
+install the latest release. `install.ps1` requires a valid Authenticode signature on `vb.exe`
+from the VibeRails publisher (`Assert-PublisherSignature`). The Windows build runs that same
+function on the binary it has just signed, so a change of signing identity fails the release
+rather than users' installs.
+
 ### Cross-Platform Builds
 ```powershell
 # Windows (local AOT) + Linux (AOT via Docker) — single script handles both

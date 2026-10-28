@@ -7,16 +7,27 @@ GitHub URLs at install time (see `README.md`). They are **not** bundled into the
 app build output — `deploy/prepare-binaries.ps1` copies the lowercase
 `VibeRails/scripts/` directory (git hook scripts), not this `Scripts/` directory.
 
-After modifying an install script here, there are no in-repo copies to sync.
-Note that both scripts also install the bundled BertV2 model assets
+`release.yml` also publishes both scripts as release assets, stamping the release's tag
+into the single empty `$ReleaseTag = ""` / `RELEASE_TAG=""` line. Keep that line as it is;
+the stamp step fails the release if it cannot find it. The stamped copy installs exactly
+its own release, and the copy on `main` installs the latest.
+`Assert-PublisherSignature` in `install.ps1` is self-contained on purpose: release.yml
+extracts it from the file and runs it on the freshly signed `vb.exe`.
+
+After modifying an install script here, there are no in-repo copies to sync. The
+viberails.ai repository (VibeRails-Front) keeps its own copies under
+`wwwroot/assets/install-scripts/`. Note that both scripts also install the bundled BertV2 model assets
 (`Models/BertV2/`) into `~/.vibe_rails/models/bertv2/` — keep that step in sync
 across `install.ps1` and `install.sh` when changing model handling.
 
 ## Other scripts
 
 - `deploy.ps1` — thin wrapper that forwards to `deploy/deploy.ps1`.
-- `download-bert-model.ps1` / `download-bert-model.sh` — dev-only helpers to
-  fetch the BertV2 ONNX model + vocab for local development.
+- `download-bert-model.ps1` / `download-bert-model.sh` — manual fallback helpers to
+  fetch the BertV2 ONNX model + vocab (release packages already bundle them). They pin the
+  commit that last changed `VibeRails/Models/BertV2` and verify SHA-256 hashes of the git
+  blobs. Update the ref and the hashes together when the model changes;
+  `ReleaseSupplyChainTests` compares the hashes with the checked-in files.
 - `test-vscode-extension-smoke.ps1` — smoke test for the VS Code extension.
 
 ---

@@ -7,6 +7,36 @@ $ErrorActionPreference = "Stop"
 $GithubRepo = "robstokes857/vibe-rails"
 $InstallDir = Join-Path $env:USERPROFILE ".vibe_rails"
 $AssetName = "vb-win-x64.zip"
+# Empty on main: install the latest release. The install.ps1 published with each release
+# has its own tag stamped here by release.yml, so it installs exactly that release.
+$ReleaseTag = ""
+
+function Assert-PublisherSignature {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Executable
+    )
+
+    # The .sha256 comes from the same release as the archive, so it proves only an intact
+    # download. The Authenticode signature (Azure Trusted Signing in release.yml) proves the
+    # publisher. release.yml runs this same function on the binary it just signed.
+    $expectedSigner = "Robert Stokes"
+    $expectedIssuerPrefix = "Microsoft ID Verified CS "
+
+    $signature = Get-AuthenticodeSignature -LiteralPath $Executable
+    if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
+        throw "vb.exe in the release package does not have a valid signature (status: $($signature.Status)). The existing installation was not changed."
+    }
+
+    $certificate = $signature.SignerCertificate
+    $subject = @($certificate.SubjectName.Format($true) -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $issuerName = $certificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $true)
+    $isExpectedSubject = ($subject -ccontains "CN=$expectedSigner") -and ($subject -ccontains "O=$expectedSigner")
+    $isExpectedIssuer = $issuerName.StartsWith($expectedIssuerPrefix, [StringComparison]::Ordinal)
+    if (-not ($isExpectedSubject -and $isExpectedIssuer)) {
+        throw "vb.exe in the release package is signed by '$($certificate.Subject)' (issuer '$($certificate.Issuer)'), not the VibeRails publisher. The existing installation was not changed."
+    }
+}
 
 function Assert-ReleasePayload {
     param(
@@ -227,9 +257,14 @@ Write-Host @"
 
 "@ -ForegroundColor Magenta
 
-# Get latest release info
-Write-Host "Fetching latest release..." -ForegroundColor Cyan
-$releaseUrl = "https://api.github.com/repos/$GithubRepo/releases/latest"
+# Get release info
+if ($ReleaseTag) {
+    Write-Host "Fetching release $ReleaseTag..." -ForegroundColor Cyan
+    $releaseUrl = "https://api.github.com/repos/$GithubRepo/releases/tags/$ReleaseTag"
+} else {
+    Write-Host "Fetching latest release..." -ForegroundColor Cyan
+    $releaseUrl = "https://api.github.com/repos/$GithubRepo/releases/latest"
+}
 
 try {
     $release = Invoke-RestMethod -Uri $releaseUrl -Headers @{ "User-Agent" = "VibeRails-Installer" }
@@ -240,7 +275,7 @@ try {
 }
 
 $version = $release.tag_name
-Write-Host "Latest version: $version" -ForegroundColor Green
+Write-Host "Version: $version" -ForegroundColor Green
 
 # Find download URLs
 $zipAsset = $release.assets | Where-Object { $_.name -eq $AssetName }
@@ -293,8 +328,9 @@ try {
     Write-Host "Extracting release into private staging..." -ForegroundColor Cyan
     Expand-Archive -Path $zipPath -DestinationPath $payloadDir -Force
     Assert-ReleasePayload -RootDir $payloadDir
+    Assert-PublisherSignature -Executable (Join-Path $payloadDir "vb.exe")
     Assert-StableInstallTarget -Path $InstallDir
-    Write-Host "Release payload validated." -ForegroundColor Green
+    Write-Host "Release payload and publisher signature validated." -ForegroundColor Green
 
     $existingExecutable = Join-Path $InstallDir "vb.exe"
     Assert-StableInstallTarget -Path $InstallDir

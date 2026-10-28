@@ -8,6 +8,9 @@ set -euo pipefail
 
 GITHUB_REPO="robstokes857/vibe-rails"
 INSTALL_DIR="$HOME/.vibe_rails"
+# Empty on main: install the latest release. The install.sh published with each release
+# has its own tag stamped here by release.yml, so it installs exactly that release.
+RELEASE_TAG=""
 
 install_bertv2_assets() {
     local root_dir="$1"
@@ -292,9 +295,14 @@ if ! command -v curl &> /dev/null && ! command -v wget &> /dev/null; then
     exit 1
 fi
 
-# Get latest release info
-echo -e "${CYAN}Fetching latest release...${NC}"
-RELEASE_URL="https://api.github.com/repos/$GITHUB_REPO/releases/latest"
+# Get release info
+if [ -n "$RELEASE_TAG" ]; then
+    echo -e "${CYAN}Fetching release $RELEASE_TAG...${NC}"
+    RELEASE_URL="https://api.github.com/repos/$GITHUB_REPO/releases/tags/$RELEASE_TAG"
+else
+    echo -e "${CYAN}Fetching latest release...${NC}"
+    RELEASE_URL="https://api.github.com/repos/$GITHUB_REPO/releases/latest"
+fi
 
 RELEASE_JSON=$(fetch_text "$RELEASE_URL") || {
     echo -e "${RED}Error: Could not fetch release info. Check your internet connection.${NC}"
@@ -302,7 +310,7 @@ RELEASE_JSON=$(fetch_text "$RELEASE_URL") || {
 }
 
 VERSION=$(echo "$RELEASE_JSON" | grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4)
-echo -e "${GREEN}Latest version: $VERSION${NC}"
+echo -e "${GREEN}Version: $VERSION${NC}"
 
 # Extract download URLs
 TAR_URL=$(echo "$RELEASE_JSON" | grep -o "\"browser_download_url\": *\"[^\"]*$ASSET_NAME\"" | cut -d'"' -f4)
@@ -385,11 +393,12 @@ install_bertv2_assets "$INSTALL_DIR"
 chmod +x "$INSTALL_DIR/vb"
 
 # Add to PATH in shell rc files. Pass "create" as the second argument to create
-# the rc file when it does not exist yet.
+# the rc file when it does not exist yet. Append, as install.ps1 does: ~/.vibe_rails is
+# user-writable application data, so it must never shadow system commands.
 add_to_path() {
     local rc_file="$1"
     local create="${2:-}"
-    local export_line='export PATH="$HOME/.vibe_rails:$PATH"'
+    local export_line='export PATH="$PATH:$HOME/.vibe_rails"'
 
     if [ ! -f "$rc_file" ] && [ "$create" = "create" ]; then
         touch "$rc_file"

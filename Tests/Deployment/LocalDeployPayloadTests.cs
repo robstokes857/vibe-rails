@@ -14,22 +14,52 @@ public sealed class LocalDeployPayloadTests
     [InlineData("WindowsRuntimePayloadTests.ps1", "No installation was run")]
     public async Task DeploymentPayloadRegression_Passes(string scriptName, string expectedMessage)
     {
-        var cancellationToken = TestContext.Current.CancellationToken;
-        var script = Path.Combine(FindRepositoryRoot(), "Tests", "Deployment", scriptName);
-        Assert.True(File.Exists(script), $"Missing {script}");
-
         var pwsh = FindOnPath(OperatingSystem.IsWindows() ? "pwsh.exe" : "pwsh");
         // A visible skip, not a silent pass: CI runners ship PowerShell 7, so the guard runs there.
         Assert.SkipWhen(pwsh is null, "PowerShell 7 (pwsh) is not on PATH.");
 
-        var startInfo = new ProcessStartInfo(pwsh!)
+        var output = await RunScriptAsync(pwsh!, scriptName);
+        Assert.Contains(expectedMessage, output);
+    }
+
+    /// <summary>
+    /// install.ps1's publisher check under both hosts: `irm ... | iex` runs in Windows
+    /// PowerShell 5.1 on a stock machine. Authenticode exists only on Windows.
+    /// </summary>
+    [Theory]
+    [InlineData("pwsh.exe")]
+    [InlineData("powershell.exe")]
+    public async Task InstallerPublisherSignatureRegression_Passes(string hostExecutable)
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Authenticode signatures are checked only on Windows.");
+        var host = FindOnPath(hostExecutable);
+        Assert.SkipWhen(host is null, $"{hostExecutable} is not on PATH.");
+
+        var output = await RunScriptAsync(host!, "InstallerPublisherSignatureTests.ps1");
+        Assert.Contains("No installation was run", output);
+    }
+
+    private static async Task<string> RunScriptAsync(string host, string scriptName)
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var script = Path.Combine(FindRepositoryRoot(), "Tests", "Deployment", scriptName);
+        Assert.True(File.Exists(script), $"Missing {script}");
+
+        var startInfo = new ProcessStartInfo(host)
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
         };
-        foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-File", script })
+        // Let each host build its own module path: Windows PowerShell 5.1 fails to load
+        // Microsoft.PowerShell.Security when it inherits PowerShell 7's PSModulePath.
+        startInfo.Environment.Remove("PSModulePath");
+        // Process-scoped Bypass: Windows PowerShell 5.1 defaults to Restricted on client SKUs.
+        var arguments = OperatingSystem.IsWindows()
+            ? new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script }
+            : new[] { "-NoProfile", "-NonInteractive", "-File", script };
+        foreach (var argument in arguments)
             startInfo.ArgumentList.Add(argument);
 
         using var process = Process.Start(startInfo)!;
@@ -38,9 +68,9 @@ public sealed class LocalDeployPayloadTests
         await process.WaitForExitAsync(cancellationToken);
 
         var output = await stdout;
-        Assert.True(process.ExitCode == 0, $"pwsh exited {process.ExitCode}.\n{output}\n{await stderr}");
+        Assert.True(process.ExitCode == 0, $"{Path.GetFileName(host)} exited {process.ExitCode}.\n{output}\n{await stderr}");
         Assert.Contains("Passed:", output);
-        Assert.Contains(expectedMessage, output);
+        return output;
     }
 
     private static string FindRepositoryRoot()

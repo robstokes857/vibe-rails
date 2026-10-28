@@ -13,6 +13,7 @@ irm https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/insta
 This will:
 - Download the latest Windows release (`vb-win-x64.zip`)
 - Verify SHA256 checksum
+- Verify that `vb.exe` carries a valid Authenticode signature from the VibeRails publisher
 - Extract to `~/.vibe_rails`
 - Install BertV2 model assets (used for semantic history search)
 - Add to your PATH
@@ -36,7 +37,8 @@ This will:
 - Verify SHA256 checksum
 - Extract to `~/.vibe_rails`
 - Install BertV2 model assets (used for semantic history search)
-- Update your shell configuration (`.bashrc`, `.zshrc`, `.zprofile`, or `.profile`)
+- Update your shell configuration (`.bashrc`, `.zshrc`, `.zprofile`, or `.profile`),
+  appending `~/.vibe_rails` to the end of `PATH`
 
 ## After Installation
 

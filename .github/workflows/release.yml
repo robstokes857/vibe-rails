@@ -5,8 +5,10 @@ on:
     tags:
       - "v*"
 
+# Read-only by default. Only the upload job writes (the GitHub release); third-party
+# actions are pinned by commit SHA, so a moved tag cannot change what runs here.
 permissions:
-  contents: write
+  contents: read
 
 env:
   PROJECT_PATH: ./VibeRails/VibeRails.csproj
@@ -21,12 +23,12 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           submodules: recursive
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
         with:
           dotnet-version: "10.0.103"
 
@@ -42,6 +44,9 @@ jobs:
     name: Build ${{ matrix.rid }}
     runs-on: ${{ matrix.os }}
     needs: test
+    # The Windows leg signs with the AZURE_* credentials. Moved into this environment's
+    # secrets (with a reviewer and a v* tag rule), they stay out of every other job.
+    environment: release-signing
     strategy:
       fail-fast: false
       matrix:
@@ -59,12 +64,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           submodules: recursive
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
         with:
           dotnet-version: "10.0.103"
 
@@ -119,7 +124,7 @@ jobs:
 
       - name: Sign Windows binary
         if: runner.os == 'Windows'
-        uses: azure/trusted-signing-action@v0.4.0
+        uses: azure/trusted-signing-action@acc6d03023f35c22bfc9ac05d2981db9dc008330 # v0.4.0
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -132,6 +137,25 @@ jobs:
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
+
+      # Run the installer's own publisher check against the freshly signed binary, so a
+      # signing identity change fails the release instead of every user's install.
+      - name: Verify Windows binary publisher
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $parseErrors = $null
+          $syntax = [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path "Scripts/install.ps1").Path, [ref]$null, [ref]$parseErrors)
+          if ($parseErrors.Count -gt 0) { throw ($parseErrors -join [Environment]::NewLine) }
+          $check = $syntax.Find({ param($node)
+              $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+                  $node.Name -eq 'Assert-PublisherSignature'
+          }, $false)
+          if ($null -eq $check) { throw "Scripts/install.ps1 has no Assert-PublisherSignature function." }
+          . ([scriptblock]::Create($check.Extent.Text))
+          Assert-PublisherSignature -Executable "artifacts/${{ matrix.rid }}/vb.exe"
 
       - name: Package + checksum (Windows)
         if: runner.os == 'Windows'
@@ -320,7 +344,7 @@ jobs:
 
       - name: Upload Windows installer test logs
         if: always() && runner.os == 'Windows'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-installer-test-logs
           path: .test-artifacts/installer-test/*.log
@@ -339,7 +363,7 @@ jobs:
           ./deploy/build-installer.ps1 -PayloadDirectory artifacts/win-x64 -Version $version -OutputDirectory release-assets -Compiler $env:INNO_COMPILER -ReleaseSigning
 
       - name: Upload workflow artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-assets-${{ matrix.rid }}
           path: release-assets/*
@@ -347,7 +371,7 @@ jobs:
 
       - name: Upload publish output for extension packaging
         if: ${{ matrix.rid == 'win-x64' || matrix.rid == 'linux-x64' || matrix.rid == 'osx-arm64' }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: publish-${{ matrix.rid }}
           path: artifacts/${{ matrix.rid }}/*
@@ -376,10 +400,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version-file: ".nvmrc"
           cache: npm
@@ -393,7 +417,7 @@ jobs:
           npm ci
 
       - name: Download publish output
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: publish-${{ matrix.rid }}
           path: Scripts/artifacts/aot/${{ matrix.rid }}
@@ -416,11 +440,26 @@ jobs:
               Pop-Location
           }
 
+      # "<hash>  <name>" with an LF on every runner, so `sha256sum -c` accepts it.
+      # publish_extension globs *.vsix, so these ride along to the release unpublished.
+      - name: Checksum VSIX
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $packages = @(Get-ChildItem -Path "vscode-viberails/dist" -Filter "vscode-viberails-${{ matrix.target }}-*.vsix" -File)
+          if ($packages.Count -eq 0) { throw "No VSIX package was produced for ${{ matrix.target }}." }
+          foreach ($package in $packages) {
+              $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $package.FullName).Hash.ToLowerInvariant()
+              [System.IO.File]::WriteAllText("$($package.FullName).sha256", "$hash  $($package.Name)`n", [System.Text.Encoding]::ASCII)
+          }
+
       - name: Upload VSIX artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: extension-vsix-${{ matrix.target }}
-          path: vscode-viberails/dist/vscode-viberails-${{ matrix.target }}-*.vsix
+          path: |
+            vscode-viberails/dist/vscode-viberails-${{ matrix.target }}-*.vsix
+            vscode-viberails/dist/vscode-viberails-${{ matrix.target }}-*.vsix.sha256
           if-no-files-found: error
 
   publish_extension:
@@ -428,14 +467,17 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     needs: package_extension
+    # Marketplace publishing is its own environment so VS_PAT can be scoped (and gated by a
+    # reviewer) separately from the signing credentials.
+    environment: vscode-marketplace
     # VSCE_PAT is deliberately NOT job-wide: only the publish step below sees the Marketplace
     # token, so dependency installation (and its install scripts) runs without it in scope.
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version-file: ".nvmrc"
 
@@ -449,7 +491,7 @@ jobs:
           npm ci
 
       - name: Download VSIX artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           pattern: extension-vsix-*
           path: dist
@@ -538,7 +580,17 @@ jobs:
       - build
       - package_extension
       - publish_extension
+    # The only job that writes: it creates the release and uploads its assets.
+    permissions:
+      contents: write
     steps:
+      # First: checkout cleans the workspace, which would remove downloaded artifacts.
+      - name: Checkout installer scripts
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          sparse-checkout: Scripts
+          persist-credentials: false
+
       - name: Ensure GitHub CLI
         shell: bash
         run: |
@@ -549,18 +601,41 @@ jobs:
           fi
 
       - name: Download workflow artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           pattern: release-assets-*
           path: release-assets
           merge-multiple: true
 
       - name: Download VSIX artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           pattern: extension-vsix-*
           path: release-assets
           merge-multiple: true
+
+      # A tag-pinned installer: releases/download/<tag>/install.ps1 installs exactly that
+      # release, and releases/latest/download/install.ps1 replaces the mutable main URL.
+      # The copies on main keep an empty tag and install the latest release.
+      - name: Stamp tag-pinned installers
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if [[ ! "$tag" =~ ^v[0-9A-Za-z.+-]+$ ]]; then
+            echo "Refusing to stamp installers with unexpected tag: $tag" >&2
+            exit 1
+          fi
+          sed 's/^\$ReleaseTag = ""$/$ReleaseTag = "'"$tag"'"/' Scripts/install.ps1 > release-assets/install.ps1
+          sed 's/^RELEASE_TAG=""$/RELEASE_TAG="'"$tag"'"/' Scripts/install.sh > release-assets/install.sh
+          grep -qxF "\$ReleaseTag = \"$tag\"" release-assets/install.ps1 || {
+            echo "install.ps1 has no empty \$ReleaseTag line to stamp." >&2
+            exit 1
+          }
+          grep -qxF "RELEASE_TAG=\"$tag\"" release-assets/install.sh || {
+            echo "install.sh has no empty RELEASE_TAG line to stamp." >&2
+            exit 1
+          }
 
       - name: Ensure release exists
         env:
