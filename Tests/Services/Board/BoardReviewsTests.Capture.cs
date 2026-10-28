@@ -1,3 +1,4 @@
+using VibeRails.DTOs;
 using VibeRails.Services.Board;
 using Xunit;
 
@@ -77,6 +78,7 @@ public sealed partial class BoardReviewsTests
         Assert.StartsWith("Current", (await reviews.ReportAsync(repo, card.Key, begun.Id, true, repo, Ct))!.Freshness);
         await new BoardWorkflowService(store, reviews).ReportAsync(repo, card.Id, repo,
             BoardAuthor.Agent("Codex", "codex", session), "passed", "Deletions reviewed", null, begun.Id, Ct);
+        await jobs.CompleteRunAsync(flow.RunId, JobRunStatus.Succeeded, 0, null, Ct);
         Assert.Equal("Passed", (await store.GetLaneAutomationStatusesAsync(repo, card.Id, Ct))[0].StepStatus);
 
         await Git("restore", "dirty.cs");
