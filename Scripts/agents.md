@@ -11,8 +11,11 @@ app build output — `deploy/prepare-binaries.ps1` copies the lowercase
 into the single empty `$ReleaseTag = ""` / `RELEASE_TAG=""` line. Keep that line as it is;
 the stamp step fails the release if it cannot find it. The stamped copy installs exactly
 its own release, and the copy on `main` installs the latest.
-`Assert-PublisherSignature` in `install.ps1` is self-contained on purpose: release.yml
-extracts it from the file and runs it on the freshly signed `vb.exe`.
+`Assert-PublisherSignature` and `Assert-PayloadMatchesCatalog` in `install.ps1` are
+self-contained on purpose: release.yml extracts them by name and runs them on the signed
+catalog and the packaged archive. Keep their names, or update the list in release.yml
+(`ReleaseSupplyChainTests` checks the two agree). `$LastReleaseIdWithoutCatalog` is a
+one-time cutoff for releases that predate `vb-win-x64.cat`; never raise it.
 
 After modifying an install script here, there are no in-repo copies to sync. The
 viberails.ai repository (VibeRails-Front) keeps its own copies under

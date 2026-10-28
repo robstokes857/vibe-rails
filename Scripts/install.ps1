@@ -7,25 +7,30 @@ $ErrorActionPreference = "Stop"
 $GithubRepo = "robstokes857/vibe-rails"
 $InstallDir = Join-Path $env:USERPROFILE ".vibe_rails"
 $AssetName = "vb-win-x64.zip"
+$CatalogAssetName = "vb-win-x64.cat"
 # Empty on main: install the latest release. The install.ps1 published with each release
 # has its own tag stamped here by release.yml, so it installs exactly that release.
 $ReleaseTag = ""
+# v10.13.2, the last release published without a signed file catalog. GitHub release ids
+# only grow, so any newer release without $CatalogAssetName is refused rather than trusted.
+$LastReleaseIdWithoutCatalog = 425975260
 
 function Assert-PublisherSignature {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$Executable
+        [string]$Path
     )
 
     # The .sha256 comes from the same release as the archive, so it proves only an intact
     # download. The Authenticode signature (Azure Trusted Signing in release.yml) proves the
-    # publisher. release.yml runs this same function on the binary it just signed.
+    # publisher. release.yml runs this same function on the files it has just signed.
     $expectedSigner = "Robert Stokes"
     $expectedIssuerPrefix = "Microsoft ID Verified CS "
+    $name = Split-Path -Leaf $Path
 
-    $signature = Get-AuthenticodeSignature -LiteralPath $Executable
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
     if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
-        throw "vb.exe in the release package does not have a valid signature (status: $($signature.Status)). The existing installation was not changed."
+        throw "$name in the release does not have a valid signature (status: $($signature.Status)). The existing installation was not changed."
     }
 
     $certificate = $signature.SignerCertificate
@@ -34,7 +39,26 @@ function Assert-PublisherSignature {
     $isExpectedSubject = ($subject -ccontains "CN=$expectedSigner") -and ($subject -ccontains "O=$expectedSigner")
     $isExpectedIssuer = $issuerName.StartsWith($expectedIssuerPrefix, [StringComparison]::Ordinal)
     if (-not ($isExpectedSubject -and $isExpectedIssuer)) {
-        throw "vb.exe in the release package is signed by '$($certificate.Subject)' (issuer '$($certificate.Issuer)'), not the VibeRails publisher. The existing installation was not changed."
+        throw "$name in the release is signed by '$($certificate.Subject)' (issuer '$($certificate.Issuer)'), not the VibeRails publisher. The existing installation was not changed."
+    }
+}
+
+function Assert-PayloadMatchesCatalog {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PayloadDir,
+
+        [Parameter(Mandatory = $true)]
+        [string]$CatalogPath
+    )
+
+    # The vb.exe signature alone would let a replaced archive keep a genuine vb.exe beside
+    # substituted DLLs, hooks or web assets. The catalog (SHA-256 of every payload file) is
+    # signed by the publisher, so any extra, missing or altered file fails here. Check the
+    # catalog's own signature with Assert-PublisherSignature: this accepts an unsigned one.
+    $status = Test-FileCatalog -Path $PayloadDir -CatalogFilePath $CatalogPath
+    if ("$status" -ne "Valid") {
+        throw "The release package does not match its signed file catalog (status: $status). The existing installation was not changed."
     }
 }
 
@@ -293,6 +317,15 @@ if (-not $checksumAsset) {
     exit 1
 }
 
+$catalogAsset = $release.assets | Where-Object { $_.name -eq $CatalogAssetName }
+if (-not $catalogAsset -and [long]$release.id -gt $LastReleaseIdWithoutCatalog) {
+    Write-Host "Error: Could not find $CatalogAssetName in release assets. Refusing to install files without the signed catalog." -ForegroundColor Red
+    exit 1
+}
+if (-not $catalogAsset) {
+    Write-Warning "Release $version predates signed file catalogs; only the vb.exe publisher signature is checked."
+}
+
 $zipUrl = $zipAsset.browser_download_url
 $checksumUrl = $checksumAsset.browser_download_url
 
@@ -325,12 +358,23 @@ try {
     }
     Write-Host "Checksum verified!" -ForegroundColor Green
 
+    $catalogPath = $null
+    if ($catalogAsset) {
+        $catalogPath = Join-Path $tempDir $CatalogAssetName
+        Write-Host "Downloading signed file catalog..." -ForegroundColor Cyan
+        Invoke-WebRequest -Uri $catalogAsset.browser_download_url -OutFile $catalogPath -UseBasicParsing
+        Assert-PublisherSignature -Path $catalogPath
+    }
+
     Write-Host "Extracting release into private staging..." -ForegroundColor Cyan
     Expand-Archive -Path $zipPath -DestinationPath $payloadDir -Force
+    if ($catalogPath) {
+        Assert-PayloadMatchesCatalog -PayloadDir $payloadDir -CatalogPath $catalogPath
+    }
     Assert-ReleasePayload -RootDir $payloadDir
-    Assert-PublisherSignature -Executable (Join-Path $payloadDir "vb.exe")
+    Assert-PublisherSignature -Path (Join-Path $payloadDir "vb.exe")
     Assert-StableInstallTarget -Path $InstallDir
-    Write-Host "Release payload and publisher signature validated." -ForegroundColor Green
+    Write-Host "Release payload and publisher signatures validated." -ForegroundColor Green
 
     $existingExecutable = Join-Path $InstallDir "vb.exe"
     Assert-StableInstallTarget -Path $InstallDir

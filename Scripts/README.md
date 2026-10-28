@@ -13,6 +13,7 @@ irm https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/insta
 This will:
 - Download the latest Windows release (`vb-win-x64.zip`)
 - Verify SHA256 checksum
+- Verify the release's signed file catalog: every file in the archive must match it
 - Verify that `vb.exe` carries a valid Authenticode signature from the VibeRails publisher
 - Extract to `~/.vibe_rails`
 - Install BertV2 model assets (used for semantic history search)

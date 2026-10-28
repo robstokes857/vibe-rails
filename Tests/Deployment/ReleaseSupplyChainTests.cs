@@ -6,8 +6,8 @@ namespace Tests.Deployment;
 
 /// <summary>
 /// Static guards for the release supply chain (VIBE-195): SHA-pinned workflow actions, the
-/// release token's write scope, the installers' release-tag stamp, PATH order on Unix and
-/// the BERT download hashes. release.yml runs only on tags, so a normal test run catches
+/// release token's write scope, the installer checks release.yml runs on its signed catalog,
+/// the installers' release-tag stamp, PATH order on Unix and the BERT download hashes. release.yml runs only on tags, so a normal test run catches
 /// these regressions before a release does.
 /// </summary>
 public sealed partial class ReleaseSupplyChainTests
@@ -49,6 +49,25 @@ public sealed partial class ReleaseSupplyChainTests
         Assert.True(upload > 0, "release.yml has no upload job.");
         Assert.True(write.Index > upload, "The only write grant must belong to the upload job.");
         Assert.Equal("contents: write", write.Value);
+    }
+
+    [Fact]
+    public void ReleaseWorkflow_RunsInstallerChecksThatExistOnTheCatalogItSigns()
+    {
+        var workflow = ReadWithLf(".github/workflows/release.yml");
+        var installer = ReadWithLf("Scripts/install.ps1");
+
+        // release.yml dot-sources these from install.ps1 by name, and only a tag run would
+        // notice a rename.
+        var extracted = InstallerFunctionList().Match(workflow);
+        Assert.True(extracted.Success, "release.yml no longer runs install.ps1's checks on the packaged archive.");
+        var names = QuotedName().Matches(extracted.Groups["names"].Value).Select(match => match.Groups["name"].Value).ToList();
+        Assert.Contains("Assert-PayloadMatchesCatalog", names);
+        foreach (var name in names)
+            Assert.Contains($"\nfunction {name} {{", installer);
+
+        Assert.Contains("-CatalogFilePath \"release-assets/vb-${{ matrix.rid }}.cat\"", workflow);
+        Assert.Contains("$CatalogAssetName = \"vb-win-x64.cat\"", installer);
     }
 
     [Theory]
@@ -125,4 +144,10 @@ public sealed partial class ReleaseSupplyChainTests
 
     [GeneratedRegex(@"\b[0-9a-f]{40}\b")]
     private static partial Regex CommitSha();
+
+    [GeneratedRegex(@"foreach \(\$functionName in @\((?<names>[^)]*)\)\)")]
+    private static partial Regex InstallerFunctionList();
+
+    [GeneratedRegex(@"'(?<name>[\w-]+)'")]
+    private static partial Regex QuotedName();
 }

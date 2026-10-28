@@ -1604,10 +1604,18 @@ which the owner can gate with reviewers and environment-scoped secrets.
 A release carries a `.sha256` for every archive, the Windows Setup EXE and each VSIX, plus `install.ps1` and
 `install.sh` with that release's tag stamped into `$ReleaseTag` / `RELEASE_TAG`. A stamped
 installer installs exactly its own release. The copies on `main` keep the tag empty and
-install the latest release. `install.ps1` requires a valid Authenticode signature on `vb.exe`
-from the VibeRails publisher (`Assert-PublisherSignature`). The Windows build runs that same
-function on the binary it has just signed, so a change of signing identity fails the release
-rather than users' installs.
+install the latest release.
+
+On Windows, the archive's `.sha256` comes from the same release, so it proves only an intact
+download. The Windows build therefore also publishes `vb-win-x64.cat`, a file catalog
+(`New-FileCatalog`, SHA-256) of every payload file, signed with the same Trusted Signing
+identity as `vb.exe`. `install.ps1` checks the catalog's publisher before extracting
+(`Assert-PublisherSignature`), then rejects any extra, missing or altered file
+(`Assert-PayloadMatchesCatalog`), and finally checks `vb.exe`'s own publisher. A release newer
+than `$LastReleaseIdWithoutCatalog` (v10.13.2) that lacks the catalog is refused. The Windows
+archive verification step runs these same functions on what users will download, so a signing
+identity change fails the release rather than users' installs. The Linux and macOS archives
+are covered only by their checksums until a signing decision is made (VB-58XPR-306).
 
 ### Cross-Platform Builds
 ```powershell

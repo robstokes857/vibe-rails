@@ -138,24 +138,32 @@ jobs:
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
 
-      # Run the installer's own publisher check against the freshly signed binary, so a
-      # signing identity change fails the release instead of every user's install.
-      - name: Verify Windows binary publisher
+      # The vb.exe signature covers only vb.exe. A signed catalog of every payload file lets
+      # install.ps1 reject a replaced archive that keeps a genuine vb.exe beside altered DLLs,
+      # hooks or web assets. Built after signing, so it records the signed vb.exe.
+      - name: Catalog Windows payload
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $parseErrors = $null
-          $syntax = [System.Management.Automation.Language.Parser]::ParseFile(
-              (Resolve-Path "Scripts/install.ps1").Path, [ref]$null, [ref]$parseErrors)
-          if ($parseErrors.Count -gt 0) { throw ($parseErrors -join [Environment]::NewLine) }
-          $check = $syntax.Find({ param($node)
-              $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-                  $node.Name -eq 'Assert-PublisherSignature'
-          }, $false)
-          if ($null -eq $check) { throw "Scripts/install.ps1 has no Assert-PublisherSignature function." }
-          . ([scriptblock]::Create($check.Extent.Text))
-          Assert-PublisherSignature -Executable "artifacts/${{ matrix.rid }}/vb.exe"
+          New-Item -ItemType Directory -Force -Path release-assets | Out-Null
+          New-FileCatalog -Path "artifacts/${{ matrix.rid }}" -CatalogFilePath "release-assets/vb-${{ matrix.rid }}.cat" -CatalogVersion 2.0 | Out-Null
+
+      - name: Sign Windows payload catalog
+        if: runner.os == 'Windows'
+        uses: azure/trusted-signing-action@acc6d03023f35c22bfc9ac05d2981db9dc008330 # v0.4.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: https://eus.codesigning.azure.net/
+          trusted-signing-account-name: viberails
+          certificate-profile-name: viberails-signing
+          files-folder: release-assets
+          files-folder-filter: cat
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
 
       - name: Package + checksum (Windows)
         if: runner.os == 'Windows'
@@ -226,6 +234,25 @@ jobs:
               if ($daemonDll) {
                   throw "Unexpected separate VBD assembly in release archive: $($daemonDll.FullName)"
               }
+
+              # Run install.ps1's own checks on what users will download, so a signing
+              # identity change or an archive/catalog mismatch fails the release, not installs.
+              $parseErrors = $null
+              $installer = [System.Management.Automation.Language.Parser]::ParseFile(
+                  (Resolve-Path "Scripts/install.ps1").Path, [ref]$null, [ref]$parseErrors)
+              if ($parseErrors.Count -gt 0) { throw ($parseErrors -join [Environment]::NewLine) }
+              foreach ($functionName in @('Assert-PublisherSignature', 'Assert-PayloadMatchesCatalog')) {
+                  $function = $installer.Find({ param($node)
+                      $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+                          $node.Name -eq $functionName
+                  }, $false)
+                  if ($null -eq $function) { throw "Scripts/install.ps1 has no $functionName function." }
+                  . ([scriptblock]::Create($function.Extent.Text))
+              }
+              $catalog = "release-assets/vb-$rid.cat"
+              Assert-PublisherSignature -Path $catalog
+              Assert-PayloadMatchesCatalog -PayloadDir $verifyDir -CatalogPath $catalog
+              Assert-PublisherSignature -Path (Join-Path $verifyDir "vb.exe")
           } finally {
               $runnerTemp = [System.IO.Path]::GetFullPath($env:RUNNER_TEMP)
               $separator = [string][System.IO.Path]::DirectorySeparatorChar
