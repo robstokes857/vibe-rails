@@ -160,7 +160,9 @@ continuation summaries. Both are stored behind `IBoardStore` in board.db, each w
 Browser launches carry the currently selected board; native launches without a board selection use
 the project's first existing board; App context applies with no project or board at all. A card
 launch already carries the full block (App, Board, Card, Card type) in its prompt and sets
-`ContextIncluded`, so the child adds nothing. Empty levels send nothing. Task/summary precedence is
+`ContextIncluded`, so the child adds nothing. A card-triggered Automation Worker gets the same block
+from `CliLoop` (`ComposeAutomationPrompt`'s `userContext`) and passes `contextIncluded` through
+`RunCliWithWebAsync`. Empty levels send nothing. Task/summary precedence is
 preserved. The default tracking guidance
 tells the agent to reply only that it is ready to help (no tools, work, or invented request) and
 then wait for a user task; story creation stays discretionary, and an existing story

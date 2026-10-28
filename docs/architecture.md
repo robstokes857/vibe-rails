@@ -101,12 +101,16 @@ GET/PUT `/api/v1/board/app-context`), Board context is still the Every Context c
 BoardContextSettings (`board-every-context/1`, GET/PUT `/api/v1/board/boards/{boardId}/every-context`)
 and Card/Card type context is still the Agent context JSON; each has its own revision. A card
 launch composes the whole block into its prompt in the root and sets `StartTerminalRequest.ContextIncluded`
-so the tab child adds nothing more. Every other managed launch (Agents, Automations, continuation
-summaries, explicit tasks) gets App and Board context prepended by `CommandService` when its switch is
-on. Browser launches carry the selected board; native launches without a selection use the first
+so the tab child adds nothing more. A card-triggered Automation Worker is a card agent too: `CliLoop`
+composes all four levels into its startup prompt (App and Board under the saved-environment switch)
+and passes `contextIncluded` the same way. Every other managed launch (Agents, card-less Automations,
+continuation summaries, explicit tasks) gets App and Board context prepended by `CommandService` when
+its switch is on. Browser launches carry the selected board; native launches without a selection use the first
 existing project board. The ready-only tracking guidance remains a fallback for sessions without a
 task. The card context estimate, launch samples and `get_board_card` render the same block as the
-launch. Existing task/summary precedence and provider argv conventions are preserved. The guidance asks agents to use their discretion, reuse an existing story and
+launch. `get_board_card` picks the Nudge switch from the calling session's recorded environment
+(`Sessions.EnvironmentName`), because a session attached through MCP has no link selection; other
+readers see what the card's saved selection would get. Existing task/summary precedence and provider argv conventions are preserved. The guidance asks agents to use their discretion, reuse an existing story and
 record progress/results and session history when useful. A guidance-only launch replies only that
 the agent is ready to help, without tools, work, or an invented request, then waits for a user task.
 The prompt names that exact reply because a bare "wait" left agents to fill the forced first turn;

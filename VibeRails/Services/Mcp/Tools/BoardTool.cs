@@ -264,11 +264,15 @@ public sealed partial class BoardTool(
             var currentProject = await projects.ResolveAsync(cancellationToken);
             var referenceRoot = string.Equals(target.Project, currentProject, BoardPaths.ProjectPathComparison) ? projects.GitWorkingDirectory : target.Project;
             detail = detail with { PreviousWork = BoardHandoffService.WithFileStatus(detail.PreviousWork, referenceRoot) };
-            // The caller's own launch decides whether App and Board context applied; anyone else
-            // sees what an agent started with the card's saved selection would receive.
-            var selection = detail.Sessions.FirstOrDefault(session => session.Id == projects.CurrentSessionId)?.Selection
-                ?? (detail.WorkflowMode == "agent" ? detail.ManagerSelection : detail.Assignee);
-            var nudgeEnabled = ContextLevels.NudgeEnabledFor((launchSettings ?? VibeRails.Utils.Config.LoadFresh)(), selection);
+            // The caller's own launch decides whether App and Board context applied: its recorded
+            // environment first, because a session attached through MCP has an empty link selection,
+            // then that link's selection. Anyone else sees what an agent started with the card's
+            // saved selection would receive.
+            var settings = (launchSettings ?? VibeRails.Utils.Config.LoadFresh)();
+            var linked = detail.Sessions.FirstOrDefault(session => session.Id == projects.CurrentSessionId);
+            var nudgeEnabled = linked is not null && await store.FindSessionLaunchedEnvironmentAsync(linked.Id, cancellationToken) is { } savedEnvironment
+                ? ContextLevels.NudgeEnabled(settings, savedEnvironment)
+                : ContextLevels.NudgeEnabledFor(settings, linked?.Selection ?? (detail.WorkflowMode == "agent" ? detail.ManagerSelection : detail.Assignee));
             var render = await RenderCardAsync(service, store, target.Project, detail, new CardReadOptions(sinceUtc, beforeUtc, allActivity, beforeId, descriptionOffset), cancellationToken, nudgeEnabled);
             return render.Text;
         }

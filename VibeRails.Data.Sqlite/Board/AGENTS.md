@@ -171,7 +171,7 @@ without opening `board.db`, even if that file is newer, busy or damaged.
 
 Reads that reach into `state.db` (`GetRunningAutomationsAsync`, `GetAutomationSessionIdsAsync`,
 `DescribeLaneAutomationsAsync`, `GetAgentRunsAsync`, `FindSessionAuthorAsync`,
-`FindSessionOutcomeAsync`, `GetSyncSessionOutcomesAsync`) still probe the schema first so a
+`FindSessionLaunchedEnvironmentAsync`, `FindSessionOutcomeAsync`, `GetSyncSessionOutcomesAsync`) still probe the schema first so a
 stdio host can open a file that never held Automations or Sessions, but they go through the
 store's `SqliteSchemaFeatures` memo (VIBE-27): a table or column seen once is never probed again
 for the life of the instance, a missing one is asked for on every call. Use `_stateFeatures`

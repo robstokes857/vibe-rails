@@ -176,6 +176,57 @@ public sealed class CliLoopEnvironmentScopeTests
         boardStore.Verify(s => s.FindCardAsync(here, "VB-23", It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    /// <summary>
+    /// VIBE-229 review N1: a card-triggered Worker is a card agent, so it starts with every level in
+    /// one block, App and Board under its saved-environment nudge and Card and Card type always, and
+    /// the child is told the prompt already carries them.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CardAutomationStartsWithEveryContextLevel_AndTheChildAddsNone(bool customEnvsNudge)
+    {
+        var here = Path.Combine(Path.GetTempPath(), "cliloop-context");
+        var boardStore = new Mock<IBoardStore>();
+        boardStore.Setup(s => s.FindCardAsync(here, "VB-23", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BoardCardRecord("card_23", here, 23, "lane_1", 0, "Task", "Scope", "base:claude", "medium", null, [], false, 0,
+                DateTime.UtcNow, DateTime.UtcNow, Type: "bug", BoardId: "board_1"));
+        boardStore.Setup(s => s.GetAppContextSettingsAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new AppContextSettingsRecord("APP level", 1));
+        boardStore.Setup(s => s.GetEveryContextSettingsAsync(here, "board_1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BoardEveryContextSettingsRecord("BOARD level", 1));
+        boardStore.Setup(s => s.GetContextSettingsAsync(here, "board_1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BoardContextSettingsRecord(new("CARD level", [new("bug", "append", "TYPE level")]), 1));
+        var (services, placeholders) = BuildServices(Environment("board-worker", here), boardStore: boardStore.Object);
+        string? template = null;
+        placeholders.Setup(p => p.ResolveLaunchAsync(It.IsAny<string>(), It.IsAny<PromptPlaceholderContext>(), It.IsAny<CancellationToken>()))
+            .Callback<string?, PromptPlaceholderContext, CancellationToken>((value, _, _) => template = value)
+            .ReturnsAsync((string value, PromptPlaceholderContext _, CancellationToken _) => new ResolvedPrompt(value, here));
+        Mock.Get(services.GetRequiredService<ITerminalStateService>())
+            .Setup(s => s.CreateSessionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<bool>(),
+                It.IsAny<CancellationToken>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>()))
+            .ReturnsAsync("session-1");
+        Func<Task<IReadOnlyList<ContextLevels.Level>>>? childResolver = () => Task.FromResult<IReadOnlyList<ContextLevels.Level>>([]);
+        Mock.Get(services.GetRequiredService<ICommandService>())
+            .Setup(c => c.PrepareSessionAsync(It.IsAny<LLM>(), It.IsAny<string?>(), It.IsAny<string[]?>(), It.IsAny<string?>(), It.IsAny<string>(),
+                It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<Func<Task<IReadOnlyList<ContextLevels.Level>>>?>()))
+            .Callback<LLM, string?, string[]?, string?, string, string?, bool, Func<Task<IReadOnlyList<ContextLevels.Level>>>?>(
+                (_, _, _, _, _, _, _, resolver) => childResolver = resolver)
+            .ThrowsAsync(new ReachedThePromptStage());
+
+        await Assert.ThrowsAsync<ReachedThePromptStage>(() => CliLoop.RunTerminalWithWebAsync(Args("board-worker", here), services,
+            boardCardKey: "VB-23", cancellationToken: TestContext.Current.CancellationToken,
+            launchSettings: () => new Settings { CreateVibeStoryTracking = !customEnvsNudge, CreateVibeStoryTrackingCustomEnvs = customEnvsNudge }));
+
+        const string heading = "Context supplied by the user, broadest first:";
+        var cardLevels = "Card context:\nCARD level\n\nCard type context (Bug):\nTYPE level";
+        Assert.Contains(heading + "\n\n" + (customEnvsNudge ? "App context:\nAPP level\n\nBoard context:\nBOARD level\n\n" : "") + cardLevels, template);
+        Assert.Equal(customEnvsNudge, template!.Contains("APP level", StringComparison.Ordinal));
+        Assert.Equal(1, template.Split(heading).Length - 1);
+        // The block sits before the Worker's own Initial Message.
+        Assert.True(template.IndexOf(heading, StringComparison.Ordinal) < template.IndexOf("Initial message with a", StringComparison.Ordinal));
+        Assert.Null(childResolver);
+    }
+
     [Fact]
     public async Task NativeLaunchRecordsTheResolvedWorktreeAsItsWorkingDirectory()
     {

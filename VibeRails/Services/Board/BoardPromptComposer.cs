@@ -89,8 +89,12 @@ public static class BoardPromptComposer
         + "Next action: use judgment and the user's Board workflow. Read get_board_card and list_board_columns for lane context and destination Automations. Save the review and handoff before moving, then report the move. Humans and LLMs decide movement; a lane named Done alone is not permission to merge or publish. "
         + "Finish explicitly: save_board_review, add_board_comment with the handoff, make any intended lane move, complete_board_agent, then end_agent_session as your last tool call. The PTY closes 30 seconds later; send your final response immediately. ";
 
-    /// <summary>Adds the Board workflow to a card-triggered Worker without replacing its instructions.</summary>
-    internal static string ComposeAutomationPrompt(string cardKey, string? workerPrompt, string purpose = "work", bool managedWorkflow = false) =>
+    /// <summary>
+    /// Adds the Board workflow to a card-triggered Worker without replacing its instructions.
+    /// <paramref name="userContext"/> is the card agent's labelled context block (VIBE-229), placed
+    /// just before the Worker's own instructions.
+    /// </summary>
+    internal static string ComposeAutomationPrompt(string cardKey, string? workerPrompt, string purpose = "work", bool managedWorkflow = false, string userContext = "") =>
         (managedWorkflow ? ManagedWorkerGuidance : "") +
         (purpose == "code_review" ? managedWorkflow ? ReviewEvidenceGuidance : ReviewGuidance : "Purpose: " + SanitizeLine(purpose, 40) + ". Expected output: the configured Worker output and a card handoff. Testing, building and deploying agents must save their results and explicitly call end_agent_session once all work and handoff steps are complete. ") +
         "This Automation was triggered for kanban card " + SanitizeLine(cardKey, 100) + ". "
@@ -100,6 +104,7 @@ public static class BoardPromptComposer
         + (managedWorkflow ? "Read the user's context from get_board_card. The manager owns lane movement and closure. "
             : "Before moving, save your handoff, check destination Automations with list_board_columns, then report the move. Read the user's context from get_board_card. ")
         + JiraGuidance + AdoGuidance + (managedWorkflow ? ManagedWorkflowGuidance : WorkflowGuidance) + AttentionGuidance + (managedWorkflow ? "" : AgentCompletionGuidance)
+        + (userContext.Length == 0 ? "" : "\n\n" + userContext)
         + "\n\n" + (workerPrompt ?? "")
         + (managedWorkflow ? "\n\nAgent workflow Automation role: complete only your assigned step. Save required review evidence, report_automation_step with passed or failed and its summary, then save your handoff, complete_board_agent and end_agent_session LAST. Leave movement and closure to the manager; do not wait for later lane steps." : "");
     public const int MinDescriptionChars = 1_500;

@@ -55,7 +55,8 @@ public static class CliLoop
         string? jobRunId = null,
         string? boardCardKey = null,
         Action<string>? onSessionCreated = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Func<Settings>? launchSettings = null)
     {
         using var scope = services.CreateScope();
         var scopedServices = scope.ServiceProvider;
@@ -159,18 +160,30 @@ public static class CliLoop
         var managedWorkflow = false;
         string? contextBoardId = null;
         var contextProjectPath = jobRun?.ProjectPath ?? workingDirectory;
+        var userContext = "";
+        var contextIncluded = false;
         if (boardCardKey is not null)
         {
             // A review may run in its explicit checkout. Resolve ownership from the originating
             // Job project, not that checkout; all Board persistence stays behind IBoardStore.
-            var card = await scopedServices.GetRequiredService<Services.Board.IBoardStore>()
-                .FindCardAsync(jobRun?.ProjectPath ?? workingDirectory, boardCardKey, cancellationToken);
+            var boardStore = scopedServices.GetRequiredService<Services.Board.IBoardStore>();
+            var card = await boardStore.FindCardAsync(contextProjectPath, boardCardKey, cancellationToken);
             managedWorkflow = card?.WorkflowMode == Services.Board.BoardWorkflowModes.Agent;
             contextBoardId = card?.BoardId;
+            if (card is not null)
+            {
+                // A card-triggered Worker is a card agent: it starts with every level, App and Board
+                // under this launch's nudge (the same base/saved-environment rule CommandService
+                // applies) and Card and Card type always. The child then adds nothing (VIBE-229).
+                var nudgeEnabled = ContextLevels.NudgeEnabled((launchSettings ?? Config.LoadFresh)(), !string.IsNullOrEmpty(environmentName));
+                userContext = ContextLevels.Format(await ContextLevels.ResolveForCardAsync(boardStore, contextProjectPath, card.BoardId, card.Type,
+                    nudgeEnabled, cancellationToken));
+                contextIncluded = true;
+            }
         }
         var promptTemplate = boardCardKey is null
             ? jobRun is null ? workerPrompt : Services.Board.BoardPromptComposer.ComposeStandaloneAutomationPrompt(workerPrompt)
-            : Services.Board.BoardPromptComposer.ComposeAutomationPrompt(boardCardKey, workerPrompt, runPurpose, managedWorkflow);
+            : Services.Board.BoardPromptComposer.ComposeAutomationPrompt(boardCardKey, workerPrompt, runPurpose, managedWorkflow, userContext);
         if (jobRun?.ReviewLaunch is {} routed) promptTemplate += Services.Board.ReviewRoutingService.Prompt(routed.Resolution);
         if (!string.IsNullOrWhiteSpace(promptTemplate))
         {
@@ -200,7 +213,8 @@ public static class CliLoop
             onSessionCreated: onSessionCreated,
             authorizeBoardTools: boardCardKey is not null,
             contextBoardId: contextBoardId,
-            contextProjectPath: contextProjectPath);
+            contextProjectPath: contextProjectPath,
+            contextIncluded: contextIncluded);
         Environment.ExitCode = exitCode;
         return exitCode;
     }

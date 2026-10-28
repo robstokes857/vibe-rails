@@ -99,6 +99,12 @@ public partial interface IBoardStore
     /// <summary>Returns the supplied sessions with unresolved attention requests, including an Automation's worker.</summary>
     Task<IReadOnlySet<string>> GetAttentionSessionIdsAsync(IReadOnlyList<string> sessionIds, CancellationToken cancellationToken = default);
     Task<BoardAuthor?> FindSessionAuthorAsync(string sessionId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Whether a recorded local session launched a saved environment (true) or a base CLI (false),
+    /// from its state.db row: the launch's own record of which Nudge switch applied. Null when this
+    /// host has no Sessions table or no row for the session.
+    /// </summary>
+    Task<bool?> FindSessionLaunchedEnvironmentAsync(string sessionId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<BoardSessionRecord>> GetSessionsForProjectAsync(string projectPath, CancellationToken cancellationToken = default);
     /// <summary>Identifies linked recordings owned by Automation runs, including older native runs.</summary>
     Task<IReadOnlySet<string>> GetAutomationSessionIdsAsync(string projectPath, IReadOnlyList<string> sessionIds, CancellationToken cancellationToken = default);

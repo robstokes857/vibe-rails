@@ -968,6 +968,22 @@ public sealed partial class BoardStore : IBoardStore
         return null;
     }
 
+    public async Task<bool?> FindSessionLaunchedEnvironmentAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenStateAsync(cancellationToken);
+        if (!await _stateFeatures.HasTableAsync(connection, "Sessions", cancellationToken)
+            || !_stateFeatures.HasColumn(connection, "Sessions", "EnvironmentName"))
+            return null;
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT EnvironmentName FROM Sessions WHERE Id = $session LIMIT 1;";
+        command.Parameters.AddWithValue("$session", sessionId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+            return null;
+        // The same test CommandService applies to its envName when it picks the Nudge switch.
+        return !reader.IsDBNull(0) && !string.IsNullOrEmpty(reader.GetString(0));
+    }
+
     public Task<BoardCommentRecord?> AddCommentAsync(string projectPath, string cardId, BoardAuthor author, string body, CancellationToken cancellationToken = default, bool syncToJira = true)
         => InsertCommentRowAsync(projectPath, cardId, author, body, BoardCommentKinds.Comment, cancellationToken, syncToJira: syncToJira);
 
