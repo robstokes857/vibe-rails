@@ -191,6 +191,25 @@ public sealed class BoardChecksTests : IAsyncLifetime
         Assert.Equal(expected, BoardCheckService.Complete(record, new(repo, [], []), result, JobActionKind.Vca).Status);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void VcaCountsDeletionsAsSkippedCoverage(bool isBinary)
+    {
+        var record = new BoardCheckRecord("id", "card", "run", "action", "VCA", "Running", "working-tree",
+            null, null, null, null, "1", DateTime.UtcNow, null, "", 0, 0, 0, 0, []);
+        var result = new GitPreflightStepResult("vca", "VCA", GitPreflightStepStatus.Passed, "summary", [], 0, true,
+            VcaSummary: new(false, false, false, [], 0, 1));
+        var snapshot = new GitStagedSnapshot(repo,
+            [new("deleted.cs", Path.Combine(repo, "deleted.cs"), GitStagedChangeKind.Deleted, false, isBinary, 0, null)], []);
+
+        var completed = BoardCheckService.Complete(record, snapshot, result, JobActionKind.Vca);
+
+        Assert.Equal(1, completed.SkippedCount);
+        Assert.Equal("Skipped/not applicable", completed.Status);
+        Assert.Contains(completed.Limitations!, limitation => limitation.Contains("deleted"));
+    }
+
     private Task Write(string name, string content) => File.WriteAllTextAsync(Path.Combine(repo, name), content, Ct);
     private async Task<string> Git(params string[] args)
     {

@@ -1146,8 +1146,12 @@ concurrent first calls; retries retain the first capture and saved report. Deskt
 register or save a terminal review using an inherited correlation ID. Supported
 scopes are working-tree, unpushed, a pinned full-SHA range, repository, or explicit unknown scope.
 Range/unpushed reviews may include dirty changes. Captured file names, base/head and fingerprints
-are retained. Capture is repeated to detect concurrent changes; unavailable/binary contents or
-failed capture leave freshness unknown. Unknown scope forces an Incomplete report.
+are retained. Capture is repeated to detect concurrent changes. Deleted entries are fingerprinted
+by path and change kind without requiring a current blob (VIBE-233); restoring a file or changing
+the deleted path changes the fingerprint. Binary, gitlink, size-limited or omitted current content
+and failed captures leave freshness unknown. Capture limitations distinguish unavailable content
+from fingerprints changing between passes. Deterministic checks still count deletions as skipped
+coverage because there is no current code to analyze. Unknown scope forces an Incomplete report.
 `save_board_review` requires the same linked session and saves findings, validation and limitations
 with No findings reported, Findings or Incomplete. A successful exit without it is Report missing.
 

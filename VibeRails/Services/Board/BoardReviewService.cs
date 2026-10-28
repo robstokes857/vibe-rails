@@ -155,7 +155,7 @@ public sealed class BoardReviewService(IBoardStore store, IBoardService board)
         try
         {
             IReadOnlyList<string>? files = null;
-            async Task<(string? Hash, string? Base, string? Head)> Once()
+            async Task<(string? Hash, string? Base, string? Head, string? Limitation)> Once()
             {
                 stage = "resolve HEAD";
                 var head = await GitCli.RunAsync(workspace, ["rev-parse", "--verify", "HEAD^{commit}"], ct);
@@ -174,19 +174,33 @@ public sealed class BoardReviewService(IBoardStore store, IBoardService board)
                 stage = "fingerprint captured inputs";
                 files = snapshot.Files.Select(f => $"{scope}: {f.ChangeKind} {f.RelativePath}")
                     .Concat(extra?.Files.Select(f => $"dirty: {f.ChangeKind} {f.RelativePath}") ?? []).Take(1000).ToList();
-                // Binary/omitted contents cannot establish a trustworthy content identity.
-                if (snapshot.Files.Concat(extra?.Files ?? []).Any(f => f.IsBinary || (f.ExistsInIndex && f.Content is null)))
-                    return (null, snapshot.CheckIdentity?.BaseCommit, snapshot.CheckIdentity?.HeadCommit ?? head.StdOut.Trim());
+                // A deletion has no current blob: its path and change kind establish its identity.
+                // The shared provider can mark that absence IsBinary. Keep rejecting unreadable
+                // current files (including real binaries, gitlinks and size-limited captures).
+                var currentFiles = snapshot.Files.Concat(extra?.Files ?? [])
+                    .Where(f => f.ChangeKind != GitStagedChangeKind.Deleted).ToList();
+                var unreadable = currentFiles.Count(f => f.IsBinary);
+                var omitted = currentFiles.Count(f => !f.IsBinary && f.Content is null);
+                if (unreadable > 0 || omitted > 0)
+                {
+                    var reasons = new List<string>();
+                    if (unreadable > 0) reasons.Add($"Binary or unreadable content in {unreadable} current file(s) prevents complete freshness verification (includes gitlinks and size-limited captures).");
+                    if (omitted > 0) reasons.Add($"Omitted content in {omitted} current file(s) prevents complete freshness verification.");
+                    return (null, snapshot.CheckIdentity?.BaseCommit, snapshot.CheckIdentity?.HeadCommit ?? head.StdOut.Trim(), string.Join(" ", reasons));
+                }
                 var value = head.StdOut.Trim() + BoardCheckService.Fingerprint(snapshot)
                     + (extra is null ? "" : BoardCheckService.Fingerprint(extra));
                 return (Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))),
                     snapshot.CheckIdentity?.BaseCommit ?? (head.Succeeded ? head.StdOut.Trim() : null),
-                    snapshot.CheckIdentity?.HeadCommit ?? (head.Succeeded ? head.StdOut.Trim() : null));
+                    snapshot.CheckIdentity?.HeadCommit ?? (head.Succeeded ? head.StdOut.Trim() : null), null);
             }
             var first = await Once();
             var second = await Once();
-            return first.Hash is not null && first == second ? new(first.Hash, first.Base, first.Head, files?.Count == 1000 ? "File listing capped at 1,000; fingerprint covers captured inputs." : null, files)
-                : new(null, first.Base, first.Head, "Inputs changed during capture, or binary/omitted content prevents complete freshness verification.", files);
+            if (first.Hash is null || second.Hash is null)
+                return new(null, first.Base, first.Head,
+                    string.Join(" ", new[] { first.Limitation, second.Limitation }.Where(reason => reason is not null).Distinct()), files);
+            return first == second ? new(first.Hash, first.Base, first.Head, files?.Count == 1000 ? "File listing capped at 1,000; fingerprint covers captured inputs." : null, files)
+                : new(null, first.Base, first.Head, "Inputs changed during capture; the two fingerprints did not match. Run the review again after changes settle.", files);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
