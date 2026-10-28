@@ -3226,7 +3226,7 @@ export class BoardController {
     openLaneEditor(columnId) {
         const column = columnId ? this.columnById(columnId) : null;
         this.state.editingColumnId = column?.id || null;
-        this.state.editingColumnColor = column?.color || LANE_COLORS[1];
+        this.state.editingColumnColor = column?.color?.toLowerCase() || LANE_COLORS[1];
 
         this.app.showModal(column ? `Lane · ${column.name}` : 'New lane', `
             <div class="board-lane-editor" data-board-lane-editor>
@@ -3242,6 +3242,12 @@ export class BoardController {
                             data-board-color="${color}" style="background:${color}"
                             aria-label="Lane colour ${color}" aria-pressed="${color === this.state.editingColumnColor}"></button>
                     `).join('')}
+                </div>
+                <div class="d-flex align-items-center flex-wrap gap-2 mt-3">
+                    <label class="board-editor-label mb-0" for="board-lane-color">Custom colour</label>
+                    <input type="color" class="form-control form-control-color" id="board-lane-color"
+                        value="${escapeHtml(this.state.editingColumnColor)}">
+                    <output for="board-lane-color" class="small font-monospace" data-board-color-value>${escapeHtml(this.state.editingColumnColor)}</output>
                 </div>
 
                 <div class="board-editor-actions mt-4">
@@ -3260,15 +3266,22 @@ export class BoardController {
         if (column) this.boardSettingsDispose = mountLaneAutomation(this.app, editor.querySelector('[data-lane-automation]'), column.id,
             settings => this.laneAgents.updateColumnCount(column.id, settings));
 
-        editor.querySelector('[data-board-swatches]')?.addEventListener('click', event => {
-            const swatch = event.target.closest('[data-board-color]');
-            if (!swatch) return;
-            this.state.editingColumnColor = swatch.dataset.boardColor;
+        const colorInput = editor.querySelector('#board-lane-color');
+        const selectColor = color => {
+            this.state.editingColumnColor = color;
+            colorInput.value = color;
+            editor.querySelector('[data-board-color-value]').textContent = color;
             editor.querySelectorAll('[data-board-color]').forEach(button => {
-                const on = button === swatch;
+                const on = button.dataset.boardColor === color;
                 button.classList.toggle('is-on', on);
                 button.setAttribute('aria-pressed', String(on));
             });
+        };
+        colorInput.addEventListener('input', () => selectColor(colorInput.value));
+        colorInput.addEventListener('change', () => selectColor(colorInput.value));
+        editor.querySelector('[data-board-swatches]')?.addEventListener('click', event => {
+            const swatch = event.target.closest('[data-board-color]');
+            if (swatch) selectColor(swatch.dataset.boardColor);
         });
 
         editor.querySelector('[data-board-save-lane]')?.addEventListener('click', () => this.saveLane(editor));

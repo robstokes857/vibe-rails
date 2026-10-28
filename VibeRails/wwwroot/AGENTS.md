@@ -229,6 +229,10 @@ fill the viewport height and the board scrolls sideways while the page itself do
 cannot all fit. The lane group's `min-width: min-content` keeps its trailing Add lane button
 after all lanes, including on empty boards with more lanes than fit in the viewport.
 
+The lane editor keeps its preset colour swatches and offers a native **Custom colour** picker
+for any RGB colour, with the selected hex value beside it. Both controls stay in sync when
+creating or editing a lane, and reopening a lane retains its saved custom colour.
+
 Completed lanes (names containing Done, Complete or Ship) initially fetch 30 cards through
 `GET /api/v1/board/cards?pageSize=30`. Scroll near the lane bottom to load another batch, or use
 Load more. Other lanes load normally. The server applies filters to the entire board and returns

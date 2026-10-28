@@ -1703,6 +1703,69 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
     return requests;
 }
 
+for (const width of [1440, 390]) {
+    test(`lane colours save custom selections and stay in sync with presets at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 900 });
+        const columns = [{ id: 'col_ready', name: 'Ready', position: 0, color: '#3b82f6', boardId: 'brd_main' }];
+        await openBoard(page, { columns, empty: true });
+        const writes = [];
+        await page.route('**/api/v1/board/columns', route => {
+            if (route.request().method() !== 'POST') return route.fulfill({ json: { columns } });
+            const body = route.request().postDataJSON();
+            writes.push(body);
+            const column = { ...body, id: 'col_custom', position: columns.length };
+            columns.push(column);
+            return route.fulfill({ json: column });
+        });
+        await page.route('**/api/v1/board/columns/col_custom', route => {
+            const body = route.request().postDataJSON();
+            writes.push(body);
+            Object.assign(columns[1], body);
+            return route.fulfill({ json: columns[1] });
+        });
+
+        await page.locator('[data-board-action="add-lane"]').click();
+        const editor = page.locator('[data-board-lane-editor]');
+        const picker = editor.getByLabel('Custom colour', { exact: true });
+        const selectedPresets = editor.locator('[data-board-color][aria-pressed="true"]');
+        await expect(picker).toHaveValue('#3b82f6');
+        await picker.fill('#cf6c48');
+        await expect(selectedPresets).toHaveCount(0);
+        await expect(editor.locator('output')).toHaveText('#cf6c48');
+        await editor.getByRole('button', { name: 'Lane colour #10b981', exact: true }).click();
+        await expect(picker).toHaveValue('#10b981');
+        await expect(editor.locator('output')).toHaveText('#10b981');
+        await expect(selectedPresets).toHaveCount(1);
+        await picker.fill('#cf6c48');
+        await editor.getByLabel('Name', { exact: true }).fill('Custom lane');
+        await page.screenshot({ path: testInfo.outputPath(`lane-colour-${width}.png`) });
+        expect(await editor.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+        await editor.getByRole('button', { name: 'Save', exact: true }).click();
+        await expect(editor).toHaveCount(0);
+        expect(writes[0]).toEqual({ name: 'Custom lane', color: '#cf6c48', boardId: 'brd_main' });
+
+        const lane = page.locator('.board-lane[data-column-id="col_custom"]');
+        await expect(lane).toHaveCSS('--lane-color', '#cf6c48');
+        await page.getByRole('button', { name: 'Settings for Custom lane', exact: true }).click();
+        await expect(picker).toHaveValue('#cf6c48');
+        await expect(selectedPresets).toHaveCount(0);
+        await picker.fill('#000000');
+        await editor.getByRole('button', { name: 'Save', exact: true }).click();
+        await expect(editor).toHaveCount(0);
+        expect(writes[1]).toEqual({ name: 'Custom lane', color: '#000000' });
+        await expect(lane).toHaveCSS('--lane-color', '#000000');
+
+        await page.getByRole('button', { name: 'Settings for Custom lane', exact: true }).click();
+        await expect(picker).toHaveValue('#000000');
+        await editor.getByRole('button', { name: 'Lane colour #a855f7', exact: true }).click();
+        await editor.getByRole('button', { name: 'Save', exact: true }).click();
+        await expect(editor).toHaveCount(0);
+        await page.getByRole('button', { name: 'Settings for Custom lane', exact: true }).click();
+        await expect(picker).toHaveValue('#a855f7');
+        await expect(selectedPresets).toHaveAttribute('data-board-color', '#a855f7');
+    });
+}
+
 for (const width of [1440, 900, 390]) {
     test(`empty board can add lanes beyond six at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 900 });
