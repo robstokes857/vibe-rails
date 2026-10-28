@@ -479,16 +479,26 @@ function Assert-ReleaseAssetsPresent {
     $assetNames = @($release.assets | ForEach-Object { [string]$_.name })
     $version = $Tag.TrimStart('v')
 
+    # install.ps1 refuses any release newer than v10.13.2 that lacks vb-win-x64.cat, so a
+    # missing catalog breaks every Windows install of this release.
     $requiredAssets = @(
         "vb-win-x64.zip",
         "vb-win-x64.zip.sha256",
+        "vb-win-x64.cat",
         "vb-linux-x64.tar.gz",
         "vb-linux-x64.tar.gz.sha256",
         "vb-osx-arm64.tar.gz",
         "vb-osx-arm64.tar.gz.sha256",
+        "VibeRails-Setup-$version-win-x64.exe",
+        "VibeRails-Setup-$version-win-x64.exe.sha256",
+        "install.ps1",
+        "install.sh",
         "vscode-viberails-win32-x64-$version.vsix",
+        "vscode-viberails-win32-x64-$version.vsix.sha256",
         "vscode-viberails-linux-x64-$version.vsix",
-        "vscode-viberails-darwin-arm64-$version.vsix"
+        "vscode-viberails-linux-x64-$version.vsix.sha256",
+        "vscode-viberails-darwin-arm64-$version.vsix",
+        "vscode-viberails-darwin-arm64-$version.vsix.sha256"
     )
 
     $missing = @()

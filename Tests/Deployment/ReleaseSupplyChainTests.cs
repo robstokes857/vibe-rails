@@ -7,7 +7,8 @@ namespace Tests.Deployment;
 /// <summary>
 /// Static guards for the release supply chain (VIBE-195): SHA-pinned workflow actions, the
 /// release token's write scope, the installer checks release.yml runs on its signed catalog,
-/// the installers' release-tag stamp, PATH order on Unix and the BERT download hashes. release.yml runs only on tags, so a normal test run catches
+/// the assets deploy.ps1 requires, the installers' release-tag stamp, PATH order on Unix and
+/// the BERT download hashes. release.yml runs only on tags, so a normal test run catches
 /// these regressions before a release does.
 /// </summary>
 public sealed partial class ReleaseSupplyChainTests
@@ -68,6 +69,20 @@ public sealed partial class ReleaseSupplyChainTests
 
         Assert.Contains("-CatalogFilePath \"release-assets/vb-${{ matrix.rid }}.cat\"", workflow);
         Assert.Contains("$CatalogAssetName = \"vb-win-x64.cat\"", installer);
+    }
+
+    [Fact]
+    public void DeployScript_RequiresTheAssetsReleaseAddedForInstallers()
+    {
+        var deploy = ReadWithLf("deploy/deploy.ps1");
+
+        // deploy.ps1's asset check is the last gate after a tag run; without these names it
+        // reports a release green that Windows installs refuse or that has no stamped installer.
+        foreach (var asset in new[] { "vb-win-x64.cat", "install.ps1", "install.sh",
+                     "vscode-viberails-win32-x64-$version.vsix.sha256",
+                     "vscode-viberails-linux-x64-$version.vsix.sha256",
+                     "vscode-viberails-darwin-arm64-$version.vsix.sha256" })
+            Assert.Contains($"        \"{asset}\"", deploy);
     }
 
     [Theory]
