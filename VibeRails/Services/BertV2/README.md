@@ -15,6 +15,14 @@ new scheduler, daemon or OS role. Each round gives Board, input and ended-sessio
 Ingestion does not require the model; query embedding and background model construction are lazy
 so keyword search survives missing model files or native ONNX dependencies.
 
+SQLite's vector extension is loaded by absolute path beside the executable in published
+installs (`vec0.dll`, `vec0.dylib` or `vec0.so`). Development builds also support
+`runtimes/<process-rid>/native/`; resolution uses the process architecture, including an x64
+process running on an ARM Mac. The system loader is a final fallback when neither bundled
+layout contains the library. Linux/macOS release verification runs the NativeAOT
+`tools/sqlite-vec-smoke` harness against the extracted archive's libraries from a different
+working directory, creating and reopening only disposable search storage.
+
 `ISearchIndexStore` owns full source text, FTS5, typed result metadata, sqlite-vec chunks,
 reconciliation cursors, expiring claims, progress, failures and retry deadlines. Board source
 access remains behind `IBoardStore`. Bounded ID pages sweep each source corpus independently;

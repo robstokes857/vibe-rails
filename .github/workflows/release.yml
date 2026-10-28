@@ -274,8 +274,10 @@ jobs:
           rid="${{ matrix.rid }}"
           archive="release-assets/vb-${rid}.tar.gz"
           verify_dir="$(mktemp -d)"
+          smoke_publish="$(mktemp -d)"
+          smoke_cwd="$(mktemp -d)"
           cleanup() {
-            rm -rf -- "$verify_dir"
+            rm -rf -- "$verify_dir" "$smoke_publish" "$smoke_cwd"
           }
           trap cleanup EXIT
 
@@ -344,6 +346,19 @@ jobs:
               fi
             done
           fi
+
+          # Compile the actual storage/loader path as NativeAOT, then use only the
+          # native libraries extracted from the release. Running outside that
+          # directory catches bare-name dlopen failures that file checks miss.
+          dotnet publish tools/sqlite-vec-smoke/SqliteVecSmoke.csproj \
+            -c "$CONFIGURATION" -f "$FRAMEWORK" -r "$rid" \
+            --self-contained true -o "$smoke_publish" \
+            /p:TreatWarningsAsErrors=true /p:ILLinkTreatWarningsAsErrors=true
+          cp "$smoke_publish/sqlite-vec-smoke" "$verify_dir/sqlite-vec-smoke"
+          (
+            cd "$smoke_cwd"
+            "$verify_dir/sqlite-vec-smoke"
+          )
 
       - name: Install pinned Inno Setup compiler
         if: runner.os == 'Windows'
