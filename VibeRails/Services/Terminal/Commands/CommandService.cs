@@ -101,7 +101,7 @@ public class CommandService : ICommandService
 
     public async Task<PreparedTerminalSession> PrepareSessionAsync(
         LLM llm, string? envName, string[]? extraArgs, string? initialPrompt = null, string summary = "",
-        string? sessionId = null, bool authorizeBoardTools = false, Func<Task<string?>>? resolveEveryContext = null)
+        string? sessionId = null, bool authorizeBoardTools = false, Func<Task<IReadOnlyList<ContextLevels.Level>>>? resolveNudgedContext = null)
     {
         if (Environment.GetEnvironmentVariable("VIBERAILS_TEST_FAKE_CLI") == "1")
         {
@@ -191,10 +191,11 @@ public class CommandService : ICommandService
         if (nudgeEnabled)
         {
             // Story tracking remains a fallback, so its ready-only instruction never
-            // displaces a task. Every Context accompanies tasks and continuations too.
+            // displaces a task. App and Board context accompany tasks and continuations too.
+            // A card prompt already carries its own block, so its launch passes no resolver.
             if (string.IsNullOrWhiteSpace(prompt))
                 prompt = VibeStoryTrackingPrompt.Guidance;
-            prompt = EveryContextPrompt.Prefix(resolveEveryContext is null ? null : await resolveEveryContext()) + prompt;
+            prompt = ContextLevels.Prefix(resolveNudgedContext is null ? [] : await resolveNudgedContext()) + prompt;
         }
 
         if (!string.IsNullOrWhiteSpace(prompt))

@@ -165,15 +165,17 @@ public sealed class CookieAuthMiddlewareTests
     }
 
     [Theory]
-    [InlineData("GET")]
-    [InlineData("PUT")]
-    public async Task EveryContext_RequiresBothDashboardCredentials(string method)
+    [InlineData("GET", "/api/v1/board/boards/board-a/every-context")]
+    [InlineData("PUT", "/api/v1/board/boards/board-a/every-context")]
+    [InlineData("GET", "/api/v1/board/app-context")]
+    [InlineData("PUT", "/api/v1/board/app-context")]
+    public async Task ContextLevels_RequireBothDashboardCredentials(string method, string path)
     {
         foreach (var session in new string?[] { null, Auth.GetInstanceToken() })
         foreach (var tab in new string?[] { null, Auth.GetTabToken() })
         {
             var middleware = Build(out var reachedNext);
-            var ctx = Request("/api/v1/board/boards/board-a/every-context", session: session, tab: tab);
+            var ctx = Request(path, session: session, tab: tab);
             ctx.Request.Method = method;
             await middleware.InvokeAsync(ctx);
             Assert.Equal(session is not null && tab is not null, reachedNext[0]);

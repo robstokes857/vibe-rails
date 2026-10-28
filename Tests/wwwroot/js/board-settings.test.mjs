@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BoardApi } from '../../../VibeRails/wwwroot/js/modules/board-api.js';
-import { boardSettingsNavigation, everyContextSection, boardContextSection, mountEveryContext, mountBoardContext, mountBoardSettingsNavigation, mountBoardSync, mountLaneAutomation, newBoardNavigation } from '../../../VibeRails/wwwroot/js/modules/board-settings.js';
+import { boardSettingsNavigation, contextEditorSection, mountAppContext, mountBoardLevelContext, mountCardContext, mountContextEditor, mountBoardSettingsNavigation, mountBoardSync, mountLaneAutomation, newBoardNavigation } from '../../../VibeRails/wwwroot/js/modules/board-settings.js';
 
 test('failed publication reloads the saved sync choice', async () => {
     const listeners = new Map();
@@ -56,7 +56,7 @@ test('closing settings suppresses a late board-status callback', async () => {
     assert.equal(content.innerHTML, 'loading');
 });
 
-for (const mount of [mountEveryContext, mountBoardContext, mountLaneAutomation]) {
+for (const mount of [mountAppContext, mountBoardLevelContext, mountCardContext, mountLaneAutomation]) {
     test(`${mount.name} aborts on close and ignores a late response`, async () => {
         let finish;
         let signal;
@@ -204,20 +204,96 @@ test('the New board dialog offers a local board or one connected to Jira or Azur
     assert.match(newBoardNavigation(), /aria-label="Board type" role="tablist"/);
     assert.match(newBoardNavigation(), /id="board-settings-tab-ado" aria-controls="board-settings-ado" aria-selected="false"/);
     assert.deepEqual(tabs(boardSettingsNavigation()), [['general', 'General'], ['jira', 'Jira Cloud'], ['ado', 'Azure DevOps'],
-        ['context', 'App context'], ['history', 'History']]);
+        ['context', 'Context'], ['history', 'History']]);
     assert.match(boardSettingsNavigation(), /aria-label="Board settings" role="tablist"/);
 });
 
-test('App context contains independent collapsible Every Context and Agent context editors', () => {
-    assert.match(everyContextSection(), /<details[^>]*data-every-context[^>]*open>/);
-    assert.match(everyContextSection(), /<summary>Every Context<\/summary>/);
-    assert.match(boardContextSection(), /<details[^>]*data-board-context>/);
-    assert.match(boardContextSection(), /<summary>Agent context<\/summary>/);
-    assert.doesNotMatch(boardContextSection(), /<details[^>]*\bopen\b/);
-    assert.doesNotMatch(boardSettingsNavigation(), /data-board-settings-tab="every-context"/);
+test('the Context tab lists every level broadest first, and Settings reuses it for App context alone', () => {
+    const levels = html => [...html.matchAll(/data-context-unit="([^"]+)"/g)].map(match => match[1]);
+    assert.deepEqual(levels(contextEditorSection()), ['app', 'board', 'card']);
+    assert.deepEqual(levels(contextEditorSection({ board: false })), ['app']);
+    // Each level says which launches it reaches; App and Board follow the nudge, Card always applies.
+    assert.match(contextEditorSection(), /<h6 class="mb-1">App context<\/h6><p[^>]*>Every LLM CLI launched from VibeRails[^<]*no board[^<]*nudge/);
+    assert.match(contextEditorSection(), /<h6 class="mb-1">Board context<\/h6><p[^>]*>Every LLM CLI launched for this board[^<]*currently selected board[^<]*nudge/);
+    assert.ok(contextEditorSection().indexOf('App context') < contextEditorSection().indexOf('Board context'));
+    assert.doesNotMatch(contextEditorSection({ board: false }), /Board context/);
+    assert.doesNotMatch(boardSettingsNavigation(), /App context|Every Context|data-board-settings-tab="every-context"/);
 });
 
-test('Every Context loads escaped text and saves its board message with its revision', async () => {
+test('Card and Card type context render as two ordered levels with one save', async () => {
+    const content = { innerHTML: '' };
+    const element = {
+        isConnected: true,
+        querySelector: () => content,
+        querySelectorAll: () => [],
+        addEventListener() {}, removeEventListener() {}
+    };
+    const app = { apiCall: () => Promise.resolve({ revision: 2, context: { defaultMessage: 'Card text', typeOverrides: [{ type: 'bug', mode: 'append', message: '<b>Bug</b>' }] } }), showToast() {} };
+    BoardApi.attach(app);
+    const dispose = mountCardContext(app, element, 'board-a');
+    await new Promise(resolve => setImmediate(resolve));
+    const html = content.innerHTML;
+    assert.ok(html.indexOf('data-context-level="card"') < html.indexOf('data-context-level="type"'));
+    assert.match(html, /Always sent/);
+    assert.match(html, /<option value="append" selected>Card context \+ type-specific<\/option>/);
+    assert.match(html, /&lt;b&gt;Bug&lt;\/b&gt;/);
+    assert.equal(html.match(/data-settings-save/g).length, 1);
+    dispose();
+});
+
+test('the editor mounts App context alone in Settings and every level for a board, and disposes them together', async () => {
+    const calls = [];
+    const units = new Map(['app', 'board', 'card'].map(name => [name, { content: { innerHTML: 'loading' } }]));
+    const unitElement = name => ({
+        isConnected: true,
+        querySelector: () => units.get(name).content,
+        querySelectorAll: () => [],
+        addEventListener() {}, removeEventListener() {}
+    });
+    const root = { querySelector: selector => unitElement(/data-context-unit="([^"]+)"/.exec(selector)[1]) };
+    const app = { apiCall: (path, method, _body, options) => { calls.push({ path, method, signal: options.signal }); return new Promise(() => {}); } };
+    BoardApi.attach(app);
+    const disposeSettings = mountContextEditor(app, root, { toastTitle: 'Settings' });
+    assert.deepEqual(calls.map(call => call.path), ['/api/v1/board/app-context']);
+    const disposeBoard = mountContextEditor(app, root, { boardId: 'board-a' });
+    assert.deepEqual(calls.slice(1).map(call => call.path),
+        ['/api/v1/board/app-context', '/api/v1/board/boards/board-a/every-context', '/api/v1/board/boards/board-a/context']);
+    disposeSettings();
+    disposeBoard();
+    assert.ok(calls.every(call => call.signal.aborted));
+});
+
+test('App context saves through its own route with its revision', async () => {
+    const listeners = new Map();
+    const content = { innerHTML: '' };
+    const input = { value: 'For every launch' };
+    const element = {
+        isConnected: true,
+        querySelector: selector => selector === '[data-board-settings-content]' ? content : input,
+        querySelectorAll: () => [],
+        addEventListener: (name, listener) => listeners.set(name, listener),
+        removeEventListener: name => listeners.delete(name)
+    };
+    const calls = [];
+    const toasts = [];
+    const app = {
+        apiCall: (path, method, body) => {
+            calls.push({ path, method, body });
+            return Promise.resolve(method === 'GET' ? { message: 'Old', revision: 5 } : { message: body.message, revision: 6 });
+        },
+        showToast: (...args) => toasts.push(args)
+    };
+    BoardApi.attach(app);
+    const dispose = mountAppContext(app, element, null, { toastTitle: 'Settings' });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.match(content.innerHTML, /data-context-message="app">Old<\/textarea>/);
+    await listeners.get('click')({ target: { closest: selector => selector === '[data-settings-save]' ? { disabled: false } : null } });
+    assert.deepEqual(calls[1], { path: '/api/v1/board/app-context', method: 'PUT', body: { message: 'For every launch', expectedRevision: 5 } });
+    assert.deepEqual(toasts[0], ['Settings', 'App context saved for every launch.', 'success']);
+    dispose();
+});
+
+test('Board context loads escaped text and saves its board message with its revision', async () => {
     const listeners = new Map();
     const content = { innerHTML: '' };
     const input = { value: 'Updated shared context' };
@@ -241,10 +317,10 @@ test('Every Context loads escaped text and saves its board message with its revi
         showToast: (...args) => toasts.push(args)
     };
     BoardApi.attach(app);
-    const dispose = mountEveryContext(app, element, 'board-a');
+    const dispose = mountBoardLevelContext(app, element, 'board-a');
     await new Promise(resolve => setImmediate(resolve));
     assert.match(content.innerHTML, /&lt;\/textarea&gt;&lt;script&gt;/);
-    assert.match(everyContextSection(), /currently selected board/);
+    assert.match(contextEditorSection(), /currently selected board/);
     const event = { target: { closest: selector => selector === '[data-settings-save]' ? button : null } };
     const saving = listeners.get('click')(event);
     await listeners.get('click')(event);

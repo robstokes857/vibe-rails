@@ -137,7 +137,7 @@ public sealed class TerminalRoutesPromptDeferralTests : IDisposable
                 .Setup(item => item.StartSessionAsync(
                     It.IsAny<LLM>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string[]>(),
                     It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<ResolvedPrompt>>>(), It.IsAny<string>(), It.IsAny<bool>()))
-                .Callback((LLM _, string _, string? _, string[]? _, string? _, bool _, Func<Task<ResolvedPrompt>>? resolve, string _, bool _, string? _) =>
+                .Callback((LLM _, string _, string? _, string[]? _, string? _, bool _, Func<Task<ResolvedPrompt>>? resolve, string _, bool _, string? _, bool _) =>
                 {
                     // Sampled at the moment the slot is claimed, not after the response: this is
                     // the window a losing concurrent request would have had to run the command in.
@@ -224,26 +224,30 @@ public sealed class TerminalRoutesPromptDeferralTests : IDisposable
         {
             Func<Task<ResolvedPrompt>>? captured = () => Task.FromResult(new ResolvedPrompt(null, Path.GetTempPath()));
             string? capturedBoard = null;
+            bool? capturedIncluded = null;
             terminal
                 .Setup(item => item.StartSessionAsync(
                     It.IsAny<LLM>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string[]>(),
-                    It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<ResolvedPrompt>>>(), It.IsAny<string>(), It.IsAny<bool>(), "selected-board"))
-                .Callback((LLM _, string _, string? _, string[]? _, string? _, bool _, Func<Task<ResolvedPrompt>>? resolve, string _, bool _, string? board) =>
+                    It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<ResolvedPrompt>>>(), It.IsAny<string>(), It.IsAny<bool>(), "selected-board", true))
+                .Callback((LLM _, string _, string? _, string[]? _, string? _, bool _, Func<Task<ResolvedPrompt>>? resolve, string _, bool _, string? board, bool included) =>
                 {
                     captured = resolve;
                     capturedBoard = board;
+                    capturedIncluded = included;
                 })
                 .ReturnsAsync(true);
 
             var client = SharedClient;
             using var response = await client.PostAsJsonAsync(
                 new Uri(new Uri(app.Urls.First()), "/api/v1/terminal/start"),
-                new StartTerminalRequest(WorkingDirectory: Path.GetTempPath(), Cli: "Claude", ContextBoardId: "selected-board"),
+                new StartTerminalRequest(WorkingDirectory: Path.GetTempPath(), Cli: "Claude", ContextBoardId: "selected-board", ContextIncluded: true),
                 TestContext.Current.CancellationToken);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.Null(captured);
             Assert.Equal("selected-board", capturedBoard);
+            // A card prompt's "context already included" reaches the child, so it adds no second block.
+            Assert.True(capturedIncluded);
         }
         finally
         {
@@ -268,7 +272,7 @@ public sealed class TerminalRoutesPromptDeferralTests : IDisposable
                 .Setup(item => item.StartSessionAsync(
                     It.IsAny<LLM>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string[]>(),
                     It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<ResolvedPrompt>>>(), It.IsAny<string>(), It.IsAny<bool>()))
-                .Returns(async (LLM _, string _, string? _, string[]? _, string? _, bool _, Func<Task<ResolvedPrompt>>? resolve, string _, bool _, string? _) =>
+                .Returns(async (LLM _, string _, string? _, string[]? _, string? _, bool _, Func<Task<ResolvedPrompt>>? resolve, string _, bool _, string? _, bool _) =>
                 {
                     // Awaited, not observed: the real service lets the throw escape the gate so
                     // the route can answer with the message instead of starting a session.

@@ -41,9 +41,12 @@ public sealed class BoardContextEstimator(
         if (card is null)
             return null;
         var isManaged = card.WorkflowMode == "agent";
-        var assignee = await ResolveAssigneeAsync(projectPath, isManaged ? card.ManagerSelection : card.Assignee, cancellationToken);
-        var prompt = await BoardLaunchService.ComposePromptAsync(store, projectPath, card, assignee.Label, assignee.EnvironmentPrompt, isManaged ? "manager" : "work", cancellationToken);
-        var measurement = await MeasureAsync(projectPath, card, prompt, isManaged ? card.ManagerSelection : card.Assignee, cancellationToken);
+        var selection = isManaged ? card.ManagerSelection : card.Assignee;
+        var assignee = await ResolveAssigneeAsync(projectPath, selection, cancellationToken);
+        var nudgeEnabled = ContextLevels.NudgeEnabledFor((launchSettings ?? Config.LoadFresh)(), selection);
+        var prompt = await BoardLaunchService.ComposePromptAsync(store, projectPath, card, assignee.Label, assignee.EnvironmentPrompt, isManaged ? "manager" : "work", cancellationToken,
+            nudgeEnabled: nudgeEnabled);
+        var measurement = await MeasureAsync(projectPath, card, prompt, cancellationToken);
         var last = await store.GetLatestContextSampleAsync(projectPath, card.Id, cancellationToken);
         return new BoardContextEstimateResponse(card.Id, card.Key, measurement.Tokens, measurement.Chars, ContextTokenEstimator.Method, DateTime.UtcNow,
             measurement.Sources, measurement.Contents, measurement.Extras, last is null ? null : ToDto(last));
@@ -52,7 +55,7 @@ public sealed class BoardContextEstimator(
     public async Task<BoardContextSampleRecord?> RecordLaunchAsync(string projectPath, BoardCardRecord card, BoardLaunchPrompt prompt, string intent,
         string? sessionId, string? cli, string? selection, CancellationToken cancellationToken = default)
     {
-        var measurement = await MeasureAsync(projectPath, card, prompt, selection, cancellationToken);
+        var measurement = await MeasureAsync(projectPath, card, prompt, cancellationToken);
         var breakdown = JsonSerializer.Serialize(new BoardContextBreakdown(measurement.Sources, measurement.Contents, measurement.Extras),
             AppJsonSerializerContext.Default.BoardContextBreakdown);
         var sample = new NewBoardContextSample(sessionId, intent, cli, selection, measurement.Tokens, measurement.Chars,
@@ -67,22 +70,20 @@ public sealed class BoardContextEstimator(
     private sealed record Measurement(int Tokens, int Chars, int PromptTokens, int CardReadTokens,
         List<BoardContextPartDto> Sources, List<BoardContextPartDto> Contents, List<BoardContextPartDto> Extras);
 
-    private async Task<Measurement> MeasureAsync(string projectPath, BoardCardRecord card, BoardLaunchPrompt prompt, string? selection, CancellationToken cancellationToken)
+    private async Task<Measurement> MeasureAsync(string projectPath, BoardCardRecord card, BoardLaunchPrompt prompt, CancellationToken cancellationToken)
     {
         var detail = await service.GetCardAsync(projectPath, card.Id, cancellationToken)
             ?? throw new BoardValidationException("The card was deleted while its context was being measured.");
-        var render = await BoardTool.RenderCardAsync(service, store, projectPath, detail, BoardTool.CardReadOptions.Default, cancellationToken);
+        // The card read shows the levels the prompt carried. A nudged prompt always carries the App level, even empty.
+        var nudgeEnabled = prompt.ContextLevels.Any(level => level.Key == ContextLevels.AppKey);
+        var render = await BoardTool.RenderCardAsync(service, store, projectPath, detail, BoardTool.CardReadOptions.Default, cancellationToken, nudgeEnabled);
         var lanes = await BoardTool.RenderLanesAsync(service, store, projectPath, prompt.BoardId, prompt.BoardName, cancellationToken);
-        var promptParts = BoardPromptComposer.Measure(prompt.Prompt, card, prompt.EnvironmentPrompt, prompt.BoardContext, prompt.Intent);
-        var settings = (launchSettings ?? Config.LoadFresh)();
-        var custom = BoardSelection.TryParse(selection, out var parsed) && parsed?.IsEnvironment == true;
-        var enabled = custom ? settings.CreateVibeStoryTrackingCustomEnvs : settings.CreateVibeStoryTracking;
-        var everyContext = enabled ? EveryContextPrompt.Prefix(await EveryContextPrompt.ResolveMessageAsync(store, projectPath, prompt.BoardId, cancellationToken)) : "";
+        var promptParts = BoardPromptComposer.Measure(prompt.Prompt, card, prompt.EnvironmentPrompt, prompt.ContextLevels, prompt.Intent);
         var stats = render.Stats;
 
         var sources = new List<BoardContextPartDto>
         {
-            Part("prompt", "Launch prompt", everyContext.Length + prompt.Prompt.Length),
+            Part("prompt", "Launch prompt", prompt.Prompt.Length),
             Part("cardRead", "get_board_card", render.Text.Length),
             Part("lanes", "list_board_columns", lanes.Length),
         };
@@ -100,10 +101,12 @@ public sealed class BoardContextEstimator(
             contents.Add(Part("linkedCards", "Linked cards", stats.LinkedCardsChars, detail.LinkedCards.Count));
         if (detail.Attachments.Count > 0)
             contents.Add(Part("attachments", "Attachment names", stats.AttachmentsChars, detail.Attachments.Count));
-        if (promptParts.BoardContextChars > 0)
-            contents.Add(Part("boardContext", "Board context", promptParts.BoardContextChars));
-        if (everyContext.Length > 0)
-            contents.Add(Part("everyContext", "Every Context", everyContext.Length));
+        // One row per level the prompt carried, broadest first. The block heading counts with the
+        // first level and each separator with the level after it, so the rows add up to the block.
+        var levels = ContextLevels.NonEmpty(prompt.ContextLevels);
+        for (var index = 0; index < levels.Count; index++)
+            contents.Add(Part(levels[index].Key, levels[index].Label,
+                ContextLevels.Format(levels.Take(index + 1)).Length - ContextLevels.Format(levels.Take(index)).Length));
         if (promptParts.EnvironmentPromptChars > 0)
             contents.Add(Part("environmentPrompt", "Environment initial message", promptParts.EnvironmentPromptChars));
         contents.Add(Part("guidance", "Card fields, lane list and tool guidance", promptParts.GuidanceChars + stats.OtherChars + lanes.Length));

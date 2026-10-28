@@ -16,7 +16,7 @@ const navigation = (name, sections) => `
     </nav>`;
 
 export const boardSettingsNavigation = () =>
-    navigation('Board settings', [['general', 'General'], ...TRACKER_TABS, ['context', 'App context'], ['history', 'History']]);
+    navigation('Board settings', [['general', 'General'], ...TRACKER_TABS, ['context', 'Context'], ['history', 'History']]);
 
 /** The New board dialog: a local board (the General section), or one connected to a tracker. */
 export const newBoardNavigation = () => navigation('Board type', [['general', 'Local'], ...TRACKER_TABS]);
@@ -123,23 +123,35 @@ const TYPES = [
     ['research-spike', 'Research spike'], ['chore', 'Chore / tech debt']
 ];
 
-export const everyContextSection = () => `
-    <details class="mb-3" data-every-context open>
-        <summary>Every Context</summary>
-        <div class="mt-3">
-            <p class="board-editor-muted">Sent before the starting message of every new CLI session on this board whose Vibe Board nudge is enabled in Settings. Launches outside a card use the currently selected board. Includes Agents, Board work, Automations and continuations. Up to 4,000 characters.</p>
-            <div data-board-settings-content>Loading context…</div>
-        </div>
-    </details>`;
+// The user's context levels, broadest first (VIBE-229). A launch gets every level that applies to
+// it in one labelled block. App and Board context follow the launch's Vibe Board nudge.
+const NUDGE_NOTE = 'Sent only when the launch\'s Vibe Board nudge is on in Settings (built-in CLIs or Quick Launches).';
+export const CONTEXT_LEVELS = [
+    ['app', 'App context', `Every LLM CLI launched from VibeRails: card agents, the Agents page, Automations, continuations and launches with no board, in any project. ${NUDGE_NOTE}`],
+    ['board', 'Board context', `Every LLM CLI launched for this board: card agents, Agents, Automations and continuations. Launches outside a card use the currently selected board. ${NUDGE_NOTE}`],
+    ['card', 'Card context', 'Every agent opened from a card on this board, for work or discussion. Always sent.'],
+    ['type', 'Card type context', 'Agents opened from a card of that type. Keep the card context, replace it, or send both (card context first). Always sent.']
+];
 
-export const boardContextSection = () => `
-    <details class="mb-3" data-board-context>
-        <summary>Agent context</summary>
-        <div class="mt-3">
-            <p class="board-editor-muted">Sent to every agent opened from a card on this board, for work or discussion. Each message can contain up to 4,000 characters.</p>
-            <div data-board-settings-content>Loading context…</div>
-        </div>
-    </details>`;
+const levelHeader = id => {
+    const [, label, reach] = CONTEXT_LEVELS.find(([level]) => level === id);
+    return `<h6 class="mb-1">${label}</h6><p class="board-editor-muted mb-2" data-context-reach>${reach}</p>`;
+};
+
+const levelSection = (id, body) => `<section class="mb-3" data-context-level="${id}">${levelHeader(id)}${body}</section>`;
+
+/**
+ * One editor for every context level, broadest first. Settings shows App context alone
+ * ({ board: false }); a board's settings show all four, so the whole chain an agent from that board
+ * receives is visible in one place. Card and Card type context are one saved record.
+ */
+export const contextEditorSection = ({ board = true } = {}) => `
+    <div data-context-editor>
+        <p class="board-editor-muted">A launch gets every level that applies to it, broadest first, in one labelled block. Empty levels send nothing. Each level can contain up to 4,000 characters.</p>
+        <div data-context-unit="app">${levelSection('app', '<div data-board-settings-content>Loading context…</div>')}</div>
+        ${board ? `<div data-context-unit="board">${levelSection('board', '<div data-board-settings-content>Loading context…</div>')}</div>
+        <div data-context-unit="card"><div data-board-settings-content>Loading context…</div></div>` : ''}
+    </div>`;
 
 export const laneAutomationSection = () => `
     <section class="mt-3 border-top pt-3" data-lane-automation>
@@ -231,7 +243,7 @@ export function mountBoardSync(app, element, boardId, onStatus = () => {}) {
 }
 
 // Each mount owns its request and DOM. Replacing/closing a modal cannot populate a newer one.
-function mountSettings(app, element, { load, render, read, save, savedMessage, onSaved }) {
+function mountSettings(app, element, { load, render, read, save, savedMessage, onSaved, toastTitle = 'Board' }) {
     if (!element) return () => {};
     const abort = new AbortController();
     let disposed = false;
@@ -267,9 +279,9 @@ function mountSettings(app, element, { load, render, read, save, savedMessage, o
             if (!alive()) return;
             revision = result.revision;
             onSaved?.(result);
-            app.showToast('Board', savedMessage, 'success');
+            app.showToast(toastTitle, savedMessage, 'success');
         } catch (error) {
-            if (alive()) app.showToast('Board', error?.message || 'Settings could not be saved.', 'error');
+            if (alive()) app.showToast(toastTitle, error?.message || 'Settings could not be saved.', 'error');
         } finally {
             busy = false;
             if (alive()) button.disabled = false;
@@ -280,48 +292,82 @@ function mountSettings(app, element, { load, render, read, save, savedMessage, o
     return () => { disposed = true; abort.abort(); element.removeEventListener('click', click); };
 }
 
-export function mountEveryContext(app, element, boardId) {
+// Labels need ids that stay unique when Settings and a board's settings are both in the document.
+let contextEditorIds = 0;
+
+/** App context: above every board and project, so it takes no board id. */
+export function mountAppContext(app, element, _boardId = null, { toastTitle = 'Board' } = {}) {
+    const id = `app-context-message-${++contextEditorIds}`;
     return mountSettings(app, element, {
-        load: extra => BoardApi.getBoardEveryContextAsync(boardId, extra),
+        load: extra => BoardApi.getAppContextAsync(extra),
         render: ({ message }) => `
-            <label class="board-editor-label" for="every-context-message">Every Context message</label>
-            <textarea id="every-context-message" class="form-control form-control-sm mb-3" rows="6" maxlength="4000" placeholder="Context for every Nudge-enabled CLI…" spellcheck="true">${escapeHtml(message || '')}</textarea>
-            <button type="button" class="btn btn-sm btn-outline-primary" data-settings-save>Save Every Context</button>`,
-        read: root => ({ message: root.querySelector('#every-context-message').value }),
-        save: payload => BoardApi.saveBoardEveryContextAsync(boardId, payload),
-        savedMessage: 'Every Context saved for this board.'
+            <label class="visually-hidden" for="${id}">App context</label>
+            <textarea id="${id}" class="form-control form-control-sm mb-2" rows="5" maxlength="4000" placeholder="Context for every LLM launched from VibeRails…" spellcheck="true" data-context-message="app">${escapeHtml(message || '')}</textarea>
+            <button type="button" class="btn btn-sm btn-outline-primary" data-settings-save>Save App context</button>`,
+        read: root => ({ message: root.querySelector('[data-context-message="app"]').value }),
+        save: payload => BoardApi.saveAppContextAsync(payload),
+        savedMessage: 'App context saved for every launch.',
+        toastTitle
     });
 }
 
-export function mountBoardContext(app, element, boardId) {
+/** Board context, stored as the board's Every Context message. */
+export function mountBoardLevelContext(app, element, boardId) {
+    const id = `board-level-context-message-${++contextEditorIds}`;
+    return mountSettings(app, element, {
+        load: extra => BoardApi.getBoardEveryContextAsync(boardId, extra),
+        render: ({ message }) => `
+            <label class="visually-hidden" for="${id}">Board context</label>
+            <textarea id="${id}" class="form-control form-control-sm mb-2" rows="5" maxlength="4000" placeholder="Context for every LLM launched for this board…" spellcheck="true" data-context-message="board">${escapeHtml(message || '')}</textarea>
+            <button type="button" class="btn btn-sm btn-outline-primary" data-settings-save>Save Board context</button>`,
+        read: root => ({ message: root.querySelector('[data-context-message="board"]').value }),
+        save: payload => BoardApi.saveBoardEveryContextAsync(boardId, payload),
+        savedMessage: 'Board context saved for this board.'
+    });
+}
+
+/** Card context and Card type context: the board's Agent context record, saved together. */
+export function mountCardContext(app, element, boardId) {
+    const id = `card-context-message-${++contextEditorIds}`;
     return mountSettings(app, element, {
         load: extra => BoardApi.getBoardContextAsync(boardId, extra),
         render: ({ context }) => `
-            <label class="board-editor-label" for="board-context-default">Default message</label>
-            <textarea id="board-context-default" class="form-control form-control-sm mb-3" rows="4" maxlength="4000" placeholder="Context for every card…" spellcheck="true">${escapeHtml(context.defaultMessage)}</textarea>
-            <p class="board-editor-muted">For each card type, use the default, replace it, or send both (default first). An empty type-only message sends no board context.</p>
-            ${TYPES.map(([type, label]) => {
+            ${levelSection('card', `
+                <label class="visually-hidden" for="${id}">Card context</label>
+                <textarea id="${id}" class="form-control form-control-sm" rows="4" maxlength="4000" placeholder="Context for every card agent on this board…" spellcheck="true" data-context-card>${escapeHtml(context.defaultMessage)}</textarea>`)}
+            ${levelSection('type', TYPES.map(([type, label]) => {
                 const override = context.typeOverrides.find(item => item.type === type);
                 const mode = override?.mode || 'default';
                 return `<details class="mb-2"><summary>${label}</summary>
-                    <label class="board-editor-label mt-2" for="board-context-mode-${type}">${label} context</label>
-                    <select id="board-context-mode-${type}" class="form-select form-select-sm mb-2" data-context-mode="${type}">
-                        ${[['default', 'Default only'], ['replace', 'Type-specific only'], ['append', 'Default + type-specific']].map(([value, text]) => `<option value="${value}" ${value === mode ? 'selected' : ''}>${text}</option>`).join('')}
+                    <label class="board-editor-label mt-2" for="${id}-mode-${type}">${label} cards</label>
+                    <select id="${id}-mode-${type}" class="form-select form-select-sm mb-2" data-context-mode="${type}">
+                        ${[['default', 'Card context only'], ['replace', 'Type-specific only'], ['append', 'Card context + type-specific']].map(([value, text]) => `<option value="${value}" ${value === mode ? 'selected' : ''}>${text}</option>`).join('')}
                     </select>
-                    <textarea class="form-control form-control-sm" rows="3" maxlength="4000" data-context-message="${type}" aria-label="${label} message" spellcheck="true">${escapeHtml(override?.message || '')}</textarea>
+                    <textarea class="form-control form-control-sm" rows="3" maxlength="4000" data-context-message="${type}" aria-label="${label} card type context" spellcheck="true">${escapeHtml(override?.message || '')}</textarea>
                 </details>`;
-            }).join('')}
-            <button type="button" class="btn btn-sm btn-outline-primary mt-2" data-settings-save>Save context</button>`,
+            }).join('') + '<p class="board-editor-muted">An empty type-specific-only message sends no Card or Card type context.</p>')}
+            <button type="button" class="btn btn-sm btn-outline-primary" data-settings-save>Save Card and Card type context</button>`,
         read: root => ({ context: {
-            defaultMessage: root.querySelector('#board-context-default').value,
+            defaultMessage: root.querySelector('[data-context-card]').value,
             typeOverrides: TYPES.map(([type]) => ({ type,
                 mode: root.querySelector(`[data-context-mode="${type}"]`).value,
                 message: root.querySelector(`[data-context-message="${type}"]`).value
             }))
         } }),
         save: payload => BoardApi.saveBoardContextAsync(boardId, payload),
-        savedMessage: 'Board context saved.'
+        savedMessage: 'Card and Card type context saved.'
     });
+}
+
+/**
+ * Mounts every unit {@link contextEditorSection} rendered. Each level keeps its own revision, so
+ * saving one never overwrites another's draft. Returns one dispose for all of them.
+ */
+export function mountContextEditor(app, root, { boardId = null, toastTitle = 'Board' } = {}) {
+    const unit = name => root?.querySelector(`[data-context-unit="${name}"]`);
+    const disposers = [mountAppContext(app, unit('app'), null, { toastTitle })];
+    if (boardId) disposers.push(mountBoardLevelContext(app, unit('board'), boardId), mountCardContext(app, unit('card'), boardId));
+    return () => disposers.forEach(dispose => dispose());
 }
 
 // Automatic account sync status and an immediate retry.

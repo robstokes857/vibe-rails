@@ -277,7 +277,7 @@ Save board. Closing/replacing the modal clears the token and ignores late respon
 follows the returned dedicated Jira board ID, and a pull refreshes cards. There are no Jira toolbar actions.
 Imported cards derive a Jira logo/key badge from `jiraIssueKey`; the origin filter includes Jira and
 Human-made excludes imports. Assignee filter choices deduplicate canonical CLI identities. A new
-local board must be saved before its Agent context can be edited.
+local board must be saved before its Context levels can be edited.
 **New board** has Local, Jira Cloud and Azure DevOps tabs (`newBoardNavigation`, same tab ids and
 `mountBoardSettingsNavigation` as settings). The tracker tabs mount the ordinary panels on the open
 local board, else the first local one (`trackerSourceBoard`), with `lanesFrom` naming it: Connect's
@@ -329,17 +329,17 @@ Lane cards have an 11rem minimum height and keep activity and assignment at the 
 The thumbtack button pins a card's slot during automatic activity promotion. Its narrow save
 preserves other fields, focus and the open editor; failures keep the previous pin state. Explicit
 dragging still moves pinned cards, and ordinary polling reads the saved marker from card summaries.
-The settings modal's **App context** tab contains two collapsible sections: **Every Context**
-first (initially expanded), then **Agent context** (initially collapsed). Card-type overrides
-remain nested inside Agent context. Toggling sections and navigating tabs preserve both drafts.
-Every Context edits one
-per-board message through GET/PUT `/api/v1/board/boards/{boardId}/every-context`; its independent,
-revision-checked save preserves Agent context drafts. New CLI launches prepend it when their built-in/saved-environment Nudge switch
-is on, even for Agents, Board work, Automations and continuations. The editor is abortable and
-escapes saved text. Agent context remains per board: a default message plus default-only,
-type-only, or combined messages for each card type. `board-settings.js` owns these asynchronous,
-abortable editors and revision-checked saves. Context is sent for both Start work and Chat with
-agent. **Save context** is independent of **Save name**.
+The settings modal's **Context** tab and Settings' **Context** tab share one editor
+(`contextEditorSection` / `mountContextEditor` in `board-settings.js`, VIBE-229). It lists the
+levels broadest first and says which launches each reaches: **App context** (every LLM launch,
+GET/PUT `/api/v1/board/app-context`), **Board context** (the board's Every Context message, GET/PUT
+`/api/v1/board/boards/{boardId}/every-context`), **Card context** and **Card type context** (the
+board's default message and per-type default/replace/append overrides, GET/PUT `.../context`).
+Settings mounts App context alone; a board mounts all four. Each unit loads, aborts and saves with its
+own revision, so one save never discards another level's draft; Card and Card type context are one
+record with one save. App and Board context reach launches only when their Nudge switch is on; Card
+and Card type context reach card agents for Start work and Chat with agent either way. The editors
+escape saved text. Saving context is independent of **Save name**.
 The picker footer's **Manage boards** opens an up/down order editor. **Save order** persists the
 complete project-scoped order through `PUT /api/v1/board/boards/order`; the first board opens
 on each Board view load, regardless of the last selection. Explicit card navigation still opens

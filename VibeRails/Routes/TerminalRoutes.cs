@@ -154,7 +154,8 @@ public static class TerminalRoutes
                 var success = await terminalService.StartSessionAsync(llm, workDir, request.EnvironmentName, extraArgs, request.Title, request.MakeRemote, resolveInitialPrompt, summary,
                     authorizeBoardTools: app.Services.GetService<ProcessRole>() is { IsActiveRootBackend: false, IsTerminalTabChild: true }
                         && context.Request.Headers["X-VibeRails-Board-Authorization"] == "true",
-                    contextBoardId: request.ContextBoardId);
+                    contextBoardId: request.ContextBoardId,
+                    contextIncluded: request.ContextIncluded);
 
                 if (!success)
                 {

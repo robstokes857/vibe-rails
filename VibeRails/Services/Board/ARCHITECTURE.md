@@ -107,7 +107,8 @@ lose old searchable chunks before replacement inference. See the
 [shared search contract](../BertV2/README.md). Source access remains behind `IBoardStore`.
 
 The existing **Chat with agent** control accepts an optional 1,000-character question. Discussion
-launches carry a short MCP bootstrap, at most 2,000 characters of environment initial message and
+launches carry a short MCP bootstrap plus the user's context block (App, Board, Card and Card type, VIBE-229),
+at most 2,000 characters of environment initial message and
 4,000 characters of environment arguments. Existing command preparation checks the final escaped
 Windows launch command, including provider options and Board grants. Discussion and implementation
 may coexist; `chat` links do not populate the working-agent indicator or block Start work. An empty

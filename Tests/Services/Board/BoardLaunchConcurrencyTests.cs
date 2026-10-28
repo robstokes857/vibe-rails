@@ -5,6 +5,7 @@ using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services.Board;
 using VibeRails.Services.Terminal;
+using VibeRails.Utils;
 using Xunit;
 
 namespace Tests.Services.Board;
@@ -332,6 +333,29 @@ public sealed class BoardLaunchConcurrencyTests : IDisposable
         Assert.Equal(codex, result.SessionId);
         _tabs.Verify(t => t.CreateTabAsync(It.IsAny<CancellationToken>()), Times.Never);
         Assert.Equal(2, (await _store.GetCardDetailAsync(_root, card.Id, Ct))!.Sessions.Count);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CardLaunchCarriesAppContextOnlyUnderItsOwnNudge_AndTellsTheChildNotToAddItAgain(bool baseNudge)
+    {
+        // VIBE-229: the card prompt carries the whole block, so the tab child must not prefix App
+        // and Board context a second time. A base launch follows the base switch, not Custom Envs.
+        var card = await CreateCardAsync();
+        await _store.SaveAppContextSettingsAsync("App-wide rule", 0, Ct);
+        StartTerminalRequest? request = null;
+        _tabs.Setup(t => t.StartSessionAsync("tab-1", It.IsAny<StartTerminalRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<string, StartTerminalRequest, CancellationToken>((_, value, _) => request = value)
+            .ReturnsAsync(new TerminalStatusResponse(true, Guid.NewGuid().ToString(), "codex", _root));
+        var launcher = new BoardLaunchService(_store, _repository.Object, _tabs.Object, new BoardContextEstimator(
+                new BoardService(_store, new Mock<IBoardCommitService>().Object, new NullBoardLiveSessionProbe()), _store, _repository.Object),
+            launchSettings: () => new Settings { CreateVibeStoryTracking = baseNudge, CreateVibeStoryTrackingCustomEnvs = !baseNudge });
+        await launcher.LaunchAsync(_root, card.Id, null, Ct);
+        Assert.True(request!.ContextIncluded);
+        Assert.Equal(baseNudge, request.InitialPrompt!.Contains("App context:\nApp-wide rule", StringComparison.Ordinal));
+        var sample = await _store.GetLatestContextSampleAsync(_root, card.Id, Ct);
+        Assert.Equal(baseNudge, sample!.BreakdownJson.Contains("\"appContext\"", StringComparison.Ordinal));
     }
 
     // A real estimator over the same store: the launch records its context sample like production does.

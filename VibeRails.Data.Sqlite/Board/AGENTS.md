@@ -2,6 +2,9 @@
 
 `board-every-context/1` adds nullable message/revision columns to BoardContextSettings, independent
 of the existing Agent context JSON/revision. Older Agent context writers omit and preserve them.
+`board-app-context/1` (VIBE-229) adds the single-row `BoardAppContextSettings` table (`Id = 1`,
+Message, Revision) for App context. No existing row is read, converted or moved: Every Context and
+Agent context stay where they are and are read as the Board, Card and Card type levels.
 `board-card-pins/1` adds nullable BoardCards.Pinned; old rows read as false. Automatic promotion
 keeps pinned slots within attention groups, using the displayed order even when older writers
 left interleaved Position values. Promote only unpinned cards in the touched card's group;

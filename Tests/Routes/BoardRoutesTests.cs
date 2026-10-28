@@ -848,6 +848,7 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         Assert.Equal(_project, started.WorkingDirectory);
         Assert.Equal("PROJ-1 · Ship the board", BoardKeyText.Short(started.Title));
         Assert.True(started.AuthorizeBoardTools);
+        Assert.True(started.ContextIncluded);
         Assert.StartsWith("You are working on kanban card PROJ-1", BoardKeyText.Short(started.InitialPrompt));
         // Board and lane names ride inside the fenced card block, between the title and the description.
         Assert.Contains("Title: Ship the board\nBoard: project\nLanes: Backlog → Ready → Build → Review → Done\nAll of it.", started.InitialPrompt);
@@ -1195,10 +1196,11 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         launched.EnsureSuccessStatusCode();
         Assert.NotNull(started);
         Assert.True(started.AuthorizeBoardTools);
+        Assert.True(started.ContextIncluded);
         Assert.Contains("get_board_card", started.InitialPrompt);
         Assert.Contains("Why this design?", started.InitialPrompt);
-        Assert.DoesNotContain("Shared context", started.InitialPrompt);
-        Assert.DoesNotContain("Bug context", started.InitialPrompt);
+        // VIBE-229: a discussion agent is a card agent, so it carries the same labelled block.
+        Assert.Contains("Card context:\nShared context\n\nCard type context (Bug):\nBug context", started.InitialPrompt);
         Assert.Contains("This is a discussion session", started.InitialPrompt);
         using var after = await GetJsonAsync("/api/v1/board/cards/PROJ-1");
         Assert.Equal(card.RootElement.GetProperty("columnId").GetString(), after.RootElement.GetProperty("columnId").GetString());

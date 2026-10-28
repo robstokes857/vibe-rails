@@ -8,6 +8,8 @@ public partial interface IBoardService
     Task<BoardContextSettingsRecord?> SaveContextSettingsAsync(string projectPath, string boardId, UpdateBoardContextRequest request, CancellationToken cancellationToken = default);
     Task<BoardEveryContextSettingsRecord?> GetEveryContextSettingsAsync(string projectPath, string boardId, CancellationToken cancellationToken = default);
     Task<BoardEveryContextSettingsRecord?> SaveEveryContextSettingsAsync(string projectPath, string boardId, UpdateBoardEveryContextRequest request, CancellationToken cancellationToken = default);
+    Task<AppContextSettingsRecord> GetAppContextSettingsAsync(CancellationToken cancellationToken = default);
+    Task<AppContextSettingsRecord> SaveAppContextSettingsAsync(UpdateAppContextRequest request, CancellationToken cancellationToken = default);
 }
 
 public sealed partial class BoardService
@@ -22,6 +24,16 @@ public sealed partial class BoardService
         if (request.ExpectedRevision is null or < 0)
             throw new BoardValidationException("The expected context revision is required.");
         return store.SaveEveryContextSettingsAsync(projectPath, boardId, NormalizeContextMessage(request.Message), request.ExpectedRevision.Value, cancellationToken);
+    }
+
+    public Task<AppContextSettingsRecord> GetAppContextSettingsAsync(CancellationToken cancellationToken = default) =>
+        store.GetAppContextSettingsAsync(cancellationToken);
+
+    public Task<AppContextSettingsRecord> SaveAppContextSettingsAsync(UpdateAppContextRequest request, CancellationToken cancellationToken = default)
+    {
+        if (request.ExpectedRevision is null or < 0)
+            throw new BoardValidationException("The expected context revision is required.");
+        return store.SaveAppContextSettingsAsync(NormalizeContextMessage(request.Message), request.ExpectedRevision.Value, cancellationToken);
     }
 
     public Task<BoardContextSettingsRecord?> GetContextSettingsAsync(string projectPath, string boardId, CancellationToken cancellationToken = default) =>
@@ -52,7 +64,7 @@ public sealed partial class BoardService
     {
         text = (text ?? "").Trim();
         if (text.Length > MaxContextMessageLength)
-            throw new BoardValidationException($"Each board context message must be {MaxContextMessageLength:N0} characters or fewer.");
+            throw new BoardValidationException($"Each context message must be {MaxContextMessageLength:N0} characters or fewer.");
         return text;
     }
 }

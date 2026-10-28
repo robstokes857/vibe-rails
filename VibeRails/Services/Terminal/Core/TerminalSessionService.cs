@@ -107,7 +107,7 @@ public class TerminalSessionService : ITerminalSessionService
         _localClientTracker = localClientTracker;
     }
 
-    public async Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false, Func<Task<ResolvedPrompt>>? resolveInitialPrompt = null, string summary = "", bool authorizeBoardTools = false, string? contextBoardId = null)
+    public async Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false, Func<Task<ResolvedPrompt>>? resolveInitialPrompt = null, string summary = "", bool authorizeBoardTools = false, string? contextBoardId = null, bool contextIncluded = false)
     {
         await s_lifecycleGate.WaitAsync();
 
@@ -140,6 +140,7 @@ public class TerminalSessionService : ITerminalSessionService
                 summary: summary,
                 authorizeBoardTools: authorizeBoardTools,
                 contextBoardId: contextBoardId,
+                contextIncluded: contextIncluded,
                 onRemoteTakeoverAuthorized: trigger =>
                 {
                     Log.Information(

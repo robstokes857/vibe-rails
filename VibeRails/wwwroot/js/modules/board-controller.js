@@ -40,7 +40,7 @@ import { boardBrandLogo, boardTracker, cardTracker, trackerLabel } from './board
 import { BoardLaneAgents } from './board-lane-agents.js';
 import { BoardCardAssign, ASSIGN_ACTION } from './board-card-assign.js';
 import { BOARD_SELECTION_STORAGE_KEY } from './board-selection.js';
-import { everyContextSection, mountEveryContext, boardContextSection, laneAutomationSection, mountBoardContext, mountLaneAutomation, boardSettingsNavigation, newBoardNavigation, mountBoardSettingsNavigation, boardSyncSection, mountBoardSync } from './board-settings.js';
+import { contextEditorSection, mountContextEditor, laneAutomationSection, mountLaneAutomation, boardSettingsNavigation, newBoardNavigation, mountBoardSettingsNavigation, boardSyncSection, mountBoardSync } from './board-settings.js';
 import { boardJiraSection, BoardJiraPanel } from './board-jira.js';
 import { boardAdoSection, BoardAdoPanel } from './board-ado.js';
 import { cardOrganizeSection, bindCardOrganization } from './board-card-organize.js';
@@ -3024,7 +3024,7 @@ export class BoardController {
                 ${board ? `
                     <section id="board-settings-jira" role="tabpanel" aria-labelledby="board-settings-tab-jira" data-board-settings-panel="jira" hidden>${boardJiraSection()}</section>
                     <section id="board-settings-ado" role="tabpanel" aria-labelledby="board-settings-tab-ado" data-board-settings-panel="ado" hidden>${boardAdoSection()}</section>
-                    <section id="board-settings-context" role="tabpanel" aria-labelledby="board-settings-tab-context" data-board-settings-panel="context" hidden>${everyContextSection()}${boardContextSection()}</section>
+                    <section id="board-settings-context" role="tabpanel" aria-labelledby="board-settings-tab-context" data-board-settings-panel="context" hidden>${contextEditorSection()}</section>
                     <section id="board-settings-history" role="tabpanel" aria-labelledby="board-settings-tab-history" data-board-settings-panel="history" hidden>${historySection()}</section>
                 ` : source ? `
                     <section id="board-settings-jira" role="tabpanel" aria-labelledby="board-settings-tab-jira" data-board-settings-panel="jira" hidden>${boardJiraSection({ lanesFrom: source.name })}</section>
@@ -3037,8 +3037,7 @@ export class BoardController {
         const editor = container?.querySelector('[data-board-board-editor]');
         if (!editor) return;
         if (board) {
-            const disposeEveryContext = mountEveryContext(this.app, editor.querySelector('[data-every-context]'), board.id);
-            const disposeContext = mountBoardContext(this.app, editor.querySelector('[data-board-context]'), board.id);
+            const disposeContext = mountContextEditor(this.app, editor.querySelector('[data-context-editor]'), { boardId: board.id });
             const disposeHistory = mountHistory(editor.querySelector('[data-board-history-view]'), board.id);
             const header = container.querySelector('.modal-header');
             header.classList.add('board-settings-header');
@@ -3052,7 +3051,7 @@ export class BoardController {
                         this.persistBoardSelection();
                     }
                     // Keep the modal and its other sections' unsaved drafts. Only the tracker panel
-                    // follows the connection; General and Agent context still edit the opened board.
+                    // follows the connection; General and Context still edit the opened board.
                     // A moved connection no longer determines the opened board's branding or sync
                     // controls. Refresh that board's status without replacing its settings drafts.
                     // A local board that kept the connection became the tracker board itself
@@ -3096,7 +3095,6 @@ export class BoardController {
                 navigation.dispose();
                 disposeSync();
                 trackers.forEach(({ panel }) => panel.dispose());
-                disposeEveryContext();
                 disposeContext();
                 disposeHistory();
             };

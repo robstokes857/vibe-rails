@@ -41,6 +41,44 @@ public sealed partial class BoardStore
         return updated;
     }
 
+    /// <inheritdoc />
+    public async Task<AppContextSettingsRecord> GetAppContextSettingsAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        return await ReadAppContextAsync(connection, null, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<AppContextSettingsRecord> SaveAppContextSettingsAsync(string message, int expectedRevision, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
+        var current = await ReadAppContextAsync(connection, transaction, cancellationToken);
+        if (current.Revision != expectedRevision)
+            throw new BoardConflictException("App context changed while you were editing. Reopen settings to load the latest version; your draft has not been saved.");
+        var updated = new AppContextSettingsRecord(message, checked(current.Revision + 1));
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO BoardAppContextSettings (Id, Message, Revision) VALUES (1, $message, $revision)
+            ON CONFLICT(Id) DO UPDATE SET Message = excluded.Message, Revision = excluded.Revision;
+            """;
+        command.Parameters.AddWithValue("$message", message);
+        command.Parameters.AddWithValue("$revision", updated.Revision);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return updated;
+    }
+
+    private static async Task<AppContextSettingsRecord> ReadAppContextAsync(SqliteConnection connection, SqliteTransaction? transaction, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT Message, Revision FROM BoardAppContextSettings WHERE Id = 1;";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? new(reader.GetString(0), reader.GetInt32(1)) : new("", 0);
+    }
+
     private static async Task<BoardEveryContextSettingsRecord?> ReadEveryContextAsync(SqliteConnection connection, SqliteTransaction? transaction, string project, string boardId, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
@@ -110,6 +148,15 @@ public sealed partial class BoardStore
         CREATE TABLE IF NOT EXISTS BoardContextSettings (
             BoardId TEXT PRIMARY KEY REFERENCES Boards(Id) ON DELETE CASCADE,
             ContextJson TEXT NOT NULL,
+            Revision INTEGER NOT NULL
+        );
+        """;
+
+    // One row: App context is not a board setting, so it has no BoardId and survives board deletion.
+    private const string AppContextSchemaSql = """
+        CREATE TABLE IF NOT EXISTS BoardAppContextSettings (
+            Id INTEGER PRIMARY KEY CHECK (Id = 1),
+            Message TEXT NOT NULL,
             Revision INTEGER NOT NULL
         );
         """;

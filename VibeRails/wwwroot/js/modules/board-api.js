@@ -141,6 +141,15 @@ async function saveBoardEveryContextAsync(boardId, payload) {
     return call(`/boards/${enc(boardId)}/every-context`, 'PUT', payload);
 }
 
+// App context (VIBE-229): one message above every board and project.
+async function getAppContextAsync(extra = {}) {
+    return call('/app-context', 'GET', null, extra);
+}
+
+async function saveAppContextAsync(payload) {
+    return call('/app-context', 'PUT', payload);
+}
+
 async function setBoardCardPinnedAsync(cardId, pinned) {
     return call(`/cards/${enc(cardId)}/pin`, 'PUT', { pinned });
 }
@@ -477,6 +486,8 @@ export const BoardApi = {
     saveBoardContextAsync,
     getBoardEveryContextAsync,
     saveBoardEveryContextAsync,
+    getAppContextAsync,
+    saveAppContextAsync,
     setBoardCardPinnedAsync,
     getLaneAutomationAsync,
     getLaneRunningAgentsAsync,

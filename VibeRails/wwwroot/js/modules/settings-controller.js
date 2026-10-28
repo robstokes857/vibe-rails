@@ -4,6 +4,8 @@ import { SetupPanel, refreshSetupStatus } from './setup-panel.js';
 import { SetupInstallWindow } from './setup-install-window.js';
 import { getToastTheme, setToastTheme } from './toast-service.js';
 import { PrReviewerSettingsPanel } from './settings-pr-reviewer.js';
+import { BoardApi } from './board-api.js';
+import { contextEditorSection, mountContextEditor } from './board-settings.js';
 
 export class SettingsController {
     constructor(app) {
@@ -20,6 +22,7 @@ export class SettingsController {
         this._setupPanel = null;
         // Outlives the Setup panel (see _mountSetupPanel), so it is never cleared on unload.
         this._setupInstallWindow = null;
+        this._disposeContextEditor = null;
         this._selectSettingsTab = null;
         this._linkedKeyVersion = 0;
         // In-app leave-confirm (window.confirm is a silent no-op in the VS Code
@@ -319,6 +322,8 @@ export class SettingsController {
     }
 
     unload() {
+        this._disposeContextEditor?.();
+        this._disposeContextEditor = null;
         this._prReviewerPanel?.unload();
         this._prReviewerPanel = null;
         this._keysPanel?.unload();
@@ -672,6 +677,15 @@ export class SettingsController {
                 if (container) {
                     this._setupPanel ??= this._mountSetupPanel(container);
                     void this._setupPanel.activate();
+                }
+            }
+            // App context (VIBE-229) uses the same editor as a board's Context tab, with only its own level.
+            if (id === 'context' && !this._disposeContextEditor) {
+                const container = root.querySelector('[data-settings-context-editor]');
+                if (container) {
+                    BoardApi.attach(this.app);
+                    container.innerHTML = contextEditorSection({ board: false });
+                    this._disposeContextEditor = mountContextEditor(this.app, container.querySelector('[data-context-editor]'), { toastTitle: 'Settings' });
                 }
             }
             if (id === 'pr-reviewer') {

@@ -98,7 +98,10 @@ test('card prose asks the browser for spell check and identifiers do not', () =>
         assert.match(local, new RegExp(`id="${id}"[^>]*spellcheck="true"`));
     }
     const settings = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/board-settings.js'), 'utf8');
-    assert.match(settings, /id="board-context-default"[^>]*spellcheck="true"/);
+    // Every context level's message is prose (VIBE-229).
+    assert.match(settings, /id="\$\{id\}"[^>]*spellcheck="true"[^>]*data-context-message="app"/);
+    assert.match(settings, /id="\$\{id\}"[^>]*spellcheck="true"[^>]*data-context-message="board"/);
+    assert.match(settings, /id="\$\{id\}"[^>]*spellcheck="true"[^>]*data-context-card/);
     assert.match(settings, /data-context-message="\$\{type\}"[^>]*spellcheck="true"/);
 });
 

@@ -110,7 +110,8 @@ public class TerminalRunner
         bool requireDirectCli = false,
         bool authorizeBoardTools = false,
         string? contextBoardId = null,
-        string? contextProjectPath = null)
+        string? contextProjectPath = null,
+        bool contextIncluded = false)
     {
         // Plain shell sessions are shared remotely like any other session when remote is
         // enabled. A remote viewer of an agent session can already Ctrl+C out of the prompt
@@ -162,7 +163,7 @@ public class TerminalRunner
             if (string.IsNullOrWhiteSpace(boardProject)) boardProject = workDir;
             var preparedSession = await _commandService.PrepareSessionAsync(
                 llm, envName, extraArgs, initialPrompt, summary, sessionId, authorizeBoardTools: authorizeBoardTools,
-                resolveEveryContext: _boardStore is null ? null : () => EveryContextPrompt.ResolveMessageAsync(_boardStore,
+                resolveNudgedContext: _boardStore is null || contextIncluded ? null : () => ContextLevels.ResolveNudgedAsync(_boardStore,
                     boardProject, contextBoardId, ct));
             foreach (var kvp in _toolApiContext.BuildEnvironment(sessionId))
             {

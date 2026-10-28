@@ -134,6 +134,9 @@ CREATE TABLE BoardAdoLinks ( CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON D
 -- table BoardAgentCompletions
 CREATE TABLE BoardAgentCompletions ( ProjectPath TEXT NOT NULL, SessionId TEXT NOT NULL, Outcome TEXT NOT NULL, Summary TEXT NOT NULL, CompletedUTC TEXT NOT NULL, PRIMARY KEY (SessionId) );
 
+-- table BoardAppContextSettings
+CREATE TABLE BoardAppContextSettings ( Id INTEGER PRIMARY KEY CHECK (Id = 1), Message TEXT NOT NULL, Revision INTEGER NOT NULL );
+
 -- table BoardAttachmentContents
 CREATE TABLE BoardAttachmentContents ( AttachmentId TEXT PRIMARY KEY REFERENCES BoardAttachments(Id) ON DELETE CASCADE, Content BLOB NOT NULL );
 

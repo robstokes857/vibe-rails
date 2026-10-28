@@ -15,9 +15,10 @@ public interface IBoardLaunchService
 
 /// <summary>
 /// A composed launch prompt and the inputs that shaped it, so the context estimator (VB-63) can
-/// break the same prompt down without composing a second one.
+/// break the same prompt down without composing a second one. <see cref="ContextLevels"/> are the
+/// user's context levels the prompt carries, broadest first (VIBE-229).
 /// </summary>
-public sealed record BoardLaunchPrompt(string Prompt, string? EnvironmentPrompt, BoardContextSettings? BoardContext, string? BoardId, string? BoardName,
+public sealed record BoardLaunchPrompt(string Prompt, string? EnvironmentPrompt, IReadOnlyList<ContextLevels.Level> ContextLevels, string? BoardId, string? BoardName,
     BoardCardDetailRecord? Detail = null, string Intent = "work");
 
 /// <summary>
@@ -39,7 +40,8 @@ public sealed class BoardLaunchService(
     IBoardStore store,
     IRepository repository,
     ITerminalTabHostService tabHost,
-    IBoardContextEstimator contextEstimator, ReviewRoutingService? reviewRouting = null) : IBoardLaunchService
+    IBoardContextEstimator contextEstimator, ReviewRoutingService? reviewRouting = null,
+    Func<Settings>? launchSettings = null) : IBoardLaunchService
 {
     // Only in-flight launches are retained. TryAdd is an immediate reservation, not a
     // queued semaphore, so removal cannot strand waiters or create two gates for one card.
@@ -143,8 +145,10 @@ public sealed class BoardLaunchService(
         var assigneeLabel = environment is not null
             ? $"{environment.CustomName} ({parsed.Cli})"
             : parsed.Cli;
-        var composed = await ComposePromptAsync(store, projectPath, card, assigneeLabel, routingWorkerPrompt is null ? environment?.CustomPrompt : routingWorkerPrompt + "\n" + environment?.CustomPrompt, intent, cancellationToken, task, isWorker);
-        if (intent == "chat") composed = composed with { Prompt = BoardPromptComposer.ComposeDiscussion(card, environment?.CustomPrompt, question) };
+        // App and Board context follow the Nudge switch for this launch's kind: base or saved environment.
+        var nudgeEnabled = ContextLevels.NudgeEnabled((launchSettings ?? Config.LoadFresh)(), environment is not null);
+        var composed = await ComposePromptAsync(store, projectPath, card, assigneeLabel, routingWorkerPrompt is null ? environment?.CustomPrompt : routingWorkerPrompt + "\n" + environment?.CustomPrompt, intent, cancellationToken, task, isWorker, nudgeEnabled);
+        if (intent == "chat") composed = composed with { Prompt = BoardPromptComposer.ComposeDiscussion(card, environment?.CustomPrompt, question, ContextLevels.Format(composed.ContextLevels)) };
         var prompt = composed.Prompt + (routingSnapshot is null ? "" : ReviewRoutingService.Prompt(routingSnapshot.Resolution));
         var title = $"{card.DisplayId} · {Truncate(card.Title, 60)}";
         var launchOptions = routingSnapshot is not null ? routingSnapshot.Resolution.Selected.Options
@@ -210,7 +214,7 @@ public sealed class BoardLaunchService(
                     Title: title,
                     InitialPrompt: prompt,
                     BaseLlmOptions: launchOptions,
-                    AuthorizeBoardTools: true, ContextBoardId: card.BoardId) { PreserveWorkingDirectory = routingSnapshot is not null },
+                    AuthorizeBoardTools: true, ContextBoardId: card.BoardId, ContextIncluded: true) { PreserveWorkingDirectory = routingSnapshot is not null },
                 cancellationToken);
 
             if (!string.IsNullOrWhiteSpace(session.SessionId))
@@ -270,16 +274,20 @@ public sealed class BoardLaunchService(
     /// the measurement the card editor shows is the prompt a launch would send, not an imitation.
     /// Lanes, linked commits and attachment names ride along so the agent does not spend its first
     /// minutes discovering which lane names exist or which change "the big refactor" was; lane
-    /// Automations ride along too, so the agent can sequence its moves (VB-34).
+    /// Automations ride along too, so the agent can sequence its moves (VB-34). The user's context
+    /// levels ride in one block: App and Board only when <paramref name="nudgeEnabled"/>, Card and
+    /// Card type always (VIBE-229).
     /// </summary>
     internal static async Task<BoardLaunchPrompt> ComposePromptAsync(IBoardStore store, string projectPath, BoardCardRecord card,
-        string? assigneeLabel, string? environmentPrompt, string intent, CancellationToken cancellationToken, string? task = null, bool delegatedWorker = false)
+        string? assigneeLabel, string? environmentPrompt, string intent, CancellationToken cancellationToken, string? task = null, bool delegatedWorker = false,
+        bool nudgeEnabled = false)
     {
         var boardId = string.IsNullOrEmpty(card.BoardId) ? null : card.BoardId;
         var columns = await store.GetColumnsAsync(projectPath, cancellationToken, boardId);
         var column = columns.FirstOrDefault(c => c.Id == card.ColumnId);
         var boardName = boardId is null ? null : (await store.GetBoardAsync(projectPath, boardId, cancellationToken))?.Name;
         var boardContext = boardId is null ? null : await store.GetContextSettingsAsync(projectPath, boardId, cancellationToken);
+        var nudged = nudgeEnabled ? await ContextLevels.ResolveNudgedForCardAsync(store, projectPath, boardId, cancellationToken) : null;
         var detail = await store.GetCardDetailAsync(projectPath, card.Id, cancellationToken);
         var orderedColumns = columns.OrderBy(c => c.Position).ToList();
         var laneAutomations = await BoardService.DescribeLaneAutomationsByLaneAsync(store, projectPath, orderedColumns.Select(c => c.Id).ToList(), cancellationToken);
@@ -291,9 +299,10 @@ public sealed class BoardLaunchService(
             boardContext?.Context,
             orderedColumns.Select(c => (IReadOnlyList<string>)laneAutomations[c.Id].Select(a => a.Name).ToList()).ToList(),
             detail is null ? null : new BoardPromptComposer.CardActivity(detail.Comments.Count, detail.Notes.Count, detail.Sessions.Count),
-            orderedColumns.SelectMany(c => laneAutomations[c.Id].Select(a => $"{c.Name} / {a.Name}: {a.Summary}. Output and next action: {a.Output}")).ToList());
+            orderedColumns.SelectMany(c => laneAutomations[c.Id].Select(a => $"{c.Name} / {a.Name}: {a.Summary}. Output and next action: {a.Output}")).ToList(),
+            nudged);
         var prompt = BoardPromptComposer.Compose(card, column?.Name ?? "(no lane)", assigneeLabel, environmentPrompt, context, intent, workerTask: task, delegatedWorker: delegatedWorker);
-        return new BoardLaunchPrompt(prompt, environmentPrompt, boardContext?.Context, boardId, boardName, detail, intent);
+        return new BoardLaunchPrompt(prompt, environmentPrompt, context.LevelsFor(card.Type), boardId, boardName, detail, intent);
     }
 
     /// <summary>

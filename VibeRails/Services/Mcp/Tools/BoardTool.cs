@@ -9,6 +9,7 @@ using VibeRails.Services.AgentTools;
 using VibeRails.Services.Board;
 using VibeRails.Services.Board.Sync;
 using VibeRails.Services.Board.Tracker;
+using VibeRails.Services.Terminal;
 
 namespace VibeRails.Services.Mcp.Tools;
 
@@ -36,7 +37,8 @@ public sealed partial class BoardTool(
     BoardSearchService? search = null,
     VibeRails.Services.Jira.JiraCommentService? jiraComments = null,
     DesktopMcpActivityTracker? desktopActivity = null,
-    VibeRails.Services.AzureDevOps.AdoCommentService? adoComments = null)
+    VibeRails.Services.AzureDevOps.AdoCommentService? adoComments = null,
+    Func<VibeRails.Utils.Settings>? launchSettings = null)
 {
     /// <summary>
     /// MCP image payloads are base64 encoded and copied by the protocol stack. Keep this transfer
@@ -262,7 +264,12 @@ public sealed partial class BoardTool(
             var currentProject = await projects.ResolveAsync(cancellationToken);
             var referenceRoot = string.Equals(target.Project, currentProject, BoardPaths.ProjectPathComparison) ? projects.GitWorkingDirectory : target.Project;
             detail = detail with { PreviousWork = BoardHandoffService.WithFileStatus(detail.PreviousWork, referenceRoot) };
-            var render = await RenderCardAsync(service, store, target.Project, detail, new CardReadOptions(sinceUtc, beforeUtc, allActivity, beforeId, descriptionOffset), cancellationToken);
+            // The caller's own launch decides whether App and Board context applied; anyone else
+            // sees what an agent started with the card's saved selection would receive.
+            var selection = detail.Sessions.FirstOrDefault(session => session.Id == projects.CurrentSessionId)?.Selection
+                ?? (detail.WorkflowMode == "agent" ? detail.ManagerSelection : detail.Assignee);
+            var nudgeEnabled = ContextLevels.NudgeEnabledFor((launchSettings ?? VibeRails.Utils.Config.LoadFresh)(), selection);
+            var render = await RenderCardAsync(service, store, target.Project, detail, new CardReadOptions(sinceUtc, beforeUtc, allActivity, beforeId, descriptionOffset), cancellationToken, nudgeEnabled);
             return render.Text;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -287,9 +294,11 @@ public sealed partial class BoardTool(
 
     /// <summary>
     /// Everything get_board_card returns, assembled from the service and store so the Board
-    /// context estimator (VB-63) can measure exactly what an agent would read.
+    /// context estimator (VB-63) can measure exactly what an agent would read. The user's context
+    /// block includes App and Board context only when <paramref name="nudgeEnabled"/> (VIBE-229).
     /// </summary>
-    internal static async Task<CardRender> RenderCardAsync(IBoardService service, IBoardStore store, string project, BoardCardResponse detail, CardReadOptions options, CancellationToken cancellationToken)
+    internal static async Task<CardRender> RenderCardAsync(IBoardService service, IBoardStore store, string project, BoardCardResponse detail, CardReadOptions options,
+        CancellationToken cancellationToken, bool nudgeEnabled = false)
     {
         var lanes = (await service.GetColumnsAsync(project, cancellationToken, BoardService.NormalizeBoardId(detail.BoardId))).Columns.OrderBy(c => c.Position).ToList();
         var lane = lanes.FirstOrDefault(c => c.Id == detail.ColumnId);
@@ -315,11 +324,9 @@ public sealed partial class BoardTool(
         var reviewRows = await store.GetReviewsAsync(project, detail.Id, 0, cancellationToken);
         text += "\n\nCode reviews: " + (reviewRows.Count == 0 ? "No saved reports. Poll get_board_reviews for queued runs and review status."
             : string.Join("\n", reviewRows.Take(5).Select(r => $"{r.Id}: {r.Result ?? "Report missing"} · {r.Provider} · scope {BoardPromptComposer.SanitizeLine(r.ScopeDescription, 300)} · freshness unknown; get_board_reviews reviewId={r.Id}")));
-        if (!string.IsNullOrEmpty(detail.BoardId))
-        {
-            var settings = await store.GetContextSettingsAsync(project, detail.BoardId, cancellationToken);
-            if (settings is not null) text += "\n\nBoard workflow context supplied by the user:\n" + BoardPromptComposer.ComposeBoardContext(settings.Context, detail.Type);
-        }
+        var userContext = ContextLevels.Format(await ContextLevels.ResolveForCardAsync(store, project, BoardService.NormalizeBoardId(detail.BoardId), detail.Type,
+            nudgeEnabled, cancellationToken));
+        if (userContext.Length > 0) text += "\n\n" + userContext;
         return new CardRender(text, stats);
     }
 

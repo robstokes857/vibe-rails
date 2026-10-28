@@ -1216,7 +1216,10 @@ namespace VibeRails.DTOs
         BaseLlmOptions? BaseLlmOptions = null,
         [property: JsonIgnore] bool AuthorizeBoardTools = false,
         int? EnvironmentId = null,
-        string? ContextBoardId = null
+        string? ContextBoardId = null,
+        // A card prompt already carries the user's context block (VIBE-229), so the child must not
+        // add App and Board context again. It can only leave context out, never add any.
+        bool ContextIncluded = false
     )
     {
         /// <summary>Server-only review scope decision. Browser input cannot bypass workspace resolution.</summary>
@@ -2027,6 +2030,8 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(EnterpriseNetworkProxyTestResponse))]
     [JsonSerializable(typeof(BoardEveryContextSettingsRecord))]
     [JsonSerializable(typeof(UpdateBoardEveryContextRequest))]
+    [JsonSerializable(typeof(AppContextSettingsRecord))]
+    [JsonSerializable(typeof(UpdateAppContextRequest))]
     [JsonSerializable(typeof(SetBoardCardPinRequest))]
     [JsonSerializable(typeof(Services.HttpRelay.HttpRelayBody))]
     [JsonSerializable(typeof(Services.HttpRelay.HttpRelayRequest))]

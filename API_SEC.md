@@ -208,6 +208,8 @@ middleware serves their paths rather than registering individual API endpoints.
 | POST | `/api/v1/bert/search` | [BertRoutes.cs](VibeRails/Routes/BertRoutes.cs) |
 | GET | `/api/v1/bert/session-captures` | [BertRoutes.cs](VibeRails/Routes/BertRoutes.cs) |
 | GET | `/api/v1/bert/status` | [BertRoutes.cs](VibeRails/Routes/BertRoutes.cs) |
+| GET | `/api/v1/board/app-context` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| PUT | `/api/v1/board/app-context` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | GET | `/api/v1/board/boards` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | POST | `/api/v1/board/boards` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | PUT | `/api/v1/board/boards/order` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |

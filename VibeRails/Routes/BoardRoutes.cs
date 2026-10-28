@@ -153,6 +153,15 @@ public static partial class BoardRoutes
             RunAsync(async () => OkOrNotFound(await board.SaveEveryContextSettingsAsync(Project(), boardId, request, cancellationToken), "Board")))
             .WithName("SaveBoardEveryContext");
 
+        // App context (VIBE-229) is above every board and project, so it takes no board or project scope.
+        app.MapGet("/api/v1/board/app-context", (IBoardService board, CancellationToken cancellationToken) =>
+            RunAsync(async () => Results.Ok(await board.GetAppContextSettingsAsync(cancellationToken))))
+            .WithName("GetAppContext");
+
+        app.MapPut("/api/v1/board/app-context", (IBoardService board, UpdateAppContextRequest request, CancellationToken cancellationToken) =>
+            RunAsync(async () => Results.Ok(await board.SaveAppContextSettingsAsync(request, cancellationToken))))
+            .WithName("SaveAppContext");
+
         app.MapGet("/api/v1/board/columns", (IBoardService board, string? boardId, CancellationToken cancellationToken) =>
             RunAsync(async () => Results.Ok(await board.GetColumnsAsync(Project(), cancellationToken, boardId))))
             .WithName("GetBoardColumns");

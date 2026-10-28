@@ -33,6 +33,8 @@ public sealed class AgentCredentialTests
     [InlineData("POST", "/api/v1/settings", false)]
     [InlineData("GET", "/api/v1/board/boards/board-a/every-context", false)]
     [InlineData("PUT", "/api/v1/board/boards/board-a/every-context", false)]
+    [InlineData("GET", "/api/v1/board/app-context", false)]
+    [InlineData("PUT", "/api/v1/board/app-context", false)]
     [InlineData("PUT", "/api/v1/board/cards/card-a/pin", false)]
     [InlineData("GET", "/api/v1/settings/security-challenge", false)]
     [InlineData("POST", "/api/v1/settings/pin", false)]

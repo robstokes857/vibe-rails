@@ -3,6 +3,9 @@ namespace VibeRails.DTOs;
 /// <summary>Revision-checked update of one board's Every Context message.</summary>
 public sealed record UpdateBoardEveryContextRequest(string? Message, int? ExpectedRevision);
 
+/// <summary>Revision-checked update of App context, the level above every board (VIBE-229).</summary>
+public sealed record UpdateAppContextRequest(string? Message, int? ExpectedRevision);
+
 /// <summary>
 /// One measured piece of the context an agent receives for a card (VB-63). <see cref="Items"/>
 /// is a count where one applies (comments, notes, sessions…); <see cref="Note"/> is a short

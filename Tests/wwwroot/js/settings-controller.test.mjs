@@ -153,6 +153,18 @@ test('settings page groups its cards under a section tab bar', () => {
     assert.match(html, /id="settings-panel-general"[\s\S]*?Remote PIN Lock[\s\S]*?Application Settings/);
 });
 
+test('the Context tab reuses the board context editor for App context, and the nudge help names it', () => {
+    const html = readFileSync(indexPath, 'utf8');
+    const source = readFileSync(modulePath, 'utf8');
+    assert.match(html, /id="settings-tab-context"[\s\S]{0,160}data-settings-tab="context">Context</);
+    assert.match(html, /id="settings-panel-context" role="tabpanel"[\s\S]{0,800}data-settings-context-editor/);
+    assert.match(source, /contextEditorSection\(\{ board: false \}\)/);
+    assert.match(source, /_disposeContextEditor\?\.\(\)/, 'leaving Settings disposes the editor');
+    assert.doesNotMatch(html, /Every Context/);
+    // Both nudge switches, built-in CLIs and Quick Launches, name the levels they gate.
+    assert.equal(html.match(/Also include App context and the\s+selected board's Board context/g)?.length, 2);
+});
+
 test('every tracked settings control survives the tabbed layout', () => {
     const html = readFileSync(indexPath, 'utf8');
     const source = readFileSync(modulePath, 'utf8');

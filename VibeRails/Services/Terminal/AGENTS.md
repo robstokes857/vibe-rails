@@ -153,12 +153,15 @@ controls custom environments; older settings files retain the base choice and de
 When a managed LLM launch has no
 nonblank initial message or continuation summary, `CommandService` reads the shared settings file
 and uses optional story-tracking guidance as its default prompt only if that launch's switch is on.
-The per-board **Every Context** message in Board settings is prepended to every managed CLI launch
-whose corresponding nudge switch is on, including explicit tasks, Board work, Agents, Automations
-and continuation summaries. It is stored behind `IBoardStore` in board.db, with its own revision. Browser launches carry the
-currently selected board; card launches carry the card's board. Native launches without a board
-selection use the project's first existing board. Empty defaults preserve existing launches.
-Board-specific Agent context and task/summary precedence are preserved. The default tracking guidance
+**App context** (Settings → Context) and the board's **Board context** (Board settings → Context)
+are prepended, in that order and in one labelled block (`ContextLevels`, VIBE-229), to every managed
+CLI launch whose corresponding nudge switch is on, including explicit tasks, Agents, Automations and
+continuation summaries. Both are stored behind `IBoardStore` in board.db, each with its own revision.
+Browser launches carry the currently selected board; native launches without a board selection use
+the project's first existing board; App context applies with no project or board at all. A card
+launch already carries the full block (App, Board, Card, Card type) in its prompt and sets
+`ContextIncluded`, so the child adds nothing. Empty levels send nothing. Task/summary precedence is
+preserved. The default tracking guidance
 tells the agent to reply only that it is ready to help (no tools, work, or invented request) and
 then wait for a user task; story creation stays discretionary, and an existing story
 should be reused. This uses the normal provider prompt argv, never TUI input or rewritten provider

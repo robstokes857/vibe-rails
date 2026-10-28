@@ -2071,6 +2071,10 @@ public sealed partial class BoardStore : IBoardStore
             SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardCards ADD COLUMN GhostReason TEXT");
             SqliteSchema.Execute(db, transaction, PostProcessingSchemaSql);
         });
+        // board-app-context/1 (VIBE-229): a new single-row table for App context. Every Context and
+        // Agent context stay in BoardContextSettings and are read as the Board, Card and Card type levels.
+        SqliteMigrationRunner.Apply(connection, "board-app-context", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, AppContextSchemaSql));
         ReconcileDerivedRows(connection);
     }
 

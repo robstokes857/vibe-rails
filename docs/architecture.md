@@ -90,18 +90,23 @@ independent and defaults off in new and older settings files. Nullable API updat
 each saved choice when an older client omits its field.
 For managed LLM launches with no nonblank initial message or continuation summary, `CommandService`
 reads the shared settings file and uses optional Board tracking guidance as the default prompt.
-Board settings' **Every Context** tab edits a separate message for each board, independently of
-**Agent context**. Authenticated project-scoped GET/PUT
-`/api/v1/board/boards/{boardId}/every-context` use a separate revision. Nullable columns in
-BoardContextSettings are added automatically (`board-every-context/1`); existing Agent context
-writers preserve them. The message defaults empty and is limited to 4,000 characters.
-Every managed CLI launch whose corresponding nudge switch is on prepends it to the starting prompt,
-including explicit tasks, Agents, Board work, Automations and continuation summaries. Browser
-launches carry the selected board; card launches use the card's board. Native launches without a
-selection use the first existing project board. The ready-only tracking guidance remains a fallback
-for sessions without a task. Board context estimates and launch samples include Every Context using
-the selected launch's nudge switch. Existing task/summary precedence and provider argv conventions
-are preserved. The guidance asks agents to use their discretion, reuse an existing story and
+User context is one system of four levels (VIBE-229), broadest first: **App context** (every LLM
+launch, any project or none), **Board context** (launches for one board), **Card context** (agents
+opened from any card on the board) and **Card type context** (a type's default, replace or append
+override). `ContextLevels` resolves and formats them into one labelled block; empty levels send
+nothing and each level is limited to 4,000 characters. App and Board context apply only when the
+launch's nudge switch is on; Card and Card type context always reach card agents. Storage is
+additive: App context is the single-row `BoardAppContextSettings` table (`board-app-context/1`,
+GET/PUT `/api/v1/board/app-context`), Board context is still the Every Context columns of
+BoardContextSettings (`board-every-context/1`, GET/PUT `/api/v1/board/boards/{boardId}/every-context`)
+and Card/Card type context is still the Agent context JSON; each has its own revision. A card
+launch composes the whole block into its prompt in the root and sets `StartTerminalRequest.ContextIncluded`
+so the tab child adds nothing more. Every other managed launch (Agents, Automations, continuation
+summaries, explicit tasks) gets App and Board context prepended by `CommandService` when its switch is
+on. Browser launches carry the selected board; native launches without a selection use the first
+existing project board. The ready-only tracking guidance remains a fallback for sessions without a
+task. The card context estimate, launch samples and `get_board_card` render the same block as the
+launch. Existing task/summary precedence and provider argv conventions are preserved. The guidance asks agents to use their discretion, reuse an existing story and
 record progress/results and session history when useful. A guidance-only launch replies only that
 the agent is ready to help, without tools, work, or an invented request, then waits for a user task.
 The prompt names that exact reply because a bare "wait" left agents to fill the forced first turn;
@@ -634,7 +639,7 @@ for data limits, vendor provenance, themes/CSP, lifecycle and regression tests.
 
 Jira Cloud connection controls live in the board settings modal (`board-jira.js`), bound to
 the edited board ID. They save separately from board metadata; the app Settings page has no
-Integrations tab. VIBE-103 separates General, Jira Cloud, Agent context and History with keyboard
+Integrations tab. VIBE-103 separates General, Jira Cloud, Context and History with keyboard
 accessible settings tabs. Pull and its report stay in Jira settings. Card summaries/detail derive
 `jiraIssueKey` from the existing issue links for a Jira logo badge; the origin filter includes Jira
 and excludes imports from Human-made. Assignee choices deduplicate canonical CLI identities.

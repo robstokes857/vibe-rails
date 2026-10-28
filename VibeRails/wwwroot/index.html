@@ -1055,6 +1055,8 @@
                             aria-controls="settings-panel-general" aria-selected="true" data-settings-tab="general">General</button>
                         <button type="button" class="settings-tab" role="tab" id="settings-tab-llm"
                             aria-controls="settings-panel-llm" aria-selected="false" tabindex="-1" data-settings-tab="llm">LLMs</button>
+                        <button type="button" class="settings-tab" role="tab" id="settings-tab-context"
+                            aria-controls="settings-panel-context" aria-selected="false" tabindex="-1" data-settings-tab="context">Context</button>
                         <button type="button" class="settings-tab" role="tab" id="settings-tab-keys"
                             aria-controls="settings-panel-keys" aria-selected="false" tabindex="-1" data-settings-tab="keys">KEYS</button>
                         <button type="button" class="settings-tab" role="tab" id="settings-tab-setup"
@@ -1063,6 +1065,16 @@
                             aria-controls="settings-panel-pr-reviewer" aria-selected="false" tabindex="-1" data-settings-tab="pr-reviewer">PR Reviewer</button>
                     </div>
                 </div>
+            </div>
+            <div class="settings-panel" id="settings-panel-context" role="tabpanel" aria-labelledby="settings-tab-context" tabindex="0" hidden>
+                <div class="row justify-content-center"><div class="col-md-8 col-lg-6">
+                    <section class="sandbox-item-card text-start" data-settings-context>
+                        <h2 class="sandbox-item-name">Context</h2>
+                        <p>Instructions you add to LLM launches, from the broadest level to the most specific: App, Board, Card, then Card type.
+                            App context is set here. Each board's settings, under Context, show all four levels for that board.</p>
+                        <div data-settings-context-editor></div>
+                    </section>
+                </div></div>
             </div>
             <div class="settings-panel" id="settings-panel-pr-reviewer" role="tabpanel" aria-labelledby="settings-tab-pr-reviewer" tabindex="0" hidden>
                 <div class="row justify-content-center"><div class="col-md-8 col-lg-6">
@@ -1365,9 +1377,9 @@
                                 </div>
                                 <small class="form-text text-muted">When a built-in CLI starts with no message of its own, open with the Vibe Board prompt:
                                     consider tracking this work as a Vibe Story (the agent decides). Agents always start with their own
-                                    message, so this tracking prompt never applies to them. Also include Every Context from the
-                                    selected board's settings on every built-in CLI launch, even with a starting message.
-                                    On by default; applies to new sessions.</small>
+                                    message, so this tracking prompt never applies to them. Also include App context and the
+                                    selected board's Board context on every built-in CLI launch, even with a starting message.
+                                    Card and Card type context reach card agents either way. On by default; applies to new sessions.</small>
                             </div>
                             <div class="mb-4">
                                 <div class="form-check form-switch">
@@ -1375,7 +1387,7 @@
                                     <label class="form-check-label" for="setting-create-vibe-story-tracking-custom-envs">Vibe Board nudge — Quick Launches</label>
                                 </div>
                                 <small class="form-text text-muted">The same opening prompt for a Quick Launch started with no message or continuation summary.
-                                    Also include Every Context from the selected board's settings on every saved setup launch,
+                                    Also include App context and the selected board's Board context on every saved setup launch,
                                     including Agents with a starting message. Off by default; applies to new sessions.</small>
                             </div>
                             <div class="mb-4">

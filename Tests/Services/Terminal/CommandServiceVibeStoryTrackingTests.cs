@@ -80,7 +80,7 @@ public partial class CommandServiceTests
 
     [Theory]
     [MemberData(nameof(IndependentNudgeLaunches))]
-    public async Task EveryContext_AccompaniesTasksAndSummariesOnlyWhenTheLaunchNudgeIsEnabled(
+    public async Task AppAndBoardContext_AccompanyTasksAndSummariesOnlyWhenTheLaunchNudgeIsEnabled(
         LLM llm, string? envName, bool baseEnabled, bool customEnabled)
     {
         const string context = "Keep the user's \"quoted\" path; preserve $value, `literal`, and\nnew lines.";
@@ -95,9 +95,17 @@ public partial class CommandServiceTests
         foreach (var continuation in new[] { "", summary })
         {
             var prepared = await service.PrepareSessionAsync(llm, envName, null, initialPrompt: task, summary: continuation,
-                resolveEveryContext: () => { Assert.True(enabled); return Task.FromResult<string?>(" \n" + context + "\n "); });
+                resolveNudgedContext: () =>
+                {
+                    Assert.True(enabled);
+                    return Task.FromResult<IReadOnlyList<ContextLevels.Level>>([
+                        new(ContextLevels.AppKey, "App context", "Every launch"),
+                        new(ContextLevels.BoardKey, "Board context", " \n" + context + "\n ")]);
+                });
             var ownPrompt = continuation.Length > 0 ? summary : task;
-            var expected = enabled ? "VibeRails Every Context:\n" + context + "\n\n" + ownPrompt : ownPrompt;
+            var expected = enabled
+                ? "Context supplied by the user, broadest first:\n\nApp context:\nEvery launch\n\nBoard context:\n" + context + "\n\n" + ownPrompt
+                : ownPrompt;
             var expectedArg = llm switch
             {
                 LLM.Copilot => "--interactive=" + expected,
@@ -115,14 +123,17 @@ public partial class CommandServiceTests
 
     [Theory]
     [MemberData(nameof(StoryTrackingLaunches))]
-    public async Task EveryContext_EmptyLaunchStillReceivesReadyOnlyGuidance(LLM llm, string? envName)
+    public async Task AppContext_EmptyLaunchStillReceivesReadyOnlyGuidance(LLM llm, string? envName)
     {
         var prepared = await CreateService(storyTrackingSettings: () => new Settings
         {
             CreateVibeStoryTrackingCustomEnvs = true
-        }).PrepareSessionAsync(llm, envName, null, resolveEveryContext: () => Task.FromResult<string?>("Shared instructions"));
+        }).PrepareSessionAsync(llm, envName, null, resolveNudgedContext: () => Task.FromResult<IReadOnlyList<ContextLevels.Level>>([
+            new(ContextLevels.AppKey, "App context", "Shared instructions"), new(ContextLevels.BoardKey, "Board context", "  ")]));
 
-        Assert.EndsWith("VibeRails Every Context:\nShared instructions\n\n" + VibeStoryTrackingPrompt.Guidance, prepared.Argv![^1]);
+        // The empty Board level sends nothing, not even its label.
+        Assert.EndsWith("Context supplied by the user, broadest first:\n\nApp context:\nShared instructions\n\n" + VibeStoryTrackingPrompt.Guidance, prepared.Argv![^1]);
+        Assert.DoesNotContain("Board context", prepared.Argv[^1]);
         // Inspect the actual argv: the display command shell-escapes apostrophes on Unix.
         Assert.Contains("tell the user you're ready to help", prepared.Argv[^1]);
     }

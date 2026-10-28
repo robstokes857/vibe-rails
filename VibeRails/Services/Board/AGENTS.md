@@ -1,10 +1,15 @@
 # Working on Vibe Board
 
-Board settings' **App context** tab puts the collapsible **Every Context** editor first and
-**Agent context** second. Every Context is per board and independent of Agent context. CLI launches
-with their corresponding Nudge switch enabled prepend it, including launches with an explicit task.
-Browser launches use the selected board and card launches their owning board. Both editors save
-with separate revisions behind `IBoardStore`; ordinary Agent context writes preserve Every Context.
+User context has four levels, broadest first (VIBE-229): **App** (every LLM launch), **Board**
+(stored as the board's Every Context), **Card** (the Agent context default message) and **Card type**
+(its per-type override). `Services/Terminal/Commands/ContextLevels.cs` resolves and formats them;
+every path (card prompt, plain launch prefix, context estimate, `get_board_card`) goes through it so
+they show the same labelled block. App and Board apply only under the launch's Nudge switch; Card and
+Card type always reach card agents. A card launch composes the block into its prompt and sets
+`ContextIncluded`, so the tab child does not prepend App and Board again. Board settings' **Context**
+tab and Settings' **Context** tab share one editor. Each level saves with its own revision behind
+`IBoardStore`; ordinary Agent context writes preserve Every Context, and App context is one row in
+`BoardAppContextSettings`.
 
 Cards have a local pin toggle. Pins preserve their slots during automatic activity promotion,
 including when another card is promoted; explicit dragging still moves a pinned card. Existing
