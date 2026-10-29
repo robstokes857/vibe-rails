@@ -12,7 +12,7 @@ public sealed record JiraPullReport(
     bool DryRun,
     string Outcome,
     int Created,
-    int Updated,
+    int AlreadyImported,
     int Skipped,
     int Failed,
     string? Message,
@@ -63,11 +63,11 @@ public interface IJiraPullService
 }
 
 /// <summary>
-/// One-way pull of one Jira board, or one saved JQL filter, into one board. Jira wins on the mapped
-/// fields. Assignee, flagged, blocked, options, notes, sessions, commits, attachments and the card
-/// number are never written. A pull places a new card by its Jira column or status and never moves
-/// a card again: its lane and board are the local workflow, and a later Jira status change is only
-/// noted in a comment.
+/// One-way pull of one Jira board, or one saved JQL filter, into one board. A pull only adds new
+/// issues (<see cref="TrackerImport"/>): each becomes a card once, with its mapped fields, placed
+/// by its Jira column or status. After that the card, its lane and its board are the local
+/// workflow, and no later pull changes or comments on it. Comments and session links still go out
+/// to the issue.
 /// </summary>
 public sealed class JiraPullService(
     IBoardStore store,
@@ -122,8 +122,8 @@ public sealed class JiraPullService(
         var token = apiToken?.Trim();
         // Links are keyed by connection id plus Jira's numeric issue id, and that id is only unique
         // within one site. A different site therefore gets a new connection id: its issues can never
-        // match, and overwrite, cards linked to the previous site. Those cards stay on the board and
-        // are no longer updated. The saved token is never sent to the new site.
+        // match cards linked to the previous site, which would leave a colliding issue unimported.
+        // Those cards stay on the board. The saved token is never sent to the new site.
         var siteChanged = existing is not null
             && !string.Equals(existing.SiteUrl, source.Origin, StringComparison.OrdinalIgnoreCase);
         if (siteChanged && string.IsNullOrEmpty(token))
@@ -141,7 +141,7 @@ public sealed class JiraPullService(
             siteChanged ? null : existing?.LastTestedUtc,
             siteChanged ? null : existing?.LastPullUtc,
             siteChanged
-                ? $"Site changed from {existing!.SiteUrl}. Cards pulled from that site stay on the board and are no longer updated."
+                ? $"Site changed from {existing!.SiteUrl}. Cards pulled from that site stay on the board."
                 : existing?.LastReport,
             source.Link, source.JiraBoardId, source.JiraBoardName, columnMap, narrow, skipOldDone, existing?.DedicatedBoard ?? false), cancellationToken)
             ?? throw new JiraConfigException("That board no longer exists. Open the board again and retry.");
@@ -302,7 +302,7 @@ public sealed class JiraPullService(
         // One writing pull at a time across every VibeRails process on this machine.
         using var held = pullLock.TryAcquire();
         if (held is null)
-            return Report(dryRun, "busy", 0, 0, 0, 0, "Another Jira pull is running. Try again when it finishes.");
+            return Report(dryRun, "busy", new TrackerPullCounts(), "Another Jira pull is running. Try again when it finishes.");
         connection = await store.EnsureDedicatedJiraBoardAsync(projectPath, connection.Id, cancellationToken);
         var report = (await PullConnectionAsync(connection, token, dryRun, cancellationToken)) with { BoardId = connection.BoardId };
         await Remember(connection, report, cancellationToken);
@@ -355,12 +355,7 @@ public sealed class JiraPullService(
     {
         var lanes = await store.GetColumnsAsync(connection.ProjectPath, cancellationToken, connection.BoardId);
         var overflowId = connection.OverflowColumnId;
-        var created = 0;
-        var updated = 0;
-        var skipped = 0;
-        var unchanged = 0;
-        var deleted = 0;
-        var failed = 0;
+        var counts = new TrackerPullCounts();
         string? pageToken = null;
         var pages = 0;
 
@@ -382,16 +377,9 @@ public sealed class JiraPullService(
             {
                 try
                 {
-                    var action = await ApplyIssueAsync(connection, plan, issue, lanes, overflowId, dryRun, cancellationToken);
-                    if (action is ApplyAction.Created or ApplyAction.CreatedOverflow) created++;
-                    else if (action == ApplyAction.Updated) updated++;
-                    else
-                    {
-                        skipped++;
-                        if (action == ApplyAction.Unchanged) unchanged++;
-                        else if (action == ApplyAction.SkippedDeleted) deleted++;
-                    }
-                    if (action == ApplyAction.CreatedOverflow)
+                    var (state, madeLane) = await ApplyIssueAsync(connection, plan, issue, lanes, overflowId, dryRun, cancellationToken);
+                    counts.Add(state);
+                    if (madeLane)
                     {
                         overflowId = await RefreshOverflowAsync(connection, cancellationToken) ?? overflowId;
                         lanes = await store.GetColumnsAsync(connection.ProjectPath, cancellationToken, connection.BoardId);
@@ -403,7 +391,7 @@ public sealed class JiraPullService(
                 }
                 catch (Exception)
                 {
-                    failed++;
+                    counts.AddFailed();
                 }
             }
 
@@ -413,34 +401,24 @@ public sealed class JiraPullService(
                 break;
         }
 
-        var message = $"{created} created, {updated} updated, {skipped} skipped, {failed} failed.";
-        if (skipped > 0)
-        {
-            var reasons = new List<string>();
-            if (unchanged > 0) reasons.Add($"{unchanged} unchanged");
-            if (deleted > 0) reasons.Add($"{deleted} previously deleted in VibeRails");
-            var alreadyLinked = skipped - unchanged - deleted;
-            if (alreadyLinked > 0) reasons.Add($"{alreadyLinked} already linked");
-            message += $" Skipped: {string.Join(", ", reasons)}.";
-        }
-        return Report(dryRun, "ok", created, updated, skipped, failed, dryRun ? "Dry run. " + message : message);
+        return Report(dryRun, "ok", counts, counts.Message(dryRun));
 
         JiraPullReport Stopped(JiraCallOutcome outcome, string? detail) => outcome switch
         {
-            JiraCallOutcome.Unauthorized => Report(dryRun, "expired", created, updated, skipped, failed, detail),
+            JiraCallOutcome.Unauthorized => Report(dryRun, "expired", counts, detail),
             // Retry-After is not waited for: the wait would hold the cross-process Jira lock
             // (blocking saves, tests, unlinks and activity delivery) only to give up afterwards.
-            JiraCallOutcome.RateLimited => Report(dryRun, "rate-limited", created, updated, skipped, failed,
+            JiraCallOutcome.RateLimited => Report(dryRun, "rate-limited", counts,
                 "Jira rate limited the pull. The next interval tries again."),
-            JiraCallOutcome.BadJql => Report(dryRun, "bad-jql", created, updated, skipped, failed, detail),
-            _ => Report(dryRun, "failed", created, updated, skipped, failed, detail ?? "Jira did not return the issues.")
+            JiraCallOutcome.BadJql => Report(dryRun, "bad-jql", counts, detail),
+            _ => Report(dryRun, "failed", counts, detail ?? "Jira did not return the issues.")
         };
     }
 
     /// <summary>
     /// What one pull reads. A board connection re-reads the board configuration every pull, so a
-    /// column or estimation change in Jira comes through; without it (403, say) lanes match by status
-    /// name and only a story points field set under Advanced is read.
+    /// column or estimation change in Jira applies to the next new cards; without it (403, say) lanes
+    /// match by status name and only a story points field set under Advanced is read.
     /// </summary>
     /// <param name="Jql">The board's narrowing, or the whole query for a JQL connection.</param>
     /// <param name="StatusLanes">Status id to its Jira column and that column's lane (null: overflow).</param>
@@ -502,90 +480,50 @@ public sealed class JiraPullService(
     private static IEnumerable<string> ColumnNames(JiraBoardConfiguration? configuration) =>
         configuration?.Columns.Where(column => column.StatusIds.Count > 0).Select(column => column.Name) ?? [];
 
-    private enum ApplyAction { Skipped, Unchanged, SkippedDeleted, Created, Updated, CreatedOverflow }
-
-    private async Task<ApplyAction> ApplyIssueAsync(
+    /// <summary>
+    /// One issue under <see cref="TrackerImport"/>: an issue with no link becomes a card, and a linked
+    /// one is left alone without being read further. <c>MadeLane</c>: the overflow lane was created.
+    /// </summary>
+    private async Task<(TrackerImportState State, bool MadeLane)> ApplyIssueAsync(
         BoardJiraConnectionRecord connection, PullPlan plan, JiraIssue issue, IReadOnlyList<BoardColumnRecord> lanes,
         string? overflowId, bool dryRun, CancellationToken cancellationToken)
     {
+        // A soft-deleted card keeps its link (VB-51) and stays deleted, so no overflow lane is
+        // made on its behalf either. Decided before the dry-run count.
+        var link = await store.FindJiraLinkAsync(connection.Id, issue.Id, cancellationToken);
+        var live = link is not null && await store.FindCardAsync(connection.ProjectPath, link.CardId, cancellationToken) is not null;
+        var state = TrackerImport.Classify(link is not null, live);
+        if (state != TrackerImportState.New)
+            return (state, false);
+
         if (string.IsNullOrWhiteSpace(issue.Summary))
             throw new JiraConfigException("Issue has no summary.");
-        var link = await store.FindJiraLinkAsync(connection.Id, issue.Id, cancellationToken);
-        BoardCardRecord? existing = link is null ? null : await store.FindCardAsync(connection.ProjectPath, link.CardId, cancellationToken);
-        // A soft-deleted card keeps its link (VB-51): the issue is neither recreated nor updated,
-        // and no overflow lane is made on its behalf. Decided before the dry-run count.
-        if (link is not null && existing is null)
-            return ApplyAction.SkippedDeleted;
-
-        var mapped = JiraFieldMapping.Map(issue, plan.PointsField, existing?.Type);
-        var mapping = TrackerLinkMapping.Serialize(plan.PointsField, mapped.StatusName);
-        var applied = TrackerLinkMapping.Parse(link?.Mapping);
-
-        // An unchanged issue is skipped while the same story points field is read; a new field
-        // re-reads it without anyone editing the issue in Jira. Where the card sits, lane or
-        // board, never matters: a pull does not move cards, so a local move always stays.
-        var unchanged = link is not null && issue.Updated.ToUniversalTime() == link.IssueUpdated.ToUniversalTime();
-        if (unchanged && existing is not null && string.Equals(applied.PointsField, plan.PointsField, StringComparison.Ordinal))
-        {
-            // Record the status an older link never stored, so its next change can be noted.
-            if (!dryRun && !string.Equals(link!.Mapping, mapping, StringComparison.Ordinal))
-                await store.UpdateJiraLinkAsync(link with { Mapping = mapping }, cancellationToken);
-            if (!string.IsNullOrWhiteSpace(existing.Description) || mapped.Description.Length == 0)
-                return ApplyAction.Unchanged;
-            // Repair descriptions missed by older string-only endpoint handling, without
-            // overwriting locally edited fields of an otherwise unchanged issue.
-            if (!dryRun)
-                await store.UpdateCardAsync(connection.ProjectPath, existing.Id,
-                    new BoardCardPatch(Description: mapped.Description), cancellationToken, JiraAuthor);
-            return ApplyAction.Updated;
-        }
+        var mapped = JiraFieldMapping.Map(issue, plan.PointsField, existingType: null);
         if (mapped.Title.Length == 0)
             throw new JiraConfigException("Issue title is empty after trimming.");
-
         if (dryRun)
-            return existing is null ? ApplyAction.Created : ApplyAction.Updated;
+            return (state, false);
 
-        if (existing is null)
-        {
-            // Only a new card is placed. The overflow lane is made on demand for one whose
-            // column or status has no lane; the lane list is refreshed by the caller afterwards.
-            var placement = Place(plan, issue, mapped.StatusName, lanes, overflowId);
-            var columnId = placement.Lane.ColumnId;
-            var madeLane = columnId is null;
-            columnId ??= await EnsureOverflowLaneAsync(connection, lanes, cancellationToken);
-            // Card and link commit together: a crash or a concurrent pull between them would leave
-            // an unlinked card, and the next pull would create a duplicate.
-            var card = await store.CreateJiraCardAsync(connection.ProjectPath, new NewBoardCard(
-                columnId, mapped.Title, mapped.Description, null, mapped.Priority, mapped.Points, mapped.Tags,
-                false, null, mapped.Type, connection.BoardId, false),
-                new BoardJiraLinkRecord(string.Empty, connection.Id, issue.Id, issue.Key, mapped.AssigneeDisplay, issue.Updated, DateTime.UtcNow, mapping),
-                cancellationToken);
-            if (card is null)
-                return ApplyAction.Skipped;
-            if (placement.Lane.Match != TrackerLaneMatch.Matched)
-                await board.AddCommentAsync(connection.ProjectPath, card.Id, JiraAuthor, placement.OverflowComment, cancellationToken, syncToJira: false);
-            return madeLane ? ApplyAction.CreatedOverflow : ApplyAction.Created;
-        }
-
-        await store.UpdateCardAsync(connection.ProjectPath, existing.Id, new BoardCardPatch(
-            Title: mapped.Title,
-            Description: mapped.Description,
-            Priority: mapped.Priority,
-            Points: mapped.Points,
-            ClearPoints: mapped.ClearPoints,
-            Tags: mapped.Tags.ToList(),
-            Type: mapped.Type), cancellationToken, JiraAuthor);
-        // The card keeps its lane and board: a Jira status change is noted, never applied. Record
-        // the new status first: a failed comment is then lost once, instead of being posted again
-        // by every later pull against a link that still holds the old status.
-        var statusChanged = !unchanged && applied.Status is not null
-            && !string.Equals(applied.Status, mapped.StatusName, StringComparison.Ordinal);
-        await store.UpdateJiraLinkAsync(new BoardJiraLinkRecord(
-            existing.Id, connection.Id, issue.Id, issue.Key, mapped.AssigneeDisplay, issue.Updated, DateTime.UtcNow, mapping), cancellationToken);
-        if (statusChanged)
-            await board.AddCommentAsync(connection.ProjectPath, existing.Id, JiraAuthor,
-                StatusChangeComment(issue.Key, applied.Status!, mapped.StatusName), cancellationToken, syncToJira: false);
-        return ApplyAction.Updated;
+        // The overflow lane is made on demand for an issue whose column or status has no lane; the
+        // caller refreshes its lane list afterwards.
+        var placement = Place(plan, issue, mapped.StatusName, lanes, overflowId);
+        var columnId = placement.Lane.ColumnId;
+        var madeLane = columnId is null;
+        columnId ??= await EnsureOverflowLaneAsync(connection, lanes, cancellationToken);
+        // Card and link commit together: a crash or a concurrent pull between them would leave
+        // an unlinked card, and the next pull would create a duplicate.
+        var card = await store.CreateJiraCardAsync(connection.ProjectPath, new NewBoardCard(
+            columnId, mapped.Title, mapped.Description, null, mapped.Priority, mapped.Points, mapped.Tags,
+            false, null, mapped.Type, connection.BoardId, false),
+            new BoardJiraLinkRecord(string.Empty, connection.Id, issue.Id, issue.Key, mapped.AssigneeDisplay, issue.Updated, DateTime.UtcNow,
+                TrackerLinkMapping.Serialize(plan.PointsField, mapped.StatusName)),
+            cancellationToken);
+        // Null: a concurrent pull imported the issue first.
+        if (card is null)
+            return (TrackerImportState.Imported, madeLane);
+        if (placement.Lane.Match != TrackerLaneMatch.Matched)
+            await board.AddCommentAsync(connection.ProjectPath, card.Id, JiraAuthor, placement.OverflowComment, cancellationToken, syncToJira: false);
+        return (state, madeLane);
     }
 
     private sealed record Placement(TrackerLaneDecision Lane, string OverflowComment);
@@ -625,9 +563,6 @@ public sealed class JiraPullService(
 
     private async Task<string?> RefreshOverflowAsync(BoardJiraConnectionRecord connection, CancellationToken cancellationToken) =>
         (await store.GetJiraConnectionAsync(connection.ProjectPath, connection.BoardId, cancellationToken))?.OverflowColumnId;
-
-    private static string StatusChangeComment(string issueKey, string before, string after) =>
-        $"{issueKey} is now \"{after}\" in Jira (was \"{before}\"). The card was not moved: its lane and board are local.";
 
     private static string OverflowComment(string issueKey, string status) =>
         $"{issueKey} is in Jira status \"{status}\", which matches no lane on this board. Parked in {OverflowLaneName}. No lane was created for that status.";
@@ -701,8 +636,8 @@ public sealed class JiraPullService(
     private BoardJiraConnectionRecord WithTokenFlag(BoardJiraConnectionRecord connection) =>
         connection with { HasToken = secrets.HasToken(connection.Id) };
 
-    private static JiraPullReport Report(bool dryRun, string outcome, int created, int updated, int skipped, int failed, string? message) =>
-        new(dryRun, outcome, created, updated, skipped, failed, message);
+    private static JiraPullReport Report(bool dryRun, string outcome, TrackerPullCounts counts, string? message) =>
+        new(dryRun, outcome, counts.Created, counts.AlreadyImported, counts.Skipped, counts.Failed, message);
 
     private static string? Trim(string? value) =>
         string.IsNullOrEmpty(value) ? value : value.Length <= 500 ? value : value[..500];

@@ -16,8 +16,9 @@ public sealed record JiraMappedFields(
     string? AssigneeDisplay);
 
 /// <summary>
-/// Pure mapping from one Jira issue onto the card fields a pull is allowed to change.
-/// Jira wins on those fields. Story points are read only when the connection names the field id.
+/// Pure mapping from one Jira issue onto the fields of the card a pull creates for it. A pull
+/// copies them once, at import, and never again. Story points are read only when the connection
+/// names the field id.
 /// Points snapping, labels and lane decisions are the shared <see cref="TrackerFieldMapping"/> rules.
 /// </summary>
 public static class JiraFieldMapping

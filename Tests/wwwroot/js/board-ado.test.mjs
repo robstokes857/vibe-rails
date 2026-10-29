@@ -55,7 +55,7 @@ function createHarness({ connection = savedConnection(), newBoard = false, test 
             }
             if (path.endsWith('/ado') && method === 'DELETE') return { message: 'Azure DevOps unlinked. Board and cards kept.' };
             if (path.endsWith('/ado/test')) return test || { ...TEST_RESULT, boardId: current.boardId || 'brd_sprint' };
-            if (path.includes('/ado/pull')) return { outcome: 'ok', message: '0 created, 0 updated, 1 unchanged, 0 skipped.' };
+            if (path.includes('/ado/pull')) return { outcome: 'ok', message: '0 created, 1 already imported, 0 skipped, 0 failed.' };
             throw new Error('unexpected ' + method + ' ' + path);
         },
         showToast() {}
@@ -259,7 +259,7 @@ test('a panel made by the New board dialog asks for a new board and pulls after 
     assert.deepEqual(order, ['PUT /api/v1/board/boards/brd_sprint/ado', 'POST /api/v1/board/boards/brd_sprint/ado/test',
         'POST /api/v1/board/boards/brd_sprint/ado/pull']);
     assert.deepEqual(changes, [['test', 'brd_sprint'], ['pull', 'brd_sprint']]);
-    assert.equal(fields.get('[data-ado-report]').textContent, '0 created, 0 updated, 1 unchanged, 0 skipped.');
+    assert.equal(fields.get('[data-ado-report]').textContent, '0 created, 1 already imported, 0 skipped, 0 failed.');
     const put = calls.find(([path, method]) => path.endsWith('/ado') && method === 'PUT');
     assert.equal(put[2].newBoard, true);
     // Once the connection has its own board, a save edits it rather than asking for another.
@@ -436,7 +436,7 @@ test('pull now reports the server text and reloads the connection', async () => 
     await panel.activate();
     await panel._pull(false);
     assert.ok(calls.some(call => String(call[0]).endsWith('/ado/pull')));
-    assert.match(fields.get('[data-ado-report]').textContent, /unchanged/);
+    assert.match(fields.get('[data-ado-report]').textContent, /already imported/);
     assert.equal(calls.filter(call => String(call[0]).endsWith('?settings=true')).length, 2);
 });
 

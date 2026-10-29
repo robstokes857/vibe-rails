@@ -51,9 +51,9 @@ public sealed record AdoMappedFields(
     string? AssigneeDisplay);
 
 /// <summary>
-/// Pure mapping from one Azure DevOps work item onto the card fields a pull may change. Azure
-/// DevOps wins on those fields. Points snapping, tags and lane decisions are the shared
-/// <see cref="TrackerFieldMapping"/> rules.
+/// Pure mapping from one Azure DevOps work item onto the fields of the card a pull creates for it.
+/// A pull copies them once, at import, and never again. Points snapping, tags and lane decisions
+/// are the shared <see cref="TrackerFieldMapping"/> rules.
 /// </summary>
 public static class AdoFieldMapping
 {

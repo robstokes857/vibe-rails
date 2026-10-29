@@ -4,6 +4,12 @@ The Azure DevOps delivery contract mirrors [Jira comments](../Jira/Comments.md):
 same ledger shape, same states and the same refusal to retry an uncertain send. Only the
 transport and the comment format differ.
 
+Delivery is the only ongoing link between a card and its work item. Azure DevOps is the source
+of truth for its work items: a pull copies each one into the board once and never changes its
+card again (VIBE-236, "Dedicated Azure DevOps boards" in the [Board guide](../Board/AGENTS.md)).
+Comments and session links keep flowing out to the work item, addressed by its numeric id, for as
+long as the card stays linked. Nothing in Azure DevOps flows back after the import.
+
 New comments on a card linked to an Azure DevOps work item are posted to that work item by
 default. REST comment/note requests and both MCP tools `add_board_comment` and
 `append_board_note` accept `syncToRemote=false` for an internal note; `syncToJira` stays as an
@@ -26,9 +32,9 @@ creates `BoardAdoDeliveries` in board.db, a copy of the Jira ledger. The `BoardC
 trigger records a comment's outbound intent in the comment transaction, and
 `QueueAdoSessionAsync` records a session's in the session-link transaction. The destination is
 pinned to the original connection id and numeric work item id, including after a local board
-move. The pull's own notes (author `Azure DevOps`), hidden discussion, rows pulled from
-viberails.ai, copied (`jiraCopy`) and opted-out comments are excluded. Persistence stays behind
-`IBoardStore`.
+move. The pull's own notes (author `Azure DevOps`, written only when it imports a work item),
+hidden discussion, rows pulled from viberails.ai, copied (`jiraCopy`) and opted-out comments are
+excluded. Persistence stays behind `IBoardStore`.
 
 `AdoPullScheduler` starts `AdoDeliveryService.DrainAsync` every 5 seconds on the leased root
 scheduler, beside the 15-minute pull and never while a pull runs. Each drain sends at most 20

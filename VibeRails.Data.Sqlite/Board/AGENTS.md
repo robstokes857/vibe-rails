@@ -271,7 +271,10 @@ placed that issue (a board connection's lane target and story points field). A p
 issue whose Jira `updated` is unchanged only while this also matches, so a changed lane pick,
 points field or JQL-to-board switch re-applies existing cards without editing them in Jira. A
 NULL row (written before board/29, or by a JQL connection without a points field) still skips
-on a JQL connection and is re-applied once by a board connection. No backfill.
+on a JQL connection and is re-applied once by a board connection. No backfill. That describes
+older versions: since VIBE-236 a pull never updates a linked card, and writes `Mapping`,
+`IssueUpdated` (and the Azure DevOps `Rev`) only at import, so those versions still skip an
+unchanged item. It never reads them; the columns and their data stay as they are.
 
 `board/14` (VB-51, additive) adds `BoardCards.CardKey` (the stored random key of a new card,
 unique where not NULL), `BoardCards.DeletedUTC` (soft delete), `BoardComments.Changes` (the

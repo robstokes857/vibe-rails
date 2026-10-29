@@ -1,5 +1,11 @@
 # Jira comments and session links
 
+Delivery is the only ongoing link between a card and its issue. Jira is the source of truth for
+its issues: a pull copies each one into the board once and never changes its card again
+(VIBE-236, "Dedicated Jira boards" in the [Board guide](../Board/AGENTS.md)). Comments and session
+links keep flowing out to the issue, addressed by its numeric id, for as long as the card stays
+linked. Nothing in Jira flows back after the import.
+
 New comments on a Jira-linked card are posted to its connected Jira issues by default.
 The card editor links to the issue and offers **Post this comment to Jira**; uncheck it for
 an internal note. REST comment/note requests and both MCP tools `add_board_comment` and
@@ -23,7 +29,8 @@ comment-insert trigger records its outbound intent in the comment transaction. S
 are written in the local session-link transaction. Persistence remains behind `IBoardStore`.
 The destination is pinned to the original connection and numeric issue ID, including after a
 local board move. Moves remap delivery source IDs without requeueing old discussion. Merge
-copies, remote Board imports, Jira pull receipts and explicit Jira-post receipts are excluded.
+copies, remote Board imports, the pull's own notes (author `Jira`, written only when it imports an
+issue) and explicit Jira-post receipts are excluded.
 Older local comment writers also use the trigger; an opted-out comment stays excluded.
 
 The existing root scheduler starts a bounded delivery drain on its normal ticks, independently

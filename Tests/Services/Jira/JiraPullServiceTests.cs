@@ -34,7 +34,7 @@ public sealed class JiraPullServiceTests : IDisposable
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Fact]
-    public async Task UnchangedIssueRepairsMissingDescriptionWithoutResettingLocalFields()
+    public async Task AnIssueImportedWithoutADescription_IsNotRepairedByALaterPull()
     {
         var service = Service();
         var board = await BoardWithLanes();
@@ -43,15 +43,12 @@ public sealed class JiraPullServiceTests : IDisposable
         _jira.Pages.Enqueue(Page(issue with { DescriptionText = "" }));
         await service.PullAsync(_project, connection.BoardId, false, Ct);
         var card = Assert.Single(await _store.GetCardsAsync(_project, Ct, connection.BoardId));
-        await _board.UpdateCardAsync(_project, card.Id, new VibeRails.DTOs.UpdateBoardCardRequest(Title: "Local title"), Ct);
-        var lane = (await _store.GetColumnsAsync(_project, Ct, connection.BoardId)).First(l => l.Id != card.ColumnId);
-        await _store.MoveCardAsync(_project, card.Id, lane.Id, null, Ct);
+        Assert.Empty(card.Description);
+
+        // The same issue now reads with a description, as it did for older string-only parsing.
         _jira.Pages.Enqueue(Page(issue));
-        Assert.Equal(1, (await service.PullAsync(_project, connection.BoardId, false, Ct)).Updated);
-        var fixedCard = (await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Card;
-        Assert.Equal("body", fixedCard.Description);
-        Assert.Equal("Local title", fixedCard.Title);
-        Assert.Equal(lane.Id, fixedCard.ColumnId);
+        Assert.Equal(1, (await service.PullAsync(_project, connection.BoardId, false, Ct)).AlreadyImported);
+        Assert.Equal(Untouched(card), Untouched((await _store.FindCardAsync(_project, card.Id, Ct))!));
     }
 
     [Fact]
@@ -195,38 +192,75 @@ public sealed class JiraPullServiceTests : IDisposable
         _jira.Pages.Enqueue(Page(
             Issue("100", "PROJ-1", "2026-09-01T00:00:00.000Z", "Fix login", "Bug", "Highest", "Backlog")));
         var second = await service.PullAsync(_project, board.Id, dryRun: false, Ct);
-        Assert.Equal(1, second.Skipped);
-        Assert.Equal(0, second.Updated);
-        Assert.Equal("0 created, 0 updated, 1 skipped, 0 failed. Skipped: 1 unchanged.", second.Message);
+        Assert.Equal((0, 1, 0), (second.Created, second.AlreadyImported, second.Skipped));
+        Assert.Equal("0 created, 1 already imported, 0 skipped, 0 failed.", second.Message);
     }
 
+    /// <summary>VIBE-236: Jira is the source of truth for its issues, and a pull copies each one once.</summary>
     [Fact]
-    public async Task NewerJiraUpdatePatchesMappedFields_NotesTheStatusChange_AndNeverMovesTheCard()
+    public async Task ALocallyEditedCard_IsNeverChangedOrCommentedOn_WhenItsIssueChangesInJira()
     {
         var service = Service();
         var board = await BoardWithLanes();
         board = board with { Id = (await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct)).BoardId };
-        var backlog = (await _store.GetColumnsAsync(_project, Ct, board.Id)).Single(column => column.Name == "Backlog");
-
         _jira.Pages.Enqueue(Page(Issue("100", "PROJ-1", "2026-09-01T00:00:00.000Z", "Fix login", "Bug", "High", "Backlog")));
         await service.PullAsync(_project, board.Id, dryRun: false, Ct);
-
-        _jira.Pages.Enqueue(Page(Issue("100", "PROJ-1", "2026-09-02T00:00:00.000Z", "Fix login again", "Bug", "Low", "Review")));
-        var report = await service.PullAsync(_project, board.Id, dryRun: false, Ct);
-        Assert.Equal(1, report.Updated);
-
         var card = Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id));
-        Assert.Equal("Fix login again", card.Title);
-        Assert.Equal("low", card.Priority);
-        Assert.Equal(backlog.Id, card.ColumnId);
-        var comment = Assert.Single((await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Comments);
-        Assert.Contains("PROJ-1 is now \"Review\" in Jira (was \"Backlog\")", comment.Body);
-        Assert.Contains("was not moved", comment.Body);
+        var connectionId = (await _store.GetJiraConnectionAsync(_project, board.Id, Ct))!.Id;
+        var link = await _store.FindJiraLinkAsync(connectionId, "100", Ct);
 
-        // An edit that keeps the status is not a change worth another comment.
-        _jira.Pages.Enqueue(Page(Issue("100", "PROJ-1", "2026-09-03T00:00:00.000Z", "Fix login once more", "Bug", "Low", "Review")));
-        Assert.Equal(1, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).Updated);
-        Assert.Single((await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Comments);
+        var ready = (await _store.GetColumnsAsync(_project, Ct, board.Id)).Single(lane => lane.Name == "Ready");
+        await _board.UpdateCardAsync(_project, card.Id, new VibeRails.DTOs.UpdateBoardCardRequest(
+            Title: "Local title", Description: "Local notes", Priority: "low", Tags: ["local"]), Ct);
+        await _board.MoveCardAsync(_project, card.Id, new BoardCardMoveRequest(ready.Id, SkipLaneAutomations: true), Ct);
+        var edited = (await _store.FindCardAsync(_project, card.Id, Ct))!;
+
+        // Every field a pull used to write changes in Jira, and so do the status and the key.
+        var changed = Issue("100", "PROJ-9", "2026-09-02T00:00:00.000Z", "Fix login again", "Story", "Highest", "Done")
+            with { DescriptionText = "Rewritten in Jira", Labels = ["two"], StoryPoints = 8 };
+        _jira.Pages.Enqueue(Page(changed));
+        Assert.Equal("Dry run. 0 created, 1 already imported, 0 skipped, 0 failed.",
+            (await service.PullAsync(_project, board.Id, dryRun: true, Ct)).Message);
+        _jira.Pages.Enqueue(Page(changed));
+        var report = await service.PullAsync(_project, board.Id, dryRun: false, Ct);
+
+        Assert.Equal(("ok", 0, 1, 0, 0), (report.Outcome, report.Created, report.AlreadyImported, report.Skipped, report.Failed));
+        Assert.Equal("0 created, 1 already imported, 0 skipped, 0 failed.", report.Message);
+        var after = (await _store.FindCardAsync(_project, card.Id, Ct))!;
+        Assert.Equal(Untouched(edited), Untouched(after));
+        Assert.Equal(("Local title", "Local notes", "low", ready.Id), (after.Title, after.Description, after.Priority, after.ColumnId));
+        Assert.DoesNotContain((await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Comments,
+            comment => comment.Author.Label == "Jira");
+        // The link keeps what it was imported with; delivery addresses the issue by its id.
+        Assert.Equal(link, await _store.FindJiraLinkAsync(connectionId, "100", Ct));
+        Assert.Empty(await _store.GetJiraDeliveriesAsync(_project, card.Id, Ct));
+    }
+
+    [Fact]
+    public async Task CommentsStillReachTheIssue_WhileThePullLeavesItsCardAlone()
+    {
+        var service = Service();
+        var board = await BoardWithLanes();
+        board = board with { Id = (await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct)).BoardId };
+        var issue = Issue("100", "PROJ-1", "2026-09-01T00:00:00.000Z", "Fix login", "Bug", "High", "Backlog");
+        _jira.Pages.Enqueue(Page(issue));
+        await service.PullAsync(_project, board.Id, dryRun: false, Ct);
+        _jira.Pages.Enqueue(Page(issue with { Key = "PROJ-9", Updated = DateTime.Parse("2026-09-02T00:00:00Z").ToUniversalTime(), StatusName = "Done" }));
+        await service.PullAsync(_project, board.Id, dryRun: false, Ct);
+        var card = Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id));
+
+        await _board.AddCommentAsync(_project, card.Id, BoardAuthor.User(), "Ready for review", Ct);
+        await _board.AddCommentAsync(_project, card.Id, BoardAuthor.User(), "Internal only", Ct, syncToJira: false);
+        var comments = new Mock<IJiraCommentClient>();
+        comments.Setup(c => c.AddCommentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new JiraCommentResult(true, false, "Posted", "1"));
+        await new JiraDeliveryService(_store, _secrets, comments.Object, Mock.Of<IJiraSessionSharing>(), new JiraPullLock(LockPath)).DrainAsync(Ct);
+
+        comments.Verify(c => c.AddCommentAsync("https://acme.atlassian.net", "ada@example.com", "secret-token", "100",
+            It.Is<string>(body => body.Contains("Ready for review")), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()), Times.Once);
+        comments.VerifyNoOtherCalls();
+        Assert.Equal("sent", Assert.Single(await _store.GetJiraDeliveriesAsync(_project, card.Id, Ct)).Status);
     }
 
     [Fact]
@@ -315,7 +349,7 @@ public sealed class JiraPullServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task LinkMatchesTheIssueIdAndKeepsTheLatestKey()
+    public async Task LinkMatchesTheIssueId_SoAMovedIssueIsStillTheSameImport_UnderItsImportedKey()
     {
         var service = Service();
         var board = await BoardWithLanes();
@@ -323,11 +357,11 @@ public sealed class JiraPullServiceTests : IDisposable
         _jira.Pages.Enqueue(Page(Issue("100", "OLD-1", "2026-09-01T00:00:00.000Z", "Moved", "Task", "Medium", "Backlog")));
         await service.PullAsync(_project, board.Id, dryRun: false, Ct);
         _jira.Pages.Enqueue(Page(Issue("100", "NEW-9", "2026-09-02T00:00:00.000Z", "Moved", "Task", "Medium", "Backlog")));
-        await service.PullAsync(_project, board.Id, dryRun: false, Ct);
+        Assert.Equal(1, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).AlreadyImported);
 
         Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id));
         var connection = (await _store.GetJiraConnectionAsync(_project, board.Id, Ct))!;
-        Assert.Equal("NEW-9", (await _store.FindJiraLinkAsync(connection.Id, "100", Ct))!.IssueKey);
+        Assert.Equal("OLD-1", (await _store.FindJiraLinkAsync(connection.Id, "100", Ct))!.IssueKey);
     }
 
     [Fact]
@@ -389,12 +423,12 @@ public sealed class JiraPullServiceTests : IDisposable
         Assert.DoesNotContain(lanes, lane => lane.Name == "Jira");
         var backlog = lanes.Single(lane => lane.Name == "Backlog");
 
-        // Both change to a status with no lane in the same pull: the fields update, nothing
-        // moves, and the overflow lane a new card would need is not created for them.
+        // Both change to a status with no lane in the same pull: nothing moves or is noted, and
+        // the overflow lane a new card would need is not created for them.
         _jira.Pages.Enqueue(Page(
             Issue("100", "PROJ-1", "2026-09-02T00:00:00.000Z", "One", "Task", "Medium", "In QA"),
             Issue("101", "PROJ-2", "2026-09-02T00:00:00.000Z", "Two", "Task", "Medium", "Blocked upstream")));
-        Assert.Equal(2, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).Updated);
+        Assert.Equal(2, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).AlreadyImported);
 
         Assert.DoesNotContain(await _store.GetColumnsAsync(_project, Ct, board.Id), lane => lane.Name == "Jira");
         var cards = await _store.GetCardsAsync(_project, Ct, board.Id);
@@ -402,8 +436,7 @@ public sealed class JiraPullServiceTests : IDisposable
         foreach (var card in cards)
         {
             Assert.Equal(backlog.Id, card.ColumnId);
-            var comment = Assert.Single((await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Comments);
-            Assert.Contains("was not moved", comment.Body);
+            Assert.Empty((await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Comments);
         }
     }
 
@@ -429,7 +462,7 @@ public sealed class JiraPullServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ACardMovedToAnotherLocalBoardStaysThere_WhileJiraStillUpdatesItsFields()
+    public async Task ACardMovedToAnotherLocalBoardStaysThere_AndIsNeverUpdated()
     {
         var service = Service();
         var source = await BoardWithLanes();
@@ -444,22 +477,21 @@ public sealed class JiraPullServiceTests : IDisposable
         var lane = (await _store.GetColumnsAsync(_project, Ct, sprint.Id))[0];
         await _board.MoveCardAsync(_project, card.Id, new BoardCardMoveRequest(lane.Id, SkipLaneAutomations: true), Ct);
 
+        var moved = (await _store.FindCardAsync(_project, card.Id, Ct))!;
         _jira.Pages.Enqueue(Page(issue));
-        Assert.Equal(1, (await service.PullAsync(_project, connection.BoardId, dryRun: false, Ct)).Skipped);
+        Assert.Equal(1, (await service.PullAsync(_project, connection.BoardId, dryRun: false, Ct)).AlreadyImported);
         _jira.Pages.Enqueue(Page(issue with
         {
             Updated = DateTime.Parse("2026-09-02T00:00:00Z").ToUniversalTime(),
             Summary = "Plan it better",
             StatusName = "Done"
         }));
-        Assert.Equal(1, (await service.PullAsync(_project, connection.BoardId, dryRun: false, Ct)).Updated);
+        Assert.Equal(1, (await service.PullAsync(_project, connection.BoardId, dryRun: false, Ct)).AlreadyImported);
 
         var kept = (await _store.FindCardAsync(_project, card.Id, Ct))!;
-        Assert.Equal(sprint.Id, kept.BoardId);
-        Assert.Equal(lane.Id, kept.ColumnId);
-        Assert.Equal("Plan it better", kept.Title);
-        Assert.Contains((await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Comments,
-            comment => comment.Body.Contains("is now \"Done\" in Jira", StringComparison.Ordinal));
+        Assert.Equal((sprint.Id, lane.Id, "Plan it"), (kept.BoardId, kept.ColumnId, kept.Title));
+        Assert.Equal(Untouched(moved), Untouched(kept));
+        Assert.Empty(await _store.GetCardsAsync(_project, Ct, connection.BoardId));
     }
 
     [Fact]
@@ -520,14 +552,14 @@ public sealed class JiraPullServiceTests : IDisposable
         var dry = await service.PullAsync(_project, board.Id, dryRun: true, Ct);
         Assert.Equal(0, dry.Created);
         Assert.Equal(1, dry.Skipped);
-        Assert.Equal("Dry run. 0 created, 0 updated, 1 skipped, 0 failed. Skipped: 1 previously deleted in VibeRails.", dry.Message);
+        Assert.Equal("Dry run. 0 created, 0 already imported, 1 skipped, 0 failed. Skipped: 1 previously deleted in VibeRails.", dry.Message);
 
         _jira.Pages.Enqueue(newer);
         var report = await service.PullAsync(_project, board.Id, dryRun: false, Ct);
         Assert.Equal(0, report.Created);
-        Assert.Equal(0, report.Updated);
+        Assert.Equal(0, report.AlreadyImported);
         Assert.Equal(1, report.Skipped);
-        Assert.Equal("0 created, 0 updated, 1 skipped, 0 failed. Skipped: 1 previously deleted in VibeRails.", report.Message);
+        Assert.Equal("0 created, 0 already imported, 1 skipped, 0 failed. Skipped: 1 previously deleted in VibeRails.", report.Message);
         Assert.Equal("ok: " + report.Message, (await _store.GetJiraConnectionAsync(_project, board.Id, Ct))!.LastReport);
         Assert.Empty(await _store.GetCardsAsync(_project, Ct, board.Id));
         var lanes = await _store.GetColumnsAsync(_project, Ct, board.Id);
@@ -536,28 +568,29 @@ public sealed class JiraPullServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task PullReportDistinguishesUnchangedDeletedAndFailedIssues()
+    public async Task PullReportDistinguishesImportedDeletedAndFailedIssues()
     {
         var service = Service();
         var source = await BoardWithLanes();
         var connection = await service.SaveAsync(_project, source.Id, Save("secret-token"), "secret-token", Ct);
-        var unchanged = Issue("100", "PROJ-1", "2026-09-01T00:00:00.000Z", "Keep", "Task", "Medium", "Backlog");
+        var imported = Issue("100", "PROJ-1", "2026-09-01T00:00:00.000Z", "Keep", "Task", "Medium", "Backlog");
         var deleted = Issue("101", "PROJ-2", "2026-09-01T00:00:00.000Z", "Gone", "Task", "Medium", "Backlog");
-        _jira.Pages.Enqueue(Page(unchanged, deleted));
+        _jira.Pages.Enqueue(Page(imported, deleted));
         await service.PullAsync(_project, connection.BoardId, dryRun: false, Ct);
         var card = Assert.Single(await _store.GetCardsAsync(_project, Ct, connection.BoardId), card => card.Title == "Gone");
         Assert.True(await _store.DeleteCardAsync(_project, card.Id, Ct));
 
-        _jira.Pages.Enqueue(Page(unchanged, deleted,
+        // An imported issue whose summary is now blank is never read again, so it is not a failure.
+        _jira.Pages.Enqueue(Page(imported with { Summary = " " }, deleted,
             Issue("102", "PROJ-3", "2026-09-01T00:00:00.000Z", "New", "Task", "Medium", "Backlog"),
             Issue("103", "PROJ-4", "2026-09-01T00:00:00.000Z", "", "Task", "Medium", "Backlog")));
         var report = await service.PullAsync(_project, connection.BoardId, dryRun: false, Ct);
 
         Assert.Equal(1, report.Created);
-        Assert.Equal(0, report.Updated);
-        Assert.Equal(2, report.Skipped);
+        Assert.Equal(1, report.AlreadyImported);
+        Assert.Equal(1, report.Skipped);
         Assert.Equal(1, report.Failed);
-        Assert.Equal("1 created, 0 updated, 2 skipped, 1 failed. Skipped: 1 unchanged, 1 previously deleted in VibeRails.", report.Message);
+        Assert.Equal("1 created, 1 already imported, 1 skipped, 1 failed. Skipped: 1 previously deleted in VibeRails.", report.Message);
         Assert.Equal(2, (await _store.GetCardsAsync(_project, Ct, connection.BoardId)).Count);
         Assert.Null(await _store.FindCardAsync(_project, card.Id, Ct));
         Assert.Equal(card.Id, (await _store.FindJiraLinkAsync(connection.Id, deleted.Id, Ct))!.CardId);
@@ -720,7 +753,7 @@ public sealed class JiraPullServiceTests : IDisposable
         Assert.Contains("Jira column \"In Progress\"", comment.Body);
 
         // A lane picked for the column under Advanced places the next new card from it; the
-        // existing parked card is updated where it is.
+        // parked card was already imported and stays where it is.
         var build = lanes.Single(lane => lane.Name == "Build");
         await service.SaveAsync(_project, board.Id, LinkSave() with
         {
@@ -730,7 +763,7 @@ public sealed class JiraPullServiceTests : IDisposable
             Issue("101", "SCRUM-2", "2026-09-02T00:00:00.000Z", "Build it", "Task", "Medium", "In Progress") with { StatusId = "3" },
             Issue("103", "SCRUM-4", "2026-09-02T00:00:00.000Z", "Test it", "Task", "Medium", "In Progress") with { StatusId = "3" }));
         var second = await service.PullAsync(_project, board.Id, dryRun: false, Ct);
-        Assert.Equal(1, second.Updated);
+        Assert.Equal(1, second.AlreadyImported);
         Assert.Equal(1, second.Created);
         cards = await _store.GetCardsAsync(_project, Ct, board.Id);
         Assert.Equal(overflow.Id, Assert.Single(cards, card => card.Title == "Build it").ColumnId);
@@ -777,7 +810,7 @@ public sealed class JiraPullServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task APointsFieldChangeReappliesUnchangedIssues_ALanePickDoesNot_AndALocalMoveAlwaysStays()
+    public async Task APointsFieldChangeOrALanePick_OnlyReachesNewCards_AndALocalMoveAlwaysStays()
     {
         var service = Service();
         var board = await BoardWithLanes();
@@ -794,32 +827,31 @@ public sealed class JiraPullServiceTests : IDisposable
         // Dragged here and nothing changed in Jira: the pull leaves it alone.
         var ready = lanes.Single(lane => lane.Name == "Ready");
         await _board.MoveCardAsync(_project, card.Id, new BoardCardMoveRequest(ready.Id, SkipLaneAutomations: true), Ct);
+        var dragged = (await _store.FindCardAsync(_project, card.Id, Ct))!;
         _jira.Pages.Enqueue(Page(issue));
-        Assert.Equal(1, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).Skipped);
+        Assert.Equal(1, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).AlreadyImported);
         Assert.Equal(ready.Id, Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id)).ColumnId);
 
-        // A lane picked for the column only places new cards: this unedited one stays where it was dragged.
+        // A lane picked for the column only places new cards: this one stays where it was dragged.
         var review = lanes.Single(lane => lane.Name == "Review");
         await service.SaveAsync(_project, board.Id, LinkSave() with
         {
             ColumnMap = new Dictionary<string, string?> { ["To Do"] = review.Id }
         }, null, Ct);
         _jira.Pages.Enqueue(Page(issue));
-        Assert.Equal(1, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).Skipped);
-        card = Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id));
-        Assert.Equal(ready.Id, card.ColumnId);
-        Assert.Empty((await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Comments);
+        Assert.Equal(1, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).AlreadyImported);
 
-        // A new estimation field on the board re-reads the unedited issue, still without moving it.
+        // A new estimation field on the board estimates the next new card, not the imported one.
         _jira.Configuration = ScrumConfiguration() with { EstimationFieldId = "customfield_10020" };
-        _jira.Pages.Enqueue(Page(issue with { StoryPoints = 8 }));
-        Assert.Equal(1, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).Updated);
-        card = Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id));
-        Assert.Equal(8, card.Points);
-        Assert.Equal(ready.Id, card.ColumnId);
-        Assert.Empty((await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Comments);
-        _jira.Pages.Enqueue(Page(issue with { StoryPoints = 8 }));
-        Assert.Equal(1, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).Skipped);
+        _jira.Pages.Enqueue(Page(issue with { StoryPoints = 8 },
+            Issue("101", "SCRUM-2", "2026-09-01T00:00:00.000Z", "Size it", "Story", "Medium", "To Do") with { StatusId = "10000", StoryPoints = 8 }));
+        var report = await service.PullAsync(_project, board.Id, dryRun: false, Ct);
+        Assert.Equal((1, 1), (report.Created, report.AlreadyImported));
+        Assert.Equal("customfield_10020", _jira.BoardSearchFields[^1]);
+        Assert.Equal(Untouched(dragged), Untouched((await _store.FindCardAsync(_project, card.Id, Ct))!));
+        Assert.Equal(5, dragged.Points);
+        var sized = Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id), other => other.Title == "Size it");
+        Assert.Equal((8, review.Id), (sized.Points, sized.ColumnId));
     }
 
     [Fact]
@@ -834,17 +866,19 @@ public sealed class JiraPullServiceTests : IDisposable
         var overflow = Assert.Single(await _store.GetColumnsAsync(_project, Ct, board.Id), lane => lane.Name == "Jira");
         Assert.Equal(overflow.Id, Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id)).ColumnId);
 
-        // Same site, so the saved token is kept; the issue itself is untouched in Jira. The board's
-        // estimation field is new to the link, so the issue is re-read, but the card is not re-placed.
+        // Same site, so the saved token is kept, and the issue's link still matches: the board's
+        // columns and estimation field neither re-place nor re-read the imported card.
+        var imported = Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id));
         board = board with { Id = (await service.SaveAsync(_project, board.Id, LinkSave("https://acme.atlassian.net/jira/software/projects/PROJ/boards/1"), null, Ct)).BoardId };
         _jira.Configuration = ScrumConfiguration();
         await service.TestAsync(_project, board.Id, Ct);
         _jira.Pages.Enqueue(Page(issue with { StatusId = "10000", StoryPoints = 3 }));
-        Assert.Equal(1, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).Updated);
+        Assert.Equal(1, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).AlreadyImported);
 
         var card = Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id));
-        Assert.Equal(3, card.Points);
         Assert.Equal(overflow.Id, card.ColumnId);
+        Assert.Null(card.Points);
+        Assert.Equal(Untouched(imported), Untouched(card));
     }
 
     [Fact]
@@ -1012,6 +1046,11 @@ public sealed class JiraPullServiceTests : IDisposable
 
     private static JiraIssue Issue(string id, string key, string updated, string summary, string type, string priority, string status) =>
         new(id, key, DateTime.Parse(updated).ToUniversalTime(), summary, "body", status, type, priority, ["one"], "Ada", null);
+
+    /// <summary>Everything a pull could write on a card, plus the stamps any write or comment bumps.</summary>
+    private static object Untouched(BoardCardRecord card) =>
+        (card.Title, card.Description, card.Type, card.Priority, card.Points, string.Join("|", card.Tags),
+            card.BoardId, card.ColumnId, card.CommentCount, card.UpdatedUtc);
 
     public void Dispose()
     {

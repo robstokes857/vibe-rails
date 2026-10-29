@@ -9,7 +9,7 @@ public sealed record AdoPullReport(
     bool DryRun,
     string Outcome,
     int Created,
-    int Updated,
+    int AlreadyImported,
     int Skipped,
     int Failed,
     string? Message,
@@ -77,11 +77,11 @@ public interface IAdoPullService
 
 /// <summary>
 /// One-way pull of one Azure DevOps team board, or one saved query, into one board, mirroring
-/// <c>JiraPullService</c>. Azure DevOps wins on title, description, type, priority, points and
-/// tags. Assignee, flagged, blocked, options, notes, sessions, commits, attachments and the card
-/// number are never written. A pull places a new card by its board column or state and never
-/// moves a card again: its lane and board are the local workflow, and a later state change is
-/// only noted in a comment.
+/// <c>JiraPullService</c>. A pull only adds new work items (<see cref="TrackerImport"/>): each
+/// becomes a card once, with its title, description, type, priority, points and tags, placed by
+/// its board column or state. After that the card, its lane and its board are the local workflow,
+/// and no later pull changes or comments on it. Comments and session links still go out to the
+/// work item.
 /// </summary>
 public sealed class AdoPullService(
     IBoardStore store,
@@ -145,9 +145,9 @@ public sealed class AdoPullService(
 
         // Links are keyed by connection id plus the work item id, which is only unique within one
         // organization. Another organization or project therefore gets a new connection id: its
-        // work items can never match, and overwrite, cards linked before. Those cards stay on the
-        // board and are no longer updated. The saved token is never sent to another organization;
-        // within the same one it carries over to the new id.
+        // work items can never match cards linked before, which would leave a colliding work item
+        // unimported. Those cards stay on the board. The saved token is never sent to another
+        // organization; within the same one it carries over to the new id.
         var secret = token?.Trim();
         var organizationChanged = existing is not null && !Same(existing.Organization, link.Organization);
         var projectChanged = existing is not null && !Same(existing.Project, link.Project);
@@ -170,7 +170,7 @@ public sealed class AdoPullService(
             scopeChanged ? null : existing?.LastTestedUtc,
             scopeChanged ? null : existing?.LastPullUtc,
             scopeChanged
-                ? $"Organization or project changed from {existing!.Organization}/{existing.Project}. Cards pulled from there stay on the board and are no longer updated."
+                ? $"Organization or project changed from {existing!.Organization}/{existing.Project}. Cards pulled from there stay on the board."
                 : existing?.LastReport), cancellationToken)
             ?? throw new AdoConfigException("That board no longer exists. Open the board again and retry.");
         if (!string.IsNullOrEmpty(secret))
@@ -311,7 +311,7 @@ public sealed class AdoPullService(
         // One writing pull at a time across every VibeRails process on this machine.
         using var held = pullLock.TryAcquire();
         if (held is null)
-            return Report(dryRun, "busy", 0, 0, 0, 0, "Another Azure DevOps pull is running. Try again when it finishes.");
+            return Report(dryRun, "busy", new TrackerPullCounts(), "Another Azure DevOps pull is running. Try again when it finishes.");
         connection = await store.EnsureDedicatedAdoBoardAsync(projectPath, connection.Id, cancellationToken);
         var report = (await PullConnectionAsync(connection, token, dryRun, cancellationToken)) with { BoardId = connection.BoardId };
         await Remember(connection, report, cancellationToken);
@@ -362,12 +362,7 @@ public sealed class AdoPullService(
     {
         var lanes = await store.GetColumnsAsync(connection.ProjectPath, cancellationToken, connection.BoardId);
         var overflowId = connection.OverflowColumnId;
-        var created = 0;
-        var updated = 0;
-        var skipped = 0;
-        var unchanged = 0;
-        var deleted = 0;
-        var failed = 0;
+        var counts = new TrackerPullCounts();
 
         var plan = await PlanAsync(connection, token, lanes, cancellationToken);
         if (plan.Outcome != AdoCallOutcome.Ok)
@@ -391,16 +386,9 @@ public sealed class AdoPullService(
             {
                 var pointsField = plan.PointsField
                     ?? (plan.DetectPoints ? AdoFieldMapping.DetectPointsField(item, plan.FieldSet) : null);
-                var action = await ApplyWorkItemAsync(connection, plan, pointsField, item, lanes, overflowId, dryRun, cancellationToken);
-                if (action is ApplyAction.Created or ApplyAction.CreatedOverflow) created++;
-                else if (action == ApplyAction.Updated) updated++;
-                else
-                {
-                    skipped++;
-                    if (action == ApplyAction.Unchanged) unchanged++;
-                    else if (action == ApplyAction.SkippedDeleted) deleted++;
-                }
-                if (action == ApplyAction.CreatedOverflow)
+                var (state, madeLane) = await ApplyWorkItemAsync(connection, plan, pointsField, item, lanes, overflowId, dryRun, cancellationToken);
+                counts.Add(state);
+                if (madeLane)
                 {
                     overflowId = await RefreshOverflowAsync(connection, cancellationToken) ?? overflowId;
                     lanes = await store.GetColumnsAsync(connection.ProjectPath, cancellationToken, connection.BoardId);
@@ -412,40 +400,31 @@ public sealed class AdoPullService(
             }
             catch (Exception)
             {
-                failed++;
+                counts.AddFailed();
             }
         }
 
-        var message = $"{created} created, {updated} updated, {skipped} skipped, {failed} failed.";
-        if (skipped > 0)
-        {
-            var reasons = new List<string>();
-            if (unchanged > 0) reasons.Add($"{unchanged} unchanged");
-            if (deleted > 0) reasons.Add($"{deleted} previously deleted in VibeRails");
-            var alreadyLinked = skipped - unchanged - deleted;
-            if (alreadyLinked > 0) reasons.Add($"{alreadyLinked} already linked");
-            message += $" Skipped: {string.Join(", ", reasons)}.";
-        }
+        var message = counts.Message(dryRun);
         if (ids.Value.Ids.Count >= AzureDevOpsClient.MaxItems)
             message += $" Only the {AzureDevOpsClient.MaxItems} most recently changed work items were read.";
-        return Report(dryRun, "ok", created, updated, skipped, failed, dryRun ? "Dry run. " + message : message);
+        return Report(dryRun, "ok", counts, message);
 
         AdoPullReport Stopped(AdoCallOutcome outcome, string? detail) => outcome switch
         {
-            AdoCallOutcome.Unauthorized => Report(dryRun, "expired", created, updated, skipped, failed, detail),
+            AdoCallOutcome.Unauthorized => Report(dryRun, "expired", counts, detail),
             // Retry-After is not waited for: the wait would hold the cross-process lock (blocking
             // saves, tests and unlinks) only to give up afterwards.
-            AdoCallOutcome.RateLimited => Report(dryRun, "rate-limited", created, updated, skipped, failed,
+            AdoCallOutcome.RateLimited => Report(dryRun, "rate-limited", counts,
                 "Azure DevOps rate limited the pull. The next interval tries again."),
-            AdoCallOutcome.BadQuery => Report(dryRun, "bad-query", created, updated, skipped, failed, detail),
-            _ => Report(dryRun, "failed", created, updated, skipped, failed, detail ?? "Azure DevOps did not return the work items.")
+            AdoCallOutcome.BadQuery => Report(dryRun, "bad-query", counts, detail),
+            _ => Report(dryRun, "failed", counts, detail ?? "Azure DevOps did not return the work items.")
         };
     }
 
     /// <summary>
     /// What one pull reads. A board connection re-reads the board configuration every pull, so a
-    /// column change in Azure DevOps comes through; without it (403 or 404) lanes match by state
-    /// name. Field discovery is required: requesting a field the organization lacks fails the batch.
+    /// column change in Azure DevOps applies to the next new cards; without it (403 or 404) lanes
+    /// match by state name. Field discovery is required: requesting a field the organization lacks fails the batch.
     /// </summary>
     /// <param name="Board">The board configuration; null for a saved query, or when it was refused.</param>
     /// <param name="Columns">The board's columns that map at least one state, index-aligned with <paramref name="ColumnLanes"/>.</param>
@@ -573,78 +552,50 @@ public sealed class AdoPullService(
         _ => "Microsoft.RequirementCategory"
     };
 
-    private enum ApplyAction { Skipped, Unchanged, SkippedDeleted, Created, Updated, CreatedOverflow }
-
-    private async Task<ApplyAction> ApplyWorkItemAsync(
+    /// <summary>
+    /// One work item under <see cref="TrackerImport"/>: a work item with no link becomes a card, and
+    /// a linked one is left alone without being read further. <c>MadeLane</c>: the overflow lane was created.
+    /// </summary>
+    private async Task<(TrackerImportState State, bool MadeLane)> ApplyWorkItemAsync(
         BoardAdoConnectionRecord connection, PullPlan plan, string? pointsField, AdoWorkItem item,
         IReadOnlyList<BoardColumnRecord> lanes, string? overflowId, bool dryRun, CancellationToken cancellationToken)
     {
+        // A soft-deleted card keeps its link and stays deleted, so no overflow lane is made on its
+        // behalf either. Decided before the dry-run count.
+        var link = await store.FindAdoLinkAsync(connection.Id, item.Id, cancellationToken);
+        var live = link is not null && await store.FindCardAsync(connection.ProjectPath, link.CardId, cancellationToken) is not null;
+        var state = TrackerImport.Classify(link is not null, live);
+        if (state != TrackerImportState.New)
+            return (state, false);
+
         if (string.IsNullOrWhiteSpace(item.Title))
             throw new AdoConfigException("Work item has no title.");
-        var link = await store.FindAdoLinkAsync(connection.Id, item.Id, cancellationToken);
-        BoardCardRecord? existing = link is null ? null : await store.FindCardAsync(connection.ProjectPath, link.CardId, cancellationToken);
-        // A soft-deleted card keeps its link: the work item is neither recreated nor updated, and
-        // no overflow lane is made on its behalf. Decided before the dry-run count.
-        if (link is not null && existing is null)
-            return ApplyAction.SkippedDeleted;
-
-        var mapped = AdoFieldMapping.Map(item, pointsField, existing?.Type);
-        var mapping = TrackerLinkMapping.Serialize(pointsField, mapped.State);
-        var applied = TrackerLinkMapping.Parse(link?.Mapping);
-        // The same revision read the same way is skipped; a new points field re-reads it without
-        // anyone editing the work item. Where the card sits never matters: a pull does not move cards.
-        var unchanged = link is not null && item.Rev == link.Rev;
-        if (unchanged && existing is not null && string.Equals(link!.Mapping, mapping, StringComparison.Ordinal))
-            return ApplyAction.Unchanged;
+        var mapped = AdoFieldMapping.Map(item, pointsField, existingType: null);
         if (mapped.Title.Length == 0)
             throw new AdoConfigException("Work item title is empty after trimming.");
-
         if (dryRun)
-            return existing is null ? ApplyAction.Created : ApplyAction.Updated;
+            return (state, false);
 
-        var key = AdoFieldMapping.Key(item.Id);
-        if (existing is null)
-        {
-            // Only a new card is placed. The overflow lane is made on demand for one whose column
-            // or state has no lane; the lane list is refreshed by the caller afterwards.
-            var placement = Place(plan, item, mapped.State, lanes, overflowId);
-            var columnId = placement.Lane.ColumnId;
-            var madeLane = columnId is null;
-            columnId ??= await EnsureOverflowLaneAsync(connection, lanes, cancellationToken);
-            // Card and link commit together: a crash or a concurrent pull between them would leave
-            // an unlinked card, and the next pull would create a duplicate.
-            var card = await store.CreateAdoCardAsync(connection.ProjectPath, new NewBoardCard(
-                columnId, mapped.Title, mapped.Description, null, mapped.Priority, mapped.Points, mapped.Tags,
-                false, null, mapped.Type, connection.BoardId, false),
-                new BoardAdoLinkRecord(string.Empty, connection.Id, item.Id, item.Rev, item.ChangedDate, mapped.AssigneeDisplay,
-                    DateTime.UtcNow, mapping),
-                cancellationToken);
-            if (card is null)
-                return ApplyAction.Skipped;
-            if (placement.Lane.Match != TrackerLaneMatch.Matched)
-                await board.AddCommentAsync(connection.ProjectPath, card.Id, AdoAuthor, placement.OverflowComment, cancellationToken, syncToJira: false);
-            return madeLane ? ApplyAction.CreatedOverflow : ApplyAction.Created;
-        }
-
-        await store.UpdateCardAsync(connection.ProjectPath, existing.Id, new BoardCardPatch(
-            Title: mapped.Title,
-            Description: mapped.Description,
-            Priority: mapped.Priority,
-            Points: mapped.Points,
-            ClearPoints: mapped.ClearPoints,
-            Tags: mapped.Tags.ToList(),
-            Type: mapped.Type), cancellationToken, AdoAuthor);
-        // The card keeps its lane and board: a state change is noted, never applied. Record the
-        // new state first: a failed comment is then lost once, instead of being posted again by
-        // every later pull against a link that still holds the old state.
-        var stateChanged = !unchanged && applied.Status is not null
-            && !string.Equals(applied.Status, mapped.State, StringComparison.Ordinal);
-        await store.UpdateAdoLinkAsync(new BoardAdoLinkRecord(
-            existing.Id, connection.Id, item.Id, item.Rev, item.ChangedDate, mapped.AssigneeDisplay, DateTime.UtcNow, mapping), cancellationToken);
-        if (stateChanged)
-            await board.AddCommentAsync(connection.ProjectPath, existing.Id, AdoAuthor,
-                StateChangeComment(key, applied.Status!, mapped.State), cancellationToken, syncToJira: false);
-        return ApplyAction.Updated;
+        // The overflow lane is made on demand for a work item whose column or state has no lane;
+        // the caller refreshes its lane list afterwards.
+        var placement = Place(plan, item, mapped.State, lanes, overflowId);
+        var columnId = placement.Lane.ColumnId;
+        var madeLane = columnId is null;
+        columnId ??= await EnsureOverflowLaneAsync(connection, lanes, cancellationToken);
+        // Card and link commit together: a crash or a concurrent pull between them would leave
+        // an unlinked card, and the next pull would create a duplicate.
+        var card = await store.CreateAdoCardAsync(connection.ProjectPath, new NewBoardCard(
+            columnId, mapped.Title, mapped.Description, null, mapped.Priority, mapped.Points, mapped.Tags,
+            false, null, mapped.Type, connection.BoardId, false),
+            new BoardAdoLinkRecord(string.Empty, connection.Id, item.Id, item.Rev, item.ChangedDate, mapped.AssigneeDisplay,
+                DateTime.UtcNow, TrackerLinkMapping.Serialize(pointsField, mapped.State)),
+            cancellationToken);
+        // Null: a concurrent pull imported the work item first.
+        if (card is null)
+            return (TrackerImportState.Imported, madeLane);
+        if (placement.Lane.Match != TrackerLaneMatch.Matched)
+            await board.AddCommentAsync(connection.ProjectPath, card.Id, AdoAuthor, placement.OverflowComment, cancellationToken, syncToJira: false);
+        return (state, madeLane);
     }
 
     private sealed record Placement(TrackerLaneDecision Lane, string OverflowComment);
@@ -714,9 +665,6 @@ public sealed class AdoPullService(
     private async Task<string?> RefreshOverflowAsync(BoardAdoConnectionRecord connection, CancellationToken cancellationToken) =>
         (await store.GetAdoConnectionAsync(connection.ProjectPath, connection.BoardId, cancellationToken))?.OverflowColumnId;
 
-    private static string StateChangeComment(string key, string before, string after) =>
-        $"{key} is now \"{after}\" in Azure DevOps (was \"{before}\"). The card was not moved: its lane and board are local.";
-
     private static string OverflowComment(string key, string state) =>
         $"{key} is in the Azure DevOps state \"{state}\", which matches no lane on this board. Parked in {OverflowLaneName}. No lane was created for that state.";
 
@@ -771,8 +719,8 @@ public sealed class AdoPullService(
     private BoardAdoConnectionRecord WithTokenFlag(BoardAdoConnectionRecord connection) =>
         connection with { HasToken = secrets.HasToken(connection.Id) };
 
-    private static AdoPullReport Report(bool dryRun, string outcome, int created, int updated, int skipped, int failed, string? message) =>
-        new(dryRun, outcome, created, updated, skipped, failed, message);
+    private static AdoPullReport Report(bool dryRun, string outcome, TrackerPullCounts counts, string? message) =>
+        new(dryRun, outcome, counts.Created, counts.AlreadyImported, counts.Skipped, counts.Failed, message);
 
     private static string? Trim(string? value) =>
         string.IsNullOrEmpty(value) ? value : value.Length <= 500 ? value : value[..500];

@@ -684,13 +684,13 @@ its filter's JQL and an approximate issue count. A board pull uses the enhanced
 `GET /rest/software/1.0/board/{id}/issue` and re-reads the configuration every pull: an issue's
 status id names its Jira column, and the shared `TrackerColumnMap` puts the column in a lane (same name, a
 whole-word match, first column to first lane, last column to Done, otherwise the "Jira" overflow
-lane), with per-column picks under Advanced. Placement happens once, when the card is created:
-a pull never moves a card, so its lane and board are the local workflow, and a manual move to
-another lane or board always stays. A later Jira status change updates the fields and adds a
-Jira comment saying the card was not moved. Each issue link records the points field the last
-pull read and the status it saw (`BoardJiraLinks.Mapping`, read through `TrackerLinkMapping`), so
-a new points field re-applies unchanged issues. Old Done issues are left out by default
-(`statusCategory != Done OR updated >= -30d`). The board filter's JQL is still written to
+lane), with per-column picks under Advanced. Placement happens once, when the card is created.
+Since VIBE-236 a pull only adds new issues and never changes a card after import
+(`Services/Board/Tracker/TrackerImport.cs`): its fields, lane and board are the local workflow,
+and the only ongoing link is outbound comment and session-link delivery. Each new issue link
+still records the points field and status it was imported with (`BoardJiraLinks.Mapping`, written
+by `TrackerLinkMapping`) for older versions; this one never reads it. Old Done issues are left
+out by default (`statusCategory != Done OR updated >= -30d`). The board filter's JQL is still written to
 `BoardJiraConnections.Jql`, so an older VibeRails keeps pulling the same issues. Without the
 configuration (a 403), lanes fall back to status-name matching and story points stay off unless
 a field is set. VB-40 site-plus-JQL connections keep working unchanged.
@@ -703,7 +703,7 @@ state mappings, the team's area paths and the organization's fields every pull, 
 (the board's types, the team scope, never Removed, newest change first) or the saved query, and
 reads at most 10 `workitemsbatch` calls of 200. A 203, a 302 or a non-JSON answer means the token
 was refused. `AdoPullService` places a new card once (board column, then state mapping, then state
-name, then the "Azure DevOps" lane) and never moves it afterwards. `AdoPullScheduler` runs every
+name, then the "Azure DevOps" lane) and never changes it afterwards. `AdoPullScheduler` runs every
 15 minutes, ticked beside Jira by the leased root job scheduler, under `.ado-pull.lock`; tokens
 live in `ado-tokens.json`. Storage is `board-ado/1`. The Board guide's "Dedicated Azure DevOps
 boards" section has the rules.

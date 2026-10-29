@@ -34,7 +34,7 @@ public sealed class AdoPullServiceTests : IDisposable
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Fact]
-    public async Task DryRunCountsWithoutWriting_ARealPullCreatesOnTheDedicatedBoard_AndAnUnchangedRevisionIsSkipped()
+    public async Task DryRunCountsWithoutWriting_ARealPullCreatesOnTheDedicatedBoard_AndTheNextOneFindsThemImported()
     {
         var service = Service();
         var source = await BoardWithLanes();
@@ -65,7 +65,7 @@ public sealed class AdoPullServiceTests : IDisposable
         Assert.Equal("points:" + AdoFields.StoryPoints + ";status:New", link.Mapping);
 
         var again = await service.PullAsync(_project, saved.BoardId, dryRun: false, Ct);
-        Assert.Equal("0 created, 0 updated, 2 skipped, 0 failed. Skipped: 2 unchanged.", again.Message);
+        Assert.Equal("0 created, 2 already imported, 0 skipped, 0 failed.", again.Message);
         Assert.StartsWith("ok: 0 created", (await service.GetAsync(_project, saved.BoardId, Ct))!.LastReport, StringComparison.Ordinal);
     }
 
@@ -115,41 +115,65 @@ public sealed class AdoPullServiceTests : IDisposable
         Assert.Empty(await _store.GetAdoDeliveriesAsync(_project, cards["Unmapped column"].Id, Ct));
     }
 
+    /// <summary>VIBE-236: Azure DevOps is the source of truth for its work items, and a pull copies each one once.</summary>
     [Fact]
-    public async Task AnUpdatedWorkItemWinsOnItsFields_ButNeverMovesTheCard_AndAStateChangeIsOnlyNoted()
+    public async Task ALocallyEditedCard_IsNeverChangedOrCommentedOn_WhenItsWorkItemChangesInAzureDevOps()
     {
         var service = Service();
         var saved = await service.SaveAsync(_project, (await BoardWithLanes()).Id, Save(), Pat, Ct);
         _ado.Serve(Item(1, "Plan", "User Story", "New", description: "<p>Old</p>", tags: "a", points: 3, priority: 2));
         await service.PullAsync(_project, saved.BoardId, false, Ct);
         var card = Assert.Single(await _store.GetCardsAsync(_project, Ct, saved.BoardId));
+        var link = await _store.FindAdoLinkAsync(saved.Id, 1, Ct);
         var build = (await _store.GetColumnsAsync(_project, Ct, saved.BoardId)).Single(lane => lane.Name == "Build");
-        await _store.MoveCardAsync(_project, card.Id, build.Id, null, Ct);
-        await _store.UpdateCardAsync(_project, card.Id, new BoardCardPatch(Assignee: "claude"), Ct);
+        await _board.UpdateCardAsync(_project, card.Id, new VibeRails.DTOs.UpdateBoardCardRequest(
+            Title: "Local plan", Description: "Local notes", Priority: "low", Tags: ["local"]), Ct);
+        await _board.MoveCardAsync(_project, card.Id, new BoardCardMoveRequest(build.Id, SkipLaneAutomations: true), Ct);
+        var edited = (await _store.FindCardAsync(_project, card.Id, Ct))!;
 
-        _ado.Serve(Item(1, "Plan it", "User Story", "Active", rev: 2, description: "<p>New</p>", tags: "b; c", points: 5,
-            priority: 1, boardColumn: "Active", assignee: "Grace"));
+        // Every field a pull used to write changes in Azure DevOps, and so do the state and column.
+        var changed = Item(1, "Plan it", "Bug", "Active", rev: 2, description: "<p>New</p>", tags: "b; c", points: 5,
+            priority: 1, boardColumn: "Active", assignee: "Grace");
+        _ado.Serve(changed);
+        Assert.Equal("Dry run. 0 created, 1 already imported, 0 skipped, 0 failed.",
+            (await service.PullAsync(_project, saved.BoardId, true, Ct)).Message);
+        _ado.Serve(changed);
         var report = await service.PullAsync(_project, saved.BoardId, false, Ct);
 
-        Assert.Equal((0, 1), (report.Created, report.Updated));
-        var updated = (await _store.GetCardDetailAsync(_project, card.Id, Ct))!;
-        Assert.Equal(("Plan it", "New", "critical", 5), (updated.Card.Title, updated.Card.Description, updated.Card.Priority, updated.Card.Points));
-        Assert.Equal(["b", "c"], updated.Card.Tags);
-        Assert.Equal(build.Id, updated.Card.ColumnId);
-        Assert.Equal("claude", updated.Card.Assignee);
-        var note = Assert.Single(updated.Comments);
-        Assert.Equal("#1 is now \"Active\" in Azure DevOps (was \"New\"). The card was not moved: its lane and board are local.", note.Body);
-        var link = (await _store.FindAdoLinkAsync(saved.Id, 1, Ct))!;
-        Assert.Equal((2, "Grace"), (link.Rev, link.AssigneeDisplay));
-        Assert.EndsWith(";status:Active", link.Mapping, StringComparison.Ordinal);
+        Assert.Equal(("ok", 0, 1, 0, 0), (report.Outcome, report.Created, report.AlreadyImported, report.Skipped, report.Failed));
+        Assert.Equal("0 created, 1 already imported, 0 skipped, 0 failed.", report.Message);
+        var after = (await _store.FindCardAsync(_project, card.Id, Ct))!;
+        Assert.Equal(Untouched(edited), Untouched(after));
+        Assert.Equal(("Local plan", "Local notes", "low", build.Id), (after.Title, after.Description, after.Priority, after.ColumnId));
+        Assert.DoesNotContain((await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Comments,
+            comment => comment.Author.Label == "Azure DevOps");
+        Assert.Equal(link, await _store.FindAdoLinkAsync(saved.Id, 1, Ct));
         Assert.Empty(await _store.GetAdoDeliveriesAsync(_project, card.Id, Ct));
+    }
 
-        // A user comment on the same card does go to Azure DevOps.
-        await _board.AddCommentAsync(_project, card.Id, BoardAuthor.User(), "Looks good", Ct);
-        Assert.Single(await _store.GetAdoDeliveriesAsync(_project, card.Id, Ct));
+    [Fact]
+    public async Task CommentsStillReachTheWorkItem_WhileThePullLeavesItsCardAlone()
+    {
+        var service = Service();
+        var saved = await service.SaveAsync(_project, (await BoardWithLanes()).Id, Save(), Pat, Ct);
+        _ado.Serve(Item(1, "Plan", "User Story", "New"));
+        await service.PullAsync(_project, saved.BoardId, false, Ct);
+        _ado.Serve(Item(1, "Plan it", "User Story", "Closed", rev: 4));
+        await service.PullAsync(_project, saved.BoardId, false, Ct);
+        var card = Assert.Single(await _store.GetCardsAsync(_project, Ct, saved.BoardId));
 
-        Assert.Equal(1, (await service.PullAsync(_project, saved.BoardId, false, Ct)).Skipped);
-        Assert.Equal(2, (await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Comments.Count);
+        await _board.AddCommentAsync(_project, card.Id, BoardAuthor.User(), "Ready for review", Ct);
+        await _board.AddCommentAsync(_project, card.Id, BoardAuthor.User(), "Internal only", Ct, syncToJira: false);
+        var comments = new Mock<IAdoCommentClient>();
+        comments.Setup(c => c.AddCommentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+            It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AdoCommentResult(true, false, "Posted", "7"));
+        await new AdoDeliveryService(_store, _secrets, comments.Object, Mock.Of<IAdoSessionSharing>(), new AdoPullLock(LockPath)).DrainAsync(Ct);
+
+        comments.Verify(c => c.AddCommentAsync("contoso", "Web", Pat, 1,
+            It.Is<string>(body => body.Contains("Ready for review")), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()), Times.Once);
+        comments.VerifyNoOtherCalls();
+        Assert.Equal("sent", Assert.Single(await _store.GetAdoDeliveriesAsync(_project, card.Id, Ct)).Status);
     }
 
     [Fact]
@@ -165,7 +189,7 @@ public sealed class AdoPullServiceTests : IDisposable
         _ado.Serve(Item(1, "Gone soon", "Bug", "Active", rev: 5));
         var report = await service.PullAsync(_project, saved.BoardId, false, Ct);
 
-        Assert.Equal("0 created, 0 updated, 1 skipped, 0 failed. Skipped: 1 previously deleted in VibeRails.", report.Message);
+        Assert.Equal("0 created, 0 already imported, 1 skipped, 0 failed. Skipped: 1 previously deleted in VibeRails.", report.Message);
         Assert.Empty(await _store.GetCardsAsync(_project, Ct, saved.BoardId));
         Assert.Equal(card.Id, (await _store.FindAdoLinkAsync(saved.Id, 1, Ct))!.CardId);
     }
@@ -571,6 +595,11 @@ public sealed class AdoPullServiceTests : IDisposable
     }
 
     private static AdoConnectionSave Save(string link = BoardLink) => new(link, true);
+
+    /// <summary>Everything a pull could write on a card, plus the stamps any write or comment bumps.</summary>
+    private static object Untouched(BoardCardRecord card) =>
+        (card.Title, card.Description, card.Type, card.Priority, card.Points, string.Join("|", card.Tags),
+            card.BoardId, card.ColumnId, card.CommentCount, card.UpdatedUtc);
 
     private static AdoFieldSet Fields(params string[] names) =>
         new(new HashSet<string>(names.Concat(AdoFields.Always), StringComparer.OrdinalIgnoreCase));

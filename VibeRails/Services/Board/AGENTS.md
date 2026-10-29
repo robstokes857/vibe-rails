@@ -709,7 +709,8 @@ independent assignment, save-before-launch and active-session guard remain uncha
 Rules every tracker pull must share live in `Tracker/` (VIBE-166): the token file store
 (`TrackerTokenStore`, one file per tracker), the cross-process pull lock (`TrackerPullLock`, one
 file per tracker), the column map with `DecideLane`/`MatchLane`, points snapping and labels
-(`TrackerColumnMap`, `TrackerFieldMapping`), and the link `Mapping` codec (`TrackerLinkMapping`).
+(`TrackerColumnMap`, `TrackerFieldMapping`), the import rule and report counts (`TrackerImport`,
+`TrackerPullCounts`; VIBE-236), and the link `Mapping` writer (`TrackerLinkMapping`).
 Jira and Azure DevOps are parallel stacks over them; keep tracker-specific mapping in each stack.
 Azure DevOps storage is described in the Board persistence guide (`board-ado/1`).
 
@@ -738,20 +739,27 @@ board local and eligible for hosted sync. Pausing pulls or expired authenticatio
 a dedicated board's identity; unlinking makes the retained board local again. Keep list/detail,
 foreign-card metadata and sync/settings projections consistent with this rule.
 
-Jira pull reports keep `skipped` as the total of unchanged issues, previously deleted cards and
-already-linked issues. The message breaks down those reasons and reports failures as `failed`.
-Deleted imports stay deleted on dry runs and writing pulls; never label them as unchanged or
-recreate them to populate an empty board.
+Pull reports count `created`, `alreadyImported` (linked to a live card), `skipped` (linked to a
+card deleted in VibeRails) and `failed`, worded by `TrackerPullCounts`. Deleted imports stay
+deleted on dry runs and writing pulls; never relabel them or recreate them to populate an empty
+board.
 
-**A pull never moves a card.** Jira wins on the mapped fields; the lane and board are the local
-workflow for doing the work, and Jira has no say in them. The column map and the "Jira" overflow
-lane place a card once, when it is created. The overflow lane is made on demand as the board's
-first lane (`CreateColumnAsync(first: true)`); one that already exists stays where the user put it.
-A later Jira status change updates the fields and
-adds a Jira-authored comment that the card was not moved; a card moved to another lane or
-another local board stays there. `BoardJiraLinks.Mapping` (read through `TrackerLinkMapping`) holds
-the points field the last pull read and the status it saw; only a new points field re-applies
-unchanged issues. Do not reintroduce lane moves, drag-backs or "lane mapping changed" moves.
+**A pull only adds new items; it never changes a card after import** (VIBE-236). The tracker is
+the source of truth for its items: a pull copies each one into the board once, one way, and then
+stops caring about the tracker's state. `TrackerImport.Classify` decides from the link alone,
+before the item is validated or mapped: an item with no link becomes a card, and a linked card is
+never touched again, whatever changes in Jira or on the card. No field update, status comment,
+description repair, points re-apply or link refresh. The 15-minute schedule and the Connect-time
+pull still run; they only find new items. The column map and the "Jira" overflow lane place a card
+once, when it is created. The overflow lane is made on demand as the board's first lane
+(`CreateColumnAsync(first: true)`); one that already exists stays where the user put it. The lane
+and board are the local workflow for doing the work, so a card moved to another lane or another
+local board stays there. The only ongoing link is outbound: comments and session links delivered
+to the issue by its numeric id (see Jira activity delivery), so a card keeps the issue key it was
+imported with. `BoardJiraLinks.IssueUpdated` and `Mapping` (`TrackerLinkMapping`) are still
+written at import, because an older VibeRails on the same machine skips an unchanged issue only
+when they match; this version never reads them. Do not reintroduce field updates, status notes,
+lane moves, drag-backs or "lane mapping changed" moves.
 
 ## Dedicated Azure DevOps boards (VIBE-167)
 
@@ -759,8 +767,10 @@ unchanged issues. Do not reintroduce lane moves, drag-backs or "lane mapping cha
 field mapping), over the shared `Tracker/` helpers, with its own `.ado-pull.lock` and
 `ado-tokens.json`. Only `https://dev.azure.com` is accepted (`AdoBoardLink`): a team board or
 backlog link, or a saved query. Everything above under "Dedicated Jira boards" holds here too,
-including **a pull never moves a card** (the comment names the work item `#id` and the Azure
-DevOps state), the skipped breakdown and deleted imports staying deleted.
+including **a pull only adds new items; it never changes a card after import** (an overflow
+comment names the work item `#id`), the report counts and deleted imports staying deleted.
+`BoardAdoLinks.Rev`, `ChangedDate` and `Mapping` are written at import for older versions and
+never read.
 
 Rules specific to Azure DevOps:
 - The client sends Basic auth with an empty user plus `X-TFS-FedAuthRedirect: Suppress`, with
@@ -788,7 +798,7 @@ Rules specific to Azure DevOps:
   override). Without one, a board's types name the process field (User Story: Story Points;
   Product Backlog Item or Issue: Effort; Requirement: Size). Where they don't, as on a saved query
   that can span processes, each work item gets its own: its type's field, else the estimate field
-  it has a value in. An item with neither keeps its card's points.
+  it has a value in. An item with neither is imported without points.
 - Every batch (at most 10 × 200) is read before anything is applied. A pull that stops part way
   writes nothing.
 - A new organization or project mints a new connection id. An organization change needs the PAT
@@ -799,7 +809,8 @@ VIBE-169), a copy of the Jira tab. Connect saves (PUT, which moves the connectio
 board), tests on the board id that PUT returned, and follows the id the test returns as well.
 Settings follow the board's `RemoteProvider`: a dedicated Azure DevOps board shows its connection
 under General and hides both tracker tabs, a Jira board hides the Azure DevOps tab, and a local
-board offers both. The settings form says it too: a pull updates fields and never moves a card.
+board offers both. The settings form says it too: a pull only adds new items; it never changes a
+card after import.
 **New board** offers the same Jira and Azure DevOps forms beside a local board. They connect the
 open (or first) local board with `newBoard: true`, so the save always creates the dedicated board
 from that board's lanes, even when that board could have become it. From that dialog only, a

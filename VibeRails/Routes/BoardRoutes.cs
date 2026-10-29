@@ -391,7 +391,7 @@ public static partial class BoardRoutes
             .WithName("UnlinkBoardCardSession");
 
         // Jira Cloud, one Jira board (or saved JQL filter) per board. The token is accepted on save
-        // and never returned. Pull is one-way: Jira wins on the mapped fields. ?settings=true adds
+        // and never returned. Pull is one-way and only adds new issues. ?settings=true adds
         // what the settings form shows, including the repository's git user.email as a suggestion.
         app.MapGet("/api/v1/board/boards/{boardId}/jira", (IJiraPullService jira, string boardId, bool? settings, CancellationToken cancellationToken) =>
             RunAsync(async () => settings == true
@@ -427,13 +427,13 @@ public static partial class BoardRoutes
             RunAsync(async () =>
             {
                 var report = await jira.PullAsync(Project(), boardId, dryRun == true, cancellationToken);
-                return Results.Ok(new JiraPullResponse(report.DryRun, report.Outcome, report.Created, report.Updated, report.Skipped, report.Failed, report.Message, report.BoardId));
+                return Results.Ok(new JiraPullResponse(report.DryRun, report.Outcome, report.Created, report.AlreadyImported, report.Skipped, report.Failed, report.Message, report.BoardId));
             }))
             .WithName("PullJiraFilter");
 
         // Azure DevOps Services (https://dev.azure.com only), one team board or saved query per
         // board, mirroring Jira. The personal access token is accepted on save and never returned.
-        // Pull is one-way: Azure DevOps wins on the mapped fields and a pull never moves a card.
+        // Pull is one-way and only adds new work items; it never changes a card after import.
         // ?settings=true adds the column map and this board's lanes for the settings form.
         app.MapGet("/api/v1/board/boards/{boardId}/ado", (IAdoPullService ado, string boardId, bool? settings, CancellationToken cancellationToken) =>
             RunAsync(async () => settings == true
@@ -471,7 +471,7 @@ public static partial class BoardRoutes
             RunAsync(async () =>
             {
                 var report = await ado.PullAsync(Project(), boardId, dryRun == true, cancellationToken);
-                return Results.Ok(new AdoPullResponse(report.DryRun, report.Outcome, report.Created, report.Updated, report.Skipped, report.Failed, report.Message, report.BoardId));
+                return Results.Ok(new AdoPullResponse(report.DryRun, report.Outcome, report.Created, report.AlreadyImported, report.Skipped, report.Failed, report.Message, report.BoardId));
             }))
             .WithName("PullAdoBoard");
 

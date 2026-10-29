@@ -215,12 +215,12 @@ namespace VibeRails.DTOs
         List<string> Warnings);
 
     public record JiraPullResponse(
-        bool DryRun, string Outcome, int Created, int Updated, int Skipped, int Failed, string? Message, string? BoardId = null);
+        bool DryRun, string Outcome, int Created, int AlreadyImported, int Skipped, int Failed, string? Message, string? BoardId = null);
 
     // Azure DevOps Services pull (VIBE-165), mirroring Jira. The personal access token is write-only:
-    // a response never carries it, only HasToken. Azure DevOps wins on the mapped fields
-    // (LastWriteWins). Columns and Lanes are filled only for GET …/ado?settings=true; a column lane
-    // has the Jira column lane's shape.
+    // a response never carries it, only HasToken. A pull only adds new work items and never changes
+    // a card after import. Columns and Lanes are filled only for GET …/ado?settings=true; a column
+    // lane has the Jira column lane's shape.
     public record AdoConnectionResponse(
         string BoardId,
         string? Organization,
@@ -276,7 +276,7 @@ namespace VibeRails.DTOs
         List<string> Warnings);
 
     public record AdoPullResponse(
-        bool DryRun, string Outcome, int Created, int Updated, int Skipped, int Failed, string? Message, string? BoardId = null);
+        bool DryRun, string Outcome, int Created, int AlreadyImported, int Skipped, int Failed, string? Message, string? BoardId = null);
 
     // Board sync with viberails.ai (VB-51). Published = a link exists; Enabled = it syncs every
     // 60 s. Configured = an HTTPS endpoint and an API key are both present. The API key itself

@@ -18,7 +18,7 @@ export const boardJiraSection = ({ lanesFrom = null } = {}) => `
                 : `<p class="small mb-2">Lanes copied from <strong>${escapeHtml(lanesFrom)}</strong></p>`}
             <p class="text-muted small">${lanesFrom === null
                 ? 'An empty board becomes the Jira board itself. Your only local board, or one with cards, lane Automations or viberails.ai sync, stays as it is: Connect creates a separate Jira board and moves existing Jira cards there with their comments, files and sessions.'
-                : 'Connect creates the board, named after the Jira board, and pulls its issues.'} Use the board picker to switch between Jira and your local work. Jira wins on title, description, type, priority, tags and story points. A local edit to those fields is replaced on the next pull. A new card is placed by its Jira column; after that its lane and board are yours, and a Jira status change is only noted in a comment. Assignee, flagged, blocked, comments, sessions and commits stay here.</p>
+                : 'Connect creates the board, named after the Jira board, and pulls its issues.'} Use the board picker to switch between Jira and your local work. A pull only adds new items; it never changes a card after import. A new card copies its title, description, type, priority, tags and story points from Jira and is placed by its Jira column; after that the card, its lane and its board are yours. Assignee, flagged, blocked, comments, sessions and commits stay here.</p>
             <div class="mb-3">
                 <label class="form-label" for="jira-link">Jira board link</label>
                 <input class="form-control" id="jira-link" data-jira-link type="url" autocomplete="off" spellcheck="false"

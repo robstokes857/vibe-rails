@@ -695,7 +695,7 @@ for (const width of [1440, 390]) {
             if (path.endsWith('/ado/test')) return route.fulfill({ json: { ok: true, project: 'Fabrikam Web', boardId: 'brd_ado', board: {
                 name: 'Stories', team: 'Fabrikam Team', backlogLevel: 'Stories', workItemCount: 7, countCapped: false,
                 pointsField: 'Microsoft.VSTS.Scheduling.StoryPoints', columns: [{ name: 'New', laneId: 'l1', laneName: 'Ready', automatic: true }], warnings: [] } } });
-            if (path.endsWith('/ado/pull')) return route.fulfill({ json: { outcome: 'ok', boardId: 'brd_ado', message: '7 created, 0 updated, 0 unchanged, 0 skipped.' } });
+            if (path.endsWith('/ado/pull')) return route.fulfill({ json: { outcome: 'ok', boardId: 'brd_ado', message: '7 created, 0 already imported, 0 skipped, 0 failed.' } });
             if (path.endsWith('/boards')) return route.fulfill({ json: { boards: [
                 { id: 'brd_main', name: 'Main', position: 0, isJiraBoard: false, remoteProvider: null },
                 ...(connected ? [{ id: 'brd_ado', name: 'Azure DevOps · Fabrikam Team', position: 1, isJiraBoard: false, remoteProvider: 'ado' }] : [])
@@ -734,7 +734,7 @@ for (const width of [1440, 390]) {
 
         await panel.getByLabel('Personal access token').fill('test-only');
         await panel.getByRole('button', { name: 'Connect', exact: true }).click();
-        await expect(panel.locator('[data-ado-report]')).toHaveText('7 created, 0 updated, 0 unchanged, 0 skipped.');
+        await expect(panel.locator('[data-ado-report]')).toHaveText('7 created, 0 already imported, 0 skipped, 0 failed.');
         // New board always asks for a new board, even when Main is empty enough to become it.
         expect(saves).toEqual([{ boardLink: ADO_LINK, personalAccessToken: 'test-only', narrowWiql: '', pointsField: '', enabled: true, skipOldDone: true, newBoard: true }]);
         expect(calls).toContain('PUT /api/v1/board/boards/brd_main/ado');
