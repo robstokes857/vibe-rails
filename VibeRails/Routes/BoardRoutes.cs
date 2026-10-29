@@ -85,10 +85,7 @@ public static partial class BoardRoutes
             context.HttpContext.Response.Headers.CacheControl = "no-store";
             return next(context);
         });
-        sharingRoutes.MapGet("/shared", ([Microsoft.AspNetCore.Mvc.FromServices] BoardSharingService sharing, CancellationToken ct) =>
-            RunAsync(async () => Results.Ok(await sharing.DiscoverAsync(ct))));
-        sharingRoutes.MapPost("/shared/{remoteId}/import", ([Microsoft.AspNetCore.Mvc.FromServices] BoardSharingService sharing, string remoteId, CancellationToken ct) =>
-            RunAsync(async () => Results.Ok(await sharing.ImportAsync(Project(), remoteId, ct))));
+        // VIBE-235: collaborators read shared boards on viberails.ai; there is no import route.
         sharingRoutes.MapGet("/boards/{boardId}/sharing", ([Microsoft.AspNetCore.Mvc.FromServices] BoardSharingService sharing, string boardId, CancellationToken ct) =>
             RunAsync(async () => Results.Ok(await sharing.GetAsync(Project(), boardId, ct))));
         sharingRoutes.MapPost("/boards/{boardId}/sharing", ([Microsoft.AspNetCore.Mvc.FromServices] BoardSharingService sharing, string boardId, BoardSharingEmailRequest body, CancellationToken ct) =>

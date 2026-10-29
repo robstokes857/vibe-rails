@@ -1,5 +1,20 @@
 # Public card sharing
 
+## Publishing is one-way and owner-only (VIBE-235)
+
+Everything VibeRails puts on viberails.ai is published from the owner's desktop, and the owner's
+local board is the source of truth. Board sync publishes only boards this account owns; the
+hosted copy shows the latest capture and can create new cards, which the owner's next pull brings
+home. Board collaborators (VB-52 invitations) and card-link viewers read on the website and never
+write back: the desktop has no shared-board import, never pushes a collaborator's edits, and
+keeps a copy an earlier version imported as a read-only local snapshot that never syncs. The
+**Remote boards** manager lists, renames and deletes hosted boards but cannot create one with no
+local board. Card publications below follow the same direction: a link is a read-only capture of
+the saved local card, refreshed from the desktop only. See
+[SYNC.md](../SYNC.md#vb-52-shared-boards) for the Board sync side.
+
+## Card links
+
 Implemented locally 2026-10-10 (VB-9KWRU-16), paired with the Front CardSharing service.
 The feature requires the companion hosted deployment and its additive CardSharingLinks migration.
 Implementation tests never publish actual user cards or run production migrations.

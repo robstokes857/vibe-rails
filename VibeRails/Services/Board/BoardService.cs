@@ -1,7 +1,9 @@
 using System.Text.RegularExpressions;
 using VibeRails.DTOs;
+using VibeRails.Services.Board.Sync;
 using VibeRails.Services.Board.Tracker;
 using VibeRails.Services.LlmClis;
+using VibeRails.Utils;
 
 namespace VibeRails.Services.Board;
 
@@ -120,8 +122,14 @@ public sealed partial class BoardService(
         var columns = await store.GetAllColumnsAsync(projectPath, cancellationToken);
         var counts = await store.CountCardsByBoardAsync(projectPath, cancellationToken);
         var providers = await store.DedicatedProvidersAsync(cancellationToken);
-        return new BoardListResponse(boards.Select(board => WithProvider(ToDto(board, columns, counts), providers.GetValueOrDefault(board.Id))).ToList());
+        var shared = await store.GetSharedBoardOriginsAsync(projectPath, cancellationToken);
+        return new BoardListResponse(boards.Select(board => WithShared(WithProvider(ToDto(board, columns, counts), providers.GetValueOrDefault(board.Id)),
+            shared.GetValueOrDefault(board.Id))).ToList());
     }
+
+    /// <summary>A copy imported from another account's shared board (VB-52): read-only, no sync (VIBE-235).</summary>
+    private static BoardSummaryResponse WithShared(BoardSummaryResponse board, string? remoteBoardId) => remoteBoardId is null ? board
+        : board with { Shared = true, SharedUrl = BoardSyncEndpoint.BoardPage(ParserConfigs.GetFrontendUrl(), remoteBoardId) };
 
     /// <summary>A dedicated tracker board names its provider; IsJiraBoard stays for older clients.</summary>
     private static BoardSummaryResponse WithProvider(BoardSummaryResponse board, string? provider) =>

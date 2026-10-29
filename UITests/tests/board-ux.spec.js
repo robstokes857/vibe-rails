@@ -1367,6 +1367,7 @@ test('shared board members have no owner CRUD and late sharing responses cannot 
     await page.getByRole('button', { name: 'Share', exact: true }).click();
     await expect(page.locator('[data-sharing-modal]')).toContainText('Only its owner');
     await expect(page.locator('[data-sharing-modal] form')).toHaveCount(0);
+    await expect(page.locator('[data-board-shared-notice]')).toBeHidden(); // an owned board has no shared notice
     await page.evaluate(() => window.app.closeModal());
     let release;
     const gate = new Promise(resolve => { release = resolve; });
@@ -1381,23 +1382,27 @@ test('shared board members have no owner CRUD and late sharing responses cannot 
     await expect(page.locator('[data-sharing-modal]')).toHaveCount(0);
 });
 
-test('accepted shared boards are explicitly imported into the chosen project', async ({ page }) => {
-    await openBoard(page);
-    const remoteId = '11111111-1111-4111-8111-111111111111';
-    await page.route('**/api/v1/board/shared', route => route.fulfill({ json: [{ remoteBoardId: remoteId, name: 'Shared <script>work</script>', isOwner: false }] }));
-    let imports = 0;
-    await page.route(`**/api/v1/board/shared/${remoteId}/import`, route => {
-        imports++; expect(route.request().method()).toBe('POST');
-        return route.fulfill({ json: { boardId: 'brd_main', name: 'Shared work' } });
-    });
-    await page.getByRole('button', { name: 'Shared boards', exact: true }).click();
-    await expect(page.locator('[data-sharing-modal]')).toContainText('Shared <script>work</script>');
-    await expect(page.locator('[data-sharing-modal] script')).toHaveCount(0);
-    expect(imports).toBe(0);
-    await page.getByRole('button', { name: 'Add to this project' }).click();
-    await expect.poll(() => imports).toBe(1);
-    await expect(page.locator('[data-sharing-modal]')).toHaveCount(0);
-    await expect(page.locator('[data-board-select]')).toHaveValue('brd_main');
+// VIBE-235: collaborators read shared boards on viberails.ai. Nothing imports one, and a copy an
+// older version imported says it is read-only and no longer syncs.
+test('boards shared with you are not imported; a retained copy shows a read-only notice', async ({ page }) => {
+    const url = 'https://viberails.ai/Boards/11111111-1111-4111-8111-111111111111';
+    const requests = await openBoard(page, { mainBoard: { shared: true, sharedUrl: url } });
+    await expect(page.getByRole('button', { name: 'Shared boards', exact: true })).toHaveCount(0);
+    const notice = page.locator('[data-board-shared-notice]');
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText('Shared with you (read-only).');
+    await expect(notice).toContainText('no longer syncs');
+    const link = notice.getByRole('link', { name: 'Open on viberails.ai' });
+    await expect(link).toHaveAttribute('href', url);
+    await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(requests.filter(request => request.path.startsWith('/api/v1/board/shared'))).toEqual([]);
+});
+
+test('a shared copy never links a non-https address', async ({ page }) => {
+    await openBoard(page, { mainBoard: { shared: true, sharedUrl: 'javascript:alert(1)' } });
+    const notice = page.locator('[data-board-shared-notice]');
+    await expect(notice).toContainText('Shared with you (read-only).');
+    await expect(notice.getByRole('link')).toHaveCount(0);
 });
 
 test('move and merge use explicit destinations and preserve drafts until saved', async ({ page }, testInfo) => {
@@ -1564,7 +1569,7 @@ const SUMMARY_FIELDS = ['id', 'key', 'columnId', 'position', 'title', 'descripti
 const cardSummary = card => Object.fromEntries(SUMMARY_FIELDS.filter(field => field in card).map(field => [field, card[field]]));
 
 async function openBoard(page, { active = false, assignee = null, relatedCards = false, empty = false,
-    onCard = () => {}, extraPickerItems = [],
+    onCard = () => {}, extraPickerItems = [], mainBoard = {},
     columns = [{ id: 'col_ready', name: 'Ready', position: 0, color: '#3b82f6', boardId: 'brd_main' }] } = {}) {
     if (process.env.VIBERAILS_BOARD_STATIC === '1') {
         await page.addInitScript(() => sessionStorage.setItem('viberails_tab', 'board-fixture'));
@@ -1690,7 +1695,7 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
                 ...extraPickerItems
             ] },
             '/api/v1/board/boards': { boards: [{ id: 'brd_main', name: 'Main', position: 0, cardCount: empty ? 0 : 1,
-                columns },
+                columns, ...mainBoard },
                 ...(relatedCards ? [{ id: 'brd_sprint', name: 'Sprint 2', position: 1, cardCount: 2,
                     columns: [{ id: 'col_build', name: 'Build', position: 0, color: '#06b6d4', boardId: 'brd_sprint' }] }] : [])] },
             '/api/v1/board/columns': { columns },

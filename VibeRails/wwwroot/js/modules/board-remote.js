@@ -1,6 +1,7 @@
 import { escapeHtml, confirmDialog } from './utils.js';
 
 // Independent of the selected local board: remote-only and other-project copies belong here too.
+// No create: a hosted board is always a local owner's board published from its settings (VIBE-235).
 export function openRemoteBoards(app, onChanged = () => {}) {
     const abort = new AbortController();
     let rows = [], context = null, nextOffset = null, busy = false, generation = 0;
@@ -14,10 +15,9 @@ export function openRemoteBoards(app, onChanged = () => {}) {
                 <option value="owned">Owned by me</option><option value="shared">Shared with me</option>
             </select>
             <button type="button" class="btn btn-outline-secondary" data-remote-refresh>Refresh</button>
-            <button type="button" class="btn btn-primary" data-remote-new disabled>New remote board</button>
         </div>
         <form data-remote-editor class="border rounded p-3 mb-3" hidden>
-            <label class="form-label" for="remote-board-name" data-remote-editor-title>Board name</label>
+            <label class="form-label" for="remote-board-name">Rename remote board</label>
             <input id="remote-board-name" class="form-control mb-2" maxlength="120" required autocomplete="off">
             <div class="d-flex gap-2"><button type="submit" class="btn btn-primary" data-remote-save>Save</button>
                 <button type="button" class="btn btn-outline-secondary" data-remote-cancel>Cancel</button></div>
@@ -39,7 +39,6 @@ export function openRemoteBoards(app, onChanged = () => {}) {
         if (!active()) return;
         host.querySelectorAll('button').forEach(button => { button.disabled = value; });
         get('#remote-board-name').disabled = value;
-        get('[data-remote-new]').disabled = value || !context || !!edit;
         host.querySelectorAll('[data-remote-rename], [data-remote-delete]').forEach(button => { button.disabled = value || !!edit; });
     }
     function render() {
@@ -90,12 +89,11 @@ export function openRemoteBoards(app, onChanged = () => {}) {
         } catch (error) { if (active() && error.name !== 'AbortError') status(error.message || 'Could not load remote boards.'); }
         finally { if (current === generation) setBusy(false); }
     }
-    function openEditor(row = null) {
+    function openEditor(row) {
         if (busy || !context) return;
-        edit = { id: row?.id, context, requestId: Array.from(crypto.getRandomValues(new Uint8Array(16)), value => value.toString(16).padStart(2, '0')).join('') };
+        edit = { id: row.id, context };
         get('[data-remote-editor]').hidden = false;
-        get('[data-remote-editor-title]').textContent = row ? 'Rename remote board' : 'New remote board name';
-        get('#remote-board-name').value = row?.name || '';
+        get('#remote-board-name').value = row.name;
         setBusy(false);
         get('#remote-board-name').focus();
     }
@@ -108,8 +106,8 @@ export function openRemoteBoards(app, onChanged = () => {}) {
         if (busy || !edit || !event.currentTarget.reportValidity()) return;
         setBusy(true);
         try {
-            const result = await request(edit.id ? `/${encodeURIComponent(edit.id)}` : '', edit.id ? 'PUT' : 'POST',
-                { context: edit.context, requestId: edit.requestId, name: get('#remote-board-name').value });
+            const result = await request(`/${encodeURIComponent(edit.id)}`, 'PUT',
+                { context: edit.context, name: get('#remote-board-name').value });
             if (!active()) return;
             edit = null; get('[data-remote-editor]').hidden = true;
             await load(false, result.message); await changed();
@@ -137,7 +135,6 @@ export function openRemoteBoards(app, onChanged = () => {}) {
     get('[data-remote-filter]').addEventListener('change', render);
     get('[data-remote-refresh]').addEventListener('click', () => load());
     get('[data-remote-more]').addEventListener('click', () => load(true));
-    get('[data-remote-new]').addEventListener('click', () => openEditor());
     get('[data-remote-cancel]').addEventListener('click', () => { edit = null; get('[data-remote-editor]').hidden = true; setBusy(false); });
     load();
     return () => abort.abort();

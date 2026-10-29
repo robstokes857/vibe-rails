@@ -5,7 +5,7 @@ public sealed partial class BoardSyncService
     /// <summary>The board's sync status when viberails.ai says this account no longer owns the linked hosted board.</summary>
     internal const string OwnershipLostMessage =
         "viberails.ai says this account no longer owns this board's hosted copy, so sync is paused and nothing is sent or repaired there; "
-        + "local work is retained. To keep working on the hosted board, ask its owner to share it with you and import it as a shared board. "
+        + "local work is retained. To see the hosted board, ask its owner to share it with you and view it on viberails.ai. "
         + "To publish this board under this account again, turn sync back on.";
 
     /// <summary>

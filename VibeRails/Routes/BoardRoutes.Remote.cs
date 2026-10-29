@@ -14,8 +14,6 @@ public static partial class BoardRoutes
         });
         routes.MapGet("", (RemoteBoardsService boards, int? offset, CancellationToken ct) =>
             RunAsync(async () => Results.Ok(await boards.ListAsync(offset ?? 0, ct))));
-        routes.MapPost("", (RemoteBoardsService boards, RemoteBoardWriteRequest request, CancellationToken ct) =>
-            RunAsync(async () => Results.Ok(await boards.CreateAsync(request, ct))));
         routes.MapPut("/{id}", (RemoteBoardsService boards, string id, RemoteBoardWriteRequest request, CancellationToken ct) =>
             RunAsync(async () => Results.Ok(await boards.RenameAsync(id, request, ct))));
         routes.MapPost("/{id}/delete", (RemoteBoardsService boards, string id, RemoteBoardWriteRequest request, CancellationToken ct) =>

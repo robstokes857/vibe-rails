@@ -24,7 +24,7 @@ async function setup(page) {
             const id = url.pathname.split('/')[5];
             if (url.pathname.endsWith('/delete')) state.rows = state.rows.filter(item => item.id !== id);
             else if (request.method() === 'PUT') state.rows.find(item => item.id === id).name = body.name;
-            else state.rows.push(row('created', body.name));
+            else return route.fulfill({ status: 405 }); // VIBE-235: no create
             return route.fulfill({ json: { message: 'Remote change saved.' } });
         }
         const payloads = {
@@ -44,7 +44,7 @@ async function setup(page) {
 }
 
 for (const width of [1440, 390]) {
-    test(`Remote manager filters, escapes metadata and supports CRUD at ${width}px`, async ({ page }, testInfo) => {
+    test(`Remote manager filters, escapes metadata and supports rename and delete at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 900 });
         const state = await setup(page);
         const manager = page.getByRole('dialog', { name: 'Remote boards', exact: true });
@@ -52,6 +52,8 @@ for (const width of [1440, 390]) {
         await expect(shared.locator('img')).toHaveCount(0);
         await expect(shared.getByRole('button')).toHaveCount(0);
         await expect(shared.getByRole('link', { name: 'Open board' })).toHaveAttribute('rel', 'noopener noreferrer');
+        // VIBE-235: a hosted board is always a local owner's publication; the manager cannot create one.
+        await expect(manager.getByRole('button', { name: 'New remote board', exact: true })).toHaveCount(0);
         await manager.getByLabel('Filter remote boards').selectOption('unlinked');
         await expect(manager.locator('[data-remote-row]')).toHaveCount(2);
         await manager.getByLabel('Search loaded remote boards').fill('unused');
@@ -65,38 +67,36 @@ for (const width of [1440, 390]) {
         await manager.getByLabel('Rename remote board').fill('Renamed archive');
         await manager.getByRole('button', { name: 'Save', exact: true }).click();
         await expect(manager.locator('[data-remote-row="old"]')).toContainText('Renamed archive');
-        await manager.getByRole('button', { name: 'New remote board', exact: true }).click();
-        await manager.getByLabel('New remote board name').fill('New project');
-        await manager.getByRole('button', { name: 'Save', exact: true }).click();
-        await expect(manager.locator('[data-remote-row="created"]')).toContainText('New project');
         await manager.locator('[data-remote-row="old"]').getByRole('button', { name: 'Delete', exact: true }).click();
         await expect(page.getByRole('alertdialog')).toContainText('Local copies on this computer are kept');
         await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel' }).click();
-        expect(state.writes).toHaveLength(2);
+        expect(state.writes).toHaveLength(1);
         await manager.locator('[data-remote-row="old"]').getByRole('button', { name: 'Delete', exact: true }).click();
         await page.getByRole('alertdialog').getByRole('button', { name: 'Delete remote board', exact: true }).click();
         await expect(manager.locator('[data-remote-row="old"]')).toHaveCount(0);
-        expect(state.writes.map(w => w.method)).toEqual(['PUT', 'POST', 'POST']);
+        expect(state.writes.map(w => w.method)).toEqual(['PUT', 'POST']);
+        expect(state.writes[1].path).toMatch(/\/old\/delete$/);
     });
 }
 
-test('Create retries keep the draft and request identity; account changes reject stale drafts', async ({ page }) => {
+test('Rename failures keep the draft; account changes reject stale drafts', async ({ page }) => {
     const state = await setup(page);
     const manager = page.getByRole('dialog', { name: 'Remote boards', exact: true });
-    await manager.getByRole('button', { name: 'New remote board', exact: true }).click();
-    await manager.getByLabel('New remote board name').fill('Retained draft');
+    await manager.locator('[data-remote-row="old"]').getByRole('button', { name: 'Rename', exact: true }).click();
+    await manager.getByLabel('Rename remote board').fill('Retained draft');
     state.fail = true;
     await manager.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(manager.locator('[data-remote-status]')).toContainText('Temporary failure');
-    await expect(manager.getByLabel('New remote board name')).toHaveValue('Retained draft');
-    await expect(manager.getByRole('button', { name: 'New remote board', exact: true })).toBeDisabled();
+    await expect(manager.getByLabel('Rename remote board')).toHaveValue('Retained draft');
+    await expect(manager.locator('[data-remote-row="old"]').getByRole('button', { name: 'Rename', exact: true })).toBeDisabled();
     state.fail = false;
     state.context = 'account-b';
     await manager.getByRole('button', { name: 'Refresh', exact: true }).click();
     await expect(manager.locator('[data-remote-status]')).toContainText('3 remote boards loaded');
     await manager.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(manager.locator('[data-remote-status]')).toContainText('account changed');
-    expect(state.writes[0].body.requestId).toMatch(/^[a-f0-9]{32}$/);
+    expect(state.writes.map(w => [w.method, w.path])).toEqual([['PUT', '/api/v1/board/remote/old'], ['PUT', '/api/v1/board/remote/old']]);
+    expect(state.writes[0].body).toEqual({ context: 'account-a', name: 'Retained draft' });
     expect(state.writes[1].body).toEqual(state.writes[0].body);
     await manager.getByRole('button', { name: 'Cancel', exact: true }).click();
     await expect(manager.locator('[data-remote-editor]')).toBeHidden();

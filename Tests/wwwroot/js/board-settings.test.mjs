@@ -97,6 +97,20 @@ test('a dedicated Azure DevOps board hides the viberails.ai sync choice', async 
     dispose();
 });
 
+test('a copy of a board shared with you shows the read-only notice instead of the sync choice (VIBE-235)', async () => {
+    const content = { innerHTML: 'loading' };
+    const element = { isConnected: true, hidden: false, querySelector: () => content, addEventListener() {}, removeEventListener() {} };
+    BoardApi.attach({ apiCall: () => Promise.resolve({ shared: true, enabled: true, configured: true, remoteProvider: null,
+        remoteUrl: 'https://viberails.ai/Boards/11111111-1111-4111-8111-111111111111' }) });
+    const dispose = mountBoardSync({}, element, 'shared-board');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(element.hidden, false);
+    assert.match(content.innerHTML, /shared with you and is read-only/);
+    assert.match(content.innerHTML, /Open on viberails\.ai/);
+    assert.doesNotMatch(content.innerHTML, /data-board-sync-enabled|data-board-sync-now/);
+    dispose();
+});
+
 // Just enough DOM for the settings navigation: tabs, panels in document order, and moves.
 function settingsEditor() {
     const node = (props = {}) => {

@@ -124,6 +124,19 @@ public sealed partial class BoardStore
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<string, string>> GetSharedBoardOriginsAsync(string projectPath, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT o.BoardId, o.RemoteBoardId FROM BoardSharedOrigins o JOIN Boards b ON b.Id=o.BoardId WHERE b.ProjectPath=$project{ProjectPathCollation};";
+        command.Parameters.AddWithValue("$project", NormalizeProjectPath(projectPath));
+        var origins = new Dictionary<string, string>(StringComparer.Ordinal);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) origins[reader.GetString(0)] = reader.GetString(1);
+        return origins;
+    }
+
+    /// <inheritdoc />
     public async Task<bool> RestoreSharedCardAsync(string projectPath, string cardId, BoardAuthor author, BoardSyncStamp stamp,
         CancellationToken cancellationToken = default)
     {

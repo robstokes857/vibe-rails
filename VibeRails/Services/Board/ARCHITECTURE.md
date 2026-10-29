@@ -179,11 +179,12 @@ for delivery, failure, lifecycle and deployment limits. No local route, listener
 
 ## VB-52: shared boards (2026-09-30)
 
-`Sync/BoardSharingService.cs` and six existing-host REST routes expose owner invitations and
-accepted-board discovery/import. The website enforces membership; desktop storage remains behind
-`IBoardStore`. `BoardStore.Sharing.cs` and additive `board/26` persist pinned origins and apply
-layouts transactionally. `board-sharing.js` owns modal requests and disposal. See
-[SYNC.md](SYNC.md#vb-52-shared-boards) for privacy, compatibility and POC limitations.
+`Sync/BoardSharingService.cs` and four existing-host REST routes expose owner invitations. The
+website enforces membership; desktop storage remains behind `IBoardStore`. VIBE-235 removed
+accepted-board discovery/import: collaborators read on viberails.ai, and copies earlier versions
+imported (pinned by `board/26` origins in `BoardStore.Sharing.cs`) stay local, read-only and
+unsynced. `board-sharing.js` owns modal requests and disposal. See
+[SYNC.md](SYNC.md#vb-52-shared-boards) for privacy, compatibility and retained-copy behavior.
 
 ## VIBE-1: card organization and unified discussion (2026-09-30)
 

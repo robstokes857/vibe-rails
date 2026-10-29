@@ -21,7 +21,8 @@
 //   commit     { sha, shortSha, author, message, committedAt, linkedAt }
 //   files      { files: ['repo/relative/path', …], truncated }   (searchFilesAsync, for `@path` refs)
 //
-//   board      { id, name, position, createdAt, cardCount, columns[], isJiraBoard, remoteProvider 'jira'|'ado'|null }
+//   board      { id, name, position, createdAt, cardCount, columns[], isJiraBoard, remoteProvider 'jira'|'ado'|null,
+//                shared, sharedUrl }   (shared: a read-only copy of a board shared with you, never synced)
 //
 // `assignee` is an LLM picker key ('base:claude' / 'env:7:codex'), never a person.
 // Boards are per project: the server scopes every call to the open workspace, and a project can
@@ -112,7 +113,7 @@ async function pullAdoAsync(boardId, dryRun = false) {
 // ---------------------------------------------- viberails.ai sync (VB-51)
 //
 //   syncStatus { boardId, published, enabled, remoteBoardId, remoteUrl, cursor, unsent,
-//                lastSyncUtc, lastError, configured }
+//                lastSyncUtc, lastError, configured, shared }
 // `configured` says whether an API key and endpoint exist; the key itself never comes back.
 
 async function getBoardSyncAsync(boardId, extra = {}) {

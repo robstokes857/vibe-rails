@@ -764,14 +764,16 @@ installed or offered as an Agent editor preset. Existing Agents, review routing,
 and lane selections remain intact. Old pending starter intents are retained without recovery.
 See the [starter workflow contract](../VibeRails/Services/Board/ARCHITECTURE.md#new-board-review-defaults-vibe-23).
 
-VB-52 adds owner invitation controls, website recipient inbox/block screens and desktop shared-board
-import. The website enforces the three-collaborator cap and Board membership. Additive `board/26`
-stores pinned import origins; existing sync carries portable edits both ways. See the
+VB-52 adds owner invitation controls and website recipient inbox/block screens. The website
+enforces the three-collaborator cap and Board membership. Publishing is one-way and owner-only
+(VIBE-235): collaborators read shared boards on the website, the desktop no longer imports them,
+and copies earlier versions imported (pinned by additive `board/26` origins) stay local, read-only
+and unsynced. See the
 [sharing contract](../VibeRails/Services/Board/SYNC.md#vb-52-shared-boards) for lifecycle and limits.
 
 The toolbar's **Remote boards** manager (`board-remote.js`, `RemoteBoardsService`) pages all
-accessible hosted boards and labels their local copies across projects. Owners can create,
-rename or delete remote boards, including orphaned copies. Deletion pauses matching local sync
+accessible hosted boards and labels their local copies across projects. Owners can rename or
+delete remote boards, including orphaned copies; there is no create (VIBE-235). Deletion pauses matching local sync
 while retaining local work; missing owned remote boards no longer recreate themselves on a tick.
 See the [manager contract](../VibeRails/Services/Board/SYNC.md#remote-board-manager).
 

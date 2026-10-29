@@ -305,11 +305,8 @@ middleware serves their paths rather than registering individual API endpoints.
 | DELETE | `/api/v1/board/local-cards/{card}/links/{linkedCard}` | [BoardRoutes.Search.cs](VibeRails/Routes/BoardRoutes.Search.cs) |
 | POST | `/api/v1/board/local-cards/{card}/move` | [BoardRoutes.Search.cs](VibeRails/Routes/BoardRoutes.Search.cs) |
 | GET | `/api/v1/board/remote` | [BoardRoutes.Remote.cs](VibeRails/Routes/BoardRoutes.Remote.cs) |
-| POST | `/api/v1/board/remote` | [BoardRoutes.Remote.cs](VibeRails/Routes/BoardRoutes.Remote.cs) |
 | PUT | `/api/v1/board/remote/{id}` | [BoardRoutes.Remote.cs](VibeRails/Routes/BoardRoutes.Remote.cs) |
 | POST | `/api/v1/board/remote/{id}/delete` | [BoardRoutes.Remote.cs](VibeRails/Routes/BoardRoutes.Remote.cs) |
-| GET | `/api/v1/board/shared` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
-| POST | `/api/v1/board/shared/{remoteId}/import` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | GET | `/api/v1/chatHistory` | [ChatHistoryRoutes.cs](VibeRails/Routes/ChatHistoryRoutes.cs) |
 | DELETE | `/api/v1/chatHistory/{sessionId}` | [ChatHistoryRoutes.cs](VibeRails/Routes/ChatHistoryRoutes.cs) |
 | GET | `/api/v1/chatHistory/{sessionId}` | [ChatHistoryRoutes.cs](VibeRails/Routes/ChatHistoryRoutes.cs) |
@@ -1109,15 +1106,16 @@ against schema/card; bounded error codes/IDs may be consumed, never arbitrary re
 Sharing checks owner-only collaborator management and accepted membership on every hosted
 request, with Auth0/antiforgery for browser writes. Invites do not disclose account existence;
 verified-email recipients accept, and declines/blocks stay private. The cap is three pending/
-accepted collaborators. Membership changes participate in concurrency checks. Imported boards
-retain their remote/destination identity and cannot auto-republish after revocation; moves/merges
-must respect the imported-board boundary. Membership does not grant live terminal control or
+accepted collaborators. Membership changes participate in concurrency checks. Since VIBE-235 the
+desktop has no shared-board import route and never syncs a copy an earlier version imported;
+those copies retain their remote/destination identity, cannot republish, and moves/merges must
+respect the imported-board boundary. Membership does not grant live terminal control or
 account-wide archive access; Board activity playback follows its explicit hosted access rules.
 
 The root-only `/api/v1/board/remote` manager requires both local credentials and returns no-store
 responses. It pages accessible remote metadata and labels matching local copies across projects.
-Writes require the destination context captured when the list was loaded. Create publishes a
-remote-only board using a stable retry identity; rename/delete recheck hosted ownership. Rename
+Writes require the destination context captured when the list was loaded. There is no create
+route (VIBE-235); rename/delete recheck hosted ownership. Rename
 updates matching local names. Delete takes the shared sync lock and pauses linked local copies
 before the outbound request, retaining local cards/history even when the remote outcome is unknown.
 Missing owned remote boards also pause background sync; only explicit re-enabling republishes them.

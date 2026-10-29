@@ -297,11 +297,14 @@ local-only/rejected delivery policy, and queue current local snapshots after mis
 Keep reconciliation atomic behind `IBoardStore`; imported collaborator boards are never
 authoritative over their owner's copy. See [the recovery contract](SYNC.md#ordering-retry-and-identity).
 
-See [SYNC.md](SYNC.md#vb-52-shared-boards) for the POC contract. Persistence stays behind
-`IBoardStore`. Imported boards retain their remote/destination identity and never fall back to
-owner publication after access ends. The hosted API enforces owner-only collaborator management.
+See [SYNC.md](SYNC.md#vb-52-shared-boards) for the contract. Publishing is one-way and owner-only
+(VIBE-235): collaborators read shared boards on viberails.ai, the desktop has no import route or
+UI, and Remote boards cannot create a board with no local copy. Copies older versions imported
+stay in place, read-only, and never push, pull or publish activity; `SyncLinkAsync` returns an
+imported link untouched and the board list marks them `shared`. Do not delete or rewrite them.
+Persistence stays behind `IBoardStore`. Imported boards retain their remote/destination identity
+and never fall back to owner publication. The hosted API enforces owner-only collaborator management.
 Keep recipient-private declines/blocks and the response that does not disclose email registration.
-Imported activity must not overwrite owner snapshots.
 
 ## Unified discussion and card organization (VIBE-1)
 

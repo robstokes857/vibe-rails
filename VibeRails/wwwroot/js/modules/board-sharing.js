@@ -14,14 +14,14 @@ function sharingModal(app, title, intro) {
 }
 
 export function openBoardSharing(app, boardId) {
-    const view = sharingModal(app, 'Share board', 'Invite up to three collaborators by email. Pending invitations use a slot. Only the owner can manage members.');
+    const view = sharingModal(app, 'Share board', 'Invite up to three collaborators by email. Pending invitations use a slot. Collaborators view it read-only on viberails.ai.');
     const { host, active, request, status } = view;
     const base = `/api/v1/board/boards/${encodeURIComponent(boardId)}/sharing`;
     const content = host?.querySelector('[data-sharing-content]');
     async function load(message = '') {
         const state = await request(base); if (!active()) return;
         if (!state.configured) { status('Sign in using Account in the navigation bar to share this board.'); return; }
-        if (!state.isOwner) { status('This board is shared with you. Only its owner can manage collaborators.'); return; }
+        if (!state.isOwner) { status('This board is shared with you and is read-only. Only its owner can manage collaborators.'); return; }
         const sharing = state.sharing;
         status(message || `${sharing.invitations.length} of ${sharing.limit} collaborator slots used`);
         content.innerHTML = `<p class="small text-muted">Recipients review invitations on <a href="https://viberails.ai/Boards/invitations" target="_blank" rel="noopener noreferrer">viberails.ai</a>. No email is sent. Registration, declines and blocks are private.</p>
@@ -54,31 +54,5 @@ export function openBoardSharing(app, boardId) {
         });
     }
     if (host) load().catch(error => { if (error.name !== 'AbortError') status(error.message || 'Could not load sharing.'); });
-    return view.dispose;
-}
-
-export function openSharedBoards(app, onImported) {
-    const view = sharingModal(app, 'Shared boards', 'Add an accepted board to this project to edit cards and run local agents.');
-    const { host, active, request, status } = view;
-    async function load() {
-        const boards = await request('/api/v1/board/shared'); if (!active()) return;
-        status(boards.length ? '' : 'No accepted shared boards yet.');
-        host.querySelector('[data-sharing-content]').innerHTML = `<p><a href="https://viberails.ai/Boards/invitations" target="_blank" rel="noopener noreferrer">Manage invitations</a> · <a href="https://viberails.ai/Boards/blocked-users" target="_blank" rel="noopener noreferrer">Blocked users</a></p>
-            ${boards.map(board => `<div class="border rounded p-3 mb-2 d-flex align-items-center justify-content-between gap-2"><span>${escapeHtml(board.name)}</span>
-            <button type="button" class="btn btn-sm btn-outline-primary" data-shared-import="${escapeHtml(board.remoteBoardId)}">Add to this project</button></div>`).join('')}`;
-        host.querySelectorAll('[data-shared-import]').forEach(button => button.addEventListener('click', async () => {
-            if (host.dataset.busy) return;
-            host.dataset.busy = 'true'; button.disabled = true; status('Adding board and syncing cards…');
-            try {
-                const result = await request(`/api/v1/board/shared/${encodeURIComponent(button.dataset.sharedImport)}/import`, 'POST', {});
-                if (active()) {
-                    app.closeModal(); await onImported(result.boardId);
-                    app.showToast('Board', result.syncError || 'Shared board added. Cards continue syncing while VibeRails is open.', result.syncError ? 'warning' : 'success');
-                }
-            } catch (error) { if (error.name !== 'AbortError') status(error.message || 'Could not add the board.'); }
-            finally { delete host.dataset.busy; button.disabled = false; }
-        }));
-    }
-    if (host) load().catch(error => { if (error.name !== 'AbortError') status(error.message || 'Could not load shared boards.'); });
     return view.dispose;
 }

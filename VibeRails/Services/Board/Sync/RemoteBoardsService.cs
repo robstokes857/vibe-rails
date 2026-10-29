@@ -12,11 +12,14 @@ public sealed record RemoteBoardRow(string Id, string Name, bool IsOwner, IReadO
 /// <summary>A bounded page; Context prevents an old screen from writing to a different account.</summary>
 public sealed record RemoteBoardPage(string Context, IReadOnlyList<RemoteBoardRow> Boards, int? NextOffset);
 /// <summary>A management command bound to the destination displayed in the remote board list.</summary>
-public sealed record RemoteBoardWriteRequest(string? Context, string? Name = null, string? RequestId = null);
-/// <summary>Confirmation of a remote change, optionally identifying the newly created board.</summary>
-public sealed record RemoteBoardActionResult(string Message, string? Id = null, string? Url = null);
+public sealed record RemoteBoardWriteRequest(string? Context, string? Name = null);
+/// <summary>Confirmation of a remote change.</summary>
+public sealed record RemoteBoardActionResult(string Message);
 
-/// <summary>Human management of hosted boards, including remote copies whose local board was removed.</summary>
+/// <summary>
+/// Human management of hosted boards, including remote copies whose local board was removed.
+/// There is no create: a hosted board is always the publication of a local owner's board (VIBE-235).
+/// </summary>
 public sealed class RemoteBoardsService(IBoardStore store, IBoardSyncClient client, BoardSyncLock syncLock)
 {
     public const int PageSize = 100;
@@ -37,24 +40,6 @@ public sealed class RemoteBoardsService(IBoardStore store, IBoardSyncClient clie
                 .Select(l => new RemoteBoardLocalCopy(l.Board.Id, l.Board.Name,
                     Path.GetFileName(Path.TrimEndingDirectorySeparator(l.Board.ProjectPath)), l.Board.SyncEnabled)).ToList())).ToList();
         return new(Context(destination), rows, remote.Count == PageSize ? offset + PageSize : null);
-    }
-
-    /// <summary>Creates a remote-only board; the client retains RequestId for safe retries.</summary>
-    public async Task<RemoteBoardActionResult> CreateAsync(RemoteBoardWriteRequest request, CancellationToken ct)
-    {
-        var destination = CheckedContext(request.Context);
-        var name = Name(request.Name);
-        if (request.RequestId is not { Length: 32 } id || id.Any(c => !char.IsAsciiHexDigit(c)))
-            throw new BoardValidationException("A valid create request id is required.");
-        var identity = "remote_" + id.ToLowerInvariant();
-        string[] names = ["Backlog", "Ready", "Build", "Review", "Done"];
-        var lanes = names.Select((label, index) => new BoardSyncLaneWire(identity + "_" + index, label, null, index)).ToList();
-        var result = await client.PublishAsync(new(identity, name, "WEB", lanes, "WEB"), ct, destination);
-        if (result.RemoteBoardId == Guid.Empty)
-            throw new BoardSyncClientException("The server did not confirm the new board. Refresh before retrying.", "invalid_response");
-        var remoteId = result.RemoteBoardId.ToString("D");
-        return new("Remote board created. Open it to manage its cards.", remoteId,
-            BoardSyncEndpoint.BoardPage(ParserConfigs.GetFrontendUrl(), remoteId));
     }
 
     /// <summary>Renames an owned remote board and its linked local copies so sync keeps the new name.</summary>

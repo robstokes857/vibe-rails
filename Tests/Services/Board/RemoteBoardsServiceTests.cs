@@ -59,24 +59,6 @@ public sealed class RemoteBoardsServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task CreateRetriesUseSameRemoteIdentityWithoutCreatingLocalData()
-    {
-        var sent = new List<BoardSyncPublishRequest>();
-        client.Setup(c => c.PublishAsync(It.IsAny<BoardSyncPublishRequest>(), It.IsAny<CancellationToken>(), "account-a"))
-            .Callback<BoardSyncPublishRequest, CancellationToken, string?>((r, _, _) => sent.Add(r))
-            .ReturnsAsync(new BoardSyncPublishResponse(Guid.Parse(remoteId), "New", 0));
-        var request = new RemoteBoardWriteRequest(await Context(), " New ", new string('a', 32));
-        Assert.Equal(remoteId, (await service.CreateAsync(request, Ct)).Id);
-        await service.CreateAsync(request, Ct);
-        Assert.Equal(sent[0].LocalBoardId, sent[1].LocalBoardId);
-        Assert.Equal("New", sent[0].Name);
-        Assert.Equal(5, sent[0].Lanes.Count);
-        Assert.Empty(await store.GetLocalBoardsAsync(Ct));
-        await Assert.ThrowsAsync<BoardValidationException>(() => service.CreateAsync(request with { RequestId = "invalid" }, Ct));
-        await Assert.ThrowsAsync<BoardValidationException>(() => service.CreateAsync(request with { Name = "two\nlines" }, Ct));
-    }
-
-    [Fact]
     public async Task RenameUpdatesRemoteAndMatchingLocalNamesWithoutChangingCardsOrLanes()
     {
         var local = await Local("one");
@@ -130,7 +112,7 @@ public sealed class RemoteBoardsServiceTests : IDisposable
     [Fact]
     public async Task AccountChangesAndConcurrentSyncRejectWritesBeforeSideEffects()
     {
-        var request = new RemoteBoardWriteRequest(await Context(), "New", new string('b', 32));
+        var request = new RemoteBoardWriteRequest(await Context(), "New");
         using (var held = syncLock.TryAcquire())
         {
             Assert.NotNull(held);
@@ -140,7 +122,6 @@ public sealed class RemoteBoardsServiceTests : IDisposable
         client.SetupGet(c => c.DestinationKey).Returns("account-b");
         await Assert.ThrowsAsync<BoardValidationException>(() => service.DeleteAsync(remoteId, request, Ct));
         await Assert.ThrowsAsync<BoardValidationException>(() => service.RenameAsync(remoteId, request, Ct));
-        await Assert.ThrowsAsync<BoardValidationException>(() => service.CreateAsync(request, Ct));
         client.Verify(c => c.DescribeAsync(It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string>()), Times.Never);
     }
 

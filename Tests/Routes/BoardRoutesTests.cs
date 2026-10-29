@@ -149,16 +149,14 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
             .ReturnsAsync([new BoardRemoteDescriptor(id.ToString(), "Remote", "VB", null, [], true, 0)]);
         client.Setup(c => c.DescribeAsync(id.ToString(), It.IsAny<CancellationToken>(), "account"))
             .ReturnsAsync(new BoardRemoteDescriptor(id.ToString(), "Remote", "VB", null, [], true, 0));
-        client.Setup(c => c.PublishAsync(It.IsAny<BoardSyncPublishRequest>(), It.IsAny<CancellationToken>(), "account"))
-            .ReturnsAsync(new BoardSyncPublishResponse(id, "Created", 0));
         client.Setup(c => c.PushAsync(id.ToString(), It.IsAny<BoardSyncPushRequest>(), It.IsAny<CancellationToken>(), "account"))
             .ReturnsAsync(new BoardSyncPushResponse([], 0));
         client.Setup(c => c.DeleteRemoteBoardAsync(id.ToString(), It.IsAny<CancellationToken>(), "account")).Returns(Task.CompletedTask);
         using var page = await GetJsonAsync(path);
         var context = page.RootElement.GetProperty("context").GetString();
         Assert.Equal("Remote", page.RootElement.GetProperty("boards")[0].GetProperty("name").GetString());
-        var body = new RemoteBoardWriteRequest(context, "Created", new string('a', 32));
-        foreach (var (method, url) in new[] { (HttpMethod.Get, path), (HttpMethod.Post, path),
+        var body = new RemoteBoardWriteRequest(context, "Renamed");
+        foreach (var (method, url) in new[] { (HttpMethod.Get, path),
             (HttpMethod.Put, path + "/" + id), (HttpMethod.Post, path + "/" + id + "/delete") })
         {
             using var none = await SendAsync(method, url, body: body);
@@ -171,8 +169,12 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
             valid.EnsureSuccessStatusCode();
             Assert.True(valid.Headers.CacheControl!.NoStore);
         }
-        using var stale = await SendAsync(HttpMethod.Post, path, "test-session", "test-tab", body with { Context = "old" });
+        using var stale = await SendAsync(HttpMethod.Put, path + "/" + id, "test-session", "test-tab", body with { Context = "old" });
         Assert.Equal(HttpStatusCode.BadRequest, stale.StatusCode);
+        // VIBE-235: a hosted board is always a local owner's publication; the manager cannot create one.
+        using var create = await SendAsync(HttpMethod.Post, path, "test-session", "test-tab", body);
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, create.StatusCode);
+        client.Verify(c => c.PublishAsync(It.IsAny<BoardSyncPublishRequest>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()), Times.Never);
         using var invalid = await SendAsync(HttpMethod.Get, path + "?offset=-1", "test-session", "test-tab");
         Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
     }
@@ -186,7 +188,6 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         var foreign = await store.CreateBoardAsync(_project + "-foreign", "Foreign", ct);
         var path = $"/api/v1/board/boards/{local.Id}/sharing";
         foreach (var (method, url) in new[] {
-            (HttpMethod.Get, "/api/v1/board/shared"), (HttpMethod.Post, "/api/v1/board/shared/remote/import"),
             (HttpMethod.Get, path), (HttpMethod.Post, path), (HttpMethod.Put, path + "/invite"), (HttpMethod.Delete, path + "/invite") })
         {
             using var anonymous = await SendAsync(method, url);
@@ -203,6 +204,12 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         Assert.False(data.RootElement.GetProperty("configured").GetBoolean());
         using var denied = await SendAsync(HttpMethod.Get, $"/api/v1/board/boards/{foreign.Id}/sharing", "test-session", "test-tab");
         Assert.Equal(HttpStatusCode.BadRequest, denied.StatusCode);
+        // VIBE-235: collaborators read shared boards on viberails.ai; the import routes are gone.
+        foreach (var (method, url) in new[] { (HttpMethod.Get, "/api/v1/board/shared"), (HttpMethod.Post, "/api/v1/board/shared/remote/import") })
+        {
+            using var gone = await SendAsync(method, url, "test-session", "test-tab");
+            Assert.Equal(HttpStatusCode.NotFound, gone.StatusCode);
+        }
     }
 
     [Fact]
@@ -550,6 +557,26 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         using var lanes = await GetJsonAsync("/api/v1/board/columns");
         Assert.All(lanes.RootElement.GetProperty("columns").EnumerateArray(), lane =>
             Assert.Equal(second.Id, lane.GetProperty("boardId").GetString()));
+    }
+
+    [Fact]
+    public async Task BoardList_MarksACopyOfABoardSharedWithYou()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var store = _app.Services.GetRequiredService<IBoardStore>();
+        await store.EnsureDefaultColumnsAsync(_project, ct);
+        var remote = Guid.NewGuid().ToString("D");
+        var lane = "col_" + Guid.NewGuid().ToString("N")[..12];
+        var imported = await store.ImportSharedBoardAsync(_project,
+            new BoardRemoteDescriptor(remote, "Shared", "VB", "VB", [new(lane, "Todo", null, 0)], false, 0), "account", ct);
+        using var catalog = await GetJsonAsync("/api/v1/board/boards");
+        var boards = catalog.RootElement.GetProperty("boards").EnumerateArray().ToList();
+        var shared = Assert.Single(boards, board => board.GetProperty("id").GetString() == imported.Id);
+        Assert.True(shared.GetProperty("shared").GetBoolean());
+        if (shared.GetProperty("sharedUrl") is { ValueKind: JsonValueKind.String } url)
+            Assert.Contains(remote, url.GetString(), StringComparison.OrdinalIgnoreCase);
+        var own = Assert.Single(boards, board => board.GetProperty("id").GetString() != imported.Id);
+        Assert.False(own.GetProperty("shared").GetBoolean());
     }
 
     [Fact]

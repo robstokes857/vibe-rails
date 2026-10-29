@@ -19,18 +19,23 @@ the status reports `RemoteProvider` (`jira`, `ado` or null) beside the retained 
 
 The Board toolbar's **Remote boards** screen lists owned and accepted shared boards, including
 remote-only boards left behind when a local board was deleted. It supports search within loaded
-pages, a **No local copy** filter, create, open, rename and confirmed owner-only deletion. Shared
+pages, a **No local copy** filter, open, rename and confirmed owner-only deletion. Shared
 boards remain read-only in this manager. Local deletion does not implicitly delete a hosted board.
 
-`RemoteBoardsService` backs the root-only `/api/v1/board/remote` routes (GET/POST, PUT `/{id}`,
-POST `/{id}/delete`). Both local credentials are required. Discovery uses the existing hosted
+There is no create (VIBE-235). A hosted board is always the publication of a local owner's board,
+started from that board's settings; a board made on the website with no local board had nowhere
+for its cards to land. Remote-only boards made before this change can still be listed, renamed and
+deleted here.
+
+`RemoteBoardsService` backs the root-only `/api/v1/board/remote` routes (GET, PUT `/{id}`,
+POST `/{id}/delete`; a POST to the collection is 405). Both local credentials are required.
+Discovery uses the existing hosted
 GET `/api/v1/boards?offset=…` in 100-board pages, ordered by name then identity; offset is a
 nonnegative multiple of 100. Paging requires the companion Front release. Refresh after concurrent
 catalog edits to rebuild the list. Old servers that repeat a page produce an explicit UI error.
 
 The list supplies an opaque destination context required by writes, protecting open screens from
-account changes. Create uses a stable random request ID as the hosted publication identity so an
-uncertain retry does not duplicate boards. It creates no local board. Rename updates linked local
+account changes. Rename updates linked local
 names under the cross-process sync lock. Delete takes that lock, checks ownership, pauses linked
 local boards across projects for the same destination, and then calls the hosted DELETE endpoint.
 Local cards, history and links stay stored, including after an uncertain deletion response.
@@ -74,40 +79,44 @@ for the five hosted routes and credential contract. No schema or local endpoint 
 
 ## VB-52: shared boards
 
+Publishing is one-way and owner-only (VIBE-235, from research spike VRF-8XZ8G-109). The owner's
+local board is the source of truth. Its hosted copy shows the latest capture and can create new
+cards, which the owner's pull brings home; collaborators are read-only on the website and never
+push. The companion Front change makes the host refuse every member write.
+
 Owners use **Share** on either client to manage three collaborators, including pending invitations.
 Inviting has the same response for registered, unregistered and blocked addresses. Recipients use
 the website's **Invitations** and **Blocked users** screens; only a verified account email can
-accept. No email notification is sent. The hosted API enforces owner-only member management and
-grants accepted members portable card, discussion and layout edits.
+accept. No email notification is sent. The hosted API enforces owner-only member management.
+`BoardSharingService` carries those owner calls; it has no discovery or import.
 
-Desktop **Shared boards** lists accepted boards and imports one into the current project on
-request. `BoardSharingService` orchestrates transport; `IBoardStore` owns atomic persistence.
-Automatic additive `board/26` adds `BoardSharedOrigins` in the normal `board.db`. It pins remote
+The desktop no longer imports shared boards: the **Shared boards** toolbar entry and its
+`/api/v1/board/shared` and `/api/v1/board/shared/{remoteId}/import` routes are gone. Copies that
+earlier versions imported are kept exactly as they are, with their cards, discussion, activity
+rails and queued Card Log entries, and are never deleted or rewritten at startup. They never
+push, pull or publish activity. `BoardSyncService.SyncLinkAsync` returns an imported link untouched
+(no request, no status write), so the scheduled tick only brings an old import's `ActivitySchema`
+up to the VIBE-85 value below; **Sync now** and turning sync on refuse with
+`SharedBoardReadOnlyMessage`. The board list marks these copies (`shared`, `sharedUrl`, read through
+`IBoardStore.GetSharedBoardOriginsAsync`), the board view shows a short read-only notice with a
+link to viberails.ai, and Board settings shows that notice instead of the sync choice.
+
+Automatic additive `board/26` added `BoardSharedOrigins` in the normal `board.db`. It pins remote
 board ID, API destination/key fingerprint and remote key prefix independently of legacy sync
-fields. Each remote board is imported at most once per machine. Imported boards never publish
-as a new owner after revocation or destination changes; downloaded data stays. The original API
-key is required for these POC imports; credential relinking is future work. Older binaries can
-read local data but do not understand shared-board sync; use the updated version for sharing.
+fields, and it is what still identifies a retained copy. No schema changes for VIBE-235. An older
+backend (VB-52 to before VIBE-235) running against the same `board.db` still syncs an imported
+copy; once the Front change ships the host refuses its writes, and the VIBE-85 rules keep it from
+republishing the copy as its own.
 
-Cards and discussion reuse bounded Card Log push/pull. Portable layouts reconcile both ways;
-transactional snapshot checks preserve concurrent local edits. Removed lanes remain until pending
-card moves arrive. Launch settings, environments and Automations stay machine-local. Owner activity
-snapshots and collaborator contributions are readable by members on the website. Imported desktop
-boards publish their own session, commit, attachment and linked-card activity through the same bounded
-rotation. The host attributes uploads to the authenticated account and preserves other publishers,
-including when this desktop has empty rails. Hosted card playback checks current Board membership
-and the recording publisher; account-wide archives and live terminals retain their own ACLs.
-Apply the Front BoardActivityContributors migration and release its server changes before installing
-this companion update. This does not import another desktop's activity into local rails.
-
-The companion Front `BoardSharing` migration adds invitations, memberships, blocks and a
-concurrency token. It must ship through the normal hosted release workflow before deploying
-sharing. This work does not apply production migrations; desktop setup remains automatic.
+`IBoardStore.ImportSharedBoardAsync`, the layout reconciliation and the shared restore replay stay in
+the store for those retained copies and their tests; no current path calls them for an import.
 
 ### VIBE-85: the sharing boundary
 
 An imported board is another account's data with a local copy. Four rules keep a member's view
 from being written into it, or into the member's own boards, by accident. None needs a schema change.
+They stay for the copies VIBE-235 retains: this version never syncs those copies, but an older
+backend on the same `board.db` may, and local edits and owned-board pulls still meet them.
 
 - **No republish by an older binary.** An import's `BoardSyncLinks` row stores
   `ActivitySchema = 1` (`BoardStore.ImportedLinkActivitySchema`), the value an owned publication
@@ -129,19 +138,22 @@ from being written into it, or into the member's own boards, by accident. None n
   on an imported board, no card is renamed: the incoming card takes a locally allocated label on its
   own board's prefix, and the correction is recorded as local-only History (`RemoteSeq = 0`, body
   "Display ID X is shown as Y on this machine …"), never queued, protecting no field. The shared
-  board keeps the owner's label, and a later web relabel still applies. The VB-69 rename-and-correct
+  board keeps the owner's label. The same rule keeps an owned board's incoming label from
+  renaming an imported card. The VB-69 rename-and-correct
   path remains for collisions where both cards are on owned boards.
 - **Cards never move or merge across it.** A move whose source and destination boards differ is
   refused when either board is imported, in `MoveCardAsync` and in a lane patch alike; a merge is
   refused when either card is on an imported board. Both checks run inside the write transaction
   and say "copy the card instead". Lane-to-lane moves inside an imported board stay ordinary
-  member edits. (A departure from an imported board would delete the card for every collaborator
-  and publish a copy under the member's account.)
+  local edits, which this version never sends. (A departure from an imported board would delete the
+  card for every collaborator and publish a copy under the member's account.)
 
 `Tests/Services/Board/BoardSharingSafetyTests.cs` holds the VIBE-14 proofs as regressions,
 including a replay of the older binary's predicate against the stored link row; the Front
 `BoardSharingTests` cover the host guard for a current and a revoked membership and the
-member prefix lock.
+member prefix lock. `Tests/Services/Board/BoardSharingTests.cs` covers VIBE-235: an imported copy
+is skipped by scheduled and manual sync with its local data intact, and owned boards beside it
+still push, pull and publish activity.
 
 ## VIBE-1: transfers and one discussion stream
 
@@ -181,7 +193,8 @@ copied comments/activity and source soft deletion. No additional listener or cre
 A configured viberails.ai API key automatically publishes opted-in local boards and their linked
 activity. The root backend pushes and pulls every 60 seconds while open. Without a key,
 opted-in local edits wait for a configured account. Protected APIs retain the manual sync action.
-VB-52 adds invitations and shared editing through the hosted Board ACL described above.
+VB-52 adds invitations through the hosted Board ACL described above; since VIBE-235 members read
+shared boards on the website only.
 
 ## Conversation and history
 
@@ -336,7 +349,7 @@ their owner's remote. Older servers without owner descriptors retain the in-plac
 When the descriptor names another owner or another board for an owned link, the refusal is terminal
 (VIBE-213): neither the in-place repair nor deletion runs, sync pauses so the background tick stops
 retrying, a replacement that has not deleted anything is marked `abandoned`, and the board's sync status
-says the account no longer owns the hosted copy (import it as a shared board, or turn sync back on to
+says the account no longer owns the hosted copy (view it on viberails.ai, or turn sync back on to
 publish this account's own copy). The feature log records it once at Warning.
 Authentication failures, malformed history, changed accounts and unproven conflicts never
 authorize deletion. Subsequent new web events retain the ordinary push/pull contract.

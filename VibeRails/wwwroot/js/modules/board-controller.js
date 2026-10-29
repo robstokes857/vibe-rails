@@ -44,7 +44,7 @@ import { contextEditorSection, mountContextEditor, laneAutomationSection, mountL
 import { boardJiraSection, BoardJiraPanel } from './board-jira.js';
 import { boardAdoSection, BoardAdoPanel } from './board-ado.js';
 import { cardOrganizeSection, bindCardOrganization } from './board-card-organize.js';
-import { openBoardSharing, openSharedBoards } from './board-sharing.js';
+import { openBoardSharing } from './board-sharing.js';
 import { openRemoteBoards } from './board-remote.js';
 import { renderCardLinksSection, bindCardLinks } from './board-card-links.js';
 import { BoardSearch } from './board-search.js';
@@ -789,6 +789,22 @@ export class BoardController {
         this.boardPicker.update(this.state.boards, this.state.boardId);
         const settings = this.query('[data-board-action="edit-board"]');
         if (settings) settings.title = `Settings for ${this.currentBoard()?.name || 'this board'}`;
+        this.renderSharedNotice();
+    }
+
+    // A copy of another account's shared board (VIBE-235): kept locally, never synced.
+    renderSharedNotice() {
+        const notice = this.query('[data-board-shared-notice]');
+        if (!notice) return;
+        const board = this.currentBoard();
+        notice.hidden = !board?.shared;
+        if (!board?.shared) { notice.innerHTML = ''; return; }
+        // The link is built by the local service; still refuse anything but a plain https URL.
+        let url = null;
+        try { const candidate = new URL(board.sharedUrl); if (candidate.protocol === 'https:' && !candidate.username && !candidate.password) url = candidate.href; } catch { /* No link. */ }
+        notice.innerHTML = `<i class="fa-solid fa-eye" aria-hidden="true"></i>
+            <span><strong>Shared with you (read-only).</strong> This copy no longer syncs, and changes here are not sent. View the current board on viberails.ai.</span>
+            ${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">Open on viberails.ai</a>` : ''}`;
     }
 
     manageBoards() {
@@ -1296,12 +1312,6 @@ export class BoardController {
             case 'share-board':
                 this.sharingDispose?.();
                 this.sharingDispose = openBoardSharing(this.app, this.state.boardId);
-                break;
-            case 'shared-boards':
-                this.sharingDispose?.();
-                this.sharingDispose = openSharedBoards(this.app, async boardId => {
-                    this.state.boardId = boardId; this.persistBoardSelection(); await this.refresh();
-                });
                 break;
             case 'remote-boards':
                 this.sharingDispose?.();

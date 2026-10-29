@@ -127,8 +127,12 @@ public sealed partial class BoardSyncServiceTests
         await store.AddCommentAsync(root, card.Id, BoardAuthor.User(), "Pending", Ct);
         var pullCalls = client.PullAfters.Count;
 
-        var status = await service.SyncNowAsync(root, card.BoardId, Ct);
-        Assert.Contains("conflicts with this device's recorded sync history", status!.LastError);
+        // VIBE-235: an imported copy never syncs, so it cannot reach owner recovery either.
+        var refused = await Assert.ThrowsAsync<BoardValidationException>(() => service.SyncNowAsync(root, card.BoardId, Ct));
+        Assert.Equal(BoardSyncService.SharedBoardReadOnlyMessage, refused.Message);
+        await service.SyncDueAsync(Ct);
+        var status = (await service.GetStatusAsync(root, card.BoardId, Ct))!;
+        Assert.Null(status.LastError);
         Assert.Equal(1, status.Unsent);
         Assert.Equal(pullCalls, client.PullAfters.Count);
     }

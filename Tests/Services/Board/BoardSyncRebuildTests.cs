@@ -222,8 +222,9 @@ public sealed partial class BoardSyncServiceTests
     {
         var card = await ConflictingOwnedBoard();
         await ExecuteAsync($"INSERT INTO BoardSharedOrigins VALUES ('{card.BoardId}', '{client.RemoteId:D}', 'server-and-account', 'VB');");
-        var status = await service.SyncNowAsync(root, card.BoardId, Ct);
-        Assert.NotNull(status!.LastError);
+        // VIBE-235: an imported copy never syncs, so neither path can reach the owner's replacement.
+        await Assert.ThrowsAsync<BoardValidationException>(() => service.SyncNowAsync(root, card.BoardId, Ct));
+        await service.SyncDueAsync(Ct);
         Assert.Equal(0, client.RemoteDeletes);
         Assert.Null(await store.GetPendingSyncRebuildAsync(card.BoardId, Ct));
     }

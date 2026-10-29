@@ -146,7 +146,9 @@ namespace VibeRails.DTOs
     // the project's first board, so a single-board client keeps working unchanged.
     // RemoteProvider is the tracker whose dedicated board this is ("jira" or "ado"), or null for a
     // local board. IsJiraBoard stays for older clients and is RemoteProvider == "jira".
-    public record BoardSummaryResponse(string Id, string Name, int Position, DateTime CreatedAt, int CardCount, List<BoardColumnResponse> Columns, string? DisplayPrefix = null, bool IsJiraBoard = false, string? RemoteProvider = null);
+    // Shared marks a copy imported from another account's shared board (VB-52). It no longer syncs
+    // (VIBE-235); SharedUrl opens the current board on viberails.ai when the site is configured.
+    public record BoardSummaryResponse(string Id, string Name, int Position, DateTime CreatedAt, int CardCount, List<BoardColumnResponse> Columns, string? DisplayPrefix = null, bool IsJiraBoard = false, string? RemoteProvider = null, bool Shared = false, string? SharedUrl = null);
     public record BoardListResponse(List<BoardSummaryResponse> Boards);
     public record CreateBoardRequest(string? Name = null, string? DisplayPrefix = null);
 
@@ -2152,7 +2154,6 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(VibeRails.Services.Board.BoardSharingState))]
     [JsonSerializable(typeof(VibeRails.Services.Board.BoardSharingEmailRequest))]
     [JsonSerializable(typeof(VibeRails.Services.Board.BoardSharingResult))]
-    [JsonSerializable(typeof(VibeRails.Services.Board.BoardSharedImportResult))]
     [JsonSerializable(typeof(IReadOnlyList<VibeRails.Services.Board.BoardRemoteDescriptor>))]
     [JsonSerializable(typeof(List<VibeRails.Services.Board.BoardRemoteDescriptor>))]
     [JsonSerializable(typeof(SetBoardSyncRequest))]

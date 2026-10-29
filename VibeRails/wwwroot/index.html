@@ -3185,6 +3185,22 @@
                     white-space: nowrap;
                 }
 
+                /* A copy of a board shared with this account (VIBE-235): read-only, no sync. */
+                .board-view .board-shared-notice {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                    flex-wrap: wrap;
+                    margin: 0;
+                    padding: 0.5rem 0.75rem;
+                    border: 1px solid var(--color-border, #334155);
+                    border-radius: 4px;
+                    color: var(--color-text, #e2e8f0);
+                    font-size: 0.85rem;
+                }
+
+                .board-view .board-shared-notice[hidden] { display: none; }
+
                 /* Toolbar ------------------------------------------------ */
                 .board-view .board-toolbar {
                     display: flex;
@@ -5365,9 +5381,6 @@
                         <button type="button" class="board-icon-btn" data-board-action="share-board" title="Share this board" aria-label="Share">
                             <i class="fa-solid fa-user-plus" aria-hidden="true"></i>
                         </button>
-                        <button type="button" class="board-icon-btn" data-board-action="shared-boards" title="Boards shared with you" aria-label="Shared boards">
-                            <i class="fa-solid fa-users" aria-hidden="true"></i>
-                        </button>
                         <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap" data-board-action="remote-boards" title="Manage boards stored on viberails.ai">
                             <i class="fa-solid fa-cloud" aria-hidden="true"></i> Remote boards
                         </button>
@@ -5380,6 +5393,8 @@
                         </button>
                     </div>
                 </header>
+
+                <p class="board-shared-notice" data-board-shared-notice role="status" hidden></p>
 
                 <div class="board-toolbar" role="group" aria-label="Filter cards">
                     <div class="board-search">

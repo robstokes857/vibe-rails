@@ -13,19 +13,26 @@ public sealed record BoardSharingOverview(int Limit, IReadOnlyList<BoardSharingI
 public sealed record BoardSharingEmailRequest(string? Email);
 /// <summary>A generic acknowledgment without recipient account information.</summary>
 public sealed record BoardSharingResult(string? Message = null, bool Saved = true);
-/// <summary>The local board identity and any initial synchronization error.</summary>
-public sealed record BoardSharedImportResult(string BoardId, string Name, string? SyncError = null);
 /// <summary>The configured account permission and optional owner controls.</summary>
 public sealed record BoardSharingState(bool Configured, bool IsOwner, string? RemoteBoardId, BoardSharingOverview? Sharing);
 
 public partial interface IBoardStore
 {
-    /// <summary>Atomically imports an accepted board once, binding it permanently to this destination.</summary>
+    /// <summary>
+    /// Atomically imports an accepted board once, binding it permanently to this destination.
+    /// No entry point imports since VIBE-235; this writes the shape older versions imported, for
+    /// tests of the retained copies' rules.
+    /// </summary>
     Task<BoardRecord> ImportSharedBoardAsync(string projectPath, BoardRemoteDescriptor remote, string destinationKey,
         CancellationToken cancellationToken = default);
     /// <summary>Applies portable layout only if the local layout still matches the caller's snapshot.</summary>
     Task<string?> ApplyRemoteLayoutAsync(string projectPath, string boardId, BoardRemoteDescriptor remote,
         BoardRecord expectedBoard, IReadOnlyList<BoardColumnRecord> expectedColumns, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Imported shared boards (VB-52) in the project, board ID to hosted board ID. These retained
+    /// copies are read-only and never sync (VIBE-235).
+    /// </summary>
+    Task<IReadOnlyDictionary<string, string>> GetSharedBoardOriginsAsync(string projectPath, CancellationToken cancellationToken = default);
     /// <summary>Replays a transfer's restore event on an imported board without echoing it.</summary>
     Task<bool> RestoreSharedCardAsync(string projectPath, string cardId, BoardAuthor author, BoardSyncStamp stamp,
         CancellationToken cancellationToken = default);

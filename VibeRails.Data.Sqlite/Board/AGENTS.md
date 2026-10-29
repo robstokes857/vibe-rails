@@ -130,11 +130,13 @@ requeue missing events and append current local field/liveness snapshots atomica
 content, local-only rows and rejected delivery policy. Never apply this recovery to an imported
 board. No schema change or startup rewrite is needed; see the [sync contract](../../VibeRails/Services/Board/SYNC.md#ordering-retry-and-identity).
 
-`BoardStore.Sharing.cs` imports accepted shared boards and applies remote layouts atomically.
+`BoardStore.Sharing.cs` holds shared-board imports and atomic remote layout application.
 `BoardSharedOrigins` pins remote identity, destination/key fingerprint and prefix separately from
-legacy sync fields. Setup adds the table without converting old rows. Keep imports project-scoped,
-retain cards when retiring remote lanes, and preserve the expected-layout check. Legacy remote keys
-are accepted only for explicit shared imports. See the Board `SYNC.md` contract.
+legacy sync fields. Setup adds the table without converting old rows. Since VIBE-235 nothing
+imports and imported copies never sync; `GetSharedBoardOriginsAsync` marks them in the board list
+and their rows stay untouched. Keep imports project-scoped, retain cards when retiring remote lanes,
+and preserve the expected-layout check. Legacy remote keys are accepted only for shared imports.
+See the Board `SYNC.md` contract.
 
 ## Card actions (board/25, VIBE-1)
 

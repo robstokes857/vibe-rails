@@ -184,6 +184,13 @@ export function mountBoardSync(app, element, boardId, onStatus = () => {}) {
             content.innerHTML = '';
             return;
         }
+        // A copy of another account's shared board never syncs (VIBE-235); its data stays here.
+        if (status.shared) {
+            content.innerHTML = `
+                <p class="board-editor-muted mb-2" data-board-sync-shared>This board was shared with you and is read-only. It no longer syncs, and changes here are not sent. View the current board on viberails.ai.</p>
+                ${status.remoteUrl ? `<a href="${escapeHtml(status.remoteUrl)}" target="_blank" rel="noopener noreferrer">Open on viberails.ai</a>` : ''}`;
+            return;
+        }
         content.innerHTML = `
             <label class="form-check mb-2">
                 <input class="form-check-input" type="checkbox" data-board-sync-enabled ${status.enabled ? 'checked' : ''}>

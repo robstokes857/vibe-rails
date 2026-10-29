@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using VibeRails.Services.Board;
@@ -8,109 +7,119 @@ using Xunit;
 
 namespace Tests.Services.Board;
 
+/// <summary>
+/// VIBE-235: the owner's local board is the source of truth and collaborators read shared boards
+/// on viberails.ai. A copy an older version imported from another account's share (VB-52) is kept
+/// as it is but never pushes, pulls or publishes activity. Owned boards still sync both ways.
+/// </summary>
 public sealed class BoardSharingTests : IDisposable
 {
+    private const string SharedCard = "card_000000000001";
     private readonly string root = Path.Combine(Path.GetTempPath(), "board-sharing-" + Guid.NewGuid().ToString("N"));
     private readonly BoardStore store;
-    private readonly SharedServer server = new();
+    private readonly HostedServer server = new();
     private readonly BoardSyncActivityCache cache = new();
     private readonly BoardSyncService sync;
-    private readonly BoardSharingService sharing;
     private readonly string cs;
     private CancellationToken Ct => TestContext.Current.CancellationToken;
+
     public BoardSharingTests()
     {
         Directory.CreateDirectory(root); cs = $"Data Source={Path.Combine(root, "board.db")};Pooling=False";
         store = new(cs, cs);
-        var gate = new BoardSyncLock(Path.Combine(root, "sync.lock"));
-        sync = new(store, server, gate, NullFeatureLog.Instance, cache);
-        sharing = new(store, server, sync, gate);
-        server.Event("created", """{"title":{"to":"Owner card"},"lane":{"to":"col_shared"},"description":{"to":"Shared text"}}""");
+        sync = new(store, server, new BoardSyncLock(Path.Combine(root, "sync.lock")), NullFeatureLog.Instance, cache);
+    }
+
+    /// <summary>An import as an older version left it: the owner's card pulled, then member work queued on top.</summary>
+    private async Task<BoardRecord> RetainedImportAsync()
+    {
+        var board = await store.ImportSharedBoardAsync(root, server.Shared, server.DestinationKey!, Ct);
+        Assert.NotNull(await store.CreateSyncedCardAsync(root, SharedCard, "VB-QWERT-1",
+            new("col_shared", "Owner card", "Shared text", null, "medium", null, [], false, BoardId: board.Id),
+            BoardAuthor.User(), new("log_owner_created", 1, DateTime.UtcNow, BoardId: board.Id), Ct));
+        await store.UpdateCardAsync(root, SharedCard, new(Title: "Member edit"), Ct);
+        await store.AddCommentAsync(root, SharedCard, BoardAuthor.User(), "Member discussion", Ct);
+        await store.LinkSessionAsync(root, SharedCard, Guid.NewGuid().ToString("D"), null, "base:codex", "codex", "Member work",
+            BoardSessionRecord.McpOrigin, Ct);
+        // The owner has moved on since: a web change waits on the hosted copy.
+        server.Event(server.Shared.RemoteBoardId, SharedCard, "VB-QWERT-1", "change", """{"description":{"to":"Website edit"}}""");
+        return board;
     }
 
     [Fact]
-    public async Task ImportRetainsIdentityAndSupportsTwoWayCardsAndCommentsWithoutRepublishing()
+    public async Task ImportedCopyIsSkippedByScheduledAndManualSyncAndKeepsItsLocalData()
     {
-        var imported = await sharing.ImportAsync(root, server.Remote.RemoteBoardId, Ct);
-        var card = (await store.FindCardAsync(root, "card_000000000001", Ct))!;
-        Assert.Equal("VB-1", card.Key); Assert.Equal("Owner card", card.Title); // older published boards work too
-        Assert.Equal(imported.BoardId, card.BoardId);
-        Assert.Equal(0, server.Publications); Assert.Equal(1, server.ActivityWrites);
-        await store.UpdateCardAsync(root, card.Id, new(Title: "Member edit"), Ct);
-        await store.AddCommentAsync(root, card.Id, BoardAuthor.User(), "Member discussion", Ct);
-        await sync.SyncNowAsync(root, imported.BoardId, Ct);
-        Assert.Contains(server.Events, e => e.Changes is {} changes && changes.TryGetProperty("title", out var title) && title.GetProperty("to").GetString() == "Member edit");
-        Assert.Contains(server.Events, e => e.Body == "Member discussion");
-        server.Event("change", """{"description":{"to":"Website edit"}}""");
-        await sync.SyncNowAsync(root, imported.BoardId, Ct);
-        Assert.Equal("Website edit", (await store.FindCardAsync(root, card.Id, Ct))!.Description);
-        Assert.Equal(0, (await sync.GetStatusAsync(root, imported.BoardId, Ct))!.Unsent);
-        Assert.Equal(imported.BoardId, (await sharing.ImportAsync(root, server.Remote.RemoteBoardId, Ct)).BoardId);
-        Assert.Single(await store.GetBoardsAsync(root, Ct));
-        Assert.Equal(0, server.Publications);
-    }
+        var board = await RetainedImportAsync();
+        Assert.True((await store.GetBoardAsync(root, board.Id, Ct))!.SyncEnabled); // an older import stays opted in
+        var linkBefore = (await store.GetSyncLinkAsync(root, board.Id, Ct))!;
+        var unsentBefore = await store.CountUnsentLogEntriesAsync(board.Id, Ct);
+        Assert.True(unsentBefore > 0);
 
-    [Fact]
-    public async Task ImportedBoardPublishesMemberSessionsAndSavedCommits()
-    {
-        var imported = await sharing.ImportAsync(root, server.Remote.RemoteBoardId, Ct);
-        const string cardId = "card_000000000001";
-        var sessionId = Guid.NewGuid().ToString("D");
-        await store.LinkSessionAsync(root, cardId, sessionId, null, "base:codex", "codex", "Member work", BoardSessionRecord.McpOrigin, Ct);
-        await store.AddCommitAsync(root, cardId, new string('a', 40), "Member", "Saved member change", DateTime.UtcNow,
-            new([new("member.cs", "csharp", "before", "after")], 1), Ct);
-        var status = await sync.SyncNowAsync(root, imported.BoardId, Ct);
-        Assert.Null(status!.LastError);
-        Assert.Equal(0, server.Publications);
-        var activity = server.Activity[^1];
-        Assert.Equal(2, activity.Schema);
-        Assert.Equal(sessionId, Assert.Single(activity.Sessions).Id);
-        var commit = Assert.Single(activity.Commits);
-        Assert.Equal("Saved member change", commit.Message);
-        Assert.Empty(commit.Files);
-        var content = Assert.IsType<BoardSyncContentWire>(commit.Content);
-        var bytes = content.Parts.SelectMany(part => server.ContentParts[part.Sha256]).ToArray();
-        Assert.Equal(content.Bytes, bytes.LongLength);
-        Assert.Equal(content.Sha256, Convert.ToHexStringLower(SHA256.HashData(bytes)));
-        var snapshot = JsonSerializer.Deserialize(bytes, BoardSyncJsonContext.Default.SandboxDiffResponse)!;
-        var file = Assert.Single(snapshot.Files);
-        Assert.Equal("member.cs", file.FileName);
-        Assert.Equal("before", file.OriginalContent);
-        Assert.Equal("after", file.ModifiedContent);
-    }
-
-    [Fact]
-    public async Task RevocationNeverRepublishesOrDeletesRetainedLocalWork()
-    {
-        var board = await sharing.ImportAsync(root, server.Remote.RemoteBoardId, Ct);
-        await store.UpdateCardAsync(root, "card_000000000001", new(Title: "Unsent local work"), Ct);
-        server.Revoked = true;
-        var result = (await sync.SyncNowAsync(root, board.BoardId, Ct))!;
-        Assert.NotNull(result.LastError); Assert.True(result.Unsent > 0);
-        Assert.Equal("Unsent local work", (await store.FindCardAsync(root, "card_000000000001", Ct))!.Title);
-        Assert.Equal(0, server.Publications);
         await sync.SyncDueAsync(Ct);
-        Assert.Equal(0, server.Publications);
-    }
-
-    [Fact]
-    public async Task AccountChangeCannotRebindOrSendImportedContent()
-    {
-        var board = await sharing.ImportAsync(root, server.Remote.RemoteBoardId, Ct);
-        var calls = server.Calls;
+        var manual = await Assert.ThrowsAsync<BoardValidationException>(() => sync.SyncNowAsync(root, board.Id, Ct));
+        Assert.Equal(BoardSyncService.SharedBoardReadOnlyMessage, manual.Message);
+        var enable = await Assert.ThrowsAsync<BoardValidationException>(() => sync.SetPublishedAsync(root, board.Id, true, Ct));
+        Assert.Equal(BoardSyncService.SharedBoardReadOnlyMessage, enable.Message);
+        // A different signed-in account changes nothing either: there is no sync to rebind.
         server.DestinationKey = "another-account";
         await sync.SyncDueAsync(Ct);
-        Assert.Equal(calls, server.Calls);
-        Assert.Equal("member-account", (await store.GetSyncLinkAsync(root, board.BoardId, Ct))!.DestinationKey);
-        await Assert.ThrowsAsync<BoardValidationException>(() => sharing.SaveAsync(root, board.BoardId, null, new("someone@example.test"), Ct));
-        await Assert.ThrowsAsync<BoardConflictException>(() => sharing.ImportAsync(root, server.Remote.RemoteBoardId, Ct));
+
+        Assert.Empty(server.Calls);
         Assert.Equal(0, server.Publications);
+        var card = (await store.FindCardAsync(root, SharedCard, Ct))!;
+        Assert.Equal(("Member edit", "Shared text", board.Id), (card.Title, card.Description, card.BoardId));
+        var detail = (await store.GetCardDetailAsync(root, SharedCard, Ct))!;
+        Assert.Contains(detail.Comments, comment => comment.Body == "Member discussion");
+        Assert.Single(detail.Sessions);
+        Assert.Equal(unsentBefore, await store.CountUnsentLogEntriesAsync(board.Id, Ct)); // retained, never sent or dropped
+        var link = (await store.GetSyncLinkAsync(root, board.Id, Ct))!;
+        Assert.Equal((linkBefore.RemoteBoardId, linkBefore.DestinationKey, linkBefore.Cursor, linkBefore.LastSyncUtc, linkBefore.LastError, true),
+            (link.RemoteBoardId, link.DestinationKey, link.Cursor, link.LastSyncUtc, link.LastError, link.Imported));
+
+        var status = (await sync.GetStatusAsync(root, board.Id, Ct))!;
+        Assert.True(status.Shared);
+        Assert.False(status.ActivityEnabled);
+        Assert.Equal(server.Shared.RemoteBoardId, status.RemoteBoardId);
     }
 
     [Fact]
-    public async Task SharedOriginsSurviveLegacyColumnWritesAndProjectScopeIsEnforced()
+    public async Task OwnedBoardsStillPushPullAndPublishActivityBesideAnImportedCopy()
     {
-        var board = await sharing.ImportAsync(root, server.Remote.RemoteBoardId, Ct);
+        await RetainedImportAsync();
+        var own = await store.CreateBoardAsync(root, "Mine", Ct);
+        await store.CreateColumnAsync(root, "Todo", "", Ct, own.Id);
+        var card = await store.CreateCardAsync(root, new(null, "Owner work", "", null, "medium", null, [], false, BoardId: own.Id), Ct);
+        await store.LinkSessionAsync(root, card.Id, Guid.NewGuid().ToString("D"), null, "base:claude", "claude", "Owner session",
+            BoardSessionRecord.McpOrigin, Ct);
+
+        // Publishing pushes the owner's card and publishes its activity.
+        var published = (await sync.SetPublishedAsync(root, own.Id, true, Ct))!;
+        Assert.Null(published.LastError);
+        Assert.False(published.Shared);
+        Assert.True(published.ActivityEnabled);
+        var remote = published.RemoteBoardId!;
+        Assert.Equal(1, server.Publications);
+        Assert.Contains(server.Entries[remote], e => e.CardId == card.Id && e.Kind == "created");
+        Assert.Contains(server.ActivityCards, write => write == (remote, card.Id));
+
+        // A web change on the owned board is pulled, and a local edit is pushed, on the scheduled tick.
+        server.Event(remote, card.Id, card.Key, "change", """{"description":{"to":"Web note"}}""");
+        await store.AddCommentAsync(root, card.Id, BoardAuthor.User(), "Owner discussion", Ct);
+        await sync.SyncDueAsync(Ct);
+        Assert.Equal("Web note", (await store.FindCardAsync(root, card.Id, Ct))!.Description);
+        Assert.Contains(server.Entries[remote], e => e.CardId == card.Id && e.Body == "Owner discussion");
+        Assert.Equal(0, await store.CountUnsentLogEntriesAsync(own.Id, Ct));
+
+        // Every call was for the owned board; the imported copy was never contacted.
+        Assert.NotEmpty(server.Calls);
+        Assert.All(server.Calls, call => Assert.Equal(remote, call.Board));
+        Assert.Equal("Shared text", (await store.FindCardAsync(root, SharedCard, Ct))!.Description);
+    }
+
+    [Fact]
+    public async Task SharedOriginsSurviveLegacyColumnWritesAndStayProjectScoped()
+    {
+        var board = await RetainedImportAsync();
         await using (var db = new SqliteConnection(cs))
         {
             await db.OpenAsync(Ct); await using var command = db.CreateCommand();
@@ -118,107 +127,78 @@ public sealed class BoardSharingTests : IDisposable
             await command.ExecuteNonQueryAsync(Ct);
         }
         var reopened = new BoardStore(cs, cs);
-        var link = (await reopened.GetSyncLinkAsync(root, board.BoardId, Ct))!;
+        var link = (await reopened.GetSyncLinkAsync(root, board.Id, Ct))!;
         Assert.True(link.Imported); Assert.Equal("member-account", link.DestinationKey);
-        Assert.Equal(server.Remote.RemoteBoardId, link.RemoteBoardId);
-        Assert.Null(await reopened.GetSyncLinkAsync(root + "-other", board.BoardId, Ct));
-        await Assert.ThrowsAsync<BoardConflictException>(() => sharing.ImportAsync(root + "-other", server.Remote.RemoteBoardId, Ct));
+        Assert.Equal(server.Shared.RemoteBoardId, link.RemoteBoardId);
+        Assert.Null(await reopened.GetSyncLinkAsync(root + "-other", board.Id, Ct));
+
+        // The board list marks only this project's imported copies.
+        await reopened.CreateBoardAsync(root, "Mine", Ct);
+        var origins = await reopened.GetSharedBoardOriginsAsync(root, Ct);
+        Assert.Equal(server.Shared.RemoteBoardId, Assert.Single(origins, o => o.Key == board.Id).Value);
+        Assert.Single(origins);
+        Assert.Empty(await reopened.GetSharedBoardOriginsAsync(root + "-other", Ct));
     }
 
-    [Fact]
-    public async Task BothSidesCanChangeLanesAndConcurrentLocalLayoutIsPreserved()
-    {
-        var result = await sharing.ImportAsync(root, server.Remote.RemoteBoardId, Ct);
-        server.Remote = server.Remote with { Name = "Renamed remotely", Lanes = [server.Remote.Lanes[0], new("col_done", "Done", null, 1)] };
-        server.Event("change", """{"lane":{"to":"col_done"}}""");
-        await sync.SyncNowAsync(root, result.BoardId, Ct);
-        Assert.Equal("col_done", (await store.FindCardAsync(root, "card_000000000001", Ct))!.ColumnId);
-        Assert.Equal("Renamed remotely", (await store.GetBoardAsync(root, result.BoardId, Ct))!.Name);
-        var before = (await store.GetBoardAsync(root, result.BoardId, Ct))!;
-        var columns = await store.GetColumnsAsync(root, Ct, result.BoardId);
-        await store.RenameBoardAsync(root, result.BoardId, "Local draft", null, Ct);
-        Assert.Null(await store.ApplyRemoteLayoutAsync(root, result.BoardId, server.Remote, before, columns, Ct));
-        await sync.SyncNowAsync(root, result.BoardId, Ct);
-        Assert.Equal("Local draft", server.Remote.Name);
-        Assert.Equal("VB", server.Remote.KeyPrefix); // never sends this checkout's unrelated project prefix
-        server.Remote = server.Remote with { Lanes = [new("col_done", "Done", "#ffffff", 0)] };
-        await sync.SyncNowAsync(root, result.BoardId, Ct);
-        Assert.Equal("col_done", Assert.Single(await store.GetColumnsAsync(root, Ct, result.BoardId)).Id);
-    }
-
-    [Fact]
-    public async Task TransferRestoreOnSharedBoardReappearsAndOlderRestoreCannotUndoLaterDeletion()
-    {
-        var board = await sharing.ImportAsync(root, server.Remote.RemoteBoardId, Ct);
-        server.Event("deleted", "{}"); server.Event("restored", "{}");
-        await sync.SyncNowAsync(root, board.BoardId, Ct);
-        Assert.NotNull(await store.FindCardAsync(root, "card_000000000001", Ct));
-        await store.DeleteCardAsync(root, "card_000000000001", Ct);
-        await sync.SyncNowAsync(root, board.BoardId, Ct);
-        await store.RestoreSharedCardAsync(root, "card_000000000001", BoardAuthor.System(),
-            new("old_restore", 3, DateTime.UtcNow, BoardId: board.BoardId), Ct);
-        Assert.Null(await store.FindCardAsync(root, "card_000000000001", Ct));
-    }
-
-    [Fact]
-    public async Task InvalidOrCollidingRemoteLanesRollBackTheWholeImport()
-    {
-        await sharing.ImportAsync(root, server.Remote.RemoteBoardId, Ct);
-        var original = (await store.GetBoardsAsync(root, Ct)).Count;
-        var another = server.Remote with { RemoteBoardId = Guid.NewGuid().ToString("D") };
-        await Assert.ThrowsAsync<BoardConflictException>(() => store.ImportSharedBoardAsync(root, another, server.DestinationKey!, Ct));
-        await Assert.ThrowsAsync<BoardValidationException>(() => store.ImportSharedBoardAsync(root,
-            another with { Lanes = [new("../outside", "Bad", null, 0)] }, server.DestinationKey!, Ct));
-        Assert.Equal(original, (await store.GetBoardsAsync(root, Ct)).Count);
-    }
-
-    private sealed class SharedServer : IBoardSyncClient
+    /// <summary>One hosted service holding the shared board and any board this account publishes.</summary>
+    private sealed class HostedServer : IBoardSyncClient
     {
         public bool IsConfigured => true;
         public string? DestinationKey { get; set; } = "member-account";
-        public BoardRemoteDescriptor Remote = new(Guid.NewGuid().ToString("D"), "Shared", "VB", "VB", [new("col_shared", "Todo", null, 0)], false, 0);
-        public List<BoardSyncPulledEntryWire> Events = [];
-        public int Publications, ActivityWrites, Calls;
-        public List<BoardSyncActivityWire> Activity = [];
-        public Dictionary<string, byte[]> ContentParts = [];
-        public bool Revoked;
-        private void Check(string? destination)
-        { Calls++; Assert.Equal(DestinationKey, destination); if (Revoked) throw new BoardSyncClientException("Access no longer available", "board_not_found", 404); }
-        public Task<BoardRemoteDescriptor?> DescribeAsync(string id, CancellationToken ct, string? destination = null)
-        { Check(destination); Assert.Equal(Remote.RemoteBoardId, id); return Task.FromResult<BoardRemoteDescriptor?>(Remote); }
-        public Task<List<BoardRemoteDescriptor>> DiscoverAsync(CancellationToken ct, string? destination = null)
-        { Check(destination); return Task.FromResult(new List<BoardRemoteDescriptor> { Remote }); }
-        public Task<BoardSyncPublishResponse> PublishAsync(BoardSyncPublishRequest body, CancellationToken ct, string? expectedDestination = null)
-        { Publications++; throw new InvalidOperationException("Imported boards must never publish"); }
-        public Task<BoardSyncActivityAck> PutActivityAsync(string board, string card, BoardSyncActivityWire body, CancellationToken ct, string? expectedDestination = null)
-        { Check(expectedDestination); Assert.Equal(Remote.RemoteBoardId, board); ActivityWrites++; Activity.Add(body); return Task.FromResult(new BoardSyncActivityAck(body.Schema, card)); }
-        public Task PutContentPartAsync(BoardSyncContentPartWire part, ReadOnlyMemory<byte> bytes, CancellationToken ct, string? destination = null)
+        public readonly BoardRemoteDescriptor Shared = new(Guid.NewGuid().ToString("D"), "Shared", "VB", "VB", [new("col_shared", "Todo", null, 0)], false, 0);
+        public readonly Dictionary<string, List<BoardSyncPulledEntryWire>> Entries = new(StringComparer.OrdinalIgnoreCase);
+        public readonly List<(string Method, string Board)> Calls = [];
+        public readonly List<(string Board, string Card)> ActivityCards = [];
+        public int Publications;
+
+        private List<BoardSyncPulledEntryWire> Board(string board) =>
+            Entries.TryGetValue(board, out var list) ? list : Entries[board] = [];
+        private void Call(string method, string board, string? destination)
         {
-            Check(destination);
-            Assert.Equal(part.Bytes, bytes.Length);
-            Assert.Equal(part.Sha256, Convert.ToHexStringLower(SHA256.HashData(bytes.Span)));
-            ContentParts[part.Sha256] = bytes.ToArray();
-            return Task.CompletedTask;
+            Assert.Equal(DestinationKey, destination);
+            Calls.Add((method, board));
         }
+
+        public Task<BoardSyncPublishResponse> PublishAsync(BoardSyncPublishRequest body, CancellationToken ct, string? expectedDestination = null)
+        {
+            Assert.Equal(DestinationKey, expectedDestination);
+            Publications++;
+            var id = Guid.NewGuid();
+            Board(id.ToString("D"));
+            return Task.FromResult(new BoardSyncPublishResponse(id, body.Name, 0));
+        }
+        public Task<BoardRemoteDescriptor?> DescribeAsync(string id, CancellationToken ct, string? destination = null)
+        { Call("describe", id, destination); return Task.FromResult<BoardRemoteDescriptor?>(null); }
+        public Task<BoardSyncActivityAck> PutActivityAsync(string board, string card, BoardSyncActivityWire body, CancellationToken ct, string? expectedDestination = null)
+        { Call("activity", board, expectedDestination); ActivityCards.Add((board, card)); return Task.FromResult(new BoardSyncActivityAck(body.Schema, card)); }
+        public Task PutContentPartAsync(BoardSyncContentPartWire part, ReadOnlyMemory<byte> bytes, CancellationToken ct, string? destination = null)
+            => Task.CompletedTask;
         public Task<BoardSyncPullResponse> PullAsync(string board, long after, int limit, CancellationToken ct, string? expectedDestination = null)
-        { Check(expectedDestination); return Task.FromResult(new BoardSyncPullResponse(Events.Where(e => e.Seq > after).Take(limit).ToList(), Events.Count, Events.Count > after + limit)); }
+        {
+            Call("pull", board, expectedDestination);
+            var events = Board(board);
+            return Task.FromResult(new BoardSyncPullResponse(events.Where(e => e.Seq > after).Take(limit).ToList(), events.Count, events.Count > after + limit));
+        }
         public Task<BoardSyncPushResponse> PushAsync(string board, BoardSyncPushRequest body, CancellationToken ct, string? expectedDestination = null)
         {
-            Check(expectedDestination);
-            if (body.Name is not null) Remote = Remote with { Name = body.Name };
-            if (body.KeyPrefix is not null) Remote = Remote with { KeyPrefix = body.KeyPrefix };
-            if (body.Lanes is not null) Remote = Remote with { Lanes = body.Lanes.Select(l => new BoardRemoteLane(l.Id, l.Name, l.Color, l.Position)).ToList() };
+            Call("push", board, expectedDestination);
+            var events = Board(board);
             var accepted = new List<BoardSyncAcceptedWire>();
             foreach (var e in body.Entries)
             {
-                var stored = Events.FirstOrDefault(x => x.Id == e.Id);
-                if (stored is null) { stored = new(e.Id, e.CardId, e.CardKey, e.Kind, e.Author, e.Body, e.Changes, e.CreatedUtc, Events.Count + 1, "desktop"); Events.Add(stored); }
+                var stored = events.FirstOrDefault(x => x.Id == e.Id);
+                if (stored is null) { stored = new(e.Id, e.CardId, e.CardKey, e.Kind, e.Author, e.Body, e.Changes, e.CreatedUtc, events.Count + 1, "desktop"); events.Add(stored); }
                 accepted.Add(new(e.Id, stored.Seq));
             }
-            return Task.FromResult(new BoardSyncPushResponse(accepted, Events.Count));
+            return Task.FromResult(new BoardSyncPushResponse(accepted, events.Count));
         }
-        public void Event(string kind, string changes) => Events.Add(new("log_" + Guid.NewGuid().ToString("N"), "card_000000000001", "VB-1", kind,
-            new("user", "Owner", null), "", JsonDocument.Parse(changes).RootElement.Clone(), DateTime.UtcNow, Events.Count + 1, "web"));
+        public void Event(string board, string cardId, string cardKey, string kind, string changes)
+        {
+            var events = Board(board);
+            events.Add(new("log_" + Guid.NewGuid().ToString("N"), cardId, cardKey, kind, new("user", "Owner", null), "",
+                JsonDocument.Parse(changes).RootElement.Clone(), DateTime.UtcNow, events.Count + 1, "web"));
+        }
     }
-    public void Dispose() { cache.Dispose(); Directory.Delete(root, true); }
+
+    public void Dispose() { cache.Dispose(); try { Directory.Delete(root, true); } catch (IOException) { } }
 }

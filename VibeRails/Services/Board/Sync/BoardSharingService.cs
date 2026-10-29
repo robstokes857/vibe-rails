@@ -1,7 +1,10 @@
 namespace VibeRails.Services.Board.Sync;
 
-/// <summary>Desktop sharing orchestration. Hosted API checks owner/member permissions on every call.</summary>
-public sealed class BoardSharingService(IBoardStore store, IBoardSyncClient client, IBoardSyncService sync, BoardSyncLock syncLock)
+/// <summary>
+/// Owner invitation management. The hosted API checks ownership on every call. Collaborators read
+/// shared boards on viberails.ai; the desktop no longer imports them (VIBE-235).
+/// </summary>
+public sealed class BoardSharingService(IBoardStore store, IBoardSyncClient client, IBoardSyncService sync)
 {
     /// <summary>Loads hosted ownership before returning collaborator controls.</summary>
     public async Task<BoardSharingState> GetAsync(string project, string boardId, CancellationToken ct)
@@ -30,30 +33,6 @@ public sealed class BoardSharingService(IBoardStore store, IBoardSyncClient clie
         var link = await LinkAsync(project, boardId, ct);
         await client.RemoveInviteAsync(link.RemoteBoardId, inviteId, ct, link.DestinationKey);
         return new(Saved: true);
-    }
-
-    /// <summary>Lists accepted shared boards for the configured account.</summary>
-    public async Task<IReadOnlyList<BoardRemoteDescriptor>> DiscoverAsync(CancellationToken ct)
-    {
-        var destination = client.DestinationKey ?? throw new BoardValidationException("Sign in to viberails.ai to see shared boards.");
-        return (await client.DiscoverAsync(ct, destination)).Where(b => !b.IsOwner).Take(100).ToList();
-    }
-
-    /// <summary>Imports an accepted board into the current project and starts bounded sync.</summary>
-    public async Task<BoardSharedImportResult> ImportAsync(string project, string remoteId, CancellationToken ct)
-    {
-        BoardRecord board;
-        using (var held = syncLock.TryAcquire() ?? throw new BoardValidationException("A Board sync is running. Try again when it finishes."))
-        {
-            var destination = client.DestinationKey ?? throw new BoardValidationException("Sign in before adding a shared board.");
-            var remote = await client.DescribeAsync(remoteId, ct, destination) ?? throw new BoardValidationException("Shared board not found.");
-            if (!string.Equals(remoteId, remote.RemoteBoardId, StringComparison.OrdinalIgnoreCase) || client.DestinationKey != destination)
-                throw new BoardValidationException("The board or account changed. Please retry.");
-            board = await store.ImportSharedBoardAsync(project, remote, destination, ct);
-        }
-        // The ordinary bounded sync fills the board and carries later local edits back.
-        var status = await sync.SyncNowAsync(project, board.Id, ct);
-        return new(board.Id, board.Name, status?.LastError);
     }
 
     private async Task<BoardSyncLinkRecord> LinkAsync(string project, string boardId, CancellationToken ct)

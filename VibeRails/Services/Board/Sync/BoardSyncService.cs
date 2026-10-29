@@ -29,7 +29,8 @@ public sealed record BoardSyncStatus(
     IReadOnlyList<BoardSyncSkippedEntry>? SkippedEntries = null,
     bool ActivityEnabled = false,
     bool IsJiraBoard = false,
-    string? RemoteProvider = null);
+    string? RemoteProvider = null,
+    bool Shared = false);
 
 public interface IBoardSyncService
 {
@@ -68,6 +69,13 @@ public sealed partial class BoardSyncService(
 {
     public const string FeatureName = "board-sync";
 
+    /// <summary>
+    /// VIBE-235: the owner's local board is the source of truth and collaborators read it on
+    /// viberails.ai. A board imported from another account's share (VB-52) is kept but never syncs.
+    /// </summary>
+    public const string SharedBoardReadOnlyMessage =
+        "This board was shared with you and is read-only. It no longer syncs; view the current board on viberails.ai. Local data is kept.";
+
     // Bounds one tick: 25 × 20 entries each way. A board further behind catches up over ticks.
     private const int MaxPushBatchesPerSync = 25;
     private const int PushBatchSize = 20;
@@ -92,6 +100,8 @@ public sealed partial class BoardSyncService(
             return null;
         if (enabled && await store.DedicatedProviderAsync(projectPath, boardId, cancellationToken) is { } tracker)
             throw TrackerBoardRefused(tracker);
+        if (enabled && await store.GetSyncLinkAsync(projectPath, boardId, cancellationToken) is { Imported: true })
+            throw new BoardValidationException(SharedBoardReadOnlyMessage);
         var wasEnabled = board.SyncEnabled;
         board = await store.SetBoardSyncEnabledAsync(projectPath, boardId, enabled, cancellationToken);
         if (board is null) return null;
@@ -115,9 +125,8 @@ public sealed partial class BoardSyncService(
         }
         if (existing is { Imported: true })
         {
-            if (client.IsConfigured && existing.DestinationKey != client.DestinationKey)
-                throw new BoardValidationException("This shared board belongs to a different signed-in account. Its local data is retained; sign in to the original account to sync.");
-            // Never publish a collaborator's cached board as a new owner. An import made before
+            // Never publish a collaborator's cached board as a new owner, and since VIBE-235 never
+            // sync it either (SyncLinkAsync returns it untouched). An import made before
             // VIBE-85 stored ActivitySchema 0, which an older binary on this machine reads as "not
             // published yet": bring the link up to the value new imports store so it leaves the
             // board alone. This is the link's own state, written on its ordinary sync tick.
@@ -180,6 +189,8 @@ public sealed partial class BoardSyncService(
             return null;
         if (await store.DedicatedProviderAsync(projectPath, boardId, cancellationToken) is { } tracker)
             throw TrackerBoardRefused(tracker);
+        if (await store.GetSyncLinkAsync(projectPath, boardId, cancellationToken) is { Imported: true })
+            throw new BoardValidationException(SharedBoardReadOnlyMessage);
         if (!board.SyncEnabled)
             throw new BoardValidationException("Enable viberails.ai sync for this board first.");
         var link = await EnsurePublishedAsync(board, cancellationToken);
@@ -205,6 +216,7 @@ public sealed partial class BoardSyncService(
             {
                 // A dedicated Jira or Azure DevOps board never uploads, even if its sync flag is set.
                 if (await store.DedicatedProviderAsync(board.ProjectPath, board.Id, cancellationToken) is not null) continue;
+                // An imported shared board only gets its VIBE-85 link state here; SyncLinkAsync skips it.
                 var link = await EnsurePublishedAsync(board, cancellationToken);
                 if (link is not null) await SyncLinkAsync(link, cancellationToken);
             }
@@ -224,6 +236,10 @@ public sealed partial class BoardSyncService(
     /// <summary>Push then pull. Every failure is recorded on the link and never thrown, except cancellation.</summary>
     private async Task<BoardSyncLinkRecord> SyncLinkAsync(BoardSyncLinkRecord link, CancellationToken cancellationToken, bool forceActivity = false)
     {
+        // VIBE-235: an imported shared board never pushes, pulls or publishes activity, and its link
+        // is left as it is: no network call, no status write. Its local cards and discussion stay.
+        if (link.Imported)
+            return link;
         try
         {
             if (link.DestinationKey is null || link.DestinationKey != client.DestinationKey)
@@ -302,8 +318,8 @@ public sealed partial class BoardSyncService(
         link = await RefreshLayoutAsync(link, cancellationToken);
         link = await PullAsync(link, cancellationToken);
         link = await RefreshLayoutAsync(link, cancellationToken);
-        // The host attributes each snapshot to the authenticated publisher. Imported boards
-        // publish their own linked work without replacing the owner or other members.
+        // The host attributes each snapshot to the authenticated publisher: the owner, since
+        // imported boards never reach this point (VIBE-235).
         return await BoardSyncActivity.RefreshAsync(store, client, activityCache, link, cancellationToken, forceActivity);
     }
 
@@ -951,6 +967,7 @@ public sealed partial class BoardSyncService(
         var boardId = board.Id;
         var tracker = await store.DedicatedProviderAsync(board.ProjectPath, boardId, cancellationToken);
         var isTrackerBoard = tracker is not null;
+        var shared = link?.Imported == true;
         var unsent = link is null ? 0 : await store.CountUnsentLogEntriesAsync(boardId, cancellationToken);
         var rejected = link is null ? 0 : await store.CountRejectedLogEntriesAsync(boardId, cancellationToken);
         var rejectedEntries = rejected == 0 ? [] : await store.GetRejectedLogEntriesAsync(boardId, 50, cancellationToken);
@@ -971,9 +988,10 @@ public sealed partial class BoardSyncService(
             rejectedEntries,
             skipped,
             skippedEntries,
-            ActivityEnabled: board.SyncEnabled && !isTrackerBoard && client.IsConfigured,
+            ActivityEnabled: board.SyncEnabled && !isTrackerBoard && !shared && client.IsConfigured,
             IsJiraBoard: tracker == TrackerProviders.Jira,
-            RemoteProvider: tracker);
+            RemoteProvider: tracker,
+            Shared: shared);
     }
 
     private static BoardValidationException TrackerBoardRefused(string tracker) =>

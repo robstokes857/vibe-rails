@@ -11,7 +11,9 @@ namespace Tests.Services.Board;
 /// VIBE-85 (VB-4HTU2-157): the regressions for the VIBE-14 proofs. An imported shared board is
 /// never republished by an older binary, never pushes a label correction caused by this machine's
 /// own cards, never renames this machine's cards, and never lets a card cross the sharing
-/// boundary by move or merge.
+/// boundary by move or merge. Since VIBE-235 nothing imports and imported copies never sync, so
+/// each retained copy is written here the way an older version left it (import, then pulled cards
+/// through the store's stamped writes); the rules still hold for those copies.
 /// </summary>
 public sealed class BoardSharingSafetyTests : IDisposable
 {
@@ -22,7 +24,6 @@ public sealed class BoardSharingSafetyTests : IDisposable
     private readonly SharedServer server = new();
     private readonly BoardSyncActivityCache cache = new();
     private readonly BoardSyncService sync;
-    private readonly BoardSharingService sharing;
     private readonly string cs;
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -31,32 +32,39 @@ public sealed class BoardSharingSafetyTests : IDisposable
         Directory.CreateDirectory(root);
         cs = $"Data Source={Path.Combine(root, "board.db")};Pooling=False";
         store = new(cs, cs);
-        var gate = new BoardSyncLock(Path.Combine(root, "sync.lock"));
-        sync = new(store, server, gate, NullFeatureLog.Instance, cache);
-        sharing = new(store, server, sync, gate);
+        sync = new(store, server, new BoardSyncLock(Path.Combine(root, "sync.lock")), NullFeatureLog.Instance, cache);
     }
 
     private static NewBoardCard Card(string title) => new(null, title, "", null, "medium", null, [], false);
 
+    private Task<BoardRecord> ImportAsync() => store.ImportSharedBoardAsync(root, server.Remote, server.DestinationKey, Ct);
+
+    /// <summary>A card an older version pulled onto the imported board.</summary>
+    private async Task<BoardCardRecord> PulledAsync(BoardRecord board, string key, string title, string? displayId = null,
+        string cardId = SharedCard, long seq = 1)
+        => (await store.CreateSyncedCardAsync(root, cardId, key,
+            Card(title) with { ColumnId = "col_shared", BoardId = board.Id, DisplayId = displayId }, BoardAuthor.User(),
+            new("log_" + Guid.NewGuid().ToString("N"), seq, DateTime.UtcNow, BoardId: board.Id), Ct))!;
+
     [Fact]
     public async Task ImportedLinkSatisfiesTheOlderBinaryPublishPredicate_AndAnEarlierImportIsBroughtUpToIt()
     {
-        server.Event("created", """{"title":{"to":"Owner card"},"lane":{"to":"col_shared"}}""", "VB-QWERT-1");
-        var imported = await sharing.ImportAsync(root, server.Remote.RemoteBoardId, Ct);
-        var link = await ReadLinkRowAsync(imported.BoardId);
+        var imported = await ImportAsync();
+        var link = await ReadLinkRowAsync(imported.Id);
         Assert.Equal((server.Remote.RemoteBoardId, 1, BoardStore.ImportedLinkActivitySchema, "member-account"), link);
         Assert.True(OlderBinaryTreatsAsPublished(link));
         Assert.Equal(0, server.Publications);
 
         // An import written before VIBE-85 stored ActivitySchema 0 and failed that predicate (F1).
         await Sql("UPDATE BoardSyncLinks SET ActivitySchema = 0");
-        Assert.False(OlderBinaryTreatsAsPublished(await ReadLinkRowAsync(imported.BoardId)));
+        Assert.False(OlderBinaryTreatsAsPublished(await ReadLinkRowAsync(imported.Id)));
         await sync.SyncDueAsync(Ct);
-        link = await ReadLinkRowAsync(imported.BoardId);
+        link = await ReadLinkRowAsync(imported.Id);
         Assert.True(OlderBinaryTreatsAsPublished(link));
         Assert.Equal(server.Remote.RemoteBoardId, link.RemoteBoardId);
         Assert.Equal(0, server.Publications);
-        Assert.Null((await sync.GetStatusAsync(root, imported.BoardId, Ct))!.LastError);
+        Assert.Equal(0, server.Calls); // the tick only wrote the link's own state; it never synced the copy
+        Assert.Null((await sync.GetStatusAsync(root, imported.Id, Ct))!.LastError);
     }
 
     /// <summary>
@@ -75,28 +83,25 @@ public sealed class BoardSharingSafetyTests : IDisposable
         var keyPrefix = parts[0];
         var reserved = keyPrefix + "-" + parts[^1]; // this machine's reserved short key, e.g. VPE-1 for VPE-D6BFU-1
         server.Remote = server.Remote with { KeyPrefix = keyPrefix, DisplayPrefix = keyPrefix };
-        server.Event("created", $$$"""{"title":{"to":"Owner card"},"lane":{"to":"col_shared"},"displayId":{"to":"{{{reserved}}}"}}""",
-            keyPrefix + "-QWERT-" + parts[^1]);
 
-        var imported = await sharing.ImportAsync(root, server.Remote.RemoteBoardId, Ct);
-        await sync.SyncNowAsync(root, imported.BoardId, Ct);
+        var imported = await ImportAsync();
+        await PulledAsync(imported, keyPrefix + "-QWERT-" + parts[^1], "Owner card", reserved);
+        await sync.SyncDueAsync(Ct);
 
         var card = (await store.FindCardAsync(root, SharedCard, Ct))!;
         Assert.NotEqual(reserved, card.DisplayId);
         Assert.StartsWith(keyPrefix + "-", card.DisplayId, StringComparison.Ordinal);
         Assert.Empty(server.PushedDisplayIds(SharedCard)); // the proof observed the local label pushed here (F2)
         Assert.Equal(local.DisplayId, (await store.FindCardAsync(root, local.Id, Ct))!.DisplayId);
-        Assert.Equal(0, await store.CountUnsentLogEntriesAsync(imported.BoardId, Ct));
+        Assert.Equal(0, await store.CountUnsentLogEntriesAsync(imported.Id, Ct));
         Assert.Equal(0, server.Publications);
+        Assert.Equal(0, server.Calls);
 
         // The explanation is local History only: RemoteSeq 0, never queued, protecting no field.
         var note = Assert.Single(await store.GetCardHistoryAsync(root, card.Id, Ct),
             entry => entry.Kind == "change" && entry.Changes?.Contains("displayId", StringComparison.Ordinal) == true);
         Assert.Contains($"{reserved} is shown as {card.DisplayId}", note.Body, StringComparison.Ordinal);
         Assert.Equal(0L, await ScalarAsync($"SELECT RemoteSeq FROM BoardComments WHERE Id = '{note.Id}'"));
-        server.Event("change", """{"displayId":{"to":"VPE-9"},"title":{"to":"Relabelled on the web"}}""", keyPrefix + "-QWERT-" + parts[^1]);
-        await sync.SyncNowAsync(root, imported.BoardId, Ct);
-        Assert.Equal("Relabelled on the web", (await store.FindCardAsync(root, SharedCard, Ct))!.Title);
     }
 
     [Fact]
@@ -109,10 +114,10 @@ public sealed class BoardSharingSafetyTests : IDisposable
         Assert.Equal("MINE-1", local.DisplayId);
         var keyPrefix = local.Key.Split('-')[0];
         server.Remote = server.Remote with { KeyPrefix = keyPrefix, DisplayPrefix = "MINE" };
-        server.Event("created", """{"title":{"to":"Owner card"},"lane":{"to":"col_shared"},"displayId":{"to":"MINE-1"}}""", keyPrefix + "-QWERT-77");
 
-        var imported = await sharing.ImportAsync(root, server.Remote.RemoteBoardId, Ct);
-        await sync.SyncNowAsync(root, imported.BoardId, Ct);
+        var imported = await ImportAsync();
+        await PulledAsync(imported, keyPrefix + "-QWERT-77", "Owner card", "MINE-1");
+        await sync.SyncDueAsync(Ct);
 
         var after = (await store.FindCardAsync(root, local.Id, Ct))!;
         Assert.Equal("MINE-1", after.DisplayId); // the proof observed VIBE-1 → VIBE-2 here (F3)
@@ -121,7 +126,7 @@ public sealed class BoardSharingSafetyTests : IDisposable
         Assert.Equal("MINE-2", card.DisplayId);
         Assert.Empty(server.PushedDisplayIds(SharedCard));
         Assert.DoesNotContain(await store.GetUnsentLogEntriesAsync(own.Id, 20, Ct), entry => entry.Entry.Kind == "change");
-        Assert.Equal(0, await store.CountUnsentLogEntriesAsync(imported.BoardId, Ct));
+        Assert.Equal(0, await store.CountUnsentLogEntriesAsync(imported.Id, Ct));
     }
 
     [Fact]
@@ -132,8 +137,8 @@ public sealed class BoardSharingSafetyTests : IDisposable
         await store.RenameBoardAsync(root, own.Id, own.Name, "MINE", Ct);
         var keyPrefix = (await store.CreateCardAsync(root, Card("Seed"), Ct)).Key.Split('-')[0];
         server.Remote = server.Remote with { KeyPrefix = keyPrefix, DisplayPrefix = "MINE" };
-        server.Event("created", """{"title":{"to":"Owner card"},"lane":{"to":"col_shared"},"displayId":{"to":"MINE-5"}}""", keyPrefix + "-QWERT-5");
-        var imported = await sharing.ImportAsync(root, server.Remote.RemoteBoardId, Ct);
+        var imported = await ImportAsync();
+        await PulledAsync(imported, keyPrefix + "-QWERT-5", "Owner card", "MINE-5");
         Assert.Equal("MINE-5", (await store.FindCardAsync(root, SharedCard, Ct))!.DisplayId);
 
         // A web card of this machine's own published board arrives wearing the same label.
@@ -146,7 +151,7 @@ public sealed class BoardSharingSafetyTests : IDisposable
         // The owned board corrects its own label on viberails.ai, as VB-69 always did for a reserved label.
         Assert.Contains(await store.GetUnsentLogEntriesAsync(own.Id, 20, Ct), entry => entry.Entry.CardId == incoming.Id
             && entry.Entry.Kind == "change" && entry.Entry.Changes!.Contains("displayId", StringComparison.Ordinal));
-        Assert.Equal(0, await store.CountUnsentLogEntriesAsync(imported.BoardId, Ct));
+        Assert.Equal(0, await store.CountUnsentLogEntriesAsync(imported.Id, Ct));
     }
 
     [Fact]
@@ -157,14 +162,11 @@ public sealed class BoardSharingSafetyTests : IDisposable
         var ownLane = (await store.GetColumnsAsync(root, Ct, own.Id)).OrderBy(c => c.Position).First();
         var mine = await store.CreateCardAsync(root, Card("My card"), Ct);
         server.Remote = server.Remote with { Lanes = [new("col_shared", "Todo", null, 0), new("col_shared_done", "Done", null, 1)] };
-        server.Event("created", """{"title":{"to":"Owner card"},"lane":{"to":"col_shared"}}""", "VB-QWERT-1");
-        server.Event("created", """{"title":{"to":"Second owner card"},"lane":{"to":"col_shared"}}""", "VB-QWERT-2", SecondSharedCard);
-        var imported = await sharing.ImportAsync(root, server.Remote.RemoteBoardId, Ct);
-        var eventsBefore = server.Events.Count;
-        var status = (await sync.GetStatusAsync(root, imported.BoardId, Ct))!;
-        Assert.True(status.LastError is null && status.Skipped == 0, $"import: {status.LastError} skipped={status.Skipped} {string.Join(";", status.SkippedEntries!.Select(s => s.Reason))}");
-        Assert.Equal(imported.BoardId, (await store.FindCardAsync(root, SharedCard, Ct))!.BoardId);
-        Assert.NotEqual(own.Id, imported.BoardId);
+        var imported = await ImportAsync();
+        await PulledAsync(imported, "VB-QWERT-1", "Owner card");
+        await PulledAsync(imported, "VB-QWERT-2", "Second owner card", cardId: SecondSharedCard, seq: 2);
+        Assert.Equal(imported.Id, (await store.FindCardAsync(root, SharedCard, Ct))!.BoardId);
+        Assert.NotEqual(own.Id, imported.Id);
 
         // Out of the imported board, by both write paths a move can take.
         var refused = await Assert.ThrowsAsync<BoardValidationException>(() => store.MoveCardAsync(root, SharedCard, ownLane.Id, null, Ct));
@@ -181,16 +183,13 @@ public sealed class BoardSharingSafetyTests : IDisposable
         Assert.Equal("col_shared", (await store.FindCardAsync(root, SharedCard, Ct))!.ColumnId);
         Assert.NotNull(await store.FindCardAsync(root, SecondSharedCard, Ct));
         Assert.Equal(ownLane.Id, (await store.FindCardAsync(root, mine.Id, Ct))!.ColumnId);
-        Assert.Equal(0, await store.CountUnsentLogEntriesAsync(imported.BoardId, Ct));
-        await sync.SyncNowAsync(root, imported.BoardId, Ct);
-        Assert.Equal(eventsBefore, server.Events.Count);
-        Assert.Equal(0, server.Publications);
+        Assert.Equal(0, await store.CountUnsentLogEntriesAsync(imported.Id, Ct));
 
-        // Lane to lane inside the shared board stays an ordinary member edit.
-        await store.MoveCardAsync(root, SharedCard, "col_shared_done", null, Ct);
-        await sync.SyncNowAsync(root, imported.BoardId, Ct);
-        Assert.Contains(server.Events, e => e.CardId == SharedCard && e.Kind == "change" && e.Changes is { } changes
-            && changes.TryGetProperty("lane", out var lane) && lane.GetProperty("to").GetString() == "col_shared_done");
+        // Lane to lane inside the shared board stays an ordinary local edit, which no longer leaves the machine.
+        Assert.Equal("col_shared_done", (await store.MoveCardAsync(root, SharedCard, "col_shared_done", null, Ct))!.ColumnId);
+        await sync.SyncDueAsync(Ct);
+        Assert.Empty(server.Pushed);
+        Assert.Equal(0, server.Publications);
         // And a move between this machine's own boards is unaffected.
         var second = await store.CreateBoardAsync(root, "Second", Ct);
         var secondLane = await store.CreateColumnAsync(root, "Todo", "", Ct, second.Id);
@@ -232,11 +231,12 @@ public sealed class BoardSharingSafetyTests : IDisposable
     private sealed class SharedServer : IBoardSyncClient
     {
         public bool IsConfigured => true;
-        public string? DestinationKey => "member-account";
+        public string DestinationKey => "member-account";
+        string? IBoardSyncClient.DestinationKey => DestinationKey;
         public BoardRemoteDescriptor Remote = new(Guid.NewGuid().ToString("D"), "Shared", "VB", "VB", [new("col_shared", "Todo", null, 0)], false, 0);
         public List<BoardSyncPulledEntryWire> Events = [];
         public List<BoardSyncEntryWire> Pushed = [];
-        public int Publications;
+        public int Publications, Calls;
 
         /// <summary>Every <c>displayId</c> value this desktop pushed for the card.</summary>
         public List<string?> PushedDisplayIds(string cardId) => Pushed
@@ -244,17 +244,16 @@ public sealed class BoardSharingSafetyTests : IDisposable
             .Select(e => e.Changes!.Value.GetProperty("displayId").GetProperty("to").GetString()).ToList();
 
         public Task<BoardRemoteDescriptor?> DescribeAsync(string id, CancellationToken ct, string? destination = null)
-        { Assert.Equal(DestinationKey, destination); Assert.Equal(Remote.RemoteBoardId, id); return Task.FromResult<BoardRemoteDescriptor?>(Remote); }
-        public Task<List<BoardRemoteDescriptor>> DiscoverAsync(CancellationToken ct, string? destination = null)
-            => Task.FromResult(new List<BoardRemoteDescriptor> { Remote });
+        { Calls++; Assert.Equal(DestinationKey, destination); Assert.Equal(Remote.RemoteBoardId, id); return Task.FromResult<BoardRemoteDescriptor?>(Remote); }
         public Task<BoardSyncPublishResponse> PublishAsync(BoardSyncPublishRequest body, CancellationToken ct, string? expectedDestination = null)
         { Publications++; throw new InvalidOperationException("Imported boards must never publish"); }
         public Task<BoardSyncActivityAck> PutActivityAsync(string board, string card, BoardSyncActivityWire body, CancellationToken ct, string? expectedDestination = null)
-            => Task.FromResult(new BoardSyncActivityAck(body.Schema, card));
+        { Calls++; return Task.FromResult(new BoardSyncActivityAck(body.Schema, card)); }
         public Task<BoardSyncPullResponse> PullAsync(string board, long after, int limit, CancellationToken ct, string? expectedDestination = null)
-            => Task.FromResult(new BoardSyncPullResponse(Events.Where(e => e.Seq > after).Take(limit).ToList(), Events.Count, Events.Count > after + limit));
+        { Calls++; return Task.FromResult(new BoardSyncPullResponse(Events.Where(e => e.Seq > after).Take(limit).ToList(), Events.Count, Events.Count > after + limit)); }
         public Task<BoardSyncPushResponse> PushAsync(string board, BoardSyncPushRequest body, CancellationToken ct, string? expectedDestination = null)
         {
+            Calls++;
             Assert.Equal(DestinationKey, expectedDestination);
             if (body.Name is not null) Remote = Remote with { Name = body.Name };
             if (body.Lanes is not null) Remote = Remote with { Lanes = body.Lanes.Select(l => new BoardRemoteLane(l.Id, l.Name, l.Color, l.Position)).ToList() };
@@ -268,7 +267,5 @@ public sealed class BoardSharingSafetyTests : IDisposable
             }
             return Task.FromResult(new BoardSyncPushResponse(accepted, Events.Count));
         }
-        public void Event(string kind, string changes, string key, string cardId = SharedCard) => Events.Add(new("log_" + Guid.NewGuid().ToString("N"), cardId, key, kind,
-            new("user", "Owner", null), "", JsonDocument.Parse(changes).RootElement.Clone(), DateTime.UtcNow, Events.Count + 1, "web"));
     }
 }
