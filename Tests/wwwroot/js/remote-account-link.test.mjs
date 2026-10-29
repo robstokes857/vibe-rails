@@ -18,7 +18,7 @@ function harness(t, apiCall = async () => ({ status: 'idle' })) {
         removeEventListener: type => listeners.delete(type)
     };
     const fields = new Map();
-    for (const name of ['start', 'cancel', 'copy', 'open', 'pending', 'code', 'status', 'copy-status', 'countdown']) {
+    for (const name of ['start', 'cancel', 'copy', 'open', 'pending', 'code', 'status', 'copy-status', 'countdown', 'signup']) {
         const field = { textContent: '', hidden: false, disabled: false, listeners: {},
             addEventListener(type, fn) { this.listeners[type] = fn; },
             removeAttribute(name) { delete this[name]; }
@@ -53,6 +53,7 @@ test('start displays a code and waits the server interval, with at most one outs
     const { panel, field, calls } = harness(t, (_url, method) => method === 'POST' ? Promise.resolve(pending({ interval: 6 })) : poll.promise);
     await panel.start();
     assert.equal(field('code').textContent, 'BXQK-2M7T');
+    assert.equal(field('signup').hidden, false, 'new users learn the sign-in page also creates accounts');
     assert.equal(field('open').href, `${SIGN_IN_URL}#code=BXQK-2M7T`);
     assert.equal(field('countdown').textContent, 'Code expires in 10:00');
     t.mock.timers.tick(5999);
@@ -67,6 +68,7 @@ test('start displays a code and waits the server interval, with at most one outs
     await Promise.resolve();
     assert.equal(field('status').textContent, 'Logged in rob@example.com');
     assert.equal(field('pending').hidden, true);
+    assert.equal(field('signup').hidden, true);
     assert.equal(field('open').href, undefined);
     t.mock.timers.tick(30_000);
     assert.equal(calls.length, 2);

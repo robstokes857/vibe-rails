@@ -10406,6 +10406,22 @@ kbd:not(.ch-search-kbd) {
     opacity: 1;
 }
 
+/* Signed-out account prompt (VIBE-243): one quiet accent pill, never a popup. */
+.app-subnav .app-subnav-account-prompt {
+    margin-inline-end: 0.5rem;
+    padding: 0.3rem 0.7rem;
+    color: var(--color-accent, #06b6d4);
+    background: color-mix(in srgb, var(--color-accent, #06b6d4) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-accent, #06b6d4) 45%, transparent);
+    border-radius: 999px;
+}
+
+.app-subnav .app-subnav-account-prompt:hover {
+    color: var(--color-text, #f8fafc);
+    background: color-mix(in srgb, var(--color-accent, #06b6d4) 16%, transparent);
+    border-color: color-mix(in srgb, var(--color-accent, #06b6d4) 70%, transparent);
+}
+
 /* ── Form controls — accent focus ring (was using a stale purple) ─────────── */
 .form-control:focus,
 .form-select:focus {

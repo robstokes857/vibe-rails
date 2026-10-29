@@ -191,6 +191,8 @@ export class RemoteAccountLinkPanel {
             this.root.querySelector('[data-remote-link-countdown]').textContent = '';
         }
         this.root.querySelector('[data-remote-link-copy-status]').textContent = '';
+        // The sign-in page also creates accounts; a saved account needs no reminder.
+        this.root.querySelector('[data-remote-link-signup]').hidden = status === 'linked';
         const messages = {
             idle: 'Sign in to connect this VibeRails instance to your account, or add an API key in Settings.',
             pending: this.state.error === 'save_failed'

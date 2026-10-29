@@ -160,10 +160,12 @@ test('unavailable site and denied or expired requests offer retry while preservi
 test('signed-out top navigation and Settings both offer sign in', async ({ page }) => {
     const { root } = await openSettings(page);
     await expect(page.locator('.app-sidebar, [data-action="switch-nav-layout"]')).toHaveCount(0);
-    await expect(page.locator('[data-account-nav]:visible')).toHaveText('Sign in');
+    await expect(page.locator('[data-account-nav]:visible')).toHaveText('Sign in / Sign up');
+    await expect(page.locator('[data-account-nav]:visible')).toHaveAccessibleName('Sign in or sign up to viberails.ai');
     await expect(root.locator('[data-account-settings-action]')).toHaveText('Sign in');
     await page.locator('[data-account-nav]:visible').click();
     await expect(page.locator('[data-remote-link-start]')).toBeEnabled();
+    await expect(page.locator('[data-remote-link-signup]')).toBeVisible();
 });
 
 test('saved account stays in Settings after reload', async ({ page }, testInfo) => {

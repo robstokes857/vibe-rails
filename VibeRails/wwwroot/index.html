@@ -119,8 +119,9 @@
         </div>
 
         <div class="app-subnav-actions d-flex align-items-center ms-auto">
-            <button type="button" class="app-subnav-link" data-action="remote-account" data-account-nav hidden title="Sign in to viberails.ai">
-                <i class="fa-solid fa-user-circle" aria-hidden="true"></i><span data-account-label>Sign in</span>
+            <button type="button" class="app-subnav-link app-subnav-account-prompt" data-action="remote-account" data-account-nav hidden
+                title="Sign in, or create a free viberails.ai account" aria-label="Sign in or sign up to viberails.ai">
+                <i class="fa-solid fa-user-plus" aria-hidden="true"></i><span data-account-label>Sign in / Sign up</span>
             </button>
             <button class="nav-exit-btn-sm" title="Close VibeRails and stop backend">
                 <svg class="nav-exit-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
@@ -164,6 +165,7 @@
                     data-remote-link-cancel hidden>Cancel</button>
             </div>
             <p class="small text-muted text-break mb-2" data-remote-link-status role="status" aria-live="polite"></p>
+            <p class="small text-muted mb-2" data-remote-link-signup>No account yet? You can create a free one on the sign-in page.</p>
             <div class="border rounded p-3" data-remote-link-pending hidden>
                 <div class="d-flex gap-2 flex-wrap align-items-center mb-2">
                     <code class="fs-5 user-select-all" data-remote-link-code></code>

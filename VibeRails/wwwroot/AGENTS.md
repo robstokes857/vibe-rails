@@ -122,7 +122,11 @@ contract intact; the relay only serves the explicit proof/test endpoints.
 
 ## Navigation account sign-in
 
-The top navigation offers **Sign in** only when no API key is saved. General Settings
+The top navigation offers **Sign in / Sign up** only when no API key is saved (VIBE-243): one
+accent pill (`app-subnav-account-prompt`), never a popup, toast or repeated reminder. Sign-up
+uses the same device link, because the viberails.ai sign-in page also creates accounts; the
+modal's `data-remote-link-signup` line says so until an account is saved. Do not add a second
+external sign-up URL: the VS Code bridge allowlist accepts only `/link` and review pages. General Settings
 always has an **Account** card: **Sign in** when signed out, or **Logged in {email}** and
 **Switch account** when linked. Manual/older keys without an approved email say **API key
 configured**. Both entry points open the shared modal from `remote-account-template`.
