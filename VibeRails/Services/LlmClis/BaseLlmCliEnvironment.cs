@@ -31,8 +31,12 @@ namespace VibeRails.Services.LlmClis
         /// <summary>
         /// Recursively copies all files and subdirectories from source to destination.
         /// Only copies if source exists and skips files that already exist in destination.
+        /// <paramref name="excludedTopLevelDirNames"/> apply to the source root only. With
+        /// <paramref name="skipLockedFiles"/>, a file another process holds locked is left out
+        /// instead of failing the whole copy.
         /// </summary>
-        protected void CopyDirectoryRecursive(string sourceDir, string destDir, HashSet<string>? excludedDirNames = null)
+        protected void CopyDirectoryRecursive(string sourceDir, string destDir, HashSet<string>? excludedDirNames = null,
+            HashSet<string>? excludedTopLevelDirNames = null, bool skipLockedFiles = false)
         {
             if (!_fileService.DirectoryExists(sourceDir))
             {
@@ -51,7 +55,14 @@ namespace VibeRails.Services.LlmClis
                 // Only copy if destination doesn't exist
                 if (!_fileService.FileExists(destFile))
                 {
-                    _fileService.CopyFile(sourceFile, destFile, overwrite: false);
+                    try
+                    {
+                        _fileService.CopyFile(sourceFile, destFile, overwrite: false);
+                    }
+                    catch (IOException ex) when (skipLockedFiles && IsLockedByAnotherProcess(ex))
+                    {
+                        Serilog.Log.Warning("[Environments] Skipped {Path}: another process holds it locked", sourceFile);
+                    }
                 }
             }
 
@@ -60,13 +71,23 @@ namespace VibeRails.Services.LlmClis
             foreach (var sourceSubDir in directories)
             {
                 var dirName = Path.GetFileName(sourceSubDir);
-                if (excludedDirNames != null && excludedDirNames.Contains(dirName))
+                if ((excludedDirNames != null && excludedDirNames.Contains(dirName))
+                    || (excludedTopLevelDirNames != null && excludedTopLevelDirNames.Contains(dirName)))
                 {
                     continue;
                 }
                 var destSubDir = Path.Combine(destDir, dirName);
-                CopyDirectoryRecursive(sourceSubDir, destSubDir, excludedDirNames);
+                CopyDirectoryRecursive(sourceSubDir, destSubDir, excludedDirNames, skipLockedFiles: skipLockedFiles);
             }
+        }
+
+        // A Windows sharing or lock violation, or on macOS/Linux the advisory flock that .NET
+        // takes when opening the source failing with EWOULDBLOCK (raw errno as the HResult).
+        private static bool IsLockedByAnotherProcess(IOException ex)
+        {
+            if (OperatingSystem.IsWindows())
+                return ex.HResult is unchecked((int)0x80070020) or unchecked((int)0x80070021);
+            return ex.HResult == (OperatingSystem.IsMacOS() ? 35 : 11);
         }
     }
 }

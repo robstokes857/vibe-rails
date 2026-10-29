@@ -10,6 +10,16 @@ namespace VibeRails.Services.LlmClis
     {
         public CodexLlmCliEnvironment(IFileService fileService) : base(fileService) { }
 
+        // Runtime state of the source home's running Codex processes: thread-writer, OAuth and
+        // project locks, and the app-server daemon's pid/lock files, which name the user's live
+        // daemon. Top level only: packages/app-server-daemon is an installed package.
+        private static readonly HashSet<string> SourceRuntimeStateDirs =
+            ["thread-writer-locks", "mcp-oauth-locks", "project-metadata-locks", "app-server-daemon", "app-server-control"];
+
+        // Copied strictly: skipping one would leave the agent signed out or silently replace the
+        // user's settings or instructions with the defaults written below.
+        private static readonly string[] RequiredFiles = ["config.toml", "auth.json", "AGENTS.md"];
+
         public override string GetConfigSubdirectory() => "codex";
 
         public override async Task CreateEnvironment(LLM_Environment environment, CancellationToken cancellationToken)
@@ -17,9 +27,19 @@ namespace VibeRails.Services.LlmClis
             var configPath = Path.Combine(environment.Path, GetConfigSubdirectory());
             EnsureDirectoryExists(configPath);
 
-            // Copy entire configuration from default Codex directory (~/.codex)
-            var defaultCodexPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex");
-            CopyDirectoryRecursive(defaultCodexPath, configPath);
+            // Copy the default Codex configuration but not the source CODEX_HOME's runtime state.
+            // A running Codex session may hold other files locked (SQLite, new lock files); leave
+            // those out rather than fail, except the required files, which must copy.
+            var defaultCodexPath = Path.Combine(_fileService.GetUserProfilePath(), ".codex");
+            foreach (var name in RequiredFiles)
+            {
+                var source = Path.Combine(defaultCodexPath, name);
+                var destination = Path.Combine(configPath, name);
+                if (_fileService.FileExists(source) && !_fileService.FileExists(destination))
+                    _fileService.CopyFile(source, destination, overwrite: false);
+            }
+            CopyDirectoryRecursive(defaultCodexPath, configPath,
+                excludedTopLevelDirNames: SourceRuntimeStateDirs, skipLockedFiles: true);
 
             // If config.toml still doesn't exist (no default Codex config), create a basic one
             var configFile = Path.Combine(configPath, "config.toml");

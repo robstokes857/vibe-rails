@@ -62,6 +62,15 @@ IBaseLlmCliLauncher (Interface)
 - **Executable**: `codex`
 - **Config Env Var**: `CODEX_HOME`
 - **Config Path**: `{envBasePath}/{envName}/codex`
+- Environment creation copies `~/.codex` except the source home's runtime state: the
+  top-level `thread-writer-locks`, `mcp-oauth-locks`, `project-metadata-locks`,
+  `app-server-daemon` and `app-server-control` directories. Their locks may be held by active
+  sessions and the daemon pid names the user's live daemon; never copy them into a new
+  environment. Top level only: `packages/app-server-daemon` is an installed package. Any
+  other file a running Codex holds locked (SQLite, newer lock files) is left out instead of
+  failing creation; on macOS/Linux .NET's shared `flock` on the source conflicts even with
+  empty lock files. `config.toml`, `auth.json` and `AGENTS.md` must copy, so a lock on one
+  of them still fails. Existing destination files remain unchanged on retry.
 - Custom environments copy the user's Codex config. If that copy contains the Windows
   desktop app's optional `node_repl` bridge and its versioned executable has been removed,
   `CommandService` disables only that server for the launched session using
