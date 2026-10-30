@@ -570,7 +570,7 @@ public sealed class AdoPullService(
 
         if (string.IsNullOrWhiteSpace(item.Title))
             throw new AdoConfigException("Work item has no title.");
-        var mapped = AdoFieldMapping.Map(item, pointsField, existingType: null);
+        var mapped = AdoFieldMapping.Map(item, pointsField);
         if (mapped.Title.Length == 0)
             throw new AdoConfigException("Work item title is empty after trimming.");
         if (dryRun)

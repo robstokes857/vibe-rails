@@ -43,6 +43,4 @@ public partial interface IBoardStore
 
     /// <summary>Inserts the link. The card must exist; a second row for the same site and issue is refused.</summary>
     Task AddJiraLinkAsync(BoardJiraLinkRecord link, CancellationToken cancellationToken = default);
-
-    Task UpdateJiraLinkAsync(BoardJiraLinkRecord link, CancellationToken cancellationToken = default);
 }

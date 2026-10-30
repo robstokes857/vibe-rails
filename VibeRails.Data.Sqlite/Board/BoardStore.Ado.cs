@@ -173,20 +173,6 @@ public sealed partial class BoardStore
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    /// <inheritdoc />
-    public async Task UpdateAdoLinkAsync(BoardAdoLinkRecord link, CancellationToken cancellationToken = default)
-    {
-        await using var connection = await OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            UPDATE BoardAdoLinks SET Rev = $rev, ChangedDate = $changed, AssigneeDisplay = $assignee,
-                Mapping = $mapping, LastPulledUTC = $pulled
-            WHERE ConnectionId = $connection AND WorkItemId = $item;
-            """;
-        BindAdoLink(command, link);
-        await command.ExecuteNonQueryAsync(cancellationToken);
-    }
-
     /// <summary>The agent every pulled card, and every pull-written comment, is authored by.
     /// The delivery trigger never sends this author's comments back to Azure DevOps.</summary>
     private static readonly BoardAuthor AdoAuthor = BoardAuthor.Agent(AdoAuthorLabel, null, null);

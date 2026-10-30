@@ -498,7 +498,7 @@ public sealed class JiraPullService(
 
         if (string.IsNullOrWhiteSpace(issue.Summary))
             throw new JiraConfigException("Issue has no summary.");
-        var mapped = JiraFieldMapping.Map(issue, plan.PointsField, existingType: null);
+        var mapped = JiraFieldMapping.Map(issue, plan.PointsField);
         if (mapped.Title.Length == 0)
             throw new JiraConfigException("Issue title is empty after trimming.");
         if (dryRun)

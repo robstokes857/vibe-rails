@@ -38,14 +38,13 @@ public static class AdoFields
     public static bool IsEstimate(string field) => !Known.Contains(field);
 }
 
-/// <summary>The work item fields a pull copies onto a card. Everything else on a card stays as it is.</summary>
+/// <summary>The work item fields a pull copies onto a new card at import.</summary>
 public sealed record AdoMappedFields(
     string Title,
     string Description,
     string Type,
     string Priority,
     int? Points,
-    bool ClearPoints,
     IReadOnlyList<string> Tags,
     string State,
     string? AssigneeDisplay);
@@ -62,7 +61,7 @@ public static class AdoFieldMapping
     public const string OverflowLaneName = "Azure DevOps";
     public const string AcceptanceCriteriaHeading = "## Acceptance criteria";
 
-    public static AdoMappedFields Map(AdoWorkItem item, string? pointsField, string? existingType)
+    public static AdoMappedFields Map(AdoWorkItem item, string? pointsField)
     {
         var title = item.Title.Trim();
         if (title.Length > MaxTitleLength)
@@ -70,10 +69,9 @@ public static class AdoFieldMapping
         return new AdoMappedFields(
             title,
             MapDescription(item),
-            MapType(item.WorkItemType, existingType),
+            MapType(item.WorkItemType),
             MapPriority(item.Priority),
-            MapPoints(item, pointsField, out var clearPoints),
-            clearPoints,
+            MapPoints(item, pointsField),
             TrackerFieldMapping.MapLabels(SplitTags(item.Tags)),
             item.State.Trim(),
             string.IsNullOrWhiteSpace(item.AssigneeDisplay) ? null : item.AssigneeDisplay.Trim());
@@ -94,10 +92,8 @@ public static class AdoFieldMapping
         return description.Length <= MaxDescriptionLength ? description : description[..MaxDescriptionLength];
     }
 
-    public static string MapType(string? workItemType, string? existingType)
+    public static string MapType(string? workItemType)
     {
-        if (string.Equals(existingType, BoardCardTypes.Chore, StringComparison.Ordinal))
-            return BoardCardTypes.Chore;
         return workItemType?.Trim().ToLowerInvariant() switch
         {
             "user story" or "product backlog item" or "requirement" or "feature" or "epic" => BoardCardTypes.Feature,
@@ -117,17 +113,14 @@ public static class AdoFieldMapping
     };
 
     /// <summary>
-    /// Snap to the Fibonacci scale. With a points field, a missing or off-scale value clears the
-    /// points, so an edit that removes them is not left behind. No field leaves points alone.
+    /// Snap to the Fibonacci scale. No configured field, a missing value or an off-scale value
+    /// imports the card without points.
     /// </summary>
-    public static int? MapPoints(AdoWorkItem item, string? pointsField, out bool clearPoints)
+    public static int? MapPoints(AdoWorkItem item, string? pointsField)
     {
-        clearPoints = false;
         if (string.IsNullOrWhiteSpace(pointsField))
             return null;
-        var points = TrackerFieldMapping.SnapPoints(item.Estimates.TryGetValue(pointsField, out var raw) ? raw : null);
-        clearPoints = points is null;
-        return points;
+        return TrackerFieldMapping.SnapPoints(item.Estimates.TryGetValue(pointsField, out var raw) ? raw : null);
     }
 
     /// <summary><c>System.Tags</c> is one string, tags separated by <c>;</c>.</summary>
@@ -155,7 +148,7 @@ public static class AdoFieldMapping
     /// The points field for one work item when nothing names one for the whole pull: a saved query
     /// can span projects with different processes, and a board's types may not say. Its type's
     /// process field, else the first estimate field it has a value in (a bug carries its process's
-    /// estimate). Null leaves the card's points alone.
+    /// estimate). Null imports the card without points.
     /// </summary>
     public static string? DetectPointsField(AdoWorkItem item, AdoFieldSet? fields) =>
         DetectPointsField([item.WorkItemType], fields)

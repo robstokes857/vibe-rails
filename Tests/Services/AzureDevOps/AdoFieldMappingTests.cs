@@ -7,28 +7,25 @@ namespace Tests.Services.AzureDevOps;
 public sealed class AdoFieldMappingTests
 {
     [Fact]
-    public void MapsTheDocumentedFields_AndLeavesAChoreAlone()
+    public void MapsTheDocumentedFieldsForANewCard()
     {
         var item = Item("Bug", "<div>It <b>breaks</b></div>", priority: 1, tags: "ui; ;  login ", points: 5);
 
-        var mapped = AdoFieldMapping.Map(item, AdoFields.StoryPoints, BoardCardTypes.Task);
+        var mapped = AdoFieldMapping.Map(item, AdoFields.StoryPoints);
         Assert.Equal("Fix sign-in", mapped.Title);
         Assert.Equal("It breaks", mapped.Description);
         Assert.Equal(BoardCardTypes.Bug, mapped.Type);
         Assert.Equal("critical", mapped.Priority);
         Assert.Equal(5, mapped.Points);
-        Assert.False(mapped.ClearPoints);
         Assert.Equal(["ui", "login"], mapped.Tags);
         Assert.Equal("Active", mapped.State);
         Assert.Equal("Ada Lovelace", mapped.AssigneeDisplay);
-
-        Assert.Equal(BoardCardTypes.Chore, AdoFieldMapping.Map(item, null, BoardCardTypes.Chore).Type);
     }
 
     [Fact]
     public void TitlesStopAt300Characters()
     {
-        var mapped = AdoFieldMapping.Map(Item("Task", null) with { Title = "  " + new string('t', 400) }, null, null);
+        var mapped = AdoFieldMapping.Map(Item("Task", null) with { Title = "  " + new string('t', 400) }, null);
         Assert.Equal(300, mapped.Title.Length);
     }
 
@@ -63,7 +60,7 @@ public sealed class AdoFieldMappingTests
     [InlineData("Test Case", "task")]
     [InlineData(null, "task")]
     public void MapsWorkItemTypes(string? type, string expected) =>
-        Assert.Equal(expected, AdoFieldMapping.MapType(type, null));
+        Assert.Equal(expected, AdoFieldMapping.MapType(type));
 
     [Theory]
     [InlineData(1, "critical")]
@@ -76,16 +73,12 @@ public sealed class AdoFieldMappingTests
         Assert.Equal(expected, AdoFieldMapping.MapPriority(priority));
 
     [Fact]
-    public void Points_SnapToFibonacci_AndAFieldWithNoValueClearsThem_WhileNoFieldLeavesThemAlone()
+    public void Points_SnapToFibonacci_AndImportWithoutPointsWhenTheFieldOrValueIsMissingOrOffScale()
     {
-        Assert.Equal(8, AdoFieldMapping.MapPoints(Item("User Story", null, points: 7.6), AdoFields.StoryPoints, out var clear));
-        Assert.False(clear);
-        Assert.Null(AdoFieldMapping.MapPoints(Item("User Story", null, points: 4), AdoFields.StoryPoints, out clear));
-        Assert.True(clear);
-        Assert.Null(AdoFieldMapping.MapPoints(Item("User Story", null), AdoFields.StoryPoints, out clear));
-        Assert.True(clear);
-        Assert.Null(AdoFieldMapping.MapPoints(Item("User Story", null, points: 5), null, out clear));
-        Assert.False(clear);
+        Assert.Equal(8, AdoFieldMapping.MapPoints(Item("User Story", null, points: 7.6), AdoFields.StoryPoints));
+        Assert.Null(AdoFieldMapping.MapPoints(Item("User Story", null, points: 4), AdoFields.StoryPoints));
+        Assert.Null(AdoFieldMapping.MapPoints(Item("User Story", null), AdoFields.StoryPoints));
+        Assert.Null(AdoFieldMapping.MapPoints(Item("User Story", null, points: 5), null));
     }
 
     [Fact]

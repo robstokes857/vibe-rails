@@ -180,19 +180,6 @@ public sealed partial class BoardStore
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    public async Task UpdateJiraLinkAsync(BoardJiraLinkRecord link, CancellationToken cancellationToken = default)
-    {
-        await using var connection = await OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            UPDATE BoardJiraLinks SET IssueKey = $key, AssigneeDisplay = $assignee,
-                IssueUpdated = $updated, LastPulledUTC = $pulled, Mapping = $mapping
-            WHERE SiteId = $site AND IssueId = $issue;
-            """;
-        BindLink(command, link);
-        await command.ExecuteNonQueryAsync(cancellationToken);
-    }
-
     private const string JiraConnectionSelect = """
         SELECT Id, ProjectPath, BoardId, SiteUrl, Email, HasToken, AuthStatus, StoryPointsFieldId,
                Jql, Enabled, DisabledReason, OverflowColumnId, LastTestedUTC, LastPullUTC, LastReport,

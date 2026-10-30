@@ -90,7 +90,9 @@ public sealed class BoardAdoStoreTests : IDisposable
         Assert.Equal(42, read.AdoWorkItemId);
         Assert.Null(read.JiraIssueKey);
 
-        Assert.Null(await _store.CreateAdoCardAsync(_root, NewCard(lane, "Duplicate"), link, Ct));
+        var changedLink = link with { Rev = 9, AssigneeDisplay = null, Mapping = "status:Closed",
+            ChangedDate = Utc("2026-10-03T09:00:00Z"), LastPulledUtc = Utc("2026-10-04T09:00:00Z") };
+        Assert.Null(await _store.CreateAdoCardAsync(_root, NewCard(lane, "Duplicate"), changedLink, Ct));
         Assert.Single(await _store.GetCardsAsync(_root, Ct, board.Id));
         await Assert.ThrowsAsync<SqliteException>(() => _store.AddAdoLinkAsync(link with { CardId = card.Id }, Ct));
 
@@ -101,13 +103,7 @@ public sealed class BoardAdoStoreTests : IDisposable
         // The same work item id under another connection (another organization) is a separate link.
         var other = await _store.CreateCardAsync(_root, NewCard(lane, "Local"), Ct);
         await _store.AddAdoLinkAsync(link with { CardId = other.Id, ConnectionId = "ado_cccccccccccc" }, Ct);
-        await _store.UpdateAdoLinkAsync(link with { Rev = 9, AssigneeDisplay = null, Mapping = "status:Closed",
-            ChangedDate = Utc("2026-10-03T09:00:00Z"), LastPulledUtc = Utc("2026-10-04T09:00:00Z") }, Ct);
-        var updated = Assert.Single(await _store.GetAdoLinksForCardAsync(_root, card.Id, Ct));
-        Assert.Equal(9, updated.Rev);
-        Assert.Null(updated.AssigneeDisplay);
-        Assert.Equal("status:Closed", updated.Mapping);
-        Assert.Equal(Utc("2026-10-03T09:00:00Z"), updated.ChangedDate);
+        Assert.Equal(link with { CardId = card.Id }, Assert.Single(await _store.GetAdoLinksForCardAsync(_root, card.Id, Ct)));
         Assert.Equal(7, (await _store.FindAdoLinkAsync("ado_cccccccccccc", 42, Ct))!.Rev);
         Assert.Empty(await _store.GetAdoLinksForCardAsync(Path.Combine(_root, "other-project"), card.Id, Ct));
     }

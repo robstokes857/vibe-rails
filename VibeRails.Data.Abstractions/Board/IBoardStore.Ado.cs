@@ -45,8 +45,6 @@ public partial interface IBoardStore
     /// <summary>Inserts the link. The card must exist; a second row for the same connection and work item is refused.</summary>
     Task AddAdoLinkAsync(BoardAdoLinkRecord link, CancellationToken cancellationToken = default);
 
-    Task UpdateAdoLinkAsync(BoardAdoLinkRecord link, CancellationToken cancellationToken = default);
-
     /// <summary>Reads bounded pending events; callers serialize delivery with the Azure DevOps lock.</summary>
     Task<IReadOnlyList<BoardAdoDelivery>> GetPendingAdoDeliveriesAsync(CancellationToken cancellationToken = default);
     /// <summary>Reads local delivery status for a live card in its owning project.</summary>

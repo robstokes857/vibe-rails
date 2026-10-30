@@ -3,14 +3,13 @@ using VibeRails.Services.Board.Tracker;
 
 namespace VibeRails.Services.Jira;
 
-/// <summary>The Jira fields phase 1 copies onto a card. Everything else on a card stays as it is.</summary>
+/// <summary>The Jira fields a pull copies onto a new card at import.</summary>
 public sealed record JiraMappedFields(
     string Title,
     string Description,
     string Type,
     string Priority,
     int? Points,
-    bool ClearPoints,
     IReadOnlyList<string> Tags,
     string StatusName,
     string? AssigneeDisplay);
@@ -27,7 +26,7 @@ public static class JiraFieldMapping
     public const int MaxDescriptionLength = BoardCardLimits.MaxDescriptionLength;
     public const string OverflowLaneName = "Jira";
 
-    public static JiraMappedFields Map(JiraIssue issue, string? storyPointsFieldId, string? existingType)
+    public static JiraMappedFields Map(JiraIssue issue, string? storyPointsFieldId)
     {
         var title = issue.Summary.Trim();
         if (title.Length > MaxTitleLength)
@@ -40,19 +39,16 @@ public static class JiraFieldMapping
         return new JiraMappedFields(
             title,
             description,
-            MapType(issue.IssueTypeName, existingType),
+            MapType(issue.IssueTypeName),
             MapPriority(issue.PriorityName),
-            MapPoints(issue, storyPointsFieldId, out var clearPoints),
-            clearPoints,
+            MapPoints(issue, storyPointsFieldId),
             TrackerFieldMapping.MapLabels(issue.Labels),
             issue.StatusName.Trim(),
             string.IsNullOrWhiteSpace(issue.AssigneeDisplay) ? null : issue.AssigneeDisplay.Trim());
     }
 
-    public static string MapType(string? issueTypeName, string? existingType)
+    public static string MapType(string? issueTypeName)
     {
-        if (string.Equals(existingType, BoardCardTypes.Chore, StringComparison.Ordinal))
-            return BoardCardTypes.Chore;
         return issueTypeName?.Trim().ToLowerInvariant() switch
         {
             "bug" => BoardCardTypes.Bug,
@@ -71,18 +67,13 @@ public static class JiraFieldMapping
     };
 
     /// <summary>
-    /// Snap to the Fibonacci scale. A configured field whose value is missing or not on the scale
-    /// clears the points, so a Jira edit that removes them is not left behind. No field id means
-    /// the pull does not touch points at all. <paramref name="clearPoints"/> is set only when there
-    /// is no value to write: the card patch treats it as "set to null" and it wins over a value.
+    /// Snap to the Fibonacci scale. No configured field, a missing value or an off-scale value
+    /// imports the card without points.
     /// </summary>
-    public static int? MapPoints(JiraIssue issue, string? storyPointsFieldId, out bool clearPoints)
+    public static int? MapPoints(JiraIssue issue, string? storyPointsFieldId)
     {
-        clearPoints = false;
         if (string.IsNullOrWhiteSpace(storyPointsFieldId))
             return null;
-        var points = TrackerFieldMapping.SnapPoints(issue.StoryPoints);
-        clearPoints = points is null;
-        return points;
+        return TrackerFieldMapping.SnapPoints(issue.StoryPoints);
     }
 }

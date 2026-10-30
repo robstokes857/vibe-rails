@@ -8,19 +8,16 @@ namespace Tests.Services.Jira;
 public sealed class JiraFieldMappingTests
 {
     [Fact]
-    public void MapsTheDocumentedFieldsAndLeavesAChoreAlone()
+    public void MapsTheDocumentedFieldsForANewCard()
     {
         var issue = Issue("Bug hunt", "Bug", "Highest", ["one", "  two  "], 5);
 
-        var mapped = JiraFieldMapping.Map(issue, "customfield_10016", BoardCardTypes.Task);
+        var mapped = JiraFieldMapping.Map(issue, "customfield_10016");
         Assert.Equal("Bug hunt", mapped.Title);
         Assert.Equal(BoardCardTypes.Bug, mapped.Type);
         Assert.Equal("critical", mapped.Priority);
         Assert.Equal(5, mapped.Points);
         Assert.Equal(["one", "two"], mapped.Tags);
-
-        var chore = JiraFieldMapping.Map(issue, "customfield_10016", BoardCardTypes.Chore);
-        Assert.Equal(BoardCardTypes.Chore, chore.Type);
     }
 
     [Theory]
@@ -30,7 +27,7 @@ public sealed class JiraFieldMappingTests
     [InlineData("Sub-task", "task")]
     [InlineData("Epic", "task")]
     public void MapsIssueTypes(string issueType, string expected) =>
-        Assert.Equal(expected, JiraFieldMapping.MapType(issueType, null));
+        Assert.Equal(expected, JiraFieldMapping.MapType(issueType));
 
     [Theory]
     [InlineData("Lowest", "low")]
@@ -47,13 +44,12 @@ public sealed class JiraFieldMappingTests
         var labels = Enumerable.Range(0, 25).Select(i => new string('x', 50) + i).ToList();
         var issue = Issue(new string('t', 400), "Task", "Medium", labels, null);
 
-        var mapped = JiraFieldMapping.Map(issue, null, null);
+        var mapped = JiraFieldMapping.Map(issue, null);
 
         Assert.Equal(300, mapped.Title.Length);
         Assert.Equal(20, mapped.Tags.Count);
         Assert.All(mapped.Tags, tag => Assert.Equal(40, tag.Length));
         Assert.Null(mapped.Points);
-        Assert.False(mapped.ClearPoints);
     }
 
     [Theory]
@@ -61,15 +57,13 @@ public sealed class JiraFieldMappingTests
     [InlineData(4, null)]
     [InlineData(8, 8)]
     [InlineData(0, null)]
-    public void SnapsStoryPointsOnlyWhenTheFieldIsConfigured(int raw, int? expected)
+    [InlineData(null, null)]
+    public void SnapsStoryPointsOnlyWhenTheFieldIsConfigured(int? raw, int? expected)
     {
         var issue = Issue("A", "Task", "Medium", [], raw);
-        var points = JiraFieldMapping.MapPoints(issue, "customfield_10016", out var clear);
-        // Clear only when there is nothing to write: the card patch lets ClearPoints win over Points.
-        Assert.Equal(expected is null, clear);
+        var points = JiraFieldMapping.MapPoints(issue, "customfield_10016");
         Assert.Equal(expected, points);
-        Assert.Null(JiraFieldMapping.MapPoints(issue, null, out var untouched));
-        Assert.False(untouched);
+        Assert.Null(JiraFieldMapping.MapPoints(issue, null));
     }
 
     [Fact]
