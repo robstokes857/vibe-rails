@@ -1,7 +1,7 @@
 <div align="center">
   <img src="vscode-viberails/media/vs-logo.png" alt="VibeRails logo" width="96" height="96" />
   <h1>VibeRails</h1>
-  <p><strong>A developer and enterprise friendly framework that keeps vibe coding from going off the rails.</strong></p>
+  <p><strong>A framework for AI-assisted development with repository rules, review workflows, and session traceability.</strong></p>
   <p>
     <a href="https://marketplace.visualstudio.com/items?itemName=viberails.vscode-viberails"><img alt="VS Code Marketplace version" src="https://badgen.net/vs-marketplace/v/viberails.vscode-viberails?label=marketplace&color=0078D4" /></a>
     <a href="https://dotnet.microsoft.com/"><img alt=".NET 10" src="https://img.shields.io/badge/.NET-10.0-512BD4" /></a>
@@ -11,189 +11,157 @@
   </p>
 </div>
 
-VibeRails puts deterministic guardrails around Claude Code and Codex: rules the agents can't
-skip, a complete audit trail of every session, and far fewer wasted tokens. Use it inside VS Code
-or in a browser.
+VibeRails gives developers and engineering teams a common workflow around the AI coding tools
+they already use. Run Claude Code, Codex, and other supported CLIs from VS Code or a browser.
+Apply repository standards, inspect code quality, and bring the recorded work into review.
 
-![VibeRails running Claude Code, with Terminals, Board, Quality, Envs, Vibe AI, MCP, Automation and Settings in the top navigation](docs/images/terminals.png)
+For enterprise teams, that means a shared process for rules, human approval, issue tracking,
+and corporate API gateways. For developers, it means real terminals, reusable agent setups,
+searchable history, and fewer manual handoffs. The core application runs on your machine.
 
-*Every screenshot here is VibeRails being used to build VibeRails.*
+![A Claude Code session running in the VibeRails terminal dashboard](docs/images/terminals.png)
 
-## Why VibeRails
+## Built for developers and engineering teams
 
-- **Deterministic standards, not slop.** Rule engines and coding standards check every commit the
-  same way, whichever agent wrote the code.
-- **100% audit and tracing.** Every session is recorded for replay, work can carry your digital
-  signature, and rules are enforced on every commit.
-- **Token savings.** TokenSaver trims noisy tool output before it ever reaches the model.
-- **A better developer workflow.** Plan agent work on a Board, save your setups as environments,
-  and automate the repeatable parts.
-- **Better PRs and reviews.** Reviewers can see the entire session a developer used to make the
-  code, not just the diff.
-- **LLM as a judge.** Have an LLM review remote sessions.
-- **Multi-LLM.** Run Claude Code and Codex side by side, and send a conversation from one LLM to
-  another.
+| Need | What VibeRails provides |
+| --- | --- |
+| Consistent repository standards | Versioned `vc.rules.md` rules, Git Guard hooks, and code quality checks. |
+| Reviewable AI work | Recorded sessions, replay, linked commits, and human review requests for staged changes. |
+| Existing team workflows | Project Boards with Jira Cloud and Azure DevOps work item integrations. |
+| Repeatable agent work | Saved Quick Launches, Agents, and script/check Automations. |
+| Corporate provider access | Configurable API gateways for supported providers, including Codex and Claude. |
+| Continuity across tools | Shared session search, session handoffs, and a built-in MCP server. |
 
-[Rules and code quality](#rules-and-code-quality) · [Audit trail and replay](#audit-trail-and-replay) ·
-[TokenSaver](#tokensaver) · [Board](#board) · [Terminals](#terminals) · [Envs](#envs) ·
-[Vibe AI](#vibe-ai) · [MCP](#mcp) · [Automation](#automation) · [Install](#install) ·
-[Build from source](#build-from-source)
+[Repository standards](#repository-standards-and-code-quality) · [Review and traceability](#review-and-session-traceability) ·
+[Boards and issue trackers](#boards-and-issue-trackers) · [Agents and Automations](#agents-and-automations) ·
+[Enterprise integration](#enterprise-integration-and-data-flow) · [Install](#install) · [Build](#build-from-source)
 
----
+## Repository standards and code quality
 
-## Rules and code quality
+Keep rules alongside the code in `vc.rules.md`, under a `## Vibe Rails Rules` heading.
+With Git Guard enabled, the installed Git hooks evaluate applicable rules for staged changes:
 
-Vibe coding turns into slop when nothing checks the output. VibeRails enforces deterministic
-standards on every commit, whichever agent wrote the code.
+- **WARN** reports a finding.
+- **COMMIT** requires an acknowledgment and reason in the commit message.
+- **STOP** blocks the commit when the rule fails.
 
-- **Rules** live in `vc.rules.md` files in your repository. A `WARN` rule is reported, a `COMMIT`
-  rule blocks the commit until its message acknowledges the rule, and a `STOP` rule blocks it
-  outright. Agents can run the same check with the `validate_vca` MCP tool.
-- **Git Guard** turns on the git hooks that enforce those rules on every commit.
-- **Code quality** grades the repository with MintLint: a letter grade, a score out of 100, a
-  radar across complexity, size, cohesion, coupling, testability, duplication and
-  maintainability, and the files that need the most attention.
+The dashboard and the `validate_vca` MCP tool make the same rule system available to developers
+and agents. Rules can cover change documentation, code quality thresholds, protected paths,
+and signed approval requirements.
 
-Explore the repository as a live code graph or as connected module cards, highlight what changed,
-and hand the report to an agent with **Fix code quality with…**.
+![The Rules page showing Git Guard, repository rule files, and rule enforcement levels](docs/images/rules.png)
 
-![The code quality report: an animated code graph beside a B grade, the quality radar and ranked report files](docs/images/code-quality-graph.gif)
+The MintLint code quality report scores supported source code, identifies files that need
+attention, and shows relationships as a code graph or connected module cards. Highlight changes
+to focus a review, or use **Fix code quality with…** to hand the report to an agent.
 
-![The same report switched to connected module cards](docs/images/code-quality-cards.gif)
+![The code graph with connected source modules and the repository quality report](docs/images/code-quality-graph.png)
 
-## Audit trail and replay
+![Connected module cards beside the code quality score and report files](docs/images/code-quality-cards.gif)
 
-Every session is recorded, from the first prompt to the last command, so you can trace exactly
-how any piece of code was made.
+## Review and session traceability
 
-- **Replay** any session at 1× to 25× speed, or at Max to run straight to the end, with a scrubber
-  and arrow-key seeking. Board cards and Automation runs open the same player.
-- **Review the session, not just the diff.** Board cards link each commit to the session that
-  produced it, so a reviewer can watch the whole conversation behind a change.
-- **LLM as a judge.** Have an LLM review remote sessions.
-- **Digital signatures.** Create signing keys in **Settings → KEYS** and sign a message or file;
-  anyone can verify the signature against your viberails.ai account. Scripts in the signed scripts
-  library run only after you sign them.
-- **Send to…** hands a session to another LLM or saved environment: VibeRails summarizes it and
-  starts the new agent with that summary.
+VibeRails records sessions launched through it so a reviewer can inspect the prompts, terminal
+activity, and decisions behind a change. Replay recorded work, follow a Board card's linked
+commits and sessions, or search past work by meaning and keyword in **Vibe AI**. Agents can search
+the same history through MCP.
 
-![Replaying a recorded Claude Code session at 10× and then 100× speed](docs/images/session-replay.gif)
+**Review requests** bring a person into the workflow before a commit. Capture staged changes and
+attach the sessions that produced them, then send the request to named reviewers through
+viberails.ai. Reviewers can inspect the changes and session context, leave comments, and approve
+or reject. Signed approvals apply to the exact staged tree; a repository's configured approval
+rules determine when they are required. The VS Code sidebar includes **Reviews requested of you**.
 
-![A session's menu in the History rail, with Send to listing custom environments and base CLIs](docs/images/history-send-to.png)
+The **Reviews** page also tracks GitHub pull request reviews across configured repositories.
+**Send to…** summarizes a recorded session for another supported CLI or saved setup, giving a
+second agent context for the next task or review.
 
-## TokenSaver
+![The session history menu handing recorded work to another CLI or saved setup](docs/images/history-send-to.png)
 
-Claude Code and Codex can route through TokenSaver, a proxy built into VibeRails that trims noisy
-tool output, such as build logs, passing tests and repeated lines, before it reaches the model.
-It never rewrites your prompts or the model's replies. Lossy trims leave a marker so the model can
-re-run a narrower command, and if anything goes wrong the original request is sent unchanged.
-Switch it on or off for each CLI in Settings; the **tokens saved** meter in the terminal bar keeps
-the running total.
+## Boards and issue trackers
 
-![The live counter on viberails.ai, past 2.7 billion tokens saved](docs/images/tokens-saved.png)
+Use a project Board to plan work, assign an agent, and retain comments, handoffs, linked commits,
+and sessions with the card. Starting work gives the agent the card's brief. Lane entry can run
+configured Agents and Automations, such as a review or a code quality check.
 
-## Board
+Connect a Board to **Jira Cloud** or **Azure DevOps** to pull work into VibeRails and send comments
+and session references back to the linked issue or work item. Teams can keep their existing
+tracker while reviewing the agent's work with its context.
 
-A kanban board for each project, where every card is a work item for an agent. Assign a card to
-Claude Code, Codex or a saved environment and **Start work** launches it with the card as its
-brief. Agents keep the card current through the built-in MCP tools: comments, handoffs, linked
-commits and sessions. Search ranks cards semantically across every local board, and cards can link
-to work in other projects.
+![A Jira-connected VibeRails Board with work organized into delivery and review lanes](docs/images/jira-board.png)
 
-The robot button on each lane header attaches Automations that run when a card enters that lane,
-such as a code review, a rules check or a quality scan. Cards with a live agent get a moving
-border.
+## Agents and Automations
 
-![Board lanes with assigned cards, live agents and a running lane Automation](docs/images/board.gif)
+Work in real PTY-backed terminals with Claude Code, Codex, other supported CLIs, or a shell.
+Sessions continue while you move between dashboard pages.
 
-## Terminals
+- **Quick Launches** save a CLI, model, arguments, and settings for reuse.
+- **Agents** add a starting message to a saved setup and run on demand or on configured triggers.
+- **Automations** run ordered scripts and checks without an LLM step. They can run on demand,
+  on a schedule, around commits, or when a card enters a Board lane.
 
-Run Claude Code and Codex side by side in real PTY-backed terminal tabs, alongside other supported
-CLIs or a plain shell. Sessions keep running when you switch pages, and tabs reconnect when you
-come back.
+Agent work can use the project folder, a separate clone, or a fresh clone for each run.
+The signed scripts library supports reusable PowerShell, Bash, and Python workflows.
+The VS Code **Launch** sidebar makes Agents, Automations, and scripts available beside your code.
 
-**Manage quick launches** decides which CLIs and Quick Launches the terminal's play button shows,
-and in what order. It also adds, edits and deletes Quick Launches, and can launch any of them,
-hidden ones included.
+Agents and Automations run while a VibeRails root backend is open. In VS Code, closing only the
+dashboard tab leaves that backend running; **VibeRails: Stop**, the dashboard's **Exit** button,
+or closing the VS Code window stops it. There is no operating-system background service.
 
-![The Manage quick launches dialog, with a visibility toggle, ordering arrows and a Launch button for each CLI](docs/images/all-llms.png)
+> Agents and scripts run with your operating-system account's permissions, including when they
+> use a separate clone. Review the prompts, tools, and scripts before enabling unattended work.
 
-## Quick Launches and Agents
+## Enterprise integration and data flow
 
-Save a CLI with its model, arguments and settings as a **Quick Launch**, like Conda for LLMs, and
-open it from the terminal's play button. Give the same setup a starting message and it is an
-**Agent**: run it now, on a schedule, before or after a commit, or when a Board card enters a lane.
-Either can work in the project folder, in its own git clone or in a fresh clone each run, and can
-run setup commands before the CLI starts.
+Configure corporate API gateway URLs in **Settings → LLMs** for supported providers. Codex and
+Claude support saved gateway credentials; requests pass through the local relay to a gateway
+that accepts the provider's API format. This allows teams to use their existing provider access
+and network controls. See the [gateway configuration guide](TokenSaver/README.md#enterprise-network-proxy).
 
-![The Agents page, listing saved CLI setups with their starting messages](docs/images/environments-workers.png)
+The application stores configuration and session history under `~/.vibe_rails/`, with repository
+rules kept in the project. The VS Code backend listens on loopback and authenticates dashboard
+and API access. AI requests go to the configured provider or gateway.
 
-## Vibe AI
+Connecting a **viberails.ai** account enables hosted collaboration and uploads completed sessions
+to that account. Sending review requests, sharing sessions, and connecting issue trackers also
+transfer the corresponding content to those services. Account connection and sharing should
+follow your team's data-handling policy. See the [API security contract](API_SEC.md) for the
+implemented authentication and data boundaries.
 
-VibeRails captures every session and indexes it locally. Vibe AI Search finds past work by meaning
-or by keyword, blending per-message and whole-session semantic matches with lexical ones. Agents
-search the same history through the `search_history` MCP tool, so a fix Codex worked out is there
-for Claude Code next time.
+## TokenSaver and MCP
 
-The page also shows how many sessions and agents have been captured and how many tokens
-TokenSaver has kept off the LLM.
+**TokenSaver** can reduce the tool output sent to Claude Code and Codex by trimming repeated
+lines, build noise, and passing test output. It preserves user prompts and model replies;
+marked trims let the agent request narrower output when needed. Savings depend on the workload
+and appear in the terminal's **tokens saved** meter.
 
-![Vibe AI Search with a learn rate of 97, 1,670 captured sessions and coverage for each CLI](docs/images/vibe-ai-search.png)
-
-## MCP
-
-VibeRails hosts an MCP server inside the app and registers it, as `viberails-mcp`, with each agent
-it launches. Its tools cover Board cards, comments, handoffs and reviews, session history search,
-rule checks and TokenSaver control.
-
-The **MCP Explorer** lists every tool with its description and input schema, and calls it with the
-arguments you give. **Remote** mode inspects an external MCP server inside an isolated sandbox.
-
-![The MCP Explorer inspecting the save_board_handoff tool, with its arguments and input schema](docs/images/mcp-explorer.png)
-
-## Automations
-
-An Automation is an ordered workflow of repository scripts (`.py`, `.ps1`, `.sh`) and checks (VCA,
-Code quality) with no LLM step. Run it on demand, on a schedule, before or after a commit, or when
-a Board card enters a lane. The signed scripts library keeps reusable pwsh, bash and Python scripts
-that run only after you sign them. Agents and Automations run only while VibeRails is open; there
-is no background service.
-
-> [!WARNING]
-> Agents and Automations are not sandboxed. They run unattended with the same operating-system
-> permissions as VibeRails. An Agent set to use its own clone or a fresh clone works in a
-> throwaway checkout, but that is not a security boundary: it can still reach files outside it
-> through CLI arguments, configuration, MCP servers, tools or scripts. Review every Agent and
-> script, and use a disposable account or machine for untrusted prompts, tools or repositories.
-
----
+The built-in **MCP server** connects supported agents to Board work, handoffs, review tracking,
+history search, rule validation, and TokenSaver controls. Use **MCP Explorer** to inspect tool
+descriptions and input schemas or call tools directly. This makes VibeRails workflows available
+to agents as well as to people using the dashboard.
 
 ## Install
 
-**VS Code (recommended):** install
-[VibeRails from the Marketplace](https://marketplace.visualstudio.com/items?itemName=viberails.vscode-viberails).
-The backend ships inside the extension, so there is nothing else to install and nothing is
-downloaded at runtime. Open it from the **VibeRails** status-bar button, the
-`VibeRails: Open Dashboard` command, or `Ctrl+Alt+V` (`Cmd+Alt+V` on macOS).
+**VS Code:** install [VibeRails from the Marketplace](https://marketplace.visualstudio.com/items?itemName=viberails.vscode-viberails).
+The extension bundles the VibeRails backend and dashboard. Open it from the **VibeRails** status-bar
+button, `VibeRails: Open Dashboard`, or `Ctrl+Alt+V` (`Cmd+Alt+V` on macOS).
 
-**Standalone:** installers for Windows, Linux and macOS are on [viberails.ai](https://viberails.ai/).
+**Standalone:** installers for Windows, Linux, and macOS are available at [viberails.ai](https://viberails.ai/).
 
 **Windows setup:** download `VibeRails-Setup-<version>-win-x64.exe` from the
-[GitHub release assets](https://github.com/robstokes857/vibe-rails/releases/latest)
-when available. It installs for your user without administrator privileges, adds
-a Start menu shortcut, and offers a desktop shortcut. Upgrades and uninstall
-preserve your VibeRails data. The ZIP and PowerShell installer remain available.
+[GitHub release assets](https://github.com/robstokes857/vibe-rails/releases/latest) when available.
+It installs for your user without administrator privileges, adds a Start menu shortcut, and
+offers a desktop shortcut. Upgrades and uninstall preserve your VibeRails data. The ZIP and
+PowerShell installer remain available.
 
-You also need Claude Code or Codex installed and signed in.
-
+Install and authenticate the AI CLI you want to use, such as Claude Code or Codex.
 To connect a viberails.ai account, open **Settings → General → Account** and choose **Sign in**.
-While an account is connected, VibeRails uploads completed sessions to it.
 
 ## Build from source
 
 Prerequisites: the [.NET 10 SDK](https://dotnet.microsoft.com/download),
-[Node.js 24 LTS](https://nodejs.org/) or later (local builds and release automation read
-`.nvmrc`), Git, and VS Code 1.125 or later for the extension.
+[Node.js 24 LTS](https://nodejs.org/) or later (builds read `.nvmrc`), Git, and VS Code 1.125 or
+later for the extension.
 
 ```bash
 git clone --recurse-submodules https://github.com/robstokes857/vibe-rails.git
@@ -215,16 +183,16 @@ Test commands for every layer are in [AGENTS.md](AGENTS.md#build-and-test).
 | Architecture reference | [docs/architecture.md](docs/architecture.md) |
 | API security contract | [API_SEC.md](API_SEC.md) |
 | Git Guard hook installation | [docs/git-hooks.md](docs/git-hooks.md) |
-| TokenSaver internals | [TokenSaver/README.md](TokenSaver/README.md) |
+| Human review requests | [Review requests contract](VibeRails/Services/ReviewRequests/README.md) |
+| TokenSaver and corporate gateways | [TokenSaver/README.md](TokenSaver/README.md) |
 | Internal tools and feature logs | [docs/internal-tools.md](docs/internal-tools.md) |
 | VS Code extension | [vscode-viberails/README.md](vscode-viberails/README.md) |
 
-## Status
+## Project
 
-This repo is a lightweight, local-focused version of my personal setup. I'm stripping out
-multi-GPU/cluster support, heavy eval tooling, and other framework dependencies so it runs fast
-with Claude Code and Codex. I'm rebuilding it around the features I think most people will
-actually want for local workflows.
+VibeRails is an open-source application for developers and teams adopting AI-assisted development.
+The project focuses on repository rules, visible agent work, repeatable workflows, and review.
+Features and their operating boundaries are documented in this repository.
 
 ## License
 
@@ -232,6 +200,4 @@ actually want for local workflows.
 
 ---
 
-**Maintained by** Robert Stokes · **Last updated** 2026-10-04
-
-*Last checked: 2026-10-04 by Claude Code (claude-opus-5-5)*
+**Maintained by** Robert Stokes · **Last updated** 2026-10-30
