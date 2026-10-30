@@ -155,6 +155,9 @@ public sealed record ReviewRequestSummary(
 
 public sealed record ReviewRequestDetail(ReviewRequestSummary Request, ReviewBundle Bundle);
 
+/// <summary>A same-tree request reused by a tool contact; exposes no other session's bundle or metadata.</summary>
+public sealed record ReviewRequestReuse(string Id, string TreeId);
+
 public sealed record ReviewRequestList(IReadOnlyList<ReviewRequestSummary> Requests);
 
 /// <summary>Body of <c>POST /api/v1/review-requests</c>.</summary>
@@ -331,6 +334,7 @@ public sealed class ReviewRequestException(string code, string message, int stat
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(ReviewBundle))]
 [JsonSerializable(typeof(ReviewRequestSummary))]
+[JsonSerializable(typeof(ReviewRequestReuse))]
 [JsonSerializable(typeof(ReviewRequestDetail))]
 [JsonSerializable(typeof(ReviewRequestList))]
 [JsonSerializable(typeof(CreateReviewRequest))]

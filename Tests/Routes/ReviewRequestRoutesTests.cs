@@ -250,8 +250,9 @@ public sealed class ReviewRequestRoutesTests : IAsyncLifetime
 
         // No sessions named: the contact's own session is attached anyway. Another session: refused.
         using var implicitSession = await SendAs(_contact, HttpMethod.Post, "/api/v1/review-requests", "{\"reviewers\":[\"lead@example.com\"]}");
-        Assert.Equal(HttpStatusCode.Created, implicitSession.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, implicitSession.StatusCode);
         var implicitId = JsonDocument.Parse(await implicitSession.Content.ReadAsStringAsync(Ct)).RootElement.GetProperty("id").GetString();
+        Assert.Equal(id, implicitId);
         using var implicitDetail = await Send(HttpMethod.Get, $"/api/v1/review-requests/{implicitId}");
         Assert.Equal(ToolSession, Assert.Single(JsonDocument.Parse(await implicitDetail.Content.ReadAsStringAsync(Ct)).RootElement
             .GetProperty("bundle").GetProperty("sessions").EnumerateArray()).GetProperty("id").GetString());
@@ -287,11 +288,39 @@ public sealed class ReviewRequestRoutesTests : IAsyncLifetime
             Assert.Equal(HttpStatusCode.Unauthorized, refused.StatusCode);
         }
         Assert.Empty(_outbound);
-        foreach (var requestId in new[] { id, implicitId, otherId })
+        foreach (var requestId in new[] { id, implicitId, otherId }.Distinct())
         {
             using var deleted = await Send(HttpMethod.Delete, $"/api/v1/review-requests/{requestId}");
             Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
         }
+    }
+
+    [Fact]
+    public async Task ToolReusesADashboardRequestWithoutExposingOrChangingItsBundle()
+    {
+        using var dashboard = await Send(HttpMethod.Post, "/api/v1/review-requests",
+            "{\"reviewers\":[\"private@example.com\"],\"note\":\"private note\",\"cardKey\":\"PRIVATE\"}");
+        using var dashboardJson = JsonDocument.Parse(await dashboard.Content.ReadAsStringAsync(Ct));
+        var id = dashboardJson.RootElement.GetProperty("id").GetString();
+        using var before = await Send(HttpMethod.Get, $"/api/v1/review-requests/{id}");
+        var original = await before.Content.ReadAsStringAsync(Ct);
+
+        using var reused = await SendAs(_contact, HttpMethod.Post, "/api/v1/review-requests",
+            "{\"reviewers\":[\"lead@example.com\"],\"note\":\"new note\"}");
+        Assert.Equal(HttpStatusCode.OK, reused.StatusCode);
+        Assert.True(reused.Headers.CacheControl?.NoStore);
+        using var reusedJson = JsonDocument.Parse(await reused.Content.ReadAsStringAsync(Ct));
+        Assert.Equal(id, reusedJson.RootElement.GetProperty("id").GetString());
+        Assert.Equal(Tree, reusedJson.RootElement.GetProperty("treeId").GetString());
+        Assert.Equal(2, reusedJson.RootElement.EnumerateObject().Count());
+        using var disclosure = await SendAs(_contact, HttpMethod.Get, $"/api/v1/review-requests/{id}/disclosure");
+        Assert.Equal(HttpStatusCode.Forbidden, disclosure.StatusCode);
+        using var after = await Send(HttpMethod.Get, $"/api/v1/review-requests/{id}");
+        Assert.Equal(original, await after.Content.ReadAsStringAsync(Ct));
+        using var list = await Send(HttpMethod.Get, "/api/v1/review-requests");
+        using var listJson = JsonDocument.Parse(await list.Content.ReadAsStringAsync(Ct));
+        Assert.Single(listJson.RootElement.GetProperty("requests").EnumerateArray());
+        Assert.Empty(_outbound);
     }
 
     /// <summary>Slice E: the card's preview reads the staged index without storing anything, and a linked commit's approval is read from the ledger.</summary>

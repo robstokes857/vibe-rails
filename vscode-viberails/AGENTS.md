@@ -42,8 +42,11 @@ This VS Code extension provides seamless integration with VibeRails, a dashboard
   view's title action. `viberails.reviewInbox.open` (row click; posts `openReviewInbox` to the
   dashboard), `viberails.reviewInbox.approve` / `viberails.reviewInbox.reject` (inline on rows that can
   still be answered; `POST /api/v1/review-inbox/{reference}/approve` and `/reject` with the typed
-  comment) and `viberails.reviewInbox.read` (context menu; opens the request's vetted viberails.ai
-  page) are hidden from the palette because they need the row.
+  comment) are hidden from the palette because they need the row. Approve compares the request's
+  repository name with the backend project's folder name
+  (case-insensitive), shows a modal warning when they differ, and sends the confirmed project path
+  to the backend; cancellation opens no popup. `viberails.reviewInbox.read` (context menu; opens the
+  request's vetted viberails.ai page) is also hidden from the palette.
 
 ## Settings
 

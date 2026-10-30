@@ -393,6 +393,9 @@ function registerReviewInboxView(context: vscode.ExtensionContext, registeredCom
     reviewInboxProvider = provider;
 
     const dependencies: ReviewInboxActionDependencies = {
+        getProjectPath: () => provider.getState()?.project ?? null,
+        confirmRepositoryMismatch: async (message) =>
+            await vscode.window.showWarningMessage(message, { modal: true }, 'Approve in this repository') === 'Approve in this repository',
         request: (method, route, body) => requestJson(getBackendConnection(), method, route, body),
         askComment: (row) => vscode.window.showInputBox({
             title: `Reject the review request from ${row.requestedBy}`,

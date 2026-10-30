@@ -33,7 +33,7 @@ function rawRow(extra: Record<string, unknown> = {}): Record<string, unknown> {
 }
 
 function rawView(extra: Record<string, unknown> = {}): Record<string, unknown> {
-    return { hasApiKey: true, email: 'me@example.test', emailVerified: true, fetchedUtc: '2026-10-24T12:00:00Z', lastError: null, popupAvailable: true, requests: [rawRow()], ...extra };
+    return { project: 'C:\\source\\vibe-rails', hasApiKey: true, email: 'me@example.test', emailVerified: true, fetchedUtc: '2026-10-24T12:00:00Z', lastError: null, popupAvailable: true, requests: [rawRow()], ...extra };
 }
 
 function tick(): Promise<void> {
@@ -45,8 +45,11 @@ function actions(overrides: Partial<ReviewInboxActionDependencies> = {}) {
     const notices: string[] = [];
     const errors: string[] = [];
     const opened: string[] = [];
+    const warnings: string[] = [];
     let refreshes = 0;
     const dependencies: ReviewInboxActionDependencies = {
+        getProjectPath: () => 'C:\\source\\vibe-rails',
+        confirmRepositoryMismatch: async (message) => { warnings.push(message); return true; },
         request: async (method, path, body) => { calls.push({ method, path, body }); return { message: 'Done.' }; },
         askComment: async () => 'Retry path still swallows the error.',
         notify: (message) => { notices.push(message); },
@@ -55,7 +58,7 @@ function actions(overrides: Partial<ReviewInboxActionDependencies> = {}) {
         openExternal: async (url) => { opened.push(url); return true; },
         ...overrides
     };
-    return { dependencies, calls, notices, errors, opened, refreshes: () => refreshes };
+    return { dependencies, calls, notices, errors, opened, warnings, refreshes: () => refreshes };
 }
 
 suite('Review inbox view rules', () => {
@@ -65,6 +68,8 @@ suite('Review inbox view rules', () => {
         }));
 
         assert.equal(state.hasApiKey, true);
+        assert.equal(state.project, 'C:\\source\\vibe-rails');
+        assert.equal(normalizeReviewInbox(undefined).project, null);
         assert.equal(state.email, 'me@example.test');
         assert.equal(state.requests.length, 2);
         assert.equal(state.requests[0].signing, 'signing');
@@ -164,7 +169,8 @@ suite('Review inbox actions', () => {
     test('approve posts to the approve route, reports the popup and refreshes', async () => {
         const seen = actions();
         await approveReviewRequest(row, seen.dependencies);
-        assert.deepEqual(seen.calls, [{ method: 'POST', path: reviewInboxActionPath(reference, 'approve'), body: {} }]);
+        assert.deepEqual(seen.calls, [{ method: 'POST', path: reviewInboxActionPath(reference, 'approve'), body: { repositoryPath: 'C:\\source\\vibe-rails' } }]);
+        assert.deepEqual(seen.warnings, []);
         assert.deepEqual(seen.notices, ['Done.']);
         assert.equal(seen.refreshes(), 1);
 
@@ -175,6 +181,43 @@ suite('Review inbox actions', () => {
         const nothing = actions();
         await approveReviewRequest(undefined, nothing.dependencies);
         assert.deepEqual(nothing.calls, []);
+    });
+
+    test('approve waits for explicit mismatch confirmation and uses the confirmed backend project', async () => {
+        let confirm: (answer: boolean) => void = () => undefined;
+        const warnings: string[] = [];
+        const seen = actions({
+            getProjectPath: () => '/source/another-clone/',
+            confirmRepositoryMismatch: (message) => {
+                warnings.push(message);
+                return new Promise<boolean>((resolve) => { confirm = resolve; });
+            }
+        });
+        const pending = approveReviewRequest(row, seen.dependencies);
+        assert.deepEqual(seen.calls, []);
+        assert.match(warnings[0], /"vibe-rails"/);
+        assert.match(warnings[0], /"another-clone" folder \(\/source\/another-clone\/\)/);
+        confirm(true);
+        await pending;
+        assert.deepEqual(seen.calls, [{ method: 'POST', path: reviewInboxActionPath(reference, 'approve'), body: { repositoryPath: '/source/another-clone/' } }]);
+
+        const cancelled = actions({ getProjectPath: () => '/other/repo', confirmRepositoryMismatch: async () => false });
+        await approveReviewRequest(row, cancelled.dependencies);
+        assert.deepEqual(cancelled.calls, []);
+        assert.deepEqual(cancelled.notices, []);
+    });
+
+    test('approve compares folder names case-insensitively across separators and refuses an unknown project', async () => {
+        for (const project of ['C:\\source\\VIBE-RAILS\\', '/source/VIBE-RAILS/']) {
+            const seen = actions({ getProjectPath: () => project });
+            await approveReviewRequest(row, seen.dependencies);
+            assert.deepEqual(seen.warnings, []);
+            assert.equal(seen.calls.length, 1);
+        }
+        const unknown = actions({ getProjectPath: () => null });
+        await approveReviewRequest(row, unknown.dependencies);
+        assert.deepEqual(unknown.calls, []);
+        assert.match(unknown.errors[0], /Refresh the review inbox/);
     });
 
     test('reject posts the typed comment and nothing when the prompt is cancelled or blank', async () => {

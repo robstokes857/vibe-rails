@@ -27,6 +27,48 @@ public sealed class ReviewRequestStore : IReviewRequestStore
     {
         using var db = SqliteConnectionFactory.Open(_connectionString);
         using var command = db.CreateCommand();
+        await InsertAsync(command, request, ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<ReviewRequestRecord?> FindOpenUnsentAsync(string projectPath, string treeId, CancellationToken ct = default)
+    {
+        using var db = SqliteConnectionFactory.Open(_connectionString);
+        using var command = db.CreateCommand();
+        return await FindOpenUnsentAsync(command, projectPath, treeId, ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<ReviewRequestRecord> AddOrGetOpenUnsentAsync(ReviewRequestRecord request, CancellationToken ct = default)
+    {
+        using var db = SqliteConnectionFactory.Open(_connectionString);
+        using var transaction = db.BeginTransaction(System.Data.IsolationLevel.Serializable);
+        using var command = db.CreateCommand();
+        command.Transaction = transaction;
+        var existing = await FindOpenUnsentAsync(command, request.ProjectPath, request.TreeId, ct);
+        if (existing is not null) return existing;
+        command.Parameters.Clear();
+        await InsertAsync(command, request, ct);
+        transaction.Commit();
+        return request;
+    }
+
+    private static async Task<ReviewRequestRecord?> FindOpenUnsentAsync(SqliteCommand command, string projectPath, string treeId, CancellationToken ct)
+    {
+        command.CommandText = RequestColumns + """
+             FROM ReviewRequests WHERE ProjectPath = $project AND TreeId = $tree
+             AND Scope = 'staged' AND Status = 'open'
+             AND SentUTC IS NULL AND RemoteId IS NULL AND SendAttemptedUTC IS NULL
+             ORDER BY CreatedUTC DESC, Id LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$project", projectPath);
+        command.Parameters.AddWithValue("$tree", treeId);
+        using var reader = await command.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct) ? ReadRequest(reader) : null;
+    }
+
+    private static async Task InsertAsync(SqliteCommand command, ReviewRequestRecord request, CancellationToken ct)
+    {
         command.CommandText = """
             INSERT INTO ReviewRequests (Id, ProjectPath, Scope, TreeId, BaseCommit, CardKey, Status, BundleJson, CreatedUTC, UpdatedUTC)
             VALUES ($id, $project, $scope, $tree, $base, $card, $status, $bundle, $created, $updated);

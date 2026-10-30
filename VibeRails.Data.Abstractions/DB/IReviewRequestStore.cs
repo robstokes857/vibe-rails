@@ -75,6 +75,15 @@ public interface IReviewRequestStore
     /// <summary>Adds a new request. The id must be unique.</summary>
     Task AddAsync(ReviewRequestRecord request, CancellationToken ct = default);
 
+    /// <summary>Newest open staged request for this project and tree with no sent copy or pending send attempt.</summary>
+    Task<ReviewRequestRecord?> FindOpenUnsentAsync(string projectPath, string treeId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Adds a staged request unless an open unsent request for its project and tree already exists.
+    /// The lookup and insert are atomic across connections; returns the existing or inserted row.
+    /// </summary>
+    Task<ReviewRequestRecord> AddOrGetOpenUnsentAsync(ReviewRequestRecord request, CancellationToken ct = default);
+
     /// <summary>The request with this id, or null.</summary>
     Task<ReviewRequestRecord?> GetAsync(string id, CancellationToken ct = default);
 

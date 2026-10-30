@@ -61,6 +61,10 @@ public static class ReviewRequestRoutes
                     if (own is null || (body?.Sessions ?? []).Any(id => !string.Equals(id?.Trim(), own, StringComparison.OrdinalIgnoreCase)))
                         return Forbidden("A terminal's tool credentials can attach only that terminal's own session to a review request.");
                     body = (body ?? new CreateReviewRequest()) with { Sessions = [own] };
+                    var result = await reviews.CreateForToolAsync(Project(), body, sessions, ct);
+                    if (result.Reused is { } reused)
+                        return Results.Json(reused, ReviewRequestJsonContext.Default.ReviewRequestReuse);
+                    return Results.Json(result.Created, ReviewRequestJsonContext.Default.ReviewRequestSummary, statusCode: StatusCodes.Status201Created);
                 }
                 var created = await reviews.CreateAsync(Project(), body, sessions, ct);
                 return Results.Json(created, ReviewRequestJsonContext.Default.ReviewRequestSummary, statusCode: StatusCodes.Status201Created);

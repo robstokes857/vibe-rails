@@ -262,6 +262,14 @@ the design decisions for the rest.
   `AgentCredentialService.Allows` admits it to exactly `POST /api/v1/review-requests` and
   `GET /{id}/disclosure`, and the routes refuse (403 `forbidden`) a contact that names any session
   but its own or reads a request that does not attach it (Codex slice E review, F1).
+  **Retry reuse (VIBE-216).** Tool-contact creation first looks for an open, unsent staged request
+  for the same project and tree, before building another bundle. An atomic lookup/insert also
+  resolves concurrent callers to one request. Sent requests and pending send attempts are excluded;
+  dashboard creation is unchanged. Reuse answers 200 with only `{ id, treeId }`, and the tool directs
+  the caller to Review requests in VibeRails without reading its disclosure. The existing reviewers,
+  note, card and sessions stay unchanged, including when another session or the dashboard created
+  it. Only a new request answers 201 with the summary and attaches the calling session. The
+  disclosure route retains its own-session restriction. No per-project request cap is imposed.
 - **A send that races a delete (Codex slice E review, F2, slice C code).** Once the person has
   confirmed, the transfer, its persistence and any recovery run to completion on the transport's
   own deadlines (90 s to send, 30 s to cancel), never on the caller's request token: a browser that

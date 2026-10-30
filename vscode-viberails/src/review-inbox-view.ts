@@ -31,6 +31,7 @@ export interface ReviewInboxRow {
 }
 
 export interface ReviewInboxState {
+    project: string | null;
     hasApiKey: boolean;
     email: string | null;
     emailVerified: boolean;
@@ -79,6 +80,7 @@ export function normalizeReviewInbox(raw: unknown): ReviewInboxState {
     const view = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
     const requests = Array.isArray(view.requests) ? view.requests : [];
     return {
+        project: typeof view.project === 'string' && view.project ? view.project : null,
         hasApiKey: Boolean(view.hasApiKey),
         email: typeof view.email === 'string' ? view.email : null,
         emailVerified: Boolean(view.emailVerified),
@@ -275,6 +277,10 @@ export class ReviewInboxTreeDataProvider implements vscode.TreeDataProvider<Revi
 }
 
 export interface ReviewInboxActionDependencies {
+    /** The running backend's project, which may differ from the active editor's workspace. */
+    getProjectPath(): string | null;
+    /** Modal confirmation; only an explicit affirmative answer proceeds. */
+    confirmRepositoryMismatch(message: string): Thenable<boolean>;
     /** Authenticated call to the running backend; rejects with `BackendRequestError` on a non-2xx. */
     request(method: BackendMethod, path: string, body?: unknown): Promise<unknown>;
     /** Asks the person why they reject the request; `undefined` means they cancelled. */
@@ -292,7 +298,21 @@ export async function approveReviewRequest(row: ReviewInboxRow | undefined, depe
         return;
     }
     try {
-        const response = await dependencies.request('POST', reviewInboxActionPath(row.id, 'approve'), {}) as { message?: unknown } | null | undefined;
+        const project = dependencies.getProjectPath();
+        if (!project) {
+            dependencies.notifyError('Refresh the review inbox to identify the VibeRails project before approving.');
+            return;
+        }
+        const name = project.split(/[\\/]+/).filter(Boolean).pop() || '';
+        if (row.repository.toLowerCase() !== name.toLowerCase()) {
+            const confirmed = await dependencies.confirmRepositoryMismatch(
+                `This request was made in a folder named "${row.repository}". Approve rebuilds it in your "${name}" folder (${project}), `
+                + 'so continue only if that is a clone of the same repository.');
+            if (!confirmed) {
+                return;
+            }
+        }
+        const response = await dependencies.request('POST', reviewInboxActionPath(row.id, 'approve'), { repositoryPath: project }) as { message?: unknown } | null | undefined;
         const text = typeof response?.message === 'string' ? response.message.trim() : '';
         dependencies.notify(text || 'The signing popup opened in its own window on the VibeRails computer.');
     } catch (error) {

@@ -42,6 +42,7 @@ public sealed class ReviewRequestTool
     [McpServerTool]
     [Description("Ask named people to review the staged changes of this terminal's project before they are committed (VibeRails review request). "
         + "Creates the request on this computer from the staged index (git add first) with this terminal's session attached, and returns the request id, the staged files, the tree id and exactly what would leave the computer. "
+        + "If an open, unsent request already covers this project's staged tree, reuses it and returns its id and tree without changing its reviewers, note or sessions; open Review requests in VibeRails to inspect it. "
         + "Nothing is sent by this tool: a person opens the card in VibeRails, reads that disclosure under Request review and presses Send, which transfers the file text, the tree and base ids, the note, and this session's recording (terminal output, prompts, saved code changes, uploaded after the session ends) to viberails.ai for the listed reviewers only, for one month. "
         + "The reviewer approves by signing the staged tree on their own computer; the approval is a vibe-signature line the commit hook applies, so commit the same staged tree afterwards. "
         + "This tool cannot sign, approve or reject. Requires an open VibeRails root backend with review requests and a signed-in account to send; no session-id argument: only the calling terminal is attached.")]
@@ -93,6 +94,14 @@ public sealed class ReviewRequestTool
                 await created.Content.ReadAsStreamAsync(deadline.Token), MaxCreateResponseBytes, deadline.Token);
             if (!created.IsSuccessStatusCode)
                 return Refusal(created, createdBytes, "create the review request");
+            if (created.StatusCode == HttpStatusCode.OK)
+            {
+                var reused = JsonSerializer.Deserialize(createdBytes, ReviewRequestJsonContext.Default.ReviewRequestReuse);
+                if (reused is null || !Guid.TryParseExact(reused.Id, "D", out _) || !CommitSignatureFormat.IsObjectId(reused.TreeId))
+                    return "FAIL: The local VibeRails backend returned no review request.";
+                return $"Review request {reused.Id} reused (open, unsent). Nothing has been sent by this tool.\nTree: {reused.TreeId}\n"
+                    + "The existing reviewers, note and attached sessions are unchanged. Open Review requests in VibeRails to inspect this request and its disclosure before sending. This tool cannot sign, approve or reject.";
+            }
             var summary = JsonSerializer.Deserialize(createdBytes, ReviewRequestJsonContext.Default.ReviewRequestSummary);
             if (summary is null || !Guid.TryParseExact(summary.Id, "D", out var requestId))
                 return "FAIL: The local VibeRails backend returned no review request.";

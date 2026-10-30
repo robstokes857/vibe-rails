@@ -59,6 +59,24 @@ public sealed class ReviewRequestService(
         ISessionStore? sessions,
         CancellationToken ct)
     {
+        var (record, bundle) = await CreateCoreAsync(projectPath, request, sessions, reuseOpenUnsent: false, ct);
+        return Summarize(record, bundle!, []);
+    }
+
+    /// <summary>
+    /// Reuses an open unsent request for the staged tree without changing its bundle. A reused
+    /// answer carries only its id and tree: the request may belong to another terminal session.
+    /// </summary>
+    internal async Task<(ReviewRequestSummary? Created, ReviewRequestReuse? Reused)> CreateForToolAsync(
+        string projectPath, CreateReviewRequest? request, ISessionStore sessions, CancellationToken ct)
+    {
+        var (record, bundle) = await CreateCoreAsync(projectPath, request, sessions, reuseOpenUnsent: true, ct);
+        return bundle is not null ? (Summarize(record, bundle, []), null) : (null, new(record.Id, record.TreeId));
+    }
+
+    private async Task<(ReviewRequestRecord Record, ReviewBundle? Bundle)> CreateCoreAsync(
+        string projectPath, CreateReviewRequest? request, ISessionStore? sessions, bool reuseOpenUnsent, CancellationToken ct)
+    {
         projectPath = NormalizeProject(projectPath);
         var scope = (request?.Scope ?? ReviewScope.Staged).Trim().ToLowerInvariant();
         if (scope != ReviewScope.Staged)
@@ -68,6 +86,9 @@ public sealed class ReviewRequestService(
         var note = Bounded(request?.Note, MaxNoteChars, "note");
         var attached = await ResolveSessionsAsync(request?.Sessions, sessions, ct);
         var snapshot = await CaptureStagedAsync(projectPath, ct);
+
+        if (reuseOpenUnsent && await store.FindOpenUnsentAsync(projectPath, snapshot.StagedIdentity!.StagedTree, ct) is { } existing)
+            return (existing, null);
 
         var now = _clock.GetUtcNow().UtcDateTime;
         var bundle = await ReviewBundleCapture.BuildAsync(snapshot, ReviewBundleCapture.BaseTextReader(snapshot),
@@ -83,8 +104,14 @@ public sealed class ReviewRequestService(
             JsonSerializer.Serialize(bundle, ReviewRequestJsonContext.Default.ReviewBundle),
             now,
             now);
+        if (reuseOpenUnsent)
+        {
+            // A second root or concurrent tool call may have inserted while this bundle was built.
+            var saved = await store.AddOrGetOpenUnsentAsync(record, ct);
+            return (saved, saved.Id == record.Id ? bundle : null);
+        }
         await store.AddAsync(record, ct);
-        return Summarize(record, bundle, []);
+        return (record, bundle);
     }
 
     /// <summary>

@@ -116,6 +116,25 @@ public sealed class ReviewRequestToolTests
     }
 
     [Fact]
+    public async Task AReusedRequestIsReportedWithoutReadingAnotherSessionsDisclosure()
+    {
+        var calls = 0;
+        using var client = new HttpClient(new Handler((request, _) =>
+        {
+            calls++;
+            Assert.Equal(HttpMethod.Post, request.Method);
+            return Task.FromResult(Json(HttpStatusCode.OK, new ReviewRequestReuse(RequestId, Tree),
+                ReviewRequestJsonContext.Default.ReviewRequestReuse));
+        }));
+        var result = await Tool(client).RequestReview("lead@example.com", Ct);
+        Assert.Equal(1, calls);
+        Assert.StartsWith($"Review request {RequestId} reused (open, unsent).", result);
+        Assert.Contains("Tree: " + Tree, result);
+        Assert.Contains("reviewers, note and attached sessions are unchanged", result);
+        Assert.Contains("Open Review requests in VibeRails", result);
+    }
+
+    [Fact]
     public async Task TheRootsOwnRefusalKeepsItsCodeAndWording()
     {
         using var client = new HttpClient(new Handler((_, _) => Task.FromResult(

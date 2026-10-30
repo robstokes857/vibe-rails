@@ -1113,6 +1113,12 @@ viberails.ai) is shown as the server gave it. Cancel and Delete also confirm thr
 tool is described under [MCP and agent launches](#mcp-and-agent-launches): it creates through the
 root and never sends.
 
+Tool-contact creation reuses an open unsent request for the current project's staged tree
+(VIBE-216), excluding pending send attempts. The 200 reuse response contains only its id and tree id,
+even if another session created it; no reviewers, notes, card metadata or session information are
+returned. It does not alter the bundle or grant disclosure access. New requests still return 201
+with the summary and attach the contact's own session; disclosure keeps its own-session check.
+
 ### Board sync, sharing and remote Start work
 
 [SYNC.md](VibeRails/Services/Board/SYNC.md) defines the full content and hosted authorization
