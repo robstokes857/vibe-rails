@@ -12,6 +12,49 @@ namespace Tests.Services.LlmProxy;
 /// </summary>
 public sealed class LlmProxySettingsServiceTests
 {
+    [Fact]
+    public void InheritedGatewaysRetainDestinationAndCompressionWithoutReusingSavedTokens()
+    {
+        var settings = ProxyOn();
+        settings.CodexGatewayBearerToken = settings.ClaudeGatewayBearerToken = "old-secret";
+        var resolved = LlmProxySettingsService.Resolve(settings, inheritedCodexBaseUrl: "https://corp.example/v1",
+            inheritedClaudeBaseUrl: "https://corp.example/anthropic");
+        Assert.Equal("https://corp.example/v1", resolved.CodexEnterpriseNetworkProxy);
+        Assert.Equal("https://corp.example/anthropic", resolved.ClaudeEnterpriseNetworkProxy);
+        Assert.True(resolved.CodexTokenSaverEnabled);
+        Assert.True(resolved.ClaudeTokenSaverEnabled);
+        Assert.Empty(resolved.CodexGatewayBearerToken);
+        Assert.Empty(resolved.ClaudeGatewayBearerToken);
+
+        settings.CodexEnterpriseNetworkProxy = "https://saved.example/v1";
+        var saved = LlmProxySettingsService.Resolve(settings, inheritedCodexBaseUrl: "https://corp.example/v1");
+        Assert.Equal(settings.CodexEnterpriseNetworkProxy, saved.CodexEnterpriseNetworkProxy);
+        Assert.Equal("old-secret", saved.CodexGatewayBearerToken);
+        Assert.Equal("api", saved.CodexLlmProxyMode);
+    }
+
+    [Theory]
+    [InlineData("http://localhost:456/llm/anthropic", global::TokenSaver.LlmProxyUpstream.Unavailable)]
+    [InlineData("http://127.0.0.1:456/llm/openai/v1", global::TokenSaver.LlmProxyUpstream.Unavailable)]
+    [InlineData("https://user:secret@corp.example/v1", "https://user:secret@corp.example/v1")]
+    public void InheritedRelayDoesNotLoopAndInvalidDestinationIsNotSilentlyDropped(string inherited, string expected)
+    {
+        Assert.Equal(expected, LlmProxySettingsService.ResolveGateway("", inherited));
+    }
+
+    [Fact]
+    public void CapturedUpstreamIsUsedOnlyBehindARelayAndNeverGrantsASavedCredential()
+    {
+        var settings = ProxyOn();
+        settings.ClaudeGatewayBearerToken = "dormant-secret";
+        var nested = LlmProxySettingsService.Resolve(settings,
+            inheritedClaudeBaseUrl: "http://localhost:456/llm/anthropic", capturedClaudeUpstream: "https://corporate.example/anthropic");
+        Assert.Equal("https://corporate.example/anthropic", nested.ClaudeEnterpriseNetworkProxy);
+        Assert.Empty(nested.ClaudeGatewayBearerToken);
+        Assert.Equal("https://new.example/v1", LlmProxySettingsService.ResolveGateway("", "https://new.example/v1", "https://old.example/v1"));
+        Assert.Equal("https://saved.example/v1", LlmProxySettingsService.ResolveGateway("https://saved.example/v1", "http://localhost:456/llm/anthropic", null));
+    }
+
     /// <summary>All proxies and savers explicitly on, so each test varies one thing.</summary>
     private static Settings ProxyOn(List<string>? stageOverride = null) => new()
     {

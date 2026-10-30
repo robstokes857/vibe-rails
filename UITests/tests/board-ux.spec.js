@@ -6,6 +6,59 @@ const IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAw
 const DESCRIPTION = 'Repro screenshot\n![Screenshot.png](attachment:att_image)\n<img src=x onerror="window.__injected=true">';
 
 for (const width of [1440, 390]) {
+    test(`lanes collapse, preserve scrolling and restore after reload at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 700 });
+        let card;
+        const columns = ['Ready', 'Review', 'Done'].map((name, position) => ({
+            id: position ? `col_${position}` : 'col_ready', name, position, boardId: 'brd_main', color: '#3b82f6'
+        }));
+        const requests = await openBoard(page, { columns, onCard: value => { card = value; } });
+        const cards = Array.from({ length: 24 }, (_, position) => ({
+            ...card, id: `card_${position}`, position, title: `Work item ${position}`
+        }));
+        await page.route('**/api/v1/board/cards?**', route => route.fulfill({ json: { cards } }));
+        await page.evaluate(() => window.app.boardController.refresh());
+        const lane = page.locator('.board-lane[data-column-id="col_ready"]');
+        const list = lane.locator('.board-lane-list');
+        const hide = lane.getByRole('button', { name: 'Hide Ready lane', exact: true });
+        const show = lane.getByRole('button', { name: 'Show Ready lane', exact: true });
+        const expandedWidth = (await lane.boundingBox()).width;
+        await list.evaluate(element => { element.scrollTop = 180; });
+        await expect.poll(() => list.evaluate(element => element.scrollTop)).toBe(180);
+        await hide.click();
+        await expect(show).toBeFocused();
+        await expect(show).toHaveAttribute('aria-expanded', 'false');
+        await expect(list).toBeHidden();
+        await expect(lane.locator('.board-lane-agents-button')).toBeHidden();
+        await expect(show.locator('.board-card-count')).toHaveText('24');
+        expect((await lane.boundingBox()).width).toBe(52);
+        expect(expandedWidth).toBeGreaterThan(250);
+        await page.evaluate(() => window.app.boardController.refresh());
+        await expect(show).toBeVisible();
+        await show.click();
+        await expect(hide).toBeFocused();
+        await expect(list).toBeVisible();
+        await expect.poll(() => list.evaluate(element => element.scrollTop)).toBe(180);
+        await hide.click();
+        await page.reload();
+        await expect(page.locator('#app-content #vb-terminal-panel')).toBeVisible();
+        await page.getByRole('navigation').getByRole('button', { name: /^Board(?: —.*)?$/ }).click();
+        await expect(show).toBeVisible();
+        await expect(list).toBeHidden();
+        await page.screenshot({ path: testInfo.outputPath(`collapsed-lane-${width}.png`) });
+        await show.focus();
+        await page.keyboard.press('Enter');
+        await expect(hide).toBeFocused();
+        await expect(hide).toHaveAttribute('aria-expanded', 'true');
+        await expect(list).toBeVisible();
+        await expect(lane.locator('.board-card')).toHaveCount(24);
+        expect(await page.evaluate(() => JSON.parse(localStorage.getItem('viberails.board.collapsedLanes.v1')))).toEqual([]);
+        expect(requests.filter(request => request.path.startsWith('/api/v1/board/')
+            && request.method !== 'GET' && request.path !== '/api/v1/board/cards/activity')).toEqual([]);
+    });
+}
+
+for (const width of [1440, 390]) {
     test(`GitHub links preserve card drafts at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 950 });
         let card;

@@ -55,7 +55,7 @@ public static class LlmProxyRoutes
             var events = context.RequestServices.GetRequiredService<ILlmProxyEventSink>();
             var target = await LlmProxyRelay.ApplyEnterpriseGatewayAsync(
                 context, events, "Codex proxy", BuildOpenAiUri(context.Request, settings.CodexLlmProxyMode),
-                settings.CodexEnterpriseNetworkProxy, OpenAiApiPath(settings.CodexLlmProxyMode));
+                settings.CodexEnterpriseNetworkProxy, OpenAiApiPath(context.Request, settings.CodexLlmProxyMode));
             if (target is null)
                 return;
             await LlmProxyRelay.HandleAsync(
@@ -68,7 +68,10 @@ public static class LlmProxyRoutes
                 "Codex proxy",
                 bodyTransform: transform,
                 context.RequestAborted,
-                exchangeSink);
+                exchangeSink,
+                string.IsNullOrWhiteSpace(settings.CodexEnterpriseNetworkProxy) ? null : settings.CodexGatewayBearerToken,
+                settings.CodexGatewayAuthMode,
+                settings.CodexGatewayApiKeyHeader);
         }).WithName("LlmOpenAiProxy");
     }
 
@@ -93,4 +96,12 @@ public static class LlmProxyRoutes
         CodexLlmProxySettings.NormalizeMode(mode) == CodexLlmProxySettings.ModeApi
             ? "/v1"
             : "/backend-api/codex";
+
+    // A running terminal keeps the path chosen at launch even after Settings changes its
+    // auth mode. Strip that actual path when sending to a gateway, not the new launch mode.
+    private static string OpenAiApiPath(HttpRequest request, string mode) =>
+        request.Path.StartsWithSegments(LlmProxyCodexConfig.OpenAiProxyPath + "/backend-api/codex")
+            ? "/backend-api/codex"
+            : request.Path.StartsWithSegments(LlmProxyCodexConfig.OpenAiProxyPath + "/v1")
+                ? "/v1" : OpenAiApiPath(mode);
 }

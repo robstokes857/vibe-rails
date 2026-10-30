@@ -6,6 +6,7 @@ import { getToastTheme, setToastTheme } from './toast-service.js';
 import { PrReviewerSettingsPanel } from './settings-pr-reviewer.js';
 import { BoardApi } from './board-api.js';
 import { contextEditorSection, mountContextEditor } from './board-settings.js';
+import { applyGatewaySettings, gatewayCredentialEdits, initGatewaySettings } from './settings-enterprise-gateway.js';
 
 export class SettingsController {
     constructor(app) {
@@ -241,7 +242,8 @@ export class SettingsController {
                             grokTokenSaverToggle?.checked ?? true,
                             clearApiKey,
                             createVibeStoryTrackingToggle?.checked ?? true,
-                            createVibeStoryTrackingCustomEnvsToggle?.checked ?? false
+                            createVibeStoryTrackingCustomEnvsToggle?.checked ?? false,
+                            gatewayCredentialEdits(root)
                         );
                         if (savedSettings) {
                             await this._reconcileSavedApiKey(savedSettings, linkedKeyVersion);
@@ -259,6 +261,7 @@ export class SettingsController {
                 });
             }
 
+            initGatewaySettings(root, settings);
             this._initSettingsDirtyTracking(root);
             this._initEnterpriseProxyTests(root);
 
@@ -276,7 +279,7 @@ export class SettingsController {
         }
     }
 
-    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexEnterpriseNetworkProxy, codexLlmProxyMode, claudeEnterpriseNetworkProxy, openCodeEnterpriseNetworkProxy, grokEnterpriseNetworkProxy, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, clearApiKey = false, createVibeStoryTracking = true, createVibeStoryTrackingCustomEnvs = false) {
+    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexEnterpriseNetworkProxy, codexLlmProxyMode, claudeEnterpriseNetworkProxy, openCodeEnterpriseNetworkProxy, grokEnterpriseNetworkProxy, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, clearApiKey = false, createVibeStoryTracking = true, createVibeStoryTrackingCustomEnvs = false, gatewayCredentials = {}) {
         try {
             const previous = this.app.appSettings || {};
             // A new gateway receives that CLI's traffic and credentials; clearing one does not
@@ -292,6 +295,7 @@ export class SettingsController {
             if (sensitive && presenceProof === null) return null;
             const savedSettings = await this.app.apiCall('/api/v1/settings', 'POST', {
                 presenceProof,
+                ...gatewayCredentials,
                 remoteAccess: remoteAccess,
                 apiKey: apiKey,
                 useVsCodeTheme: useVsCodeTheme,
@@ -472,6 +476,14 @@ export class SettingsController {
             '#setting-create-vibe-story-tracking',
             '#setting-create-vibe-story-tracking-custom-envs',
             '#setting-computer-name',
+            '#setting-codex-gateway-auth-mode',
+            '#setting-codex-gateway-api-key-header',
+            '#setting-claude-gateway-auth-mode',
+            '#setting-claude-gateway-api-key-header',
+            '#setting-codex-gateway-token',
+            '#setting-codex-gateway-token-clear',
+            '#setting-claude-gateway-token',
+            '#setting-claude-gateway-token-clear',
             '#setting-codex-enterprise-network-proxy',
             'input[name="setting-codex-llm-proxy-mode"]',
             '#setting-claude-enterprise-network-proxy',
@@ -490,6 +502,7 @@ export class SettingsController {
         const valueOf = (selector) => root.querySelector(selector)?.value || '';
 
         return JSON.stringify({
+            ...gatewayCredentialEdits(root),
             remoteAccess: isChecked('#setting-remote-access'),
             apiKey: valueOf('#setting-api-key'),
             useVsCodeTheme: isChecked('#setting-use-vscode-theme'),
@@ -626,6 +639,7 @@ export class SettingsController {
         if (codexTokenSaverToggle) codexTokenSaverToggle.checked = settings.codexTokenSaverEnabled !== false;
         if (opencodeTokenSaverToggle) opencodeTokenSaverToggle.checked = settings.openCodeTokenSaverEnabled !== false;
         if (grokTokenSaverToggle) grokTokenSaverToggle.checked = settings.grokTokenSaverEnabled !== false;
+        applyGatewaySettings(root, settings);
     }
 
     _getCodexLlmProxyMode(root) {

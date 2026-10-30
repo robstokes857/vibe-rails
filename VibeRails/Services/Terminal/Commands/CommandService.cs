@@ -277,32 +277,42 @@ public class CommandService : ICommandService
         // added by TerminalRunner intentionally continue to target the root agent-tool API.
         if (useCodexProxy)
         {
+            environment[LlmProxyUpstream.CodexVariable] = LlmProxyUpstream.Capture(proxySettings.CodexEnterpriseNetworkProxy);
             AddProxyContactDetails(environment, LlmProxyProvider.Codex, sessionId);
+            if (UsesGatewayCredential(proxySettings.CodexEnterpriseNetworkProxy, proxySettings.CodexGatewayBearerToken))
+                environment[LlmProxyCodexConfig.GatewayAuthVariable] = LlmProxyCodexConfig.GatewayAuthPlaceholder;
         }
 
         // If Claude proxying is enabled separately, route Claude Code's Anthropic API traffic
         // through the local LLM proxy. Keep it independent from Codex's subscription/API setting:
         // Claude may use API tokens while Codex uses a ChatGPT subscription.
-        // Skip if the selected environment already points Claude somewhere (base URL OR custom
-        // headers): respect the user's explicit Anthropic config instead of clobbering it — the
-        // proxy owns both variables together, so a partial overwrite would drop their headers.
-        // An inherited ANTHROPIC_BASE_URL is kept too unless a Claude gateway is configured.
+        // Preserve custom routing unless Settings supplies a complete gateway+credential choice.
+        // With that choice, route through TokenSaver and retain the other custom headers.
+        // The settings snapshot routes inherited ANTHROPIC_BASE_URL through the relay too.
         // The same bundle carries ENABLE_TOOL_SEARCH=true: a custom base URL otherwise makes
         // Claude Code load every MCP tool schema up front (see LlmProxyClaudeConfig).
         if (proxySettings.ClaudeLlmProxyEnabled
             && llm == LLM.Claude
-            && !environment.ContainsKey(LlmProxyClaudeConfig.BaseUrlVariable)
-            && !environment.ContainsKey(LlmProxyClaudeConfig.CustomHeadersVariable)
-            && !KeepsOwnApiBase(LlmProxyClaudeConfig.BaseUrlVariable, proxySettings.ClaudeEnterpriseNetworkProxy))
+            && (UsesGatewayCredential(proxySettings.ClaudeEnterpriseNetworkProxy, proxySettings.ClaudeGatewayBearerToken)
+                || (!environment.ContainsKey(LlmProxyClaudeConfig.BaseUrlVariable)
+                    && !environment.ContainsKey(LlmProxyClaudeConfig.CustomHeadersVariable))))
         {
+            environment[LlmProxyUpstream.ClaudeVariable] = LlmProxyUpstream.Capture(proxySettings.ClaudeEnterpriseNetworkProxy);
             var claudeProxyEnv = LlmProxyClaudeConfig.BuildClaudeProxyEnvironment(
                 _llmProxyContext.ApiBaseUrl,
                 _llmProxyContext.SessionToken,
                 _llmProxyContext.TabToken,
                 sessionId,
-                enterpriseGateway: !string.IsNullOrWhiteSpace(proxySettings.ClaudeEnterpriseNetworkProxy));
+                enterpriseGateway: !string.IsNullOrWhiteSpace(proxySettings.ClaudeEnterpriseNetworkProxy),
+                additionalHeaders: environment.GetValueOrDefault(LlmProxyClaudeConfig.CustomHeadersVariable)
+                    ?? Environment.GetEnvironmentVariable(LlmProxyClaudeConfig.CustomHeadersVariable));
             foreach (var kvp in claudeProxyEnv)
                 environment[kvp.Key] = kvp.Value;
+            if (UsesGatewayCredential(proxySettings.ClaudeEnterpriseNetworkProxy, proxySettings.ClaudeGatewayBearerToken))
+            {
+                environment["ANTHROPIC_AUTH_TOKEN"] = LlmProxyCodexConfig.GatewayAuthPlaceholder;
+                environment["ANTHROPIC_API_KEY"] = "";
+            }
             AddProxyContactDetails(environment, LlmProxyProvider.Claude, sessionId);
         }
 
@@ -456,6 +466,12 @@ public class CommandService : ICommandService
         environment[LocalLlmProxyContext.BaseUrlVariable] = _llmProxyContext.ApiBaseUrl;
         environment[LocalLlmProxyContext.SessionTokenVariable] = _llmProxyContext.SessionToken;
         environment[LocalLlmProxyContext.TabTokenVariable] = _llmProxyContext.TabToken;
+        // The CLI's first hop is loopback even when the upstream gateway needs HTTP_PROXY.
+        // Preserve the caller's exclusions and keep that local hop out of the corporate proxy.
+        var noProxy = MergeLoopbackNoProxy(environment.GetValueOrDefault("NO_PROXY"),
+            environment.GetValueOrDefault("no_proxy"), Environment.GetEnvironmentVariable("NO_PROXY"),
+            Environment.GetEnvironmentVariable("no_proxy"));
+        environment["NO_PROXY"] = environment["no_proxy"] = noProxy;
         // The terminal-session correlation value: Codex and Grok resolve it by name at request time
         // (env_http_headers), so one variable serves both. Omitted when there is no session — those
         // exchanges intentionally record a NULL session id rather than a guessed one.
@@ -463,6 +479,11 @@ public class CommandService : ICommandService
             environment[LocalLlmProxyContext.SessionIdVariable] = sessionId.Trim();
         _llmProxySessionState.RecordProxiedLaunch(provider);
     }
+
+    internal static string MergeLoopbackNoProxy(params string?[] values) => string.Join(",",
+        values.SelectMany(value => (value ?? "").Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+            .Concat(["localhost", "127.0.0.1", "::1", "[::1]"])
+            .Distinct(StringComparer.OrdinalIgnoreCase));
 
     /// <summary>
     /// One-time merge of <c>env_http_headers</c> into the user's <c>~/.grok/config.toml</c>
@@ -531,7 +552,8 @@ public class CommandService : ICommandService
             proxySettings.CodexLlmProxyMode,
             LocalLlmProxyContext.SessionTokenVariable,
             LocalLlmProxyContext.TabTokenVariable,
-            string.IsNullOrWhiteSpace(sessionId) ? null : LocalLlmProxyContext.SessionIdVariable);
+            string.IsNullOrWhiteSpace(sessionId) ? null : LocalLlmProxyContext.SessionIdVariable,
+            gatewayBearerAuth: UsesGatewayCredential(proxySettings.CodexEnterpriseNetworkProxy, proxySettings.CodexGatewayBearerToken));
         if (extraArgs is not { Length: > 0 })
             return proxyArgs;
 
@@ -566,9 +588,13 @@ public class CommandService : ICommandService
         LlmProxySettings proxySettings)
     {
         if (!proxySettings.CodexLlmProxyEnabled || llm != LLM.Codex
-            || ShouldSkipCodexProxy(extraArgs)
-            || KeepsOwnApiBase(OpenAiBaseUrlVariable, proxySettings.CodexEnterpriseNetworkProxy))
+            || ShouldSkipCodexProxy(extraArgs))
             return false;
+
+        // A gateway plus credential entered in Settings is a complete routing choice. It must
+        // not silently bypass TokenSaver because an older custom provider remains in config.toml.
+        if (UsesGatewayCredential(proxySettings.CodexEnterpriseNetworkProxy, proxySettings.CodexGatewayBearerToken))
+            return true;
 
         // A provider selected in config.toml is as intentional as a -c model_provider override.
         // Replacing it loses the gateway, env_key and transport options (e.g. websockets=false).
@@ -595,30 +621,8 @@ public class CommandService : ICommandService
         return true;
     }
 
-    // Codex's built-in OpenAI provider reads this. Routing replaces that provider, so an
-    // inherited value would otherwise be ignored.
-    private const string OpenAiBaseUrlVariable = "OPENAI_BASE_URL";
-
-    /// <summary>
-    /// True when this process's environment already points the CLI at its own API base (a
-    /// corporate gateway, typically) and no Enterprise Network Proxy is set for that provider.
-    /// Routing would replace that base with the provider default, sending the work somewhere
-    /// the user did not choose, so the CLI keeps its own setting and bypasses the relay. A
-    /// configured gateway is the explicit opt-in to route through VibeRails to it instead.
-    /// A VibeRails relay URL inherited from an enclosing managed tab does not count.
-    /// </summary>
-    private static bool KeepsOwnApiBase(string variable, string enterpriseNetworkProxy)
-    {
-        if (!string.IsNullOrWhiteSpace(enterpriseNetworkProxy))
-            return false;
-        var inherited = Environment.GetEnvironmentVariable(variable);
-        return !string.IsNullOrWhiteSpace(inherited) && !IsVibeRailsRelay(inherited);
-    }
-
-    private static bool IsVibeRailsRelay(string baseUrl) =>
-        LlmProxyBaseUrl.TryNormalizeLoopback(baseUrl, out var normalized)
-        && Uri.TryCreate(normalized, UriKind.Absolute, out var uri)
-        && uri.AbsolutePath.StartsWith("/llm/", StringComparison.OrdinalIgnoreCase);
+    private static bool UsesGatewayCredential(string gateway, string token) =>
+        !string.IsNullOrWhiteSpace(gateway) && !string.IsNullOrWhiteSpace(token);
 
     private static bool ShouldSkipCodexProxy(string[]? extraArgs)
     {

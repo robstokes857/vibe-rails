@@ -24,6 +24,18 @@ namespace Tests.Services.LlmProxy;
 [Collection("ProcessEnvIsolation")]
 public class LlmProxyClaudeConfigTests : IDisposable
 {
+    [Fact]
+    public void CorporateHeadersArePreservedWhileInheritedLocalCredentialsAreReplaced()
+    {
+        var headers = LlmProxyClaudeConfig.BuildCustomHeaders("new-session", "new-tab", "new-terminal",
+            "Authorization: Bearer corporate-token\r\nX-Gateway-Project: team\r\nviberails_session: old-session\nVIBERAILS_TAB: old-tab\nviberails_terminal_session: old-terminal");
+        Assert.Contains("Authorization: Bearer corporate-token\n", headers);
+        Assert.Contains("X-Gateway-Project: team\n", headers);
+        Assert.Contains("viberails_session: new-session", headers);
+        Assert.Contains("viberails_tab: new-tab", headers);
+        Assert.DoesNotContain("old-", headers);
+    }
+
     private readonly string? _originalFakeCliFlag;
 
     public LlmProxyClaudeConfigTests()

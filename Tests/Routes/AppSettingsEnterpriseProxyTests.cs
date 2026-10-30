@@ -45,7 +45,9 @@ public sealed class AppSettingsEnterpriseProxyTests
             var oldClient = read with
             {
                 CodexEnterpriseNetworkProxy = null, ClaudeEnterpriseNetworkProxy = null,
-                OpenCodeEnterpriseNetworkProxy = null, GrokEnterpriseNetworkProxy = null
+                OpenCodeEnterpriseNetworkProxy = null, GrokEnterpriseNetworkProxy = null,
+                CodexGatewayAuthMode = null, CodexGatewayApiKeyHeader = null,
+                ClaudeGatewayAuthMode = null, ClaudeGatewayApiKeyHeader = null
             };
             var preserved = AppSettingsRoutes.UpdateSettings(oldClient, store);
             Assert.Equal(saved.CodexEnterpriseNetworkProxy, preserved.CodexEnterpriseNetworkProxy);
@@ -57,7 +59,54 @@ public sealed class AppSettingsEnterpriseProxyTests
             Assert.Equal("", cleared.CodexEnterpriseNetworkProxy);
             Assert.Equal(saved.ClaudeEnterpriseNetworkProxy, cleared.ClaudeEnterpriseNetworkProxy);
 
+            var credentialResponse = AppSettingsRoutes.UpdateSettings(oldClient with
+            {
+                CodexEnterpriseNetworkProxy = "https://genai.example.test/v1",
+                CodexGatewayBearerToken = "Bearer codex-secret",
+                ClaudeGatewayBearerToken = "claude-secret"
+            }, store);
+            Assert.True(credentialResponse.HasCodexGatewayBearerToken);
+            Assert.True(credentialResponse.HasClaudeGatewayBearerToken);
+            Assert.Null(credentialResponse.CodexGatewayBearerToken);
+            Assert.Null(credentialResponse.ClaudeGatewayBearerToken);
+            Assert.DoesNotContain("codex-secret", System.Text.Json.JsonSerializer.Serialize(credentialResponse));
+            Assert.Equal("codex-secret", store.LoadFresh().CodexGatewayBearerToken);
+            Assert.Equal("api", store.LoadFresh().CodexLlmProxyMode);
+            AppSettingsRoutes.UpdateSettings(oldClient with { ClaudeGatewayBearerToken = "" }, store);
+            Assert.Equal("claude-secret", store.LoadFresh().ClaudeGatewayBearerToken);
+            AppSettingsRoutes.UpdateSettings(oldClient with { ClearCodexGatewayBearerToken = true }, store);
+            Assert.Empty(store.LoadFresh().CodexGatewayBearerToken);
+            Assert.Equal("claude-secret", store.LoadFresh().ClaudeGatewayBearerToken);
+
+            var apiKeyResponse = AppSettingsRoutes.UpdateSettings(oldClient with
+            {
+                CodexGatewayAuthMode = "api-key", CodexGatewayApiKeyHeader = " X-Corporate-Key ",
+                CodexGatewayBearerToken = "raw-corporate-key"
+            }, store);
+            Assert.Equal("api-key", apiKeyResponse.CodexGatewayAuthMode);
+            Assert.Equal("X-Corporate-Key", apiKeyResponse.CodexGatewayApiKeyHeader);
+            Assert.Null(apiKeyResponse.CodexGatewayBearerToken);
+            Assert.Equal("raw-corporate-key", store.LoadFresh().CodexGatewayBearerToken);
+            AppSettingsRoutes.UpdateSettings(oldClient, store);
+            Assert.Equal("api-key", store.LoadFresh().CodexGatewayAuthMode);
+            Assert.Equal("X-Corporate-Key", store.LoadFresh().CodexGatewayApiKeyHeader);
+
             var before = File.ReadAllText(Path.Combine(directory, "settings.json"));
+            Assert.Throws<ArgumentException>(() => AppSettingsRoutes.UpdateSettings(oldClient with
+            {
+                CodexGatewayApiKeyHeader = "Host", CodexGatewayBearerToken = "must-not-save"
+            }, store));
+            Assert.Equal(before, File.ReadAllText(Path.Combine(directory, "settings.json")));
+            Assert.Throws<ArgumentException>(() => AppSettingsRoutes.UpdateSettings(oldClient with
+            {
+                CodexGatewayBearerToken = "secret\r\nInjected: header"
+            }, store));
+            Assert.Equal(before, File.ReadAllText(Path.Combine(directory, "settings.json")));
+            Assert.Throws<ArgumentException>(() => AppSettingsRoutes.UpdateSettings(oldClient with
+            {
+                CodexEnterpriseNetworkProxy = "", CodexGatewayBearerToken = "secret"
+            }, store));
+            Assert.Equal(before, File.ReadAllText(Path.Combine(directory, "settings.json")));
             Assert.Throws<ArgumentException>(() => AppSettingsRoutes.UpdateSettings(oldClient with
             {
                 CodexEnterpriseNetworkProxy = "https://valid.example/v1",

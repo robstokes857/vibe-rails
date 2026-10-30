@@ -75,6 +75,7 @@ const CARD_TYPES = [
 ];
 const LANE_COLORS = ['#64748b', '#3b82f6', '#06b6d4', '#f59e0b', '#10b981', '#a855f7', '#ec4899'];
 const FILTERS_STORAGE_KEY = 'viberails.board.filters.v1';
+const COLLAPSED_LANES_STORAGE_KEY = 'viberails.board.collapsedLanes.v1';
 // The last board the user looked at (see board-selection.js).
 const BOARD_STORAGE_KEY = BOARD_SELECTION_STORAGE_KEY;
 const RASTER_DATA_URL_RE = /^data:image\/(?:png|jpeg|gif|webp);base64,/i;
@@ -134,6 +135,8 @@ export class BoardController {
         this._activityDisposers = [];
         this._activityGeneration = 0;
         this._startingCards = new Map();
+        this.collapsedLaneIds = this.readCollapsedLaneIds();
+        this._laneScrollTops = new Map();
         BoardApi.attach(app);
         this.laneAgents = new BoardLaneAgents(app, agent => this.goToCardAutomation(agent.cardId, agent.terminalSessionId || agent.sessionId));
         // The lane card's assignee menu (VIBE-145): rows wear the same brand marks as the chips.
@@ -539,6 +542,29 @@ export class BoardController {
         } catch {
             // Storage blocked: filters simply do not survive a reload.
         }
+    }
+
+    readCollapsedLaneIds() {
+        try {
+            const saved = JSON.parse(localStorage.getItem(COLLAPSED_LANES_STORAGE_KEY));
+            return new Set(Array.isArray(saved) ? saved.filter(id => typeof id === 'string') : []);
+        } catch {
+            return new Set();
+        }
+    }
+
+    toggleLane(columnId) {
+        if (!this.state.columns.some(column => column.id === columnId)) return;
+        if (this.collapsedLaneIds.has(columnId)) this.collapsedLaneIds.delete(columnId);
+        else this.collapsedLaneIds.add(columnId);
+        try {
+            localStorage.setItem(COLLAPSED_LANES_STORAGE_KEY, JSON.stringify([...this.collapsedLaneIds]));
+        } catch {
+            // Storage blocked: collapsing still works for this view.
+        }
+        this.renderLanes();
+        this.queryAll('[data-board-action="toggle-lane"]')
+            .find(button => button.dataset.columnId === columnId && !button.closest('[hidden]'))?.focus({ preventScroll: true });
     }
 
     // ============================================
@@ -990,7 +1016,8 @@ export class BoardController {
         const html = this.state.columns
             .slice()
             .sort((a, b) => a.position - b.position)
-            .map((column, index) => {
+            .map(column => {
+                const collapsed = this.collapsedLaneIds.has(column.id);
                 const cards = visible
                     .filter(card => card.columnId === column.id)
                     .sort((a, b) => Number(Boolean(b.flagged)) - Number(Boolean(a.flagged))
@@ -1004,23 +1031,38 @@ export class BoardController {
                     || `<p class="board-lane-empty">${escapeHtml(this.emptyLaneCopy(column, total > 0))}</p>`;
 
                 return `
-                    <section class="board-lane" data-column-id="${escapeHtml(column.id)}"
+                    <section class="board-lane${collapsed ? ' is-collapsed' : ''}" data-column-id="${escapeHtml(column.id)}"
                         style="--lane-color:${escapeHtml(column.color)}">
                         ${this.laneAgents.button(column)}
-                        <header class="board-lane-head">
+                        <header class="board-lane-head" ${collapsed ? 'hidden' : ''}>
                             <button type="button" class="board-lane-grip" title="Drag to reorder this lane"
                                 aria-label="Reorder ${escapeHtml(column.name)}">
                                 <i class="fa-solid fa-grip-vertical" aria-hidden="true"></i>
                             </button>
                             <h2 class="board-lane-title">${escapeHtml(column.name)}</h2>
                             <span class="board-card-count" title="Cards in lane">${total}</span>
+                            <button type="button" class="board-icon-btn" data-board-action="toggle-lane"
+                                data-column-id="${escapeHtml(column.id)}" title="Hide lane"
+                                aria-label="Hide ${escapeHtml(column.name)} lane" aria-expanded="true"
+                                aria-controls="board-lane-cards-${escapeHtml(column.id)}">
+                                <i class="fa-solid fa-angles-left" aria-hidden="true"></i>
+                            </button>
                             <button type="button" class="board-icon-btn" data-board-action="edit-lane"
                                 data-column-id="${escapeHtml(column.id)}" title="Lane settings"
                                 aria-label="Settings for ${escapeHtml(column.name)}">
                                 <i class="fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>
                             </button>
                         </header>
-                        <div class="board-lane-list" data-column-id="${escapeHtml(column.id)}">${list}${more}</div>
+                        <button type="button" class="board-lane-restore" data-board-action="toggle-lane"
+                            data-column-id="${escapeHtml(column.id)}" title="Show ${escapeHtml(column.name)} lane"
+                            aria-label="Show ${escapeHtml(column.name)} lane" aria-expanded="false"
+                            aria-controls="board-lane-cards-${escapeHtml(column.id)}" ${collapsed ? '' : 'hidden'}>
+                            <i class="fa-solid fa-angles-right" aria-hidden="true"></i>
+                            <span class="board-card-count" title="Cards in lane">${total}</span>
+                            <span class="board-lane-restore-name">${escapeHtml(column.name)}</span>
+                        </button>
+                        <div class="board-lane-list" id="board-lane-cards-${escapeHtml(column.id)}"
+                            data-column-id="${escapeHtml(column.id)}" ${collapsed ? 'hidden' : ''}>${list}${more}</div>
                     </section>`;
             })
             .join('');
@@ -1036,6 +1078,7 @@ export class BoardController {
         this.bindDragAndDrop();
         this.queryAll('.board-lane-list').forEach(list => {
             list.addEventListener('scroll', () => {
+                if (list.hidden) return;
                 if (list.scrollHeight - list.scrollTop - list.clientHeight < 240) {
                     void this.loadMoreCards(list.dataset.columnId);
                 }
@@ -1102,7 +1145,11 @@ export class BoardController {
     captureScroll() {
         const map = { board: this.query('[data-board-canvas]')?.scrollLeft || 0, lanes: {} };
         this.queryAll('.board-lane').forEach(lane => {
-            map.lanes[lane.dataset.columnId] = lane.querySelector('.board-lane-list')?.scrollTop || 0;
+            const id = lane.dataset.columnId;
+            if (!lane.classList.contains('is-collapsed')) {
+                this._laneScrollTops.set(id, lane.querySelector('.board-lane-list')?.scrollTop || 0);
+            }
+            map.lanes[id] = this._laneScrollTops.get(id) || 0;
         });
         return map;
     }
@@ -1141,7 +1188,7 @@ export class BoardController {
         this.queryAll('.board-lane-list').forEach(list => {
             this.sortables.push(window.Sortable.create(list, {
                 group: 'board-cards',
-                disabled: this.hasActiveFilters(),
+                disabled: list.hidden || this.hasActiveFilters(),
                 animation,
                 draggable: '.board-card',
                 ghostClass: 'is-ghost',
@@ -1305,6 +1352,9 @@ export class BoardController {
                 break;
             case 'edit-lane':
                 this.openLaneEditor(trigger.dataset.columnId);
+                break;
+            case 'toggle-lane':
+                this.toggleLane(trigger.dataset.columnId);
                 break;
             case 'new-board':
                 this.openBoardEditor(null);

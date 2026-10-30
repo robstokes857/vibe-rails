@@ -69,7 +69,10 @@ public static class LlmAnthropicProxyRoutes
                 "Claude proxy",
                 transform,
                 context.RequestAborted,
-                exchangeSink);
+                exchangeSink,
+                string.IsNullOrWhiteSpace(settings.ClaudeEnterpriseNetworkProxy) ? null : settings.ClaudeGatewayBearerToken,
+                settings.ClaudeGatewayAuthMode,
+                settings.ClaudeGatewayApiKeyHeader);
         }).WithName("LlmAnthropicProxy");
     }
 }

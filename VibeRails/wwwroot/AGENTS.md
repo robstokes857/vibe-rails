@@ -229,9 +229,15 @@ with the server's 40-current-attachment contract.
 The `board` nav destination (`board-template` in index.html, `BoardController`) is a lane board
 for the current project. It rides the `.vb-rules-workspace-active` flowing shell, so the lanes
 fill the viewport height and the board scrolls sideways while the page itself does not. Lanes are
-`flex: 1 1 0` with a 232px floor: they share the width evenly and only start scrolling once they
+`flex: 1 1 0` with a 252px floor: they share the width evenly and only start scrolling once they
 cannot all fit. The lane group's `min-width: min-content` keeps its trailing Add lane button
 after all lanes, including on empty boards with more lanes than fit in the viewport.
+
+Each lane header offers **Hide lane**, collapsing it to a 52px strip with its name, card count
+and **Show lane** button. Collapsed lane IDs are a browser-only preference in localStorage
+`viberails.board.collapsedLanes.v1`; cards, lane order and Automations are unchanged. Refreshes
+retain the collapsed state and in-view lane scroll positions. Hidden lists cannot receive dragged
+cards or trigger infinite scrolling; expanding restores the ordinary lane controls and keyboard focus.
 
 The lane editor keeps its preset colour swatches and offers a native **Custom colour** picker
 for any RGB colour, with the selected hex value beside it. Both controls stay in sync when
@@ -879,6 +885,19 @@ next request; auth-mode edits apply to newly launched terminals. Each field's **
 `/api/v1/settings/enterprise-network-proxy/test` without the loading overlay; its result line
 clears on edit, and a suggested corrected URL is applied as an ordinary (dirty) edit. Saving
 shows the server's validation message. See `TokenSaver/README.md`.
+
+Codex/Claude also expose write-only gateway credential inputs and explicit removal checkboxes
+(`settings-enterprise-gateway.js`). Empty fields preserve saved tokens; responses expose only
+`has*GatewayBearerToken`, never masks or secrets. These edits participate in the same Save/dirty
+tracking flow. Route status shows the saved URL, inherited backend environment URL, or provider
+default and the TokenSaver switch state. An inherited URL can be adopted before saving a token;
+inherited traffic itself already uses TokenSaver. Connectivity tests remain credential-free.
+Each provider selects Bearer or raw API-key-header mode, with a configurable header name and a
+placeholder-only header preview. Auth mode and header name participate in save/restore/dirty
+tracking; switching the mode never clears a typed key. Route text explicitly shows CLI → Token
+Saver → destination and marks unsaved routing changes as a preview.
+The route line is labelled **Default managed route** and names the CLI overrides that can bypass
+it; it is configuration guidance, not evidence that a running session used the relay.
 
 The token-savings meter sits at the far right of the terminal controls bar and is owned by
 `terminal-token-compression.js`. The per-LLM on/off switches live in Settings (Claude, Codex,

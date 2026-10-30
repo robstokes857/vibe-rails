@@ -53,9 +53,19 @@ public static class LlmProxyClaudeConfig
     /// process command line.
     /// </summary>
     public static string BuildCustomHeaders(
-        string sessionToken, string tabToken, string? terminalSessionId = null)
+        string sessionToken, string tabToken, string? terminalSessionId = null, string? additionalHeaders = null)
     {
         var builder = new StringBuilder();
+        // Preserve corporate gateway headers inherited by the backend, but replace any local
+        // contact inherited from an enclosing VibeRails terminal with this session's contact.
+        foreach (var line in (additionalHeaders ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var name = line.Split(':', 2)[0].Trim();
+            if (name.Equals(SessionHeaderName, StringComparison.OrdinalIgnoreCase)
+                || name.Equals(TabHeaderName, StringComparison.OrdinalIgnoreCase)
+                || name.Equals(TerminalSessionHeaderName, StringComparison.OrdinalIgnoreCase)) continue;
+            builder.Append(line.TrimEnd('\r')).Append('\n');
+        }
         builder.Append(SessionHeaderName).Append(": ").Append(sessionToken).Append('\n');
         builder.Append(TabHeaderName).Append(": ").Append(tabToken);
         if (!string.IsNullOrWhiteSpace(terminalSessionId))
@@ -74,12 +84,12 @@ public static class LlmProxyClaudeConfig
     /// </summary>
     public static IReadOnlyDictionary<string, string> BuildClaudeProxyEnvironment(
         string apiBaseUrl, string sessionToken, string tabToken, string? terminalSessionId = null,
-        bool enterpriseGateway = false)
+        bool enterpriseGateway = false, string? additionalHeaders = null)
     {
         var environment = new Dictionary<string, string>
         {
             [BaseUrlVariable] = BuildAnthropicBaseUrl(apiBaseUrl),
-            [CustomHeadersVariable] = BuildCustomHeaders(sessionToken, tabToken, terminalSessionId)
+            [CustomHeadersVariable] = BuildCustomHeaders(sessionToken, tabToken, terminalSessionId, additionalHeaders)
         };
         if (!enterpriseGateway)
             environment[ToolSearchVariable] = ToolSearchEnabledValue;

@@ -326,6 +326,8 @@ public sealed class BackupFilesCredentialTests : IDisposable
     [InlineData("refresh_token")]
     [InlineData("OPENAI_KEY")]
     [InlineData("GITHUB_PAT")]
+    [InlineData("CodexGatewayBearerToken")]
+    [InlineData("ClaudeGatewayBearerToken")]
     public void CommonCredentialPropertyNamesAreRedacted(string name) =>
         Assert.True(CredentialRedactor.IsCredentialProperty(name.Replace("_", "").Replace("-", "").ToLowerInvariant()));
 

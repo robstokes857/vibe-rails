@@ -35,6 +35,9 @@ public partial class CommandServiceTests : IDisposable
     private readonly string? _originalGrokProxyUrl;
     private readonly string? _originalOpenAiBaseUrl;
     private readonly string? _originalAnthropicBaseUrl;
+    private readonly string? _originalCodexUpstream;
+    private readonly string? _originalClaudeUpstream;
+    private readonly string? _originalCodexHome;
     private readonly string _originalEnvPath;
 
     public CommandServiceTests()
@@ -54,8 +57,14 @@ public partial class CommandServiceTests : IDisposable
         // A developer's own gateway variables would make routing defer to them.
         _originalOpenAiBaseUrl = Environment.GetEnvironmentVariable("OPENAI_BASE_URL");
         _originalAnthropicBaseUrl = Environment.GetEnvironmentVariable(LlmProxyClaudeConfig.BaseUrlVariable);
+        _originalCodexUpstream = Environment.GetEnvironmentVariable(LlmProxyUpstream.CodexVariable);
+        _originalClaudeUpstream = Environment.GetEnvironmentVariable(LlmProxyUpstream.ClaudeVariable);
+        _originalCodexHome = Environment.GetEnvironmentVariable("CODEX_HOME");
         Environment.SetEnvironmentVariable("OPENAI_BASE_URL", null);
         Environment.SetEnvironmentVariable(LlmProxyClaudeConfig.BaseUrlVariable, null);
+        Environment.SetEnvironmentVariable(LlmProxyUpstream.CodexVariable, null);
+        Environment.SetEnvironmentVariable(LlmProxyUpstream.ClaudeVariable, null);
+        Environment.SetEnvironmentVariable("CODEX_HOME", null);
 
         // The env-name launch tests resolve GetEnvironmentVariables -> ParserConfigs.GetEnvPath(),
         // a process-global that is empty unless startup set it. Pin it to a temp root here so those
@@ -78,6 +87,9 @@ public partial class CommandServiceTests : IDisposable
             _originalGrokProxyUrl);
         Environment.SetEnvironmentVariable("OPENAI_BASE_URL", _originalOpenAiBaseUrl);
         Environment.SetEnvironmentVariable(LlmProxyClaudeConfig.BaseUrlVariable, _originalAnthropicBaseUrl);
+        Environment.SetEnvironmentVariable(LlmProxyUpstream.CodexVariable, _originalCodexUpstream);
+        Environment.SetEnvironmentVariable(LlmProxyUpstream.ClaudeVariable, _originalClaudeUpstream);
+        Environment.SetEnvironmentVariable("CODEX_HOME", _originalCodexHome);
         ParserConfigs.SetEnvPath(_originalEnvPath);
     }
 
@@ -870,7 +882,9 @@ public partial class CommandServiceTests : IDisposable
         Action<Mock<IFileService>>? configureFiles = null,
         Func<Settings>? storyTrackingSettings = null,
         string codexEnterpriseNetworkProxy = "",
-        string claudeEnterpriseNetworkProxy = "")
+        string claudeEnterpriseNetworkProxy = "",
+        string codexGatewayBearerToken = "",
+        string claudeGatewayBearerToken = "")
     {
         var fileService = new Mock<IFileService>();
         fileService.Setup(x => x.GetUserProfilePath()).Returns(Path.Combine(Path.GetTempPath(), "viberails-grok-tests"));
@@ -911,8 +925,10 @@ public partial class CommandServiceTests : IDisposable
                 GrokLlmProxyMode: grokLlmProxyMode)
             {
                 GrokLlmProxyLaunchEnabled = grokLlmProxyEnabled,
-                CodexEnterpriseNetworkProxy = codexEnterpriseNetworkProxy,
-                ClaudeEnterpriseNetworkProxy = claudeEnterpriseNetworkProxy
+                CodexEnterpriseNetworkProxy = LlmProxySettingsService.ResolveGateway(codexEnterpriseNetworkProxy, Environment.GetEnvironmentVariable("OPENAI_BASE_URL"), Environment.GetEnvironmentVariable(LlmProxyUpstream.CodexVariable)),
+                ClaudeEnterpriseNetworkProxy = LlmProxySettingsService.ResolveGateway(claudeEnterpriseNetworkProxy, Environment.GetEnvironmentVariable(LlmProxyClaudeConfig.BaseUrlVariable), Environment.GetEnvironmentVariable(LlmProxyUpstream.ClaudeVariable)),
+                CodexGatewayBearerToken = codexGatewayBearerToken,
+                ClaudeGatewayBearerToken = claudeGatewayBearerToken
             });
         return new CommandService(
             envService,

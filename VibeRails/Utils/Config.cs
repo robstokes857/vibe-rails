@@ -51,6 +51,18 @@ public class Settings
     public string CodexEnterpriseNetworkProxy { get; set; } = string.Empty;
     /// <summary>Optional enterprise API base URL for Claude, including its API path.</summary>
     public string ClaudeEnterpriseNetworkProxy { get; set; } = string.Empty;
+    /// <summary>Optional bearer credential used only for the saved Codex gateway.</summary>
+    public string CodexGatewayBearerToken { get; set; } = string.Empty;
+    /// <summary>Optional bearer credential used only for the saved Claude gateway.</summary>
+    public string ClaudeGatewayBearerToken { get; set; } = string.Empty;
+    /// <summary>Gateway credential format: bearer or api-key. Existing settings default to bearer.</summary>
+    public string CodexGatewayAuthMode { get; set; } = "bearer";
+    /// <summary>HTTP header receiving the raw Codex gateway API key.</summary>
+    public string CodexGatewayApiKeyHeader { get; set; } = "api-key";
+    /// <summary>Gateway credential format: bearer or api-key.</summary>
+    public string ClaudeGatewayAuthMode { get; set; } = "bearer";
+    /// <summary>HTTP header receiving the raw Claude gateway API key.</summary>
+    public string ClaudeGatewayApiKeyHeader { get; set; } = "api-key";
     /// <summary>Optional enterprise API base URL for OpenCode's Z.AI and xAI providers.</summary>
     public string OpenCodeEnterpriseNetworkProxy { get; set; } = string.Empty;
     /// <summary>Optional enterprise API base URL for native Grok.</summary>

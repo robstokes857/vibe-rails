@@ -6,6 +6,9 @@ public static class LlmProxyCodexConfig
     public const string OpenAiProviderName = "viberails_openai_proxy";
     public const string SessionHeaderName = "viberails_session";
     public const string TabHeaderName = "viberails_tab";
+    /// <summary>Non-secret local placeholder; the relay supplies the actual gateway credential.</summary>
+    public const string GatewayAuthVariable = "VIBERAILS_GATEWAY_AUTH";
+    public const string GatewayAuthPlaceholder = "viberails-local-gateway";
 
     /// <summary>
     /// Correlation header carrying the terminal session id (<c>Sessions.Id</c>) that produced the
@@ -38,20 +41,22 @@ public static class LlmProxyCodexConfig
         string mode,
         string sessionTokenEnvVar,
         string tabTokenEnvVar,
-        string? terminalSessionEnvVar = null)
+        string? terminalSessionEnvVar = null,
+        bool gatewayBearerAuth = false)
     {
         var normalizedMode = CodexLlmProxySettings.NormalizeMode(mode);
         var baseUrl = normalizedMode == CodexLlmProxySettings.ModeApi
             ? BuildOpenAiBaseUrl(apiBaseUrl)
             : BuildChatGptBaseUrl(apiBaseUrl);
-        return BuildOpenAiProviderArgs(baseUrl, sessionTokenEnvVar, tabTokenEnvVar, terminalSessionEnvVar);
+        return BuildOpenAiProviderArgs(baseUrl, sessionTokenEnvVar, tabTokenEnvVar, terminalSessionEnvVar, gatewayBearerAuth);
     }
 
     private static string[] BuildOpenAiProviderArgs(
         string baseUrl,
         string sessionTokenEnvVar,
         string tabTokenEnvVar,
-        string? terminalSessionEnvVar)
+        string? terminalSessionEnvVar,
+        bool gatewayBearerAuth)
     {
         var args = new List<string>
         {
@@ -64,12 +69,18 @@ public static class LlmProxyCodexConfig
             "--config",
             $"model_providers.{OpenAiProviderName}.wire_api=\"responses\"",
             "--config",
-            $"model_providers.{OpenAiProviderName}.requires_openai_auth=true",
+            $"model_providers.{OpenAiProviderName}.requires_openai_auth={(!gatewayBearerAuth).ToString().ToLowerInvariant()}",
             "--config",
             $"model_providers.{OpenAiProviderName}.env_http_headers.{SessionHeaderName}=\"{sessionTokenEnvVar}\"",
             "--config",
             $"model_providers.{OpenAiProviderName}.env_http_headers.{TabHeaderName}=\"{tabTokenEnvVar}\""
         };
+
+        if (gatewayBearerAuth)
+        {
+            args.Add("--config");
+            args.Add($"model_providers.{OpenAiProviderName}.env_key=\"{GatewayAuthVariable}\"");
+        }
 
         if (!string.IsNullOrWhiteSpace(terminalSessionEnvVar))
         {

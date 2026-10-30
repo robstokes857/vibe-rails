@@ -15,7 +15,11 @@ public sealed class LlmProxySettingsService(
 {
     public LlmProxySettings GetSettings()
     {
-        return Resolve(Config.LoadFresh(), tokenSaverPauseState.IsPaused);
+        return Resolve(Config.LoadFresh(), tokenSaverPauseState.IsPaused,
+            Environment.GetEnvironmentVariable("OPENAI_BASE_URL"),
+            Environment.GetEnvironmentVariable(LlmProxyClaudeConfig.BaseUrlVariable),
+            Environment.GetEnvironmentVariable(LlmProxyUpstream.CodexVariable),
+            Environment.GetEnvironmentVariable(LlmProxyUpstream.ClaudeVariable));
     }
 
     /// <summary>
@@ -60,7 +64,11 @@ public sealed class LlmProxySettingsService(
 
     internal static LlmProxySettings Resolve(
         Settings settings,
-        bool tokenSaverPaused = false)
+        bool tokenSaverPaused = false,
+        string? inheritedCodexBaseUrl = null,
+        string? inheritedClaudeBaseUrl = null,
+        string? capturedCodexUpstream = null,
+        string? capturedClaudeUpstream = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -85,7 +93,9 @@ public sealed class LlmProxySettingsService(
         // is what makes one gate cover Claude, Codex, OpenCode and anything added later.
         return new LlmProxySettings(
             CodexLlmProxyEnabled: true,
-            CodexLlmProxyMode: CodexLlmProxySettings.NormalizeMode(settings.CodexLlmProxyMode),
+            CodexLlmProxyMode: !string.IsNullOrWhiteSpace(settings.CodexEnterpriseNetworkProxy)
+                && !string.IsNullOrWhiteSpace(settings.CodexGatewayBearerToken)
+                ? CodexLlmProxySettings.ModeApi : CodexLlmProxySettings.NormalizeMode(settings.CodexLlmProxyMode),
             ClaudeLlmProxyEnabled: true,
             OpenCodeLlmProxyEnabled: true,
             ClaudeTokenSaverEnabled: !tokenSaverPaused && claudeSaver,
@@ -98,10 +108,20 @@ public sealed class LlmProxySettingsService(
         {
             OpenCodeLlmProxyLaunchEnabled = true,
             GrokLlmProxyLaunchEnabled = true,
-            CodexEnterpriseNetworkProxy = settings.CodexEnterpriseNetworkProxy,
-            ClaudeEnterpriseNetworkProxy = settings.ClaudeEnterpriseNetworkProxy,
+            CodexEnterpriseNetworkProxy = ResolveGateway(settings.CodexEnterpriseNetworkProxy, inheritedCodexBaseUrl, capturedCodexUpstream),
+            ClaudeEnterpriseNetworkProxy = ResolveGateway(settings.ClaudeEnterpriseNetworkProxy, inheritedClaudeBaseUrl, capturedClaudeUpstream),
+            CodexGatewayBearerToken = string.IsNullOrWhiteSpace(settings.CodexEnterpriseNetworkProxy) ? "" : settings.CodexGatewayBearerToken,
+            ClaudeGatewayBearerToken = string.IsNullOrWhiteSpace(settings.ClaudeEnterpriseNetworkProxy) ? "" : settings.ClaudeGatewayBearerToken,
+            CodexGatewayAuthMode = settings.CodexGatewayAuthMode,
+            CodexGatewayApiKeyHeader = settings.CodexGatewayApiKeyHeader,
+            ClaudeGatewayAuthMode = settings.ClaudeGatewayAuthMode,
+            ClaudeGatewayApiKeyHeader = settings.ClaudeGatewayApiKeyHeader,
             OpenCodeEnterpriseNetworkProxy = settings.OpenCodeEnterpriseNetworkProxy,
             GrokEnterpriseNetworkProxy = settings.GrokEnterpriseNetworkProxy
         };
     }
+
+    /// <summary>Keep the destination behind an inherited relay, or fail closed when it is unknown.</summary>
+    internal static string ResolveGateway(string? saved, string? inherited, string? captured = null) =>
+        LlmProxyUpstream.Resolve(saved, inherited, captured);
 }

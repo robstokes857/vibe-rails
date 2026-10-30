@@ -384,12 +384,14 @@ so a concurrent save can't tear a single body's rewrite in half.
 Each provider has an optional enterprise **API gateway base URL**, such as
 `https://genai.example.test/v1`. The request path is CLI → VibeRails local proxy
 (and Token Saver, when enabled) → enterprise gateway → the gateway's chosen backend.
-The gateway must accept the provider's API format and existing CLI credentials; it owns any
+The gateway must accept the provider's API format and either existing CLI credentials or a saved
+gateway bearer token (Codex/Claude); it owns any
 translation/routing to Bedrock or another service. This setting is not an HTTP CONNECT proxy.
 
 `CodexEnterpriseNetworkProxy`, `ClaudeEnterpriseNetworkProxy`,
 `OpenCodeEnterpriseNetworkProxy`, and `GrokEnterpriseNetworkProxy` live in settings.json.
-Blank uses the normal provider destination. A supplied base replaces the provider API root,
+Blank uses the inherited API base for Codex/Claude when present, otherwise the normal provider
+destination. A supplied base replaces the provider API root,
 including its API path: `/v1/responses`, `/backend-api/codex/responses`, and
 `/api/paas/v4/chat/completions` become `<base>/responses` or `<base>/chat/completions`, so
 OpenAI-style bases are used exactly as `OPENAI_BASE_URL` would be (usually ending in `/v1`).
@@ -417,13 +419,39 @@ that does not validate fails closed with a plain-text 502 naming the setting; it
 back to the public provider. Retired `*LlmProxyEnabled` values remain stored for older
 versions, but cannot disable routing in the current version.
 
-**A base URL the CLI already has wins while the gateway is blank.** If VibeRails inherits
+**An inherited base URL remains the destination while the saved gateway is blank.** If VibeRails inherits
 `OPENAI_BASE_URL` (Codex) or `ANTHROPIC_BASE_URL` (Claude) and that provider's gateway is
-blank, the launch leaves the CLI's own setting alone and skips the relay (no Token Saver),
-because routing would otherwise send the work to the public provider instead of the
-user's gateway. Setting the gateway is the opt-in to route through VibeRails to it. A loopback
-`/llm/...` URL inherited from an enclosing VibeRails tab does not count. Not yet covered: a
-Codex `model_provider` chosen in `config.toml` (outside a `--profile`) is still replaced.
+blank, its requests now pass through the local relay and TokenSaver to that inherited destination.
+The inherited URL is validated on each request; invalid values fail closed. Managed Codex/Claude
+launches capture the original validated upstream in `VIBERAILS_CODEX_UPSTREAM_BASE` /
+`VIBERAILS_CLAUDE_UPSTREAM_BASE` before injecting local routing. An explicit `provider-default`
+marker distinguishes a known public-provider launch from missing metadata. Nested backends
+recover this destination behind an inherited `/llm/...` URL, without recursively forwarding to
+the parent relay. Missing/invalid metadata fails closed; set the gateway in Settings or restart
+VibeRails outside the old parent terminal. A saved gateway plus credential
+takes precedence over a saved Codex provider or Claude environment URL. Without that complete
+choice, custom provider configurations retain their routing; explicit Codex launch profiles or
+provider overrides also retain their routing.
+Managed proxy launches preserve existing `NO_PROXY` exclusions and add loopback hosts to both
+uppercase/lowercase variables. Only the CLI → local relay hop bypasses the HTTP proxy; the relay
+continues using the backend's corporate/system proxy for the gateway request.
+
+Codex and Claude each have **Gateway authentication** controls in Settings → LLMs. Choose
+**Bearer token** for `Authorization: Bearer <token>`, or **API key in a named header** for
+`api-key: <key>`, `x-api-key: <key>`, or your gateway's custom header. API-key mode sends the
+key unchanged without `Bearer `. Routing/content/cookie/proxy/local-auth header names are
+reserved. Paste a bearer token alone or with `Bearer `. Save a gateway URL with the credential; **Use environment URL in
+Settings** can adopt an inherited URL first. The token is saved in the private local settings file,
+never returned by the API, and used only for that saved gateway. Blank input preserves a token;
+**Remove saved credential** clears it. Clearing the saved URL retains the dormant token but cannot send
+it to the public provider or an inherited URL. Token replacement takes effect on the next request;
+start a new terminal when changing authentication between CLI credentials and a gateway token.
+Codex switches to API auth automatically when a gateway credential is saved. Both CLIs receive only a
+non-secret local placeholder, and the relay supplies the real token after compression, replacing
+provider Authorization/API-key/account headers. TokenSaver is the in-process body transform before
+that HTTP send; it is not a separate server. Proxy activity is reported even if no compression
+was possible. The Test button checks connectivity without a
+token; a 401/403 means the endpoint answered, not that the saved token was accepted.
 
 ### Pausing — the agent's escape hatch
 

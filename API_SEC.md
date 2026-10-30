@@ -102,8 +102,15 @@ rejected `/llm/grok` sidecar. See [TokenSaver](TokenSaver/README.md).
 
 The authenticated Settings API also accepts an optional Enterprise Network Proxy API base URL
 per provider. This explicitly selects the enterprise gateway that receives that provider's
-requests, including its provider credentials, after the local Token Saver step. Blank retains
-the fixed provider destination; a configured base replaces the provider API root without allowing
+requests, including its provider credentials, after the local Token Saver step. Blank uses a
+non-VibeRails `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` inherited by the backend for Codex/Claude,
+or the fixed provider destination when absent. Inherited destinations pass through the same
+validation and TokenSaver path; an invalid value fails closed. Managed launches carry a validated
+original upstream base (or an explicit provider-default marker) in provider-specific environment
+metadata before replacing the CLI base with the local relay. A nested backend recovers that
+destination instead of forwarding into the parent relay. A parent `/llm/` URL without valid
+metadata fails closed with 502; it must never select a public provider while retaining corporate
+authentication. Captured metadata contains no URL credentials. A configured base replaces the provider API root without allowing
 request paths to replace its origin. HTTP/HTTPS only, no URL credentials, query or fragment;
 invalid values are refused atomically on save, before any confirmation is requested. A stored
 value that does not validate (hand-edited) fails closed with 502 after the two-header gate and
@@ -112,6 +119,29 @@ never falls back to a public provider. Pointing a gateway at a new host requires
 local-header/cookie stripping, TLS validation, no-redirect transport and the frozen listener
 topology are unchanged. Claude's base may be given with or without `/v1`; `/v1` is added when
 missing, because Claude Code appends it to `ANTHROPIC_BASE_URL` itself.
+
+Codex and Claude gateway credentials are write-only Settings fields, stored in the private
+local settings file. Responses report only whether a token is saved. Blank/omitted input preserves
+it; explicit clear removes it. A new token requires an explicitly saved gateway URL (an inherited
+URL alone is insufficient), and clearing that URL makes the saved token dormant. The token is
+bound to the explicitly configured gateway: it is never applied to an inherited destination or a
+public-provider fallback. A gateway change retains the existing presence check. At the outbound
+hop only, the relay removes the CLI's Authorization/API-key/account-routing headers and sends
+either `Authorization: Bearer <token>` or the raw key in the configured API-key header. Header
+names must be HTTP field tokens; routing, content, cookie, proxy and local VibeRails credential
+headers are reserved. Invalid saved authentication configuration fails closed before the send.
+CLI processes receive a non-secret placeholder for login-free gateway launches, never the saved
+token. Codex uses API authentication for these launches. Tokens, including pasted `Bearer `
+prefixes, are normalized and reject whitespace/control characters before any settings write.
+Raw API-key mode does not add or strip an authentication scheme. New fields default to Bearer
+mode, and omitted fields preserve saved choices for older clients. An explicit saved gateway
+plus credential takes precedence over a saved Codex provider or Claude environment base, so
+those configurations cannot silently bypass TokenSaver; explicit Codex launch overrides retain
+their own routing.
+Managed proxy launches extend the CLI's existing `NO_PROXY`/`no_proxy` exclusions with loopback
+hosts so an inherited corporate HTTP proxy cannot intercept the authenticated local relay hop.
+This launch-only environment change does not affect the backend's upstream proxy configuration.
+The connectivity Test remains credential-free and does not verify the token.
 
 Root-only `POST /api/v1/settings/enterprise-network-proxy/test` is a deliberate, bounded
 outbound probe of a user-entered URL (saved or not, so it does not change routing and needs

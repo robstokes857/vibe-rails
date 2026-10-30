@@ -1118,9 +1118,33 @@
                                 <button class="btn btn-outline-secondary" type="button" data-enterprise-proxy-test="codex"
                                     title="Send one request without credentials through your network proxy and check that the gateway answers">Test</button>
                             </div>
-                            <small id="setting-codex-enterprise-network-proxy-help" class="form-text text-muted">Optional enterprise API base URL: the value you would give <code>OPENAI_BASE_URL</code>, usually ending in <code>/v1</code>. Leave blank to use the provider’s default. Requests use the CLI’s existing credentials.</small>
+                            <small id="setting-codex-enterprise-network-proxy-help" class="form-text text-muted">Optional enterprise API base URL: the value you would give <code>OPENAI_BASE_URL</code>, usually ending in <code>/v1</code>. Leave blank to use OPENAI_BASE_URL from the environment, or the provider default. Traffic passes through TokenSaver when enabled.</small>
                             <div id="setting-codex-enterprise-network-proxy-result" class="small mt-1" role="status" aria-live="polite" hidden></div>
                         </div>
+                        <div class="mb-3">
+                            <label class="form-label" for="setting-codex-gateway-auth-mode">Gateway authentication</label>
+                            <select class="form-select mb-2" id="setting-codex-gateway-auth-mode">
+                                <option value="bearer">Bearer token (Authorization header)</option>
+                                <option value="api-key">API key in a named header</option>
+                            </select>
+                            <div id="setting-codex-gateway-api-key-row" class="mb-2" hidden>
+                                <label class="form-label" for="setting-codex-gateway-api-key-header">API key header name</label>
+                                <input class="form-control" type="text" id="setting-codex-gateway-api-key-header"
+                                    value="api-key" placeholder="api-key, x-api-key, or your company's header" maxlength="128" autocomplete="off" spellcheck="false">
+                            </div>
+                            <p class="small mb-2">Sent to the gateway: <code id="setting-codex-gateway-auth-preview">Authorization: Bearer &lt;token&gt;</code></p>
+                            <label class="form-label" id="setting-codex-gateway-token-label" for="setting-codex-gateway-token">Gateway bearer token</label>
+                            <input class="form-control" type="password" id="setting-codex-gateway-token"
+                                autocomplete="new-password" spellcheck="false" aria-describedby="setting-codex-gateway-token-help">
+                            <small id="setting-codex-gateway-token-help" class="form-text text-muted">Optional. Enter the API key or token for your gateway. Bearer tokens may include “Bearer”. Saved locally; leave blank to keep it. Start a new terminal after changing authentication. The Test button checks connectivity without credentials.</small>
+                            <div class="form-check mt-2">
+                                <input class="form-check-input" type="checkbox" id="setting-codex-gateway-token-clear">
+                                <label class="form-check-label" for="setting-codex-gateway-token-clear">Remove saved credential</label>
+                            </div>
+                        </div>
+                        <p id="setting-codex-gateway-route" class="small text-muted text-break" role="status"></p>
+                        <p id="setting-codex-gateway-route-caveat" class="small text-muted">Custom CLI profiles or provider overrides can bypass this route. A saved gateway and credential here override saved provider settings for ordinary launches.</p>
+                        <button type="button" class="btn btn-outline-secondary btn-sm mb-3" data-use-inherited-gateway="codex" hidden>Use environment URL in Settings</button>
                         <div class="mb-3">
                             <div class="form-label mb-2">Codex auth type</div>
                             <div class="form-check mb-3">
@@ -1135,9 +1159,9 @@
                                 <input class="form-check-input" type="radio" name="setting-codex-llm-proxy-mode"
                                     id="setting-codex-llm-proxy-mode-api" value="api">
                                 <label class="form-check-label" for="setting-codex-llm-proxy-mode-api">
-                                    API usage
+                                    API key or corporate gateway
                                 </label>
-                                <small class="form-text text-muted d-block">Use this when Codex is signed in with an OpenAI API key and billed through Platform usage.</small>
+                                <small class="form-text text-muted d-block">Use this for an OpenAI API key or a corporate gateway. A saved gateway credential takes precedence over CLI credentials and saved provider settings.</small>
                             </div>
                         </div>
                         <small class="form-text text-muted">Gateway changes apply to the next request. Auth type changes apply to new terminals.</small>
@@ -1159,10 +1183,34 @@
                                 <button class="btn btn-outline-secondary" type="button" data-enterprise-proxy-test="claude"
                                     title="Send one request without credentials through your network proxy and check that the gateway answers">Test</button>
                             </div>
-                            <small id="setting-claude-enterprise-network-proxy-help" class="form-text text-muted">Optional enterprise gateway URL, with or without <code>/v1</code>; both forms work. Leave blank to use the provider’s default. Requests use Claude’s existing credentials (set <code>ANTHROPIC_AUTH_TOKEN</code> when the gateway expects a Bearer key).</small>
+                            <small id="setting-claude-enterprise-network-proxy-help" class="form-text text-muted">Optional enterprise gateway URL, with or without <code>/v1</code>; both forms work. Leave blank to use ANTHROPIC_BASE_URL from the environment, or the provider default. Traffic passes through TokenSaver when enabled.</small>
                             <div id="setting-claude-enterprise-network-proxy-result" class="small mt-1" role="status" aria-live="polite" hidden></div>
                         </div>
-                        <small class="form-text text-muted">Gateway changes apply to the next request.</small>
+                        <div class="mb-3">
+                            <label class="form-label" for="setting-claude-gateway-auth-mode">Gateway authentication</label>
+                            <select class="form-select mb-2" id="setting-claude-gateway-auth-mode">
+                                <option value="bearer">Bearer token (Authorization header)</option>
+                                <option value="api-key">API key in a named header</option>
+                            </select>
+                            <div id="setting-claude-gateway-api-key-row" class="mb-2" hidden>
+                                <label class="form-label" for="setting-claude-gateway-api-key-header">API key header name</label>
+                                <input class="form-control" type="text" id="setting-claude-gateway-api-key-header"
+                                    value="api-key" placeholder="api-key, x-api-key, or your company's header" maxlength="128" autocomplete="off" spellcheck="false">
+                            </div>
+                            <p class="small mb-2">Sent to the gateway: <code id="setting-claude-gateway-auth-preview">Authorization: Bearer &lt;token&gt;</code></p>
+                            <label class="form-label" id="setting-claude-gateway-token-label" for="setting-claude-gateway-token">Gateway bearer token</label>
+                            <input class="form-control" type="password" id="setting-claude-gateway-token"
+                                autocomplete="new-password" spellcheck="false" aria-describedby="setting-claude-gateway-token-help">
+                            <small id="setting-claude-gateway-token-help" class="form-text text-muted">Optional. Enter the API key or token for your gateway. Bearer tokens may include “Bearer”. Saved locally; leave blank to keep it. Start a new terminal after changing authentication. The Test button checks connectivity without credentials.</small>
+                            <div class="form-check mt-2">
+                                <input class="form-check-input" type="checkbox" id="setting-claude-gateway-token-clear">
+                                <label class="form-check-label" for="setting-claude-gateway-token-clear">Remove saved credential</label>
+                            </div>
+                        </div>
+                        <p id="setting-claude-gateway-route" class="small text-muted text-break" role="status"></p>
+                        <p id="setting-claude-gateway-route-caveat" class="small text-muted">Custom CLI profiles or provider overrides can bypass this route. A saved gateway and credential here override saved provider settings for ordinary launches.</p>
+                        <button type="button" class="btn btn-outline-secondary btn-sm mb-3" data-use-inherited-gateway="claude" hidden>Use environment URL in Settings</button>
+                        <small class="form-text text-muted">Gateway changes apply to the next request. Authentication changes apply to new terminals.</small>
                     </div>
                 </div>
             </div>
@@ -3536,6 +3584,54 @@
                 .board-view .board-lane.is-drop-target {
                     border-color: var(--color-primary, #3b82f6);
                     background: color-mix(in srgb, var(--color-primary, #3b82f6) 8%, var(--color-bg-surface, #1e1e1e));
+                }
+
+                .board-view .board-lane > [hidden],
+                .board-view .board-lane.is-collapsed > .board-lane-agents-button {
+                    display: none;
+                }
+
+                .board-view .board-lane.is-collapsed {
+                    flex: 0 0 52px;
+                    min-width: 52px;
+                }
+
+                .board-view .board-lane-restore {
+                    display: flex;
+                    flex: 1;
+                    min-height: 0;
+                    flex-direction: column;
+                    align-items: center;
+                    gap: 0.7rem;
+                    width: 100%;
+                    padding: 0.9rem 0.4rem;
+                    border: 0;
+                    border-radius: inherit;
+                    background: transparent;
+                    color: var(--color-text-muted, #94a3b8);
+                    cursor: pointer;
+                }
+
+                .board-view .board-lane-restore:hover {
+                    color: var(--color-text, #f8fafc);
+                    background: var(--color-bg-surface-hover, #2c2c2c);
+                }
+
+                .board-view .board-lane-restore:focus-visible,
+                .board-view .board-icon-btn:focus-visible {
+                    outline: 2px solid var(--color-primary, #3b82f6);
+                    outline-offset: -2px;
+                }
+
+                .board-view .board-lane-restore-name {
+                    writing-mode: vertical-rl;
+                    min-height: 0;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                    font-size: 0.85rem;
+                    font-weight: 700;
+                    color: var(--color-text, #f8fafc);
                 }
 
 

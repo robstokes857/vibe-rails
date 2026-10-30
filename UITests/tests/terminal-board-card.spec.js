@@ -1,8 +1,8 @@
 const { test, expect } = require('@playwright/test');
 
 // Real frontend and xterm with read-only HTTP/WebSocket fixtures; no CLI, snapshots or database.
-async function openTerminal(page) {
-    const tab = { tabId: 'ordinary', sessionId: 'ordinary-session', cli: 'codex', hasActiveSession: true,
+async function openTerminal(page, cli = 'codex') {
+    const tab = { tabId: 'ordinary', sessionId: 'ordinary-session', cli, hasActiveSession: true,
         workingDirectory: 'C:/fixture', createdUTC: '2026-10-19T06:00:00Z' };
     const tabs = new Map([[tab.tabId, tab]]);
     const connections = [];
@@ -36,6 +36,15 @@ async function openTerminal(page) {
         window.app.terminalController.manager.getActiveTab().instance._initialConnectActive
     )).toBe(false);
     return { tabs, connections };
+}
+
+for (const [cli, logo] of [['claude', 'claude-color.svg'], ['codex', 'openai.svg']]) {
+    test(`restored ${cli} terminal uses its provider icon without a saved picker`, async ({ page }) => {
+        await openTerminal(page, cli);
+        const tab = page.locator('#vb-terminal-tab-list [data-tab-id="ordinary"]');
+        await expect(tab.locator('img.vb-tab-brand-logo')).toHaveAttribute('src', new RegExp(logo.replace('.', '\\.')));
+        await expect(tab.locator('.vb-tab-brand-fallback')).toHaveCount(0);
+    });
 }
 
 for (const width of [1280, 390]) {

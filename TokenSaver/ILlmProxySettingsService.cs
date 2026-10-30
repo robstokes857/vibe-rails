@@ -38,6 +38,18 @@ public sealed record LlmProxySettings(
     public string CodexEnterpriseNetworkProxy { get; init; } = string.Empty;
     /// <summary>Optional Claude API gateway base URL, including its API path (usually /v1).</summary>
     public string ClaudeEnterpriseNetworkProxy { get; init; } = string.Empty;
+    /// <summary>Bearer override bound to the explicitly saved Codex gateway, never an inherited URL.</summary>
+    public string CodexGatewayBearerToken { get; init; } = string.Empty;
+    /// <summary>Bearer override bound to the explicitly saved Claude gateway, never an inherited URL.</summary>
+    public string ClaudeGatewayBearerToken { get; init; } = string.Empty;
+    /// <summary>Codex gateway format: bearer or api-key.</summary>
+    public string CodexGatewayAuthMode { get; init; } = "bearer";
+    /// <summary>Header name for Codex API-key authentication.</summary>
+    public string CodexGatewayApiKeyHeader { get; init; } = "api-key";
+    /// <summary>Claude gateway format: bearer or api-key.</summary>
+    public string ClaudeGatewayAuthMode { get; init; } = "bearer";
+    /// <summary>Header name for Claude API-key authentication.</summary>
+    public string ClaudeGatewayApiKeyHeader { get; init; } = "api-key";
     /// <summary>Optional shared API gateway base URL for OpenCode's Z.AI and xAI providers.</summary>
     public string OpenCodeEnterpriseNetworkProxy { get; init; } = string.Empty;
     /// <summary>Optional native Grok API gateway base URL, including its API path.</summary>

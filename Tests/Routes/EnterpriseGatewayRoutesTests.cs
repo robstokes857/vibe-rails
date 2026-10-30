@@ -15,6 +15,74 @@ namespace Tests.Routes;
 
 public sealed class EnterpriseGatewayRoutesTests
 {
+    [Fact]
+    public async Task NestedClaudeSendsInheritedCorporateCredentialsOnlyToTheCapturedGateway()
+    {
+        await Exercise("anthropic", "/llm/anthropic/v1/messages", "messages", "session", "tab",
+            inheritedClaudeBase: "http://127.0.0.1:4321/llm/anthropic",
+            capturedClaudeUpstream: "https://claude.gateway.example");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("https://user:secret@corporate.example/v1")]
+    [InlineData("http://127.0.0.1:4321/llm/anthropic")]
+    public async Task NestedClaudeNeverForwardsCorporateCredentialsWhenItsUpstreamIsUnknown(string? captured)
+    {
+        await Exercise("anthropic", "/llm/anthropic/v1/messages", "messages", "session", "tab",
+            inheritedClaudeBase: "http://127.0.0.1:4321/llm/anthropic", capturedClaudeUpstream: captured,
+            unknownUpstream: true);
+    }
+
+    [Fact]
+    public async Task NestedClaudeUsesPublicProviderOnlyWithAnExplicitDefaultMarker()
+    {
+        await Exercise("anthropic", "/llm/anthropic/v1/messages", "messages", "session", "tab",
+            clearGateway: true, inheritedClaudeBase: "http://127.0.0.1:4321/llm/anthropic",
+            capturedClaudeUpstream: LlmProxyUpstream.ProviderDefault);
+    }
+
+    [Theory]
+    [InlineData("openai", "/llm/openai/v1/responses", "responses", "api-key")]
+    [InlineData("openai", "/llm/openai/v1/responses", "responses", "x-api-key")]
+    [InlineData("anthropic", "/llm/anthropic/v1/messages", "messages", "api-key")]
+    [InlineData("anthropic", "/llm/anthropic/v1/messages", "messages", "X-Corporate-Key")]
+    public async Task RawApiKeyAndTokenSaverUseTheSameGatewayRequest(string provider, string path, string endpoint, string header)
+    {
+        await Exercise(provider, path, endpoint, "session", "tab", bearer: "gateway-secret", compress: true, apiKeyHeader: header);
+    }
+
+    [Fact]
+    public async Task InvalidSavedHeaderFailsClosedBeforeSendingTheCredential()
+    {
+        await Exercise("openai", "/llm/openai/v1/responses", "responses", "session", "tab",
+            bearer: "gateway-secret", apiKeyHeader: "Host", invalidAuth: true);
+    }
+
+    [Fact]
+    public async Task UncompressedGatewayRequestStillReportsProxyActivity()
+    {
+        await Exercise("openai", "/llm/openai/v1/responses", "responses", "session", "tab",
+            bearer: "gateway-secret", apiKeyHeader: "api-key");
+    }
+
+    [Theory]
+    [InlineData("openai", "/llm/openai/v1/responses", "responses")]
+    [InlineData("anthropic", "/llm/anthropic/v1/messages", "messages")]
+    public async Task GatewayBearerOverridesProviderCredentialsAfterTokenSaver(string provider, string path, string endpoint)
+    {
+        await Exercise(provider, path, endpoint, "session", "tab", bearer: "gateway-secret", compress: true);
+    }
+
+    [Theory]
+    [InlineData("openai", "/llm/openai/v1/responses", "responses")]
+    [InlineData("anthropic", "/llm/anthropic/v1/messages", "messages")]
+    public async Task RemovedGatewayNeverReceivesSavedBearerAtPublicProvider(string provider, string path, string endpoint)
+    {
+        await Exercise(provider, path, endpoint, "session", "tab", bearer: "dormant-secret", clearGateway: true);
+    }
+
     [Theory]
     [InlineData("openai", "/llm/openai/v1/responses", "responses")]
     [InlineData("anthropic", "/llm/anthropic/v1/messages", "messages")]
@@ -54,9 +122,18 @@ public sealed class EnterpriseGatewayRoutesTests
             claudeGateway: "https://claude.gateway.example");
     }
 
+    [Fact]
+    public async Task GatewayAuthChangeKeepsAnExistingCodexTerminalEndpoint()
+    {
+        await Exercise("openai", "/llm/openai/backend-api/codex/responses", "responses", "session", "tab",
+            bearer: "gateway-secret");
+    }
+
     private static async Task Exercise(
         string provider, string path, string endpoint, string? session, string? tab, string? storedGateway = null,
-        string? claudeGateway = null)
+        string? claudeGateway = null, string? bearer = null, bool compress = false, bool clearGateway = false,
+        string? apiKeyHeader = null, bool invalidAuth = false, string? inheritedClaudeBase = null,
+        string? capturedClaudeUpstream = null, bool unknownUpstream = false)
     {
         var builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
@@ -79,7 +156,17 @@ public sealed class EnterpriseGatewayRoutesTests
             settings.CodexEnterpriseNetworkProxy = settings.ClaudeEnterpriseNetworkProxy = storedGateway;
             settings.OpenCodeEnterpriseNetworkProxy = settings.GrokEnterpriseNetworkProxy = storedGateway;
         }
-        var snapshot = LlmProxySettingsService.Resolve(settings);
+        settings.CodexGatewayBearerToken = settings.ClaudeGatewayBearerToken = bearer ?? "";
+        if (apiKeyHeader is not null)
+        {
+            settings.CodexGatewayAuthMode = settings.ClaudeGatewayAuthMode = "api-key";
+            settings.CodexGatewayApiKeyHeader = settings.ClaudeGatewayApiKeyHeader = apiKeyHeader;
+        }
+        settings.CodexTokenSaverEnabled = settings.ClaudeTokenSaverEnabled = compress;
+        if (clearGateway) settings.CodexEnterpriseNetworkProxy = settings.ClaudeEnterpriseNetworkProxy = "";
+        if (inheritedClaudeBase is not null) settings.ClaudeEnterpriseNetworkProxy = "";
+        var snapshot = LlmProxySettingsService.Resolve(settings, inheritedClaudeBaseUrl: inheritedClaudeBase,
+            capturedClaudeUpstream: capturedClaudeUpstream);
         var settingsService = new Mock<ILlmProxySettingsService>();
         settingsService.Setup(s => s.GetSettings()).Returns(snapshot);
         var auth = new Mock<ILlmProxyAuthGate>();
@@ -92,7 +179,8 @@ public sealed class EnterpriseGatewayRoutesTests
         builder.Services.AddSingleton(settingsService.Object);
         builder.Services.AddSingleton(auth.Object);
         builder.Services.AddSingleton(clients.Object);
-        builder.Services.AddSingleton(Mock.Of<ILlmProxyEventSink>());
+        var events = new Mock<ILlmProxyEventSink>();
+        builder.Services.AddSingleton(events.Object);
         builder.Services.AddSingleton(Mock.Of<ILlmProxyExchangeSink>());
         await using var app = builder.Build();
         switch (provider)
@@ -113,8 +201,20 @@ public sealed class EnterpriseGatewayRoutesTests
         context.Request.Headers[LlmProxyCodexConfig.TerminalSessionHeaderName] = "local-terminal";
         context.Request.Headers.Cookie = "local-cookie";
         context.Request.Headers.Authorization = "Bearer provider-key";
+        context.Request.Headers["x-api-key"] = "provider-secret";
+        if (inheritedClaudeBase is not null && !clearGateway)
+            context.Request.Headers["x-corporate-key"] = "corporate-secret";
+        context.Request.Headers["chatgpt-account-id"] = "personal-account";
         context.Request.Headers["Proxy-Authorization"] = "local-proxy-key";
-        const string body = "{\"model\":\"enterprise-model\",\"input\":\"unchanged\"}";
+        var body = !compress ? "{\"model\":\"enterprise-model\",\"input\":\"unchanged\"}" : provider == "openai" ? """
+            {"model":"enterprise-model","input":[
+              {"type":"function_call","name":"shell_command","call_id":"c1","arguments":"{}"},
+              {"type":"function_call_output","call_id":"c1","output":"\u001b[31mred\u001b[0m  \r\n"}]}
+            """ : """
+            {"model":"enterprise-model","messages":[
+              {"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]},
+              {"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"\u001b[31mred\u001b[0m  \r\n"}]}]}
+            """;
         context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(body));
         context.Request.ContentLength = context.Request.Body.Length;
         context.Request.ContentType = "application/json";
@@ -128,6 +228,15 @@ public sealed class EnterpriseGatewayRoutesTests
             Assert.Null(handler.Target);
             return;
         }
+        if (unknownUpstream)
+        {
+            Assert.Equal(502, context.Response.StatusCode);
+            Assert.Null(handler.Target);
+            var message = Encoding.UTF8.GetString(((MemoryStream)context.Response.Body).ToArray());
+            Assert.Contains("original upstream destination", message);
+            Assert.DoesNotContain("secret", message);
+            return;
+        }
         if (storedGateway is not null)
         {
             Assert.Equal(502, context.Response.StatusCode);
@@ -135,10 +244,44 @@ public sealed class EnterpriseGatewayRoutesTests
             Assert.Contains("Enterprise Network Proxy", Encoding.UTF8.GetString(((MemoryStream)context.Response.Body).ToArray()));
             return;
         }
+        if (invalidAuth)
+        {
+            Assert.Equal(502, context.Response.StatusCode);
+            Assert.Null(handler.Target);
+            return;
+        }
         var host = provider switch { "openai" => "codex", "anthropic" => "claude", "zai" or "xai" => "opencode", _ => "grok" };
-        Assert.Equal($"https://{host}.gateway.example/v1/{endpoint}?stream=true", handler.Target?.AbsoluteUri);
-        Assert.Equal(body, handler.Body);
-        Assert.Equal("Bearer provider-key", handler.Authorization);
+        Assert.Equal(clearGateway ? $"https://{(provider == "openai" ? "api.openai.com" : "api.anthropic.com")}/v1/{endpoint}?stream=true"
+            : $"https://{host}.gateway.example/v1/{endpoint}?stream=true", handler.Target?.AbsoluteUri);
+        if (compress)
+        {
+            Assert.NotEqual(body, handler.Body);
+            using var transformed = System.Text.Json.JsonDocument.Parse(handler.Body!);
+            var toolOutput = provider == "openai"
+                ? transformed.RootElement.GetProperty("input")[1].GetProperty("output").GetString()
+                : transformed.RootElement.GetProperty("messages")[1].GetProperty("content")[0].GetProperty("content").GetString();
+            // The curated pipeline retains ANSI styling, but removes trailing spaces/newlines.
+            Assert.Equal("\u001b[31mred\u001b[0m", toolOutput);
+            events.Verify(e => e.SavingsMeasured(It.Is<LlmProxySavingsReport>(s => s.BytesAfter < s.BytesBefore)), Times.Once);
+        }
+        else Assert.Equal(body, handler.Body);
+        if (inheritedClaudeBase is not null && !clearGateway)
+        {
+            Assert.Equal("corporate-secret", handler.Headers["x-corporate-key"]);
+            Assert.Equal("provider-secret", handler.Headers["x-api-key"]);
+        }
+        Assert.Equal(bearer is not null && !clearGateway
+            ? apiKeyHeader is null ? $"Bearer {bearer}" : null
+            : "Bearer provider-key", handler.Authorization);
+        if (bearer is not null && !clearGateway)
+        {
+            if (apiKeyHeader is not null)
+                Assert.Equal(bearer, handler.Headers[apiKeyHeader]);
+            if (!string.Equals(apiKeyHeader, "x-api-key", StringComparison.OrdinalIgnoreCase))
+                Assert.False(handler.HasProviderApiKey);
+            Assert.False(handler.HasProviderAccount);
+        }
+        events.Verify(e => e.ProxyActivity(It.IsAny<string>(), "POST", It.IsAny<string>(), "200", It.IsAny<long?>()), Times.Once);
         Assert.Equal(200, context.Response.StatusCode);
         Assert.Equal("data: gateway-response\n\n", Encoding.UTF8.GetString(((MemoryStream)context.Response.Body).ToArray()));
     }
@@ -148,11 +291,17 @@ public sealed class EnterpriseGatewayRoutesTests
         internal Uri? Target;
         internal string? Body;
         internal string? Authorization;
+        internal bool HasProviderApiKey;
+        internal bool HasProviderAccount;
+        internal Dictionary<string, string> Headers = new(StringComparer.OrdinalIgnoreCase);
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
             Target = request.RequestUri;
             Body = await request.Content!.ReadAsStringAsync(token);
             Authorization = request.Headers.Authorization?.ToString();
+            HasProviderApiKey = request.Headers.Contains("x-api-key");
+            HasProviderAccount = request.Headers.Contains("chatgpt-account-id");
+            Headers = request.Headers.ToDictionary(h => h.Key, h => string.Join(",", h.Value), StringComparer.OrdinalIgnoreCase);
             foreach (var name in new[] { "viberails_session", "viberails_tab", "viberails_terminal_session", "Cookie", "Proxy-Authorization" })
                 Assert.False(request.Headers.Contains(name), name);
             return new HttpResponseMessage(HttpStatusCode.OK)

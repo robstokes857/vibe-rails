@@ -15,8 +15,9 @@ public static class AppSettingsRoutes
     public static void Map(WebApplication app, bool allowWrites = true)
     {
         // GET /api/v1/settings - Read current app settings
-        app.MapGet("/api/v1/settings", () =>
+        app.MapGet("/api/v1/settings", (HttpContext context) =>
         {
+            context.Response.Headers.CacheControl = "no-store";
             return Results.Ok(BuildAppSettingsDto(Config.LoadFresh()));
         }).WithName("GetAppSettings");
 
@@ -49,6 +50,8 @@ public static class AppSettingsRoutes
             // Refuse an invalid gateway before presence so a typo never consumes a confirmation.
             if (!EnterpriseNetworkProxiesAreValid(settingsDto))
                 return Results.BadRequest(new ErrorResponse(EnterpriseNetworkProxy.InvalidMessage));
+            try { ValidateGatewayCredentials(settingsDto, settings); }
+            catch (ArgumentException ex) { return Results.BadRequest(new ErrorResponse(ex.Message)); }
             if (RequiresPresence(settingsDto, settings) && !presence.Verify(settingsDto.PresenceProof, settings))
                 return Results.Json(new ErrorResponse("Confirm this change with your current PIN or a fresh dashboard code."), statusCode: 403);
             var result = UpdateSettings(settingsDto, Config.Store, app.Services.GetService<IRemoteHttpRelayClient>());
@@ -97,6 +100,27 @@ public static class AppSettingsRoutes
         && EnterpriseNetworkProxy.TryNormalize(request.OpenCodeEnterpriseNetworkProxy, out _)
         && EnterpriseNetworkProxy.TryNormalize(request.GrokEnterpriseNetworkProxy, out _);
 
+    private static void ValidateGatewayCredentials(AppSettingsDto request, Settings saved)
+    {
+        Validate(request.CodexGatewayBearerToken, request.ClearCodexGatewayBearerToken,
+            request.CodexEnterpriseNetworkProxy ?? saved.CodexEnterpriseNetworkProxy,
+            request.CodexGatewayAuthMode ?? saved.CodexGatewayAuthMode,
+            request.CodexGatewayApiKeyHeader ?? saved.CodexGatewayApiKeyHeader);
+        Validate(request.ClaudeGatewayBearerToken, request.ClearClaudeGatewayBearerToken,
+            request.ClaudeEnterpriseNetworkProxy ?? saved.ClaudeEnterpriseNetworkProxy,
+            request.ClaudeGatewayAuthMode ?? saved.ClaudeGatewayAuthMode,
+            request.ClaudeGatewayApiKeyHeader ?? saved.ClaudeGatewayApiKeyHeader);
+
+        static void Validate(string? token, bool? clear, string? gateway, string mode, string header)
+        {
+            EnterpriseGatewayCredentials.NormalizeMode(mode);
+            EnterpriseGatewayCredentials.NormalizeApiKeyHeader(header);
+            if (clear == true) return;
+            if (EnterpriseGatewayCredentials.NormalizeSecret(token, mode).Length > 0 && string.IsNullOrWhiteSpace(gateway))
+                throw new ArgumentException("Enter and save a gateway URL with its credential.");
+        }
+    }
+
     // The internal store parameter is solely for isolated regression fixtures. Production calls
     // always use Config.Store and therefore the normal application settings path.
     internal static AppSettingsDto UpdateSettings(AppSettingsDto settingsDto, SettingsFile store, IRemoteHttpRelayClient? relay = null)
@@ -113,6 +137,7 @@ public static class AppSettingsRoutes
             // the process's cached copy would silently revert any settings.json edit made since
             // the cache was filled — including flipping the token-saver kill switch back on.
             var settings = store.LoadFresh();
+            ValidateGatewayCredentials(settingsDto, settings);
             // Use the same locked snapshot for PIN readiness and the settings write.
             var remoteAccess = settingsDto.RemoteAccess
                 && !string.IsNullOrWhiteSpace(settings.PinHash) && !string.IsNullOrWhiteSpace(settings.PinSalt);
@@ -160,6 +185,20 @@ public static class AppSettingsRoutes
             if (claudeProxy is not null) settings.ClaudeEnterpriseNetworkProxy = claudeProxy;
             if (openCodeProxy is not null) settings.OpenCodeEnterpriseNetworkProxy = openCodeProxy;
             if (grokProxy is not null) settings.GrokEnterpriseNetworkProxy = grokProxy;
+            if (settingsDto.CodexGatewayAuthMode is not null)
+                settings.CodexGatewayAuthMode = EnterpriseGatewayCredentials.NormalizeMode(settingsDto.CodexGatewayAuthMode);
+            if (settingsDto.ClaudeGatewayAuthMode is not null)
+                settings.ClaudeGatewayAuthMode = EnterpriseGatewayCredentials.NormalizeMode(settingsDto.ClaudeGatewayAuthMode);
+            if (settingsDto.CodexGatewayApiKeyHeader is not null)
+                settings.CodexGatewayApiKeyHeader = EnterpriseGatewayCredentials.NormalizeApiKeyHeader(settingsDto.CodexGatewayApiKeyHeader);
+            if (settingsDto.ClaudeGatewayApiKeyHeader is not null)
+                settings.ClaudeGatewayApiKeyHeader = EnterpriseGatewayCredentials.NormalizeApiKeyHeader(settingsDto.ClaudeGatewayApiKeyHeader);
+            settings.CodexGatewayBearerToken = MergeGatewayToken(settings.CodexGatewayBearerToken,
+                settingsDto.CodexGatewayBearerToken, settingsDto.ClearCodexGatewayBearerToken, settings.CodexGatewayAuthMode);
+            settings.ClaudeGatewayBearerToken = MergeGatewayToken(settings.ClaudeGatewayBearerToken,
+                settingsDto.ClaudeGatewayBearerToken, settingsDto.ClearClaudeGatewayBearerToken, settings.ClaudeGatewayAuthMode);
+            if (!string.IsNullOrWhiteSpace(settingsDto.CodexGatewayBearerToken) && settingsDto.ClearCodexGatewayBearerToken != true)
+                settings.CodexLlmProxyMode = CodexLlmProxySettings.ModeApi;
             // Per-LLM saver toggles, same stale-client guard. Writing an explicit Codex/OpenCode
             // value deliberately severs the pre-split inheritance from the legacy master switch
             // (see Settings) — from then on each LLM stands on its own value.
@@ -275,8 +314,29 @@ public static class AppSettingsRoutes
             CodexEnterpriseNetworkProxy: settings.CodexEnterpriseNetworkProxy,
             ClaudeEnterpriseNetworkProxy: settings.ClaudeEnterpriseNetworkProxy,
             OpenCodeEnterpriseNetworkProxy: settings.OpenCodeEnterpriseNetworkProxy,
-            GrokEnterpriseNetworkProxy: settings.GrokEnterpriseNetworkProxy
+            GrokEnterpriseNetworkProxy: settings.GrokEnterpriseNetworkProxy,
+            HasCodexGatewayBearerToken: !string.IsNullOrEmpty(settings.CodexGatewayBearerToken),
+            HasClaudeGatewayBearerToken: !string.IsNullOrEmpty(settings.ClaudeGatewayBearerToken),
+            CodexInheritedApiBaseUrl: SafeInheritedBase("OPENAI_BASE_URL", LlmProxyUpstream.CodexVariable),
+            ClaudeInheritedApiBaseUrl: SafeInheritedBase(LlmProxyClaudeConfig.BaseUrlVariable, LlmProxyUpstream.ClaudeVariable),
+            CodexGatewayAuthMode: settings.CodexGatewayAuthMode,
+            CodexGatewayApiKeyHeader: settings.CodexGatewayApiKeyHeader,
+            ClaudeGatewayAuthMode: settings.ClaudeGatewayAuthMode,
+            ClaudeGatewayApiKeyHeader: settings.ClaudeGatewayApiKeyHeader
         );
+    }
+
+    private static string MergeGatewayToken(string saved, string? supplied, bool? clear, string mode) =>
+        clear == true ? "" : string.IsNullOrWhiteSpace(supplied) ? saved
+            : EnterpriseGatewayCredentials.NormalizeSecret(supplied, mode);
+
+    private static string? SafeInheritedBase(string variable, string capturedVariable)
+    {
+        var value = LlmProxySettingsService.ResolveGateway("", Environment.GetEnvironmentVariable(variable),
+            Environment.GetEnvironmentVariable(capturedVariable));
+        // Never return an invalid URL that might contain embedded credentials to the browser.
+        return !string.IsNullOrEmpty(value) && EnterpriseNetworkProxy.TryNormalize(value, out var normalized)
+            ? normalized : null;
     }
 
     private static string NormalizeComputerName(string? value) =>

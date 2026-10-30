@@ -1,5 +1,29 @@
 # VibeRails architecture reference
 
+## Corporate gateways for Codex and Claude
+
+`LlmProxySettingsService` resolves each destination from the saved Enterprise Network Proxy,
+then the backend's inherited `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL`, then the provider default.
+Managed launches preserve their original upstream base in provider-specific environment metadata,
+using an explicit marker for the public-provider default. Nested backends resolve an inherited
+loopback `/llm/` URL through that metadata instead of recursing or losing the corporate destination.
+Missing/invalid metadata and invalid external destinations fail closed. Both saved and inherited gateways use the ordinary authenticated local
+relay and the provider's TokenSaver setting. A saved gateway plus credential overrides older
+Codex provider configuration and Claude environment URLs. Without that complete choice, those
+custom configurations retain their routing; explicit Codex launch profiles/providers also retain
+their routing.
+
+The Settings API accepts write-only `CodexGatewayBearerToken` / `ClaudeGatewayBearerToken` edits,
+returns presence flags, and stores credentials in the existing private settings file. Tokens are
+active only with an explicitly saved gateway, never with an inherited URL. The CLI gets a local
+placeholder; the relay adds the real bearer token after compression and strips conflicting
+provider credentials/account headers. Authentication supports Bearer or a raw API key in a
+configurable header (`api-key`, `x-api-key`, or another valid non-reserved name). The existing
+`*GatewayBearerToken` storage keys also hold raw API keys for compatibility. Clearing a gateway
+leaves its credential dormant. No separate TokenSaver server is contacted: the relay runs its
+body transform before sending the HTTP request, and emits activity even for zero savings. See
+[TokenSaver](../TokenSaver/README.md#enterprise-network-proxy) and [API security](../API_SEC.md).
+
 ## Incremental token-savings publishing (VIBE-215)
 
 The existing byte-based `TokenSavings` tally remains unchanged. While a root backend is open,
@@ -640,6 +664,11 @@ See the [viewer integration contract](../VibeRails/wwwroot/js/modules/code-repor
 for data limits, vendor provenance, themes/CSP, lifecycle and regression tests.
 
 ### Vibe Board
+
+Lane visibility is a local browser preference: `BoardController` stores collapsed lane IDs in
+`viberails.board.collapsedLanes.v1`. Hide lane reduces a column to a 52px restore strip with its
+name and card count; Show lane restores its contents and in-view scroll position. This changes
+no Board data or Automation behavior and requires no schema or API changes.
 
 Jira Cloud connection controls live in the board settings modal (`board-jira.js`), bound to
 the edited board ID. They save separately from board metadata; the app Settings page has no

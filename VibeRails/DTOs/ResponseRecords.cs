@@ -1391,7 +1391,20 @@ namespace VibeRails.DTOs
         string? CodexEnterpriseNetworkProxy = null,
         string? ClaudeEnterpriseNetworkProxy = null,
         string? OpenCodeEnterpriseNetworkProxy = null,
-        string? GrokEnterpriseNetworkProxy = null
+        string? GrokEnterpriseNetworkProxy = null,
+        // Write-only credentials. Responses return presence flags, never credential bytes.
+        string? CodexGatewayBearerToken = null,
+        string? ClaudeGatewayBearerToken = null,
+        bool? ClearCodexGatewayBearerToken = null,
+        bool? ClearClaudeGatewayBearerToken = null,
+        bool HasCodexGatewayBearerToken = false,
+        bool HasClaudeGatewayBearerToken = false,
+        string? CodexInheritedApiBaseUrl = null,
+        string? ClaudeInheritedApiBaseUrl = null,
+        string? CodexGatewayAuthMode = null,
+        string? CodexGatewayApiKeyHeader = null,
+        string? ClaudeGatewayAuthMode = null,
+        string? ClaudeGatewayApiKeyHeader = null
     );
     // Append new fields at the END of this record, with a default. Inserting one in the middle
     // shifts every positional argument after it: call sites only fail to compile when the types

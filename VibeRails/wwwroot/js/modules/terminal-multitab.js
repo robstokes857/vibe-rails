@@ -974,10 +974,7 @@ export class TerminalManager {
 
         const instance = new TerminalTab(this, state);
         instance.statusController = new TabStatusController(state, state.ui, {
-            getCliKey: () => {
-                const meta = this.getSelectionMeta(state.selection);
-                return meta.cli || null;
-            },
+            getCliKey: () => this.getTabCliKey(state),
             isActiveTab: () => this.activeTabId === state.id,
             setProgress: (progress) => this.updateTabProgress(state.id, progress),
             notifyReady: () => this._notifyTabReady(state),
@@ -1907,6 +1904,12 @@ export class TerminalManager {
             return false;
         }
         return await tab.instance.connect({ pinnedGeometry: geometry });
+    }
+
+    getTabCliKey(state) {
+        // Board/remote launches have no browser-local picker choice. The running
+        // session owns its identity; the picker is a fallback for unstarted tabs.
+        return lower(state.cli) || this.getSelectionMeta(state.selection).cli || null;
     }
 
     getSelectionMeta(selection) {

@@ -10,6 +10,25 @@ namespace Tests.Services.Terminal;
 
 public partial class CommandServiceTests
 {
+    [Fact]
+    public async Task Codex_ExplicitGatewayCredentialRoutesSavedCorporateProviderThroughTokenSaver()
+    {
+        var service = CreateService(codexLlmProxyEnabled: true,
+            codexEnterpriseNetworkProxy: "https://gateway.example/v1", codexGatewayBearerToken: "saved-secret",
+            configureFiles: files =>
+            {
+                files.Setup(f => f.FileExists(It.IsAny<string>())).Returns(true);
+                files.Setup(f => f.ReadAllTextAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync("model_provider = 'corporate'\n[model_providers.corporate]\nbase_url = 'https://old.example/v1'");
+            });
+        var prepared = await service.PrepareSessionAsync(LLM.Codex, null, null, "hello", sessionId: "gateway-session");
+        Assert.Contains(LlmProxyCodexConfig.OpenAiProviderName, prepared.LaunchCommand);
+        Assert.Contains("http://127.0.0.1:4321/llm/openai/", prepared.LaunchCommand);
+        Assert.Equal(LlmProxyCodexConfig.GatewayAuthPlaceholder, prepared.Environment[LlmProxyCodexConfig.GatewayAuthVariable]);
+        Assert.DoesNotContain("saved-secret", prepared.LaunchCommand);
+        Assert.DoesNotContain("saved-secret", prepared.Environment.Values);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("corporate")]

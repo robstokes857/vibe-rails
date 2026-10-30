@@ -8,6 +8,20 @@ import { TabStatusController, TAB_STATUS } from '../../../VibeRails/wwwroot/js/m
 const modulePath = path.resolve('VibeRails/wwwroot/js/modules/terminal-multitab.js');
 const { TerminalController, TerminalManager, shouldCreateFreshTab, selectBlankPlaceholderTabIds } = await import(pathToFileURL(modulePath).href);
 
+test('remote and restored tabs use the running CLI for their icon without a saved picker', () => {
+    const manager = Object.create(TerminalManager.prototype);
+    manager.app = { data: { environments: [] } };
+    for (const cli of ['Claude', 'Codex', 'OpenCode']) {
+        const state = { cli, hasActiveSession: true, selection: null };
+        assert.equal(manager.getTabCliKey(state), cli.toLowerCase());
+        state.selection = 'base:shell';
+        assert.equal(manager.getTabCliKey(state), cli.toLowerCase(), 'running identity wins over stale browser storage');
+    }
+    assert.equal(manager.getTabCliKey({ cli: null, selection: 'base:claude' }), 'claude');
+    assert.equal(manager.getTabCliKey({ cli: null, selection: 'env:7:codex' }), 'codex');
+    assert.equal(manager.getTabCliKey({ cli: null, selection: null }), null);
+});
+
 test('tab selection acknowledges only the selected tab even before xterm is mounted', async () => {
     const manager = {
         tabs: new Map(), activeTabId: 'previous',

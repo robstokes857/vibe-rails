@@ -101,7 +101,9 @@ internal static class LlmProxyRelay
         context.Response.StatusCode = StatusCodes.Status502BadGateway;
         context.Response.ContentType = "text/plain; charset=utf-8";
         await context.Response.WriteAsync(
-            "VibeRails: the saved Enterprise Network Proxy for this CLI is not a valid HTTP or HTTPS API base URL. Correct or clear it in Settings.",
+            gatewayBaseUrl == LlmProxyUpstream.Unavailable
+                ? "VibeRails: the original upstream destination behind the inherited relay is unavailable. Configure the gateway in Settings or restart VibeRails outside the parent terminal. No request was forwarded."
+                : "VibeRails: the saved Enterprise Network Proxy for this CLI is not a valid HTTP or HTTPS API base URL. Correct or clear it in Settings.",
             context.RequestAborted);
         return null;
     }
@@ -126,7 +128,10 @@ internal static class LlmProxyRelay
         string activitySource,
         ILlmProxyBodyTransform? bodyTransform,
         CancellationToken cancellationToken,
-        ILlmProxyExchangeSink exchanges)
+        ILlmProxyExchangeSink exchanges,
+        string? gatewayBearerToken = null,
+        string gatewayAuthMode = "bearer",
+        string gatewayApiKeyHeader = "api-key")
     {
         if (!IsAuthenticated(context, authGate))
         {
@@ -153,6 +158,21 @@ internal static class LlmProxyRelay
                 context.Request, transformed, recorder, cancellationToken);
 
             using var upstreamRequest = CreateUpstreamRequest(context, target, upstreamBody);
+            if (!string.IsNullOrWhiteSpace(gatewayBearerToken))
+            {
+                // Replace provider login credentials only at the saved gateway hop. Neither
+                // the real token nor provider account routing headers belong in CLI config.
+                try
+                {
+                    EnterpriseGatewayCredentials.Apply(upstreamRequest, gatewayBearerToken, gatewayAuthMode, gatewayApiKeyHeader);
+                }
+                catch (ArgumentException)
+                {
+                    recorder.StatusCode = context.Response.StatusCode = StatusCodes.Status502BadGateway;
+                    await context.Response.WriteAsync("VibeRails: invalid saved gateway authentication settings. Correct them in Settings.", cancellationToken);
+                    return;
+                }
+            }
             var http = httpClientFactory.CreateClient("llm-proxy");
             // An SSE turn streams for as long as the model keeps generating, which routinely outlasts
             // HttpClient's 100 s default timeout — that firing would abort the read mid-turn. Leave it
