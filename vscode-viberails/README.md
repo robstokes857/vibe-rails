@@ -19,7 +19,7 @@ Developers keep their preferred coding tools. Teams get a consistent way to insp
 rules, connect issue trackers, and route provider traffic through corporate API gateways.
 The extension bundles the VibeRails backend and dashboard and runs them on your machine.
 
-![A Claude Code session running in the VibeRails terminal dashboard](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/terminals.png)
+![A Claude Code session running in the VibeRails terminal dashboard](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/terminal-session.png)
 
 ## Built for developers and engineering teams
 
@@ -62,7 +62,7 @@ The dashboard's **Reviews** page also tracks GitHub pull request reviews across 
 repositories. **Send to…** summarizes a recorded session and starts another supported CLI or
 saved setup with that context.
 
-![The session history menu handing recorded work to another CLI or saved setup](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/history-send-to.png)
+![The session history menu handing recorded work to another CLI or saved setup](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/session-handoff.png)
 
 ## Boards and issue trackers
 

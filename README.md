@@ -19,7 +19,7 @@ For enterprise teams, that means a shared process for rules, human approval, iss
 and corporate API gateways. For developers, it means real terminals, reusable agent setups,
 searchable history, and fewer manual handoffs. The core application runs on your machine.
 
-![A Claude Code session running in the VibeRails terminal dashboard](docs/images/terminals.png)
+![A Claude Code session running in the VibeRails terminal dashboard](docs/images/terminal-session.png)
 
 ## Built for developers and engineering teams
 
@@ -76,7 +76,7 @@ The **Reviews** page also tracks GitHub pull request reviews across configured r
 **Send to…** summarizes a recorded session for another supported CLI or saved setup, giving a
 second agent context for the next task or review.
 
-![The session history menu handing recorded work to another CLI or saved setup](docs/images/history-send-to.png)
+![The session history menu handing recorded work to another CLI or saved setup](docs/images/session-handoff.png)
 
 ## Boards and issue trackers
 
