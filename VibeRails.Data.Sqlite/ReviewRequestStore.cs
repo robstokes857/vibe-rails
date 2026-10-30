@@ -31,11 +31,11 @@ public sealed class ReviewRequestStore : IReviewRequestStore
     }
 
     /// <inheritdoc />
-    public async Task<ReviewRequestRecord?> FindOpenUnsentAsync(string projectPath, string treeId, CancellationToken ct = default)
+    public async Task<ReviewRequestRecord?> FindOpenUnsentAsync(string projectPath, string treeId, string? baseCommit, CancellationToken ct = default)
     {
         using var db = SqliteConnectionFactory.Open(_connectionString);
         using var command = db.CreateCommand();
-        return await FindOpenUnsentAsync(command, projectPath, treeId, ct);
+        return await FindOpenUnsentAsync(command, projectPath, treeId, baseCommit, ct);
     }
 
     /// <inheritdoc />
@@ -45,7 +45,7 @@ public sealed class ReviewRequestStore : IReviewRequestStore
         using var transaction = db.BeginTransaction(System.Data.IsolationLevel.Serializable);
         using var command = db.CreateCommand();
         command.Transaction = transaction;
-        var existing = await FindOpenUnsentAsync(command, request.ProjectPath, request.TreeId, ct);
+        var existing = await FindOpenUnsentAsync(command, request.ProjectPath, request.TreeId, request.BaseCommit, ct);
         if (existing is not null) return existing;
         command.Parameters.Clear();
         await InsertAsync(command, request, ct);
@@ -53,16 +53,19 @@ public sealed class ReviewRequestStore : IReviewRequestStore
         return request;
     }
 
-    private static async Task<ReviewRequestRecord?> FindOpenUnsentAsync(SqliteCommand command, string projectPath, string treeId, CancellationToken ct)
+    private static async Task<ReviewRequestRecord?> FindOpenUnsentAsync(SqliteCommand command, string projectPath, string treeId,
+        string? baseCommit, CancellationToken ct)
     {
+        // IS, not =: an unborn HEAD stores a NULL base, which must match only another NULL.
         command.CommandText = RequestColumns + """
-             FROM ReviewRequests WHERE ProjectPath = $project AND TreeId = $tree
+             FROM ReviewRequests WHERE ProjectPath = $project AND TreeId = $tree AND BaseCommit IS $base
              AND Scope = 'staged' AND Status = 'open'
              AND SentUTC IS NULL AND RemoteId IS NULL AND SendAttemptedUTC IS NULL
              ORDER BY CreatedUTC DESC, Id LIMIT 1;
             """;
         command.Parameters.AddWithValue("$project", projectPath);
         command.Parameters.AddWithValue("$tree", treeId);
+        command.Parameters.AddWithValue("$base", (object?)baseCommit ?? DBNull.Value);
         using var reader = await command.ExecuteReaderAsync(ct);
         return await reader.ReadAsync(ct) ? ReadRequest(reader) : null;
     }

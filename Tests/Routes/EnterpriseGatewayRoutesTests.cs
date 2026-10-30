@@ -24,8 +24,8 @@ public sealed class EnterpriseGatewayRoutesTests
     }
 
     [Theory]
-    [InlineData(null)]
     [InlineData("")]
+    [InlineData(LlmProxyUpstream.Unavailable)]
     [InlineData("https://user:secret@corporate.example/v1")]
     [InlineData("http://127.0.0.1:4321/llm/anthropic")]
     public async Task NestedClaudeNeverForwardsCorporateCredentialsWhenItsUpstreamIsUnknown(string? captured)
@@ -33,6 +33,16 @@ public sealed class EnterpriseGatewayRoutesTests
         await Exercise("anthropic", "/llm/anthropic/v1/messages", "messages", "session", "tab",
             inheritedClaudeBase: "http://127.0.0.1:4321/llm/anthropic", capturedClaudeUpstream: captured,
             unknownUpstream: true);
+    }
+
+    [Fact]
+    public async Task NestedClaudeUnderAReleaseWithoutTheCaptureUsesThatReleasesOwnDestination()
+    {
+        // An installed release from before the capture sets the relay URL and nothing else; its relay
+        // forwarded to the provider default, so this build does the same instead of answering 502.
+        await Exercise("anthropic", "/llm/anthropic/v1/messages", "messages", "session", "tab",
+            clearGateway: true, inheritedClaudeBase: "http://127.0.0.1:4321/llm/anthropic",
+            capturedClaudeUpstream: null);
     }
 
     [Fact]

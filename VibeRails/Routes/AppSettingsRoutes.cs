@@ -113,8 +113,10 @@ public static class AppSettingsRoutes
 
         static void Validate(string? token, bool? clear, string? gateway, string mode, string header)
         {
-            EnterpriseGatewayCredentials.NormalizeMode(mode);
-            EnterpriseGatewayCredentials.NormalizeApiKeyHeader(header);
+            // The header matters only in API-key mode. The form always sends its hidden header
+            // field, so a half-typed name left behind in Bearer mode must not block every save.
+            if (EnterpriseGatewayCredentials.NormalizeMode(mode) == EnterpriseGatewayCredentials.ApiKeyMode)
+                EnterpriseGatewayCredentials.NormalizeApiKeyHeader(header);
             if (clear == true) return;
             if (EnterpriseGatewayCredentials.NormalizeSecret(token, mode).Length > 0 && string.IsNullOrWhiteSpace(gateway))
                 throw new ArgumentException("Enter and save a gateway URL with its credential.");
@@ -143,6 +145,8 @@ public static class AppSettingsRoutes
                 && !string.IsNullOrWhiteSpace(settings.PinHash) && !string.IsNullOrWhiteSpace(settings.PinSalt);
             var previousApiKey = settings.ApiKey;
             var previousRelaySetting = settings.RouteThroughVibeRailsAi;
+            var previousCodexGateway = settings.CodexEnterpriseNetworkProxy;
+            var previousClaudeGateway = settings.ClaudeEnterpriseNetworkProxy;
 
             // A blank apiKey means "unchanged" (masked value was not edited), so removing a saved
             // key needs its own explicit signal — otherwise a stored key can never be cleared from
@@ -189,18 +193,20 @@ public static class AppSettingsRoutes
                 settings.CodexGatewayAuthMode = EnterpriseGatewayCredentials.NormalizeMode(settingsDto.CodexGatewayAuthMode);
             if (settingsDto.ClaudeGatewayAuthMode is not null)
                 settings.ClaudeGatewayAuthMode = EnterpriseGatewayCredentials.NormalizeMode(settingsDto.ClaudeGatewayAuthMode);
-            if (settingsDto.CodexGatewayApiKeyHeader is not null)
+            if (settingsDto.CodexGatewayApiKeyHeader is not null && UsesApiKeyHeader(settings.CodexGatewayAuthMode))
                 settings.CodexGatewayApiKeyHeader = EnterpriseGatewayCredentials.NormalizeApiKeyHeader(settingsDto.CodexGatewayApiKeyHeader);
-            if (settingsDto.ClaudeGatewayApiKeyHeader is not null)
+            if (settingsDto.ClaudeGatewayApiKeyHeader is not null && UsesApiKeyHeader(settings.ClaudeGatewayAuthMode))
                 settings.ClaudeGatewayApiKeyHeader = EnterpriseGatewayCredentials.NormalizeApiKeyHeader(settingsDto.ClaudeGatewayApiKeyHeader);
             if (settingsDto.ClaudeGatewaySupportsToolSearch.HasValue)
                 settings.ClaudeGatewaySupportsToolSearch = settingsDto.ClaudeGatewaySupportsToolSearch.Value;
+            // Codex's API auth while a credential is saved is derived (LlmProxySettingsService), not
+            // stored, so removing the credential returns a subscription user to their own login.
             settings.CodexGatewayBearerToken = MergeGatewayToken(settings.CodexGatewayBearerToken,
-                settingsDto.CodexGatewayBearerToken, settingsDto.ClearCodexGatewayBearerToken, settings.CodexGatewayAuthMode);
+                settingsDto.CodexGatewayBearerToken, settingsDto.ClearCodexGatewayBearerToken, settings.CodexGatewayAuthMode,
+                SameGatewayOrigin(previousCodexGateway, settings.CodexEnterpriseNetworkProxy));
             settings.ClaudeGatewayBearerToken = MergeGatewayToken(settings.ClaudeGatewayBearerToken,
-                settingsDto.ClaudeGatewayBearerToken, settingsDto.ClearClaudeGatewayBearerToken, settings.ClaudeGatewayAuthMode);
-            if (!string.IsNullOrWhiteSpace(settingsDto.CodexGatewayBearerToken) && settingsDto.ClearCodexGatewayBearerToken != true)
-                settings.CodexLlmProxyMode = CodexLlmProxySettings.ModeApi;
+                settingsDto.ClaudeGatewayBearerToken, settingsDto.ClearClaudeGatewayBearerToken, settings.ClaudeGatewayAuthMode,
+                SameGatewayOrigin(previousClaudeGateway, settings.ClaudeEnterpriseNetworkProxy));
             // Per-LLM saver toggles, same stale-client guard. Writing an explicit Codex/OpenCode
             // value deliberately severs the pre-split inheritance from the legacy master switch
             // (see Settings) — from then on each LLM stands on its own value.
@@ -319,7 +325,7 @@ public static class AppSettingsRoutes
             GrokEnterpriseNetworkProxy: settings.GrokEnterpriseNetworkProxy,
             HasCodexGatewayBearerToken: !string.IsNullOrEmpty(settings.CodexGatewayBearerToken),
             HasClaudeGatewayBearerToken: !string.IsNullOrEmpty(settings.ClaudeGatewayBearerToken),
-            CodexInheritedApiBaseUrl: SafeInheritedBase("OPENAI_BASE_URL", LlmProxyUpstream.CodexVariable),
+            CodexInheritedApiBaseUrl: SafeInheritedBase("OPENAI_BASE_URL", null),
             ClaudeInheritedApiBaseUrl: SafeInheritedBase(LlmProxyClaudeConfig.BaseUrlVariable, LlmProxyUpstream.ClaudeVariable),
             CodexGatewayAuthMode: settings.CodexGatewayAuthMode,
             CodexGatewayApiKeyHeader: settings.CodexGatewayApiKeyHeader,
@@ -329,14 +335,35 @@ public static class AppSettingsRoutes
         );
     }
 
-    private static string MergeGatewayToken(string saved, string? supplied, bool? clear, string mode) =>
-        clear == true ? "" : string.IsNullOrWhiteSpace(supplied) ? saved
-            : EnterpriseGatewayCredentials.NormalizeSecret(supplied, mode);
+    // A saved credential belongs to the gateway it was entered for. Blank input keeps it only while
+    // the gateway stays on that origin; a new host, scheme or port, or a cleared URL, drops it
+    // unless the same save supplies a replacement, so it is never sent somewhere new.
+    private static string MergeGatewayToken(string saved, string? supplied, bool? clear, string mode, bool sameGateway) =>
+        clear == true ? "" : !string.IsNullOrWhiteSpace(supplied) ? EnterpriseGatewayCredentials.NormalizeSecret(supplied, mode)
+            : sameGateway ? saved : "";
 
-    private static string? SafeInheritedBase(string variable, string capturedVariable)
+    /// <summary>
+    /// True when both values name the same gateway origin (scheme, host and port), or are the same
+    /// blank or unchanged value. A path change on the same origin keeps the credential.
+    /// </summary>
+    internal static bool SameGatewayOrigin(string? previous, string? current)
+    {
+        if (string.Equals((previous ?? "").Trim(), (current ?? "").Trim(), StringComparison.Ordinal)) return true;
+        return Origin(previous) is { } before && Origin(current) is { } after
+            && string.Equals(before, after, StringComparison.OrdinalIgnoreCase);
+
+        static string? Origin(string? value) =>
+            EnterpriseNetworkProxy.TryNormalize(value, out var normalized) && normalized.Length > 0
+                ? new Uri(normalized).GetLeftPart(UriPartial.Authority) : null;
+    }
+
+    private static bool UsesApiKeyHeader(string mode) =>
+        EnterpriseGatewayCredentials.NormalizeMode(mode) == EnterpriseGatewayCredentials.ApiKeyMode;
+
+    private static string? SafeInheritedBase(string variable, string? capturedVariable)
     {
         var value = LlmProxySettingsService.ResolveGateway("", Environment.GetEnvironmentVariable(variable),
-            Environment.GetEnvironmentVariable(capturedVariable));
+            capturedVariable is null ? null : Environment.GetEnvironmentVariable(capturedVariable));
         // Never return an invalid URL that might contain embedded credentials to the browser.
         return !string.IsNullOrEmpty(value) && EnterpriseNetworkProxy.TryNormalize(value, out var normalized)
             ? normalized : null;

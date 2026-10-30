@@ -277,7 +277,8 @@ public class CommandService : ICommandService
         // added by TerminalRunner intentionally continue to target the root agent-tool API.
         if (useCodexProxy)
         {
-            environment[LlmProxyUpstream.CodexVariable] = LlmProxyUpstream.Capture(proxySettings.CodexEnterpriseNetworkProxy);
+            // No upstream capture here: Codex is routed through --config model_providers, so its
+            // OPENAI_BASE_URL is never a relay URL that a nested backend would need to see behind.
             AddProxyContactDetails(environment, LlmProxyProvider.Codex, sessionId);
             if (UsesGatewayCredential(proxySettings.CodexEnterpriseNetworkProxy, proxySettings.CodexGatewayBearerToken))
                 environment[LlmProxyCodexConfig.GatewayAuthVariable] = LlmProxyCodexConfig.GatewayAuthPlaceholder;
@@ -295,6 +296,7 @@ public class CommandService : ICommandService
         // (LlmProxyClaudeConfig.KeepsToolSearch).
         if (proxySettings.ClaudeLlmProxyEnabled
             && llm == LLM.Claude
+            && !KeepsUnroutableInheritedBase(proxySettings.ClaudeEnterpriseNetworkProxy, LlmProxyClaudeConfig.BaseUrlVariable)
             && (UsesGatewayCredential(proxySettings.ClaudeEnterpriseNetworkProxy, proxySettings.ClaudeGatewayBearerToken)
                 || (!environment.ContainsKey(LlmProxyClaudeConfig.BaseUrlVariable)
                     && !environment.ContainsKey(LlmProxyClaudeConfig.CustomHeadersVariable))))
@@ -483,10 +485,16 @@ public class CommandService : ICommandService
         _llmProxySessionState.RecordProxiedLaunch(provider);
     }
 
-    internal static string MergeLoopbackNoProxy(params string?[] values) => string.Join(",",
-        values.SelectMany(value => (value ?? "").Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
-            .Concat(["localhost", "127.0.0.1", "::1", "[::1]"])
+    internal static string MergeLoopbackNoProxy(params string?[] values)
+    {
+        var entries = values.SelectMany(value => (value ?? "").Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+            .ToList();
+        // curl, libcurl (git) and Python read "*" as "bypass every proxy" only when it is the whole
+        // value; "*,localhost" would silently send git fetch, pip and curl back through the proxy.
+        if (entries.Contains("*")) return "*";
+        return string.Join(",", entries.Concat(["localhost", "127.0.0.1", "::1", "[::1]"])
             .Distinct(StringComparer.OrdinalIgnoreCase));
+    }
 
     /// <summary>
     /// One-time merge of <c>env_http_headers</c> into the user's <c>~/.grok/config.toml</c>
@@ -599,6 +607,9 @@ public class CommandService : ICommandService
         if (UsesGatewayCredential(proxySettings.CodexEnterpriseNetworkProxy, proxySettings.CodexGatewayBearerToken))
             return true;
 
+        if (KeepsUnroutableInheritedBase(proxySettings.CodexEnterpriseNetworkProxy, OpenAiBaseUrlVariable))
+            return false;
+
         // A provider selected in config.toml is as intentional as a -c model_provider override.
         // Replacing it loses the gateway, env_key and transport options (e.g. websockets=false).
         // Inspect only the effective config home; never copy, edit or log its contents.
@@ -626,6 +637,24 @@ public class CommandService : ICommandService
 
     private static bool UsesGatewayCredential(string gateway, string token) =>
         !string.IsNullOrWhiteSpace(gateway) && !string.IsNullOrWhiteSpace(token);
+
+    private const string OpenAiBaseUrlVariable = "OPENAI_BASE_URL";
+
+    /// <summary>
+    /// True when the destination is the backend's own inherited base URL (nothing saved in
+    /// Settings) and the relay cannot represent it: a query such as <c>?api-version=</c>, a
+    /// fragment or embedded credentials. The CLI then keeps that base and talks to it directly,
+    /// as it did before inherited bases were routed, without TokenSaver. Routing it would fail every request with a
+    /// 502 the user cannot fix in Settings, since a gateway URL may not carry a query either.
+    /// A saved gateway never reaches this: settings saves validate it.
+    /// </summary>
+    private static bool KeepsUnroutableInheritedBase(string resolvedGateway, string variable)
+    {
+        var inherited = Environment.GetEnvironmentVariable(variable)?.Trim();
+        return !string.IsNullOrEmpty(inherited)
+            && string.Equals(resolvedGateway, inherited, StringComparison.Ordinal)
+            && !EnterpriseNetworkProxy.TryNormalize(inherited, out _);
+    }
 
     private static bool ShouldSkipCodexProxy(string[]? extraArgs)
     {

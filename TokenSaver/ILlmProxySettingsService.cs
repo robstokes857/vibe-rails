@@ -40,9 +40,12 @@ public sealed record LlmProxySettings(
     public string ClaudeEnterpriseNetworkProxy { get; init; } = string.Empty;
     /// <summary>The user's opt-in to keep MCP tool search on behind <see cref="ClaudeEnterpriseNetworkProxy"/>.</summary>
     public bool ClaudeGatewaySupportsToolSearch { get; init; }
-    /// <summary>Bearer override bound to the explicitly saved Codex gateway, never an inherited URL.</summary>
+    /// <summary>
+    /// Bearer override bound to the explicitly saved Codex gateway, never an inherited URL: the
+    /// snapshot leaves it blank unless a gateway is saved, and the relay routes rely on that.
+    /// </summary>
     public string CodexGatewayBearerToken { get; init; } = string.Empty;
-    /// <summary>Bearer override bound to the explicitly saved Claude gateway, never an inherited URL.</summary>
+    /// <summary>Bearer override bound to the explicitly saved Claude gateway; blank unless one is saved.</summary>
     public string ClaudeGatewayBearerToken { get; init; } = string.Empty;
     /// <summary>Codex gateway format: bearer or api-key.</summary>
     public string CodexGatewayAuthMode { get; init; } = "bearer";

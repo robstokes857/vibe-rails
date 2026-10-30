@@ -431,13 +431,18 @@ versions, but cannot disable routing in the current version.
 **An inherited base URL remains the destination while the saved gateway is blank.** If VibeRails inherits
 `OPENAI_BASE_URL` (Codex) or `ANTHROPIC_BASE_URL` (Claude) and that provider's gateway is
 blank, its requests now pass through the local relay and TokenSaver to that inherited destination.
-The inherited URL is validated on each request; invalid values fail closed. Managed Codex/Claude
-launches capture the original validated upstream in `VIBERAILS_CODEX_UPSTREAM_BASE` /
-`VIBERAILS_CLAUDE_UPSTREAM_BASE` before injecting local routing. An explicit `provider-default`
-marker distinguishes a known public-provider launch from missing metadata. Nested backends
-recover this destination behind an inherited `/llm/...` URL, without recursively forwarding to
-the parent relay. Missing/invalid metadata fails closed; set the gateway in Settings or restart
-VibeRails outside the old parent terminal. A saved gateway plus credential
+The inherited URL is validated on each request. One the relay cannot represent (a query such as
+`?api-version=`, a fragment, or embedded credentials) is left to the CLI at launch: it uses that
+base directly, without TokenSaver, as it did before inherited bases were routed. Managed Claude
+launches capture the original validated upstream in `VIBERAILS_CLAUDE_UPSTREAM_BASE` before
+injecting local routing. (Codex needs no capture: it is routed through `model_providers`, so its
+`OPENAI_BASE_URL` is never a relay URL.) An explicit `provider-default` marker distinguishes a
+known public-provider launch from unrecoverable metadata. Nested backends recover this destination
+behind an inherited `/llm/...` URL, without recursively forwarding to the parent relay. Empty,
+invalid or `viberails-upstream-unavailable` metadata fails closed; set the gateway in Settings or
+restart VibeRails outside the parent terminal. No metadata at all means the parent is a release
+from before the capture: its relay only ever used the gateway saved in the shared settings.json or
+the provider default, so the nested backend does the same. A saved gateway plus credential
 takes precedence over a saved Codex provider or Claude environment URL. Without that complete
 choice, custom provider configurations retain their routing; explicit Codex launch profiles or
 provider overrides also retain their routing.
@@ -458,10 +463,13 @@ same without a credential). For a plain provider key, choose **Anthropic API key
 stores the URL, mode and header like any gateway, and a reload shows the choice again when they
 match. The token is saved in the private local settings file,
 never returned by the API, and used only for that saved gateway. Blank input preserves a token;
-**Remove saved credential** clears it. Clearing the saved URL retains the dormant token but cannot send
-it to the public provider or an inherited URL. Token replacement takes effect on the next request;
+**Remove saved credential** clears it. Saving the gateway at another origin (scheme, host or port),
+for example by choosing **OpenAI API key** in place of a corporate gateway, or clearing its URL,
+removes the saved credential unless you enter a new one in the same save; the credential field says
+so before you save. A path change on the same host keeps it. Token replacement takes effect on the next request;
 start a new terminal when changing authentication between CLI credentials and a gateway token.
-Codex switches to API auth automatically when a gateway credential is saved. Both CLIs receive only a
+Codex uses API auth automatically while a gateway credential is saved; the stored ChatGPT/API choice
+is not changed, so removing the credential returns to it. Both CLIs receive only a
 non-secret local placeholder, and the relay supplies the real token after compression, replacing
 provider Authorization/API-key/account headers. TokenSaver is the in-process body transform before
 that HTTP send; it is not a separate server. Proxy activity is reported even if no compression

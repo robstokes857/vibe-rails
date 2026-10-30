@@ -16,6 +16,18 @@ const presets = {
 const control = (root, provider, suffix) => root?.querySelector(`#setting-${provider}-${suffix}`);
 const sameUrl = (left, right) => (left || '').trim().replace(/\/+$/, '').toLowerCase()
     === (right || '').trim().replace(/\/+$/, '').toLowerCase();
+// Mirrors AppSettingsRoutes.SameGatewayOrigin: a saved credential stays with its gateway's origin
+// (scheme, host and port), so pointing the URL anywhere else removes it on save.
+const gatewayOrigin = value => {
+    try {
+        const url = new URL((value || '').trim());
+        return url.protocol === 'http:' || url.protocol === 'https:' ? url.origin.toLowerCase() : null;
+    } catch {
+        return null;
+    }
+};
+const keepsSavedCredential = (entered, saved) => sameUrl(entered, saved)
+    || (gatewayOrigin(entered) !== null && gatewayOrigin(entered) === gatewayOrigin(saved));
 // Claude takes its base with or without /v1, so both spellings name the preset.
 const isPresetUrl = (provider, url) => sameUrl(url, presets[provider].url)
     || (provider === 'claude' && sameUrl(url, `${presets.claude.url}/v1`));
@@ -76,8 +88,13 @@ function updateGatewayAuth(root, settings, provider) {
     const label = control(root, provider, 'gateway-token-label');
     if (label) label.textContent = preset ? preset.label : isApiKey ? 'Gateway API key' : 'Gateway bearer token';
     const input = control(root, provider, 'gateway-token');
-    if (input) input.placeholder = settings[`has${title(provider)}GatewayBearerToken`]
-        ? 'Credential saved — enter a replacement' : isApiKey ? 'Optional API key' : 'Optional bearer token';
+    const hasSaved = settings[`has${title(provider)}GatewayBearerToken`] === true;
+    const entered = control(root, provider, 'enterprise-network-proxy')?.value;
+    const moving = hasSaved && entered !== undefined
+        && !keepsSavedCredential(entered, settings[`${provider}EnterpriseNetworkProxy`]);
+    if (input) input.placeholder = moving
+        ? 'Saving removes the credential saved for the previous gateway — enter one for this URL'
+        : hasSaved ? 'Credential saved — enter a replacement' : isApiKey ? 'Optional API key' : 'Optional bearer token';
     const preview = control(root, provider, 'gateway-auth-preview');
     if (preview) preview.textContent = isApiKey ? `${header}: <API key>` : 'Authorization: Bearer <token>';
 }
@@ -146,6 +163,7 @@ export function initGatewaySettings(root, settings) {
                 if (header && preset.header) header.value = preset.header;
                 mode.dispatchEvent(new Event('change', { bubbles: true }));
             }
+            updateGatewayAuth(root, saved(), provider);
             updateGatewayRoute(root, saved(), provider);
         });
         root.querySelector(`#setting-token-saver-${provider}`)

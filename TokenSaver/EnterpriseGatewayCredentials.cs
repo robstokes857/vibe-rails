@@ -3,11 +3,14 @@ namespace TokenSaver;
 /// <summary>Validation shared by gateway settings and the outbound relay.</summary>
 public static class EnterpriseGatewayCredentials
 {
+    /// <summary>The raw key travels in a named header instead of <c>Authorization: Bearer</c>.</summary>
+    public const string ApiKeyMode = "api-key";
+
     /// <summary>Validates the supported outgoing authentication formats.</summary>
     public static string NormalizeMode(string? mode) => (mode ?? "bearer").Trim().ToLowerInvariant() switch
     {
         "" or "bearer" => "bearer",
-        "api-key" => "api-key",
+        ApiKeyMode => ApiKeyMode,
         _ => throw new ArgumentException("Choose Bearer token or API key header for gateway authentication.")
     };
 

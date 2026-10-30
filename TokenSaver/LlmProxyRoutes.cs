@@ -69,19 +69,23 @@ public static class LlmProxyRoutes
                 bodyTransform: transform,
                 context.RequestAborted,
                 exchangeSink,
-                string.IsNullOrWhiteSpace(settings.CodexEnterpriseNetworkProxy) ? null : settings.CodexGatewayBearerToken,
+                // Already bound to the saved gateway (blank otherwise) by the settings snapshot.
+                settings.CodexGatewayBearerToken,
                 settings.CodexGatewayAuthMode,
                 settings.CodexGatewayApiKeyHeader);
         }).WithName("LlmOpenAiProxy");
     }
 
     /// <summary>
-    /// Resolves the upstream target for the given auth mode: API mode goes to <c>api.openai.com</c>,
-    /// subscription mode to the ChatGPT backend. Only the host differs — the path/query are relayed.
+    /// Resolves the upstream target: API requests go to <c>api.openai.com</c>, subscription requests
+    /// to the ChatGPT backend. Only the host differs — the path/query are relayed. The request's own
+    /// API path decides, as in <see cref="OpenAiApiPath(HttpRequest, string)"/>: a running terminal
+    /// keeps the path chosen at launch after Settings changes the auth mode, and its requests must
+    /// keep reaching the host that path belongs to. The mode decides only for any other path.
     /// </summary>
     internal static Uri BuildOpenAiUri(HttpRequest request, string mode)
     {
-        var targetHost = CodexLlmProxySettings.NormalizeMode(mode) == CodexLlmProxySettings.ModeApi
+        var targetHost = OpenAiApiPath(request, mode) == OpenAiApiPath(CodexLlmProxySettings.ModeApi)
             ? ApiUpstreamHost
             : SubscriptionUpstreamHost;
 

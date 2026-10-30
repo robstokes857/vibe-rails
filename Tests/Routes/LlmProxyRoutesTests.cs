@@ -55,6 +55,20 @@ public class LlmProxyRoutesTests
         Assert.Equal("https://api.openai.com/v1/responses?stream=true", target.AbsoluteUri);
     }
 
+    [Theory]
+    [InlineData("/llm/openai/backend-api/codex/responses", "api", "https://chatgpt.com/backend-api/codex/responses")]
+    [InlineData("/llm/openai/v1/responses", "subscription", "https://api.openai.com/v1/responses")]
+    [InlineData("/llm/openai/models", "api", "https://api.openai.com/models")]
+    [InlineData("/llm/openai/models", "subscription", "https://chatgpt.com/models")]
+    public void BuildOpenAiUri_TheRequestPathPicksTheHostAfterTheModeChanges(string path, string mode, string expected)
+    {
+        // A terminal launched in ChatGPT mode keeps posting to backend-api/codex after a gateway
+        // credential switches the mode to api (and back): it must keep reaching chatgpt.com.
+        var target = LlmProxyRoutes.BuildOpenAiUri(CreateRequest(path, ""), mode);
+
+        Assert.Equal(expected, target.AbsoluteUri);
+    }
+
     [Fact]
     public async Task OpenAiProxy_AuthenticatedEnabledRelay_PublishesSanitizedProxyActivity()
     {

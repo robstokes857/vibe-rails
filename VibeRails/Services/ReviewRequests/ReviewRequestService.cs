@@ -87,7 +87,8 @@ public sealed class ReviewRequestService(
         var attached = await ResolveSessionsAsync(request?.Sessions, sessions, ct);
         var snapshot = await CaptureStagedAsync(projectPath, ct);
 
-        if (reuseOpenUnsent && await store.FindOpenUnsentAsync(projectPath, snapshot.StagedIdentity!.StagedTree, ct) is { } existing)
+        if (reuseOpenUnsent && await store.FindOpenUnsentAsync(projectPath, snapshot.StagedIdentity!.StagedTree,
+                snapshot.StagedIdentity.BaseCommit, ct) is { } existing)
             return (existing, null);
 
         var now = _clock.GetUtcNow().UtcDateTime;

@@ -17,6 +17,17 @@ public partial class CommandServiceTests
             CommandService.MergeLoopbackNoProxy(".company.test,localhost", "internal.test,LOCALHOST", null));
     }
 
+    [Theory]
+    [InlineData("*", null)]
+    [InlineData(" * ", "localhost")]
+    [InlineData("internal.test", "*")]
+    public void AWildcardNoProxyStaysTheWholeValue(string? upper, string? lower)
+    {
+        // "*,localhost" is no longer a wildcard to curl, git or Python: they would go back through
+        // the corporate proxy.
+        Assert.Equal("*", CommandService.MergeLoopbackNoProxy(upper, lower, null));
+    }
+
     [Fact]
     public async Task PrepareSession_Codex_RoutesInheritedGatewayThroughTokenSaver()
     {
@@ -27,6 +38,31 @@ public partial class CommandServiceTests
 
         Assert.Contains(LlmProxyCodexConfig.OpenAiProviderName, prepared.LaunchCommand);
         Assert.True(prepared.Environment.ContainsKey(LocalLlmProxyContext.SessionTokenVariable));
+    }
+
+    [Theory]
+    [InlineData("https://genai.example.test/openai?api-version=2025-01")]
+    [InlineData("https://user:secret@genai.example.test/v1")]
+    public async Task PrepareSession_InheritedBaseTheRelayCannotUseKeepsTheClisOwnRouting(string inherited)
+    {
+        // Before inherited bases were routed, such a base bypassed the relay and worked; routing it now would answer
+        // every request with a 502 naming a saved setting that does not exist.
+        Environment.SetEnvironmentVariable("OPENAI_BASE_URL", inherited);
+        Environment.SetEnvironmentVariable(LlmProxyClaudeConfig.BaseUrlVariable, inherited);
+
+        var codex = await CreateService(codexLlmProxyEnabled: true)
+            .PrepareSessionAsync(LLM.Codex, envName: null, extraArgs: null);
+        var claude = await CreateService(claudeLlmProxyEnabled: true)
+            .PrepareSessionAsync(LLM.Claude, envName: null, extraArgs: null);
+
+        Assert.DoesNotContain(LlmProxyCodexConfig.OpenAiProviderName, codex.LaunchCommand);
+        Assert.False(claude.Environment.ContainsKey(LlmProxyClaudeConfig.BaseUrlVariable));
+        Assert.False(claude.Environment.ContainsKey(LlmProxyUpstream.ClaudeVariable));
+
+        // A saved gateway still takes precedence and is routed.
+        var saved = await CreateService(claudeLlmProxyEnabled: true, claudeEnterpriseNetworkProxy: "https://gateway.example/v1")
+            .PrepareSessionAsync(LLM.Claude, envName: null, extraArgs: null);
+        Assert.StartsWith("http://127.0.0.1:4321/", saved.Environment[LlmProxyClaudeConfig.BaseUrlVariable]);
     }
 
     [Fact]
@@ -141,16 +177,22 @@ public partial class CommandServiceTests
     [Theory]
     [InlineData("http://127.0.0.1:5001/llm/anthropic")]
     [InlineData("http://localhost:5001/llm/anthropic/")]
-    public async Task PrepareSession_Claude_InheritedRelayWithoutUpstreamMetadataFailsClosed(string enclosingRelay)
+    public async Task PrepareSession_Claude_InheritedRelayFailsClosedOnlyWhenItsMetadataIsUnusable(string enclosingRelay)
     {
         // A root started from inside a managed Claude tab inherits that tab's relay URL.
         Environment.SetEnvironmentVariable(LlmProxyClaudeConfig.BaseUrlVariable, enclosingRelay);
 
-        var prepared = await CreateService(claudeLlmProxyEnabled: true)
+        // No metadata: a parent from before the capture, whose relay used the provider default.
+        var olderParent = await CreateService(claudeLlmProxyEnabled: true)
             .PrepareSessionAsync(LLM.Claude, envName: null, extraArgs: null);
+        Assert.StartsWith("http://127.0.0.1:4321/", olderParent.Environment[LlmProxyClaudeConfig.BaseUrlVariable]);
+        Assert.Equal(LlmProxyUpstream.ProviderDefault, olderParent.Environment[LlmProxyUpstream.ClaudeVariable]);
 
-        Assert.StartsWith("http://127.0.0.1:4321/", prepared.Environment[LlmProxyClaudeConfig.BaseUrlVariable]);
-        Assert.Equal(LlmProxyUpstream.Unavailable, prepared.Environment[LlmProxyUpstream.ClaudeVariable]);
+        // Metadata that names no recoverable destination stays fail-closed down the chain.
+        Environment.SetEnvironmentVariable(LlmProxyUpstream.ClaudeVariable, LlmProxyUpstream.Unavailable);
+        var unknown = await CreateService(claudeLlmProxyEnabled: true)
+            .PrepareSessionAsync(LLM.Claude, envName: null, extraArgs: null);
+        Assert.Equal(LlmProxyUpstream.Unavailable, unknown.Environment[LlmProxyUpstream.ClaudeVariable]);
     }
 
     [Fact]

@@ -101,6 +101,41 @@ public sealed class CodexEnvironmentCreationTests : IDisposable
         Assert.Equal("wal", await File.ReadAllTextAsync(heldPath, Ct));
     }
 
+    [Fact]
+    public async Task CreateEnvironment_LeavesOutALockedDatabaseTogetherWithItsWalAndShm()
+    {
+        await WriteSourceAsync("config.toml", "model = \"test-model\"\n");
+        var database = await WriteSourceAsync(Path.Combine("sqlite", "state_5.sqlite"), "database");
+        await WriteSourceAsync(Path.Combine("sqlite", "state_5.sqlite-wal"), "wal");
+        await WriteSourceAsync(Path.Combine("sqlite", "state_5.sqlite-shm"), "shm");
+        await WriteSourceAsync(Path.Combine("sqlite", "logs_1.sqlite"), "other database");
+
+        using (new FileStream(database, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            await service.CreateEnvironment(new LLM_Environment { Path = Path.Combine(root, "agent") }, Ct);
+        }
+
+        // A WAL without its database would be replayed onto the fresh one the CLI creates.
+        foreach (var name in new[] { "state_5.sqlite", "state_5.sqlite-wal", "state_5.sqlite-shm" })
+            Assert.False(File.Exists(Path.Combine(Destination, "sqlite", name)), name);
+        Assert.Equal("other database", await File.ReadAllTextAsync(Path.Combine(Destination, "sqlite", "logs_1.sqlite"), Ct));
+    }
+
+    [Fact]
+    public async Task CreateEnvironment_ToleratesAFileTheRunningCliDeletesWhileCopying()
+    {
+        await WriteSourceAsync("config.toml", "model = \"test-model\"\n");
+        await WriteSourceAsync("history.jsonl", "{}\n");
+        var vanished = await WriteSourceAsync(Path.Combine("sessions", "rollout.jsonl.lock"), "lock");
+        files.Setup(x => x.CopyFile(vanished, It.IsAny<string>(), It.IsAny<bool>()))
+            .Throws(new FileNotFoundException("Removed by the running CLI.", vanished));
+
+        await service.CreateEnvironment(new LLM_Environment { Path = Path.Combine(root, "agent") }, Ct);
+
+        Assert.False(File.Exists(Path.Combine(Destination, "sessions", "rollout.jsonl.lock")));
+        Assert.Equal("{}\n", await File.ReadAllTextAsync(Path.Combine(Destination, "history.jsonl"), Ct));
+    }
+
     [Theory]
     [InlineData("config.toml")]
     [InlineData("auth.json")]

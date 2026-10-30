@@ -1,5 +1,6 @@
 using VibeRails.DTOs;
 using VibeRails.Routes;
+using VibeRails.Services.LlmProxy;
 using VibeRails.Utils;
 using Xunit;
 
@@ -71,7 +72,8 @@ public sealed class AppSettingsEnterpriseProxyTests
             Assert.Null(credentialResponse.ClaudeGatewayBearerToken);
             Assert.DoesNotContain("codex-secret", System.Text.Json.JsonSerializer.Serialize(credentialResponse));
             Assert.Equal("codex-secret", store.LoadFresh().CodexGatewayBearerToken);
-            Assert.Equal("api", store.LoadFresh().CodexLlmProxyMode);
+            // API auth is derived while the credential exists; the stored choice is left alone.
+            Assert.Equal("subscription", store.LoadFresh().CodexLlmProxyMode);
             AppSettingsRoutes.UpdateSettings(oldClient with { ClaudeGatewayBearerToken = "" }, store);
             Assert.Equal("claude-secret", store.LoadFresh().ClaudeGatewayBearerToken);
             AppSettingsRoutes.UpdateSettings(oldClient with { ClearCodexGatewayBearerToken = true }, store);
@@ -113,6 +115,133 @@ public sealed class AppSettingsEnterpriseProxyTests
                 GrokEnterpriseNetworkProxy = "https://user:secret@grok.example/v1"
             }, store));
             Assert.Equal(before, File.ReadAllText(Path.Combine(directory, "settings.json")));
+        }
+        finally
+        {
+            ParserConfigs.SetRemoteAccess(remote);
+            ParserConfigs.SetApiKey(key);
+            ParserConfigs.SetUseVsCodeTheme(theme);
+            ParserConfigs.SetMcpEnabled(mcp);
+            ParserConfigs.SetRouteThroughVibeRailsAi(relay);
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ASavedCredentialNeverFollowsItsGatewayToANewOrigin()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"viberails-enterprise-origin-{Guid.NewGuid():N}");
+        var remote = ParserConfigs.GetRemoteAccess();
+        var key = ParserConfigs.GetApiKey();
+        var theme = ParserConfigs.GetUseVsCodeTheme();
+        var mcp = ParserConfigs.GetMcpEnabled();
+        var relay = ParserConfigs.GetRouteThroughVibeRailsAi();
+        try
+        {
+            using var store = new SettingsFile(Path.Combine(directory, "settings.json"));
+            store.Save(new Settings
+            {
+                CodexEnterpriseNetworkProxy = "https://genai.corp.example/v1", CodexGatewayBearerToken = "corp-token",
+                ClaudeEnterpriseNetworkProxy = "https://genai.corp.example/anthropic", ClaudeGatewayBearerToken = "corp-key"
+            });
+            var read = AppSettingsRoutes.UpdateComputerName(new UpdateComputerNameDto("Fixture"), store);
+            var client = read with
+            {
+                CodexEnterpriseNetworkProxy = null, ClaudeEnterpriseNetworkProxy = null,
+                OpenCodeEnterpriseNetworkProxy = null, GrokEnterpriseNetworkProxy = null
+            };
+
+            // A new path or a retyped spelling on the same origin keeps the credential.
+            AppSettingsRoutes.UpdateSettings(client with { CodexEnterpriseNetworkProxy = "https://GENAI.corp.example:443/openai/v1/" }, store);
+            Assert.Equal("corp-token", store.LoadFresh().CodexGatewayBearerToken);
+
+            // The "OpenAI API key" choice saved without typing a key: the corporate token must
+            // not be sent to api.openai.com. Only that provider's credential is affected.
+            var moved = AppSettingsRoutes.UpdateSettings(client with { CodexEnterpriseNetworkProxy = "https://api.openai.com/v1" }, store);
+            Assert.False(moved.HasCodexGatewayBearerToken);
+            Assert.Empty(store.LoadFresh().CodexGatewayBearerToken);
+            Assert.True(moved.HasClaudeGatewayBearerToken);
+
+            // Clearing the URL removes it as well, so no dormant credential waits for the next host.
+            AppSettingsRoutes.UpdateSettings(client with { ClaudeEnterpriseNetworkProxy = "" }, store);
+            Assert.Empty(store.LoadFresh().ClaudeGatewayBearerToken);
+
+            // A replacement in the same save belongs to the new gateway; scheme and port are part of it.
+            AppSettingsRoutes.UpdateSettings(client with
+            {
+                ClaudeEnterpriseNetworkProxy = "https://api.anthropic.com", ClaudeGatewayBearerToken = "sk-ant-key"
+            }, store);
+            Assert.Equal("sk-ant-key", store.LoadFresh().ClaudeGatewayBearerToken);
+            AppSettingsRoutes.UpdateSettings(client with { ClaudeEnterpriseNetworkProxy = "https://api.anthropic.com:8443" }, store);
+            Assert.Empty(store.LoadFresh().ClaudeGatewayBearerToken);
+            AppSettingsRoutes.UpdateSettings(client with
+            {
+                ClaudeEnterpriseNetworkProxy = "https://api.anthropic.com", ClaudeGatewayBearerToken = "sk-ant-key"
+            }, store);
+            AppSettingsRoutes.UpdateSettings(client with { ClaudeEnterpriseNetworkProxy = "http://api.anthropic.com" }, store);
+            Assert.Empty(store.LoadFresh().ClaudeGatewayBearerToken);
+
+            Assert.True(AppSettingsRoutes.SameGatewayOrigin("", " "));
+            Assert.False(AppSettingsRoutes.SameGatewayOrigin("", "https://gateway.example/v1"));
+            Assert.False(AppSettingsRoutes.SameGatewayOrigin("not a url", "https://gateway.example/v1"));
+        }
+        finally
+        {
+            ParserConfigs.SetRemoteAccess(remote);
+            ParserConfigs.SetApiKey(key);
+            ParserConfigs.SetUseVsCodeTheme(theme);
+            ParserConfigs.SetMcpEnabled(mcp);
+            ParserConfigs.SetRouteThroughVibeRailsAi(relay);
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CodexApiAuthIsDerivedFromTheCredentialAndAHiddenHeaderNeverBlocksASave()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"viberails-enterprise-derived-{Guid.NewGuid():N}");
+        var remote = ParserConfigs.GetRemoteAccess();
+        var key = ParserConfigs.GetApiKey();
+        var theme = ParserConfigs.GetUseVsCodeTheme();
+        var mcp = ParserConfigs.GetMcpEnabled();
+        var relay = ParserConfigs.GetRouteThroughVibeRailsAi();
+        try
+        {
+            using var store = new SettingsFile(Path.Combine(directory, "settings.json"));
+            store.Save(new Settings());
+            var read = AppSettingsRoutes.UpdateComputerName(new UpdateComputerNameDto("Fixture"), store);
+            var client = read with
+            {
+                CodexEnterpriseNetworkProxy = null, ClaudeEnterpriseNetworkProxy = null,
+                OpenCodeEnterpriseNetworkProxy = null, GrokEnterpriseNetworkProxy = null
+            };
+
+            AppSettingsRoutes.UpdateSettings(client with
+            {
+                CodexEnterpriseNetworkProxy = "https://genai.corp.example/v1", CodexGatewayBearerToken = "corp-token"
+            }, store);
+            Assert.Equal("subscription", store.LoadFresh().CodexLlmProxyMode);
+            Assert.Equal("api", LlmProxySettingsService.Resolve(store.LoadFresh()).CodexLlmProxyMode);
+            // Removing the credential returns a ChatGPT-subscription user to their own login.
+            AppSettingsRoutes.UpdateSettings(client with { ClearCodexGatewayBearerToken = true }, store);
+            Assert.Equal("subscription", LlmProxySettingsService.Resolve(store.LoadFresh()).CodexLlmProxyMode);
+
+            // Bearer mode with a reserved or half-typed name left in the hidden header field: the
+            // save (here a theme change) succeeds and the stored header is untouched.
+            var saved = AppSettingsRoutes.UpdateSettings(client with
+            {
+                UseVsCodeTheme = !read.UseVsCodeTheme,
+                CodexGatewayAuthMode = "bearer", CodexGatewayApiKeyHeader = "Host",
+                ClaudeGatewayAuthMode = "bearer", ClaudeGatewayApiKeyHeader = "x-half typed"
+            }, store);
+            Assert.Equal(!read.UseVsCodeTheme, saved.UseVsCodeTheme);
+            Assert.Equal("api-key", store.LoadFresh().CodexGatewayApiKeyHeader);
+            Assert.Equal("api-key", store.LoadFresh().ClaudeGatewayApiKeyHeader);
+            // In API-key mode the header is used, so it is still validated.
+            Assert.Throws<ArgumentException>(() => AppSettingsRoutes.UpdateSettings(client with
+            {
+                CodexGatewayAuthMode = "api-key", CodexGatewayApiKeyHeader = "Host"
+            }, store));
         }
         finally
         {

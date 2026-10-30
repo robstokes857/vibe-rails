@@ -75,12 +75,18 @@ public interface IReviewRequestStore
     /// <summary>Adds a new request. The id must be unique.</summary>
     Task AddAsync(ReviewRequestRecord request, CancellationToken ct = default);
 
-    /// <summary>Newest open staged request for this project and tree with no sent copy or pending send attempt.</summary>
-    Task<ReviewRequestRecord?> FindOpenUnsentAsync(string projectPath, string treeId, CancellationToken ct = default);
+    /// <summary>
+    /// Newest open staged request for this project, tree and base commit with no sent copy or pending
+    /// send attempt. The base is part of the match: the same staged tree on another HEAD is another
+    /// diff, and reusing the old bundle would show the reviewer changes the commit does not carry.
+    /// A null base (unborn HEAD) matches only another null base.
+    /// </summary>
+    Task<ReviewRequestRecord?> FindOpenUnsentAsync(string projectPath, string treeId, string? baseCommit, CancellationToken ct = default);
 
     /// <summary>
-    /// Adds a staged request unless an open unsent request for its project and tree already exists.
-    /// The lookup and insert are atomic across connections; returns the existing or inserted row.
+    /// Adds a staged request unless an open unsent request for its project, tree and base commit
+    /// already exists. The lookup and insert are atomic across connections; returns the existing or
+    /// inserted row.
     /// </summary>
     Task<ReviewRequestRecord> AddOrGetOpenUnsentAsync(ReviewRequestRecord request, CancellationToken ct = default);
 

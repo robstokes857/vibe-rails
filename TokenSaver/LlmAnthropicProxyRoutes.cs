@@ -70,7 +70,8 @@ public static class LlmAnthropicProxyRoutes
                 transform,
                 context.RequestAborted,
                 exchangeSink,
-                string.IsNullOrWhiteSpace(settings.ClaudeEnterpriseNetworkProxy) ? null : settings.ClaudeGatewayBearerToken,
+                // Already bound to the saved gateway (blank otherwise) by the settings snapshot.
+                settings.ClaudeGatewayBearerToken,
                 settings.ClaudeGatewayAuthMode,
                 settings.ClaudeGatewayApiKeyHeader,
                 string.IsNullOrWhiteSpace(settings.ClaudeEnterpriseNetworkProxy) ? null : ToolSearchRejected);

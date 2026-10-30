@@ -17,6 +17,7 @@ public sealed class ReviewRequestReuseTests : IDisposable
     private readonly ReviewRequestStore _store;
     private readonly string _project;
     private static readonly string Tree = new('b', 40);
+    private static readonly string Base = new('a', 40);
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     public ReviewRequestReuseTests()
@@ -30,7 +31,7 @@ public sealed class ReviewRequestReuseTests : IDisposable
     public void Dispose() => Directory.Delete(_directory, recursive: true);
 
     private ReviewRequestRecord Record() => new(Guid.NewGuid().ToString("D"), _project, "staged", Tree,
-        new string('a', 40), "ORIGINAL", "open", "original bundle", DateTime.UtcNow, DateTime.UtcNow);
+        Base, "ORIGINAL", "open", "original bundle", DateTime.UtcNow, DateTime.UtcNow);
 
     [Fact]
     public async Task ConcurrentConnectionsKeepOneBundleForTheSameProjectAndTree()
@@ -52,7 +53,7 @@ public sealed class ReviewRequestReuseTests : IDisposable
         await _store.AddAsync(first, Ct);
         for (var i = 0; i < ReviewRequestService.ListLimit + 1; i++)
             await _store.AddAsync(Record() with { TreeId = new string('c', 40) }, Ct);
-        Assert.Equal(first, await _store.FindOpenUnsentAsync(_project, Tree, Ct));
+        Assert.Equal(first, await _store.FindOpenUnsentAsync(_project, Tree, Base, Ct));
     }
 
     [Theory]
@@ -64,7 +65,9 @@ public sealed class ReviewRequestReuseTests : IDisposable
     [InlineData("other-project")]
     [InlineData("other-tree")]
     [InlineData("other-scope")]
-    public async Task OnlyOpenUnsentStagedRequestsForThisProjectAndTreeAreReused(string variant)
+    [InlineData("other-base")]
+    [InlineData("unborn-base")]
+    public async Task OnlyOpenUnsentStagedRequestsForThisProjectTreeAndBaseAreReused(string variant)
     {
         var original = Record();
         original = variant switch
@@ -72,6 +75,8 @@ public sealed class ReviewRequestReuseTests : IDisposable
             "other-project" => original with { ProjectPath = _project + "-other" },
             "other-tree" => original with { TreeId = new string('c', 40) },
             "other-scope" => original with { Scope = "working" },
+            "other-base" => original with { BaseCommit = new string('d', 40) },
+            "unborn-base" => original with { BaseCommit = null },
             "approved" or "rejected" or "cancelled" => original with { Status = variant },
             _ => original
         };
@@ -80,7 +85,7 @@ public sealed class ReviewRequestReuseTests : IDisposable
             await _store.MarkSentAsync(original.Id, "rvw_" + new string('a', 32), "key", DateTime.UtcNow, DateTime.UtcNow.AddMonths(1), Ct);
         if (variant == "attempted")
             await _store.MarkSendAttemptAsync(original.Id, "key", DateTime.UtcNow, Ct);
-        Assert.Null(await _store.FindOpenUnsentAsync(_project, Tree, Ct));
+        Assert.Null(await _store.FindOpenUnsentAsync(_project, Tree, Base, Ct));
         var candidate = Record();
         Assert.Equal(candidate, await _store.AddOrGetOpenUnsentAsync(candidate, Ct));
     }
@@ -100,6 +105,31 @@ public sealed class ReviewRequestReuseTests : IDisposable
             new Mock<ISessionStore>(MockBehavior.Strict).Object, Ct);
         Assert.Null(result.Created);
         Assert.Equal(new ReviewRequestReuse(original.Id, Tree), result.Reused);
+        Assert.Equal(original, await _store.GetAsync(original.Id, Ct));
+    }
+
+    [Fact]
+    public async Task TheSameTreeOnAnotherHeadBuildsANewBundleInsteadOfReusingTheOldDiff()
+    {
+        // Tree T was requested on HEAD B1; after git reset --soft HEAD~1 the index is still T but
+        // the staged diff is B0 to T. Reusing the B1 bundle would let a reviewer sign T without
+        // seeing the B0 to B1 changes the commit now carries.
+        var original = Record();
+        await _store.AddAsync(original, Ct);
+        var resetBase = new string('d', 40);
+        var snapshots = new Mock<IGitStagedSnapshotProvider>();
+        snapshots.Setup(s => s.CaptureAsync(_project, It.IsAny<CancellationToken>())).ReturnsAsync(new GitStagedSnapshot(
+            _project, [new GitStagedFileSnapshot("file.cs", Path.Combine(_project, "file.cs"),
+                GitStagedChangeKind.Modified, true, false, 1, "after", PreviousContent: "before")], [],
+            StagedIdentity: new GitStagedSnapshotIdentity(resetBase, new string('c', 40), Tree)));
+        var service = new ReviewRequestService(_store, snapshots.Object, FakeCommitSignatureVerifier.ValidFor("owner@example.com"));
+        var sessions = new Mock<ISessionStore>(MockBehavior.Strict);
+        var result = await service.CreateForToolAsync(_project, new CreateReviewRequest(Reviewers: ["owner@example.com"]),
+            sessions.Object, Ct);
+        Assert.Null(result.Reused);
+        var created = Assert.IsType<ReviewRequestSummary>(result.Created);
+        Assert.NotEqual(original.Id, created.Id);
+        Assert.Equal(resetBase, (await _store.GetAsync(created.Id, Ct))!.BaseCommit);
         Assert.Equal(original, await _store.GetAsync(original.Id, Ct));
     }
 }

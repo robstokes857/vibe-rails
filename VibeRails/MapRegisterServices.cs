@@ -566,8 +566,10 @@ namespace VibeRails
         /// another host, so following one would replay the secret and request body to wherever the
         /// response pointed. 3xx is treated as a plain failure.
         /// </summary>
-        internal static HttpMessageHandler CreateNoRedirectHttpMessageHandler() =>
-            new HttpClientHandler
+        internal static HttpMessageHandler CreateNoRedirectHttpMessageHandler() => CreateCredentialSafeHandler();
+
+        private static HttpClientHandler CreateCredentialSafeHandler() =>
+            new()
             {
                 AllowAutoRedirect = false,
                 UseCookies = false
@@ -582,13 +584,12 @@ namespace VibeRails
         /// Linux it works only with Kerberos (GSSAPI) configured and is otherwise inert. Scoped to
         /// this client, not the shared X-Api-Key handler above; see API_SEC.md.
         /// </summary>
-        internal static HttpMessageHandler CreateLlmProxyHttpMessageHandler() =>
-            new HttpClientHandler
-            {
-                AllowAutoRedirect = false,
-                UseCookies = false,
-                DefaultProxyCredentials = System.Net.CredentialCache.DefaultCredentials
-            };
+        internal static HttpMessageHandler CreateLlmProxyHttpMessageHandler()
+        {
+            var handler = CreateCredentialSafeHandler();
+            handler.DefaultProxyCredentials = System.Net.CredentialCache.DefaultCredentials;
+            return handler;
+        }
 
         /// <summary>
         /// True only for a long-lived root backend that may coordinate global Automation work.

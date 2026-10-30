@@ -105,12 +105,20 @@ per provider. This explicitly selects the enterprise gateway that receives that 
 requests, including its provider credentials, after the local Token Saver step. Blank uses a
 non-VibeRails `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` inherited by the backend for Codex/Claude,
 or the fixed provider destination when absent. Inherited destinations pass through the same
-validation and TokenSaver path; an invalid value fails closed. Managed launches carry a validated
-original upstream base (or an explicit provider-default marker) in provider-specific environment
-metadata before replacing the CLI base with the local relay. A nested backend recovers that
-destination instead of forwarding into the parent relay. A parent `/llm/` URL without valid
-metadata fails closed with 502; it must never select a public provider while retaining corporate
-authentication. Captured metadata contains no URL credentials. A configured base replaces the provider API root without allowing
+validation and TokenSaver path. An inherited base the relay cannot represent (a query, fragment or
+embedded credentials; Settings would refuse it) is left to the CLI, which talks to it directly
+without TokenSaver as it did before inherited bases were routed: the relay never applies a saved credential to it,
+and nothing in Settings could otherwise repair the 502. Managed Claude launches carry a
+validated original upstream base (or an explicit provider-default marker) in
+`VIBERAILS_CLAUDE_UPSTREAM_BASE` before replacing the CLI base with the local relay; Codex
+launches route through `model_providers` and never put the relay in `OPENAI_BASE_URL`. A nested
+backend recovers that destination instead of forwarding into the parent relay. A parent `/llm/`
+URL with empty, invalid or unavailable metadata fails closed with 502; it must never select a
+public provider while retaining corporate authentication. Metadata that is absent altogether marks
+a parent from a release before the capture existed: that release's relay forwarded only to the
+gateway saved in the shared settings file or to the provider default (an inherited corporate base
+left its CLI unrouted instead), so the nested backend uses the same destination rather than
+breaking every request. Captured metadata contains no URL credentials. A configured base replaces the provider API root without allowing
 request paths to replace its origin. HTTP/HTTPS only, no URL credentials, query or fragment;
 invalid values are refused atomically on save, before any confirmation is requested. A stored
 value that does not validate (hand-edited) fails closed with 502 after the two-header gate and
@@ -123,9 +131,11 @@ missing, because Claude Code appends it to `ANTHROPIC_BASE_URL` itself.
 Codex and Claude gateway credentials are write-only Settings fields, stored in the private
 local settings file. Responses report only whether a token is saved. Blank/omitted input preserves
 it; explicit clear removes it. A new token requires an explicitly saved gateway URL (an inherited
-URL alone is insufficient), and clearing that URL makes the saved token dormant. The token is
-bound to the explicitly configured gateway: it is never applied to an inherited destination or a
-public-provider fallback. A gateway change retains the existing presence check. At the outbound
+URL alone is insufficient). The token is bound to the explicitly configured gateway: it is never
+applied to an inherited destination or a public-provider fallback. A save that moves the gateway to
+another origin (scheme, host or port) or clears its URL removes the saved token unless the same
+save supplies a replacement, so a credential never follows its gateway somewhere new (a path change
+on the same origin keeps it). A gateway change retains the existing presence check. At the outbound
 hop only, the relay removes the CLI's Authorization/API-key/account-routing headers and sends
 either `Authorization: Bearer <token>` or the raw key in the configured API-key header. Header
 names must be HTTP field tokens; routing, content, cookie, proxy and local VibeRails credential
@@ -1150,8 +1160,9 @@ viberails.ai) is shown as the server gave it. Cancel and Delete also confirm thr
 tool is described under [MCP and agent launches](#mcp-and-agent-launches): it creates through the
 root and never sends.
 
-Tool-contact creation reuses an open unsent request for the current project's staged tree
-(VIBE-216), excluding pending send attempts. The 200 reuse response contains only its id and tree id,
+Tool-contact creation reuses an open unsent request for the current project's staged tree and
+base commit (VIBE-216), excluding pending send attempts. A different HEAD is a different diff and
+always builds a new bundle. The 200 reuse response contains only its id and tree id,
 even if another session created it; no reviewers, notes, card metadata or session information are
 returned. It does not alter the bundle or grant disclosure access. New requests still return 201
 with the summary and attach the contact's own session; disclosure keeps its own-session check.

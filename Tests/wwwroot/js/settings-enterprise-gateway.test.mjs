@@ -45,6 +45,31 @@ test('saved gateway credentials never populate password controls and edits can b
     assert.equal(controls['#setting-codex-gateway-token-clear'].checked, false);
 });
 
+test('moving a gateway to another origin says the saved credential will be removed before Save', () => {
+    const { root, controls } = fixture();
+    const url = controls['#setting-codex-enterprise-network-proxy'];
+    url.value = 'https://genai.corp.example/v1';
+    initGatewaySettings(root, { codexEnterpriseNetworkProxy: 'https://genai.corp.example/v1', hasCodexGatewayBearerToken: true });
+    const token = controls['#setting-codex-gateway-token'];
+    assert.match(token.placeholder, /Credential saved/);
+
+    // Same origin, another path: the server keeps the credential (AppSettingsRoutes.SameGatewayOrigin).
+    url.value = 'https://GENAI.corp.example:443/openai/v1';
+    url.dispatchEvent(new Event('input'));
+    assert.match(token.placeholder, /Credential saved/);
+
+    // The OpenAI API key choice points the URL at api.openai.com: the corporate token goes away.
+    const mode = controls['#setting-codex-gateway-auth-mode'];
+    mode.value = 'openai-api-key';
+    mode.dispatchEvent(new Event('change'));
+    assert.equal(url.value, 'https://api.openai.com/v1');
+    assert.match(token.placeholder, /removes the credential saved for the previous gateway/);
+
+    url.value = '';
+    url.dispatchEvent(new Event('input'));
+    assert.match(token.placeholder, /removes the credential/);
+});
+
 test('inherited route is visible and can be adopted for a saved gateway credential', () => {
     const { root, controls } = fixture();
     initGatewaySettings(root, { codexInheritedApiBaseUrl: 'https://corp.example/v1' });

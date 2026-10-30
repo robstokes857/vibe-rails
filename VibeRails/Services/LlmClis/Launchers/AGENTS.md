@@ -67,8 +67,10 @@ IBaseLlmCliLauncher (Interface)
   `app-server-daemon` and `app-server-control` directories. Their locks may be held by active
   sessions and the daemon pid names the user's live daemon; never copy them into a new
   environment. Top level only: `packages/app-server-daemon` is an installed package. Any
-  other file a running Codex holds locked (SQLite, newer lock files) is left out instead of
-  failing creation; on macOS/Linux .NET's shared `flock` on the source conflicts even with
+  other file a running Codex holds locked (SQLite, newer lock files), or deletes between
+  enumeration and copy, is left out instead of failing creation. A SQLite database that is left
+  out takes its `-wal`, `-shm` and `-journal` with it, so a stray WAL is never replayed onto the
+  fresh database Codex creates; on macOS/Linux .NET's shared `flock` on the source conflicts even with
   empty lock files. `config.toml`, `auth.json` and `AGENTS.md` must copy, so a lock on one
   of them still fails. Existing destination files remain unchanged on retry.
 - Custom environments copy the user's Codex config. If that copy contains the Windows

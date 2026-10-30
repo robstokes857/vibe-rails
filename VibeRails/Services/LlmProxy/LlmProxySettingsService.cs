@@ -18,7 +18,6 @@ public sealed class LlmProxySettingsService(
         return Resolve(Config.LoadFresh(), tokenSaverPauseState.IsPaused,
             Environment.GetEnvironmentVariable("OPENAI_BASE_URL"),
             Environment.GetEnvironmentVariable(LlmProxyClaudeConfig.BaseUrlVariable),
-            Environment.GetEnvironmentVariable(LlmProxyUpstream.CodexVariable),
             Environment.GetEnvironmentVariable(LlmProxyUpstream.ClaudeVariable));
     }
 
@@ -67,7 +66,6 @@ public sealed class LlmProxySettingsService(
         bool tokenSaverPaused = false,
         string? inheritedCodexBaseUrl = null,
         string? inheritedClaudeBaseUrl = null,
-        string? capturedCodexUpstream = null,
         string? capturedClaudeUpstream = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -108,7 +106,9 @@ public sealed class LlmProxySettingsService(
         {
             OpenCodeLlmProxyLaunchEnabled = true,
             GrokLlmProxyLaunchEnabled = true,
-            CodexEnterpriseNetworkProxy = ResolveGateway(settings.CodexEnterpriseNetworkProxy, inheritedCodexBaseUrl, capturedCodexUpstream),
+            // Codex launches never put a relay URL in OPENAI_BASE_URL (they use model_providers),
+            // so there is no captured upstream to recover for it.
+            CodexEnterpriseNetworkProxy = ResolveGateway(settings.CodexEnterpriseNetworkProxy, inheritedCodexBaseUrl),
             ClaudeEnterpriseNetworkProxy = ResolveGateway(settings.ClaudeEnterpriseNetworkProxy, inheritedClaudeBaseUrl, capturedClaudeUpstream),
             ClaudeGatewaySupportsToolSearch = settings.ClaudeGatewaySupportsToolSearch,
             CodexGatewayBearerToken = string.IsNullOrWhiteSpace(settings.CodexEnterpriseNetworkProxy) ? "" : settings.CodexGatewayBearerToken,

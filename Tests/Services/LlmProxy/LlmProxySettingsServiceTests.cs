@@ -45,12 +45,15 @@ public sealed class LlmProxySettingsServiceTests
     }
 
     [Theory]
-    [InlineData("http://localhost:456/llm/anthropic", global::TokenSaver.LlmProxyUpstream.Unavailable)]
-    [InlineData("http://127.0.0.1:456/llm/openai/v1", global::TokenSaver.LlmProxyUpstream.Unavailable)]
-    [InlineData("https://user:secret@corp.example/v1", "https://user:secret@corp.example/v1")]
-    public void InheritedRelayDoesNotLoopAndInvalidDestinationIsNotSilentlyDropped(string inherited, string expected)
+    [InlineData("http://localhost:456/llm/anthropic", null, "")]
+    [InlineData("http://127.0.0.1:456/llm/openai/v1", null, "")]
+    [InlineData("http://localhost:456/llm/anthropic", global::TokenSaver.LlmProxyUpstream.Unavailable, global::TokenSaver.LlmProxyUpstream.Unavailable)]
+    [InlineData("https://user:secret@corp.example/v1", null, "https://user:secret@corp.example/v1")]
+    public void InheritedRelayDoesNotLoopAndInvalidDestinationIsNotSilentlyDropped(string inherited, string? captured, string expected)
     {
-        Assert.Equal(expected, LlmProxySettingsService.ResolveGateway("", inherited));
+        // A relay URL with no metadata at all comes from a release before the capture existed,
+        // whose relay forwarded to the provider default (see LlmProxyUpstream.Resolve).
+        Assert.Equal(expected, LlmProxySettingsService.ResolveGateway("", inherited, captured));
     }
 
     [Fact]

@@ -263,7 +263,10 @@ the design decisions for the rest.
   `GET /{id}/disclosure`, and the routes refuse (403 `forbidden`) a contact that names any session
   but its own or reads a request that does not attach it (Codex slice E review, F1).
   **Retry reuse (VIBE-216).** Tool-contact creation first looks for an open, unsent staged request
-  for the same project and tree, before building another bundle. An atomic lookup/insert also
+  for the same project, tree and base commit, before building another bundle. The base is part of
+  the match because the same staged tree on a different HEAD (after `git reset --soft`, say) is a
+  different diff; reusing the old bundle would show the reviewer changes the commit no longer
+  carries, or hide ones it now does. An atomic lookup/insert also
   resolves concurrent callers to one request. Sent requests and pending send attempts are excluded;
   dashboard creation is unchanged. Reuse answers 200 with only `{ id, treeId }`, and the tool directs
   the caller to Review requests in VibeRails without reading its disclosure. The existing reviewers,

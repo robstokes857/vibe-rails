@@ -19,8 +19,8 @@ active only with an explicitly saved gateway, never with an inherited URL. The C
 placeholder; the relay adds the real bearer token after compression and strips conflicting
 provider credentials/account headers. Authentication supports Bearer or a raw API key in a
 configurable header (`api-key`, `x-api-key`, or another valid non-reserved name). The existing
-`*GatewayBearerToken` storage keys also hold raw API keys for compatibility. Clearing a gateway
-leaves its credential dormant. No separate TokenSaver server is contacted: the relay runs its
+`*GatewayBearerToken` storage keys also hold raw API keys for compatibility. Clearing a gateway,
+or moving it to another origin without entering a new credential, removes the saved one. No separate TokenSaver server is contacted: the relay runs its
 body transform before sending the HTTP request, and emits activity even for zero savings. See
 [TokenSaver](../TokenSaver/README.md#enterprise-network-proxy) and [API security](../API_SEC.md).
 
