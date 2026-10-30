@@ -1,7 +1,8 @@
 <div align="center">
   <img src="https://raw.githubusercontent.com/robstokes857/vibe-rails/main/vscode-viberails/media/vs-logo.png" alt="VibeRails logo" width="100" height="100" />
   <h1>VibeRails</h1>
-  <p><strong>A framework for AI-assisted development with repository rules, review workflows, and session traceability.</strong></p>
+  <p><strong>A developer and enterprise friendly framework that keeps vibe coding from
+going off the rails</strong></p>
   <p>
     <a href="https://marketplace.visualstudio.com/items?itemName=viberails.vscode-viberails"><img alt="Marketplace version" src="https://badgen.net/vs-marketplace/v/viberails.vscode-viberails?label=marketplace&color=0078D4" /></a>
     <a href="https://marketplace.visualstudio.com/items?itemName=viberails.vscode-viberails"><img alt="Installs" src="https://badgen.net/vs-marketplace/i/viberails.vscode-viberails?color=0078D4" /></a>
