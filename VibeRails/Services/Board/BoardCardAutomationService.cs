@@ -15,6 +15,7 @@ public sealed class BoardCardAutomationService(IBoardStore boards, IJobStore job
             throw new BoardValidationException("Choose a lane Automation to retry.");
         var card = await boards.FindCardAsync(projectPath, cardKeyOrId, cancellationToken);
         if (card is null) return null;
+        await BoardAccess.RequireWritableAsync(boards, projectPath, card.BoardId, cancellationToken);
         var status = (await boards.GetLaneAutomationStatusesAsync(projectPath, card.Id, cancellationToken))
             .SingleOrDefault(entry => entry.JobId == jobId && entry.EventKey == eventKey);
         if (status is null || !status.CanRerun)
@@ -45,6 +46,7 @@ public sealed class BoardCardAutomationService(IBoardStore boards, IJobStore job
             throw new BoardValidationException("Choose a waiting lane Automation.");
         var card = await boards.FindCardAsync(projectPath, cardKeyOrId, cancellationToken);
         if (card is null) return null;
+        await BoardAccess.RequireWritableAsync(boards, projectPath, card.BoardId, cancellationToken);
         var status = (await boards.GetLaneAutomationStatusesAsync(projectPath, card.Id, cancellationToken))
             .FirstOrDefault(entry => entry.JobId == jobId && entry.EventKey == eventKey);
         if (status is null || !(status.CanSkip || status.Status == BoardStepStatus.Waiting && status.RunId is null))
@@ -91,6 +93,7 @@ public sealed class BoardCardAutomationService(IBoardStore boards, IJobStore job
     {
         var card = await boards.GetCardDetailAsync(projectPath, cardKeyOrId, cancellationToken);
         if (card is null) return null;
+        await BoardAccess.RequireWritableAsync(boards, projectPath, card.Card.BoardId, cancellationToken);
         if (jobId <= 0) throw new BoardValidationException("Choose an Automation to run.");
         return await runner.RunForBoardCardAsync(jobId, projectPath, card.Card.Key, cancellationToken);
     }

@@ -260,3 +260,31 @@ test('a late soft refresh cannot restore stale Board labels after a full refresh
     assert.deepEqual(sidebar.allItems[0].boardCards, []);
     assert.equal(sidebar._softRefreshInFlight, false);
 });
+
+test('lifecycle refresh keeps Automation wrapper and worker recordings out of chat history', async () => {
+    const regular = session('chat', { endedUTC: null });
+    const shell = session('shell', { cli: 'Shell', endedUTC: null });
+    const wrapper = session('wrapper', { cli: 'Shell', endedUTC: null, isAutomation: true, boardCards: cards });
+    const worker = session('worker', { endedUTC: null, isAutomation: true, boardCards: cards });
+    const sidebar = historySidebar(async url => {
+        if (url.endsWith('/wrapper')) return wrapper;
+        if (url.endsWith('/worker')) return worker;
+        return { items: [regular, shell] };
+    });
+    // session_started can arrive before the wrapper is linked to its Automation run.
+    sidebar.allItems = [{ ...wrapper, isAutomation: false }];
+    sidebar._softRefreshSessionIds.add('wrapper');
+    sidebar._softRefreshSessionIds.add('worker');
+    await sidebar._runSoftRefresh();
+
+    assert.deepEqual(sidebar._getFilteredItems().map(item => item.id).sort(), ['chat', 'shell']);
+    assert.equal(sidebar.allItems.find(item => item.id === 'chat').cli, 'codex');
+    sidebar.llmFilters.add('shell');
+    assert.deepEqual(sidebar._getFilteredItems().map(item => item.id), ['shell'], 'ordinary terminals remain visible');
+});
+
+test('an explicit session lookup cannot reintroduce an Automation recording into history', async () => {
+    const sidebar = historySidebar(async () => session('worker', { isAutomation: true, boardCards: cards }));
+    await sidebar._fetchSessionByIdIntoList('worker');
+    assert.deepEqual(sidebar._getFilteredItems(), []);
+});

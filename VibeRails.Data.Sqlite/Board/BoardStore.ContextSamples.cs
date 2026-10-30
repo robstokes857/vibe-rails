@@ -43,7 +43,7 @@ public sealed partial class BoardStore
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
-        var card = await ReadCardAsync(connection, transaction, project, cardId, cancellationToken);
+        var card = await ReadCardForWriteAsync(connection, transaction, project, cardId, cancellationToken);
         if (card is null)
             return null;
 

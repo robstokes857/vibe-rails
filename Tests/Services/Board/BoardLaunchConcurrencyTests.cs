@@ -30,6 +30,31 @@ public sealed class BoardLaunchConcurrencyTests : IDisposable
         _tabs.Setup(t => t.DeleteTabAsync("tab-1", It.IsAny<CancellationToken>())).ReturnsAsync(true);
     }
 
+    [Theory]
+    [InlineData("work")]
+    [InlineData("chat")]
+    [InlineData("code_review")]
+    [InlineData("manager")]
+    [InlineData("worker")]
+    public async Task ImportedSharedCardNeverStartsATerminal(string intent)
+    {
+        var card = await CreateCardAsync();
+        await using (var db = new SqliteConnection(_connectionString))
+        {
+            await db.OpenAsync(Ct);
+            await using var command = db.CreateCommand();
+            command.CommandText = "INSERT INTO BoardSharedOrigins (BoardId,RemoteBoardId,DestinationKey,KeyPrefix) VALUES ($board,$remote,'other-account','VB');";
+            command.Parameters.AddWithValue("$board", card.BoardId);
+            command.Parameters.AddWithValue("$remote", Guid.NewGuid().ToString("D"));
+            await command.ExecuteNonQueryAsync(Ct);
+        }
+        Assert.Equal(BoardAccess.ReadOnlyMessage,
+            (await Assert.ThrowsAsync<BoardValidationException>(() => Launcher().LaunchAsync(_root, card.Id, null, Ct, intent))).Message);
+        _tabs.Verify(t => t.CreateTabAsync(It.IsAny<CancellationToken>()), Times.Never);
+        _tabs.Verify(t => t.StartSessionAsync(It.IsAny<string>(), It.IsAny<StartTerminalRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Empty((await _store.GetCardDetailAsync(_root, card.Id, Ct))!.Sessions);
+    }
+
     [Fact]
     public async Task DirectReviewRecordsPurposeAndFailedStartupWithoutASession()
     {

@@ -31,7 +31,7 @@ public sealed partial class BoardStore
         var parsed = BoardCodeLinks.Parse(url);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
-        var card = await ReadCardAsync(connection, transaction, NormalizeProjectPath(projectPath), cardId, cancellationToken);
+        var card = await ReadCardForWriteAsync(connection, transaction, NormalizeProjectPath(projectPath), cardId, cancellationToken);
         if (card is null) return null;
         var links = await ReadCodeLinksAsync(connection, transaction, card.Id, cancellationToken);
         var existing = links.FirstOrDefault(link => link.Url == parsed.Url);
@@ -59,7 +59,7 @@ public sealed partial class BoardStore
     {
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
-        var card = await ReadCardAsync(connection, transaction, NormalizeProjectPath(projectPath), cardId, cancellationToken);
+        var card = await ReadCardForWriteAsync(connection, transaction, NormalizeProjectPath(projectPath), cardId, cancellationToken);
         if (card is null) return false;
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;

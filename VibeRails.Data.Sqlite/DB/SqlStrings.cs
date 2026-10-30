@@ -999,7 +999,8 @@ namespace VibeRails.DB
                    (SELECT COUNT(*) FROM UserInputs WHERE SessionId = s.Id),
                    CASE WHEN s.EndedUTC IS NOT NULL THEN CAST((julianday(s.EndedUTC) - julianday(s.StartedUTC)) * 86400 AS INTEGER) ELSE NULL END,
                    EXISTS(SELECT 1 FROM ConversationTitleRequests q WHERE q.SessionId=s.Id
-                       AND q.LastTitle=s.SessionDisplayName AND s.ConversationTitleEligible=1)
+                       AND q.LastTitle=s.SessionDisplayName AND s.ConversationTitleEligible=1),
+                   s.JobRunId IS NOT NULL
             FROM Sessions s
             LEFT JOIN UserInputs u ON u.Id = (
                 SELECT Id FROM UserInputs WHERE SessionId = s.Id ORDER BY Sequence ASC LIMIT 1
@@ -1024,7 +1025,8 @@ namespace VibeRails.DB
                    (SELECT COUNT(*) FROM UserInputs WHERE SessionId = s.Id),
                    CASE WHEN s.EndedUTC IS NOT NULL THEN CAST((julianday(s.EndedUTC) - julianday(s.StartedUTC)) * 86400 AS INTEGER) ELSE NULL END,
                    EXISTS(SELECT 1 FROM ConversationTitleRequests q WHERE q.SessionId=s.Id
-                       AND q.LastTitle=s.SessionDisplayName AND s.ConversationTitleEligible=1)
+                       AND q.LastTitle=s.SessionDisplayName AND s.ConversationTitleEligible=1),
+                   s.JobRunId IS NOT NULL
             FROM Sessions s
             LEFT JOIN UserInputs u ON u.Id = (
                 SELECT Id FROM UserInputs WHERE SessionId = s.Id ORDER BY Sequence ASC LIMIT 1

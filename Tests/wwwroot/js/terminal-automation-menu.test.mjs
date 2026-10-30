@@ -25,6 +25,21 @@ function managerWithSnapshot(snapshot) {
     return { manager, added };
 }
 
+test('Automation launch refreshes its history row after the wrapper is linked to the run', async () => {
+    const handlers = new Map();
+    const refreshed = [];
+    const controller = Object.assign(Object.create(TerminalController.prototype), {
+        manager: {
+            historySidebar: { refresh: options => refreshed.push(options) },
+            refreshAutomationTabs: async () => {}
+        },
+        rememberTabLaunch() {}
+    });
+    controller.bindSessionEvents({ on: (name, handler) => handlers.set(name, handler) });
+    await handlers.get('automation_terminal_started')({ tabId: 'auto', sessionId: 'wrapper', jobName: 'Review' });
+    assert.deepEqual(refreshed, [{ sessionId: 'wrapper' }]);
+});
+
 test('restore keeps dozens of Automation runs as metadata without creating terminal viewers', async () => {
     const automations = Array.from({ length: 99 }, (_, index) => ({
         tabId: `auto-${index}`, jobRunId: `run-${index}`, automationName: `Check ${index}`,

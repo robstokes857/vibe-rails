@@ -184,6 +184,11 @@ base64 encoding. The resulting JSON is for
 
 ## Board
 
+Retained shared-board copies are read-only. The board disables dragging, creation and work
+launches; its card viewer disables editing while preserving history/session/attachment reads.
+The foreign-project card response also carries `shared` so its editor enforces the same rule.
+Backend guards remain authoritative for every write and launch.
+
 `board-code-links.js` renders the saved card's **GitHub links** rail. Add/remove saves immediately
 through authenticated Board routes without replacing card or comment drafts. The input accepts
 GitHub PR/commit URLs; canonical links are separate from the saved local commit/diff rail.
@@ -747,6 +752,11 @@ placeholder on `.board-card`. Clearing is the Advanced checkbox plus Save, which
 `clearGhost: true`; the browser never sets a ghost.
 
 ## Chat history sidebar
+
+Automation recordings stay out of the sidebar, including exact-session lookups during lifecycle
+refreshes. `ChatHistoryItem.isAutomation` reflects the existing `JobRunId`; single-session access
+remains available for Board replay. `automation_terminal_started` refreshes the outer recording
+after its run link is saved, removing any provisional shell row seen before that link existed.
 
 History loads and soft refreshes synchronize generated session titles to matching live terminal
 tabs through `TerminalManager.syncSessionTitles`. Match the current session ID after the request

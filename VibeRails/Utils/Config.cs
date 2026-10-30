@@ -8,8 +8,21 @@ internal partial class ConfigJsonContext : JsonSerializerContext
 {
 }
 
-public class Settings
+public class Settings : IJsonOnDeserialized, IJsonOnSerializing
 {
+    /// <summary>Preserves fields written by newer versions sharing this settings file.</summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? AdditionalSettings { get; set; }
+
+    void IJsonOnDeserialized.OnDeserialized() => RemoveRetiredSettings();
+    void IJsonOnSerializing.OnSerializing() => RemoveRetiredSettings();
+
+    private void RemoveRetiredSettings()
+    {
+        AdditionalSettings?.Remove("TokenSaverStages");
+        AdditionalSettings?.Remove("TokenSaverCaptureEnabled");
+    }
+
     public string InstallDirName { get; set; } = PathConstants.DEFAULT_INSTALL_DIR_NAME;
     public string ApiKey { get; set; } = string.Empty;
     /// <summary>Display email from account approval, valid only for the fingerprinted key.</summary>
@@ -101,8 +114,8 @@ public class Settings
     // Deliberately NOT the old TokenSaverStages key: the retired stage picker persisted that key
     // on every save, and honoring it would freeze early adopters on whatever selection the picker
     // last wrote — silently exempting them from the curated set. The rename is the one-time
-    // reset. The old key (and the pre-2026-07 tier/bool knobs) are ignored on read and dropped on
-    // the next save.
+    // reset. The old key is ignored on read and dropped on the next save. Other unknown keys
+    // are retained as extension data so this version cannot discard future settings.
     public List<string>? TokenSaverStageOverride { get; set; }
 
     // TokenSaverCaptureEnabled (2026-07-15 → 2026-09-17) is gone: the per-tool_result capture

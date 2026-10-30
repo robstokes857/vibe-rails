@@ -136,6 +136,10 @@ legacy sync fields. Setup adds the table without converting old rows. Since VIBE
 imports and imported copies never sync; `GetSharedBoardOriginsAsync` marks them in the board list
 and their rows stay untouched. Keep imports project-scoped, retain cards when retiring remote lanes,
 and preserve the expected-layout check. Legacy remote keys are accepted only for shared imports.
+`ReadCardForWriteAsync` and the board/card write guards enforce read-only access inside write
+transactions. Keep stamped legacy import/replay paths separate from user writes. The normal
+application neither imports nor replays shared boards; pending shared lane entries are retained
+but excluded from dispatch. No schema change or historical cleanup accompanies these guards.
 See the Board `SYNC.md` contract.
 
 ## Card actions (board/25, VIBE-1)

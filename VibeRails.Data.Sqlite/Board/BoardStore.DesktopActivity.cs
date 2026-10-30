@@ -51,6 +51,7 @@ public sealed partial class BoardStore
         var now = DateTime.UtcNow;
         if (expiresUtc.ToUniversalTime() <= now) return false;
         await using var connection = await OpenAsync(cancellationToken);
+        await RequireWritableCardAsync(connection, null, cardId, cancellationToken);
         await using var command = connection.CreateCommand();
         // One statement validates current membership and starts the lease atomically, including
         // when another process closes or deletes the card at the same time.

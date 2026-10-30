@@ -3467,6 +3467,9 @@ export class TerminalController {
         appEventClient.on('automation_terminal_started', payload => {
             const tabId = cleanString(payload?.tabId);
             if (!tabId) return;
+            // session_started can arrive before JobRunId is saved. Re-read the wrapper
+            // now that it is linked so history removes any provisional shell row.
+            this.manager?.historySidebar?.refresh({ sessionId: payload?.sessionId || null });
             this.rememberTabLaunch(tabId, {
                 selection: 'base:shell',
                 title: `Automation: ${payload?.jobName || 'Workflow'}`,

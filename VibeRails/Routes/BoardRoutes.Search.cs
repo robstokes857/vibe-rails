@@ -34,9 +34,10 @@ public static partial class BoardRoutes
                 var owner = await board.FindBoardAsync(target.ProjectPath, detail.BoardId, ct);
                 var columns = await board.GetColumnsAsync(target.ProjectPath, ct, detail.BoardId);
                 var provider = await store.DedicatedProviderAsync(target.ProjectPath, detail.BoardId, ct);
+                var shared = (await store.GetSharedBoardOriginsAsync(target.ProjectPath, ct)).ContainsKey(detail.BoardId);
                 return Results.Ok(new LocalBoardCardResponse(ForCurrentProject(detail)!, target.ProjectPath,
                     owner?.Name ?? detail.BoardId, columns.Columns, IsCurrentProject(target.ProjectPath),
-                    provider == TrackerProviders.Jira, provider));
+                    provider == TrackerProviders.Jira, provider, Shared: shared));
             }, ct)).WithName("GetLocalBoardCard");
         local.MapPut("", ([FromServices] IBoardStore store, [FromServices] IBoardService board,
             string card, UpdateBoardCardRequest request, CancellationToken ct) =>

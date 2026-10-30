@@ -170,14 +170,14 @@ public sealed class BoardSharingSafetyTests : IDisposable
 
         // Out of the imported board, by both write paths a move can take.
         var refused = await Assert.ThrowsAsync<BoardValidationException>(() => store.MoveCardAsync(root, SharedCard, ownLane.Id, null, Ct));
-        Assert.Contains("Copy the card", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(BoardAccess.ReadOnlyMessage, refused.Message);
         await Assert.ThrowsAsync<BoardValidationException>(() => store.UpdateCardAsync(root, SharedCard, new(ColumnId: ownLane.Id), Ct));
         // Into it.
         await Assert.ThrowsAsync<BoardValidationException>(() => store.MoveCardAsync(root, mine.Id, "col_shared", null, Ct));
         await Assert.ThrowsAsync<BoardValidationException>(() => store.UpdateCardAsync(root, mine.Id, new(ColumnId: "col_shared"), Ct));
         // Merges across the boundary and within the shared board.
         foreach (var (source, target) in new[] { (SharedCard, mine.Id), (mine.Id, SharedCard), (SharedCard, SecondSharedCard) })
-            Assert.Contains("Copy the card", (await Assert.ThrowsAsync<BoardValidationException>(() => store.MergeCardsAsync(root, source, target, Ct))).Message, StringComparison.Ordinal);
+            Assert.Equal(BoardAccess.ReadOnlyMessage, (await Assert.ThrowsAsync<BoardValidationException>(() => store.MergeCardsAsync(root, source, target, Ct))).Message);
 
         // Nothing moved, nothing was deleted, nothing was queued for either board.
         Assert.Equal("col_shared", (await store.FindCardAsync(root, SharedCard, Ct))!.ColumnId);
@@ -185,8 +185,8 @@ public sealed class BoardSharingSafetyTests : IDisposable
         Assert.Equal(ownLane.Id, (await store.FindCardAsync(root, mine.Id, Ct))!.ColumnId);
         Assert.Equal(0, await store.CountUnsentLogEntriesAsync(imported.Id, Ct));
 
-        // Lane to lane inside the shared board stays an ordinary local edit, which no longer leaves the machine.
-        Assert.Equal("col_shared_done", (await store.MoveCardAsync(root, SharedCard, "col_shared_done", null, Ct))!.ColumnId);
+        // Lane moves inside the retained shared copy are read-only too.
+        await Assert.ThrowsAsync<BoardValidationException>(() => store.MoveCardAsync(root, SharedCard, "col_shared_done", null, Ct));
         await sync.SyncDueAsync(Ct);
         Assert.Empty(server.Pushed);
         Assert.Equal(0, server.Publications);

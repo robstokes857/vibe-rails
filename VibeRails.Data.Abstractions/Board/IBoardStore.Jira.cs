@@ -31,6 +31,10 @@ public partial interface IBoardStore
 
     Task<BoardJiraLinkRecord?> FindJiraLinkAsync(string siteId, string issueId, CancellationToken cancellationToken = default);
 
+    /// <summary>Linked issue IDs in a bounded search page, with true for live cards and false for deleted cards.</summary>
+    Task<IReadOnlyDictionary<string, bool>> GetJiraImportStatesAsync(string projectPath, string siteId,
+        IReadOnlyList<string> issueIds, CancellationToken cancellationToken = default);
+
     /// <summary>Retained issue identities for a live card in this project, including after a lane/board move.</summary>
     Task<IReadOnlyList<BoardJiraLinkRecord>> GetJiraLinksForCardAsync(string projectPath, string cardId, CancellationToken cancellationToken = default);
 

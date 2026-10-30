@@ -331,7 +331,9 @@ public static class AppSettingsRoutes
             CodexGatewayApiKeyHeader: settings.CodexGatewayApiKeyHeader,
             ClaudeGatewayAuthMode: settings.ClaudeGatewayAuthMode,
             ClaudeGatewayApiKeyHeader: settings.ClaudeGatewayApiKeyHeader,
-            ClaudeGatewaySupportsToolSearch: settings.ClaudeGatewaySupportsToolSearch
+            ClaudeGatewaySupportsToolSearch: settings.ClaudeGatewaySupportsToolSearch,
+            CodexInheritedBaseBypassesRelay: InheritedBaseBypassesRelay("OPENAI_BASE_URL", null),
+            ClaudeInheritedBaseBypassesRelay: InheritedBaseBypassesRelay(LlmProxyClaudeConfig.BaseUrlVariable, LlmProxyUpstream.ClaudeVariable)
         );
     }
 
@@ -367,6 +369,18 @@ public static class AppSettingsRoutes
         // Never return an invalid URL that might contain embedded credentials to the browser.
         return !string.IsNullOrEmpty(value) && EnterpriseNetworkProxy.TryNormalize(value, out var normalized)
             ? normalized : null;
+    }
+
+    // Like SafeInheritedBase, describes the inherited fallback even while a saved URL masks it.
+    // That lets the UI preview clearing a saved gateway without exposing the rejected URL.
+    private static bool InheritedBaseBypassesRelay(string variable, string? capturedVariable)
+    {
+        var inherited = Environment.GetEnvironmentVariable(variable)?.Trim();
+        var resolved = LlmProxySettingsService.ResolveGateway("", inherited,
+            capturedVariable is null ? null : Environment.GetEnvironmentVariable(capturedVariable));
+        return !string.IsNullOrEmpty(inherited)
+            && string.Equals(resolved, inherited, StringComparison.Ordinal)
+            && !EnterpriseNetworkProxy.TryNormalize(inherited, out _);
     }
 
     private static string NormalizeComputerName(string? value) =>

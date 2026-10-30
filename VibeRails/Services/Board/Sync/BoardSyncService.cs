@@ -73,8 +73,7 @@ public sealed partial class BoardSyncService(
     /// VIBE-235: the owner's local board is the source of truth and collaborators read it on
     /// viberails.ai. A board imported from another account's share (VB-52) is kept but never syncs.
     /// </summary>
-    public const string SharedBoardReadOnlyMessage =
-        "This board was shared with you and is read-only. It no longer syncs; view the current board on viberails.ai. Local data is kept.";
+    public const string SharedBoardReadOnlyMessage = BoardAccess.ReadOnlyMessage;
 
     // Bounds one tick: 25 × 20 entries each way. A board further behind catches up over ticks.
     private const int MaxPushBatchesPerSync = 25;

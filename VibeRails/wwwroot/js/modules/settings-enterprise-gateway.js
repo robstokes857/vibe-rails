@@ -109,8 +109,12 @@ function updateGatewayRoute(root, settings, provider) {
     const pending = (entered || '') !== (settings[`${provider}EnterpriseNetworkProxy`] || '');
     const filled = !!entered && autoFilledByRoot.get(root)?.[provider] === entered;
     const typedCredential = !!control(root, provider, 'gateway-token')?.value.trim();
-    route.textContent = `Default managed route: ${pending ? 'After saving: ' : ''}CLI → ${saver ? 'Token Saver' : 'VibeRails relay (Token Saver off)'} → `
+    const direct = !entered && settings[`${provider}InheritedBaseBypassesRelay`] === true;
+    route.textContent = `Default managed route: ${pending ? 'After saving: ' : ''}` + (direct
+        ? 'CLI → inherited base from the environment (direct, Token Saver off)'
+        : `CLI → ${saver ? 'Token Saver' : 'VibeRails relay (Token Saver off)'} → `
         + (destination ? `${destination}${!entered ? ' (from environment)' : filled ? ' (filled in from the environment)' : ''}` : 'provider default')
+        )
         + (typedCredential && !destination ? `. A credential needs a gateway URL: enter one, or choose ${presets[provider].label}.` : '');
     const use = root.querySelector(`[data-use-inherited-gateway="${provider}"]`);
     if (use) use.hidden = !inherited || entered === inherited;

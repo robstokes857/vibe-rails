@@ -92,6 +92,8 @@ public record ChatHistoryItem(
     public IReadOnlyList<ChatHistoryCard> BoardCards { get; init; } = [];
     /// <summary>A generated title yields to a Board label even when the card was attached later.</summary>
     public bool SessionTitleGenerated { get; init; }
+    /// <summary>An Automation recording is available by ID for replay but excluded from the chat history sidebar.</summary>
+    public bool IsAutomation { get; init; }
 }
 
 /// <summary>Current Board identity, display label and title shown in local chat history. Show <see cref="DisplayId"/>; <see cref="Key"/> is the identity.</summary>

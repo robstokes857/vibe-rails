@@ -108,7 +108,9 @@ or the fixed provider destination when absent. Inherited destinations pass throu
 validation and TokenSaver path. An inherited base the relay cannot represent (a query, fragment or
 embedded credentials; Settings would refuse it) is left to the CLI, which talks to it directly
 without TokenSaver as it did before inherited bases were routed: the relay never applies a saved credential to it,
-and nothing in Settings could otherwise repair the 502. Managed Claude launches carry a
+and nothing in Settings could otherwise repair the 502. Settings reports this direct route using
+`CodexInheritedBaseBypassesRelay` / `ClaudeInheritedBaseBypassesRelay` flags; it never returns
+the rejected URL, which may contain credentials. Managed Claude launches carry a
 validated original upstream base (or an explicit provider-default marker) in
 `VIBERAILS_CLAUDE_UPSTREAM_BASE` before replacing the CLI base with the local relay; Codex
 launches route through `model_providers` and never put the relay in `OPENAI_BASE_URL`. A nested

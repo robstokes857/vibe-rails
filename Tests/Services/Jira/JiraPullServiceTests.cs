@@ -34,6 +34,31 @@ public sealed class JiraPullServiceTests : IDisposable
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Fact]
+    public async Task PageClassifiesLiveDeletedAndUnlinkedIssuesTogetherWithoutRecreatingDeletedCards()
+    {
+        var service = Service();
+        var connection = await service.SaveAsync(_project, (await BoardWithLanes()).Id, Save("secret-token"), "secret-token", Ct);
+        var first = Issue("100", "PROJ-1", "2026-09-01T00:00:00.000Z", "Keep", "Story", "Medium", "Backlog");
+        var second = first with { Id = "101", Key = "PROJ-2", Summary = "Delete" };
+        _jira.Pages.Enqueue(Page(first, second));
+        await service.PullAsync(_project, connection.BoardId, false, Ct);
+        var deleted = (await _store.FindJiraLinkAsync(connection.Id, second.Id, Ct))!;
+        await _store.DeleteCardAsync(_project, deleted.CardId, Ct);
+        var states = await _store.GetJiraImportStatesAsync(_project, connection.Id, ["100", "101", "102", "100"], Ct);
+        Assert.True(states["100"]);
+        Assert.False(states["101"]);
+        Assert.False(states.ContainsKey("102"));
+        Assert.Empty(await _store.GetJiraImportStatesAsync(_project + "-other", connection.Id, ["100"], Ct));
+        Assert.Empty(await _store.GetJiraImportStatesAsync(_project, "other-site", ["100"], Ct));
+
+        _jira.Pages.Enqueue(Page(first with { Summary = "" }, second with { Summary = "" },
+            first with { Id = "102", Key = "PROJ-3", Summary = "New work" }));
+        var report = await service.PullAsync(_project, connection.BoardId, false, Ct);
+        Assert.Equal((1, 1, 1, 0), (report.Created, report.AlreadyImported, report.Skipped, report.Failed));
+        Assert.Null(await _store.FindCardAsync(_project, deleted.CardId, Ct));
+    }
+
+    [Fact]
     public async Task AnIssueImportedWithoutADescription_IsNotRepairedByALaterPull()
     {
         var service = Service();

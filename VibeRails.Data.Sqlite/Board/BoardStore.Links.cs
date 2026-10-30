@@ -62,7 +62,7 @@ public sealed partial class BoardStore
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(deferred: false);
-        var card = await ReadCardAsync(connection, transaction, project, idOrKey, cancellationToken);
+        var card = await ReadCardForWriteAsync(connection, transaction, project, idOrKey, cancellationToken);
         var target = await ReadLinkTargetAsync(connection, transaction, project, targetIdOrKey, cancellationToken);
         if (card is null || target is null) return null;
         if (card.Id == target.Id) throw new BoardValidationException("A card cannot link to itself.");
@@ -112,7 +112,7 @@ public sealed partial class BoardStore
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(deferred: false);
-        var card = await ReadCardAsync(connection, transaction, project, idOrKey, cancellationToken);
+        var card = await ReadCardForWriteAsync(connection, transaction, project, idOrKey, cancellationToken);
         var target = await ReadLinkTargetAsync(connection, transaction, project, targetIdOrKey, cancellationToken);
         if (card is null || target is null) return false;
 
@@ -138,9 +138,13 @@ public sealed partial class BoardStore
     // Resolve global identities in this write transaction, never accept a caller-supplied
     // target project. Short keys/display labels retain their source-project meaning.
     private static async Task<BoardCardRecord?> ReadLinkTargetAsync(SqliteConnection connection,
-        SqliteTransaction transaction, string project, string idOrKey, CancellationToken ct) =>
-        await ReadLocalCardAsync(connection, transaction, idOrKey, ct)
-        ?? await ReadCardAsync(connection, transaction, project, idOrKey, ct);
+        SqliteTransaction transaction, string project, string idOrKey, CancellationToken ct)
+    {
+        var target = await ReadLocalCardAsync(connection, transaction, idOrKey, ct)
+            ?? await ReadCardAsync(connection, transaction, project, idOrKey, ct);
+        if (target is not null) await RequireWritableBoardAsync(connection, transaction, target.BoardId, ct);
+        return target;
+    }
 
     private static async Task InsertDraftLinksAsync(SqliteConnection connection, SqliteTransaction transaction,
         BoardCardRecord card, IReadOnlyList<string>? targets, CancellationToken ct)

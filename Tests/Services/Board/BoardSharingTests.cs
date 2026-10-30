@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using VibeRails.DTOs;
 using VibeRails.Services.Board;
 using VibeRails.Services.Board.Sync;
 using VibeRails.Services.Diagnostics;
@@ -37,10 +38,24 @@ public sealed class BoardSharingTests : IDisposable
         Assert.NotNull(await store.CreateSyncedCardAsync(root, SharedCard, "VB-QWERT-1",
             new("col_shared", "Owner card", "Shared text", null, "medium", null, [], false, BoardId: board.Id),
             BoardAuthor.User(), new("log_owner_created", 1, DateTime.UtcNow, BoardId: board.Id), Ct));
-        await store.UpdateCardAsync(root, SharedCard, new(Title: "Member edit"), Ct);
-        await store.AddCommentAsync(root, SharedCard, BoardAuthor.User(), "Member discussion", Ct);
-        await store.LinkSessionAsync(root, SharedCard, Guid.NewGuid().ToString("D"), null, "base:codex", "codex", "Member work",
-            BoardSessionRecord.McpOrigin, Ct);
+        // Simulate the rows an older writable release left behind. Current store methods must
+        // refuse these edits, while the upgrade must keep the old data exactly as it was.
+        await using (var db = new SqliteConnection(cs))
+        {
+            await db.OpenAsync(Ct);
+            await using var command = db.CreateCommand();
+            command.CommandText = """
+                UPDATE BoardCards SET Title='Member edit' WHERE Id=$card;
+                INSERT INTO BoardComments (Id,CardId,AuthorKind,AuthorLabel,Body,CreatedUTC,Kind)
+                VALUES ('legacy-comment',$card,'user','You','Member discussion',$now,'comment');
+                INSERT INTO BoardCardSessions (SessionId,CardId,Selection,Cli,DisplayName,Origin,CreatedUTC)
+                VALUES ($session,$card,'base:codex','codex','Member work','mcp',$now);
+                """;
+            command.Parameters.AddWithValue("$card", SharedCard);
+            command.Parameters.AddWithValue("$session", Guid.NewGuid().ToString("D"));
+            command.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("O"));
+            await command.ExecuteNonQueryAsync(Ct);
+        }
         // The owner has moved on since: a web change waits on the hosted copy.
         server.Event(server.Shared.RemoteBoardId, SharedCard, "VB-QWERT-1", "change", """{"description":{"to":"Website edit"}}""");
         return board;
@@ -80,6 +95,88 @@ public sealed class BoardSharingTests : IDisposable
         Assert.True(status.Shared);
         Assert.False(status.ActivityEnabled);
         Assert.Equal(server.Shared.RemoteBoardId, status.RemoteBoardId);
+    }
+
+    [Fact]
+    public async Task RetainedSharedBoardRejectsLocalWritesWithoutChangingDataOrQueuingLogs()
+    {
+        var shared = await RetainedImportAsync();
+        var own = await store.CreateBoardAsync(root, "Mine", Ct);
+        var ownLane = await store.CreateColumnAsync(root, "Todo", "", Ct, own.Id);
+        var ownCard = await store.CreateCardAsync(root, new(ownLane.Id, "Mine", "", null, "medium", null, [], false), Ct);
+        var before = (await store.GetCardDetailAsync(root, SharedCard, Ct))!;
+        var logs = await store.CountUnsentLogEntriesAsync(shared.Id, Ct);
+        var session = Assert.Single(before.Sessions).SessionId;
+        var actions = new Func<Task>[]
+        {
+            () => store.UpdateCardAsync(root, SharedCard, new(Title: "Forbidden"), Ct),
+            () => store.AddCommentAsync(root, SharedCard, BoardAuthor.User(), "Forbidden", Ct),
+            () => store.AddNoteAsync(root, SharedCard, BoardAuthor.User(), "Forbidden", Ct),
+            () => store.DeleteCommentAsync(root, SharedCard, "legacy-comment", BoardAuthor.User(), Ct),
+            () => store.DeleteCardAsync(root, SharedCard, Ct),
+            () => store.MoveCardAsync(root, SharedCard, "col_shared", 0, Ct),
+            () => store.MoveCardAsync(root, ownCard.Id, "col_shared", 0, Ct),
+            () => store.CreateCardAsync(root, new("col_shared", "Forbidden", "", null, "medium", null, [], false), Ct),
+            () => store.CreateColumnAsync(root, "Forbidden", "", Ct, shared.Id),
+            () => store.UpdateColumnAsync(root, "col_shared", "Forbidden", null, Ct),
+            () => store.DeleteColumnAsync(root, "col_shared", Ct),
+            () => store.ReorderColumnsAsync(root, ["col_shared"], Ct, shared.Id),
+            () => store.RenameBoardAsync(root, shared.Id, "Forbidden", null, Ct),
+            () => store.DeleteBoardAsync(root, shared.Id, Ct),
+            () => store.SetCardPinnedAsync(root, SharedCard, true, Ct),
+            () => store.LinkCardAsync(root, ownCard.Id, SharedCard, Ct),
+            () => store.LinkCardAsync(root, SharedCard, ownCard.Id, Ct),
+            () => store.AddAttachmentContentAsync(root, SharedCard, "file.txt", "text/plain", [1], Ct),
+            () => store.AddCodeLinkAsync(root, SharedCard, "https://github.com/example/repo/pull/1", Ct),
+            () => store.LinkSessionAsync(root, SharedCard, Guid.NewGuid().ToString("D"), null, "base:codex", "codex", "Forbidden", "mcp", Ct),
+            () => store.RenameSessionAsync(root, SharedCard, session, "Forbidden", Ct),
+            () => store.UnlinkSessionAsync(root, SharedCard, session, Ct),
+            () => store.CompleteAgentAsync(root, SharedCard, session, "completed", "Forbidden", Ct),
+            () => store.StartDesktopActivityAsync(root, SharedCard, "client", "Agent", DateTime.UtcNow.AddMinutes(1), Ct),
+            () => store.SaveReviewSettingsAsync(root, SharedCard, new BoardReviewSettings(), Ct),
+            () => store.SetBoardSyncEnabledAsync(root, shared.Id, false, Ct),
+            () => store.DeleteAttachmentAsync(root, SharedCard, "missing", Ct),
+            () => store.SaveEveryContextSettingsAsync(root, shared.Id, "Forbidden", 0, Ct),
+            () => store.SaveContextSettingsAsync(root, shared.Id, BoardContextSettings.Empty, 0, Ct),
+            () => store.SaveLaneAutomationAsync(root, "col_shared", [], 0, Ct)
+        };
+        foreach (var action in actions)
+            Assert.Equal(BoardAccess.ReadOnlyMessage, (await Assert.ThrowsAsync<BoardValidationException>(action)).Message);
+
+        Assert.Equivalent(before.Card, (await store.GetCardDetailAsync(root, SharedCard, Ct))!.Card, strict: true);
+        Assert.Equal(logs, await store.CountUnsentLogEntriesAsync(shared.Id, Ct));
+        Assert.Equal("Member discussion", Assert.Single((await store.GetCardDetailAsync(root, SharedCard, Ct))!.Comments).Body);
+        Assert.Equal("Member work", Assert.Single((await store.GetCardDetailAsync(root, SharedCard, Ct))!.Sessions).DisplayName);
+        Assert.Empty(await store.GetLinkedCardIdsAsync(root, ownCard.Id, Ct));
+    }
+
+    [Fact]
+    public async Task OldSharedLaneEntriesStayStoredButNeverDispatchOrStarveOwnedCards()
+    {
+        await RetainedImportAsync();
+        var own = await store.CreateBoardAsync(root, "Mine", Ct);
+        var lane = await store.CreateColumnAsync(root, "Todo", "", Ct, own.Id);
+        var card = await store.CreateCardAsync(root, new(lane.Id, "Mine", "", null, "medium", null, [], false), Ct);
+        await using (var db = new SqliteConnection(cs))
+        {
+            await db.OpenAsync(Ct);
+            await using var command = db.CreateCommand();
+            command.CommandText = """
+                INSERT INTO BoardLaneAutomations(ColumnId,JobId,Revision) VALUES ('col_shared',77,1),($lane,77,1);
+                INSERT INTO BoardPendingAutomations(CardId,ColumnId,JobId,EventKey,DueUnixMs)
+                VALUES ($shared,'col_shared',77,'old-shared-event',0),($own,$lane,77,'owned-event',1);
+                """;
+            command.Parameters.AddWithValue("$shared", SharedCard);
+            command.Parameters.AddWithValue("$own", card.Id);
+            command.Parameters.AddWithValue("$lane", lane.Id);
+            await command.ExecuteNonQueryAsync(Ct);
+        }
+        var due = Assert.Single(await store.GetDueLaneAutomationsAsync(DateTime.UtcNow, Ct));
+        Assert.Equal(card.Id, due.CardId);
+        Assert.True(await store.IsLaneAutomationCurrentAsync(due, Ct));
+        Assert.False(await store.IsLaneAutomationCurrentAsync(new(SharedCard, 77, "old-shared-event", root,
+            "board-lane:VB-QWERT-1:col_shared:old-shared-event", true), Ct));
+        Assert.Single(await store.GetPendingLaneAutomationsAsync(root, SharedCard, Ct));
     }
 
     [Fact]

@@ -7,8 +7,11 @@ then the backend's inherited `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL`, then the 
 Managed launches preserve their original upstream base in provider-specific environment metadata,
 using an explicit marker for the public-provider default. Nested backends resolve an inherited
 loopback `/llm/` URL through that metadata instead of recursing or losing the corporate destination.
-Missing/invalid metadata and invalid external destinations fail closed. Both saved and inherited gateways use the ordinary authenticated local
-relay and the provider's TokenSaver setting. A saved gateway plus credential overrides older
+Missing/invalid metadata and invalid saved destinations fail closed. Valid inherited gateways use the ordinary authenticated local
+relay and the provider's TokenSaver setting. An inherited base the relay cannot represent
+(query, fragment or embedded credentials) stays with the CLI's direct routing, with TokenSaver
+off. Settings reports that using non-secret `*InheritedBaseBypassesRelay` flags and never sends
+the rejected URL to the browser. A saved gateway plus credential overrides older
 Codex provider configuration and Claude environment URLs. Without that complete choice, those
 custom configurations retain their routing; explicit Codex launch profiles/providers also retain
 their routing.
@@ -33,6 +36,11 @@ keep `ENABLE_TOOL_SEARCH=true` only for api.anthropic.com or with `ClaudeGateway
 (default off). A gateway 400 mentioning `tool_reference` logs a Warning naming that switch. The
 `llm-proxy` HttpClient alone uses `CreateLlmProxyHttpMessageHandler`, which offers the Windows
 account to an authenticating corporate proxy (NTLM/Negotiate/Kerberos, on challenge only).
+
+`Settings` preserves unknown JSON fields through source-generated extension data so future
+versions' settings survive a read/modify/save by this version. The known retired
+`TokenSaverStages` and `TokenSaverCaptureEnabled` keys are still discarded. Binaries shipped
+before this support can still drop unfamiliar fields; the current release cannot repair their writes.
 
 ## Incremental token-savings publishing (VIBE-215)
 
@@ -179,6 +187,10 @@ The history API reads session pages from `state.db`. `ChatHistoryService` then o
 card labels for those session IDs through `IBoardStore.GetSessionCardsAsync`, which batches reads
 from `board.db` and includes primary/additional attachments without deleted cards. The existing
 history endpoints retain their global local-session scope and session-plus-tab authentication.
+Pages exclude Automation recordings by `JobRunId`; exact-session responses expose the derived
+`isAutomation` marker so lifecycle refreshes apply the same sidebar exclusion. Exact-session
+access remains available for replay. After an Automation wrapper is linked to its run, its launch
+event refreshes any provisional shell row that arrived before the link was saved.
 No cross-database SQL join, schema migration or historical-data rewrite is needed. The sidebar
 uses these labels for automatic titles and card metadata. Its provider/folder filters intersect
 with a selected immutable card ID; the shared Board `Find a card` picker searches all local boards

@@ -130,6 +130,57 @@ async function openHistory(page) {
     await expect(page.locator('.ch-item').first()).toBeVisible();
 }
 
+test('Automation lifecycle refreshes remove provisional wrapper rows and preserve real chat icons', async ({ page }) => {
+    await openHistory(page);
+    await page.evaluate(async () => {
+        const { TerminalController } = await import('/js/modules/terminal-multitab.js');
+        const sidebar = historySidebar;
+        const base = {
+            startedUTC: new Date().toISOString(), endedUTC: null,
+            workingDirectory: 'C:/fixture', projectDisplayName: 'Fixture',
+            boardCards: [{ id: 'card', key: 'VB-1', title: 'Same card' }]
+        };
+        const chat = { ...base, id: 'chat', cli: 'Codex' };
+        const shell = { ...base, id: 'shell', cli: 'Shell', boardCards: [], sessionDisplayName: 'My terminal' };
+        window.automationLinked = false;
+        sidebar.app.apiCall = async url => {
+            if (url.endsWith('/wrapper')) return { ...base, id: 'wrapper', cli: 'Shell', isAutomation: automationLinked };
+            if (url.endsWith('/worker')) return { ...base, id: 'worker', cli: 'Codex', isAutomation: true };
+            return { items: [chat, shell] };
+        };
+        await sidebar._load();
+        const controller = new TerminalController(sidebar.app);
+        controller.manager = { historySidebar: sidebar, tabs: new Map(), refreshAutomationTabs: async () => {} };
+        controller.rememberTabLaunch = () => {};
+        window.historyEventHandlers = new Map();
+        controller.bindSessionEvents({ on: (name, handler) => historyEventHandlers.set(name, handler) });
+        // Model session_started winning the race with saving the wrapper's JobRunId.
+        historyEventHandlers.get('session_started')({ sessionId: 'wrapper' });
+    });
+    const chatIcon = page.locator('.ch-item[data-id="chat"] img.ch-item-logo');
+    await expect(chatIcon).toHaveAttribute('alt', 'Codex');
+    await expect(page.locator('.ch-item[data-id="wrapper"] .fa-terminal')).toBeVisible();
+
+    await page.evaluate(async () => {
+        window.automationLinked = true;
+        await historyEventHandlers.get('automation_terminal_started')({ tabId: 'auto', sessionId: 'wrapper', jobName: 'Review' });
+        historyEventHandlers.get('session_started')({ sessionId: 'worker' });
+    });
+    await expect(page.locator('.ch-item[data-id="wrapper"]')).toHaveCount(0);
+    await expect(page.locator('.ch-item[data-id="worker"]')).toHaveCount(0);
+    await expect(chatIcon).toHaveAttribute('alt', 'Codex');
+    await expect(page.locator('.ch-item[data-id="shell"] .fa-terminal')).toBeVisible();
+
+    await page.evaluate(async () => {
+        historySidebar._softRefreshSessionIds.add('wrapper');
+        historySidebar._softRefreshSessionIds.add('worker');
+        await historySidebar._runSoftRefresh();
+        await historySidebar._load();
+    });
+    await expect(page.locator('.ch-item')).toHaveCount(2);
+    await expect(chatIcon).toHaveAttribute('alt', 'Codex');
+});
+
 test('a server title refresh also renames its live terminal tab and preserves its status', async ({ page }) => {
     await openHistory(page);
     await page.evaluate(async () => {

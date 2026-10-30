@@ -404,7 +404,8 @@ namespace VibeRails.DTOs
     public record BoardSearchResponse(IReadOnlyList<BoardSearchHit> Cards);
     // RemoteProvider is the owning board's dedicated tracker, as on BoardSummaryResponse.
     public record LocalBoardCardResponse(BoardCardResponse Card, string ProjectPath, string BoardName,
-        List<BoardColumnResponse> Columns, bool IsCurrentProject, bool IsJiraBoard = false, string? RemoteProvider = null);
+        List<BoardColumnResponse> Columns, bool IsCurrentProject, bool IsJiraBoard = false, string? RemoteProvider = null,
+        bool Shared = false);
     public record LinkBoardCardRequest(string? Card = null);
     public record BoardCardResponse(
         string Id,
@@ -1406,7 +1407,10 @@ namespace VibeRails.DTOs
         string? ClaudeGatewayAuthMode = null,
         string? ClaudeGatewayApiKeyHeader = null,
         // Keep Claude Code tool search on behind a Claude gateway. Omitted requests preserve it.
-        bool? ClaudeGatewaySupportsToolSearch = null
+        bool? ClaudeGatewaySupportsToolSearch = null,
+        // Non-secret inherited fallback status; an explicitly entered gateway masks it.
+        bool CodexInheritedBaseBypassesRelay = false,
+        bool ClaudeInheritedBaseBypassesRelay = false
     );
     // Append new fields at the END of this record, with a default. Inserting one in the middle
     // shifts every positional argument after it: call sites only fail to compile when the types

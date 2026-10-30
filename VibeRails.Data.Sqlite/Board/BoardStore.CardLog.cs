@@ -47,6 +47,7 @@ public sealed partial class BoardStore
         string cardId, BoardAuthor author, string kind, string body, string? changes, DateTime createdUtc,
         CancellationToken cancellationToken, BoardSyncStamp? stamp = null, string? syncBoardId = null, bool localOnly = false)
     {
+        if (stamp is null && !localOnly) await RequireWritableCardAsync(connection, transaction, cardId, cancellationToken);
         // A stamped entry was pulled from viberails.ai: it keeps its remote id and time, and its
         // RemoteSeq is already known, so the push never sends it back. A localOnly entry is History
         // this machine writes for itself (RemoteSeq 0): never sent, and it protects no field.

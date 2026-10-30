@@ -55,6 +55,7 @@ public sealed partial class BoardStore
     {
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
+        await RequireWritableCardAsync(connection, null, cardId, cancellationToken);
         await using var command = connection.CreateCommand();
         // Membership and insertion share one statement. A removed/foreign link cannot authorize a report.
         command.CommandText = $"""

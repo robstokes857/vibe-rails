@@ -23,6 +23,7 @@ public sealed partial class BoardStore
                 throw new BoardValidationException("The Jira connection changed. Reopen Board settings and retry.");
             current = ReadJiraConnection(reader);
         }
+        await RequireWritableBoardAsync(db, transaction, current.BoardId, cancellationToken);
         if (current.DedicatedBoard) return current;
 
         var name = "Jira · " + (current.JiraBoardName ?? current.JiraBoardId ?? new Uri(current.SiteUrl).Host.Split('.')[0]);

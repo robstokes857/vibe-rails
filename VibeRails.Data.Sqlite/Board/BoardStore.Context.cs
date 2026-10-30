@@ -22,6 +22,7 @@ public sealed partial class BoardStore
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
         var current = await ReadEveryContextAsync(connection, transaction, project, boardId, cancellationToken);
         if (current is null) return null;
+        await RequireWritableBoardAsync(connection, transaction, boardId.Trim(), cancellationToken);
         if (current.Revision != expectedRevision)
             throw new BoardConflictException("Every Context changed while you were editing. Reopen settings to load the latest version; your draft has not been saved.");
         var updated = new BoardEveryContextSettingsRecord(message, checked(current.Revision + 1));
@@ -107,6 +108,7 @@ public sealed partial class BoardStore
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
+        await RequireWritableBoardAsync(connection, transaction, boardId.Trim(), cancellationToken);
         var current = await ReadContextSettingsAsync(connection, transaction, project, boardId, cancellationToken);
         if (current is null) return null;
         if (current.Revision != expectedRevision)

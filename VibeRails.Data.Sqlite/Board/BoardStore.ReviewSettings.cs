@@ -58,6 +58,7 @@ public sealed partial class BoardStore
     public async Task<bool> SaveReviewSettingsAsync(string projectPath, string cardId, BoardReviewSettings settings, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);
+        await RequireWritableCardAsync(connection, null, cardId, cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
             INSERT INTO BoardReviewSettings (CardId, SettingsJson)

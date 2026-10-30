@@ -372,8 +372,11 @@ public sealed class AdoPullService(
             return Stopped(ids.Outcome, ids.Detail);
 
         // Every batch is read before anything is applied, so a pull that stops part way writes nothing.
+        var queriedIds = ids.Value.Ids.Take(AzureDevOpsClient.MaxItems).Distinct().ToArray();
+        var imported = await store.GetAdoImportStatesAsync(connection.ProjectPath, connection.Id, queriedIds, cancellationToken);
+        foreach (var live in imported.Values) counts.Add(TrackerImport.Classify(true, live));
         var items = new List<AdoWorkItem>();
-        foreach (var batch in ids.Value.Ids.Take(AzureDevOpsClient.MaxItems).Chunk(AzureDevOpsClient.BatchSize).Take(AzureDevOpsClient.MaxBatches))
+        foreach (var batch in queriedIds.Where(id => !imported.ContainsKey(id)).Chunk(AzureDevOpsClient.BatchSize).Take(AzureDevOpsClient.MaxBatches))
         {
             var page = await ado.GetWorkItemsAsync(connection.Organization, connection.Project, batch, plan.Fields, token, cancellationToken);
             if (page.Outcome != AdoCallOutcome.Ok || page.Value is null)
@@ -560,13 +563,8 @@ public sealed class AdoPullService(
         BoardAdoConnectionRecord connection, PullPlan plan, string? pointsField, AdoWorkItem item,
         IReadOnlyList<BoardColumnRecord> lanes, string? overflowId, bool dryRun, CancellationToken cancellationToken)
     {
-        // A soft-deleted card keeps its link and stays deleted, so no overflow lane is made on its
-        // behalf either. Decided before the dry-run count.
-        var link = await store.FindAdoLinkAsync(connection.Id, item.Id, cancellationToken);
-        var live = link is not null && await store.FindCardAsync(connection.ProjectPath, link.CardId, cancellationToken) is not null;
-        var state = TrackerImport.Classify(link is not null, live);
-        if (state != TrackerImportState.New)
-            return (state, false);
+        // Linked IDs (including deleted cards) were removed before fetching full work items.
+        const TrackerImportState state = TrackerImportState.New;
 
         if (string.IsNullOrWhiteSpace(item.Title))
             throw new AdoConfigException("Work item has no title.");

@@ -81,6 +81,24 @@ test('inherited route is visible and can be adopted for a saved gateway credenti
     assert.doesNotMatch(controls['#setting-codex-gateway-route'].textContent, /from environment/);
 });
 
+test('an inherited base that bypasses the relay shows a direct route until a gateway is entered', () => {
+    const { root, controls } = fixture();
+    initGatewaySettings(root, { codexInheritedBaseBypassesRelay: true, claudeInheritedBaseBypassesRelay: true });
+    for (const provider of ['codex', 'claude']) {
+        const route = controls[`#setting-${provider}-gateway-route`];
+        assert.match(route.textContent, /CLI → inherited base from the environment \(direct, Token Saver off\)/);
+        assert.doesNotMatch(route.textContent, /provider default/);
+        assert.equal(controls[`[data-use-inherited-gateway="${provider}"]`].hidden, true);
+        const url = controls[`#setting-${provider}-enterprise-network-proxy`];
+        url.value = 'https://saved.example/v1';
+        url.dispatchEvent(new Event('input'));
+        assert.match(route.textContent, /After saving: CLI → Token Saver → https:\/\/saved.example\/v1/);
+        url.value = '';
+        url.dispatchEvent(new Event('input'));
+        assert.match(route.textContent, /direct, Token Saver off/);
+    }
+});
+
 test('API key header mode restores, previews, saves, and preserves a typed secret while switching', () => {
     const { root, controls } = fixture();
     initGatewaySettings(root, { codexGatewayAuthMode: 'api-key', codexGatewayApiKeyHeader: 'x-company-key', hasCodexGatewayBearerToken: true });

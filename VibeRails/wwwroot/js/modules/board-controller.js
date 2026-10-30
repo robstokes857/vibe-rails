@@ -829,7 +829,7 @@ export class BoardController {
         let url = null;
         try { const candidate = new URL(board.sharedUrl); if (candidate.protocol === 'https:' && !candidate.username && !candidate.password) url = candidate.href; } catch { /* No link. */ }
         notice.innerHTML = `<i class="fa-solid fa-eye" aria-hidden="true"></i>
-            <span><strong>Shared with you (read-only).</strong> This copy no longer syncs, and changes here are not sent. View the current board on viberails.ai.</span>
+            <span><strong>Shared with you (read-only).</strong> This retained copy cannot be edited or used to start work. View the current board on viberails.ai.</span>
             ${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">Open on viberails.ai</a>` : ''}`;
     }
 
@@ -843,6 +843,9 @@ export class BoardController {
     }
 
     renderToolbar() {
+        const readOnly = this.currentBoard()?.shared === true;
+        this.queryAll('[data-board-action="new-card"], [data-board-action="add-lane"], [data-board-action="edit-board"]')
+            .forEach(button => { button.disabled = readOnly; });
         const stats = this.stats();
         const statsHost = this.query('[data-board-stats]');
         if (statsHost) {
@@ -948,12 +951,13 @@ export class BoardController {
         const ghost = ghostSummary(card);
         const running = this.hasRunningSession(card);
         const startLabel = running ? (card.workflowMode === 'agent' ? 'Go to manager' : 'Go to agent') : 'Start work';
-        const startWork = `<button type="button" class="btn btn-sm btn-outline-success board-card-start-work"
+        const readOnly = this.boardById(card.boardId)?.shared === true;
+        const startWork = readOnly ? '' : `<button type="button" class="btn btn-sm btn-outline-success board-card-start-work"
                 data-board-action="start-work" data-board-start-card-work
                 aria-label="${startLabel} on ${id}" ${this._startingCards.has(card.id) ? 'disabled' : ''}>
                 <i class="fa-solid ${running ? 'fa-terminal' : 'fa-play'}" aria-hidden="true"></i>
                 <span data-board-start-work-label>${startLabel}</span></button>`;
-        const assignee = `<button type="button" class="board-assignee-chip${member ? '' : ' is-empty'}" data-board-action="${ASSIGN_ACTION}" tabindex="-1"
+        const assignee = `<button type="button" class="board-assignee-chip${member ? '' : ' is-empty'}" data-board-action="${ASSIGN_ACTION}" tabindex="-1" ${readOnly ? 'disabled' : ''}
                 aria-haspopup="dialog" aria-expanded="false"
                 ${member
                     ? `title="${escapeHtml(member.label)} — click to change the assignee" aria-label="Change assignee of ${id} (${escapeHtml(member.label)})"`
@@ -969,7 +973,7 @@ export class BoardController {
                 <div class="board-card-body">
                     <div class="board-card-top">
                         <span class="board-key${ghost ? ' has-ghost' : ''}"${ghost ? ` title="${escapeHtml(ghost)}"` : ''}>${ghostKeyHtml(`${card.flagged ? '<i class="fa-solid fa-flag board-attention-flag" title="Needs your attention" aria-hidden="true"></i> ' : ''}${card.agentMade ? `<i class="fa-solid fa-robot board-agent-mark" title="${escapeHtml(agentMadeSummary(card))}" aria-label="${escapeHtml(agentMadeSummary(card))}"></i> ` : ''}${escapeHtml(cardDisplayId(card))}`, card)}</span>
-                        <button type="button" class="board-icon-btn board-card-pin${card.pinned ? ' is-pinned' : ''}" data-board-action="toggle-pin"
+                        <button type="button" class="board-icon-btn board-card-pin${card.pinned ? ' is-pinned' : ''}" data-board-action="toggle-pin" ${readOnly ? 'disabled' : ''}
                             aria-label="${card.pinned ? 'Unpin' : 'Pin'} ${id}" aria-pressed="${Boolean(card.pinned)}"
                             title="${card.pinned ? 'Unpin: allow activity to move this card' : 'Pin this card in place'}">
                             <i class="fa-solid fa-thumbtack" aria-hidden="true"></i>
@@ -1182,6 +1186,7 @@ export class BoardController {
 
     bindDragAndDrop() {
         this.destroySortables();
+        if (this.currentBoard()?.shared) return;
         if (typeof window.Sortable === 'undefined') return;
         const animation = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 160;
 
@@ -1942,6 +1947,7 @@ export class BoardController {
         // Ctrl+Enter saves the card from anywhere except the comment composer,
         // which owns the shortcut for posting (see bindComposer).
         editor.addEventListener('keydown', event => {
+            if (this.boardById(card.boardId)?.shared) return;
             if (!(event.ctrlKey || event.metaKey) || event.key !== 'Enter') return;
             if (event.target.closest('[data-board-composer="comment"]')) return;
             event.preventDefault();
@@ -1949,7 +1955,35 @@ export class BoardController {
         });
 
         editor._boardFormBaseline = this.readCardForm(editor);
+        if (this.boardById(card.boardId)?.shared) this.lockSharedCardEditor(editor);
         editor.querySelector('#board-card-title')?.focus();
+    }
+
+    lockSharedCardEditor(editor) {
+        const readActions = '[data-board-open-session], [data-board-open-diff], [data-board-view-attachment], '
+            + '[data-board-comment-jump], [data-board-ref-session], [data-board-ref-commit], [data-board-ref-card], '
+            + '[data-board-image], [data-board-open-linked-card], [data-board-comment-more]';
+        const lock = () => {
+            editor.querySelectorAll('input, textarea, select').forEach(control => {
+                if (control.matches('[data-board-comment-filter]')) return;
+                control.disabled = true;
+                if (control.tomselect && !control.tomselect.isDisabled) control.tomselect.disable();
+            });
+            editor.querySelectorAll('button').forEach(button => {
+                if (button.matches(readActions) || button.closest('[data-board-history-view]')) return;
+                button.disabled = true;
+                button.hidden = true;
+            });
+        };
+        const notice = document.createElement('p');
+        notice.className = 'alert alert-info';
+        notice.textContent = 'Shared with you (read-only). Editing and starting work are unavailable for this retained copy.';
+        editor.prepend(notice);
+        lock();
+        // Activity refreshes replace rail controls. Keep those replacements read-only too.
+        const observer = new MutationObserver(lock);
+        observer.observe(editor, { childList: true, subtree: true });
+        this.composerDisposers.push(() => observer.disconnect());
     }
 
     async openLinkedCard(editor, cardId) {

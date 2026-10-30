@@ -10,12 +10,12 @@ import { boardTracker, cardTracker, trackerLabel } from './board-brand.js';
 const TYPES = [['task', 'Task'], ['bug', 'Bug'], ['feature', 'Feature'], ['research-spike', 'Research spike'], ['chore', 'Chore / tech debt']];
 const options = (items, selected) => items.map(([id, name]) => `<option value="${escapeHtml(id)}"${id === selected ? ' selected' : ''}>${escapeHtml(name)}</option>`).join('');
 
-export function localCardEditorHtml({ card, projectPath, boardName, columns }) {
+export function localCardEditorHtml({ card, projectPath, boardName, columns, shared = false }) {
     const tracker = trackerLabel(cardTracker(card)?.provider);
     return `<div class="board-local-card" data-local-board-card-editor>
         <div class="alert alert-warning" role="note"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
             This card belongs to another project's board: <strong>${escapeHtml(boardName)}</strong>.
-            Changes are saved to that board.<div class="board-local-project">${escapeHtml(projectPath)}</div></div>
+            ${shared ? 'Shared with you (read-only). Editing and starting work are unavailable.' : 'Changes are saved to that board.'}<div class="board-local-project">${escapeHtml(projectPath)}</div></div>
         <form data-local-card-form>
             <label class="form-label" for="local-card-title">Title</label>
             <input id="local-card-title" class="form-control" name="title" required spellcheck="true" value="${escapeHtml(card.title || '')}">
@@ -113,6 +113,11 @@ export function openLocalCardEditor(app, detail, { openCard, onChanged }) {
     };
     const showError = message => { if (alive()) app.showToast('Board', message, 'error'); };
     comments.innerHTML = commentsHtml(card, boardTracker(detail));
+    if (detail.shared) {
+        editor.querySelectorAll('input, select, textarea, button').forEach(control => { control.disabled = true; });
+        form.elements.namedItem('assignee').tomselect?.disable();
+        return dispose;
+    }
     linksDispose = bindCardLinks(editor, card, {
         api: {
             getCardLinkCandidatesAsync: BoardApi.getLocalCardLinkCandidatesAsync,

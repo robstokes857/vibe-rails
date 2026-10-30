@@ -302,6 +302,10 @@ See [SYNC.md](SYNC.md#vb-52-shared-boards) for the contract. Publishing is one-w
 UI, and Remote boards cannot create a board with no local copy. Copies older versions imported
 stay in place, read-only, and never push, pull or publish activity; `SyncLinkAsync` returns an
 imported link untouched and the board list marks them `shared`. Do not delete or rewrite them.
+Store write paths enforce this inside card/board transactions; REST and MCP cannot edit cards,
+discussion, lanes, settings or links on these copies. Launch and Automation queues reject them
+before starting work, and pending lane entries stay stored but are excluded from dispatch.
+The owner's own published boards still accept phone-created cards and remote Start work.
 Persistence stays behind `IBoardStore`. Imported boards retain their remote/destination identity
 and never fall back to owner publication. The hosted API enforces owner-only collaborator management.
 Keep recipient-private declines/blocks and the response that does not disclose email registration.
@@ -760,6 +764,10 @@ imported with. `BoardJiraLinks.IssueUpdated` and `Mapping` (`TrackerLinkMapping`
 written at import, because an older VibeRails on the same machine skips an unchanged issue only
 when they match; this version never reads them. Do not reintroduce field updates, status notes,
 lane moves, drag-backs or "lane mapping changed" moves.
+
+Import classification is batched behind `IBoardStore`: Jira checks each search page together;
+Azure DevOps checks queried IDs before downloading work-item detail batches. Live and deleted
+links remain distinct in pull counts, and neither is fetched or mapped again by ADO.
 
 ## Dedicated Azure DevOps boards (VIBE-167)
 

@@ -50,7 +50,7 @@ public sealed partial class BoardStore
             ? await FindSessionPurposeAsync(projectPath, cardId, session, cancellationToken) : null };
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
-        var card = await ReadCardAsync(connection, transaction, NormalizeProjectPath(projectPath), cardId, cancellationToken);
+        var card = await ReadCardForWriteAsync(connection, transaction, NormalizeProjectPath(projectPath), cardId, cancellationToken);
         if (card is null) return null;
         var saved = handoff with { Id = "handoff_" + Guid.NewGuid().ToString("N"), Author = author, CreatedUtc = DateTime.UtcNow };
         await using var command = connection.CreateCommand();

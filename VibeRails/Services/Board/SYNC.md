@@ -100,6 +100,11 @@ up to the VIBE-85 value below; **Sync now** and turning sync on refuse with
 `SharedBoardReadOnlyMessage`. The board list marks these copies (`shared`, `sharedUrl`, read through
 `IBoardStore.GetSharedBoardOriginsAsync`), the board view shows a short read-only notice with a
 link to viberails.ai, and Board settings shows that notice instead of the sync choice.
+Local writes now enforce that notice: card edits, discussion, links, attachments, lanes and
+settings are refused behind the store, with matching REST and MCP behavior. Launch services
+and manual/queued Automations reject shared copies before running work. Existing pending entries
+and historical member edits stay stored; no cleanup or schema migration is performed. Owned
+boards still pull cards created by their owner on the website and accept remote Start work.
 
 Automatic additive `board/26` added `BoardSharedOrigins` in the normal `board.db`. It pins remote
 board ID, API destination/key fingerprint and remote key prefix independently of legacy sync
@@ -144,8 +149,8 @@ backend on the same `board.db` may, and local edits and owned-board pulls still 
 - **Cards never move or merge across it.** A move whose source and destination boards differ is
   refused when either board is imported, in `MoveCardAsync` and in a lane patch alike; a merge is
   refused when either card is on an imported board. Both checks run inside the write transaction
-  and say "copy the card instead". Lane-to-lane moves inside an imported board stay ordinary
-  local edits, which this version never sends. (A departure from an imported board would delete the
+  and report the shared board as read-only. Lane-to-lane moves inside an imported board are also
+  refused. (A departure from an imported board would delete the
   card for every collaborator and publish a copy under the member's account.)
 
 `Tests/Services/Board/BoardSharingSafetyTests.cs` holds the VIBE-14 proofs as regressions,

@@ -69,6 +69,7 @@ public sealed partial class BoardStore
     public async Task<BoardJiraConnectionRecord?> SaveJiraConnectionAsync(BoardJiraConnectionRecord connection, CancellationToken cancellationToken = default)
     {
         await using var db = await OpenAsync(cancellationToken);
+        await RequireWritableBoardAsync(db, null, connection.BoardId, cancellationToken);
         await using var command = db.CreateCommand();
         // The board check and the write are one statement, so a board deleted concurrently cannot
         // be left with a connection. Id is updated too: a new site gets a new link namespace.

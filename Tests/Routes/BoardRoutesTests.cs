@@ -560,6 +560,34 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SharedCardIsReadableButBothScopedAndLocalWriteRoutesRefuseIt()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var store = _app.Services.GetRequiredService<IBoardStore>();
+        var shared = await store.ImportSharedBoardAsync(_project,
+            new(Guid.NewGuid().ToString("D"), "Shared", "VB", "VB", [new("shared_lane", "Todo", null, 0)], false, 0),
+            "other-account", ct);
+        var card = (await store.CreateSyncedCardAsync(_project, "shared_card", "VB-QWERT-1",
+            new("shared_lane", "Shared task", "Keep", null, "medium", null, [], false, BoardId: shared.Id),
+            BoardAuthor.User(), new("shared_created", 1, DateTime.UtcNow, BoardId: shared.Id), ct))!;
+        using var read = await GetJsonAsync($"/api/v1/board/local-cards/{card.Id}");
+        Assert.True(read.RootElement.GetProperty("shared").GetBoolean());
+        using var noPoints = JsonDocument.Parse("null");
+        foreach (var prefix in new[] { "/api/v1/board/cards/", "/api/v1/board/local-cards/" })
+        {
+            using var update = await SendAsync(HttpMethod.Put, prefix + card.Id, "test-session", "test-tab",
+                new UpdateBoardCardRequest(Title: "Forbidden", Points: noPoints.RootElement));
+            Assert.Equal(HttpStatusCode.BadRequest, update.StatusCode);
+            Assert.Contains("read-only", await update.Content.ReadAsStringAsync(ct));
+            using var comment = await SendAsync(HttpMethod.Post, prefix + card.Id + "/comments", "test-session", "test-tab",
+                new AddBoardCommentRequest("Forbidden"));
+            Assert.Equal(HttpStatusCode.BadRequest, comment.StatusCode);
+        }
+        Assert.Equal("Shared task", (await store.FindCardAsync(_project, card.Id, ct))!.Title);
+        Assert.Equal(0, await store.CountUnsentLogEntriesAsync(shared.Id, ct));
+    }
+
+    [Fact]
     public async Task BoardList_MarksACopyOfABoardSharedWithYou()
     {
         var ct = TestContext.Current.CancellationToken;

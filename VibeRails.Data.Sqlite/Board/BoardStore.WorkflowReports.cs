@@ -37,7 +37,7 @@ public sealed partial class BoardStore
             throw new BoardValidationException("Choose a valid step status and a summary of 1–4,000 characters.");
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(deferred: false);
-        var card = await ReadCardAsync(connection, transaction, NormalizeProjectPath(projectPath), cardId, cancellationToken);
+        var card = await ReadCardForWriteAsync(connection, transaction, NormalizeProjectPath(projectPath), cardId, cancellationToken);
         if (card is null) return false;
         await using var query = connection.CreateCommand();
         query.Transaction = transaction;

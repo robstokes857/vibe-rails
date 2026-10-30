@@ -23,6 +23,7 @@ public sealed partial class BoardStore
     public async Task<bool> SaveCheckAsync(string projectPath, BoardCheckRecord check, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);
+        await RequireWritableCardAsync(connection, null, check.CardId, cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
             INSERT INTO BoardChecks (Id, CardId, RunId, ActionId, StartedUTC, EndedUTC, SummaryJson, ResultJson)

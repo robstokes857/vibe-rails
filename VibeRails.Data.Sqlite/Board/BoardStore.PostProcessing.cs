@@ -44,6 +44,7 @@ public sealed partial class BoardStore
                 JOIN BoardColumns k ON k.Id = c.ColumnId
                 JOIN Boards b ON b.Id = k.BoardId
                 WHERE c.PostProcessed = 0 AND c.DeletedUTC IS NULL AND c.UpdatedUTC <= $settled
+                  AND NOT EXISTS (SELECT 1 FROM BoardSharedOrigins origin WHERE origin.BoardId = k.BoardId)
                   AND {LastOfSeveralLanesSql}
                 ORDER BY c.UpdatedUTC, c.Id
                 LIMIT $limit;
@@ -160,6 +161,7 @@ public sealed partial class BoardStore
         var card = check.Card;
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
+        await RequireWritableCardAsync(connection, transaction, card.CardId, cancellationToken);
         // Compared as instants, like CompletePostProcessingAsync: the stored text need not be in
         // the exact round-trip spelling ToDb produces for the snapshot to still be current.
         await using (var read = connection.CreateCommand())

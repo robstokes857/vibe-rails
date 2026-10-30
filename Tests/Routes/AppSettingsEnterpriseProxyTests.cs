@@ -9,6 +9,42 @@ namespace Tests.Routes;
 [Collection("ProcessEnvIsolation")]
 public sealed class AppSettingsEnterpriseProxyTests
 {
+    [Theory]
+    [InlineData("https://secret:password@gateway.example/v1")]
+    [InlineData("https://gateway.example/v1?key=secret")]
+    [InlineData("https://gateway.example/v1#secret")]
+    public void InheritedDirectRouteReportsOnlyItsStatusEvenWhileASavedGatewayMasksIt(string inherited)
+    {
+        var variables = new[] { "OPENAI_BASE_URL", "ANTHROPIC_BASE_URL", "VIBERAILS_CLAUDE_UPSTREAM_BASE" };
+        var previous = variables.Select(Environment.GetEnvironmentVariable).ToArray();
+        var directory = Path.Combine(Path.GetTempPath(), "gateway-route-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Environment.SetEnvironmentVariable(variables[0], inherited);
+            Environment.SetEnvironmentVariable(variables[1], inherited);
+            Environment.SetEnvironmentVariable(variables[2], null);
+            using var store = new SettingsFile(Path.Combine(directory, "settings.json"));
+            var result = AppSettingsRoutes.UpdateComputerName(new("Fixture"), store);
+            Assert.True(result.CodexInheritedBaseBypassesRelay);
+            Assert.True(result.ClaudeInheritedBaseBypassesRelay);
+            Assert.Null(result.CodexInheritedApiBaseUrl);
+            Assert.Null(result.ClaudeInheritedApiBaseUrl);
+            Assert.DoesNotContain("secret", System.Text.Json.JsonSerializer.Serialize(result, AppJsonSerializerContext.Default.AppSettingsDto));
+
+            store.Save(new Settings { CodexEnterpriseNetworkProxy = "https://saved.example/v1",
+                ClaudeEnterpriseNetworkProxy = "https://saved.example/v1" });
+            result = AppSettingsRoutes.UpdateComputerName(new("Fixture"), store);
+            Assert.True(result.CodexInheritedBaseBypassesRelay);
+            Assert.True(result.ClaudeInheritedBaseBypassesRelay);
+            Assert.Equal("https://saved.example/v1", result.CodexEnterpriseNetworkProxy);
+        }
+        finally
+        {
+            for (var i = 0; i < variables.Length; i++) Environment.SetEnvironmentVariable(variables[i], previous[i]);
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        }
+    }
+
     [Fact]
     public void Save_RoundTripsClearsAndPreservesOmittedGatewaysWithoutChangingLegacySwitches()
     {

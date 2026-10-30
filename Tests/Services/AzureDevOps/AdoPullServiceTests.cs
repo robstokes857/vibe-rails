@@ -34,6 +34,31 @@ public sealed class AdoPullServiceTests : IDisposable
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Fact]
+    public async Task ImportedAndDeletedIdsAreCountedWithoutDownloadingTheirDetails()
+    {
+        var service = Service();
+        var saved = await service.SaveAsync(_project, (await BoardWithLanes()).Id, Save(), Pat, Ct);
+        _ado.Serve(Item(1, "Keep", "User Story", "New"), Item(2, "Delete", "User Story", "New"));
+        await service.PullAsync(_project, saved.BoardId, false, Ct);
+        var deleted = (await _store.FindAdoLinkAsync(saved.Id, 2, Ct))!;
+        await _store.DeleteCardAsync(_project, deleted.CardId, Ct);
+        _ado.BatchSizes.Clear();
+        _ado.RequestedIds.Clear();
+        _ado.Serve(Item(1, "", "User Story", "New"), Item(2, "", "User Story", "New"),
+            Item(3, "New work", "User Story", "New"));
+
+        var report = await service.PullAsync(_project, saved.BoardId, false, Ct);
+
+        Assert.Equal((1, 1, 1, 0), (report.Created, report.AlreadyImported, report.Skipped, report.Failed));
+        Assert.Equal([3], Assert.Single(_ado.RequestedIds));
+        _ado.RequestedIds.Clear();
+        report = await service.PullAsync(_project, saved.BoardId, true, Ct);
+        Assert.Equal((0, 2, 1, 0), (report.Created, report.AlreadyImported, report.Skipped, report.Failed));
+        Assert.Empty(_ado.RequestedIds);
+        Assert.Null(await _store.FindCardAsync(_project, deleted.CardId, Ct));
+    }
+
+    [Fact]
     public async Task DryRunCountsWithoutWriting_ARealPullCreatesOnTheDedicatedBoard_AndTheNextOneFindsThemImported()
     {
         var service = Service();
@@ -222,6 +247,7 @@ public sealed class AdoPullServiceTests : IDisposable
 
         // A field this organization lacks is never requested: it would fail the whole batch.
         _ado.Fields = Fields(AdoFields.Priority, AdoFields.StoryPoints);
+        _ado.Serve(Item(2, "New item", "User Story", "New"));
         await service.SaveAsync(_project, saved.BoardId, Save() with { SkipOldDone = false, NarrowWiql = "" }, null, Ct);
         await service.PullAsync(_project, saved.BoardId, false, Ct);
         Assert.DoesNotContain(AdoFields.AcceptanceCriteria, _ado.RequestedFields[^1]);
@@ -664,6 +690,7 @@ public sealed class AdoPullServiceTests : IDisposable
         public List<string> Wiql { get; } = [];
         public List<IReadOnlyList<string>> RequestedFields { get; } = [];
         public List<int> BatchSizes { get; } = [];
+        public List<int[]> RequestedIds { get; } = [];
         public List<string> Tokens { get; } = [];
         public List<(string Organization, string Project, string Team)> Scopes { get; } = [];
         public (string, string, string) LastScope => Scopes[^1];
@@ -738,6 +765,7 @@ public sealed class AdoPullServiceTests : IDisposable
         {
             Assert.InRange(ids.Count, 1, AzureDevOpsClient.BatchSize);
             BatchSizes.Add(ids.Count);
+            RequestedIds.Add(ids.ToArray());
             RequestedFields.Add(fields);
             Tokens.Add(token);
             IReadOnlyList<AdoWorkItem> items = ids.Where(_items.ContainsKey).Select(id => _items[id]).ToList();

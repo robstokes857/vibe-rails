@@ -373,8 +373,15 @@ public sealed class JiraPullService(
             if (page.Outcome != JiraCallOutcome.Ok || page.Value is null)
                 return Stopped(page.Outcome, page.Detail);
 
+            var imported = await store.GetJiraImportStatesAsync(connection.ProjectPath, connection.Id,
+                page.Value.Issues.Select(issue => issue.Id).ToArray(), cancellationToken);
             foreach (var issue in page.Value.Issues)
             {
+                if (imported.TryGetValue(issue.Id, out var live))
+                {
+                    counts.Add(TrackerImport.Classify(true, live));
+                    continue;
+                }
                 try
                 {
                     var (state, madeLane) = await ApplyIssueAsync(connection, plan, issue, lanes, overflowId, dryRun, cancellationToken);
@@ -488,13 +495,8 @@ public sealed class JiraPullService(
         BoardJiraConnectionRecord connection, PullPlan plan, JiraIssue issue, IReadOnlyList<BoardColumnRecord> lanes,
         string? overflowId, bool dryRun, CancellationToken cancellationToken)
     {
-        // A soft-deleted card keeps its link (VB-51) and stays deleted, so no overflow lane is
-        // made on its behalf either. Decided before the dry-run count.
-        var link = await store.FindJiraLinkAsync(connection.Id, issue.Id, cancellationToken);
-        var live = link is not null && await store.FindCardAsync(connection.ProjectPath, link.CardId, cancellationToken) is not null;
-        var state = TrackerImport.Classify(link is not null, live);
-        if (state != TrackerImportState.New)
-            return (state, false);
+        // The page's linked issues (including deleted cards) were classified in one store read.
+        const TrackerImportState state = TrackerImportState.New;
 
         if (string.IsNullOrWhiteSpace(issue.Summary))
             throw new JiraConfigException("Issue has no summary.");

@@ -122,9 +122,9 @@ public sealed partial class BoardSyncServiceTests
         await service.SetPublishedAsync(root, card.BoardId, true, Ct);
         await store.UpdateCardAsync(root, card.Id, new(Title: "Acknowledged"), Ct);
         await service.SyncNowAsync(root, card.BoardId, Ct);
+        await store.AddCommentAsync(root, card.Id, BoardAuthor.User(), "Pending", Ct);
         await ExecuteAsync($"INSERT INTO BoardSharedOrigins VALUES ('{card.BoardId}', '{client.RemoteId:D}', 'server-and-account', 'VB');");
         client.Entries.RemoveAt(1);
-        await store.AddCommentAsync(root, card.Id, BoardAuthor.User(), "Pending", Ct);
         var pullCalls = client.PullAfters.Count;
 
         // VIBE-235: an imported copy never syncs, so it cannot reach owner recovery either.

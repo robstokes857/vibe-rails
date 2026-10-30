@@ -23,6 +23,7 @@ public sealed partial class BoardStore
                 throw new BoardValidationException("The Azure DevOps connection changed. Reopen Board settings and retry.");
             current = ReadAdoConnection(reader);
         }
+        await RequireWritableBoardAsync(db, transaction, current.BoardId, cancellationToken);
         // A team board is named for its team, a saved query (no team) for the query.
         var name = DedicatedAdoBoardName(current);
         if (current.DedicatedBoard)

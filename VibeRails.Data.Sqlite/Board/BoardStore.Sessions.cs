@@ -35,7 +35,7 @@ public sealed partial class BoardStore
             throw new BoardValidationException("Choose an explicit launch origin.");
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(System.Data.IsolationLevel.Serializable);
-        var card = await ReadCardAsync(connection, transaction, NormalizeProjectPath(projectPath), cardId, cancellationToken);
+        var card = await ReadCardForWriteAsync(connection, transaction, NormalizeProjectPath(projectPath), cardId, cancellationToken);
         if (card is null) return false;
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;

@@ -171,6 +171,29 @@ public sealed partial class BoardStore
     private static async Task<bool> IsImportedBoardAsync(SqliteConnection db, SqliteTransaction? tx, string boardId, CancellationToken ct)
         => await ScalarLongAsync(db, tx, "SELECT COUNT(*) FROM BoardSharedOrigins WHERE BoardId=$board", ("$board", boardId), ct) == 1;
 
+    private static async Task RequireWritableBoardAsync(SqliteConnection db, SqliteTransaction? tx, string boardId, CancellationToken ct)
+    {
+        if (await IsImportedBoardAsync(db, tx, boardId, ct))
+            throw new BoardValidationException(BoardAccess.ReadOnlyMessage);
+    }
+
+    private static async Task RequireWritableCardAsync(SqliteConnection db, SqliteTransaction? tx, string cardId, CancellationToken ct)
+    {
+        if (await ScalarLongAsync(db, tx, """
+            SELECT COUNT(*) FROM BoardCards c JOIN BoardColumns lane ON lane.Id=c.ColumnId
+            JOIN BoardSharedOrigins origin ON origin.BoardId=lane.BoardId WHERE c.Id=$card
+            """, ("$card", cardId), ct) != 0)
+            throw new BoardValidationException(BoardAccess.ReadOnlyMessage);
+    }
+
+    private static async Task<BoardCardRecord?> ReadCardForWriteAsync(SqliteConnection db, SqliteTransaction tx,
+        string project, string idOrKey, CancellationToken ct, BoardSyncStamp? stamp = null)
+    {
+        var card = await ReadCardAsync(db, tx, project, idOrKey, ct, includeDeleted: stamp is not null);
+        if (card is not null && stamp is null) await RequireWritableBoardAsync(db, tx, card.BoardId, ct);
+        return card;
+    }
+
     /// <summary>
     /// VIBE-85: a card never crosses the sharing boundary. Moving a card out of an imported board
     /// would queue its departure on the shared board (deleting it for every collaborator) and
@@ -182,7 +205,7 @@ public sealed partial class BoardStore
     {
         if (sourceBoardId == targetBoardId) return;
         if (await IsImportedBoardAsync(db, tx, sourceBoardId, ct) || await IsImportedBoardAsync(db, tx, targetBoardId, ct))
-            throw new BoardValidationException("Cards cannot be moved between a shared board you imported and another board. Copy the card to the other board instead.");
+            throw new BoardValidationException(BoardAccess.ReadOnlyMessage);
     }
 
     private static async Task<bool> ColumnExistsAsync(SqliteConnection db, SqliteTransaction tx, string id, CancellationToken ct)

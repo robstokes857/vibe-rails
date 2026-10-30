@@ -37,6 +37,28 @@ public class ChatHistorySqlTests
         Assert.Equal("raw preview", reader.GetString(12));
     }
 
+    [Theory]
+    [InlineData("Shell")]
+    [InlineData("Codex")]
+    public async Task AutomationRecordings_AreHiddenFromPages_ButMarkedInSingleLookups(string cli)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var connection = new SqliteConnection($"Data Source=chat-history-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+        await connection.OpenAsync(ct);
+        var repository = new Repository(connection.ConnectionString);
+        await repository.CreateSessionAsync("ordinary", "Shell", null, "C:/project", 1234);
+        await repository.CreateSessionAsync("automation", cli, null, "C:/project", 1234, jobRunId: "run");
+
+        var page = await repository.GetChatHistoryPageAsync(20, 0, null, null, null, ct);
+        var ordinary = Assert.Single(page);
+        Assert.Equal("ordinary", ordinary.Id);
+        Assert.False(ordinary.IsAutomation);
+
+        var recording = Assert.IsType<VibeRails.DTOs.ChatHistoryItem>(await repository.GetChatHistoryItemAsync("automation", ct));
+        Assert.True(recording.IsAutomation);
+        Assert.Equal(cli, recording.Cli);
+    }
+
     private static Task InitializeSchemaAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();

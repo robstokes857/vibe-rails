@@ -97,6 +97,7 @@ public sealed partial class BoardStore : IBoardStore
         var existing = await ReadBoardAsync(connection, transaction, project, boardId, cancellationToken);
         if (existing is null)
             return null;
+        await RequireWritableBoardAsync(connection, transaction, existing.Id, cancellationToken);
         // Null keeps a value; an empty prefix returns future cards to the repository default.
         var prefix = displayPrefix is null ? existing.DisplayPrefix
             : displayPrefix.Trim().Length == 0 ? null
@@ -125,6 +126,7 @@ public sealed partial class BoardStore : IBoardStore
         var target = boards.FirstOrDefault(b => string.Equals(b.Id, boardId.Trim(), StringComparison.Ordinal));
         if (target is null)
             return null;
+        await RequireWritableBoardAsync(connection, transaction, target.Id, cancellationToken);
         if (boards.Count <= 1)
             throw new BoardConflictException("The project needs at least one board.");
 
@@ -322,6 +324,7 @@ public sealed partial class BoardStore : IBoardStore
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
         var board = await ResolveBoardIdAsync(connection, transaction, project, boardId, cancellationToken)
             ?? throw new BoardValidationException("No board available. Create a board first.");
+        await RequireWritableBoardAsync(connection, transaction, board, cancellationToken);
         var position = first ? 0 : (int)await ScalarLongAsync(connection, transaction,
             "SELECT COUNT(*) FROM BoardColumns WHERE BoardId = $board",
             ("$board", board), cancellationToken);
@@ -344,6 +347,7 @@ public sealed partial class BoardStore : IBoardStore
         var existing = await ReadColumnAsync(connection, transaction, project, columnId, cancellationToken);
         if (existing is null)
             return null;
+        await RequireWritableBoardAsync(connection, transaction, existing.BoardId, cancellationToken);
 
         var updated = existing with
         {
@@ -377,6 +381,7 @@ public sealed partial class BoardStore : IBoardStore
         var target = await ReadColumnAsync(connection, transaction, project, columnId, cancellationToken);
         if (target is null)
             return null;
+        await RequireWritableBoardAsync(connection, transaction, target.BoardId, cancellationToken);
         var columns = await ReadColumnsAsync(connection, transaction, project, target.BoardId, cancellationToken);
         if (columns.Count <= 1)
             throw new BoardConflictException("The board needs at least one lane.");
@@ -438,6 +443,7 @@ public sealed partial class BoardStore : IBoardStore
             board = (await ReadColumnAsync(connection, transaction, project, requested[0], cancellationToken))?.BoardId;
         board ??= await ResolveBoardIdAsync(connection, transaction, project, boardId, cancellationToken)
             ?? throw new BoardValidationException("No board available. Create a board first.");
+        await RequireWritableBoardAsync(connection, transaction, board, cancellationToken);
         var columns = await ReadColumnsAsync(connection, transaction, project, board, cancellationToken);
         var known = columns.Select(c => c.Id).ToHashSet(StringComparer.Ordinal);
         if (requested.Count != known.Count
@@ -578,6 +584,8 @@ public sealed partial class BoardStore : IBoardStore
                 ?? throw new BoardValidationException($"Lane not found: {card.ColumnId}");
         }
 
+        if (stamp is null) await RequireWritableBoardAsync(connection, transaction, column.BoardId, cancellationToken);
+
         // The project's first card fixes its key prefix, in this same transaction, before the
         // number exists: a prefix chosen while cards already exist would have to be VB.
         var prefix = await EnsureProjectKeyPrefixAsync(connection, transaction, project, cancellationToken);
@@ -662,7 +670,7 @@ public sealed partial class BoardStore : IBoardStore
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
-        var existing = await ReadCardAsync(connection, transaction, project, cardId, cancellationToken, includeDeleted: stamp is not null);
+        var existing = await ReadCardForWriteAsync(connection, transaction, project, cardId, cancellationToken, stamp);
         if (existing is null)
             return null;
 
@@ -811,7 +819,7 @@ public sealed partial class BoardStore : IBoardStore
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
-        var existing = await ReadCardAsync(connection, transaction, project, cardId, cancellationToken, includeDeleted: stamp is not null);
+        var existing = await ReadCardForWriteAsync(connection, transaction, project, cardId, cancellationToken, stamp);
         if (existing is null)
             return false;
         if (stamp is not null)
@@ -868,7 +876,7 @@ public sealed partial class BoardStore : IBoardStore
         string project, string cardId, string columnId, int? position, bool skipLaneAutomations,
         CancellationToken cancellationToken, BoardAuthor? author)
     {
-        var existing = await ReadCardAsync(connection, transaction, project, cardId, cancellationToken);
+        var existing = await ReadCardForWriteAsync(connection, transaction, project, cardId, cancellationToken);
         if (existing is null)
             return null;
         var column = await ReadColumnAsync(connection, transaction, project, columnId, cancellationToken)
@@ -995,7 +1003,7 @@ public sealed partial class BoardStore : IBoardStore
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
-        var card = await ReadCardAsync(connection, transaction, project, cardId, cancellationToken, includeDeleted: stamp is not null);
+        var card = await ReadCardForWriteAsync(connection, transaction, project, cardId, cancellationToken, stamp);
         if (card is null)
             return null;
         if (stamp is not null) RequireSyncBoard(card, stamp);
@@ -1087,7 +1095,7 @@ public sealed partial class BoardStore : IBoardStore
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
-        var card = await ReadCardAsync(connection, transaction, project, cardId, cancellationToken);
+        var card = await ReadCardForWriteAsync(connection, transaction, project, cardId, cancellationToken);
         if (card is null)
             return null;
 
@@ -1141,7 +1149,7 @@ public sealed partial class BoardStore : IBoardStore
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
-        var card = await ReadCardAsync(connection, transaction, project, cardId, cancellationToken);
+        var card = await ReadCardForWriteAsync(connection, transaction, project, cardId, cancellationToken);
         if (card is null)
             return null;
         await using (var update = connection.CreateCommand())
@@ -1167,7 +1175,7 @@ public sealed partial class BoardStore : IBoardStore
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
-        var card = await ReadCardAsync(connection, transaction, project, cardId, cancellationToken);
+        var card = await ReadCardForWriteAsync(connection, transaction, project, cardId, cancellationToken);
         if (card is null)
             return false;
         bool removed;
@@ -1225,7 +1233,7 @@ public sealed partial class BoardStore : IBoardStore
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
-        var card = await ReadCardAsync(connection, transaction, project, cardId, cancellationToken);
+        var card = await ReadCardForWriteAsync(connection, transaction, project, cardId, cancellationToken);
         if (card is null)
             return false;
         bool removed;
@@ -1266,7 +1274,7 @@ public sealed partial class BoardStore : IBoardStore
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
-        var card = await ReadCardAsync(connection, transaction, project, cardId, cancellationToken);
+        var card = await ReadCardForWriteAsync(connection, transaction, project, cardId, cancellationToken);
         if (card is null)
             return null;
 
@@ -1339,7 +1347,7 @@ public sealed partial class BoardStore : IBoardStore
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
-        var card = await ReadCardAsync(connection, transaction, project, cardId, cancellationToken);
+        var card = await ReadCardForWriteAsync(connection, transaction, project, cardId, cancellationToken);
         if (card is null)
             return false;
         bool removed;
@@ -1799,6 +1807,7 @@ public sealed partial class BoardStore : IBoardStore
 
     private static async Task TouchCardAsync(SqliteConnection connection, SqliteTransaction transaction, string cardId, CancellationToken cancellationToken)
     {
+        await RequireWritableCardAsync(connection, transaction, cardId, cancellationToken);
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = "UPDATE BoardCards SET UpdatedUTC = $updated WHERE Id = $id;";

@@ -77,6 +77,7 @@ public sealed partial class BoardSettingsTests
         var entry = Assert.Single(await _boards.GetLaneAutomationStatusesAsync(_root, card.Id, Ct));
         var racing = new Mock<IBoardStore>(MockBehavior.Strict);
         racing.Setup(s => s.FindCardAsync(_root, card.Id, Ct)).ReturnsAsync(card);
+        racing.Setup(s => s.GetSharedBoardOriginsAsync(_root, Ct)).Returns(() => _boards.GetSharedBoardOriginsAsync(_root, Ct));
         racing.Setup(s => s.GetLaneAutomationStatusesAsync(_root, card.Id, Ct)).Returns(async () =>
         {
             await _boards.MoveCardAsync(_root, card.Id, other, null, Ct);

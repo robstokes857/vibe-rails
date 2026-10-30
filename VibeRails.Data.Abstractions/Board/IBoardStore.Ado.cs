@@ -32,6 +32,10 @@ public partial interface IBoardStore
 
     Task<BoardAdoLinkRecord?> FindAdoLinkAsync(string connectionId, int workItemId, CancellationToken cancellationToken = default);
 
+    /// <summary>Linked work item IDs in a bounded query result, with true for live cards and false for deleted cards.</summary>
+    Task<IReadOnlyDictionary<int, bool>> GetAdoImportStatesAsync(string projectPath, string connectionId,
+        IReadOnlyList<int> workItemIds, CancellationToken cancellationToken = default);
+
     /// <summary>Retained work item identities for a live card in this project, including after a lane/board move.</summary>
     Task<IReadOnlyList<BoardAdoLinkRecord>> GetAdoLinksForCardAsync(string projectPath, string cardId, CancellationToken cancellationToken = default);
 

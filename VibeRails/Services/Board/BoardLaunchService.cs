@@ -86,6 +86,8 @@ public sealed class BoardLaunchService(
         if (card is null)
             return null;
 
+        await BoardAccess.RequireWritableAsync(store, projectPath, card.BoardId, cancellationToken);
+
         if (intent == "work" && card.WorkflowMode == "agent") intent = "manager";
         var isManager = intent == "manager";
         var isWorker = intent == "worker" || (intent == "code_review" && card.WorkflowMode == "agent");

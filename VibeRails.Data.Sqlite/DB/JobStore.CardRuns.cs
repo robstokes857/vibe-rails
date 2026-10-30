@@ -15,6 +15,8 @@ public sealed partial class JobStore
     {
         if (string.IsNullOrWhiteSpace(cardKey) || cardKey.Contains(':'))
             throw new ArgumentException("A card key is required.", nameof(cardKey));
+        if (_boards is not null && await _boards.FindCardAsync(projectPath, cardKey, cancellationToken) is { } sourceCard)
+            await BoardAccess.RequireWritableAsync(_boards, projectPath, sourceCard.BoardId, cancellationToken);
         var reviewLaunch = await PrepareReviewAsync(jobId, cardKey, cancellationToken);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(deferred: false);
@@ -53,6 +55,7 @@ public sealed partial class JobStore
     private async Task<bool> CanRerunLaneAsync(BoardLaneAutomationEvent entry, string? sourceRunId, CancellationToken ct)
     {
         if (_boards is null || await _boards.FindCardAsync(entry.ProjectPath, entry.CardId, ct) is not { } card) return false;
+        await BoardAccess.RequireWritableAsync(_boards, entry.ProjectPath, card.BoardId, ct);
         var status = (await _boards.GetLaneAutomationStatusesAsync(entry.ProjectPath, entry.CardId, ct))
             .SingleOrDefault(row => row.JobId == entry.JobId && row.EventKey == entry.EventKey);
         return status is { CanRerun: true } && status.RunId == sourceRunId

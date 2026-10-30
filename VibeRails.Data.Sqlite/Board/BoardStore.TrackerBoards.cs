@@ -23,6 +23,7 @@ public sealed partial class BoardStore
         string? columnMap, string? overflowColumnId, string importedCardSql, string connectionId,
         BoardAuthor author, string missingSourceMessage, bool newBoard, CancellationToken cancellationToken)
     {
+        await RequireWritableBoardAsync(db, transaction, sourceBoardId, cancellationToken);
         if (!newBoard && await CanTakeOverBoardAsync(db, transaction, project, sourceBoardId, importedCardSql, connectionId, cancellationToken))
             return new DedicatedBoardTarget(sourceBoardId, columnMap, overflowColumnId);
         return await CloneToDedicatedBoardAsync(db, transaction, project, sourceBoardId, name, columnMap,

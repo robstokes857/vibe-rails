@@ -1968,7 +1968,11 @@ namespace VibeRails.DB
                 InputText: reader.IsDBNull(12) ? null : reader.GetString(12),
                 UserInputCount: reader.GetInt32(13),
                 DurationSeconds: reader.IsDBNull(14) ? null : reader.GetInt64(14)
-            ) { SessionTitleGenerated = reader.GetBoolean(15) };
+            )
+            {
+                SessionTitleGenerated = reader.GetBoolean(15),
+                IsAutomation = reader.GetBoolean(16)
+            };
         }
 
         private static string BuildChatHistoryPageQuery(string? preferredWorkingDirectory, string? sortBy, string? sortDirection)

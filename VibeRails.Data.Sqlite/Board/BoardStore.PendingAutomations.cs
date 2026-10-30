@@ -20,7 +20,9 @@ public sealed partial class BoardStore
         query.CommandText = $"""
             WITH pending AS ({PendingLaneEntriesSql}), ranked AS (
                 SELECT *, ROW_NUMBER() OVER (PARTITION BY JobId ORDER BY DueUnixMs, CardId, EventKey) AS rank
-                FROM pending WHERE DueUnixMs <= $now
+                FROM pending WHERE DueUnixMs <= $now AND NOT EXISTS (
+                    SELECT 1 FROM BoardCards sharedCard JOIN BoardColumns sharedLane ON sharedLane.Id = sharedCard.ColumnId
+                    JOIN BoardSharedOrigins origin ON origin.BoardId = sharedLane.BoardId WHERE sharedCard.Id = pending.CardId)
             )
             SELECT p.CardId, p.JobId, p.EventKey, c.ProjectPath,
                 'board-lane:' || {CardKeySql} || ':' || p.ColumnId || ':' || p.EventKey,
@@ -57,6 +59,8 @@ public sealed partial class BoardStore
             SELECT EXISTS (SELECT 1 FROM pending p JOIN BoardCards c ON c.Id = p.CardId
                 WHERE p.CardId = $card AND p.JobId = $job AND p.EventKey = $event
                   AND c.ProjectPath = $project{ProjectPathCollation} AND c.ColumnId = p.ColumnId AND c.DeletedUTC IS NULL
+                  AND NOT EXISTS (SELECT 1 FROM BoardColumns lane JOIN BoardSharedOrigins origin ON origin.BoardId = lane.BoardId
+                      WHERE lane.Id = c.ColumnId)
                   AND (EXISTS (SELECT 1 FROM BoardLaneAutomations a WHERE a.ColumnId = p.ColumnId AND a.JobId = p.JobId)
                     OR EXISTS (SELECT 1 FROM BoardLaneAdditionalAutomations a WHERE a.ColumnId = p.ColumnId AND a.JobId = p.JobId)));
             """;

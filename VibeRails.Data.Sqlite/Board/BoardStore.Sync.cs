@@ -93,6 +93,7 @@ public sealed partial class BoardStore
     {
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
+        await RequireWritableBoardAsync(connection, null, boardId.Trim(), cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = $"UPDATE Boards SET SyncEnabled = $enabled WHERE Id = $board AND ProjectPath = $project{ProjectPathCollation};";
         command.Parameters.AddWithValue("$enabled", enabled ? 1 : 0);

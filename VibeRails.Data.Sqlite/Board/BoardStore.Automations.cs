@@ -21,6 +21,8 @@ public sealed partial class BoardStore
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
         var current = await ReadLaneAutomationAsync(connection, transaction, project, columnId, cancellationToken);
         if (current is null) return null;
+        var column = await ReadColumnAsync(connection, transaction, project, columnId, cancellationToken);
+        await RequireWritableBoardAsync(connection, transaction, column!.BoardId, cancellationToken);
         if (current.Revision != expectedRevision)
             throw new BoardConflictException("Lane automation changed while you were editing. Reopen the lane to load the latest version.");
         // Jobs are local Automation definitions in state.db. Only read them here; the scheduler

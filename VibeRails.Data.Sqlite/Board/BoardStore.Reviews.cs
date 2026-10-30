@@ -21,6 +21,7 @@ public sealed partial class BoardStore
     {
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(deferred: false);
+        await RequireWritableCardAsync(connection, transaction, review.CardId, cancellationToken);
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = $"""

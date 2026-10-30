@@ -7,7 +7,7 @@ public sealed partial class BoardStore
     {
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(deferred: false);
-        var card = await ReadCardAsync(connection, transaction, NormalizeProjectPath(entry.ProjectPath), entry.CardId, cancellationToken);
+        var card = await ReadCardForWriteAsync(connection, transaction, NormalizeProjectPath(entry.ProjectPath), entry.CardId, cancellationToken);
         if (card is null) return false;
         await using (var pending = connection.CreateCommand())
         {

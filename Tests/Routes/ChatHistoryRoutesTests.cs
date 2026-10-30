@@ -30,10 +30,14 @@ public sealed class ChatHistoryRoutesTests
         var board = new Mock<IBoardStore>(MockBehavior.Strict);
         var item = new ChatHistoryItem("session", "codex", "Review", "C:/project", "Project",
             DateTime.UtcNow, null, null, null, null, "My renamed chat", 1, "Automatic preview", 1, null);
+        var automation = item with { Id = "automation", Cli = "Shell", IsAutomation = true };
         repository.Setup(r => r.GetChatHistoryPageAsync(20, 0, null, null, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync([item]);
         repository.Setup(r => r.GetChatHistoryItemAsync("session", It.IsAny<CancellationToken>())).ReturnsAsync(item);
         repository.Setup(r => r.GetChatHistoryItemAsync("missing", It.IsAny<CancellationToken>())).ReturnsAsync((ChatHistoryItem?)null);
+        repository.Setup(r => r.GetChatHistoryItemAsync("automation", It.IsAny<CancellationToken>())).ReturnsAsync(automation);
+        board.Setup(s => s.GetSessionCardsAsync(It.Is<IReadOnlyList<string>>(ids => ids.Count == 1 && ids[0] == "automation"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
         repository.Setup(r => r.GetSessionOutputAsync("session", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SessionOutputDetailResponse("session", "codex", null, "C:/project", DateTime.UtcNow, null, true, "transcript"));
         repository.Setup(r => r.GetChatSummariesBySessionAsync("session", It.IsAny<CancellationToken>()))
@@ -62,6 +66,17 @@ public sealed class ChatHistoryRoutesTests
         await app.StartAsync(ct);
         try
         {
+            using (var request = new HttpRequestMessage(HttpMethod.Get, new Uri(new Uri(app.Urls.First()), "/api/v1/chatHistory/automation")))
+            {
+                request.Headers.Add("viberails_session", "session-token");
+                request.Headers.Add("viberails_tab", "tab-token");
+                using var response = await Client.SendAsync(request, ct);
+                response.EnsureSuccessStatusCode();
+                using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+                Assert.True(json.RootElement.GetProperty("isAutomation").GetBoolean());
+                Assert.Equal("Shell", json.RootElement.GetProperty("cli").GetString());
+            }
+
             foreach (var path in new[] { "/api/v1/chatHistory", "/api/v1/chatHistory/session", "/api/v1/chatHistory/session/summary" })
             {
                 foreach (var credential in new[] { "none", "session", "tab", "both" })
@@ -93,7 +108,7 @@ public sealed class ChatHistoryRoutesTests
                 }
             }
             Assert.Null(await app.Services.GetRequiredService<IChatHistoryService>().GetSessionAsync("missing", ct));
-            board.Verify(s => s.GetSessionCardsAsync(It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
+            board.Verify(s => s.GetSessionCardsAsync(It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()), Times.Exactly(4));
         }
         finally { await app.StopAsync(CancellationToken.None); }
     }

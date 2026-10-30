@@ -916,6 +916,12 @@ export class ChatHistorySidebar {
     }
 
     _shouldDisplayItem(item) {
+        // Exact-ID lookups also serve Board replay and can return Automation recordings
+        // that the paged history query excludes (including their outer shell wrappers).
+        if (item?.isAutomation) {
+            return false;
+        }
+
         const displayName = this._getDisplayName(item);
         if (displayName.length > 0 && displayName.toLowerCase() !== 'untitled') {
             return true;
