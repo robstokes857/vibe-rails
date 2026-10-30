@@ -110,6 +110,7 @@ public sealed class LlmProxySettingsService(
             GrokLlmProxyLaunchEnabled = true,
             CodexEnterpriseNetworkProxy = ResolveGateway(settings.CodexEnterpriseNetworkProxy, inheritedCodexBaseUrl, capturedCodexUpstream),
             ClaudeEnterpriseNetworkProxy = ResolveGateway(settings.ClaudeEnterpriseNetworkProxy, inheritedClaudeBaseUrl, capturedClaudeUpstream),
+            ClaudeGatewaySupportsToolSearch = settings.ClaudeGatewaySupportsToolSearch,
             CodexGatewayBearerToken = string.IsNullOrWhiteSpace(settings.CodexEnterpriseNetworkProxy) ? "" : settings.CodexGatewayBearerToken,
             ClaudeGatewayBearerToken = string.IsNullOrWhiteSpace(settings.ClaudeEnterpriseNetworkProxy) ? "" : settings.ClaudeGatewayBearerToken,
             CodexGatewayAuthMode = settings.CodexGatewayAuthMode,

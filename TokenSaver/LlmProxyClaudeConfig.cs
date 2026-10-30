@@ -75,23 +75,43 @@ public static class LlmProxyClaudeConfig
     }
 
     /// <summary>
+    /// Whether a launch whose traffic reaches <paramref name="upstream"/> keeps tool search. Tool
+    /// search needs <c>tool_reference</c> blocks to survive the whole route, and a gateway that
+    /// translates for Bedrock or similar may reject them with a 400 on every request. So it stays
+    /// on for the provider default (blank), for api.anthropic.com named explicitly (the first-party
+    /// API, which is what Settings' "Anthropic API key" choice saves), and for a gateway the user
+    /// has marked with <c>ClaudeGatewaySupportsToolSearch</c>. Any other gateway, including an
+    /// unrecoverable inherited destination, gets Claude Code's own default for a non-first-party
+    /// host: off. A wrong "off" costs context; a wrong "on" makes the gateway unusable.
+    /// </summary>
+    public static bool KeepsToolSearch(string? upstream, bool gatewaySupportsToolSearch) =>
+        string.IsNullOrWhiteSpace(upstream) || gatewaySupportsToolSearch || IsFirstPartyApi(upstream);
+
+    /// <summary>True for an HTTPS base on <see cref="UpstreamHost"/> itself, on the default port.</summary>
+    public static bool IsFirstPartyApi(string? upstream) =>
+        EnterpriseNetworkProxy.TryNormalize(upstream, out var normalized)
+        && Uri.TryCreate(normalized, UriKind.Absolute, out var uri)
+        && uri.Scheme == Uri.UriSchemeHttps
+        && uri.IsDefaultPort
+        && uri.Host.Equals(UpstreamHost, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     /// The env vars that point Claude Code at the proxy, plus the tool-search opt-in that the
     /// custom base URL would otherwise switch off. Merged into the prepared-session environment
-    /// at the <c>CommandService</c> seam. The opt-in is left out when an enterprise gateway
-    /// receives the traffic: tool search needs <c>tool_reference</c> blocks to survive, and a
-    /// gateway that translates for Bedrock or similar may reject them. Claude Code then keeps its
-    /// own safe default for a non-first-party base URL.
+    /// at the <c>CommandService</c> seam. Pass <paramref name="toolSearch"/> from
+    /// <see cref="KeepsToolSearch"/>; false leaves the variable out so Claude Code keeps its own
+    /// safe default for a non-first-party base URL.
     /// </summary>
     public static IReadOnlyDictionary<string, string> BuildClaudeProxyEnvironment(
         string apiBaseUrl, string sessionToken, string tabToken, string? terminalSessionId = null,
-        bool enterpriseGateway = false, string? additionalHeaders = null)
+        bool toolSearch = true, string? additionalHeaders = null)
     {
         var environment = new Dictionary<string, string>
         {
             [BaseUrlVariable] = BuildAnthropicBaseUrl(apiBaseUrl),
             [CustomHeadersVariable] = BuildCustomHeaders(sessionToken, tabToken, terminalSessionId, additionalHeaders)
         };
-        if (!enterpriseGateway)
+        if (toolSearch)
             environment[ToolSearchVariable] = ToolSearchEnabledValue;
         return environment;
     }

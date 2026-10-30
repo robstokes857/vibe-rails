@@ -193,6 +193,8 @@ public static class AppSettingsRoutes
                 settings.CodexGatewayApiKeyHeader = EnterpriseGatewayCredentials.NormalizeApiKeyHeader(settingsDto.CodexGatewayApiKeyHeader);
             if (settingsDto.ClaudeGatewayApiKeyHeader is not null)
                 settings.ClaudeGatewayApiKeyHeader = EnterpriseGatewayCredentials.NormalizeApiKeyHeader(settingsDto.ClaudeGatewayApiKeyHeader);
+            if (settingsDto.ClaudeGatewaySupportsToolSearch.HasValue)
+                settings.ClaudeGatewaySupportsToolSearch = settingsDto.ClaudeGatewaySupportsToolSearch.Value;
             settings.CodexGatewayBearerToken = MergeGatewayToken(settings.CodexGatewayBearerToken,
                 settingsDto.CodexGatewayBearerToken, settingsDto.ClearCodexGatewayBearerToken, settings.CodexGatewayAuthMode);
             settings.ClaudeGatewayBearerToken = MergeGatewayToken(settings.ClaudeGatewayBearerToken,
@@ -322,7 +324,8 @@ public static class AppSettingsRoutes
             CodexGatewayAuthMode: settings.CodexGatewayAuthMode,
             CodexGatewayApiKeyHeader: settings.CodexGatewayApiKeyHeader,
             ClaudeGatewayAuthMode: settings.ClaudeGatewayAuthMode,
-            ClaudeGatewayApiKeyHeader: settings.ClaudeGatewayApiKeyHeader
+            ClaudeGatewayApiKeyHeader: settings.ClaudeGatewayApiKeyHeader,
+            ClaudeGatewaySupportsToolSearch: settings.ClaudeGatewaySupportsToolSearch
         );
     }
 

@@ -1126,6 +1126,7 @@
                             <select class="form-select mb-2" id="setting-codex-gateway-auth-mode">
                                 <option value="bearer">Bearer token (Authorization header)</option>
                                 <option value="api-key">API key in a named header</option>
+                                <option value="openai-api-key">OpenAI API key (api.openai.com)</option>
                             </select>
                             <div id="setting-codex-gateway-api-key-row" class="mb-2" hidden>
                                 <label class="form-label" for="setting-codex-gateway-api-key-header">API key header name</label>
@@ -1191,6 +1192,7 @@
                             <select class="form-select mb-2" id="setting-claude-gateway-auth-mode">
                                 <option value="bearer">Bearer token (Authorization header)</option>
                                 <option value="api-key">API key in a named header</option>
+                                <option value="anthropic-api-key">Anthropic API key (api.anthropic.com)</option>
                             </select>
                             <div id="setting-claude-gateway-api-key-row" class="mb-2" hidden>
                                 <label class="form-label" for="setting-claude-gateway-api-key-header">API key header name</label>
@@ -1206,6 +1208,12 @@
                                 <input class="form-check-input" type="checkbox" id="setting-claude-gateway-token-clear">
                                 <label class="form-check-label" for="setting-claude-gateway-token-clear">Remove saved credential</label>
                             </div>
+                        </div>
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="setting-claude-gateway-tool-search"
+                                aria-describedby="setting-claude-gateway-tool-search-help">
+                            <label class="form-check-label" for="setting-claude-gateway-tool-search">Gateway supports tool search</label>
+                            <small id="setting-claude-gateway-tool-search-help" class="form-text text-muted d-block">Turn on if your gateway passes Anthropic <code>tool_reference</code> blocks through unchanged. Claude Code then loads MCP tool definitions when it needs them instead of sending all of them up front, about 40k tokens of context per session. Leave it off if the gateway translates to Bedrock or Vertex: one that rejects <code>tool_reference</code> fails every request. Tool search is always on for api.anthropic.com and when no gateway is set. Applies to new terminals.</small>
                         </div>
                         <p id="setting-claude-gateway-route" class="small text-muted text-break" role="status"></p>
                         <p id="setting-claude-gateway-route-caveat" class="small text-muted">Custom CLI profiles or provider overrides can bypass this route. A saved gateway and credential here override saved provider settings for ordinary launches.</p>

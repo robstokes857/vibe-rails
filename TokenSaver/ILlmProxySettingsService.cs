@@ -38,6 +38,8 @@ public sealed record LlmProxySettings(
     public string CodexEnterpriseNetworkProxy { get; init; } = string.Empty;
     /// <summary>Optional Claude API gateway base URL, including its API path (usually /v1).</summary>
     public string ClaudeEnterpriseNetworkProxy { get; init; } = string.Empty;
+    /// <summary>The user's opt-in to keep MCP tool search on behind <see cref="ClaudeEnterpriseNetworkProxy"/>.</summary>
+    public bool ClaudeGatewaySupportsToolSearch { get; init; }
     /// <summary>Bearer override bound to the explicitly saved Codex gateway, never an inherited URL.</summary>
     public string CodexGatewayBearerToken { get; init; } = string.Empty;
     /// <summary>Bearer override bound to the explicitly saved Claude gateway, never an inherited URL.</summary>

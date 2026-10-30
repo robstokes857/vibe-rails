@@ -32,6 +32,13 @@ public interface ILlmProxyEventSink
 
     /// <summary>Debug-level diagnostics (e.g. mid-stream disconnects); host routes to its logger.</summary>
     void Diagnostic(string source, string message, Exception? exception = null);
+
+    /// <summary>
+    /// A misconfiguration the user can fix, naming the setting to change. Unlike
+    /// <see cref="Diagnostic"/>, hosts keep it at their normal log level. Defaults to
+    /// <see cref="Diagnostic"/> so sinks that only care about activity need not implement it.
+    /// </summary>
+    void Warning(string source, string message) => Diagnostic(source, message);
 }
 
 /// <summary>

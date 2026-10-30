@@ -58,4 +58,10 @@ public sealed class LlmProxyEventSinkAdapter(IAppEventBus eventBus, ITokenSaving
     {
         Log.Debug(exception, "{ActivitySource} {Message}", source, message);
     }
+
+    // The file sink starts at Information, so Debug diagnostics never reach logs/vb-*.log.
+    public void Warning(string source, string message)
+    {
+        Log.Warning("{ActivitySource} {Message}", source, message);
+    }
 }

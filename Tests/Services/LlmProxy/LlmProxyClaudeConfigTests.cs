@@ -142,14 +142,37 @@ public class LlmProxyClaudeConfigTests : IDisposable
     }
 
     [Fact]
-    public void BuildClaudeProxyEnvironment_LeavesToolSearchToClaudeBehindAnEnterpriseGateway()
+    public void BuildClaudeProxyEnvironment_LeavesToolSearchToClaudeWhenTheRouteMayRejectIt()
     {
         // A gateway that translates for Bedrock or similar may reject tool_reference blocks.
         var env = LlmProxyClaudeConfig.BuildClaudeProxyEnvironment(
-            "http://127.0.0.1:4321", "session-abc", "tab-xyz", enterpriseGateway: true);
+            "http://127.0.0.1:4321", "session-abc", "tab-xyz", toolSearch: false);
 
         Assert.False(env.ContainsKey(LlmProxyClaudeConfig.ToolSearchVariable));
         Assert.Equal("http://127.0.0.1:4321/llm/anthropic", env[LlmProxyClaudeConfig.BaseUrlVariable]);
+    }
+
+    [Theory]
+    // No gateway: the provider default, which accepts tool_reference.
+    [InlineData("", false, true)]
+    [InlineData("  ", false, true)]
+    // The first-party API named explicitly, as Settings' "Anthropic API key" choice saves it.
+    [InlineData("https://api.anthropic.com", false, true)]
+    [InlineData("https://API.Anthropic.com/v1", false, true)]
+    [InlineData("https://api.anthropic.com:443/v1", false, true)]
+    // Anything else needs the user's opt-in.
+    [InlineData("https://gateway.example/v1", false, false)]
+    [InlineData("https://gateway.example/v1", true, true)]
+    [InlineData("http://api.anthropic.com", false, false)]
+    [InlineData("https://api.anthropic.com:8443", false, false)]
+    [InlineData("https://api.anthropic.com.gateway.example", false, false)]
+    [InlineData("https://gateway.example/api.anthropic.com", false, false)]
+    // An unrecoverable inherited destination fails closed at the relay; don't promise tool search.
+    [InlineData(LlmProxyUpstream.Unavailable, false, false)]
+    public void KeepsToolSearch_OnlyWhereTheRouteIsKnownOrDeclaredToAcceptToolReference(
+        string upstream, bool optIn, bool expected)
+    {
+        Assert.Equal(expected, LlmProxyClaudeConfig.KeepsToolSearch(upstream, optIn));
     }
 
     [Fact]

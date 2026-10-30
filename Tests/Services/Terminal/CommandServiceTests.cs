@@ -884,7 +884,8 @@ public partial class CommandServiceTests : IDisposable
         string codexEnterpriseNetworkProxy = "",
         string claudeEnterpriseNetworkProxy = "",
         string codexGatewayBearerToken = "",
-        string claudeGatewayBearerToken = "")
+        string claudeGatewayBearerToken = "",
+        bool claudeGatewaySupportsToolSearch = false)
     {
         var fileService = new Mock<IFileService>();
         fileService.Setup(x => x.GetUserProfilePath()).Returns(Path.Combine(Path.GetTempPath(), "viberails-grok-tests"));
@@ -928,7 +929,8 @@ public partial class CommandServiceTests : IDisposable
                 CodexEnterpriseNetworkProxy = LlmProxySettingsService.ResolveGateway(codexEnterpriseNetworkProxy, Environment.GetEnvironmentVariable("OPENAI_BASE_URL"), Environment.GetEnvironmentVariable(LlmProxyUpstream.CodexVariable)),
                 ClaudeEnterpriseNetworkProxy = LlmProxySettingsService.ResolveGateway(claudeEnterpriseNetworkProxy, Environment.GetEnvironmentVariable(LlmProxyClaudeConfig.BaseUrlVariable), Environment.GetEnvironmentVariable(LlmProxyUpstream.ClaudeVariable)),
                 CodexGatewayBearerToken = codexGatewayBearerToken,
-                ClaudeGatewayBearerToken = claudeGatewayBearerToken
+                ClaudeGatewayBearerToken = claudeGatewayBearerToken,
+                ClaudeGatewaySupportsToolSearch = claudeGatewaySupportsToolSearch
             });
         return new CommandService(
             envService,

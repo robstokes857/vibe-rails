@@ -129,6 +129,72 @@ public sealed class EnterpriseGatewayRoutesTests
             bearer: "gateway-secret");
     }
 
+    [Theory]
+    // A gateway marked as supporting tool search that does not: name the switch, once, in the log.
+    [InlineData("https://claude.gateway.example/v1", 400, "{\"error\":{\"message\":\"Unknown content type: tool_reference\"}}", true)]
+    [InlineData("https://claude.gateway.example/v1", 400, "{\"error\":{\"message\":\"max_tokens is required\"}}", false)]
+    [InlineData("https://claude.gateway.example/v1", 200, "data: {\"type\":\"tool_reference\"}\n\n", false)]
+    [InlineData("", 400, "{\"error\":{\"message\":\"Unknown content type: tool_reference\"}}", false)]
+    public async Task ToolReferenceRejectionNamesTheSwitchWithoutChangingTheResponse(
+        string gateway, int status, string upstreamBody, bool warns)
+    {
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.Logging.ClearProviders();
+        var snapshot = LlmProxySettingsService.Resolve(new Settings
+        {
+            ClaudeTokenSaverEnabled = false,
+            ClaudeEnterpriseNetworkProxy = gateway,
+            ClaudeGatewaySupportsToolSearch = true
+        });
+        var settingsService = new Mock<ILlmProxySettingsService>();
+        settingsService.Setup(s => s.GetSettings()).Returns(snapshot);
+        var auth = new Mock<ILlmProxyAuthGate>();
+        auth.Setup(a => a.ValidateTokens(It.IsAny<string?>(), It.IsAny<string?>())).Returns(true);
+        var handler = new FixedResponseHandler((HttpStatusCode)status, upstreamBody);
+        using var client = new HttpClient(handler);
+        var clients = new Mock<IHttpClientFactory>();
+        clients.Setup(c => c.CreateClient("llm-proxy")).Returns(client);
+        var events = new Mock<ILlmProxyEventSink>();
+        builder.Services.AddSingleton(settingsService.Object);
+        builder.Services.AddSingleton(auth.Object);
+        builder.Services.AddSingleton(clients.Object);
+        builder.Services.AddSingleton(events.Object);
+        builder.Services.AddSingleton(Mock.Of<ILlmProxyExchangeSink>());
+        await using var app = builder.Build();
+        LlmAnthropicProxyRoutes.Map(app);
+
+        var context = new DefaultHttpContext { RequestServices = app.Services };
+        context.Request.Method = "POST";
+        context.Request.Path = "/llm/anthropic/v1/messages";
+        context.Request.Headers[LlmProxyCodexConfig.SessionHeaderName] = "session";
+        context.Request.Headers[LlmProxyCodexConfig.TabHeaderName] = "tab";
+        context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes("{\"model\":\"m\",\"messages\":[]}"));
+        context.Request.ContentType = "application/json";
+        context.Response.Body = new MemoryStream();
+        var route = Assert.Single(((IEndpointRouteBuilder)app).DataSources.SelectMany(s => s.Endpoints));
+        await route.RequestDelegate!(context);
+
+        Assert.Equal(1, handler.Calls);
+        Assert.Equal(status, context.Response.StatusCode);
+        Assert.Equal(upstreamBody, Encoding.UTF8.GetString(((MemoryStream)context.Response.Body).ToArray()));
+        events.Verify(e => e.Warning("Claude proxy", It.Is<string>(m =>
+            m.Contains("tool_reference") && m.Contains("\"Gateway supports tool search\"") && m.Contains("Settings → LLMs → Claude"))),
+            warns ? Times.Once : Times.Never);
+    }
+
+    private sealed class FixedResponseHandler(HttpStatusCode status, string body) : HttpMessageHandler
+    {
+        internal int Calls;
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+        {
+            Calls++;
+            return Task.FromResult(new HttpResponseMessage(status)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json")
+            });
+        }
+    }
+
     private static async Task Exercise(
         string provider, string path, string endpoint, string? session, string? tab, string? storedGateway = null,
         string? claudeGateway = null, string? bearer = null, bool compress = false, bool clearGateway = false,

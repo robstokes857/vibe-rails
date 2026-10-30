@@ -484,6 +484,7 @@ export class SettingsController {
             '#setting-codex-gateway-token-clear',
             '#setting-claude-gateway-token',
             '#setting-claude-gateway-token-clear',
+            '#setting-claude-gateway-tool-search',
             '#setting-codex-enterprise-network-proxy',
             'input[name="setting-codex-llm-proxy-mode"]',
             '#setting-claude-enterprise-network-proxy',

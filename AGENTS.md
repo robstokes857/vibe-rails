@@ -147,8 +147,10 @@ file; it is reference material, not instructions.
 - **Claude launches go through the TokenSaver proxy** (`ANTHROPIC_BASE_URL`). That disables
   Claude Code's MCP tool search and makes it budget a 200K window for a bare model ID, so the
   proxy env carries `ENABLE_TOOL_SEARCH=true` and the model catalogs offer `[1m]` IDs. Keep
-  those together. The one exception is a configured Claude Enterprise Network Proxy, where a
-  translating gateway may reject `tool_reference` blocks; see the
+  those together. The one exception is a Claude Enterprise Network Proxy, where a translating
+  gateway may reject `tool_reference` blocks: tool search stays off there unless the user turns on
+  **Gateway supports tool search** (`ClaudeGatewaySupportsToolSearch`, default off) or the gateway
+  is api.anthropic.com (`LlmProxyClaudeConfig.KeepsToolSearch`); see the
   [TokenSaver README](TokenSaver/README.md#things-that-will-bite-you).
 
 ## Build and test

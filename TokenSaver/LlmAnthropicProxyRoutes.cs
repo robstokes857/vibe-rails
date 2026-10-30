@@ -72,7 +72,16 @@ public static class LlmAnthropicProxyRoutes
                 exchangeSink,
                 string.IsNullOrWhiteSpace(settings.ClaudeEnterpriseNetworkProxy) ? null : settings.ClaudeGatewayBearerToken,
                 settings.ClaudeGatewayAuthMode,
-                settings.ClaudeGatewayApiKeyHeader);
+                settings.ClaudeGatewayApiKeyHeader,
+                string.IsNullOrWhiteSpace(settings.ClaudeEnterpriseNetworkProxy) ? null : ToolSearchRejected);
         }).WithName("LlmAnthropicProxy");
     }
+
+    // Claude Code sends tool_reference blocks only when the launch kept tool search on, which behind
+    // a gateway other than api.anthropic.com takes the switch: this 400 means the gateway refuses it.
+    internal static readonly LlmProxyRejectionHint ToolSearchRejected = new(
+        StatusCodes.Status400BadRequest,
+        "tool_reference",
+        "the gateway rejected a request that mentions tool_reference. If it cannot accept Claude Code tool search, "
+        + "turn off \"Gateway supports tool search\" in Settings → LLMs → Claude and start a new terminal.");
 }

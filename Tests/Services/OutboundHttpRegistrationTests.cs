@@ -37,6 +37,32 @@ public sealed class OutboundHttpRegistrationTests
     }
 
     [Theory]
+    [InlineData("llm-proxy", true)]
+    [InlineData("ISummaryService", false)]
+    [InlineData("board-sync", false)]
+    [InlineData("conversation-titles", false)]
+    [InlineData("token-savings", false)]
+    [InlineData("IRemoteStateService", false)]
+    [InlineData("ISessionDataExportService", false)]
+    [InlineData("complete-backups", false)]
+    [InlineData("IPushNotificationService", false)]
+    [InlineData("UpdateService", false)]
+    [InlineData("jira-cloud", false)]
+    [InlineData("azure-devops", false)]
+    public void OnlyTheLlmRelayOffersWindowsSignInToAnAuthenticatingProxy(string name, bool signsIn)
+    {
+        // VIBE-244 / API_SEC.md "Proxy sign-in": the relay (and the gateway Test, which resolves
+        // the same client) answers a 407; every other outbound client keeps offering nothing.
+        var services = new ServiceCollection();
+        MapRegisterServices.Register(services, [], "http://127.0.0.1:12345");
+        using var provider = services.BuildServiceProvider();
+        var handler = PrimaryHandler(provider, name);
+        Assert.Equal(signsIn ? CredentialCache.DefaultCredentials : null, handler.DefaultProxyCredentials);
+        Assert.False(handler.UseDefaultCredentials);
+        Assert.Null(handler.Credentials);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public void TokenSaverHasTheSameHardenedHandlerInBothTransports(bool stdio)

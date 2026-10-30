@@ -51,6 +51,12 @@ public class Settings
     public string CodexEnterpriseNetworkProxy { get; set; } = string.Empty;
     /// <summary>Optional enterprise API base URL for Claude, including its API path.</summary>
     public string ClaudeEnterpriseNetworkProxy { get; set; } = string.Empty;
+    /// <summary>
+    /// Keep Claude Code's MCP tool search on behind a Claude gateway (ENABLE_TOOL_SEARCH=true).
+    /// Off by default because a translating gateway may reject tool_reference blocks, which fails
+    /// every request; api.anthropic.com keeps tool search regardless. See LlmProxyClaudeConfig.
+    /// </summary>
+    public bool ClaudeGatewaySupportsToolSearch { get; set; }
     /// <summary>Optional bearer credential used only for the saved Codex gateway.</summary>
     public string CodexGatewayBearerToken { get; set; } = string.Empty;
     /// <summary>Optional bearer credential used only for the saved Claude gateway.</summary>

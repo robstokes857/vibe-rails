@@ -408,7 +408,16 @@ no-redirect transport as CLI traffic. 401/403 (credentials requested) or 400/422
 validated the empty body) mean the URL is right; 404 means a wrong path, and for an
 OpenAI-style base without `/v1` the probe tries once more with it and offers the corrected URL.
 DNS, TLS, proxy (407), redirect and timeout failures are named. The CLI's key is never read.
-With a Claude gateway configured, launches leave `ENABLE_TOOL_SEARCH` unset (see below).
+With a Claude gateway configured, launches leave `ENABLE_TOOL_SEARCH` unset unless the gateway
+is marked as supporting tool search or is api.anthropic.com (see below).
+
+The `llm-proxy` client signs in to an authenticating corporate proxy as the current Windows user
+(`MapRegisterServices.CreateLlmProxyHttpMessageHandler`, `DefaultProxyCredentials =
+CredentialCache.DefaultCredentials`). .NET offers those credentials only to the default
+(system or environment) proxy, only after it answers 407, and only for NTLM, Negotiate or
+Kerberos; the gateway itself never receives them. Without it, a proxy that requires Windows
+sign-in answers 407 to every relayed request and to the Test button. On Linux it works only with
+Kerberos (GSSAPI) configured. The shared client for viberails.ai traffic does not get it.
 
 Only absolute HTTP/HTTPS URLs without embedded credentials, queries or fragments are accepted.
 Pointing a gateway at a new host needs the same PIN or dashboard-code confirmation as the
@@ -440,8 +449,14 @@ Codex and Claude each have **Gateway authentication** controls in Settings → L
 **Bearer token** for `Authorization: Bearer <token>`, or **API key in a named header** for
 `api-key: <key>`, `x-api-key: <key>`, or your gateway's custom header. API-key mode sends the
 key unchanged without `Bearer `. Routing/content/cookie/proxy/local-auth header names are
-reserved. Paste a bearer token alone or with `Bearer `. Save a gateway URL with the credential; **Use environment URL in
-Settings** can adopt an inherited URL first. The token is saved in the private local settings file,
+reserved. Paste a bearer token alone or with `Bearer `. A credential is saved with an explicit
+gateway URL. Typing one while the URL is blank fills in the inherited `OPENAI_BASE_URL` /
+`ANTHROPIC_BASE_URL`, and the route line says so (**Use environment URL in Settings** does the
+same without a credential). For a plain provider key, choose **Anthropic API key** (saves
+`https://api.anthropic.com` with `x-api-key`) or **OpenAI API key** (saves
+`https://api.openai.com/v1` with Bearer). These choices are client-side shorthand: the server
+stores the URL, mode and header like any gateway, and a reload shows the choice again when they
+match. The token is saved in the private local settings file,
 never returned by the API, and used only for that saved gateway. Blank input preserves a token;
 **Remove saved credential** clears it. Clearing the saved URL retains the dormant token but cannot send
 it to the public provider or an inherited URL. Token replacement takes effect on the next request;
@@ -588,9 +603,15 @@ smudge byte-exact fixtures on a fresh Windows checkout and you'll get failures w
   200K window for natively-1M models unless the `--model` ID carries `[1m]`. The proxy
   therefore ships `ENABLE_TOOL_SEARCH=true` next to the base URL
   (`LlmProxyClaudeConfig.BuildClaudeProxyEnvironment`); the relay copies `tool_reference`
-  blocks through verbatim, which is what that opt-in requires. The exception is a configured
-  Claude Enterprise Network Proxy: a gateway that translates for Bedrock or similar may reject
-  those blocks, so the launch leaves Claude Code's own default (tool search off) in place.
+  blocks through verbatim, which is what that opt-in requires. The exception is a Claude
+  Enterprise Network Proxy (saved or inherited): a gateway that translates for Bedrock or similar
+  may reject those blocks with a 400 on every request, so the launch leaves Claude Code's own
+  default (tool search off) in place unless Settings → LLMs → Claude **Gateway supports tool
+  search** (`ClaudeGatewaySupportsToolSearch`) is on, or the gateway is `https://api.anthropic.com`
+  itself, which is what the **Anthropic API key** choice saves (`LlmProxyClaudeConfig.KeepsToolSearch`).
+  The switch defaults off because a wrong "on" breaks the gateway outright while a wrong "off"
+  only costs context. When a gateway answers 400 with `tool_reference` in the body, the relay logs
+  a Warning naming the switch; the response is not retried or rewritten.
   The window half is the launcher's job: the Board and Environment catalogs offer `[1m]` model IDs.
 - **`token_saving_plan.md` does not exist, and nothing points at it any more.** It was
   deleted; the comments that cited its `§2`/`§3`/`§5`/`§6` were rewritten (2026-07-15) to

@@ -290,7 +290,9 @@ public class CommandService : ICommandService
         // With that choice, route through TokenSaver and retain the other custom headers.
         // The settings snapshot routes inherited ANTHROPIC_BASE_URL through the relay too.
         // The same bundle carries ENABLE_TOOL_SEARCH=true: a custom base URL otherwise makes
-        // Claude Code load every MCP tool schema up front (see LlmProxyClaudeConfig).
+        // Claude Code load every MCP tool schema up front. Behind a gateway it needs the
+        // ClaudeGatewaySupportsToolSearch opt-in, except for api.anthropic.com
+        // (LlmProxyClaudeConfig.KeepsToolSearch).
         if (proxySettings.ClaudeLlmProxyEnabled
             && llm == LLM.Claude
             && (UsesGatewayCredential(proxySettings.ClaudeEnterpriseNetworkProxy, proxySettings.ClaudeGatewayBearerToken)
@@ -303,7 +305,8 @@ public class CommandService : ICommandService
                 _llmProxyContext.SessionToken,
                 _llmProxyContext.TabToken,
                 sessionId,
-                enterpriseGateway: !string.IsNullOrWhiteSpace(proxySettings.ClaudeEnterpriseNetworkProxy),
+                toolSearch: LlmProxyClaudeConfig.KeepsToolSearch(
+                    proxySettings.ClaudeEnterpriseNetworkProxy, proxySettings.ClaudeGatewaySupportsToolSearch),
                 additionalHeaders: environment.GetValueOrDefault(LlmProxyClaudeConfig.CustomHeadersVariable)
                     ?? Environment.GetEnvironmentVariable(LlmProxyClaudeConfig.CustomHeadersVariable));
             foreach (var kvp in claudeProxyEnv)

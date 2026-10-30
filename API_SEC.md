@@ -138,10 +138,47 @@ mode, and omitted fields preserve saved choices for older clients. An explicit s
 plus credential takes precedence over a saved Codex provider or Claude environment base, so
 those configurations cannot silently bypass TokenSaver; explicit Codex launch overrides retain
 their own routing.
+The Settings UI's one-step choices keep this contract. A credential typed while the URL field is
+blank fills in the backend's inherited `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` in the visible URL
+field, and the route line labels it. The **Anthropic API key** / **OpenAI API key** choices fill in
+`https://api.anthropic.com` with `x-api-key` and `https://api.openai.com/v1` with Bearer. In every
+case the request carries that URL explicitly, so the token stays bound to a saved URL, and pointing
+the gateway at the new host still needs presence. The server has no preset or inherited-URL
+fallback for credentials.
 Managed proxy launches extend the CLI's existing `NO_PROXY`/`no_proxy` exclusions with loopback
 hosts so an inherited corporate HTTP proxy cannot intercept the authenticated local relay hop.
 This launch-only environment change does not affect the backend's upstream proxy configuration.
 The connectivity Test remains credential-free and does not verify the token.
+
+**Proxy sign-in (review gate).** The `llm-proxy` HttpClient alone uses
+`MapRegisterServices.CreateLlmProxyHttpMessageHandler`, which sets `DefaultProxyCredentials =
+CredentialCache.DefaultCredentials` so a corporate proxy that requires Windows sign-in does not
+answer 407 to every relayed request. Scope and limits:
+- .NET offers these credentials only to the *default* proxy (the system/WinINet setting or
+  `HTTP(S)_PROXY`/`ALL_PROXY` read by the backend), never to the gateway or provider: `Credentials`
+  and `UseDefaultCredentials` stay unset, so a gateway or provider that answers 401 with a
+  Negotiate/NTLM challenge gets nothing.
+- They are offered only after the proxy challenges with 407, and are usable only for NTLM,
+  Negotiate or Kerberos. These are challenge-response, so the password is never sent. The default
+  credentials expose no password, so a Basic or Digest challenge cannot obtain one.
+- Whoever controls the proxy setting can receive an NTLM challenge response for the current
+  user. That setting belongs to the user or their organization. Anything able to change the
+  backend's proxy environment can already run code as that user, and NTLM relay risk is the
+  organization's proxy policy (prefer an HTTPS or Kerberos-only proxy).
+- Every relayed provider (Codex, Claude, OpenCode Z.AI/xAI, native Grok) and the Settings Test
+  probe share this client, deliberately: a Test that skipped sign-in would report 407 for a route
+  that works. Every other outbound client (viberails.ai, Jira, Azure DevOps, backups, updates)
+  is unchanged and offers no proxy credentials.
+- On Linux the default credentials work only with Kerberos (GSSAPI) configured; otherwise they
+  are inert. Whether a target environment actually uses an authenticating proxy is unverified.
+  `LlmProxyHttpHandlerTests` pins the handler; `OutboundHttpRegistrationTests` pins which
+  registered clients get it.
+
+Claude tool search behind a gateway (`ClaudeGatewaySupportsToolSearch`, default off) changes only
+the launch environment (`ENABLE_TOOL_SEARCH`), not routing or credentials. It needs no presence.
+When a Claude gateway answers 400 and the captured response contains `tool_reference`, the relay
+logs a fixed Warning naming the switch. The check reads the copy the exchange log already holds,
+logs no body bytes, and never retries or rewrites the response.
 
 Root-only `POST /api/v1/settings/enterprise-network-proxy/test` is a deliberate, bounded
 outbound probe of a user-entered URL (saved or not, so it does not change routing and needs

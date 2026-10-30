@@ -898,6 +898,15 @@ tracking; switching the mode never clears a typed key. Route text explicitly sho
 Saver → destination and marks unsaved routing changes as a preview.
 The route line is labelled **Default managed route** and names the CLI overrides that can bypass
 it; it is configuration guidance, not evidence that a running session used the relay.
+Setup is one step (VIBE-244). Typing a credential into a blank-URL provider fills in its
+inherited URL and labels it "filled in from the environment". Clearing the credential undoes a
+fill the user has not edited since. With nothing inherited, the route line says a URL is needed.
+The auth select also offers **OpenAI API key** / **Anthropic API key**. These client-side presets
+fill `https://api.openai.com/v1` + Bearer or `https://api.anthropic.com` + `x-api-key`. Saves still
+post an ordinary mode and header. Reload re-selects the preset when the saved URL, mode and header
+match, and editing the URL away from it falls back to the plain mode. Claude's **Gateway supports
+tool search** switch (`claudeGatewaySupportsToolSearch`) rides in `gatewayCredentialEdits` with
+the other gateway edits. Tests: `Tests/wwwroot/js/settings-enterprise-gateway.test.mjs`.
 
 The token-savings meter sits at the far right of the terminal controls bar and is owned by
 `terminal-token-compression.js`. The per-LLM on/off switches live in Settings (Claude, Codex,

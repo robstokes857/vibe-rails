@@ -24,6 +24,16 @@ leaves its credential dormant. No separate TokenSaver server is contacted: the r
 body transform before sending the HTTP request, and emits activity even for zero savings. See
 [TokenSaver](../TokenSaver/README.md#enterprise-network-proxy) and [API security](../API_SEC.md).
 
+Settings → LLMs keeps setup to one step without changing that contract
+(`settings-enterprise-gateway.js`). A credential typed while the URL is blank fills in the
+inherited URL, shown in the route line. The **Anthropic API key** and **OpenAI API key** choices
+fill `https://api.anthropic.com` + `x-api-key` and `https://api.openai.com/v1` + Bearer. Either
+way the server receives an explicit URL and an ordinary auth mode. Claude launches behind a gateway
+keep `ENABLE_TOOL_SEARCH=true` only for api.anthropic.com or with `ClaudeGatewaySupportsToolSearch`
+(default off). A gateway 400 mentioning `tool_reference` logs a Warning naming that switch. The
+`llm-proxy` HttpClient alone uses `CreateLlmProxyHttpMessageHandler`, which offers the Windows
+account to an authenticating corporate proxy (NTLM/Negotiate/Kerberos, on challenge only).
+
 ## Incremental token-savings publishing (VIBE-215)
 
 The existing byte-based `TokenSavings` tally remains unchanged. While a root backend is open,

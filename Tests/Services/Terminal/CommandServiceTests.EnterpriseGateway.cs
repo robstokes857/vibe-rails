@@ -81,6 +81,43 @@ public partial class CommandServiceTests
     }
 
     [Fact]
+    public async Task PrepareSession_Claude_KeepsToolSearchBehindAGatewayMarkedAsSupportingIt()
+    {
+        var prepared = await CreateService(claudeLlmProxyEnabled: true,
+                claudeEnterpriseNetworkProxy: "https://gateway.example/v1", claudeGatewayBearerToken: "secret",
+                claudeGatewaySupportsToolSearch: true)
+            .PrepareSessionAsync(LLM.Claude, envName: null, extraArgs: null);
+
+        Assert.Equal("true", prepared.Environment[LlmProxyClaudeConfig.ToolSearchVariable]);
+    }
+
+    [Fact]
+    public async Task PrepareSession_Claude_InheritedGatewayFollowsTheToolSearchSwitch()
+    {
+        Environment.SetEnvironmentVariable(LlmProxyClaudeConfig.BaseUrlVariable, "https://genai.example.test/anthropic");
+
+        var prepared = await CreateService(claudeLlmProxyEnabled: true, claudeGatewaySupportsToolSearch: true)
+            .PrepareSessionAsync(LLM.Claude, envName: null, extraArgs: null);
+
+        Assert.Equal("true", prepared.Environment[LlmProxyClaudeConfig.ToolSearchVariable]);
+    }
+
+    [Theory]
+    [InlineData("https://api.anthropic.com")]
+    [InlineData("https://API.anthropic.com/v1")]
+    public async Task PrepareSession_Claude_AnthropicApiKeyChoiceKeepsToolSearchWithoutTheSwitch(string gateway)
+    {
+        // Settings' "Anthropic API key" saves the first-party API as the gateway: nothing translates.
+        var prepared = await CreateService(claudeLlmProxyEnabled: true,
+                claudeEnterpriseNetworkProxy: gateway, claudeGatewayBearerToken: "sk-ant-secret")
+            .PrepareSessionAsync(LLM.Claude, envName: null, extraArgs: null);
+
+        Assert.Equal("true", prepared.Environment[LlmProxyClaudeConfig.ToolSearchVariable]);
+        Assert.Equal(LlmProxyCodexConfig.GatewayAuthPlaceholder, prepared.Environment["ANTHROPIC_AUTH_TOKEN"]);
+        Assert.DoesNotContain("sk-ant-secret", prepared.Environment.Values);
+    }
+
+    [Fact]
     public async Task GatewayBearerLaunchesDoNotNeedProviderLoginOrExposeRealTokens()
     {
         var codex = await CreateService(codexLlmProxyEnabled: true,

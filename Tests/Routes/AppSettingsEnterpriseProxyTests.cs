@@ -167,4 +167,71 @@ public sealed class AppSettingsEnterpriseProxyTests
             if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
         }
     }
+
+    [Fact]
+    public void AnthropicApiKeySavesInOneRequestAndTheToolSearchSwitchRoundTrips()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"viberails-enterprise-tool-search-{Guid.NewGuid():N}");
+        var remote = ParserConfigs.GetRemoteAccess();
+        var key = ParserConfigs.GetApiKey();
+        var theme = ParserConfigs.GetUseVsCodeTheme();
+        var mcp = ParserConfigs.GetMcpEnabled();
+        var relay = ParserConfigs.GetRouteThroughVibeRailsAi();
+        try
+        {
+            using var store = new SettingsFile(Path.Combine(directory, "settings.json"));
+            store.Save(new Settings());
+            var read = AppSettingsRoutes.UpdateComputerName(new UpdateComputerNameDto("Fixture"), store);
+            // Absent from older settings files: off, so an unknown gateway is never broken by default.
+            Assert.False(read.ClaudeGatewaySupportsToolSearch);
+
+            // What the Settings "Anthropic API key" choice posts: an explicit URL, so the
+            // credential stays bound to a saved gateway and the change still needs presence.
+            var anthropicKey = read with
+            {
+                ClaudeEnterpriseNetworkProxy = "https://api.anthropic.com",
+                ClaudeGatewayAuthMode = "api-key",
+                ClaudeGatewayApiKeyHeader = "x-api-key",
+                ClaudeGatewayBearerToken = "sk-ant-secret"
+            };
+            Assert.True(AppSettingsRoutes.RequiresPresence(anthropicKey, store.LoadFresh()));
+            var saved = AppSettingsRoutes.UpdateSettings(anthropicKey, store);
+            Assert.Equal("https://api.anthropic.com", saved.ClaudeEnterpriseNetworkProxy);
+            Assert.Equal("api-key", saved.ClaudeGatewayAuthMode);
+            Assert.Equal("x-api-key", saved.ClaudeGatewayApiKeyHeader);
+            Assert.True(saved.HasClaudeGatewayBearerToken);
+            Assert.Equal("sk-ant-secret", store.LoadFresh().ClaudeGatewayBearerToken);
+
+            // An older client omits the switch and every gateway field: all of them are preserved.
+            var oldClient = read with
+            {
+                CodexEnterpriseNetworkProxy = null, ClaudeEnterpriseNetworkProxy = null,
+                OpenCodeEnterpriseNetworkProxy = null, GrokEnterpriseNetworkProxy = null,
+                CodexGatewayAuthMode = null, CodexGatewayApiKeyHeader = null,
+                ClaudeGatewayAuthMode = null, ClaudeGatewayApiKeyHeader = null,
+                ClaudeGatewaySupportsToolSearch = null
+            };
+            var on = oldClient with { ClaudeGatewaySupportsToolSearch = true };
+            // The switch is not routing: flipping it needs no PIN or dashboard code.
+            Assert.False(AppSettingsRoutes.RequiresPresence(on, store.LoadFresh()));
+            Assert.True(AppSettingsRoutes.UpdateSettings(on, store).ClaudeGatewaySupportsToolSearch);
+            Assert.True(store.LoadFresh().ClaudeGatewaySupportsToolSearch);
+            var preserved = AppSettingsRoutes.UpdateSettings(oldClient, store);
+            Assert.True(preserved.ClaudeGatewaySupportsToolSearch);
+            Assert.Equal("https://api.anthropic.com", preserved.ClaudeEnterpriseNetworkProxy);
+            Assert.Equal("x-api-key", preserved.ClaudeGatewayApiKeyHeader);
+            Assert.False(AppSettingsRoutes.UpdateSettings(oldClient with { ClaudeGatewaySupportsToolSearch = false }, store)
+                .ClaudeGatewaySupportsToolSearch);
+            Assert.False(store.LoadFresh().ClaudeGatewaySupportsToolSearch);
+        }
+        finally
+        {
+            ParserConfigs.SetRemoteAccess(remote);
+            ParserConfigs.SetApiKey(key);
+            ParserConfigs.SetUseVsCodeTheme(theme);
+            ParserConfigs.SetMcpEnabled(mcp);
+            ParserConfigs.SetRouteThroughVibeRailsAi(relay);
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
 }

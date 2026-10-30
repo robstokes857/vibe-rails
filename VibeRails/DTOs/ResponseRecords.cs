@@ -1404,7 +1404,9 @@ namespace VibeRails.DTOs
         string? CodexGatewayAuthMode = null,
         string? CodexGatewayApiKeyHeader = null,
         string? ClaudeGatewayAuthMode = null,
-        string? ClaudeGatewayApiKeyHeader = null
+        string? ClaudeGatewayApiKeyHeader = null,
+        // Keep Claude Code tool search on behind a Claude gateway. Omitted requests preserve it.
+        bool? ClaudeGatewaySupportsToolSearch = null
     );
     // Append new fields at the END of this record, with a default. Inserting one in the middle
     // shifts every positional argument after it: call sites only fail to compile when the types

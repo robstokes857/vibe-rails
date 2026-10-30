@@ -116,7 +116,9 @@ internal static class LlmProxyRelay
     /// <paramref name="bodyTransform"/> is the provider-specific token-saver hook. A route passes
     /// null when saving is disabled; a request the transform declines or fails to rewrite is
     /// forwarded untouched. <paramref name="exchanges"/> is required because every authenticated
-    /// request that reaches the upstream relay is recorded.
+    /// request that reaches the upstream relay is recorded. <paramref name="rejectionHint"/>, when
+    /// given, is logged once the response has been relayed if it matches; it never changes what
+    /// the CLI receives and never triggers a retry.
     /// </summary>
     internal static async Task HandleAsync(
         HttpContext context,
@@ -131,7 +133,8 @@ internal static class LlmProxyRelay
         ILlmProxyExchangeSink exchanges,
         string? gatewayBearerToken = null,
         string gatewayAuthMode = "bearer",
-        string gatewayApiKeyHeader = "api-key")
+        string gatewayApiKeyHeader = "api-key",
+        LlmProxyRejectionHint? rejectionHint = null)
     {
         if (!IsAuthenticated(context, authGate))
         {
@@ -222,6 +225,9 @@ internal static class LlmProxyRelay
             recorder.StatusCode = (int)upstreamResponse.StatusCode;
             recorder.ResponseMediaType = upstreamResponse.Content.Headers.ContentType?.MediaType;
             await TeeAsync(upstreamResponse, context.Response.Body, recorder, cancellationToken);
+            if (rejectionHint is not null && recorder.StatusCode == rejectionHint.StatusCode
+                && recorder.ResponseContains(rejectionHint.BodyMarker))
+                events.Warning(activitySource, rejectionHint.Message);
         }
         catch (Exception ex) when (ex is OperationCanceledException
             or IOException
@@ -369,6 +375,9 @@ internal static class LlmProxyRelay
 
             _response.Write(chunk);
         }
+
+        internal bool ResponseContains(string marker) =>
+            _response.GetBuffer().AsSpan(0, (int)_response.Length).IndexOf(Encoding.UTF8.GetBytes(marker)) >= 0;
 
         internal LlmProxyExchange Build()
         {
@@ -554,3 +563,10 @@ internal static class LlmProxyRelay
         || LocalOnlyHeaders.Contains(headerName)
         || headerName.Equals(AcceptEncodingHeader, StringComparison.OrdinalIgnoreCase);
 }
+
+/// <summary>
+/// A Warning the relay logs when an upstream answers <paramref name="StatusCode"/> with a body
+/// containing <paramref name="BodyMarker"/>: a known misconfiguration whose fix is a setting the
+/// message names. Detection only; the response reaches the CLI unchanged.
+/// </summary>
+internal sealed record LlmProxyRejectionHint(int StatusCode, string BodyMarker, string Message);

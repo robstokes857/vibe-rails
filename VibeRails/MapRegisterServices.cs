@@ -190,8 +190,9 @@ namespace VibeRails
                 new LocalToolApiContext(localApiBaseUrl, sp.GetRequiredService<IAuthService>(), sp.GetRequiredService<AgentCredentialService>()));
             serviceCollection.AddSingleton<ILocalLlmProxyContext>(sp =>
                 new LocalLlmProxyContext(localApiBaseUrl, sp.GetRequiredService<IAuthService>(), sp.GetRequiredService<AgentCredentialService>()));
-            serviceCollection.AddHttpClient("llm-proxy").ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
-            // The Settings gateway Test button; it shares the relay's transport on purpose.
+            serviceCollection.AddHttpClient("llm-proxy").ConfigurePrimaryHttpMessageHandler(CreateLlmProxyHttpMessageHandler);
+            // The Settings gateway Test button; it shares the relay's transport on purpose, so a
+            // proxy that needs Windows sign-in answers the Test the way it answers the relay.
             serviceCollection.AddSingleton<EnterpriseNetworkProxyProbe>();
             serviceCollection.AddSingleton<ILlmProxySessionState, LlmProxySessionState>();
             // Singleton, and ungated: the pause must outlive request scopes, and it is the terminal
@@ -570,6 +571,23 @@ namespace VibeRails
             {
                 AllowAutoRedirect = false,
                 UseCookies = false
+            };
+
+        /// <summary>
+        /// The LLM relay's transport (<c>llm-proxy</c>): no redirects, no cookies, like every
+        /// credential client, and the signed-in Windows account for a system or environment proxy
+        /// that answers 407. .NET offers them only to the default (system or environment) proxy and
+        /// only after it challenges; they are usable for NTLM, Negotiate or Kerberos, which are
+        /// challenge-response, and carry no password a Basic or Digest challenge could obtain. On
+        /// Linux it works only with Kerberos (GSSAPI) configured and is otherwise inert. Scoped to
+        /// this client, not the shared X-Api-Key handler above; see API_SEC.md.
+        /// </summary>
+        internal static HttpMessageHandler CreateLlmProxyHttpMessageHandler() =>
+            new HttpClientHandler
+            {
+                AllowAutoRedirect = false,
+                UseCookies = false,
+                DefaultProxyCredentials = System.Net.CredentialCache.DefaultCredentials
             };
 
         /// <summary>

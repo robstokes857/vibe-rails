@@ -33,6 +33,17 @@ public sealed class LlmProxySettingsServiceTests
         Assert.Equal("api", saved.CodexLlmProxyMode);
     }
 
+    [Fact]
+    public void ToolSearchSwitchDefaultsOffAndReachesTheLaunchSnapshot()
+    {
+        var settings = ProxyOn();
+        Assert.False(LlmProxySettingsService.Resolve(settings).ClaudeGatewaySupportsToolSearch);
+        settings.ClaudeGatewaySupportsToolSearch = true;
+        // Applies to an inherited destination too: it describes the route, not the saved credential.
+        Assert.True(LlmProxySettingsService.Resolve(settings, inheritedClaudeBaseUrl: "https://corp.example/anthropic")
+            .ClaudeGatewaySupportsToolSearch);
+    }
+
     [Theory]
     [InlineData("http://localhost:456/llm/anthropic", global::TokenSaver.LlmProxyUpstream.Unavailable)]
     [InlineData("http://127.0.0.1:456/llm/openai/v1", global::TokenSaver.LlmProxyUpstream.Unavailable)]
