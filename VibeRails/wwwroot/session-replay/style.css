@@ -3,11 +3,11 @@
    there is a one-block change here. Event kinds share one color each across timeline, legend,
    list icons and toasts. */
 :root{color-scheme:dark;
-  --color-bg-base:#121212;--color-bg-surface:#1e1e1e;--color-bg-surface-hover:#2c2c2c;--color-bg-elevated:#232323;
-  --color-primary:#3b82f6;--color-primary-dark:#2563eb;--color-accent:#06b6d4;
+  --color-bg-base:#0a0a0f;--color-bg-surface:#14141d;--color-bg-surface-hover:#1e1e2a;--color-bg-elevated:#191b25;
+  --color-primary:#8b5cf6;--color-primary-dark:#7c3aed;--color-accent:#14b8a6;
   --color-text:#f8fafc;--color-text-muted:#94a3b8;
-  --color-success:#10b981;--color-warning:#f59e0b;--color-danger:#ef4444;--color-border:#334155;
-  --border-radius:4px;--control-radius:6px;
+  --color-success:#10b981;--color-warning:#F66210;--color-danger:#ef4444;--color-border:#2d2d3f;
+  --radius-control:4px;--border-radius:var(--radius-control);--control-radius:6px;
   --nav-bg:#16161c;
   --link:color-mix(in srgb,var(--color-primary) 65%,var(--color-text));
   --selected-bg:color-mix(in srgb,var(--color-primary) 16%,var(--color-bg-surface));

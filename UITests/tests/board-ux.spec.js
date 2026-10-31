@@ -1921,7 +1921,8 @@ for (const width of [1440, 900, 390]) {
         await expect(page.locator('[data-board-stats]')).toContainText('1 card');
         const tools = page.locator('.board-tools');
         const bounds = await tools.boundingBox();
-        if (width >= 900) expect(bounds.height).toBeLessThan(120);
+        // Shared 16px fields and 40px targets wrap to two filter rows at tablet widths.
+        if (width >= 900) expect(bounds.height).toBeLessThan(width >= 1200 ? 120 : 164);
         expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
         expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
         for (const control of await tools.locator('button:visible, input:visible, select:visible, .ts-control:visible').all()) {
@@ -2302,6 +2303,8 @@ test('waiting badge follows server activity and skip preserves editor drafts', a
         waiting = false; entry.status = 'Skipped'; entry.reason = 'User chose to continue without this Automation.';
         return route.fulfill({ json: response() });
     });
+    // The initial activity request may finish before these waiting-state routes are installed.
+    await page.evaluate(() => window.app.boardController.refreshSessionActivity());
     await expect(page.locator('.board-automation-waiting')).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath('waiting-card.png') });
     await page.locator('.board-automation-waiting').click();

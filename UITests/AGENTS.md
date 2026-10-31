@@ -67,7 +67,8 @@ independent Rules/Quality checks, and responsive navigation with the Settings co
 ### Focused Page Header Tests (No Backend Required)
 
 From `UITests`, run `npx playwright test --config playwright.page-headers.config.js`.
-Uses the five production views that share the header, with intercepted APIs, to compare title typography and header
+Also runs `design-system.spec.js` for button states/contrast, focus, fields, alerts,
+modal chrome, touch sizing and the VS Code theme adapter. Uses the five production views that share the header, with intercepted APIs, to compare title typography and header
 treatment at desktop, tablet and phone widths, exercise retained controls, and verify theme colors.
 The static fixture never opens application databases or launches a CLI.
 

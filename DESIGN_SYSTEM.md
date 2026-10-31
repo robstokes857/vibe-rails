@@ -594,6 +594,32 @@ Fix these where you touch them; never copy them.
 
 ## Implementation map
 
+### Shared component implementation (VIBE-117)
+
+The migration implements the proposed tokens and component appearances in this
+document. The older “In the code today” inventories describe the pre-migration
+audit; use the shared layer below for the current implementation.
+
+`wwwroot/css/vibe-components.css` implements the standards above for both Bootstrap
+and the existing page component class names. It loads after page styles in every
+shell. Page styles own layout; this shared layer owns control, feedback and surface
+appearance. Existing class names remain valid hooks for scripts. The standalone
+sharing and board-link shells use the same tokens and locally hosted fonts.
+
+The following supporting tokens name values already specified above: `--action-secondary-hover`
+(`#303040`), `--menu-item-hover` (`#343447`), `--action-danger-bg` (`#2a171e`),
+`--action-danger-hover` (`#46212e`), `--dialog-backdrop` (`#080810c9`),
+`--disabled-opacity` (`.45`), and `--control-height-small` (`32px`). Status borders use
+`--tone-success-border` (`#2d6155`) and `--tone-danger-border` (`#a45261`);
+tones without a specified border use their fill for badges and `--control-border`
+for essential boundaries. Type sizes are `--text-page` (`32px`), `--text-section`
+(`24px`), `--text-component` (`18px`), `--text-body` (`16px`), `--text-control`
+(`14px`), `--text-support` (`13px`) and `--text-badge` (`11px`).
+
+The old `--border-radius` is a compatibility alias for `--radius-surface`; controls
+use `--radius-control` explicitly. Page-local color aliases resolve to shared tokens.
+Terminal output and syntax highlighting retain their content-specific palettes.
+
 | Concern | Where |
 | --- | --- |
 | Tokens | `:root` in [`viberails.css`](VibeRails-Front/wwwroot/css/viberails.css#L6); `--portal-surface*` on `body.portal-page` in `vibe-portal.css` |
@@ -604,6 +630,28 @@ Fix these where you touch them; never copy them.
 | Other shells | `_LinkLayout.cshtml` (device link), shared card and shared session pages: same tokens, own stylesheets |
 
 Defined but unused, so do not build on them: Bootstrap `.table` and modal overrides, `.form-switch`, breadcrumb styles, `.terminal-mock`, `.rails-divider`, `.btn-danger-outline`, `Views/Shared/_Layout.cshtml.css` (never linked) and the Tom Select files under `wwwroot/assets/tom-select`.
+
+### Desktop implementation
+
+The desktop SPA maps these standards to `VibeRails/wwwroot/style.css` and its existing
+Bootstrap controls. `index.html` loads Manrope, Sora and JetBrains Mono. Shared buttons,
+fields, labels, badges, alerts, dialog chrome and page headings use this system; the Board
+also has scoped component styles in its view template. Keep the existing single top bar,
+terminal workspaces, Board drawer and specialized editor layouts. The optional VS Code
+host theme continues to supply colors and fonts through the same semantic tokens.
+Terminal output, Monaco, provider marks and the user's Light/System toast preference keep
+their own rendering contracts. Feature-specific legacy controls migrate as those views are updated.
+
+Desktop aliases for values specified above (these add no new visual choices):
+
+| Token | Value | Use |
+| --- | --- | --- |
+| `--action-secondary-hover` | `#303040` | Secondary hover fill |
+| `--action-danger-bg` | `#2a171e` | Destructive action fill |
+| `--action-danger-hover` | `#46212e` | Destructive hover fill |
+| `--tone-danger-border` | `#a45261` | Destructive action and alert edge |
+| `--tone-success-border` | `#2d6155` | Success alert edge |
+| `--dialog-backdrop` | `#080810c9` | Modal overlay |
 
 ## Decisions made while merging
 

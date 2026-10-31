@@ -42,11 +42,27 @@ The bootstrap HTML also needs the response nonce so it can save the tab token an
 VS Code command/visibility handlers use `isParentMessage`: normally `window.parent`, with
 the actual frame hierarchy checked when VS Code replaces parent/top with the webview itself.
 
+## Shared design system (VIBE-252)
+
+`style.css` owns the shared tokens and Bootstrap component appearance from the root
+`DESIGN_SYSTEM.md`. Use Manrope for controls and body text, Sora for headings and
+JetBrains Mono for technical values. Buttons, fields and labels use the common rules;
+page styles own layout. Avoid adding later overrides that restore monospace uppercase
+labels, bright Bootstrap alert fills, blue primary actions or faint focus glows.
+The Board's scoped controls and type badges live in `index.html`. Replay mirrors the
+base color tokens in its isolated document; terminal output and syntax themes stay independent.
+The optional VS Code theme adapter still supplies host colors and fonts. Light/System toast
+preferences are retained. Shared controls have 44px targets on touch/narrow screens.
+
+Validate with `playwright.page-headers.config.js` (includes `design-system.spec.js`) and
+the relevant feature harnesses; these use static frontend files and intercepted APIs.
+The shared heading band keeps Quality's placement below the map.
+
 ## Page headings (VIBE-70)
 
 Rules, Quality, Vibe AI, MCP and Settings use `vb-page-header`, `vb-page-heading` and
 one `h1.vb-page-title` in their view templates. `style.css` owns the shared title typography,
-left alignment, divider, shared top inset, spacing and narrow-screen stacking. Optional supporting text uses
+left alignment, surface band, shared top inset, spacing and narrow-screen stacking. Optional supporting text uses
 `vb-page-description`; grouped controls use `vb-page-actions`. Grid workspaces supply their
 own gap after the header. Keep page-specific status/action styles, but do not restore local
 title rules, uppercase utilities, inline letter spacing or gradient page titles. Quality is the

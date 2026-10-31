@@ -14,7 +14,7 @@ test('notifications default to compact dark and remember the selected appearance
         const css = getComputedStyle(element);
         return { background: css.backgroundColor, blur: css.backdropFilter, width: element.offsetWidth, height: element.offsetHeight };
     });
-    expect(style.background).toBe('rgb(24, 29, 39)');
+    expect(style.background).toBe('rgb(30, 30, 42)');
     expect(style.blur).toBe('none');
     expect(style.width).toBeLessThanOrEqual(360);
     expect(style.height).toBeLessThan(90);

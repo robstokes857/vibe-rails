@@ -17,6 +17,7 @@ test.beforeEach(async ({ page }) => {
         const payloads = {
             '/api/v1/context': { isInGit: true, rootPath: 'C:/fixture', launchDirectory: 'C:/fixture' },
             '/api/v1/settings': { mcpEnabled: true },
+            '/api/v1/setup/status': { tools: [{ id: 'codex', name: 'Codex', group: 'agent', state: 'ready', methods: [] }] },
             '/api/v1/environments': { environments: [] },
             '/api/v1/agents': { agents: [] },
             '/api/v1/rules/details': { rules: [] },
@@ -68,8 +69,9 @@ for (const width of [1440, 768, 390]) {
             reference ||= metrics;
             expect(metrics.typography).toEqual(reference.typography);
             expect(metrics.treatment).toEqual(reference.treatment);
-            expect(metrics.leftOffset).toBeCloseTo(0, 0);
-            expect(metrics.topInset).toEqual(reference.topInset);
+            expect(metrics.leftOffset).toBeCloseTo(17, 0);
+            // Quality intentionally puts its shared header below the map.
+            if (view !== 'code-quality') expect(metrics.topInset).toEqual(reference.topInset);
             expect(metrics.right).toBeLessThanOrEqual(width);
             expect(metrics.overflow).toBeLessThanOrEqual(1);
 

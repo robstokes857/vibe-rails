@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet"
-        href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&family=JetBrains+Mono:wght@400;600;700&family=Major+Mono+Display&display=swap">
+        href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Sora:wght@600;700&family=JetBrains+Mono:wght@400;600;700&display=swap">
     <link rel="stylesheet" href="assets/bootstrap.min.css" />
     <link rel="stylesheet" href="assets/xterm/xterm.css" />
     <link rel="stylesheet" href="assets/fontawesome/all.min.css" />
@@ -3284,15 +3284,16 @@
                 }
 
                 .board-view .board-control {
-                    min-height: 34px;
+                    min-height: var(--control-height);
                     padding: 0.35rem 0.6rem;
                     border-radius: 4px;
-                    border: 1px solid var(--color-border, #334155);
+                    border: 1px solid var(--control-border);
                     background: var(--color-bg-base, #121212);
                     color: var(--color-text, #f8fafc);
                     font: inherit;
-                    font-size: 0.82rem;
-                    line-height: 1.35;
+                    font-size: 16px;
+                    line-height: 1.6;
+                    color-scheme: inherit;
                 }
 
                 /* The LLM filter lists environment names, which can be long: cap the control and
@@ -3312,9 +3313,10 @@
                 }
 
                 .board-view .board-control:focus {
-                    outline: none;
-                    border-color: var(--color-primary, #3b82f6);
-                    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+                    outline: 2px solid var(--focus-ring);
+                    outline-offset: 2px;
+                    border-color: var(--focus-ring);
+                    box-shadow: none;
                 }
 
                 /* After .board-control: its padding shorthand would otherwise
@@ -3574,7 +3576,7 @@
                     min-height: 0;
                     height: 100%;
                     border: 1px solid var(--color-border, #334155);
-                    border-radius: 8px;
+                    border-radius: var(--radius-surface);
                     background: var(--color-bg-surface, #1e1e1e);
                 }
 
@@ -3762,7 +3764,7 @@
                     min-height: 11rem;
                     overflow: hidden;
                     border: 1px solid var(--color-border, #334155);
-                    border-radius: 6px;
+                    border-radius: var(--radius-surface);
                     background: var(--color-bg-elevated, #232323);
                     cursor: pointer;
                     user-select: none;
@@ -3997,19 +3999,17 @@
                 .board-view .board-type-chip {
                     display: inline-block;
                     flex-shrink: 0;
-                    padding: 1px 6px;
-                    border: 1px solid color-mix(in srgb, #94a3b8 45%, transparent);
+                    padding: 3px 9px;
+                    border: 1px solid var(--color-border);
+                    background: var(--tone-neutral-bg);
                     border-radius: 999px;
-                    color: #94a3b8;
-                    font-size: 0.62rem;
-                    font-weight: 600;
+                    color: var(--tone-neutral-fg);
+                    font-size: 11px;
+                    font-weight: 400;
                     white-space: nowrap;
                 }
 
-                .board-view .board-type-chip[data-type="bug"] { color: #fb7185; border-color: color-mix(in srgb, #fb7185 45%, transparent); }
-                .board-view .board-type-chip[data-type="feature"] { color: #38bdf8; border-color: color-mix(in srgb, #38bdf8 45%, transparent); }
-                .board-view .board-type-chip[data-type="research-spike"] { color: #c084fc; border-color: color-mix(in srgb, #c084fc 45%, transparent); }
-                .board-view .board-type-chip[data-type="chore"] { color: #fbbf24; border-color: color-mix(in srgb, #fbbf24 45%, transparent); }
+                .board-view .board-type-chip[data-type="bug"] { color: var(--tone-danger-fg); background: var(--tone-danger-bg); border-color: var(--tone-danger-bg); }
 
                 .board-view .board-workflow-chip {
                     display: inline-flex;
@@ -4584,7 +4584,7 @@
                 .board-side-form input {
                     flex: 1 1 auto;
                     min-width: 0;
-                    font-size: 0.75rem;
+                    font-size: 16px;
                 }
 
                 .board-side-form input[name="sha"] {
@@ -4658,9 +4658,9 @@
                 .board-editor-label {
                     display: block;
                     margin: 0 0 0.3rem;
-                    color: var(--color-text-muted, #94a3b8);
-                    font-size: 0.72rem;
-                    font-weight: 700;
+                    color: var(--color-text);
+                    font-size: 14px;
+                    font-weight: 600;
                 }
 
                 /* Bootstrap lays .form-check out with a floated input pulled left by

@@ -30,9 +30,9 @@ const DEFAULT_DURATIONS = Object.freeze({
 });
 
 const BASE_TOAST_OPTIONS = Object.freeze({
-    borderRadius: '8px',
+    borderRadius: 'var(--radius-control)',
     fontSize: '13px',
-    fontFamily: '\'Inter\', -apple-system, sans-serif',
+    fontFamily: 'var(--font-sans)',
     showIcon: true,
     showCloseButton: true,
     progressBarPosition: 'bottom',
@@ -41,10 +41,10 @@ const BASE_TOAST_OPTIONS = Object.freeze({
 });
 
 const TONES = Object.freeze({
-    info: '#60a5fa',
-    success: '#34d399',
-    warning: '#fbbf24',
-    error: '#fb7185'
+    info: 'var(--color-accent)',
+    success: 'var(--tone-success-fg)',
+    warning: 'var(--tone-warning-fg)',
+    error: 'var(--tone-danger-fg)'
 });
 
 const TOAST_TYPES = Object.freeze(['info', 'success', 'warning', 'error']);

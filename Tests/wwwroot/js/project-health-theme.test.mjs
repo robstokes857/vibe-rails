@@ -177,9 +177,9 @@ test('the map leads the Quality page; the bar with the title, scan line and acti
         assert.match(header, new RegExp(`data-action="${action}"`), `${action} stays in the bar`);
     assert.match(header, /<div class="project-health-fix-controls" role="group"[^>]*>\s*<button[^>]*data-action="launch-health-fix"[^>]*>\s*<i class="fa-solid fa-screwdriver-wrench"[^>]*><\/i>\s*Fix with\s*<\/button>\s*<label class="project-health-fix-picker">/,
         'Fix is a short label ahead of the picker, inside one group');
-    // The bar is a compact strip under the map, its menu opens upward, and the Fix group is one pill.
-    assert.match(styleCss, /\.code-quality-page \.project-health-header \{[^}]*border-bottom: 0;[^}]*border-top: 1px solid/);
-    assert.match(styleCss, /\.code-quality-page \.vb-page-title \{\s*font-size: 1rem;/);
+    // The shared heading band remains under the map; its menu opens upward and Fix stays a pill.
+    assert.match(styleCss, /\.code-quality-page \.project-health-header \{[^}]*border: 1px solid var\(--color-border, #2d2d3f\)/);
+    assert.doesNotMatch(styleCss, /\.code-quality-page \.vb-page-title \{\s*font-size:/);
     assert.match(styleCss, /\.code-quality-page \.rules-action-menu-popover \{\s*top: auto;\s*bottom: calc\(100% \+ 0\.4rem\);/);
     assert.match(styleCss, /\.project-health-fix-controls \{[^}]*border-radius: 999px;/);
     assert.match(styleCss, /\.project-health-fix-picker \.ts-wrapper \.ts-control \{[^}]*border: 0;/);

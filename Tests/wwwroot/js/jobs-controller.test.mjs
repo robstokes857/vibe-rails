@@ -2269,7 +2269,7 @@ test('Automation surfaces have a defined elevated background in every theme scop
     // vscode-only #vb-terminal-panel scope also defines it) must not cover for a
     // regressed browser-mode default. Comments inside :root contain no braces, so
     // [^}]* safely spans the block.
-    assert.match(css, /:root\s*\{[^}]*--color-bg-elevated:\s*#232323/);
+    assert.match(css, /:root\s*\{[^}]*--color-bg-elevated:\s*#191b25/);
     assert.match(css, /--color-bg-elevated:\s*var\(--vb-vscode-card-bg\)/);
     const definitions = css.match(/--color-bg-elevated:/g) || [];
     assert.ok(definitions.length >= 3, `expected the variable defined in all three theme scopes, found ${definitions.length}`);
