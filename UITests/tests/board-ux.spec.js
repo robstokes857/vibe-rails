@@ -2997,10 +2997,10 @@ test('long new-card descriptions grow inside the composer instead of painting ov
     expect(layout.attachmentsTop).toBeGreaterThanOrEqual(layout.composerBottom);
 });
 
-for (const width of [1440, 390]) {
+for (const width of [1920, 1440, 390]) {
     test(`the card face never squeezes the assignee name for Start work at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 900 });
-        // Four lanes: roomy at 1440px, the 232px lane floor at 390px.
+        // Four lanes: roomy at 1920px, compact at 1440px and at the lane floor on phones.
         const columns = ['Backlog', 'Build', 'Review', 'Done'].map((name, position) => ({
             id: position ? `col_${position}` : 'col_ready', name, position, boardId: 'brd_main', color: '#64748b'
         }));
@@ -3016,7 +3016,7 @@ for (const width of [1440, 390]) {
         const name = chip.locator('.board-assignee-name');
         expect(await name.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
         const [chipBounds, startBounds, tileBounds] = await Promise.all([chip.boundingBox(), start.boundingBox(), tile.boundingBox()]);
-        if (width > 720) {
+        if (width > 1440) {
             // Room for both: one row, nothing moves.
             expect(chipBounds.x + chipBounds.width).toBeLessThanOrEqual(startBounds.x);
             expect(Math.abs(chipBounds.y + chipBounds.height / 2 - startBounds.y - startBounds.height / 2)).toBeLessThan(1);
@@ -3117,6 +3117,31 @@ for (const { assignee, active, action } of [
         expect(startBounds.x + startBounds.width).toBeLessThanOrEqual(tileBounds.x + tileBounds.width);
         expect(await tile.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
         await page.screenshot({ path: testInfo.outputPath(`board-face-lineup-${active ? 'go-to-agent' : 'start-work'}.png`) });
+    });
+}
+
+const compactCardLayouts = [16, 20].flatMap(rootSize => [1440, 390].flatMap(width =>
+    [false, true].map(active => ({ rootSize, width, active }))));
+for (const { rootSize, width, active } of compactCardLayouts) {
+    test(`compact card keeps ${active ? 'Claude beside Go to agent' : 'Unassigned beside Start work'} at ${rootSize}px root size and ${width}px viewport`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 1200 });
+        const columns = ['Ready', 'Build', 'Review', 'PR', 'Ship', 'Done'].map((name, position) => ({
+            id: position ? `col_${position}` : 'col_ready', name, position, boardId: 'brd_main', color: '#64748b'
+        }));
+        await openBoard(page, { columns, active, assignee: active ? 'base:claude' : null, onCard: card => {
+            card.title = 'Preserve full attachment and commit content; retire automatic full snapshots';
+        } });
+        await page.addStyleTag({ content: `html { font-size: ${rootSize}px; }` });
+        const tile = page.locator('.board-card');
+        const chip = tile.locator('.board-assignee-chip');
+        const start = tile.locator('.board-card-start-work');
+        await expect(start).toBeInViewport();
+        await tile.screenshot({ path: testInfo.outputPath(`compact-card-${rootSize}-${width}-${active ? 'active' : 'unassigned'}.png`) });
+        const [chipBounds, startBounds] = await Promise.all([chip.boundingBox(), start.boundingBox()]);
+        expect(Math.abs(chipBounds.y + chipBounds.height / 2 - startBounds.y - startBounds.height / 2)).toBeLessThan(1);
+        expect(startBounds.x - chipBounds.x - chipBounds.width).toBeGreaterThanOrEqual(7.9);
+        expect(await chip.locator('.board-assignee-name').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+        expect(await tile.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
     });
 }
 

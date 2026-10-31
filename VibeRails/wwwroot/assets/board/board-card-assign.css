@@ -5,7 +5,7 @@
 .board-view button.board-assignee-chip {
     border: 1px solid transparent;
     font: inherit;
-    font-size: 0.72rem;
+    font-size: 14px;
     font-weight: 500;
     line-height: inherit;
     cursor: pointer;

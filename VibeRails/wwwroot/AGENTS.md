@@ -541,6 +541,11 @@ Without the required assignee/manager, it opens the editor for selection. Card-f
 launches share a per-card in-flight guard, retained across lane repaints. Activity polling
 updates the button, and navigation discards unfinished card reads.
 
+Short assignees (including **Unassigned**) and the action share a vertically centered row
+with at least 8px between them. The lane minimum grows with text scaling; long agent names
+can wrap the action to a second, right-aligned row without squeezing the name. Cover the
+minimum lane width as well as roomy layouts in the Board harness.
+
 `board-card-assign.js` is the lane card's assignee menu. The whole assignee chip, assigned or
 **Unassigned**, is one button that opens it; an assigned card's menu leads with an **Unassign** row.
 The chip never filters the board: sharing one chip between a large filter target and a small

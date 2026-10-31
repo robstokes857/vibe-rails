@@ -3570,9 +3570,9 @@
                     display: flex;
                     flex-direction: column;
                     flex: 1 1 0;
-                    /* Lanes share the width evenly, with room for the card actions.
-                       Scroll sideways when the available space is below this floor. */
-                    min-width: 252px;
+                    /* Fit short assignees and the work action at readable control sizes.
+                       Scale the floor with text size; narrower boards scroll sideways. */
+                    min-width: max(300px, 18.75rem);
                     min-height: 0;
                     height: 100%;
                     border: 1px solid var(--color-border, #334155);
@@ -4067,7 +4067,7 @@
                     flex-wrap: wrap;
                     align-items: center;
                     justify-content: space-between;
-                    gap: 0.3rem;
+                    gap: var(--space-2);
                     margin-top: 0.45rem;
                     padding-top: 0.4rem;
                     border-top: 1px solid color-mix(in srgb, var(--color-border, #334155) 60%, transparent);
@@ -4081,7 +4081,7 @@
                     gap: 0.3rem;
                     margin-inline-start: auto;
                     padding: 0.2rem 0.45rem;
-                    font-size: 0.7rem;
+                    font-size: 14px;
                     white-space: nowrap;
                 }
 
