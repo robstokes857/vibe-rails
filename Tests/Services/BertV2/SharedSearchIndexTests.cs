@@ -214,6 +214,7 @@ public sealed class SharedSearchIndexTests : IDisposable
         SqliteConnection.ClearAllPools();
         File.Move(State, State + ".offline");
         var card = await Card("New Board work", "vehicle wheel replacement");
+        Execute(SearchPath, "UPDATE SearchCheckpoints SET CompletedUtc=NULL");
         await Worker().RunBatchAsync(Ct);
         Assert.Equal(1, index.Count("input"));
         Assert.Equal(1, index.Count("session"));
@@ -346,6 +347,59 @@ public sealed class SharedSearchIndexTests : IDisposable
         Assert.Equal((5, false), (resumed.Documents, resumed.Incomplete));
         // Finishing the epoch removed nothing: every card was marked by the same epoch across both calls.
         Assert.Equal(30, index.Count("board"));
+    }
+
+    [Fact]
+    public async Task BacklogAndOtherRootsSkipRecentlyCompletedSweepsButResumePartialCorpora()
+    {
+        for (var i = 0; i < 30; i++) await Card("Card " + i, "Text " + i);
+        var interval = TimeSpan.FromMinutes(5);
+        var first = await index.ReconcileAsync(board, 25, Ct, TimeSpan.Zero, interval);
+        Assert.True(first.Incomplete);
+        var second = new SqliteSearchIndexStore(SearchPath, State);
+        var resumed = await second.ReconcileAsync(board, 25, Ct, TimeSpan.Zero, interval);
+        Assert.Equal(5, resumed.Documents);
+        Assert.False(resumed.Incomplete);
+        var skipped = await index.ReconcileAsync(board, 25, Ct, minimumInterval: interval);
+        Assert.Equal(0, skipped.Documents);
+        Assert.False(skipped.Incomplete);
+        await Worker().RunBatchAsync(Ct, 1); // tokenization/inference continues without a sweep
+        Assert.True(model.Calls > 0);
+        Execute(SearchPath, "UPDATE SearchCheckpoints SET CompletedUtc='2000-01-01T00:00:00.0000000Z'");
+        Assert.Equal(30, (await index.ReconcileAsync(board, 25, Ct, minimumInterval: interval)).Documents);
+    }
+
+    [Fact]
+    public async Task LaunchNoiseIsRemovedFromInputsAndSessionAggregatesOnReconciliation()
+    {
+        SeedInput("s1", 1, "You are working on kanban card VB-1 in the VibeRails board. generatednoise", ended: true);
+        SeedInput("s1", 2, "C:/app/vb.exe --job-run generatednoise");
+        SeedInput("s1", 3, "Real request about vehicle maintenance");
+        await index.ReconcileAsync(board, 25, Ct);
+        Assert.Equal(1, index.Count("input"));
+        Assert.Equal(1, index.Count("session"));
+        Assert.Empty(index.Search("input", "generatednoise", null, 10));
+        Assert.Empty(index.Search("session", "generatednoise", null, 10));
+        Assert.Single(index.Search("session", "maintenance", null, 10));
+        // The filter also retires previously indexed text without modifying canonical captures.
+        Execute(State, "UPDATE UserInputs SET InputText='You are working on kanban card VB-2 in the VibeRails board.' WHERE Id=3");
+        await index.ReconcileAsync(board, 25, Ct);
+        Assert.Equal(0, index.Count("input"));
+        Assert.Equal(0, index.Count("session"));
+    }
+
+    [Fact]
+    public async Task PruningExpectedOrphanVectorsDoesNotReportCorruption()
+    {
+        var card = await Card("Repair", "wheel replacement");
+        await Worker().RunBatchAsync(Ct);
+        await board.DeleteCardAsync(root, card.Id, Ct);
+        await index.ReconcileAsync(board, 25, Ct);
+        Assert.False(index.Repair());
+        using var db = BertVectorDatabase.Open(SearchPath);
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "SELECT count(*) FROM vec_search_chunks";
+        Assert.Equal(0L, cmd.ExecuteScalar());
     }
 
     [Fact]

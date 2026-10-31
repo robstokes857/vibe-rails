@@ -5,6 +5,22 @@ namespace Tests.Services.BertV2;
 
 public class InputEtlFilterTests
 {
+    [Theory]
+    [InlineData("You are working on kanban card VB-123 in the VibeRails board for this project. Lane: Ready Title: Fix wheel")]
+    [InlineData("> You are managing kanban card VB-123 in the VibeRails board for this project.")]
+    [InlineData("C:\\Users\\dev\\.vibe_rails\\vb.exe --workdir C:\\repo --job-run run-123")]
+    [InlineData("& 'C:\\path with spaces\\vb.exe' '--job-run' 'run-123'")]
+    [InlineData("exec '/home/user/.vibe_rails/vb' '--job-run' 'run-123'")]
+    [InlineData("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; & 'C:/app/vb.exe' @('--job-run', 'run-123'); exit $LASTEXITCODE")]
+    public void Process_SkipsGeneratedLaunchInput(string input) => Assert.Null(InputEtlFilter.Process(input));
+
+    [Theory]
+    [InlineData("Fix vb.exe --job-run handling")]
+    [InlineData("Explain why You are working on kanban card appears in search results")]
+    [InlineData("vb.exe --help")]
+    [InlineData("vb.exe --job-runner example")]
+    public void Process_KeepsRequestsAboutLaunches(string input) => Assert.Equal(input, InputEtlFilter.Process(input));
+
     // ── Secret detection ──────────────────────────────────────────
 
     [Theory]

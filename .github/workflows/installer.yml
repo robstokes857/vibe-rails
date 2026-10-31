@@ -6,6 +6,8 @@ on:
       - 'deploy/installer/**'
       - 'deploy/build-installer.ps1'
       - 'Tests/Deployment/InstallerSigningCommandTests.ps1'
+      - 'Tests/Deployment/BertModelAssetsTests.ps1'
+      - 'Scripts/install.ps1'
       - '.github/workflows/installer.yml'
   workflow_dispatch:
 
@@ -53,9 +55,16 @@ jobs:
           }
           $model = Join-Path $payload 'model.onnx'
           [IO.File]::WriteAllBytes($model, [byte[]]::new(1100000))
-          Compress-Archive -LiteralPath $model -DestinationPath (Join-Path $payload 'Models/BertV2/model.onnx.zip')
+          $source = [IO.File]::OpenRead($model)
+          $destination = [IO.File]::Create((Join-Path $payload 'Models/BertV2/model.onnx.gz'))
+          $gzip = [IO.Compression.GZipStream]::new($destination, [IO.Compression.CompressionMode]::Compress)
+          try { $source.CopyTo($gzip) } finally { $gzip.Dispose(); $destination.Dispose(); $source.Dispose() }
           Remove-Item -LiteralPath $model
           ./deploy/installer/test.ps1 -PayloadDirectory $payload -Compiler $env:INNO_COMPILER
+
+      - name: Exercise scripted model installation
+        shell: pwsh
+        run: ./Tests/Deployment/BertModelAssetsTests.ps1
 
       - name: Test installer signing command
         shell: pwsh

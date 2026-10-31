@@ -17,6 +17,7 @@ BASE_URL="https://raw.githubusercontent.com/$GITHUB_REPO/$MODEL_REF/VibeRails/Mo
 # SHA-256 of the git blobs (vocab.txt is LF in the blob even where a checkout uses CRLF).
 VOCAB_SHA256="07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3"
 MODEL_GZ_SHA256="25e54c5059641222151bc3f4bd5c523ae60057e6296a23fb90317b8ef5522698"
+MODEL_SHA256="828e1496d7fabb79cfa4dcd84fa38625c0d3d21da474a00f08db0f559940cf35"
 
 require_cmd() {
     local cmd="$1"
@@ -76,21 +77,21 @@ assert_download_hash() {
 
 mkdir -p "$MODELS_DIR"
 
-if [ "$FORCE_DOWNLOAD" = "1" ]; then
-    rm -f "$MODEL_PATH" "$VOCAB_PATH"
-fi
+installed_asset_matches() {
+    [ "$FORCE_DOWNLOAD" != "1" ] && [ -f "$1" ] && [ "$(sha256_file "$1")" = "$2" ]
+}
 
-if [ -f "$MODEL_PATH" ] && [ -f "$VOCAB_PATH" ]; then
+if installed_asset_matches "$MODEL_PATH" "$MODEL_SHA256" && installed_asset_matches "$VOCAB_PATH" "$VOCAB_SHA256"; then
     echo "BertV2 model assets already exist, skipping."
     echo ""
     echo "Done. BertV2 model files are in: $MODELS_DIR"
     exit 0
 fi
 
-TEMP_DIR=$(mktemp -d)
+TEMP_DIR=$(mktemp -d "$MODELS_DIR/.download.XXXXXX")
 trap 'rm -rf "$TEMP_DIR"' EXIT
 
-if [ ! -f "$VOCAB_PATH" ]; then
+if ! installed_asset_matches "$VOCAB_PATH" "$VOCAB_SHA256"; then
     echo "Downloading BertV2 vocab..."
     download_to_file "$BASE_URL/vocab.txt" "$TEMP_DIR/vocab.txt"
     assert_download_hash "$TEMP_DIR/vocab.txt" "vocab.txt" "$VOCAB_SHA256"
@@ -100,7 +101,7 @@ else
     echo "vocab.txt already exists, skipping."
 fi
 
-if [ ! -f "$MODEL_PATH" ]; then
+if ! installed_asset_matches "$MODEL_PATH" "$MODEL_SHA256"; then
     require_cmd gzip
     echo "Downloading BertV2 model archive..."
     download_to_file "$BASE_URL/model.onnx.gz" "$TEMP_DIR/model.onnx.gz"
@@ -108,6 +109,7 @@ if [ ! -f "$MODEL_PATH" ]; then
 
     echo "Extracting BertV2 model..."
     gzip -dc "$TEMP_DIR/model.onnx.gz" > "$TEMP_DIR/model.onnx"
+    assert_download_hash "$TEMP_DIR/model.onnx" "model.onnx" "$MODEL_SHA256"
     mv "$TEMP_DIR/model.onnx" "$MODEL_PATH"
     echo "  -> $MODEL_PATH"
 else

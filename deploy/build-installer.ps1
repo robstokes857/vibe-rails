@@ -46,7 +46,7 @@ try {
     $scripts = @('pre-commit-hook.sh', 'commit-msg-hook.sh', 'post-commit-hook.sh', 'download-bert-model.ps1', 'download-bert-model.sh')
     $required = @('vb.exe', 'appsettings.json', 'wwwroot/index.html', 'onnxruntime.dll',
         'e_sqlite3.dll', 'vec0.dll', 'scripts/pre-commit-hook.sh', 'scripts/commit-msg-hook.sh',
-        'Models/BertV2/model.onnx.zip', 'Models/BertV2/vocab.txt',
+        'Models/BertV2/model.onnx.gz', 'Models/BertV2/vocab.txt',
         'msvcp140.dll', 'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')
     foreach ($relative in $required) {
         if (-not (Test-Path -LiteralPath (Join-Path $payload $relative) -PathType Leaf)) {
@@ -78,9 +78,8 @@ try {
             # Setup ships the materialized model below. Including both compressed
             # archives as well would triple model storage and installer work.
             if ($relative -imatch '\.(zip|gz)$') { continue }
-            # Model assets share their case-insensitive directory with runtime
-            # models. Install missing assets, never overwrite or uninstall them.
-            $preserve = $true
+            # Owned model assets are versioned payload. Preserve on uninstall,
+            # but repair/upgrade when their bytes differ from this package.
         }
         elseif (($rootFiles + $crtFiles) -icontains $relative) {
             $preserve = $relative -ilike 'appsettings*.json'
@@ -89,20 +88,38 @@ try {
         else { throw "Unrecognized release file (not safe to overlay user data): $relative" }
 
         $flags = if ($preserve) { 'onlyifdoesntexist uninsneveruninstall' } else { 'ignoreversion' }
+        $check = ''
+        if ($relative -ieq 'Models\BertV2\vocab.txt') {
+            $flags = 'ignoreversion uninsneveruninstall'
+            $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+            $check = '; Check: ModelNeedsUpdate(''{app}\models\bertv2\vocab.txt'', ''' + $hash + ''')'
+        }
         $destination = Split-Path -Parent $relative
-        $entries.Add(('Source: "{0}"; DestDir: "{{app}}\{1}"; Flags: {2}' -f $file.FullName, $destination, $flags))
+        $entries.Add(('Source: "{0}"; DestDir: "{{app}}\{1}"; Flags: {2}{3}' -f $file.FullName, $destination, $flags, $check))
         $paths.Add($relative)
         if (-not $preserve) { $replacePaths.Add($relative) }
     }
 
     # Materialize BERT during packaging, so setup needs neither a download nor
-    # PowerShell on the target machine. Existing runtime assets remain untouched.
+    # PowerShell on the target machine. SHA-256 decides whether to replace assets.
     $modelDir = Join-Path $work 'model'
-    Expand-Archive -LiteralPath (Join-Path $payload 'Models/BertV2/model.onnx.zip') -DestinationPath $modelDir
+    New-Item -ItemType Directory -Path $modelDir | Out-Null
     $model = Join-Path $modelDir 'model.onnx'
-    if (-not (Test-Path -LiteralPath $model -PathType Leaf)) { throw 'BERT archive is missing model.onnx' }
-    $entries.Add(('Source: "{0}"; DestDir: "{{app}}\models\bertv2"; Flags: onlyifdoesntexist uninsneveruninstall' -f $model))
+    $source = [IO.File]::OpenRead((Join-Path $payload 'Models/BertV2/model.onnx.gz'))
+    try {
+        $gzip = [IO.Compression.GZipStream]::new($source, [IO.Compression.CompressionMode]::Decompress)
+        try {
+            $destination = [IO.File]::Create($model)
+            try { $gzip.CopyTo($destination) } finally { $destination.Dispose() }
+        } finally { $gzip.Dispose() }
+    } finally { $source.Dispose() }
+    $hash = (Get-FileHash -LiteralPath $model -Algorithm SHA256).Hash
+    $entries.Add(('Source: "{0}"; DestDir: "{{app}}\models\bertv2"; Flags: ignoreversion uninsneveruninstall; Check: ModelNeedsUpdate(''{{app}}\models\bertv2\model.onnx'', ''{1}'')' -f $model, $hash))
     $paths.Add('models\bertv2\model.onnx')
+    $replacePaths.Add('models\bertv2\model.onnx')
+    foreach ($archive in @('model.onnx.gz', 'model.onnx.zip', 'model.onnx.br')) {
+        $paths.Add('models\bertv2\' + $archive)
+    }
     $icon = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '../docs/brand/viberails-mark.ico')).Path
     $entries.Add(('Source: "{0}"; DestDir: "{{app}}"; DestName: "viberails.ico"; Flags: ignoreversion' -f $icon))
     $paths.Add('viberails.ico')

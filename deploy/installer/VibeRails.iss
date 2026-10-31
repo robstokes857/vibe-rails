@@ -58,6 +58,11 @@ Name: desktopicon; Description: "Create a &desktop shortcut"; Flags: unchecked
 [Files]
 #include FileEntries
 
+[InstallDelete]
+Type: files; Name: "{app}\models\bertv2\model.onnx.gz"
+Type: files; Name: "{app}\models\bertv2\model.onnx.zip"
+Type: files; Name: "{app}\models\bertv2\model.onnx.br"
+
 [Icons]
 #ifdef TestRoot
 Name: "{userprograms}\VibeRails Installer Test"; Filename: "{app}\vb.exe"; Parameters: "--web"; WorkingDir: "{code:UserProfile}"; IconFilename: "{app}\viberails.ico"; Flags: runminimized
@@ -92,6 +97,15 @@ var
   PayloadPaths: TArrayOfString;
   ReplacePaths: TArrayOfString;
   InstallerMutex: THandle;
+
+function ModelNeedsUpdate(Path, ExpectedHash: String): Boolean;
+begin
+  Path := ExpandConstant(Path);
+  if not FileExists(Path) then
+    Result := True
+  else
+    Result := CompareText(GetSHA256OfFile(Path), ExpectedHash) <> 0;
+end;
 
 function GetFileAttributes(Name: String): LongWord;
   external 'GetFileAttributesW@kernel32.dll stdcall';

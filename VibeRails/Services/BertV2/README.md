@@ -8,12 +8,15 @@ dashboard, link candidates, `search_board_cards` and card discovery in `search_h
 
 The existing root-only `BertEmbeddingBackfillJob` sweeps every source corpus and then runs bounded
 inference rounds, subject to the existing resource-pressure policy. An idle root ticks every five
-minutes; while a sweep or an inference backlog is unfinished the job follows up after five seconds
+minutes; each corpus's durable completion time suppresses duplicate sweeps across roots for five
+minutes. While a sweep or an inference backlog is unfinished the job follows up after five seconds
 (VB-2GUR8-187: the earlier five-second cadence re-upserted the whole corpus around the clock in
 every root). `SearchIndexMaintenanceJob` repairs derived indexes every fifteen minutes. There is no
 new scheduler, daemon or OS role. Each round gives Board, input and ended-session work a turn.
 Ingestion does not require the model; query embedding and background model construction are lazy
-so keyword search survives missing model files or native ONNX dependencies.
+so keyword search survives missing model files or native ONNX dependencies. The singleton owner
+releases the native model after two minutes without inference, including in stdio MCP processes;
+the next semantic query loads it again. Inference and disposal share a lock.
 
 SQLite's vector extension is loaded by absolute path beside the executable in published
 installs (`vec0.dll`, `vec0.dylib` or `vec0.so`). Development builds also support
@@ -27,9 +30,15 @@ working directory, creating and reopening only disposable search storage.
 reconciliation cursors, expiring claims, progress, failures and retry deadlines. Board source
 access remains behind `IBoardStore`. Bounded ID pages sweep each source corpus independently;
 an epoch marks seen documents and removes deleted source documents when that sweep finishes.
-One reconciliation call sweeps each corpus from its cursor to its end with one write transaction
+Generated Board launch envelopes and Automation `vb --job-run` commands are excluded by
+`InputEtlFilter` from both individual input documents and session aggregates. Canonical captured
+inputs remain untouched; an ordinary successful sweep removes obsolete derived entries.
+
+One reconciliation call sweeps each due corpus from its cursor to its end with one write transaction
 per page, yielding after ten seconds on a very large corpus; the durable cursor resumes after a
-restart or an interrupted call. Repeated sweeps detect older/concurrent writers without relying
+restart or an interrupted call, regardless of the completion cooldown. Epoch marks remain for
+compatibility with older processes sharing the checkpoint; session chunk counts are retained
+instead of reset on an unchanged sweep. Repeated sweeps detect older/concurrent writers without relying
 on timestamps or in-process notifications. Queries never advance these cursors, claim work, write
 vectors or consult canonical history metadata.
 
@@ -53,6 +62,13 @@ bounded 10% current-project preference.
 An unavailable history database or incomplete source schema records a retryable reconciliation
 failure and retains the existing search documents. It is never treated as an empty corpus.
 Vector repair removes at most 256 missing/orphan entries per pass to bound writer commits.
+Expected orphan-vector pruning after text replacement is maintenance, not a corruption warning.
+
+All release platforms use the checked-in `model.onnx.gz`; the duplicate ZIP is retired.
+Installers compare the installed model/vocabulary to the packaged assets and replace changed
+bytes. The Windows setup embeds SHA-256 comparisons; script installers stage model extraction
+before replacement. Successful installation removes only the known gzip/ZIP/Brotli model
+archives. The pinned manual download scripts verify both compressed and extracted model hashes.
 
 The database is populated automatically from canonical sources. Legacy Board JSON caches,
 standalone vector files and state search tables/columns remain stored but are no longer the

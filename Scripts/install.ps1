@@ -72,7 +72,7 @@ function Assert-ReleasePayload {
         "vb.exe",
         "appsettings.json",
         "wwwroot\index.html",
-        "Models\BertV2\model.onnx.zip",
+        "Models\BertV2\model.onnx.gz",
         "Models\BertV2\vocab.txt",
         "scripts\pre-commit-hook.sh",
         "scripts\commit-msg-hook.sh",
@@ -226,17 +226,12 @@ function Install-BertV2ModelAssets {
     )
 
     $bundledDir = Join-Path $RootDir "Models\BertV2"
-    $bundledModelArchive = Join-Path $bundledDir "model.onnx.zip"
+    $bundledModelArchive = Join-Path $bundledDir "model.onnx.gz"
     $bundledVocab = Join-Path $bundledDir "vocab.txt"
 
     $runtimeDir = Join-Path $RootDir "models\bertv2"
     $runtimeModel = Join-Path $runtimeDir "model.onnx"
     $runtimeVocab = Join-Path $runtimeDir "vocab.txt"
-
-    if ((Test-Path $runtimeModel) -and (Test-Path $runtimeVocab)) {
-        Write-Host "BertV2 model assets already installed, skipping." -ForegroundColor Green
-        return
-    }
 
     if (-not (Test-Path $bundledModelArchive)) {
         throw "Bundled BertV2 model archive not found at $bundledModelArchive. The release package is incomplete."
@@ -247,27 +242,36 @@ function Install-BertV2ModelAssets {
 
     New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
 
-    if (-not (Test-Path $runtimeVocab)) {
+    if (-not (Test-Path $runtimeVocab) -or
+        (Get-FileHash -LiteralPath $runtimeVocab).Hash -ne (Get-FileHash -LiteralPath $bundledVocab).Hash) {
         Write-Host "Installing BertV2 vocab..." -ForegroundColor Cyan
         Copy-Item -Path $bundledVocab -Destination $runtimeVocab -Force
     }
 
-    if (-not (Test-Path $runtimeModel)) {
-        $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "vibe_rails_bertv2_$([Guid]::NewGuid().ToString('N'))"
-        New-Item -ItemType Directory -Path $tempDir | Out-Null
+    # Inflate beside the destination, verify against the existing file, then
+    # rename only when the bytes differ. A failed extraction leaves it intact.
+    $tempDir = Join-Path $runtimeDir (".install-" + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $tempDir | Out-Null
+    try {
+        $extractedModelPath = Join-Path $tempDir "model.onnx"
+        $source = [IO.File]::OpenRead($bundledModelArchive)
         try {
-            Write-Host "Extracting BertV2 model..." -ForegroundColor Cyan
-            Expand-Archive -Path $bundledModelArchive -DestinationPath $tempDir -Force
-
-            $extractedModelPath = Join-Path $tempDir "model.onnx"
-            if (-not (Test-Path $extractedModelPath)) {
-                throw "BertV2 model archive did not contain model.onnx"
-            }
-
-            Move-Item -Path $extractedModelPath -Destination $runtimeModel -Force
-        } finally {
-            Remove-InstallerStagingDirectory -Path $tempDir
+            $gzip = [IO.Compression.GZipStream]::new($source, [IO.Compression.CompressionMode]::Decompress)
+            try {
+                $destination = [IO.File]::Create($extractedModelPath)
+                try { $gzip.CopyTo($destination) } finally { $destination.Dispose() }
+            } finally { $gzip.Dispose() }
+        } finally { $source.Dispose() }
+        if (-not (Test-Path $runtimeModel) -or
+            (Get-FileHash -LiteralPath $runtimeModel).Hash -ne (Get-FileHash -LiteralPath $extractedModelPath).Hash) {
+            Move-Item -LiteralPath $extractedModelPath -Destination $runtimeModel -Force
         }
+    } finally {
+        # This exact child was created above; never recursively remove the model directory.
+        Remove-Item -LiteralPath $tempDir -Recurse -Force
+    }
+    foreach ($archive in @('model.onnx.gz', 'model.onnx.zip', 'model.onnx.br')) {
+        Remove-Item -LiteralPath (Join-Path $bundledDir $archive) -Force -ErrorAction SilentlyContinue
     }
 
     Write-Host "BertV2 model assets installed to $runtimeDir" -ForegroundColor Green

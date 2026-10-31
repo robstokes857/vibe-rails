@@ -124,7 +124,7 @@ public sealed partial class ReleaseSupplyChainTests
     }
 
     [Theory]
-    [InlineData("Scripts/download-bert-model.ps1", "[string]$Ref = \"", "model.onnx.zip")]
+    [InlineData("Scripts/download-bert-model.ps1", "[string]$Ref = \"", "model.onnx.gz")]
     [InlineData("Scripts/download-bert-model.sh", "MODEL_REF=\"${MODEL_REF:-", "model.onnx.gz")]
     public void BertDownloadScripts_PinACommitAndTheCheckedInHashes(string script, string refPrefix, string modelArchive)
     {
@@ -139,6 +139,9 @@ public sealed partial class ReleaseSupplyChainTests
         var vocab = File.ReadAllBytes(Path.Combine(modelDirectory, "vocab.txt"));
         Assert.Contains(Sha256(WithLf(vocab)), text);
         Assert.Contains(Sha256(File.ReadAllBytes(Path.Combine(modelDirectory, modelArchive))), text);
+        using var archive = File.OpenRead(Path.Combine(modelDirectory, modelArchive));
+        using var gzip = new System.IO.Compression.GZipStream(archive, System.IO.Compression.CompressionMode.Decompress);
+        Assert.Contains(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(gzip)).ToLowerInvariant(), text);
     }
 
     private static string Sha256(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));

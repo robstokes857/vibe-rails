@@ -28,6 +28,12 @@ public static class InputEtlFilter
         @"^[›>$%#]+\s",
         RegexOptions.Compiled);
 
+    // These are generated launch envelopes, not a user's request. Match only the
+    // beginning so a request discussing a Board prompt or command remains searchable.
+    private static readonly Regex JobLaunch = new(
+        "^(?:exec\\s+|&\\s*)?(?:\"[^\"]*[/\\\\]vb(?:\\.exe)?\"|'[^']*[/\\\\]vb(?:\\.exe)?'|(?:[^\\s\"']*[/\\\\])?vb(?:\\.exe)?)(?=\\s).*?(?<![\\w-])--job-run(?=[\\s\"'])",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     /// <summary>
     /// Full ETL pipeline. Returns cleaned text ready for embedding,
     /// or null if the input should be skipped entirely.
@@ -39,6 +45,13 @@ public static class InputEtlFilter
 
         var normalized = Normalize(rawInput);
         if (string.IsNullOrWhiteSpace(normalized))
+            return null;
+
+        if (normalized.StartsWith("You are working on kanban card ", StringComparison.Ordinal)
+            || normalized.StartsWith("You are managing kanban card ", StringComparison.Ordinal)
+            || JobLaunch.IsMatch(normalized)
+            || (normalized.StartsWith("[Console]::OutputEncoding = ", StringComparison.Ordinal)
+                && normalized.Contains("--job-run", StringComparison.Ordinal)))
             return null;
 
         if (ContainsSecret(normalized))

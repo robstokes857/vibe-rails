@@ -67,7 +67,7 @@ try {
     $invalidPayload = Join-Path $output 'invalid-payload'
     $requiredFiles = @('vb.exe', 'appsettings.json', 'wwwroot/index.html', 'onnxruntime.dll',
         'e_sqlite3.dll', 'vec0.dll', 'scripts/pre-commit-hook.sh', 'scripts/commit-msg-hook.sh',
-        'Models/BertV2/model.onnx.zip', 'Models/BertV2/vocab.txt', 'msvcp140.dll',
+        'Models/BertV2/model.onnx.gz', 'Models/BertV2/vocab.txt', 'msvcp140.dll',
         'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'board.db')
     foreach ($relative in $requiredFiles) {
         $file = Join-Path $invalidPayload $relative
@@ -113,13 +113,25 @@ try {
     $sentinels = @('state.db', 'state.db-wal', 'state.db-shm', 'board.db', 'board.db-wal',
         'board.db-shm', 'search.db', 'search.db-wal', 'config.json', 'appsettings.json',
         'logs/keep.txt', 'envs/keep.txt', 'sandboxes/keep.txt', 'scripts/custom.ps1',
-        'models/custom/model.bin', 'models/bertv2/vocab.txt')
+        'models/custom/model.bin')
     foreach ($relative in $sentinels) {
         $file = Join-Path $root $relative
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $file) | Out-Null
         [IO.File]::WriteAllText($file, "keep:$relative")
     }
+    $vocab = Join-Path $root 'models/bertv2/vocab.txt'
+    $model = Join-Path $root 'models/bertv2/model.onnx'
+    [IO.File]::WriteAllText($vocab, 'obsolete vocabulary')
+    [IO.File]::WriteAllText($model, 'obsolete model')
+    foreach ($extension in @('gz', 'zip', 'br')) {
+        [IO.File]::WriteAllText((Join-Path $root "models/bertv2/model.onnx.$extension"), 'obsolete archive')
+    }
     Invoke-Installer $setup 'upgrade'
+    Assert ((Get-Item -LiteralPath $model).Length -gt 1000000) 'Upgrade did not replace the obsolete model'
+    Assert ((Get-FileHash -LiteralPath $vocab).Hash -eq (Get-FileHash -LiteralPath (Join-Path $PayloadDirectory 'Models/BertV2/vocab.txt')).Hash) 'Upgrade did not replace the obsolete vocabulary'
+    foreach ($extension in @('gz', 'zip', 'br')) {
+        Assert (-not (Test-Path -LiteralPath (Join-Path $root "models/bertv2/model.onnx.$extension"))) 'Upgrade retained an unused archive'
+    }
     Assert ((Get-RawUserPath) -eq $savedPath) 'Repeat installation duplicated or changed PATH'
 
     # Elevated runners default new directories to Administrators. New installs

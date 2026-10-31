@@ -22,11 +22,6 @@ install_bertv2_assets() {
     local runtime_model="$runtime_dir/model.onnx"
     local runtime_vocab="$runtime_dir/vocab.txt"
 
-    if [ -f "$runtime_model" ] && [ -f "$runtime_vocab" ]; then
-        echo -e "${GREEN}BertV2 model assets already installed, skipping.${NC}"
-        return
-    fi
-
     if [ ! -f "$bundled_model_archive" ]; then
         echo -e "${RED}Error: Bundled BertV2 model archive not found at $bundled_model_archive. The release package is incomplete.${NC}" >&2
         exit 1
@@ -38,16 +33,24 @@ install_bertv2_assets() {
 
     mkdir -p "$runtime_dir"
 
-    if [ ! -f "$runtime_vocab" ]; then
+    if [ ! -f "$runtime_vocab" ] || ! cmp -s "$bundled_vocab" "$runtime_vocab"; then
         echo -e "${CYAN}Installing BertV2 vocab...${NC}"
         cp "$bundled_vocab" "$runtime_vocab"
     fi
 
-    if [ ! -f "$runtime_model" ]; then
-        require_cmd gzip
-        echo -e "${CYAN}Extracting BertV2 model...${NC}"
-        gzip -dc "$bundled_model_archive" > "$runtime_model"
-    fi
+    require_cmd gzip
+    # Subshell trap owns only this temporary file; failed decompression preserves the model.
+    (
+        local staged
+        staged=$(mktemp "$runtime_dir/.model.XXXXXX")
+        trap 'rm -f "$staged"' EXIT
+        gzip -dc "$bundled_model_archive" > "$staged" || exit 1
+        if [ ! -f "$runtime_model" ] || ! cmp -s "$staged" "$runtime_model"; then
+            mv -f "$staged" "$runtime_model"
+        fi
+    ) || return 1
+    rm -f "$bundled_dir/model.onnx.gz" "$bundled_dir/model.onnx.zip" "$bundled_dir/model.onnx.br" \
+        "$runtime_dir/model.onnx.gz" "$runtime_dir/model.onnx.zip" "$runtime_dir/model.onnx.br"
 
     echo -e "${GREEN}BertV2 model assets installed to $runtime_dir${NC}"
 }

@@ -166,7 +166,7 @@ namespace VibeRails
             serviceCollection.AddSingleton<IBertV2BgeEmbedder>(sp =>
             {
                 var settings = sp.GetRequiredService<IBertSettings>();
-                return new BertV2BgeEmbedder(settings.ModelPath, settings.VocabPath);
+                return new IdleBertV2BgeEmbedder(() => new BertV2BgeEmbedder(settings.ModelPath, settings.VocabPath));
             });
             serviceCollection.AddSqliteStorage(_ => new SqliteStoragePaths(ParserConfigs.GetStatePath()));
             serviceCollection.AddSingleton<SearchTextChunker>();

@@ -21,7 +21,7 @@ function Assert-DeployPayload {
         "vb.exe",
         "appsettings.json",
         "wwwroot\index.html",
-        "Models\BertV2\model.onnx.zip",
+        "Models\BertV2\model.onnx.gz",
         "Models\BertV2\vocab.txt",
         "scripts\pre-commit-hook.sh",
         "scripts\commit-msg-hook.sh",

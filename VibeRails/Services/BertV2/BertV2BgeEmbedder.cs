@@ -65,15 +65,23 @@ public class BertV2BgeEmbedder : IBertV2BgeEmbedder
             string.Join(",", _session.InputMetadata.Keys),
             _requiresTokenTypeIds);
 
-        using var vocabStream = File.OpenRead(vocabPath);
-        _tokenizer = BertTokenizer.Create(vocabStream, new BertOptions
+        try
         {
-            LowerCaseBeforeTokenization = true,
-            SeparatorToken = "[SEP]",
-            ClassificationToken = "[CLS]",
-            UnknownToken = "[UNK]",
-            PaddingToken = "[PAD]",
-        });
+            using var vocabStream = File.OpenRead(vocabPath);
+            _tokenizer = BertTokenizer.Create(vocabStream, new BertOptions
+            {
+                LowerCaseBeforeTokenization = true,
+                SeparatorToken = "[SEP]",
+                ClassificationToken = "[CLS]",
+                UnknownToken = "[UNK]",
+                PaddingToken = "[PAD]",
+            });
+        }
+        catch
+        {
+            _session.Dispose();
+            throw;
+        }
     }
 
     public float[] GenerateEmbedding(string text)

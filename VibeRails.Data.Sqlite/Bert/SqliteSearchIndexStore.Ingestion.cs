@@ -12,7 +12,8 @@ public sealed partial class SqliteSearchIndexStore
 {
     private static readonly string[] Kinds = ["board", "input", "session"];
 
-    public async Task<SearchReconcileResult> ReconcileAsync(IBoardStore board, int batchSize, CancellationToken ct, TimeSpan? budget = null)
+    public async Task<SearchReconcileResult> ReconcileAsync(IBoardStore board, int batchSize, CancellationToken ct, TimeSpan? budget = null,
+        TimeSpan? minimumInterval = null)
     {
         Initialize();
         var stopwatch = Stopwatch.StartNew();
@@ -23,7 +24,7 @@ public sealed partial class SqliteSearchIndexStore
         foreach (var kind in Kinds)
         {
             ct.ThrowIfCancellationRequested();
-            var claim = ClaimReconciliation(kind);
+            var claim = ClaimReconciliation(kind, minimumInterval);
             if (claim is null) continue;
             try
             {
@@ -69,14 +70,18 @@ public sealed partial class SqliteSearchIndexStore
 
     private sealed record Reconciliation(string Kind, string Cursor, long Epoch, string Lease);
 
-    private Reconciliation? ClaimReconciliation(string kind)
+    private Reconciliation? ClaimReconciliation(string kind, TimeSpan? minimumInterval)
     {
         using var db = Open();
         using var tx = db.BeginTransaction();
         Execute(db, "INSERT OR IGNORE INTO SearchCheckpoints(Kind) VALUES($kind)", ("$kind", kind));
         var lease = Guid.NewGuid().ToString("N");
-        if (Execute(db, "UPDATE SearchCheckpoints SET Lease=$lease,LeaseUntil=$until WHERE Kind=$kind AND LeaseUntil<=$now AND RetryAt<=$now",
-            ("$lease", lease), ("$until", Now + LeaseMilliseconds), ("$kind", kind), ("$now", Now)) != 1) return null;
+        if (Execute(db, """
+            UPDATE SearchCheckpoints SET Lease=$lease,LeaseUntil=$until
+            WHERE Kind=$kind AND LeaseUntil<=$now AND RetryAt<=$now
+                AND (Cursor<>'' OR CompletedUtc IS NULL OR CompletedUtc<=$cutoff OR Error IS NOT NULL)
+            """, ("$lease", lease), ("$until", Now + LeaseMilliseconds), ("$kind", kind), ("$now", Now),
+            ("$cutoff", DateTime.UtcNow.Subtract(minimumInterval ?? TimeSpan.Zero).ToString("O"))) != 1) return null;
         using var cmd = Command(db, "SELECT Cursor,Epoch FROM SearchCheckpoints WHERE Kind=$kind", ("$kind", kind));
         Reconciliation claim;
         using (var reader = cmd.ExecuteReader())
@@ -130,13 +135,18 @@ public sealed partial class SqliteSearchIndexStore
     {
         if (document.Sources.Count == 0)
             return Execute(db, "DELETE FROM SearchDocuments WHERE Id=$id", ("$id", document.Id)) > 0;
-        // SeenEpoch is the durable "still at the source" mark. Writing an unchanged row rewrites only the
-        // bytes that differ, so this costs far less than it reads.
+        // Keep the epoch mark for older writers that share this checkpoint. Preserve
+        // session chunk counts instead of resetting and rewriting them on every sweep.
         Execute(db, """
             INSERT INTO SearchDocuments(Id,Kind,ProjectPath,SessionId,Metadata,SeenEpoch)
             VALUES($id,$kind,$project,$session,$metadata,$epoch)
             ON CONFLICT(Id) DO UPDATE SET ProjectPath=excluded.ProjectPath,SessionId=excluded.SessionId,
-                Metadata=excluded.Metadata,SeenEpoch=excluded.SeenEpoch
+                Metadata=CASE WHEN SearchDocuments.Kind='session' THEN
+                    json_set(excluded.Metadata,'$.session.totalChunkCount',
+                        coalesce(json_extract(SearchDocuments.Metadata,'$.session.totalChunkCount'),0))
+                    ELSE excluded.Metadata END,SeenEpoch=excluded.SeenEpoch
+            WHERE ProjectPath<>excluded.ProjectPath OR SessionId IS NOT excluded.SessionId
+                OR Metadata<>excluded.Metadata OR SeenEpoch<>excluded.SeenEpoch
             """, ("$id", document.Id), ("$kind", document.Kind), ("$project", document.ProjectPath),
             ("$session", document.Input?.SessionId ?? document.Session?.SessionId),
             ("$metadata", Json(document with { Sources = [] })), ("$epoch", claim.Epoch));
@@ -164,7 +174,7 @@ public sealed partial class SqliteSearchIndexStore
             foreach (var id in removed) Execute(db, "DELETE FROM SearchSources WHERE Id=$id", ("$id", id));
             changed |= removed.Count > 0;
         }
-        if (document.Kind == "session")
+        if (document.Kind == "session" && changed)
             Execute(db, """
                 UPDATE SearchDocuments SET Metadata=json_set(Metadata,'$.session.totalChunkCount',
                     (SELECT count(*) FROM SearchChunks c JOIN SearchSources s ON s.Id=c.SourceId WHERE s.DocumentId=$id))

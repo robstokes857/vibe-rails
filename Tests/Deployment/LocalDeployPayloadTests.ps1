@@ -19,7 +19,7 @@ $fixturePath = [IO.Path]::GetFullPath($fixture)
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
 if (-not $fixturePath.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Invalid fixture path.' }
 try {
-    foreach ($relative in @('vb.exe', 'appsettings.json', 'wwwroot/index.html', 'Models/BertV2/model.onnx.zip',
+    foreach ($relative in @('vb.exe', 'appsettings.json', 'wwwroot/index.html', 'Models/BertV2/model.onnx.gz',
         'Models/BertV2/vocab.txt', 'scripts/pre-commit-hook.sh', 'scripts/commit-msg-hook.sh',
         'onnxruntime.dll', 'e_sqlite3.dll', 'vec0.dll')) {
         $file = Join-Path $fixturePath $relative

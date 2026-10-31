@@ -40,6 +40,10 @@ jobs:
             -c "$CONFIGURATION" \
             -f "$FRAMEWORK"
 
+      - name: Check shell model installation
+        shell: bash
+        run: bash Tests/Deployment/bert-model-assets.test.sh
+
   build:
     name: Build ${{ matrix.rid }}
     runs-on: ${{ matrix.os }}
@@ -211,7 +215,7 @@ jobs:
                   "vb.exe",
                   "appsettings.json",
                   "wwwroot/index.html",
-                  "Models/BertV2/model.onnx.zip",
+                  "Models/BertV2/model.onnx.gz",
                   "Models/BertV2/vocab.txt",
                   "scripts/pre-commit-hook.sh",
                   "scripts/commit-msg-hook.sh",

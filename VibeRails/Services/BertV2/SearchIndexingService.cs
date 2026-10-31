@@ -24,7 +24,7 @@ public sealed class SearchIndexingService(ISearchIndexStore store, IBoardStore b
     public async Task<bool> RunBatchAsync(CancellationToken ct, int perKind = 10)
     {
         var stopwatch = Stopwatch.StartNew();
-        var sweep = await store.ReconcileAsync(board, 25, ct, SweepBudget);
+        var sweep = await store.ReconcileAsync(board, 25, ct, SweepBudget, TimeSpan.FromMinutes(5));
         var inference = Stopwatch.StartNew();
         var completed = 0;
         var more = sweep.Incomplete;

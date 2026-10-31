@@ -204,10 +204,11 @@ public sealed partial class SqliteSearchIndexStore(string databasePath, string s
                 SELECT Id FROM SearchChunks WHERE ModelVersion IS NOT NULL
                     AND Id NOT IN (SELECT Id FROM vec_search_chunks) LIMIT 256)
             """) > 0;
-        repaired |= Execute(vectors, """
+        // Orphan vectors are routine after source replacement/deletion, not corruption.
+        Execute(vectors, """
             DELETE FROM vec_search_chunks WHERE Id IN (
                 SELECT Id FROM vec_search_chunks WHERE Id NOT IN (SELECT Id FROM SearchChunks) LIMIT 256)
-            """) > 0;
+            """);
         tx.Commit();
         return repaired;
     }

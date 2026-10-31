@@ -39,8 +39,10 @@ public interface ISearchIndexStore
     /// Sweeps every source corpus from its durable cursor to its end, one write transaction per page of
     /// <paramref name="batchSize"/> documents. With a <paramref name="budget"/>, a sweep yields once the
     /// call has run that long; each corpus still advances at least one page per call.
+    /// A minimum interval skips recently completed corpora across all processes; partial sweeps resume immediately.
     /// </summary>
-    Task<SearchReconcileResult> ReconcileAsync(IBoardStore board, int batchSize, CancellationToken ct, TimeSpan? budget = null);
+    Task<SearchReconcileResult> ReconcileAsync(IBoardStore board, int batchSize, CancellationToken ct, TimeSpan? budget = null,
+        TimeSpan? minimumInterval = null);
     IReadOnlyList<SearchWork> ClaimSources(string kind, int count, string version);
     void CompleteSource(SearchWork work, IReadOnlyList<string> chunks, string version);
     IReadOnlyList<SearchWork> ClaimChunks(string kind, int count, string modelVersion);

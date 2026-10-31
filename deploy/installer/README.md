@@ -45,7 +45,9 @@ in-place upgrades and a per-user Windows Installed Apps entry. There is no
 service, login startup registration, database migration or OS scheduled task.
 
 Only exact application files are owned by the uninstaller. Configuration files
-and bundled/runtime models use `onlyifdoesntexist uninsneveruninstall`. Databases,
+use `onlyifdoesntexist uninsneveruninstall`. Packaged model/vocabulary files use SHA-256
+checks to repair or upgrade changed bytes and `uninsneveruninstall` to retain them on uninstall.
+Only the known obsolete `model.onnx.gz`, `.zip` and `.br` archives are removed. Databases,
 SQLite sidecars, credentials, environments, user scripts, logs and sandboxes
 are never installer payload entries. There is no wildcard uninstall deletion.
 Uninstall preserves these files and the installation directory when nonempty.

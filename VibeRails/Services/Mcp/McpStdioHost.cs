@@ -111,7 +111,7 @@ public static class McpStdioHost
         services.AddSingleton<IBertV2BgeEmbedder>(sp =>
         {
             var settings = sp.GetRequiredService<IBertSettings>();
-            return new BertV2BgeEmbedder(settings.ModelPath, settings.VocabPath);
+            return new IdleBertV2BgeEmbedder(() => new BertV2BgeEmbedder(settings.ModelPath, settings.VocabPath));
         });
         // The short-lived child only reads search.db. Do not register IRepository or root
         // indexing jobs here: schema population and source reconciliation belong to the root.
