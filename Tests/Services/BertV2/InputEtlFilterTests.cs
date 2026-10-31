@@ -1,10 +1,41 @@
 using VibeRails.Services.UserInOut;
+using VibeRails.Services.Board;
 using Xunit;
 
 namespace Tests.Services.BertV2;
 
 public class InputEtlFilterTests
 {
+    [Theory]
+    [InlineData("work", false)]
+    [InlineData("work", true)]
+    [InlineData("code_review", false)]
+    [InlineData("code_review", true)]
+    public void Process_SkipsActualAutomationPrompts(string purpose, bool managed)
+    {
+        var prompt = BoardPromptComposer.ComposeAutomationPrompt("VB-12", "Review the changed code", purpose, managed);
+        Assert.Null(InputEtlFilter.Process(prompt));
+    }
+
+    [Theory]
+    [InlineData("work", false)]
+    [InlineData("work", true)]
+    [InlineData("code_review", false)]
+    [InlineData("code_review", true)]
+    [InlineData("manager", false)]
+    [InlineData("worker", false)]
+    public void Process_SkipsActualCardPromptsIncludingGuidance(string intent, bool remoteLinked)
+    {
+        var card = new BoardCardRecord("card_1", "/project", 12, "ready", 0, "Task", "Description",
+            "codex", "medium", null, [], false, 0, DateTime.UtcNow, DateTime.UtcNow);
+        if (remoteLinked) card = card with { JiraIssueKey = "APP-1" };
+        Assert.Null(InputEtlFilter.Process(BoardPromptComposer.Compose(card, "Ready", "codex", null, intent: intent)));
+    }
+
+    [Fact]
+    public void Process_SkipsStandaloneAutomationWrapper() => Assert.Null(InputEtlFilter.Process(
+        BoardPromptComposer.ComposeStandaloneAutomationPrompt("Review the changed code")));
+
     [Theory]
     [InlineData("You are working on kanban card VB-123 in the VibeRails board for this project. Lane: Ready Title: Fix wheel")]
     [InlineData("> You are managing kanban card VB-123 in the VibeRails board for this project.")]
@@ -19,6 +50,8 @@ public class InputEtlFilterTests
     [InlineData("Explain why You are working on kanban card appears in search results")]
     [InlineData("vb.exe --help")]
     [InlineData("vb.exe --job-runner example")]
+    [InlineData("You are the code review agent. Purpose: Code review. Review my parser.")]
+    [InlineData("Purpose: explain why This Automation was triggered for kanban card appears in a log")]
     public void Process_KeepsRequestsAboutLaunches(string input) => Assert.Equal(input, InputEtlFilter.Process(input));
 
     // ── Secret detection ──────────────────────────────────────────

@@ -34,6 +34,17 @@ public static class InputEtlFilter
         "^(?:exec\\s+|&\\s*)?(?:\"[^\"]*[/\\\\]vb(?:\\.exe)?\"|'[^']*[/\\\\]vb(?:\\.exe)?'|(?:[^\\s\"']*[/\\\\])?vb(?:\\.exe)?)(?=\\s).*?(?<![\\w-])--job-run(?=[\\s\"'])",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    private static readonly string[] BoardLaunchPrefixes =
+    [
+        "You are working on kanban card ",
+        "You are managing kanban card ",
+        "You are the manager agent for this card's Agent workflow. ",
+        "This is a delegated worker in an Agent workflow. ",
+        "You are the code review agent. Purpose: Code review. ",
+        "For Jira-linked cards, Board comments sync to Jira by default. ",
+        "For Azure DevOps-linked cards, Board comments post to the work item by default. "
+    ];
+
     /// <summary>
     /// Full ETL pipeline. Returns cleaned text ready for embedding,
     /// or null if the input should be skipped entirely.
@@ -47,8 +58,7 @@ public static class InputEtlFilter
         if (string.IsNullOrWhiteSpace(normalized))
             return null;
 
-        if (normalized.StartsWith("You are working on kanban card ", StringComparison.Ordinal)
-            || normalized.StartsWith("You are managing kanban card ", StringComparison.Ordinal)
+        if (IsGeneratedLaunchPrompt(normalized)
             || JobLaunch.IsMatch(normalized)
             || (normalized.StartsWith("[Console]::OutputEncoding = ", StringComparison.Ordinal)
                 && normalized.Contains("--job-run", StringComparison.Ordinal)))
@@ -61,6 +71,19 @@ public static class InputEtlFilter
             return null;
 
         return normalized;
+    }
+
+    private static bool IsGeneratedLaunchPrompt(string text)
+    {
+        if (text.StartsWith("This is an Automation Worker session. ", StringComparison.Ordinal)) return true;
+        // Review, manager, delegated and remotely linked launches prepend guidance
+        // before the card header. Require both that prefix and the generated header.
+        return (BoardLaunchPrefixes.Any(prefix => text.StartsWith(prefix, StringComparison.Ordinal))
+                || (text.StartsWith("Purpose: ", StringComparison.Ordinal)
+                    && text.Contains(". Expected output: the configured Worker output and a card handoff. ", StringComparison.Ordinal)))
+            && (text.Contains("You are working on kanban card ", StringComparison.Ordinal)
+                || text.Contains("You are managing kanban card ", StringComparison.Ordinal)
+                || text.Contains("This Automation was triggered for kanban card ", StringComparison.Ordinal));
     }
 
     /// <summary>Detects possible secrets using the shared search-index policy.</summary>
