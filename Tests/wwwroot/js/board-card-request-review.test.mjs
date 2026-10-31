@@ -124,7 +124,7 @@ test('badges and rows escape server text and offer Send only for an open unsent 
     const preview = previewHtml({ treeId: TREE, files: [{ path: '<script>x.cs', change: 'modified', added: 1, removed: 1, textIncluded: true },
         { path: 'logo.png', change: 'added', textIncluded: false, omitted: 'binary' }], filesWithText: 1, filesWithoutText: 1, textBytes: 30,
         rules: [{ path: 'db.cs', approvers: ['lead@example.test'], sourcePath: 'vc.rules.md' }] });
-    assert.doesNotMatch(preview, /<script>/);
+    assert.doesNotMatch(preview, /<script>/i);
     assert.match(preview, /modified &lt;script&gt;x\.cs/);
     assert.match(preview, /\+1 −1/);
     assert.match(preview, /no text \(binary\)/);
