@@ -175,6 +175,8 @@ For an interactive loop, open `vscode-viberails/` in VS Code and press **F5** to
 
 `package.json` carries an npm `overrides` entry pinning `@azure/msal-node` to `^7.1.0` (VIBE-217, GHSA-xcx6-jx8p-x3h5, Dependabot alert #42). It exists only because every `@azure/identity` release still declares the vulnerable `^6` line, so no `npm update` can reach the patched version on its own. npm records nothing in the lockfile when an override goes stale, and `npm ls` shows no `invalid` marker, so nothing will flag it. Drop the override once `@azure/identity` (reached through `@vscode/vsce`) allows msal-node >= 7.1 by itself; check with `npm view @azure/identity dependencies.@azure/msal-node`. Tracked on VB-NW72V-297.
 
+The `minimatch` `^11.0.3` and `glob` `^14.0.3` overrides (GHSA-g3hv-75wg-m249, Dependabot alert #47) have the same cause. Only minimatch 11.0.1+ is patched, and `@vscode/vsce` and `mocha` still declare `minimatch ^10`, as does the `glob` 13 they share. glob 14 is the first glob line built on minimatch 11, so the two move together. Both are dev-only. vsce matches `.vscodeignore` with minimatch, and the per-target `!bin/<target>/**` re-include goes through the same negation path. A `win32-x64` VSIX built with the overrides was byte-identical to the one built without them, apart from `package.json`. The test runner adds files with `mocha.addFile`, so it never calls minimatch. Drop both overrides once `npm view @vscode/vsce dependencies.minimatch` and `npm view mocha dependencies.minimatch` allow `^11`.
+
 ## Agent Management
 
 The extension integrates with VibeRails agent system:
