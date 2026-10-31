@@ -1616,6 +1616,11 @@ the checksum is produced. Build details and lifecycle tests are in the
 
 ### Release runners and Linux glibc baseline
 
+Both the macOS NativeAOT build and `darwin-arm64` VSIX packaging use `macos-15`.
+The macOS launch tests use the same runner image. Keep all macOS jobs on supported
+images: `macos-14` enters retirement on 2026-11-02, and its scheduled brownouts
+can block publication even when the native build succeeds.
+
 The tag-triggered [release workflow](../.github/workflows/release.yml) pins every Linux
 job to `ubuntu-24.04`, including tests, NativeAOT builds, VSIX packaging and publishing,
 and GitHub release uploads. This avoids the `ubuntu-latest` move to Ubuntu 26 beginning

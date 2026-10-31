@@ -1,0 +1,841 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://unpkg.com; style-src 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Vibe Rails design system examples</title>
+<!-- Interactive examples for DESIGN_SYSTEM.md, which is the source of truth. The :root block below
+     mirrors its Tokens section; the vr-* classes are example styles, not application classes. -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&family=Sora:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/fontawesome.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/brands.min.css">
+<style>
+  /* Canonical tokens. This block mirrors DESIGN_SYSTEM.md › Tokens: change a value there first,
+     then here and in the :root block of VibeRails-Front/wwwroot/css/viberails.css. */
+  :root {
+    /* Surfaces */
+    --color-bg-base: #0a0a0f;
+    --color-bg-surface: #14141d;
+    --color-bg-surface-hover: #1e1e2a;
+    --portal-surface: #191b25;
+    --portal-surface-hover: #222532;
+    --header-bg: rgba(30, 30, 36, 0.95);
+    --subnav-bg: rgba(22, 22, 28, 0.97);
+    /* Brand and actions */
+    --color-primary: #8b5cf6;
+    --color-primary-dark: #7c3aed;
+    --action-primary-bg: var(--color-primary-dark);
+    --action-primary-fg: #ffffff;
+    --action-primary-hover: #6d28d9;
+    --action-primary-active: #5b21b6;
+    --color-secondary: #64748b;
+    --control-border: #64748b;
+    --color-accent: #14b8a6;
+    --action-accent-fg: var(--color-accent);
+    --focus-ring: var(--color-accent);
+    --color-wordmark: #a77bf3;
+    --color-mint: #80e7a5;
+    --brand-gradient: linear-gradient(135deg, #a77bf3 0%, #14b8a6 100%);
+    /* Text and lines */
+    --color-text: #f8fafc;
+    --color-text-muted: #94a3b8;
+    --color-border: #2d2d3f;
+    /* Status (warning and milestone are the approved target values) */
+    --color-success: #10b981;
+    --color-warning: #F66210;
+    --color-danger: #ef4444;
+    --feedback-error-fg: #fca5a5;
+    --color-milestone: #CAD00C;
+    /* Status tones */
+    --tone-success-fg: #6ee7b7;
+    --tone-success-bg: #102c25;
+    --tone-success-border: #2d6155;
+    --tone-saved-fg: #a5f3e5;
+    --tone-warning-fg: var(--color-warning);
+    --tone-warning-bg: #33251f;
+    --tone-danger-fg: var(--feedback-error-fg);
+    --tone-danger-bg: #341c26;
+    --tone-danger-border: #a45261;
+    --tone-active-fg: #c4b5fd;
+    --tone-active-bg: #2e2146;
+    --tone-milestone-fg: var(--color-milestone);
+    --tone-milestone-bg: #282a13;
+    --tone-neutral-fg: var(--color-text-muted);
+    --tone-neutral-bg: var(--color-bg-surface-hover);
+    /* Type */
+    --font-sans: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-display: 'Sora', 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-mono: 'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace;
+    /* Spacing */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 24px;
+    --space-6: 32px;
+    --space-7: 48px;
+    --space-8: 64px;
+    /* Shape and size */
+    --radius-control: 4px;
+    --radius-surface: 12px;
+    --radius-pill: 999px;
+    --radius-round: 50%;
+    --control-height: 40px;
+    --navbar-height: 64px;
+    /* Elevation and motion */
+    --shadow-soft: 0 1px 3px rgba(0, 0, 0, 0.5);
+    --shadow-hover: 0 4px 6px rgba(0, 0, 0, 0.5);
+    --shadow-menu: 0 12px 32px #0008;
+    --shadow-dialog: 0 24px 80px #0009;
+    --transition-speed: 0.15s;
+  }
+  #vr-system { --vr-base:var(--color-bg-base); --vr-surface:var(--color-bg-surface); --vr-raised:var(--color-bg-surface-hover); --vr-brand:var(--color-primary); --vr-action:var(--action-primary-bg); --vr-teal:var(--color-accent); --vr-text:var(--color-text); --vr-muted:var(--color-text-muted); --vr-border:var(--color-border); --vr-field-border:var(--control-border); --vr-success:var(--color-success); --vr-danger:var(--color-danger); --vr-danger-text:var(--feedback-error-fg); --vr-warning:var(--color-warning); --vr-milestone:var(--color-milestone); --vr-radius:var(--radius-control); --vr-height:var(--control-height); color-scheme:dark; color:var(--vr-text); background:var(--vr-base); font:400 14px/1.6 'Manrope',system-ui,sans-serif; padding:28px; box-sizing:border-box; }
+  #vr-system *, #vr-system *::before, #vr-system *::after { box-sizing:border-box; }
+  #vr-system [hidden] { display:none !important; }
+  #vr-system h1, #vr-system h2, #vr-system h3, #vr-system p { margin:0; }
+  #vr-system button, #vr-system input, #vr-system select, #vr-system textarea { font:inherit; }
+  #vr-system button { -webkit-tap-highlight-color:transparent; }
+  #vr-system .vr-brandline { color:var(--vr-teal); font:600 11px/1.5 'JetBrains Mono',monospace; letter-spacing:.1em; text-transform:uppercase; }
+  #vr-system .vr-heading { margin-top:9px; font:600 clamp(25px,4.5vw,34px)/1.2 'Sora',sans-serif; letter-spacing:-1px; }
+  #vr-system .vr-subtitle { margin-top:10px; color:var(--vr-muted); font-size:13px; }
+  #vr-system .vr-header { padding-right:70px; }
+  #vr-system .vr-tabs { display:flex; flex-wrap:wrap; gap:4px; padding:20px 0 0; margin-bottom:24px; border-bottom:1px solid var(--vr-border); }
+  #vr-system .vr-tab { border:0; border-bottom:2px solid transparent; background:transparent; padding:10px 12px; color:var(--vr-muted); min-height:44px; font-weight:600; }
+  #vr-system .vr-tab:hover { color:var(--vr-text); background:var(--vr-surface); }
+  #vr-system .vr-tab[aria-pressed="true"] { color:var(--vr-teal); border-bottom-color:var(--vr-teal); }
+  #vr-system .vr-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px; }
+  #vr-system .vr-section { min-width:0; }
+  #vr-system .vr-section + .vr-section { margin:0; }
+  #vr-system .vr-section-title { display:flex; align-items:center; gap:8px; margin-bottom:14px; font:600 15px/1.4 'Sora',sans-serif; }
+  #vr-system .vr-section-title > span { color:var(--vr-muted); font:400 11px 'JetBrains Mono',monospace; }
+  #vr-system .vr-sample { padding:18px; border:1px solid var(--vr-border); border-radius:12px; background:var(--vr-surface); min-width:0; }
+  #vr-system .vr-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  #vr-system .vr-stack { display:grid; gap:14px; }
+  #vr-system .vr-fieldset { border:0; margin:0; padding:0; min-width:0; }
+  #vr-system .vr-label, #vr-system .vr-fieldset legend { display:block; color:var(--vr-text); font-size:12px; font-weight:600; margin-bottom:6px; }
+  #vr-system .vr-caption { color:var(--vr-muted); font-size:12px; line-height:1.5; margin-top:10px; }
+  #vr-system .vr-btn { display:inline-flex; justify-content:center; align-items:center; gap:7px; min-height:var(--vr-height); padding:8px 14px; border:1px solid var(--vr-field-border); border-radius:var(--vr-radius); background:var(--vr-raised); color:var(--vr-text); font-size:13px; font-weight:600; line-height:1.4; transition:background .15s, border-color .15s; text-decoration:none; }
+  #vr-system .vr-btn:hover { background:#303040; border-color:var(--vr-muted); }
+  #vr-system .vr-btn-primary { background:var(--vr-action); border-color:var(--vr-action); color:#fff; }
+  #vr-system .vr-btn-primary:hover { background:#6d28d9; border-color:#6d28d9; }
+  #vr-system .vr-btn-primary:active { background:#5b21b6; border-color:#5b21b6; }
+  #vr-system #vr-save-state { min-width:100px; }
+  #vr-system .vr-btn-ghost { background:transparent; border-color:transparent; color:var(--vr-muted); }
+  #vr-system .vr-btn-ghost:hover { background:var(--vr-raised); border-color:transparent; color:var(--vr-text); }
+  #vr-system .vr-btn-danger { background:#2a171e; color:var(--vr-danger-text); border-color:#a45261; }
+  #vr-system .vr-btn-danger:hover { background:#46212e; }
+  #vr-system .vr-btn:disabled { opacity:.45; cursor:not-allowed; }
+  #vr-system .vr-btn-icon { width:var(--vr-height); padding:8px; }
+  #vr-system .vr-btn svg { width:15px; height:15px; flex:none; }
+  #vr-system .vr-state-row { padding-top:14px; margin-top:14px; border-top:1px solid var(--vr-border); }
+  #vr-system .vr-input { width:100%; min-width:0; min-height:var(--vr-height); padding:9px 11px; border:1px solid var(--vr-field-border); border-radius:var(--vr-radius); color:var(--vr-text); background:var(--vr-base); font-size:16px; line-height:1.45; }
+  #vr-system .vr-input::placeholder { color:var(--vr-muted); opacity:1; }
+  #vr-system textarea.vr-input { resize:vertical; min-height:76px; }
+  #vr-system .vr-input[aria-invalid="true"] { border-color:var(--vr-danger-text); }
+  #vr-system .vr-error { color:var(--vr-danger-text); font-size:12px; margin-top:6px; }
+  #vr-system select.vr-input { padding-right:24px; }
+  #vr-system .vr-menu-wrap { position:relative; }
+  #vr-system .vr-menu { position:absolute; top:calc(100% + 6px); left:0; width:212px; max-width:100%; z-index:20; padding:5px; border:1px solid var(--vr-field-border); border-radius:12px; background:var(--vr-raised); box-shadow:0 12px 32px #0008; }
+  #vr-system .vr-menu button { width:100%; min-height:40px; display:flex; align-items:center; gap:9px; padding:9px; border:0; border-radius:5px; background:transparent; color:var(--vr-text); text-align:left; font-size:13px; }
+  #vr-system .vr-menu button:hover { background:#343447; }
+  #vr-system .vr-menu button svg { width:15px; height:15px; }
+  #vr-system .vr-menu .vr-menu-danger { color:var(--vr-danger-text); border-top:1px solid var(--vr-border); border-radius:0; }
+  #vr-system .vr-check { display:flex; align-items:center; gap:10px; min-height:36px; font-size:13px; }
+  #vr-system .vr-check input { flex:none; width:17px; height:17px; margin:0; accent-color:var(--vr-teal); }
+  #vr-system .vr-check input[type="radio"] { accent-color:var(--vr-brand); }
+  #vr-system .vr-toggle-row { display:flex; justify-content:space-between; align-items:center; gap:16px; padding:10px 0; min-height:44px; font-size:13px; }
+  #vr-system .vr-switch { appearance:none; -webkit-appearance:none; position:relative; flex:none; width:42px; height:24px; border:1px solid var(--vr-field-border); border-radius:999px; margin:0; background:#303040; }
+  #vr-system .vr-switch::after { content:""; position:absolute; width:16px; height:16px; border-radius:50%; top:3px; left:3px; background:var(--vr-text); transition:transform .15s; }
+  #vr-system .vr-switch:checked { background:var(--vr-teal); border-color:var(--vr-teal); }
+  #vr-system .vr-switch:checked::after { background:var(--vr-base); transform:translateX(18px); }
+  #vr-system .vr-divider { border:0; border-top:1px solid var(--vr-border); margin:14px 0; }
+  #vr-system .vr-badge { display:inline-flex; align-items:center; gap:6px; padding:3px 9px; font-size:11px; line-height:1.6; border-radius:999px; background:var(--vr-raised); color:var(--vr-muted); white-space:nowrap; }
+  #vr-system .vr-badge-success { color:#6ee7b7; background:#102c25; }
+  #vr-system .vr-badge-warning { color:var(--vr-warning); background:#33251f; }
+  #vr-system .vr-badge-danger { color:var(--vr-danger-text); background:#341c26; }
+  #vr-system .vr-badge-active { color:#c4b5fd; background:#2e2146; }
+  #vr-system .vr-badge svg { width:12px; height:12px; }
+  #vr-system .vr-inline-alert { display:flex; gap:9px; padding:12px; font-size:13px; border-radius:var(--vr-radius); color:#a5f3e5; background:#102c25; border:1px solid #2d6155; }
+  #vr-system .vr-inline-alert svg { width:18px; height:18px; flex:none; margin-top:2px; }
+  #vr-system .vr-card { background:var(--vr-surface); padding:18px; border:1px solid var(--vr-border); border-radius:12px; }
+  #vr-system .vr-card-name { font:600 17px/1.4 'Sora',sans-serif; margin:14px 0 7px; }
+  #vr-system .vr-meta { color:var(--vr-muted); font-size:12px; }
+  #vr-system .vr-code { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--vr-teal); overflow-wrap:anywhere; }
+  #vr-system .vr-empty { text-align:center; display:grid; justify-items:center; gap:12px; padding:26px 16px; border:1px dashed var(--vr-field-border); border-radius:var(--vr-radius); }
+  #vr-system .vr-empty > svg { width:26px; height:26px; color:var(--vr-muted); }
+  #vr-system .vr-empty-title { font:500 15px 'Sora',sans-serif; }
+  #vr-system .vr-toast-demo { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; background:var(--vr-raised); border:1px solid var(--vr-field-border); border-left:3px solid var(--vr-teal); border-radius:var(--vr-radius); font-size:13px; }
+  #vr-system .vr-disclosure { border-top:1px solid var(--vr-border); }
+  #vr-system .vr-disclosure summary { padding:14px 0; font-size:13px; color:var(--vr-text); }
+  #vr-system .vr-disclosure p { font-size:13px; color:var(--vr-muted); padding-bottom:14px; }
+  #vr-system .vr-palette { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+  #vr-system .vr-swatch { display:flex; align-items:center; gap:10px; min-width:0; padding:10px; border:1px solid var(--vr-border); border-radius:var(--vr-radius); background:var(--vr-surface); }
+  #vr-system .vr-swatch-color { width:30px; height:36px; border-radius:5px; flex:none; box-shadow:inset 0 0 0 1px #ffffff24; }
+  #vr-system .vr-swatch-label { font-size:12px; font-weight:600; }
+  #vr-system .vr-swatch-code { font:400 11px/1.7 'JetBrains Mono',monospace; color:var(--vr-muted); }
+  #vr-system .vr-type-display { font:600 26px/1.2 'Sora',sans-serif; letter-spacing:-.7px; }
+  #vr-system .vr-type-body { font-size:16px; }
+  #vr-system .vr-type-mono { font:400 13px/1.5 'JetBrains Mono',monospace; color:var(--vr-teal); }
+  #vr-system .vr-spacing { display:flex; flex-wrap:wrap; align-items:flex-end; gap:18px; padding-top:12px; }
+  #vr-system .vr-spacing-unit { display:flex; flex-direction:column; gap:6px; align-items:center; color:var(--vr-muted); font:11px 'JetBrains Mono',monospace; }
+  #vr-system .vr-spacing-block { height:12px; border-radius:2px; background:var(--vr-teal); }
+  #vr-system .vr-footer { display:flex; align-items:flex-start; gap:7px; border-top:1px solid var(--vr-border); padding-top:16px; margin-top:26px; font-size:12px; color:var(--vr-muted); min-height:50px; }
+  #vr-system .vr-footer > svg { width:15px; height:15px; color:var(--vr-teal); flex:none; margin-top:2px; }
+  #vr-system .vr-dialog { border:1px solid var(--vr-field-border); border-radius:12px; padding:24px; color:var(--vr-text); background:var(--vr-surface); width:min(420px,calc(100% - 32px)); max-height:calc(100% - 32px); box-shadow:0 24px 80px #0009; }
+  #vr-system .vr-dialog::backdrop { background:#080810c9; }
+  #vr-system .vr-dialog h2 { font:600 21px/1.3 'Sora',sans-serif; margin:0 0 6px; }
+  #vr-system .vr-dialog .vr-meta { margin-bottom:20px; }
+  #vr-system .vr-dialog-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; margin-top:24px; }
+  @media (max-width:620px) { #vr-system { padding:20px 16px; } #vr-system .vr-grid { grid-template-columns:1fr; gap:24px; } #vr-system .vr-header { padding-right:42px; } #vr-system .vr-tabs { gap:0; } #vr-system .vr-tab { padding:10px 9px; font-size:12px; } }
+  @media (max-width:380px) { #vr-system .vr-palette { grid-template-columns:1fr; } #vr-system .vr-sample { padding:14px; } }
+  @media (pointer:coarse) { #vr-system { --vr-height:44px; } #vr-system .vr-btn, #vr-system .vr-input { min-height:max(44px,var(--vr-height)); } #vr-system .vr-btn-icon { width:max(44px,var(--vr-height)); } #vr-system .vr-input { font-size:16px; } #vr-system .vr-check { min-height:44px; } #vr-system .vr-menu button { min-height:44px; } }
+  @media (prefers-reduced-motion:reduce) { #vr-system *, #vr-system *::after { transition:none !important; } }
+  /* Page base (replaces the viewer styles the Codex export carried). */
+  html { color-scheme: dark; background: var(--color-bg-base); }
+  body { margin: 0; background: var(--color-bg-base); }
+  .cursor-interaction { cursor: pointer; }
+  #vr-system { max-width: 1180px; margin: 0 auto; }
+  #vr-system :focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+  /* Shared additions */
+  #vr-system .vr-span { grid-column: 1 / -1; }
+  #vr-system .vr-sample-flush { padding: 0; overflow: hidden; }
+  #vr-system .vr-shell-label { padding: 10px 16px; color: var(--vr-muted); font: 600 11px/1.5 var(--font-mono); text-transform: uppercase; background: var(--vr-surface); border-bottom: 1px solid var(--vr-border); }
+  #vr-system .vr-shell-label:not(:first-child) { border-top: 1px solid var(--vr-border); }
+  #vr-system .vr-btn-sm { min-height: 32px; padding: 4px 10px; font-size: 12px; }
+  #vr-system .vr-btn-icon.vr-btn-sm { width: 32px; padding: 4px; }
+  #vr-system .vr-card-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; align-items: start; }
+  #vr-system .vr-icon-tile { display: grid; place-items: center; flex: none; width: 40px; height: 40px; border-radius: var(--radius-control); background: rgb(20 184 166 / 0.10); border: 1px solid rgb(20 184 166 / 0.2); color: var(--vr-teal); }
+  #vr-system .vr-icon-tile svg { width: 20px; height: 20px; }
+  #vr-system .vr-icon-tile-lg { width: 56px; height: 56px; border-radius: var(--radius-surface); background: linear-gradient(135deg, rgb(124 58 237 / 0.25), rgb(20 184 166 / 0.15)); }
+  #vr-system .vr-icon-tile-lg svg { width: 26px; height: 26px; }
+
+  /* 13 Header */
+  #vr-system .vr-appbar { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 12px; min-height: var(--navbar-height); padding: 8px 16px; background: var(--header-bg); box-shadow: 0 2px 15px rgba(0, 0, 0, 0.3); }
+  #vr-system .vr-appbar-start { grid-column: 1; justify-self: start; display: flex; align-items: center; min-width: 0; }
+  #vr-system .vr-appbar-end { grid-column: 3; justify-self: end; display: flex; align-items: center; gap: 10px; min-width: 0; }
+  #vr-system .vr-brand { grid-column: 2; display: flex; align-items: center; gap: 12px; color: var(--vr-text); text-decoration: none; }
+  #vr-system { --vr-logo: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAQAElEQVR4nOydCWAb1Z3/v28kS7Zs+T4lO3Z8xFcScnGEmwIhdoACJS0UKNvzT0tL721LT7rQblu6W2i37W4Pem23QEtLKTk42nCUO5CD2DmcxInv+5BlW7ak939vHCU+pJmRrJFm5Pm0io1mJFkz7/3e7/d7v8MMAwODJYsZBgYGSxZDABgYLGEMAWBgsIQxBICBwRLGEAAGBksYQwAYGCxhDAFgYLCEMQSAgcESxhAABgZLGEMAGBgsYQwBYGCwhDEEgIHBEmZJCQDHppUllPjLBIEu9xPiJH7aS0BapyhO9O1saoHBkqL4ytoqfxLKKFAKkDyAthM/Oe4xe48P/O1wB5YABAlOUWPdZvYlb2QT/V3sPzOlzmUD4efwe+/v3HHoEAwSksKGujoTyBfYyH+fzKlDoPRRNige6djR9CwSlIQVAOxG3ygQ3M8mfinChFLspH56X9fOphdgkBAUbqm/TKD0bjYerkDY0CPw0U937Gx+EglGwgkAUa0zk18SQi7EYqH0p16f+XM9T+1zw0CX5F5bbbdOm3+kYMWXhVL6LKbxgc5nmk4iQUgoAeBsrHs3BXmIfSkbogVF+zT1bundcWgfDHSFs6H2PDbEHwMhRYgSTAiMMt/RexNFGxCQIDgaaz/PbvbDUZ38HILiJGL6h/Oq+rNgoBucm2s2ssXg6WhOfg7TLNNhEv7GfEv/DwlAQmgAzs11l1OCp9nNUe/7UDroFeglPU82vw0DTVN4Vd05goBn2XBIg0pQUJ8PuKBnW9Or0DG6FwBFjbWlAoQ9kPHwRwVmDpDhkRXtL7dPwECTZF5almmz2Y4wZ18uVIbtGvV4PeSs3mff7oFO0X0cALvRDyCMyW8vSIUtywqLLQlT49OYGPVgtFOhj4+ZA/6s9HvYb/8KA02SmmL7DsKY/BnONCSnW5GUYsKUm42HIQ9cveOKXstWzwKzxf999uut0Cm61gCKrqq7SDCR5+XOE5IEFNbkwLEqDykZ1gXHpye86G4ewMk3uuD3Ucn3YluEXp9v0tnz1NFeGGiKgk3Vy00m01E5U5CNGZSe50DBimwkJS9cA8eHJ9G5vw89Bwfh9/ohD13bsa1pD3SICTomfUUe3+4rlzon2W7B2hurkVeZFfRmc0xMQGQUpSF7WToGW0fgmw5909nQEohgsrqO9O2AgabIXFH4ABsPa6TOsaYlYfV1Vcgty4TJHNwHzsdJdmkG8quy0H9sWHI8zEDy2Hh4BDpEtxpA7lW1RRaBdEhJez75z7phhajuK4WbBQe2HcNYn5QaSKeoyevsfOJwPww0AQ/zhokeY6MhpFmbXpSK+oZymK3KLd9JZiLu/csR0TwICcW0e8KdP7yrdRg6Q7fbgFYBH5BT9VZeUxnW5Ofw8+say2XOIhZ4zV+EgWYgZv+XpSY/py7Myc/h/gE+jqQ/HEm2FJsu/QA6jgMQJEM68yozg9r7SrAyIZBdli55DhtsH+MeZxjEnbzGukL24/1S5+Rze98amc87NSsZWcwkkOFK6BDdCgBKaI3U8eK1BVDCZXnrgj5fWCfnSCYpKbbUz8Ig7lgo+YKolUlQWJez4Dm2g4RLciVdBqcpPitP+gSCGugQXQoAxzUOG7t5haGOm60mpOUqCwjcmFUfdBDkMIlvy06WfC0B/WTepXWqBZsYyOO8nG3vECoZlZeamyI6eeezqWADNmRVQwmZTrvcKRXYWmeBztClAPD6Uwuljpssyjc38qyZuNFxKbKTFqr8JeskP4avIHZLCv0kDOIGtZh4CHiK1DmlZy+MBs6zZOK6wovFn0oxW0NPFzYWTM5Bv6yU0Bq6FAD+KWFS6rjZouxrJQsWpJlTkGyy4ENlVy84zv0IVru0UKeEfIprJDCIOcVX1WWzO3Cn1Dk2Zr9nl84V7txz/OGya2AWTKLgFxRuhsk5EKltVHcRoroUACYCSe8eD/xRQn5y1unfq9KKcX52/ZzjfJOheE2+5HvwkFMynZUQiSF6w2/CXXLx/sXrCjB/s+iy3HVYnjqjFfBjXAtUgklmXE1MJIe35aQB9GkCWOiU1HEiKJPomea5Y+e6oothJnPNh8LanJABRKcRqOEMjAOE4hNSx3nQDw/mmQ3X+q4tmlsqwp6UCkXIjCvq9esuriZh0oHnQJWdZjXNVe+zLHZsyj97znOCSYBzjYwHGMTJaxHAIGYUNdR/mC3f2VLnlARZ/a8uPB+p5rnO3WRB4cLtlx5YxCwoHHnaQZcCgHiI5IWmSsK3wYOJFt74xoLzYDPNHSBF9Xmy6h+l5C4YxAw2rz8tddycbEJBzdytvwxzKi7PX7/gXKtSASDjKzDZkhSOPO2gTw1AkJa0VKEKkCIsdPBxreCd81REM9tV4EJACjYgL2BagLJNZYNFwev7salYK3WO86x8UXubzVbnZQtMPI5SAUCpjAYwajI0gFhATNIaAInQBAjA4wLs5rmOfccq+QxTpgV8CgaqI/ippLbFfUBF8wK5CqxZOCcruMwINQ4WICMABIvZEACxgHhkbC2FrhiLECI7kAi4Mn/DnOesaRbkVmTIfCy9KWPLqiwYqEbO1Suc7EJfK3VOQfXCNN+r8s9BqNQRC1EWIkzlTABrvyEAYgExTUibAFTZffBJOAv4VtH8geFYlS/zhxFrmt//cRiohtVn/jTbepUct1z9nw2P9diYvTLk+T6FTiMq4wTsdFkMH4AmoMpUAKkbz4ODLsqdWweUh5PysFKZj74TW/VdZ0GrFG8sTmGL8EekzuEVfnjwz2yuyNsgBv2EYpr6oAQi51tKMUyAmCDnA/D7lAlir1/6xotq47znnKtlnIFMA3W4640tQRWgWem38/BrqXOcq+eu/klMi7s0d63US+BVKAB8MtWikGYxBEAsmAI8Usd908pu6DT1Sh7ncQGrM+bmgudXZYvJRtLQO2AQfSg+JnWYF4CZH/a7Mbt+wb7/fLwy4yCAb0pmYXm0aQo6Q5cCYHB7y6jUcd+UQomuQPJfmL1qzn+LHuaV0jsCbJW6uHBzTRkMooajoW4t87GskjqniGln8x19F+RKvkREThMMIDWueMMQ6BD91gOgdCzUMa9HmQng8U/LnrMmswqpprl2f9FKuchALihMH4RBNJEs+MELfRbOC/zhW3/lNgfkmFQwDuTqAjK544IO0a0AYHJe8oL7FPgBxrzKkrfOnbd/LFYMKpWuGCRQ+gEYRIdLYWb3W7K3X25llhiwNZvzc1ZCCS6vfBlwr4xZybYIDQEQS6iMxFViBii58ZyNQQYSLzElCSEOx1W1EXSiNZhPka3+nex6SgZh5FcvvB/nZ8ur/5zRafm+EHLjibmlDQEQY6QFgAJH4KhCAVBmK0RR8lz1Mmd55oIVZwECeT8MFo0AKnkdLTYzMh1zMzvr7GXITFJWrMk1LT8O5BcUagiAWEIokdEA5HdkRqbHoJT5YaTc5sytlM4jZ2rrDUaxkMXBS36xO9kgdU5+bc4C59/ZWZKpAqdxeyfhg7y5KLcDQA0fQGyhWLwJwAOBJnzKdm7WZy6sHVdQLWsGJFNf5m0wiBhqIR+Ui/wrmuf848U+N2Qqq/WnVAuU8wHI+aS0io5NAGmVa9qjbG93ZFrZfeMmAPcqzya9ME3ce5ZCkPFeG8hAiORuir0wVazdP5sa+zIxklMJwwrvP28fJwVzAhrbgDFmQOog7/CjhB7PEJQSVAuoldECQM51bK5WthwZzMHZUHseW81XSJ0TzBm7IUt5he5ez6Ci86ZlxhPTSJW9kcbQ8TYglWzJLCexA/SGJQAWjsWC6hzZ1xFiMsyACGCr6i1SxwnzwxSsWJh8uT5DUmbMocejrJvXlMx4IpTqskW4bgWAn0Dygkv2cptF96Rywb2M7QbkWObu//M04WA15+dAYOQGRAIhW6UO55RlwJQ0dydmRVoJUs3SCVuz6VF4/6fG5QQADAEQS9jWULfUcbkbFqBvKrx+jnX25Quey62SqypLqgoaa5RtShuIODbXXcgTq6TOyatauPrXp5chHHo8SgWAtLPYR/y6bBevWwHg85ukNYAJZRpAOCYAp8ZesuC5vIos2SIkJmraCgPlCJC8XrxGY/ayhbFB1WmlUIqf7QL1KjQBpmUWFMHnNzSAWCJ4ZXwACjWAgalRTPmUCQtOddqyBc/x6jMZDmkzgBB6EwzCgLxH6mg2U/95LMZseG2/ilT52P8A3P5XWj9y0iWtAbiTrIYAiCWdQyldUseV+gA4JyeVa28ZSWkoTF7oec6tUGAGbKlVFpy+xHE01F8gq/4Hud5VqcUIh5Pj3YrO8/KYEik5QTE98uT+8FRJjaDfbcDdu/kMD6m/8fJN3illWsAJt7KBECCYFqDMDCA3wkAWdhklrxNX/7OCqP81duXqP+fEhLJFW4E/SZerP0fXJcGozNaLUi3gxMTiBYASM4CtFIYfQAGU4Gap49nLF6r/nGr7MoRD63iXovNkYwCIPrcAOfquCSizFegZUyYAWsfDEwCVqc6gz8uZAYSQuryr6iphEBLn5pqN8ur/Qu8/L/21LEXyZXPwU4pWhZrfpEuyAJVutwA5yuohaxWKNim1W85xE6B7ckAsDqK0QQQvFcb7BsxPJ+YD8+gL7ZL2Itu25sEt90AjFGyqXm4ymxsJpVWUkHz2s4Bd03xK2e/iT8ojLnsISC9b6XrZd+M/W9jxp7u3NzUh2ggmWe9/VsnCWgxlqYUQiPLWfN2T/bIl4QJ4XLILSTt0iq4FABuwx6Vu+eSotOQ+/T7scYJpATyIRCnlqUXYO3J0znMBM2CkY0zqw94JBQKAZ8H5LEIBc2bkmwSBTUSwCUmZikH6/X5/L4HQSwR/7/jUVM/QM8dGoBBeWdebYb/MRMgm9p9bmFoyo5EQMiNLT02iwFxiWgsPdeSPOvEMMpNsw//vbKjn0m4bW013eCfJ0327mpSnV4aC0vdAYiLzNOxg6n9ZSiHC4VgYWt/EqGQ3eh6xeAw6RdcCgK1Wx6UGy8So8hqNR8bawxIAZbaFAoCTW54pKQDYhFrruGZFbucTh/tnP88bXlj8pgYBQgObBJfzAhhijNupVlYzX3PmuwqnS1ybYLOkwNZQ18Xs5p3s6PYxYno6qEd6/fokZ/7EXUxofoW9Wlk/bDkImNudfIStvB9JsmHc0Vj3PZiGv9v5RKeyFLt5iDkThEju44Uys5aHsf3HaXErX7TlNEk2DnUrAHTtA/BTv+SF97iUaQCcg64TCAdeJCQYfIWSxWsWO9vwVZ5teX3H0VB3INmf1M4m/8/Y0zfIVb9ZACFFbFX+F/bLw2nUP+hsqHvZ0Vj7eVxaJpbDdW6u2+oomDjCzrsf0Zr88/8EwMb+hq/Dl3nUubn+dkQAgblR8rhAmPofvCp4qPsRin1BhHcoJkekBYBf8B2HTtG3BiAQyQs/GYYG0OLuwLTfiyRB2SUpD+EItKYmITUnGe6B0Goj0wIaddBF+gAAEABJREFU2cTPo6B3s5U9XXb/MFwI4Vl05zltqd9FY/3MU4gN7HOZMY5fORvrP+2jvk92bz/4nNLXUoE2Eom/NJNN/vkNPznJggV5VuVyrWdySHE5OL6dLLebZPKZDA0gHnRtaz7BbOOQnhzvpA8+r8ImIdSHo0wIKMVmsiI7KfhqlF0WejDyyDPmWLuBTfx/Z4JAurKovjnLREy7mKD7ppKTxa4/wGVS52SXBleMljN/TDgcHFOu7cn6kSj1tO9s0mUqMEffuwAQbeOT7Ed5qOMT7AamZSvLDjs4djKsYJKilFwMBikowSsGt+2e52SiM0GnYukqErMFOe6wr/tV5iws7dh+4Pa8S+vSzMn+TQIR1jOfhYNtn/E2Ptn8d3Z5CtkFMlHe9Els7SZerZlWz3TmuuWWBRcA8wu1yHHQdVLxuXJ+JPanNkPH6F4AsGl1jM2nkALAMxKGAOADI4zFpNCajQNYaIXY820wJ5tEDWTmj5w1+XWC1Z6EJFsSvBPesEypoBC8j5kEp8p6n3Jqnv7nzO/kzPlnDp46YMtJgSU1+DZtfpgC4IBLucku50ciOt4B4OheADARfFxqPZ1wKR+8x9ydYq+ANIX55MFyAjh8onN1tffQoNhSnkDbk9+SliR617OXpSMlIzlombNJ9xQmhz0Ybneh/+gQJkZi2wUrpyy0tZQXhgDgQV8TPuXOYVkNQMc7ABz9awCEHpfSqCeGld9svk7vGWnBhTnKUvdDCQAONwO4ACBzVrPwScmwsNXYyh4WJKWYMDXmZasSm4xjHiUBKiHhe+lFq/LEXodpufICLznVIj4ynXaUnevA+NAE+lqG0bG3V7ZrTjTIKQu9MRKOCbBn5AjCYWJYOgYAfCtax+jfB8AlsFQswKDMDZzHW8OHlQsAa+hyYGKuesCUVYhgFpDhSBWDiTIcdqTlpbA9/9B+Wu7gHO1xi3EHwx2jGOudkO1hL7Yvrs7GsnOKxAkdKbasFJSenQIHEyLc39H5dr/8Z0cIb8Zqz08NeTwcAbB3uAXhMC4zfqhgmABxhanWh6SOuweVtf8KwO1DriKmmKyy5/LGE3wLatK/UE3kIat8teQqsxx84pesy4fzrAKYzMo3Zvi5Wewz+IM7L6YnvTj5Rhc69/cHPT8tPwXV7ygVJ2+04NGP5RcUw7E6D0d2tSn6vuGSUx56VyXbkg6BKLtmw9NjaJ/sg1J4m3k5/4ff65Mcf1pH38lAjI6elANMdQ+pg3o9vrBqA/BeAUqDRI67u+Dxhx4gWTL9A/lqXFifi7NvqcOy9UVhTf5g8MlYcWEJ1t9UIxbMmE1RXQ5WX7ciqpN/NsnMTFm5pYIJMuUJOUqR6sPIm7u0Tyib1G8MH0Q4yC0eTN8Z73nqkK5NAN0LgJm6AOSw1Cnu4fDMgDeHD8uewzvK/PT4XyQ1/GBJKwFMFhNWX1uFqotLYLEpS0JSCp/k9Q3lqLpsmahdVF5Swh7LYDKpe7t5pB73D9RuXi5qQErhOyapzNxJzU4GMS8057KK7SFfywU2vw+Tfnmn5J4oq/8EdD90jv53ASD6Ad5mtkDIYvD8Rs6oycrY7zqGp3tfx5X5Zwc9PjTlwn8cfThoDMBsUrOSmePOvKBEOfe6r7q6QrXVOABvlz2/ZXYsyF2eCcvVZuz980KHW0qWVfRvZDrTYGPbs8lsu9FknlvZl5syPADHze7b5NgUBBlhwns7fPfw7/GZynezHZzgndh29LyGQ2PK9/857kHZJCBDAGgBtgrvl6oiMxGmH4CHBD/S8Q880/sGLso9C3mWTGRYUiFQQRxET/e9rrilGA9f7Tt8JjcnlXncV11dKQqGRIZ3TVrBNJDD/zgpajvL1heIHXwtKfLaDjdl+GOu44/v0YTe72mb6MVXmn6OqwrOQYXNCT/73/C0G31MODw/sFe0/8NlXNYE8L8NnZMYAoD63yYkdKde91B4JkAAvsI/3vUiFgN3BAYEAA+uWXVNhTi4lwIFTPvgHvz0orQofOeZyS/GVZBTUYLzcPsm8Vjn84gW4zLjRqCGBqAJTD6yn0poiWN94WkA0STQtprvu9dtLmcTIbr2vtZRlB0ZBoG4ikA1X7Wiqnl7ebk4C6/Po3sNQP9OQEb7083M2KQhdXI/2y/3jEceNLMYeOPK5HQLajYtR1qu0Sk8WpBT/1MLt3z8yHDPU0d12QxkNgkhADjcDyB1fHwgfloAt3+lItkMtIds/AilbyIBSBgBAEok1TG1zICAKnoqzTfoObkV4SWrGIQHpUrbeyhHwXjRvf3PSRwNgPjfkjo+1u9GVD5HHGpn/g2ooaJCygzUgAyYGZRU9FrNb2BpEF34dSeB6x0lxnplCoYQ7EECkDDuaOYZfl3q/i9GA5jtcz4z4YFgnuhZxTQR4hQDNeDXO5B6uUi48HYPSAsAnw+vIwFIGA2g0z35plRIMI/p5gEm4XDG02ygB0QNLApawFj/hMRI4tCJ7p0qlESPA4njA9jVOkkkIrO4VB/rU1gH7tQwWkKFexILujghIDdO2Lu/DkTR3ogjiSMAIE7cN4IfmLlXSsyAGbvdmPp6hYgxAovDJWf/08RQ/zkJJgCC35hAOS55R+Apld+Y/bpmxv8SuRgY6x+X3NVh720IAE3iC35jAg45V29oDeCM0m/M/kQg0unv91ExZiSwqxMMr+A1BIAW6drZ/Bbv1T77udlOIV5Ky+sJ7gg0Jn5iQSKUAO7B8aAOwFnbu6O9Tx7RdRWg2SSWBiBmaJ6J0OIq3PyJPd++O7Orb5BQkMh8AaHsf3GXcUZLfBkJRKIJAC6pz6hnQVQ41zwPL5FMMjXQMzOeABqWkJdyFIsORkpzkUAknAAgpxw0M1F6Cxntdi94xVJhxqlFTxnI82Ia6ZnnE4mAV4cEMgjp7G+9kNEu6boBgkDWOxrqfoEEIfEEgBeSKtpo56wbTBNrsIckMLfndOA4MzEQcHjNTrVNwGsz09Z89rc+ZQKe+q48UExJGXl2rT7AhMDnkAAknADgqcHshg6EWtl5DfuxwYmZQb5U9vtOzW2lps6ZiYKQK2WicKZpCxXLjyl+HSHfc15VuwU6J+EEAIfdz79LDVtRC9DoqJ6tkp/Ziw7vjz2tzUeB0ytlBMk28xVtqmkTg8Cea8O6d9cgOUO+JDyHCsLDhQ11ddAxCSkA/JR2Sq123BGopVZdgQk7k8tyRiU/sxcdWI0Dtrr0JDqtzUeRwN8jRUCdDvydZxTtM3+X+N/0jGCjGjM1UnNSsPbG6gVl1YPBvk8qm0BPOi+PQ+XVKJGYGgD3BEggaCA7l54yzEVnZUBFl5m1pwXCqbTj+StyrKYSXfDfM5M5oE5LBdGIkNmCjZwSGNAMZotJLKteeo58p1j2PcqoxfR96JSEEwCOhvoL2Jg6R+qc9II0xJPTq+MiOoWf6TJOT/8vVjrNbJPgTE2ExX4P5Vt1sWLZ+kIUr8uXPY99h9udjTUroEMSph5A4eaaMoGYvs1uxk1ygzE1Lz61+QKTJbrmx6n3ilIufDifS2j0HKmzi31qKS5j+blOuAcmMXRiVPpEKtzH/t0KnaF7DSDrivIMR2Pdd02C6fjM5JfHYo293FOzssAZT3bsIEpslkjeF4EIPu1oA7VXlsGWnSx9EiE3Ohvr1kBn6FoAODatqEmxJO9lg+bz4bwuyRZ7ARC5krz0CFVtKV7wkm68qaosFPdBZ+hWADg2110Ik/lVNvkV3Jkz8J51WtoBMNAHacxszCyWaS9HSGPuldUO6AhdCgCmar2bCOQFNpHTw30tDwSKlIC3mlI6xwkWOrBUe44tvSGRk38mYpHSsGP+I6H07ELZcyxm02boCN0JAEdj/Z1M1D6MCOCNKXk7bp9XuRA4M7UDDrxTW12B7S6ciTYP7H/PHbOGtrEoZl2+0/ESmFW74dS26OyY/1NnI9p+BN7vMMMpvYPE/hRdCQBd7QI4rqq9gt3UB8OZVFxtK6zNRkaRHZZU5W256CkP96wwFtnXBLb2Zjb4yekQXIPIIbN2Bs5Ybkqu6jzJESWzr2BFNkY6pBKGyJXQEboZnzzkklnvr/HoKyXnc69t+flOZJWEZyWo3XPOIL4sVhZMe7x45ZcyPUGof2PH9uZXoAN0oQE4rlmRCy+eVDL5eS/5iguLURhhdKYx8RObxSoCSWwL2V6QCldP6PqSfkLOYj8MARA1vOa/8pBLudN4EsfKxnKkZCYjXGbiaKKnKhpolxkPwsy/kZBTni4pAARK5MMHNYLmBUBRY92X2Kq8Ue48nrxRfXmpGMcdCacTVQwSnsXGGaTlSEeSMvdPAXSCpgUAz7JicvpLcudllWaIyRuRorXwU4NYEZkWkJQsPW2YdqEbDUDT24B+q3A3m5iS0Rfc2cdDNSPFmPxLmcgKh8oJAPamhgmwWBxX1C1jE/MzUueYk02oZzY/j+6LFGPyL20iufvmFOlpw4RKHnSCZjUAYsG9cufwbb5ku7LqLcEwovQMOOGOA79cIBlB5K2oY4wmBUB2Q2U688rfKnVOSlYyCqoXV4jFWP0NOOGOA49bunYgoeiBTtCkAEghls1EJmNHSVy2FForRWUQZ8IYD9Pj0m3m2S5AF3SCNk0ASiSrrdpyk5FXkYVFYSz+BrOgYYyHKfe05HH2Vu8taqx/F3SAJgUAJbRR6rijLqGasxhogHDWg/ndpYK8Wwqh9NGihrq7oXE0JwCKGqs3MJtMcobnlGVi8RgqgMEswlAB+o8Oy57DTViBkPscjXXfgIbRngZAzWulDqfmpoSV1RcKYvgADGahdP5PjHjg9ysfO2wx+3phQ92N0CiaEwAC8UuGUeYuj8bqb2AwD4VzOiXDirNvqYPzrHwIJmVSg532m6KratdBg2hOAFBKJEsqpeVHp6IvNZJ+DGZDlK/qPCOQx6CcdcMKJKUoiaUjKYJA/pbXWLe4rSsV0KITUPIiWVKiE7xIDAvAYDY0/AUhLdeGtVtrkJqtIPuUkKIkiv+GxtCeACBE0gRIsi3e/jcwmE+kCqGV+aNWX78CGcXyzWaYX/Daosbai6EhNCcAiJwGEKWS3jRBVYBLnRuRJKgjJC0mCy5xnIdEZDGjYaaVWIV87wCItQJ+BA2hgS55c0mvyvs4EwMhY3yXbSiMSlnvRAwDvm3F9dhauQVn5dbhrf63MemT73WvlJzkLHxlw11MwJzHHLUEzUMtSBwWnxHKbHy2PZ2BnkOD8PskxAnTcO2VeW2ulr63oAE0JwDslfnvYeNrWajjhbU5ERf9mE+ipAJb2cr8iVX/goscMy0RM63puIxpAmbBjNbRNnipD5GSmmTDdeWbcEf9LciyznTMrcmqRKEtD2/07kPisPhxwMdlemEqeg8PSqsUBOfaa5J+4jrsmkac0Z4GsCKfhwHXhjqeV5XF7C4LokG8OtBksQkardU5LzkbX1x/J5uUFXOeT2KTv5ZN1MuLL2CqexImvEbnKgwAABAASURBVJMYnhpV/L7L00uwqeRifGzlbViZXS0Kk9mUpDmwhmkae/oPRO27ZEbxuoRPdMZBst0C77Qfrm63xCeRNPiTj2lBC9Dc8udsqPsJU5PuCHW8rmF5lCIBZ4i8MlxkZCVn4P6NX8abbOI82fosWl3tiAQ+WRpKL8UVzgtF21wJI55R9rlvs8/sQO9EP3rc/eibHEB+Si4KbDOPMnsJ1uXWw25R1kF5wuvBU23PYWfb83BNjSESKtJLcU3ZFViZswKfevGbGJt2I1aocf+nJ714/X8PwDcllTZMn+zY1nS11PvEAs0JAEdj3deZhPxGqOPLzi5E6Qb5vu3Kia0h8IV1HxVX1AAHmS39et9+vN7zFoY80it0ssmKdXkrsSavDhsL1kNLTPun8WrPHtH3sLe/GR6fdMos9ylsyF+Ns9mjOvOM9vJ67148uO8hxAJ6qn+DGiEhJ3d348Rr0kmBU+PU3rerKTKpGSU0qAHUfhRE+HGo4zwUeB3be40msRIB15ZdKTrpQsG1gbaxLvSO96PL3YtJvwfO1AIUsBXakVaAmsxK6AXuJOwY6xY1jQ53D2zmFBSl5iOfaRmlaU5mQoQW4r8+9Ec80/Yi1Ebt+/7yL/fB6wntf/FRurV7e9MfEUc0VxLM5ye7TRKeCXf/BDxjU7CmRccPwJndfUYtqjKW410VDZLnlNmLxUciwP0P/BEJt1Rdj0NDx5gw7IRaBJqLqUl2acaMQzAEJoJr2Y+4CgDNxQF072x6DZRK6k4DJ5Q7s5QSEAJqlAmry6rC59f+P7Z9putu7DHDLJjwpXV3ojKjDNFmpqlrbFRfXqpeGnIN4ow2RyTBX6UOd7/dB3U+lkR9Vdi07BLmpf8YUszhNytZytgtqfjK+k/goqJzEE0IiZ2/J6vELndKpmNzdTXiiOa2ATlpVXledptC1gScnvAiJdOK1JwUqIGoA5xKF4406Iirv3eufJ+4H2/UHowMrjGtz1/FfB8V6GF+kUGPfB5+SPjKT2J7JwSTgP7WYckSYoTS37ta+iPbCooC2hMAW+ss6VPkd+xeSWYFjvVNwLlanfLrYpvpU22nZz8nh5V56dfnr8TtNVtxQ/lmZCcbqcvRIC8lB5c4z8Ny5h+ZptPomxiCnypp8T7j5acktiv/bAaZuTo5Ejq2gUJ43NXSdxhxQnNOQKeb/J7dqQ1y53FbbnzYA1tm5GXB5QgMGO7BvqP+Vpwc62Cr0AjGptxwe8fFCDx7UhrS2Z4538vmq5WBeqxlW6D84fF52FbjQRx3nRRjD1zTY5hk2452cxrSLDZR8BbbCvBfb/8WU2x7Mp76Fw8MkoLAv8jilotDUwLAsbmOe0VliylmONNQu2m5fIeWKPHeFe9kA69efBjEH65pnVNwlviQ4j2V1+C3hx9DPLGmySRmUWFxte0XiaacgExLk20Gwu3++saKmE1+vl+dqBlwic4VJRfCkRrfPp0WmfR1KlC5rQJV0YwAcDTW38wkgKQOLbYCayiHyRy7P/uDtTfBQJ9wJ+ItK65DPOFhwVIwU3YRns3FoxkBwOw0ydWfb6Gv3FIBqz16AUByrMqpQUVGKQz0y+qcWpTGMbhqelw6E5NQdCOOaEIAFDXWfoj9kOzvXbymAPb8VMQS7sk30D9bKxoRL6bGpTN+/aCGABCo8BGp4yaLIAqAWFKesUyVSDSD2MMLpBSnxqcep2dcpo+gyRzXPoJxFwCOa1bkMv3/bKlzStYXwGyNbcjCpY6NMEgceBxBPHD3STcKHgdZ4hrAtOkKqcMmNvFL1sRWeluEJJxfqK10W4PFcVHRuTDFOBdj8OSoZDYgBT058uT+IcSR+AsAIkga2jllsd8l2ZC/SgzyMUgcUpNSmFO3FrGk/6jM3KZ4EnFGCz4AyRzZnLJ0xJp1eUZEXyLCi6nECp/Xj4HjI5LnEOLfhjgTVwFQsKkinxBIBvRnLYutADARE9bmGhF/iciGvNWIFZ37+iTVf07H+OQziDNxDQWmglnSuE/Ls8Fkjq3zb0XmcsU19hbLwMgQ9h5pxv5jh7Hv6CEU5uShrqwSqyuqsaoirlmiqrD3yEHsP3pQ/L797LuvrarFSvY911TWItOuvqDnKca82Onx0TaoiXfKh7Y3pX17lOIp7GqdRJyJqwAwC4Lk3p5sHLUKzK5PpxbDYy7c84sH8Ofnnw55Tn5WNu754KfQsPES6B3+Pb/50A8xNDpXJX72jZdO/37zlVfjy7ffibSU6PR+DEVVZrnqAoDXA/RNS2crUg2o/5y4mgDUL90GLNkee0dcqd0JNfnri8/gHZ+4VXLyc3qHBvHR+7+G99/3BXG11CNdA7247ZufxacfuHfB5J/P/z39N1z28Vvw990vQ02WpUWzoOxCRrrGmPrfK3fa8Dgx/wYaIK71ADJW5LEtQHJVqON55Vlio4VYcmNFA9KS1PnMR/+xHZ958FsoLSzBnVs/hA++81acu3KDWIDkeMeJoK9p7WrHjleex3uvvAZmk+ayt0PiGndj82c+gNbuTrz/mvfiw9fdhusv3QJHXhEOnzwKz/TCAJnxyQk8/sIzohlUUaxOCLbX58Vzna9ADTyuKez76xH4p6XLyrHtvy/0bzvwHDRAfEcURY5UsrbZFvs/r9CmTpGRjr4efO1nP8Cqyjps+8HDcyoN3dqwFXf/+F785sk/BH3tyZ5O3Pubn+DfPvQp6IVv/PwB9A0P4vH7f4f1tWtOP7954+W4edMNeMdHr4PPH9xJ9vkffwfralYiNyP6qfLONPViSo6+3AHvpFwXJnqkc1vTg9AI8d0GpKRf6rBXJpMq2vB2V2rAi5d84j/vwYRnEu++4rqgZcbec6V01tpvt/8ZL+1/E3rgqddexJ+e24myopI5kz9ARfFyrKkOvdU6wnwkn/3ht6EGvDYjL/CiBuUbHTBb5aYUqSpqrJeteREr4ioA/IRKGku89l8s4dV91OBt5vV+89AB8ff87OBCpiBbXvP4+ROPQA/8z+Mzmkyo78opzJYWts+99SozHzqgBryrkhok262oa6iAXMAhAf0WNEJcBQDxU8lECLlMqmhjt6jjgeZbfAF6BoLLvO4BWceRuGWodfx+P9vmm/m+PQOhqzd3Kfi++1rU+b6ZFvW2HDOK0uCQqVVJQFY4N9ffDg0QVwHgJX7JUTDljrEASJIt4xwR+2cJgEeffVw0Cebzh6f+BDkGRofR2S8/ceLJ4fZWeKZmHHwnutuwu3nPgnMOth7BnsP7Zd9rX8shqIFaml6AZesKxQxWKSih/w8aIK5OQIH4uqT+BFffOGJJWpI6GkDziZbTv+9vacKVd97AbP7rUVGyHJ193Xj6tV149jVlTuGm4y1w5KrjqIwG/O+bzU1f/rDo5FxXsxpJ5iS8wQTC/25/VNQU5N/rCNQgJUndHg08c5Wnr0v1BmR+oI1ZV5RnDD1zbARxJK4CoHt7S5+joa6PXYygBiH3qA63u5BZrM7KPB9bkjrOoWz73PLgB08cwT0//y4iISs9NtciUnIz5n7XCc8EfvaXyLa8s9LVKatuM6nfpMW5Og8de3slw4Ft5uRNQ0wpRBzRQDagdBcg2YyqKJKi0sCoX16FaMB3D+rLVkDLrKmKXsbdynJ1vmuyWb1S8gFMSSaxN6AUVCCbEGfiLgCoXzoksu9Y7GomqpUCXBclAVDhXIZkq/qDdzGkp9pRmJOLaLCyPDrXbT6xyvXIlstkpWJz0LgSdwHgnRSekj7uQ9ue2BRNsZjUyT14x7rzUJSz+BiDWze9E3rglk2LH9fljhJsXLkWapBEYmP5ZpVICwCeCZuxZVVcG4PEXQD07WoaY17xZ6XOadvdK2ZYqY2ZqCMA+Kr97Ts+h8XA1eHbG2+AHrjjulvECbwY7v/4l1QLfY5VSLXZYkJqtrRZmTrtiWvjAk0UBSXAdqnjPjb5299Sv3aimu27L2VaQGOEmX2CIOD7n/hSxI1KY02S2Yzv3flFRMp7Lt+CddXq1WRIEmLn+7bIZLRSYlYn/FQhmhAA1Oz9NdMCxqTOad/TC/eAdIHFKPwlUJOvf+Au0Y4Ply/f9lFULyuHnlhfsxJ3bQ0/1qVueSXuft9HoSa86EusSE6T9jdQAXHVADTRHdh1eGA8vSpvii1xob2ilBdZHEF+dbZqnYE2Fq5DUap6e+w81/3mK68RM+HePHxA9vzivEL8+qvfQ+P5l0IpXaN9aO5qwctH38Kb7QcwPD4qirVMW/jRb8f627C3/SBeaHkdLb0n4PaMwyyYkGZVFi/BbfiNq9bh5f1vitmBUpjY+955w634wSe/CluyOtuxAdrGuvBG7z7EgrH+cYx0hl7bCKXPuVr6X0ec0Ex+acf2pu87GuvuIiAhl0iPaxqHnj2BlY3qFO1Q1nJ6cVjMSeIKd9U5F+FTD9yLtt7gwSLva7ged992B/MfKNua/MehV/Cfz/wCHSPBTaUUSzLes34L/mXju2BPDh0JN+gexkMv/Ql/fGs7przBa9qXZBXhXzd9BOdXyFdOPrfuLDz1g1/hmw/9CA8/G7wGJvcX/Oiz3xDTgGOBj6rvTwpgldEAmN0ZVxNAU0Zl0eaaGwTBJBsT61yTj/KN0S/cceeq23FegTqe51Ac72rHsY4TONrRhow0O1YUl6GypAx2m/KaBANjQ9j0oDJ1OznJitvPuwEfuejmBcd+9I/f4KGX/wilvPC5P8AWRv4Ez/I70t4qPsaYRlDJvmu5swSlBeoWYZnP3ztewkPNsUms6jrQh5bn20Mep9T/hc7tzZFFhUUBTVWY6Npx8DFnYz3v5yzp7u5g/gDP2BRqr1yOaOL1xzb7kLO8qFh8XL4BEeP1K1/RJqc9+O8X/g8HmJnw79d/XgyLHWOq/ef/9G281roX4eDzh+cz4QJuQ80q8RFPeFGQWDEpk89CqLC0OwPNh5qGbmP/vi133mDrqGzn1XCZjoMAiAYF6bk4uyy8ircvMrv+w7+7Gwe7j+H9v/582JP/khXnMlMittWaosUUjV2S2fS49JhiRmdcOwNprsZU5xOd40Wbsz7Hdr52SJ1Xsi4fScnR/fOnfFPQK1/d8gn89pU/42jfSWTbMuDMLMSEdxI9o/3Y09aEkQnXgtdwZ+EtvwxdZSg7NROrndVMwOTBaragY7gbQ8ypWFdYgfeeo4+gpGB4vLG7z9MyKe2CQOOqAWiyyJxA6MVS7omkFDOcZ0XfWz/hW3yVZjo+ySNNQCyxrWjszCjAF6+6I+ix8alxPLx7G37x4iOYmJb/jtzL/5ELb8K71jWIPgOtQKemQb0+CLbF5Wy4vbHLMh3tlf6sKUMDCMo1UgeL6nNV6RfgnooszsA3NAI6OAzq8Zx5UmD7GampMBXmgyTF9zJzR937N96INcW1+MQf7pEUAjZLCn56y32oLVS/PLoS+KT39fSAuif4No34HPd4EKsVJI9tCUeQHemejo0A4Nt/XolfGZ43AAAQAElEQVSqVpTRt73JaA8+m6LG2lIQIuklyilXp1/gmNcd1vmUOZO8Jzvg7+qZO/k5bLBSFxsAR4/DPzIKLbC2pB7/dfM9IY/z1f7nt31bM5Pfz4Qqv37UNX568gfg19vf3gVvWye7D+Ft6417Y9OPo79VLpGN7Eac0Z4TkBLJVuFWexLSctQp3DE6NRbW+f7OXtAxGaHBBq6vowv+cbWjGJVxFtMC7m74WNBjX7/6LlQXaCPi0M+uq6+7VzY4kwtZf3d4VZLGpsMT9JEyIFPrgxL6GOKM5gQA+4MkOzfklKlTJIIzMqV8peZqv9+lVGAQJiy6eeoztMC71m5GesrcYKAi5ujbVHsRtABf0blWpRT/iEsUGEpxTakvAPpahsQ+AVIwd0Zci4FwNCcA2GSRjApJy1MvTHTQo7w6Ex0Kr06B6MByhadhqAmZ52RVNwsiPCib0HQ6vC1ZX/+g4nMHPerXmDjxWqfkcWb+N/XtbGpBnNGcACCEOqSOy4ZWLgIXMwEUxQLw2eIJfyuJTnqwGFyTbnz58ftxyfdvwo+f+x20xPee/hku/Y+bcc/fHsTE1OLMHb8nAhvdo+zaDkwOs3usbhxA54E+TIzIjQ8iXwU2BmhPA6CQ1AAsqepWc2kf65I9x88GW7DKvnJQz+L2n7/y1//AjgPPi5F7v/jnI/j5Px+GFnjg77/CH15/QhRQf933DO7d9iMsCk8EE9TnF7UsObrc6m67T4x60PqK9OrPBo9nyu//CTSA9pyAhEj6AFLS1RUAJ8fkm1EIkW7rmSLfumwd6BCj92bzk+f+V4zfjyf/vvOn+M0rc31ZO5peEPMTIibSLV4F9+W4S73OwD6vHwf+dhS+KVlfz/f7dzbLrzQxQIMaAJU08omgbv5Sy8gJ+ZP4RE4Kf5AKyZEH1ZTlOJGblr3geZ68852d/41wofOs/nA1Gn7+lx//Ph7dvbCkY1V+GXLSIq90Fcl14oFXSgqmtIy0Qi0OPdvKVH9pU4Rd935mIanT9ywCtOcDAOmTOj41oa79dmBAWTMKITO83QhiEthrFteR5t5rPxP0+Ud2P4mbfn4Xntj3LJQy3wkYTrWhP725Azf+z8eYObKwlwFPLgq1zaj4b8tID1vQkyxlsSGHho9BDY693CG77SdCcQ8vgweNoL1IQLFfYOibz9uFWVLUC7PtmxzESVcHltmlU1SFnCzQ4RHF3mohN3tRJgCHJ/z89L334o7ff2XBsSO9rfjG3x7Ag//4Na5fswmrnNVY5ahWXAhESgPgNQLe7jyMPW3N+PPenRidCD5++eT/yc3fZJ9dg8VAkthqns2ur0LPPl/9hWx5jeMwm/zRjgL0M9/DwadbMXBc0Q7Ssc7tTYt0kEQXzQkANgy7pWS/mF2VA1XZ3bdfVgAQga3ohfnwtck4fPi5VgsTGNmIBgEh8MlHvhk0qYVPVu4gDFBgz0WdoxJVecuRYrGKk9SaZFmQHNTj6hcdeJNTHkx6PXB7JnC49ziau1vQ55KfiDyE+Mc33YNVxYub/AFMTGCKEZQKBKxQVKBIg4l2FSDeuu7tJ1vgHlC2a+EnvndDY2iuyqSzoe4+djfvDnW89NwisfeampSkFeFb531B0bl0YhI+HuQT1MNPxZVJyM8VBUY0aRvqwo93/Q5PNb+AeMIn3paVl+Kjl9yKwvToFrcRA4J6++EXYy4WDlXCfAUmR6H4UwmfefGbooa3WHzTPrHrD69T6ZtWGNzl81/dsbP5SWgMTdQEnI19Rd5KZp82hDrOVa7C2ug0nggFDwlel1uPTKu8XckTfYTszJnkFJ4ByDWDlBSQTDtMBfnM7s9QpZpvRoodV9RegIsqN+DkYCe6RmLfNJSXBPveDV8UswbTrNGvDSBqWfY0CGnsvZkWxU0obh4I6XbRRDDzRCuzMiW2eagFO9uU9V+UYmJ0ErsfOYShE6OgCguiMMffBzp3xKgEUZhozwTw4S2poq2unnGx3xpvwKgmz3W9irJ05bXthfQ0IF3drrPBqCuqwv/c+i28dHQ3frjrNzjccxxqU1tYic9d+SGsKalDLCBMoJpSFhcB+lzHy4gG1lQL/NNhJB9R+i1m9z8EjaLJQvPOxnqup4X06tRcWYq8yujY1KFINlnxwEXfgM2sboXaaMOLdhxiQqClr1Us+HGkp1WsFBwpvLBIRd4y1DuqmB+hDCsKy8W8AT0xOuXCp5j6H60IwAPbj4oVqWSh/q90bG++DxpGo/UAKLOVyK2hjvYcHlJdAEz6PHiq7Xlct/wq6Ak+YfnjHdUb5zzfPzaI0Uk3e7hEL/7oJHswRyCvgZBmscHOTIqMlDSkJ7MH+z2dqfSL2cvXEttP7Ipq+K89zyYjAOgEMw5u7tze/Dg0jlYLgjzBHiEFALe/XD1u2AvUrUnHB07jssti1kxSTXgQUbBAokTHPT2Bp9uj6yi1pks7Hdnk/33ntibNT36OBrMBmaOFTu2QO4cHXqjNuHcCT7QqD64x0B5/ObYTnijXerSmSsehMLta3W2qKKK5XQDORMugx16ZV8q85yGL9HvGpkUNICVD3Zp1PHT0Qsc5uvMFBPjda38RY/W7RnvF3oe8grAce9ubse3tXfjf1x4X4wpWOquhR3rH+/GTA79F1GG7Op37QvtVKMWAq6XvF9ABWjUBeLWUe9h24Pulzjny3EmsvbFa1chAL9uW+PXBP+Kzaz4MvcE7Bf3utRlNlHcO4vDqvvWOFWLl4MzUdGQk28WgoKHxETbZR/BW29yWZfx13F8QrJGI1vlF88MLch6iQbJdxiQkRDfOE80KgK5tzSccjXUPMiFwV6hzppgWcODJY1h9XZVq/QI5e/oP4KmTz2PTsouhJ57Y//cFz/HowTdPyrZdmPs++57VnQD4a+vTaBo6AjXwyDT7YCrAIlIhY4smfQABBB/uYRdTMs5yrG9c7BeoNr89/BhaR9VLJVUDvrpHA64p6ImDQy14tEW9oLupcVmfQlxr/YeDpgVA+86mQT8h98udN3BsmO3NHlMelhkh9+/5GYbDKBsWb35489exPKcYi4EXCb3/hruhF/omBvGfe9U1v6fd0vkJJM61/sNBk07A2WTmWl+hKdbNzBSQLBU2MezBINsezC61w2xRx7Lx+Dw4MHgEFxWdLbaz1jrpTAN417rNuKB8PZxZhWIKcP/YEHwSvQR5stA5Zatx/dpNuPOS9zHV/ybJbsJagndC+rc3HsBwGMVdI2G4c0wca6GgBH9zHelbfNxxDNBkJOB88hrrCpnb5Q25gqEcc7IJ9Q3lSC9Ub9DWZFXi82s+otv4ABcPAvK4xYCgyelJNulTxCrBdmuqbvv98cn/nTd/gqOj6puDh/9xAj0HQycV+UHv6NrWFH6VljigCwHAcV5VfxYE+grzsCrqC5W/IhvFa/ORmq3O9l1lRhm+sPajSDZrp3XWUoUH+9y3+0G0KajnGA1e/uVeeD2hzU0v6Hk925pehQ7Qvh57CtfRvh57Vf4+pmDdRBSk17kHJtB1oB9j/ePiDoEta3H95ObDS0vv7W/G+rxVhhCII/3M5r9v9w/R6Y6N322wbQQ9zRIpxZSOdG1v+gR0gm4EAMfV0nc4vSq3l2kBW5S+hvsG+lqG0banRxQGPJ2Yl5vivQUF0+IUoJEpF17peRNrcutht+hTddYzJ1wduPeNB2NS5z/Ayd094uISGvIIG6d/gU7QlQDguFr630ivytlNKbmWKQLKjXCmsU0MecTSTZUXlyx68gfgSUM8dTjLmo5S++I87gbK+Xv7S/jh/l9FpaOzUsbZYtKy66TkOcwB+B3mAAwv0CKO6E4AcFxH+g/bqnOfYFN4C/Nsh1WdU2DmwLL10Q3V9lEf3mT3vHOsB/XZK5hzMLatwZcSPLX3R/t/gx0nd8FPY9tqreW5kxgfkq76Oz7u/tBk63DspNIi0aUA4LiP9Pfaa7J+B7/pAuYRWKb0dbyKS8m6QlXKi3e4u/GPzpdhEcxiMREee28QHXg6746Tz+HBfQ+h3R37kvpc7T/6onQCGqX4Z98zR34MHaFbAcBxHR4YZ/bWL9Mrc3spcA4zCRQZ4gU1WUiyqhMrwAfqvoGDzDfwFjIt6XCm6SYxTLO81L0bD+59CK/17hFzM2INrwH49t+OYnpSrkCp/1+ZiXoAOkI324By5F5bbU/ymv+VrblfkTuX5w5kFKkb3BJIQkkiSeJV5kE4mRY7spIzUZleirNy61CXXQWDGfYzoblnoBnHR05iiDn1Rk61avfDB9+prsr8mpI4DNm3tx0Va1BIQukrHdubNkJnJIwACJB7ZbXDmmTmnTMvC3VO+YXFcK6KcgVbcXDO9A1VOki54/C65ZtxifNcmIiulbGI8Pq9eKbtBfz1xLNiY1Yl0JkLzH+LiTA4/nIn2vfIbzH6fPTc7p1Nr0FnJNyoGz824EqrynOwwXF56LOoGCgUNfioJASB/ymF7yDwTENuLvDowgxLdJJ39MDRkRO4l+3fv8rU+qkwCnYQEli1+JU+LQ1U4eSb3WjbLR/Wz/6K/+va0fQgdEhCLjvplTk2QoTbQh2fHJlC8doCCNFyBJLFrUVj0+N4sfM1FKcVwZFagETnxa7X8YO9v4DbG3mXHjLrXzU4+GyrZNGPAEzzO+4mpnd6jvTqxvM/m4QzAQI4GurH2LwM6RSsa1iOnLLw+vvNRw2b9Jz8NbjYcQ7K05fBbpH2U/D05ANDR9A7MSBuj/F4+PSkNKRb7XDYCrA2r56ZGcp65kkxMDmEt9g2Z9dEH0Y9LoxOjyHVbEM6+/sKbLlYmV0jNlORYsQzimOjJ7Gr81W2Zbof0SSa94Hn+jdtPyammct/Lsb9lJ7dvb2pCTolgQVA3WNsV+D6UMdzKzJRu2k5IiXg5Iu2AOA9+sR3ZNIrx5qJErsDZfYSlNqdKLTliRGHPAjm2Y6XxEklR5m9GJtLL8MFhesRLrs6XsbOtufRriDGPic5C1eUXIiLi84Vs/G63b1ipF6rqx1tYx3MsTeqohOPhuV7CYZ3yieu+O17e+GbUrbTwJyTW7p3NG+DjklYAeBsrPsX9vUkGzKs3VqNtFwbIkFNj7QoBIKkO4jDnBJE0miImxd31N8qChI5uH3+0wO/Q/d4+P0EZiZiCNv8lK9ES0xPeNHV3I+OPb1iwxnFUPo55vX/PnROwgqAwobKPBOxSvbLyiqxY+XVlQgfdZ1PsfmE2BKbLTxlV83jmkLfsSEMtI5gtNONcGEC+ped25s+iAQgYQUAh2kBj7CvuFXqnNXvrEKGQ3lMwOKVTeWfo5qjK9QCHeVJGtBkFqO5hPmJmP3Feo8MYmLEI6r3fNJPsgf/6Z2MPJiIfaV/69x+4GtIEBJcANSsYBsdh6TOsdotoimgNDIwpsEoMVSZ6anPi34j09iG78z+tFce2q8gei+sd39Px7YmTTb5jJSEDlbv2HbwMBsQkgXi+IrQtOMYRGLO8gAACDZJREFUlBM7mUlV/CguWyid9R+AKl2MY23KBCb/2MB49CY/pV1+4tuQaJOfk/DZKh7B+3W5c7gdqLyycPTrzIdCzXWTnIqmE/8l6n1S7EN3Z77TcLuyyEIFb/eDMcFU3/Xkwd1IQBI+/nTi8IArvTI/k43D86TO49le3F7MLZePDYhHPLoaBFb8xLIDZ75N6yud8IxF3hKMKUVPEOK7tmN78+/1GuSjBM02BokmniTv16xe0xY2OCSzb/qODIkVhOq3lKvabUhLaHBnbpFQsWrvSFdkGgBzXDbBTz/ZubP5GSwBEtoJOBvuEKTU9KZUdGCAJJtZrCxsz194aqJtzyUeFHseOwxXj/IwYyYE29i4+CP108c6dzS9iCXEkhrLjob6a9iN/qvi81flYdmGQiQln1GUDAGgbaYnp5n3P3RFLrbCjzHTp5f97GS+j10gvr8kqn2vhCU3lh2NdV9nNvw3lJ5vspiw7OxCFNZkiw1H4pWTbqCMgRMjaNoWeleH3b/uzvHx5djVmrB2fTgsuSR03rHFXpl3FlsFapWcT33Mpmxzof2tXox2u5GalQxLqj4bgiwFeg4OiPcpFNSPz449c0QXNftjwZIsWte5vekGpgL+BGEy3O7CkRf01SB0qdF/VLJE+LGuHU3/A4PTLNmqlUwIfIy3cEKYjPVOKEoVNYg9XEBPjobe+mPq/1dhMIclXbaW92/zUd+l7NewOku0vtYJA+1x/NXQ94VN/sc7tzX9HgZzWPJ1q7u3H3xuCrSWmQQPKX3N0EkXRnvCzyJTTuyiDWOLet9r8OQo087GQ31q8/Q4boXBApZeJcogjB/pG3O19D2eXp7/FyrQOublL5V7zQhTN/Mqs2BKUuMSksTbbWCb7TzkGCoEHgXyOXzT/iAfS0cFL31H99+b5Yv7LUEMATAL3oCU7RL8KrUy7wAbpOexCRiynhZPMR1qG2VCIFPsMxgNxKi80zMkNtM/VoJmrH9CbMcmJJ0p6RkNPOPT2Pf4EXjGpoMe91N6Q+dTzYbXPwSGAAjCWEtfExMEP7CX5/6TjVM3G6rFbFIuKNnLq8n0HhlCVrEdFtviQ4dn5n1gYsRgYorpv+GVMo+UvX85jNZXuzDSPQZei9WWlbLo7EMuVPax950KMfnZnt9XunY0/xIGITEiWhTi2FJzPvzCDWzUbmQTx8F+5vNxzI8RM0HFhcUoqs1FZISKL1Q37vD06q9yQkDbnm60vjy3rqDZakLlJSXIq8hCJHTs68Wxf4Zu1cW+0cc7tx34LxhIYgiARZK/pao8yW/O91GaXFSfW1KypuBOa5r1XJNZ3r860DosdpwtrM0JUZCETVG1KunMm/RUlWIgM1mWe/50CH5fcAdgak4yys5xILtMvnqxz+tD/7ERnHitS7T7QzDMvsy7OrY3/R0GshgCQAUcDbXXZZWm/ynTaRfScmxskDN1l9m/7r6ZGILhrjHRiRiYFKYkAcXrCuBcnbfAn6CKDhBkxZ8p2xXdoiC8IMdbfzwkNVlPw7s28xqNGYVpsOWlIC03Rbw+7oFxds0mMNIxJu7zS0Jpi5/QK7q2NZ+AgSIMAaASRQ31H2a2blhRZ1wQZJemI6c8C9nL0sX/FqGnBEEU7tbEyCQm3VPIcqQvODZTGCg6mgCf/Ae2H4OrW83t0hl4fX72x98P8/B3Op/oNKK0wsAQACrCS5MzFf5nbD6FXXeBe8zTC1KRnGmFNS0JtuwU0dm4mG1HXgX34FPHxZU1rcCGZesLkVO6+MYh83EPTojddKfc01ATSkWR9XuCqS92bG9ph0HYGAJAZYoaay8WKPkzW1YX3YyQC4WiVXkoWVswJ0VZDj4hud08cHxkwTHujMsuS0fu8kxkljCtg6niZ5qenPlXCVNsS67tzR50HejjSTcqQ1/1w/fxrm2H3oBBxBgCIAYwIVDKdsB3sItdgyhgsghiEFIWMxOyimeZCrPg++N8wg+dHMFgq3wHoQBcIPAUaJNVgJlpG2n5qUwTSQHzZzChs3CrcyYewoXBEyPoOzoE6lUv2o9H9BFK/+wX/I8t5Rz+aGIIgBiR3VCZnkwsDzOf/mZEGXOKGRb24ObBtMeLaTb5fVPRX4K5cEhin2NONonvz1d8JTX22cR9iXh813qtQqWJ4kamDZ0/fyt1wWsoHWWmUw8o6QDxP0u9vj92PnX4IAyiiiEAYoxjc+1NhAj3sitfgSUAL8veua3pQ1LnFGyqXg6zKV8gfi+ZNvd2PvW2kXMdIwwBEA+2wuR0193GXFhfZx73MiQgbOIfZqv35zq3H3gCBprFEADxhAkCx2jtZRCEd7MpcwMTBjlYJEx1bmV39VG/nzzavePA6+wpwnYjbmcz8ltM5S6C+gzDj292TB74IXYhmm15DFTAEABagQuDsZrLQYR3E4rrw9k1YKvtSWZn/5FZ/Y/0bGsKmvhSsGl1qtnk/RL79bPsvZMRZZg242Wj6b8FH/1a+86mQRjoAkMAaBTn5TU5PotQwPbT8k2CkM8mWD4hNJPdsn6/39/LdhV62WTrcVNP79Azx0aUvm/GllVZqX7f9ezXdzKN41osEiZ8nuaeea9v6k89Tx3thYGuMATAEkbUCgRvIyV4FxMGNWwZz5cyE5gQYoKH9jBto4X9/tikd/KJcISPgfYwBIDBArj24U825xM/zfb76TCEqd7u7S19MEg4DAFgYLCEWRK9AQ0MDIJjCAADgyWMIQAMDJYwhgAwMFjCGALAwGAJYwgAA4MljCEADAyWMIYAMDBYwhgCwMBgCWMIAAODJYwhAAwMljD/HwAA///E/yVHAAAABklEQVQDACQ/iQ/M+885AAAAAElFTkSuQmCC"); }
+  #vr-system .vr-mascot { display: inline-block; flex: none; width: 36px; height: 36px; background: var(--vr-logo) center / contain no-repeat; }
+  #vr-system .vr-mascot-lg { width: 64px; height: 64px; }
+  #vr-system .vr-wordmark { font: 700 20px/1 var(--font-display); text-transform: uppercase; background: var(--brand-gradient); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  #vr-system .vr-wordmark-lg { font-size: 30px; }
+  #vr-system .vr-pill { display: inline-flex; align-items: center; gap: 8px; border: 1px solid transparent; border-radius: var(--radius-pill); text-decoration: none; font-weight: 600; white-space: nowrap; transition: background var(--transition-speed), border-color var(--transition-speed), color var(--transition-speed); }
+  #vr-system .vr-pill svg { width: 16px; height: 16px; flex: none; }
+  #vr-system .vr-pill-signin { min-height: 44px; padding: 6px 16px; color: var(--vr-teal); background: rgb(20 184 166 / 0.10); border-color: rgb(20 184 166 / 0.35); font-size: 13px; line-height: 1.15; text-transform: uppercase; }
+  #vr-system .vr-pill-signin:hover { color: var(--vr-text); background: rgb(20 184 166 / 0.16); border-color: rgb(20 184 166 / 0.6); }
+  #vr-system .vr-pill-signin small { display: block; font-size: 11px; font-weight: 500; opacity: 0.8; }
+  #vr-system .vr-profile { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 4px 6px 4px 4px; border: 1px solid var(--vr-border); border-radius: var(--radius-pill); background: rgb(15 23 42 / 0.35); }
+  #vr-system .vr-avatar { display: grid; place-items: center; flex: none; width: 34px; height: 34px; border-radius: var(--radius-round); border: 1px solid rgb(148 163 184 / 0.5); background: var(--vr-raised); color: var(--vr-text); }
+  #vr-system .vr-avatar svg { width: 15px; height: 15px; }
+  #vr-system .vr-profile-name { display: grid; min-width: 0; line-height: 1.25; }
+  #vr-system .vr-profile-name strong { font-size: 12.5px; font-weight: 600; }
+  #vr-system .vr-profile-name span { color: var(--vr-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #vr-system .vr-pill-logout { min-height: 30px; padding: 4px 10px; color: var(--vr-muted); background: rgb(15 23 42 / 0.45); border-color: rgb(148 163 184 / 0.25); font-size: 11px; text-transform: uppercase; }
+  #vr-system .vr-pill-logout svg { width: 13px; height: 13px; }
+  #vr-system .vr-pill-logout:hover { color: var(--vr-danger); background: rgb(239 68 68 / 0.08); border-color: rgb(239 68 68 / 0.4); }
+  #vr-system .vr-savings { min-height: 34px; padding: 0 12px 0 10px; gap: 6px; color: #c6f5ee; background: linear-gradient(135deg, rgb(20 184 166 / 0.16), rgb(16 185 129 / 0.10)); border-color: rgb(45 212 191 / 0.35); font-size: 12.8px; font-variant-numeric: tabular-nums; }
+  #vr-system .vr-savings svg { width: 14px; height: 14px; color: var(--vr-milestone); }
+  #vr-system .vr-savings:hover { color: #fff; border-color: rgb(45 212 191 / 0.75); }
+  #vr-system .vr-savings-label { font-weight: 500; }
+  #vr-system .vr-round { position: relative; display: grid; place-items: center; flex: none; width: var(--control-height); height: var(--control-height); padding: 0; border: 1px solid var(--vr-border); border-radius: var(--radius-round); background: var(--vr-raised); color: var(--vr-text); text-decoration: none; transition: background var(--transition-speed), border-color var(--transition-speed), color var(--transition-speed); }
+  #vr-system .vr-round svg { width: 20px; height: 20px; }
+  #vr-system .vr-round:hover, #vr-system .vr-round[aria-expanded="true"], #vr-system .vr-round[aria-current="page"] { background: #303040; border-color: var(--vr-teal); color: var(--vr-teal); }
+  #vr-system .vr-count { position: absolute; top: -5px; right: -7px; min-width: 20px; padding: 1px 5px; border: 2px solid var(--vr-raised); border-radius: var(--radius-pill); background: var(--vr-teal); color: var(--vr-base); font: 700 11px/16px var(--font-sans); text-align: center; }
+
+  /* 14 Section bar */
+  #vr-system .vr-subnav { display: flex; justify-content: safe center; gap: 4px; overflow-x: auto; padding: 0 16px; background: var(--subnav-bg); scrollbar-width: thin; }
+  #vr-system .vr-subnav a { display: inline-flex; align-items: center; gap: 7px; flex: none; min-height: 44px; padding: 10px; color: var(--vr-muted); border-bottom: 2px solid transparent; font-size: 12.8px; font-weight: 500; text-decoration: none; text-transform: uppercase; white-space: nowrap; transition: color var(--transition-speed), background var(--transition-speed), border-color var(--transition-speed); }
+  #vr-system .vr-subnav a svg { width: 14px; height: 14px; opacity: 0.7; }
+  #vr-system .vr-subnav a:hover { color: var(--vr-text); background: rgb(255 255 255 / 0.03); border-bottom-color: var(--vr-teal); }
+  #vr-system .vr-subnav a:hover svg { opacity: 1; }
+  #vr-system .vr-subnav a[aria-current="page"] { color: var(--vr-teal); border-bottom-color: var(--vr-teal); font-weight: 700; }
+  #vr-system .vr-subnav a:focus-visible { outline-offset: -3px; }
+
+  /* 15 Page header */
+  #vr-system .vr-page-header { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 16px; border: 1px solid var(--vr-border); border-radius: var(--radius-surface); background: linear-gradient(135deg, rgb(20 184 166 / 0.07), rgb(139 92 246 / 0.06)), var(--portal-surface); }
+  #vr-system .vr-page-header-copy { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  #vr-system .vr-page-title { font: 600 32px/1.2 var(--font-display); }
+  #vr-system .vr-page-subtitle { margin-top: 2px; color: var(--vr-muted); font-size: 14.4px; }
+  #vr-system .vr-page-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+
+  /* 16 Notifications menu */
+  #vr-system .vr-notify { display: grid; justify-items: end; gap: 6px; }
+  #vr-system .vr-notify-panel { width: min(360px, 100%); border: 1px solid var(--vr-field-border); border-radius: var(--radius-surface); background: var(--vr-raised); box-shadow: var(--shadow-menu); overflow: hidden; text-align: left; }
+  #vr-system .vr-notify-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 12px 4px 16px; }
+  #vr-system .vr-notify-head h3 { font: 600 15px/1.4 var(--font-display); }
+  #vr-system .vr-notify-status { padding: 0 16px 12px; color: var(--vr-muted); font-size: 13px; }
+  #vr-system .vr-notify-list { list-style: none; margin: 0; padding: 0; }
+  #vr-system .vr-notify-list a, #vr-system .vr-notify-all { display: grid; gap: 3px; padding: 12px 16px; border-top: 1px solid var(--vr-border); color: var(--vr-text); text-decoration: none; overflow-wrap: anywhere; }
+  #vr-system .vr-notify-list a:hover, #vr-system .vr-notify-all:hover { background: #343447; }
+  #vr-system .vr-notify-list small { color: var(--vr-teal); font: 600 11px/1.5 var(--font-mono); text-transform: uppercase; }
+  #vr-system .vr-notify-list strong { font-size: 14px; }
+  #vr-system .vr-notify-list span { color: var(--vr-muted); font-size: 13px; }
+  #vr-system .vr-notify-all { color: var(--vr-teal); font-size: 13px; font-weight: 600; }
+
+  /* 17 Status badges in the app */
+  #vr-system .vr-badge-milestone { color: var(--tone-milestone-fg); background: var(--tone-milestone-bg); }
+  #vr-system .vr-dot { width: 7px; height: 7px; flex: none; border-radius: var(--radius-round); background: currentColor; }
+  #vr-system .vr-dot-live { animation: vr-pulse 1.6s ease-out infinite; }
+  @keyframes vr-pulse { 0% { box-shadow: 0 0 0 0 rgb(110 231 183 / 0.6); } 70%, 100% { box-shadow: 0 0 0 6px rgb(110 231 183 / 0); } }
+  #vr-system .vr-status-line { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  #vr-system .vr-status-dot { width: 9px; height: 9px; flex: none; border-radius: var(--radius-round); background: var(--vr-muted); }
+  #vr-system .vr-status-dot[data-tone="success"] { background: var(--vr-success); box-shadow: 0 0 0 3px rgb(16 185 129 / 0.18); }
+  #vr-system .vr-status-dot[data-tone="accent"] { background: var(--vr-teal); }
+  #vr-system .vr-status-dot[data-tone="danger"] { background: var(--vr-danger); }
+  #vr-system .vr-status-dot[data-tone="warning"] { background: var(--vr-warning); }
+
+  /* 18 Logo and wordmark */
+  #vr-system .vr-lockup { display: flex; align-items: center; gap: 16px; }
+
+  /* 19 Hero and section opener */
+  #vr-system .vr-hero { position: relative; display: grid; justify-items: center; gap: 14px; padding: 36px 20px; text-align: center; overflow: hidden; background: radial-gradient(420px 220px at 32% 20%, rgb(139 92 246 / 0.14), transparent 70%), radial-gradient(380px 200px at 68% 10%, rgb(20 184 166 / 0.10), transparent 70%), var(--vr-surface); }
+  #vr-system .vr-hero-title { font: 700 clamp(36px, 6vw, 72px)/1.1 var(--font-display); background: linear-gradient(135deg, #a77bf3 0%, #14b8a6 100%, #a77bf3 200%) 0 0 / 200% auto; -webkit-background-clip: text; background-clip: text; color: transparent; animation: vr-shine 5s linear infinite; }
+  @keyframes vr-shine { to { background-position: 200% center; } }
+  #vr-system .vr-hero-lead { display: grid; gap: 2px; max-width: 720px; font: 600 clamp(19px, 2.6vw, 24.8px)/1.22 var(--font-display); }
+  #vr-system .vr-hero-accent { background: linear-gradient(100deg, var(--color-wordmark) 10%, var(--color-accent) 68%, var(--color-mint) 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  #vr-system .vr-kicker { color: var(--vr-muted); font: 600 11.84px/1.6 var(--font-mono); text-transform: uppercase; }
+  #vr-system .vr-eyebrow { color: var(--vr-teal); font: 700 11.52px/1.6 var(--font-mono); text-transform: uppercase; }
+  #vr-system .vr-section-heading { font: 600 24px/1.3 var(--font-display); }
+  #vr-system .vr-hero .vr-divider { width: 100%; }
+
+  /* 20 Install and feature cards */
+  #vr-system .vr-install { display: flex; flex-direction: column; border: 1px solid var(--vr-border); border-radius: var(--radius-surface); background: var(--vr-surface); overflow: hidden; }
+  #vr-system .vr-install-head { display: flex; align-items: center; gap: 9px; padding: 12px 14px; border-bottom: 1px solid var(--vr-border); background: linear-gradient(135deg, rgb(124 58 237 / 0.12), rgb(20 184 166 / 0.08)); font-weight: 600; }
+  #vr-system .vr-install-head i { width: 22px; font-size: 20px; text-align: center; }
+  #vr-system .vr-install[data-os="windows"] .vr-install-head i { color: #59b3f0; }
+  #vr-system .vr-install[data-os="linux"] .vr-install-head i { color: #ee7339; }
+  #vr-system .vr-install[data-os="mac"] .vr-install-head i, #vr-system .vr-install[data-os="github"] .vr-install-head i { color: #f5f5f7; }
+  #vr-system .vr-install-cmd { position: relative; flex: 1; padding: 12px 58px 12px 14px; background: rgb(0 0 0 / 0.24); }
+  #vr-system .vr-install-cmd code { display: block; color: var(--vr-teal); font: 400 12.8px/1.5 var(--font-mono); word-break: break-all; }
+  #vr-system .vr-install-cmd .vr-btn-icon { position: absolute; top: 8px; right: 8px; }
+  #vr-system .vr-install-cmd .vr-btn-icon.is-copied { color: var(--tone-success-fg); background: var(--tone-success-bg); border-color: var(--tone-success-border); }
+  #vr-system .vr-install-download { padding: 0 14px 12px; background: rgb(0 0 0 / 0.24); }
+  #vr-system .vr-feature { display: grid; gap: 12px; }
+  #vr-system .vr-feature .vr-icon-tile-lg { justify-self: center; }
+  #vr-system .vr-feature h3 { font: 600 18px/1.4 var(--font-display); text-align: center; }
+  #vr-system .vr-feature ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; color: var(--vr-muted); font-size: 13px; }
+  #vr-system .vr-feature li { display: flex; gap: 8px; }
+  #vr-system .vr-feature li svg { width: 15px; height: 15px; flex: none; margin-top: 3px; color: var(--vr-teal); }
+  #vr-system .vr-feature-proof { padding-top: 12px; border-top: 1px solid var(--vr-border); font-size: 13px; font-weight: 600; }
+
+  /* 21 Milestone notice and nudge */
+  #vr-system .vr-milestone { display: flex; align-items: flex-start; gap: 10px; padding: 14px 10px 14px 16px; border: 1px solid rgb(202 208 12 / 0.34); border-radius: var(--radius-surface); background: radial-gradient(130% 150% at 0% 0%, rgb(202 208 12 / 0.15), transparent 58%), linear-gradient(180deg, rgb(22 22 32 / 0.97), rgb(12 12 19 / 0.97)); box-shadow: 0 18px 44px rgb(0 0 0 / 0.55); }
+  #vr-system .vr-milestone-body { display: grid; gap: 4px; flex: 1; min-width: 0; color: var(--vr-text); text-decoration: none; }
+  #vr-system .vr-milestone-kicker { display: inline-flex; align-items: center; gap: 6px; color: var(--vr-milestone); font: 700 10px/1.5 var(--font-mono); text-transform: uppercase; }
+  #vr-system .vr-milestone-kicker svg { width: 13px; height: 13px; }
+  #vr-system .vr-milestone-body strong { font: 700 16px/1.25 var(--font-display); }
+  #vr-system .vr-milestone-body strong span { color: var(--vr-milestone); }
+  #vr-system .vr-milestone-cta { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; color: var(--vr-teal); font-size: 12.5px; font-weight: 700; }
+  #vr-system .vr-milestone-cta svg { width: 14px; height: 14px; transition: transform var(--transition-speed); }
+  #vr-system .vr-milestone-body:hover .vr-milestone-cta { color: var(--color-mint); }
+  #vr-system .vr-milestone-body:hover .vr-milestone-cta svg { transform: translateX(3px); }
+  #vr-system .vr-nudge { display: flex; align-items: flex-start; gap: 12px; padding: 16px; border: 1px solid rgb(20 184 166 / 0.3); border-radius: var(--radius-surface); background: var(--vr-surface); box-shadow: var(--shadow-hover); }
+  #vr-system .vr-nudge-main { display: grid; gap: 12px; flex: 1; min-width: 0; }
+  #vr-system .vr-nudge-main strong { display: block; font-size: 14px; }
+  #vr-system .vr-nudge-main span { color: var(--vr-muted); font-size: 13px; }
+  #vr-system .vr-nudge-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+
+  /* 22 Token reference */
+  #vr-system .vr-table-wrap { overflow-x: auto; padding: 0; }
+  #vr-system .vr-token-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  #vr-system .vr-token-table th, #vr-system .vr-token-table td { padding: 8px 12px; border-bottom: 1px solid var(--vr-border); text-align: left; vertical-align: middle; }
+  #vr-system .vr-token-table th { color: var(--vr-muted); font-weight: 600; background: var(--vr-raised); }
+  #vr-system .vr-token-table tr.vr-token-group td { color: var(--vr-teal); font: 600 11px/1.5 var(--font-mono); text-transform: uppercase; background: var(--vr-base); }
+  #vr-system .vr-token-table code { font: 400 11.5px/1.5 var(--font-mono); overflow-wrap: anywhere; }
+  #vr-system .vr-token-swatch { display: inline-block; width: 22px; height: 22px; margin-right: 10px; vertical-align: middle; border-radius: var(--radius-control); box-shadow: inset 0 0 0 1px #ffffff24; }
+
+  @media (max-width: 760px) {
+    #vr-system .vr-appbar { grid-template-columns: minmax(0, 1fr) auto; }
+    #vr-system .vr-brand { grid-column: 1; }
+    #vr-system .vr-appbar-start { display: none; }
+    #vr-system .vr-appbar-end { grid-column: 2; }
+    #vr-system .vr-savings-label, #vr-system .vr-pill-signin small { display: none; }
+    #vr-system .vr-page-title { font-size: 26px; }
+  }
+  @media (max-width: 575.98px) {
+    #vr-system .vr-appbar .vr-wordmark { display: none; }
+    #vr-system .vr-brand .vr-mascot { width: 32px; height: 32px; }
+    #vr-system .vr-pill-signin > span { display: none; }
+  }
+  @media (pointer: coarse) { #vr-system .vr-round { width: 44px; height: 44px; } }
+  @media (prefers-reduced-motion: reduce) { #vr-system .vr-hero-title, #vr-system .vr-dot-live { animation: none; } }
+</style>
+</head>
+<body>
+<div id="vr-system" aria-label="Vibe Rails component library">
+  <header class="vr-header">
+    <div class="vr-brandline">Vibe Rails / Design system</div>
+    <h1 class="vr-heading">Component library</h1>
+    <p class="vr-subtitle">Design target for new and updated UI, with the app shell, status badges and home page patterns. DESIGN_SYSTEM.md is the source of truth.</p>
+  </header>
+  <nav class="vr-tabs" aria-label="Component categories">
+    <button class="vr-tab cursor-interaction" type="button" aria-pressed="true" aria-controls="vr-controls" data-panel="controls">Buttons &amp; fields</button>
+    <button class="vr-tab cursor-interaction" type="button" aria-pressed="false" aria-controls="vr-patterns" data-panel="patterns">Cards &amp; feedback</button>
+    <button class="vr-tab cursor-interaction" type="button" aria-pressed="false" aria-controls="vr-shell" data-panel="shell">App shell</button>
+    <button class="vr-tab cursor-interaction" type="button" aria-pressed="false" aria-controls="vr-home" data-panel="home">Home page</button>
+    <button class="vr-tab cursor-interaction" type="button" aria-pressed="false" aria-controls="vr-tokens" data-panel="tokens">Brand foundations</button>
+  </nav>
+  <section id="vr-controls" aria-label="Buttons and fields">
+    <div class="vr-grid">
+      <section class="vr-section">
+        <h2 class="vr-section-title"><span>01</span> Buttons</h2>
+        <div class="vr-sample">
+          <div class="vr-row">
+            <button class="vr-btn vr-btn-primary cursor-interaction" type="button" data-open-create><i data-lucide="plus" aria-hidden="true"></i>Create board</button>
+            <button class="vr-btn cursor-interaction" type="button" data-notice="Secondary action selected.">View board<i data-lucide="arrow-up-right" aria-hidden="true"></i></button>
+            <button class="vr-btn vr-btn-ghost cursor-interaction" type="button" data-notice="Changes cancelled in this preview.">Cancel</button>
+            <button class="vr-btn vr-btn-danger cursor-interaction" type="button" data-open-delete><i data-lucide="trash-2" aria-hidden="true"></i>Delete card</button>
+          </div>
+          <div class="vr-row vr-state-row">
+            <button class="vr-btn vr-btn-primary cursor-interaction" type="button" id="vr-save-state">Try saving</button>
+            <button class="vr-btn" type="button" disabled>Unavailable</button>
+            <button class="vr-btn vr-btn-icon cursor-interaction" type="button" aria-label="Show sample card key" data-notice="Sample card key: VIBE-42"><i data-lucide="hash" aria-hidden="true"></i></button>
+          </div>
+          <p class="vr-caption">Primary · secondary · quiet · destructive<br>Hover, tab to focus, or try the loading state.</p>
+        </div>
+      </section>
+      <section class="vr-section">
+        <h2 class="vr-section-title"><span>02</span> Dropdowns</h2>
+        <div class="vr-sample vr-stack">
+          <div><label class="vr-label" for="vr-priority">Priority</label><select id="vr-priority" class="vr-input cursor-interaction"><option>Normal</option><option>High</option><option>Critical</option></select></div>
+          <div class="vr-menu-wrap">
+            <span class="vr-label">Card actions</span>
+            <button class="vr-btn cursor-interaction" id="vr-menu-trigger" type="button" aria-expanded="false" aria-controls="vr-action-menu">Actions<i data-lucide="chevron-down" aria-hidden="true"></i></button>
+            <div class="vr-menu" id="vr-action-menu" role="group" aria-label="Card actions" hidden>
+              <button type="button" class="cursor-interaction" data-notice="A duplicate of VIBE-42 is ready in this preview."><i data-lucide="copy" aria-hidden="true"></i>Duplicate card</button>
+              <button type="button" class="cursor-interaction" data-notice="Sample card link selected."><i data-lucide="link" aria-hidden="true"></i>Get card link</button>
+              <button type="button" class="cursor-interaction vr-menu-danger" data-open-delete><i data-lucide="trash-2" aria-hidden="true"></i>Delete card</button>
+            </div>
+          </div>
+          <p class="vr-caption">Select a value. Use the action menu for commands.</p>
+        </div>
+      </section>
+      <section class="vr-section">
+        <h2 class="vr-section-title"><span>03</span> Inputs &amp; validation</h2>
+        <form id="vr-example-form" class="vr-sample vr-stack" novalidate>
+          <div><label class="vr-label" for="vr-title">Card title <span class="vr-meta">(required)</span></label><input class="vr-input" id="vr-title" name="title" type="text" placeholder="e.g. Improve the onboarding flow" required minlength="3" aria-describedby="vr-title-help vr-title-error"><div class="vr-caption" id="vr-title-help" style="margin-top:5px">Use at least 3 characters.</div><div class="vr-error" id="vr-title-error" role="alert" hidden>Enter a title with at least 3 characters.</div></div>
+          <div><label class="vr-label" for="vr-description">Description <span class="vr-meta">(optional)</span></label><textarea class="vr-input" id="vr-description" name="description" placeholder="Describe the outcome you want…"></textarea></div>
+          <div class="vr-row"><button type="button" class="vr-btn vr-btn-primary cursor-interaction" id="vr-example-submit">Save example</button><span class="vr-meta" id="vr-form-result" aria-live="polite"></span></div>
+        </form>
+      </section>
+      <section class="vr-section">
+        <h2 class="vr-section-title"><span>04</span> Selection controls</h2>
+        <div class="vr-sample">
+          <label class="vr-toggle-row" for="vr-notifications"><span>Board notifications</span><input class="vr-switch cursor-interaction" type="checkbox" role="switch" id="vr-notifications" checked></label>
+          <label class="vr-toggle-row" for="vr-compact"><span>Compact card spacing</span><input class="vr-switch cursor-interaction" type="checkbox" role="switch" id="vr-compact"></label>
+          <hr class="vr-divider">
+          <label class="vr-check cursor-interaction"><input id="vr-include-notes" class="cursor-interaction" type="checkbox" checked>Include card notes</label>
+          <fieldset class="vr-fieldset" style="margin-top:14px"><legend>Default view</legend><div class="vr-row"><label class="vr-check cursor-interaction"><input type="radio" name="vr-view" value="Board" checked>Board</label><label class="vr-check cursor-interaction"><input type="radio" name="vr-view" value="List">List</label></div></fieldset>
+        </div>
+      </section>
+    </div>
+  </section>
+  <section id="vr-patterns" aria-label="Cards and feedback" hidden>
+    <div class="vr-grid">
+      <section class="vr-section"><h2 class="vr-section-title"><span>05</span> Board card</h2><article class="vr-card" id="vr-example-card"><div class="vr-row" style="justify-content:space-between"><span class="vr-code">VIBE-42 · Example</span><span class="vr-badge vr-badge-active">In progress</span></div><h3 class="vr-card-name">Improve the onboarding flow</h3><p class="vr-meta">Give new developers a clear first step.</p><div class="vr-row" style="justify-content:space-between;margin-top:22px"><span class="vr-meta" id="vr-card-priority">Normal priority</span><button class="vr-btn vr-btn-ghost cursor-interaction" type="button" data-notice="Sample card opened in this preview.">Open card<i data-lucide="arrow-up-right" aria-hidden="true"></i></button></div></article></section>
+      <section class="vr-section"><h2 class="vr-section-title"><span>06</span> Status &amp; alerts</h2><div class="vr-sample vr-stack"><div class="vr-row"><span class="vr-badge vr-badge-success"><i data-lucide="check" aria-hidden="true"></i>Connected</span><span class="vr-badge vr-badge-warning"><i data-lucide="clock-3" aria-hidden="true"></i>Pending</span><span class="vr-badge vr-badge-danger"><i data-lucide="circle-alert" aria-hidden="true"></i>Failed</span><span class="vr-badge">Offline</span></div><div class="vr-inline-alert"><i data-lucide="circle-check" aria-hidden="true"></i><span>Your changes have been saved.</span></div><div class="vr-toast-demo"><span id="vr-toast-text">Card moved to In progress.</span><button class="vr-btn vr-btn-ghost cursor-interaction" type="button" id="vr-undo">Undo</button></div></div></section>
+      <section class="vr-section"><h2 class="vr-section-title"><span>07</span> Empty state</h2><div class="vr-empty"><i data-lucide="layout-dashboard" aria-hidden="true"></i><h3 class="vr-empty-title">Your next idea starts here</h3><span class="vr-meta">Create a board to organize your work.</span><button class="vr-btn vr-btn-primary cursor-interaction" type="button" data-open-create><i data-lucide="plus" aria-hidden="true"></i>Create board</button></div></section>
+      <section class="vr-section"><h2 class="vr-section-title"><span>08</span> Dialog &amp; disclosure</h2><div class="vr-sample vr-stack"><div class="vr-row"><button class="vr-btn cursor-interaction" type="button" data-open-create>Open dialog<i data-lucide="square-arrow-out-up-right" aria-hidden="true"></i></button><button class="vr-btn vr-btn-danger cursor-interaction" type="button" data-open-delete>Confirm deletion</button></div><details class="vr-disclosure"><summary class="cursor-interaction">What belongs in a card?</summary><p>A clear title, the intended outcome, and enough context to get started.</p></details><p class="vr-caption">Dialogs support Escape. Destructive actions require confirmation.</p></div></section>
+    </div>
+  </section>
+  <section id="vr-shell" aria-label="App shell" hidden>
+    <div class="vr-grid">
+      <section class="vr-section vr-span">
+        <h2 class="vr-section-title"><span>13</span> Header</h2>
+        <div class="vr-sample vr-sample-flush">
+          <div class="vr-shell-label">Signed out</div>
+          <div class="vr-appbar">
+            <a class="vr-brand cursor-interaction" href="#vr-shell" aria-label="Vibe Rails home" data-notice="Home selected in this preview."><span class="vr-mascot" aria-hidden="true"></span><span class="vr-wordmark">Vibe Rails</span></a>
+            <div class="vr-appbar-end">
+              <a class="vr-pill vr-pill-signin cursor-interaction" href="#vr-shell" aria-label="Sign in or register" data-notice="Sign in selected in this preview."><i data-lucide="log-in" aria-hidden="true"></i><span>Sign In<small>or Register</small></span></a>
+            </div>
+          </div>
+          <div class="vr-shell-label">Signed in</div>
+          <div class="vr-appbar">
+            <div class="vr-appbar-start">
+              <div class="vr-profile">
+                <span class="vr-avatar" role="img" aria-label="Jordan Lee"><i data-lucide="user" aria-hidden="true"></i></span>
+                <span class="vr-profile-name"><strong>Jordan Lee</strong><span>jordan@example.com</span></span>
+                <button class="vr-pill vr-pill-logout cursor-interaction" type="button" data-notice="In the app, Logout asks “Sign out?” first."><i data-lucide="log-out" aria-hidden="true"></i>Logout</button>
+              </div>
+            </div>
+            <a class="vr-brand cursor-interaction" href="#vr-shell" aria-label="Vibe Rails home" data-notice="Home selected in this preview."><span class="vr-mascot" aria-hidden="true"></span><span class="vr-wordmark">Vibe Rails</span></a>
+            <div class="vr-appbar-end">
+              <a class="vr-pill vr-savings cursor-interaction" href="#vr-shell" title="1,284,512 tokens saved" aria-label="1,284,512 tokens saved" data-notice="1,284,512 tokens saved (example figure)."><i data-lucide="dollar-sign" aria-hidden="true"></i><span>1.28M</span><span class="vr-savings-label">Tokens Saved</span></a>
+              <button class="vr-round cursor-interaction" type="button" aria-label="Notifications, 2 new" aria-expanded="false" data-notice="The bell opens the notifications menu (see 16)."><i data-lucide="bell" aria-hidden="true"></i><span class="vr-count" aria-hidden="true">2</span></button>
+              <a class="vr-round cursor-interaction" href="#vr-shell" aria-label="Account settings" aria-current="page" data-notice="Account settings is the current page."><i data-lucide="settings" aria-hidden="true"></i></a>
+            </div>
+          </div>
+        </div>
+        <p class="vr-caption">Mascot and wordmark centred · round header buttons and pills are established header treatments · the account button is shown as the current page.</p>
+      </section>
+      <section class="vr-section vr-span">
+        <h2 class="vr-section-title"><span>14</span> Section bar</h2>
+        <div class="vr-sample vr-sample-flush">
+          <nav class="vr-subnav" aria-label="Main navigation example">
+            <a class="cursor-interaction" href="#vr-shell" data-subnav><i data-lucide="house" aria-hidden="true"></i>Home</a>
+            <a class="cursor-interaction" href="#vr-shell" data-subnav><i data-lucide="square-terminal" aria-hidden="true"></i>Terminals</a>
+            <a class="cursor-interaction" href="#vr-shell" data-subnav><i data-lucide="share-2" aria-hidden="true"></i>Card Sharing</a>
+            <a class="cursor-interaction" href="#vr-shell" data-subnav><i data-lucide="link" aria-hidden="true"></i>Session Sharing</a>
+            <a class="cursor-interaction" href="#vr-shell" data-subnav aria-current="page"><i data-lucide="kanban" aria-hidden="true"></i>Boards</a>
+            <a class="cursor-interaction" href="#vr-shell" data-subnav><i data-lucide="clipboard-check" aria-hidden="true"></i>Reviews</a>
+            <a class="cursor-interaction" href="#vr-shell" data-subnav><i data-lucide="key-round" aria-hidden="true"></i>API Keys</a>
+            <a class="cursor-interaction" href="#vr-shell" data-subnav><i data-lucide="fingerprint" aria-hidden="true"></i>Signing Keys</a>
+          </nav>
+        </div>
+        <p class="vr-caption">Short labels, uppercase by CSS · the teal underline marks the current page · select another link to move it.</p>
+      </section>
+      <section class="vr-section vr-span">
+        <h2 class="vr-section-title"><span>15</span> Page header</h2>
+        <div class="vr-sample">
+          <div class="vr-page-header">
+            <span class="vr-icon-tile"><i data-lucide="square-terminal" aria-hidden="true"></i></span>
+            <div class="vr-page-header-copy">
+              <h3 class="vr-page-title">Active Terminals</h3>
+              <p class="vr-page-subtitle">Connect to your running Vibe Rails terminal sessions.</p>
+            </div>
+            <div class="vr-page-actions"><button class="vr-btn cursor-interaction" type="button" data-notice="Terminal list refreshed in this preview."><i data-lucide="refresh-cw" aria-hidden="true"></i>Refresh</button></div>
+          </div>
+        </div>
+        <p class="vr-caption">One per signed-in page · icon tile, page title, one sentence, page-wide actions.</p>
+      </section>
+      <section class="vr-section">
+        <h2 class="vr-section-title"><span>16</span> Notifications menu</h2>
+        <div class="vr-sample">
+          <div class="vr-notify">
+            <button class="vr-round cursor-interaction" type="button" id="vr-bell" aria-label="Notifications, 2 new" aria-expanded="true" aria-controls="vr-notify-panel"><i data-lucide="bell" aria-hidden="true"></i><span class="vr-count" aria-hidden="true">2</span></button>
+            <section class="vr-notify-panel" id="vr-notify-panel" aria-labelledby="vr-notify-title">
+              <div class="vr-notify-head">
+                <h3 id="vr-notify-title">Notifications</h3>
+                <button class="vr-btn vr-btn-ghost vr-btn-sm cursor-interaction" type="button" data-notice="Notifications refreshed in this preview.">Refresh</button>
+              </div>
+              <p class="vr-notify-status" role="status">2 notifications.</p>
+              <ul class="vr-notify-list">
+                <li><a class="cursor-interaction" href="#vr-shell" data-notice="Invitation opened in this preview."><small>Board invitation</small><strong>Website launch</strong><span>Alex Rivera invited you to collaborate.</span></a></li>
+                <li><a class="cursor-interaction" href="#vr-shell" data-notice="Invitation opened in this preview."><small>Board invitation</small><strong>Release checklist</strong><span>Sam Okafor invited you to collaborate.</span></a></li>
+              </ul>
+              <a class="vr-notify-all cursor-interaction" href="#vr-shell" data-notice="All invitations opened in this preview.">View all invitations</a>
+            </section>
+          </div>
+        </div>
+        <p class="vr-caption">The app's popover pattern · example rows · Escape or a click outside closes it.</p>
+      </section>
+      <section class="vr-section">
+        <h2 class="vr-section-title"><span>17</span> Status badges in the app</h2>
+        <div class="vr-sample vr-stack">
+          <div>
+            <div class="vr-label">Board card · type, priority, points</div>
+            <div class="vr-row"><span class="vr-badge">task</span><span class="vr-badge vr-badge-danger">bug</span><span class="vr-badge vr-badge-danger">critical</span><span class="vr-badge vr-badge-warning">high</span><span class="vr-badge vr-badge-active">medium</span><span class="vr-badge">low</span><span class="vr-badge" title="Story points">5 pt</span></div>
+          </div>
+          <div>
+            <div class="vr-label">Card panel</div>
+            <div class="vr-row"><span class="vr-badge vr-badge-success"><span class="vr-dot vr-dot-live" aria-hidden="true"></span>Agent running</span><span class="vr-badge vr-badge-danger">Deleted</span><span class="vr-badge" title="Shared with you. Only the board owner can add or change cards."><i data-lucide="eye" aria-hidden="true"></i>Read-only</span></div>
+          </div>
+          <div>
+            <div class="vr-label">Terminals and agents</div>
+            <div class="vr-row"><span class="vr-badge vr-badge-active">claude</span><span class="vr-badge vr-badge-success"><span class="vr-dot" aria-hidden="true"></span>Connected</span><span class="vr-badge vr-badge-warning"><span class="vr-dot" aria-hidden="true"></span>Connecting...</span><span class="vr-badge"><span class="vr-dot" aria-hidden="true"></span>Disconnected</span></div>
+          </div>
+          <div>
+            <div class="vr-label">API and signing keys</div>
+            <div class="vr-row"><span class="vr-badge vr-badge-success">Active</span><span class="vr-badge vr-badge-warning">Legacy</span><span class="vr-badge">Revoked</span><span class="vr-badge vr-badge-danger">Invalid</span><span class="vr-badge">Terminal relay</span></div>
+          </div>
+          <div>
+            <div class="vr-label">Setting status</div>
+            <div class="vr-stack" style="gap:6px">
+              <span class="vr-status-line"><span class="vr-status-dot" data-tone="success"></span>On — notifications enabled</span>
+              <span class="vr-status-line"><span class="vr-status-dot" data-tone="danger"></span>Blocked in your browser settings</span>
+              <span class="vr-status-line"><span class="vr-status-dot" data-tone="warning"></span>Not supported in this browser</span>
+            </div>
+          </div>
+        </div>
+        <p class="vr-caption">Every app status maps to one tone · the word always carries the meaning.</p>
+      </section>
+    </div>
+  </section>
+  <section id="vr-home" aria-label="Home page patterns" hidden>
+    <div class="vr-grid">
+      <section class="vr-section vr-span">
+        <h2 class="vr-section-title"><span>18</span> Logo &amp; wordmark</h2>
+        <div class="vr-sample">
+          <div class="vr-row" style="gap:40px">
+            <div class="vr-lockup"><span class="vr-mascot vr-mascot-lg" role="img" aria-label="Vibe Rails logo"></span><span class="vr-wordmark vr-wordmark-lg">Vibe Rails</span></div>
+            <div class="vr-lockup"><span class="vr-mascot" aria-hidden="true"></span><span class="vr-wordmark">Vibe Rails</span></div>
+          </div>
+        </div>
+        <p class="vr-caption">Full-colour mascot, never recoloured · wordmark set in Sora in the brand gradient · the mascot stands alone below 576px.</p>
+      </section>
+      <section class="vr-section vr-span">
+        <h2 class="vr-section-title"><span>19</span> Hero &amp; section opener</h2>
+        <div class="vr-sample vr-hero">
+          <h3 class="vr-hero-title">Vibe Rails</h3>
+          <p class="vr-hero-lead"><span>A developer and enterprise friendly framework that keeps vibe coding from</span><span class="vr-hero-accent">going off the rails</span></p>
+          <span class="vr-kicker">Download the Windows app or run an install command</span>
+          <hr class="vr-divider">
+          <span class="vr-eyebrow">Works with your stack</span>
+          <h3 class="vr-section-heading">LLMs, Code Editors and Work Tracking</h3>
+        </div>
+        <p class="vr-caption">The gradient belongs to the wordmark and hero title only · eyebrows are short phrases, uppercase by CSS.</p>
+      </section>
+      <section class="vr-section vr-span">
+        <h2 class="vr-section-title"><span>20</span> Install &amp; feature cards</h2>
+        <div class="vr-card-row">
+          <div class="vr-install" data-os="windows">
+            <div class="vr-install-head"><i class="fa-brands fa-windows" aria-hidden="true"></i><span>Windows</span></div>
+            <div class="vr-install-cmd">
+              <code>irm https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/install.ps1 | iex</code>
+              <button class="vr-btn vr-btn-icon vr-btn-sm cursor-interaction" type="button" data-copy aria-label="Copy Windows install command"><i data-lucide="copy" aria-hidden="true"></i></button>
+            </div>
+            <div class="vr-install-download"><a class="vr-btn vr-btn-primary vr-btn-sm cursor-interaction" href="#vr-home" data-notice="The installer download opens GitHub releases in the app."><i data-lucide="download" aria-hidden="true"></i>Download Windows Installer from GitHub</a></div>
+          </div>
+          <div class="vr-install" data-os="linux">
+            <div class="vr-install-head"><i class="fa-brands fa-ubuntu" aria-hidden="true"></i><span>Linux</span></div>
+            <div class="vr-install-cmd">
+              <code>wget -qO- https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/install.sh | bash</code>
+              <button class="vr-btn vr-btn-icon vr-btn-sm cursor-interaction" type="button" data-copy aria-label="Copy Linux install command"><i data-lucide="copy" aria-hidden="true"></i></button>
+            </div>
+          </div>
+          <article class="vr-card vr-feature">
+            <span class="vr-icon-tile vr-icon-tile-lg"><i data-lucide="users" aria-hidden="true"></i></span>
+            <h3>Clearer Team Handoffs</h3>
+            <p class="vr-meta">Keep the task and its history together so the next developer or agent has a useful starting point.</p>
+            <ul>
+              <li><i data-lucide="check" aria-hidden="true"></i><span>Bring Jira issues and Azure DevOps work items into your board.</span></li>
+              <li><i data-lucide="check" aria-hidden="true"></i><span>Keep decisions and progress in card comments.</span></li>
+              <li><i data-lucide="check" aria-hidden="true"></i><span>Link commits and recorded sessions to the task.</span></li>
+            </ul>
+            <p class="vr-feature-proof">Less time reconstructing what happened. More context for the next step.</p>
+          </article>
+        </div>
+        <p class="vr-caption">Platform marks from Font Awesome Brands, tinted per platform · the copy button shows a check for 1.6 seconds instead of a toast.</p>
+      </section>
+      <section class="vr-section vr-span">
+        <h2 class="vr-section-title"><span>21</span> Milestone notice &amp; nudge</h2>
+        <div class="vr-card-row">
+          <div class="vr-stack">
+            <div class="vr-milestone" id="vr-milestone" role="status">
+              <a class="vr-milestone-body cursor-interaction" href="#vr-home" data-notice="The counter opens on the home page in the app."><span class="vr-milestone-kicker"><i data-lucide="sparkles" aria-hidden="true"></i>Milestone</span><strong>Vibe Rails just crossed <span>3 billion</span> tokens saved!</strong><span class="vr-milestone-cta">See the counter<i data-lucide="arrow-right" aria-hidden="true"></i></span></a>
+              <button class="vr-btn vr-btn-ghost vr-btn-icon vr-btn-sm cursor-interaction" type="button" id="vr-milestone-close" aria-label="Dismiss milestone notice"><i data-lucide="x" aria-hidden="true"></i></button>
+            </div>
+            <button class="vr-btn vr-btn-ghost vr-btn-sm cursor-interaction" type="button" id="vr-milestone-again" hidden>Show the notice again</button>
+          </div>
+          <div class="vr-nudge" role="dialog" aria-labelledby="vr-nudge-title">
+            <span class="vr-icon-tile"><i data-lucide="bell" aria-hidden="true"></i></span>
+            <div class="vr-nudge-main">
+              <div><strong id="vr-nudge-title">Turn on notifications here?</strong><span>You've enabled them on another device — switch them on for this browser too.</span></div>
+              <div class="vr-nudge-actions">
+                <button class="vr-btn vr-btn-ghost vr-btn-sm cursor-interaction" type="button" data-notice="Nudge dismissed in this preview.">Not now</button>
+                <button class="vr-btn vr-btn-primary vr-btn-sm cursor-interaction" type="button" data-notice="Notifications would turn on for this browser.">Enable</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="vr-caption">Lime only for token-savings milestones, always with the sparkles icon and the word Milestone · a nudge asks one question.</p>
+      </section>
+    </div>
+  </section>
+  <section id="vr-tokens" aria-label="Brand foundations" hidden>
+    <div class="vr-grid">
+      <section class="vr-section"><h2 class="vr-section-title"><span>09</span> Existing brand palette</h2><div class="vr-palette">
+        <div class="vr-swatch"><span class="vr-swatch-color" style="background:#0a0a0f"></span><div><div class="vr-swatch-label">Base</div><div class="vr-swatch-code">#0A0A0F</div></div></div>
+        <div class="vr-swatch"><span class="vr-swatch-color" style="background:#14141d"></span><div><div class="vr-swatch-label">Surface</div><div class="vr-swatch-code">#14141D</div></div></div>
+        <div class="vr-swatch"><span class="vr-swatch-color" style="background:#8b5cf6"></span><div><div class="vr-swatch-label">Brand purple</div><div class="vr-swatch-code">#8B5CF6</div></div></div>
+        <div class="vr-swatch"><span class="vr-swatch-color" style="background:#7c3aed"></span><div><div class="vr-swatch-label">Action purple</div><div class="vr-swatch-code">#7C3AED</div></div></div>
+        <div class="vr-swatch"><span class="vr-swatch-color" style="background:#14b8a6"></span><div><div class="vr-swatch-label">Teal</div><div class="vr-swatch-code">#14B8A6</div></div></div>
+        <div class="vr-swatch"><span class="vr-swatch-color" style="background:#94a3b8"></span><div><div class="vr-swatch-label">Muted text</div><div class="vr-swatch-code">#94A3B8</div></div></div>
+      </div><p class="vr-caption">Deeper purple for filled controls · teal for accents and selected states.</p></section>
+      <section class="vr-section"><h2 class="vr-section-title"><span>10</span> Typography</h2><div class="vr-sample vr-stack"><div><div class="vr-label">Sora · headings</div><div class="vr-type-display">Make room for ideas.</div></div><div><div class="vr-label">Manrope · interface</div><div class="vr-type-body">Clear actions. Useful feedback.</div></div><div><div class="vr-label">JetBrains Mono · code &amp; references</div><div class="vr-type-mono">VIBE-42 / In progress</div></div></div></section>
+      <section class="vr-section"><h2 class="vr-section-title"><span>11</span> Spacing &amp; geometry</h2><div class="vr-sample"><div class="vr-label">4 px spacing rhythm</div><div class="vr-spacing"><div class="vr-spacing-unit"><span class="vr-spacing-block" style="width:4px"></span>4</div><div class="vr-spacing-unit"><span class="vr-spacing-block" style="width:8px"></span>8</div><div class="vr-spacing-unit"><span class="vr-spacing-block" style="width:12px"></span>12</div><div class="vr-spacing-unit"><span class="vr-spacing-block" style="width:16px"></span>16</div><div class="vr-spacing-unit"><span class="vr-spacing-block" style="width:24px"></span>24</div><div class="vr-spacing-unit"><span class="vr-spacing-block" style="width:32px"></span>32</div></div><p class="vr-caption">4 px control radius · 12 px dialog radius<br>40 px default height · 44 px touch targets</p></div></section>
+      <section class="vr-section"><h2 class="vr-section-title"><span>12</span> Semantic colors</h2><div class="vr-sample vr-stack"><div class="vr-row"><span class="vr-badge vr-badge-success">Success</span><span class="vr-code" style="color:var(--vr-success)">#10B981</span></div><div class="vr-row"><span class="vr-badge vr-badge-warning">Warning</span><span class="vr-code" id="vr-warning-value" style="color:var(--vr-warning)">#F66210</span></div><div class="vr-row"><span class="vr-badge vr-badge-danger">Danger</span><span class="vr-code" style="color:var(--vr-danger-text)">#EF4444</span></div><div class="vr-row"><span class="vr-badge" style="background:#282a13;color:var(--vr-milestone)"><i data-lucide="sparkles" aria-hidden="true"></i>Milestone</span><span class="vr-code" id="vr-milestone-value" style="color:var(--vr-milestone)">#CAD00C</span></div><p class="vr-caption">Orange warnings · lime milestones<br>Milestones use a celebration icon and an explicit label.</p></div></section>
+      <section class="vr-section vr-span">
+        <h2 class="vr-section-title"><span>22</span> Token reference</h2>
+        <div class="vr-sample vr-table-wrap">
+          <table class="vr-token-table" id="vr-token-table">
+            <thead><tr><th scope="col">Token</th><th scope="col">Value</th></tr></thead>
+            <tbody><tr><td colspan="2">Reading the token block…</td></tr></tbody>
+          </table>
+        </div>
+        <p class="vr-caption">Listed from this page's :root block, which mirrors DESIGN_SYSTEM.md › Tokens.</p>
+      </section>
+    </div>
+  </section>
+  <div class="vr-footer" role="status" aria-live="polite"><i data-lucide="mouse-pointer-2" aria-hidden="true"></i><span id="vr-status">Preview only · controls stay local and do not change your account.</span></div>
+  <dialog class="vr-dialog" id="vr-create-dialog" aria-labelledby="vr-dialog-title">
+    <form id="vr-create-form" novalidate><h2 id="vr-dialog-title">Create a board</h2><p class="vr-meta">A home for your next project.</p><label class="vr-label" for="vr-board-name">Board name <span class="vr-meta">(required)</span></label><input class="vr-input" id="vr-board-name" name="name" placeholder="e.g. Website refresh" required minlength="3" aria-describedby="vr-board-error"><p class="vr-error" id="vr-board-error" role="alert" hidden>Enter a board name with at least 3 characters.</p><div class="vr-dialog-actions"><button type="button" class="vr-btn vr-btn-ghost cursor-interaction" data-close-dialog>Cancel</button><button type="button" class="vr-btn vr-btn-primary cursor-interaction" id="vr-create-submit">Create board</button></div></form>
+  </dialog>
+  <dialog class="vr-dialog" id="vr-delete-dialog" aria-labelledby="vr-delete-title"><h2 id="vr-delete-title">Delete this sample card?</h2><p class="vr-meta">VIBE-42 · Improve the onboarding flow</p><div class="vr-dialog-actions"><button class="vr-btn cursor-interaction" type="button" data-close-dialog>Keep card</button><button class="vr-btn vr-btn-danger cursor-interaction" type="button" id="vr-confirm-delete">Delete sample card</button></div></dialog>
+</div>
+<script>
+(() => {
+  const root = document.getElementById('vr-system');
+  const status = root.querySelector('#vr-status');
+  const menu = root.querySelector('#vr-action-menu');
+  const menuTrigger = root.querySelector('#vr-menu-trigger');
+  const createDialog = root.querySelector('#vr-create-dialog');
+  const deleteDialog = root.querySelector('#vr-delete-dialog');
+  let state = { panel:'controls', priority:'Normal', notifications:true, compact:false, includeNotes:true, view:'Board' };
+  let lastDialogTrigger = null;
+  const announce = text => { status.textContent = text; };
+  const save = () => { if (window.openai?.setWidgetState) window.openai.setWidgetState({modelContent:{componentCategory:state.panel,priority:state.priority,compact:state.compact},privateContent:state}).catch(()=>{}); };
+  function render() {
+    root.querySelectorAll('[data-panel]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.panel === state.panel)));
+    ['controls','patterns','shell','home','tokens'].forEach(name => { root.querySelector('#vr-' + name).hidden = name !== state.panel; });
+    root.querySelector('#vr-priority').value = state.priority;
+    root.querySelector('#vr-card-priority').textContent = state.priority + ' priority';
+    root.querySelector('#vr-notifications').checked = state.notifications;
+    root.querySelector('#vr-compact').checked = state.compact;
+    root.querySelector('#vr-include-notes').checked = state.includeNotes;
+    root.querySelectorAll('[name="vr-view"]').forEach(input => {input.checked = input.value === state.view;});
+    root.querySelector('#vr-example-card').style.padding = state.compact ? '12px' : '18px';
+  }
+  function restore(saved) {
+    if (!saved || typeof saved !== 'object') return;
+    if (['controls','patterns','shell','home','tokens'].includes(saved.panel)) state.panel = saved.panel;
+    if (['Normal','High','Critical'].includes(saved.priority)) state.priority = saved.priority;
+    ['notifications','compact','includeNotes'].forEach(key=>{if(typeof saved[key]==='boolean') state[key]=saved[key];});
+    if (['Board','List'].includes(saved.view)) state.view=saved.view;
+    render();
+  }
+  function closeMenu(returnFocus=false) { menu.hidden = true; menuTrigger.setAttribute('aria-expanded','false'); if(returnFocus) menuTrigger.focus(); }
+  root.querySelectorAll('[data-panel]').forEach(button=>button.addEventListener('click',()=>{state.panel=button.dataset.panel;closeMenu();render();save();}));
+  root.querySelector('#vr-priority').addEventListener('change',event=>{state.priority=event.target.value;render();announce('Priority set to ' + state.priority.toLowerCase() + '.');save();});
+  [['vr-notifications','notifications'],['vr-compact','compact'],['vr-include-notes','includeNotes']].forEach(([id,key])=>root.querySelector('#'+id).addEventListener('change',event=>{state[key]=event.target.checked;render();announce(event.target.closest('label').textContent.trim()+': '+(state[key]?'on.':'off.'));save();}));
+  root.querySelectorAll('[name="vr-view"]').forEach(input=>input.addEventListener('change',()=>{state.view=input.value;announce('Default view: '+state.view+'.');save();}));
+  menuTrigger.addEventListener('click',()=>{const opening=menu.hidden;menu.hidden=!opening;menuTrigger.setAttribute('aria-expanded',String(opening));});
+  document.addEventListener('click',event=>{if(!event.target.closest('#vr-system .vr-menu-wrap')) closeMenu();});
+  root.addEventListener('keydown',event=>{if(event.key==='Escape'&&!menu.hidden){closeMenu(true);event.preventDefault();}});
+  root.querySelectorAll('[data-notice]').forEach(button=>button.addEventListener('click',()=>{announce(button.dataset.notice);if(menu.contains(button))closeMenu(true);}));
+  root.querySelectorAll('[data-open-create],[data-open-delete]').forEach(button=>button.addEventListener('click',()=>{lastDialogTrigger=menu.contains(button)?menuTrigger:button;closeMenu();const dialog=button.hasAttribute('data-open-delete')?deleteDialog:createDialog;dialog.showModal();}));
+  root.querySelectorAll('[data-close-dialog]').forEach(button=>button.addEventListener('click',()=>button.closest('dialog').close()));
+  [createDialog,deleteDialog].forEach(dialog=>dialog.addEventListener('close',()=>{if(lastDialogTrigger)lastDialogTrigger.focus();}));
+  root.querySelector('#vr-confirm-delete').addEventListener('click',()=>{deleteDialog.close();announce('Sample deletion confirmed. No real card was changed.');});
+  function createBoard() {const name=root.querySelector('#vr-board-name');const valid=name.value.trim().length>=3;name.setAttribute('aria-invalid',String(!valid));root.querySelector('#vr-board-error').hidden=valid;if(!valid){name.focus();return;}createDialog.close();announce('Board “'+name.value.trim()+'” created in this preview.');}
+  function saveExample() {const field=root.querySelector('#vr-title');const valid=field.value.trim().length>=3;field.setAttribute('aria-invalid',String(!valid));root.querySelector('#vr-title-error').hidden=valid;root.querySelector('#vr-form-result').textContent=valid?'Saved in preview.':'';if(valid)announce('Example card saved.');else field.focus();}
+  [['vr-create-form','vr-create-submit',createBoard],['vr-example-form','vr-example-submit',saveExample]].forEach(([formId,buttonId,action])=>{root.querySelector('#'+buttonId).addEventListener('click',action);const form=root.querySelector('#'+formId);form.addEventListener('submit',event=>{event.preventDefault();action();});form.addEventListener('keydown',event=>{if(event.key==='Enter'&&event.target.tagName==='INPUT'){event.preventDefault();action();}});});
+  root.querySelector('#vr-title').addEventListener('input',event=>{if(event.target.getAttribute('aria-invalid')==='true'&&event.target.value.trim().length>=3){event.target.setAttribute('aria-invalid','false');root.querySelector('#vr-title-error').hidden=true;}});
+  root.querySelector('#vr-save-state').addEventListener('click',event=>{const button=event.currentTarget;button.disabled=true;button.setAttribute('aria-busy','true');button.textContent='Saving…';announce('Saving example…');setTimeout(()=>{button.disabled=false;button.removeAttribute('aria-busy');button.textContent='Try saving';announce('Saved successfully in this preview.');},1100);});
+  root.querySelector('#vr-undo').addEventListener('click',event=>{root.querySelector('#vr-toast-text').textContent='Card returned to To do.';event.currentTarget.disabled=true;announce('Sample card move undone.');});
+  restore(window.openai?.widgetState?.privateContent);
+  render();
+  window.addEventListener('openai:set_globals',event=>restore(event.detail?.globals?.widgetState?.privateContent));
+})();
+</script>
+<script>
+// App shell, home page patterns and the token reference. Everything stays local to this page.
+(() => {
+  const root = document.getElementById('vr-system');
+  const status = root.querySelector('#vr-status');
+  const announce = text => { status.textContent = text; };
+
+  // Example links only announce; they never navigate.
+  root.querySelectorAll('a[href^="#vr-"]').forEach(link => link.addEventListener('click', event => event.preventDefault()));
+
+  // 14 Section bar: one current page at a time.
+  const subnavLinks = [...root.querySelectorAll('[data-subnav]')];
+  subnavLinks.forEach(link => link.addEventListener('click', () => {
+    subnavLinks.forEach(other => other.removeAttribute('aria-current'));
+    link.setAttribute('aria-current', 'page');
+    announce(link.textContent.trim() + ' is now the current page.');
+  }));
+
+  // 16 Notifications menu: the bell toggles it; Escape or a click outside closes it.
+  const bell = root.querySelector('#vr-bell');
+  const panel = root.querySelector('#vr-notify-panel');
+  const setOpen = (open, returnFocus = false) => {
+    panel.hidden = !open;
+    bell.setAttribute('aria-expanded', String(open));
+    if (returnFocus) bell.focus();
+  };
+  bell.addEventListener('click', () => setOpen(panel.hidden));
+  document.addEventListener('click', event => { if (!panel.hidden && !event.target.closest('#vr-system .vr-notify')) setOpen(false); });
+  root.addEventListener('keydown', event => { if (event.key === 'Escape' && !panel.hidden) { setOpen(false, true); event.preventDefault(); } });
+
+  // 20 Copy buttons: a check and the success tone for 1.6 seconds.
+  root.querySelectorAll('[data-copy]').forEach(button => button.addEventListener('click', () => {
+    if (button.classList.contains('is-copied')) return;
+    const icon = button.innerHTML;
+    button.classList.add('is-copied');
+    button.innerHTML = '<i data-lucide="check" aria-hidden="true"></i>';
+    globalThis.lucide?.createIcons({ attrs: { width: 16, height: 16 } });
+    announce('Command copied (preview only; your clipboard is unchanged).');
+    setTimeout(() => { button.innerHTML = icon; button.classList.remove('is-copied'); }, 1600);
+  }));
+
+  // 21 Milestone notice: dismiss, then offer it again.
+  const milestone = root.querySelector('#vr-milestone');
+  const again = root.querySelector('#vr-milestone-again');
+  root.querySelector('#vr-milestone-close').addEventListener('click', () => { milestone.hidden = true; again.hidden = false; again.focus(); announce('Milestone notice dismissed.'); });
+  again.addEventListener('click', () => { milestone.hidden = false; again.hidden = true; announce('Milestone notice shown again.'); });
+
+  // 22 Token reference, read from the :root block so it can never drift from it.
+  const groups = [
+    ['Surfaces', /^--(color-bg|portal|header|subnav)/],
+    ['Brand and actions', /^--(color-primary|action|color-secondary|control-border|color-accent|focus|color-wordmark|color-mint|brand)/],
+    ['Text and lines', /^--color-(text|border)/],
+    ['Status', /^--(color-success|color-warning|color-danger|feedback|color-milestone)/],
+    ['Status tones', /^--tone/],
+    ['Type', /^--font/],
+    ['Spacing', /^--space/],
+    ['Shape and size', /^--(radius|control-height|navbar)/],
+    ['Elevation and motion', /^--(shadow|transition)/],
+  ];
+  let tokenRule = null;
+  for (const sheet of document.styleSheets) {
+    let rules;
+    try { rules = sheet.cssRules; } catch { continue; }
+    for (const rule of rules) if (rule.selectorText === ':root' && rule.style.getPropertyValue('--color-bg-base')) tokenRule = rule;
+  }
+  const body = root.querySelector('#vr-token-table tbody');
+  if (tokenRule) {
+    const names = [...tokenRule.style].filter(name => name.startsWith('--'));
+    const computed = getComputedStyle(document.documentElement);
+    body.textContent = '';
+    for (const [label, pattern] of groups) {
+      const members = names.filter(name => pattern.test(name));
+      if (!members.length) continue;
+      const head = body.insertRow();
+      head.className = 'vr-token-group';
+      const headCell = head.insertCell();
+      headCell.colSpan = 2;
+      headCell.textContent = label;
+      for (const name of members) {
+        const specified = tokenRule.style.getPropertyValue(name).trim();
+        const value = computed.getPropertyValue(name).trim();
+        const row = body.insertRow();
+        const nameCell = row.insertCell();
+        const isPaint = CSS.supports('color', value) || value.startsWith('linear-gradient');
+        if (isPaint) {
+          const swatch = document.createElement('span');
+          swatch.className = 'vr-token-swatch';
+          swatch.style.background = value;
+          nameCell.append(swatch);
+        }
+        const code = document.createElement('code');
+        code.textContent = name;
+        nameCell.append(code);
+        const valueCell = row.insertCell();
+        const valueCode = document.createElement('code');
+        valueCode.textContent = specified === value ? value : specified + '  →  ' + value;
+        valueCell.append(valueCode);
+      }
+    }
+  }
+})();
+</script>
+<script id="vr-lucide" async src="https://unpkg.com/lucide@1.17.0/dist/umd/lucide.js"></script>
+<script>
+(() => {
+  const initialize = () => {
+    globalThis.lucide?.createIcons({ attrs: { width: 16, height: 16 } });
+  };
+  if (globalThis.lucide != null) {
+    initialize();
+    return;
+  }
+  document.getElementById("vr-lucide")?.addEventListener("load", initialize, { once: true });
+})();
+</script>
+</body>
+</html>

@@ -437,7 +437,8 @@ jobs:
             binary_name: vb
           - target: darwin-arm64
             rid: osx-arm64
-            os: macos-14
+            # Match the native build runner; macOS 14 retires on 2026-11-02.
+            os: macos-15
             binary_name: vb
 
     steps:

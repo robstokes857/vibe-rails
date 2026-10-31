@@ -40,6 +40,25 @@ public sealed partial class ReleaseSupplyChainTests
     }
 
     [Fact]
+    public void WorkflowMacOsRunners_DoNotUseRetiredImages()
+    {
+        var workflows = Directory.GetFiles(Path.Combine(RepositoryRoot, ".github", "workflows"), "*.yml");
+        Assert.NotEmpty(workflows);
+
+        foreach (var workflow in workflows)
+        {
+            var lines = File.ReadAllLines(workflow);
+            for (var index = 0; index < lines.Length; index++)
+            {
+                var runner = MacOsRunner().Match(lines[index]);
+                if (runner.Success)
+                    Assert.True(int.Parse(runner.Groups["version"].Value) >= 15,
+                        $"{Path.GetFileName(workflow)}:{index + 1}: macOS 14 and older runner images are retired; update every build and packaging job.");
+            }
+        }
+    }
+
+    [Fact]
     public void ReleaseWorkflow_GrantsWriteOnlyToTheUploadJob()
     {
         var workflow = ReadWithLf(".github/workflows/release.yml");
@@ -156,6 +175,9 @@ public sealed partial class ReleaseSupplyChainTests
 
     [GeneratedRegex(@"[\w-]+:\s*write\b")]
     private static partial Regex WritePermission();
+
+    [GeneratedRegex(@"^\s*(?:-\s+)?(?:os|runs-on):\s*['""\[]?macos-(?<version>\d+)\b")]
+    private static partial Regex MacOsRunner();
 
     [GeneratedRegex(@"\b[0-9a-f]{40}\b")]
     private static partial Regex CommitSha();

@@ -1,5 +1,21 @@
 # AGENTS.md - VibeRails Project Documentation
 
+## Shared design system
+
+Read and follow [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md) before creating or changing
+customer-facing UI. Open [DESIGN_SYSTEM.html](DESIGN_SYSTEM.html) for interactive
+examples; these are local demonstrations, not live application actions.
+
+These files share the approved visual and interaction standards with the sibling
+`VibeRails-Front` project. Keep both copies aligned when changing a design decision,
+and update the Markdown standard before implementing it. Apply the system within
+the requested scope; existing screens may retain legacy styling until migrated.
+
+Implementation paths beginning with `VibeRails-Front/` describe that project's
+baseline, not files in this repository. Map the standards to this app's shared
+components and follow [the frontend guide](VibeRails/wwwroot/AGENTS.md) and
+[the UI test guide](UITests/AGENTS.md) for its behavior and validation workflow.
+
 ## Runbooks and diagnostic helpers
 
 Runbooks, investigation notes, and diagnostic Python helpers live in the private
