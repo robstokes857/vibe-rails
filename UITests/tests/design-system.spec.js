@@ -13,7 +13,8 @@ test.beforeEach(async ({ page }) => {
             <button class="btn btn-secondary" id="secondary">Preview</button>
             <button class="btn btn-outline-secondary" id="ghost">Cancel</button>
             <button class="btn btn-danger" id="danger">Delete sample</button>
-            <button class="btn btn-primary" id="disabled" disabled>Unavailable</button></p>
+            <button class="btn btn-primary" id="disabled" disabled>Unavailable</button>
+            <button class="btn btn-secondary btn-sm" id="small">Small action</button></p>
             <label class="form-label" for="name">Name</label><input class="form-control" id="name">
             <label class="form-label" for="priority">Priority</label>
             <select class="form-select" id="priority"><option>Normal</option><option>High</option></select>
@@ -46,6 +47,12 @@ async function contrast(locator, foreground = 'color', background = 'backgroundC
 test('shared actions keep readable colors and borders through hover, press, focus and disabled', async ({ page }) => {
     const primary = page.locator('#primary');
     await expect(primary).toHaveCSS('background-color', 'rgb(124, 58, 237)');
+    await expect(primary).toHaveCSS('font-size', '14px');
+    await expect(primary).toHaveCSS('font-weight', '600');
+    await expect(primary).toHaveCSS('line-height', '19.6px');
+    await expect(primary).toHaveCSS('min-height', '40px');
+    await expect(page.locator('#small')).toHaveCSS('min-height', '32px');
+    await expect(page.locator('#small')).toHaveCSS('font-size', '14px');
     for (const id of ['primary', 'secondary', 'danger']) {
         const button = page.locator(`#${id}`);
         expect(await contrast(button)).toBeGreaterThanOrEqual(4.5);

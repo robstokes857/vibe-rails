@@ -1235,14 +1235,11 @@ code {
 }
 
 .ql-actions .btn {
-    --bs-btn-disabled-opacity: .45;
-    min-height: var(--control-height);
-    border-radius: var(--radius-control);
-    padding: 8px 14px;
-    font: 600 14px/1.4 var(--font-sans);
-    letter-spacing: normal;
-    border: 1px solid transparent;
-    transition: color var(--transition-speed), background-color var(--transition-speed), border-color var(--transition-speed);
+    min-width: 0;
+    width: 100%;
+    padding-left: 0.45rem;
+    padding-right: 0.45rem;
+    white-space: normal;
 }
 
 .ql-actions .btn span {
@@ -1252,10 +1249,8 @@ code {
 }
 
 .quick-launch-card .btn.btn-sm {
-    min-height: 32px;
-    padding: 5px 10px;
-    font-size: 14px;
-    border-radius: var(--radius-control);
+    font-size: 0.72rem;
+    min-height: 31px;
 }
 
 
@@ -2255,21 +2250,21 @@ code {
 
 /* Buttons */
 .btn {
-    border-radius: var(--border-radius);
-    padding: 0.65rem 1.5rem;
-    font-weight: 500;
-    /* Slightly lighter weight for 'toned down' look */
-    transition: all var(--transition-speed);
+    --bs-btn-disabled-opacity: .45;
+    min-height: var(--control-height);
+    border-radius: var(--radius-control);
+    padding: 8px 14px;
+    font: 600 14px/1.4 var(--font-sans);
+    letter-spacing: normal;
     border: 1px solid transparent;
-    /* Changed from 2px to 1px for cleaner look */
-    letter-spacing: 0.02em;
+    transition: color var(--transition-speed), background-color var(--transition-speed), border-color var(--transition-speed);
 }
 
 .btn-sm {
-    padding: 0.5rem 1.15rem;
-    /* Slightly larger than standard bootstrap sm for 'bigger' feel */
-    font-size: 0.85rem;
-    border-radius: 4px;
+    min-height: 32px;
+    padding: 5px 10px;
+    font-size: 14px;
+    border-radius: var(--radius-control);
 }
 
 /* Make button icons visibly larger without affecting surrounding text */
