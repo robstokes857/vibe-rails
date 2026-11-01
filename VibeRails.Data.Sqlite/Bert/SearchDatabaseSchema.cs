@@ -49,6 +49,20 @@ internal static class SearchDatabaseSchema
                 """;
             cmd.ExecuteNonQuery();
         });
+        SqliteMigrationRunner.Apply(db, "shared-search", 2, MigrationKind.Additive, (connection, transaction) =>
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.Transaction = transaction;
+            cmd.CommandText = """
+                CREATE TABLE SearchDocumentPresence (
+                    DocumentId TEXT PRIMARY KEY REFERENCES SearchDocuments(Id) ON DELETE CASCADE,
+                    Sweep TEXT NOT NULL) WITHOUT ROWID;
+                CREATE TABLE SearchSweepProgress (
+                    Kind TEXT PRIMARY KEY REFERENCES SearchCheckpoints(Kind) ON DELETE CASCADE,
+                    Epoch INTEGER NOT NULL, Cursor TEXT NOT NULL, Sweep TEXT NOT NULL) WITHOUT ROWID;
+                """;
+            cmd.ExecuteNonQuery();
+        });
         SqliteMigrationRunner.StampGeneration(db, 1);
     }
 

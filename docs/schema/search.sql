@@ -29,6 +29,9 @@ CREATE TABLE SearchCheckpoints ( Kind TEXT PRIMARY KEY, Cursor TEXT NOT NULL DEF
 -- table SearchChunks
 CREATE TABLE SearchChunks ( Id TEXT PRIMARY KEY, SourceId TEXT NOT NULL REFERENCES SearchSources(Id) ON DELETE CASCADE, Position INTEGER NOT NULL, Text TEXT NOT NULL, Hash TEXT NOT NULL, ModelVersion TEXT, Attempts INTEGER NOT NULL DEFAULT 0, RetryAt INTEGER NOT NULL DEFAULT 0, Lease TEXT, LeaseUntil INTEGER NOT NULL DEFAULT 0, Error TEXT);
 
+-- table SearchDocumentPresence
+CREATE TABLE SearchDocumentPresence ( DocumentId TEXT PRIMARY KEY REFERENCES SearchDocuments(Id) ON DELETE CASCADE, Sweep TEXT NOT NULL) WITHOUT ROWID;
+
 -- table SearchDocuments
 CREATE TABLE SearchDocuments ( Id TEXT PRIMARY KEY, Kind TEXT NOT NULL, ProjectPath TEXT NOT NULL, SessionId TEXT, Metadata TEXT NOT NULL, SeenEpoch INTEGER NOT NULL);
 
@@ -49,6 +52,9 @@ CREATE TABLE 'SearchSources_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB);
 
 -- table SearchSources_fts_idx
 CREATE TABLE 'SearchSources_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID;
+
+-- table SearchSweepProgress
+CREATE TABLE SearchSweepProgress ( Kind TEXT PRIMARY KEY REFERENCES SearchCheckpoints(Kind) ON DELETE CASCADE, Epoch INTEGER NOT NULL, Cursor TEXT NOT NULL, Sweep TEXT NOT NULL) WITHOUT ROWID;
 
 -- table sqlite_sequence
 CREATE TABLE sqlite_sequence(name,seq);

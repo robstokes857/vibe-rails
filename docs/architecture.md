@@ -871,7 +871,9 @@ VIBE-6 adds `BoardSearchService` for dashboard search, link candidates, `search_
 card recall: all local boards share current-text BGE/keyword retrieval with a bounded repository
 preference. VIBE-55 feeds full titles, descriptions, Comments, retained notes and handoffs through
 `IBoardStore` into the shared per-user `search.db`. Existing root jobs reconcile sources and build
-token-aware BGE/sqlite-vec chunks. Queries read only this search component; full lexical text,
+token-aware BGE/sqlite-vec chunks. Narrow presence rows and private sweep cursors avoid rewriting
+unchanged metadata; older writers restart from the shared cursor before applying their epoch marks.
+Queries read only this search component; full lexical text,
 result metadata, work claims and progress live there too. See the [shared search contract](../VibeRails/Services/BertV2/README.md). Foreign cards have explicit board/project warnings and an authenticated
 local-card editor that resolves ownership from immutable identities. Related-card links can cross
 local projects; foreign links remain outside hosted publication. Moves, merges and repository

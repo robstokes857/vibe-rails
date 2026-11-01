@@ -11,7 +11,7 @@ using Xunit;
 
 namespace Tests.Services.BertV2;
 
-public sealed class SharedSearchIndexTests : IDisposable
+public sealed partial class SharedSearchIndexTests : IDisposable
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "shared-search-" + Guid.NewGuid().ToString("N"));
     private readonly IBoardStore board;

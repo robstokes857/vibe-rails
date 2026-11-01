@@ -68,7 +68,7 @@ public sealed partial class SqliteSearchIndexStore
         return new(documents, changed, incomplete);
     }
 
-    private sealed record Reconciliation(string Kind, string Cursor, long Epoch, string Lease);
+    private sealed record Reconciliation(string Kind, string Cursor, long Epoch, string Lease, string Sweep);
 
     private Reconciliation? ClaimReconciliation(string kind, TimeSpan? minimumInterval)
     {
@@ -79,16 +79,31 @@ public sealed partial class SqliteSearchIndexStore
         if (Execute(db, """
             UPDATE SearchCheckpoints SET Lease=$lease,LeaseUntil=$until
             WHERE Kind=$kind AND LeaseUntil<=$now AND RetryAt<=$now
-                AND (Cursor<>'' OR CompletedUtc IS NULL OR CompletedUtc<=$cutoff OR Error IS NOT NULL)
+                AND (Cursor<>'' OR CompletedUtc IS NULL OR CompletedUtc<=$cutoff OR Error IS NOT NULL
+                    OR EXISTS (SELECT 1 FROM SearchSweepProgress p
+                        WHERE p.Kind=SearchCheckpoints.Kind AND p.Epoch=SearchCheckpoints.Epoch AND SearchCheckpoints.Cursor=''))
             """, ("$lease", lease), ("$until", Now + LeaseMilliseconds), ("$kind", kind), ("$now", Now),
             ("$cutoff", DateTime.UtcNow.Subtract(minimumInterval ?? TimeSpan.Zero).ToString("O"))) != 1) return null;
-        using var cmd = Command(db, "SELECT Cursor,Epoch FROM SearchCheckpoints WHERE Kind=$kind", ("$kind", kind));
+        using var cmd = Command(db, """
+            SELECT c.Cursor,c.Epoch,p.Cursor,p.Sweep,p.Epoch FROM SearchCheckpoints c
+            LEFT JOIN SearchSweepProgress p ON p.Kind=c.Kind WHERE c.Kind=$kind
+            """, ("$kind", kind));
         Reconciliation claim;
         using (var reader = cmd.ExecuteReader())
         {
             reader.Read();
-            claim = new(kind, reader.GetString(0), reader.GetInt64(1), lease);
+            // The legacy cursor stays empty during a presence sweep: an older binary taking
+            // over must scan from the beginning before applying its SeenEpoch deletion rule.
+            // Legacy page commits advance Cursor or Epoch, invalidating our private progress.
+            var resume = reader.GetString(0).Length == 0 && !reader.IsDBNull(4) && reader.GetInt64(4) == reader.GetInt64(1);
+            claim = new(kind, resume ? reader.GetString(2) : "", reader.GetInt64(1), lease,
+                resume ? reader.GetString(3) : Guid.NewGuid().ToString("N"));
         }
+        Execute(db, "UPDATE SearchCheckpoints SET Cursor='' WHERE Kind=$kind", ("$kind", kind));
+        Execute(db, """
+            INSERT INTO SearchSweepProgress(Kind,Epoch,Cursor,Sweep) VALUES($kind,$epoch,$cursor,$sweep)
+            ON CONFLICT(Kind) DO UPDATE SET Epoch=excluded.Epoch,Cursor=excluded.Cursor,Sweep=excluded.Sweep
+            """, ("$kind", kind), ("$epoch", claim.Epoch), ("$cursor", claim.Cursor), ("$sweep", claim.Sweep));
         tx.Commit();
         return claim;
     }
@@ -119,13 +134,22 @@ public sealed partial class SqliteSearchIndexStore
             if (Ingest(db, document, claim)) changed++;
         }
         Execute(db, """
-            UPDATE SearchCheckpoints SET Cursor=$cursor,Epoch=$epoch,CompletedUtc=CASE WHEN $finished THEN $utc ELSE CompletedUtc END,
+            UPDATE SearchCheckpoints SET Epoch=$epoch,CompletedUtc=CASE WHEN $finished THEN $utc ELSE CompletedUtc END,
                 Error=NULL,Attempts=0,RetryAt=0
             WHERE Kind=$kind AND Lease=$lease
-            """, ("$cursor", finished ? "" : cursor), ("$epoch", claim.Epoch + (finished ? 1 : 0)),
+            """, ("$epoch", claim.Epoch + (finished ? 1 : 0)),
             ("$finished", finished), ("$utc", DateTime.UtcNow.ToString("O")), ("$kind", claim.Kind), ("$lease", claim.Lease));
         if (finished)
-            Execute(db, "DELETE FROM SearchDocuments WHERE Kind=$kind AND SeenEpoch<>$epoch", ("$kind", claim.Kind), ("$epoch", claim.Epoch));
+        {
+            Execute(db, """
+                DELETE FROM SearchDocuments WHERE Kind=$kind AND NOT EXISTS (
+                    SELECT 1 FROM SearchDocumentPresence p WHERE p.DocumentId=SearchDocuments.Id AND p.Sweep=$sweep)
+                """, ("$kind", claim.Kind), ("$sweep", claim.Sweep));
+            Execute(db, "DELETE FROM SearchSweepProgress WHERE Kind=$kind", ("$kind", claim.Kind));
+        }
+        else
+            Execute(db, "UPDATE SearchSweepProgress SET Cursor=$cursor WHERE Kind=$kind",
+                ("$cursor", cursor), ("$kind", claim.Kind));
         tx.Commit();
         return changed;
     }
@@ -135,8 +159,8 @@ public sealed partial class SqliteSearchIndexStore
     {
         if (document.Sources.Count == 0)
             return Execute(db, "DELETE FROM SearchDocuments WHERE Id=$id", ("$id", document.Id)) > 0;
-        // Keep the epoch mark for older writers that share this checkpoint. Preserve
-        // session chunk counts instead of resetting and rewriting them on every sweep.
+        // Presence belongs to a narrow row; unchanged wide metadata is never rewritten.
+        // SeenEpoch remains for legacy inserts/readers, whose takeovers restart a full scan.
         Execute(db, """
             INSERT INTO SearchDocuments(Id,Kind,ProjectPath,SessionId,Metadata,SeenEpoch)
             VALUES($id,$kind,$project,$session,$metadata,$epoch)
@@ -144,12 +168,19 @@ public sealed partial class SqliteSearchIndexStore
                 Metadata=CASE WHEN SearchDocuments.Kind='session' THEN
                     json_set(excluded.Metadata,'$.session.totalChunkCount',
                         coalesce(json_extract(SearchDocuments.Metadata,'$.session.totalChunkCount'),0))
-                    ELSE excluded.Metadata END,SeenEpoch=excluded.SeenEpoch
+                    ELSE excluded.Metadata END
             WHERE ProjectPath<>excluded.ProjectPath OR SessionId IS NOT excluded.SessionId
-                OR Metadata<>excluded.Metadata OR SeenEpoch<>excluded.SeenEpoch
+                OR Metadata<>CASE WHEN SearchDocuments.Kind='session' THEN
+                    json_set(excluded.Metadata,'$.session.totalChunkCount',
+                        coalesce(json_extract(SearchDocuments.Metadata,'$.session.totalChunkCount'),0))
+                    ELSE excluded.Metadata END
             """, ("$id", document.Id), ("$kind", document.Kind), ("$project", document.ProjectPath),
             ("$session", document.Input?.SessionId ?? document.Session?.SessionId),
             ("$metadata", Json(document with { Sources = [] })), ("$epoch", claim.Epoch));
+        Execute(db, """
+            INSERT INTO SearchDocumentPresence(DocumentId,Sweep) VALUES($id,$sweep)
+            ON CONFLICT(DocumentId) DO UPDATE SET Sweep=excluded.Sweep WHERE Sweep<>excluded.Sweep
+            """, ("$id", document.Id), ("$sweep", claim.Sweep));
         var changed = false;
         var sourceIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var source in document.Sources)

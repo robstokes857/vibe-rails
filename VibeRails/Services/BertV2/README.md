@@ -29,18 +29,23 @@ working directory, creating and reopening only disposable search storage.
 `ISearchIndexStore` owns full source text, FTS5, typed result metadata, sqlite-vec chunks,
 reconciliation cursors, expiring claims, progress, failures and retry deadlines. Board source
 access remains behind `IBoardStore`. Bounded ID pages sweep each source corpus independently;
-an epoch marks seen documents and removes deleted source documents when that sweep finishes.
+`SearchDocumentPresence` marks seen documents in narrow rows and removes deleted source documents
+when that sweep finishes. Unchanged document metadata, including session chunk counts, is not rewritten.
 Generated Board launch envelopes and Automation `vb --job-run` commands are excluded by
 `InputEtlFilter` from both individual input documents and session aggregates. Canonical captured
 inputs remain untouched; an ordinary successful sweep removes obsolete derived entries.
 
 One reconciliation call sweeps each due corpus from its cursor to its end with one write transaction
 per page, yielding after ten seconds on a very large corpus; the durable cursor resumes after a
-restart or an interrupted call, regardless of the completion cooldown. Epoch marks remain for
-compatibility with older processes sharing the checkpoint; session chunk counts are retained
-instead of reset on an unchanged sweep. Repeated sweeps detect older/concurrent writers without relying
-on timestamps or in-process notifications. Queries never advance these cursors, claim work, write
-vectors or consult canonical history metadata.
+restart or an interrupted call, regardless of the completion cooldown. `SearchSweepProgress` holds
+the presence cursor and a unique sweep token, tied to the shared `SearchCheckpoints.Epoch` and lease.
+The legacy checkpoint cursor stays empty during a presence sweep, so an older process taking over
+starts from the beginning and safely applies its own `SeenEpoch` deletion rule. An older process's
+page or completion changes the shared cursor or epoch; a newer process then discards its private
+progress and starts a new presence sweep. The additive `shared-search/2` migration creates only
+these two tables in `search.db`, without backfilling or changing canonical storage. Repeated sweeps
+detect older/concurrent writers without relying on timestamps or in-process notifications. Queries
+never advance these cursors, claim work, write vectors or consult canonical history metadata.
 
 Full titles, descriptions, visible Comments/retained notes and all retained handoffs are separate
 sources. History rows and deleted/hidden discussion are excluded. WordPiece chunks use the

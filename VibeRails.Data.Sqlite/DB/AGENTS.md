@@ -223,6 +223,12 @@ current inserts use `search/1` and skip the old pending queue; older inserts omi
 retain their existing trigger behavior. No old row is backfilled. Startup no longer drains
 legacy search work. See the [search contract](../../VibeRails/Services/BertV2/README.md).
 
+The additive `shared-search/2` migration creates `SearchDocumentPresence` and `SearchSweepProgress`
+in `search.db` without a backfill. Presence marks no longer rewrite wide document metadata. New
+writers resume the private cursor under the shared lease; the legacy cursor stays empty so older
+writers restart safely before using their `SeenEpoch` deletion rule. A legacy page or completion
+invalidates private progress through the shared cursor/epoch. Canonical stores are unchanged.
+
 ## Database Overview
 
 | Property | Value |
