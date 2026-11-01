@@ -113,8 +113,8 @@ The model lives in `models/reranker/` (`model.onnx` and `vocab.txt`; `CrossEncod
 XLM-R and DeBERTa-v3 SentencePiece files for comparisons). `IdleSearchReranker` loads it on first
 use and releases it after two idle minutes, like the embedder. While the directory is empty,
 `IsAvailable` is false and search runs exactly as before, with the same pool sizes. The measured
-choice is ms-marco TinyBERT-L2-v2: MRR@10 0.62 → 0.86 on a fixed personal query set, about +80 ms
-on a 900 ms search, 17.6 MB. Larger re-rankers, including bge-reranker-base, were slower and
+choice is ms-marco TinyBERT-L2-v2: MRR@10 0.59 → 0.82 on a fixed personal query set, scored in
+the order the tools return results, about +80 ms on a 930 ms search, 17.6 MB. Larger re-rankers, including bge-reranker-base, were slower and
 no better. Packaging the model into installers is a separate step. The opt-in benchmark is
 `SearchRetrievalBenchmarkTests.PersonalSnapshotRetrievalQualityBySetup`. Its query sets with
 known answers are personal data and live outside this repository.

@@ -242,8 +242,10 @@ public sealed partial class SearchRetrievalBenchmarkTests
                     }
                     try
                     {
-                        var unified = new UnifiedSearchService(() => embedder, history, new BertDocumentResponseMapper(), null, () => reranker);
-                        var board = new BoardSearchService(store, () => embedder, NullLogger<BoardSearchService>.Instance, () => reranker);
+                        IBertV2BgeEmbedder queryModel = setup.Instruction ? new InstructedQueries(embedder) : embedder;
+                        var unified = new UnifiedSearchService(() => queryModel, history, new BertDocumentResponseMapper(), null, () => reranker);
+                        var board = new BoardSearchService(store, () => queryModel, NullLogger<BoardSearchService>.Instance, () => reranker);
+                        var recall = new BoardRecallService(new FixedProject(project), store, board, history);
                         var times = new List<double>();
                         QualityOutcome[] outcomes = [];
                         for (var pass = 0; pass <= repeats; pass++)
@@ -252,7 +254,7 @@ public sealed partial class SearchRetrievalBenchmarkTests
                             for (var i = 0; i < queries.Length; i++)
                             {
                                 var timer = Stopwatch.StartNew();
-                                outcomes[i] = await RunQualityQueryAsync(queries[i], project, setup.Instruction, embedder, board, unified, history, ct);
+                                outcomes[i] = await RunQualityQueryAsync(queries[i], project, board, recall, unified, history, ct);
                                 if (pass > 0) times.Add(timer.Elapsed.TotalMilliseconds);
                             }
                         }
@@ -290,25 +292,43 @@ public sealed partial class SearchRetrievalBenchmarkTests
         return full;
     }
 
-    private static async Task<QualityOutcome> RunQualityQueryAsync(QualityQuery query, string project, bool instruction,
-        IBertV2BgeEmbedder embedder, BoardSearchService board, UnifiedSearchService unified, BertSearchDbService history, CancellationToken ct)
+    private static async Task<QualityOutcome> RunQualityQueryAsync(QualityQuery query, string project, BoardSearchService board,
+        BoardRecallService recall, UnifiedSearchService unified, BertSearchDbService history, CancellationToken ct)
     {
-        // The same order as the tools: one query embedding, card discovery, then history.
-        var embedding = embedder.GenerateEmbedding(instruction ? QueryInstruction + query.Text : query.Text);
         if (query.Tool == "cards")
         {
-            var hits = await board.SearchAsync(project, query.Text, 10, ct: ct, queryEmbedding: embedding, rerank: true);
+            // BoardTool.SearchBoardCards.
+            var hits = await board.SearchAsync(project, query.Text, 10, ct: ct, rerank: true);
             return new(RankOf(hits.Select(hit => query.Cards.Any(card => Matches(hit, card))).ToArray()), 0);
         }
-        var cards = await board.SearchAsync(project, query.Text, 5, ct: ct, queryEmbedding: embedding, rerank: true);
-        var fused = unified.Search(query.Text, 10, embedding).Groups.Single(group => group.Key == "fused").Hits;
+        // SessionSearchTool.SearchHistory: card recall embeds the query once, the fused history search reuses
+        // it, and hits from the discovered cards' linked sessions are listed first.
+        var cards = await recall.SearchAsync(query.Text, 10, ct);
+        var fused = unified.Search(query.Text, 10, cards.QueryEmbedding).Groups.Single(group => group.Key == "fused").Hits
+            .OrderByDescending(hit => cards.SessionIds.Contains(hit.SessionId)).ToArray();
         var texts = fused.Select(hit => (hit.Kind == "session-chunk" ? history.GetSessionCapture(hit.DocumentId) : history.GetCapture(hit.DocumentId))?.RawText
             ?? hit.UserTextPreview).ToArray();
         var noise = texts.Take(5).Count(text => GeneratedMarkers.Any(marker => text.Contains(marker, StringComparison.Ordinal)));
         if (query.Needles.Length > 0)
             return new(RankOf(texts.Select(text => query.Needles.Any(needle => text.Contains(needle, StringComparison.OrdinalIgnoreCase))).ToArray()), noise);
         // A query whose only right answer is a card is scored on search_history's card section.
-        return new(query.Cards.Length == 0 ? null : RankOf(cards.Select(hit => query.Cards.Any(card => Matches(hit, card))).ToArray()), noise);
+        var sections = cards.Text.Split('\n').Where(line => line.StartsWith("[card", StringComparison.Ordinal)).ToArray();
+        return new(query.Cards.Length == 0 ? null
+            : RankOf(sections.Select(line => query.Cards.Any(card => line.Contains(card, StringComparison.OrdinalIgnoreCase))).ToArray()), noise);
+    }
+
+    /// <summary>The BGE v1.5 query instruction applied wherever a tool embeds the query.</summary>
+    private sealed class InstructedQueries(IBertV2BgeEmbedder model) : IBertV2BgeEmbedder
+    {
+        public float[] GenerateEmbedding(string text) => model.GenerateEmbedding(QueryInstruction + text);
+        public void Dispose() { }
+    }
+
+    private sealed class FixedProject(string project) : IBoardProjectResolver
+    {
+        public Task<string> ResolveAsync(CancellationToken cancellationToken = default) => Task.FromResult(project);
+        public string GitWorkingDirectory => project;
+        public string? CurrentSessionId => null;
     }
 
     private static bool Matches(BoardSearchHit hit, string card) =>
