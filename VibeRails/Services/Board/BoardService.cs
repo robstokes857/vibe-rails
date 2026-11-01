@@ -712,6 +712,7 @@ public sealed partial class BoardService(
             summary.WorkflowMode, summary.ManagerSelection, summary.ManagerBaseLlmOptions)
         {
             HasActiveDesktopAgent = desktopCards?.Contains(detail.Card.Id) == true,
+            RemoteCreated = summary.RemoteCreated,
             JiraIssueUrl = jiraUrl,
             JiraDeliveries = jiraDeliveries,
             RemoteProvider = summary.RemoteProvider,
@@ -812,6 +813,7 @@ public sealed partial class BoardService(
         RemoteProvider = card.JiraIssueKey is not null ? TrackerProviders.Jira : card.AdoWorkItemId is not null ? TrackerProviders.Ado : null,
         RemoteIssueKey = card.JiraIssueKey ?? (card.AdoWorkItemId is int id ? AzureDevOps.AdoFieldMapping.Key(id) : null),
         GhostReason = card.GhostReason,
+        RemoteCreated = card.RemoteCreated,
         Pinned = card.Pinned
     };
 
@@ -978,8 +980,8 @@ public sealed partial class BoardService(
     {
         var origin = value?.Trim().ToLowerInvariant();
         return string.IsNullOrEmpty(origin) ? null
-            : origin is "agent" or "human" or "jira" or "ado" ? origin
-            : throw new BoardValidationException("Origin must be agent, human, jira or ado.");
+            : origin is "agent" or "human" or "jira" or "ado" or "remote" ? origin
+            : throw new BoardValidationException("Origin must be agent, human, jira, ado or remote.");
     }
 
     internal static bool IsClearValue(System.Text.Json.JsonElement element) =>

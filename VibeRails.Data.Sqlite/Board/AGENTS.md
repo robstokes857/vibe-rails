@@ -1,5 +1,11 @@
 # Board persistence
 
+`board-remote-origin/1` adds nullable `BoardCards.RemoteCreated`, with no backfill. Only a
+new card inserted through `CreateSyncedCardAsync` sets it; local inserts write 0, old rows
+read as false, and all update/acknowledgement paths preserve it. It stays local and travels
+through card responses and indexed Board metadata. `origin=remote` filters before paging;
+the human origin excludes remote-created cards. Older writers can omit the column.
+
 `board-every-context/1` adds nullable message/revision columns to BoardContextSettings, independent
 of the existing Agent context JSON/revision. Older Agent context writers omit and preserve them.
 `board-app-context/1` (VIBE-229) adds the single-row `BoardAppContextSettings` table (`Id = 1`,

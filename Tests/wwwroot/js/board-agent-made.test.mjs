@@ -42,6 +42,23 @@ test('an agent-made tile carries the robot mark and a human tile does not', () =
     assert.doesNotMatch(human, /board-agent-mark/);
 });
 
+test('remote push filters by creation provenance and combines with other filters', () => {
+    const board = controller();
+    board.state.cards = [card({ id: 'remote', remoteCreated: true, type: 'bug' }),
+        card({ id: 'other-remote', remoteCreated: true }), card({ id: 'human' }),
+        card({ id: 'agent', agentMade: true }), card({ id: 'jira', jiraIssueKey: 'TEST-1' })];
+    board.state.filters.origin = 'remote';
+    assert.deepEqual(board.filteredCards().map(item => item.id), ['remote', 'other-remote']);
+    assert.equal(board.hasActiveFilters(), true);
+    board.state.filters.type = 'bug';
+    assert.deepEqual(board.filteredCards().map(item => item.id), ['remote']);
+    board.state.filters.type = '';
+    board.state.filters.origin = 'human';
+    assert.deepEqual(board.filteredCards().map(item => item.id), ['human']);
+    board.state.filters.origin = '';
+    assert.equal(board.filteredCards().length, 5);
+});
+
 test('Jira origins have an escaped logo badge and are excluded from the human filter', () => {
     const board = controller();
     const imported = card({ id: 'jira', jiraIssueKey: 'PROJ-1<svg>' });

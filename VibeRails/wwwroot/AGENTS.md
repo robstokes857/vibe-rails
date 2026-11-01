@@ -756,9 +756,13 @@ inside `.monaco-editor` belongs to Monaco's own widgets and must be left alone. 
 `getModels().length` as the leak signal, which is what the e2e test asserts.
 
 Filters (search, assignee, type, priority, origin) persist per browser in
-`localStorage['viberails.board.filters.v1']`. Origin is `agent` or `human`: a card
-`create_board_card` made as an agent carries `agentMade` and shows a robot mark beside its key;
-every other card, including ones made before the mark existed, is human-made. Since VIBE-96 the
+`localStorage['viberails.board.filters.v1']`. Origins include `agent`, `human`, `jira`, `ado`
+and `remote` (**Remote push**). Remote push selects `remoteCreated` cards first received
+through viberails.ai sync, across paging and global search; later remote edits do not relabel
+local cards. Human-made excludes remote-created cards and tracker imports. Older unmarked
+cards keep their existing classification. A card that `create_board_card` made as an agent
+carries `agentMade` and shows a robot mark beside its key. Cards made before that mark existed
+do not gain it retroactively. Since VIBE-96 the
 mark's tooltip and the editor's provenance block (`board-agent-provenance.js`) name the agent
 (`agentMadeBy`), when (`createdAt`, with the year) and its session (`agentMadeSessionId`), whose
 button replays that session seeked to the creation moment; all three are escaped card data. Clicking a card's tag or avatar toggles that filter,

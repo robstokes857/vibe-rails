@@ -65,6 +65,13 @@ See the [MCP lifetime contract](../Mcp/AGENTS.md#desktop-client-activity).
 
 ## Local Board search (VIBE-6)
 
+The toolbar's **Remote push** origin (`origin=remote`) selects cards first received through
+viberails.ai sync, including cards on later pages and in indexed search. `RemoteCreated` is
+local creation provenance, set only when sync inserts a missing card; acknowledgements,
+remote edits and baselines for existing local cards never set it. Human-made excludes this
+origin as well as agents and tracker imports. Older unmarked cards keep their classification;
+there is no historical inference or backfill.
+
 `BoardSearchService` is shared by dashboard search, link candidates, `search_board_cards` and
 no-key `search_history` discovery. Search all local boards, prefer the current repository, and
 return explicit board/lane/project metadata. Full permanent keys and row IDs identify foreign

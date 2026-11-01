@@ -18,8 +18,9 @@ public sealed partial class BoardStore
         AND ($ghost IS NULL OR (c.GhostReason IS NOT NULL) = $ghost)
         AND ($tag = '' OR EXISTS (SELECT 1 FROM json_each(c.Tags) WHERE value = $tag))
         AND ($origin = '' OR ($origin = 'agent' AND c.AgentMade <> 0)
+            OR ($origin = 'remote' AND c.RemoteCreated = 1)
             OR ($origin = 'human' AND c.AgentMade = 0 AND NOT EXISTS (SELECT 1 FROM BoardJiraLinks j WHERE j.CardId = c.Id)
-                AND NOT EXISTS (SELECT 1 FROM BoardAdoLinks a WHERE a.CardId = c.Id))
+                AND NOT EXISTS (SELECT 1 FROM BoardAdoLinks a WHERE a.CardId = c.Id) AND COALESCE(c.RemoteCreated, 0) = 0)
             OR ($origin = 'jira' AND EXISTS (SELECT 1 FROM BoardJiraLinks j WHERE j.CardId = c.Id))
             OR ($origin = 'ado' AND EXISTS (SELECT 1 FROM BoardAdoLinks a WHERE a.CardId = c.Id)))
         """;

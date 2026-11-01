@@ -64,7 +64,8 @@ public sealed partial class BoardSearchService(ISearchIndexStore store, Func<IBe
                 || origin is not null && !(origin switch
                 {
                     "agent" => document.AgentMade,
-                    "human" => !document.AgentMade && !document.HasJiraLink && !document.HasAdoLink,
+                    "human" => !document.AgentMade && !document.HasJiraLink && !document.HasAdoLink && !document.RemoteCreated,
+                    "remote" => document.RemoteCreated,
                     "jira" => document.HasJiraLink,
                     "ado" => document.HasAdoLink,
                     _ => false

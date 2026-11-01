@@ -613,9 +613,9 @@ public sealed partial class BoardStore : IBoardStore
             insert.Transaction = transaction;
             insert.CommandText = """
                 INSERT INTO BoardCards
-                    (Id, ProjectPath, Number, ColumnId, Position, Title, Description, Assignee, Priority, Type, Points, Tags, Blocked, Flagged, CreatedUTC, UpdatedUTC, CardKey, DisplayId, AgentMade, AgentMadeBy, AgentMadeSessionId, WorkflowMode, ManagerSelection, ManagerOptionsJson, PostProcessed)
+                    (Id, ProjectPath, Number, ColumnId, Position, Title, Description, Assignee, Priority, Type, Points, Tags, Blocked, Flagged, CreatedUTC, UpdatedUTC, CardKey, DisplayId, AgentMade, AgentMadeBy, AgentMadeSessionId, WorkflowMode, ManagerSelection, ManagerOptionsJson, PostProcessed, RemoteCreated)
                 VALUES
-                    ($id, $project, $number, $column, $position, $title, $description, $assignee, $priority, $type, $points, $tags, $blocked, $flagged, $created, $updated, $cardKey, $displayId, $agentMade, $agentMadeBy, $agentMadeSession, $workflow, $manager, $managerOptions, 0);
+                    ($id, $project, $number, $column, $position, $title, $description, $assignee, $priority, $type, $points, $tags, $blocked, $flagged, $created, $updated, $cardKey, $displayId, $agentMade, $agentMadeBy, $agentMadeSession, $workflow, $manager, $managerOptions, 0, $remoteCreated);
                 """;
             insert.Parameters.AddWithValue("$id", id);
             insert.Parameters.AddWithValue("$cardKey", cardKey);
@@ -634,6 +634,7 @@ public sealed partial class BoardStore : IBoardStore
             insert.Parameters.AddWithValue("$blocked", card.Blocked ? 1 : 0);
             insert.Parameters.AddWithValue("$flagged", card.Flagged ? 1 : 0);
             insert.Parameters.AddWithValue("$agentMade", card.AgentMade ? 1 : 0);
+            insert.Parameters.AddWithValue("$remoteCreated", synced is not null ? 1 : 0);
             insert.Parameters.AddWithValue("$agentMadeBy", (object?)agentMadeBy ?? DBNull.Value);
             insert.Parameters.AddWithValue("$agentMadeSession", (object?)agentMadeSessionId ?? DBNull.Value);
             AddManagerParameters(insert, card.WorkflowMode, card.ManagerSelection, card.ManagerBaseLlmOptions);
@@ -647,7 +648,8 @@ public sealed partial class BoardStore : IBoardStore
         var created = new BoardCardRecord(id, project, number, column.Id, position, card.Title, card.Description,
             card.Assignee, card.Priority, card.Points, card.Tags, card.Blocked, 0, now, now, card.BaseLlmOptions, Type: card.Type, BoardId: column.BoardId, Flagged: card.Flagged, KeyPrefix: prefix, StoredKey: cardKey, StoredDisplayId: displayId, AgentMade: card.AgentMade,
             AgentMadeBy: agentMadeBy, AgentMadeSessionId: agentMadeSessionId, WorkflowMode: card.WorkflowMode,
-            ManagerSelection: card.ManagerSelection, ManagerBaseLlmOptions: card.ManagerBaseLlmOptions);
+            ManagerSelection: card.ManagerSelection, ManagerBaseLlmOptions: card.ManagerBaseLlmOptions)
+            { RemoteCreated = synced is not null };
         await LogCardCreatedAsync(connection, transaction, created, column.Name, author, cancellationToken, stamp);
         if (created.WorkflowMode != BoardWorkflowModes.Manual || created.ManagerSelection is not null || created.ManagerBaseLlmOptions is not null)
             await LogAgentWorkflowChangedAsync(connection, transaction,
@@ -1388,7 +1390,7 @@ public sealed partial class BoardStore : IBoardStore
                (SELECT a.WorkItemId FROM BoardAdoLinks a WHERE a.CardId = c.Id ORDER BY a.LastPulledUTC DESC, a.rowid DESC LIMIT 1),
                (SELECT j.SiteId FROM BoardJiraLinks j WHERE j.CardId = c.Id ORDER BY j.LastPulledUTC DESC, j.rowid DESC LIMIT 1),
                (SELECT a.ConnectionId FROM BoardAdoLinks a WHERE a.CardId = c.Id ORDER BY a.LastPulledUTC DESC, a.rowid DESC LIMIT 1),
-               c.GhostReason, COALESCE(c.Pinned, 0)
+               c.GhostReason, COALESCE(c.Pinned, 0), COALESCE(c.RemoteCreated, 0)
         FROM BoardCards c
         {CardPrefixJoinSql}
         """;
@@ -1588,7 +1590,8 @@ public sealed partial class BoardStore : IBoardStore
         AdoWorkItemId: reader.IsDBNull(29) ? null : reader.GetInt32(29),
         JiraConnectionId: reader.IsDBNull(30) ? null : reader.GetString(30),
         AdoConnectionId: reader.IsDBNull(31) ? null : reader.GetString(31),
-        GhostReason: reader.IsDBNull(32) ? null : reader.GetString(32)) { Pinned = reader.GetInt32(33) != 0 };
+        GhostReason: reader.IsDBNull(32) ? null : reader.GetString(32))
+        { Pinned = reader.GetInt32(33) != 0, RemoteCreated = reader.GetInt32(34) != 0 };
 
     private static async Task<IReadOnlyList<BoardCommentRecord>> ReadCommentsAsync(SqliteConnection connection, string cardId, CancellationToken cancellationToken)
     {
@@ -2084,6 +2087,9 @@ public sealed partial class BoardStore : IBoardStore
         });
         SqliteMigrationRunner.Apply(connection, "board-card-pins", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardCards ADD COLUMN Pinned INTEGER"));
+        // Creation provenance is local-only. Existing rows and older writers remain unclassified.
+        SqliteMigrationRunner.Apply(connection, "board-remote-origin", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardCards ADD COLUMN RemoteCreated INTEGER"));
         // board-post-processing/1 (VIBE-185): the run-once card pass and the ghost it can set
         // (BoardStore.PostProcessing.cs). PostProcessed defaults to 1, so every card that already
         // exists, and every card an older binary inserts, counts as processed with no backfill;

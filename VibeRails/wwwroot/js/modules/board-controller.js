@@ -670,8 +670,9 @@ export class BoardController {
         if (filters.ghost === 'true' && !card.ghostReason) return false;
         if (filters.ghost === 'false' && card.ghostReason) return false;
         if (filters.origin === 'agent' && !card.agentMade) return false;
-        // Human-made excludes cards imported from either tracker.
-        if (filters.origin === 'human' && (card.agentMade || cardTracker(card))) return false;
+        if (filters.origin === 'remote' && !card.remoteCreated) return false;
+        // Human-made excludes cards received from hosted sync or either tracker.
+        if (filters.origin === 'human' && (card.agentMade || card.remoteCreated || cardTracker(card))) return false;
         if ((filters.origin === 'jira' || filters.origin === 'ado') && cardTracker(card)?.provider !== filters.origin) return false;
         return true;
     }

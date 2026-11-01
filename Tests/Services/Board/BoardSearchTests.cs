@@ -113,6 +113,9 @@ public sealed class BoardSearchTests : IDisposable
             new(null, "needle agent", "", null, "medium", null, [], false, AgentMade: true), Ct);
         var jira = await Card("needle jira");
         var ado = await Card("needle ado");
+        var remote = (await store.CreateSyncedCardAsync(root, "card_remote", "VB-ABCDE-100",
+            new(human.ColumnId, "needle remote", "", null, "medium", null, [], false, BoardId: human.BoardId),
+            BoardAuthor.User(), new("log_remote", 1, DateTime.UtcNow, BoardId: human.BoardId), Ct))!;
         await store.SaveJiraConnectionAsync(new("jira_search", root, jira.BoardId,
             "https://example.atlassian.net", "user@example.com", false, BoardJiraAuthStatus.Expired,
             null, "project = TEST", false, null, null, null, null, null), Ct);
@@ -122,9 +125,9 @@ public sealed class BoardSearchTests : IDisposable
             false, BoardAdoAuthStatus.Expired, false, null, null, false, null, null, null), Ct);
         await store.AddAdoLinkAsync(new(ado.Id, "ado_search", 42, 1, DateTime.UtcNow, null, DateTime.UtcNow), Ct);
         var search = Search();
-        foreach (var (origin, expected) in new[] { ("human", human.Id), ("agent", agent.Id), ("jira", jira.Id), ("ado", ado.Id) })
+        foreach (var (origin, expected) in new[] { ("human", human.Id), ("agent", agent.Id), ("jira", jira.Id), ("ado", ado.Id), ("remote", remote.Id) })
             Assert.Equal(expected, Assert.Single(await search.SearchAsync(root, "needle", ct: Ct,
-                filters: new(Origin: origin))).Id);
+                count: 1, filters: new(Origin: origin))).Id);
     }
 
     [Fact]

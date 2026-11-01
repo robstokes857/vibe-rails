@@ -1618,7 +1618,7 @@ const SUMMARY_FIELDS = ['id', 'key', 'columnId', 'position', 'title', 'descripti
     'tags', 'blocked', 'commentCount', 'activeSessionId', 'activeTabId', 'createdAt', 'updatedAt', 'baseLlmOptions',
     'type', 'boardId', 'flagged', 'hasActiveAutomation', 'displayId', 'agentMade', 'hasWaitingAutomation', 'agentMadeBy',
     'agentMadeSessionId', 'jiraIssueKey', 'workflowMode', 'managerSelection', 'managerBaseLlmOptions',
-    'hasActiveDesktopAgent', 'remoteProvider', 'remoteIssueKey', 'remoteIssueUrl', 'pinned', 'ghostReason'];
+    'hasActiveDesktopAgent', 'remoteProvider', 'remoteIssueKey', 'remoteIssueUrl', 'pinned', 'ghostReason', 'remoteCreated'];
 const cardSummary = card => Object.fromEntries(SUMMARY_FIELDS.filter(field => field in card).map(field => [field, card[field]]));
 
 async function openBoard(page, { active = false, assignee = null, relatedCards = false, empty = false,
@@ -1762,6 +1762,55 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
 }
 
 for (const width of [1440, 390]) {
+    test(`remote push origin filters cards and search and persists at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        let template;
+        await openBoard(page, { onCard: card => { template = card; } });
+        const cards = [
+            { ...template, id: 'remote-bug', title: 'Remote bug', type: 'bug', remoteCreated: true },
+            { ...template, id: 'remote-task', title: 'Remote task', type: 'task', remoteCreated: true },
+            { ...template, id: 'local-task', title: 'Local task', type: 'task', remoteCreated: false }
+        ];
+        const requests = [];
+        const matches = params => cards.filter(card =>
+            (!params.get('origin') || params.get('origin') === 'remote' && card.remoteCreated)
+            && (!params.get('type') || params.get('type') === card.type));
+        await page.route('**/api/v1/board/cards?*', route => {
+            const params = new URL(route.request().url()).searchParams;
+            requests.push(Object.fromEntries(params));
+            return route.fulfill({ json: { cards: matches(params) } });
+        });
+        await page.route('**/api/v1/board/cards/search?*', route => {
+            const params = new URL(route.request().url()).searchParams;
+            requests.push(Object.fromEntries(params));
+            return route.fulfill({ json: { cards: matches(params).map(card => ({ ...card,
+                isCurrentProject: true, boardName: 'Main', columnName: 'Ready', snippet: card.title })) } });
+        });
+        await page.evaluate(() => window.app.boardController.refresh());
+        await expect(page.locator('.board-card')).toHaveCount(3);
+        const origin = page.getByRole('combobox', { name: 'Filter by who made the card' });
+        await origin.selectOption({ label: 'Remote push' });
+        await expect(page.locator('.board-card')).toHaveCount(2);
+        await expect.poll(() => requests.at(-1)?.origin).toBe('remote');
+        await page.locator('[data-board-filter-type]').selectOption('bug');
+        await expect(page.locator('.board-card')).toHaveCount(1);
+        await page.locator('[data-board-search]').fill('Remote');
+        await expect(page.locator('[data-board-search-card]')).toHaveCount(1);
+        await expect.poll(() => requests.at(-1)?.q).toBe('Remote');
+        expect(requests.at(-1)).toMatchObject({ q: 'Remote', origin: 'remote', type: 'bug' });
+        await page.reload();
+        await expect(page.locator('#app-content #vb-terminal-panel')).toBeVisible();
+        await page.getByRole('navigation').getByRole('button', { name: /^Board(?: —.*)?$/ }).click();
+        await expect(origin).toHaveValue('remote');
+        await expect(page.locator('[data-board-search-card]')).toHaveCount(1);
+        await origin.focus();
+        await expect(origin).toBeFocused();
+        await page.screenshot({ path: testInfo.outputPath(`remote-origin-${width}.png`) });
+        await page.locator('[data-board-clear-filters]').click();
+        await expect(origin).toHaveValue('');
+        await expect(page.locator('.board-card')).toHaveCount(3);
+    });
+
     test(`lane colours save custom selections and stay in sync with presets at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 900 });
         const columns = [{ id: 'col_ready', name: 'Ready', position: 0, color: '#3b82f6', boardId: 'brd_main' }];

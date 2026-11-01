@@ -31,7 +31,7 @@ public sealed partial class BoardStore
                     COALESCE(pk.Prefix, $legacyPrefix), c.UpdatedUTC, c.Type, c.Priority, c.Assignee,
                     c.Blocked, c.Flagged, CASE WHEN $content THEN c.Description ELSE substr(c.Description,1,260) END,
                     c.AgentMade, EXISTS (SELECT 1 FROM BoardJiraLinks j WHERE j.CardId=c.Id),
-                    EXISTS (SELECT 1 FROM BoardAdoLinks a WHERE a.CardId=c.Id), c.GhostReason
+                    EXISTS (SELECT 1 FROM BoardAdoLinks a WHERE a.CardId=c.Id), c.GhostReason, COALESCE(c.RemoteCreated, 0)
                 FROM BoardCards c JOIN BoardColumns col ON col.Id=c.ColumnId
                 JOIN Boards b ON b.Id=col.BoardId
                 {CardPrefixJoinSql}
@@ -55,6 +55,7 @@ public sealed partial class BoardStore
                     reader.IsDBNull(14) ? null : reader.GetString(14), reader.GetBoolean(15), reader.GetBoolean(16), passages)
                 { AgentMade = reader.GetBoolean(18), HasJiraLink = reader.GetBoolean(19), HasAdoLink = reader.GetBoolean(20),
                     GhostReason = reader.IsDBNull(21) ? null : reader.GetString(21),
+                    RemoteCreated = reader.GetBoolean(22),
                     KeywordSources = new List<string> { title, description },
                     Sources = new List<SearchSource> { new("title", title), new("description", description, title) } });
             }

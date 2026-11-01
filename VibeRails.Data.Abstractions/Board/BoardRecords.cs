@@ -86,6 +86,9 @@ public sealed record BoardCardRecord(
     /// <summary>Keep this card's slot during automatic activity promotion.</summary>
     public bool Pinned { get; init; }
 
+    /// <summary>This card was first created locally by an incoming hosted sync entry.</summary>
+    public bool RemoteCreated { get; init; }
+
     /// <summary>The stored <c>PREFIX-RRRRR-n</c> key (cards created since board/14), else the
     /// computed legacy <c>PREFIX-n</c>.</summary>
     public string Key => StoredKey ?? BoardKeys.Format(KeyPrefix, Number);

@@ -25,6 +25,8 @@ public sealed record BoardSearchDocument(string Id, string Key, string DisplayId
 {
     /// <summary>Stored creation origin, independent of current assignment.</summary>
     public bool AgentMade { get; init; }
+    /// <summary>The card was first received through hosted sync.</summary>
+    public bool RemoteCreated { get; init; }
     /// <summary>Whether this card has a retained Jira issue link.</summary>
     public bool HasJiraLink { get; init; }
     /// <summary>Whether this card has a retained Azure DevOps work item link.</summary>
