@@ -57,6 +57,36 @@ public sealed class BoardSearchTests : IDisposable
         Assert.Equal("no-code", match.GhostReason);
         Assert.Equal(plain.Id, Assert.Single(await search.SearchAsync(root, "needle", 1, ct: Ct, filters: new(Ghost: false))).Id);
     }
+    [Fact]
+    public async Task RerankingIsOptInKeepsExactIdentitiesFirstAndFallsBackOnFailure()
+    {
+        var alpha = await Card("needle alpha");
+        var beta = await Card("needle beta");
+        var gamma = await Card("needle gamma");
+        var index = SearchTestIndex.Build(store, root, embedder.Object);
+        var calls = 0;
+        var favoursGamma = new Mock<ISearchReranker>();
+        favoursGamma.SetupGet(model => model.IsAvailable).Returns(true);
+        favoursGamma.Setup(model => model.Score(It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>()))
+            .Returns((string _, IReadOnlyList<string> passages) => { calls++; return passages.Select(p => p.Contains("gamma") ? 8f : -1f).ToArray(); });
+        BoardSearchService With(ISearchReranker model) =>
+            new(index, () => new ExpandedModel(embedder.Object), NullLogger<BoardSearchService>.Instance, () => model);
+
+        var hybrid = (await With(favoursGamma.Object).SearchAsync(root, "needle", 3, ct: Ct)).Select(hit => hit.Id).ToArray();
+        Assert.Equal(0, calls);
+        var reranked = await With(favoursGamma.Object).SearchAsync(root, "needle", 3, ct: Ct, rerank: true);
+        Assert.Equal(gamma.Id, reranked[0].Id);
+        Assert.Equal(new[] { alpha.Id, beta.Id, gamma.Id }.Order(), reranked.Select(hit => hit.Id).Order());
+
+        var exact = await With(favoursGamma.Object).SearchAsync(root, alpha.Key, 3, ct: Ct, rerank: true);
+        Assert.Equal(alpha.Id, exact[0].Id);
+
+        var broken = new Mock<ISearchReranker>();
+        broken.SetupGet(model => model.IsAvailable).Returns(true);
+        broken.Setup(model => model.Score(It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>())).Throws(new InvalidOperationException("onnx"));
+        Assert.Equal(hybrid, (await With(broken.Object).SearchAsync(root, "needle", 3, ct: Ct, rerank: true)).Select(hit => hit.Id));
+    }
+
     private async Task<BoardCardRecord> Card(string title = "Task", string description = "", string? project = null)
     {
         project ??= root;

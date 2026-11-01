@@ -208,6 +208,51 @@ public class UnifiedSearchServiceTests : IDisposable
         Assert.Null(BertSessionDocumentId.Parse("session-abc:42"));
     }
 
+    [Fact]
+    public void Search_RerankerReordersTheFusedPoolAndTrimsEveryGroupToTopK()
+    {
+        for (var i = 1; i <= 12; i++) SeedUserInput("s1", i, $"Deployment checklist step {i} for the staging server");
+        SeedUserInput("s2", 1, "Rollback the staging server after a failed deployment");
+        var reranker = new PassageReranker(passage => passage.Contains("Rollback", StringComparison.Ordinal) ? 9 : -2);
+        var search = new UnifiedSearchService(() => _embedder, _searchDb, new BertDocumentResponseMapper(), null, () => reranker);
+
+        var response = search.Search("deployment staging server", topK: 3);
+
+        var fused = response.Groups.Single(group => group.Key == "fused");
+        Assert.Equal("s2", fused.Hits[0].SessionId);
+        Assert.Contains("re-ranked", fused.Label);
+        Assert.All(response.Groups, group => Assert.True(group.Hits.Count <= 3));
+        // The model scores the deeper pool, not just the requested three.
+        Assert.True(reranker.Passages > 3);
+    }
+
+    [Fact]
+    public void Search_RerankerFailureKeepsTheHybridOrder()
+    {
+        SeedUserInput("s1", 1, "billing invoice summary");
+        SeedUserInput("s1", 2, "customer invoice settings");
+        var expected = _unifiedSearch.Search("invoice", topK: 5).Groups.Single(group => group.Key == "fused");
+        var broken = new PassageReranker(_ => throw new InvalidOperationException("native failure"));
+        var response = new UnifiedSearchService(() => _embedder, _searchDb, new BertDocumentResponseMapper(), null, () => broken)
+            .Search("invoice", topK: 5);
+
+        var fused = response.Groups.Single(group => group.Key == "fused");
+        Assert.Equal(expected.Label, fused.Label);
+        Assert.Equal(expected.Hits.Select(hit => hit.DocumentId), fused.Hits.Select(hit => hit.DocumentId));
+    }
+
+    private sealed class PassageReranker(Func<string, float> score) : ISearchReranker
+    {
+        public int Passages;
+        public bool IsAvailable => true;
+        public float[] Score(string query, IReadOnlyList<string> passages)
+        {
+            Passages += passages.Count;
+            return passages.Select(score).ToArray();
+        }
+        public void Dispose() { }
+    }
+
     public void Dispose()
     {
         _embedder.Dispose();

@@ -38,7 +38,7 @@ public sealed partial class BoardRecallService(IBoardProjectResolver projects, I
         {
             // search_history embeds the same query for its history groups; one model run serves both.
             embedding = await search.EmbedQueryAsync(query, cancellationToken);
-            foreach (var hit in await search.SearchAsync(project, query, Math.Min(count, 5), ct: cancellationToken, queryEmbedding: embedding))
+            foreach (var hit in await search.SearchAsync(project, query, Math.Min(count, 5), ct: cancellationToken, queryEmbedding: embedding, rerank: true))
                 Append(text, hit, "card - BGE/keyword ranking", sessions);
         }
         return new(text.ToString(), sessions, keys.Count > 0, embedding);

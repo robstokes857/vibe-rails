@@ -34,6 +34,14 @@ when that sweep finishes. Unchanged document metadata, including session chunk c
 Generated Board launch envelopes and Automation `vb --job-run` commands are excluded by
 `InputEtlFilter` from both individual input documents and session aggregates. Canonical captured
 inputs remain untouched; an ordinary successful sweep removes obsolete derived entries.
+VIBE-257 closed the gaps VIBE-254 left: Automation launch lines whose arguments are base64
+PowerShell literals (VIBE-153), so `--job-run` is visible only after decoding; script runs
+(`--run-python-script`); Automation prompts from older builds that start with the card header;
+and card discussion bootstraps, which keep only the question the user typed into them. On a copy
+of a real index, one sweep by a filtering build retired 669 of 2,858 input documents (2,083 of
+4,511 input chunks) and 583 of 1,278 session aggregates, and re-chunked 131 mixed sessions.
+`SearchRetrievalBenchmarkTests.PersonalSnapshotSweepRetiresGeneratedLaunchInputs` repeats that
+check against any snapshot; it never opens the live `search.db`.
 
 One reconciliation call sweeps each due corpus from its cursor to its end with one write transaction
 per page, yielding after ten seconds on a very large corpus; the durable cursor resumes after a
@@ -92,3 +100,21 @@ cards or explicitly requested captured documents.
 Coverage: `SharedSearchIndexTests`, `SearchRetrievalBenchmarkTests`, `BoardSearchTests`,
 `BoardRecallTests`, history retrieval tests, schema snapshots and previous-release compatibility
 fixtures. All database fixtures are disposable; application debugging uses the normal databases.
+
+## Re-ranking (VIBE-257)
+
+`search_board_cards`, `search_history` card discovery, and the fused group of `search_history` and
+`/api/v1/search` can rescore their top 30 hybrid candidates with a local cross-encoder
+(`ISearchReranker`). The cross-encoder reads the query and each candidate's matched text together.
+`SearchReranking.Apply` reorders only that pool, keeps exact card identities first, and preserves
+the bounded 10% current-repository preference by scaling the relevance probability. Any failure
+keeps the hybrid order. Search-as-you-type and link pickers do not re-rank.
+The model lives in `models/reranker/` (`model.onnx` and `vocab.txt`; `CrossEncoderReranker` also reads
+XLM-R and DeBERTa-v3 SentencePiece files for comparisons). `IdleSearchReranker` loads it on first
+use and releases it after two idle minutes, like the embedder. While the directory is empty,
+`IsAvailable` is false and search runs exactly as before, with the same pool sizes. The measured
+choice is ms-marco TinyBERT-L2-v2: MRR@10 0.62 → 0.86 on a fixed personal query set, about +80 ms
+on a 900 ms search, 17.6 MB. Larger re-rankers, including bge-reranker-base, were slower and
+no better. Packaging the model into installers is a separate step. The opt-in benchmark is
+`SearchRetrievalBenchmarkTests.PersonalSnapshotRetrievalQualityBySetup`. Its query sets with
+known answers are personal data and live outside this repository.

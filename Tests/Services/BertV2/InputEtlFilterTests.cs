@@ -43,7 +43,43 @@ public class InputEtlFilterTests
     [InlineData("& 'C:\\path with spaces\\vb.exe' '--job-run' 'run-123'")]
     [InlineData("exec '/home/user/.vibe_rails/vb' '--job-run' 'run-123'")]
     [InlineData("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; & 'C:/app/vb.exe' @('--job-run', 'run-123'); exit $LASTEXITCODE")]
+    [InlineData("& 'c:\\Users\\dev\\.vscode\\extensions\\viberails-10.11.19\\bin\\vb.exe' --run-python-script 'f0ccd65b.ps1'")]
+    [InlineData("This Automation was triggered for kanban card VB-1C1CI-8. The user has authorized the viberails-mcp Board tools for this card session. Read get_board_card for its task.")]
     public void Process_SkipsGeneratedLaunchInput(string input) => Assert.Null(InputEtlFilter.Process(input));
+
+    [Theory]
+    [InlineData("--job-run")]
+    [InlineData("--run-python-script")]
+    public void Process_SkipsBase64EncodedPowerShellLaunches(string flag)
+    {
+        // VIBE-257: since VIBE-153 the flag is only visible after decoding; 159 such lines survived VIBE-254.
+        var command = VibeRails.Services.Jobs.JobTerminalTabLauncher.BuildRunCommand(@"C:\Users\dev\.vibe_rails\vb.exe",
+            ["--env", "codex_code_review", "--workdir", @"C:\source\it’s a repo", flag, "run-123"], windows: true);
+        Assert.DoesNotContain(flag, command);
+        Assert.Null(InputEtlFilter.Process(command));
+    }
+
+    [Fact]
+    public void Process_KeepsEncodedPowerShellCommandsThatAreNotLaunches()
+    {
+        var command = VibeRails.Services.Jobs.JobTerminalTabLauncher.BuildRunCommand(@"C:\tools\codex.exe", ["--model", "gpt"], windows: true);
+        Assert.Equal(InputEtlFilter.Normalize(command), InputEtlFilter.Process(command));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Process_KeepsOnlyTheUsersQuestionFromADiscussionBootstrap(bool remoteLinked)
+    {
+        var card = new BoardCardRecord("card_1", "/project", 12, "ready", 0, "Task", "Description",
+            "codex", "medium", null, [], false, 0, DateTime.UtcNow, DateTime.UtcNow);
+        if (remoteLinked) card = card with { JiraIssueKey = "APP-1" };
+        Assert.Null(InputEtlFilter.Process(BoardPromptComposer.ComposeDiscussion(card, null, null)));
+        Assert.Null(InputEtlFilter.Process(BoardPromptComposer.ComposeDiscussion(card, "Prefer short answers.", "  ", "Card context: be brief")));
+        Assert.Equal("Is this all getting backed up now?",
+            InputEtlFilter.Process(BoardPromptComposer.ComposeDiscussion(card, "Prefer short answers.", "Is this all getting backed up now?", "Card context: be brief")));
+        Assert.Null(InputEtlFilter.Process(BoardPromptComposer.ComposeDiscussion(card, null, "ok")));
+    }
 
     [Theory]
     [InlineData("Fix vb.exe --job-run handling")]
@@ -52,6 +88,9 @@ public class InputEtlFilterTests
     [InlineData("vb.exe --job-runner example")]
     [InlineData("You are the code review agent. Purpose: Code review. Review my parser.")]
     [InlineData("Purpose: explain why This Automation was triggered for kanban card appears in a log")]
+    [InlineData("This Automation was triggered for kanban card VB-12 twice, why?")]
+    [InlineData("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8 makes the tab readable, why?")]
+    [InlineData("The user wants to talk with you about kanban card prompts showing up in search")]
     public void Process_KeepsRequestsAboutLaunches(string input) => Assert.Equal(input, InputEtlFilter.Process(input));
 
     // ── Secret detection ──────────────────────────────────────────

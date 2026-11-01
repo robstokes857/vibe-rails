@@ -168,6 +168,9 @@ namespace VibeRails
                 var settings = sp.GetRequiredService<IBertSettings>();
                 return new IdleBertV2BgeEmbedder(() => new BertV2BgeEmbedder(settings.ModelPath, settings.VocabPath));
             });
+            // Optional cross-encoder (VIBE-257): loads on first agent search, unloads when idle, and
+            // leaves the hybrid order in place while models/reranker is empty.
+            serviceCollection.AddSingleton<ISearchReranker>(_ => SearchRerankerSettings.CreateOwner());
             serviceCollection.AddSqliteStorage(_ => new SqliteStoragePaths(ParserConfigs.GetStatePath()));
             serviceCollection.AddSingleton<SearchTextChunker>();
             serviceCollection.AddSingleton<SearchIndexingService>(SearchIndexingService.Create);

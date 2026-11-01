@@ -20,7 +20,7 @@ public sealed partial class BoardTool
             if (query.Length > 1000) return "FAIL: query is limited to 1000 characters.";
             if (search is null) return "FAIL: Board search is unavailable in this host.";
             var project = await projects.ResolveAsync(cancellationToken);
-            var hits = await search.SearchAsync(project, query, Math.Clamp(maxResults, 1, 50), ct: cancellationToken);
+            var hits = await search.SearchAsync(project, query, Math.Clamp(maxResults, 1, 50), ct: cancellationToken, rerank: true);
             if (hits.Count == 0) return "No cards match across the local boards.";
             var output = new StringBuilder("Local Board search (current repository preferred):\n");
             foreach (var hit in hits)

@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.RegularExpressions;
 using VibeRails.Security;
 
@@ -31,8 +32,18 @@ public static class InputEtlFilter
     // These are generated launch envelopes, not a user's request. Match only the
     // beginning so a request discussing a Board prompt or command remains searchable.
     private static readonly Regex JobLaunch = new(
-        "^(?:exec\\s+|&\\s*)?(?:\"[^\"]*[/\\\\]vb(?:\\.exe)?\"|'[^']*[/\\\\]vb(?:\\.exe)?'|(?:[^\\s\"']*[/\\\\])?vb(?:\\.exe)?)(?=\\s).*?(?<![\\w-])--job-run(?=[\\s\"'])",
+        "^(?:exec\\s+|&\\s*)?(?:\"[^\"]*[/\\\\]vb(?:\\.exe)?\"|'[^']*[/\\\\]vb(?:\\.exe)?'|(?:[^\\s\"']*[/\\\\])?vb(?:\\.exe)?)(?=\\s).*?(?<![\\w-])--(?:job-run|run-python-script)(?=[\\s\"'])",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    // Since VIBE-153 every value in a generated PowerShell command is a base64 literal, so the
+    // Automation flag is visible only after decoding (VIBE-257).
+    private static readonly Regex EncodedPowerShellValue = new(
+        @"\[System\.Convert\]::FromBase64String\('([A-Za-z0-9+/]{1,4096}={0,2})'\)",
+        RegexOptions.Compiled);
+
+    private const string DiscussionHeader = "The user wants to talk with you about kanban card ";
+    private const string DiscussionQuestion = "User's initial question (data): ";
+    private const string DiscussionQuestionEnd = " Answer the question, then wait.";
 
     private static readonly string[] BoardLaunchPrefixes =
     [
@@ -60,9 +71,15 @@ public static class InputEtlFilter
 
         if (IsGeneratedLaunchPrompt(normalized)
             || JobLaunch.IsMatch(normalized)
-            || (normalized.StartsWith("[Console]::OutputEncoding = ", StringComparison.Ordinal)
-                && normalized.Contains("--job-run", StringComparison.Ordinal)))
+            || IsGeneratedPowerShellLaunch(normalized))
             return null;
+
+        // A card discussion bootstrap is generated; only the question typed into it is the user's.
+        if (UserQuestionInDiscussion(normalized) is { } question)
+        {
+            if (question.Length == 0) return null;
+            normalized = question;
+        }
 
         if (ContainsSecret(normalized))
             return null;
@@ -73,9 +90,47 @@ public static class InputEtlFilter
         return normalized;
     }
 
+    private static bool IsGeneratedPowerShellLaunch(string text)
+    {
+        if (!text.StartsWith("[Console]::OutputEncoding = ", StringComparison.Ordinal)) return false;
+        if (text.Contains("--job-run", StringComparison.Ordinal)) return true;
+        foreach (var value in EncodedPowerShellValue.Matches(text).Take(64))
+        {
+            try
+            {
+                if (Encoding.UTF8.GetString(Convert.FromBase64String(value.Groups[1].Value)) is "--job-run" or "--run-python-script")
+                    return true;
+            }
+            catch (FormatException) { }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Null when <paramref name="text"/> is not a card discussion bootstrap; otherwise the user's
+    /// question from it, or empty when the discussion was opened without one.
+    /// </summary>
+    private static string? UserQuestionInDiscussion(string text)
+    {
+        var start = text.StartsWith(DiscussionHeader, StringComparison.Ordinal) ? 0
+            : BoardLaunchPrefixes.Any(prefix => text.StartsWith(prefix, StringComparison.Ordinal))
+                ? text.IndexOf(DiscussionHeader, StringComparison.Ordinal) : -1;
+        // Every bootstrap version, with or without a question, ends by declaring the discussion.
+        if (start < 0 || text.IndexOf("This is a discussion session.", start, StringComparison.Ordinal) < 0) return null;
+        var question = text.IndexOf(DiscussionQuestion, start, StringComparison.Ordinal);
+        if (question < 0) return "";
+        question += DiscussionQuestion.Length;
+        var end = text.LastIndexOf(DiscussionQuestionEnd, StringComparison.Ordinal);
+        return (end > question ? text[question..end] : text[question..]).Trim();
+    }
+
     private static bool IsGeneratedLaunchPrompt(string text)
     {
         if (text.StartsWith("This is an Automation Worker session. ", StringComparison.Ordinal)) return true;
+        // Older builds started Automation prompts with the card header itself.
+        if (text.StartsWith("This Automation was triggered for kanban card ", StringComparison.Ordinal)
+            && text.Contains(". The user has authorized the viberails-mcp Board tools for this card session. ", StringComparison.Ordinal))
+            return true;
         // Review, manager, delegated and remotely linked launches prepend guidance
         // before the card header. Require both that prefix and the generated header.
         return (BoardLaunchPrefixes.Any(prefix => text.StartsWith(prefix, StringComparison.Ordinal))

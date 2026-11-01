@@ -113,6 +113,7 @@ public static class McpStdioHost
             var settings = sp.GetRequiredService<IBertSettings>();
             return new IdleBertV2BgeEmbedder(() => new BertV2BgeEmbedder(settings.ModelPath, settings.VocabPath));
         });
+        services.AddSingleton<ISearchReranker>(_ => SearchRerankerSettings.CreateOwner());
         // The short-lived child only reads search.db. Do not register IRepository or root
         // indexing jobs here: schema population and source reconciliation belong to the root.
         services.AddSingleton<ISearchIndexStore>(_ => new SqliteSearchIndexStore(

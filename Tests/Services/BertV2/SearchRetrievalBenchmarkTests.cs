@@ -9,7 +9,7 @@ using Xunit;
 
 namespace Tests.Services.BertV2;
 
-public sealed class SearchRetrievalBenchmarkTests(ITestOutputHelper output)
+public sealed partial class SearchRetrievalBenchmarkTests(ITestOutputHelper output)
 {
     [Fact]
     public async Task RealBgeFindsLateCardAndDeepDiscussionWhileSourceWritesRemainResponsive()

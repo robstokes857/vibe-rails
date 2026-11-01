@@ -5,15 +5,16 @@ namespace VibeRails.Services.Board;
 
 /// <summary>Shared read-only local Board retrieval for the UI and MCP.</summary>
 public sealed partial class BoardSearchService(ISearchIndexStore store, Func<IBertV2BgeEmbedder> embedder,
-    ILogger<BoardSearchService> logger)
+    ILogger<BoardSearchService> logger, Func<ISearchReranker?>? reranker = null)
 {
     private static readonly SemaphoreSlim QueryModel = new(1, 1);
+    private static readonly SemaphoreSlim RerankModel = new(1, 1);
     public BoardSearchService(ISearchIndexStore store, IBertV2BgeEmbedder embedder, ILogger<BoardSearchService> logger)
         : this(store, () => embedder, logger) { }
 
     public static BoardSearchService Create(IServiceProvider services) => new(
         services.GetRequiredService<ISearchIndexStore>(), () => services.GetRequiredService<IBertV2BgeEmbedder>(),
-        services.GetRequiredService<ILogger<BoardSearchService>>());
+        services.GetRequiredService<ILogger<BoardSearchService>>(), () => services.GetService<ISearchReranker>());
 
     /// <summary>Embeds a search query, or returns null (logged) when the model is unavailable.</summary>
     public async Task<float[]?> EmbedQueryAsync(string query, CancellationToken ct = default)
@@ -30,10 +31,14 @@ public sealed partial class BoardSearchService(ISearchIndexStore store, Func<IBe
 
     /// <summary>Searches indexed local cards, filtering project eligibility before ranking and limits.</summary>
     /// <param name="queryEmbedding">An embedding of this query the caller already computed, so the model runs once.</param>
+    /// <param name="rerank">
+    /// Rescore the top hybrid matches with the local re-ranking model when it is installed (VIBE-257).
+    /// Agent recall opts in; search-as-you-type and link pickers keep the cheaper hybrid order.
+    /// </param>
     public async Task<IReadOnlyList<BoardSearchHit>> SearchAsync(string currentProjectPath, string query,
         int count = 50, string? excludeCardId = null, CancellationToken ct = default,
         IReadOnlyCollection<string>? excludedCardIds = null, string? projectScope = null, bool exactOnly = false,
-        float[]? queryEmbedding = null, BoardSearchFilters? filters = null)
+        float[]? queryEmbedding = null, BoardSearchFilters? filters = null, bool rerank = false)
     {
         query = (query ?? "").Trim();
         if (query.Length > 1000) throw new BoardValidationException("Card search must be at most 1000 characters.");
@@ -80,7 +85,7 @@ public sealed partial class BoardSearchService(ISearchIndexStore store, Func<IBe
                     : match.Lexical > 0 ? "keyword" : match.Semantic > 0 ? "semantic" : "recent", 0,
                 document.Type, document.Priority, document.Assignee, document.Blocked, document.Flagged)
                 { GhostReason = document.GhostReason };
-            candidates.Add(new(hit, exact, match.Lexical, match.Semantic, document.UpdatedUtc));
+            candidates.Add(new(hit, exact, match.Lexical, match.Semantic, document.UpdatedUtc, document.Title + "\n" + match.Text));
         }
 
         // Weight semantic evidence by its similarity, then give local matches a bounded
@@ -106,12 +111,31 @@ public sealed partial class BoardSearchService(ISearchIndexStore store, Func<IBe
             }
         }
         double Score(Candidate candidate) => fused.GetValueOrDefault(candidate.Hit.Id) * (candidate.Hit.IsCurrentProject ? 1.1 : 1);
-        return candidates.OrderByDescending(candidate => candidate.Exact)
+        IReadOnlyList<Candidate> ordered = candidates.OrderByDescending(candidate => candidate.Exact)
             .ThenByDescending(candidate => candidate.Exact == 1 && candidate.Hit.IsCurrentProject)
             .ThenByDescending(Score)
             .ThenByDescending(candidate => candidate.Hit.IsCurrentProject)
-            .ThenByDescending(candidate => candidate.UpdatedUtc).ThenBy(candidate => candidate.Hit.Id)
-            .Take(count).Select(candidate => candidate.Hit with { Score = Score(candidate) + candidate.Exact }).ToArray();
+            .ThenByDescending(candidate => candidate.UpdatedUtc).ThenBy(candidate => candidate.Hit.Id).ToArray();
+        if (rerank && query.Length > 0 && reranker is not null)
+        {
+            // Exact identities keep precedence; the re-ranker reorders only relevance matches and keeps
+            // the bounded current-repository preference.
+            var exactCount = ordered.TakeWhile(candidate => candidate.Exact > 0).Count();
+            ISearchReranker? model = null;
+            try { model = reranker(); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { logger.LogWarning(ex, "Search re-ranker unavailable; keeping hybrid order"); }
+            if (model is not null)
+            {
+                await RerankModel.WaitAsync(ct);
+                try
+                {
+                    ordered = ordered.Take(exactCount).Concat(SearchReranking.Apply(model, query, ordered.Skip(exactCount).ToArray(),
+                        candidate => candidate.Passage, logger, candidate => candidate.Hit.IsCurrentProject ? 1.1 : 1)).ToArray();
+                }
+                finally { RerankModel.Release(); }
+            }
+        }
+        return ordered.Take(count).Select(candidate => candidate.Hit with { Score = Score(candidate) + candidate.Exact }).ToArray();
     }
 
     private static int Exact(BoardSearchDocument document, string query, bool current)
@@ -144,7 +168,7 @@ public sealed partial class BoardSearchService(ISearchIndexStore store, Func<IBe
         return (start > 0 ? "…" : "") + text.Substring(start, length) + (start + length < text.Length ? "…" : "");
     }
 
-    private sealed record Candidate(BoardSearchHit Hit, int Exact, double Lexical, double Semantic, DateTime UpdatedUtc);
+    private sealed record Candidate(BoardSearchHit Hit, int Exact, double Lexical, double Semantic, DateTime UpdatedUtc, string Passage);
     private static readonly HashSet<string> StopWords = new(StringComparer.OrdinalIgnoreCase)
         { "the", "card", "cards", "where", "what", "that", "this", "about", "with", "did", "was", "for", "how", "have", "from", "and", "are", "can", "to", "of" };
     [GeneratedRegex(@"[\p{L}\p{N}]+")]
