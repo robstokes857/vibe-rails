@@ -248,7 +248,10 @@ export class SettingsController {
                         if (savedSettings) {
                             await this._reconcileSavedApiKey(savedSettings, linkedKeyVersion);
                             if (this._settingsRoot !== root) return;
-                            this.app.setAppSettings({ apiKey: savedSettings.apiKey, remoteAccountEmail: savedSettings.remoteAccountEmail });
+                            this.app.setAppSettings({
+                                apiKey: savedSettings.apiKey, remoteAccountEmail: savedSettings.remoteAccountEmail,
+                                remoteAccountOrganization: savedSettings.remoteAccountOrganization ?? null
+                            });
                             this._applySavedSettingsToControls(root, savedSettings);
                             this._markSettingsClean(root);
                             // A pasted key or clear can supersede the linked identity.
@@ -562,6 +565,7 @@ export class SettingsController {
             } while (this._settingsRoot && linkedKeyVersion !== this._linkedKeyVersion);
             savedSettings.apiKey = latest.apiKey || '';
             savedSettings.remoteAccountEmail = latest.remoteAccountEmail;
+            savedSettings.remoteAccountOrganization = latest.remoteAccountOrganization;
         } catch {
             this.app.showToast('Settings', 'Settings saved. Reopen Settings when your connection is available to refresh the account details.', 'warning');
         }

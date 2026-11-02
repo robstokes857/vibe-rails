@@ -573,7 +573,8 @@ retain the received key in memory for retry until cancellation, replacement or s
 The masked `remote-account-linked` event updates open Settings views without replacing
 their unrelated drafts. Closing the account modal stops UI polling; reopening it resumes the attempt.
 
-The top navigation shows **Sign in** only without a saved API key. General Settings
+The top navigation shows **Sign in** only without a saved API key; with one it shows an
+account chip and popover (`account-nav.js`). General Settings
 has an Account card with **Sign in**, or **Logged in {email}** and **Switch account**.
 Both open the shared device-approval modal. `ApiKeyStore` saves the approved display email
 and a SHA-256 fingerprint alongside the key in the existing settings file. The settings
@@ -581,6 +582,8 @@ response includes `remoteAccountEmail` only when the full current key matches th
 request values for that field are ignored. This preserves the email across restarts and avoids
 showing an old identity after a manual key replacement, including by older writers. Keys without
 email metadata show **API key configured**. No account identity is inferred from a masked suffix.
+The UI also reads an optional `remoteAccountOrganization` for managed (corporate) accounts; no
+backend supplies it yet, and one that does should store it with the email under the same fingerprint.
 
 Existing keys remain valid; the site lists a linked key with its computer name so it can be
 revoked. If a one-time response is lost in transit, the user starts again and can revoke

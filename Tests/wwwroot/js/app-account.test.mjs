@@ -48,7 +48,17 @@ test('the latest account event wins even when the older read completes first', a
     await first;
     latest.resolve({ apiKey: 'new-mask', remoteAccountEmail: 'new@example.com' });
     await second;
-    assert.deepEqual(app.appSettings, { apiKey: 'new-mask', remoteAccountEmail: 'new@example.com' });
+    assert.deepEqual(app.appSettings, { apiKey: 'new-mask', remoteAccountEmail: 'new@example.com', remoteAccountOrganization: null });
+});
+
+test('an account refresh replaces the organization with the saved one, or clears it', async () => {
+    const app = appFixture();
+    app.apiCall = async () => ({ apiKey: 'mask', remoteAccountEmail: 'rob@example.com', remoteAccountOrganization: 'Contoso' });
+    await app.refreshAccountSettings();
+    assert.equal(app.appSettings.remoteAccountOrganization, 'Contoso');
+    app.apiCall = async () => ({ apiKey: 'other-mask', remoteAccountEmail: 'other@example.com' });
+    await app.refreshAccountSettings();
+    assert.equal(app.appSettings.remoteAccountOrganization, null);
 });
 
 test('unavailable account refresh retains the last known display', async () => {

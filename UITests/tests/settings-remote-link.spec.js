@@ -6,7 +6,7 @@ const MASK = '••••••••abcd';
 const LINK_URL = 'https://viberails.ai/link';
 const COMPLETE_LINK_URL = `${LINK_URL}#code=BXQK-2M7T`;
 
-async function openSettings(page, { bridge = false, signedIn = false, email = 'rob@example.com' } = {}) {
+async function openSettings(page, { bridge = false, signedIn = false, email = 'rob@example.com', organization } = {}) {
     await page.addInitScript(({ bridge }) => {
         sessionStorage.setItem('viberails_tab', 'remote-link-fixture');
         if (bridge) {
@@ -18,6 +18,8 @@ async function openSettings(page, { bridge = false, signedIn = false, email = 'r
     let state = { status: 'idle' };
     let settings = { apiKey: signedIn ? MASK : '', remoteAccountEmail: signedIn ? email : null,
         computerName: '', machineName: 'Fixture machine', mcpEnabled: true };
+    // Nothing supplies an organization yet; the field is the managed-account placeholder.
+    if (organization) settings.remoteAccountOrganization = organization;
     let nextStart;
     const calls = [];
     await page.route('**/api/v1/**', async route => {
@@ -94,6 +96,7 @@ test('browser sign-in opens from an explicit click and saves only the linked key
     await expect(page.locator('[data-remote-link-status]')).toHaveText('Logged in rob@example.com', { timeout: 7000 });
     await page.getByRole('button', { name: 'Close dialog' }).click();
     await expect(page.locator('[data-account-nav]:visible')).toHaveCount(0);
+    await expect(page.locator('[data-action="account-menu"]')).toHaveAccessibleName('Account menu. Signed in as rob@example.com');
     await expect(root.locator('[data-account-status]')).toHaveText('Logged in rob@example.com');
     await expect(root.locator('[data-account-settings-action]')).toHaveText('Switch account');
     const key = root.locator('#setting-api-key');
@@ -163,9 +166,107 @@ test('signed-out top navigation and Settings both offer sign in', async ({ page 
     await expect(page.locator('[data-account-nav]:visible')).toHaveText('Sign in / Sign up');
     await expect(page.locator('[data-account-nav]:visible')).toHaveAccessibleName('Sign in or sign up to viberails.ai');
     await expect(root.locator('[data-account-settings-action]')).toHaveText('Sign in');
+    await expect(page.locator('[data-account-menu-host]')).toBeHidden();
     await page.locator('[data-account-nav]:visible').click();
     await expect(page.locator('[data-remote-link-start]')).toBeEnabled();
     await expect(page.locator('[data-remote-link-signup]')).toBeVisible();
+});
+
+test('signed-in top bar shows the account and a menu that closes back to its chip', async ({ page }, testInfo) => {
+    const { root } = await openSettings(page, { signedIn: true });
+    const chip = page.locator('[data-action="account-menu"]');
+    const menu = page.getByRole('dialog', { name: 'viberails.ai account' });
+    await expect(chip).toHaveAccessibleName('Account menu. Signed in as rob@example.com');
+    await expect(chip).toContainText('rob@example.com');
+    await chip.click();
+    await expect(menu).toBeVisible();
+    await expect(chip).toHaveAttribute('aria-expanded', 'true');
+    await expect(menu).toContainText('Signed in');
+    await expect(menu).toContainText('Personal account');
+    await expect(menu.locator('[data-account-key]')).toHaveText('••••abcd');
+    await expect(menu.locator('[data-account-badge="managed"]')).toBeHidden();
+    await expect(menu.locator('[data-account-org-block]')).toBeHidden();
+    const site = menu.getByRole('link', { name: 'Manage account on viberails.ai' });
+    await expect(site).toHaveAttribute('href', 'https://viberails.ai/Account');
+    await expect(site).toHaveAttribute('rel', 'noopener noreferrer');
+    await expect(menu.getByRole('button', { name: 'Account settings' })).toBeFocused();
+    await page.screenshot({ path: testInfo.outputPath('account-menu-personal.png') });
+    await page.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
+    await expect(chip).toBeFocused();
+    await expect(chip).toHaveAttribute('aria-expanded', 'false');
+
+    await chip.click();
+    await page.locator('#app-content').click({ position: { x: 5, y: 5 } });
+    await expect(menu).toBeHidden();
+
+    await root.locator('#setting-computer-name').fill('Unsaved laptop');
+    await chip.click();
+    await menu.getByRole('button', { name: 'Account settings' }).click();
+    await expect(menu).toBeHidden();
+    await expect(root.locator('#setting-computer-name')).toHaveValue('Unsaved laptop');
+    await expect(root.locator('#settings-panel-general')).toBeVisible();
+
+    await chip.click();
+    await menu.getByRole('button', { name: 'Switch account' }).click();
+    await expect(page.locator('[data-remote-link-status]')).toHaveText('Logged in rob@example.com');
+    await expect(page.locator('[data-remote-link-start]')).toHaveText('Switch account');
+});
+
+test('a managed account names its organization and leaves switching to the administrator', async ({ page }, testInfo) => {
+    const email = 'robert.stokes@example-company.com';
+    const { root } = await openSettings(page, { signedIn: true, email, organization: 'Contoso <b>Ltd</b>' });
+    const chip = page.locator('[data-action="account-menu"]');
+    const menu = page.getByRole('dialog', { name: 'viberails.ai account' });
+    await expect(chip).toHaveAccessibleName(`Account menu. Signed in as ${email}, managed by Contoso <b>Ltd</b>`);
+    await expect(chip.locator('[data-account-chip-org]')).toHaveText('Contoso <b>Ltd</b>');
+    // At 1280px the compact bar shows the organization icon only and keeps the links clear of the brand.
+    await expect(chip.locator('[data-account-chip-org] [data-account-org-name]')).toBeHidden();
+    const brand = await page.locator('.app-subnav-brand').boundingBox();
+    const firstLink = await page.locator('.app-subnav-links .app-subnav-link').first().boundingBox();
+    expect(brand.x + brand.width).toBeLessThanOrEqual(firstLink.x);
+    await page.setViewportSize({ width: 1600, height: 720 });
+    await expect(chip.locator('[data-account-chip-org] [data-account-org-name]')).toBeVisible();
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await chip.click();
+    await expect(menu.locator('[data-account-badge="managed"]')).toBeVisible();
+    await expect(menu.locator('[data-account-badge="personal"]')).toBeHidden();
+    await expect(menu.locator('[data-account-org-block]')).toContainText('Contoso <b>Ltd</b>');
+    await expect(menu.locator('b')).toHaveCount(0);
+    const switchAccount = menu.getByRole('button', { name: 'Switch account' });
+    await expect(switchAccount).toBeDisabled();
+    await expect(switchAccount).toHaveAccessibleDescription('Your administrator controls which account this computer uses.');
+    await page.screenshot({ path: testInfo.outputPath('account-menu-managed.png') });
+    await expect(root.locator('[data-account-status]')).toHaveText(`Logged in ${email}, managed by Contoso <b>Ltd</b>`);
+    await expect(root.locator('[data-account-settings-action]')).toBeDisabled();
+});
+
+test('a manual key without account details offers sign-in from the menu', async ({ page }) => {
+    await openSettings(page, { signedIn: true, email: null });
+    const chip = page.locator('[data-action="account-menu"]');
+    const menu = page.getByRole('dialog', { name: 'viberails.ai account' });
+    await expect(chip).toHaveAccessibleName('Account menu. API key configured');
+    await expect(chip).toContainText('API key');
+    await chip.click();
+    await expect(menu.locator('[data-account-menu-title]')).toHaveText('API key configured');
+    await expect(menu.getByText('Signed in', { exact: true })).toBeHidden();
+    await expect(menu.getByRole('link', { name: 'Manage account on viberails.ai' })).toBeHidden();
+    await expect(menu.getByRole('button', { name: 'Switch account' })).toBeHidden();
+    await menu.getByRole('button', { name: 'Sign in to viberails.ai' }).click();
+    await expect(page.locator('[data-remote-link-start]')).toBeEnabled();
+});
+
+test('the account menu stays inside a narrow window', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 375, height: 760 });
+    await openSettings(page, { signedIn: true, email: 'a-very-long-account-email-for-narrow-layouts@example.com', organization: 'A Very Long Organization Name Incorporated' });
+    const chip = page.locator('[data-action="account-menu"]');
+    await expect(chip.locator('[data-account-chip-label]')).toBeHidden();
+    await chip.click();
+    const box = await page.getByRole('dialog', { name: 'viberails.ai account' }).boundingBox();
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(375);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath('account-menu-narrow.png') });
 });
 
 test('saved account stays in Settings after reload', async ({ page }, testInfo) => {

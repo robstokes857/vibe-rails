@@ -14,6 +14,7 @@ import { TerminalController } from './js/modules/terminal-multitab.js';
 import { SettingsController } from './js/modules/settings-controller.js';
 import { SetupAlert } from './js/modules/setup-panel.js';
 import { RemoteAccountLinkPanel } from './js/modules/remote-account-link.js';
+import { AccountNavMenu, accountSummary } from './js/modules/account-nav.js';
 import { McpController } from './js/modules/mcp-controller.js';
 import { PrReviewsController } from './js/modules/pr-reviews-controller.js';
 import { ReviewInboxController } from './js/modules/review-inbox-controller.js';
@@ -69,6 +70,7 @@ export class VibeControlApp {
         this.pythonScriptWorkbench = new PythonScriptWorkbench(this);
         this.boardController = new BoardController(this);
         this.automationNavLauncher = new AutomationNavLauncher(this);
+        this.accountNav = new AccountNavMenu(this);
         this.appEventClient = new AppEventClient(this);
         this.appEventClient.on('remote-account-linked', () => void this.refreshAccountSettings());
         this.appEventClient.on('account_key_changed', () => {
@@ -458,6 +460,11 @@ export class VibeControlApp {
             if (account) {
                 e.preventDefault();
                 this.openRemoteAccount();
+                return;
+            }
+            if (e.target.closest('[data-action="account-menu"]')) {
+                e.preventDefault();
+                this.accountNav.toggle();
                 return;
             }
             const goSettings = e.target.closest('[data-action="navigate-settings"]');
@@ -1152,16 +1159,21 @@ export class VibeControlApp {
     updateAccountNav() {
         const hasKey = !!this.appSettings?.apiKey;
         const email = hasKey ? this.appSettings.remoteAccountEmail : null;
+        const account = accountSummary(this.appSettings);
+        const managed = account.state === 'managed';
         for (const link of document.querySelectorAll('[data-account-nav]')) {
             link.hidden = hasKey;
         }
         for (const status of document.querySelectorAll('[data-account-status]')) {
-            status.textContent = email ? `Logged in ${email}`
+            status.textContent = email ? `Logged in ${email}${managed ? `, managed by ${account.organization}` : ''}`
                 : hasKey ? 'API key configured' : 'Sign in to your viberails.ai account.';
         }
         for (const action of document.querySelectorAll('[data-account-settings-action]')) {
             action.textContent = hasKey ? 'Switch account' : 'Sign in';
+            // The top-bar menu says why: an organization controls a managed account's sign-in.
+            action.disabled = managed;
         }
+        this.accountNav?.render(account);
     }
 
     async loadPrReviewerSettings() {
@@ -1185,7 +1197,10 @@ export class VibeControlApp {
         try {
             const settings = await this.apiCall('/api/v1/settings', 'GET', null, { showLoading: false });
             if (generation !== this.accountRefreshGeneration || version !== this.accountSettingsVersion) return;
-            this.setAppSettings({ apiKey: settings.apiKey, remoteAccountEmail: settings.remoteAccountEmail });
+            this.setAppSettings({
+                apiKey: settings.apiKey, remoteAccountEmail: settings.remoteAccountEmail,
+                remoteAccountOrganization: settings.remoteAccountOrganization ?? null
+            });
             const controller = this.settingsController;
             const root = controller._settingsRoot;
             if (root && settings.apiKey && root.querySelector('#setting-api-key')?.dataset.originalValue !== settings.apiKey) {
@@ -1205,7 +1220,8 @@ export class VibeControlApp {
         if (!root) return;
         panel = new RemoteAccountLinkPanel(this, root, {
             onLinked: state => {
-                this.setAppSettings({ apiKey: state.keyHint, remoteAccountEmail: state.account?.email });
+                // The link status carries no organization; the linked event's settings read fills it.
+                this.setAppSettings({ apiKey: state.keyHint, remoteAccountEmail: state.account?.email, remoteAccountOrganization: null });
                 // Sign-in may finish while Settings has an unrelated unsaved draft.
                 // Update only the saved credential and its dirty-tracking baseline.
                 const settings = this.settingsController;

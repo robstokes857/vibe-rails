@@ -88,6 +88,7 @@ Use microtasks, not short-delay `setTimeout` batching, for webview activity even
 | [js/modules/internal-tools-modal.js](js/modules/internal-tools-modal.js) | Triple-click the brand icon to open Internal tools: About/version, retained upload attempts, and filterable application/Demon logs and feature journal; lazy loaded with bounded pages and no polling |
 | [js/modules/settings-controller.js](js/modules/settings-controller.js) | App settings, split into General / LLMs / KEYS section tabs (panels stay in the DOM so dirty tracking and the save bar keep reading hidden-tab controls; `_initSettingsTabs` owns click + arrow-key switching). Git Guard trailer cleanup and completed-session sharing are always on (no switches). The one-shot Export Data button and its progress modal are gone; smaller complete backups stay. |
 | [js/modules/remote-account-link.js](js/modules/remote-account-link.js) | Navigation account modal: user code, external browser link, countdown, polling and cancellation over the protected local `settings/remote-link` API. |
+| [js/modules/account-nav.js](js/modules/account-nav.js) | Signed-in account chip and popover in the top bar: email, key ending, Account settings, viberails.ai account page, Switch account; the managed-organization placeholder. |
 | [js/modules/settings-keys.js](js/modules/settings-keys.js) | Lazy KEYS panel: create password-protected RSA-4096 keys, sync public keys to the saved API-key account, download public/encrypted private PEMs, and sign a message/file into public-verification JSON. Independent of the settings save bar. |
 | [js/modules/terminal-multitab.js](js/modules/terminal-multitab.js) | Reusable xterm.js terminal manager with per-tab lifecycle and environment picker |
 | [js/modules/llm-picker-controller.js](js/modules/llm-picker-controller.js) | Shared launch-picker catalog, Tom Select lifecycle, customization modal, and live preference refresh |
@@ -146,6 +147,25 @@ external sign-up URL: the VS Code bridge allowlist accepts only `/link` and revi
 always has an **Account** card: **Sign in** when signed out, or **Logged in {email}** and
 **Switch account** when linked. Manual/older keys without an approved email say **API key
 configured**. Both entry points open the shared modal from `remote-account-template`.
+
+Signed in, the top bar shows the account instead (VB-0U0SI-331): `account-nav.js` renders a chip
+beside Exit (avatar initial and email; **API key** for a key without an approved email) and a
+popover of ordinary buttons, not ARIA menu items. It shows the masked key ending, **Account
+settings** (switches to the General tab in place when Settings is already open, so drafts
+survive), **Manage account on viberails.ai** (`https://viberails.ai/Account`) and **Switch
+account**, which opens the same modal. Escape and an outside click close it; Escape returns focus
+to the chip. Signed-in controls never use `data-account-nav` or `data-action="remote-account"`,
+which tests count for the signed-out prompt. Below 1500px the chip caps the email and shows only
+the organization icon; below 1120px only the avatar. There is no footer status: `.app-footer` is
+hidden on every view.
+
+**Managed-account placeholder.** Nothing supplies an organization yet. When settings carry a
+non-blank `remoteAccountOrganization` for an account with an approved email, the chip adds a
+building icon, the popover shows **Managed** and an organization block, and **Switch account** is
+disabled in the popover and the Settings Account card, which reads **Logged in {email}, managed by
+{organization}**. Every place that sets `remoteAccountEmail` also sets the organization (null when
+the source has none), so a stale organization cannot outlive its account. A backend that supplies
+it must save it with the email's key fingerprint and return it response-only, like the email.
 Settings retains the manual API-key field. `app.js` owns modal creation, panel disposal and
 navigation state; Settings does not mount a second polling panel. Email is rendered as text.
 The approved email is saved with a full-key fingerprint and returned as response-only

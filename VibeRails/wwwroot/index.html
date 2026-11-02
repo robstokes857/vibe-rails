@@ -123,6 +123,65 @@
                 title="Sign in, or create a free viberails.ai account" aria-label="Sign in or sign up to viberails.ai">
                 <i class="fa-solid fa-user-plus" aria-hidden="true"></i><span data-account-label>Sign in / Sign up</span>
             </button>
+            <!-- Signed-in account (VB-0U0SI-331). account-nav.js fills it from the saved settings. -->
+            <div class="app-account" data-account-menu-host hidden>
+                <button type="button" class="app-account-chip" data-action="account-menu" aria-haspopup="dialog"
+                    aria-expanded="false" aria-controls="app-account-menu" aria-label="Account menu">
+                    <span class="app-account-avatar" data-account-avatar aria-hidden="true"><span data-account-initial></span><svg class="app-account-key-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg></span>
+                    <span class="app-account-chip-label" data-account-chip-label></span>
+                    <span class="app-account-chip-org" data-account-chip-org hidden>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></svg>
+                        <span class="app-account-chip-label" data-account-org-name></span>
+                    </span>
+                    <svg class="app-account-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                </button>
+                <div class="app-account-menu" id="app-account-menu" role="dialog" aria-label="viberails.ai account" data-account-menu hidden>
+                    <div class="app-account-menu-head">
+                        <span class="app-account-avatar app-account-avatar-lg" data-account-avatar aria-hidden="true"><span data-account-initial></span><svg class="app-account-key-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg></span>
+                        <div class="app-account-menu-identity">
+                            <span class="app-account-menu-title" data-account-menu-title></span>
+                            <span class="app-account-menu-note" data-account-key-only hidden>No account details for this key.</span>
+                            <span class="app-account-badges">
+                                <span class="app-account-badge is-success" data-account-signed-in><span class="app-account-badge-dot" aria-hidden="true"></span>Signed in</span>
+                                <span class="app-account-badge is-neutral" data-account-badge="personal">Personal account</span>
+                                <span class="app-account-badge is-active" data-account-badge="managed" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></svg>Managed</span>
+                            </span>
+                        </div>
+                    </div>
+                    <div class="app-account-org-block" data-account-org-block hidden>
+                        <span class="app-account-org-tile" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></svg></span>
+                        <span class="app-account-org-text">
+                            <span class="app-account-org-name" data-account-org-name></span>
+                            <span>Your organization manages sign-in for this account. Some settings may be set by your administrator.</span>
+                        </span>
+                    </div>
+                    <div class="app-account-menu-row">
+                        <span>API key</span>
+                        <span class="app-account-key" data-account-key></span>
+                    </div>
+                    <p class="app-account-menu-hint" data-account-key-only hidden>Sign in to show which account this computer uses.</p>
+                    <div class="app-account-menu-actions">
+                        <button type="button" class="app-account-menu-item is-accent" data-account-menu-action="sign-in" data-account-key-only hidden>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" x2="3" y1="12" y2="12"/></svg>
+                            <span>Sign in to viberails.ai</span>
+                        </button>
+                        <button type="button" class="app-account-menu-item" data-account-menu-action="settings">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                            <span>Account settings</span>
+                        </button>
+                        <a class="app-account-menu-item" data-account-menu-action="site" data-account-signed-in
+                            href="https://viberails.ai/Account" target="_blank" rel="noopener noreferrer">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+                            <span>Manage account on viberails.ai</span>
+                        </a>
+                        <button type="button" class="app-account-menu-item" data-account-menu-action="switch" data-account-signed-in>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 3 4 4-4 4"/><path d="M20 7H4"/><path d="m8 21-4-4 4-4"/><path d="M4 17h16"/></svg>
+                            <span>Switch account</span>
+                        </button>
+                        <p class="app-account-menu-help" id="app-account-switch-help" data-account-switch-help hidden>Your administrator controls which account this computer uses.</p>
+                    </div>
+                </div>
+            </div>
             <button class="nav-exit-btn-sm" title="Close VibeRails and stop backend">
                 <svg class="nav-exit-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
                     fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

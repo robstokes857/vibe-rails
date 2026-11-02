@@ -154,7 +154,9 @@ From `UITests`, run `npx playwright test --config playwright.remote-link.config.
 This serves the real frontend with local API fixtures and an intercepted sign-in page. It covers
 browser popup behavior, copy code, the VS Code bridge, narrow layout, completion alongside unsaved
 settings, cancellation, and unavailable/denied/expired requests. It also checks the signed-out top-navigation link, the Settings account summary after reload, cross-tab completion and escaped
-emails. It opens no application database
+emails, and the signed-in account chip: its popover's personal, key-only and managed-organization
+states, Escape and outside-click closing, drafts kept by **Account settings**, the compact bar at
+1280px and a 375px window. It opens no application database
 and creates no account or API key.
 
 ### View Report

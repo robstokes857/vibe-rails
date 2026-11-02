@@ -10423,6 +10423,393 @@ kbd:not(.ch-search-kbd) {
     border-color: color-mix(in srgb, var(--color-accent, #06b6d4) 70%, transparent);
 }
 
+/* Signed-in account chip and its popover (VB-0U0SI-331). Hidden while signed out, when the
+   prompt above is the only account control. account-nav.js fills both from saved settings. */
+.app-account {
+    position: relative;
+    display: flex;
+    margin-inline-end: 0.5rem;
+}
+
+.app-account[hidden] {
+    display: none !important;
+}
+
+.app-account-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    height: 32px;
+    padding: 0 10px 0 4px;
+    color: var(--color-text);
+    background: var(--color-bg-surface-hover);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-pill);
+    font: 600 0.8125rem/1 var(--font-sans);
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color var(--transition-speed), border-color var(--transition-speed);
+}
+
+.app-account-chip:hover,
+.app-account-chip[aria-expanded="true"] {
+    background: var(--action-secondary-hover);
+    border-color: var(--color-accent);
+}
+
+.app-account-chip:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+.app-account-chip-label {
+    min-width: 0;
+    max-width: 14rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.app-account-chip-org {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    max-width: 10rem;
+    padding-inline-start: var(--space-2);
+    border-inline-start: 1px solid var(--color-border);
+    color: var(--tone-active-fg);
+    font-size: 0.75rem;
+}
+
+.app-account-chip-org[hidden] {
+    display: none;
+}
+
+.app-account-chip-org svg,
+.app-account-caret {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+}
+
+.app-account-caret {
+    color: var(--color-text-muted);
+    transition: transform var(--transition-speed);
+}
+
+.app-account-chip[aria-expanded="true"] .app-account-caret {
+    transform: rotate(180deg);
+}
+
+.app-account-avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 24px;
+    width: 24px;
+    height: 24px;
+    box-sizing: border-box;
+    border-radius: var(--radius-round);
+    background: var(--tone-active-bg);
+    color: var(--tone-active-fg);
+    font: 600 11px/1 var(--font-display);
+}
+
+.app-account-avatar-lg {
+    flex-basis: 40px;
+    width: 40px;
+    height: 40px;
+    font-size: 16px;
+}
+
+.app-account-avatar[data-kind="key"] {
+    background: var(--color-bg-surface);
+    border: 1px solid var(--control-border);
+    color: var(--color-text-muted);
+}
+
+.app-account-avatar[data-kind="key"] [data-account-initial],
+.app-account-avatar:not([data-kind="key"]) .app-account-key-icon {
+    display: none;
+}
+
+.app-account-key-icon {
+    width: 55%;
+    height: 55%;
+}
+
+/* The chip sits 10px above the bar's bottom edge; the panel opens just under the bar. */
+.app-account-menu {
+    position: absolute;
+    top: calc(100% + 16px);
+    right: 0;
+    z-index: 1060;
+    width: 320px;
+    box-sizing: border-box;
+    padding: 5px;
+    color: var(--color-text);
+    background: var(--color-bg-surface-hover);
+    border: 1px solid var(--control-border);
+    border-radius: var(--radius-surface);
+    box-shadow: var(--shadow-menu);
+    font-family: var(--font-sans);
+    text-align: left;
+    white-space: normal;
+}
+
+.app-account-menu[hidden] {
+    display: none;
+}
+
+.app-account-menu-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: 11px;
+}
+
+.app-account-menu-identity {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.app-account-menu-title {
+    font: 600 0.875rem/1.3 var(--font-sans);
+    overflow-wrap: anywhere;
+}
+
+.app-account-menu-note,
+.app-account-menu-hint,
+.app-account-menu-help {
+    margin: 0;
+    color: var(--color-text-muted);
+    font: 400 0.75rem/1.5 var(--font-sans);
+}
+
+.app-account-menu-hint {
+    padding: 10px 11px 0;
+}
+
+.app-account-menu-help {
+    padding: 0 11px 6px 36px;
+}
+
+.app-account-menu [hidden] {
+    display: none !important;
+}
+
+.app-account-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.app-account-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 9px;
+    border-radius: var(--radius-pill);
+    font: 400 11px/1.6 var(--font-sans);
+    white-space: nowrap;
+}
+
+.app-account-badge svg {
+    width: 12px;
+    height: 12px;
+}
+
+.app-account-badge.is-success {
+    color: var(--tone-success-fg);
+    background: var(--tone-success-bg);
+}
+
+.app-account-badge.is-active {
+    color: var(--tone-active-fg);
+    background: var(--tone-active-bg);
+}
+
+/* The neutral fill matches the panel, so the edge carries the shape. */
+.app-account-badge.is-neutral {
+    padding: 2px 8px;
+    color: var(--tone-neutral-fg);
+    background: var(--tone-neutral-bg);
+    border: 1px solid var(--color-border);
+}
+
+.app-account-badge-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: var(--radius-round);
+    background: currentColor;
+}
+
+.app-account-org-block {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin: 0 6px 10px;
+    padding: 10px 12px;
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-control);
+}
+
+.app-account-org-tile {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 32px;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-control);
+    background: var(--tone-active-bg);
+    color: var(--tone-active-fg);
+}
+
+.app-account-org-tile svg {
+    width: 16px;
+    height: 16px;
+}
+
+.app-account-org-text {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+    color: var(--color-text-muted);
+    font: 400 0.75rem/1.5 var(--font-sans);
+}
+
+.app-account-org-name {
+    color: var(--color-text);
+    font: 600 0.8125rem/1.4 var(--font-sans);
+    overflow-wrap: anywhere;
+}
+
+.app-account-menu-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    margin: 0 6px;
+    padding: 10px 5px;
+    border-block: 1px solid var(--color-border);
+    color: var(--color-text-muted);
+    font: 400 0.75rem/1.5 var(--font-sans);
+}
+
+.app-account-key {
+    color: var(--color-text);
+    font-family: var(--font-mono);
+}
+
+.app-account-menu-actions {
+    display: flex;
+    flex-direction: column;
+    padding-top: 4px;
+}
+
+.app-account-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 40px;
+    box-sizing: border-box;
+    padding: 0 11px;
+    color: var(--color-text);
+    background: transparent;
+    border: 0;
+    border-radius: 5px;
+    font: 500 0.875rem/1.3 var(--font-sans);
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.app-account-menu-item svg {
+    flex: 0 0 auto;
+    width: 15px;
+    height: 15px;
+    color: var(--color-text-muted);
+}
+
+.app-account-menu-item:hover:not(:disabled),
+.app-account-menu-item:focus-visible {
+    color: var(--color-text);
+    background: var(--action-secondary-hover);
+}
+
+.app-account-menu-item:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
+}
+
+.app-account-menu-item.is-accent,
+.app-account-menu-item.is-accent svg {
+    color: var(--color-accent);
+    font-weight: 600;
+}
+
+.app-account-menu-item:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+@media (pointer: coarse) {
+    .app-account-menu-item {
+        min-height: 44px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .app-account-caret {
+        transition: none;
+    }
+}
+
+/* The compact top bar has no room for both names: the organization keeps its icon here and
+   its name in the menu and the chip's accessible name. */
+@media (max-width: 1500px) {
+    .app-account-chip > .app-account-chip-label {
+        max-width: 9rem;
+    }
+
+    .app-account-chip-org .app-account-chip-label {
+        display: none;
+    }
+}
+
+/* Labels fold with the rest of the top bar; the avatar (and the organization icon) stay. */
+@media (max-width: 1120px) {
+    .app-account-chip .app-account-chip-label {
+        display: none;
+    }
+
+    .app-account-chip-org {
+        padding-inline-start: 0;
+        border-inline-start: 0;
+    }
+}
+
+/* Too narrow to hang the panel off the chip: span the window under the bar instead. */
+@media (max-width: 576px) {
+    .app-account-menu {
+        position: fixed;
+        top: calc(var(--navbar-height) + 6px);
+        right: 8px;
+        left: 8px;
+        width: auto;
+    }
+}
+
+body.vb-terminal-focus-active .app-subnav .app-account-chip {
+    height: 30px;
+}
+
 /* ── Settings / shared scrollable panels — refined scrollbar (NOT xterm) ──── */
 .modal-body::-webkit-scrollbar,
 .developer-tracer-payload::-webkit-scrollbar,
