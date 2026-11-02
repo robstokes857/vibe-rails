@@ -94,18 +94,18 @@ public sealed class SystemResourceServiceTests
         Assert.Null(snapshot.SystemCpuPercent);
         Assert.Null(snapshot.OtherCpuPercent);
         Assert.Equal(TimeSpan.Zero, snapshot.QuietFor);
-        Assert.True(SystemResourceService.IsCpuUnderPressure(snapshot));
-        Assert.False(SystemResourceService.IsCpuUnderPressure(snapshot with { ProcessCpuPercent = 65 }));
+        Assert.True(SystemResourceService.ExceedsCpuThreshold(snapshot));
+        Assert.False(SystemResourceService.ExceedsCpuThreshold(snapshot with { ProcessCpuPercent = 65 }));
     }
 
     [Fact]
     public void PressureIsMachineWideCpuAboveEightyFivePercent()
     {
         // A build saturating the machine defers jobs even though this process is idle.
-        Assert.True(SystemResourceService.IsCpuUnderPressure(new ResourceSnapshot { SystemCpuPercent = 90, ProcessCpuPercent = 1 }));
+        Assert.True(SystemResourceService.ExceedsCpuThreshold(new ResourceSnapshot { SystemCpuPercent = 90, ProcessCpuPercent = 1 }));
         // A merely busy box does not.
-        Assert.False(SystemResourceService.IsCpuUnderPressure(new ResourceSnapshot { SystemCpuPercent = 80, ProcessCpuPercent = 1 }));
-        Assert.False(SystemResourceService.IsCpuUnderPressure(new ResourceSnapshot { SystemCpuPercent = 85, ProcessCpuPercent = 1 }));
+        Assert.False(SystemResourceService.ExceedsCpuThreshold(new ResourceSnapshot { SystemCpuPercent = 80, ProcessCpuPercent = 1 }));
+        Assert.False(SystemResourceService.ExceedsCpuThreshold(new ResourceSnapshot { SystemCpuPercent = 85, ProcessCpuPercent = 1 }));
     }
 
     [Fact]

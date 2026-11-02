@@ -12,7 +12,9 @@ namespace VibeRails.Jobs;
 /// <para>
 /// A large backlog waits for an idle machine (VIBE-172, <see cref="SearchBackfillGate"/>). While it
 /// waits, the job still sweeps the sources, so lexical search keeps finding new work, and it rechecks
-/// the machine every <see cref="HoldRecheck"/>.
+/// the machine every <see cref="HoldRecheck"/>. The gate is this job's whole CPU policy: the shared
+/// <see cref="JobBase"/> CPU deferral would stack a second wait on its cap and then hold every
+/// follow-up batch for another episode, so the job opts out of it. Memory pressure still defers it.
 /// </para>
 /// </remarks>
 public sealed class BertEmbeddingBackfillJob : JobBase
@@ -34,7 +36,7 @@ public sealed class BertEmbeddingBackfillJob : JobBase
         : this(logger, resources, indexing, TimeProvider.System) { }
 
     internal BertEmbeddingBackfillJob(ILogger<BertEmbeddingBackfillJob> logger,
-        ISystemResourceService resources, SearchIndexingService indexing, TimeProvider clock) : base(logger, resources)
+        ISystemResourceService resources, SearchIndexingService indexing, TimeProvider clock) : base(logger, resources, clock)
     {
         _resources = resources;
         _indexing = indexing;
@@ -49,6 +51,7 @@ public sealed class BertEmbeddingBackfillJob : JobBase
         _ => Idle,
     };
     protected override JobPriority Priority => JobPriority.Med;
+    protected override bool DefersForCpuPressure => false;
     protected override Task ExecuteJob(CancellationToken cancellationToken) => TickAsync(cancellationToken);
 
     /// <summary>One tick: a batch of inference, or only a sweep while a large backlog waits for an idle machine.</summary>

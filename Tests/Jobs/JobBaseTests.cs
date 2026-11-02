@@ -10,6 +10,7 @@ namespace Tests.Jobs;
 public sealed class JobBaseTests
 {
     private static readonly TimeSpan Settle = TimeSpan.FromMilliseconds(500);
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Fact]
     public async Task ABackloggedJobFollowsUpQuicklyAndReturnsToItsIntervalOnceIdle()
@@ -49,18 +50,50 @@ public sealed class JobBaseTests
     }
 
     [Fact]
-    public async Task AJobThatHasDeferredForItsMaximumRunsAnywayOnAMachineThatIsAlwaysBusy()
+    public async Task SustainedCpuPressureDefersAtMostTheCapThenTheJobKeepsItsCadence()
     {
-        var logger = new CountingLogger();
-        var job = new AlwaysBusyJob(Resources(underPressure: true), logger);
-        await job.StartAsync(CancellationToken.None);
-        try
-        {
-            // Pressure never lifts; only the deferral cap (VIBE-172) can produce a tick.
-            await WaitUntil(() => Volatile.Read(ref job.Ticks) >= 1);
-            Assert.True(Volatile.Read(ref logger.Deferrals) >= 1);
-        }
-        finally { await job.StopAsync(CancellationToken.None); }
+        var clock = new ManualClock();
+        var pressure = new Pressure { Cpu = true };
+        var job = new BackloggedJob(pressure.Resources(), new CountingLogger(), clock);
+
+        // Deferred ticks wait the full interval until the episode has lasted the cap.
+        var delays = new List<TimeSpan>();
+        while (job.Ticks == 0) { var delay = await job.RunTickAsync(Ct); delays.Add(delay); clock.Now += delay; }
+        Assert.All(delays.SkipLast(1), d => Assert.Equal(BackloggedJob.IntervalValue, d));
+        Assert.Equal(BackloggedJob.CpuCap, clock.Now - ManualClock.Start - BackloggedJob.FollowUpValue);
+
+        // The episode continues: every tick runs at the follow-up cadence instead of one per cap.
+        for (var i = 0; i < 20; i++) Assert.Equal(BackloggedJob.FollowUpValue, await job.RunTickAsync(Ct));
+        Assert.Equal(21, job.Ticks);
+
+        // A quiet tick ends the episode; the next busy spell defers again.
+        pressure.Cpu = false;
+        Assert.Equal(BackloggedJob.FollowUpValue, await job.RunTickAsync(Ct));
+        pressure.Cpu = true;
+        Assert.Equal(BackloggedJob.IntervalValue, await job.RunTickAsync(Ct));
+        Assert.Equal(22, job.Ticks);
+    }
+
+    [Fact]
+    public async Task MemoryPressureDefersWithoutACap()
+    {
+        var clock = new ManualClock();
+        var job = new BackloggedJob(new Pressure { Memory = true }.Resources(), new CountingLogger(), clock);
+
+        for (var i = 0; i < 100; i++) clock.Now += await job.RunTickAsync(Ct);
+
+        Assert.True(clock.Now - ManualClock.Start > TimeSpan.FromHours(8));
+        Assert.Equal(0, job.Ticks);
+    }
+
+    [Fact]
+    public async Task AJobWithItsOwnCpuPolicyIsNotDeferredForCpu()
+    {
+        var clock = new ManualClock();
+        var job = new BackloggedJob(new Pressure { Cpu = true }.Resources(), new CountingLogger(), clock, defersForCpu: false);
+
+        Assert.Equal(BackloggedJob.FollowUpValue, await job.RunTickAsync(Ct));
+        Assert.Equal(1, job.Ticks);
     }
 
     private static async Task WaitUntil(Func<bool> condition)
@@ -76,7 +109,7 @@ public sealed class JobBaseTests
     private static ISystemResourceService Resources(bool underPressure)
     {
         var resources = new Mock<ISystemResourceService>();
-        resources.SetupGet(r => r.IsUnderPressure).Returns(underPressure);
+        resources.SetupGet(r => r.IsCpuUnderPressure).Returns(underPressure);
         resources.SetupGet(r => r.Current).Returns(new ResourceSnapshot { ProcessCpuPercent = underPressure ? 95 : 5 });
         return resources.Object;
     }
@@ -95,16 +128,46 @@ public sealed class JobBaseTests
         }
     }
 
-    private sealed class AlwaysBusyJob(ISystemResourceService resources, ILogger logger) : JobBase(logger, resources)
+    /// <summary>A job that always has a backlog, driven tick by tick on a manual clock.</summary>
+    private sealed class BackloggedJob(ISystemResourceService resources, ILogger logger, TimeProvider clock, bool defersForCpu = true)
+        : JobBase(logger, resources, clock)
     {
+        public static readonly TimeSpan IntervalValue = TimeSpan.FromMinutes(5);
+        public static readonly TimeSpan FollowUpValue = TimeSpan.FromSeconds(5);
+        public static readonly TimeSpan CpuCap = TimeSpan.FromMinutes(30);
         public int Ticks;
-        protected override TimeSpan Interval => TimeSpan.FromMilliseconds(20);
-        protected override TimeSpan MaxDeferral => TimeSpan.FromMilliseconds(150);
+        protected override TimeSpan Interval => IntervalValue;
+        protected override TimeSpan NextDelay => FollowUpValue;
+        protected override JobPriority Priority => JobPriority.Med;
+        protected override TimeSpan MaxCpuDeferral => CpuCap;
+        protected override bool DefersForCpuPressure => defersForCpu;
         protected override Task ExecuteJob(CancellationToken cancellationToken)
         {
-            Interlocked.Increment(ref Ticks);
+            Ticks++;
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class Pressure
+    {
+        public bool Cpu;
+        public bool Memory;
+
+        public ISystemResourceService Resources()
+        {
+            var resources = new Mock<ISystemResourceService>();
+            resources.SetupGet(r => r.IsCpuUnderPressure).Returns(() => Cpu);
+            resources.SetupGet(r => r.IsMemoryUnderPressure).Returns(() => Memory);
+            resources.SetupGet(r => r.Current).Returns(new ResourceSnapshot { SystemCpuPercent = 95 });
+            return resources.Object;
+        }
+    }
+
+    private sealed class ManualClock : TimeProvider
+    {
+        public static readonly DateTimeOffset Start = new(2026, 11, 2, 12, 0, 0, TimeSpan.Zero);
+        public DateTimeOffset Now = Start;
+        public override DateTimeOffset GetUtcNow() => Now;
     }
 
     private sealed class CountingLogger : ILogger

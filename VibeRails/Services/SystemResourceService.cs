@@ -53,10 +53,13 @@ public interface ISystemResourceService
     ResourceSnapshot Current { get; }
 
     /// <summary>
-    /// True when machine-wide CPU is above 85% (this process's own above 70% where the platform has no
-    /// system-wide figure) or system memory exceeds the GC's built-in high-memory threshold.
+    /// True when machine-wide CPU is above 85%, or this process's own CPU is above 70% where the platform
+    /// has no system-wide figure.
     /// </summary>
-    bool IsUnderPressure { get; }
+    bool IsCpuUnderPressure { get; }
+
+    /// <summary>True when system memory load reaches the GC's built-in high-memory threshold.</summary>
+    bool IsMemoryUnderPressure { get; }
 }
 
 /// <summary>
@@ -82,12 +85,14 @@ public sealed class SystemResourceService : BackgroundService, ISystemResourceSe
     public ResourceSnapshot Startup { get; }
     public ResourceSnapshot Current => Volatile.Read(ref _current);
 
-    public bool IsUnderPressure
+    public bool IsCpuUnderPressure => ExceedsCpuThreshold(Current);
+
+    public bool IsMemoryUnderPressure
     {
         get
         {
             var gcInfo = GC.GetGCMemoryInfo();
-            return IsCpuUnderPressure(Current) || gcInfo.MemoryLoadBytes >= gcInfo.HighMemoryLoadThresholdBytes;
+            return gcInfo.MemoryLoadBytes >= gcInfo.HighMemoryLoadThresholdBytes;
         }
     }
 
@@ -107,8 +112,8 @@ public sealed class SystemResourceService : BackgroundService, ISystemResourceSe
         _current = snap;
     }
 
-    /// <summary>The CPU half of <see cref="IsUnderPressure"/>.</summary>
-    internal static bool IsCpuUnderPressure(ResourceSnapshot snapshot) => snapshot.SystemCpuPercent is { } system
+    /// <summary>The rule behind <see cref="IsCpuUnderPressure"/>, for one snapshot.</summary>
+    internal static bool ExceedsCpuThreshold(ResourceSnapshot snapshot) => snapshot.SystemCpuPercent is { } system
         ? system > SystemCpuPressureThreshold
         : snapshot.ProcessCpuPercent > ProcessCpuPressureThreshold;
 

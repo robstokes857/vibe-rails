@@ -21,8 +21,11 @@ the next semantic query loads it again. Inference and disposal share a lock.
 Resource pressure is machine-wide (VIBE-172). `SystemResourceService` samples whole-machine CPU
 (`GetSystemTimes` on Windows, `/proc/stat` on Linux) and, on Windows, the time since the last user
 input (`GetLastInputInfo`). Low and Med `JobBase` jobs defer while system CPU is above 85%, or while
-this process's own CPU is above 70% where no machine figure exists (macOS). They run anyway after
-30 minutes of deferral. Terminal tab children keep process-only sampling. Before each batch the
+this process's own CPU is above 70% where no machine figure exists (macOS). One CPU-pressure
+episode defers a job for at most 30 minutes; after that the job runs at its normal cadence until a
+tick sees the machine below the threshold. Memory pressure defers without a cap, as before. Terminal
+tab children keep process-only sampling. The backfill job opts out of the shared CPU deferral, because
+its own gate is its CPU policy and stacking the two delayed every batch. Before each batch the
 backfill job counts the pending sources and chunks (`CountPendingWork`, which reads only the work
 indexes). A backlog of up to 500 items runs immediately, so a new card or comment is searchable right
 away. A larger one, such as a first start or a `SearchIndexVersions` bump of about 18K chunks, waits
