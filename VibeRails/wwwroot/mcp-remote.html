@@ -10,7 +10,8 @@
       allow-same-origin) by the MCP Explorer. It therefore runs at an opaque/null origin
       with no access to VibeRails cookies, localStorage, or the parent DOM. It renders
       UNTRUSTED tool metadata/results from an arbitrary external MCP server. All backend
-      calls are brokered by the parent over postMessage — this page never fetches anything
+      calls are brokered by the parent over a private MessageChannel port it transfers in
+      reply to this page's ready announcement — this page never fetches anything
       itself, and it renders every value with HTML escaping. Do not add fetch()/img/script
       injection of remote data here; keep it isolated.
     -->
@@ -104,9 +105,11 @@
                 status: document.querySelector('[data-status]')
             };
 
+            // Private channel from the parent. Everything except the ready announcement uses it.
+            var port = null;
+
             function post(msg) {
-                // The parent validates event.source; an opaque-origin frame can only target '*'.
-                window.parent.postMessage(msg, '*');
+                if (port) { port.postMessage(msg); }
             }
 
             function setStatus(text) { if (els.status) { els.status.textContent = text || ''; } }
@@ -165,8 +168,7 @@
                 renderDetail();
             });
 
-            window.addEventListener('message', function (event) {
-                if (event.source !== window.parent) { return; }
+            function onParentMessage(event) {
                 var data = event.data;
                 if (!data || typeof data !== 'object') { return; }
                 switch (data.type) {
@@ -200,9 +202,22 @@
                         renderDetail();
                         break;
                 }
+            }
+
+            // The handshake is the only window message accepted: the parent answers the ready
+            // announcement by transferring the port, and all data travels over that port.
+            window.addEventListener('message', function (event) {
+                if (event.source !== window.parent) { return; }
+                var data = event.data;
+                if (!data || data.type !== 'mcp-remote-port' || !event.ports || !event.ports[0]) { return; }
+                if (port) { port.onmessage = null; port.close(); }
+                port = event.ports[0];
+                port.onmessage = onParentMessage;
             });
 
-            post({ type: 'mcp-remote-ready' });
+            // An opaque-origin frame cannot name the parent's origin. This constant announcement
+            // carries no data; the parent validates event.source before replying with the port.
+            window.parent.postMessage({ type: 'mcp-remote-ready' }, '*');
         })();
     </script>
 </body>

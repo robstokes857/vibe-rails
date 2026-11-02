@@ -72,6 +72,13 @@ modal chrome, touch sizing and the VS Code theme adapter. Uses the five producti
 treatment at desktop, tablet and phone widths, exercise retained controls, and verify theme colors.
 The static fixture never opens application databases or launches a CLI.
 
+### Focused MCP remote frame test (No Backend Required)
+
+From `UITests`, run `npx playwright test --config playwright.mcp-remote.config.js`.
+Reuses the page-header static server. It connects the real MCP Explorer to an intercepted remote
+endpoint and calls a tool in the real sandboxed `mcp-remote.html` frame. It also checks that the
+only window message the frame receives is the port handshake. No MCP server is contacted.
+
 ### Focused Board UX Tests (No Backend Required)
 
 ```powershell

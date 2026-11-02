@@ -465,6 +465,13 @@ endpoint so the request clears auth (which requires both); external targets rece
 headers explicitly supplied in the Explorer. Kestrel serves local
 loopback requests on a separate connection, so there is no self-deadlock.
 
+Remote tools render only in `mcp-remote.html`, an opaque-origin `sandbox="allow-scripts"` frame
+that never fetches. Its one window message is a constant `mcp-remote-ready`; the parent checks
+`event.source` and replies with a transferred `MessageChannel` port, and tool lists, calls and
+results travel only over that port. Never send data with `postMessage(…, '*')`: an opaque origin
+cannot be targeted, and a later document in the frame would receive it (CodeQL
+`js/cross-window-information-leak`). A reloaded frame gets a fresh port; `unload()` closes it.
+
 ## CLI auto-registration
 
 Managed agent launches always run a VibeRails MCP setup step before the agent starts. Codex and

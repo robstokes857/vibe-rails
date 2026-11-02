@@ -655,6 +655,9 @@ GIF/WebP image transfer is limited to 5 MiB, using metadata before BLOB load and
 length checks afterward. This transfer limit does not restrict human storage/downloads.
 Code/report viewers retain their opaque-origin iframe sandbox, MessageChannel lifecycle and
 explicit teardown; see the [viewer contract](VibeRails/wwwroot/js/modules/code-report/README.md).
+The MCP Explorer's remote frame follows the same rule: only constant handshake messages use
+target `'*'`, and data goes over the transferred port
+([MCP guide](VibeRails/Services/Mcp/AGENTS.md#mcp-explorer-dashboard)).
 
 ### MCP and agent launches
 

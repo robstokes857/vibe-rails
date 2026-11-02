@@ -50,6 +50,7 @@ export class McpController {
         content.appendChild(fragment);
         if (!this.root) return;
 
+        this._closeRemotePort();
         this.state = {
             mode: 'local',
             // Local (trusted)
@@ -62,7 +63,8 @@ export class McpController {
             remoteConnected: false,
             remoteEndpoint: '',
             remoteHeaders: {},
-            remoteReady: false,
+            // Private MessageChannel port to the frame document that announced itself.
+            remotePort: null,
             remotePending: null
         };
 
@@ -379,7 +381,7 @@ export class McpController {
     _sendToolsToFrame() {
         // The iframe announces itself with 'mcp-remote-ready'. If it hasn't yet, stash the
         // tools and flush them when it does.
-        if (!this.state.remoteReady) {
+        if (!this.state.remotePort) {
             this.state.remotePending = this.state.remoteTools;
             return;
         }
@@ -391,30 +393,45 @@ export class McpController {
     }
 
     _postToFrame(msg) {
+        // Data goes only through the private port, never through frame.contentWindow with
+        // target '*': an opaque-origin frame has no origin to target, and whatever document
+        // the frame holds later would receive a '*' message. That document never has the port.
+        this.state.remotePort?.postMessage(msg);
+    }
+
+    _closeRemotePort() {
+        const port = this.state?.remotePort;
+        if (!port) return;
+        port.onmessage = null;
+        port.close();
+        this.state.remotePort = null;
+    }
+
+    _handleRemoteMessage(event) {
         const frame = this.nodes.frame;
-        // The frame is an opaque-origin sandbox, so we can only target '*'. That is safe:
-        // messages to it carry only the untrusted MCP data it is meant to render.
-        if (frame && frame.contentWindow) {
-            frame.contentWindow.postMessage(msg, '*');
+        // Only accept messages from OUR sandboxed frame; never trust arbitrary senders.
+        if (!frame || !frame.contentWindow || event.source !== frame.contentWindow) return;
+        const data = event.data;
+        if (!data || typeof data !== 'object' || data.type !== 'mcp-remote-ready') return;
+
+        // Each frame document announces itself once. Give it a fresh private channel; a
+        // reloaded frame replaces the old port, so the previous document is cut off. The
+        // '*' handshake carries only the constant type and the transferred port.
+        this._closeRemotePort();
+        const channel = new MessageChannel();
+        channel.port1.onmessage = portEvent => this._handleFramePortMessage(portEvent.data);
+        frame.contentWindow.postMessage({ type: 'mcp-remote-port' }, '*', [channel.port2]);
+        this.state.remotePort = channel.port1;
+
+        if (this.state.remotePending) {
+            const tools = this.state.remotePending;
+            this.state.remotePending = null;
+            this._postToFrame({ type: 'mcp-remote-tools', tools, message: `${tools.length} tool(s)` });
         }
     }
 
-    async _handleRemoteMessage(event) {
-        const frame = this.nodes.frame;
-        // Only accept messages from OUR sandboxed frame; never trust arbitrary senders.
-        if (!frame || event.source !== frame.contentWindow) return;
-        const data = event.data;
+    async _handleFramePortMessage(data) {
         if (!data || typeof data !== 'object') return;
-
-        if (data.type === 'mcp-remote-ready') {
-            this.state.remoteReady = true;
-            if (this.state.remotePending) {
-                const tools = this.state.remotePending;
-                this.state.remotePending = null;
-                this._postToFrame({ type: 'mcp-remote-tools', tools, message: `${tools.length} tool(s)` });
-            }
-            return;
-        }
 
         if (data.type === 'mcp-remote-call') {
             const name = typeof data.name === 'string' ? data.name : '';
@@ -571,14 +588,15 @@ export class McpController {
         }
     }
 
-    // Called by app.loadView() before switching views so the global 'message' listener and any
-    // rendered xterm.js instances don't outlive this view. Idempotent and safe to call before
-    // the view has ever been loaded.
+    // Called by app.loadView() before switching views so the global 'message' listener, the
+    // remote frame's port and any rendered xterm.js instances don't outlive this view.
+    // Idempotent and safe to call before the view has ever been loaded.
     unload() {
         if (this._onRemoteMessage) {
             window.removeEventListener('message', this._onRemoteMessage);
             this._onRemoteMessage = null;
         }
+        this._closeRemotePort();
         this.disposeRenderedResults();
     }
 
