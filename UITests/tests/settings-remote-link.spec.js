@@ -5,6 +5,13 @@ const { test, expect } = process.env.VIBERAILS_REMOTE_LINK_STATIC === '1'
 const MASK = '••••••••abcd';
 const LINK_URL = 'https://viberails.ai/link';
 const COMPLETE_LINK_URL = `${LINK_URL}#code=BXQK-2M7T`;
+const PRESENCE_CODE = 'C0FFEE01';
+
+// Clearing or replacing the account key needs the same presence confirmation as the server (VIBE-182).
+async function confirmPresence(page) {
+    await page.locator('#settings-presence-proof').fill(PRESENCE_CODE);
+    await page.locator('#settings-presence-confirm').click();
+}
 
 async function openSettings(page, { bridge = false, signedIn = false, email = 'rob@example.com', organization } = {}) {
     await page.addInitScript(({ bridge }) => {
@@ -50,6 +57,7 @@ async function openSettings(page, { bridge = false, signedIn = false, email = 'r
         const payloads = {
             '/api/v1/context': { isInGit: false, rootPath: 'C:/fixture', launchDirectory: 'C:/fixture' },
             '/api/v1/settings/pin/status': { isSet: false },
+            '/api/v1/settings/security-challenge': { pinRequired: false, code: PRESENCE_CODE },
             '/api/v1/environments': { environments: [] },
             '/api/v1/llm-picker/preferences': { items: [] }
         };
@@ -110,8 +118,14 @@ test('browser sign-in opens from an explicit click and saves only the linked key
     expect(save.body.apiKey).toBe('');
     expect(save.body.computerName).toBe('Unsaved laptop name');
     expect(save.body.clearApiKey).toBe(false);
+    expect(save.body.presenceProof).toBeNull();
     await key.fill('');
     await root.locator('#settings-save-button').click();
+    await confirmPresence(page);
+    await expect(page.locator('[data-account-nav]:visible')).toBeVisible();
+    const clear = calls.filter(call => call.pathname === '/api/v1/settings' && call.method === 'POST').at(-1);
+    expect(clear.body.clearApiKey).toBe(true);
+    expect(clear.body.presenceProof).toBe(PRESENCE_CODE);
     await page.locator('[data-account-nav]:visible').click();
     await expect(page.locator('[data-remote-link-status]')).toContainText('Sign in to connect');
     await page.evaluate(mask => window.app.appEventClient._handleMessage(JSON.stringify({
@@ -305,11 +319,15 @@ test('sign-in completed from another tab updates Settings and nav without discar
 });
 
 test('manual keys have an honest fallback and account emails render as text', async ({ page }) => {
-    const { root } = await openSettings(page, { signedIn: true, email: '<img src=x onerror=alert(1)>' });
+    const { root, calls } = await openSettings(page, { signedIn: true, email: '<img src=x onerror=alert(1)>' });
     await expect(root.locator('[data-account-status]')).toHaveText('Logged in <img src=x onerror=alert(1)>');
     await expect(root.locator('[data-account-status] img')).toHaveCount(0);
     await root.locator('#setting-api-key').fill('different-manual-key');
     await root.locator('#settings-save-button').click();
+    await confirmPresence(page);
     await expect(root.locator('[data-account-status]')).toHaveText('API key configured');
     await expect(page.locator('[data-account-nav]:visible')).toHaveCount(0);
+    const save = calls.find(call => call.pathname === '/api/v1/settings' && call.method === 'POST');
+    expect(save.body.apiKey).toBe('different-manual-key');
+    expect(save.body.presenceProof).toBe(PRESENCE_CODE);
 });
