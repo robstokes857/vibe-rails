@@ -164,6 +164,20 @@ public sealed partial class SqliteSearchIndexStore(string databasePath, string s
             reader.GetInt32(5), reader.IsDBNull(6) ? null : reader.GetString(6), reader.IsDBNull(7) ? null : reader.GetString(7));
     }
 
+    public int CountPendingWork()
+    {
+        if (!File.Exists(databasePath)) return 0;
+        Initialize();
+        using var db = Open(true);
+        // Both predicates scan only IX_SearchSources_Work / IX_SearchChunks_Work; GetProgress's
+        // error and total counts read every row, including source text overflow pages.
+        using var cmd = Command(db, """
+            SELECT (SELECT count(*) FROM SearchSources WHERE ChunkVersion IS NULL OR ChunkVersion<>$chunks)
+                 + (SELECT count(*) FROM SearchChunks WHERE ModelVersion IS NULL OR ModelVersion<>$model)
+            """, ("$model", SearchIndexVersions.Model), ("$chunks", SearchIndexVersions.Chunks));
+        return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
+    }
+
     public int Count(string kind, bool vectors = false)
     {
         if (!File.Exists(databasePath)) return 0;

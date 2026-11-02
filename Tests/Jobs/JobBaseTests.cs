@@ -48,6 +48,21 @@ public sealed class JobBaseTests
         finally { await job.StopAsync(CancellationToken.None); }
     }
 
+    [Fact]
+    public async Task AJobThatHasDeferredForItsMaximumRunsAnywayOnAMachineThatIsAlwaysBusy()
+    {
+        var logger = new CountingLogger();
+        var job = new AlwaysBusyJob(Resources(underPressure: true), logger);
+        await job.StartAsync(CancellationToken.None);
+        try
+        {
+            // Pressure never lifts; only the deferral cap (VIBE-172) can produce a tick.
+            await WaitUntil(() => Volatile.Read(ref job.Ticks) >= 1);
+            Assert.True(Volatile.Read(ref logger.Deferrals) >= 1);
+        }
+        finally { await job.StopAsync(CancellationToken.None); }
+    }
+
     private static async Task WaitUntil(Func<bool> condition)
     {
         var deadline = DateTime.UtcNow.AddSeconds(15);
@@ -76,6 +91,18 @@ public sealed class JobBaseTests
         protected override Task ExecuteJob(CancellationToken cancellationToken)
         {
             if (Interlocked.Increment(ref Ticks) >= 3) _backlog = false;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class AlwaysBusyJob(ISystemResourceService resources, ILogger logger) : JobBase(logger, resources)
+    {
+        public int Ticks;
+        protected override TimeSpan Interval => TimeSpan.FromMilliseconds(20);
+        protected override TimeSpan MaxDeferral => TimeSpan.FromMilliseconds(150);
+        protected override Task ExecuteJob(CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref Ticks);
             return Task.CompletedTask;
         }
     }

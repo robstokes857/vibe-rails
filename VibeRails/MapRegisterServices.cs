@@ -441,7 +441,8 @@ namespace VibeRails
             serviceCollection.AddHostedService<LocalClientLifecycleWatchdogService>();
 
             // System resource monitor — injectable as ISystemResourceService, also runs as a hosted service.
-            serviceCollection.AddSingleton<SystemResourceService>();
+            // Tab children run no jobs, so they keep process-only sampling (VIBE-172).
+            serviceCollection.AddSingleton(_ => new SystemResourceService(systemWide: !isTerminalTabChildProcess));
             serviceCollection.AddSingleton<ISystemResourceService>(sp => sp.GetRequiredService<SystemResourceService>());
             serviceCollection.AddHostedService(sp => sp.GetRequiredService<SystemResourceService>());
 

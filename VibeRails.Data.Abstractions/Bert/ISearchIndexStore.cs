@@ -56,6 +56,12 @@ public interface ISearchIndexStore
         IReadOnlyCollection<string>? ids = null, string? sessionId = null, long? userInputId = null);
     IReadOnlyList<SearchMatch> ReadSessionChunks(int skip, int take, string? sessionId = null, int? chunk = null);
     SearchIndexProgress GetProgress();
+    /// <summary>
+    /// Sources awaiting chunking plus chunks awaiting inference at the current <see cref="SearchIndexVersions"/>:
+    /// the backlog size the backfill job schedules by (VIBE-172). Reads the work indexes only, so it is
+    /// cheap enough to ask before every batch, unlike <see cref="GetProgress"/>.
+    /// </summary>
+    int CountPendingWork();
     int Count(string kind, bool vectors = false);
     IReadOnlySet<string> GetBoardPrefixes(string projectPath);
     BoardSearchDocument? FindSessionCard(string sessionId, string projectPath);

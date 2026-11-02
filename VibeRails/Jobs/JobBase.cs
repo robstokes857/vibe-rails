@@ -20,6 +20,11 @@ public abstract class JobBase : BackgroundService
     /// </summary>
     protected virtual TimeSpan NextDelay => Interval;
     protected virtual JobPriority Priority => JobPriority.Low;
+    /// <summary>
+    /// After deferring for pressure this long without running, a Low or Med job runs its next tick anyway.
+    /// Pressure is machine-wide CPU (VIBE-172), so a box that is always busy must not stop these jobs for good.
+    /// </summary>
+    protected virtual TimeSpan MaxDeferral => TimeSpan.FromMinutes(30);
     protected abstract Task ExecuteJob(CancellationToken cancellationToken);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -34,6 +39,7 @@ public abstract class JobBase : BackgroundService
 
         using var timer = new PeriodicTimer(NextDelay);
         var tickCount = 0L;
+        DateTime? deferredSince = null;
 
         try
         {
@@ -41,20 +47,29 @@ public abstract class JobBase : BackgroundService
             {
                 tickCount++;
 
-                // Defer low-to-medium priority jobs when the system is under pressure.
+                // Defer low-to-medium priority jobs when the system is under pressure, up to MaxDeferral.
                 if (Priority <= JobPriority.Med && _resources.IsUnderPressure)
                 {
                     var s = _resources.Current;
-                    _logger.LogDebug(
-                        "[{Job}] Deferring tick — system under pressure (CPU={Cpu:F0}%, Mem={Mem:F0}%)",
-                        jobName, s.ProcessCpuPercent, s.MemoryUsedPercent);
+                    deferredSince ??= DateTime.UtcNow;
+                    var deferredFor = DateTime.UtcNow - deferredSince.Value;
+                    if (deferredFor < MaxDeferral)
+                    {
+                        _logger.LogDebug(
+                            "[{Job}] Deferring tick — system under pressure (CPU={Cpu:F0}%, process={ProcessCpu:F0}%, Mem={Mem:F0}%)",
+                            jobName, s.SystemCpuPercent ?? s.ProcessCpuPercent, s.ProcessCpuPercent, s.MemoryUsedPercent);
+                        Serilog.Log.Information(
+                            "[Job:{Job}] Deferred tick={Tick} reason=pressure systemCpu={SystemCpu:F0} processCpu={Cpu:F0} mem={Mem:F0}",
+                            jobName, tickCount, s.SystemCpuPercent, s.ProcessCpuPercent, s.MemoryUsedPercent);
+                        // A deferred backlog waits for the normal interval, not the follow-up delay.
+                        Reschedule(timer, Interval);
+                        continue;
+                    }
                     Serilog.Log.Information(
-                        "[Job:{Job}] Deferred tick={Tick} reason=pressure cpu={Cpu:F0} mem={Mem:F0}",
-                        jobName, tickCount, s.ProcessCpuPercent, s.MemoryUsedPercent);
-                    // A deferred backlog waits for the normal interval, not the follow-up delay.
-                    Reschedule(timer, Interval);
-                    continue;
+                        "[Job:{Job}] Running under pressure after deferring for {DeferredFor} tick={Tick} systemCpu={SystemCpu:F0} processCpu={Cpu:F0} mem={Mem:F0}",
+                        jobName, deferredFor, tickCount, s.SystemCpuPercent, s.ProcessCpuPercent, s.MemoryUsedPercent);
                 }
+                deferredSince = null;
 
                 var started = DateTime.UtcNow;
                 Serilog.Log.Information("[Job:{Job}] Tick begin. tick={Tick} pid={Pid}", jobName, tickCount, Environment.ProcessId);

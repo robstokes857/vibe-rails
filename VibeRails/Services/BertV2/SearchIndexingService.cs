@@ -10,6 +10,8 @@ public sealed class SearchIndexingService(ISearchIndexStore store, IBoardStore b
     private static readonly string[] Kinds = ["board", "input", "session"];
     /// <summary>A sweep of a very large corpus yields after this long; its durable cursor resumes on the next batch.</summary>
     private static readonly TimeSpan SweepBudget = TimeSpan.FromSeconds(10);
+    /// <summary>A corpus swept this recently is skipped, in every process, so follow-up batches do not re-sweep it.</summary>
+    private static readonly TimeSpan SweepInterval = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan InferenceBudget = TimeSpan.FromSeconds(3);
 
     public static SearchIndexingService Create(IServiceProvider services) => new(
@@ -24,7 +26,7 @@ public sealed class SearchIndexingService(ISearchIndexStore store, IBoardStore b
     public async Task<bool> RunBatchAsync(CancellationToken ct, int perKind = 10)
     {
         var stopwatch = Stopwatch.StartNew();
-        var sweep = await store.ReconcileAsync(board, 25, ct, SweepBudget, TimeSpan.FromMinutes(5));
+        var sweep = await store.ReconcileAsync(board, 25, ct, SweepBudget, SweepInterval);
         var inference = Stopwatch.StartNew();
         var completed = 0;
         var more = sweep.Incomplete;
@@ -57,6 +59,22 @@ public sealed class SearchIndexingService(ISearchIndexStore store, IBoardStore b
         Serilog.Log.Information("[SearchIndex] Batch completed in {Milliseconds} ms: swept={Documents} changed={Changed} finished={Completed} more={More}",
             stopwatch.ElapsedMilliseconds, sweep.Documents, sweep.Changed, completed, more);
         return more;
+    }
+
+    /// <summary>Sources and chunks still waiting at the current versions: the backlog the job schedules by.</summary>
+    public int CountPendingWork() => store.CountPendingWork();
+
+    /// <summary>
+    /// Reconciles the source corpora without chunking or inference (VIBE-172). Lexical search reads
+    /// sources directly, so a new card stays findable while a large backlog waits for an idle machine.
+    /// </summary>
+    public async Task SweepAsync(CancellationToken ct)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var sweep = await store.ReconcileAsync(board, 25, ct, SweepBudget, SweepInterval);
+        if (sweep.Documents > 0 || sweep.Incomplete)
+            Serilog.Log.Information("[SearchIndex] Sweep completed in {Milliseconds} ms while the backlog waits: swept={Documents} changed={Changed} incomplete={Incomplete}",
+                stopwatch.ElapsedMilliseconds, sweep.Documents, sweep.Changed, sweep.Incomplete);
     }
 
     private async Task<bool> Process(SearchWork work, bool source, Action action, CancellationToken ct)

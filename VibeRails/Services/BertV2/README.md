@@ -7,7 +7,7 @@ result metadata use only the derived search database. `BoardSearchService` is sh
 dashboard, link candidates, `search_board_cards` and card discovery in `search_history`.
 
 The existing root-only `BertEmbeddingBackfillJob` sweeps every source corpus and then runs bounded
-inference rounds, subject to the existing resource-pressure policy. An idle root ticks every five
+inference rounds, subject to the resource-pressure policy below. An idle root ticks every five
 minutes; each corpus's durable completion time suppresses duplicate sweeps across roots for five
 minutes. While a sweep or an inference backlog is unfinished the job follows up after five seconds
 (VB-2GUR8-187: the earlier five-second cadence re-upserted the whole corpus around the clock in
@@ -17,6 +17,21 @@ Ingestion does not require the model; query embedding and background model const
 so keyword search survives missing model files or native ONNX dependencies. The singleton owner
 releases the native model after two minutes without inference, including in stdio MCP processes;
 the next semantic query loads it again. Inference and disposal share a lock.
+
+Resource pressure is machine-wide (VIBE-172). `SystemResourceService` samples whole-machine CPU
+(`GetSystemTimes` on Windows, `/proc/stat` on Linux) and, on Windows, the time since the last user
+input (`GetLastInputInfo`). Low and Med `JobBase` jobs defer while system CPU is above 85%, or while
+this process's own CPU is above 70% where no machine figure exists (macOS). They run anyway after
+30 minutes of deferral. Terminal tab children keep process-only sampling. Before each batch the
+backfill job counts the pending sources and chunks (`CountPendingWork`, which reads only the work
+indexes). A backlog of up to 500 items runs immediately, so a new card or comment is searchable right
+away. A larger one, such as a first start or a `SearchIndexVersions` bump of about 18K chunks, waits
+for an idle machine. Idle means everything except this process has used under 25% CPU for two
+minutes and, where reported, nobody has touched the keyboard or mouse for two minutes. The backlog
+starts anyway 30 minutes after it was first seen (`SearchBackfillGate`). While it waits, the job
+rechecks every 30 seconds and runs only the source sweep, without chunking or inference, so keyword
+search keeps finding new work. Neither those rechecks nor the five-second follow-up batches repeat
+a full sweep, because each corpus's five-minute completion time already suppresses it.
 
 SQLite's vector extension is loaded by absolute path beside the executable in published
 installs (`vec0.dll`, `vec0.dylib` or `vec0.so`). Development builds also support
