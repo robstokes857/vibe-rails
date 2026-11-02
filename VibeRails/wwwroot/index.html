@@ -4347,6 +4347,7 @@
                 .board-card-editor .board-editor-side {
                     display: flex;
                     flex-direction: column;
+                    min-width: 0;
                     min-height: 0;
                     padding: 0;
                     overflow: visible;
@@ -4357,6 +4358,7 @@
                     flex: 1 1 auto;
                     flex-direction: column;
                     gap: 1.1rem;
+                    min-width: 0;
                     min-height: 0;
                     overflow: visible;
                     padding: 1.1rem 1.15rem 0.6rem;
@@ -5247,20 +5249,6 @@
                     padding: 0.2rem 0.35rem;
                 }
 
-                .board-chat-controls {
-                    flex: 0 1 auto;
-                    flex-wrap: nowrap;
-                }
-
-                .board-chat-controls > .btn {
-                    flex: 0 0 auto;
-                }
-
-                .board-chat-controls .project-health-fix-picker {
-                    flex: 1 1 180px;
-                    min-width: 0;
-                }
-
                 @media (max-width: 520px) {
                     .board-card-editor > .board-editor-actions {
                         display: grid;
@@ -5272,11 +5260,6 @@
                     }
 
                     .board-editor-open-terminals {
-                        grid-column: 1 / -1;
-                        grid-row: 1;
-                    }
-
-                    .board-chat-controls {
                         grid-column: 1 / -1;
                         grid-row: 1;
                     }

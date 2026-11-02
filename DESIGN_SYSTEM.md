@@ -335,6 +335,10 @@ No screen uses Bootstrap dropdowns, and `bootstrap.bundle.min.js` loads without 
 - Use `<textarea>` for multiline descriptions and a native search input for filtering lists.
 - State required or optional status in text. Do not rely on a red border or an asterisk alone.
 
+Compact discussion forms put the optional question first, followed by a labelled agent
+picker and a full-width **Start discussion** action at the bottom. Use a section heading
+for the task and keep blank-question guidance below the textarea.
+
 | Part | Value |
 | --- | --- |
 | Field | `--control-height`, 9px × 11px padding, `--color-bg-base` fill, `--control-border` border, `--radius-control`, 16px text |

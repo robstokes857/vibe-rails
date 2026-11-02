@@ -1581,7 +1581,7 @@ test('display IDs are visible and editable while permanent IDs remain available'
     const editor = page.locator('[data-board-card-editor]');
     await expect(page.locator('.modal-title')).toContainText('VIBE-7');
     await expect(editor.locator('.board-editor-actions')).not.toContainText('Chat with agent');
-    await expect(editor.locator('.board-discussion')).toContainText('Ask about previous work. Leave the question empty to open a discussion and wait.');
+    await expect(editor.getByRole('region', { name: 'Discuss this card' })).toContainText('Leave blank to start an open discussion.');
     const picker = editor.locator('.board-chat-controls .ts-wrapper');
     const chat = editor.locator('[data-board-chat]');
     expect(await picker.evaluate((element, other) => Boolean(element.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING), await chat.elementHandle())).toBe(true);
@@ -2909,7 +2909,7 @@ test('Chat defaults to the assignee, saves first and focuses the returned tab', 
     await page.getByText('Description images', { exact: true }).click();
     await expect(page.locator('[data-board-chat-agent]')).toHaveValue('base:codex');
     await page.locator('#board-card-title').fill('Discuss this card');
-    await page.getByRole('button', { name: 'Chat', exact: true }).click();
+    await page.getByRole('button', { name: 'Start discussion', exact: true }).click();
     await expect.poll(() => page.evaluate(() => window.__chatTabs)).toEqual(['board_background']);
     const writes = requests.filter(item => item.method === 'PUT' || item.path.endsWith('/launch'));
     expect(writes[0].body.title).toBe('Discuss this card');
@@ -2917,10 +2917,15 @@ test('Chat defaults to the assignee, saves first and focuses the returned tab', 
     await expect(page.locator('[data-board-card-editor]')).toHaveCount(0);
 });
 
-for (const width of [1440, 390]) {
+for (const width of [1440, 1024, 768, 390, 375, 320]) {
     test(`previous work and an initial question remain usable alongside work at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 950 });
-        const requests = await openBoard(page, { active: true, assignee: 'base:codex', onCard: card => {
+        const discussionTarget = width === 375 ? 'env:17:codex' : 'base:codex';
+        const requests = await openBoard(page, { active: true, assignee: discussionTarget, extraPickerItems: [
+            { key: 'env:17:codex', kind: 'environment', group: 'Custom Environments',
+                label: 'Card history and implementation review assistant (codex)',
+                cli: 'codex', environmentId: 17, enabled: true, order: 3 }
+        ], onCard: card => {
             card.previousWork = { outcome: 'Description overflow fixed', decisions: 'Keep a single scroll region', validation: 'Browser regression passed', outstanding: 'None',
                 author: { label: 'Codex', sessionId: 'earlier-session' }, createdUtc: '2026-10-02T00:00:00Z',
                 files: [{ path: 'VibeRails/wwwroot/js/modules/board-controller.js', reason: 'Open the card editor here', role: 'implementation', symbol: 'openCardEditor', commit: 'cf302fe', status: 'historical reference; verify current code' }] };
@@ -2930,16 +2935,39 @@ for (const width of [1440, 390]) {
             window.app.terminalController.adoptLaunchedTab = async id => { window.__discussionTabs.push(id); return true; };
         });
         await page.getByText('Description images', { exact: true }).click();
+        if (width === 375) await page.addStyleTag({ content: '.board-discussion { zoom: 1.25; }' });
         await page.locator('[data-board-previous-work] summary').click();
         await expect(page.locator('[data-board-previous-work]')).toContainText('Open the card editor here');
         const question = page.getByLabel('Initial question (optional)');
         await question.fill('Why did we choose one scroll region?');
-        await question.scrollIntoViewIfNeeded();
+        await expect(question).toHaveAccessibleDescription('Leave blank to start an open discussion.');
+        const discussion = page.getByRole('region', { name: 'Discuss this card' });
+        const picker = discussion.locator('.ts-control');
+        const start = discussion.getByRole('button', { name: 'Start discussion', exact: true });
+        const questionBounds = await question.boundingBox();
+        const pickerBounds = await picker.boundingBox();
+        const startBounds = await start.boundingBox();
+        expect(pickerBounds.y).toBeGreaterThan(questionBounds.y + questionBounds.height);
+        expect(startBounds.y).toBeGreaterThanOrEqual(pickerBounds.y + pickerBounds.height);
+        expect(startBounds.width).toBeCloseTo(questionBounds.width, 0);
+        expect(startBounds.height).toBeGreaterThanOrEqual(width <= 520 ? 44 : 40);
+        for (const bounds of [questionBounds, pickerBounds, startBounds]) {
+            expect(bounds.x).toBeGreaterThanOrEqual(0);
+            expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+        }
+        await discussion.scrollIntoViewIfNeeded();
         await page.screenshot({ path: testInfo.outputPath(`recall-${width}.png`) });
-        await page.getByRole('button', { name: 'Chat', exact: true }).click();
+        await question.focus();
+        await page.keyboard.press('Tab');
+        await expect(page.locator('.ts-dropdown:visible').getByRole('textbox', { name: 'Search…', exact: true })).toBeFocused();
+        await page.keyboard.press('Enter');
+        await expect(discussion.locator('[data-board-chat-agent]')).toHaveValue(discussionTarget);
+        await page.keyboard.press('Tab');
+        await expect(start).toBeFocused();
+        await start.click();
         await expect.poll(() => page.evaluate(() => window.__discussionTabs)).toEqual(['board_background']);
         const launch = requests.find(item => item.path.endsWith('/launch'));
-        expect(launch.body).toEqual({ selection: 'base:codex', intent: 'chat', question: 'Why did we choose one scroll region?' });
+        expect(launch.body).toEqual({ selection: discussionTarget, intent: 'chat', question: 'Why did we choose one scroll region?' });
     });
 }
 
@@ -2961,7 +2989,7 @@ for (const [assignee, selection] of [
         await expect(page.locator('[data-board-chat-agent]')).toHaveValue(selection);
         await expect(page.locator('#board-card-assignee')).toHaveValue(assignee || '');
         await page.screenshot({ path: testInfo.outputPath('board-chat-picker.png') });
-        await page.getByRole('button', { name: 'Chat', exact: true }).click();
+        await page.getByRole('button', { name: 'Start discussion', exact: true }).click();
         await expect.poll(() => page.evaluate(() => window.__chatTabs)).toEqual(['board_background']);
 
         const writes = requests.filter(item => item.method === 'PUT' || item.path.endsWith('/launch'));
@@ -3212,7 +3240,7 @@ test('a running agent exposes Go to agent while keeping Save and the session ava
     });
     await page.getByText('Description images', { exact: true }).click();
     await expect(page.getByRole('button', { name: 'Go to agent', exact: true })).toBeEnabled();
-    await expect(page.getByRole('button', { name: 'Chat', exact: true })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Start discussion', exact: true })).toBeEnabled();
     await expect(page.locator('[data-board-save-card]')).toBeEnabled();
     await expect(page.locator('[data-board-open-session="session_test"]')).toBeEnabled();
     await page.getByRole('button', { name: 'Go to agent', exact: true }).click();

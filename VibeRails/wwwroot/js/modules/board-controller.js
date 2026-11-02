@@ -1593,17 +1593,23 @@ export class BoardController {
                         </div>
                     </div>
 
-                    ${card ? `<section class="board-side-section board-discussion">
-                        <label class="board-editor-label" for="board-chat-agent">Discuss this card</label>
-                        <div class="board-chat-controls">
-                            <select id="board-chat-agent" class="form-select form-select-sm" data-board-chat-agent aria-label="Agent for card discussion"></select>
-                            <button type="button" class="btn btn-link btn-sm" data-board-chat aria-describedby="board-chat-help">
-                                <i class="fa-solid fa-comments" aria-hidden="true"></i> Chat
-                            </button>
+                    ${card ? `<section class="board-side-section board-discussion" aria-labelledby="board-discussion-title">
+                        <h3 class="board-discussion-title" id="board-discussion-title">Discuss this card</h3>
+                        <div>
+                            <label class="board-editor-label" for="board-chat-question">Initial question <span class="text-muted">(optional)</span></label>
+                            <textarea id="board-chat-question" class="form-control" data-board-chat-question maxlength="1000" rows="3" spellcheck="true" placeholder="e.g. Where did we leave off?" aria-describedby="board-chat-help"></textarea>
+                            <p class="board-editor-muted" id="board-chat-help">Leave blank to start an open discussion.</p>
                         </div>
-                        <label class="board-editor-label mt-2" for="board-chat-question">Initial question (optional)</label>
-                        <textarea id="board-chat-question" class="form-control form-control-sm" data-board-chat-question maxlength="1000" rows="2" spellcheck="true"></textarea>
-                        <p class="board-editor-muted mt-2" id="board-chat-help">Ask about previous work. Leave the question empty to open a discussion and wait.</p>
+                        <div>
+                            <label class="board-editor-label" for="board-chat-agent">Discuss with</label>
+                            <div class="board-chat-controls">
+                                <select id="board-chat-agent" class="form-select" data-board-chat-agent aria-label="Agent for card discussion"></select>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-primary" data-board-chat>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>
+                            Start discussion
+                        </button>
                     </section>` : ''}
 
 

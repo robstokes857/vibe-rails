@@ -19626,13 +19626,33 @@ body.performance-mode .brand-text-sm {
     overflow-wrap: anywhere;
 }
 
-/* Keep the card discussion action visibly distinct from its agent picker. */
-.board-chat-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
-.board-chat-controls > select,
-.board-chat-controls > .ts-wrapper { flex: 1 1 160px; min-width: 0; }
-.board-chat-controls > [data-board-chat] { padding: .35rem .2rem; text-align: left; text-decoration: none; }
-.board-chat-controls > [data-board-chat]:hover:not(:disabled) { text-decoration: underline; }
-.board-chat-controls > [data-board-chat]:focus-visible { outline: 2px solid var(--bs-primary); outline-offset: 2px; }
+/* Read and compose first; choose an agent and start the discussion below. */
+.board-discussion { gap: var(--space-4); }
+.board-discussion-title {
+    margin: 0;
+    color: var(--color-text);
+    font-family: var(--font-display);
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1.4;
+}
+.board-discussion .board-editor-label { margin-bottom: var(--space-2); }
+.board-discussion .board-editor-muted { margin-top: var(--space-2); }
+.board-discussion textarea { resize: vertical; }
+.board-chat-controls { min-width: 0; }
+.board-chat-controls > .ts-wrapper { width: 100%; min-width: 0; }
+.board-chat-controls .ts-control {
+    min-height: var(--control-height);
+    border-color: var(--control-border);
+    background: var(--color-bg-base);
+    font-size: 16px;
+}
+.board-chat-controls .ts-wrapper.focus .ts-control {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+    box-shadow: none;
+}
+.board-discussion > [data-board-chat] { width: 100%; white-space: normal; }
 
 
 .project-health-scan-transcript .vca-console-output {

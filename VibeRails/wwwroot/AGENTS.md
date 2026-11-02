@@ -435,8 +435,9 @@ filter lists the keys present on the board. **Start work** (`startWork`) saves t
 the board without adopting/focusing the terminal or navigating away. Creating or saving a
 card never immediately launches an agent (a lane Automation can queue after its delay). Sessions
 opens a linked terminal. The
-**Chat with agent** action has a separate discussion section, with the shared LLM/environment
-picker followed by a link-style button. It defaults to the card's assignee (or the first enabled
+**Start discussion** action has a separate discussion section: an optional initial question
+with blank-question guidance, the labelled shared LLM/environment picker, then a full-width
+primary button. It defaults to the card's assignee (or the first enabled
 target for an unassigned card); its selection is independent of the saved assignment. It saves
 the card and uses the same launch route with the selected target and `intent: 'chat'`,
 then adopts/focuses the returned tab (or navigates to `terminal-focus`). The prompt asks for a
@@ -603,9 +604,9 @@ footer sibling of that scroller, so they stay reachable and never paint over the
 The viewport-fill + single-scroller layout is pinned in
 `Tests/wwwroot/js/board-card-modal.test.mjs`.
 
-Buttons follow the app's outline register (`btn-outline-primary` / `-secondary` / `-danger`) rather
-than solid fills; there are no solid `btn-primary` buttons in this view. The composer's submit sits
-in a footer **below** the textarea, not in its toolbar.
+Buttons follow the shared design system. **Start discussion** uses the primary action below
+its question and agent picker; the existing editor footer keeps its outline actions. The
+comment composer's submit sits in a footer **below** the textarea, not in its toolbar.
 
 **Do not reintroduce tabs here** — they were tried and rejected.
 
@@ -1509,8 +1510,8 @@ link in their immutable run trigger. Linked recordings use the existing open/rep
 
 Board tags are hidden: no tile chips, editor field, or tag filter. Ignore legacy saved tag filters
 and omit tags on card saves; keep stored tag data and API compatibility. The discussion controls
-have their own section away from Start work, with the shared agent picker before a text-style
-Chat button and explanatory text.
+have their own section away from Start work, ordered question, shared agent picker, then
+**Start discussion**, with explanatory text associated with the question.
 
 The card editor groups linked recordings into Sessions and Automations (`session.isAutomation`),
 with separate counts and the same live-terminal/replay/remove actions. New Automation links carry
