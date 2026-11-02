@@ -471,6 +471,7 @@ Use `role="status"` or a polite live region for confirmations; reserve `role="al
 | API keys | "Active": Success; "Legacy": Warning; "Revoked" and other states: Neutral; capability chips: Neutral |
 | Signing keys | "Active", "Valid": Success; "Invalid": Danger; "Revoked": Neutral |
 | Push status | Dot plus sentence: on Success, working Accent (pulsing), off Neutral, blocked Danger, unsupported Warning |
+| Account (desktop top bar) | "Signed in": Success with a dot; "Personal account": Neutral; "Managed": Active with a building icon |
 
 **In the code today**
 
@@ -534,6 +535,8 @@ These patterns belong to the public home page and the header. Task screens do no
 ### Responsive behavior and motion
 
 Start with a single column. Add columns only when controls and labels fit naturally. At narrow widths, stack form groups and wrap action rows; avoid horizontal page scrolling. Test at 320px, 375px, 768px and 1024px, including enlarged text and long labels.
+
+Hosted boards keep at least 24rem of lane height. When wrapped controls, enlarged text or a short viewport leave less room, the page scrolls vertically instead of compressing the card list. Lanes retain their own card scrolling and horizontal lane navigation. Card attachments offer owners a labelled image picker and Upload image action, format/size guidance, an inline error and a polite upload status. Shared members only read attachments.
 
 Keep menus and dialogs inside the viewport. Do not hide essential actions behind hover. Maintain 16px editable-field text on small screens and adequate touch targets. Preserve visible focus when sticky navigation or overlays are present.
 
@@ -654,6 +657,29 @@ Desktop aliases for values specified above (these add no new visual choices):
 | `--tone-danger-border` | `#a45261` | Destructive action and alert edge |
 | `--tone-success-border` | `#2d6155` | Success alert edge |
 | `--dialog-backdrop` | `#080810c9` | Modal overlay |
+| `--menu-item-hover` | `#343447` | Menu item hover; under the VS Code theme, a 10% text tint over the menu fill |
+
+The desktop footer (`.app-footer`) is hidden on every view. Put persistent status in the top bar, not the footer.
+
+#### Top bar account
+
+Signed in, the desktop top bar shows the viberails.ai account as a chip beside Exit, with a popover (VB-0U0SI-331). Signed out, the existing **Sign in / Sign up** accent pill stays the only account control, with no popup, toast or repeated reminder.
+
+| Part | Value |
+| --- | --- |
+| Chip | 32px pill (30px in terminal focus), `--color-bg-surface-hover` fill, `--color-border` ring, 13px Manrope 600; hover and open: `--action-secondary-hover` fill and `--color-accent` ring. The chevron turns over while open, without motion under reduced motion |
+| Avatar | 24px round (40px in the popover), Active tone, the email's first character in Sora 600. A key without an email shows a muted Lucide `key-round` on `--color-bg-surface` inside a `--control-border` ring |
+| Label | The email, ending in an ellipsis past 14rem (9rem below 1500px); hidden below 1120px, leaving the avatar. A key without an email reads "API key" |
+| Managed marker | A `--color-border` divider, then Lucide `building-2` and the organization name in `--tone-active-fg`; the icon alone below 1500px |
+| Popover | The Menu panel standard, 320px wide, right-aligned to the chip and 6px below the top bar; below 576px it spans the window under the bar with 8px side gutters |
+| Popover header | The avatar, the email (breaks anywhere), then badges: "Signed in" with "Personal account" or "Managed". The Neutral badge takes a `--color-border` edge because its fill matches the panel |
+| Organization block | `--color-bg-surface`, `--color-border`, `--radius-control`, a 32px Active icon tile, the organization name and "Your organization manages sign-in for this account. Some settings may be set by your administrator." |
+| Key row | "API key" and the visible end of the settings mask (`••••abcd`) in `--font-mono`, between `--color-border` lines |
+| Actions | Menu items: **Account settings**, **Manage account on viberails.ai** (a link to `https://viberails.ai/Account`) and **Switch account**. A key without an email shows "Sign in to show which account this computer uses." and **Sign in to viberails.ai** in `--color-accent` instead of the last two. A managed account disables **Switch account** and explains below it: "Your administrator controls which account this computer uses." |
+
+The popover is a simple popover of ordinary buttons (`role="dialog"`, `aria-label="viberails.ai account"`), not an ARIA menu. The chip carries `aria-haspopup`, `aria-expanded` and `aria-controls`; opening focuses the first action, Tab moves through the rest, and Escape or an outside click closes it, with Escape returning focus to the chip. The chip's accessible name states the account and any organization ("Account menu. Signed in as rob@example.com, managed by Contoso"). Email and organization names are set as text, never markup. The component uses inline Lucide icons only.
+
+The managed state is a placeholder: nothing supplies an organization yet. The Settings Account card follows it ("Logged in {email}, managed by {organization}", **Switch account** disabled). Implemented by `VibeRails/wwwroot/js/modules/account-nav.js`, the `data-account-menu-host` markup in `index.html` and the `.app-account*` rules in `style.css`; the data contract is in `VibeRails/wwwroot/AGENTS.md`.
 
 ## Decisions made while merging
 

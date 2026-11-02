@@ -24,6 +24,7 @@
     --action-primary-hover: #6d28d9;
     --action-primary-active: #5b21b6;
     --action-secondary-hover: #303040;
+    --menu-item-hover: #343447;
     --action-danger-bg: #2a171e;
     --action-danger-hover: #46212e;
     --tone-danger-border: #a45261;
@@ -146,6 +147,8 @@ html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] {
     --action-primary-hover: var(--vb-vscode-primary-hover);
     --action-primary-active: var(--vb-vscode-primary-hover);
     --action-secondary-hover: var(--vb-vscode-surface-hover);
+    /* Menus are filled with the surface hover color, so their rows need a step of their own. */
+    --menu-item-hover: color-mix(in srgb, var(--color-text) 10%, var(--vb-vscode-surface-hover));
     --action-danger-bg: var(--tone-danger-bg);
     --action-danger-hover: color-mix(in srgb, var(--tone-danger-fg) 18%, var(--color-bg-surface));
     --tone-danger-border: var(--tone-danger-fg);
@@ -10538,10 +10541,10 @@ kbd:not(.ch-search-kbd) {
     height: 55%;
 }
 
-/* The chip sits 10px above the bar's bottom edge; the panel opens just under the bar. */
+/* The chip is centred in the bar; the panel opens 6px below the bar's bottom edge. */
 .app-account-menu {
     position: absolute;
-    top: calc(100% + 16px);
+    top: calc(100% + (var(--navbar-height) - 100%) / 2 + 6px);
     right: 0;
     z-index: 1060;
     width: 320px;
@@ -10740,7 +10743,7 @@ kbd:not(.ch-search-kbd) {
 .app-account-menu-item:hover:not(:disabled),
 .app-account-menu-item:focus-visible {
     color: var(--color-text);
-    background: var(--action-secondary-hover);
+    background: var(--menu-item-hover);
 }
 
 .app-account-menu-item:focus-visible {
