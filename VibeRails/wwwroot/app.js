@@ -467,12 +467,6 @@ export class VibeControlApp {
                 this.accountNav.toggle();
                 return;
             }
-            const goSettings = e.target.closest('[data-action="navigate-settings"]');
-            if (goSettings) {
-                e.preventDefault();
-                this.navigate('settings', {}, { resetStack: true });
-            }
-
             const goNav = e.target.closest('.app-subnav [data-action="navigate"]');
             if (goNav) {
                 e.preventDefault();
@@ -797,7 +791,7 @@ export class VibeControlApp {
                         ? 'ai-agents'
                         : view;
         document.querySelectorAll('.app-subnav-link').forEach(link => {
-            const linkView = link.getAttribute('data-view') || (link.getAttribute('data-action') === 'navigate-home' ? 'dashboard' : (link.getAttribute('data-action') === 'navigate-settings' ? 'settings' : ''));
+            const linkView = link.getAttribute('data-view') || (link.getAttribute('data-action') === 'navigate-home' ? 'dashboard' : '');
 
             if (linkView === highlightView) {
                 link.classList.add('active');
@@ -1162,6 +1156,9 @@ export class VibeControlApp {
         const account = accountSummary(this.appSettings);
         const managed = account.state === 'managed';
         for (const link of document.querySelectorAll('[data-account-nav]')) {
+            link.hidden = hasKey;
+        }
+        for (const link of document.querySelectorAll('[data-settings-nav]')) {
             link.hidden = hasKey;
         }
         for (const status of document.querySelectorAll('[data-account-status]')) {

@@ -29,6 +29,8 @@ public sealed class ConversationTitleClientTests
         // The word break is in the first half, so the cut falls inside the run of x.
         Assert.Equal($"{ConversationTitleClient.UserTextHeading}\n{userText[..(ConversationTitleClient.MaxUserTextChars - 1)]}…", sentText);
         Assert.Equal("Fix login configuration", result.Title);
+        Assert.Equal("title_received", result.Outcome);
+        Assert.Equal(200, result.HttpStatusCode);
     }
 
     [Fact]
@@ -184,6 +186,8 @@ public sealed class ConversationTitleClientTests
         Assert.Equal(TimeSpan.FromSeconds(seconds), result.RetryAfter);
         Assert.Equal(permanent, result.Permanent);
         Assert.Equal(keyWide, result.KeyWide);
+        Assert.Equal("http_error", result.Outcome);
+        Assert.Equal(code, result.HttpStatusCode);
     }
 
     [Fact]
@@ -193,6 +197,8 @@ public sealed class ConversationTitleClientTests
             .GenerateAsync("full transcript", Enabled, Ct);
         Assert.Null(result.Title);
         Assert.True(result.KeyWide);
+        Assert.Equal("network_error:Unknown", result.Outcome);
+        Assert.Null(result.HttpStatusCode);
     }
 
     [Theory]
@@ -210,6 +216,8 @@ public sealed class ConversationTitleClientTests
         var result = await Create(new Handler((_, _) => Task.FromResult(Reply(response))))
             .GenerateAsync("full transcript", Enabled, Ct);
         Assert.Null(result.Title);
+        Assert.Equal(200, result.HttpStatusCode);
+        Assert.Contains(result.Outcome, new[] { "invalid_json", "invalid_title" });
     }
 
     [Theory]
@@ -256,7 +264,9 @@ public sealed class ConversationTitleClientTests
             throw new InvalidOperationException("Unreachable");
         });
         var client = new ConversationTitleClient(new HttpClient(handler), () => settings);
-        Assert.Null((await client.GenerateAsync("full transcript", Enabled, Ct).WaitAsync(TimeSpan.FromSeconds(5), Ct)).Title);
+        var result = await client.GenerateAsync("full transcript", Enabled, Ct).WaitAsync(TimeSpan.FromSeconds(5), Ct);
+        Assert.Null(result.Title);
+        Assert.Equal("settings_changed_or_disabled", result.Outcome);
     }
 
     [Fact]
@@ -271,6 +281,8 @@ public sealed class ConversationTitleClientTests
         var timedOut = await client.GenerateAsync("full transcript", Enabled, Ct);
         Assert.Null(timedOut.Title);
         Assert.False(timedOut.KeyWide); // A slow request is this conversation's problem.
+        Assert.Equal("timeout", timedOut.Outcome);
+        Assert.Null(timedOut.HttpStatusCode);
         using var cancelled = new CancellationTokenSource();
         cancelled.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.GenerateAsync("full transcript", Enabled, cancelled.Token));

@@ -174,20 +174,38 @@ test('unavailable site and denied or expired requests offer retry while preservi
     }
 });
 
-test('signed-out top navigation and Settings both offer sign in', async ({ page }) => {
-    const { root } = await openSettings(page);
-    await expect(page.locator('.app-sidebar, [data-action="switch-nav-layout"]')).toHaveCount(0);
-    await expect(page.locator('[data-account-nav]:visible')).toHaveText('Sign in / Sign up');
-    await expect(page.locator('[data-account-nav]:visible')).toHaveAccessibleName('Sign in or sign up to viberails.ai');
-    await expect(root.locator('[data-account-settings-action]')).toHaveText('Sign in');
-    await expect(page.locator('[data-account-menu-host]')).toBeHidden();
-    await page.locator('[data-account-nav]:visible').click();
-    await expect(page.locator('[data-remote-link-start]')).toBeEnabled();
-    await expect(page.locator('[data-remote-link-signup]')).toBeVisible();
-});
+for (const width of [1440, 768, 375, 320]) {
+    test(`signed-out navigation keeps Settings and sign in reachable at ${width}px`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 900 });
+        const { root } = await openSettings(page);
+        const settingsLink = page.locator('[data-settings-nav]');
+        await expect(page.locator('.app-sidebar, [data-action="switch-nav-layout"]')).toHaveCount(0);
+        await expect(settingsLink).toBeVisible();
+        await expect(settingsLink).toHaveAccessibleName('Settings');
+        await expect(settingsLink.locator('i, svg')).toHaveCount(0);
+        await expect(settingsLink).toHaveAttribute('aria-current', 'page');
+        const bounds = await settingsLink.boundingBox();
+        expect(bounds.x).toBeGreaterThanOrEqual(0);
+        expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+        await page.locator('[data-action="navigate-home"]').click();
+        await expect(root).toHaveCount(0);
+        await settingsLink.focus();
+        await settingsLink.press('Enter');
+        await expect(root).toBeVisible();
+        await expect(page.locator('[data-account-nav]:visible')).toHaveText('Sign in / Sign up');
+        await expect(page.locator('[data-account-nav]:visible')).toHaveAccessibleName('Sign in or sign up to viberails.ai');
+        await expect(root.locator('[data-account-settings-action]')).toHaveText('Sign in');
+        await expect(page.locator('[data-account-menu-host]')).toBeHidden();
+        await page.locator('[data-account-nav]:visible').click();
+        await expect(page.locator('[data-remote-link-start]')).toBeEnabled();
+        await expect(page.locator('[data-remote-link-signup]')).toBeVisible();
+    });
+}
 
 test('signed-in top bar shows the account and a menu that closes back to its chip', async ({ page }, testInfo) => {
     const { root } = await openSettings(page, { signedIn: true });
+    await expect(page.locator('[data-settings-nav]')).toBeHidden();
     const chip = page.locator('[data-action="account-menu"]');
     const menu = page.getByRole('dialog', { name: 'viberails.ai account' });
     await expect(chip).toHaveAccessibleName('Account menu. Signed in as rob@example.com');
@@ -290,7 +308,8 @@ test('saved account stays in Settings after reload', async ({ page }, testInfo) 
     await page.reload();
     await expect(page.locator('.app-subnav')).toBeVisible();
     await expect(page.locator('.app-sidebar')).toHaveCount(0);
-    await page.locator('[data-action="navigate-settings"]:visible').click();
+    await page.locator('[data-action="account-menu"]').click();
+    await page.getByRole('button', { name: 'Account settings', exact: true }).click();
     await expect(page.locator('[data-account-nav]:visible')).toHaveCount(0);
     await expect(root.locator('[data-account-status]')).toHaveText(`Logged in ${email}`);
     await expect(root.locator('[data-account-settings-action]')).toHaveText('Switch account');
@@ -313,6 +332,7 @@ test('sign-in completed from another tab updates Settings and nav without discar
     })));
     await expect(root.locator('[data-account-status]')).toHaveText('Logged in rob@example.com');
     await expect(page.locator('[data-account-nav]:visible')).toHaveCount(0);
+    await expect(page.locator('[data-settings-nav]')).toBeHidden();
     await expect(root.locator('#setting-computer-name')).toHaveValue('Unsaved laptop');
     await expect(root.locator('#settings-save-button')).toBeEnabled();
     await expect(root.locator('#setting-api-key')).toHaveValue(MASK);

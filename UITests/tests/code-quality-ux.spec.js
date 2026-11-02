@@ -239,17 +239,19 @@ for (const rulesView of ['dashboard', 'agents']) {
 }
 
 for (const width of [1920, 1492, 1210, 1100, 1000, 768, 390]) {
-    test(`split navigation and Settings cog fit at ${width}px`, async ({ page }, testInfo) => {
+    test(`split navigation and account settings fit at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 900 });
         await installQualityApi(page);
+        await page.route('**/api/v1/settings', route => route.fulfill({ json: {
+            apiKey: '••••••••abcd', remoteAccountEmail: 'rob@example.com'
+        } }));
         await openQuality(page);
         const nav = page.locator('.app-subnav');
         await expect(nav.locator('.app-subnav-links > button').nth(2)).toHaveText('QUALITY');
         await expect(nav.locator('.app-subnav-links > button').nth(3)).toHaveText('Rules');
-        const cog = nav.getByRole('button', { name: 'Settings', exact: true });
+        const account = nav.locator('[data-action="account-menu"]');
         const play = nav.getByRole('button', { name: 'Launch an agent or automation', exact: true });
-        await expect(cog.locator('.fa-gear')).toHaveCount(1);
-        expect(await cog.innerText()).toBe('');
+        await expect(nav.getByRole('button', { name: 'Settings', exact: true })).toHaveCount(0);
         expect(await nav.evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
         expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
         if (width >= 1210) {
@@ -264,10 +266,12 @@ for (const width of [1920, 1492, 1210, 1100, 1000, 768, 390]) {
         }
         await play.focus();
         await play.press('Tab');
-        await expect(cog).toBeFocused();
-        await cog.press('Enter');
+        await expect(account).toBeFocused();
+        await account.press('Enter');
+        const settings = nav.getByRole('button', { name: 'Account settings', exact: true });
+        await expect(settings).toBeFocused();
+        await settings.press('Enter');
         await expect(page.getByRole('heading', { name: 'Application Settings', exact: true })).toBeVisible();
-        await expect(cog).toHaveAttribute('aria-current', 'page');
     });
 }
 

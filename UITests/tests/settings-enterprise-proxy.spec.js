@@ -65,7 +65,7 @@ for (const width of [1280, 390]) {
 
         await page.reload({ waitUntil: 'domcontentloaded' });
         await expect(page.locator('#app-content > *').first()).toBeAttached();
-        await page.locator('[data-action="navigate-settings"]:visible').click();
+        await page.evaluate(() => window.app.navigate('settings'));
         await root.locator('#settings-tab-llm').click();
         for (const [provider, value] of Object.entries(values))
             await expect(root.locator(`#setting-${provider}-enterprise-network-proxy`)).toHaveValue(value);

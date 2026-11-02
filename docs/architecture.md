@@ -183,6 +183,13 @@ titled too; its primary card's display ID, title and description go first, label
 refresh and its `LastExcerptHash` are retired; the column stays, unused. The sidebar shows a
 generated title ahead of the card label, and the card keeps its own row.
 
+Title diagnostics use the bounded `IFeatureLog` journal under `conversation-titles`: request
+start, numeric HTTP status, elapsed time, safe outcome code, retry delay/scope, and whether the
+title was applied or discarded. Each attempt shares an operation ID and its session ID as the
+subject. Triple-click the brand logo, then choose **Logs → Feature journal** and filter by
+`conversation-titles`. Idle/disabled ticks produce no entries. Messages, story text, generated
+titles, credentials, remote error bodies and exception messages are never logged.
+
 The history API reads session pages from `state.db`. `ChatHistoryService` then obtains current
 card labels for those session IDs through `IBoardStore.GetSessionCardsAsync`, which batches reads
 from `board.db` and includes primary/additional attachments without deleted cards. The existing

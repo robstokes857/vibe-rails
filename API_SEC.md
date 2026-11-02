@@ -905,6 +905,9 @@ names the conversation rather than its story. It requires the saved API key and 
 hosted Integrations permission failures preserve existing labels.
 
 Keys use only `X-Api-Key`. No redirects, cookies, HTTP body/error logging or new listener is added.
+The local `conversation-titles` feature journal records only session/attempt identifiers,
+HTTP status, elapsed time, fixed outcome codes and retry/application decisions. It never logs
+user or story text, generated titles, credentials, remote bodies or exception messages.
 Requests have a 20-second deadline and 8-KiB response bound; titles are validated before saving.
 Fresh settings are checked before sending and applying, with cancellation when they change.
 Durable two-minute claims coordinate open roots. Rejected keys, rate limits, unavailable

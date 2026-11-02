@@ -22,7 +22,7 @@ async function mount(page, detail, listExtras = {}, queueFixture = null) {
         const path = new URL(route.request().url()).pathname;
         const payloads = {
             '/api/v1/context': { isInGit: true, rootPath: 'C:/fixture', launchDirectory: 'C:/fixture' },
-            '/api/v1/settings': {},
+            '/api/v1/settings': { apiKey: '••••••••abcd', remoteAccountEmail: 'rob@example.com' },
             '/api/v1/environments': { environments: [] },
             '/api/v1/agents': { agents: [] },
             '/api/v1/llm-picker/preferences': { items: [] },
@@ -76,6 +76,11 @@ for (const useLegacy of [false, true]) {
     });
 }
 
+async function openAccountSettings(page) {
+    await page.locator('[data-action="account-menu"]').click();
+    await page.getByRole('button', { name: 'Account settings', exact: true }).click();
+}
+
 test('dedicated PR Reviewer settings persist and disclose in-progress behavior', async ({ page }) => {
     await mount(page, reviewFixture());
     const reviewsNav = page.locator('.app-subnav-link[data-view="pr-reviews"]');
@@ -89,7 +94,7 @@ test('dedicated PR Reviewer settings persist and disclose in-progress behavior',
         }
         return route.fulfill({ json: { enabled, repositories } });
     });
-    await page.locator('[data-action="navigate-settings"]').click();
+    await openAccountSettings(page);
     await page.getByRole('tab', { name: 'PR Reviewer', exact: true }).click();
     const toggle = page.getByRole('switch', { name: 'Enable PR Reviewer and GitHub publishing' });
     await expect(toggle).toBeEnabled();
@@ -101,7 +106,7 @@ test('dedicated PR Reviewer settings persist and disclose in-progress behavior',
     await expect(reviewsNav).toBeVisible();
     await page.reload();
     await expect(reviewsNav).toBeVisible();
-    await page.locator('[data-action="navigate-settings"]').click();
+    await openAccountSettings(page);
     await page.getByRole('tab', { name: 'PR Reviewer', exact: true }).click();
     await expect(toggle).toBeChecked();
     await toggle.uncheck();
@@ -123,7 +128,7 @@ test('dedicated PR Reviewer settings persist and disclose in-progress behavior',
     await expect(page.locator('[data-pr-reviewer-status]')).toHaveText('That repository is already in the list.');
     expect(repositories).toEqual(['octo/widgets', 'else/tools']);
     await page.reload();
-    await page.locator('[data-action="navigate-settings"]').click();
+    await openAccountSettings(page);
     await page.getByRole('tab', { name: 'PR Reviewer', exact: true }).click();
     await expect(watches.getByRole('listitem')).toHaveCount(2);
     await watches.getByRole('button', { name: 'Remove octo/widgets', exact: true }).click();
@@ -135,7 +140,7 @@ test('dedicated PR Reviewer settings persist and disclose in-progress behavior',
     expect(repositories).toEqual([]);
     await page.reload();
     await expect(reviewsNav).toBeHidden();
-    await expect(page.locator('[data-action="navigate-settings"]')).toBeVisible();
+    await expect(page.locator('[data-action="account-menu"]')).toBeVisible();
 });
 
 test('repository rows wrap long names and keep Add and Remove usable on narrow screens', async ({ page }, testInfo) => {
@@ -147,7 +152,7 @@ test('repository rows wrap long names and keep Add and Remove usable on narrow s
         if (route.request().method() === 'PUT') repositories = route.request().postDataJSON().repositories;
         return route.fulfill({ json: { enabled: false, repositories } });
     });
-    await page.locator('[data-action="navigate-settings"]').click();
+    await openAccountSettings(page);
     await page.getByRole('tab', { name: 'PR Reviewer', exact: true }).click();
     const panel = page.locator('[data-settings-pr-reviewer]');
     const remove = panel.getByRole('button', { name: `Remove ${longRepository}`, exact: true });

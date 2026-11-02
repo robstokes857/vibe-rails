@@ -669,6 +669,10 @@ The desktop footer (`.app-footer`) is hidden on every view. Put persistent statu
 
 #### Top bar account
 
+Application Settings opens from **Account settings** in the account dropdown. The desktop
+top bar has no standalone Settings icon. When signed out, a text **Settings** link stays
+visible beside **Sign in / Sign up**.
+
 Signed in, the desktop top bar shows the viberails.ai account as a chip beside Exit, with a popover (VB-0U0SI-331). Signed out, the existing **Sign in / Sign up** accent pill stays the only account control, with no popup, toast or repeated reminder.
 
 | Part | Value |

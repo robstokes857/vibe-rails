@@ -496,7 +496,6 @@ code {
     min-width: 0;
 }
 
-.app-subnav .app-subnav-settings,
 .app-subnav .automation-launch-btn {
     flex: 0 0 40px;
     width: 40px;
@@ -19936,7 +19935,7 @@ body.performance-mode .brand-text-sm {
 /* Touch and motion apply to shared chrome; terminal/Monaco rendering is independent. */
 @media (pointer: coarse), (max-width: 576px) {
     :root { --control-height: 44px; }
-    .btn, .app-subnav .app-subnav-settings, .app-subnav .automation-launch-btn { min-width: 44px; min-height: 44px; }
+    .btn, .app-subnav .automation-launch-btn { min-width: 44px; min-height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) {
     .btn, .card, .badge, .brand-text-sm, .brand-logo-sm, .app-subnav-link,

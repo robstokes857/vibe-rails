@@ -19,7 +19,9 @@ only application navigation. Quality is third and Rules fourth; they are separat
 Automations follows Agents, then MCP and Reviews. Reviews stays hidden until the saved
 **Enable PR Reviewer and GitHub publishing** setting is on, and updates immediately after
 the setting is loaded or saved. The standalone play button opens
-Quick actions for automations and signed scripts beside the accessible icon-only Settings cog.
+Quick actions for automations and signed scripts. Application Settings opens from
+**Account settings** in the account dropdown; when signed out, a text **Settings** link
+stays visible beside **Sign in / Sign up**. There is no standalone Settings icon.
 Its footer offers only **Customize list…**; open Agents and Automations through their top navigation links.
 Rules runs validation only; Quality restores or starts its own cached scan when opened.
 

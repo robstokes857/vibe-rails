@@ -71,14 +71,7 @@ async function installSettingsApi(
 }
 
 async function openSettings(page) {
-    await page.goto('/');
-    await expect(page.locator('#terminal-settings-btn')).toBeVisible({ timeout: 15_000 });
-
-    const settingsNav = page.locator(
-        '.app-subnav-link[data-action="navigate-settings"]:visible'
-    );
-    await expect(settingsNav).toBeVisible({ timeout: 15_000 });
-    await settingsNav.click();
+    await page.goto('/?view=settings');
 
     const root = page.locator('[data-view="settings"]');
     await expect(root).toBeVisible({ timeout: 10_000 });

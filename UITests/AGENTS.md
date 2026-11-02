@@ -62,7 +62,7 @@ Set `VIBERAILS_QUALITY_TEST_PORT` to use another local port if the default 18763
 The tests cover compact actions, file-to-map selection, visible domain links and large overviews,
 saved metrics, radar keyboard access, themes/reduced motion, independent scrolling, narrow layouts,
 failure/empty states, request cancellation and cleanup, exclusion/restore flow, agent choice,
-independent Rules/Quality checks, and responsive navigation with the Settings cog.
+independent Rules/Quality checks, and responsive navigation with Settings in the account dropdown.
 
 ### Focused Page Header Tests (No Backend Required)
 
@@ -161,7 +161,7 @@ From `UITests`, run `npx playwright test --config playwright.remote-link.config.
 This serves the real frontend with local API fixtures and an intercepted sign-in page. It covers
 browser popup behavior, copy code, the VS Code bridge, narrow layout, completion alongside unsaved
 settings, cancellation, and unavailable/denied/expired requests. It also checks the signed-out top-navigation link, the Settings account summary after reload, cross-tab completion and escaped
-emails, and the signed-in account chip: its popover's personal, key-only and managed-organization
+emails, signed-out Settings access from 320px to desktop widths, and the signed-in account chip: its popover's personal, key-only and managed-organization
 states, Escape and outside-click closing, drafts kept by **Account settings**, the compact bar at
 1280px and a 375px window. It opens no application database
 and creates no account or API key.
