@@ -62,6 +62,7 @@ Name: desktopicon; Description: "Create a &desktop shortcut"; Flags: unchecked
 Type: files; Name: "{app}\models\bertv2\model.onnx.gz"
 Type: files; Name: "{app}\models\bertv2\model.onnx.zip"
 Type: files; Name: "{app}\models\bertv2\model.onnx.br"
+Type: files; Name: "{app}\models\reranker\model.onnx.gz"
 
 [Icons]
 #ifdef TestRoot

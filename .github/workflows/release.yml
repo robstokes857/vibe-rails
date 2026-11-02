@@ -217,6 +217,9 @@ jobs:
                   "wwwroot/index.html",
                   "Models/BertV2/model.onnx.gz",
                   "Models/BertV2/vocab.txt",
+                  "Models/Reranker/model.onnx.gz",
+                  "Models/Reranker/vocab.txt",
+                  "Models/Reranker/LICENSE.txt",
                   "scripts/pre-commit-hook.sh",
                   "scripts/commit-msg-hook.sh",
                   "onnxruntime.dll",
@@ -293,6 +296,9 @@ jobs:
             "wwwroot/index.html"
             "Models/BertV2/model.onnx.gz"
             "Models/BertV2/vocab.txt"
+            "Models/Reranker/model.onnx.gz"
+            "Models/Reranker/vocab.txt"
+            "Models/Reranker/LICENSE.txt"
             "scripts/pre-commit-hook.sh"
             "scripts/commit-msg-hook.sh"
           )

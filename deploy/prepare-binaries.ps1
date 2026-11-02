@@ -217,6 +217,33 @@ foreach ($platform in $platforms) {
         Write-Host "    Copied $($dir.Name)/" -ForegroundColor Green
     }
 
+    # Stage the search re-ranker (VIBE-258) already extracted, in Models/Reranker beside the
+    # binary. The extension never writes to ~/.vibe_rails, so the backend falls back to this
+    # copy (SearchRerankerSettings.BundledDirectory) when no installer has put a model in
+    # ~/.vibe_rails/models/reranker. The BERT embedder (130 MB) is not bundled; it comes
+    # from an installer.
+    $rerankerSource = Join-Path $sourceDir "Models" "Reranker"
+    $rerankerArchive = Join-Path $rerankerSource "model.onnx.gz"
+    foreach ($required in @($rerankerArchive, (Join-Path $rerankerSource "vocab.txt"), (Join-Path $rerankerSource "LICENSE.txt"))) {
+        if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+            throw "Re-ranker asset $required is missing. Did the AOT publish emit VibeRails/Models/Reranker into $sourceDir?"
+        }
+    }
+    $rerankerDest = Join-Path $platformDir "Models" "Reranker"
+    New-Item -ItemType Directory -Force -Path $rerankerDest | Out-Null
+    foreach ($name in @("vocab.txt", "LICENSE.txt")) {
+        Copy-Item -LiteralPath (Join-Path $rerankerSource $name) -Destination (Join-Path $rerankerDest $name) -Force
+    }
+    $archiveStream = [IO.File]::OpenRead($rerankerArchive)
+    try {
+        $gzip = [IO.Compression.GZipStream]::new($archiveStream, [IO.Compression.CompressionMode]::Decompress)
+        try {
+            $modelStream = [IO.File]::Create((Join-Path $rerankerDest "model.onnx"))
+            try { $gzip.CopyTo($modelStream) } finally { $modelStream.Dispose() }
+        } finally { $gzip.Dispose() }
+    } finally { $archiveStream.Dispose() }
+    Write-Host "    Staged Models/Reranker/ (extracted model.onnx)" -ForegroundColor Green
+
     # Set execute permissions on Linux binary (no-op on Windows)
     if ($platform.Binary -eq "vb" -and -not $IsWindows) {
         chmod +x $destBinary

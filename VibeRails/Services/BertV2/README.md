@@ -77,7 +77,8 @@ failure and retains the existing search documents. It is never treated as an emp
 Vector repair removes at most 256 missing/orphan entries per pass to bound writer commits.
 Expected orphan-vector pruning after text replacement is maintenance, not a corruption warning.
 
-All release platforms use the checked-in `model.onnx.gz`; the duplicate ZIP is retired.
+All release platforms use the checked-in `model.onnx.gz`; the duplicate ZIP is retired. The search
+re-ranker follows the same path (see "Shipping the re-ranker" below).
 Installers compare the installed model/vocabulary to the packaged assets and replace changed
 bytes. The Windows setup embeds SHA-256 comparisons; script installers stage model extraction
 before replacement. Successful installation removes only the known gzip/ZIP/Brotli model
@@ -111,10 +112,28 @@ the bounded 10% current-repository preference by scaling the relevance probabili
 keeps the hybrid order. Search-as-you-type and link pickers do not re-rank.
 The model lives in `models/reranker/` (`model.onnx` and `vocab.txt`; `CrossEncoderReranker` also reads
 XLM-R and DeBERTa-v3 SentencePiece files for comparisons). `IdleSearchReranker` loads it on first
-use and releases it after two idle minutes, like the embedder. While the directory is empty,
+use and releases it after two idle minutes, like the embedder. While no model is installed,
 `IsAvailable` is false and search runs exactly as before, with the same pool sizes. The measured
 choice is ms-marco TinyBERT-L2-v2: MRR@10 0.59 → 0.82 on a fixed personal query set, scored in
 the order the tools return results, about +80 ms on a 930 ms search, 17.6 MB. Larger re-rankers, including bge-reranker-base, were slower and
-no better. Packaging the model into installers is a separate step. The opt-in benchmark is
+no better. The opt-in benchmark is
 `SearchRetrievalBenchmarkTests.PersonalSnapshotRetrievalQualityBySetup`. Its query sets with
 known answers are personal data and live outside this repository.
+
+### Shipping the re-ranker (VIBE-258)
+
+`VibeRails/Models/Reranker/` holds the upstream fp32 `onnx/model.onnx` from Hugging Face revision
+`81d1926f`, gzip-compressed, along with its `vocab.txt` (the same git blob as the BertV2 vocabulary)
+and an Apache-2.0 `LICENSE.txt` that names the revision and the model's SHA-256. Release archives
+carry `Models/Reranker/` beside `Models/BertV2/`, and every installer handles it the way it
+handles the embedder. Setup extracts it at build time with SHA-256 `Check:` entries.
+`install.ps1`/`install.sh` and `local_deploy.ps1` stage the extraction and replace the installed
+file only when its bytes differ. The install scripts skip the re-ranker when a release does not
+carry it.
+
+`SearchRerankerSettings` uses `~/.vibe_rails/models/reranker` first. When that has no model, it
+falls back to `Models/Reranker/` beside the executable. The VS Code extension never writes to the
+install directory, so `prepare-binaries.ps1` stages the extracted model there. The embedder is not
+in the VSIX. `download-reranker-model.ps1/.sh` fetch the pinned upstream files as a manual
+fallback. `SearchRerankerAssetTests` loads the checked-in asset, and `ReleaseSupplyChainTests`
+pins the download hashes and the license to it.

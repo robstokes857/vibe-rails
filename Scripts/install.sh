@@ -12,29 +12,39 @@ INSTALL_DIR="$HOME/.vibe_rails"
 # has its own tag stamped here by release.yml, so it installs exactly that release.
 RELEASE_TAG=""
 
-install_bertv2_assets() {
+# Usage: install_model_assets <root> <Name> [optional]
+# Extracts Models/<Name>/model.onnx.gz into models/<name>/, where the application loads it.
+# "optional" skips a model that an older release does not carry instead of failing the install.
+install_model_assets() {
     local root_dir="$1"
-    local bundled_dir="$root_dir/Models/BertV2"
+    local name="$2"
+    local optional="${3:-}"
+    local bundled_dir="$root_dir/Models/$name"
     local bundled_model_archive="$bundled_dir/model.onnx.gz"
     local bundled_vocab="$bundled_dir/vocab.txt"
 
-    local runtime_dir="$root_dir/models/bertv2"
+    local runtime_dir
+    runtime_dir="$root_dir/models/$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')"
     local runtime_model="$runtime_dir/model.onnx"
     local runtime_vocab="$runtime_dir/vocab.txt"
 
     if [ ! -f "$bundled_model_archive" ]; then
-        echo -e "${RED}Error: Bundled BertV2 model archive not found at $bundled_model_archive. The release package is incomplete.${NC}" >&2
+        if [ "$optional" = "optional" ]; then
+            echo -e "${YELLOW}This release has no $name model; skipping.${NC}"
+            return 0
+        fi
+        echo -e "${RED}Error: Bundled $name model archive not found at $bundled_model_archive. The release package is incomplete.${NC}" >&2
         exit 1
     fi
     if [ ! -f "$bundled_vocab" ]; then
-        echo -e "${RED}Error: Bundled BertV2 vocab not found at $bundled_vocab. The release package is incomplete.${NC}" >&2
+        echo -e "${RED}Error: Bundled $name vocab not found at $bundled_vocab. The release package is incomplete.${NC}" >&2
         exit 1
     fi
 
     mkdir -p "$runtime_dir"
 
     if [ ! -f "$runtime_vocab" ] || ! cmp -s "$bundled_vocab" "$runtime_vocab"; then
-        echo -e "${CYAN}Installing BertV2 vocab...${NC}"
+        echo -e "${CYAN}Installing $name vocab...${NC}"
         cp "$bundled_vocab" "$runtime_vocab"
     fi
 
@@ -52,7 +62,7 @@ install_bertv2_assets() {
     rm -f "$bundled_dir/model.onnx.gz" "$bundled_dir/model.onnx.zip" "$bundled_dir/model.onnx.br" \
         "$runtime_dir/model.onnx.gz" "$runtime_dir/model.onnx.zip" "$runtime_dir/model.onnx.br"
 
-    echo -e "${GREEN}BertV2 model assets installed to $runtime_dir${NC}"
+    echo -e "${GREEN}$name model assets installed to $runtime_dir${NC}"
 }
 
 # Colors
@@ -390,7 +400,9 @@ assert_no_destination_links "$PAYLOAD_DIR" "$INSTALL_DIR"
 echo -e "${CYAN}Installing application files to $INSTALL_DIR...${NC}"
 cp -R "$PAYLOAD_DIR"/. "$INSTALL_DIR"/
 
-install_bertv2_assets "$INSTALL_DIR"
+install_model_assets "$INSTALL_DIR" BertV2
+# Search re-ranking (VIBE-258). Without it, search keeps its hybrid order.
+install_model_assets "$INSTALL_DIR" Reranker optional
 
 # Make binary executable
 chmod +x "$INSTALL_DIR/vb"

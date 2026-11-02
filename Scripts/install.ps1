@@ -220,31 +220,44 @@ function Remove-InstallerStagingDirectory {
     Remove-Item -LiteralPath $resolvedPath -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-function Install-BertV2ModelAssets {
+function Install-BundledModelAssets {
     param(
-        [string]$RootDir
+        [Parameter(Mandatory = $true)]
+        [string]$RootDir,
+
+        # Payload folder under Models\ (BertV2, Reranker). The runtime folder is its
+        # lowercase name under models\, where the application loads model.onnx.
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+
+        # Older releases do not carry this model. Skip it rather than fail the install.
+        [switch]$Optional
     )
 
-    $bundledDir = Join-Path $RootDir "Models\BertV2"
+    $bundledDir = Join-Path $RootDir "Models\$Name"
     $bundledModelArchive = Join-Path $bundledDir "model.onnx.gz"
     $bundledVocab = Join-Path $bundledDir "vocab.txt"
 
-    $runtimeDir = Join-Path $RootDir "models\bertv2"
+    $runtimeDir = Join-Path $RootDir ("models\" + $Name.ToLowerInvariant())
     $runtimeModel = Join-Path $runtimeDir "model.onnx"
     $runtimeVocab = Join-Path $runtimeDir "vocab.txt"
 
     if (-not (Test-Path $bundledModelArchive)) {
-        throw "Bundled BertV2 model archive not found at $bundledModelArchive. The release package is incomplete."
+        if ($Optional) {
+            Write-Host "This release has no $Name model; skipping." -ForegroundColor Yellow
+            return
+        }
+        throw "Bundled $Name model archive not found at $bundledModelArchive. The release package is incomplete."
     }
     if (-not (Test-Path $bundledVocab)) {
-        throw "Bundled BertV2 vocab not found at $bundledVocab. The release package is incomplete."
+        throw "Bundled $Name vocab not found at $bundledVocab. The release package is incomplete."
     }
 
     New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
 
     if (-not (Test-Path $runtimeVocab) -or
         (Get-FileHash -LiteralPath $runtimeVocab).Hash -ne (Get-FileHash -LiteralPath $bundledVocab).Hash) {
-        Write-Host "Installing BertV2 vocab..." -ForegroundColor Cyan
+        Write-Host "Installing $Name vocab..." -ForegroundColor Cyan
         Copy-Item -Path $bundledVocab -Destination $runtimeVocab -Force
     }
 
@@ -274,7 +287,7 @@ function Install-BertV2ModelAssets {
         Remove-Item -LiteralPath (Join-Path $bundledDir $archive) -Force -ErrorAction SilentlyContinue
     }
 
-    Write-Host "BertV2 model assets installed to $runtimeDir" -ForegroundColor Green
+    Write-Host "$Name model assets installed to $runtimeDir" -ForegroundColor Green
 }
 
 Write-Host @"
@@ -399,7 +412,9 @@ try {
         Copy-Item -LiteralPath $item.FullName -Destination $InstallDir -Recurse -Force
     }
 
-    Install-BertV2ModelAssets -RootDir $InstallDir
+    Install-BundledModelAssets -RootDir $InstallDir -Name BertV2
+    # Search re-ranking (VIBE-258). Without it, search keeps its hybrid order.
+    Install-BundledModelAssets -RootDir $InstallDir -Name Reranker -Optional
 
     # Add to PATH
     $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")

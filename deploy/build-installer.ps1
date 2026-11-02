@@ -43,10 +43,15 @@ try {
     $crtFiles = @('concrt140.dll', 'msvcp140.dll', 'msvcp140_1.dll', 'msvcp140_2.dll',
         'msvcp140_atomic_wait.dll', 'msvcp140_codecvt_ids.dll', 'vcruntime140.dll',
         'vcruntime140_1.dll', 'vcruntime140_threads.dll')
-    $scripts = @('pre-commit-hook.sh', 'commit-msg-hook.sh', 'post-commit-hook.sh', 'download-bert-model.ps1', 'download-bert-model.sh')
+    $scripts = @('pre-commit-hook.sh', 'commit-msg-hook.sh', 'post-commit-hook.sh', 'download-bert-model.ps1', 'download-bert-model.sh',
+        'download-reranker-model.ps1', 'download-reranker-model.sh')
+    # Payload folders under Models\ that setup materializes into models\<lowercase name>:
+    # the BERT embedder and the search re-ranker (VIBE-258).
+    $models = @('BertV2', 'Reranker')
     $required = @('vb.exe', 'appsettings.json', 'wwwroot/index.html', 'onnxruntime.dll',
         'e_sqlite3.dll', 'vec0.dll', 'scripts/pre-commit-hook.sh', 'scripts/commit-msg-hook.sh',
         'Models/BertV2/model.onnx.gz', 'Models/BertV2/vocab.txt',
+        'Models/Reranker/model.onnx.gz', 'Models/Reranker/vocab.txt', 'Models/Reranker/LICENSE.txt',
         'msvcp140.dll', 'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')
     foreach ($relative in $required) {
         if (-not (Test-Path -LiteralPath (Join-Path $payload $relative) -PathType Leaf)) {
@@ -74,7 +79,7 @@ try {
         $preserve = $false
         if ($relative -imatch '^wwwroot\\') { }
         elseif ($relative -imatch '^scripts\\([^\\]+)$' -and $scripts -icontains $Matches[1]) { }
-        elseif ($relative -imatch '^Models\\BertV2\\(model\.onnx\.(zip|gz)|vocab\.txt)$') {
+        elseif ($relative -imatch '^Models\\(BertV2|Reranker)\\(model\.onnx\.(zip|gz)|vocab\.txt|LICENSE\.txt)$') {
             # Setup ships the materialized model below. Including both compressed
             # archives as well would triple model storage and installer work.
             if ($relative -imatch '\.(zip|gz)$') { continue }
@@ -89,10 +94,13 @@ try {
 
         $flags = if ($preserve) { 'onlyifdoesntexist uninsneveruninstall' } else { 'ignoreversion' }
         $check = ''
-        if ($relative -ieq 'Models\BertV2\vocab.txt') {
+        if ($relative -imatch '^Models\\([^\\]+)\\(vocab\.txt|LICENSE\.txt)$') {
+            # A license stays installed with the model it describes.
             $flags = 'ignoreversion uninsneveruninstall'
-            $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
-            $check = '; Check: ModelNeedsUpdate(''{app}\models\bertv2\vocab.txt'', ''' + $hash + ''')'
+            if ($Matches[2] -ieq 'vocab.txt') {
+                $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+                $check = '; Check: ModelNeedsUpdate(''{app}\models\' + $Matches[1].ToLowerInvariant() + '\vocab.txt'', ''' + $hash + ''')'
+            }
         }
         $destination = Split-Path -Parent $relative
         $entries.Add(('Source: "{0}"; DestDir: "{{app}}\{1}"; Flags: {2}{3}' -f $file.FullName, $destination, $flags, $check))
@@ -100,25 +108,28 @@ try {
         if (-not $preserve) { $replacePaths.Add($relative) }
     }
 
-    # Materialize BERT during packaging, so setup needs neither a download nor
+    # Materialize the models during packaging, so setup needs neither a download nor
     # PowerShell on the target machine. SHA-256 decides whether to replace assets.
-    $modelDir = Join-Path $work 'model'
-    New-Item -ItemType Directory -Path $modelDir | Out-Null
-    $model = Join-Path $modelDir 'model.onnx'
-    $source = [IO.File]::OpenRead((Join-Path $payload 'Models/BertV2/model.onnx.gz'))
-    try {
-        $gzip = [IO.Compression.GZipStream]::new($source, [IO.Compression.CompressionMode]::Decompress)
+    foreach ($name in $models) {
+        $runtime = 'models\' + $name.ToLowerInvariant()
+        $modelDir = Join-Path $work $name
+        New-Item -ItemType Directory -Path $modelDir | Out-Null
+        $model = Join-Path $modelDir 'model.onnx'
+        $source = [IO.File]::OpenRead((Join-Path $payload "Models/$name/model.onnx.gz"))
         try {
-            $destination = [IO.File]::Create($model)
-            try { $gzip.CopyTo($destination) } finally { $destination.Dispose() }
-        } finally { $gzip.Dispose() }
-    } finally { $source.Dispose() }
-    $hash = (Get-FileHash -LiteralPath $model -Algorithm SHA256).Hash
-    $entries.Add(('Source: "{0}"; DestDir: "{{app}}\models\bertv2"; Flags: ignoreversion uninsneveruninstall; Check: ModelNeedsUpdate(''{{app}}\models\bertv2\model.onnx'', ''{1}'')' -f $model, $hash))
-    $paths.Add('models\bertv2\model.onnx')
-    $replacePaths.Add('models\bertv2\model.onnx')
-    foreach ($archive in @('model.onnx.gz', 'model.onnx.zip', 'model.onnx.br')) {
-        $paths.Add('models\bertv2\' + $archive)
+            $gzip = [IO.Compression.GZipStream]::new($source, [IO.Compression.CompressionMode]::Decompress)
+            try {
+                $destination = [IO.File]::Create($model)
+                try { $gzip.CopyTo($destination) } finally { $destination.Dispose() }
+            } finally { $gzip.Dispose() }
+        } finally { $source.Dispose() }
+        $hash = (Get-FileHash -LiteralPath $model -Algorithm SHA256).Hash
+        $entries.Add(('Source: "{0}"; DestDir: "{{app}}\{1}"; Flags: ignoreversion uninsneveruninstall; Check: ModelNeedsUpdate(''{{app}}\{1}\model.onnx'', ''{2}'')' -f $model, $runtime, $hash))
+        $paths.Add("$runtime\model.onnx")
+        $replacePaths.Add("$runtime\model.onnx")
+        foreach ($archive in @('model.onnx.gz', 'model.onnx.zip', 'model.onnx.br')) {
+            $paths.Add("$runtime\$archive")
+        }
     }
     $icon = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '../docs/brand/viberails-mark.ico')).Path
     $entries.Add(('Source: "{0}"; DestDir: "{{app}}"; DestName: "viberails.ico"; Flags: ignoreversion' -f $icon))

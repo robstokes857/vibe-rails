@@ -22,18 +22,21 @@ internal static class BertV2TestAssets
             overwrite: true);
     }
 
-    public static string GetBundledModelDirectory()
+    public static string GetBundledModelDirectory() => GetBundledDirectory("BertV2");
+
+    /// <summary>The checked-in <c>Models/&lt;name&gt;</c> folder holding <c>model.onnx.gz</c> and <c>vocab.txt</c>.</summary>
+    public static string GetBundledDirectory(string name)
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);
         while (current is not null)
         {
-            var sourceCandidate = Path.Combine(current.FullName, "VibeRails", "Models", "BertV2");
+            var sourceCandidate = Path.Combine(current.FullName, "VibeRails", "Models", name);
             if (ContainsBundledModel(sourceCandidate))
             {
                 return sourceCandidate;
             }
 
-            var outputCandidate = Path.Combine(current.FullName, "Models", "BertV2");
+            var outputCandidate = Path.Combine(current.FullName, "Models", name);
             if (ContainsBundledModel(outputCandidate))
             {
                 return outputCandidate;
@@ -42,7 +45,7 @@ internal static class BertV2TestAssets
             current = current.Parent;
         }
 
-        throw new DirectoryNotFoundException("Could not locate the BertV2 model assets for tests.");
+        throw new DirectoryNotFoundException($"Could not locate the {name} model assets for tests.");
     }
 
     private static bool ContainsBundledModel(string directory)

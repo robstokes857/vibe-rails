@@ -19,9 +19,12 @@ one-time cutoff for releases that predate `vb-win-x64.cat`; never raise it.
 
 After modifying an install script here, there are no in-repo copies to sync. The
 viberails.ai repository (VibeRails-Front) keeps its own copies under
-`wwwroot/assets/install-scripts/`. Note that both scripts also install the bundled BertV2 model assets
-(`Models/BertV2/`) into `~/.vibe_rails/models/bertv2/` — keep that step in sync
-across `install.ps1` and `install.sh` when changing model handling.
+`wwwroot/assets/install-scripts/`. Note that both scripts also install the bundled model assets
+(`Models/<Name>/`) into `~/.vibe_rails/models/<name>/` through one function
+(`Install-BundledModelAssets` / `install_model_assets`): BertV2 is required, and the search
+re-ranker (`Reranker`, VIBE-258) is optional so the copy on `main` still installs releases that
+predate it. `deploy/local_deploy.ps1` loads the same PowerShell function by name. Keep that step in
+sync across `install.ps1` and `install.sh` when changing model handling.
 
 ## Other scripts
 
@@ -31,6 +34,11 @@ across `install.ps1` and `install.sh` when changing model handling.
   commit that last changed `VibeRails/Models/BertV2` and verify SHA-256 hashes of the git
   blobs. Update the ref and the hashes together when the model changes;
   `ReleaseSupplyChainTests` compares the hashes with the checked-in files.
+- `download-reranker-model.ps1` / `download-reranker-model.sh` — the same fallback for the
+  search re-ranker. They download `cross-encoder/ms-marco-TinyBERT-L2-v2` from Hugging Face at
+  the pinned revision (not a vibe-rails commit) and verify the upstream model and vocabulary
+  hashes. Update the revision, the hashes and `VibeRails/Models/Reranker/LICENSE.txt` together;
+  `ReleaseSupplyChainTests` checks all three against the checked-in files.
 - `test-vscode-extension-smoke.ps1` — smoke test for the VS Code extension.
 
 ---

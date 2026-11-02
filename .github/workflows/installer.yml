@@ -47,19 +47,23 @@ jobs:
           $payload = Join-Path $env:RUNNER_TEMP 'installer-fixture-payload'
           $files = @('vb.exe', 'appsettings.json', 'wwwroot/index.html', 'onnxruntime.dll',
               'e_sqlite3.dll', 'vec0.dll', 'scripts/pre-commit-hook.sh', 'scripts/commit-msg-hook.sh',
-              'Models/BertV2/vocab.txt', 'msvcp140.dll', 'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')
+              'Models/BertV2/vocab.txt', 'Models/Reranker/vocab.txt', 'Models/Reranker/LICENSE.txt',
+              'msvcp140.dll', 'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')
           foreach ($relative in $files) {
               $path = Join-Path $payload $relative
               [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($path)) | Out-Null
               [IO.File]::WriteAllText($path, 'Inert installer regression fixture; never execute')
           }
-          $model = Join-Path $payload 'model.onnx'
-          [IO.File]::WriteAllBytes($model, [byte[]]::new(1100000))
-          $source = [IO.File]::OpenRead($model)
-          $destination = [IO.File]::Create((Join-Path $payload 'Models/BertV2/model.onnx.gz'))
-          $gzip = [IO.Compression.GZipStream]::new($destination, [IO.Compression.CompressionMode]::Compress)
-          try { $source.CopyTo($gzip) } finally { $gzip.Dispose(); $destination.Dispose(); $source.Dispose() }
-          Remove-Item -LiteralPath $model
+          # Distinct sizes, so the test can tell the two extracted models apart.
+          foreach ($entry in @(@('BertV2', 1100000), @('Reranker', 1200000))) {
+              $model = Join-Path $payload 'model.onnx'
+              [IO.File]::WriteAllBytes($model, [byte[]]::new($entry[1]))
+              $source = [IO.File]::OpenRead($model)
+              $destination = [IO.File]::Create((Join-Path $payload "Models/$($entry[0])/model.onnx.gz"))
+              $gzip = [IO.Compression.GZipStream]::new($destination, [IO.Compression.CompressionMode]::Compress)
+              try { $source.CopyTo($gzip) } finally { $gzip.Dispose(); $destination.Dispose(); $source.Dispose() }
+              Remove-Item -LiteralPath $model
+          }
           ./deploy/installer/test.ps1 -PayloadDirectory $payload -Compiler $env:INNO_COMPILER
 
       - name: Exercise scripted model installation

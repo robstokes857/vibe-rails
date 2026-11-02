@@ -554,6 +554,13 @@ function Assert-VsixContainsNativeOnnxRuntime {
         }
 
         Write-Host "  ✓ Found native ONNX Runtime in VSIX: $($ortHit.Name)" -ForegroundColor Green
+
+        # The extension finds the search re-ranker beside its backend (VIBE-258).
+        $reranker = Join-Path $extractDir "extension/bin/win32-x64/Models/Reranker/model.onnx"
+        if (-not (Test-Path -LiteralPath $reranker -PathType Leaf)) {
+            throw "Released $vsixName does not contain bin/win32-x64/Models/Reranker/model.onnx, so its search runs without re-ranking. Fix prepare-binaries.ps1 and re-release."
+        }
+        Write-Host "  ✓ Found the search re-ranker in VSIX" -ForegroundColor Green
     } finally {
         if (Test-Path $tmpDir) { Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue }
     }

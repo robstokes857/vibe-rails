@@ -55,7 +55,7 @@
   <ItemGroup>
     <Folder Include="wwwroot\assets\" />
   </ItemGroup>
-  <!-- Copy bundled BERT model assets to output directory -->
+  <!-- Copy bundled BERT embedder (Models/BertV2) and search re-ranker (Models/Reranker) assets to output directory -->
   <ItemGroup>
     <Content Include="Models\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest">
       <Link>Models\%(RecursiveDir)%(Filename)%(Extension)</Link>
@@ -65,6 +65,8 @@
   <ItemGroup>
     <Content Include="..\Scripts\download-bert-model.ps1" Link="Scripts\download-bert-model.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\Scripts\download-bert-model.sh" Link="Scripts\download-bert-model.sh" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\Scripts\download-reranker-model.ps1" Link="Scripts\download-reranker-model.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\Scripts\download-reranker-model.sh" Link="Scripts\download-reranker-model.sh" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
   <!-- Copy hook scripts to output directory -->
   <!-- Create the scripts subdirectory explicitly to avoid a race condition under NativeAOT

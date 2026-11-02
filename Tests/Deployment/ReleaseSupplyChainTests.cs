@@ -144,6 +144,30 @@ public sealed partial class ReleaseSupplyChainTests
         Assert.Contains(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(gzip)).ToLowerInvariant(), text);
     }
 
+    /// <summary>
+    /// The re-ranker scripts (VIBE-258) download from Hugging Face at a pinned revision, so they
+    /// verify the upstream files: the uncompressed model the package's model.onnx.gz expands to,
+    /// and the LF vocabulary. LICENSE.txt names the same revision.
+    /// </summary>
+    [Theory]
+    [InlineData("Scripts/download-reranker-model.ps1", "[string]$Revision = \"")]
+    [InlineData("Scripts/download-reranker-model.sh", "MODEL_REVISION=\"${MODEL_REVISION:-")]
+    public void RerankerDownloadScripts_PinTheUpstreamRevisionAndTheCheckedInHashes(string script, string revisionPrefix)
+    {
+        var text = ReadWithLf(script);
+
+        var revisionLine = Assert.Single(text.Split('\n'), line => line.TrimStart().StartsWith(revisionPrefix, StringComparison.Ordinal));
+        var revision = CommitSha().Match(revisionLine);
+        Assert.True(revision.Success, revisionLine);
+
+        var modelDirectory = Path.Combine(RepositoryRoot, "VibeRails", "Models", "Reranker");
+        Assert.Contains(revision.Value, File.ReadAllText(Path.Combine(modelDirectory, "LICENSE.txt")));
+        Assert.Contains(Sha256(WithLf(File.ReadAllBytes(Path.Combine(modelDirectory, "vocab.txt")))), text);
+        using var archive = File.OpenRead(Path.Combine(modelDirectory, "model.onnx.gz"));
+        using var gzip = new System.IO.Compression.GZipStream(archive, System.IO.Compression.CompressionMode.Decompress);
+        Assert.Contains(Convert.ToHexStringLower(SHA256.HashData(gzip)), text);
+    }
+
     private static string Sha256(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
 
     private static byte[] WithLf(byte[] bytes)

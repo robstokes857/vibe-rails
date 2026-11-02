@@ -23,6 +23,9 @@ function Assert-DeployPayload {
         "wwwroot\index.html",
         "Models\BertV2\model.onnx.gz",
         "Models\BertV2\vocab.txt",
+        "Models\Reranker\model.onnx.gz",
+        "Models\Reranker\vocab.txt",
+        "Models\Reranker\LICENSE.txt",
         "scripts\pre-commit-hook.sh",
         "scripts\commit-msg-hook.sh",
         "onnxruntime.dll",
@@ -143,6 +146,20 @@ function Wait-ExecutableReadyForReplacement {
     return $false
 }
 
+function Get-InstallerModelFunction {
+    # One implementation of model extraction: load install.ps1's function by name, never
+    # running the installer itself. Dot-source the result to define it in the caller's scope.
+    $installer = Join-Path $RepoRoot "Scripts" "install.ps1"
+    $parseErrors = $null
+    $syntax = [System.Management.Automation.Language.Parser]::ParseFile($installer, [ref]$null, [ref]$parseErrors)
+    if ($parseErrors.Count -gt 0) { throw ($parseErrors -join [Environment]::NewLine) }
+    $function = $syntax.Find({ param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Install-BundledModelAssets'
+    }, $false)
+    if ($null -eq $function) { throw "Scripts/install.ps1 has no Install-BundledModelAssets function." }
+    return [scriptblock]::Create($function.Extent.Text)
+}
+
 function Remove-DeployStagingDirectory {
     param(
         [Parameter(Mandatory = $true)]
@@ -201,6 +218,7 @@ try {
     }
     Assert-DeployPayload -RootDir $payloadDir
     Assert-StableInstallTarget -Path $InstallDir
+    . (Get-InstallerModelFunction)
     Write-Host "Publish payload validated." -ForegroundColor Green
 
     # Other dashboard/terminal vb processes also hold vb.exe open on Windows.
@@ -229,6 +247,11 @@ try {
     foreach ($item in Get-ChildItem -LiteralPath $payloadDir -Force) {
         Copy-Item -LiteralPath $item.FullName -Destination $InstallDir -Recurse -Force
     }
+
+    # Extract the models exactly as install.ps1 does, so a local deploy also turns on search
+    # re-ranking and replaces a model only when its bytes changed (VIBE-258).
+    Install-BundledModelAssets -RootDir $InstallDir -Name BertV2
+    Install-BundledModelAssets -RootDir $InstallDir -Name Reranker
 
     Write-Host ""
     Write-Host "Deploy complete!" -ForegroundColor Green

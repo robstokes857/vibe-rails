@@ -67,7 +67,8 @@ try {
     $invalidPayload = Join-Path $output 'invalid-payload'
     $requiredFiles = @('vb.exe', 'appsettings.json', 'wwwroot/index.html', 'onnxruntime.dll',
         'e_sqlite3.dll', 'vec0.dll', 'scripts/pre-commit-hook.sh', 'scripts/commit-msg-hook.sh',
-        'Models/BertV2/model.onnx.gz', 'Models/BertV2/vocab.txt', 'msvcp140.dll',
+        'Models/BertV2/model.onnx.gz', 'Models/BertV2/vocab.txt', 'Models/Reranker/model.onnx.gz',
+        'Models/Reranker/vocab.txt', 'Models/Reranker/LICENSE.txt', 'msvcp140.dll',
         'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'board.db')
     foreach ($relative in $requiredFiles) {
         $file = Join-Path $invalidPayload $relative
@@ -97,6 +98,11 @@ try {
     Assert ($folderOwner.Value -eq $currentUser.Value) 'New installation folder is not owned by the current user'
     Assert (Test-Path -LiteralPath $uninstaller) 'Uninstaller was not installed'
     Assert ((Get-Item -LiteralPath (Join-Path $root 'models/bertv2/model.onnx')).Length -gt 1000000) 'Runtime model was not extracted'
+    $reranker = Join-Path $root 'models/reranker/model.onnx'
+    Assert ((Get-FileHash -LiteralPath $reranker).Hash -ne (Get-FileHash -LiteralPath (Join-Path $root 'models/bertv2/model.onnx')).Hash) 'Re-ranker model was not extracted from its own archive'
+    Assert (Test-Path -LiteralPath (Join-Path $root 'models/reranker/vocab.txt')) 'Re-ranker vocabulary was not installed'
+    Assert (Test-Path -LiteralPath (Join-Path $root 'models/reranker/LICENSE.txt')) 'Re-ranker license was not installed'
+    Assert (-not (Test-Path -LiteralPath (Join-Path $root 'models/reranker/model.onnx.gz'))) 'Setup installed the compressed re-ranker archive'
     Assert (Test-Path -LiteralPath $desktop) 'Desktop shortcut is missing'
     Assert (Test-Path -LiteralPath $startMenu) 'Start menu shortcut is missing'
     $shell = New-Object -ComObject WScript.Shell
@@ -126,12 +132,20 @@ try {
     foreach ($extension in @('gz', 'zip', 'br')) {
         [IO.File]::WriteAllText((Join-Path $root "models/bertv2/model.onnx.$extension"), 'obsolete archive')
     }
+    $rerankerHash = (Get-FileHash -LiteralPath $reranker).Hash
+    $rerankerVocab = Join-Path $root 'models/reranker/vocab.txt'
+    [IO.File]::WriteAllText($reranker, 'obsolete model')
+    [IO.File]::WriteAllText($rerankerVocab, 'obsolete vocabulary')
+    [IO.File]::WriteAllText((Join-Path $root 'models/reranker/model.onnx.gz'), 'obsolete archive')
     Invoke-Installer $setup 'upgrade'
     Assert ((Get-Item -LiteralPath $model).Length -gt 1000000) 'Upgrade did not replace the obsolete model'
     Assert ((Get-FileHash -LiteralPath $vocab).Hash -eq (Get-FileHash -LiteralPath (Join-Path $PayloadDirectory 'Models/BertV2/vocab.txt')).Hash) 'Upgrade did not replace the obsolete vocabulary'
     foreach ($extension in @('gz', 'zip', 'br')) {
         Assert (-not (Test-Path -LiteralPath (Join-Path $root "models/bertv2/model.onnx.$extension"))) 'Upgrade retained an unused archive'
     }
+    Assert ((Get-FileHash -LiteralPath $reranker).Hash -eq $rerankerHash) 'Upgrade did not replace the obsolete re-ranker model'
+    Assert ((Get-FileHash -LiteralPath $rerankerVocab).Hash -eq (Get-FileHash -LiteralPath (Join-Path $PayloadDirectory 'Models/Reranker/vocab.txt')).Hash) 'Upgrade did not replace the obsolete re-ranker vocabulary'
+    Assert (-not (Test-Path -LiteralPath (Join-Path $root 'models/reranker/model.onnx.gz'))) 'Upgrade retained the re-ranker archive'
     Assert ((Get-RawUserPath) -eq $savedPath) 'Repeat installation duplicated or changed PATH'
 
     # Elevated runners default new directories to Administrators. New installs
@@ -195,6 +209,9 @@ try {
         Assert ([IO.File]::ReadAllText((Join-Path $root $relative)) -eq "keep:$relative") "User data changed: $relative"
     }
     Assert (Test-Path -LiteralPath (Join-Path $root 'models/bertv2/model.onnx')) 'Uninstall removed the runtime model'
+    foreach ($kept in @('model.onnx', 'vocab.txt', 'LICENSE.txt')) {
+        Assert (Test-Path -LiteralPath (Join-Path $root "models/reranker/$kept")) "Uninstall removed the re-ranker $kept"
+    }
 
     # An existing script-installed PATH entry belongs to the user. Preserve it,
     # including quotes, casing, trailing slash, and every unrelated segment.

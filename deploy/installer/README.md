@@ -31,8 +31,10 @@ as part of `dotnet test Tests/Tests.csproj`.
 The builder requires known assets and rejects unrecognized payload files. It
 generates explicit Inno file entries from the publish output; symbols, import
 libraries and assembly XML documentation are excluded. It extracts the bundled
-BERT model at build time and ships the extracted model instead of duplicate ZIP
-and gzip archives, so installation does not need a download, .NET or
+models at build time: the BERT embedder into `models\bertv2` and the search
+re-ranker into `models\reranker` (VIBE-258), whose Apache-2.0 `LICENSE.txt` installs
+beside it. Setup ships the extracted models instead of duplicate ZIP and gzip
+archives, so installation does not need a download, .NET or
 PowerShell. Inno itself is a build dependency, not a target-machine prerequisite.
 Git, PowerShell 7 and an AI CLI remain prerequisites managed through the existing
 Setup screen.
@@ -46,7 +48,8 @@ service, login startup registration, database migration or OS scheduled task.
 
 Only exact application files are owned by the uninstaller. Configuration files
 use `onlyifdoesntexist uninsneveruninstall`. Packaged model/vocabulary files use SHA-256
-checks to repair or upgrade changed bytes and `uninsneveruninstall` to retain them on uninstall.
+checks to repair or upgrade changed bytes and `uninsneveruninstall` to retain them on uninstall;
+a model's `LICENSE.txt` is retained with it.
 Only the known obsolete `model.onnx.gz`, `.zip` and `.br` archives are removed. Databases,
 SQLite sidecars, credentials, environments, user scripts, logs and sandboxes
 are never installer payload entries. There is no wildcard uninstall deletion.
