@@ -13,7 +13,7 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
     <!-- xunit.v3 4.x defaults to Microsoft Testing Platform v2, whose MSBuild targets refuse the
          classic VSTest-mode `dotnet test` on the .NET 10 SDK (this killed release v10.11.18).
          The mtp-off variant is the same xunit with MTP support disabled, so `dotnet test`,

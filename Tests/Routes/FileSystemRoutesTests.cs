@@ -12,6 +12,7 @@ using Xunit;
 
 namespace Tests.Routes;
 
+[Collection("ProcessEnvIsolation")] // ResolveDefaultPath reads the process-wide ParserConfigs root.
 public sealed class FileSystemRoutesTests : IDisposable
 {
     private static readonly HttpClient SharedClient = new();
