@@ -644,8 +644,10 @@ fields, labels, badges, alerts, dialog chrome and page headings use this system;
 also has scoped component styles in its view template. Keep the existing single top bar,
 terminal workspaces, Board drawer and specialized editor layouts. The optional VS Code
 host theme continues to supply colors and fonts through the same semantic tokens.
-Terminal output, Monaco, provider marks and the user's Light/System toast preference keep
-their own rendering contracts. Feature-specific legacy controls migrate as those views are updated.
+Terminal output, Monaco and provider marks keep their own rendering contracts.
+Desktop notifications use the shared app palette, including the VS Code host theme when enabled;
+there is no separate notification appearance preference. Feature-specific legacy controls migrate
+as those views are updated.
 
 Desktop aliases for values specified above (these add no new visual choices):
 

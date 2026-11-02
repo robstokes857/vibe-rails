@@ -51,8 +51,8 @@ page styles own layout. Avoid adding later overrides that restore monospace uppe
 labels, bright Bootstrap alert fills, blue primary actions or faint focus glows.
 The Board's scoped controls and type badges live in `index.html`. Replay mirrors the
 base color tokens in its isolated document; terminal output and syntax themes stay independent.
-The optional VS Code theme adapter still supplies host colors and fonts. Light/System toast
-preferences are retained. Shared controls have 44px targets on touch/narrow screens.
+The optional VS Code theme adapter still supplies host colors and fonts. Notifications use the
+shared app palette without a separate appearance preference. Shared controls have 44px targets on touch/narrow screens.
 
 Validate with `playwright.page-headers.config.js` (includes `design-system.spec.js`) and
 the relevant feature harnesses; these use static frontend files and intercepted APIs.
@@ -1486,8 +1486,8 @@ recovery rechecks content after a library refresh: retained registrations do not
 ## Notifications and session replay
 
 `toast-service.js` keeps the shared notification entry point and stacking library, using compact,
-opaque Midnight cards by default. General settings offers Midnight, Light and Follow system;
-this appearance preference applies immediately and persists in browser local storage. CSS owns
+opaque cards in the shared app palette. General settings has no notification appearance picker;
+the retired browser preference is ignored and left in storage for older versions. CSS owns
 the palette and compact spacing; toasts retain escaped content, hover pause and manual dismissal.
 
 Session/history/Board/Automation replay uses `session-replay/viewer.mjs` through

@@ -2,7 +2,6 @@ import { confirmDialog } from './utils.js';
 import { SettingsKeysPanel } from './settings-keys.js';
 import { SetupPanel, refreshSetupStatus } from './setup-panel.js';
 import { SetupInstallWindow } from './setup-install-window.js';
-import { getToastTheme, setToastTheme } from './toast-service.js';
 import { PrReviewerSettingsPanel } from './settings-pr-reviewer.js';
 import { BoardApi } from './board-api.js';
 import { contextEditorSection, mountContextEditor } from './board-settings.js';
@@ -73,15 +72,6 @@ export class SettingsController {
             this.app.bindAction(root, '[data-action="go-back"]', () => this.app.goBack());
             this._initSettingsTabs(root);
             if (data.tab) this._selectSettingsTab?.(data.tab);
-            const toastTheme = root.querySelector('#setting-toast-theme');
-            if (toastTheme) {
-                toastTheme.value = getToastTheme();
-                toastTheme.addEventListener('change', () => {
-                    const theme = setToastTheme(toastTheme.value);
-                    this.app.showToast('Notifications', 'Your notification style is ready.', 'success', { theme });
-                });
-            }
-
             const projectIdentityCard = root.querySelector('[data-project-identity-card]');
             if (projectIdentityCard && this.app.data.isInGit) {
                 projectIdentityCard.hidden = false;

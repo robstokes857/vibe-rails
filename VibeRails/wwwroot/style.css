@@ -9437,10 +9437,8 @@ input.form-control:disabled {
 }
 
 /* Compact application notifications. The library supplies stacking and timers;
-   appearance stays here so every theme shares the same spacing and typography. */
-.notAToastvr-dark,
-.notAToastvr-light,
-.notAToastvr-system {
+   appearance follows the shared app palette. */
+.notAToastvr-dark {
     --vr-toast-bg: var(--color-bg-surface-hover);
     --vr-toast-fg: var(--color-text);
     --vr-toast-muted: var(--color-text-muted);
@@ -9456,22 +9454,6 @@ input.form-control:disabled {
     width: fit-content;
     max-width: min(360px, calc(100vw - 24px));
     box-sizing: border-box;
-}
-
-.notAToastvr-light {
-    --vr-toast-bg: #ffffff;
-    --vr-toast-fg: #18202e;
-    --vr-toast-muted: #566174;
-    --vr-toast-border: #d9dfe8;
-}
-
-@media (prefers-color-scheme: light) {
-    .notAToastvr-system {
-        --vr-toast-bg: #ffffff;
-        --vr-toast-fg: #18202e;
-        --vr-toast-muted: #566174;
-        --vr-toast-border: #d9dfe8;
-    }
 }
 
 .vr-toast-title {

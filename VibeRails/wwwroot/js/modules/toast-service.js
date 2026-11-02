@@ -1,23 +1,5 @@
 import { escapeHtml, escapeHtmlWithLineBreaks } from './utils.js';
 
-const DEFAULT_THEME = 'dark';
-const THEME_STORAGE_KEY = 'viberails.toast.theme';
-const THEMES = new Set(['dark', 'light', 'system']);
-
-export function getToastTheme() {
-    try {
-        const stored = localStorage.getItem(THEME_STORAGE_KEY);
-        return THEMES.has(stored) ? stored : DEFAULT_THEME;
-    } catch {
-        return DEFAULT_THEME;
-    }
-}
-
-export function setToastTheme(theme) {
-    const resolved = THEMES.has(theme) ? theme : DEFAULT_THEME;
-    try { localStorage.setItem(THEME_STORAGE_KEY, resolved); } catch { /* Storage may be disabled. */ }
-    return resolved;
-}
 const DEFAULT_POSITION = 'top-right';
 const DEFAULT_ENTRY_ANIMATION = 'fadeIn';
 const DEFAULT_EXIT_ANIMATION = 'fadeOut';
@@ -72,7 +54,6 @@ export function showAppToast(title, message, type = 'info', options = {}) {
         icon,
         iconBackground,
         iconColor,
-        theme = getToastTheme(),
         duration,
         autoClose,
         requireDismiss = false,
@@ -92,7 +73,6 @@ export function showAppToast(title, message, type = 'info', options = {}) {
         ? (duration ?? (compact ? compactDuration : baseDuration))
         : 0;
     const resolvedPosition = position ?? (compact ? 'bottom-right' : DEFAULT_POSITION);
-    const resolvedTheme = `vr-${THEMES.has(theme) ? theme : DEFAULT_THEME}`;
 
     const toastOptions = {
         ...BASE_TOAST_OPTIONS,
@@ -100,7 +80,7 @@ export function showAppToast(title, message, type = 'info', options = {}) {
         position: resolvedPosition,
         duration: resolvedDuration,
         autoClose: shouldAutoClose,
-        theme: resolvedTheme,
+        theme: 'vr-dark',
         entryAnimation: entryAnimation ?? animation?.enter ?? DEFAULT_ENTRY_ANIMATION,
         exitAnimation: exitAnimation ?? animation?.exit ?? DEFAULT_EXIT_ANIMATION,
         iconType: toastType === 'warning' ? 'warn' : toastType,
