@@ -71,8 +71,8 @@ public sealed class BoardLaunchService(
     public const string ManagerElsewhereMessage = "This board's manager is already running in another VibeRails window on this project. "
         + "It manages this board's Agent cards from there: use that window, or stop it there first.";
 
-    /// <summary>How far back another window's sessions are looked for: a day, like the manager's open-worker window.</summary>
-    internal static readonly TimeSpan ElsewhereWindow = TimeSpan.FromHours(24);
+    /// <summary>Sessions per state.db read when looking for another window's agents (the store's limit).</summary>
+    internal const int ElsewhereBatchSize = 200;
 
     // Only in-flight launches are retained. TryAdd is an immediate reservation, not a
     // queued semaphore, so removal cannot strand waiters or create two gates for one card.
@@ -368,28 +368,34 @@ public sealed class BoardLaunchService(
     }
 
     /// <summary>
-    /// The sessions another VibeRails window is running (VIBE-262): not a tab in this root, linked
-    /// within the last day, still open in state.db (which every window on the machine shares), and
-    /// owned by a live process that started before the session did. A window that crashed stops
-    /// counting as soon as its tab children are gone. This is a read, not a lock: two windows
-    /// launching in the same instant can still both start. A state.db that cannot be read leaves
-    /// the check to this root rather than failing the launch or the status.
+    /// The sessions another VibeRails window is running (VIBE-262): not a tab in this root, still
+    /// open in state.db (which every window on the machine shares), and owned by a live process that
+    /// started before the session did. Age is no reason to skip one: a manager or worker can run for
+    /// days, so every candidate is checked, newest first, in store-sized batches of primary-key reads,
+    /// and only open rows reach the process check. A window that crashed stops counting as soon as its
+    /// tab children are gone. This is a read, not a lock: two windows launching in the same instant can
+    /// still both start. A state.db that cannot be read leaves the check to this root rather than
+    /// failing the launch or the status.
     /// </summary>
     private async Task<IReadOnlySet<string>> RunningElsewhereAsync(IEnumerable<(string SessionId, DateTime StartedUtc)> sessions,
         IReadOnlyList<TerminalTabStatusResponse> tabs, CancellationToken cancellationToken)
     {
         var local = tabs.Where(tab => !string.IsNullOrWhiteSpace(tab.SessionId)).Select(tab => tab.SessionId!).ToHashSet(StringComparer.Ordinal);
-        var cutoff = DateTime.UtcNow - ElsewhereWindow;
-        var candidates = sessions.Where(session => session.StartedUtc >= cutoff && !local.Contains(session.SessionId))
+        var candidates = sessions.Where(session => !local.Contains(session.SessionId))
             .OrderByDescending(session => session.StartedUtc).Select(session => session.SessionId)
-            .Distinct(StringComparer.Ordinal).Take(200).ToList();
+            .Distinct(StringComparer.Ordinal).ToList();
         if (candidates.Count == 0) return NoSessions;
         try
         {
             var running = sessionOwnerRunning ?? SessionOwnerProcess.IsRunning;
-            return (await store.GetOpenSessionOwnersAsync(candidates, cancellationToken))
-                .Where(owner => owner.OwnerPid != Environment.ProcessId && running(owner.OwnerPid, owner.StartedUtc))
-                .Select(owner => owner.SessionId).ToHashSet(StringComparer.Ordinal);
+            var elsewhere = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var batch in candidates.Chunk(ElsewhereBatchSize))
+            {
+                foreach (var owner in await store.GetOpenSessionOwnersAsync(batch, cancellationToken))
+                    if (owner.OwnerPid != Environment.ProcessId && running(owner.OwnerPid, owner.StartedUtc))
+                        elsewhere.Add(owner.SessionId);
+            }
+            return elsewhere;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

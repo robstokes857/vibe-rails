@@ -63,7 +63,7 @@ public sealed class BoardManagerLaunchTests : IDisposable
     private static bool OtherWindow(int pid, DateTime started) => pid == OtherWindowPid;
 
     /// <summary>A state.db session row, as a tab child records it (the fixture shares one file for both databases).</summary>
-    private async Task RecordSessionAsync(string sessionId, int? ownerPid = OtherWindowPid, DateTime? endedUtc = null)
+    private async Task RecordSessionAsync(string sessionId, int? ownerPid = OtherWindowPid, DateTime? endedUtc = null, DateTime? startedUtc = null)
     {
         await using var db = new SqliteConnection(_connectionString);
         await db.OpenAsync(Ct);
@@ -73,10 +73,22 @@ public sealed class BoardManagerLaunchTests : IDisposable
             INSERT INTO Sessions (Id, Cli, StartedUTC, EndedUTC, OwnerPid) VALUES ($id, 'claude', $started, $ended, $pid);
             """;
         command.Parameters.AddWithValue("$id", sessionId);
-        command.Parameters.AddWithValue("$started", DateTime.UtcNow.AddMinutes(-1).ToString("O"));
+        command.Parameters.AddWithValue("$started", (startedUtc ?? DateTime.UtcNow.AddMinutes(-1)).ToString("O"));
         command.Parameters.AddWithValue("$ended", endedUtc is { } ended ? ended.ToString("O") : DBNull.Value);
         command.Parameters.AddWithValue("$pid", ownerPid is { } pid ? pid : DBNull.Value);
         await command.ExecuteNonQueryAsync(Ct);
+    }
+
+    /// <summary>Moves a board.db link's recorded time back, as if the agent had been running that long.</summary>
+    private async Task BackdateLinkAsync(string table, string column, string sessionId, DateTime when)
+    {
+        await using var db = new SqliteConnection(_connectionString);
+        await db.OpenAsync(Ct);
+        await using var command = db.CreateCommand();
+        command.CommandText = $"UPDATE {table} SET {column} = $when WHERE SessionId = $id;";
+        command.Parameters.AddWithValue("$id", sessionId);
+        command.Parameters.AddWithValue("$when", when.ToString("O"));
+        Assert.Equal(1, await command.ExecuteNonQueryAsync(Ct));
     }
 
     private async Task EndSessionAsync(string sessionId)
@@ -420,6 +432,57 @@ public sealed class BoardManagerLaunchTests : IDisposable
         await EndSessionAsync(theirs);
         Assert.NotNull(await Launcher(OtherWindow).LaunchAsync(_root, third.Id, null, Ct, intent: "worker"));
         Assert.Equal(2, _requests.Count);
+    }
+
+    [Fact]
+    public async Task AnotherWindowsManagerAndWorker_StillCount_AfterRunningForMoreThanADay()
+    {
+        // Review finding F1 (VIBE-262): age alone must never hide a live owner.
+        var boardId = await BoardWithManagerAsync();
+        var busy = await _store.CreateCardAsync(_root, Card("Long-running elsewhere", BoardWorkflowModes.Agent), Ct);
+        var next = await _store.CreateCardAsync(_root, Card("Next", BoardWorkflowModes.Agent), Ct);
+        var dayAndAHourAgo = DateTime.UtcNow.AddHours(-25);
+        var manager = Guid.NewGuid().ToString();
+        await _store.RecordBoardManagerSessionAsync(_root, boardId, manager, "their-manager-tab", "base:codex", "codex", Ct);
+        await RecordSessionAsync(manager, startedUtc: dayAndAHourAgo);
+        await BackdateLinkAsync("BoardManagerSessions", "StartedUTC", manager, dayAndAHourAgo);
+        var worker = Guid.NewGuid().ToString();
+        await _store.LinkSessionAsync(_root, busy.Id, worker, "their-worker-tab", "base:claude", "claude", "Worker", BoardSessionRecord.WorkerOrigin, Ct);
+        await RecordSessionAsync(worker, startedUtc: dayAndAHourAgo);
+        await BackdateLinkAsync("BoardCardSessions", "CreatedUTC", worker, dayAndAHourAgo);
+
+        var state = await Launcher(OtherWindow).GetBoardManagerLiveStateAsync(_root, boardId, Ct);
+        Assert.Equal(manager, state.Elsewhere?.SessionId);
+        Assert.Equal(worker, Assert.Single(state.Workers).SessionId);
+        Assert.Equal(1, state.WorkersElsewhere);
+        var refused = await Assert.ThrowsAsync<BoardConflictException>(() => Launcher(OtherWindow).LaunchBoardManagerAsync(_root, boardId, Ct));
+        Assert.Equal(BoardLaunchService.ManagerElsewhereMessage, refused.Message);
+        var limited = await Assert.ThrowsAsync<BoardConflictException>(() => Launcher(OtherWindow).LaunchAsync(_root, next.Id, null, Ct, intent: "worker"));
+        Assert.Contains("in another VibeRails window", limited.Message);
+        Assert.Empty(_requests);
+    }
+
+    [Fact]
+    public async Task AnotherWindowsWorker_IsFound_BeyondTheFirstBatchOfCandidates()
+    {
+        var boardId = await BoardWithManagerAsync();
+        var card = await _store.CreateCardAsync(_root, Card("Many workers", BoardWorkflowModes.Agent), Ct);
+        // More finished-but-unrecorded worker sessions than one state.db read takes, all newer than the live one.
+        const int deadOwnerPid = 31337;
+        for (var i = 0; i < BoardLaunchService.ElsewhereBatchSize + 5; i++)
+        {
+            var dead = Guid.NewGuid().ToString();
+            await _store.LinkSessionAsync(_root, card.Id, dead, $"dead-tab-{i}", "base:claude", "claude", "Worker", BoardSessionRecord.WorkerOrigin, Ct);
+            await RecordSessionAsync(dead, ownerPid: deadOwnerPid);
+        }
+        var live = Guid.NewGuid().ToString();
+        await _store.LinkSessionAsync(_root, card.Id, live, "their-tab", "base:claude", "claude", "Worker", BoardSessionRecord.WorkerOrigin, Ct);
+        await RecordSessionAsync(live, startedUtc: DateTime.UtcNow.AddDays(-3));
+        await BackdateLinkAsync("BoardCardSessions", "CreatedUTC", live, DateTime.UtcNow.AddDays(-3));
+
+        var state = await Launcher(OtherWindow).GetBoardManagerLiveStateAsync(_root, boardId, Ct);
+        Assert.Equal(live, Assert.Single(state.Workers).SessionId);
+        Assert.Equal(1, state.WorkersElsewhere);
     }
 
     public void Dispose()

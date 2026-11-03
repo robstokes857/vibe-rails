@@ -94,10 +94,11 @@ running cards and points at `await_board_events`; `start_board_agent` passes it 
 with their own manager are outside it, and so is everything while the switch is off.
 
 **Across windows (VIBE-262).** Every VibeRails window on the machine shares state.db, so a root
-also sees the board manager and workers another window runs: a session linked within 24 hours
-that is not a tab in this root, is still open in state.db (`IBoardStore.GetOpenSessionOwnersAsync`)
-and whose recorded `Sessions.OwnerPid` (its tab child) is a live process that started before the
-session did (`SessionOwnerProcess`, so a reused PID does not count). A second window's manager
+also sees the board manager and workers another window runs: a session that is not a tab in this
+root, is still open in state.db (`IBoardStore.GetOpenSessionOwnersAsync`, read in batches of 200
+ids, newest first, however old the link) and whose recorded `Sessions.OwnerPid` (its tab child) is
+a live process that started before the session did (`SessionOwnerProcess`, so a reused PID does
+not count). Age never hides a live owner: a manager can run for days. A second window's manager
 launch, from the chip or Start Agent workflow, is a 409 (`BoardLaunchService.ManagerElsewhereMessage`);
 the status carries `elsewhere` and the chip reads Running in another window, with no Go to, Stop
 or Start. Another window's workers count toward the worker limit and the chip's busy count; the
