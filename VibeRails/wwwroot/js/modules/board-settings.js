@@ -2,10 +2,12 @@ import { escapeHtml } from './utils.js';
 import { BoardApi } from './board-api.js';
 import { boardTracker } from './board-brand.js';
 import { jobLaunchKind } from './launch-kind.js';
+import { mountLlmPicker } from './pickers/llm-picker.js';
+import { renderBoardLaunchOptions, bindBoardLaunchOptions, readBoardLaunchOptions } from './board-launch-options.js';
 
 // A dedicated board's tracker connection sits under General; a local board offers each as a tab.
 const TRACKER_TABS = [['jira', 'Jira Cloud'], ['ado', 'Azure DevOps']];
-const SECTION_ORDER = ['general', ...TRACKER_TABS.map(([id]) => id), 'context', 'history'];
+const SECTION_ORDER = ['general', ...TRACKER_TABS.map(([id]) => id), 'manager', 'context', 'history'];
 
 const navigation = (name, sections) => `
     <nav class="nav nav-pills board-settings-nav gap-2 mb-3" aria-label="${name}" role="tablist">
@@ -15,8 +17,10 @@ const navigation = (name, sections) => `
                 tabindex="${id === 'general' ? 0 : -1}" data-board-settings-tab="${id}">${label}</button>`).join('')}
     </nav>`;
 
-export const boardSettingsNavigation = () =>
-    navigation('Board settings', [['general', 'General'], ...TRACKER_TABS, ['context', 'Context'], ['history', 'History']]);
+// The Manager tab exists only while the AI board manager setting is on.
+export const boardSettingsNavigation = ({ manager = false } = {}) =>
+    navigation('Board settings', [['general', 'General'], ...TRACKER_TABS, ...(manager ? [['manager', 'Manager']] : []),
+        ['context', 'Context'], ['history', 'History']]);
 
 /** The New board dialog: a local board (the General section), or one connected to a tracker. */
 export const newBoardNavigation = () => navigation('Board type', [['general', 'Local'], ...TRACKER_TABS]);
@@ -250,26 +254,36 @@ export function mountBoardSync(app, element, boardId, onStatus = () => {}) {
 }
 
 // Each mount owns its request and DOM. Replacing/closing a modal cannot populate a newer one.
-function mountSettings(app, element, { load, render, read, save, savedMessage, onSaved, toastTitle = 'Board' }) {
+// afterRender(element, result) may mount widgets on the fresh markup and return their disposer;
+// clear(element) is the payload for a [data-settings-clear] button; reloadAfterSave re-renders
+// from the saved result so widgets show what was stored.
+function mountSettings(app, element, { load, render, read, save, savedMessage, onSaved, afterRender, clear, reloadAfterSave = false, toastTitle = 'Board' }) {
     if (!element) return () => {};
     const abort = new AbortController();
     let disposed = false;
     let revision = null;
     let busy = false;
+    let disposeWidgets = () => {};
     const content = element.querySelector('[data-board-settings-content]');
     const alive = () => !disposed && element.isConnected !== false;
+    const show = result => {
+        disposeWidgets();
+        disposeWidgets = () => {};
+        revision = result.revision;
+        content.innerHTML = render(result);
+        element.querySelectorAll('[data-context-mode]').forEach(select => {
+            const message = element.querySelector(`[data-context-message="${select.dataset.contextMode}"]`);
+            const sync = () => { message.hidden = select.value === 'default'; };
+            select.addEventListener('change', sync);
+            sync();
+        });
+        disposeWidgets = afterRender?.(element, result) || (() => {});
+    };
     async function reload() {
         try {
             const result = await load({ signal: abort.signal });
             if (!alive()) return;
-            revision = result.revision;
-            content.innerHTML = render(result);
-            element.querySelectorAll('[data-context-mode]').forEach(select => {
-                const message = element.querySelector(`[data-context-message="${select.dataset.contextMode}"]`);
-                const sync = () => { message.hidden = select.value === 'default'; };
-                select.addEventListener('change', sync);
-                sync();
-            });
+            show(result);
         } catch (error) {
             if (!alive() || error?.name === 'AbortError') return;
             content.innerHTML = `<p role="alert">${escapeHtml(error?.message || 'Settings could not be loaded.')}</p><button type="button" class="btn btn-sm btn-outline-secondary" data-settings-retry>Retry</button>`;
@@ -277,26 +291,117 @@ function mountSettings(app, element, { load, render, read, save, savedMessage, o
     }
     const click = async event => {
         if (event.target.closest('[data-settings-retry]')) { void reload(); return; }
-        const button = event.target.closest('[data-settings-save]');
+        const clearing = clear && event.target.closest('[data-settings-clear]');
+        const button = clearing || event.target.closest('[data-settings-save]');
         if (!button || busy || revision === null) return;
         busy = true;
         button.disabled = true;
         try {
-            const result = await save({ ...read(element), expectedRevision: revision });
+            const result = await save({ ...(clearing ? clear(element) : read(element)), expectedRevision: revision });
             if (!alive()) return;
-            revision = result.revision;
+            if (reloadAfterSave) show(result);
+            else revision = result.revision;
             onSaved?.(result);
             app.showToast(toastTitle, savedMessage, 'success');
         } catch (error) {
             if (alive()) app.showToast(toastTitle, error?.message || 'Settings could not be saved.', 'error');
         } finally {
             busy = false;
-            if (alive()) button.disabled = false;
+            if (alive() && button.isConnected !== false) button.disabled = false;
         }
     };
     element.addEventListener('click', click);
     void reload();
-    return () => { disposed = true; abort.abort(); element.removeEventListener('click', click); };
+    return () => { disposed = true; abort.abort(); disposeWidgets(); element.removeEventListener('click', click); };
+}
+
+export const boardManagerSection = () => `
+    <section class="mt-3 border-top pt-3" data-board-manager-settings>
+        <h6>Board manager</h6>
+        <p class="board-editor-muted">One AI manager agent for the whole board. It runs every card whose workflow is Agent and that has no manager of its own: it assigns each card's work to a worker session, waits for board events instead of polling, checks handoffs and reviews, and moves cards through your lanes. Start, open or stop it from the board header. Cards you give their own manager keep it.</p>
+        <div data-board-settings-content>Loading manager…</div>
+    </section>`;
+
+/** The most standing-order characters; the server enforces the same limit. */
+export const MANAGER_INSTRUCTIONS_LIMIT = 4000;
+/** The most implementation workers a board manager may run at once. */
+export const MANAGER_WORKERS_LIMIT = 4;
+
+const managerStatusLine = status => {
+    const cards = status.managedCards === 1 ? '1 Agent card' : `${status.managedCards || 0} Agent cards`;
+    const own = status.ownManagerCards ? ` ${status.ownManagerCards} ${status.ownManagerCards === 1 ? 'card keeps its' : 'cards keep their'} own manager.` : '';
+    if (!status.selection) return `No board manager yet. Pick one below; it will manage ${cards} on this board.${own}`;
+    return `${status.active ? `Running since ${new Date(status.active.startedAt).toLocaleString()}` : 'Not running'} · manages ${cards}.${own}`;
+};
+
+/**
+ * The Manager tab: the shared LLM picker and base launch options, how many implementation workers
+ * may run at once, and the manager's standing instructions, saved together under the board's
+ * manager revision. picker is injectable so node tests can stand in for the Tom Select mount.
+ */
+export function mountBoardManager(app, element, boardId, { onSaved, picker = mountLlmPicker } = {}) {
+    return mountSettings(app, element, {
+        load: extra => BoardApi.getBoardManagerAsync(boardId, extra),
+        render: status => {
+            const workers = Math.min(MANAGER_WORKERS_LIMIT, Math.max(1, Number(status.maxWorkers) || 1));
+            return `
+            <p class="board-editor-muted mb-2" data-board-manager-status>${escapeHtml(managerStatusLine(status))}</p>
+            <label class="board-editor-label" for="board-manager-selection">Manager agent</label>
+            <select class="form-select form-select-sm" id="board-manager-selection" aria-label="Board manager agent"></select>
+            <div class="mt-2" data-board-manager-options></div>
+            <label class="board-editor-label mt-3" for="board-manager-workers">Workers at a time</label>
+            <select class="form-select form-select-sm" id="board-manager-workers" data-board-manager-workers aria-describedby="board-manager-workers-help">
+                ${Array.from({ length: MANAGER_WORKERS_LIMIT }, (_, index) => index + 1).map(value =>
+                    `<option value="${value}"${value === workers ? ' selected' : ''}>${value === 1 ? '1 (recommended for one checkout)' : value}</option>`).join('')}
+            </select>
+            <p class="board-editor-muted mt-1" id="board-manager-workers-help">Implementation workers share this checkout unless their environment uses a clone sandbox. VibeRails refuses a worker past this limit; reviews and planning workers do not count.</p>
+            <label class="board-editor-label mt-3" for="board-manager-instructions">Manager instructions</label>
+            <textarea class="form-control form-control-sm" id="board-manager-instructions" data-board-manager-instructions rows="5" maxlength="${MANAGER_INSTRUCTIONS_LIMIT}" spellcheck="true"
+                placeholder="Standing orders for this board's manager, e.g. Bugs before features. Run the tests before Review. Never move a card to Done without a passing code review."
+                aria-describedby="board-manager-instructions-help">${escapeHtml(status.instructions || '')}</textarea>
+            <p class="board-editor-muted mt-1" id="board-manager-instructions-help">The manager follows these on every card it runs, within its role. Card and Card type context still reach each worker through its card.</p>
+            <div class="d-flex flex-wrap gap-2 mt-3">
+                <button type="button" class="btn btn-sm btn-outline-primary" data-settings-save>Save manager</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-settings-clear ${status.selection ? '' : 'disabled'}>Remove manager</button>
+            </div>
+            <p class="board-editor-muted mt-2">Choose a work agent or environment, not a code review one. A running manager keeps the settings it started with; stop and start it to apply changes.</p>`;
+        },
+        afterRender: (root, status) => {
+            const select = root.querySelector('#board-manager-selection');
+            const host = root.querySelector('[data-board-manager-options]');
+            if (!select || !host) return () => {};
+            const disposePicker = picker(app, select, {
+                context: 'assignee', includeHidden: true,
+                placeholder: 'Choose a manager agent…',
+                selectedValue: status.selection || ''
+            }) || (() => {});
+            let disposeOptions = () => {};
+            const renderOptions = (options = {}, selection = select.value) => {
+                disposeOptions();
+                host.innerHTML = renderBoardLaunchOptions(selection, options, { idPrefix: 'board-manager-settings' });
+                disposeOptions = bindBoardLaunchOptions(host, selection) || (() => {});
+            };
+            renderOptions(status.baseLlmOptions || {}, status.selection || '');
+            const change = () => renderOptions();
+            select.addEventListener('change', change);
+            return () => { select.removeEventListener('change', change); disposeOptions(); disposePicker(); };
+        },
+        read: root => {
+            const selection = root.querySelector('#board-manager-selection')?.value || '';
+            const workers = Number(root.querySelector('[data-board-manager-workers]')?.value) || 1;
+            return {
+                selection,
+                baseLlmOptions: selection ? readBoardLaunchOptions(root.querySelector('[data-board-manager-options]') || root, selection) : null,
+                instructions: root.querySelector('[data-board-manager-instructions]')?.value ?? '',
+                maxWorkers: Math.min(MANAGER_WORKERS_LIMIT, Math.max(1, workers))
+            };
+        },
+        clear: () => ({ selection: '', baseLlmOptions: null }),
+        save: payload => BoardApi.saveBoardManagerAsync(boardId, payload),
+        savedMessage: 'Board manager saved.',
+        reloadAfterSave: true,
+        onSaved
+    });
 }
 
 // Labels need ids that stay unique when Settings and a board's settings are both in the document.

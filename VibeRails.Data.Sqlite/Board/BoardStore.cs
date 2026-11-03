@@ -567,7 +567,6 @@ public sealed partial class BoardStore : IBoardStore
         SqliteConnection connection, SqliteTransaction transaction, string project, NewBoardCard card, BoardAuthor author, CancellationToken cancellationToken,
         SyncedCardIdentity? synced = null, BoardSyncStamp? stamp = null)
     {
-        ValidateAgentWorkflow(card.WorkflowMode, card.ManagerSelection);
         BoardColumnRecord column;
         if (string.IsNullOrWhiteSpace(card.ColumnId))
         {
@@ -583,6 +582,8 @@ public sealed partial class BoardStore : IBoardStore
             column = await ReadColumnAsync(connection, transaction, project, card.ColumnId, cancellationToken)
                 ?? throw new BoardValidationException($"Lane not found: {card.ColumnId}");
         }
+        // After the lane: an Agent card without its own manager is valid only on a board that has one.
+        await ValidateAgentWorkflowAsync(connection, transaction, project, card.WorkflowMode, card.ManagerSelection, column.BoardId, cancellationToken);
 
         if (stamp is null) await RequireWritableBoardAsync(connection, transaction, column.BoardId, cancellationToken);
 
@@ -748,7 +749,10 @@ public sealed partial class BoardStore : IBoardStore
             ManagerBaseLlmOptions = patch.ClearManagerBaseLlmOptions ? null : patch.ManagerBaseLlmOptions ?? existing.ManagerBaseLlmOptions,
             GhostReason = patch.ClearGhost ? null : existing.GhostReason
         };
-        ValidateAgentWorkflow(updated.WorkflowMode, updated.ManagerSelection);
+        // Only a change to the workflow, the manager or the board re-checks who manages the card:
+        // removing a board manager must not make a title edit on a card that relied on it fail.
+        if (patch.WorkflowMode is not null || patch.ManagerSelection is not null || patch.ClearManagerSelection || boardId != existing.BoardId)
+            await ValidateAgentWorkflowAsync(connection, transaction, project, updated.WorkflowMode, updated.ManagerSelection, boardId, cancellationToken);
 
         await using (var command = connection.CreateCommand())
         {
@@ -2070,6 +2074,13 @@ public sealed partial class BoardStore : IBoardStore
             SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardCards ADD COLUMN ManagerSelection TEXT");
             SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardCards ADD COLUMN ManagerOptionsJson TEXT");
         });
+        // board-agent-workflow/2: one manager per board and its launches (BoardStore.BoardManager.cs).
+        // Additive; an Agent card an older binary saves still names its own manager.
+        SqliteMigrationRunner.Apply(connection, "board-agent-workflow", 2, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, BoardManagerSchemaSql));
+        // board-agent-workflow/3 (VIBE-204): the AI board manager switch (absent row = off) and the
+        // manager's nullable Instructions / MaxWorkers. Additive, no backfill; older binaries ignore them.
+        SqliteMigrationRunner.Apply(connection, "board-agent-workflow", 3, MigrationKind.Additive, ApplyBoardManagerFeatureMigration);
         // board-ado/1: Azure DevOps connections and work item links in their own tables (BoardStore.Ado.cs),
         // never Jira's, so an older binary never reads one as Jira. Additive; older binaries ignore them.
         SqliteMigrationRunner.Apply(connection, "board-ado", 1, MigrationKind.Additive, (db, transaction) =>

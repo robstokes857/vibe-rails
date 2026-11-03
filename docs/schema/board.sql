@@ -92,6 +92,9 @@ CREATE INDEX IX_BoardLaneWorkflows_Column ON BoardLaneWorkflows(ColumnId, Curren
 -- index IX_BoardLaneWorkflows_Current
 CREATE UNIQUE INDEX IX_BoardLaneWorkflows_Current ON BoardLaneWorkflows(CardId) WHERE Current = 1;
 
+-- index IX_BoardManagerSessions_Board
+CREATE INDEX IX_BoardManagerSessions_Board ON BoardManagerSessions(BoardId, StartedUTC);
+
 -- index IX_BoardPendingAdditionalAutomations_Due
 CREATE INDEX IX_BoardPendingAdditionalAutomations_Due ON BoardPendingAdditionalAutomations(DueUnixMs);
 
@@ -226,6 +229,15 @@ CREATE TABLE BoardLaneWorkflowSteps ( WorkflowId TEXT NOT NULL REFERENCES BoardL
 
 -- table BoardLaneWorkflows
 CREATE TABLE BoardLaneWorkflows ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL, ColumnId TEXT NOT NULL, CreatedUnixMs INTEGER NOT NULL, Current INTEGER NOT NULL DEFAULT 1 );
+
+-- table BoardManagerFeature
+CREATE TABLE BoardManagerFeature ( Id INTEGER PRIMARY KEY CHECK (Id = 1), Enabled INTEGER NOT NULL, UpdatedUTC TEXT NOT NULL );
+
+-- table BoardManagerSessions
+CREATE TABLE BoardManagerSessions ( SessionId TEXT PRIMARY KEY, BoardId TEXT NOT NULL REFERENCES Boards(Id) ON DELETE CASCADE, TabId TEXT, Selection TEXT NOT NULL, Cli TEXT NOT NULL, StartedUTC TEXT NOT NULL );
+
+-- table BoardManagers
+CREATE TABLE BoardManagers ( BoardId TEXT PRIMARY KEY REFERENCES Boards(Id) ON DELETE CASCADE, Selection TEXT NOT NULL, OptionsJson TEXT, Revision INTEGER NOT NULL, UpdatedUTC TEXT NOT NULL , Instructions TEXT, MaxWorkers INTEGER);
 
 -- table BoardPendingAdditionalAutomations
 CREATE TABLE BoardPendingAdditionalAutomations ( CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, ColumnId TEXT NOT NULL, JobId INTEGER NOT NULL, EventKey TEXT NOT NULL, DueUnixMs INTEGER NOT NULL, PRIMARY KEY (CardId, JobId), FOREIGN KEY (ColumnId, JobId) REFERENCES BoardLaneAdditionalAutomations(ColumnId, JobId) ON DELETE CASCADE );

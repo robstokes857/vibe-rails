@@ -279,6 +279,8 @@ namespace VibeRails
             {
                 serviceCollection.AddSingleton<Services.Board.IBoardLiveSessionProbe, Services.Board.TerminalTabLiveSessionProbe>();
                 serviceCollection.AddScoped<Services.Board.IBoardLaunchService, Services.Board.BoardLaunchService>();
+                // The board manager's settings/status/launch (VIBE-52 follow-up) read this root's tabs.
+                serviceCollection.AddScoped<Services.Board.BoardManagerService>();
                 serviceCollection.AddScoped<Services.Board.Sync.BoardRemoteLaunchService>();
                 if (!isFakeCliTestProcess)
                     serviceCollection.AddHostedService<Services.Board.Sync.BoardRemoteLaunchHostedService>();

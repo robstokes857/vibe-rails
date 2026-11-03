@@ -308,6 +308,7 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         builder.Services.AddSingleton(_tabHost.Object);
         builder.Services.AddSingleton(_repository.Object);
         builder.Services.AddScoped<IBoardLaunchService, BoardLaunchService>();
+        builder.Services.AddScoped<BoardManagerService>();
         builder.Services.AddScoped<IBoardContextEstimator, BoardContextEstimator>();
         // Jira routes: real service over this fixture's board.db; the cloud client is never reached.
         builder.Services.AddSingleton<IJiraSecretStore>(new JiraSecretStore(Path.Combine(_root, "jira-tokens.json")));

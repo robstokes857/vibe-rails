@@ -1123,6 +1123,8 @@
                             aria-controls="settings-panel-setup" aria-selected="false" tabindex="-1" data-settings-tab="setup">Setup</button>
                         <button type="button" class="settings-tab" role="tab" id="settings-tab-pr-reviewer"
                             aria-controls="settings-panel-pr-reviewer" aria-selected="false" tabindex="-1" data-settings-tab="pr-reviewer">PR Reviewer</button>
+                        <button type="button" class="settings-tab" role="tab" id="settings-tab-ai-board-manager"
+                            aria-controls="settings-panel-ai-board-manager" aria-selected="false" tabindex="-1" data-settings-tab="ai-board-manager">AI board manager</button>
                     </div>
                 </div>
             </div>
@@ -1156,6 +1158,27 @@
                         <ul class="list-unstyled mb-3" aria-label="Watched repositories" data-pr-reviewer-repositories hidden></ul>
                         <p role="status" data-pr-reviewer-status>Open this page to load the saved setting.</p>
                         <button type="button" class="btn btn-outline-secondary" data-pr-reviewer-reload>Reload saved setting</button>
+                    </section>
+                </div></div>
+            </div>
+            <div class="settings-panel" id="settings-panel-ai-board-manager" role="tabpanel" aria-labelledby="settings-tab-ai-board-manager" tabindex="0" hidden>
+                <div class="row justify-content-center"><div class="col-md-8 col-lg-6">
+                    <section class="sandbox-item-card text-start" data-settings-ai-board-manager>
+                        <h2 class="sandbox-item-name">AI board manager</h2>
+                        <div class="form-check form-switch my-3">
+                            <input type="checkbox" role="switch" class="form-check-input" id="setting-ai-board-manager-enabled" data-ai-board-manager-enabled
+                                aria-describedby="setting-ai-board-manager-help" disabled>
+                            <label class="form-check-label" for="setting-ai-board-manager-enabled">AI board manager</label>
+                        </div>
+                        <p>One manager agent per board runs its Agent cards for you. It assigns each card's work to a worker session, waits for board events instead of polling, checks handoffs and reviews, moves cards through your lanes and flags only what needs you.</p>
+                        <ul class="small mb-3">
+                            <li>Choose each board's manager, its standing instructions and how many workers may run at once in Board settings &gt; Manager.</li>
+                            <li>Agent cards without a manager of their own go to the board manager. Cards with their own manager keep it.</li>
+                            <li>Start, open or stop the manager from the chip in the board header. It runs only while VibeRails is open.</li>
+                        </ul>
+                        <p id="setting-ai-board-manager-help" class="form-text">Off by default. Saves immediately for every project on this machine. Turning it off starts and stops nothing: a running manager is told to hand off and end, and saved boards keep their manager settings.</p>
+                        <p role="status" data-ai-board-manager-status>Open this page to load the saved setting.</p>
+                        <button type="button" class="btn btn-outline-secondary" data-ai-board-manager-reload>Reload saved setting</button>
                     </section>
                 </div></div>
             </div>
@@ -3424,6 +3447,115 @@
                     color: var(--color-danger, #ef4444);
                 }
 
+                /* AI board manager chip (VIBE-52 follow-up, VIBE-204) ------ */
+                /* Its own class: .board-manager-chip is the card foot's per-card manager label. */
+                .board-view .board-ai-manager[hidden] { display: none; }
+
+                .board-view .board-ai-manager-chip {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.45rem;
+                    max-width: 100%;
+                    min-width: 0;
+                    padding: 0.2rem 0.3rem 0.2rem 0.6rem;
+                    border: 1px solid var(--color-border, #2d2d3f);
+                    border-radius: 999px;
+                    color: var(--color-text-muted, #94a3b8);
+                    font-size: 0.78rem;
+                    white-space: nowrap;
+                    background: var(--color-bg-surface, #14141d);
+                }
+
+                .board-view .board-ai-manager-chip.is-unset {
+                    padding: 0.3rem 0.7rem;
+                    cursor: pointer;
+                    background: transparent;
+                }
+
+                .board-view .board-ai-manager-chip.is-unset:hover,
+                .board-view .board-ai-manager-chip.is-unset:focus-visible {
+                    color: var(--color-text, #f8fafc);
+                    border-color: var(--color-primary, #8b5cf6);
+                }
+
+                .board-view .board-ai-manager-chip.is-running {
+                    border-color: color-mix(in srgb, var(--color-success, #10b981) 45%, var(--color-border, #2d2d3f));
+                }
+
+                .board-view .board-ai-manager-chip.has-attention {
+                    border-color: color-mix(in srgb, var(--color-danger, #ef4444) 55%, var(--color-border, #2d2d3f));
+                }
+
+                .board-view .board-ai-manager-icon { color: var(--color-primary, #8b5cf6); }
+
+                .board-view .board-ai-manager-text {
+                    display: inline-flex;
+                    align-items: baseline;
+                    gap: 0.4rem;
+                    min-width: 0;
+                    overflow: hidden;
+                }
+
+                .board-view .board-ai-manager-label {
+                    color: var(--color-text, #f8fafc);
+                    font-weight: 600;
+                }
+
+                .board-view .board-ai-manager-state {
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+
+                .board-view .board-ai-manager-dot {
+                    display: inline-block;
+                    width: 0.5rem;
+                    height: 0.5rem;
+                    margin-right: 0.3rem;
+                    border-radius: 50%;
+                    background: var(--color-success, #10b981);
+                    animation: board-ai-manager-pulse 1.6s ease-in-out infinite;
+                }
+
+                .board-view .board-ai-manager-stop:hover,
+                .board-view .board-ai-manager-stop:focus-visible {
+                    color: var(--color-danger, #ef4444);
+                    border-color: color-mix(in srgb, var(--color-danger, #ef4444) 45%, transparent);
+                }
+
+                @keyframes board-ai-manager-pulse {
+                    0%, 100% { opacity: 1; }
+                    50% { opacity: 0.35; }
+                }
+
+                @media (prefers-reduced-motion: reduce) {
+                    .board-view .board-ai-manager-dot { animation: none; }
+                }
+
+                /* Narrow boards: the chip takes its own header row (New card stays beside the
+                   title), and below 640px the counts move to the tooltip. */
+                @media (max-width: 860px) {
+                    .board-view .board-head-actions:has(> .board-ai-manager:not([hidden])) { display: contents; }
+                    .board-view .board-head-actions:has(> .board-ai-manager:not([hidden])) > [data-board-action="new-card"] {
+                        grid-column: 2;
+                        grid-row: 1;
+                        justify-self: end;
+                    }
+                    .board-view .board-ai-manager:not([hidden]) {
+                        grid-column: 1 / -1;
+                        min-width: 0;
+                    }
+                }
+
+                @media (max-width: 640px) {
+                    .board-view .board-ai-manager-summary { display: none; }
+                }
+
+                /* A tile run by the board manager names it in the foot, like a card's own manager. */
+                .board-view .board-card-foot .board-manager-chip.is-board-manager i {
+                    width: 18px;
+                    text-align: center;
+                }
+
                 /* Canvas and lanes --------------------------------------- */
                 .board-view.is-searching .board-canvas {
                     display: none;
@@ -5525,6 +5657,7 @@
                     </div>
                     <div class="board-stats" data-board-stats></div>
                     <div class="board-head-actions">
+                        <div class="board-ai-manager" data-board-ai-manager aria-live="polite" hidden></div>
                         <button type="button" class="btn btn-sm btn-outline-primary text-nowrap" data-board-action="new-card">
                             <i class="fa-solid fa-plus" aria-hidden="true"></i>
                             <span>New card</span>

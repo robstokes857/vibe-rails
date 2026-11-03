@@ -287,6 +287,8 @@ middleware serves their paths rather than registering individual API endpoints.
 | POST | `/api/v1/bert/search` | [BertRoutes.cs](VibeRails/Routes/BertRoutes.cs) |
 | GET | `/api/v1/bert/session-captures` | [BertRoutes.cs](VibeRails/Routes/BertRoutes.cs) |
 | GET | `/api/v1/bert/status` | [BertRoutes.cs](VibeRails/Routes/BertRoutes.cs) |
+| GET | `/api/v1/board/ai-board-manager` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| PUT | `/api/v1/board/ai-board-manager` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | GET | `/api/v1/board/app-context` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | PUT | `/api/v1/board/app-context` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | GET | `/api/v1/board/boards` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
@@ -310,6 +312,10 @@ middleware serves their paths rather than registering individual API endpoints.
 | PUT | `/api/v1/board/boards/{boardId}/jira` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | POST | `/api/v1/board/boards/{boardId}/jira/pull` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | POST | `/api/v1/board/boards/{boardId}/jira/test` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/boards/{boardId}/manager` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| PUT | `/api/v1/board/boards/{boardId}/manager` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/boards/{boardId}/manager/launch` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| POST | `/api/v1/board/boards/{boardId}/manager/stop` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | GET | `/api/v1/board/boards/{boardId}/sharing` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | POST | `/api/v1/board/boards/{boardId}/sharing` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | DELETE | `/api/v1/board/boards/{boardId}/sharing/{inviteId}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |

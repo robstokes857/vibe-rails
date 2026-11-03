@@ -47,6 +47,29 @@ Canonical URLs deduplicate within each card. Add/remove rechecks live project me
 its write transaction and touches the card; merge copies and deduplicates links while retaining
 source rows. No old data is converted. Session export reads references through `IBoardStore`.
 
+`board-agent-workflow/2` (additive, `BoardStore.BoardManager.cs`) adds `BoardManagers` (one
+selection, options JSON and revision per board, cascading with the board; clearing deletes the
+row so the revision reads 0 again) and `BoardManagerSessions` (each board manager launch). It
+shipped in the first build (applied 2026-10-23 on the owner's machine), so its SQL never changes.
+`board-agent-workflow/3` (VIBE-204, additive) adds the single-row `BoardManagerFeature` table (the
+AI board manager switch; no row reads as off) and nullable `BoardManagers.Instructions` /
+`MaxWorkers` (NULL reads as no standing orders and one worker). No backfill; the first build's
+upsert names only its own columns and leaves the new ones as they are.
+`ValidateAgentWorkflowAsync` runs inside the card write transaction: Agent mode needs the card's
+own `ManagerSelection`, or, while the switch row says on, a `BoardManagers` row for the card's
+lane's board. With the switch off it is the rule from before board managers, with the same
+message. An update re-checks only when the patch touches the workflow, the manager or the board,
+so removing a board manager or turning the switch off never fails a title edit.
+`GetBoardEventsAsync` unions `BoardComments` (all kinds, not hidden, not deleted; a deleted card
+keeps only its `deleted` row) with `BoardAgentCompletions` for the board's cards after a `ToDb`
+cursor, ordered by stamp, source and rowid; `managedOnly` keeps board-managed cards plus any card's
+workflow/manager `change` row, `excludeSessionId` drops the caller's own rows, and a full batch is
+trimmed so it never ends inside a group of rows that share a stamp. `GetManagedCardsAsync` reads
+Agent cards through `CardSelectSql` plus lane names and the newest discussion time;
+`GetManagedWorkerSessionsAsync` lists worker and planning-worker attachments (both session tables)
+on board-managed cards. Older binaries ignore all three tables' new parts; an Agent card they save
+still names its own manager, so nothing they read changes.
+
 `board-agent-workflow/1` adds nullable `BoardCards.WorkflowMode`, `ManagerSelection` and
 `ManagerOptionsJson` without converting older cards. NULL workflow reads as `manual`.
 Agent workflow manager settings are independent of worker `Assignee`/`BaseLlmOptions`;

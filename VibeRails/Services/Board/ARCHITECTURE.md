@@ -1,5 +1,35 @@
 # Vibe Board architecture and review
 
+## AI board manager (VIBE-52 follow-up, VIBE-204)
+
+The per-card manager below is kept, and a board-level one is added above it, behind the
+machine-wide AI board manager switch (`BoardManagerFeature`, one row, absent = off). `BoardManagers`
+holds one selection, base options, standing orders and worker limit per board;
+`BoardManagerSessions` records each launch. `BoardManagerService` (root only) owns the switch and,
+while it is on, reads settings, the root-local live session, the live implementation workers and
+the Agent-card counts, and saves under a revision; while it is off it reports only `enabled: false`
+and refuses to save or start. `BoardLaunchService.LaunchBoardManagerAsync` is the launch; the
+card-level manager launch delegates to it when the card has no manager of its own, so the same
+reservation (`board:<id>`) gates both entry points. The new session is linked to each managed card
+with the `agent_manager` origin, which the existing list/detail/activity projections already treat
+as the Agent card's active session. Stop closes that one tab.
+
+Two guards make one manager per board safe in one checkout. The store decides who manages an Agent
+card inside its write transaction (the card's manager, or the board's while the switch is on). The
+launch refuses an implementation worker on a board-managed card past the manager's worker limit,
+counting live `agent_worker` tabs on board-managed cards without reviews and Automations; this is
+root-local like every live check, and the prompt states the same limit.
+
+`await_board_events` is the manager's wait primitive: a bounded server-side poll over the Card Log
+and completion reports of the board's cards after a cursor, scoped to the board-managed cards plus
+workflow/manager changes, without the caller's own writes, returning entries oldest first with the
+lane each card is in now, a snapshot of Agent cards with their open worker sessions, and `nextSince`.
+The cursor is exclusive, carries a digest of the snapshot so a worker exit (no Card Log row) wakes
+the manager and a quiet wait does not repeat the snapshot, and is not advanced by an empty wait. It
+is read-only and registered on both transports with an exact grant. No daemon, restart watchdog or
+deterministic lane movement is introduced; the chip in the board header is the only way a stopped
+manager restarts.
+
 ## Agent workflow (VIBE-52, 2026-10-11)
 
 The card editor offers Manual (the existing behavior) and Agent. Agent cards save a required

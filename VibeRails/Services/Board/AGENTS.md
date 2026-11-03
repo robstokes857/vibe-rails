@@ -41,6 +41,65 @@ host are added. Restart a stopped manager using Start Agent workflow; it recover
 Nullable `board-agent-workflow/1` columns are additive with no backfill. Manager configuration
 and its change history stay local, preserving the existing hosted sync protocol.
 
+### AI board manager (VIBE-52 follow-up, VIBE-204)
+
+One manager per board, above the per-card manager, behind the machine-wide **AI board manager**
+switch (Settings > AI board manager, off by default; `BoardManagerFeature` in board.db,
+`GET|PUT /api/v1/board/ai-board-manager`). While the switch is off the board manager does not
+exist for any reader: `GET …/manager` returns `enabled: false` and nothing else, saving or starting
+one is a 409 naming the switch, `await_board_events` answers that it is off, the card editor offers
+no **Use the board manager**, Board settings has no **Manager** tab, the header chip is hidden, and
+an Agent card needs its own manager exactly as before (the store's message is the old one). Saved
+board managers and board-managed cards are kept; turning it off stops nothing that runs.
+
+Board settings > **Manager** saves a selection, base options, **Workers at a time** (1–4, default
+1) and **Manager instructions** (standing orders, 4,000 characters) in `BoardManagers`
+(`board-agent-workflow/2` and `/3`, additive; `BoardManagerService`,
+`GET|PUT /api/v1/board/boards/{boardId}/manager`, revision-checked; an empty selection clears the
+row; omitted instructions or limit keep what is saved, and omitted options stay while the manager
+is unchanged, as on cards). An Agent card **without** its own `ManagerSelection` belongs to the
+board manager; a card that keeps its own manager is not, and is listed to it as such. The store
+owns that rule inside the card write transaction (`ValidateAgentWorkflowAsync`): Agent mode needs
+the card's manager, or the board's while the switch is on. Removing the board manager or turning
+the switch off never blocks ordinary edits of a card that relied on it; only a workflow, manager or
+board change re-checks, and Start then fails with a message naming the fix. `BoardService` still
+refuses a manager selection that is not a picker key.
+
+`BoardLaunchService.LaunchBoardManagerAsync` (`POST …/manager/launch`, the chip's Start manager)
+checks the switch and the shared-board guard, resolves the saved selection like a card launch,
+refuses a code review environment, keeps one live manager per board (`BoardManagerSessions` ×
+this root's live tabs, so root-local), composes `BoardPromptComposer.ComposeBoardManager`, records
+the session and links it to every managed card with the `agent_manager` origin, so each card's Go
+to manager reaches the same tab. A second launch returns the live one (`Reused`). Start Agent
+workflow on a board-managed card (editor or tile) delegates to it and links the card; a manager that
+`attach_board_session`s another Agent card keeps the manager origin there. `POST …/manager/stop`
+(the chip's Stop, behind a confirm) closes only that manager's tab, also while the switch is off;
+its workers keep running and a restart recovers from the cards.
+
+The prompt carries the board's lanes and on-entry Automations, its managed cards (those with a live
+worker marked, trimmed to the 30,000-character launch budget with a list_board_cards pointer, so a
+large board still launches), the standing orders, the worker limit, and App and Board context under
+the launch's nudge switch (`ContextIncluded`, so the tab child does not add them again). Card and
+Card type context reach each worker through its own card.
+
+**Worker limit.** A worker launch (`intent=worker`, not a review or planning worker) on a
+board-managed card is refused with a 409 while the board's live implementation workers reach the
+manager's **Workers at a time**: `agent_worker` sessions on board-managed cards with a live tab in
+this root, without review or Automation sessions. The message names the running cards and points at
+`await_board_events`; `start_board_agent` passes it through. Cards with their own manager are
+outside it, and so is everything while the switch is off.
+
+**`await_board_events`** is the manager's wait: a server-side long poll (default 25 s, max 45 s,
+two-second reads) over `IBoardStore.GetBoardEventsAsync`: Card Log and discussion rows plus
+completion reports (`BoardAgentCompletions` are not Card Log rows), scoped by default to the
+board-managed cards plus any card's workflow or manager change, without the caller's own writes, and
+never ending a full batch inside a group of entries that share a stamp. Its cursor is
+`<timestamp>~<snapshot digest>`: the digest covers each Agent card's lane, priority, flag, block,
+worker, owner and open worker sessions (recorded session ends from state.db, within 24 hours, which
+the stdio host can read), so a worker that exits without writing anything still wakes the manager,
+and a quiet wait says "unchanged" instead of repeating the snapshot. An empty wait keeps its cursor.
+No daemon, automatic restart or deterministic moves: when its tab is gone the chip shows Stopped.
+
 ## MCP agent settings parity
 
 MCP create/update accepts the UI's `assignee` and typed `baseLlmOptions`, including explicit
@@ -364,6 +423,7 @@ folder name only, because that pass has no custom-name lookup.
 | Validation and orchestration | `BoardService.cs` and its partials in this directory |
 | SQL and migration | `VibeRails.Data.Sqlite/Board/BoardStore*.cs`, `BoardStore.Options.cs`; contracts in `VibeRails.Data.Abstractions/Board` |
 | Start work / prompt | `BoardLaunchService.cs`, `BoardPromptComposer.cs`, `BoardSelection.cs` |
+| AI board manager (switch, settings, chip, launch, worker limit, `await_board_events`) | `BoardManagerService.cs`, `BoardLaunchService.LaunchBoardManagerAsync` / `RequireManagedWorkerSlotAsync`, `BoardPromptComposer.ComposeBoardManager`, `Mcp/Tools/BoardTool.Events.cs`, `BoardStore.BoardManager.cs`, `wwwroot/js/modules/board-manager.js`, the Manager tab in `board-settings.js`, `settings-ai-board-manager.js` |
 | Agent tools and project context | `Services/Mcp/Tools/BoardTool.cs`, `BoardProjectResolver.cs`; read [MCP instructions](../Mcp/AGENTS.md) |
 | Agent context size (VB-63): the editor's "Agent context" section, launch samples, `get_board_card` activity budget | `BoardContextEstimator.cs`, `ContextTokenEstimator.cs`, `BoardStore.ContextSamples.cs`, `BoardTool.FormatCard`, `wwwroot/js/modules/board-card-context.js`; plan in `vibe-books/vibe_board_context_rot/about.md` |
 | Provider grants / child context | `Services/Terminal/Commands/BoardMcpAuthorization.cs`, OpenCode companion; read [terminal instructions](../Terminal/AGENTS.md) |
@@ -668,6 +728,7 @@ Never replace the durable queue with a browser timer or an in-memory queue.
 | Routes/scope/auth | `Tests/Routes/BoardRoutesTests.cs`, `CookieAuthMiddlewareTests` |
 | MCP / grants | `BoardToolTests`, `McpServerHttpTests`, `McpStdioHostTests`, `BoardToolAuthorizationTests`, OpenCode/command Board tests |
 | Launch concurrency/prompt | `BoardLaunchConcurrencyTests`, `BoardPromptComposerTests`, launch cases in `BoardServiceTests` |
+| AI board manager | `BoardManagerStoreTests`, `BoardManagerLaunchTests`, `BoardManagerPromptTests`, `BoardToolTests.BoardEvents`, `BoardRoutesTests.BoardManager`, `BoardAgentLaunchToolTests`, `board-manager.test.mjs`, `UITests/tests/board-manager.spec.js` |
 | UI behavior | `Tests/wwwroot/js/board-*.test.mjs`; `UITests/tests/board-ux.spec.js` and `board-attachment-security.spec.js` |
 | `@path` references / file index | `BoardFileIndexServiceTests`, the referenced-files cases in `BoardPromptComposerTests`, the files route case in `BoardRoutesTests`, `board-text.test.mjs`, `board-file-refs.test.mjs`, the typeahead case in `board-ux.spec.js` |
 | Schema changes | `Tests/DB/SchemaSnapshotTests.cs`, `PreviousReleaseCompatibilityTests.cs`, migration/Board adoption tests |

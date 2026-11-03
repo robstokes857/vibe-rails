@@ -142,6 +142,25 @@ public sealed class BoardAgentLaunchToolTests
     }
 
     [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.Conflict)]
+    public async Task BoardGuidanceOnARefusal_ReachesTheAgent_AsOneLine(HttpStatusCode status)
+    {
+        // The Board's 400/409 bodies are its validation and conflict guidance, e.g. the board
+        // manager's worker limit (VIBE-204); the agent needs it to wait instead of retrying.
+        using var client = new HttpClient(new Handler((_, _) => Task.FromResult(new HttpResponseMessage(status)
+        {
+            Content = JsonContent.Create(new ErrorResponse("The board manager runs at most 1 implementation worker at a time on this board,\nand 1 is running (VIBE-7)."),
+                AppJsonSerializerContext.Default.ErrorResponse)
+        })));
+        var result = await Tool(client).StartBoardAgent("VIBE-42", TestContext.Current.CancellationToken, intent: "worker");
+        Assert.StartsWith("FAIL:", result);
+        Assert.Contains($"HTTP {(int)status}", result);
+        Assert.Contains("The board manager runs at most 1 implementation worker at a time on this board, and 1 is running (VIBE-7).", result);
+        Assert.DoesNotContain('\n', result);
+    }
+
+    [Theory]
     [InlineData("invalid-json")]
     [InlineData("oversized")]
     [InlineData("missing-session")]

@@ -23,6 +23,13 @@ card's evidence on demand. Local unpushed default-branch commits count; PR links
 merges into the owning repository's default branch. No historical-card polling is started.
 `update_board_card(clearGhost=true)` dismisses the marker explicitly, preserving evidence.
 
+Since the AI board manager (VIBE-52 follow-up, VIBE-204), while Settings > AI board manager is on,
+an Agent card without `managerSelection` is valid when its board has a manager (Board settings >
+Manager); `start_board_agent(card)` on such a card starts or focuses the board manager and attaches
+the card to it. With the switch off the old rule holds. A board manager waits with
+`await_board_events(board, since)` between actions instead of polling `get_board_agent_status`.
+`start_board_agent` passes the root's 400/409 guidance through as one bounded line (validation and
+conflict messages only, never other bodies), so a manager sees the worker limit and waits.
 `start_board_agent(card)` calls the same root route as Start work: Agent cards launch the saved
 manager by default. `intent=worker` launches the saved worker, with optional `selection` and
 bounded `task` instructions; `intent=code_review` launches a direct reviewer. Overrides never
@@ -223,6 +230,7 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 | `save_pr_review_draft` | `PrReviewTool.SavePrReviewDraft` | Checkpoints supplied findings onto the pending pass without completing it. |
 | `complete_pr_review` | `PrReviewTool.CompletePrReview` | Completes the pending pass with feedback and verdict; `blocking` defaults to `verdict == request_changes`. Local record only; posts nothing to GitHub. |
 | `get_board_agent_status` | `BoardTool.GetBoardAgentStatus` | Poll a card's ten newest agents or a specific linked session, completion reports, latest updates, recorded exits, pending lane entries and twenty recent card-triggered runs. Unknown liveness is explicit. |
+| `await_board_events` | `BoardTool.AwaitBoardEvents` | The AI board manager's wait (VIBE-204): `FAIL` while the switch is off. Blocks server-side up to `timeoutSeconds` (default 25, max 45) until a Card Log, discussion or completion-report entry lands after `since`, or the Agent-card snapshot changes (a worker exiting), then returns the entries oldest first (card, current lane, kind, attention, author, bounded body), the snapshot (lane, flag, worker, open worker sessions, owner) and `nextSince` (`<time>~<digest>`). `scope=managed` (default) covers board-managed cards plus workflow/manager changes, `scope=all` every card; the caller's own writes never wake it. Without `since` it returns the snapshot and a fresh cursor; a quiet wait keeps its cursor and says the snapshot is unchanged instead of repeating it. Read-only. |
 > The wire names are what tool callers use. Calling `SearchHistory` (PascalCase) returns "Unknown tool".
 
 ### Kanban board tools (`BoardTool`)

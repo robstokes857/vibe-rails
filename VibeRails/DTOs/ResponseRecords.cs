@@ -533,6 +533,32 @@ namespace VibeRails.DTOs
         string CardKey,
         string Selection);
 
+    // Board manager (VIBE-52 follow-up, VIBE-204): one manager per board for its Agent-workflow cards,
+    // behind the machine-wide AI board manager switch (off by default).
+    /// <summary>Reused is true when the board's manager was already running and this is its tab.</summary>
+    public record LaunchBoardManagerResponse(string TabId, string? SessionId, string? Cli, string BoardId, string Selection, bool Reused);
+    /// <summary>The board manager session whose tab is live in this root.</summary>
+    public record BoardManagerActiveSession(string SessionId, string TabId, string Cli, string Selection, DateTime StartedAt);
+    /// <summary>
+    /// Saved manager settings, their revision, the live session (if any) and the board it covers:
+    /// managed and own-manager Agent cards, flagged managed cards and live implementation workers.
+    /// While <see cref="Enabled"/> is false (the AI board manager switch is off) every other field is empty.
+    /// </summary>
+    public record BoardManagerResponse(string? Selection, BaseLlmOptions? BaseLlmOptions, int Revision, BoardManagerActiveSession? Active, int ManagedCards, int OwnManagerCards,
+        bool Enabled = true, string? Instructions = null, int MaxWorkers = 1, int RunningWorkers = 0, int FlaggedCards = 0);
+    /// <summary>
+    /// An empty or null selection clears the board manager. Base options apply to base CLIs only.
+    /// A null <see cref="Instructions"/> or <see cref="MaxWorkers"/> keeps the saved value; "" clears the instructions.
+    /// </summary>
+    public record UpdateBoardManagerRequest(string? Selection = null, BaseLlmOptions? BaseLlmOptions = null, int? ExpectedRevision = null,
+        string? Instructions = null, int? MaxWorkers = null);
+    /// <summary>Stopped is false when no board manager was running in this root.</summary>
+    public record StopBoardManagerResponse(bool Stopped, string? SessionId);
+    /// <summary>The machine-wide AI board manager switch.</summary>
+    public record BoardManagerFeatureResponse(bool Enabled);
+    /// <summary>Enabled is required; a missing value is refused rather than read as off.</summary>
+    public record UpdateBoardManagerFeatureRequest(bool? Enabled = null);
+
     public record MergeBackResponse(
         bool Success,
         string Message
@@ -2201,6 +2227,13 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(EnvironmentStep))]
     [JsonSerializable(typeof(LaunchBoardCardRequest))]
     [JsonSerializable(typeof(LaunchBoardCardResponse))]
+    [JsonSerializable(typeof(LaunchBoardManagerResponse))]
+    [JsonSerializable(typeof(BoardManagerActiveSession))]
+    [JsonSerializable(typeof(BoardManagerResponse))]
+    [JsonSerializable(typeof(UpdateBoardManagerRequest))]
+    [JsonSerializable(typeof(StopBoardManagerResponse))]
+    [JsonSerializable(typeof(BoardManagerFeatureResponse))]
+    [JsonSerializable(typeof(UpdateBoardManagerFeatureRequest))]
     [JsonSerializable(typeof(JsonElement))]
     // BERT explorer DTOs
     [JsonSerializable(typeof(BertStatusResponse))]

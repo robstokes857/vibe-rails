@@ -11,7 +11,25 @@ namespace VibeRails.Services.Board;
 public interface IBoardLaunchService
 {
     Task<LaunchBoardCardResponse?> LaunchAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken = default, string intent = "work", ReviewLaunchRequest? reviewRequest = null, string? question = null, string? task = null);
+
+    /// <summary>Starts the board's manager, or returns the one already running. Null when the board is not in the project.</summary>
+    Task<LaunchBoardManagerResponse?> LaunchBoardManagerAsync(string projectPath, string boardId, CancellationToken cancellationToken = default);
+
+    /// <summary>The board manager session whose tab is live in this root, if any. Root-local like every live check.</summary>
+    Task<BoardManagerActiveSession?> FindLiveBoardManagerAsync(string projectPath, string boardId, CancellationToken cancellationToken = default);
+
+    /// <summary>The live board manager and the board's live implementation workers, from one read of this root's tabs.</summary>
+    Task<BoardManagerLiveState> GetBoardManagerLiveStateAsync(string projectPath, string boardId, CancellationToken cancellationToken = default);
+
+    /// <summary>Closes the board manager's terminal in this root. Null when the board is not in the project.</summary>
+    Task<StopBoardManagerResponse?> StopBoardManagerAsync(string projectPath, string boardId, CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// What is running for a board manager in this root (VIBE-204): its own session, and the live
+/// implementation workers on the cards it manages, which its worker limit counts.
+/// </summary>
+public sealed record BoardManagerLiveState(BoardManagerActiveSession? Active, IReadOnlyList<BoardManagedWorkerSession> Workers);
 
 /// <summary>
 /// A composed launch prompt and the inputs that shaped it, so the context estimator (VB-63) can
@@ -95,6 +113,24 @@ public sealed class BoardLaunchService(
             throw new BoardValidationException("Manager and delegated worker launches require the card's Agent workflow.");
         if (!string.IsNullOrWhiteSpace(task) && !isWorker)
             throw new BoardValidationException("Task instructions apply only to a delegated worker launch.");
+
+        // An Agent card without its own manager belongs to the board manager (VIBE-204): Start Agent
+        // workflow starts (or focuses) that one and makes sure this card is attached to it. With the
+        // AI board manager switch off, such a card (saved while it was on) needs its own manager again.
+        if (isManager && string.IsNullOrWhiteSpace(selectionOverride) && string.IsNullOrWhiteSpace(card.ManagerSelection))
+        {
+            if (!await store.GetBoardManagerEnabledAsync(cancellationToken))
+                throw new BoardValidationException("This card uses the board manager, and the AI board manager is off. Turn it on in Settings > AI board manager, or pick a manager agent for this card.");
+            var board = string.IsNullOrEmpty(card.BoardId) ? null : await store.GetBoardAsync(projectPath, card.BoardId, cancellationToken);
+            var settings = board is null ? null : (await store.GetBoardManagerAsync(projectPath, board.Id, cancellationToken))?.Settings;
+            if (settings?.IsConfigured != true)
+                throw new BoardValidationException("Pick a manager agent for this card first, or set up this board's manager in Board settings > Manager.");
+            var manager = await LaunchBoardManagerReservedAsync(projectPath, board!, cancellationToken);
+            if (manager.SessionId is not null)
+                await LinkManagerToCardAsync(projectPath, card, manager.SessionId, manager.TabId, manager.Selection, manager.Cli ?? "", cancellationToken);
+            return new Launched(new LaunchBoardCardResponse(manager.TabId, manager.SessionId, manager.Cli, projectPath, card.Id, card.Key, manager.Selection),
+                card, new BoardLaunchPrompt("", null, [], card.BoardId, board!.Name, Intent: intent), manager.Cli ?? "", manager.Selection, intent, Reused: true);
+        }
 
         ReviewLaunchSnapshot? routingSnapshot = null;
         if (reviewRequest is not null)
@@ -195,6 +231,8 @@ public sealed class BoardLaunchService(
         else if ((!isReview || isWorker) && existingTab is not null)
             throw new BoardConflictException(isManager ? "A manager is already running on this card. Open it from Sessions."
                 : "A worker is already running on this card. Wait for its session to finish or open it from Sessions.", existingTab.SessionId);
+        if (isWorker && !isReview && !isPlanning)
+            await RequireManagedWorkerSlotAsync(projectPath, card, tabs, cancellationToken);
         if (tabs.Count >= tabHost.MaxTabs)
             throw new BoardConflictException($"All {tabHost.MaxTabs} terminal tabs are in use. Close one first.");
 
@@ -269,6 +307,220 @@ public sealed class BoardLaunchService(
             }
             throw;
         }
+    }
+
+    public async Task<LaunchBoardManagerResponse?> LaunchBoardManagerAsync(string projectPath, string boardId, CancellationToken cancellationToken = default)
+    {
+        var board = await store.GetBoardAsync(projectPath, boardId, cancellationToken);
+        return board is null ? null : await LaunchBoardManagerReservedAsync(projectPath, board, cancellationToken);
+    }
+
+    public async Task<BoardManagerActiveSession?> FindLiveBoardManagerAsync(string projectPath, string boardId, CancellationToken cancellationToken = default) =>
+        FindLiveBoardManager(await store.GetBoardManagerSessionsAsync(projectPath, boardId, 10, cancellationToken), await tabHost.ListTabsAsync(cancellationToken));
+
+    private static BoardManagerActiveSession? FindLiveBoardManager(IReadOnlyList<BoardManagerSessionRecord> sessions, IReadOnlyList<TerminalTabStatusResponse> tabs)
+    {
+        foreach (var session in sessions)
+        {
+            var tab = tabs.FirstOrDefault(tab => tab.HasActiveSession && tab.SessionId == session.SessionId);
+            if (tab is not null)
+                return new BoardManagerActiveSession(session.SessionId, tab.TabId, session.Cli, session.Selection, session.StartedUtc);
+        }
+        return null;
+    }
+
+    public async Task<BoardManagerLiveState> GetBoardManagerLiveStateAsync(string projectPath, string boardId, CancellationToken cancellationToken = default)
+    {
+        var tabs = await tabHost.ListTabsAsync(cancellationToken);
+        var active = FindLiveBoardManager(await store.GetBoardManagerSessionsAsync(projectPath, boardId, 10, cancellationToken), tabs);
+        return new BoardManagerLiveState(active, await LiveImplementationWorkersAsync(projectPath, boardId, tabs, cancellationToken));
+    }
+
+    public async Task<StopBoardManagerResponse?> StopBoardManagerAsync(string projectPath, string boardId, CancellationToken cancellationToken = default)
+    {
+        if (await store.GetBoardAsync(projectPath, boardId, cancellationToken) is null) return null;
+        var live = await FindLiveBoardManagerAsync(projectPath, boardId, cancellationToken);
+        if (live is null) return new StopBoardManagerResponse(false, null);
+        // Closing the tab is what closing it in the terminal does: the recording is kept, workers it
+        // started keep running, and a restart recovers from the cards' handoffs.
+        await tabHost.DeleteTabAsync(live.TabId, cancellationToken);
+        Log.Information("[Board] Stopped board manager {SessionId} for board {Board}", live.SessionId, boardId);
+        return new StopBoardManagerResponse(true, live.SessionId);
+    }
+
+    /// <summary>
+    /// Live implementation workers on the board's board-managed cards: worker sessions with a live tab
+    /// in this root, without reviews, planning workers and lane Automations, which never edit files on
+    /// the manager's behalf. One entry per session, however many cards it is attached to.
+    /// </summary>
+    private async Task<IReadOnlyList<BoardManagedWorkerSession>> LiveImplementationWorkersAsync(string projectPath, string boardId,
+        IReadOnlyList<TerminalTabStatusResponse> tabs, CancellationToken cancellationToken)
+    {
+        var live = tabs.Where(tab => tab.HasActiveSession && !string.IsNullOrWhiteSpace(tab.SessionId))
+            .Select(tab => tab.SessionId!).ToHashSet(StringComparer.Ordinal);
+        if (live.Count == 0) return [];
+        var workers = (await store.GetManagedWorkerSessionsAsync(projectPath, boardId, cancellationToken))
+            .Where(session => session.Origin == BoardSessionRecord.WorkerOrigin && live.Contains(session.SessionId))
+            .GroupBy(session => session.SessionId, StringComparer.Ordinal).Select(group => group.First()).ToList();
+        if (workers.Count == 0) return [];
+        var ids = workers.Select(session => session.SessionId).ToList();
+        var reviews = await store.GetReviewSessionIdsAsync(projectPath, ids, cancellationToken);
+        var automations = await store.GetAutomationSessionIdsAsync(projectPath, ids, cancellationToken);
+        return workers.Where(session => !reviews.Contains(session.SessionId) && !automations.Contains(session.SessionId)).ToList();
+    }
+
+    /// <summary>
+    /// The board manager's worker limit (VIBE-204): implementation workers on the cards it manages
+    /// usually share one checkout, so at most <see cref="BoardManagerSettings.MaxWorkers"/> of them
+    /// run at once across the board, whoever asks. Cards with their own manager, reviews and
+    /// planning workers are outside it, and so is everything while the AI board manager is off.
+    /// Root-local, like every live check here.
+    /// </summary>
+    private async Task RequireManagedWorkerSlotAsync(string projectPath, BoardCardRecord card, IReadOnlyList<TerminalTabStatusResponse> tabs, CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(card.ManagerSelection) || string.IsNullOrEmpty(card.BoardId)) return;
+        if (!await store.GetBoardManagerEnabledAsync(cancellationToken)) return;
+        if ((await store.GetBoardManagerAsync(projectPath, card.BoardId, cancellationToken))?.Settings is not { IsConfigured: true } manager) return;
+        var running = await LiveImplementationWorkersAsync(projectPath, card.BoardId, tabs, cancellationToken);
+        if (running.Count < manager.MaxWorkers) return;
+        var cards = string.Join(", ", running.Select(worker => worker.DisplayId ?? worker.CardKey).Distinct(StringComparer.Ordinal));
+        throw new BoardConflictException(
+            $"The board manager runs at most {manager.MaxWorkers} implementation worker{(manager.MaxWorkers == 1 ? "" : "s")} at a time on this board, "
+            + $"and {running.Count} {(running.Count == 1 ? "is" : "are")} running ({cards}). Wait for one to finish with await_board_events, "
+            + "or raise Workers at a time in Board settings > Manager.", running[0].SessionId);
+    }
+
+    /// <summary>One board manager starts at a time per board, whichever card or button asked for it.</summary>
+    private async Task<LaunchBoardManagerResponse> LaunchBoardManagerReservedAsync(string projectPath, BoardRecord board, CancellationToken cancellationToken)
+    {
+        var reservation = "board:" + board.Id;
+        if (!LaunchingCards.TryAdd(reservation, 0))
+            throw new BoardConflictException("The board manager is already starting. Wait for it to finish starting.");
+        try { return await LaunchBoardManagerCoreAsync(projectPath, board, cancellationToken); }
+        finally { LaunchingCards.TryRemove(reservation, out _); }
+    }
+
+    /// <summary>
+    /// The board manager launch (VIBE-52 follow-up, VIBE-204). It mirrors the card launch: the AI
+    /// board manager switch and a writable board first, then resolve the saved selection, refuse a
+    /// reviewer as manager, one live manager per board, grant only the Board tools, and record the
+    /// session before anyone can poll it. App and Board context follow the launch's nudge switch and
+    /// are composed into the prompt, so the tab child does not prepend them again. The new session is
+    /// attached to every Agent card it manages with the manager origin, so each card's Go to manager
+    /// reaches this tab.
+    /// </summary>
+    private async Task<LaunchBoardManagerResponse> LaunchBoardManagerCoreAsync(string projectPath, BoardRecord board, CancellationToken cancellationToken)
+    {
+        if (!await store.GetBoardManagerEnabledAsync(cancellationToken))
+            throw new BoardConflictException(BoardManagerService.DisabledMessage);
+        await BoardAccess.RequireWritableAsync(store, projectPath, board.Id, cancellationToken);
+        var settings = (await store.GetBoardManagerAsync(projectPath, board.Id, cancellationToken))?.Settings;
+        if (settings?.IsConfigured != true)
+            throw new BoardValidationException("Set up this board's manager in Board settings > Manager first.");
+        if (!BoardSelection.TryParse(settings.Selection, out var parsed) || parsed is null)
+            throw new BoardValidationException("The board manager is not a launchable LLM selection.");
+        LLM_Environment? environment = null;
+        if (parsed.IsEnvironment)
+        {
+            var byId = await repository.GetEnvironmentByIdAsync(parsed.EnvironmentId!.Value, cancellationToken);
+            environment = byId is not null && byId.LLM == parsed.Llm ? byId : null;
+            if (environment is null)
+                throw new BoardValidationException("The board manager's environment no longer exists (or changed CLI). Pick another manager in Board settings.");
+            if (!ProjectPathComparer.IsVisibleIn(environment.ProjectPath, projectPath))
+                throw new BoardValidationException("The board manager's environment belongs to another project.");
+            if (environment.Purpose == "code_review" || environment.ReviewerRouting?.Mode == "switch")
+                throw new BoardValidationException("Choose a work environment or base agent as the board manager; a code review environment is a worker.");
+        }
+
+        var tabs = await tabHost.ListTabsAsync(cancellationToken);
+        var live = FindLiveBoardManager(await store.GetBoardManagerSessionsAsync(projectPath, board.Id, 10, cancellationToken), tabs);
+        if (live is not null)
+            return new LaunchBoardManagerResponse(live.TabId, live.SessionId, live.Cli, board.Id, live.Selection, Reused: true);
+        if (tabs.Count >= tabHost.MaxTabs)
+            throw new BoardConflictException($"All {tabHost.MaxTabs} terminal tabs are in use. Close one first.");
+
+        var label = environment is not null ? $"{environment.CustomName} ({parsed.Cli})" : parsed.Cli;
+        var nudgeEnabled = ContextLevels.NudgeEnabled((launchSettings ?? Config.LoadFresh)(), environment is not null);
+        var liveWorkerCards = (await LiveImplementationWorkersAsync(projectPath, board.Id, tabs, cancellationToken))
+            .Select(worker => worker.CardId).ToHashSet(StringComparer.Ordinal);
+        var composed = await ComposeBoardManagerPromptAsync(store, projectPath, board, settings, label, environment?.CustomPrompt, nudgeEnabled, liveWorkerCards, cancellationToken);
+        var title = $"{Truncate(board.Name, 40)} · Manager";
+        TerminalTabStatusResponse? tab = null;
+        try
+        {
+            tab = await tabHost.CreateTabAsync(cancellationToken);
+            var session = await tabHost.StartSessionAsync(tab.TabId, new StartTerminalRequest(
+                WorkingDirectory: projectPath,
+                Cli: parsed.Cli,
+                EnvironmentName: environment?.CustomName,
+                EnvironmentId: environment?.Id,
+                Title: title,
+                InitialPrompt: composed.Prompt,
+                BaseLlmOptions: environment is null ? settings.BaseLlmOptions : null,
+                AuthorizeBoardTools: true, ContextBoardId: board.Id, ContextIncluded: true), cancellationToken);
+            if (string.IsNullOrWhiteSpace(session.SessionId))
+            {
+                Log.Warning("[Board] Tab {TabId} started the manager for board {Board} without a session id; the board will not show it", tab.TabId, board.Id);
+                return new LaunchBoardManagerResponse(tab.TabId, null, session.Cli, board.Id, parsed.Key, Reused: false);
+            }
+            if (await store.RecordBoardManagerSessionAsync(projectPath, board.Id, session.SessionId, tab.TabId, parsed.Key, parsed.Cli, cancellationToken) is null)
+                throw new BoardValidationException("The board was deleted while its manager was starting. The terminal has been closed.");
+            foreach (var managed in composed.Cards.Where(card => !card.OwnManager))
+                await LinkManagerToCardAsync(projectPath, managed.Card, session.SessionId, tab.TabId, parsed.Key, parsed.Cli, cancellationToken);
+            Log.Information("[Board] Started board manager {SessionId} ({Cli}) for board {Board} with {Cards} managed card(s)",
+                session.SessionId, parsed.Cli, board.Id, composed.Cards.Count(card => !card.OwnManager));
+            return new LaunchBoardManagerResponse(tab.TabId, session.SessionId, session.Cli, board.Id, parsed.Key, Reused: false);
+        }
+        catch (Exception)
+        {
+            if (tab is not null)
+            {
+                try { await tabHost.DeleteTabAsync(tab.TabId, CancellationToken.None); }
+                catch (Exception ex) { Log.Debug(ex, "[Board] Failed to clean up tab {TabId} after a failed board manager launch", tab.TabId); }
+            }
+            throw;
+        }
+    }
+
+    /// <summary>Attaches the board manager to a card it manages; an existing attachment is kept as it is.</summary>
+    private async Task LinkManagerToCardAsync(string projectPath, BoardCardRecord card, string sessionId, string? tabId, string selection, string cli, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await store.LinkSessionAsync(projectPath, card.Id, sessionId, tabId, selection, cli,
+                $"{card.DisplayId ?? card.Key} · Manager", BoardSessionRecord.ManagerOrigin, cancellationToken);
+        }
+        catch (BoardConflictException)
+        {
+            // Already attached to this card: the manager was running when the card became an Agent card.
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "[Board] Could not attach the board manager {SessionId} to {Card}", sessionId, card.Key);
+        }
+    }
+
+    /// <summary>A composed board manager prompt, the cards it lists and the user's context levels it carries.</summary>
+    internal sealed record BoardManagerPrompt(string Prompt, IReadOnlyList<BoardManagedCardRecord> Cards, IReadOnlyList<ContextLevels.Level> ContextLevels);
+
+    /// <summary>
+    /// The board manager prompt: lanes and their Automations, the managed cards (those with a live
+    /// worker marked), the manager's standing orders and worker limit, and App and Board context when
+    /// <paramref name="nudgeEnabled"/>. Card and Card type context reach workers through their cards.
+    /// </summary>
+    internal static async Task<BoardManagerPrompt> ComposeBoardManagerPromptAsync(IBoardStore store, string projectPath, BoardRecord board,
+        BoardManagerSettings settings, string? managerLabel, string? environmentPrompt, bool nudgeEnabled, IReadOnlySet<string>? liveWorkerCards,
+        CancellationToken cancellationToken)
+    {
+        var columns = (await store.GetColumnsAsync(projectPath, cancellationToken, board.Id)).OrderBy(column => column.Position).ToList();
+        var cards = await store.GetManagedCardsAsync(projectPath, board.Id, cancellationToken);
+        var levels = nudgeEnabled ? await ContextLevels.ResolveNudgedForCardAsync(store, projectPath, board.Id, cancellationToken) : [];
+        var laneAutomations = await BoardService.DescribeLaneAutomationsByLaneAsync(store, projectPath, columns.Select(column => column.Id).ToList(), cancellationToken);
+        var context = new BoardPromptComposer.BoardManagerContext(board, columns, cards,
+            columns.Select(column => (IReadOnlyList<string>)laneAutomations[column.Id].Select(automation => automation.Name).ToList()).ToList(),
+            columns.SelectMany(column => laneAutomations[column.Id].Select(automation => $"{column.Name} / {automation.Name}: {automation.Summary}. Output and next action: {automation.Output}")).ToList(),
+            settings, levels, liveWorkerCards);
+        return new BoardManagerPrompt(BoardPromptComposer.ComposeBoardManager(context, managerLabel, environmentPrompt), cards, levels);
     }
 
     /// <summary>

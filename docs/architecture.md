@@ -859,6 +859,13 @@ The resident manager uses existing authenticated launches, status/review polling
 to drive the pipeline while the root is open. Direct workers and lane Automations finish their
 own steps; the manager chooses movement. Configuration is additive and local-only. See the
 [Agent workflow contract](../VibeRails/Services/Board/ARCHITECTURE.md#agent-workflow-vibe-52-2026-10-11).
+With Settings > AI board manager on (off by default), a board can instead run one manager for all
+of its Agent cards (Board settings > Manager; the board header's chip starts, reaches and stops it).
+Cards without their own manager belong to it; it is attached to each with the manager origin, runs
+at most its configured number of implementation workers at once (enforced at launch), follows the
+board's standing orders, and waits on the `await_board_events` long poll instead of polling per
+card. See the
+[AI board manager contract](../VibeRails/Services/Board/ARCHITECTURE.md#ai-board-manager-vibe-52-follow-up-vibe-204).
 Base Codex cards persist an optional Speed choice (Default/Fast/Ultrafast) in their existing
 `BaseLlmOptions` JSON. `llm-model-catalog.js` and `CodexModelCapabilities` define supported
 model/tier pairs; `BaseLlmOptionsBuilder` validates them and emits session-only service-tier

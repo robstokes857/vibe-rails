@@ -71,13 +71,22 @@ public sealed class BoardAgentLaunchTool
             using var response = await clients.CreateClient(HttpClientName)
                 .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
             if (!response.IsSuccessStatusCode)
+            {
+                // 400 and 409 carry the Board's own guidance (validation and conflict messages, never
+                // exception detail), such as the board manager's worker limit; pass it on, bounded.
+                var reason = response.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Conflict
+                    ? await ReadReasonAsync(response, deadline.Token) : null;
                 return response.StatusCode switch
                 {
                     HttpStatusCode.NotFound => "FAIL: Card not found in the current root backend's project (HTTP 404). Cross-project agent launches are not supported.",
-                    HttpStatusCode.BadRequest => "FAIL: The root backend rejected the saved assignment or launch options (HTTP 400). Check the card's assignee and options with get_board_card, or use Start work in the Board for details.",
-                    HttpStatusCode.Conflict => "FAIL: The root backend could not start this card (HTTP 409). An agent may already be starting/running or the terminal limit may be reached. Check get_board_agent_status and the Board before retrying.",
+                    HttpStatusCode.BadRequest => "FAIL: The root backend rejected the saved assignment or launch options (HTTP 400)."
+                        + (reason is null ? " Check the card's assignee and options with get_board_card, or use Start work in the Board for details." : " " + reason),
+                    HttpStatusCode.Conflict => "FAIL: The root backend could not start this card (HTTP 409)."
+                        + (reason is null ? " An agent may already be starting/running or the terminal limit may be reached." : " " + reason)
+                        + " Check get_board_agent_status and the Board before retrying.",
                     _ => $"FAIL: Could not confirm agent launch with the root backend (HTTP {(int)response.StatusCode}). Check get_board_agent_status before retrying; an agent may already have started."
                 };
+            }
 
             var bytes = await SessionSharingService.ReadBoundedAsync(
                 await response.Content.ReadAsStreamAsync(deadline.Token), 16 * 1024, deadline.Token);
@@ -96,6 +105,18 @@ public sealed class BoardAgentLaunchTool
             // A timed-out request may already have launched an agent. Never retry or log credentials/response bodies.
             return UnconfirmedLaunch;
         }
+    }
+
+    /// <summary>The refusal's message from a bounded error body, as one sanitized line; null when absent or unreadable.</summary>
+    private static async Task<string?> ReadReasonAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var bytes = await SessionSharingService.ReadBoundedAsync(await response.Content.ReadAsStreamAsync(cancellationToken), 4 * 1024, cancellationToken);
+            var error = JsonSerializer.Deserialize(bytes, AppJsonSerializerContext.Default.ErrorResponse)?.Error;
+            return string.IsNullOrWhiteSpace(error) ? null : VibeRails.Services.Board.BoardPromptComposer.SanitizeLine(error, 400);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { return null; }
     }
 
     private const string UnconfirmedLaunch = "FAIL: Could not confirm agent launch with the root backend. Check get_board_agent_status and the Board before retrying; an agent may already have started.";

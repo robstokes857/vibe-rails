@@ -829,9 +829,12 @@ public sealed partial class BoardService(
         return mode;
     }
 
+    // Whether an Agent card needs its own manager depends on its board (one with a board manager
+    // does not) and on the AI board manager switch, so the store decides that inside the card's
+    // write transaction. A manager the card does name must still be a launchable selection.
     private static void ValidateManager(string mode, string? selection)
     {
-        if (mode == BoardWorkflowModes.Agent && !BoardSelection.TryParse(selection, out _))
+        if (mode == BoardWorkflowModes.Agent && !string.IsNullOrWhiteSpace(selection) && !BoardSelection.TryParse(selection, out _))
             throw new BoardValidationException("Choose a manager agent for the Agent workflow.");
     }
 

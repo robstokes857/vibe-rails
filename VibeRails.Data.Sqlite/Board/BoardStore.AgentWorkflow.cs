@@ -6,13 +6,8 @@ namespace VibeRails.Services.Board;
 
 public sealed partial class BoardStore
 {
-    private static void ValidateAgentWorkflow(string workflowMode, string? managerSelection)
-    {
-        if (!BoardWorkflowModes.IsValid(workflowMode))
-            throw new BoardValidationException("Workflow must be manual or agent.");
-        if (workflowMode == BoardWorkflowModes.Agent && string.IsNullOrWhiteSpace(managerSelection))
-            throw new BoardValidationException("Select a manager agent for the Agent workflow.");
-    }
+    // Agent-mode validation is ValidateAgentWorkflowAsync in BoardStore.BoardManager.cs: it needs the
+    // card's board, because a card without its own manager can be managed by the board's.
 
     private static void AddManagerParameters(SqliteCommand command, string workflowMode, string? managerSelection,
         BaseLlmOptions? managerOptions)

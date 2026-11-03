@@ -412,7 +412,7 @@ public sealed partial class BoardTool(
             + "Omitted: a VibeRails terminal assigns the card to its own LLM; other clients leave it unassigned. Pass an empty string to create it unassigned.")] string? assignee = null,
         [Description("Base CLI launch settings, matching the Board UI: model, effort, mode, yolo, speed. Example: {model: gpt-6-astra, effort: xhigh, speed: ultrafast}. Only valid with a base assignee; saved environments use their own settings.")] BaseLlmOptions? baseLlmOptions = null,
         [Description("manual (default) | agent. Agent gives a selected manager responsibility for the card's pipeline.")] string? workflowMode = null,
-        [Description("Manager picker key from list_board_agent_options. Required for agent workflow; separate from worker assignee.")] string? managerSelection = null,
+        [Description("Manager picker key from list_board_agent_options; separate from worker assignee. Required for agent workflow unless the AI board manager is on and the board has a manager (Board settings > Manager): omit it there to hand the card to the board manager.")] string? managerSelection = null,
         [Description("Saved base CLI settings for the manager. Saved environments use their own settings.")] BaseLlmOptions? managerBaseLlmOptions = null)
     {
         try
@@ -493,7 +493,7 @@ public sealed partial class BoardTool(
         [Description("Replaces all saved base CLI options: model, effort, mode, yolo, speed. speed is default, fast or ultrafast (model dependent); Astra supports ultrafast. Omitted preserves options for the same assignee. Saved environments use their own settings and reject base overrides.")] BaseLlmOptions? baseLlmOptions = null,
         [Description("Clear the saved base CLI options. Cannot be combined with baseLlmOptions.")] bool clearBaseLlmOptions = false,
         [Description("manual | agent. Omitted preserves the card's workflow.")] string? workflowMode = null,
-        [Description("Manager picker key. Empty clears it when switching to manual; omitted preserves it. Changing manager clears its old base settings.")] string? managerSelection = null,
+        [Description("Manager picker key. Empty clears it when switching to manual, or hands an Agent card to the board manager while the AI board manager is on and the board has one; omitted preserves it. Changing manager clears its old base settings.")] string? managerSelection = null,
         [Description("Replace all saved manager base CLI settings; saved environments reject overrides.")] BaseLlmOptions? managerBaseLlmOptions = null,
         [Description("Clear saved manager base CLI options. Cannot be combined with managerBaseLlmOptions.")] bool clearManagerBaseLlmOptions = false,
         [Description("Explicitly dismiss this card's ghost marker. This does not verify code landing or delete linked evidence. To verify after a merge, use recheck_board_ghost instead.")] bool clearGhost = false)

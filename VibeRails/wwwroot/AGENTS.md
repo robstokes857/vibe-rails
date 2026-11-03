@@ -226,6 +226,26 @@ Retained shared-board copies are read-only. The board disables dragging, creatio
 launches; its card viewer disables editing while preserving history/session/attachment reads.
 The foreign-project card response also carries `shared` so its editor enforces the same rule.
 Backend guards remain authoritative for every write and launch.
+**AI board manager (VIBE-52 follow-up, VIBE-204).** Settings > **AI board manager**
+(`settings-ai-board-manager.js`) is an immediate-save, default-off switch like PR Reviewer. While it
+is off the manager status says `enabled: false`: the header chip is hidden, Board settings has no
+**Manager** tab (`boardSettingsNavigation({ manager })`), the card editor offers no **Use the board
+manager**, and board-managed tiles behave like any Agent card without a manager. `board-manager.js`
+renders the chip (`[data-board-ai-manager]`; its own `.board-ai-manager-*` classes, because
+`.board-manager-chip` is the card foot's per-card manager label): Set up board manager when none is
+saved, Start manager when it is stopped, and while it runs Go to manager, Stop (behind
+`confirmDialog`) and a summary of managed cards, busy workers and cards that need the user. Below
+860px it takes its own header row. `mountBoardManagerChip` refreshes with the controller's
+ten-second poll and on every board switch, drops a reply for a board that is no longer current,
+and hides itself when the route is unavailable; `onStatus` feeds `state.boardManager` and
+`state.aiBoardManager` and repaints the lanes when the manager's availability or live tab changes.
+A board-managed tile names **Board manager · <agent>** in its foot, its Start work starts or joins
+the board manager (no selection override), and it reads Go to manager while the manager runs, with
+a fallback to the manager's tab when the card is not linked yet. The Manager tab in
+`board-settings.js` is a `mountSettings` section with the shared LLM picker, base launch options,
+Workers at a time and Manager instructions; `mountSettings` has `afterRender`, `clear` and
+`reloadAfterSave` for it. `UITests/tests/board-manager.spec.js` covers the off state, the chip,
+Stop, the Manager tab and the Settings switch.
 
 `board-code-links.js` renders the saved card's **GitHub links** rail. Add/remove saves immediately
 through authenticated Board routes without replacing card or comment drafts. The input accepts

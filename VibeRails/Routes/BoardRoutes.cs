@@ -159,6 +159,34 @@ public static partial class BoardRoutes
             RunAsync(async () => Results.Ok(await board.SaveAppContextSettingsAsync(request, cancellationToken))))
             .WithName("SaveAppContext");
 
+        // The AI board manager switch (VIBE-204): machine-wide like App context, so no board or project
+        // scope. Off by default; while it is off the manager routes below refuse to save or start one.
+        app.MapGet("/api/v1/board/ai-board-manager", ([Microsoft.AspNetCore.Mvc.FromServices] BoardManagerService manager, CancellationToken cancellationToken) =>
+            RunAsync(async () => Results.Ok(await manager.GetFeatureAsync(cancellationToken))))
+            .WithName("GetAiBoardManager");
+
+        app.MapPut("/api/v1/board/ai-board-manager", ([Microsoft.AspNetCore.Mvc.FromServices] BoardManagerService manager, UpdateBoardManagerFeatureRequest request, CancellationToken cancellationToken) =>
+            RunAsync(async () => Results.Ok(await manager.SetFeatureAsync(request, cancellationToken))))
+            .WithName("SaveAiBoardManager");
+
+        // The board manager (VIBE-52 follow-up): settings with their revision plus the live session,
+        // a launch that starts it or hands back the one already running, and a stop that closes its tab.
+        app.MapGet("/api/v1/board/boards/{boardId}/manager", ([Microsoft.AspNetCore.Mvc.FromServices] BoardManagerService manager, string boardId, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(await manager.GetAsync(Project(), boardId, cancellationToken), "Board")))
+            .WithName("GetBoardManager");
+
+        app.MapPut("/api/v1/board/boards/{boardId}/manager", ([Microsoft.AspNetCore.Mvc.FromServices] BoardManagerService manager, string boardId, UpdateBoardManagerRequest request, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(await manager.SaveAsync(Project(), boardId, request, cancellationToken), "Board")))
+            .WithName("SaveBoardManager");
+
+        app.MapPost("/api/v1/board/boards/{boardId}/manager/launch", ([Microsoft.AspNetCore.Mvc.FromServices] BoardManagerService manager, string boardId, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(await manager.LaunchAsync(Project(), boardId, cancellationToken), "Board")))
+            .WithName("LaunchBoardManager");
+
+        app.MapPost("/api/v1/board/boards/{boardId}/manager/stop", ([Microsoft.AspNetCore.Mvc.FromServices] BoardManagerService manager, string boardId, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(await manager.StopAsync(Project(), boardId, cancellationToken), "Board")))
+            .WithName("StopBoardManager");
+
         app.MapGet("/api/v1/board/columns", (IBoardService board, string? boardId, CancellationToken cancellationToken) =>
             RunAsync(async () => Results.Ok(await board.GetColumnsAsync(Project(), cancellationToken, boardId))))
             .WithName("GetBoardColumns");

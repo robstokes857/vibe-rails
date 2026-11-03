@@ -3,6 +3,7 @@ import { SettingsKeysPanel } from './settings-keys.js';
 import { SetupPanel, refreshSetupStatus } from './setup-panel.js';
 import { SetupInstallWindow } from './setup-install-window.js';
 import { PrReviewerSettingsPanel } from './settings-pr-reviewer.js';
+import { AiBoardManagerSettingsPanel } from './settings-ai-board-manager.js';
 import { BoardApi } from './board-api.js';
 import { contextEditorSection, mountContextEditor } from './board-settings.js';
 import { applyGatewaySettings, gatewayCredentialEdits, initGatewaySettings } from './settings-enterprise-gateway.js';
@@ -323,6 +324,8 @@ export class SettingsController {
         this._disposeContextEditor = null;
         this._prReviewerPanel?.unload();
         this._prReviewerPanel = null;
+        this._aiBoardManagerPanel?.unload();
+        this._aiBoardManagerPanel = null;
         this._keysPanel?.unload();
         this._keysPanel = null;
         this._setupPanel?.unload();
@@ -702,6 +705,13 @@ export class SettingsController {
                 if (container) {
                     this._prReviewerPanel ??= new PrReviewerSettingsPanel(this.app, container);
                     void this._prReviewerPanel.load();
+                }
+            }
+            if (id === 'ai-board-manager') {
+                const container = root.querySelector('[data-settings-ai-board-manager]');
+                if (container) {
+                    this._aiBoardManagerPanel ??= new AiBoardManagerSettingsPanel(this.app, container);
+                    void this._aiBoardManagerPanel.load();
                 }
             }
         };

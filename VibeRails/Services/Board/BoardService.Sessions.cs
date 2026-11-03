@@ -18,11 +18,16 @@ public sealed partial class BoardService
 
         var source = links.FirstOrDefault();
         var author = await store.FindSessionAuthorAsync(id, cancellationToken);
+        // A manager attaching to another Agent card (the board manager taking on a card that joined its
+        // scope, VIBE-204) stays that card's manager, so the card's Go to manager reaches its tab.
+        var origin = source?.Origin is "chat" or "planning" or "code_review" ? source.Origin
+            : source?.Origin == BoardSessionRecord.ManagerOrigin && card.WorkflowMode == BoardWorkflowModes.Agent ? BoardSessionRecord.ManagerOrigin
+            : BoardSessionRecord.McpOrigin;
         try
         {
             return await LinkSessionAsync(projectPath, card.Id, id, source?.TabId ?? tabId,
                 source?.Selection ?? string.Empty, source?.Cli ?? author?.Cli ?? string.Empty,
-                author?.Label ?? source?.DisplayName ?? "Agent session", source?.Origin is "chat" or "planning" or "code_review" ? source.Origin : BoardSessionRecord.McpOrigin, cancellationToken);
+                author?.Label ?? source?.DisplayName ?? "Agent session", origin, cancellationToken);
         }
         catch (BoardConflictException)
         {

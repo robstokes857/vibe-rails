@@ -40,7 +40,8 @@ import { boardBrandLogo, boardTracker, cardTracker, trackerLabel } from './board
 import { BoardLaneAgents } from './board-lane-agents.js';
 import { BoardCardAssign, ASSIGN_ACTION } from './board-card-assign.js';
 import { BOARD_SELECTION_STORAGE_KEY } from './board-selection.js';
-import { contextEditorSection, mountContextEditor, laneAutomationSection, mountLaneAutomation, boardSettingsNavigation, newBoardNavigation, mountBoardSettingsNavigation, boardSyncSection, mountBoardSync } from './board-settings.js';
+import { contextEditorSection, mountContextEditor, laneAutomationSection, mountLaneAutomation, boardSettingsNavigation, newBoardNavigation, mountBoardSettingsNavigation, boardSyncSection, mountBoardSync, boardManagerSection, mountBoardManager } from './board-settings.js';
+import { mountBoardManagerChip } from './board-manager.js';
 import { boardJiraSection, BoardJiraPanel } from './board-jira.js';
 import { boardAdoSection, BoardAdoPanel } from './board-ado.js';
 import { cardOrganizeSection, bindCardOrganization } from './board-card-organize.js';
@@ -151,7 +152,12 @@ export class BoardController {
             cards: [],
             filters: emptyFilters(),
             editingColumnId: null,
-            editingColumnColor: LANE_COLORS[1]
+            editingColumnColor: LANE_COLORS[1],
+            // The current board's manager status (board-manager.js keeps it current), null while
+            // Settings > AI board manager is off. The card editor reads it to offer "Use the board
+            // manager"; aiBoardManager decides whether Board settings shows its Manager tab.
+            boardManager: null,
+            aiBoardManager: false
         };
     }
 
@@ -234,6 +240,8 @@ export class BoardController {
         this._refreshAbort?.abort();
         this.boardSettingsDispose?.();
         this.boardSettingsDispose = null;
+        this.managerChip?.dispose();
+        this.managerChip = null;
         this._refreshGeneration += 1;
         this._openCardGeneration += 1;
         this._openCardAbort?.abort();
@@ -297,6 +305,8 @@ export class BoardController {
             || this._cardPageGeneration !== this._refreshGeneration || this._pageRequests.size || this._boardDragging) return;
         const generation = this._refreshGeneration;
         const boardId = this.state.boardId;
+        // The manager chip rides the same ten-second poll; its request is its own.
+        void this.managerChip?.refresh();
         this._boardPollAbort?.abort();
         const abort = this._boardPollAbort = new AbortController();
         const current = () => !abort.signal.aborted && root === this.root && root.isConnected
@@ -793,6 +803,27 @@ export class BoardController {
 
         const picker = this.query('[data-board-select]');
         picker?.addEventListener('change', () => this.switchBoard(picker.value));
+
+        this.managerChip?.dispose();
+        this.managerChip = mountBoardManagerChip(this.app, this.query('[data-board-ai-manager]'), {
+            boardId: () => this.state.boardId,
+            describe: selection => this.assigneeInfo(selection),
+            openSettings: tab => this.openBoardSettingsTab(tab),
+            focusTab: (tabId, selection) => this.focusManagerTab(tabId, selection),
+            onStatus: status => {
+                const enabled = status?.enabled === true;
+                const before = this.state.boardManager;
+                const changed = enabled !== this.state.aiBoardManager
+                    || (enabled ? status.selection || null : null) !== (before?.selection || null)
+                    || (enabled ? status.active?.tabId || null : null) !== (before?.active?.tabId || null);
+                this.state.aiBoardManager = enabled;
+                this.state.boardManager = enabled ? status : null;
+                // Tiles of board-managed cards follow the manager: its name in the foot, and Start
+                // work or Go to manager. Repaint only when that changes, never mid-drag.
+                if (changed && this.root?.isConnected !== false && !this._boardDragging && this.state.cards.some(card => this.isBoardManaged(card)))
+                    this.renderLanes();
+            }
+        });
     }
 
     // ============================================
@@ -803,6 +834,7 @@ export class BoardController {
         this.renderBoardPicker();
         this.renderToolbar();
         this.renderLanes();
+        void this.managerChip?.refresh();
     }
 
     // Board names stay uncluttered; counts belong in the stats and lane headers.
@@ -934,6 +966,8 @@ export class BoardController {
     renderCard(card) {
         const member = this.assigneeInfo(card.assignee);
         const manager = card.workflowMode === 'agent' ? this.assigneeInfo(card.managerSelection) : null;
+        // VIBE-204: an Agent card without its own manager is run by the board manager.
+        const boardManager = !manager && this.isBoardManaged(card) && this.boardManagerAvailable() ? this.assigneeInfo(this.state.boardManager.selection) : null;
         const type = cardType(card.type);
         const live = card.activeTabId
             ? `<span class="board-live-dot" title="A terminal session is working this card" aria-label="Session open"></span>`
@@ -1000,7 +1034,8 @@ export class BoardController {
                             ${comments}
                         </div>
                     </div>
-                    <div class="board-card-foot">${manager ? `<span class="board-manager-chip" title="Manager: ${escapeHtml(manager.label)}">${this.avatarHtml(manager, 18)}<span class="board-assignee-name">Manager · ${escapeHtml(manager.label)}</span></span>` : ''}${assignee}${startWork}</div>
+                    <div class="board-card-foot">${manager ? `<span class="board-manager-chip" title="Manager: ${escapeHtml(manager.label)}">${this.avatarHtml(manager, 18)}<span class="board-assignee-name">Manager · ${escapeHtml(manager.label)}</span></span>`
+                        : boardManager ? `<span class="board-manager-chip is-board-manager" title="Run by the board manager (${escapeHtml(boardManager.label)})"><i class="fa-solid fa-diagram-project" aria-hidden="true"></i><span class="board-assignee-name">Board manager · ${escapeHtml(boardManager.label)}</span></span>` : ''}${assignee}${startWork}</div>
                 </div>
             </article>`;
     }
@@ -1565,10 +1600,18 @@ export class BoardController {
                             </select>
                         </div>
                         <div data-board-manager-fields${card?.workflowMode === 'agent' ? '' : ' hidden'}>
-                            <label class="board-editor-label" for="board-card-manager">Manager agent</label>
-                            <select class="form-select form-select-sm" id="board-card-manager" aria-label="Manager agent"></select>
-                            <p class="board-editor-muted mt-2">The manager guides this card through the pipeline, coordinates workers and checks their results until the card is closed.</p>
-                            <div data-board-manager-launch-options></div>
+                            ${this.boardManagerAvailable() ? `<div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="board-card-use-board-manager"${card?.managerSelection ? '' : ' checked'}>
+                                <label class="form-check-label" for="board-card-use-board-manager">Use the board manager (${escapeHtml(this.boardManagerLabel())})</label>
+                            </div>` : ''}
+                            <div data-board-own-manager-fields${this.boardManagerAvailable() && !card?.managerSelection ? ' hidden' : ''}>
+                                <label class="board-editor-label" for="board-card-manager">Manager agent</label>
+                                <select class="form-select form-select-sm" id="board-card-manager" aria-label="Manager agent"></select>
+                                <p class="board-editor-muted mt-2">${this.boardManagerAvailable()
+                                    ? 'A manager of its own takes this card out of the board manager\'s hands.'
+                                    : 'The manager guides this card through the pipeline, coordinates workers and checks their results until the card is closed.'}</p>
+                                <div data-board-manager-launch-options></div>
+                            </div>
                         </div>
                         <div>
                             <label class="board-editor-label" for="board-card-assignee" data-board-assignee-label>${card?.workflowMode === 'agent' ? 'Worker' : 'Assignee'}</label>
@@ -1912,16 +1955,22 @@ export class BoardController {
             managerSelect.addEventListener('change', () => renderManagerOptions());
         }
         const workflowSelect = editor.querySelector('#board-card-workflow');
+        const useBoardManager = editor.querySelector('#board-card-use-board-manager');
         const updateWorkflow = () => {
             const agent = workflowSelect?.value === 'agent';
             const managerFields = editor.querySelector('[data-board-manager-fields]');
             if (managerFields) managerFields.hidden = !agent;
-            if (managerSelect) managerSelect.required = agent;
+            // With the board manager checked the card needs no manager of its own.
+            const shared = Boolean(useBoardManager?.checked);
+            const ownFields = editor.querySelector('[data-board-own-manager-fields]');
+            if (ownFields) ownFields.hidden = shared;
+            if (managerSelect) managerSelect.required = agent && !shared;
             const workerLabel = editor.querySelector('[data-board-assignee-label]');
             if (workerLabel) workerLabel.textContent = agent ? 'Worker' : 'Assignee';
             this.updateStartWorkButton(editor, card);
         };
         workflowSelect?.addEventListener('change', updateWorkflow);
+        useBoardManager?.addEventListener('change', updateWorkflow);
         updateWorkflow();
 
         // Chat can use any launch target without changing the card's assignment.
@@ -2785,8 +2834,10 @@ export class BoardController {
             assignee: value('#board-card-assignee'),
             baseLlmOptions: readBoardLaunchOptions(editor.querySelector('[data-board-worker-launch-options]') || editor, value('#board-card-assignee')),
             workflowMode: value('#board-card-workflow') === 'agent' ? 'agent' : 'manual',
-            managerSelection: value('#board-card-manager'),
-            managerBaseLlmOptions: readBoardLaunchOptions(editor.querySelector('[data-board-manager-launch-options]') || editor, value('#board-card-manager')),
+            // An empty manager with Agent workflow means "the board manager" (the store checks the board has one).
+            managerSelection: editor.querySelector('#board-card-use-board-manager')?.checked ? '' : value('#board-card-manager'),
+            managerBaseLlmOptions: editor.querySelector('#board-card-use-board-manager')?.checked ? null
+                : readBoardLaunchOptions(editor.querySelector('[data-board-manager-launch-options]') || editor, value('#board-card-manager')),
             blocked: Boolean(editor.querySelector('[data-board-blocked]')?.checked),
             flagged: Boolean(editor.querySelector('[data-board-flagged]')?.checked),
             ...readGhostField(editor)
@@ -2799,8 +2850,10 @@ export class BoardController {
             editor.querySelector('#board-card-title')?.focus();
             return false;
         }
-        if (payload.workflowMode === 'agent' && !payload.managerSelection) {
-            this.app.showToast('Board', 'Choose a manager agent for the Agent workflow.', 'warning');
+        if (payload.workflowMode === 'agent' && !payload.managerSelection && !this.boardManagerAvailable()) {
+            this.app.showToast('Board', this.state.aiBoardManager
+                ? 'Choose a manager agent for the Agent workflow, or set up this board\'s manager in Board settings > Manager.'
+                : 'Choose a manager agent for the Agent workflow.', 'warning');
             const manager = editor.querySelector('#board-card-manager');
             if (manager?.tomselect) manager.tomselect.focus();
             else manager?.focus();
@@ -2883,7 +2936,23 @@ export class BoardController {
     hasRunningSession(card, workflowMode = card?.workflowMode) {
         return Boolean((workflowMode !== 'agent' || card?.workflowMode === 'agent') && card?.activeSessionId
             || card?.sessions?.some(session => this.isWorkingSession(session)
-            && (workflowMode !== 'agent' || session.origin === 'agent_manager')));
+            && (workflowMode !== 'agent' || session.origin === 'agent_manager'))
+            || workflowMode === 'agent' && this.isBoardManaged(card) && this.boardManagerAvailable() && this.state.boardManager.active);
+    }
+
+    /** The board's manager is usable: Settings > AI board manager is on and this board has one saved (VIBE-204). */
+    boardManagerAvailable() {
+        return this.state.boardManager?.enabled === true && Boolean(this.state.boardManager.selection);
+    }
+
+    /** An Agent card without a manager of its own belongs to the board manager. */
+    isBoardManaged(card) {
+        return card?.workflowMode === 'agent' && !card.managerSelection;
+    }
+
+    boardManagerLabel() {
+        const selection = this.state.boardManager?.selection;
+        return this.assigneeInfo(selection)?.label || selection || 'Board manager';
     }
 
     updateCardStartWorkButtons(card) {
@@ -2911,15 +2980,20 @@ export class BoardController {
                 return;
             }
             const manager = card.workflowMode === 'agent';
-            const selection = manager ? card.managerSelection : card.assignee;
+            // A board-managed card sends no selection: the server starts or joins the board manager.
+            const boardManaged = manager && this.isBoardManaged(card) && this.boardManagerAvailable();
+            const selection = boardManaged ? this.state.boardManager.selection : manager ? card.managerSelection : card.assignee;
             if (!selection) {
                 this._startingCards.delete(cardId);
                 await this.openCardEditor(cardId);
                 return;
             }
-            const { info } = await this.launchCardAgent(card, selection, manager ? 'manager' : 'work');
+            const { info } = await this.launchCardAgent(card, boardManaged ? null : selection, manager ? 'manager' : 'work');
             if (!current()) return;
-            this.app.showToast('Board', `${cardDisplayId(card)} started with ${info?.label || 'the LLM'}. Open it from Sessions when ready.`, 'success');
+            this.app.showToast('Board', boardManaged
+                ? `The board manager (${info?.label || 'the LLM'}) is handling ${cardDisplayId(card)}. Open it from the board header.`
+                : `${cardDisplayId(card)} started with ${info?.label || 'the LLM'}. Open it from Sessions when ready.`, 'success');
+            void this.managerChip?.refresh();
             await this.refreshBoardSnapshot();
         } catch (error) {
             if (current() && !request.signal.aborted)
@@ -2936,11 +3010,14 @@ export class BoardController {
         const tabId = String(result?.tabId || '').trim();
         if (!tabId) throw new Error('The launch did not return a terminal tab.');
         const info = this.assigneeInfo(result.selection || selection);
+        // Delegated to the board manager: its one tab belongs to the board, not to this card.
+        const boardManager = intent === 'manager' && !selection && this.isBoardManaged(card);
+        const managerTitle = `${this.currentBoard()?.name || 'Board'} · Manager`;
         this.app.terminalController?.rememberTabLaunch?.(tabId, {
             selection: result.selection || selection,
-            label: cardLabel(card),
-            title: cardLabel(card),
-            taskKey: intent === 'chat' ? `${CARD_TASK_KEY(card.id)}:chat` : CARD_TASK_KEY(card.id),
+            label: boardManager ? managerTitle : cardLabel(card),
+            title: boardManager ? managerTitle : cardLabel(card),
+            taskKey: intent === 'chat' ? `${CARD_TASK_KEY(card.id)}:chat` : boardManager ? `board-manager:${this.state.boardId}` : CARD_TASK_KEY(card.id),
             accentColor: info?.color || null,
             workingDirectory: result.workingDirectory || null
         });
@@ -2971,8 +3048,37 @@ export class BoardController {
         if (icon) icon.className = `fa-solid ${running ? 'fa-terminal' : 'fa-play'}`;
     }
 
+    /** Board settings opened on one tab, e.g. the header chip's "Set up board manager". */
+    openBoardSettingsTab(tab) {
+        if (!this.state.boardId) return;
+        this.openBoardEditor(this.state.boardId);
+        document.getElementById('modal-container')?.querySelector(`[data-board-settings-tab="${tab}"]`)?.click();
+    }
+
+    /** The board manager's terminal: not a card session, so it is focused by tab alone. */
+    async focusManagerTab(tabId, selection) {
+        const terminal = this.app.terminalController;
+        if (!terminal || !tabId) return;
+        terminal.rememberTabLaunch?.(tabId, {
+            selection: selection || null,
+            label: `${this.currentBoard()?.name || 'Board'} · Manager`,
+            title: `${this.currentBoard()?.name || 'Board'} · Manager`,
+            taskKey: `board-manager:${this.state.boardId}`,
+            workingDirectory: null
+        });
+        if (!(await terminal.adoptLaunchedTab?.(tabId))) {
+            this.app.navigate?.('terminal-focus', { preferredTabId: tabId, preferredSelection: selection || null });
+        }
+    }
+
     async goToAgent(editor, card) {
         const manager = (editor?.querySelector('#board-card-workflow')?.value || card.workflowMode) === 'agent';
+        // The board manager's one tab belongs to the board: focus it under the board's name, never
+        // relabel it as whichever card asked.
+        if (manager && this.isBoardManaged(card) && this.boardManagerAvailable() && this.state.boardManager.active?.tabId) {
+            await this.focusManagerTab(this.state.boardManager.active.tabId, this.state.boardManager.selection);
+            return;
+        }
         const workingSession = item => this.isWorkingSession(item) && item.tabId && (!manager || item.origin === 'agent_manager');
         const selection = manager ? card.managerSelection : card.assignee;
         let session = card.sessions?.find(workingSession);
@@ -2988,6 +3094,8 @@ export class BoardController {
                 session = { id: card.activeSessionId, tabId: card.activeTabId, selection, displayName: card.title };
         }
         if (session) await this.focusSessionTab(card, session);
+        else if (manager && this.isBoardManaged(card) && this.state.boardManager?.active?.tabId)
+            await this.focusManagerTab(this.state.boardManager.active.tabId, this.state.boardManager.selection);
         else this.app.showToast('Board', 'The agent terminal is no longer available. You can replay its session from Sessions.', 'info');
     }
 
@@ -3007,8 +3115,11 @@ export class BoardController {
         const payload = this.readCardForm(editor);
         if (!this.validateCardTitle(editor, payload)) return;
         if (intent === 'work' && payload.workflowMode === 'agent') intent = 'manager';
+        // A card without its own manager is the board manager's: the launch sends no selection, so
+        // the server starts (or focuses) the board manager instead of a per-card one.
+        const boardManaged = intent === 'manager' && !payload.managerSelection && this.boardManagerAvailable();
         const selection = intent === 'chat' ? editor.querySelector('[data-board-chat-agent]')?.value
-            : intent === 'manager' ? payload.managerSelection : payload.assignee;
+            : intent === 'manager' ? (payload.managerSelection || (boardManaged ? this.state.boardManager.selection : '')) : payload.assignee;
         if (!selection) {
             this.app.showToast('Board', intent === 'chat' ? 'Choose who to chat with.' : 'Assign a CLI, Quick Launch or Agent to this card first.', 'warning');
             const select = editor.querySelector(intent === 'chat' ? '[data-board-chat-agent]' : '#board-card-assignee');
@@ -3031,7 +3142,7 @@ export class BoardController {
                 return;
             }
             const question = intent === 'chat' ? editor.querySelector('[data-board-chat-question]')?.value?.trim() : undefined;
-            const { result, tabId, info } = await this.launchCardAgent({ ...card, ...saved, title: payload.title || card.title }, selection, intent, question);
+            const { result, tabId, info } = await this.launchCardAgent({ ...card, ...saved, title: payload.title || card.title }, boardManaged ? null : selection, intent, question);
             if (intent === 'chat') {
                 if (editor.isConnected !== false) {
                     this.app.closeModal();
@@ -3042,7 +3153,10 @@ export class BoardController {
                 return;
             }
             if (editor.isConnected !== false) this.app.closeModal();
-            this.app.showToast('Board', `${cardDisplayId({ ...card, ...saved })} started with ${info?.label || 'the LLM'}. Open it from Sessions when ready.`, 'success');
+            this.app.showToast('Board', boardManaged
+                ? `The board manager (${info?.label || 'the LLM'}) is handling ${cardDisplayId({ ...card, ...saved })}. Open it from the board header.`
+                : `${cardDisplayId({ ...card, ...saved })} started with ${info?.label || 'the LLM'}. Open it from Sessions when ready.`, 'success');
+            void this.managerChip?.refresh();
             await this.refresh();
         } catch (error) {
             this.app.showToast('Board', error?.message || 'Failed to start work on the card.', 'error');
@@ -3104,9 +3218,11 @@ export class BoardController {
         const board = boardId ? this.boardById(boardId) : null;
         // A new Jira or Azure DevOps board is made by connecting a local board, as its settings do.
         const source = board ? null : this.trackerSourceBoard();
+        // The Manager tab appears only while Settings > AI board manager is on.
+        const manager = Boolean(board && this.state.aiBoardManager);
         this.app.showModal(board ? `Board · ${board.name}` : 'New board', `
             <div class="board-lane-editor" data-board-board-editor>
-                ${board ? boardSettingsNavigation() : source ? newBoardNavigation() : ''}
+                ${board ? boardSettingsNavigation({ manager }) : source ? newBoardNavigation() : ''}
                 <section id="board-settings-general" data-board-settings-panel="general" ${board || source ? 'role="tabpanel" aria-labelledby="board-settings-tab-general"' : ''}>
                 <label class="board-editor-label" for="board-board-name">Board name</label>
                 <input type="text" class="form-control form-control-sm mb-3" id="board-board-name" maxlength="60"
@@ -3128,6 +3244,7 @@ export class BoardController {
                 ${board ? `
                     <section id="board-settings-jira" role="tabpanel" aria-labelledby="board-settings-tab-jira" data-board-settings-panel="jira" hidden>${boardJiraSection()}</section>
                     <section id="board-settings-ado" role="tabpanel" aria-labelledby="board-settings-tab-ado" data-board-settings-panel="ado" hidden>${boardAdoSection()}</section>
+                    ${manager ? `<section id="board-settings-manager" role="tabpanel" aria-labelledby="board-settings-tab-manager" data-board-settings-panel="manager" hidden>${boardManagerSection()}</section>` : ''}
                     <section id="board-settings-context" role="tabpanel" aria-labelledby="board-settings-tab-context" data-board-settings-panel="context" hidden>${contextEditorSection()}</section>
                     <section id="board-settings-history" role="tabpanel" aria-labelledby="board-settings-tab-history" data-board-settings-panel="history" hidden>${historySection()}</section>
                 ` : source ? `
@@ -3142,6 +3259,8 @@ export class BoardController {
         if (!editor) return;
         if (board) {
             const disposeContext = mountContextEditor(this.app, editor.querySelector('[data-context-editor]'), { boardId: board.id });
+            const disposeManager = manager ? mountBoardManager(this.app, editor.querySelector('[data-board-manager-settings]'), board.id,
+                { onSaved: () => { void this.managerChip?.refresh(); } }) : () => {};
             const disposeHistory = mountHistory(editor.querySelector('[data-board-history-view]'), board.id);
             const header = container.querySelector('.modal-header');
             header.classList.add('board-settings-header');
@@ -3200,6 +3319,7 @@ export class BoardController {
                 disposeSync();
                 trackers.forEach(({ panel }) => panel.dispose());
                 disposeContext();
+                disposeManager();
                 disposeHistory();
             };
         } else if (source) {

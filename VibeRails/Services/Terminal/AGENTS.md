@@ -198,6 +198,14 @@ tools and its existing PTY; it has no background host or restart watchdog. Saved
 environments can be workers and cannot silently become the selected manager. All launches retain
 argv-only prompts and the existing narrow tool grants.
 
+With Settings > AI board manager on (VIBE-204), a board can also have one manager for all of its
+Agent cards: Board settings > Manager, started from the board header or by Start Agent workflow on
+a card without its own manager. It is an ordinary Board-tool-granted PTY whose session is attached
+to every card it manages with the `agent_manager` origin; its prompt carries App and Board context
+under the nudge switch with `ContextIncluded`, and it waits with the `await_board_events` tool
+(server-side long poll, 45 s ceiling under every CLI's MCP tool timeout) instead of polling. Stop
+closes its tab like closing it here. The grant allowlist gains that one read-only tool.
+
 | Provider | Session-only Board grants and evidence |
 |---|---|
 | Codex | `--config mcp_servers.viberails-mcp.tools.<tool>.approval_mode="approve"` per listed Board tool; [official MCP reference](https://developers.openai.com/codex/mcp/). |

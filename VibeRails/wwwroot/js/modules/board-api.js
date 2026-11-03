@@ -163,6 +163,25 @@ async function saveBoardContextAsync(boardId, payload) {
     return call(`/boards/${enc(boardId)}/context`, 'PUT', payload);
 }
 
+// The board manager (VIBE-52 follow-up, VIBE-204): settings + live status, save, start/focus and stop.
+// The status carries `enabled`, the machine-wide AI board manager switch; while it is false every
+// other field is empty and the board shows no manager UI.
+async function getBoardManagerAsync(boardId, extra = {}) {
+    return call(`/boards/${enc(boardId)}/manager`, 'GET', null, extra);
+}
+
+async function saveBoardManagerAsync(boardId, payload) {
+    return call(`/boards/${enc(boardId)}/manager`, 'PUT', payload);
+}
+
+async function launchBoardManagerAsync(boardId) {
+    return call(`/boards/${enc(boardId)}/manager/launch`, 'POST', {});
+}
+
+async function stopBoardManagerAsync(boardId) {
+    return call(`/boards/${enc(boardId)}/manager/stop`, 'POST', {});
+}
+
 async function getLaneAutomationAsync(columnId, extra = {}) {
     return call(`/columns/${enc(columnId)}/automation`, 'GET', null, extra);
 }
@@ -490,6 +509,10 @@ export const BoardApi = {
     getAppContextAsync,
     saveAppContextAsync,
     setBoardCardPinnedAsync,
+    getBoardManagerAsync,
+    saveBoardManagerAsync,
+    launchBoardManagerAsync,
+    stopBoardManagerAsync,
     getLaneAutomationAsync,
     getLaneRunningAgentsAsync,
     saveLaneAutomationAsync,

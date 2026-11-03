@@ -155,7 +155,7 @@ public partial class CommandServiceTests
             "list_board_agent_options", "start_board_agent",
             "create_board_card", "update_board_card", "move_board_card", "add_board_comment",
             "append_board_note", "add_board_attachment", "attach_board_session", "link_board_commit", "link_board_code",
-            "complete_board_agent", "end_agent_session", "get_board_agent_status", "begin_board_review", "save_board_review", "get_board_reviews", "report_automation_step"
+            "complete_board_agent", "end_agent_session", "get_board_agent_status", "await_board_events", "begin_board_review", "save_board_review", "get_board_reviews", "report_automation_step"
         ];
 
         Assert.Equal(expected.Order(), BoardMcpAuthorization.ToolNames.Order());
