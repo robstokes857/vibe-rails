@@ -42,6 +42,33 @@ public sealed partial class BoardSettingsTests
         """);
 
     [Fact]
+    public async Task Reordering_PreservesPausedSelectionsAndCancelsPendingEntries()
+    {
+        var (_, lane, _, _) = await Lanes();
+        var first = await Job("First");
+        var second = await Job("Second");
+        var third = await Job("Third");
+        await _boards.SaveLaneAutomationAsync(_root, lane, [first.Id, second.Id], 0, Ct);
+        var card = await Card(lane);
+        Assert.NotEmpty(await _boards.GetPendingLaneAutomationsAsync(_root, card.Id, Ct));
+        await _jobs.UpdateJobAsync(first.Id, new(first.Name, _root, LLM.NotSet, null, "", null, false, []), Ct);
+
+        var saved = await _boards.SaveLaneAutomationAsync(_root, lane, [second.Id, first.Id], 1, Ct);
+
+        Assert.Equal(2, saved!.Revision);
+        Assert.Equal(new[] { second.Id, first.Id }, saved.JobIds);
+        Assert.False((await _jobs.GetJobAsync(first.Id, Ct))!.Enabled);
+        Assert.Empty(await _boards.GetPendingLaneAutomationsAsync(_root, card.Id, Ct));
+        Assert.Equal(saved.JobIds, (await new BoardStore(_connectionString, _stateConnectionString)
+            .GetLaneAutomationAsync(_root, lane, Ct))!.JobIds);
+        await Assert.ThrowsAsync<BoardConflictException>(() =>
+            _boards.SaveLaneAutomationAsync(_root, lane, [first.Id, second.Id], 1, Ct));
+        // Changing membership still requires all selected Automations to be enabled.
+        await Assert.ThrowsAsync<BoardValidationException>(() =>
+            _boards.SaveLaneAutomationAsync(_root, lane, [second.Id, first.Id, third.Id], 2, Ct));
+    }
+
+    [Fact]
     public async Task MultipleSelections_PersistAndValidateTheEntireListBeforeChangingAnything()
     {
         var (_, a, _, _) = await Lanes();

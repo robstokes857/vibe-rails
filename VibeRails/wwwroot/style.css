@@ -16321,6 +16321,8 @@ body.vb-terminal-focus-active .app-subnav .nav-exit-btn-sm {
 }
 .job-import-groups {
     display: grid;
+    /* Keep repository contents intact; the list scrolls instead of shrinking its rows. */
+    grid-auto-rows: max-content;
     gap: 0.9rem;
     max-height: 60vh;
     overflow: auto;

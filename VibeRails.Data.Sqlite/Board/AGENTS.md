@@ -1,5 +1,11 @@
 # Board persistence
 
+`SaveLaneAutomationAsync` allows a pure permutation of the currently selected Job IDs even when
+one has since become paused/unavailable. Soft-deleted Jobs hidden by the lane API may be omitted;
+missing or wrong-project entries remain part of the visible set. The writable-board and revision checks still run inside
+the transaction, and normal selection writes still cancel pending entries. Membership changes
+retain the enabled, project-local Job validation for the whole new selection. No schema change.
+
 `board-remote-origin/1` adds nullable `BoardCards.RemoteCreated`, with no backfill. Only a
 new card inserted through `CreateSyncedCardAsync` sets it; local inserts write 0, old rows
 read as false, and all update/acknowledgement paths preserve it. It stays local and travels

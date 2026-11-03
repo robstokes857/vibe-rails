@@ -27,8 +27,26 @@ public sealed partial class BoardStore
             throw new BoardConflictException("Lane automation changed while you were editing. Reopen the lane to load the latest version.");
         // Jobs are local Automation definitions in state.db. Only read them here; the scheduler
         // validates them again when it queues the run, since the two stores commit independently.
-        await using var state = selected.Length > 0 ? await OpenStateAsync(cancellationToken) : null;
-        foreach (var jobId in selected)
+        // Reordering the visible selection must preserve paused or unavailable entries.
+        // The API hides soft-deleted Jobs; dropping only those hidden IDs is also a reorder.
+        var currentIds = current.JobIds.ToHashSet();
+        var reorderedOnly = currentIds.SetEquals(selected);
+        await using var state = selected.Length > 0 && !reorderedOnly ? await OpenStateAsync(cancellationToken) : null;
+        if (!reorderedOnly && selected.Length > 0 && selected.All(currentIds.Contains))
+        {
+            reorderedOnly = true;
+            foreach (var removedId in currentIds.Except(selected))
+            {
+                await using var deleted = state!.CreateCommand();
+                deleted.CommandText = "SELECT COUNT(*) FROM Jobs WHERE Id = $job AND DeletedUTC IS NOT NULL;";
+                deleted.Parameters.AddWithValue("$job", removedId);
+                if (Convert.ToInt64(await deleted.ExecuteScalarAsync(cancellationToken)) == 1) continue;
+                reorderedOnly = false;
+                break;
+            }
+        }
+        // Real membership changes still validate every selected Job under the existing rules.
+        foreach (var jobId in reorderedOnly ? Array.Empty<long>() : selected)
         {
             await using var validate = state!.CreateCommand();
             validate.CommandText = $"SELECT COUNT(*) FROM Jobs WHERE Id = $job AND ProjectPath = $project{ProjectPathCollation} AND DeletedUTC IS NULL AND Enabled = 1;";

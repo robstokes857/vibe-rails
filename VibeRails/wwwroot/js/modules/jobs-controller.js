@@ -177,6 +177,44 @@ export class JobController {
         return kind === 'agent' ? 'Agent' : 'Automation';
     }
 
+    /** Open the shared editor over the Board without mounting or navigating to a Jobs page. */
+    async openFromBoard({ jobId = null, mode = 'automations', preferredTrigger = null } = {}) {
+        this.unload();
+        const origin = document.querySelector('#app-content [data-view="board"]');
+        if (!origin?.isConnected) return;
+        this.root = origin;
+        this.editorFromBoard = true;
+        const generation = this.editorRequestGeneration;
+        const previousModal = this.app.modalState;
+        const previousModalSequence = this.app.modalSequence;
+        const openerColumnId = document.activeElement?.dataset.columnId;
+        const abort = this.boardEditorAbort = new AbortController();
+        const options = { showLoading: false, preferErrorResponseMessage: true, signal: abort.signal };
+        try {
+            const [job, profiles] = await Promise.all([
+                jobId == null ? null : this.app.apiCall(`/api/v1/jobs/${jobId}`, 'GET', null, options),
+                this.app.apiCall('/api/v1/environments', 'GET', null, options)
+            ]);
+            if (abort.signal.aborted || generation !== this.editorRequestGeneration
+                || this.root !== origin || !origin.isConnected || this.app.modalState !== previousModal
+                || this.app.modalSequence !== previousModalSequence) return;
+            if (jobId != null && !job) throw new Error('This Agent or Automation is no longer available.');
+            this.mode = job ? (jobLaunchKind(job) === 'agent' ? 'agents' : 'automations') : mode;
+            this.jobs = job ? [job] : [];
+            this.environments = this.app.environmentController.setEnvironments(profiles?.environments || []);
+            await this.openEditor(job, preferredTrigger, null, () => queueMicrotask(() => {
+                // Background pagination can replace the button while the editor is open.
+                if (this.root !== origin || !origin.isConnected || this.app.modalState || !openerColumnId) return;
+                [...origin.querySelectorAll('[data-board-action="lane-agents"]')]
+                    .find(button => button.dataset.columnId === openerColumnId)?.focus({ preventScroll: true });
+            }));
+        } catch (error) {
+            if (!abort.signal.aborted && this.root === origin && origin.isConnected && this.app.modalState === previousModal
+                && this.app.modalSequence === previousModalSequence)
+                this.app.showError(error?.message || 'Could not open the editor.');
+        }
+    }
+
     async loadView(data = {}) {
         this.unload();
         this.mode = data?.mode === 'automations' ? 'automations' : 'agents';
@@ -249,6 +287,9 @@ export class JobController {
     }
 
     unload() {
+        this.boardEditorAbort?.abort();
+        this.boardEditorAbort = null;
+        this.editorFromBoard = false;
         this.unsubscribeUiVisible?.();
         this.unsubscribeUiVisible = null;
         this.closeEditor();
@@ -1284,12 +1325,13 @@ export class JobController {
         return ' title="Approximate — measured to when VibeRails noticed the terminal had closed, not to when it closed."';
     }
 
-    async openEditor(job = null, preferredTrigger = null, editorState = null) {
+    async openEditor(job = null, preferredTrigger = null, editorState = null, onClose = null) {
         this.closeEditor();
         if (!this.root) return;
         const origin = this.root;
         const generation = ++this.editorRequestGeneration;
         const previousModal = this.app.modalState;
+        const previousModalSequence = this.app.modalSequence;
         const isEdit = Boolean(job);
         const agentMode = this.mode === 'agents';
         const page = this.page;
@@ -1306,7 +1348,8 @@ export class JobController {
         const worker = actions.find(action => action.kind === JOB_ACTION.WORKER);
         const environment = worker ? this.findEnvironment(worker.environmentId) : null;
         const cliSettings = environment ? await this.app.environmentController.loadEditorSettings(environment) : {};
-        if (generation !== this.editorRequestGeneration || this.root !== origin || this.app.modalState !== previousModal) return;
+        if (generation !== this.editorRequestGeneration || this.root !== origin || this.app.modalState !== previousModal
+            || this.app.modalSequence !== previousModalSequence) return;
         this.editorActions = actions;
         this.editorWorkerOptional = workerOptional;
         this.activeEditorJob = job;
@@ -1379,7 +1422,7 @@ export class JobController {
                     ? `<span>Runs in</span><code>${this.escape(projectPath)}</code>`
                     : `<span>No Git repository detected — open one to run ${page.noun}s.</span>`}</div>
                 <div class="job-inline-form-actions"><button class="btn btn-outline-secondary" type="button" data-job-action="cancel-editor">Cancel</button><button class="btn btn-primary" type="submit">${isEdit ? `Save ${page.noun}` : `Create ${page.noun}`}</button></div>
-            </form></div>`, { onClose: () => this.resetEditor() });
+            </form></div>`, { onClose: () => { this.resetEditor(); onClose?.(); } });
         const editor = document.querySelector('#modal-container [data-job-editor]');
         this.editorRoot = editor;
         editor.closest('.modal').classList.add('job-creation-modal');
@@ -2021,7 +2064,8 @@ export class JobController {
             if (!form.isConnected) return;
             this.closeEditor();
             this.app.showToast(this.kindTitle(), existingJob ? 'Saved.' : 'Created.', 'success');
-            await this.refreshAll({ quiet: true });
+            if (this.editorFromBoard) globalThis.__viberails_launcherChanged__?.();
+            else await this.refreshAll({ quiet: true });
         } catch (error) {
             if (form.isConnected) this.app.showError(error?.message || `Could not save the ${this.page.noun}.`);
         } finally {

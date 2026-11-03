@@ -2253,7 +2253,8 @@ async function openLaneAgentsBoard(page) {
         if (route.request().method() === 'PUT') {
             const body = route.request().postDataJSON();
             expect(body.expectedRevision).toBe(current.revision);
-            expect(body.jobIds.every(jobId => jobs.some(job => job.id === jobId && job.enabled))).toBe(true);
+            const reordering = body.jobIds.length === current.jobIds.length && body.jobIds.every(jobId => current.jobIds.includes(jobId));
+            expect(reordering || body.jobIds.every(jobId => jobs.some(job => job.id === jobId && job.enabled))).toBe(true);
             writes.push({ kind: 'selection', id, body });
             current.jobIds = body.jobIds;
             current.revision++;
@@ -2267,6 +2268,134 @@ async function openLaneAgentsBoard(page) {
     ], hasMore: false } }));
     await page.evaluate(() => window.app.boardController.refresh());
     return { jobs, settings, writes };
+}
+
+for (const width of [1440, 390]) {
+    test(`lane actions reorder with keyboard and persist without rewriting jobs at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 900 });
+        const { jobs, settings, writes } = await openLaneAgentsBoard(page);
+        jobs.push({ ...jobs[2], id: 16, name: 'VCA', actions: [{ kind: 3, arguments: ['working-tree'] }] });
+        jobs[0].enabled = false;
+        settings.lane_2.jobIds = [12, 14, 15, 16];
+        const button = page.getByRole('button', { name: 'Agents and Automations on entry to Review', exact: true });
+        await button.click();
+        const panel = page.getByRole('dialog', { name: 'Agents and Automations', exact: true });
+        const order = () => panel.locator('.board-lane-agent').evaluateAll(rows => rows.map(row => Number(row.dataset.agentId)));
+        await expect(panel.getByRole('button', { name: 'Move Code reviewer up', exact: true })).toBeDisabled();
+        await expect(panel.getByRole('button', { name: 'Move VCA down', exact: true })).toBeDisabled();
+        await panel.getByRole('button', { name: 'Move VCA up', exact: true }).focus();
+        await page.keyboard.press('Enter');
+        await expect.poll(order).toEqual([12, 14, 16, 15]);
+        await expect(panel.getByRole('button', { name: 'Move VCA up', exact: true })).toBeFocused();
+        await panel.getByRole('button', { name: 'Move Code reviewer down', exact: true }).click();
+        await expect.poll(order).toEqual([14, 12, 16, 15]);
+        expect(writes.map(write => write.kind)).toEqual(['selection', 'selection']);
+        expect(writes.map(write => write.body.expectedRevision)).toEqual([3, 4]);
+        expect(jobs[0].enabled).toBe(false);
+        await page.keyboard.press('Escape');
+        await button.click();
+        await expect.poll(order).toEqual([14, 12, 16, 15]);
+        expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+        await page.screenshot({ path: testInfo.outputPath(`lane-order-${width}.png`) });
+    });
+
+    test(`lane editors save and cancel over the same Board at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 900 });
+        const { jobs, settings, writes } = await openLaneAgentsBoard(page);
+        settings.lane_2.jobIds.push(15);
+        await page.route('**/api/v1/environments', route => route.fulfill({ json: { environments: [
+            { id: 8, name: 'Review Worker', cli: 'codex', customPrompt: 'Review the changes.', automationWorker: true,
+                projectPath: 'C:/board-fixture', customArgs: '--sandbox read-only --search' }
+        ] } }));
+        const board = await page.locator('#app-content [data-view="board"]').elementHandle();
+        const originalUrl = page.url();
+        await page.locator('[data-board-filter-priority]').selectOption('medium');
+        const button = page.getByRole('button', { name: 'Agents and Automations on entry to Review', exact: true });
+        for (const [id, name, noun] of [[12, 'Code reviewer', 'agent'], [15, 'Release checks', 'automation']]) {
+            await button.click();
+            await page.getByRole('button', { name: `Edit ${name}`, exact: true }).click();
+            const editor = page.locator('[data-job-editor]');
+            await expect(editor.locator('#job-name')).toHaveValue(name);
+            expect(page.url()).toBe(originalUrl);
+            expect(await page.evaluate(() => window.app.currentView)).toBe('board');
+            expect(await board.evaluate(el => el.isConnected)).toBe(true);
+            await page.evaluate(() => window.app.boardController.renderLanes());
+            await editor.locator('#job-name').fill(`${name} updated`);
+            await page.screenshot({ path: testInfo.outputPath(`lane-editor-${noun}-${width}.png`) });
+            await editor.getByRole('button', { name: `Save ${noun}`, exact: true }).click();
+            await expect(editor).toHaveCount(0);
+            await expect(button).toBeFocused();
+            await expect(page.locator('[data-board-filter-priority]')).toHaveValue('medium');
+            expect(jobs.find(job => job.id === id).name).toBe(`${name} updated`);
+            await button.click();
+            await page.getByRole('button', { name: `Edit ${name} updated`, exact: true }).click();
+            await expect(editor.locator('#job-name')).toHaveValue(`${name} updated`);
+            await editor.locator('#job-name').fill('Discard this edit');
+            await editor.getByRole('button', { name: 'Cancel', exact: true }).click();
+            await expect(button).toBeFocused();
+            expect(jobs.find(job => job.id === id).name).toBe(`${name} updated`);
+        }
+        expect(writes.map(write => write.kind)).toEqual(['description', 'description']);
+        expect(settings.lane_2.jobIds).toEqual([12, 14, 15]);
+        expect(page.url()).toBe(originalUrl);
+    });
+}
+
+test('lane reorder conflicts preserve the list and reload the latest order before retrying', async ({ page }) => {
+    const { settings, jobs } = await openLaneAgentsBoard(page);
+    let conflict = true;
+    await page.route('**/api/v1/board/columns/lane_2/automation', route => {
+        if (route.request().method() === 'PUT') {
+            if (conflict) {
+                settings.lane_2.jobIds = [14, 12]; settings.lane_2.revision++;
+                return route.fulfill({ status: 409, json: { error: 'Lane changed. Reload before saving.' } });
+            }
+            const body = route.request().postDataJSON();
+            expect(body.expectedRevision).toBe(4);
+            settings.lane_2.jobIds = body.jobIds; settings.lane_2.revision++;
+        }
+        return route.fulfill({ json: { ...settings.lane_2, jobs } });
+    });
+    await page.getByRole('button', { name: 'Agents and Automations on entry to Review', exact: true }).click();
+    const panel = page.getByRole('dialog', { name: 'Agents and Automations', exact: true });
+    const order = () => panel.locator('.board-lane-agent').evaluateAll(rows => rows.map(row => Number(row.dataset.agentId)));
+    await panel.getByRole('button', { name: 'Move Test runner up', exact: true }).click();
+    await expect(panel.getByRole('alert')).toContainText('Lane changed');
+    expect(await order()).toEqual([12, 14]);
+    await panel.getByRole('button', { name: 'Reload', exact: true }).click();
+    await expect.poll(order).toEqual([14, 12]);
+    conflict = false;
+    await panel.getByRole('button', { name: 'Move Code reviewer up', exact: true }).click();
+    await expect.poll(order).toEqual([12, 14]);
+});
+
+for (const replacement of ['navigation', 'another dialog', 'a closed newer dialog']) {
+    test(`a late lane editor load cannot replace ${replacement}`, async ({ page }) => {
+        const { jobs } = await openLaneAgentsBoard(page);
+        let release, requested = false;
+        const gate = new Promise(resolve => { release = resolve; });
+        await page.route('**/api/v1/jobs/12', async route => {
+            requested = true; await gate;
+            await route.fulfill({ json: jobs[0] }).catch(() => {});
+        });
+        await page.evaluate(() => {
+            const controller = window.app.jobController;
+            const open = controller.openFromBoard.bind(controller);
+            controller.openFromBoard = options => (window.__laneEditorLoad = open(options));
+        });
+        await page.getByRole('button', { name: 'Agents and Automations on entry to Review', exact: true }).click();
+        await page.getByRole('button', { name: 'Edit Code reviewer', exact: true }).click();
+        await expect.poll(() => requested).toBe(true);
+        if (replacement === 'navigation') await page.evaluate(() => window.app.navigate('jobs'));
+        else await page.evaluate(close => {
+            window.app.showModal('Keep this dialog', '<p>Another task</p>');
+            if (close) window.app.closeModal();
+        }, replacement === 'a closed newer dialog');
+        release();
+        await page.evaluate(() => window.__laneEditorLoad);
+        await expect(page.locator('[data-job-editor]')).toHaveCount(0);
+        if (replacement === 'another dialog') await expect(page.getByRole('dialog', { name: 'Keep this dialog' })).toBeVisible();
+    });
 }
 
 test('adding an Automation offers a separate optional Worker purpose', async ({ page }) => {
@@ -2641,10 +2770,11 @@ test('lane agents handle paused selections, sync the settings badge, and open th
     await button.click();
     await panel.getByRole('button', { name: 'Add agent or automation', exact: true }).click();
     await panel.getByLabel('What would you like to add?').selectOption('new');
-    await panel.getByRole('button', { name: 'Open Automations page', exact: true }).click();
+    await panel.getByRole('button', { name: 'Create automation', exact: true }).click();
     await expect(page.locator('[data-job-editor] #job-name')).toHaveValue('');
     await expect(page.locator('[data-job-editor]')).toContainText('Create automation');
     await expect(panel).toHaveCount(0);
+    expect(await page.evaluate(() => window.app.currentView)).toBe('board');
 });
 
 test('script search reaches beyond a truncated catalog and ignores stale results without losing drafts', async ({ page }) => {
@@ -3074,6 +3204,19 @@ test('long new-card descriptions grow inside the composer instead of painting ov
     expect(layout.attachmentsTop).toBeGreaterThanOrEqual(layout.composerBottom);
 });
 
+async function expectStackedCardControls(tile) {
+    const chip = tile.locator('.board-assignee-chip');
+    const action = tile.locator('.board-card-start-work');
+    const [chipBounds, actionBounds, footerBounds] = await Promise.all([
+        chip.boundingBox(), action.boundingBox(), tile.locator('.board-card-foot').boundingBox()
+    ]);
+    expect(actionBounds.y - chipBounds.y - chipBounds.height).toBeGreaterThanOrEqual(7.9);
+    expect(Math.abs(chipBounds.x - footerBounds.x)).toBeLessThan(1);
+    expect(Math.abs(actionBounds.x + actionBounds.width - footerBounds.x - footerBounds.width)).toBeLessThan(1);
+    expect(await chip.locator('.board-assignee-name').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    expect(await tile.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+}
+
 for (const width of [1920, 1440, 390]) {
     test(`the card face never squeezes the assignee name for Start work at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 900 });
@@ -3090,21 +3233,8 @@ for (const width of [1920, 1440, 390]) {
         const start = tile.getByRole('button', { name: 'Start work on VB-1', exact: true });
         await expect(chip).toContainText('Card review (claude)');
         await page.screenshot({ path: testInfo.outputPath(`board-face-long-assignee-${width}.png`) });
-        const name = chip.locator('.board-assignee-name');
-        expect(await name.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
-        const [chipBounds, startBounds, tileBounds] = await Promise.all([chip.boundingBox(), start.boundingBox(), tile.boundingBox()]);
-        if (width > 1440) {
-            // Room for both: one row, nothing moves.
-            expect(chipBounds.x + chipBounds.width).toBeLessThanOrEqual(startBounds.x);
-            expect(Math.abs(chipBounds.y + chipBounds.height / 2 - startBounds.y - startBounds.height / 2)).toBeLessThan(1);
-        } else {
-            // A narrow lane: Start work takes its own row at the right rather than truncating the name.
-            expect(startBounds.y).toBeGreaterThanOrEqual(chipBounds.y + chipBounds.height);
-            const footerBounds = await tile.locator('.board-card-foot').boundingBox();
-            expect(Math.abs(startBounds.x + startBounds.width - footerBounds.x - footerBounds.width)).toBeLessThan(1);
-        }
-        expect(startBounds.x + startBounds.width).toBeLessThanOrEqual(tileBounds.x + tileBounds.width);
-        expect(await tile.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+        await expect(start).toBeVisible();
+        await expectStackedCardControls(tile);
     });
 
     test(`Start work on the card face launches saved work and fits a narrow lane at ${width}px`, async ({ page }, testInfo) => {
@@ -3130,11 +3260,7 @@ for (const width of [1920, 1440, 390]) {
         const tile = page.locator('.board-card');
         const start = tile.getByRole('button', { name: 'Start work on VB-1', exact: true });
         await expect(start).toBeVisible();
-        const chipBounds = await tile.locator('.board-assignee-chip').boundingBox();
-        const buttonBounds = await start.boundingBox();
-        expect(chipBounds.x + chipBounds.width).toBeLessThanOrEqual(buttonBounds.x);
-        expect(Math.abs(chipBounds.y + chipBounds.height / 2 - buttonBounds.y - buttonBounds.height / 2)).toBeLessThan(1);
-        expect(await tile.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+        await expectStackedCardControls(tile);
         await page.screenshot({ path: testInfo.outputPath(`board-face-start-work-${width}.png`) });
 
         let releaseLaunch;
@@ -3173,7 +3299,7 @@ for (const { assignee, active, action } of [
     { assignee: 'base:claude', active: true, action: 'Go to agent on VB-1' },
     { assignee: null, active: false, action: 'Start work on VB-1' }
 ]) {
-    test(`${action} shares a row with a short assignee when leftover space remains`, async ({ page }, testInfo) => {
+    test(`${action} stays below a short assignee even when leftover space remains`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width: 1440, height: 900 });
         const columns = ['Backlog', 'Ready'].map((name, position) => ({
             id: position ? `col_${position}` : 'col_ready', name, position, boardId: 'brd_main', color: '#64748b'
@@ -3185,22 +3311,16 @@ for (const { assignee, active, action } of [
         const chip = tile.locator('.board-assignee-chip');
         const start = tile.getByRole('button', { name: action, exact: true });
         await expect(chip).toContainText(assignee ? 'Claude' : 'Unassigned');
-        const [chipBounds, startBounds, tileBounds] = await Promise.all([
-            chip.boundingBox(), start.boundingBox(), tile.boundingBox()
-        ]);
-        expect(chipBounds.x + chipBounds.width).toBeLessThanOrEqual(startBounds.x);
-        expect(startBounds.x - (chipBounds.x + chipBounds.width)).toBeGreaterThan(8);
-        expect(Math.abs(chipBounds.y + chipBounds.height / 2 - startBounds.y - startBounds.height / 2)).toBeLessThan(1);
-        expect(startBounds.x + startBounds.width).toBeLessThanOrEqual(tileBounds.x + tileBounds.width);
-        expect(await tile.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+        await expect(start).toBeVisible();
+        await expectStackedCardControls(tile);
         await page.screenshot({ path: testInfo.outputPath(`board-face-lineup-${active ? 'go-to-agent' : 'start-work'}.png`) });
     });
 }
 
-const compactCardLayouts = [16, 20].flatMap(rootSize => [1440, 390].flatMap(width =>
+const compactCardLayouts = [16, 20].flatMap(rootSize => [1440, 1024, 768, 390, 375, 320].flatMap(width =>
     [false, true].map(active => ({ rootSize, width, active }))));
 for (const { rootSize, width, active } of compactCardLayouts) {
-    test(`compact card keeps ${active ? 'Claude beside Go to agent' : 'Unassigned beside Start work'} at ${rootSize}px root size and ${width}px viewport`, async ({ page }, testInfo) => {
+    test(`compact card keeps ${active ? 'Go to agent below Claude' : 'Start work below Unassigned'} at ${rootSize}px root size and ${width}px viewport`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 1200 });
         const columns = ['Ready', 'Build', 'Review', 'PR', 'Ship', 'Done'].map((name, position) => ({
             id: position ? `col_${position}` : 'col_ready', name, position, boardId: 'brd_main', color: '#64748b'
@@ -3210,17 +3330,12 @@ for (const { rootSize, width, active } of compactCardLayouts) {
         } });
         await page.addStyleTag({ content: `html { font-size: ${rootSize}px; }` });
         const tile = page.locator('.board-card');
-        const chip = tile.locator('.board-assignee-chip');
         const start = tile.locator('.board-card-start-work');
         await expect(start).toBeInViewport();
         const laneWidth = await tile.evaluate(element => element.closest('.board-lane').getBoundingClientRect().width);
         expect(laneWidth).toBeCloseTo(Math.max(288, 18 * rootSize), 0);
         await tile.screenshot({ path: testInfo.outputPath(`compact-card-${rootSize}-${width}-${active ? 'active' : 'unassigned'}.png`) });
-        const [chipBounds, startBounds] = await Promise.all([chip.boundingBox(), start.boundingBox()]);
-        expect(Math.abs(chipBounds.y + chipBounds.height / 2 - startBounds.y - startBounds.height / 2)).toBeLessThan(1);
-        expect(startBounds.x - chipBounds.x - chipBounds.width).toBeGreaterThanOrEqual(7.9);
-        expect(await chip.locator('.board-assignee-name').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
-        expect(await tile.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+        await expectStackedCardControls(tile);
     });
 }
 

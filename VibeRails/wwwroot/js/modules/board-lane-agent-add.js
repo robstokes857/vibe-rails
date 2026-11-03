@@ -78,12 +78,12 @@ export function laneAgentAddMarkup(draft, settings, jobs, environments, scripts)
             <label for="board-lane-script-arguments">Arguments — one per line</label>
             <textarea id="board-lane-script-arguments" class="form-control" data-lane-draft="arguments" rows="4">${escapeHtml(draft.arguments)}</textarea>
             <small>Each line is one argument. Adding approves the current file contents. Later file changes need approval on the Automations page.</small>` : ''}
-        ${draft.kind === 'new' ? '<p>Build the automation — scripts and checks — on the Automations page, then return here to add it to the lane.</p>' : ''}
-        ${draft.kind === 'new-agent' ? '<p>Create the agent — a CLI with its starting message — on the Agents page, then return here to add it to the lane.</p>' : ''}
+        ${draft.kind === 'new' ? '<p>Create an automation with scripts and checks here, then add it to the lane.</p>' : ''}
+        ${draft.kind === 'new-agent' ? '<p>Create an agent with its starting message here, then add it to the lane.</p>' : ''}
         <div data-agent-error role="alert"></div>
         <footer class="board-lane-agents-footer">
-            ${draft.kind === 'new' ? '<button type="button" class="btn btn-outline-primary" data-agent-action="create">Open Automations page</button>'
-                : draft.kind === 'new-agent' ? '<button type="button" class="btn btn-outline-primary" data-agent-action="create-agent">Open Agents page</button>'
+            ${draft.kind === 'new' ? '<button type="button" class="btn btn-outline-primary" data-agent-action="create">Create automation</button>'
+                : draft.kind === 'new-agent' ? '<button type="button" class="btn btn-outline-primary" data-agent-action="create-agent">Create agent</button>'
                 : `<button type="submit" class="btn btn-outline-primary" ${!draft.kind || draft.kind === 'script' && !scripts ? 'disabled' : ''}>Add to lane</button>`}
             <button type="button" class="btn btn-outline-secondary" data-agent-action="back">Cancel</button>
         </footer>

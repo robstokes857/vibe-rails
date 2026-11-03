@@ -5,7 +5,13 @@ import { agentPurposeLabel } from './agent-purpose.js';
 
 export const selectedLaneJobIds = settings => settings.jobIds ?? (settings.jobId ? [settings.jobId] : []);
 
-/** Read-only lane summary: one row per Agent or Automation. The pencil opens its editor. */
+const actionIcon = path => `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
+const upIcon = actionIcon('<path d="m5 12 7-7 7 7M12 5v14"/>');
+const downIcon = actionIcon('<path d="m5 12 7 7 7-7M12 5v14"/>');
+const editIcon = actionIcon('<path d="m16 3 5 5-13 13H3v-5Z M14 5l5 5"/>');
+const removeIcon = actionIcon('<path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/>');
+
+/** Ordered lane summary: one row per Agent or Automation, with immediate move controls. */
 export function laneAgentListMarkup(settings, jobs, environments) {
     const rows = selectedLaneJobIds(settings).map((id, index, ids) => {
         const option = settings.jobs?.find(job => job.id === id);
@@ -27,15 +33,19 @@ export function laneAgentListMarkup(settings, jobs, environments) {
                     <small><span class="board-lane-agent-kind">${escapeHtml(worker.kindLabel)}</span>${label ? ` · ${escapeHtml(label)}` : ''}</small>
                     ${environment ? `<small>${escapeHtml(agentPurposeLabel(environment.purpose))}</small>` : ''}
                     ${worker.modelSummary ? `<small class="board-lane-agent-model">${escapeHtml(worker.modelSummary)}</small>` : ''}
-                    ${option && !option.enabled ? `<small>Disabled · enable it on the ${isAgent ? 'Agents' : 'Automations'} page</small>` : ''}</div>
-                <button type="button" class="board-lane-agents-action" data-agent-action="edit" aria-label="Edit ${escapeHtml(name)}" title="Edit" ${option ? '' : 'disabled'}><i class="fa-solid fa-pen" aria-hidden="true"></i></button>
-                <button type="button" class="board-lane-agents-action" data-agent-action="remove" aria-label="Remove ${escapeHtml(name)} from this lane" title="Remove from this lane"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>
+                    ${option && !option.enabled ? '<small>Disabled · open Edit to enable it</small>' : ''}</div>
+            </div>
+            <div class="board-lane-agent-controls" role="group" aria-label="Actions for ${escapeHtml(name)}">
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-agent-action="move-up" aria-label="Move ${escapeHtml(name)} up" title="Move up" ${index === 0 ? 'disabled' : ''}>${upIcon}</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-agent-action="move-down" aria-label="Move ${escapeHtml(name)} down" title="Move down" ${index === ids.length - 1 ? 'disabled' : ''}>${downIcon}</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-agent-action="edit" aria-label="Edit ${escapeHtml(name)}" title="Edit" ${option ? '' : 'disabled'}>${editIcon}</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-agent-action="remove" aria-label="Remove ${escapeHtml(name)} from this lane" title="Remove from this lane">${removeIcon}</button>
             </div>
             <div data-lane-step-id="${Number(id)}" aria-live="polite">${laneStepMarkup(Number(id), settings.workflows || [])}</div>
         </article>${index < ids.length - 1 ? `<div data-lane-arrow-id="${Number(id)}">${laneArrowMarkup(Number(id), settings.workflows || [])}</div>` : ''}`;
     }).join('');
     return `${settings.starterSetupPending ? '<p role="status">Starter review setup is pending. Reopen to retry, or save your own lane selection.</p>' : ''}
         <div class="board-lane-agents-list">${rows || '<p class="board-lane-agents-empty">Nothing runs when a card enters this lane yet.</p>'}</div>
-        <p class="board-lane-agents-scope">Agents and Automations are shared wherever they are used. Remove unlinks one from this lane and cancels pending entries.</p>
+        <p class="board-lane-agents-scope">Move up or down to change the run order. Changes save immediately and cancel pending entries. Edits apply wherever the Agent or Automation is used; Remove only unlinks it from this lane.</p>
         <button type="button" class="btn btn-sm btn-outline-secondary" data-agent-action="add"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add agent or automation</button>`;
 }

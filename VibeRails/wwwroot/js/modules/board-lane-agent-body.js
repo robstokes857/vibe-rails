@@ -133,10 +133,24 @@ export function mountLaneAgentBody({ app, panel, column, signal, position, updat
             return;
         }
         if (action === 'edit' || action === 'create' || action === 'create-agent') {
-            close(false);
-            // 'jobs' is the Agents page; it sends an Automation's edit request on to its own page.
-            if (action === 'edit') app.navigate('jobs', { editJobId: id });
-            else app.navigate(action === 'create-agent' ? 'ai-agents' : 'automations', { newJob: true, triggerKind: 3 });
+            // Focus the surviving lane button before the modal captures its return target.
+            close();
+            void app.jobController.openFromBoard({ jobId: action === 'edit' ? id : null,
+                mode: action === 'create-agent' ? 'agents' : 'automations', preferredTrigger: 3 });
+            return;
+        }
+        if (action === 'move-up' || action === 'move-down') {
+            const ids = [...selectedLaneJobIds(settings)];
+            const from = ids.indexOf(id);
+            const to = from + (action === 'move-up' ? -1 : 1);
+            if (from < 0 || to < 0 || to >= ids.length) return;
+            [ids[from], ids[to]] = [ids[to], ids[from]];
+            void run(() => saveSelection(ids), () => {
+                const next = selectedLaneJobIds(settings).indexOf(id);
+                const direction = action === 'move-up' && next === 0 ? 'move-down'
+                    : action === 'move-down' && next === ids.length - 1 ? 'move-up' : action;
+                return `[data-agent-id="${id}"] [data-agent-action="${direction}"]`;
+            });
             return;
         }
         if (action === 'skip' || action === 'rerun') {

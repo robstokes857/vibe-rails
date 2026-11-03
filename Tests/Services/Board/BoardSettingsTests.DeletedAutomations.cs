@@ -1,5 +1,6 @@
 using Moq;
 using VibeRails.DB;
+using VibeRails.Services;
 using VibeRails.Services.Board;
 using Xunit;
 
@@ -69,6 +70,35 @@ public sealed partial class BoardSettingsTests
         // Saving what the editor shows drops the hidden entry.
         await _boards.SaveLaneAutomationAsync(_root, a, [second.Id], settings.Revision, Ct);
         Assert.Equal(new[] { second.Id }, (await _boards.GetLaneAutomationAsync(_root, a, Ct))!.JobIds);
+    }
+
+    [Fact]
+    public async Task ReorderingVisibleSelections_PreservesPausedAndMissingJobs_WhenADeletedJobIsHidden()
+    {
+        var (_, lane, _, _) = await Lanes();
+        var deleted = await Job("Deleted");
+        var paused = await Job("Paused");
+        var enabled = await Job("Enabled");
+        await _boards.SaveLaneAutomationAsync(_root, lane, [deleted.Id, paused.Id, enabled.Id], 0, Ct);
+        await ExecuteSql($"INSERT INTO BoardLaneAdditionalAutomations (ColumnId, JobId, Position) VALUES ('{lane}', 99999, 3);");
+        var card = await Card(lane);
+        Assert.True(await new JobStore(_stateConnectionString).SoftDeleteJobAsync(deleted.Id, Ct));
+        await _jobs.UpdateJobAsync(paused.Id, new(paused.Name, _root, LLM.NotSet, null, "", null, false, []), Ct);
+        var service = new BoardAutomationService(_boards, _jobs);
+        var visible = (await service.GetAsync(_root, lane, Ct))!;
+        Assert.Equal(new[] { paused.Id, enabled.Id, 99999L }, visible.JobIds);
+
+        var reordered = new[] { enabled.Id, 99999L, paused.Id };
+        var saved = await _boards.SaveLaneAutomationAsync(_root, lane, reordered, visible.Revision, Ct);
+
+        Assert.Equal(reordered, saved!.JobIds);
+        Assert.Equal(reordered, (await service.GetAsync(_root, lane, Ct))!.JobIds);
+        Assert.Empty(await _boards.GetPendingLaneAutomationsAsync(_root, card.Id, Ct));
+        Assert.False((await _jobs.GetJobAsync(paused.Id, Ct))!.Enabled);
+        Assert.NotNull((await _jobs.GetJobAsync(deleted.Id, Ct))!.DeletedUtc);
+        // A missing (not soft-deleted) visible ID cannot be silently dropped as part of a reorder.
+        await Assert.ThrowsAsync<BoardValidationException>(() =>
+            _boards.SaveLaneAutomationAsync(_root, lane, [enabled.Id, paused.Id], saved.Revision, Ct));
     }
 
     [Fact]

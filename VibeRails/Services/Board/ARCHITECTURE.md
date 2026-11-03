@@ -1365,6 +1365,13 @@ reports and process failures hold the chain. Missing, deleted and disabled Autom
 recorded as Skipped with a reason, so later steps can proceed without a per-card user skip.
 Wrong-project and actionless definitions remain Failed configuration errors.
 
+The lane panel saves row moves through the revision-checked lane selection endpoint. A pure
+permutation retains all visible selected IDs, including paused/unavailable entries, without changing
+the Job definitions. A membership change still validates the complete selection as enabled and
+project-local. Only soft-deleted Jobs hidden by the API may be omitted during a reorder.
+Agent/Automation editing reuses the shared modal over the Board; the Jobs page
+is not mounted, and its load lifecycle cannot replace Board filters or scroll state.
+
 Deterministic retries retain the original lane event in their immutable trigger key. A manual
 card run started against a failed script/check step records the same exact entry. Status reads
 use those run outcomes, including retry-of-retry, without requiring an LLM verdict. A successful

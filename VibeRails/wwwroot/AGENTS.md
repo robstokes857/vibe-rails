@@ -544,9 +544,15 @@ including disabled or unavailable ones. The first lane has its own accessible ag
 The anchored list panel is 440px maximum. Add replaces its body with a dedicated form and
 widens to 720px, constrained to the viewport; Back/Cancel restores the list. The type picker
 is separate from the existing-Automation picker. VCA and Code quality additions always use
-working-tree scope. Existing rows are read-only; their heading pencil opens the full Automation
-editor for description, workflow and reviewer changes. Removing a lane selection keeps the
-Automation and recordings. New Automation opens that same editor.
+working-tree scope. Each row has **Move up** / **Move down** buttons; each move immediately saves
+the full ordered selection with its revision. Reordering preserves paused/unavailable selections,
+never rewrites Jobs, and cancels pending entries like any lane-settings save. A failed move keeps
+the displayed order and offers Reload for conflicts. Restore focus to the moved row's controls.
+The pencil opens the shared Agent or Automation editor over the Board through
+`JobController.openFromBoard`, without mounting another page or changing navigation history.
+New Agent and New Automation use that same flow. Closing returns focus to the lane button;
+reopening the lane reads fresh names/settings. Navigation cancels pending editor loads and a
+newer dialog wins over late responses. Removing a lane selection keeps the Automation and recordings.
 
 `board-lane-workflow.js` renders per-card step badges, completion arrows and user Skip/Stop and skip.
 Detailed step reasons stay out of the lane display, including badge tooltips.
@@ -581,7 +587,7 @@ from the activity endpoint's `activeAutomationColumnIds`, independently of filte
 cards. Reviewing/Running step spinners rotate, including on reruns. Polling preserves panel drafts;
 reduced-motion preferences leave a static lit robot, dot and status icon.
 Lane selection saves use the existing revision check and cancel pending triggers. The existing
-endpoint only accepts enabled selections: an Add explains disabled selections that must first be
+endpoint only accepts enabled selections when membership changes: an Add explains disabled selections that must first be
 enabled/removed, and a Remove confirmation lists other unavailable selections being cleared.
 Lane rerenders (including background pagination) reattach the existing panel to the replacement
 button, preserving creation drafts, focus and pending panel requests. Navigation or removal of
@@ -598,9 +604,9 @@ Without the required assignee/manager, it opens the editor for selection. Card-f
 launches share a per-card in-flight guard, retained across lane repaints. Activity polling
 updates the button, and navigation discards unfinished card reads.
 
-Short assignees (including **Unassigned**) and the action share a vertically centered row
-with at least 8px between them. The lane minimum grows with text scaling; long agent names
-can wrap the action to a second, right-aligned row without squeezing the name. Cover the
+The assignee (including **Unassigned**) has its own left-aligned row; the action always sits
+on a separate, right-aligned row below it with at least 8px between them. A manager label
+stays above the assignee. Keep this layout at every lane width and text scale. Cover the
 minimum lane width as well as roomy layouts in the Board harness.
 
 `board-card-assign.js` is the lane card's assignee menu. The whole assignee chip, assigned or
@@ -1179,7 +1185,8 @@ its origin and is hidden while that origin exists (VB-33), so the picker needs n
 Import from repository, Import recipe and New agent / New automation in `.jobs-page-actions`; the
 nav launcher customize modal hands off with `app.navigate('ai-agents', { importFromRepository: true })`.
 The catalog picker shows entries with a Worker on the Agents page and scripts-only entries on the
-Automations page.
+Automations page. Repository sections keep their full content height inside the scrollable
+catalog; do not shrink the sections to fit its maximum height and clip their entries.
 
 Card/run-detail styles use the `job-action-*`, `job-script-*`, and `job-run-action-*` prefixes and
 must keep explicit `var(--token, #fallback)` colors in every theme scope.

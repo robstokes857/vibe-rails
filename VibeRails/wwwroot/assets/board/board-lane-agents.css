@@ -150,7 +150,7 @@
 }
 .board-lane-agent-heading {
     display: grid;
-    grid-template-columns: 32px minmax(0, 1fr) 28px 28px;
+    grid-template-columns: 32px minmax(0, 1fr);
     align-items: start;
     gap: 6px;
     margin-bottom: 10px;
@@ -160,6 +160,12 @@
 .board-lane-agent-copy { flex: 1; min-width: 0; }
 .board-lane-agent-copy strong { display: block; font-size: 14px; font-weight: 600; }
 .board-lane-agent-copy small { display: block; color: var(--color-text-muted, #94a3b8); font-size: 11px; white-space: pre-line; }
+.board-lane-agent-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.board-lane-agent-controls .btn { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; }
+.board-lane-agent-controls [data-agent-action="remove"]:hover { color: var(--feedback-error-fg, #ff8585); }
+@media (max-width: 767px), (pointer: coarse) {
+    .board-lane-agent-controls .btn { width: 44px; height: 44px; }
+}
 .board-lane-agent-reviewer { margin-bottom: 8px; font-size: 12px; }
 .board-lane-agent > .small { margin-bottom: 10px; color: var(--color-text-muted, #94a3b8); }
 .board-lane-agent-description-preview {

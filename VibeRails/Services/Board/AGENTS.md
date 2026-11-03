@@ -221,6 +221,11 @@ See [the starter contract](ARCHITECTURE.md#new-board-review-defaults-vibe-23).
 All lane Automations run in selected order, with no mode setting. Preserve explicit LLM pass/fail
 via `report_automation_step`, per-entry user skips and stop-before-continue behavior. Keep workflow
 snapshots and append-only receipts behind `IBoardStore`; do not infer approval from process exit.
+The lane panel's Move up/down controls save the complete ordered selection with its revision.
+Pure reorders may retain paused or unavailable selections while omitting soft-deleted hidden Jobs;
+membership changes still validate every
+selected Automation as enabled and project-local. Reorders cancel pending entries through the
+existing settings-save path without changing Jobs or committed run snapshots.
 See [the ordered workflow contract](ARCHITECTURE.md#ordered-lane-workflows).
 
 ### Waiting lane Automations (VIBE-21)
