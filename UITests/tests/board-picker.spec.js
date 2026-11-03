@@ -1,6 +1,6 @@
 const { test, expect } = require('@playwright/test');
 
-async function openBoards(page) {
+async function openBoards(page, { beforeColumns } = {}) {
     const state = {
         boards: [
             { id: 'alpha', name: 'Alpha', position: 0 },
@@ -17,8 +17,9 @@ async function openBoards(page) {
         }
     });
     await page.routeWebSocket('**/api/v1/events/ws*', () => {});
-    await page.route('**/api/v1/**', route => {
+    await page.route('**/api/v1/**', async route => {
         const url = new URL(route.request().url());
+        if (url.pathname === '/api/v1/board/columns') await beforeColumns?.(url);
         const boardId = url.searchParams.get('boardId') || state.boards[0].id;
         if (url.pathname === '/api/v1/board/boards/order') {
             const { orderedIds } = route.request().postDataJSON();
@@ -40,7 +41,21 @@ async function openBoards(page) {
     });
     await page.goto('/?view=board');
     await expect(page.locator('.board-picker-control')).toBeVisible();
+    await waitForBoardLoad(page);
     return state;
+}
+
+async function waitForBoardLoad(page) {
+    await expect(page.locator('.board-view')).not.toHaveClass(/\bis-loading\b/);
+}
+
+async function focusBoardSearch(page) {
+    const search = page.getByPlaceholder('Search boards...', { exact: true });
+    // Tom Select opens on a deferred focus callback. Focusing the hidden input
+    // succeeds as a Playwright action without actually giving it keyboard focus.
+    await expect(search).toBeVisible();
+    await search.focus();
+    await expect(search).toBeFocused();
 }
 
 async function openManager(page) {
@@ -102,7 +117,14 @@ for (const width of [1440, 390]) {
 }
 
 test('Board logo refresh follows connection changes while preserving an open search', async ({ page }) => {
-    const state = await openBoards(page);
+    let releaseSwitch, switchStarted;
+    const switching = new Promise(resolve => { releaseSwitch = resolve; });
+    const requested = new Promise(resolve => { switchStarted = resolve; });
+    const state = await openBoards(page, { beforeColumns: async url => {
+        if (url.searchParams.get('boardId') !== 'jira') return;
+        switchStarted();
+        await switching;
+    } });
     state.boards[0].name = '<img src=x onerror=alert(1)> Jira';
     await page.evaluate(() => window.app.boardController.refreshBoardSnapshot());
     await expect(page.locator('.board-picker-control .item img')).toHaveCount(1);
@@ -117,6 +139,12 @@ test('Board logo refresh follows connection changes while preserving an open sea
     await expect(page.locator('.board-picker-dropdown .option img')).toHaveAttribute('src', 'assets/img/logo.png');
     await page.locator('.board-picker-dropdown .option').click();
     await expect(page.locator('.board-picker-control .item img')).toHaveAttribute('alt', 'VibeRails board');
+    await requested;
+    await expect(page.locator('.board-view')).toHaveClass(/\bis-loading\b/);
+    releaseSwitch();
+    // The selected item changes before the board load finishes. Snapshot polls
+    // intentionally skip an in-flight load, so finish the switch before mutating.
+    await waitForBoardLoad(page);
     state.boards[1].isJiraBoard = true;
     await page.evaluate(() => window.app.boardController.refreshBoardSnapshot());
     await expect(page.locator('.board-picker-control .item img')).toHaveAttribute('src', 'assets/img/jira.svg');
@@ -144,13 +172,34 @@ test('Board order errors preserve edits and reload recovers a changed catalog', 
 test('Board picker keyboard can reach Manage and cancel without changing the order', async ({ page }) => {
     const state = await openBoards(page);
     await page.locator('.board-picker-control .ts-control').click();
-    const search = page.getByPlaceholder('Search boards...', { exact: true });
-    await search.focus();
+    await focusBoardSearch(page);
     await page.keyboard.press('Tab');
     await expect(page.getByRole('button', { name: 'Manage boards', exact: true })).toBeFocused();
     await page.keyboard.press('Enter');
     const manager = page.getByRole('dialog', { name: 'Manage boards', exact: true });
     await manager.getByRole('button', { name: 'Move Gamma up', exact: true }).click();
+    await page.keyboard.press('Escape');
+    await expect(manager).toHaveCount(0);
+    expect(state.writes).toEqual([]);
+    await expect(page.locator('[data-board-select]')).toHaveValue('alpha');
+});
+
+test('Board picker keyboard waits for deferred opening before reaching Manage', async ({ page }) => {
+    const state = await openBoards(page);
+    await page.clock.install();
+    await page.clock.pauseAt(new Date());
+    await page.locator('.board-picker-control .ts-control').click();
+    const search = page.getByPlaceholder('Search boards...', { exact: true });
+    await expect(search).not.toBeVisible();
+    const focusing = focusBoardSearch(page);
+    await page.clock.runFor(1);
+    await focusing;
+    await page.clock.resume();
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('button', { name: 'Manage boards', exact: true })).toBeFocused();
+    await page.keyboard.press('Enter');
+    const manager = page.getByRole('dialog', { name: 'Manage boards', exact: true });
+    await expect(manager.locator('[data-board-order-id]')).toHaveCount(3);
     await page.keyboard.press('Escape');
     await expect(manager).toHaveCount(0);
     expect(state.writes).toEqual([]);

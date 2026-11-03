@@ -89,6 +89,11 @@ Uses the real frontend with mocked board APIs to verify compact board controls, 
 image rendering/editing/upload/deletion, save/reopen, running-agent controls, and desktop/narrow layouts.
 It starts a temporary static server and never touches the machine's board database.
 
+`board-picker.spec.js` holds a board-switch response and pauses the browser clock to cover
+picker timing. Wait for the board's loading state to clear before changing a snapshot fixture;
+the selected item updates before its board finishes loading. Wait for the search to be visible
+and focused before sending keyboard input; Tom Select opens it asynchronously.
+
 ### Focused PR Reviews tests (No Backend Required)
 
 From `UITests`, run `npx playwright test --config playwright.pr-reviews.config.js`.
