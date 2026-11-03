@@ -112,7 +112,8 @@ for (const width of [1440, 390]) {
         await expect(page.locator('.board-card .board-manager-chip.is-board-manager')).toHaveText('Board manager · Codex');
 
         await chip.getByRole('button', { name: 'Start manager', exact: true }).click();
-        await expect(chip).toContainText('Running');
+        // A manager the chip just started reads Thinking, as its tab does (VIBE-262).
+        await expect(chip.locator('.board-ai-manager-word')).toHaveText('Thinking');
         await expect(chip.getByRole('button', { name: 'Go to manager', exact: true })).toBeVisible();
         await expect(page.locator('.board-card [data-board-start-work-label]')).toHaveText('Go to manager');
         expect(requests.filter(request => request.method === 'POST' && request.path.endsWith('/manager/launch'))).toHaveLength(1);
@@ -123,7 +124,7 @@ for (const width of [1440, 390]) {
         const dialog = page.getByRole('alertdialog');
         await expect(dialog).toContainText('Its terminal closes');
         await dialog.getByRole('button', { name: 'Cancel' }).click();
-        await expect(chip).toContainText('Running');
+        await expect(chip.getByRole('button', { name: 'Go to manager', exact: true })).toBeVisible();
         expect(requests.filter(request => request.path.endsWith('/manager/stop'))).toEqual([]);
         await chip.getByRole('button', { name: 'Stop board manager', exact: true }).click();
         await page.getByRole('alertdialog').getByRole('button', { name: 'Stop manager', exact: true }).click();
@@ -131,7 +132,46 @@ for (const width of [1440, 390]) {
         await expect(chip.getByRole('button', { name: 'Start manager', exact: true })).toBeVisible();
         expect(requests.filter(request => request.method === 'POST' && request.path.endsWith('/manager/stop'))).toHaveLength(1);
     });
+
+    test(`"needs you" opens the flagged Agent cards inside the window at ${width}px (VIBE-262)`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 900 });
+        await openBoard(page, { manager: {
+            active: { sessionId: 'mgr-session', tabId: 'mgr-tab', cli: 'codex', selection: 'base:codex', startedAt: '2026-11-02T07:00:00Z' },
+            flaggedCards: 1, flagged: [{ id: 'card_managed', key: 'VB-1', displayId: 'VB-1', title: 'Board managed card', laneName: 'Ready' }]
+        } });
+        const chip = page.locator('[data-board-ai-manager]');
+        const needs = chip.getByRole('button', { name: '1 needs you' });
+        await expect(needs).toHaveAttribute('aria-expanded', 'false');
+        await needs.click();
+        const menu = chip.locator('#board-ai-manager-flagged-menu');
+        await expect(menu).toBeVisible();
+        await expect(menu).toContainText('Board managed card');
+        await expect(menu).toContainText('Ready');
+        const box = await menu.boundingBox();
+        expect(box.x).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.width).toBeLessThanOrEqual(width);
+        await page.screenshot({ path: testInfo.outputPath(`manager-flagged-${width}.png`) });
+
+        // Escape closes it and returns focus to the button.
+        await page.keyboard.press('Escape');
+        await expect(menu).toBeHidden();
+        await expect(chip.getByRole('button', { name: '1 needs you' })).toBeFocused();
+
+        // Picking a card opens its editor.
+        await chip.getByRole('button', { name: '1 needs you' }).click();
+        await menu.getByRole('button', { name: /Board managed card/ }).click();
+        await expect(menu).toBeHidden();
+        await expect(page.locator('.modal-dialog')).toContainText('Board managed card');
+    });
 }
+
+test('a manager running in another VibeRails window shows there, with nothing to start or stop (VIBE-262)', async ({ page }) => {
+    await openBoard(page, { manager: { elsewhere: { sessionId: 'other-session', cli: 'Claude', selection: 'base:codex', startedAt: '2026-11-02T07:00:00Z' } } });
+    const chip = page.locator('[data-board-ai-manager]');
+    await expect(chip).toContainText('Running in another window');
+    await expect(chip.locator('.is-elsewhere')).toHaveCount(1);
+    await expect(chip.getByRole('button')).toHaveCount(0);
+});
 
 test('the Manager tab saves the worker limit and standing orders with the revision', async ({ page }) => {
     const { state, requests } = await openBoard(page);

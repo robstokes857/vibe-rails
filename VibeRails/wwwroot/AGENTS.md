@@ -247,7 +247,9 @@ events for that session (`session_input`, `session_waiting_for_user`, `session_b
 does; one already running when the page loaded shows Running until its first event. The word is
 display only: never use it to decide that an agent is done. "N need you" is a button opening the
 flagged Agent cards (the Menu panel standard; Escape, an outside click or focus leaving closes it,
-and a poll waits while it is open); picking one opens its card editor. `mountBoardManagerChip` refreshes with the controller's
+and a poll waits while it is open); picking one opens its card editor. The panel is right-aligned
+to its button and flips to stay 8px inside the window; below 640px the button shows only its flag
+and count, keeping "N need you" as its accessible name. `mountBoardManagerChip` refreshes with the controller's
 ten-second poll and on every board switch, drops a reply for a board that is no longer current,
 and hides itself when the route is unavailable; `onStatus` feeds `state.boardManager` and
 `state.aiBoardManager` and repaints the lanes when the manager's availability or live tab changes.

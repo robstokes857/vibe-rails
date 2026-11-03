@@ -57,8 +57,9 @@ function renderFlagged(status, menuOpen) {
         </button>`).join('');
     return `<span class="board-ai-manager-flagged">
         <button type="button" class="board-ai-manager-needs" data-board-manager-action="flagged" aria-haspopup="true"
-            aria-expanded="${menuOpen ? 'true' : 'false'}" aria-controls="${FLAGGED_MENU_ID}" title="Agent cards flagged for your attention">
-            <i class="fa-solid fa-flag" aria-hidden="true"></i><span>${escapeHtml(needsYou(flagged))}</span></button>
+            aria-expanded="${menuOpen ? 'true' : 'false'}" aria-controls="${FLAGGED_MENU_ID}" aria-label="${escapeHtml(needsYou(flagged))}"
+            title="Agent cards flagged for your attention">
+            <i class="fa-solid fa-flag" aria-hidden="true"></i><span class="board-ai-manager-needs-count">${flagged}</span><span class="board-ai-manager-needs-words">${flagged === 1 ? 'needs' : 'need'} you</span></button>
         <div class="board-ai-manager-menu" id="${FLAGGED_MENU_ID}" role="group" aria-label="Flagged Agent cards"${menuOpen ? '' : ' hidden'}>
             ${items}
             ${more > 0 ? `<p class="board-ai-manager-menu-more">${escapeHtml(`+${count(more, 'more flagged card')} on this board`)}</p>` : ''}
@@ -202,12 +203,32 @@ export function mountBoardManagerChip(app, host, {
     ].filter(fn => typeof fn === 'function') : [];
 
     const trigger = () => host.querySelector?.('[data-board-manager-action="flagged"]');
+    // Right-aligned to its button, flipped to left-aligned near the window's left edge, and kept
+    // 8px inside the window either way (the Menu panel standard: align to the trigger, flip at edges).
+    function placeMenu() {
+        const menu = host.querySelector?.(`#${FLAGGED_MENU_ID}`);
+        const button = trigger();
+        const frame = menu?.parentElement;
+        if (!menu?.getBoundingClientRect || !button?.getBoundingClientRect || !frame?.getBoundingClientRect) return;
+        const gutter = 8;
+        const viewport = globalThis.document?.documentElement?.clientWidth || globalThis.innerWidth || 0;
+        const anchor = button.getBoundingClientRect();
+        const width = menu.getBoundingClientRect().width;
+        let left = anchor.right - width;
+        if (left < gutter) left = anchor.left;
+        if (viewport) left = Math.min(left, viewport - width - gutter);
+        left = Math.max(gutter, left);
+        menu.style.right = 'auto';
+        menu.style.left = `${Math.round(left - frame.getBoundingClientRect().left)}px`;
+    }
     function setMenu(open, { focusTrigger = false } = {}) {
         if (menuOpen === open || !alive()) return;
         menuOpen = open;
         host.innerHTML = renderBoardManagerChip(status, describe, { statusWord: tracker?.word() ?? null, menuOpen });
-        if (open) host.querySelector?.('[data-board-manager-card]')?.focus?.();
-        else if (focusTrigger) trigger()?.focus?.();
+        if (open) {
+            placeMenu();
+            host.querySelector?.('[data-board-manager-card]')?.focus?.();
+        } else if (focusTrigger) trigger()?.focus?.();
     }
 
     async function refresh() {

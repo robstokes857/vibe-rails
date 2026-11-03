@@ -3631,6 +3631,12 @@
                     .board-view .board-ai-manager-menu-item { min-height: 44px; }
                 }
 
+                /* Below 640px the counts move to the tooltip; "needs you" keeps its flag and number
+                   (its accessible name keeps the words) so Go to manager and Stop still fit. */
+                @media (max-width: 640px) {
+                    .board-view .board-ai-manager-needs-words { display: none; }
+                }
+
                 @keyframes board-ai-manager-pulse {
                     0%, 100% { opacity: 1; }
                     50% { opacity: 0.35; }

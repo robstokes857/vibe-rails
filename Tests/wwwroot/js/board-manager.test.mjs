@@ -372,7 +372,8 @@ test('"needs you" is a button that lists the flagged Agent cards, escaped, with 
         flagged: [{ id: 'c1', key: 'VB-1', displayId: 'VIBE-1', title: '<b>Fix</b>', laneName: 'Review' }, { id: 'c2', key: 'VB-2', title: 'Two', laneName: 'Ready' }] };
     const closed = renderBoardManagerChip(status, () => ({ label: 'Claude' }));
     assert.match(closed, /data-board-manager-action="flagged"[^>]*aria-expanded="false"/);
-    assert.match(closed, /3 need you/);
+    assert.match(closed, /aria-label="3 need you"/);
+    assert.match(closed, /board-ai-manager-needs-count">3</);
     assert.match(closed, /id="board-ai-manager-flagged-menu"[^>]*hidden/);
     assert.match(closed, /data-board-manager-card="c1"/);
     assert.match(closed, /VIBE-1/);
