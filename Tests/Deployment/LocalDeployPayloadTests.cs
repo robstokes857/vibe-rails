@@ -12,6 +12,7 @@ public sealed class LocalDeployPayloadTests
     [Theory]
     [InlineData("LocalDeployPayloadTests.ps1", "No deployment was run")]
     [InlineData("WindowsRuntimePayloadTests.ps1", "No installation was run")]
+    [InlineData("ReleasePreflightTests.ps1", "No release was run")]
     public async Task DeploymentPayloadRegression_Passes(string scriptName, string expectedMessage)
     {
         var pwsh = FindOnPath(OperatingSystem.IsWindows() ? "pwsh.exe" : "pwsh");

@@ -19629,7 +19629,7 @@ body.performance-mode .brand-text-sm {
 .board-discussion { gap: var(--space-4); }
 .board-discussion-title {
     margin: 0;
-    color: var(--color-text);
+    color: var(--color-text, #f8fafc);
     font-family: var(--font-display);
     font-size: 18px;
     font-weight: 600;
@@ -19643,7 +19643,7 @@ body.performance-mode .brand-text-sm {
 .board-chat-controls .ts-control {
     min-height: var(--control-height);
     border-color: var(--control-border);
-    background: var(--color-bg-base);
+    background: var(--color-bg-base, #0a0a0f);
     font-size: 16px;
 }
 .board-chat-controls .ts-wrapper.focus .ts-control {

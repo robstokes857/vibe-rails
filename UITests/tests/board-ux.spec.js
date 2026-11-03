@@ -1444,7 +1444,7 @@ test('boards shared with you are not imported; a retained copy shows a read-only
     const notice = page.locator('[data-board-shared-notice]');
     await expect(notice).toBeVisible();
     await expect(notice).toContainText('Shared with you (read-only).');
-    await expect(notice).toContainText('no longer syncs');
+    await expect(notice).toContainText('cannot be edited or used to start work');
     const link = notice.getByRole('link', { name: 'Open on viberails.ai' });
     await expect(link).toHaveAttribute('href', url);
     await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
@@ -2770,7 +2770,7 @@ test('closing lane agents during script discovery discards the late result', asy
     expect(writes).toHaveLength(0);
 });
 
-test('lane automations select multiple jobs, persist, remove one and clear all', async ({ page }) => {
+test('lane automations select multiple jobs, persist, remove one and clear all', async ({ page }, testInfo) => {
     await openBoard(page);
     let saved = { jobIds: [], revision: 0 };
     await page.route('**/api/v1/board/columns/col_ready/automation', async route => {
@@ -2788,7 +2788,7 @@ test('lane automations select multiple jobs, persist, remove one and clear all',
     await expect(page.getByRole('checkbox', { name: 'Paused (disabled)', exact: true })).toBeDisabled();
     await page.getByRole('button', { name: 'Save lane settings', exact: true }).click();
     await expect.poll(() => saved).toEqual({ jobIds: [12, 14], revision: 1 });
-    await page.screenshot({ path: '../.codex-test-artifacts/vb22-lane.png' });
+    await page.screenshot({ path: testInfo.outputPath('lane-automations.png') });
     await page.locator('#modal-container [data-action="close-modal"]').first().click();
     await page.getByRole('button', { name: 'Settings for Ready', exact: true }).click();
     await expect(page.getByRole('checkbox', { name: 'Run review', exact: true })).toBeChecked();
@@ -2801,7 +2801,7 @@ test('lane automations select multiple jobs, persist, remove one and clear all',
     await expect.poll(() => saved).toEqual({ jobIds: [], revision: 3 });
 });
 
-test('lane automation conflicts preserve selections and unavailable jobs can be removed', async ({ page }) => {
+test('lane automation conflicts preserve selections and unavailable jobs can be removed', async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openBoard(page);
     let payload;
@@ -2825,7 +2825,7 @@ test('lane automation conflicts preserve selections and unavailable jobs can be 
     await expect(page.getByRole('checkbox', { name: 'Checks', exact: true })).toBeChecked();
     await expect(page.getByRole('checkbox', { name: 'Paused (disabled)', exact: true })).not.toBeChecked();
     expect(await page.evaluate(() => window.__laneXss)).toBeUndefined();
-    await page.screenshot({ path: '../.codex-test-artifacts/vb22-lane-narrow.png' });
+    await page.screenshot({ path: testInfo.outputPath('lane-automation-conflict.png') });
 });
 
 // VIBE-145: the lane card's assignee chip assigns without opening the editor. The whole chip is
@@ -3903,7 +3903,7 @@ test('closing a card while its Automation catalog loads cannot repaint the next 
 });
 
 
-test('Switch reviewer Worker preset saves a default reviewer and a different alternate', async ({ page }, testInfo) => {
+test('Automation workers omit retired reviewer routing controls and save an ordinary assignment', async ({ page }, testInfo) => {
     await openBoard(page);
     const writes = [];
     await page.route('**/api/v1/environments', async route => {
@@ -3915,22 +3915,16 @@ test('Switch reviewer Worker preset saves a default reviewer and a different alt
     });
     await page.evaluate(() => window.app.environmentController.showEnvironmentForm({ mode: 'create', automationWorker: true }));
     const form = page.locator('#env-form');
-    await form.getByRole('button', { name: 'Switch reviewer', exact: true }).click();
-    await expect(form.locator('#env-purpose')).toHaveValue('code_review');
-    await expect(form.locator('#env-reviewer-mode')).toHaveValue('switch');
-    const defaultReviewer = form.locator('[data-reviewer-fallback] [data-reviewer-target]');
-    const alternate = form.locator('[data-reviewer-alternate] [data-reviewer-target]');
-    await expect(defaultReviewer).toHaveValue('base:codex');
-    await expect(alternate).toHaveValue('base:claude');
-    expect(await alternate.evaluate(select => Object.keys(select.tomselect.options))).not.toContain('base:codex');
-    await page.screenshot({ path: testInfo.outputPath('switch-worker-preset.png') });
+    await expect(form.getByRole('button', { name: 'Switch reviewer', exact: true })).toHaveCount(0);
+    await expect(form.locator('#env-reviewer-mode, [data-reviewer-policy], [data-reviewer-routing]')).toHaveCount(0);
+    await form.locator('#env-name').fill('Task worker');
+    await form.getByRole('textbox', { name: 'Initial Message', exact: true }).fill('Run the task assigned by the Board manager.');
+    await page.screenshot({ path: testInfo.outputPath('task-worker.png') });
     await form.getByRole('button', { name: 'Create agent', exact: true }).click();
     await expect.poll(() => writes.length).toBe(1);
-    expect(writes[0]).toMatchObject({ name: 'Switch reviewer', purpose: 'code_review', automationWorker: true,
-        reviewerRouting: { mode: 'switch', mappings: [
-            { sourceProvider: 'codex', reviewer: { selection: 'base:claude' } },
-            { sourceProvider: 'claude', reviewer: { selection: 'base:codex' } }
-        ], fallback: { selection: 'base:codex' } } });
+    expect(writes[0]).toMatchObject({ name: 'Task worker', automationWorker: true,
+        customPrompt: 'Run the task assigned by the Board manager.' });
+    expect(writes[0]).not.toHaveProperty('reviewerRouting');
 });
 
 test('Code review Worker preset defaults to Codex and remains editable', async ({ page }) => {

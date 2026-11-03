@@ -38,7 +38,7 @@ test('Done loads 30 cards, scrolls for more, and searches unloaded history', asy
     });
     await page.goto('/?view=board', { waitUntil: 'domcontentloaded' });
     await expect(page.locator('.board-card')).toHaveCount(30);
-    await expect(page.locator('.board-card-count')).toHaveText('95');
+    await expect(page.locator('.board-lane-head .board-card-count')).toHaveText('95');
     const lane = page.locator('.board-lane-list');
     await lane.evaluate(element => { element.scrollTop = element.scrollHeight; });
     await expect(page.locator('.board-card')).toHaveCount(60);
@@ -56,7 +56,7 @@ test('Done loads 30 cards, scrolls for more, and searches unloaded history', asy
     await expect(page.locator('[data-board-canvas]')).toBeHidden();
     await page.locator('[data-board-search]').fill('');
     await expect(page.locator('[data-board-canvas]')).toBeVisible();
-    await expect(page.locator('.board-card-count')).toHaveText('95');
+    await expect(page.locator('.board-lane-head .board-card-count')).toHaveText('95');
     expect(requests.every(url => url.searchParams.get('pageSize') === '30')).toBeTruthy();
     expect(requests.some(url => url.searchParams.get('offset') === '30')).toBeTruthy();
 });

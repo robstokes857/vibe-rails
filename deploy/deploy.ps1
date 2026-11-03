@@ -51,8 +51,13 @@ function Test-GitIndexLockAbandoned {
     }
 
     # The fsmonitor daemon is long-lived and never holds the index lock.
-    $activeGit = @(Get-CimInstance Win32_Process -Filter "Name='git.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -notmatch 'fsmonitor--daemon' })
+    try {
+        $activeGit = @(Get-CimInstance Win32_Process -Filter "Name='git.exe'" -ErrorAction Stop |
+            Where-Object { $_.CommandLine -notmatch 'fsmonitor--daemon' })
+    } catch {
+        # An unavailable process inventory is not evidence that the lock is abandoned.
+        return $false
+    }
     if ($activeGit.Count -gt 0) {
         return $false
     }
@@ -139,11 +144,13 @@ function Test-PreFlightChecks {
     }
 
     $currentBranch = git branch --show-current
+    Assert-NativeCommandSucceeded -ExitCode $LASTEXITCODE -Operation "Resolving the release branch"
     if ($currentBranch -ne "main" -and $currentBranch -ne "master") {
         throw "Must be on 'main' or 'master' branch. Currently on: $currentBranch"
     }
 
     $status = git status --porcelain
+    Assert-NativeCommandSucceeded -ExitCode $LASTEXITCODE -Operation "Checking the working tree"
     if ($status) {
         Write-Host "`nUncommitted changes detected:" -ForegroundColor Red
         git status --short
@@ -151,10 +158,14 @@ function Test-PreFlightChecks {
     }
 
     git fetch origin $currentBranch 2>$null
+    Assert-NativeCommandSucceeded -ExitCode $LASTEXITCODE -Operation "Fetching the release branch"
     $localCommit = git rev-parse HEAD
-    $remoteCommit = git rev-parse "origin/$currentBranch" 2>$null
+    Assert-NativeCommandSucceeded -ExitCode $LASTEXITCODE -Operation "Resolving the local release commit"
+    $remoteCommit = git rev-parse --verify "refs/remotes/origin/$currentBranch" 2>$null
+    Assert-NativeCommandSucceeded -ExitCode $LASTEXITCODE -Operation "Resolving the remote release commit"
     if ($remoteCommit -and $localCommit -ne $remoteCommit) {
         $behind = git rev-list --count "HEAD..origin/$currentBranch" 2>$null
+        Assert-NativeCommandSucceeded -ExitCode $LASTEXITCODE -Operation "Comparing the release branch with origin"
         if ($behind -gt 0) {
             throw "Local branch is behind remote by $behind commit(s). Run 'git pull' first."
         }
@@ -181,12 +192,14 @@ function Test-PreFlightChecks {
 }
 
 function Get-LatestReleaseVersion {
-    $releases = gh release list --repo $GithubRepo --limit 1 2>$null
-    if (-not $releases) {
+    $releasesJson = gh release list --repo $GithubRepo --limit 1 --json tagName
+    Assert-NativeCommandSucceeded -ExitCode $LASTEXITCODE -Operation "Reading the latest GitHub release"
+    $releases = @($releasesJson | ConvertFrom-Json)
+    if ($releases.Count -eq 0) {
         return [version]"0.0.0"
     }
 
-    $tag = ($releases -split "`t")[2]
+    $tag = [string]$releases[0].tagName
     $versionStr = $tag -replace "^v", ""
     try {
         return [version]$versionStr
