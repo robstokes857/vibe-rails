@@ -145,13 +145,14 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         var files = new List<GitStagedFileSnapshot>(stagedEntries.Count);
         var contentBudget = new SnapshotMemoryBudget(long.MaxValue);
         var textByObject = new Dictionary<string, BlobTextResult>(StringComparer.Ordinal);
+        await using var blobs = new GitBlobBatchReader(repositoryPath);
 
         async Task<BlobTextResult> ReadTreeTextAsync(GitTreeEntry treeEntry)
         {
             if (textByObject.TryGetValue(treeEntry.ObjectId, out var cached))
                 return cached;
             var loaded = await TryReadTextBlobAsync(
-                repositoryPath,
+                blobs,
                 treeEntry.ObjectId,
                 treeEntry.Size,
                 contentBudget,
@@ -542,9 +543,9 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
 
     /// <inheritdoc cref="CaptureUnpushedAsync(string, CancellationToken)"/>
     /// <param name="includeImpactFiles">Also read every supported source file at HEAD for
-    /// MintLint impact ranking. That is one git process per file, about two minutes on a
-    /// repository with two thousand sources on Windows, so callers that only fingerprint the
-    /// changed files pass false (VIBE-267).</param>
+    /// MintLint impact ranking. Callers that only fingerprint the changed files pass false
+    /// (VIBE-267): it is still the bulk of the content read, though no longer one git process
+    /// per file (VIBE-269).</param>
     public async Task<GitStagedSnapshot> CaptureUnpushedAsync(
         string workingDirectory,
         bool includeImpactFiles,
@@ -667,6 +668,10 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
 
         var budget = new SnapshotMemoryBudget(_maximumUnpushedSnapshotBytes);
         var headTextByObject = new Dictionary<string, BlobTextResult>(StringComparer.Ordinal);
+        // Every blob below, HEAD and base alike, is read by object id through one cat-file process
+        // (VIBE-269). One process per blob cost about 52 ms each on Windows: 108 s for a range whose
+        // impact files were two thousand HEAD sources.
+        await using var blobs = new GitBlobBatchReader(repositoryPath);
 
         async Task<BlobTextResult> ReadHeadTextAsync(GitTreeEntry entry)
         {
@@ -676,13 +681,29 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
             }
 
             var loaded = await TryReadTextBlobAsync(
-                repositoryPath,
+                blobs,
                 entry.ObjectId,
                 entry.Size,
                 budget,
                 cancellationToken);
             headTextByObject[entry.ObjectId] = loaded;
             return loaded;
+        }
+
+        // The base tree is listed once, and only if some changed file needs its baseline, so its
+        // blobs come with ids and sizes like HEAD's instead of a `<base>:./path` lookup and a size
+        // query each. Ordinal, because a tree path matches exactly, as the old path spec did.
+        Dictionary<string, GitTreeEntry>? baseByPath = null;
+        async Task<GitTreeEntry?> FindBaseEntryAsync(string relativePath)
+        {
+            if (baseByPath is null)
+            {
+                baseByPath = new Dictionary<string, GitTreeEntry>(StringComparer.Ordinal);
+                foreach (var baseEntry in await ReadTreeEntriesAsync(repositoryPath, mergeBaseRef, cancellationToken))
+                    baseByPath.TryAdd(baseEntry.RelativePath, baseEntry);
+            }
+
+            return baseByPath.TryGetValue(relativePath, out var found) ? found : null;
         }
 
         // Rules are part of the snapshot's meaning, so reserve memory for HEAD's rule files before
@@ -728,16 +749,22 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
             if (!isBinary
                 && entry.Kind is GitStagedChangeKind.Modified or GitStagedChangeKind.Renamed)
             {
+                // Read separately from the HEAD cache even when the ids match, so each baseline
+                // still takes its own share of the budget, exactly as before VIBE-269.
                 var previousPath = entry.PreviousRelativePath ?? entry.RelativePath;
-                var baseBlob = await TryReadTextBlobAsync(
-                    repositoryPath,
-                    $"{mergeBaseRef}:./{previousPath}",
-                    knownSize: null,
-                    budget,
-                    cancellationToken);
-                if (!baseBlob.IsBinary)
+                var baseEntry = await FindBaseEntryAsync(previousPath);
+                if (baseEntry is { Type: "blob" } && baseEntry.Mode != GitLinkMode)
                 {
-                    previousContent = baseBlob.Content;
+                    var baseBlob = await TryReadTextBlobAsync(
+                        blobs,
+                        baseEntry.ObjectId,
+                        baseEntry.Size,
+                        budget,
+                        cancellationToken);
+                    if (!baseBlob.IsBinary)
+                    {
+                        previousContent = baseBlob.Content;
+                    }
                 }
             }
 
@@ -1123,59 +1150,35 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         return new GitStagedSnapshotIdentity(baseCommit, baseTree, stagedTree);
     }
 
+    /// <summary>
+    /// A tree blob as text, by object id, through the capture's shared cat-file process. The size
+    /// comes from <c>ls-tree -l</c>, so an oversized or out-of-budget blob is refused before any
+    /// content is requested; a blob without a known size (never the case for a listed blob) is
+    /// refused too. The budget share is released when the blob turns out unreadable or binary.
+    /// </summary>
     private static async Task<BlobTextResult> TryReadTextBlobAsync(
-        string repositoryPath,
-        string objectSpec,
+        GitBlobBatchReader blobs,
+        string objectId,
         long? knownSize,
         SnapshotMemoryBudget budget,
         CancellationToken cancellationToken)
     {
-        var size = knownSize;
-        if (size is null)
-        {
-            var sizeResult = await RunTextGitAsync(
-                repositoryPath,
-                ["cat-file", "-s", objectSpec],
-                cancellationToken);
-            if (sizeResult.ExitCode != 0
-                || sizeResult.TimedOut
-                || !long.TryParse(
-                    sizeResult.StdOut.Trim(),
-                    NumberStyles.None,
-                    CultureInfo.InvariantCulture,
-                    out var parsedSize))
-            {
-                return BlobTextResult.Binary;
-            }
-
-            size = parsedSize;
-        }
-
-        if (size < 0 || size > MaximumTextFileBytes)
+        if (knownSize is not { } size || size < 0 || size > MaximumTextFileBytes)
         {
             return BlobTextResult.Binary;
         }
 
-        if (!budget.TryReserve(size.Value))
+        if (!budget.TryReserve(size))
         {
             return BlobTextResult.Binary;
         }
 
-        var result = await RunBinaryGitAsync(
-            repositoryPath,
-            ["cat-file", "blob", objectSpec],
-            cancellationToken,
-            MaximumTextFileBytes);
-        if (result.ExitCode != 0 || result.TimedOut || result.OutputLimitExceeded)
+        // Capped at the reserved size, so the budget holds even if git disagreed with ls-tree.
+        var bytes = await blobs.TryReadBlobAsync(objectId, size, cancellationToken);
+        var content = bytes is null ? null : DecodeText(bytes, out _);
+        if (content is null)
         {
-            budget.Release(size.Value);
-            return BlobTextResult.Binary;
-        }
-
-        var content = DecodeText(result.Bytes, out var binary);
-        if (binary || content is null)
-        {
-            budget.Release(size.Value);
+            budget.Release(size);
             return BlobTextResult.Binary;
         }
 
@@ -1204,13 +1207,18 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
             return (true, false, null);
         if (size > maximumBytes)
             return (false, true, null);
-        var blob = await TryReadTextBlobAsync(
+        // One path, so a single cat-file call; the batch reader is for whole captures.
+        if (size < 0 || size > MaximumTextFileBytes)
+            return (true, false, null);
+        var result = await RunBinaryGitAsync(
             repositoryPath,
-            objectSpec,
-            size,
-            new SnapshotMemoryBudget(Math.Max(size, 1)),
-            cancellationToken);
-        return (blob.IsBinary, false, blob.Content);
+            ["cat-file", "blob", objectSpec],
+            cancellationToken,
+            MaximumTextFileBytes);
+        if (result.ExitCode != 0 || result.TimedOut || result.OutputLimitExceeded)
+            return (true, false, null);
+        var content = DecodeText(result.Bytes, out var isBinary);
+        return (isBinary, false, content);
     }
 
     /// <summary>

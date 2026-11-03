@@ -1208,8 +1208,13 @@ sources (`includeImpactFiles: false`), which are every supported source at HEAD 
 passes plus the dirty working tree, `begin_board_review` took minutes: reviewers recorded
 "stalled without returning an id", and one installed-build call that did return took 152 s
 (VIBE-267). The same ranges now capture in 4 to 7 s. Board Code quality checks and the code
-analyzer still read impact sources, because their
-ranking uses them. The whole capture, both passes together, also runs under
+analyzer still read impact sources, because their ranking uses them. Since VIBE-269 every
+committed-scope and staged blob, impact sources included, is read by object id through one
+`git cat-file --batch` process per capture (`GitBlobBatchReader`), with base blobs taken from the
+base tree's `ls-tree -l` listing. Measured 2026-11-03 on a 19-file range of this repository: 0.7 to
+1.0 s per pass with the 2,071 impact sources (89 to 100 s before) and 0.3 to 0.4 s without them
+(2.6 to 3.8 s before). The captured content, and so every saved fingerprint, is byte-identical.
+The whole capture, both passes together, also runs under
 `BoardReviewService.CaptureDeadline` (40 s). An overrun becomes the ordinary failed-capture
 limitation ("Capture exceeded its 40-second limit while trying to …"). The caller's own
 cancellation still propagates. `get_board_reviews verify=true` uses the same capture and limit.

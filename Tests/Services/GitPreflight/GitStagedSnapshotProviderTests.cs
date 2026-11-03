@@ -731,6 +731,62 @@ public sealed class GitStagedSnapshotProviderTests : IAsyncLifetime
         Assert.Equal(full.CheckIdentity, lean.CheckIdentity);
     }
 
+    /// <summary>
+    /// VIBE-269: baselines come from the base tree's listing by object id, not a
+    /// <c>&lt;base&gt;:./path</c> lookup per file. Renamed, unusually named and binary files must
+    /// still get exactly the baseline the old lookup gave them, in every committed scope.
+    /// </summary>
+    [Theory]
+    [InlineData("unpushed")]
+    [InlineData("range")]
+    public async Task CommittedCaptures_ReadBaselinesFromTheBaseTree(string scope)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        const string oddName = "dir with space/naïve file.cs";
+        Directory.CreateDirectory(Path.Combine(_repository, "dir with space"));
+        await File.WriteAllTextAsync(Path.Combine(_repository, oddName), "class Odd { int before; }\n", ct);
+        await File.WriteAllTextAsync(
+            Path.Combine(_repository, "moved-from.cs"),
+            string.Concat(Enumerable.Range(0, 20).Select(i => $"// shared line {i}\n")) + "class Moved { }\n",
+            ct);
+        await File.WriteAllBytesAsync(Path.Combine(_repository, "data.bin"), [0, 1, 2, 3], ct);
+        await File.WriteAllTextAsync(Path.Combine(_repository, "removed.cs"), "class Removed { }\n", ct);
+        await GitAsync("add", ".");
+        await GitAsync("commit", "-m", "base");
+        await ConfigureUpstreamAtHeadAsync();
+        var baseCommit = await HeadAsync();
+
+        await File.WriteAllTextAsync(Path.Combine(_repository, "tracked.cs"), "class Original { int after; }\n", ct);
+        await File.WriteAllTextAsync(Path.Combine(_repository, oddName), "class Odd { int after; }\n", ct);
+        await GitAsync("mv", "moved-from.cs", "moved-to.cs");
+        await File.AppendAllTextAsync(Path.Combine(_repository, "moved-to.cs"), "class Extra { }\n", ct);
+        await File.WriteAllBytesAsync(Path.Combine(_repository, "data.bin"), [0, 1, 2, 3, 4], ct);
+        await GitAsync("rm", "removed.cs");
+        await File.WriteAllTextAsync(Path.Combine(_repository, "added.cs"), "class Added { }\n", ct);
+        await GitAsync("add", ".");
+        await GitAsync("commit", "-m", "head");
+        var headCommit = await HeadAsync();
+
+        var provider = new GitStagedSnapshotProvider();
+        var snapshot = scope == "unpushed"
+            ? await provider.CaptureUnpushedAsync(_repository, includeImpactFiles: false, ct)
+            : await provider.CaptureRangeAsync(_repository, baseCommit, headCommit, includeImpactFiles: false, ct);
+
+        GitStagedFileSnapshot FileAt(string path) => Assert.Single(snapshot.Files, file => file.RelativePath == path);
+        Assert.Equal("class Original { }\n", FileAt("tracked.cs").PreviousContent);
+        Assert.Equal("class Original { int after; }\n", FileAt("tracked.cs").Content);
+        Assert.Equal("class Odd { int before; }\n", FileAt(oddName).PreviousContent);
+        var moved = FileAt("moved-to.cs");
+        Assert.Equal(GitStagedChangeKind.Renamed, moved.ChangeKind);
+        Assert.Equal("moved-from.cs", moved.PreviousRelativePath);
+        Assert.EndsWith("class Moved { }\n", moved.PreviousContent);
+        Assert.True(FileAt("data.bin").IsBinary);
+        Assert.Null(FileAt("data.bin").PreviousContent);
+        Assert.Null(FileAt("removed.cs").PreviousContent);
+        Assert.Null(FileAt("added.cs").PreviousContent);
+        Assert.Equal("class Added { }\n", FileAt("added.cs").Content);
+    }
+
     [Fact]
     public async Task CaptureUnpushedAsync_RejectsOversizedHeadBlobBeforeReadingIt()
     {
