@@ -1,3 +1,4 @@
+using TokenSaver;
 using VibeRails.Services;
 using VibeRails.Services.Board;
 using VibeRails.Services.Terminal;
@@ -157,8 +158,20 @@ public partial class CommandServiceTests
         };
         Assert.Equal(expectedArgument, prepared.Argv![^1]);
         Assert.DoesNotContain("Creating a story is optional", prepared.LaunchCommand);
-        Assert.Contains("--model", prepared.Argv);
-        Assert.Contains("chosen", prepared.Argv);
+        if (llm is LLM.OpenCode or LLM.Glm52 or LLM.Glm53 or LLM.DeepSeekV4Pro or LLM.KimiK3)
+        {
+            // OpenCode v2 has no TUI --model flag: the caller's choice is lifted out of argv
+            // into the OPENCODE_CONFIG_CONTENT inline config instead.
+            Assert.DoesNotContain("--model", prepared.Argv);
+            Assert.Contains(
+                "\"model\":\"chosen\"",
+                prepared.Environment[LlmProxyZaiConfig.ConfigContentVariable]);
+        }
+        else
+        {
+            Assert.Contains("--model", prepared.Argv);
+            Assert.Contains("chosen", prepared.Argv);
+        }
     }
 
     [Theory]

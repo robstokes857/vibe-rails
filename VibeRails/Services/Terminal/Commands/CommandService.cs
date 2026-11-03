@@ -140,23 +140,46 @@ public class CommandService : ICommandService
         }
 
         var cli = ResolveCliExecutable(llm);
-        // OpenCode-backed pseudo-CLIs pin --model on base CLI launches (no envName).
-        // Custom environments already carry --model in their CustomArgs (built by the env
-        // settings form), so we skip injection when an env is selected to avoid a duplicate.
-        if (string.IsNullOrEmpty(envName))
+        // OpenCode v2 has no TUI flags for model, agent or plugins: no released v2 binary accepts
+        // --model / --agent / --pure on the root command (only `run` and `mini` kept them), and an
+        // unrecognized flag aborts the launch. VibeRails keeps its --model/--agent/--pure contract
+        // in CustomArgs and Board options, then adapts it here: the flags are pulled out of argv
+        // and re-expressed through OPENCODE_CONFIG_CONTENT (inline JSON config, OpenCode's
+        // highest-precedence config document) as the `model` and `default_agent` keys, with
+        // OPENCODE_PURE for the plugins-off toggle. See OpenCodeSessionConfig.
+        var isOpenCodeBacked = llm is LLM.OpenCode or LLM.Glm52 or LLM.Glm53 or LLM.DeepSeekV4Pro or LLM.KimiK3;
+        string? openCodeSessionModel = null;
+        string? openCodeDefaultAgent = null;
+        var openCodePure = false;
+        if (isOpenCodeBacked)
         {
-            extraArgs = llm switch
-            {
-                LLM.Glm52 => WithPinnedModel(extraArgs, "zai/glm-5.2"),
-                LLM.Glm53 => WithPinnedModel(extraArgs, "zai-coding-plan/glm-5.3"),
-                LLM.DeepSeekV4Pro => WithPinnedModel(extraArgs, "deepseek/deepseek-v4-pro"),
-                LLM.KimiK3 => WithPinnedModel(extraArgs, "moonshotai/kimi-k3"),
-                _ => extraArgs
-            };
+            string? callerModel;
+            (extraArgs, callerModel, openCodeDefaultAgent, openCodePure) = ExtractOpenCodeSessionOptions(extraArgs);
+            // Base CLI launches (no envName) pin the pseudo-CLI's model. Custom environments
+            // already carry --model in their CustomArgs (built by the env settings form), and a
+            // caller-supplied value — even an explicit empty --model= — keeps precedence over
+            // the pin, preserving the argv form's last-value-wins behaviour.
+            openCodeSessionModel = callerModel
+                ?? (string.IsNullOrEmpty(envName) ? BaseLlmOptionsBuilder.PinnedModel(llm) : null);
         }
         // One fresh snapshot for the whole prepare so the enabled/mode fields can't tear across a
         // concurrent settings save and the launch hits the disk once, not once per field.
         var proxySettings = _llmProxySettings.GetSettings();
+        // OPENCODE_CONFIG_CONTENT and OPENCODE_PERMISSION are resolved by the *server* process an
+        // OpenCode TUI connects to, and v2's shared background service keeps the environment it
+        // was started with: a launch attaching to an already-running service would silently keep
+        // that service's config — wrong pinned model, missing proxy route or missing Board tool
+        // grants. --standalone gives this launch its own private server whenever it carries
+        // session config, so what this launch set is what the session gets. Bare OpenCode
+        // launches with no options keep the shared service (and its cross-launch session list).
+        // An explicit --standalone/--server in Additional Arguments is never overridden.
+        if (isOpenCodeBacked
+            && (openCodeSessionModel is not null || openCodeDefaultAgent is not null || openCodePure
+                || proxySettings.OpenCodeLlmProxyLaunchEnabled || authorizeBoardTools)
+            && !HasOpenCodeServerOverride(extraArgs))
+        {
+            extraArgs = ["--standalone", .. (extraArgs ?? [])];
+        }
         var useCodexProxy = await ShouldUseCodexProxyAsync(llm, envName, extraArgs, proxySettings);
         var launchArgs = BuildLaunchArgs(extraArgs, proxySettings, useCodexProxy, sessionId);
         if (llm == LLM.Codex)
@@ -345,6 +368,26 @@ public class CommandService : ICommandService
                 _llmProxyContext.SessionToken,
                 _llmProxyContext.TabToken,
                 sessionId);
+        }
+
+        // Re-express the extracted OpenCode session options (see the extraction near the top of
+        // this method) through the same env var the proxy just used, merging into whatever
+        // content is already set — the proxy payload above, or a custom environment's explicit
+        // OPENCODE_CONFIG_CONTENT — so provider overrides and the model/default_agent keys share
+        // one document instead of clobbering each other. --pure has no config key; OPENCODE_PURE
+        // is its v2 form.
+        if (isOpenCodeBacked)
+        {
+            var existingOpenCodeContent = environment.TryGetValue(LlmProxyZaiConfig.ConfigContentVariable, out var setOpenCodeContent)
+                ? setOpenCodeContent
+                : inheritedOpenCodeConfig;
+            var mergedOpenCodeContent = OpenCodeSessionConfig.ApplySessionKeys(
+                existingOpenCodeContent, openCodeSessionModel, openCodeDefaultAgent);
+            if (!string.IsNullOrEmpty(mergedOpenCodeContent)
+                && !string.Equals(mergedOpenCodeContent, existingOpenCodeContent, StringComparison.Ordinal))
+                environment[LlmProxyZaiConfig.ConfigContentVariable] = mergedOpenCodeContent;
+            if (openCodePure)
+                environment[OpenCodeSessionConfig.PureVariable] = "true";
         }
 
         // Native Grok uses /llm/cli-chat. Subscription keeps grok login (no GROK_MODELS_BASE_URL);
@@ -575,22 +618,87 @@ public class CommandService : ICommandService
     }
 
     /// <summary>
-    /// Prepends a <c>--model=&lt;model&gt;</c> arg to <paramref name="extraArgs"/>. Used by the
-    /// OpenCode-backed pseudo-CLIs to pin their model on base CLI launches.
-    /// Uses =-form so the arg survives ShellArgSanitizer without re-quoting. It is prepended so a
-    /// later caller-supplied <c>--model</c> retains yargs' last-value precedence.
+    /// Removes OpenCode's v1-era TUI session flags from <paramref name="args"/> so
+    /// <see cref="PrepareSessionAsync"/> can re-express them through env/config (see
+    /// <see cref="OpenCodeSessionConfig"/>). Handles both the <c>--flag=value</c> and
+    /// <c>--flag value</c> forms of <c>--model</c> (short <c>-m</c>) and <c>--agent</c>, plus
+    /// the valueless <c>--pure</c>. A separate-form value is only consumed when the next token
+    /// does not start with <c>--</c> — model IDs and agent names never do; a dangling flag
+    /// without a value stays in place so the CLI reports it, exactly as before. Everything else,
+    /// including the <c>--</c> separator and anything after it, passes through untouched.
+    /// Repeated flags keep the argv form's last-value-wins behaviour.
     /// </summary>
-    private static string[] WithPinnedModel(string[]? extraArgs, string model)
+    private static (string[] Remaining, string? Model, string? Agent, bool Pure) ExtractOpenCodeSessionOptions(
+        string[]? args)
     {
-        var modelArg = $"--model={model}";
-        if (extraArgs is not { Length: > 0 })
-            return [modelArg];
+        if (args is not { Length: > 0 })
+            return ([], null, null, false);
 
-        var result = new string[extraArgs.Length + 1];
-        result[0] = modelArg;
-        extraArgs.CopyTo(result, 1);
-        return result;
+        var remaining = new List<string>(args.Length);
+        string? model = null;
+        string? agent = null;
+        var pure = false;
+
+        for (var i = 0; i < args.Length; i++)
+        {
+            var arg = args[i];
+            if (arg == "--pure")
+            {
+                pure = true;
+                continue;
+            }
+            if (arg == "--")
+            {
+                // Everything after the separator is positional passthrough, never a flag.
+                remaining.AddRange(args[i..]);
+                break;
+            }
+
+            var isModel = arg is "--model" or "-m"
+                || arg.StartsWith("--model=", StringComparison.Ordinal)
+                || arg.StartsWith("-m=", StringComparison.Ordinal);
+            var isAgent = arg is "--agent" || arg.StartsWith("--agent=", StringComparison.Ordinal);
+            if (!isModel && !isAgent)
+            {
+                remaining.Add(arg);
+                continue;
+            }
+
+            string value;
+            var separator = arg.IndexOf('=');
+            if (separator >= 0)
+            {
+                value = arg[(separator + 1)..];
+            }
+            else if (i + 1 < args.Length && !args[i + 1].StartsWith("--", StringComparison.Ordinal))
+            {
+                value = args[++i];
+            }
+            else
+            {
+                // Dangling flag without a value: leave it for the CLI to report.
+                remaining.Add(arg);
+                continue;
+            }
+
+            if (isModel)
+                model = value;
+            else
+                agent = value;
+        }
+
+        return (remaining.ToArray(), model, agent, pure);
     }
+
+    /// <summary>
+    /// True when the caller already chose OpenCode's server topology (<c>--standalone</c> or
+    /// <c>--server[=url]</c> in Additional Arguments), so VibeRails must not add its own
+    /// <c>--standalone</c> on top.
+    /// </summary>
+    private static bool HasOpenCodeServerOverride(string[]? args) =>
+        args is not null && args.Any(arg =>
+            arg is "--standalone" or "--server"
+            || arg.StartsWith("--server=", StringComparison.Ordinal));
 
     private async Task<bool> ShouldUseCodexProxyAsync(
         LLM llm,

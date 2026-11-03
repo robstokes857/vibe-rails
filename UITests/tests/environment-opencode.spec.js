@@ -46,16 +46,30 @@ test.describe('OpenCode environment form – Model field', () => {
         await openOpencodeEnvironmentForm(page);
 
         const expectedValues = [
+            'anthropic/claude-fable-5-1',
+            'anthropic/claude-opus-5-5',
+            'anthropic/claude-haiku-5-5',
             'anthropic/claude-opus-4-5',
             'anthropic/claude-sonnet-4-5',
+            'openai/gpt-6-astra',
+            'openai/gpt-6.1-sol',
+            'openai/gpt-5.6-sol',
             'openai/gpt-5.2',
-            'openai/gpt-5.1-codex',
-            'google/gemini-3-pro',
+            'google/gemini-4-argon',
+            'google/gemini-3.8-flash',
+            'zai/glm-5.3',
+            'zai/glm-5.3-flash',
+            'zai/glm-5.3-flashx',
             'zai/glm-5.2',
             'zai-coding-plan/glm-5.3',
+            'zai-coding-plan/glm-5.3-flash',
+            'zai-coding-plan/glm-5.3-highspeed',
             'deepseek/deepseek-v4-pro',
+            'moonshotai/kimi-k3.1-pro',
             'moonshotai/kimi-k3',
+            'xai/grok-4.7',
             'xai/grok-4.6',
+            'opencode/glm-5.3-flash-free',
             'opencode/gpt-5.1-codex',
         ];
 

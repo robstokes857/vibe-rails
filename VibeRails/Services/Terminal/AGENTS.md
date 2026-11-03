@@ -127,10 +127,16 @@ The run and lane-triggering Board card reference the same session ID. No history
 `StartTerminalRequest.BaseLlmOptions` carries typed model/effort/start-mode/YOLO/speed choices only for
 base CLIs. `BaseLlmOptionsBuilder` validates these at both board save/launch and the terminal
 child, producing discrete argv without changing physical CLI config. Saved environments
-keep their own arguments. Every startup mode the UI offers is a native CLI flag
-(`--permission-mode`, `--mode`, `--agent`), applied when the process is spawned. **Codex has no
+keep their own arguments. Every startup mode the UI offers becomes a real CLI argument at spawn
+(`--permission-mode`, `--mode`, `--agent`). **Codex has no
 startup mode**: `/plan` is a TUI command with no launch flag, and the handshake that used to type
 it — wait for the composer, send `/plan`, paste the task, press Enter — was removed 2026-09-15.
+**OpenCode and its fixed-model variants** (2026-11-03): the stored `--agent build|plan` — and the
+model `--model provider/model`, plus `--pure` — are lifted out of argv by
+`CommandService.PrepareSessionAsync` and re-expressed through the `OPENCODE_CONFIG_CONTENT` env
+var (`default_agent` / `model` keys) and `OPENCODE_PURE`, because no released OpenCode v2 binary
+accepts those TUI flags; such launches also get `--standalone` so a shared v2 background service
+cannot keep a stale config.
 Session options are set at spawn time or not at all; nothing types into a running TUI. A mode
 stored on an older Codex card is dropped by `BaseLlmOptionsBuilder`, not rejected, so those cards
 still launch. YOLO is a separate, explicit card toggle translated into the provider's native

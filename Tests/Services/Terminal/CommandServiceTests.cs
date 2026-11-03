@@ -409,11 +409,16 @@ public partial class CommandServiceTests : IDisposable
     {
         var service = CreateService();
 
-        // GLM 5.2 is a pseudo-CLI backed by OpenCode. The binary is `opencode` (not `glm52`),
-        // and base CLI launches inject --model=zai/glm-5.2 so the session picks the right model.
+        // GLM 5.2 is a pseudo-CLI backed by OpenCode. The binary is `opencode` (not `glm52`).
+        // OpenCode v2 has no TUI --model flag, so the pin rides OPENCODE_CONFIG_CONTENT, and the
+        // launch gets its own private server (--standalone) so that content is the config the
+        // session actually resolves instead of whatever a shared background service kept.
         var prepared = await service.PrepareSessionAsync(LLM.Glm52, envName: null, extraArgs: null);
 
-        Assert.Equal("opencode --model=zai/glm-5.2", prepared.LaunchCommand);
+        Assert.Equal("opencode --standalone", prepared.LaunchCommand);
+        Assert.Contains(
+            "\"model\":\"zai/glm-5.2\"",
+            prepared.Environment[LlmProxyZaiConfig.ConfigContentVariable]);
     }
 
     [Fact]
@@ -426,7 +431,7 @@ public partial class CommandServiceTests : IDisposable
         var prepared = await service.PrepareSessionAsync(
             LLM.Glm52, envName: null, extraArgs: null, initialPrompt: "hello world");
 
-        Assert.StartsWith("opencode --model=zai/glm-5.2 --prompt=", prepared.LaunchCommand);
+        Assert.StartsWith("opencode --standalone --prompt=", prepared.LaunchCommand);
     }
 
     [Fact]
@@ -444,7 +449,10 @@ public partial class CommandServiceTests : IDisposable
         Assert.Equal(
             "test-tab-token",
             prepared.Environment[LocalLlmProxyContext.TabTokenVariable]);
-        Assert.True(prepared.Environment.ContainsKey(LlmProxyZaiConfig.ConfigContentVariable));
+        // The proxy payload and the model pin share one OPENCODE_CONFIG_CONTENT document.
+        var config = prepared.Environment[LlmProxyZaiConfig.ConfigContentVariable];
+        Assert.Contains("http://127.0.0.1:4321/llm/zai/api/paas/v4", config);
+        Assert.Contains("\"model\":\"zai/glm-5.2\"", config);
     }
 
     [Fact]
@@ -453,18 +461,20 @@ public partial class CommandServiceTests : IDisposable
         var service = CreateService();
 
         // For custom env launches, the model is already in CustomArgs (built by the env
-        // settings form). CommandService must NOT inject --model again — that would duplicate
-        // the flag. The env's CustomArgs arrive as extraArgs.
+        // settings form). CommandService must NOT inject the pin again — and since the v2 CLI
+        // rejects a TUI --model flag outright, the caller's flag is lifted out of argv into the
+        // inline config instead of being passed through or duplicated. The env's CustomArgs
+        // arrive as extraArgs.
         var prepared = await service.PrepareSessionAsync(
             LLM.Glm52,
             envName: "my-glm-env",
             extraArgs: ["--model=zai/glm-5.2", "--auto"]);
 
-        Assert.Equal("opencode --model=zai/glm-5.2 --auto", prepared.LaunchCommand);
-        // Exactly one --model arg — no duplicate injection.
-        Assert.Equal(
-            1,
-            prepared.LaunchCommand.Split(' ').Count(tok => tok.StartsWith("--model")));
+        Assert.Equal("opencode --standalone --auto", prepared.LaunchCommand);
+        Assert.DoesNotContain("--model", prepared.LaunchCommand);
+        Assert.Contains(
+            "\"model\":\"zai/glm-5.2\"",
+            prepared.Environment[LlmProxyZaiConfig.ConfigContentVariable]);
     }
 
     [Fact]
@@ -625,11 +635,15 @@ public partial class CommandServiceTests : IDisposable
         var service = CreateService();
 
         // GLM 5.3 is a pseudo-CLI backed by OpenCode. The binary is `opencode` (not `glm53`),
-        // and base CLI launches inject --model=zai-coding-plan/glm-5.3 — GLM 5.3 ships under
-        // the zai-coding-plan provider in the live OpenCode catalog, not plain zai.
+        // and the pin is zai-coding-plan/glm-5.3 — GLM 5.3 ships under the zai-coding-plan
+        // provider in the live OpenCode catalog, not plain zai. OpenCode v2 has no TUI --model
+        // flag, so the pin rides OPENCODE_CONFIG_CONTENT behind a --standalone private server.
         var prepared = await service.PrepareSessionAsync(LLM.Glm53, envName: null, extraArgs: null);
 
-        Assert.Equal("opencode --model=zai-coding-plan/glm-5.3", prepared.LaunchCommand);
+        Assert.Equal("opencode --standalone", prepared.LaunchCommand);
+        Assert.Contains(
+            "\"model\":\"zai-coding-plan/glm-5.3\"",
+            prepared.Environment[LlmProxyZaiConfig.ConfigContentVariable]);
     }
 
     [Fact]
@@ -640,7 +654,7 @@ public partial class CommandServiceTests : IDisposable
         var prepared = await service.PrepareSessionAsync(
             LLM.Glm53, envName: null, extraArgs: null, initialPrompt: "hello world");
 
-        Assert.StartsWith("opencode --model=zai-coding-plan/glm-5.3 --prompt=", prepared.LaunchCommand);
+        Assert.StartsWith("opencode --standalone --prompt=", prepared.LaunchCommand);
     }
 
     [Fact]
@@ -648,7 +662,8 @@ public partial class CommandServiceTests : IDisposable
     {
         // GLM 5.3 is OpenCode-backed, so the OpenCode proxy config is injected — but it only
         // remaps the zai/xai providers. The pinned zai-coding-plan provider must NOT appear in
-        // the injected config: its traffic deliberately goes direct to Z.AI (no token saver).
+        // the injected config as a provider override: its traffic deliberately goes direct to
+        // Z.AI (no token saver). The model key naming zai-coding-plan/glm-5.3 is the pin itself.
         var service = CreateService(openCodeLlmProxyEnabled: true);
 
         var prepared = await service.PrepareSessionAsync(LLM.Glm53, envName: null, extraArgs: null);
@@ -663,7 +678,8 @@ public partial class CommandServiceTests : IDisposable
         var config = prepared.Environment[LlmProxyZaiConfig.ConfigContentVariable];
         Assert.Contains("http://127.0.0.1:4321/llm/zai/api/paas/v4", config);
         Assert.Contains("http://127.0.0.1:4321/llm/xai/v1", config);
-        Assert.DoesNotContain("zai-coding-plan", config);
+        Assert.Contains("\"model\":\"zai-coding-plan/glm-5.3\"", config);
+        Assert.DoesNotContain("\"zai-coding-plan\":", config);
     }
 
     [Fact]
@@ -676,10 +692,11 @@ public partial class CommandServiceTests : IDisposable
             envName: "my-glm53-env",
             extraArgs: ["--model=zai-coding-plan/glm-5.3", "--auto"]);
 
-        Assert.Equal("opencode --model=zai-coding-plan/glm-5.3 --auto", prepared.LaunchCommand);
-        Assert.Equal(
-            1,
-            prepared.LaunchCommand.Split(' ').Count(tok => tok.StartsWith("--model")));
+        Assert.Equal("opencode --standalone --auto", prepared.LaunchCommand);
+        Assert.DoesNotContain("--model", prepared.LaunchCommand);
+        Assert.Contains(
+            "\"model\":\"zai-coding-plan/glm-5.3\"",
+            prepared.Environment[LlmProxyZaiConfig.ConfigContentVariable]);
     }
 
     [Fact]
@@ -701,10 +718,13 @@ public partial class CommandServiceTests : IDisposable
         var service = CreateService();
 
         // DeepSeek V4 Pro is a pseudo-CLI backed by OpenCode. The binary is `opencode` (not
-        // `deepseekv4pro`), and base CLI launches inject --model=deepseek/deepseek-v4-pro.
+        // `deepseekv4pro`); the model pin rides OPENCODE_CONFIG_CONTENT behind --standalone.
         var prepared = await service.PrepareSessionAsync(LLM.DeepSeekV4Pro, envName: null, extraArgs: null);
 
-        Assert.Equal("opencode --model=deepseek/deepseek-v4-pro", prepared.LaunchCommand);
+        Assert.Equal("opencode --standalone", prepared.LaunchCommand);
+        Assert.Contains(
+            "\"model\":\"deepseek/deepseek-v4-pro\"",
+            prepared.Environment[LlmProxyZaiConfig.ConfigContentVariable]);
         Assert.Equal("opencode", prepared.Executable);
     }
 
@@ -716,7 +736,7 @@ public partial class CommandServiceTests : IDisposable
         var prepared = await service.PrepareSessionAsync(
             LLM.DeepSeekV4Pro, envName: null, extraArgs: null, initialPrompt: "hello world");
 
-        Assert.StartsWith("opencode --model=deepseek/deepseek-v4-pro --prompt=", prepared.LaunchCommand);
+        Assert.StartsWith("opencode --standalone --prompt=", prepared.LaunchCommand);
     }
 
     [Fact]
@@ -724,7 +744,8 @@ public partial class CommandServiceTests : IDisposable
     {
         // DeepSeek V4 Pro is OpenCode-backed, so the OpenCode proxy config is injected — but it
         // only remaps the zai/xai providers. The pinned deepseek provider must NOT appear in the
-        // injected config: its traffic deliberately goes direct to DeepSeek (no token saver).
+        // injected config as a provider override: its traffic deliberately goes direct to
+        // DeepSeek (no token saver). The model key naming deepseek/deepseek-v4-pro is the pin.
         var service = CreateService(openCodeLlmProxyEnabled: true);
 
         var prepared = await service.PrepareSessionAsync(LLM.DeepSeekV4Pro, envName: null, extraArgs: null);
@@ -739,7 +760,8 @@ public partial class CommandServiceTests : IDisposable
         var config = prepared.Environment[LlmProxyZaiConfig.ConfigContentVariable];
         Assert.Contains("http://127.0.0.1:4321/llm/zai/api/paas/v4", config);
         Assert.Contains("http://127.0.0.1:4321/llm/xai/v1", config);
-        Assert.DoesNotContain("deepseek", config);
+        Assert.Contains("\"model\":\"deepseek/deepseek-v4-pro\"", config);
+        Assert.DoesNotContain("\"deepseek\":", config);
     }
 
     [Fact]
@@ -752,10 +774,11 @@ public partial class CommandServiceTests : IDisposable
             envName: "my-deepseek-env",
             extraArgs: ["--model=deepseek/deepseek-v4-pro", "--auto"]);
 
-        Assert.Equal("opencode --model=deepseek/deepseek-v4-pro --auto", prepared.LaunchCommand);
-        Assert.Equal(
-            1,
-            prepared.LaunchCommand.Split(' ').Count(tok => tok.StartsWith("--model")));
+        Assert.Equal("opencode --standalone --auto", prepared.LaunchCommand);
+        Assert.DoesNotContain("--model", prepared.LaunchCommand);
+        Assert.Contains(
+            "\"model\":\"deepseek/deepseek-v4-pro\"",
+            prepared.Environment[LlmProxyZaiConfig.ConfigContentVariable]);
     }
 
     [Fact]
@@ -777,10 +800,13 @@ public partial class CommandServiceTests : IDisposable
         var service = CreateService();
 
         // Kimi K3 is a pseudo-CLI backed by OpenCode. The binary is `opencode` (not
-        // `kimik3`), and base CLI launches inject --model=moonshotai/kimi-k3.
+        // `kimik3`); the model pin rides OPENCODE_CONFIG_CONTENT behind --standalone.
         var prepared = await service.PrepareSessionAsync(LLM.KimiK3, envName: null, extraArgs: null);
 
-        Assert.Equal("opencode --model=moonshotai/kimi-k3", prepared.LaunchCommand);
+        Assert.Equal("opencode --standalone", prepared.LaunchCommand);
+        Assert.Contains(
+            "\"model\":\"moonshotai/kimi-k3\"",
+            prepared.Environment[LlmProxyZaiConfig.ConfigContentVariable]);
         Assert.Equal("opencode", prepared.Executable);
     }
 
@@ -792,7 +818,7 @@ public partial class CommandServiceTests : IDisposable
         var prepared = await service.PrepareSessionAsync(
             LLM.KimiK3, envName: null, extraArgs: null, initialPrompt: "hello world");
 
-        Assert.StartsWith("opencode --model=moonshotai/kimi-k3 --prompt=", prepared.LaunchCommand);
+        Assert.StartsWith("opencode --standalone --prompt=", prepared.LaunchCommand);
     }
 
     [Fact]
@@ -800,7 +826,8 @@ public partial class CommandServiceTests : IDisposable
     {
         // Kimi K3 is OpenCode-backed, so the OpenCode proxy config is injected — but it
         // only remaps the zai/xai providers. The pinned moonshotai provider must NOT appear in
-        // the injected config: its traffic deliberately goes direct to Moonshot AI (no token saver).
+        // the injected config as a provider override: its traffic deliberately goes direct to
+        // Moonshot AI (no token saver). The model key naming moonshotai/kimi-k3 is the pin.
         var service = CreateService(openCodeLlmProxyEnabled: true);
 
         var prepared = await service.PrepareSessionAsync(LLM.KimiK3, envName: null, extraArgs: null);
@@ -815,7 +842,8 @@ public partial class CommandServiceTests : IDisposable
         var config = prepared.Environment[LlmProxyZaiConfig.ConfigContentVariable];
         Assert.Contains("http://127.0.0.1:4321/llm/zai/api/paas/v4", config);
         Assert.Contains("http://127.0.0.1:4321/llm/xai/v1", config);
-        Assert.DoesNotContain("moonshotai", config);
+        Assert.Contains("\"model\":\"moonshotai/kimi-k3\"", config);
+        Assert.DoesNotContain("\"moonshotai\":", config);
     }
 
     [Fact]
@@ -828,10 +856,11 @@ public partial class CommandServiceTests : IDisposable
             envName: "my-kimi-env",
             extraArgs: ["--model=moonshotai/kimi-k3", "--auto"]);
 
-        Assert.Equal("opencode --model=moonshotai/kimi-k3 --auto", prepared.LaunchCommand);
-        Assert.Equal(
-            1,
-            prepared.LaunchCommand.Split(' ').Count(tok => tok.StartsWith("--model")));
+        Assert.Equal("opencode --standalone --auto", prepared.LaunchCommand);
+        Assert.DoesNotContain("--model", prepared.LaunchCommand);
+        Assert.Contains(
+            "\"model\":\"moonshotai/kimi-k3\"",
+            prepared.Environment[LlmProxyZaiConfig.ConfigContentVariable]);
     }
 
     [Fact]
@@ -845,6 +874,149 @@ public partial class CommandServiceTests : IDisposable
         Assert.True(
             prepared.Environment.ContainsKey("XDG_CONFIG_HOME"),
             "Kimi K3 must share OpenCode's XDG_CONFIG_HOME env isolation.");
+    }
+
+    [Fact]
+    public async Task PrepareSession_OpenCode_ModelFlagMovesIntoConfigContent()
+    {
+        var service = CreateService();
+
+        // The env form and Board options still write `--model provider/model` into CustomArgs,
+        // but no released OpenCode v2 binary accepts a TUI --model flag, so the launch lifts it
+        // out of argv (both the `--flag value` and `--flag=value` shapes) into
+        // OPENCODE_CONFIG_CONTENT behind a private server.
+        var prepared = await service.PrepareSessionAsync(
+            LLM.OpenCode, envName: null, extraArgs: ["--model", "zai/glm-5.3"]);
+
+        Assert.Equal("opencode --standalone", prepared.LaunchCommand);
+        Assert.Contains(
+            "\"model\":\"zai/glm-5.3\"",
+            prepared.Environment[LlmProxyZaiConfig.ConfigContentVariable]);
+    }
+
+    [Fact]
+    public async Task PrepareSession_OpenCode_AgentStartupModeBecomesDefaultAgentConfig()
+    {
+        var service = CreateService();
+
+        // Board startup modes arrive as `--agent build|plan`; OpenCode v2 has no TUI --agent
+        // flag, and the config equivalent is the default_agent key in the same inline content.
+        var prepared = await service.PrepareSessionAsync(
+            LLM.OpenCode, envName: null, extraArgs: ["--agent", "build", "--auto"]);
+
+        Assert.Equal("opencode --standalone --auto", prepared.LaunchCommand);
+        var config = prepared.Environment[LlmProxyZaiConfig.ConfigContentVariable];
+        Assert.Contains("\"default_agent\":\"build\"", config);
+        Assert.DoesNotContain("\"model\"", config);
+    }
+
+    [Fact]
+    public async Task PrepareSession_OpenCode_PureFlagBecomesEnvVar()
+    {
+        var service = CreateService();
+
+        var prepared = await service.PrepareSessionAsync(
+            LLM.OpenCode, envName: null, extraArgs: ["--pure"]);
+
+        Assert.Equal("opencode --standalone", prepared.LaunchCommand);
+        Assert.Equal("true", prepared.Environment[OpenCodeSessionConfig.PureVariable]);
+        Assert.False(prepared.Environment.ContainsKey(LlmProxyZaiConfig.ConfigContentVariable));
+    }
+
+    [Fact]
+    public async Task PrepareSession_OpenCode_SessionOptionsMergeWithProxyContent()
+    {
+        var service = CreateService(openCodeLlmProxyEnabled: true);
+
+        var prepared = await service.PrepareSessionAsync(
+            LLM.OpenCode, envName: null, extraArgs: ["--model=zai/glm-5.3", "--pure"]);
+
+        Assert.Equal("opencode --standalone", prepared.LaunchCommand);
+        var config = prepared.Environment[LlmProxyZaiConfig.ConfigContentVariable];
+        Assert.Contains("http://127.0.0.1:4321/llm/zai/api/paas/v4", config);
+        Assert.Contains("\"model\":\"zai/glm-5.3\"", config);
+        Assert.Equal("true", prepared.Environment[OpenCodeSessionConfig.PureVariable]);
+    }
+
+    [Fact]
+    public async Task PrepareSession_OpenCode_ExplicitServerFlagIsNotDuplicated()
+    {
+        var service = CreateService();
+
+        var prepared = await service.PrepareSessionAsync(
+            LLM.OpenCode, envName: null, extraArgs: ["--standalone", "--model=zai/glm-5.3"]);
+
+        Assert.Equal("opencode --standalone", prepared.LaunchCommand);
+        Assert.Equal(1, prepared.LaunchCommand.Split(' ').Count(tok => tok == "--standalone"));
+        Assert.Contains(
+            "\"model\":\"zai/glm-5.3\"",
+            prepared.Environment[LlmProxyZaiConfig.ConfigContentVariable]);
+    }
+
+    [Fact]
+    public async Task PrepareSession_Glm53_MergesPinIntoInheritedConfigContent()
+    {
+        const string inherited = "{\"plugin\":[\"caller-plugin\"]}";
+        Environment.SetEnvironmentVariable(LlmProxyZaiConfig.ConfigContentVariable, inherited);
+        try
+        {
+            var service = CreateService();
+
+            var prepared = await service.PrepareSessionAsync(LLM.Glm53, envName: null, extraArgs: null);
+
+            var config = prepared.Environment[LlmProxyZaiConfig.ConfigContentVariable];
+            Assert.Contains("\"model\":\"zai-coding-plan/glm-5.3\"", config);
+            Assert.Contains("caller-plugin", config);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(LlmProxyZaiConfig.ConfigContentVariable, null);
+        }
+    }
+
+    [Fact]
+    public async Task PrepareSession_Glm53_ExplicitEmptyModelRestoresDefaultAndKeepsPrivateServer()
+    {
+        var service = CreateService();
+
+        // An explicit `--model=` means "no model" and suppresses the pseudo-CLI pin, the same
+        // way the argv form's last-value-wins did; the launch still owns its server.
+        var prepared = await service.PrepareSessionAsync(
+            LLM.Glm53, envName: null, extraArgs: ["--model="]);
+
+        Assert.Equal("opencode --standalone", prepared.LaunchCommand);
+        Assert.False(prepared.Environment.ContainsKey(LlmProxyZaiConfig.ConfigContentVariable));
+    }
+
+    [Fact]
+    public void OpenCodeSessionConfig_MergesAndOverwritesSessionKeys()
+    {
+        Assert.Equal(
+            "{\"model\":\"zai/glm-5.3\",\"default_agent\":\"build\"}",
+            OpenCodeSessionConfig.ApplySessionKeys(null, "zai/glm-5.3", "build"));
+        // An existing document keeps its unrelated keys and has its model key overwritten.
+        Assert.Equal(
+            "{\"provider\":{\"zai\":{}},\"model\":\"zai/glm-5.2\"}",
+            OpenCodeSessionConfig.ApplySessionKeys("{\"provider\":{\"zai\":{}},\"model\":\"old\"}", "zai/glm-5.2", null));
+        // A null agent leaves an existing default_agent untouched.
+        Assert.Equal(
+            "{\"default_agent\":\"plan\",\"model\":\"zai/glm-5.3\"}",
+            OpenCodeSessionConfig.ApplySessionKeys("{\"default_agent\":\"plan\"}", "zai/glm-5.3", null));
+    }
+
+    [Fact]
+    public void OpenCodeSessionConfig_RespectsExplicitContentAndSkipsEmptyValues()
+    {
+        Assert.Null(OpenCodeSessionConfig.ApplySessionKeys(null, null, null));
+        // Content that does not parse as a JSON object is returned unchanged.
+        Assert.Equal(
+            "not json",
+            OpenCodeSessionConfig.ApplySessionKeys("not json", "zai/glm-5.3", "build"));
+        Assert.Equal(
+            "[1,2]",
+            OpenCodeSessionConfig.ApplySessionKeys("[1,2]", "zai/glm-5.3", null));
+        // Empty/whitespace values are skipped — an explicit empty --model= keeps OpenCode's default.
+        Assert.Null(OpenCodeSessionConfig.ApplySessionKeys(null, "  ", " "));
     }
 
     [Fact]

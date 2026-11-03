@@ -100,10 +100,20 @@ IBaseLlmCliLauncher (Interface)
   standard config/agents/commands/plugins directory beneath that root at `opencode/`.
   `OPENCODE_CONFIG_DIR` is intentionally not used because it is an additive overlay and still
   merges the user's global config. `XDG_DATA_HOME` is left unchanged, so credentials remain
-  global. Launch-flag-only — no settings file is written. YOLO is `--auto`; initial prompt is
-  `--prompt=<text>` (positional = project path). VibeRails registers its MCP server via
+  global. Launch-flag/env-var-only — no settings file is written. YOLO is `--auto`; initial
+  prompt is `--prompt=<text>` (positional = project path). VibeRails registers its MCP server via
   `opencode mcp add` (or `opencode.cmd mcp add` on Windows) as a setup command — see
   `CommandService.McpClis` / `GetMcpCommands`.
+- **OpenCode v2 session options (2026-11-03)**: no released v2 binary accepts the v1 TUI flags
+  `--model` / `--agent` / `--pure` on the root command (only `run`/`mini` kept them), so
+  `CommandService.PrepareSessionAsync` lifts them out of argv (CustomArgs and Board options keep
+  storing them) and re-expresses them through `OPENCODE_CONFIG_CONTENT` (`model`,
+  `default_agent`; merged with the TokenSaver proxy payload or a custom env's explicit content —
+  see `OpenCodeSessionConfig`) plus `OPENCODE_PURE=true`. When a launch carries any of that
+  session config (or an active proxy / Board tool grants) it also gets `--standalone`, because
+  v2's shared background service resolves config from its own start-time environment and would
+  ignore a later launch's env; a bare plain-OpenCode launch with no options keeps the shared
+  service, and an explicit `--standalone`/`--server` in Additional Arguments is never duplicated.
 
 ## Antigravity (agy) — no settings feature
 
