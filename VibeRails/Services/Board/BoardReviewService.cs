@@ -149,9 +149,9 @@ public sealed class BoardReviewService(IBoardStore store, IBoardService board)
     internal sealed record Capture(string? Hash, string? Base, string? Head, string? Limitations, IReadOnlyList<string>? Files = null);
 
     /// <summary>
-    /// The longest one scope capture may take, both fingerprint passes together. It stays under
-    /// the 60-second default MCP tool timeout of Codex, the usual reviewer, so begin_board_review
-    /// answers with a limitation instead of leaving the client to give up without one (VIBE-267).
+    /// The longest one scope capture may take, both fingerprint passes together. A capture that
+    /// ran for minutes left reviewers with no review id at all (VIBE-267); past this limit
+    /// begin_board_review answers with a limitation instead. Normal captures take a few seconds.
     /// </summary>
     internal static readonly TimeSpan CaptureDeadline = TimeSpan.FromSeconds(40);
 
