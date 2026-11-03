@@ -2850,7 +2850,13 @@ export class BoardController {
             editor.querySelector('#board-card-title')?.focus();
             return false;
         }
-        if (payload.workflowMode === 'agent' && !payload.managerSelection && !this.boardManagerAvailable()) {
+        // Only a new Agent card, or a change to the workflow or manager, needs a manager now. A saved
+        // board-managed card stays editable after the AI board manager is turned off or its board's
+        // manager is removed, exactly as the store allows (VIBE-204); Start work explains the rest.
+        const baseline = editor._boardFormBaseline;
+        const assignmentUnchanged = Boolean(this.cardIdFromEditor(editor) && baseline)
+            && baseline.workflowMode === payload.workflowMode && (baseline.managerSelection || '') === (payload.managerSelection || '');
+        if (payload.workflowMode === 'agent' && !payload.managerSelection && !this.boardManagerAvailable() && !assignmentUnchanged) {
             this.app.showToast('Board', this.state.aiBoardManager
                 ? 'Choose a manager agent for the Agent workflow, or set up this board\'s manager in Board settings > Manager.'
                 : 'Choose a manager agent for the Agent workflow.', 'warning');

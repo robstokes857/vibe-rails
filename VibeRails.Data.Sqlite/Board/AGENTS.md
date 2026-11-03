@@ -58,13 +58,15 @@ upsert names only its own columns and leaves the new ones as they are.
 `ValidateAgentWorkflowAsync` runs inside the card write transaction: Agent mode needs the card's
 own `ManagerSelection`, or, while the switch row says on, a `BoardManagers` row for the card's
 lane's board. With the switch off it is the rule from before board managers, with the same
-message. An update re-checks only when the patch touches the workflow, the manager or the board,
-so removing a board manager or turning the switch off never fails a title edit.
+message. An update re-checks only when the workflow, the manager or the board actually changes
+(a resent unchanged value is not a change), so removing a board manager or turning the switch off
+never fails a title edit.
 `GetBoardEventsAsync` unions `BoardComments` (all kinds, not hidden, not deleted; a deleted card
 keeps only its `deleted` row) with `BoardAgentCompletions` for the board's cards after a `ToDb`
 cursor, ordered by stamp, source and rowid; `managedOnly` keeps board-managed cards plus any card's
 workflow/manager `change` row, `excludeSessionId` drops the caller's own rows, and a full batch is
-trimmed so it never ends inside a group of rows that share a stamp. `GetManagedCardsAsync` reads
+trimmed so it never ends inside a group of rows that share a stamp; a batch that is one stamp
+throughout returns that whole group (up to 10,000 rows) so the cursor never skips its tail. `GetManagedCardsAsync` reads
 Agent cards through `CardSelectSql` plus lane names and the newest discussion time;
 `GetManagedWorkerSessionsAsync` lists worker and planning-worker attachments (both session tables)
 on board-managed cards. Older binaries ignore all three tables' new parts; an Agent card they save

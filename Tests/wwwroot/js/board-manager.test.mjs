@@ -257,6 +257,31 @@ test('the card editor sends no manager for a board-managed card and accepts it w
     assert.equal(toasts[1][1], 'Choose a manager agent for the Agent workflow.');
 });
 
+test('a saved board-managed card keeps saving ordinary edits after the setting is off or its manager is removed', () => {
+    const toasts = [];
+    const controller = new BoardController({ showToast: (...args) => toasts.push(args) });
+    const payload = { title: 'Renamed title', workflowMode: 'agent', managerSelection: '', assignee: 'base:claude' };
+    const editor = {
+        dataset: { cardId: 'card_saved' },
+        _boardFormBaseline: { title: 'Old title', workflowMode: 'agent', managerSelection: '', assignee: 'base:claude' },
+        querySelector: () => null
+    };
+    // Switch off, or on with the board's manager removed: the unchanged assignment is not re-checked.
+    for (const boardManager of [null, { enabled: true, selection: null, active: null }]) {
+        controller.state.boardManager = boardManager;
+        controller.state.aiBoardManager = Boolean(boardManager);
+        assert.equal(controller.validateCardTitle(editor, payload), true);
+        assert.deepEqual(controller.cardChanges(editor, payload), { title: 'Renamed title' });
+    }
+    assert.equal(toasts.length, 0);
+    // Making a Manual card an Agent card without a manager is still refused...
+    editor._boardFormBaseline = { ...editor._boardFormBaseline, workflowMode: 'manual' };
+    assert.equal(controller.validateCardTitle(editor, payload), false);
+    // ...and so is a new card that would rely on a board manager it does not have.
+    assert.equal(controller.validateCardTitle({ dataset: {}, querySelector: () => null }, payload), false);
+    assert.equal(toasts.length, 2);
+});
+
 test('a board-managed card runs while the board manager runs, and only while the setting is on', () => {
     const controller = new BoardController({ showToast() {} });
     const card = { id: 'c1', workflowMode: 'agent', managerSelection: null, sessions: [] };

@@ -245,6 +245,45 @@ public sealed class BoardManagerLaunchTests : IDisposable
         Assert.NotNull(await Launcher().LaunchAsync(_root, fourth.Id, null, Ct, intent: "worker"));
     }
 
+    [Fact]
+    public async Task TwoWorkerLaunchesAtOnce_OnDifferentManagedCards_StartOnlyOne()
+    {
+        await BoardWithManagerAsync();
+        var first = await _store.CreateCardAsync(_root, Card("First", BoardWorkflowModes.Agent), Ct);
+        var second = await _store.CreateCardAsync(_root, Card("Second", BoardWorkflowModes.Agent), Ct);
+        // The first worker's session start is held open, before it is linked to its card.
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _tabs.Setup(t => t.StartSessionAsync(It.IsAny<string>(), It.IsAny<StartTerminalRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(async (string tabId, StartTerminalRequest request, CancellationToken _) =>
+            {
+                _requests.Add(request);
+                entered.TrySetResult();
+                await release.Task;
+                var session = new TerminalStatusResponse(true, Guid.NewGuid().ToString(), request.Cli, _root);
+                _liveTabs.Add(new TerminalTabStatusResponse(tabId, DateTime.UtcNow, true, session.SessionId));
+                return session;
+            });
+
+        var launching = Launcher().LaunchAsync(_root, first.Id, null, Ct, intent: "worker");
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10), Ct);
+        var racing = await Assert.ThrowsAsync<BoardConflictException>(() => Launcher().LaunchAsync(_root, second.Id, null, Ct, intent: "worker"));
+        Assert.Contains("Another implementation worker is starting on this board", racing.Message);
+        release.SetResult();
+        Assert.NotNull(await launching);
+        Assert.Single(_requests);
+
+        // Once the first is linked and live, the limit itself refuses the second; the slot was released.
+        var limited = await Assert.ThrowsAsync<BoardConflictException>(() => Launcher().LaunchAsync(_root, second.Id, null, Ct, intent: "worker"));
+        Assert.Contains("at most 1 implementation worker at a time", limited.Message);
+        Assert.Single(_requests);
+
+        // A refused launch releases the slot too: with room again, the next one starts.
+        _liveTabs.Clear();
+        Assert.NotNull(await Launcher().LaunchAsync(_root, second.Id, null, Ct, intent: "worker"));
+        Assert.Equal(2, _requests.Count);
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearPool(new SqliteConnection(_connectionString));

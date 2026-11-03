@@ -238,22 +238,46 @@ public sealed partial class BoardStore
     /// <summary>Characters of an entry's body read for an event; the tool shows 300 of them.</summary>
     private const int EventBodyReadChars = 600;
 
+    /// <summary>Most entries returned for one shared stamp; far beyond any real burst, it only bounds a pathological one.</summary>
+    private const int MaxEventCohort = 10_000;
+
     public async Task<IReadOnlyList<BoardEventRecord>> GetBoardEventsAsync(string projectPath, string boardId, DateTime sinceUtc, int limit = 100,
         bool managedOnly = false, string? excludeSessionId = null, CancellationToken cancellationToken = default)
     {
         var project = NormalizeProjectPath(projectPath);
         limit = Math.Clamp(limit, 1, 500);
+        var since = ToDb(sinceUtc);
+        var exclude = string.IsNullOrWhiteSpace(excludeSessionId) ? null : excludeSessionId.Trim();
         await using var connection = await OpenAsync(cancellationToken);
+        var events = await ReadBoardEventsAsync(connection, project, boardId.Trim(), since, null, limit + 1, managedOnly, exclude, cancellationToken);
+        if (events.Count <= limit) return events.Select(item => item.Event).ToList();
+        // A full batch: drop the trailing entries that share the last returned stamp with the row
+        // just past the limit, so the next cursor (the last stamp returned) cannot skip any of them.
+        var cut = events[limit].Stamp;
+        var kept = events.Take(limit).Where(item => !string.Equals(item.Stamp, cut, StringComparison.Ordinal)).Select(item => item.Event).ToList();
+        if (kept.Count > 0) return kept;
+        // The whole batch is one stamp: return that whole group, however large, so the cursor can
+        // move past it without leaving any of its entries behind.
+        return (await ReadBoardEventsAsync(connection, project, boardId.Trim(), since, cut, MaxEventCohort, managedOnly, exclude, cancellationToken))
+            .Select(item => item.Event).ToList();
+    }
+
+    /// <summary>
+    /// Two sources, one stream, both stamped in the ToDb round-trip format, which orders as text:
+    /// 1. The Card Log (VB-51): every card write appends a BoardComments row in its own IMMEDIATE
+    ///    transaction, so moves, edits, comments, handoffs and flags arrive in commit order. Hidden
+    ///    and deleted discussion stays out, exactly as it does for card reads; a card's deletion is
+    ///    the one entry kept for a deleted card, so a manager learns the card is gone.
+    /// 2. Completion reports (BoardAgentCompletions), which are not Card Log rows: a worker that
+    ///    reports and exits without a comment still wakes its manager.
+    /// managedOnly keeps the cards the board manager owns, plus a workflow or manager change on any
+    /// card: switching a card to Manual, or giving it its own manager, takes it out of scope.
+    /// <paramref name="exactStamp"/> reads one stamp's whole group.
+    /// </summary>
+    private static async Task<List<(string Stamp, BoardEventRecord Event)>> ReadBoardEventsAsync(SqliteConnection connection, string project, string boardId,
+        string since, string? exactStamp, int limit, bool managedOnly, string? excludeSessionId, CancellationToken cancellationToken)
+    {
         await using var command = connection.CreateCommand();
-        // Two sources, one stream, both stamped in the ToDb round-trip format, which orders as text:
-        // 1. The Card Log (VB-51): every card write appends a BoardComments row in its own IMMEDIATE
-        //    transaction, so moves, edits, comments, handoffs and flags arrive in commit order. Hidden
-        //    and deleted discussion stays out, exactly as it does for card reads; a card's deletion is
-        //    the one entry kept for a deleted card, so a manager learns the card is gone.
-        // 2. Completion reports (BoardAgentCompletions), which are not Card Log rows: a worker that
-        //    reports and exits without a comment still wakes its manager.
-        // managedOnly keeps the cards the board manager owns, plus a workflow or manager change on
-        // any card: switching a card to Manual, or giving it its own manager, takes it out of scope.
         command.CommandText = $"""
             SELECT Stamp, CardId, CardKey, DisplayId, LaneName, Kind, AuthorKind, AuthorLabel, Body, Attention FROM (
                 SELECT m.CreatedUTC AS Stamp, 0 AS Source, m.rowid AS RowOrder, c.Id AS CardId, {CardKeySql} AS CardKey, c.DisplayId AS DisplayId,
@@ -266,7 +290,7 @@ public sealed partial class BoardStore
                 {CardPrefixJoinSql}
                 WHERE c.ProjectPath = $project{ProjectPathCollation} AND lane.BoardId = $board
                   AND (c.DeletedUTC IS NULL OR m.Kind = 'deleted')
-                  AND m.CreatedUTC > $since AND m.DiscussionHidden = 0
+                  AND m.CreatedUTC > $since AND ($exact IS NULL OR m.CreatedUTC = $exact) AND m.DiscussionHidden = 0
                   AND NOT EXISTS (SELECT 1 FROM BoardDeletedComments d WHERE d.CommentId = m.Id)
                   AND ($managedOnly = 0 OR ({BoardManagedCardSql})
                        OR (m.Kind = 'change' AND (m.Changes LIKE '%"workflowMode"%' OR m.Changes LIKE '%"managerSelection"%')))
@@ -280,37 +304,30 @@ public sealed partial class BoardStore
                 JOIN BoardColumns lane ON lane.Id = c.ColumnId
                 {CardPrefixJoinSql}
                 WHERE a.ProjectPath = $project{ProjectPathCollation} AND c.ProjectPath = $project{ProjectPathCollation} AND lane.BoardId = $board
-                  AND c.DeletedUTC IS NULL AND a.CompletedUTC > $since
+                  AND c.DeletedUTC IS NULL AND a.CompletedUTC > $since AND ($exact IS NULL OR a.CompletedUTC = $exact)
                   AND ($managedOnly = 0 OR ({BoardManagedCardSql}))
                   AND ($exclude IS NULL OR a.SessionId <> $exclude)
             )
             ORDER BY Stamp, Source, RowOrder LIMIT $limit;
             """;
         command.Parameters.AddWithValue("$project", project);
-        command.Parameters.AddWithValue("$board", boardId.Trim());
-        command.Parameters.AddWithValue("$since", ToDb(sinceUtc));
-        command.Parameters.AddWithValue("$limit", limit + 1);
+        command.Parameters.AddWithValue("$board", boardId);
+        command.Parameters.AddWithValue("$since", since);
+        command.Parameters.AddWithValue("$exact", (object?)exactStamp ?? DBNull.Value);
+        command.Parameters.AddWithValue("$limit", limit);
         command.Parameters.AddWithValue("$managedOnly", managedOnly ? 1 : 0);
-        command.Parameters.AddWithValue("$exclude", string.IsNullOrWhiteSpace(excludeSessionId) ? DBNull.Value : excludeSessionId.Trim());
+        command.Parameters.AddWithValue("$exclude", (object?)excludeSessionId ?? DBNull.Value);
         var events = new List<(string Stamp, BoardEventRecord Event)>();
-        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
         {
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                var stamp = reader.GetString(0);
-                events.Add((stamp, new BoardEventRecord(ParseDb(stamp), reader.GetString(1), reader.GetString(2),
-                    reader.IsDBNull(3) ? null : reader.GetString(3), reader.GetString(4), reader.GetString(5),
-                    reader.GetString(6), reader.GetString(7), reader.IsDBNull(8) ? "" : reader.GetString(8),
-                    !reader.IsDBNull(9) && BoardAttention.IsAttention(reader.GetString(9)))));
-            }
+            var stamp = reader.GetString(0);
+            events.Add((stamp, new BoardEventRecord(ParseDb(stamp), reader.GetString(1), reader.GetString(2),
+                reader.IsDBNull(3) ? null : reader.GetString(3), reader.GetString(4), reader.GetString(5),
+                reader.GetString(6), reader.GetString(7), reader.IsDBNull(8) ? "" : reader.GetString(8),
+                !reader.IsDBNull(9) && BoardAttention.IsAttention(reader.GetString(9)))));
         }
-        if (events.Count <= limit) return events.Select(item => item.Event).ToList();
-        // A full batch: drop the trailing entries that share the last returned stamp with the row
-        // just past the limit, so the next cursor (the last stamp returned) cannot skip any of them.
-        // A batch that is one stamp throughout is returned whole rather than never advancing.
-        var cut = events[limit].Stamp;
-        var kept = events.Take(limit).Where(item => !string.Equals(item.Stamp, cut, StringComparison.Ordinal)).Select(item => item.Event).ToList();
-        return kept.Count > 0 ? kept : events.Where(item => string.Equals(item.Stamp, cut, StringComparison.Ordinal)).Select(item => item.Event).ToList();
+        return events;
     }
 
     public async Task<IReadOnlyList<BoardManagedCardRecord>> GetManagedCardsAsync(string projectPath, string boardId, CancellationToken cancellationToken = default)

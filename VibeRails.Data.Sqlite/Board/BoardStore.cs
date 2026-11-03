@@ -749,10 +749,15 @@ public sealed partial class BoardStore : IBoardStore
             ManagerBaseLlmOptions = patch.ClearManagerBaseLlmOptions ? null : patch.ManagerBaseLlmOptions ?? existing.ManagerBaseLlmOptions,
             GhostReason = patch.ClearGhost ? null : existing.GhostReason
         };
-        // Only a change to the workflow, the manager or the board re-checks who manages the card:
-        // removing a board manager must not make a title edit on a card that relied on it fail.
-        if (patch.WorkflowMode is not null || patch.ManagerSelection is not null || patch.ClearManagerSelection || boardId != existing.BoardId)
+        // Only an actual change to the workflow, the manager or the board re-checks who manages the
+        // card: removing a board manager, or turning the AI board manager off, must not make a title
+        // edit on a card that relied on it fail, even when a client resends the unchanged values.
+        if (!string.Equals(updated.WorkflowMode, existing.WorkflowMode, StringComparison.Ordinal)
+            || !string.Equals(updated.ManagerSelection ?? "", existing.ManagerSelection ?? "", StringComparison.Ordinal)
+            || boardId != existing.BoardId)
             await ValidateAgentWorkflowAsync(connection, transaction, project, updated.WorkflowMode, updated.ManagerSelection, boardId, cancellationToken);
+        else if (!BoardWorkflowModes.IsValid(updated.WorkflowMode))
+            throw new BoardValidationException("Workflow must be manual or agent.");
 
         await using (var command = connection.CreateCommand())
         {

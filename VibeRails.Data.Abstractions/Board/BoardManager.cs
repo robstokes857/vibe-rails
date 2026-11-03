@@ -71,7 +71,8 @@ public partial interface IBoardStore
     /// first. With <paramref name="managedOnly"/> only the cards the board manager owns count, plus any
     /// card's workflow or manager change, so a card leaving the manager's hands still wakes it. Entries
     /// written by <paramref name="excludeSessionId"/> (the caller's own writes) are left out. A full
-    /// batch never ends inside a group of entries that share a timestamp, so the cursor cannot split one.
+    /// batch never ends inside a group of entries that share a timestamp, and a batch that is one
+    /// timestamp throughout is returned whole, so the timestamp cursor never skips an entry.
     /// </summary>
     Task<IReadOnlyList<BoardEventRecord>> GetBoardEventsAsync(string projectPath, string boardId, DateTime sinceUtc, int limit = 100,
         bool managedOnly = false, string? excludeSessionId = null, CancellationToken cancellationToken = default);

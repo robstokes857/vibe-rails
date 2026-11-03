@@ -61,8 +61,9 @@ is unchanged, as on cards). An Agent card **without** its own `ManagerSelection`
 board manager; a card that keeps its own manager is not, and is listed to it as such. The store
 owns that rule inside the card write transaction (`ValidateAgentWorkflowAsync`): Agent mode needs
 the card's manager, or the board's while the switch is on. Removing the board manager or turning
-the switch off never blocks ordinary edits of a card that relied on it; only a workflow, manager or
-board change re-checks, and Start then fails with a message naming the fix. `BoardService` still
+the switch off never blocks ordinary edits of a card that relied on it; only an actual workflow,
+manager or board change re-checks (a resent unchanged value does not), the editor likewise checks
+only a new Agent card or a changed assignment, and Start then fails with a message naming the fix. `BoardService` still
 refuses a manager selection that is not a picker key.
 
 `BoardLaunchService.LaunchBoardManagerAsync` (`POST …/manager/launch`, the chip's Start manager)
@@ -85,9 +86,12 @@ Card type context reach each worker through its own card.
 **Worker limit.** A worker launch (`intent=worker`, not a review or planning worker) on a
 board-managed card is refused with a 409 while the board's live implementation workers reach the
 manager's **Workers at a time**: `agent_worker` sessions on board-managed cards with a live tab in
-this root, without review or Automation sessions. The message names the running cards and points at
-`await_board_events`; `start_board_agent` passes it through. Cards with their own manager are
-outside it, and so is everything while the switch is off.
+this root, without review or Automation sessions. The launch first reserves the board's worker slot
+(`workers:<boardId>`, released only after its session is started and linked, or on failure) and
+lists tabs again under it, so two launches on different cards cannot both see a free slot; the
+second gets "Another implementation worker is starting on this board". The message names the
+running cards and points at `await_board_events`; `start_board_agent` passes it through. Cards
+with their own manager are outside it, and so is everything while the switch is off.
 
 **`await_board_events`** is the manager's wait: a server-side long poll (default 25 s, max 45 s,
 two-second reads) over `IBoardStore.GetBoardEventsAsync`: Card Log and discussion rows plus

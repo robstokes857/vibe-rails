@@ -124,7 +124,11 @@ public sealed class BoardManagerStoreTests : IDisposable
         Assert.Equal("Renamed", (await _store.UpdateCardAsync(_project, managed.Id, new BoardCardPatch(Title: "Renamed"), Ct))!.Title);
         var manual = await _store.CreateCardAsync(_project, NewCard("Manual"), Ct);
         await Assert.ThrowsAsync<BoardValidationException>(() => _store.UpdateCardAsync(_project, manual.Id, new BoardCardPatch(WorkflowMode: BoardWorkflowModes.Agent), Ct));
-        await Assert.ThrowsAsync<BoardValidationException>(() => _store.UpdateCardAsync(_project, managed.Id, new BoardCardPatch(ClearManagerSelection: true), Ct));
+        // Clearing a manager the card does not have is no change, so it saves; dropping a real one
+        // to rely on a board manager that is gone is refused.
+        Assert.Null((await _store.UpdateCardAsync(_project, managed.Id, new BoardCardPatch(ClearManagerSelection: true), Ct))!.ManagerSelection);
+        var keeps = await _store.CreateCardAsync(_project, NewCard("Keeps its manager", BoardWorkflowModes.Agent, "base:claude"), Ct);
+        await Assert.ThrowsAsync<BoardValidationException>(() => _store.UpdateCardAsync(_project, keeps.Id, new BoardCardPatch(ClearManagerSelection: true), Ct));
     }
 
     [Fact]
@@ -139,8 +143,11 @@ public sealed class BoardManagerStoreTests : IDisposable
         Assert.Equal("Select a manager agent for the Agent workflow.", refused.Message);
         var manual = await _store.CreateCardAsync(_project, NewCard("Manual"), Ct);
         await Assert.ThrowsAsync<BoardValidationException>(() => _store.UpdateCardAsync(_project, manual.Id, new BoardCardPatch(WorkflowMode: BoardWorkflowModes.Agent), Ct));
-        // A card saved while it was on keeps saving ordinary edits; giving it a manager is always allowed.
+        // A card saved while it was on keeps saving ordinary edits, even when a client resends its
+        // unchanged workflow and (empty) manager; giving it a manager is always allowed.
         Assert.Equal("Still editable", (await _store.UpdateCardAsync(_project, managed.Id, new BoardCardPatch(Title: "Still editable"), Ct))!.Title);
+        Assert.Equal("Resent", (await _store.UpdateCardAsync(_project, managed.Id,
+            new BoardCardPatch(Title: "Resent", WorkflowMode: BoardWorkflowModes.Agent, ClearManagerSelection: true), Ct))!.Title);
         Assert.Equal("base:claude", (await _store.UpdateCardAsync(_project, managed.Id, new BoardCardPatch(ManagerSelection: "base:claude"), Ct))!.ManagerSelection);
         Assert.NotNull(await _store.CreateCardAsync(_project, NewCard("Own manager", BoardWorkflowModes.Agent, "base:codex"), Ct));
     }
@@ -277,8 +284,35 @@ public sealed class BoardManagerStoreTests : IDisposable
         Assert.Equal(["first"], batch.Select(entry => entry.Summary));
         var rest = await _store.GetBoardEventsAsync(_project, boardId, batch[^1].Utc, 2, cancellationToken: Ct);
         Assert.Equal(["same-a", "same-b"], rest.Select(entry => entry.Summary));
-        // One stamp throughout still advances instead of returning nothing forever.
+        // One stamp throughout returns that whole group instead of returning nothing forever.
         Assert.Equal(2, (await _store.GetBoardEventsAsync(_project, boardId, first.CreatedUtc, 1, cancellationToken: Ct)).Count);
+    }
+
+    [Fact]
+    public async Task ABurstLargerThanTheLimit_AtOneStamp_IsReturnedWhole()
+    {
+        var boardId = await DefaultBoardAsync();
+        var card = await _store.CreateCardAsync(_project, NewCard("Burst"), Ct);
+        var cursor = DateTime.UtcNow;
+        var shared = cursor.AddMilliseconds(20);
+        await using (var connection = new SqliteConnection(_connectionString))
+        {
+            await connection.OpenAsync(Ct);
+            for (var index = 0; index < 105; index++)
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = "INSERT INTO BoardComments (Id, CardId, AuthorKind, AuthorLabel, Body, CreatedUTC, Kind) VALUES ($id, $card, 'user', 'You', $body, $at, 'comment');";
+                command.Parameters.AddWithValue("$id", $"cm_burst_{index:D3}");
+                command.Parameters.AddWithValue("$card", card.Id);
+                command.Parameters.AddWithValue("$body", $"burst {index}");
+                command.Parameters.AddWithValue("$at", shared.ToString("O"));
+                await command.ExecuteNonQueryAsync(Ct);
+            }
+        }
+        var batch = await _store.GetBoardEventsAsync(_project, boardId, cursor, 100, cancellationToken: Ct);
+        Assert.Equal(105, batch.Count);
+        Assert.Equal(Enumerable.Range(0, 105).Select(index => $"burst {index}"), batch.Select(entry => entry.Summary));
+        Assert.Empty(await _store.GetBoardEventsAsync(_project, boardId, batch[^1].Utc, 100, cancellationToken: Ct));
     }
 
     [Fact]

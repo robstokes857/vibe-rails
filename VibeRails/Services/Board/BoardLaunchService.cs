@@ -80,12 +80,18 @@ public sealed class BoardLaunchService(
         if (!LaunchingCards.TryAdd(reservation, 0))
             throw new BoardConflictException("An agent is already starting on this card. Wait for it to finish starting.");
         Launched? launched;
+        // Further reservations the launch takes (the board's worker slot) live until it has linked its session.
+        var held = new List<string>();
         try
         {
             // Re-read after the reservation: fields may have changed while resolving the key.
-            launched = await LaunchCoreAsync(projectPath, card.Id, selectionOverride, cancellationToken, intent, reviewRequest, question, task);
+            launched = await LaunchCoreAsync(projectPath, card.Id, selectionOverride, cancellationToken, intent, reviewRequest, question, task, held);
         }
-        finally { LaunchingCards.TryRemove(reservation, out _); }
+        finally
+        {
+            LaunchingCards.TryRemove(reservation, out _);
+            foreach (var key in held) LaunchingCards.TryRemove(key, out _);
+        }
         if (launched is null)
             return null;
         // Measured after the reservation is released, so the measurement never holds the gate: a second
@@ -98,7 +104,8 @@ public sealed class BoardLaunchService(
     /// <summary>A started launch and what its context sample needs.</summary>
     private sealed record Launched(LaunchBoardCardResponse Response, BoardCardRecord Card, BoardLaunchPrompt Prompt, string Cli, string Selection, string Intent, bool Reused = false);
 
-    private async Task<Launched?> LaunchCoreAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken, string intent, ReviewLaunchRequest? reviewRequest, string? question, string? task)
+    private async Task<Launched?> LaunchCoreAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken, string intent, ReviewLaunchRequest? reviewRequest, string? question, string? task,
+        List<string> held)
     {
         var card = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
         if (card is null)
@@ -232,7 +239,7 @@ public sealed class BoardLaunchService(
             throw new BoardConflictException(isManager ? "A manager is already running on this card. Open it from Sessions."
                 : "A worker is already running on this card. Wait for its session to finish or open it from Sessions.", existingTab.SessionId);
         if (isWorker && !isReview && !isPlanning)
-            await RequireManagedWorkerSlotAsync(projectPath, card, tabs, cancellationToken);
+            await RequireManagedWorkerSlotAsync(projectPath, card, held, cancellationToken);
         if (tabs.Count >= tabHost.MaxTabs)
             throw new BoardConflictException($"All {tabHost.MaxTabs} terminal tabs are in use. Close one first.");
 
@@ -374,14 +381,21 @@ public sealed class BoardLaunchService(
     /// usually share one checkout, so at most <see cref="BoardManagerSettings.MaxWorkers"/> of them
     /// run at once across the board, whoever asks. Cards with their own manager, reviews and
     /// planning workers are outside it, and so is everything while the AI board manager is off.
+    /// The board's worker slot is reserved before counting and kept (in <paramref name="held"/>)
+    /// until the caller has started and linked its session, so two launches on different cards can
+    /// never both see a free slot; tabs are listed again under the reservation for the same reason.
     /// Root-local, like every live check here.
     /// </summary>
-    private async Task RequireManagedWorkerSlotAsync(string projectPath, BoardCardRecord card, IReadOnlyList<TerminalTabStatusResponse> tabs, CancellationToken cancellationToken)
+    private async Task RequireManagedWorkerSlotAsync(string projectPath, BoardCardRecord card, List<string> held, CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(card.ManagerSelection) || string.IsNullOrEmpty(card.BoardId)) return;
         if (!await store.GetBoardManagerEnabledAsync(cancellationToken)) return;
         if ((await store.GetBoardManagerAsync(projectPath, card.BoardId, cancellationToken))?.Settings is not { IsConfigured: true } manager) return;
-        var running = await LiveImplementationWorkersAsync(projectPath, card.BoardId, tabs, cancellationToken);
+        var slot = "workers:" + card.BoardId;
+        if (!LaunchingCards.TryAdd(slot, 0))
+            throw new BoardConflictException("Another implementation worker is starting on this board. Wait for it with await_board_events, then try again.");
+        held.Add(slot);
+        var running = await LiveImplementationWorkersAsync(projectPath, card.BoardId, await tabHost.ListTabsAsync(cancellationToken), cancellationToken);
         if (running.Count < manager.MaxWorkers) return;
         var cards = string.Join(", ", running.Select(worker => worker.DisplayId ?? worker.CardKey).Distinct(StringComparer.Ordinal));
         throw new BoardConflictException(

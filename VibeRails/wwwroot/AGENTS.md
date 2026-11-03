@@ -230,7 +230,9 @@ Backend guards remain authoritative for every write and launch.
 (`settings-ai-board-manager.js`) is an immediate-save, default-off switch like PR Reviewer. While it
 is off the manager status says `enabled: false`: the header chip is hidden, Board settings has no
 **Manager** tab (`boardSettingsNavigation({ manager })`), the card editor offers no **Use the board
-manager**, and board-managed tiles behave like any Agent card without a manager. `board-manager.js`
+manager**, and board-managed tiles behave like any Agent card without a manager; a saved card
+whose workflow and manager are unchanged still saves ordinary edits (`validateCardTitle` checks only
+a new Agent card or a changed assignment), and Start work reports the server's reason. `board-manager.js`
 renders the chip (`[data-board-ai-manager]`; its own `.board-ai-manager-*` classes, because
 `.board-manager-chip` is the card foot's per-card manager label): Set up board manager when none is
 saved, Start manager when it is stopped, and while it runs Go to manager, Stop (behind
