@@ -393,7 +393,7 @@ Label the preference itself, such as “Email notifications,” rather than usin
 
 Cards group a meaningful object or task. Use a quiet border, one heading and a small set of actions. Let the content determine height; avoid equal-height layouts that create large empty areas. Give action buttons separate targets rather than nesting buttons in a clickable card.
 
-Board task tiles keep a short assignee (including **Unassigned**) and **Start work** / **Go to agent** on one row, vertically centered with at least 8px between them. The minimum lane width must accommodate these controls and grow with text scaling. Long agent names may put the action on a second, right-aligned row without squeezing the name.
+Board task tiles keep a short assignee (including **Unassigned**) and **Start work** / **Go to agent** on one row, vertically centered with at least 8px between them. The minimum lane width must accommodate these controls and grow with text scaling. The desktop app uses a compact lane minimum of `max(288px, 18rem)` to reduce horizontal scrolling. Long agent names may put the action on a second, right-aligned row without squeezing the name.
 
 | Part | Value |
 | --- | --- |

@@ -3213,6 +3213,8 @@ for (const { rootSize, width, active } of compactCardLayouts) {
         const chip = tile.locator('.board-assignee-chip');
         const start = tile.locator('.board-card-start-work');
         await expect(start).toBeInViewport();
+        const laneWidth = await tile.evaluate(element => element.closest('.board-lane').getBoundingClientRect().width);
+        expect(laneWidth).toBeCloseTo(Math.max(288, 18 * rootSize), 0);
         await tile.screenshot({ path: testInfo.outputPath(`compact-card-${rootSize}-${width}-${active ? 'active' : 'unassigned'}.png`) });
         const [chipBounds, startBounds] = await Promise.all([chip.boundingBox(), start.boundingBox()]);
         expect(Math.abs(chipBounds.y + chipBounds.height / 2 - startBounds.y - startBounds.height / 2)).toBeLessThan(1);
