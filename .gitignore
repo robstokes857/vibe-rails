@@ -467,3 +467,4 @@ Tests/Services/Terminal/Fixtures/session_b91596d9_codex_working_falsefire.fixtur
 # failed on LookalikeNames_AreNotPackageFiles because the file was never committed. Only *.user
 # needs re-including: bin/, obj/ and .vs/ under the fixtures stay ignored like everywhere else.
 !Tests/VcaRegression/Fixtures/**/*.user
+opencode.json
