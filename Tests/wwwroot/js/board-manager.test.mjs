@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BoardApi } from '../../../VibeRails/wwwroot/js/modules/board-api.js';
-import { renderBoardManagerChip, mountBoardManagerChip, boardManagerChipState, boardManagerSummary } from '../../../VibeRails/wwwroot/js/modules/board-manager.js';
+import { renderBoardManagerChip, mountBoardManagerChip, boardManagerChipState, boardManagerSummary, BOARD_MANAGER_HIDDEN_POLL_MS } from '../../../VibeRails/wwwroot/js/modules/board-manager.js';
 import { boardSettingsNavigation, mountBoardManager } from '../../../VibeRails/wwwroot/js/modules/board-settings.js';
 import { BoardController } from '../../../VibeRails/wwwroot/js/modules/board-controller.js';
 import { AiBoardManagerSettingsPanel, aiBoardManagerStatus, AI_BOARD_MANAGER_PATH } from '../../../VibeRails/wwwroot/js/modules/settings-ai-board-manager.js';
@@ -52,6 +52,53 @@ test('the chip is hidden while the AI board manager is off, then renders setup, 
     assert.match(running, /data-board-manager-action="stop" aria-label="Stop board manager"/);
     // The chip's own class never reuses the card foot's per-card manager label.
     assert.doesNotMatch(running, /class="board-manager-chip/);
+});
+
+test('while the chip is hidden the board poll asks once a minute; shown, every tick; refresh always asks', async () => {
+    let clock = 1_000_000;
+    let reads = 0;
+    let status = { enabled: false, selection: null, active: null, managedCards: 0 };
+    BoardApi.attach({ apiCall: async () => { reads += 1; return status; } });
+    const host = fakeHost();
+    const chip = mountBoardManagerChip({ showToast() {} }, host, { boardId: () => 'board-a', now: () => clock });
+    await tick();
+    assert.equal(reads, 1, 'mounting reads the status once');
+    assert.equal(host.hidden, true);
+
+    // Ten-second ticks inside the minute send nothing.
+    for (let i = 0; i < 5; i += 1) { clock += 10_000; await chip.poll(); }
+    assert.equal(reads, 1);
+    clock += BOARD_MANAGER_HIDDEN_POLL_MS - 50_000;
+    await chip.poll();
+    assert.equal(reads, 2, 'a minute after the last read the poll asks again');
+
+    // An explicit refresh (board switch, launch, manager save) asks at once, off or not.
+    clock += 1_000;
+    await chip.refresh();
+    assert.equal(reads, 3);
+
+    // Once the switch reads on, every tick asks.
+    status = { enabled: true, selection: 'base:codex', active: null, managedCards: 1 };
+    clock += BOARD_MANAGER_HIDDEN_POLL_MS;
+    await chip.poll();
+    assert.equal(reads, 4);
+    assert.equal(host.hidden, false);
+    clock += 10_000;
+    await chip.poll();
+    clock += 10_000;
+    await chip.poll();
+    assert.equal(reads, 6);
+
+    // A failed read hides the chip and drops back to once a minute.
+    BoardApi.attach({ apiCall: async () => { reads += 1; throw new Error('offline'); } });
+    clock += 10_000;
+    await chip.poll();
+    assert.equal(reads, 7);
+    assert.equal(host.hidden, true);
+    clock += 10_000;
+    await chip.poll();
+    assert.equal(reads, 7);
+    chip.dispose();
 });
 
 test('the summary counts cards, busy workers while running, and cards that need the user', () => {

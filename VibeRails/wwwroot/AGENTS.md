@@ -236,7 +236,10 @@ a new Agent card or a changed assignment), and Start work reports the server's r
 renders the chip (`[data-board-ai-manager]`; its own `.board-ai-manager-*` classes, because
 `.board-manager-chip` is the card foot's per-card manager label): Set up board manager when none is
 saved, Start manager when it is stopped, and while it runs Go to manager, Stop (behind
-`confirmDialog`) and a summary of managed cards, busy workers and cards that need the user. Below
+`confirmDialog`) and a summary of managed cards, busy workers and cards that need the user. The
+chip's `poll()` rides the board's ten-second poll, but while the chip is hidden it asks for the
+status at most once a minute (`BOARD_MANAGER_HIDDEN_POLL_MS`); a board switch, a launch and a
+manager save call `refresh()` and ask at once. Below
 860px it takes its own header row. While another VibeRails window runs the board's manager
 (`elsewhere`, VIBE-262) it reads Running in another window, with no buttons. While the manager
 runs here the chip repeats its tab's status word (Thinking, Ready, Waiting for user input, through

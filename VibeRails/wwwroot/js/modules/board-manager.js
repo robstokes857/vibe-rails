@@ -17,6 +17,13 @@ export const boardManagerChipState = status =>
         : status.elsewhere ? 'elsewhere'
         : 'stopped';
 
+/**
+ * While the chip is hidden (the switch off, an older backend, a failed read) the board's ten-second
+ * poll asks for the manager status at most this often. A board switch, a launch and a manager save
+ * still ask at once through refresh().
+ */
+export const BOARD_MANAGER_HIDDEN_POLL_MS = 60_000;
+
 const count = (value, one, many = `${one}s`) => `${value} ${value === 1 ? one : many}`;
 const flaggedCount = status => Number(status?.flaggedCards) || 0;
 const needsYou = flagged => `${flagged} ${flagged === 1 ? 'needs' : 'need'} you`;
@@ -158,14 +165,15 @@ function createManagerStatusTracker(active, onChange) {
  */
 export function mountBoardManagerChip(app, host, {
     boardId, describe = () => null, openSettings, focusTab, openCard, onStatus = () => {}, confirm = confirmDialog,
-    events = app?.appEventClient
+    events = app?.appEventClient, now = () => Date.now()
 }) {
-    if (!host) return { refresh: async () => null, status: () => null, dispose() {} };
+    if (!host) return { refresh: async () => null, poll: async () => null, status: () => null, dispose() {} };
     let disposed = false;
     let busy = false;
     let generation = 0;
     let abort = null;
     let status = null;
+    let requestedAt = null;
     let tracker = null;
     let launchedSession = null;
     let menuOpen = false;
@@ -237,6 +245,7 @@ export function mountBoardManagerChip(app, host, {
         abort?.abort();
         const own = abort = new AbortController();
         const token = ++generation;
+        requestedAt = now();
         try {
             const next = await BoardApi.getBoardManagerAsync(id, { signal: own.signal });
             if (!alive() || token !== generation || id !== boardId()) return status;
@@ -248,6 +257,12 @@ export function mountBoardManagerChip(app, host, {
             render();
         }
         return status;
+    }
+    /** The board's ten-second poll: every tick while the chip shows, once a minute while it is hidden. */
+    function poll() {
+        if (boardManagerChipState(status) === 'hidden' && requestedAt !== null && now() - requestedAt < BOARD_MANAGER_HIDDEN_POLL_MS)
+            return Promise.resolve(status);
+        return refresh();
     }
     async function stop(id) {
         const label = describe(status?.selection)?.label || 'The board manager';
@@ -321,6 +336,7 @@ export function mountBoardManagerChip(app, host, {
     void refresh();
     return {
         refresh,
+        poll,
         status: () => status,
         statusWord: () => tracker?.word() ?? null,
         dispose() {

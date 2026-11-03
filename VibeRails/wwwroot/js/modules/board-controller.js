@@ -305,8 +305,8 @@ export class BoardController {
             || this._cardPageGeneration !== this._refreshGeneration || this._pageRequests.size || this._boardDragging) return;
         const generation = this._refreshGeneration;
         const boardId = this.state.boardId;
-        // The manager chip rides the same ten-second poll; its request is its own.
-        void this.managerChip?.refresh();
+        // The manager chip rides the same ten-second poll (once a minute while it is hidden); its request is its own.
+        void this.managerChip?.poll();
         this._boardPollAbort?.abort();
         const abort = this._boardPollAbort = new AbortController();
         const current = () => !abort.signal.aborted && root === this.root && root.isConnected
