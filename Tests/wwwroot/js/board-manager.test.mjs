@@ -335,3 +335,170 @@ test('the Settings switch loads, saves at once and reports an unconfirmed save',
     assert.equal(toggle.checked, true);
     panel.unload();
 });
+
+// VIBE-262 -----------------------------------------------------------------------------------
+
+test('a manager running in another window shows there, with nothing to focus, stop or start', () => {
+    const status = { enabled: true, selection: 'base:claude', active: null, elsewhere: { sessionId: 's-other' }, managedCards: 2, runningWorkers: 1, maxWorkers: 1 };
+    assert.equal(boardManagerChipState(status), 'elsewhere');
+    const html = renderBoardManagerChip(status, () => ({ label: 'Claude' }));
+    assert.match(html, /is-elsewhere/);
+    assert.match(html, /Running in another window/);
+    assert.match(html, /2 Agent cards · 1 of 1 worker busy/);
+    assert.match(html, /from another VibeRails window on this project/);
+    assert.doesNotMatch(html, /data-board-manager-action="(focus|stop|start)"/);
+    // A live tab here always wins over another window's record.
+    assert.equal(boardManagerChipState({ ...status, active: { tabId: 't' } }), 'running');
+});
+
+test('the chip repeats the manager tab status word and falls back to Running', () => {
+    const status = { enabled: true, selection: 'base:claude', active: { tabId: 't', sessionId: 's' }, managedCards: 1 };
+    const describe = () => ({ label: 'Claude' });
+    assert.match(renderBoardManagerChip(status, describe), /board-ai-manager-word">Running</);
+    assert.match(renderBoardManagerChip(status, describe, { statusWord: { status: 'thinking', text: 'Thinking' } }), /board-ai-manager-word">Thinking</);
+    assert.match(renderBoardManagerChip(status, describe, { statusWord: { status: 'ready', text: 'Ready' } }), /board-ai-manager-word">Ready</);
+    const waiting = renderBoardManagerChip(status, describe, { statusWord: { status: 'waiting', text: 'Waiting for user input' } });
+    assert.match(waiting, /board-ai-manager-word">Waiting for user input</);
+    assert.match(waiting, /is-waiting/);
+    assert.match(waiting, /aria-label="Board manager Claude, running, Waiting for user input"/);
+    // Connected and Disconnected say nothing about the agent, so the chip keeps Running.
+    assert.match(renderBoardManagerChip(status, describe, { statusWord: { status: 'connected', text: 'Connected' } }), /board-ai-manager-word">Running</);
+    // A stopped manager never shows a stale word.
+    assert.match(renderBoardManagerChip({ ...status, active: null }, describe, { statusWord: { status: 'thinking', text: 'Thinking' } }), /Stopped/);
+});
+
+test('"needs you" is a button that lists the flagged Agent cards, escaped, with the rest counted', () => {
+    const status = { enabled: true, selection: 'base:claude', active: { tabId: 't' }, managedCards: 4, flaggedCards: 3,
+        flagged: [{ id: 'c1', key: 'VB-1', displayId: 'VIBE-1', title: '<b>Fix</b>', laneName: 'Review' }, { id: 'c2', key: 'VB-2', title: 'Two', laneName: 'Ready' }] };
+    const closed = renderBoardManagerChip(status, () => ({ label: 'Claude' }));
+    assert.match(closed, /data-board-manager-action="flagged"[^>]*aria-expanded="false"/);
+    assert.match(closed, /3 need you/);
+    assert.match(closed, /id="board-ai-manager-flagged-menu"[^>]*hidden/);
+    assert.match(closed, /data-board-manager-card="c1"/);
+    assert.match(closed, /VIBE-1/);
+    assert.match(closed, /&lt;b&gt;Fix&lt;\/b&gt;/);
+    assert.match(closed, /VB-2/, 'a card without a display id shows its key');
+    assert.match(closed, /\+1 more flagged card on this board/);
+    // The inline summary leaves the count to the button; the tooltip keeps the whole sentence.
+    assert.match(closed, /board-ai-manager-summary">· 4 Agent cards · 0 of 1 worker busy</);
+    assert.match(closed, /title="Claude is managing this board: 4 Agent cards · 0 of 1 worker busy · 3 need you"/);
+    const open = renderBoardManagerChip(status, () => ({ label: 'Claude' }), { menuOpen: true });
+    assert.match(open, /aria-expanded="true"/);
+    assert.doesNotMatch(open, /id="board-ai-manager-flagged-menu"[^>]*hidden/);
+    assert.doesNotMatch(renderBoardManagerChip({ ...status, flaggedCards: 0, flagged: [] }), /data-board-manager-action="flagged"/);
+});
+
+function fakeEvents() {
+    const handlers = new Map();
+    return {
+        on(type, fn) {
+            handlers.set(type, [...(handlers.get(type) || []), fn]);
+            return () => handlers.set(type, (handlers.get(type) || []).filter(other => other !== fn));
+        },
+        emit(type, payload) { for (const fn of handlers.get(type) || []) fn(payload); },
+        count: () => [...handlers.values()].reduce((sum, list) => sum + list.length, 0)
+    };
+}
+
+function eventHost() {
+    const host = fakeHost();
+    const listeners = new Map();
+    host.addEventListener = (name, listener) => listeners.set(name, listener);
+    host.removeEventListener = name => listeners.delete(name);
+    host.click = clicked => listeners.get('click')?.({ target: clicked });
+    host.fire = (name, event) => listeners.get(name)?.(event);
+    return host;
+}
+
+const target = dataset => ({ dataset, disabled: false, isConnected: true, closest: () => ({ dataset, disabled: false, isConnected: true }) });
+
+test('the status word follows the manager session app events and ignores every other session', async () => {
+    let status = { enabled: true, selection: 'base:claude', active: { tabId: 'tab-1', sessionId: 's-1', cli: 'Claude' }, managedCards: 1 };
+    BoardApi.attach({ apiCall: async () => status });
+    const events = fakeEvents();
+    const host = eventHost();
+    const chip = mountBoardManagerChip({ showToast() {} }, host, { boardId: () => 'board-a', describe: () => ({ label: 'Claude' }), events });
+    await tick();
+    // Already running when the page loaded: no word until the session says something.
+    assert.equal(chip.statusWord(), null);
+    assert.match(host.innerHTML, /board-ai-manager-word">Running</);
+
+    events.emit('session_idle', { sessionId: 's-other' });
+    assert.equal(chip.statusWord(), null, 'another session never moves the word');
+
+    // A quiet spell after unknown output reads as the turn ending.
+    events.emit('session_idle', { sessionId: 's-1' });
+    assert.equal(chip.statusWord()?.text, 'Ready');
+    assert.match(host.innerHTML, /board-ai-manager-word">Ready</);
+
+    events.emit('session_input', { sessionId: 's-1', kind: 'submit' });
+    assert.equal(chip.statusWord()?.text, 'Thinking');
+    assert.match(host.innerHTML, /board-ai-manager-word">Thinking</);
+
+    events.emit('session_waiting_for_user', { sessionId: 's-1' });
+    assert.equal(chip.statusWord()?.text, 'Waiting for user input');
+    assert.match(host.innerHTML, /is-waiting/);
+
+    // A new manager session starts from nothing again.
+    status = { ...status, active: { tabId: 'tab-2', sessionId: 's-2', cli: 'Codex' } };
+    await chip.refresh();
+    assert.equal(chip.statusWord(), null);
+    events.emit('session_waiting_for_user', { sessionId: 's-1' });
+    assert.equal(chip.statusWord(), null);
+
+    chip.dispose();
+    assert.equal(events.count(), 0, 'dispose unsubscribes from the app events');
+});
+
+test('a manager this chip starts reads Thinking at once, as its tab does', async () => {
+    let status = { enabled: true, selection: 'base:codex', active: null, managedCards: 1 };
+    BoardApi.attach({
+        apiCall: async (path, method) => {
+            if (method === 'POST' && path.endsWith('/launch')) {
+                status = { ...status, active: { tabId: 'tab-7', sessionId: 's-7', cli: 'Codex' } };
+                return { tabId: 'tab-7', sessionId: 's-7', selection: 'base:codex', reused: false };
+            }
+            return status;
+        }
+    });
+    const events = fakeEvents();
+    const host = eventHost();
+    const chip = mountBoardManagerChip({ showToast() {} }, host, { boardId: () => 'board-a', describe: () => ({ label: 'Codex' }), events });
+    await tick();
+    await host.click(target({ boardManagerAction: 'start' }));
+    assert.equal(chip.statusWord()?.text, 'Thinking');
+    assert.match(host.innerHTML, /board-ai-manager-word">Thinking</);
+    events.emit('session_idle', { sessionId: 's-7' });
+    assert.equal(chip.statusWord()?.text, 'Ready');
+    chip.dispose();
+});
+
+test('the flagged list opens, opens a card and closes, and a refresh waits while it is open', async () => {
+    let status = { enabled: true, selection: 'base:claude', active: { tabId: 't', sessionId: 's' }, managedCards: 2, flaggedCards: 1,
+        flagged: [{ id: 'c1', key: 'VB-1', title: 'One', laneName: 'Review' }] };
+    BoardApi.attach({ apiCall: async () => status });
+    const opened = [];
+    const host = eventHost();
+    const chip = mountBoardManagerChip({ showToast() {} }, host, {
+        boardId: () => 'board-a', describe: () => ({ label: 'Claude' }), openCard: id => opened.push(id), events: fakeEvents()
+    });
+    await tick();
+    await host.click(target({ boardManagerAction: 'flagged' }));
+    assert.match(host.innerHTML, /aria-expanded="true"/);
+
+    // A poll while the list is open keeps the DOM (and keyboard focus) where it is.
+    status = { ...status, managedCards: 5 };
+    await chip.refresh();
+    assert.match(host.innerHTML, /2 Agent cards/);
+    assert.equal(chip.status().managedCards, 5);
+
+    host.fire('keydown', { key: 'Escape', preventDefault() {} });
+    assert.match(host.innerHTML, /aria-expanded="false"/);
+    assert.match(host.innerHTML, /5 Agent cards/, 'closing repaints with what arrived meanwhile');
+
+    await host.click(target({ boardManagerAction: 'flagged' }));
+    await host.click(target({ boardManagerCard: 'c1' }));
+    assert.deepEqual(opened, ['c1']);
+    assert.match(host.innerHTML, /aria-expanded="false"/);
+    chip.dispose();
+});

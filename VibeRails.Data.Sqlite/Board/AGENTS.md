@@ -71,6 +71,9 @@ Agent cards through `CardSelectSql` plus lane names and the newest discussion ti
 `GetManagedWorkerSessionsAsync` lists worker and planning-worker attachments (both session tables)
 on board-managed cards. Older binaries ignore all three tables' new parts; an Agent card they save
 still names its own manager, so nothing they read changes.
+`GetOpenSessionOwnersAsync` (VIBE-262, no schema change) reads state.db `Sessions` rows still open
+(`EndedUTC IS NULL`) with a recorded `OwnerPid`, for at most 200 ids, behind the `_stateFeatures`
+probes; a file without those columns answers none. The host decides whether the owner still runs.
 
 `board-agent-workflow/1` adds nullable `BoardCards.WorkflowMode`, `ManagerSelection` and
 `ManagerOptionsJson` without converting older cards. NULL workflow reads as `manual`.

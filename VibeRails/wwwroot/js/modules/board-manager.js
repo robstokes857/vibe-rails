@@ -1,31 +1,76 @@
 import { escapeHtml, confirmDialog } from './utils.js';
 import { BoardApi } from './board-api.js';
+import { TabStatusController, TAB_STATUS } from './terminal-tab-status.js';
 
 /**
  * The board header's AI board manager chip (VIBE-52 follow-up, VIBE-204). Hidden unless the status
  * says enabled: true, so the setting being off, a backend without the manager route, or an answer
- * without the field all show nothing. Otherwise one of three states: no manager saved (Set up board manager), saved
- * but not running (Start manager), and running (Go to manager, Stop, and what it is doing).
+ * without the field all show nothing. Otherwise one of four states: no manager saved (Set up board
+ * manager), saved but not running (Start manager), running here (Go to manager, Stop, and what it
+ * is doing), and running in another VibeRails window on this project (VIBE-262), which this window
+ * can neither focus nor stop.
  */
 export const boardManagerChipState = status =>
-    status?.enabled !== true ? 'hidden' : !status.selection ? 'unset' : status.active ? 'running' : 'stopped';
+    status?.enabled !== true ? 'hidden'
+        : !status.selection ? 'unset'
+        : status.active ? 'running'
+        : status.elsewhere ? 'elsewhere'
+        : 'stopped';
 
 const count = (value, one, many = `${one}s`) => `${value} ${value === 1 ? one : many}`;
+const flaggedCount = status => Number(status?.flaggedCards) || 0;
+const needsYou = flagged => `${flagged} ${flagged === 1 ? 'needs' : 'need'} you`;
 
-/** The one-line summary the chip and its tooltip share, e.g. "3 Agent cards · 1 of 1 worker busy · 1 needs you". */
-export function boardManagerSummary(status) {
+/**
+ * The one-line summary the chip and its tooltip share, e.g. "3 Agent cards · 1 of 1 worker busy · 1 needs you".
+ * The chip itself shows the "needs you" part as its own button, so it asks for the rest with flagged: false.
+ */
+export function boardManagerSummary(status, { flagged = true } = {}) {
     const parts = [count(Number(status?.managedCards) || 0, 'Agent card')];
-    if (status?.active) {
+    if (status?.active || status?.elsewhere) {
         const max = Math.max(1, Number(status.maxWorkers) || 1);
         parts.push(`${Number(status.runningWorkers) || 0} of ${count(max, 'worker')} busy`);
     }
-    const flagged = Number(status?.flaggedCards) || 0;
-    if (flagged) parts.push(`${flagged} ${flagged === 1 ? 'needs' : 'need'} you`);
+    const cards = flaggedCount(status);
+    if (flagged && cards) parts.push(needsYou(cards));
     return parts.join(' · ');
 }
 
-/** describe(selection) is the controller's assigneeInfo, so the chip and the lane cards agree on an agent's name. */
-export function renderBoardManagerChip(status, describe = () => null) {
+/**
+ * The manager tab's status words the chip repeats, exactly as the tab shows them. Anything else
+ * (no event seen yet, Connected, Disconnected) reads as Running. The word is display only (owner,
+ * 2026-11-03): it is right most of the time, so nothing here decides that the manager is done.
+ */
+const CHIP_STATUSES = new Set([TAB_STATUS.THINKING, TAB_STATUS.READY, TAB_STATUS.WAITING]);
+
+const FLAGGED_MENU_ID = 'board-ai-manager-flagged-menu';
+
+function renderFlagged(status, menuOpen) {
+    const flagged = flaggedCount(status);
+    if (!flagged) return '';
+    const listed = Array.isArray(status.flagged) ? status.flagged : [];
+    const more = flagged - listed.length;
+    const items = listed.map(card => `<button type="button" class="board-ai-manager-menu-item" data-board-manager-card="${escapeHtml(card.id)}">
+            <span class="board-ai-manager-menu-key">${escapeHtml(card.displayId || card.key || '')}</span>
+            <span class="board-ai-manager-menu-title">${escapeHtml(card.title || '')}</span>
+            <span class="board-ai-manager-menu-lane">${escapeHtml(card.laneName || '')}</span>
+        </button>`).join('');
+    return `<span class="board-ai-manager-flagged">
+        <button type="button" class="board-ai-manager-needs" data-board-manager-action="flagged" aria-haspopup="true"
+            aria-expanded="${menuOpen ? 'true' : 'false'}" aria-controls="${FLAGGED_MENU_ID}" title="Agent cards flagged for your attention">
+            <i class="fa-solid fa-flag" aria-hidden="true"></i><span>${escapeHtml(needsYou(flagged))}</span></button>
+        <div class="board-ai-manager-menu" id="${FLAGGED_MENU_ID}" role="group" aria-label="Flagged Agent cards"${menuOpen ? '' : ' hidden'}>
+            ${items}
+            ${more > 0 ? `<p class="board-ai-manager-menu-more">${escapeHtml(`+${count(more, 'more flagged card')} on this board`)}</p>` : ''}
+        </div>
+    </span>`;
+}
+
+/**
+ * describe(selection) is the controller's assigneeInfo, so the chip and the lane cards agree on an
+ * agent's name. statusWord is the manager tab's { status, text } while it runs here, or null.
+ */
+export function renderBoardManagerChip(status, describe = () => null, { statusWord = null, menuOpen = false } = {}) {
     const state = boardManagerChipState(status);
     if (state === 'hidden') return '';
     if (state === 'unset') {
@@ -35,23 +80,69 @@ export function renderBoardManagerChip(status, describe = () => null) {
     }
     const label = describe(status.selection)?.label || status.selection;
     const running = state === 'running';
+    const elsewhere = state === 'elsewhere';
     const summary = boardManagerSummary(status);
-    const title = running ? `${label} is managing this board: ${summary}` : `${label} manages ${summary} once started`;
-    const flagged = Number(status.flaggedCards) || 0;
-    return `<span class="board-ai-manager-chip${running ? ' is-running' : ''}${flagged ? ' has-attention' : ''}" role="group"
-            aria-label="Board manager ${escapeHtml(label)}, ${running ? 'running' : 'stopped'}" title="${escapeHtml(title)}">
+    const word = running && statusWord && CHIP_STATUSES.has(statusWord.status) ? statusWord : null;
+    const waiting = word?.status === TAB_STATUS.WAITING;
+    const title = running ? `${label} is managing this board${word ? ` (${word.text})` : ''}: ${summary}`
+        : elsewhere ? `${label} is managing this board from another VibeRails window on this project: ${summary}. Open that window to see or stop it.`
+        : `${label} manages ${summary} once started`;
+    const stateText = running ? escapeHtml(word?.text || 'Running')
+        : elsewhere ? 'Running in another window'
+        : 'Stopped';
+    const flagged = flaggedCount(status);
+    const classes = ['board-ai-manager-chip', running || elsewhere ? 'is-running' : '', elsewhere ? 'is-elsewhere' : '',
+        waiting ? 'is-waiting' : '', flagged ? 'has-attention' : ''].filter(Boolean).join(' ');
+    const where = running ? 'running' : elsewhere ? 'running in another window' : 'stopped';
+    return `<span class="${classes}" role="group"
+            aria-label="Board manager ${escapeHtml(label)}, ${where}${word ? `, ${escapeHtml(word.text)}` : ''}" title="${escapeHtml(title)}">
         <i class="fa-solid fa-diagram-project board-ai-manager-icon" aria-hidden="true"></i>
         <span class="board-ai-manager-text">
             <span class="board-ai-manager-label">${escapeHtml(label)}</span>
-            <span class="board-ai-manager-state">${running ? '<span class="board-ai-manager-dot" aria-hidden="true"></span>Running' : 'Stopped'}
-                <span class="board-ai-manager-summary">· ${escapeHtml(summary)}</span></span>
+            <span class="board-ai-manager-state">${running || elsewhere ? '<span class="board-ai-manager-dot" aria-hidden="true"></span>' : ''}<span class="board-ai-manager-word">${stateText}</span>
+                <span class="board-ai-manager-summary">· ${escapeHtml(boardManagerSummary(status, { flagged: false }))}</span></span>
         </span>
+        ${renderFlagged(status, menuOpen)}
         ${running
             ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-board-manager-action="focus">Go to manager</button>
                <button type="button" class="board-icon-btn board-ai-manager-stop" data-board-manager-action="stop" aria-label="Stop board manager" title="Stop board manager">
                    <i class="fa-solid fa-stop" aria-hidden="true"></i></button>`
+            : elsewhere ? ''
             : '<button type="button" class="btn btn-sm btn-outline-primary" data-board-manager-action="start">Start manager</button>'}
     </span>`;
+}
+
+/**
+ * The manager tab's status, for the chip only (VIBE-262). The Board page does not mount the
+ * manager's terminal tab, so it runs the tab's own TabStatusController headless (no DOM, no
+ * flashes, toasts or pushes) on the app-wide session events for that one session. A manager this
+ * page just started begins at Thinking, as its tab does; one already running when the page loaded
+ * shows no word until its first event, and its first output or quiet spell then seeds Thinking,
+ * so a 5-second quiet reads Ready. Display only, never a completion signal.
+ */
+function createManagerStatusTracker(active, onChange) {
+    const cli = String(active?.cli || '').toLowerCase();
+    const controller = new TabStatusController({ id: active.tabId, label: '' }, {}, {
+        getCliKey: () => cli,
+        isActiveTab: () => false,
+        onStatusChange: () => onChange()
+    });
+    const seed = () => {
+        if (controller.status) return;
+        controller.markResumedSession();
+        controller.onSocketOpen();
+    };
+    return {
+        sessionId: active.sessionId,
+        controller,
+        launched() { seed(); },
+        word: () => controller.status ? { status: controller.status, text: controller.statusText() } : null,
+        input: kind => controller.onSessionInput(kind),
+        waiting: () => controller.onWaitingForUserSelection(),
+        busy: () => { seed(); controller.onSessionBusy(); },
+        idle: () => { seed(); controller.onSessionIdle(); },
+        completed: () => controller.onSessionCompleted()
+    };
 }
 
 /**
@@ -59,21 +150,66 @@ export function renderBoardManagerChip(status, describe = () => null) {
  * board's ten-second activity poll and on every board switch. Requests carry a generation and an
  * abort so a late reply for another board never repaints this one. A backend without the route
  * (an older binary serving a newer page) hides the chip instead of toasting every ten seconds.
- * confirm is injectable so node tests can answer the Stop dialog.
+ * The flagged-cards list opens from "N need you" and closes on Escape, an outside click or focus
+ * leaving it; while it is open a refresh waits, so keyboard focus stays put. confirm is injectable
+ * so node tests can answer the Stop dialog, and events (app.appEventClient) so they can drive the
+ * status word.
  */
-export function mountBoardManagerChip(app, host, { boardId, describe = () => null, openSettings, focusTab, onStatus = () => {}, confirm = confirmDialog }) {
+export function mountBoardManagerChip(app, host, {
+    boardId, describe = () => null, openSettings, focusTab, openCard, onStatus = () => {}, confirm = confirmDialog,
+    events = app?.appEventClient
+}) {
     if (!host) return { refresh: async () => null, status: () => null, dispose() {} };
     let disposed = false;
     let busy = false;
     let generation = 0;
     let abort = null;
     let status = null;
+    let tracker = null;
+    let launchedSession = null;
+    let menuOpen = false;
     const alive = () => !disposed && host.isConnected !== false;
-    const render = () => {
-        host.innerHTML = renderBoardManagerChip(status, describe);
+    const paint = () => {
+        if (!alive()) return;
+        // An open list is left alone; closing it repaints with whatever arrived meanwhile.
+        if (menuOpen) return;
+        host.innerHTML = renderBoardManagerChip(status, describe, { statusWord: tracker?.word() ?? null, menuOpen });
         host.hidden = boardManagerChipState(status) === 'hidden';
+    };
+    const track = () => {
+        const active = status?.enabled === true ? status.active : null;
+        const sessionId = active?.sessionId || null;
+        if ((tracker?.sessionId || null) === sessionId) return;
+        tracker = sessionId ? createManagerStatusTracker(active, paint) : null;
+        if (tracker && sessionId === launchedSession) tracker.launched();
+    };
+    const render = () => {
+        track();
+        if (!flaggedCount(status) && menuOpen) menuOpen = false;
+        paint();
         onStatus(status);
     };
+    const forManager = handler => payload => {
+        if (!alive() || !tracker || !payload?.sessionId || payload.sessionId !== tracker.sessionId) return;
+        handler(payload);
+    };
+    const unsubscribe = typeof events?.on === 'function' ? [
+        events.on('session_input', forManager(payload => tracker.input(payload?.kind))),
+        events.on('session_waiting_for_user', forManager(() => tracker.waiting())),
+        events.on('session_busy', forManager(() => tracker.busy())),
+        events.on('session_idle', forManager(() => tracker.idle())),
+        events.on('session_completed', forManager(() => tracker.completed()))
+    ].filter(fn => typeof fn === 'function') : [];
+
+    const trigger = () => host.querySelector?.('[data-board-manager-action="flagged"]');
+    function setMenu(open, { focusTrigger = false } = {}) {
+        if (menuOpen === open || !alive()) return;
+        menuOpen = open;
+        host.innerHTML = renderBoardManagerChip(status, describe, { statusWord: tracker?.word() ?? null, menuOpen });
+        if (open) host.querySelector?.('[data-board-manager-card]')?.focus?.();
+        else if (focusTrigger) trigger()?.focus?.();
+    }
+
     async function refresh() {
         const id = boardId();
         if (!id) { status = null; if (alive()) render(); return null; }
@@ -107,22 +243,32 @@ export function mountBoardManagerChip(app, host, { boardId, describe = () => nul
         await refresh();
     }
     const click = async event => {
-        const button = event.target.closest('[data-board-manager-action]');
-        if (!button || busy) return;
-        const action = button.dataset.boardManagerAction;
+        const target = event.target?.closest?.('[data-board-manager-card], [data-board-manager-action]');
+        if (!target) return;
+        const cardId = target.dataset?.boardManagerCard;
+        if (cardId) {
+            setMenu(false);
+            await openCard?.(cardId);
+            return;
+        }
+        const action = target.dataset?.boardManagerAction;
+        if (action === 'flagged') { setMenu(!menuOpen); return; }
+        if (busy) return;
         if (action === 'setup') { openSettings?.('manager'); return; }
         const id = boardId();
         if (!id) return;
         busy = true;
-        button.disabled = true;
+        target.disabled = true;
         try {
             if (action === 'focus' && status?.active) {
                 await focusTab?.(status.active.tabId, status.selection);
                 return;
             }
             if (action === 'stop') { await stop(id); return; }
+            if (action !== 'start') return;
             const result = await BoardApi.launchBoardManagerAsync(id);
             if (!alive()) return;
+            if (!result.reused) launchedSession = result.sessionId || null;
             app.showToast('Board', result.reused
                 ? 'The board manager is already running.'
                 : 'Board manager started. It picks up this board\'s Agent cards and assigns their work.', 'success');
@@ -132,14 +278,39 @@ export function mountBoardManagerChip(app, host, { boardId, describe = () => nul
             if (alive()) app.showToast('Board', error?.message || (action === 'stop' ? 'The board manager could not be stopped.' : 'The board manager could not start.'), 'error');
         } finally {
             busy = false;
-            if (alive() && button.isConnected !== false) button.disabled = false;
+            if (alive() && target.isConnected !== false) target.disabled = false;
         }
     };
+    const keydown = event => {
+        if (event.key === 'Escape' && menuOpen) {
+            event.preventDefault?.();
+            setMenu(false, { focusTrigger: true });
+        }
+    };
+    const focusout = event => {
+        if (menuOpen && event.relatedTarget && !host.contains?.(event.relatedTarget)) setMenu(false);
+    };
+    const outside = event => {
+        if (menuOpen && !host.contains?.(event.target)) setMenu(false);
+    };
     host.addEventListener('click', click);
+    host.addEventListener('keydown', keydown);
+    host.addEventListener('focusout', focusout);
+    globalThis.document?.addEventListener?.('pointerdown', outside, true);
     void refresh();
     return {
         refresh,
         status: () => status,
-        dispose() { disposed = true; abort?.abort(); host.removeEventListener('click', click); }
+        statusWord: () => tracker?.word() ?? null,
+        dispose() {
+            disposed = true;
+            abort?.abort();
+            host.removeEventListener('click', click);
+            host.removeEventListener('keydown', keydown);
+            host.removeEventListener('focusout', focusout);
+            globalThis.document?.removeEventListener?.('pointerdown', outside, true);
+            for (const off of unsubscribe) off();
+            tracker = null;
+        }
     };
 }

@@ -51,10 +51,44 @@ public sealed class BoardManagerLaunchTests : IDisposable
             });
     }
 
-    private BoardLaunchService Launcher() =>
+    /// <summary>owners says whether a recorded owner process is still running its session (VIBE-262).</summary>
+    private BoardLaunchService Launcher(Func<int, DateTime, bool>? owners = null) =>
         new(_store, _repository.Object, _tabs.Object, new BoardContextEstimator(
             new BoardService(_store, new Mock<IBoardCommitService>().Object, new NullBoardLiveSessionProbe()), _store, _repository.Object),
-            launchSettings: () => new Settings { CreateVibeStoryTracking = _nudge });
+            launchSettings: () => new Settings { CreateVibeStoryTracking = _nudge }, sessionOwnerRunning: owners);
+
+    /// <summary>The tab child of another VibeRails window on this machine.</summary>
+    private const int OtherWindowPid = 4242;
+
+    private static bool OtherWindow(int pid, DateTime started) => pid == OtherWindowPid;
+
+    /// <summary>A state.db session row, as a tab child records it (the fixture shares one file for both databases).</summary>
+    private async Task RecordSessionAsync(string sessionId, int? ownerPid = OtherWindowPid, DateTime? endedUtc = null)
+    {
+        await using var db = new SqliteConnection(_connectionString);
+        await db.OpenAsync(Ct);
+        await using var command = db.CreateCommand();
+        command.CommandText = """
+            CREATE TABLE IF NOT EXISTS Sessions (Id TEXT PRIMARY KEY, Cli TEXT, StartedUTC TEXT NOT NULL, EndedUTC TEXT, ExitCode INTEGER, OwnerPid INTEGER);
+            INSERT INTO Sessions (Id, Cli, StartedUTC, EndedUTC, OwnerPid) VALUES ($id, 'claude', $started, $ended, $pid);
+            """;
+        command.Parameters.AddWithValue("$id", sessionId);
+        command.Parameters.AddWithValue("$started", DateTime.UtcNow.AddMinutes(-1).ToString("O"));
+        command.Parameters.AddWithValue("$ended", endedUtc is { } ended ? ended.ToString("O") : DBNull.Value);
+        command.Parameters.AddWithValue("$pid", ownerPid is { } pid ? pid : DBNull.Value);
+        await command.ExecuteNonQueryAsync(Ct);
+    }
+
+    private async Task EndSessionAsync(string sessionId)
+    {
+        await using var db = new SqliteConnection(_connectionString);
+        await db.OpenAsync(Ct);
+        await using var command = db.CreateCommand();
+        command.CommandText = "UPDATE Sessions SET EndedUTC = $ended, ExitCode = 0 WHERE Id = $id;";
+        command.Parameters.AddWithValue("$id", sessionId);
+        command.Parameters.AddWithValue("$ended", DateTime.UtcNow.ToString("O"));
+        await command.ExecuteNonQueryAsync(Ct);
+    }
 
     /// <summary>How prompts print a card: its key, plus the display label when that differs.</summary>
     private static string Label(BoardCardRecord card) => card.DisplayId == card.Key ? card.Key : $"{card.Key} ({card.DisplayId})";
@@ -281,6 +315,110 @@ public sealed class BoardManagerLaunchTests : IDisposable
         // A refused launch releases the slot too: with room again, the next one starts.
         _liveTabs.Clear();
         Assert.NotNull(await Launcher().LaunchAsync(_root, second.Id, null, Ct, intent: "worker"));
+        Assert.Equal(2, _requests.Count);
+    }
+
+    [Fact]
+    public async Task AManagerRunningInAnotherWindow_RefusesASecondOne_ShowsInTheStatus_AndStopsCountingWithItsWindow()
+    {
+        var boardId = await BoardWithManagerAsync();
+        var card = await _store.CreateCardAsync(_root, Card("Managed", BoardWorkflowModes.Agent), Ct);
+        var theirs = Guid.NewGuid().ToString();
+        await _store.RecordBoardManagerSessionAsync(_root, boardId, theirs, "their-tab", "base:codex", "codex", Ct);
+        await RecordSessionAsync(theirs);
+
+        var refused = await Assert.ThrowsAsync<BoardConflictException>(() => Launcher(OtherWindow).LaunchBoardManagerAsync(_root, boardId, Ct));
+        Assert.Equal(BoardLaunchService.ManagerElsewhereMessage, refused.Message);
+        Assert.Null(refused.SessionId);
+        // Start Agent workflow on one of its cards says the same and starts nothing either.
+        var fromCard = await Assert.ThrowsAsync<BoardConflictException>(() => Launcher(OtherWindow).LaunchAsync(_root, card.Id, null, Ct));
+        Assert.Equal(BoardLaunchService.ManagerElsewhereMessage, fromCard.Message);
+        Assert.Empty(_requests);
+
+        var state = await Launcher(OtherWindow).GetBoardManagerLiveStateAsync(_root, boardId, Ct);
+        Assert.Null(state.Active);
+        Assert.Equal(theirs, state.Elsewhere?.SessionId);
+        var status = (await new BoardManagerService(_store, Launcher(OtherWindow)).GetAsync(_root, boardId, Ct))!;
+        Assert.Null(status.Active);
+        Assert.Equal(theirs, status.Elsewhere?.SessionId);
+        Assert.Equal("base:codex", status.Elsewhere?.Selection);
+        // There is no tab here to close.
+        Assert.False((await Launcher(OtherWindow).StopBoardManagerAsync(_root, boardId, Ct))!.Stopped);
+        Assert.Empty(_deletedTabs);
+
+        // That window closed: its tab child is gone, so this window starts its own manager.
+        Assert.Null((await Launcher((_, _) => false).GetBoardManagerLiveStateAsync(_root, boardId, Ct)).Elsewhere);
+        var launched = (await Launcher((_, _) => false).LaunchBoardManagerAsync(_root, boardId, Ct))!;
+        Assert.False(launched.Reused);
+        Assert.Single(_requests);
+        // A live manager here wins over any record of another window's.
+        Assert.True((await Launcher(OtherWindow).LaunchBoardManagerAsync(_root, boardId, Ct))!.Reused);
+    }
+
+    [Fact]
+    public async Task AnotherWindowsManager_NeedsAnOpenSessionAndAnotherProcess_AndThisRootsTabsAreNeverElsewhere()
+    {
+        var boardId = await BoardWithManagerAsync();
+        async Task<string> Recorded(string tabId, int? ownerPid = OtherWindowPid, DateTime? endedUtc = null)
+        {
+            var sessionId = Guid.NewGuid().ToString();
+            await _store.RecordBoardManagerSessionAsync(_root, boardId, sessionId, tabId, "base:codex", "codex", Ct);
+            await RecordSessionAsync(sessionId, ownerPid, endedUtc);
+            return sessionId;
+        }
+        async Task<string?> Elsewhere(Func<int, DateTime, bool> owners) =>
+            (await Launcher(owners).GetBoardManagerLiveStateAsync(_root, boardId, Ct)).Elsewhere?.SessionId;
+
+        // Its end is recorded, or it never recorded an owner: not running anywhere.
+        await Recorded("ended-tab", endedUtc: DateTime.UtcNow);
+        await Recorded("no-owner-tab", ownerPid: null);
+        Assert.Null(await Elsewhere((_, _) => true));
+        // Recorded by this process itself, or a tab this root lists (even one whose session ended): this window's own.
+        await Recorded("self-tab", ownerPid: Environment.ProcessId);
+        Assert.Null(await Elsewhere((_, _) => true));
+        var mine = await Recorded("my-tab");
+        _liveTabs.Add(new TerminalTabStatusResponse("my-tab", DateTime.UtcNow, false, mine));
+        Assert.Null(await Elsewhere(OtherWindow));
+
+        var open = await _store.GetOpenSessionOwnersAsync([mine, Guid.NewGuid().ToString()], Ct);
+        Assert.Equal(mine, Assert.Single(open).SessionId);
+        Assert.Equal(OtherWindowPid, open[0].OwnerPid);
+        Assert.Empty(await _store.GetOpenSessionOwnersAsync([], Ct));
+    }
+
+    [Fact]
+    public async Task TheWorkerLimit_CountsWorkersAnotherWindowRuns_AndFreesTheirSlotWhenTheyEnd()
+    {
+        var boardId = await BoardWithManagerAsync();
+        var busy = await _store.CreateCardAsync(_root, Card("Busy elsewhere", BoardWorkflowModes.Agent), Ct);
+        var next = await _store.CreateCardAsync(_root, Card("Next", BoardWorkflowModes.Agent), Ct);
+        var third = await _store.CreateCardAsync(_root, Card("Third", BoardWorkflowModes.Agent), Ct);
+        var theirs = Guid.NewGuid().ToString();
+        await _store.LinkSessionAsync(_root, busy.Id, theirs, "their-tab", "base:claude", "claude", "Worker", BoardSessionRecord.WorkerOrigin, Ct);
+        await RecordSessionAsync(theirs);
+
+        var refused = await Assert.ThrowsAsync<BoardConflictException>(() => Launcher(OtherWindow).LaunchAsync(_root, next.Id, null, Ct, intent: "worker"));
+        Assert.Contains("at most 1 implementation worker at a time", refused.Message);
+        Assert.Contains($"1 is running ({busy.DisplayId ?? busy.Key}) in another VibeRails window.", refused.Message);
+        Assert.Null(refused.SessionId);
+        Assert.Empty(_requests);
+        var state = await Launcher(OtherWindow).GetBoardManagerLiveStateAsync(_root, boardId, Ct);
+        Assert.Equal(theirs, Assert.Single(state.Workers).SessionId);
+        Assert.Equal(1, state.WorkersElsewhere);
+        Assert.Equal(1, (await new BoardManagerService(_store, Launcher(OtherWindow)).GetAsync(_root, boardId, Ct))!.RunningWorkers);
+
+        // Two slots: one worker here and one there fill them, and only the one here can be opened.
+        var saved = (await _store.GetBoardManagerAsync(_root, boardId, Ct))!;
+        await _store.SaveBoardManagerAsync(_root, boardId, saved.Settings with { MaxWorkers = 2 }, saved.Revision, Ct);
+        var here = (await Launcher(OtherWindow).LaunchAsync(_root, next.Id, null, Ct, intent: "worker"))!;
+        var full = await Assert.ThrowsAsync<BoardConflictException>(() => Launcher(OtherWindow).LaunchAsync(_root, third.Id, null, Ct, intent: "worker"));
+        Assert.Contains("and 2 are running", full.Message);
+        Assert.Contains("1 of them in another VibeRails window", full.Message);
+        Assert.Equal(here.SessionId, full.SessionId);
+
+        // The other window's worker finished: its slot is free again.
+        await EndSessionAsync(theirs);
+        Assert.NotNull(await Launcher(OtherWindow).LaunchAsync(_root, third.Id, null, Ct, intent: "worker"));
         Assert.Equal(2, _requests.Count);
     }
 

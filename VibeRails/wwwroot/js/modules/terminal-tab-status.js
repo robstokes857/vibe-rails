@@ -64,6 +64,8 @@ export class TabStatusController {
      *   notifyPush:     (statusKey) => void  – fired on READY/WAITING when opted
      *                                          in, regardless of focus. statusKey
      *                                          is 'ready' | 'waiting'.
+     *   onStatusChange: (status, prev) => void – after every real transition;
+     *                                          a display-only listener (VIBE-262)
      */
     constructor(tabState, ui, options) {
         this._tabState = tabState;
@@ -93,6 +95,20 @@ export class TabStatusController {
     }
 
     // ── Public API ──────────────────────────────────────────────────────
+
+    /** The current TAB_STATUS value, or null before the first transition. */
+    get status() {
+        return this._status;
+    }
+
+    /**
+     * The current status in the exact words the tab shows ("Thinking", "Ready", "Waiting for user
+     * input", …), or '' before the first transition. For display elsewhere (the board manager chip,
+     * VIBE-262) only: it is a heuristic, so never use it to decide that an agent has finished.
+     */
+    statusText() {
+        return this._status ? this._statusTextFor(this._status) : '';
+    }
 
     render() {
         const button = this._ui.button;
@@ -456,6 +472,7 @@ export class TabStatusController {
         }
 
         this._applyVisuals(newStatus);
+        this._options.onStatusChange?.(newStatus, prev);
 
         // Progress bar: indeterminate during thinking, off otherwise
         if (newStatus === TAB_STATUS.THINKING) {

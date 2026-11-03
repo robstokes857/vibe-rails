@@ -545,7 +545,15 @@ namespace VibeRails.DTOs
     /// While <see cref="Enabled"/> is false (the AI board manager switch is off) every other field is empty.
     /// </summary>
     public record BoardManagerResponse(string? Selection, BaseLlmOptions? BaseLlmOptions, int Revision, BoardManagerActiveSession? Active, int ManagedCards, int OwnManagerCards,
-        bool Enabled = true, string? Instructions = null, int MaxWorkers = 1, int RunningWorkers = 0, int FlaggedCards = 0);
+        bool Enabled = true, string? Instructions = null, int MaxWorkers = 1, int RunningWorkers = 0, int FlaggedCards = 0,
+        BoardManagerElsewhereSession? Elsewhere = null, IReadOnlyList<BoardManagerFlaggedCard>? Flagged = null);
+    /// <summary>
+    /// The board manager another VibeRails window on this project is running (VIBE-262), when this
+    /// root has none: it has no tab here, so it can be neither focused nor stopped from this window.
+    /// </summary>
+    public record BoardManagerElsewhereSession(string SessionId, string Cli, string Selection, DateTime StartedAt);
+    /// <summary>A flagged card the board manager runs, newest activity first, for the chip's "needs you" list (VIBE-262).</summary>
+    public record BoardManagerFlaggedCard(string Id, string Key, string? DisplayId, string Title, string LaneName);
     /// <summary>
     /// An empty or null selection clears the board manager. Base options apply to base CLIs only.
     /// A null <see cref="Instructions"/> or <see cref="MaxWorkers"/> keeps the saved value; "" clears the instructions.

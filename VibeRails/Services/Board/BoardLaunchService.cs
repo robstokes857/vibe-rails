@@ -15,10 +15,13 @@ public interface IBoardLaunchService
     /// <summary>Starts the board's manager, or returns the one already running. Null when the board is not in the project.</summary>
     Task<LaunchBoardManagerResponse?> LaunchBoardManagerAsync(string projectPath, string boardId, CancellationToken cancellationToken = default);
 
-    /// <summary>The board manager session whose tab is live in this root, if any. Root-local like every live check.</summary>
+    /// <summary>The board manager session whose tab is live in this root, if any.</summary>
     Task<BoardManagerActiveSession?> FindLiveBoardManagerAsync(string projectPath, string boardId, CancellationToken cancellationToken = default);
 
-    /// <summary>The live board manager and the board's live implementation workers, from one read of this root's tabs.</summary>
+    /// <summary>
+    /// The live board manager and the board's live implementation workers, from one read of this
+    /// root's tabs, plus those another VibeRails window on the machine is running (VIBE-262).
+    /// </summary>
     Task<BoardManagerLiveState> GetBoardManagerLiveStateAsync(string projectPath, string boardId, CancellationToken cancellationToken = default);
 
     /// <summary>Closes the board manager's terminal in this root. Null when the board is not in the project.</summary>
@@ -26,10 +29,13 @@ public interface IBoardLaunchService
 }
 
 /// <summary>
-/// What is running for a board manager in this root (VIBE-204): its own session, and the live
-/// implementation workers on the cards it manages, which its worker limit counts.
+/// What is running for a board manager (VIBE-204): its session with a tab in this root, and the live
+/// implementation workers on the cards it manages, which its worker limit counts. <see cref="Elsewhere"/>
+/// is the manager another VibeRails window is running when this root has none, and
+/// <see cref="WorkersElsewhere"/> how many of <see cref="Workers"/> run there (VIBE-262).
 /// </summary>
-public sealed record BoardManagerLiveState(BoardManagerActiveSession? Active, IReadOnlyList<BoardManagedWorkerSession> Workers);
+public sealed record BoardManagerLiveState(BoardManagerActiveSession? Active, IReadOnlyList<BoardManagedWorkerSession> Workers,
+    BoardManagerSessionRecord? Elsewhere = null, int WorkersElsewhere = 0);
 
 /// <summary>
 /// A composed launch prompt and the inputs that shaped it, so the context estimator (VB-63) can
@@ -59,8 +65,15 @@ public sealed class BoardLaunchService(
     IRepository repository,
     ITerminalTabHostService tabHost,
     IBoardContextEstimator contextEstimator, ReviewRoutingService? reviewRouting = null,
-    Func<Settings>? launchSettings = null) : IBoardLaunchService
+    Func<Settings>? launchSettings = null, Func<int, DateTime, bool>? sessionOwnerRunning = null) : IBoardLaunchService
 {
+    /// <summary>The refusal a second window's board manager launch gets (VIBE-262).</summary>
+    public const string ManagerElsewhereMessage = "This board's manager is already running in another VibeRails window on this project. "
+        + "It manages this board's Agent cards from there: use that window, or stop it there first.";
+
+    /// <summary>How far back another window's sessions are looked for: a day, like the manager's open-worker window.</summary>
+    internal static readonly TimeSpan ElsewhereWindow = TimeSpan.FromHours(24);
+
     // Only in-flight launches are retained. TryAdd is an immediate reservation, not a
     // queued semaphore, so removal cannot strand waiters or create two gates for one card.
     private static readonly ConcurrentDictionary<string, byte> LaunchingCards = new(StringComparer.Ordinal);
@@ -339,9 +352,53 @@ public sealed class BoardLaunchService(
     public async Task<BoardManagerLiveState> GetBoardManagerLiveStateAsync(string projectPath, string boardId, CancellationToken cancellationToken = default)
     {
         var tabs = await tabHost.ListTabsAsync(cancellationToken);
-        var active = FindLiveBoardManager(await store.GetBoardManagerSessionsAsync(projectPath, boardId, 10, cancellationToken), tabs);
-        return new BoardManagerLiveState(active, await LiveImplementationWorkersAsync(projectPath, boardId, tabs, cancellationToken));
+        var sessions = await store.GetBoardManagerSessionsAsync(projectPath, boardId, 10, cancellationToken);
+        var active = FindLiveBoardManager(sessions, tabs);
+        var elsewhere = active is null ? await FindBoardManagerElsewhereAsync(sessions, tabs, cancellationToken) : null;
+        var workers = await LiveImplementationWorkersAsync(projectPath, boardId, tabs, cancellationToken);
+        return new BoardManagerLiveState(active, workers.Sessions, elsewhere, workers.ElsewhereIds.Count);
     }
+
+    /// <summary>The newest recorded board manager that another VibeRails window is running, if any.</summary>
+    private async Task<BoardManagerSessionRecord?> FindBoardManagerElsewhereAsync(IReadOnlyList<BoardManagerSessionRecord> sessions,
+        IReadOnlyList<TerminalTabStatusResponse> tabs, CancellationToken cancellationToken)
+    {
+        var running = await RunningElsewhereAsync(sessions.Select(session => (session.SessionId, session.StartedUtc)), tabs, cancellationToken);
+        return running.Count == 0 ? null : sessions.FirstOrDefault(session => running.Contains(session.SessionId));
+    }
+
+    /// <summary>
+    /// The sessions another VibeRails window is running (VIBE-262): not a tab in this root, linked
+    /// within the last day, still open in state.db (which every window on the machine shares), and
+    /// owned by a live process that started before the session did. A window that crashed stops
+    /// counting as soon as its tab children are gone. This is a read, not a lock: two windows
+    /// launching in the same instant can still both start. A state.db that cannot be read leaves
+    /// the check to this root rather than failing the launch or the status.
+    /// </summary>
+    private async Task<IReadOnlySet<string>> RunningElsewhereAsync(IEnumerable<(string SessionId, DateTime StartedUtc)> sessions,
+        IReadOnlyList<TerminalTabStatusResponse> tabs, CancellationToken cancellationToken)
+    {
+        var local = tabs.Where(tab => !string.IsNullOrWhiteSpace(tab.SessionId)).Select(tab => tab.SessionId!).ToHashSet(StringComparer.Ordinal);
+        var cutoff = DateTime.UtcNow - ElsewhereWindow;
+        var candidates = sessions.Where(session => session.StartedUtc >= cutoff && !local.Contains(session.SessionId))
+            .OrderByDescending(session => session.StartedUtc).Select(session => session.SessionId)
+            .Distinct(StringComparer.Ordinal).Take(200).ToList();
+        if (candidates.Count == 0) return NoSessions;
+        try
+        {
+            var running = sessionOwnerRunning ?? SessionOwnerProcess.IsRunning;
+            return (await store.GetOpenSessionOwnersAsync(candidates, cancellationToken))
+                .Where(owner => owner.OwnerPid != Environment.ProcessId && running(owner.OwnerPid, owner.StartedUtc))
+                .Select(owner => owner.SessionId).ToHashSet(StringComparer.Ordinal);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log.Warning(ex, "[Board] Could not read other windows' board sessions; the board manager checks stay in this window");
+            return NoSessions;
+        }
+    }
+
+    private static readonly IReadOnlySet<string> NoSessions = new HashSet<string>(StringComparer.Ordinal);
 
     public async Task<StopBoardManagerResponse?> StopBoardManagerAsync(string projectPath, string boardId, CancellationToken cancellationToken = default)
     {
@@ -355,25 +412,34 @@ public sealed class BoardLaunchService(
         return new StopBoardManagerResponse(true, live.SessionId);
     }
 
+    /// <summary>Live implementation workers on a board, and which of them another VibeRails window runs.</summary>
+    private sealed record LiveWorkers(IReadOnlyList<BoardManagedWorkerSession> Sessions, IReadOnlySet<string> ElsewhereIds);
+
     /// <summary>
     /// Live implementation workers on the board's board-managed cards: worker sessions with a live tab
-    /// in this root, without reviews, planning workers and lane Automations, which never edit files on
-    /// the manager's behalf. One entry per session, however many cards it is attached to.
+    /// in this root or running in another VibeRails window, without reviews, planning workers and lane
+    /// Automations, which never edit files on the manager's behalf. One entry per session, however many
+    /// cards it is attached to.
     /// </summary>
-    private async Task<IReadOnlyList<BoardManagedWorkerSession>> LiveImplementationWorkersAsync(string projectPath, string boardId,
+    private async Task<LiveWorkers> LiveImplementationWorkersAsync(string projectPath, string boardId,
         IReadOnlyList<TerminalTabStatusResponse> tabs, CancellationToken cancellationToken)
     {
         var live = tabs.Where(tab => tab.HasActiveSession && !string.IsNullOrWhiteSpace(tab.SessionId))
             .Select(tab => tab.SessionId!).ToHashSet(StringComparer.Ordinal);
-        if (live.Count == 0) return [];
-        var workers = (await store.GetManagedWorkerSessionsAsync(projectPath, boardId, cancellationToken))
-            .Where(session => session.Origin == BoardSessionRecord.WorkerOrigin && live.Contains(session.SessionId))
+        var all = (await store.GetManagedWorkerSessionsAsync(projectPath, boardId, cancellationToken))
+            .Where(session => session.Origin == BoardSessionRecord.WorkerOrigin)
             .GroupBy(session => session.SessionId, StringComparer.Ordinal).Select(group => group.First()).ToList();
-        if (workers.Count == 0) return [];
+        if (all.Count == 0) return new([], NoSessions);
+        var elsewhere = await RunningElsewhereAsync(all.Where(session => !live.Contains(session.SessionId))
+            .Select(session => (session.SessionId, session.StartedUtc)), tabs, cancellationToken);
+        var workers = all.Where(session => live.Contains(session.SessionId) || elsewhere.Contains(session.SessionId)).ToList();
+        if (workers.Count == 0) return new([], NoSessions);
         var ids = workers.Select(session => session.SessionId).ToList();
         var reviews = await store.GetReviewSessionIdsAsync(projectPath, ids, cancellationToken);
         var automations = await store.GetAutomationSessionIdsAsync(projectPath, ids, cancellationToken);
-        return workers.Where(session => !reviews.Contains(session.SessionId) && !automations.Contains(session.SessionId)).ToList();
+        var implementation = workers.Where(session => !reviews.Contains(session.SessionId) && !automations.Contains(session.SessionId)).ToList();
+        return new(implementation, implementation.Where(session => elsewhere.Contains(session.SessionId))
+            .Select(session => session.SessionId).ToHashSet(StringComparer.Ordinal));
     }
 
     /// <summary>
@@ -384,7 +450,8 @@ public sealed class BoardLaunchService(
     /// The board's worker slot is reserved before counting and kept (in <paramref name="held"/>)
     /// until the caller has started and linked its session, so two launches on different cards can
     /// never both see a free slot; tabs are listed again under the reservation for the same reason.
-    /// Root-local, like every live check here.
+    /// Workers another VibeRails window runs count too (VIBE-262), but the reservation is this
+    /// root's: two windows starting a worker in the same instant can both get through.
     /// </summary>
     private async Task RequireManagedWorkerSlotAsync(string projectPath, BoardCardRecord card, List<string> held, CancellationToken cancellationToken)
     {
@@ -395,13 +462,20 @@ public sealed class BoardLaunchService(
         if (!LaunchingCards.TryAdd(slot, 0))
             throw new BoardConflictException("Another implementation worker is starting on this board. Wait for it with await_board_events, then try again.");
         held.Add(slot);
-        var running = await LiveImplementationWorkersAsync(projectPath, card.BoardId, await tabHost.ListTabsAsync(cancellationToken), cancellationToken);
+        var live = await LiveImplementationWorkersAsync(projectPath, card.BoardId, await tabHost.ListTabsAsync(cancellationToken), cancellationToken);
+        var running = live.Sessions;
         if (running.Count < manager.MaxWorkers) return;
         var cards = string.Join(", ", running.Select(worker => worker.DisplayId ?? worker.CardKey).Distinct(StringComparer.Ordinal));
+        var elsewhere = live.ElsewhereIds.Count;
+        var where = elsewhere == 0 ? ""
+            : elsewhere == running.Count ? " in another VibeRails window"
+            : $", {elsewhere} of them in another VibeRails window";
         throw new BoardConflictException(
             $"The board manager runs at most {manager.MaxWorkers} implementation worker{(manager.MaxWorkers == 1 ? "" : "s")} at a time on this board, "
-            + $"and {running.Count} {(running.Count == 1 ? "is" : "are")} running ({cards}). Wait for one to finish with await_board_events, "
-            + "or raise Workers at a time in Board settings > Manager.", running[0].SessionId);
+            + $"and {running.Count} {(running.Count == 1 ? "is" : "are")} running ({cards}){where}. Wait for one to finish with await_board_events, "
+            + "or raise Workers at a time in Board settings > Manager.",
+            // Only a worker with a tab in this root can be opened from here.
+            running.FirstOrDefault(worker => !live.ElsewhereIds.Contains(worker.SessionId))?.SessionId);
     }
 
     /// <summary>One board manager starts at a time per board, whichever card or button asked for it.</summary>
@@ -447,15 +521,19 @@ public sealed class BoardLaunchService(
         }
 
         var tabs = await tabHost.ListTabsAsync(cancellationToken);
-        var live = FindLiveBoardManager(await store.GetBoardManagerSessionsAsync(projectPath, board.Id, 10, cancellationToken), tabs);
+        var managerSessions = await store.GetBoardManagerSessionsAsync(projectPath, board.Id, 10, cancellationToken);
+        var live = FindLiveBoardManager(managerSessions, tabs);
         if (live is not null)
             return new LaunchBoardManagerResponse(live.TabId, live.SessionId, live.Cli, board.Id, live.Selection, Reused: true);
+        // One manager per board across windows (VIBE-262). This root cannot focus another window's tab.
+        if (await FindBoardManagerElsewhereAsync(managerSessions, tabs, cancellationToken) is not null)
+            throw new BoardConflictException(ManagerElsewhereMessage);
         if (tabs.Count >= tabHost.MaxTabs)
             throw new BoardConflictException($"All {tabHost.MaxTabs} terminal tabs are in use. Close one first.");
 
         var label = environment is not null ? $"{environment.CustomName} ({parsed.Cli})" : parsed.Cli;
         var nudgeEnabled = ContextLevels.NudgeEnabled((launchSettings ?? Config.LoadFresh)(), environment is not null);
-        var liveWorkerCards = (await LiveImplementationWorkersAsync(projectPath, board.Id, tabs, cancellationToken))
+        var liveWorkerCards = (await LiveImplementationWorkersAsync(projectPath, board.Id, tabs, cancellationToken)).Sessions
             .Select(worker => worker.CardId).ToHashSet(StringComparer.Ordinal);
         var composed = await ComposeBoardManagerPromptAsync(store, projectPath, board, settings, label, environment?.CustomPrompt, nudgeEnabled, liveWorkerCards, cancellationToken);
         var title = $"{Truncate(board.Name, 40)} · Manager";

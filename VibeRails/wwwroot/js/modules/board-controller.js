@@ -810,6 +810,7 @@ export class BoardController {
             describe: selection => this.assigneeInfo(selection),
             openSettings: tab => this.openBoardSettingsTab(tab),
             focusTab: (tabId, selection) => this.focusManagerTab(tabId, selection),
+            openCard: cardId => this.openCardEditor(cardId),
             onStatus: status => {
                 const enabled = status?.enabled === true;
                 const before = this.state.boardManager;

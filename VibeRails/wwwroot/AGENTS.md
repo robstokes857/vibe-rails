@@ -237,7 +237,17 @@ renders the chip (`[data-board-ai-manager]`; its own `.board-ai-manager-*` class
 `.board-manager-chip` is the card foot's per-card manager label): Set up board manager when none is
 saved, Start manager when it is stopped, and while it runs Go to manager, Stop (behind
 `confirmDialog`) and a summary of managed cards, busy workers and cards that need the user. Below
-860px it takes its own header row. `mountBoardManagerChip` refreshes with the controller's
+860px it takes its own header row. While another VibeRails window runs the board's manager
+(`elsewhere`, VIBE-262) it reads Running in another window, with no buttons. While the manager
+runs here the chip repeats its tab's status word (Thinking, Ready, Waiting for user input, through
+`TabStatusController.statusText()`; Connected and Disconnected read as Running). The Board page has
+no mounted manager tab, so the chip runs a headless `TabStatusController` on the app-wide session
+events for that session (`session_input`, `session_waiting_for_user`, `session_busy`,
+`session_idle`, `session_completed`). A manager the chip started begins at Thinking, as its tab
+does; one already running when the page loaded shows Running until its first event. The word is
+display only: never use it to decide that an agent is done. "N need you" is a button opening the
+flagged Agent cards (the Menu panel standard; Escape, an outside click or focus leaving closes it,
+and a poll waits while it is open); picking one opens its card editor. `mountBoardManagerChip` refreshes with the controller's
 ten-second poll and on every board switch, drops a reply for a board that is no longer current,
 and hides itself when the route is unavailable; `onStatus` feeds `state.boardManager` and
 `state.aiBoardManager` and repaints the lanes when the manager's availability or live tab changes.

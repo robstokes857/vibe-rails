@@ -42,6 +42,13 @@ public sealed record BoardManagedCardRecord(BoardCardRecord Card, string LaneNam
 /// <summary>A worker session linked to a board-managed card, live or not; the host decides liveness from its tabs.</summary>
 public sealed record BoardManagedWorkerSession(string SessionId, string CardId, string CardKey, string? DisplayId, string Origin, DateTime StartedUtc);
 
+/// <summary>
+/// A recorded terminal session with no recorded end, and the process that recorded it (state.db
+/// <c>Sessions.OwnerPid</c>, the tab child running it). The host decides whether that process is
+/// still the one that started the session; this row says only that nobody recorded an end.
+/// </summary>
+public sealed record BoardOpenSessionOwner(string SessionId, DateTime StartedUtc, int OwnerPid);
+
 public partial interface IBoardStore
 {
     /// <summary>
@@ -82,4 +89,11 @@ public partial interface IBoardStore
 
     /// <summary>Worker sessions (origins <c>agent_worker</c> and <c>agent_worker_planning</c>) linked to the board's board-managed cards.</summary>
     Task<IReadOnlyList<BoardManagedWorkerSession>> GetManagedWorkerSessionsAsync(string projectPath, string boardId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Of these sessions (at most 200), the ones state.db still has open with a recorded owner process.
+    /// With the owner's liveness this is how one root sees a board manager or worker that another
+    /// VibeRails window on the same machine is running (VIBE-262).
+    /// </summary>
+    Task<IReadOnlyList<BoardOpenSessionOwner>> GetOpenSessionOwnersAsync(IReadOnlyList<string> sessionIds, CancellationToken cancellationToken = default);
 }

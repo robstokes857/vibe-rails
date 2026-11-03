@@ -90,9 +90,18 @@ public sealed class BoardManagerService(IBoardStore store, IBoardLaunchService l
         var live = await launcher.GetBoardManagerLiveStateAsync(projectPath, boardId, cancellationToken);
         var cards = await store.GetManagedCardsAsync(projectPath, boardId, cancellationToken);
         var settings = record.Settings;
+        var flagged = cards.Where(card => !card.OwnManager && card.Card.Flagged).ToList();
+        var elsewhere = live.Elsewhere is { } other
+            ? new BoardManagerElsewhereSession(other.SessionId, other.Cli, BoardService.PresentAssignee(other.Selection) ?? other.Selection, other.StartedUtc)
+            : null;
         return new BoardManagerResponse(BoardService.PresentAssignee(settings.Selection), settings.BaseLlmOptions, record.Revision, live.Active,
             cards.Count(card => !card.OwnManager), cards.Count(card => card.OwnManager),
             Enabled: true, Instructions: settings.Instructions, MaxWorkers: settings.MaxWorkers, RunningWorkers: live.Workers.Count,
-            FlaggedCards: cards.Count(card => !card.OwnManager && card.Card.Flagged));
+            FlaggedCards: flagged.Count, Elsewhere: elsewhere,
+            Flagged: flagged.OrderByDescending(card => card.LastActivityUtc).Take(MaxFlaggedListed)
+                .Select(card => new BoardManagerFlaggedCard(card.Card.Id, card.Card.Key, card.Card.DisplayId, card.Card.Title, card.LaneName)).ToList());
     }
+
+    /// <summary>The chip lists at most this many flagged cards; the count still says how many there are.</summary>
+    internal const int MaxFlaggedListed = 10;
 }

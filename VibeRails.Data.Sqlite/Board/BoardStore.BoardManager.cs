@@ -1,4 +1,5 @@
 using System.Data;
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using VibeRails.Data.Sqlite;
@@ -400,5 +401,34 @@ public sealed partial class BoardStore
             sessions.Add(new(reader.GetString(0), reader.GetString(1), reader.GetString(2),
                 reader.IsDBNull(3) ? null : reader.GetString(3), reader.GetString(4), ParseDb(reader.GetString(5))));
         return sessions;
+    }
+
+    public async Task<IReadOnlyList<BoardOpenSessionOwner>> GetOpenSessionOwnersAsync(IReadOnlyList<string> sessionIds, CancellationToken cancellationToken = default)
+    {
+        if (sessionIds.Count > 200) throw new ArgumentOutOfRangeException(nameof(sessionIds));
+        var ids = sessionIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToArray();
+        if (ids.Length == 0) return [];
+        await using var connection = await OpenStateAsync(cancellationToken);
+        // A stdio host can open a state.db that predates session ownership; nothing is open there.
+        if (!await _stateFeatures.HasTableAsync(connection, "Sessions", cancellationToken)
+            || !_stateFeatures.HasColumn(connection, "Sessions", "EndedUTC")
+            || !_stateFeatures.HasColumn(connection, "Sessions", "StartedUTC")
+            || !_stateFeatures.HasColumn(connection, "Sessions", "OwnerPid")) return [];
+        await using var command = connection.CreateCommand();
+        var parameters = ids.Select((_, index) => "$session" + index).ToArray();
+        for (var i = 0; i < ids.Length; i++) command.Parameters.AddWithValue(parameters[i], ids[i]);
+        command.CommandText = $"""
+            SELECT Id, StartedUTC, OwnerPid FROM Sessions
+            WHERE EndedUTC IS NULL AND OwnerPid IS NOT NULL AND Id IN ({string.Join(',', parameters)});
+            """;
+        var owners = new List<BoardOpenSessionOwner>();
+        await using var rows = await command.ExecuteReaderAsync(cancellationToken);
+        while (await rows.ReadAsync(cancellationToken))
+        {
+            if (rows.IsDBNull(1) || !DateTime.TryParse(rows.GetString(1), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var started))
+                continue;
+            owners.Add(new(rows.GetString(0), started.ToUniversalTime(), rows.GetInt32(2)));
+        }
+        return owners;
     }
 }

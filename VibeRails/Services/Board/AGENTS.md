@@ -69,7 +69,7 @@ refuses a manager selection that is not a picker key.
 `BoardLaunchService.LaunchBoardManagerAsync` (`POST …/manager/launch`, the chip's Start manager)
 checks the switch and the shared-board guard, resolves the saved selection like a card launch,
 refuses a code review environment, keeps one live manager per board (`BoardManagerSessions` ×
-this root's live tabs, so root-local), composes `BoardPromptComposer.ComposeBoardManager`, records
+this root's live tabs, and another window's is refused, see below), composes `BoardPromptComposer.ComposeBoardManager`, records
 the session and links it to every managed card with the `agent_manager` origin, so each card's Go
 to manager reaches the same tab. A second launch returns the live one (`Reused`). Start Agent
 workflow on a board-managed card (editor or tile) delegates to it and links the card; a manager that
@@ -92,6 +92,20 @@ lists tabs again under it, so two launches on different cards cannot both see a 
 second gets "Another implementation worker is starting on this board". The message names the
 running cards and points at `await_board_events`; `start_board_agent` passes it through. Cards
 with their own manager are outside it, and so is everything while the switch is off.
+
+**Across windows (VIBE-262).** Every VibeRails window on the machine shares state.db, so a root
+also sees the board manager and workers another window runs: a session linked within 24 hours
+that is not a tab in this root, is still open in state.db (`IBoardStore.GetOpenSessionOwnersAsync`)
+and whose recorded `Sessions.OwnerPid` (its tab child) is a live process that started before the
+session did (`SessionOwnerProcess`, so a reused PID does not count). A second window's manager
+launch, from the chip or Start Agent workflow, is a 409 (`BoardLaunchService.ManagerElsewhereMessage`);
+the status carries `elsewhere` and the chip reads Running in another window, with no Go to, Stop
+or Start. Another window's workers count toward the worker limit and the chip's busy count; the
+409 says where they run, and its session id is a worker with a tab here, or none. This is a read,
+not a lock: two windows launching in the same instant can both start, and a state.db that cannot
+be read leaves the checks in this window. A crashed window stops counting once its tab children
+are gone. The status also lists up to ten flagged board-managed cards (`flagged`, newest activity
+first) for the chip's "needs you" list.
 
 **`await_board_events`** is the manager's wait: a server-side long poll (default 25 s, max 45 s,
 two-second reads) over `IBoardStore.GetBoardEventsAsync`: Card Log and discussion rows plus
@@ -427,7 +441,7 @@ folder name only, because that pass has no custom-name lookup.
 | Validation and orchestration | `BoardService.cs` and its partials in this directory |
 | SQL and migration | `VibeRails.Data.Sqlite/Board/BoardStore*.cs`, `BoardStore.Options.cs`; contracts in `VibeRails.Data.Abstractions/Board` |
 | Start work / prompt | `BoardLaunchService.cs`, `BoardPromptComposer.cs`, `BoardSelection.cs` |
-| AI board manager (switch, settings, chip, launch, worker limit, `await_board_events`) | `BoardManagerService.cs`, `BoardLaunchService.LaunchBoardManagerAsync` / `RequireManagedWorkerSlotAsync`, `BoardPromptComposer.ComposeBoardManager`, `Mcp/Tools/BoardTool.Events.cs`, `BoardStore.BoardManager.cs`, `wwwroot/js/modules/board-manager.js`, the Manager tab in `board-settings.js`, `settings-ai-board-manager.js` |
+| AI board manager (switch, settings, chip, launch, worker limit, cross-window checks, `await_board_events`) | `BoardManagerService.cs`, `BoardLaunchService.LaunchBoardManagerAsync` / `RequireManagedWorkerSlotAsync` / `RunningElsewhereAsync`, `SessionOwnerProcess.cs`, `BoardPromptComposer.ComposeBoardManager`, `Mcp/Tools/BoardTool.Events.cs`, `BoardStore.BoardManager.cs`, `wwwroot/js/modules/board-manager.js`, the Manager tab in `board-settings.js`, `settings-ai-board-manager.js` |
 | Agent tools and project context | `Services/Mcp/Tools/BoardTool.cs`, `BoardProjectResolver.cs`; read [MCP instructions](../Mcp/AGENTS.md) |
 | Agent context size (VB-63): the editor's "Agent context" section, launch samples, `get_board_card` activity budget | `BoardContextEstimator.cs`, `ContextTokenEstimator.cs`, `BoardStore.ContextSamples.cs`, `BoardTool.FormatCard`, `wwwroot/js/modules/board-card-context.js`; plan in `vibe-books/vibe_board_context_rot/about.md` |
 | Provider grants / child context | `Services/Terminal/Commands/BoardMcpAuthorization.cs`, OpenCode companion; read [terminal instructions](../Terminal/AGENTS.md) |
@@ -732,7 +746,7 @@ Never replace the durable queue with a browser timer or an in-memory queue.
 | Routes/scope/auth | `Tests/Routes/BoardRoutesTests.cs`, `CookieAuthMiddlewareTests` |
 | MCP / grants | `BoardToolTests`, `McpServerHttpTests`, `McpStdioHostTests`, `BoardToolAuthorizationTests`, OpenCode/command Board tests |
 | Launch concurrency/prompt | `BoardLaunchConcurrencyTests`, `BoardPromptComposerTests`, launch cases in `BoardServiceTests` |
-| AI board manager | `BoardManagerStoreTests`, `BoardManagerLaunchTests`, `BoardManagerPromptTests`, `BoardToolTests.BoardEvents`, `BoardRoutesTests.BoardManager`, `BoardAgentLaunchToolTests`, `board-manager.test.mjs`, `UITests/tests/board-manager.spec.js` |
+| AI board manager | `BoardManagerStoreTests`, `BoardManagerLaunchTests` (cross-window cases too), `SessionOwnerProcessTests`, `BoardManagerPromptTests`, `BoardToolTests.BoardEvents`, `BoardRoutesTests.BoardManager`, `BoardAgentLaunchToolTests`, `board-manager.test.mjs`, `UITests/tests/board-manager.spec.js` |
 | UI behavior | `Tests/wwwroot/js/board-*.test.mjs`; `UITests/tests/board-ux.spec.js` and `board-attachment-security.spec.js` |
 | `@path` references / file index | `BoardFileIndexServiceTests`, the referenced-files cases in `BoardPromptComposerTests`, the files route case in `BoardRoutesTests`, `board-text.test.mjs`, `board-file-refs.test.mjs`, the typeahead case in `board-ux.spec.js` |
 | Schema changes | `Tests/DB/SchemaSnapshotTests.cs`, `PreviousReleaseCompatibilityTests.cs`, migration/Board adoption tests |
