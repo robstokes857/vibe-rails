@@ -61,7 +61,7 @@ async function installSettingsApi(page, initialSettings) {
 async function openSettings(page) {
     await page.goto('/?view=settings');
 
-    const root = page.locator('[data-view="settings"]');
+    const root = page.locator('.view[data-view="settings"]');
     await expect(root).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('#loading-overlay')).toHaveClass(/\bd-none\b/);
     return {

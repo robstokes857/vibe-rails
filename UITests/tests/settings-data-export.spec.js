@@ -3,6 +3,13 @@
 const { test, expect } = require('./fixtures');
 
 const MASKED_API_KEY = '••••••••test';
+const PRESENCE_CODE = 'C0FFEE01';
+
+// Replacing or clearing the API key needs presence confirmation (VIBE-182).
+async function confirmPresence(page) {
+    await page.locator('#settings-presence-proof').fill(PRESENCE_CODE);
+    await page.locator('#settings-presence-confirm').click();
+}
 
 function buildSettings(apiKey, dataExportConfigured = true) {
     return {
@@ -66,6 +73,13 @@ async function installSettingsApi(
             body: JSON.stringify({ isSet: false })
         });
     });
+    await page.route('**/api/v1/settings/security-challenge', async route => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ pinRequired: false, code: PRESENCE_CODE })
+        });
+    });
 
     return { writes };
 }
@@ -73,7 +87,7 @@ async function installSettingsApi(
 async function openSettings(page) {
     await page.goto('/?view=settings');
 
-    const root = page.locator('[data-view="settings"]');
+    const root = page.locator('.view[data-view="settings"]');
     await expect(root).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('#loading-overlay')).toHaveClass(/\bd-none\b/);
 
@@ -97,8 +111,10 @@ test('settings has no session-sharing switch and saving still shares', async ({ 
     await ui.apiKey.fill('new-api-key');
     await expect(ui.saveButton).toBeEnabled();
     await ui.saveButton.click();
+    await confirmPresence(page);
 
     await expect.poll(() => api.writes.length).toBe(1);
+    expect(api.writes[0].presenceProof).toBe(PRESENCE_CODE);
     expect(api.writes[0].apiKey).toBe('new-api-key');
     expect(api.writes[0].dataExportOptIn).toBe(true);
     await expect(ui.apiKey).toHaveValue(MASKED_API_KEY);
@@ -111,8 +127,10 @@ test('clearing the API key still sends the explicit key flag and keeps sharing o
 
     await ui.apiKey.fill('');
     await ui.saveButton.click();
+    await confirmPresence(page);
 
     await expect.poll(() => api.writes.length).toBe(1);
+    expect(api.writes[0].presenceProof).toBe(PRESENCE_CODE);
     expect(api.writes[0].clearApiKey).toBe(true);
     expect(api.writes[0].apiKey).toBe('');
     expect(api.writes[0].dataExportOptIn).toBe(true);

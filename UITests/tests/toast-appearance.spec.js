@@ -9,7 +9,7 @@ test('notifications use the app appearance without a separate setting', async ({
     await page.routeWebSocket('**/api/v1/events/ws*', () => {});
     await page.route('**/api/v1/**', route => route.fulfill({ json: route.request().url().includes('/context') ? { isInGit: true, rootPath: 'C:/fixture' } : {} }));
     await page.goto('/?view=settings', { waitUntil: 'domcontentloaded' });
-    await expect(page.locator('[data-view="settings"]')).toBeVisible();
+    await expect(page.locator('.view[data-view="settings"]')).toBeVisible();
     await expect(page.getByLabel('Notification appearance')).toHaveCount(0);
     await page.evaluate(async () => {
         const { showAppToast } = await import('/js/modules/toast-service.js');
@@ -31,7 +31,7 @@ test('notifications use the app appearance without a separate setting', async ({
     await page.evaluate(() => document.documentElement.style.setProperty('--color-bg-surface-hover', '#213141'));
     await expect(dark).toHaveCSS('background-color', 'rgb(33, 49, 65)');
     await page.goto('/?view=settings', { waitUntil: 'domcontentloaded' });
-    await expect(page.locator('[data-view="settings"]')).toBeVisible();
+    await expect(page.locator('.view[data-view="settings"]')).toBeVisible();
     await expect(page.getByLabel('Notification appearance')).toHaveCount(0);
     expect(await page.evaluate(() => localStorage.getItem('viberails.toast.theme'))).toBe('light');
     await page.setViewportSize({ width: 375, height: 720 });
