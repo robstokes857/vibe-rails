@@ -148,29 +148,44 @@ public sealed class BoardReviewService(IBoardStore store, IBoardService board)
 
     internal sealed record Capture(string? Hash, string? Base, string? Head, string? Limitations, IReadOnlyList<string>? Files = null);
 
-    internal static async Task<Capture> CaptureAsync(string workspace, string scope, string? baseCommit, string? headCommit, bool dirty, CancellationToken ct)
+    /// <summary>
+    /// The longest one scope capture may take, both fingerprint passes together. It stays under
+    /// the 60-second default MCP tool timeout of Codex, the usual reviewer, so begin_board_review
+    /// answers with a limitation instead of leaving the client to give up without one (VIBE-267).
+    /// </summary>
+    internal static readonly TimeSpan CaptureDeadline = TimeSpan.FromSeconds(40);
+
+    internal static async Task<Capture> CaptureAsync(string workspace, string scope, string? baseCommit, string? headCommit, bool dirty,
+        CancellationToken ct, TimeSpan? deadline = null)
     {
         if (scope == "unknown") return new(null, baseCommit, headCommit, "Scope ambiguous; freshness cannot be established.");
         var stage = "resolve HEAD";
+        var limit = deadline ?? CaptureDeadline;
+        using var deadlineCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadlineCts.CancelAfter(limit);
+        var token = deadlineCts.Token;
         try
         {
             IReadOnlyList<string>? files = null;
             async Task<(string? Hash, string? Base, string? Head, string? Limitation)> Once()
             {
                 stage = "resolve HEAD";
-                var head = await GitCli.RunAsync(workspace, ["rev-parse", "--verify", "HEAD^{commit}"], ct);
+                var head = await GitCli.RunAsync(workspace, ["rev-parse", "--verify", "HEAD^{commit}"], token);
                 if (head.TimedOut) throw new TimeoutException("Git timed out resolving HEAD.");
                 if (!head.Succeeded) throw new InvalidOperationException($"Git could not resolve HEAD: {head.StdErr.Trim()}");
                 stage = $"capture {scope} changes";
+                // The fingerprint covers the changed files and rule files only. The committed scopes
+                // would otherwise also read every source file at HEAD for MintLint impact ranking,
+                // one git process each: minutes on this repository, twice per capture (VIBE-267).
                 var snapshot = scope switch
                 {
-                    "range" => await snapshots.CaptureRangeAsync(workspace, baseCommit!, headCommit!, ct),
-                    "unpushed" => await snapshots.CaptureUnpushedAsync(workspace, ct),
-                    "repository" => await snapshots.CaptureRepositoryAsync(workspace, ct),
-                    _ => await snapshots.CaptureWorkingTreeAsync(workspace, ct)
+                    "range" => await snapshots.CaptureRangeAsync(workspace, baseCommit!, headCommit!, includeImpactFiles: false, token),
+                    "unpushed" => await snapshots.CaptureUnpushedAsync(workspace, includeImpactFiles: false, token),
+                    "repository" => await snapshots.CaptureRepositoryAsync(workspace, includeImpactFiles: false, token),
+                    _ => await snapshots.CaptureWorkingTreeAsync(workspace, token)
                 };
                 stage = "capture working-tree changes";
-                var extra = dirty && scope != "working-tree" ? await snapshots.CaptureWorkingTreeAsync(workspace, ct) : null;
+                var extra = dirty && scope != "working-tree" ? await snapshots.CaptureWorkingTreeAsync(workspace, token) : null;
                 stage = "fingerprint captured inputs";
                 files = snapshot.Files.Select(f => $"{scope}: {f.ChangeKind} {f.RelativePath}")
                     .Concat(extra?.Files.Select(f => $"dirty: {f.ChangeKind} {f.RelativePath}") ?? []).Take(1000).ToList();
@@ -202,15 +217,18 @@ public sealed class BoardReviewService(IBoardStore store, IBoardService board)
             return first == second ? new(first.Hash, first.Base, first.Head, files?.Count == 1000 ? "File listing capped at 1,000; fingerprint covers captured inputs." : null, files)
                 : new(null, first.Base, first.Head, "Inputs changed during capture; the two fingerprints did not match. Run the review again after changes settle.", files);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException || deadlineCts.IsCancellationRequested && !ct.IsCancellationRequested)
         {
             // Loud on purpose. The agent reading this record is the only one who sees the failure
             // in time to report it, so the exact cause travels with the limitation, not just a log.
-            Log.Error(ex, "[BoardReview] Scope capture failed: workspace={Workspace}, scope={Scope}, stage={Stage}",
-                workspace, scope, stage);
-            var reason = ex is TimeoutException ? "Git timed out" : "Capture failed";
+            var overDeadline = ex is OperationCanceledException;
+            Log.Error(ex, "[BoardReview] Scope capture failed: workspace={Workspace}, scope={Scope}, stage={Stage}, overDeadline={OverDeadline}",
+                workspace, scope, stage, overDeadline);
+            var reason = overDeadline ? $"Capture exceeded its {limit.TotalSeconds:0}-second limit"
+                : ex is TimeoutException ? "Git timed out" : "Capture failed";
+            var detail = overDeadline ? "The scope may be too large to fingerprint in time." : OneLine(ex.Message, 600);
             return new(null, baseCommit, headCommit,
-                $"Scope capture unavailable: {reason} while trying to {stage}. {OneLine(ex.Message, 600)} "
+                $"Scope capture unavailable: {reason} while trying to {stage}. {detail} "
                 + "This is a VibeRails capture failure, not a finding about the change: report it verbatim, "
                 + "then describe what was actually reviewed and its limitations.");
         }

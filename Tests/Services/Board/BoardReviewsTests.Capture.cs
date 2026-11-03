@@ -85,6 +85,37 @@ public sealed partial class BoardReviewsTests
         Assert.StartsWith("Stale", (await reviews.ReportAsync(repo, card.Key, begun.Id, true, repo, Ct))!.Freshness);
     }
 
+    /// <summary>
+    /// VIBE-267: begin_board_review must answer with a limitation inside the client's tool timeout,
+    /// never leave the reviewer waiting with no review id. An overrun is a reported capture failure.
+    /// </summary>
+    [Theory]
+    [InlineData("range")]
+    [InlineData("working-tree")]
+    public async Task CaptureOverItsDeadlineReturnsALimitationInsteadOfWaiting(string scope)
+    {
+        var head = await Git("rev-parse", "HEAD");
+
+        var capture = await BoardReviewService.CaptureAsync(repo, scope, baseline, head, true, Ct, deadline: TimeSpan.Zero);
+
+        Assert.Null(capture.Hash);
+        // CancelAfter fires on a timer even for zero, so the stage it interrupts can vary.
+        Assert.StartsWith("Scope capture unavailable: Capture exceeded its 0-second limit while trying to ", capture.Limitations);
+        Assert.Contains("report it verbatim", capture.Limitations);
+        Assert.Equal(baseline, capture.Base);
+    }
+
+    [Fact]
+    public async Task CaptureStillHonoursTheCallersCancellation()
+    {
+        var head = await Git("rev-parse", "HEAD");
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            BoardReviewService.CaptureAsync(repo, "range", baseline, head, true, cancelled.Token));
+    }
+
     [Theory]
     [InlineData("range", "binary")]
     [InlineData("range", "gitlink")]

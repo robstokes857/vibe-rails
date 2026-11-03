@@ -1201,6 +1201,18 @@ review limitations the agent reads, with an instruction to report it verbatim, a
 Failed captures have no fingerprint and cannot establish freshness; a new review is required once
 the running build carries the fix.
 
+A review capture reads only what its fingerprint covers: the changed files, their baselines and
+the rule files. Committed scopes (range, unpushed, repository) skip the provider's MintLint impact
+sources (`includeImpactFiles: false`), which are every supported source at HEAD read one
+`git cat-file` each. On this repository that was 2,071 files and about 108 s per pass. Two passes
+plus the dirty working tree came to roughly four minutes, past Codex's 60-second MCP tool timeout,
+so `begin_board_review` never answered (VIBE-267). The same 16-file range now captures in about
+7 s. Board Code quality checks and the code analyzer still read impact sources, because their
+ranking uses them. The whole capture, both passes together, also runs under
+`BoardReviewService.CaptureDeadline` (40 s). An overrun becomes the ordinary failed-capture
+limitation ("Capture exceeded its 40-second limit while trying to …"). The caller's own
+cancellation still propagates. `get_board_reviews verify=true` uses the same capture and limit.
+
 `get_board_reviews` and the root-only `/cards/{card}/reviews` reads expose the same record. History
 pages direct attempts and review Automation runs by 50; the latest saved report is fetched
 independently, so many newer unfinished attempts cannot hide it. Freshness comparison only reads

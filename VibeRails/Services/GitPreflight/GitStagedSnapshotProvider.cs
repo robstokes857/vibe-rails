@@ -535,8 +535,19 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
     /// the branch has no upstream (e.g. a brand-new branch that has never been pushed).
     /// The caller maps that to a friendly API response.
     /// </summary>
+    public Task<GitStagedSnapshot> CaptureUnpushedAsync(
+        string workingDirectory,
+        CancellationToken cancellationToken) =>
+        CaptureUnpushedAsync(workingDirectory, includeImpactFiles: true, cancellationToken);
+
+    /// <inheritdoc cref="CaptureUnpushedAsync(string, CancellationToken)"/>
+    /// <param name="includeImpactFiles">Also read every supported source file at HEAD for
+    /// MintLint impact ranking. That is one git process per file, about two minutes on a
+    /// repository with two thousand sources on Windows, so callers that only fingerprint the
+    /// changed files pass false (VIBE-267).</param>
     public async Task<GitStagedSnapshot> CaptureUnpushedAsync(
         string workingDirectory,
+        bool includeImpactFiles,
         CancellationToken cancellationToken)
     {
         var rootResult = await RunTextGitAsync(
@@ -590,27 +601,40 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         EnsureSucceeded(mergeBaseResult, $"find the merge base of {upstreamRef} and HEAD", repositoryPath);
         var mergeBaseRef = mergeBaseResult.StdOut.Trim();
 
-        return await CaptureCommittedCoreAsync(repositoryPath, mergeBaseRef, headCommit, cancellationToken);
+        return await CaptureCommittedCoreAsync(repositoryPath, mergeBaseRef, headCommit, includeImpactFiles, cancellationToken);
     }
 
     /// <summary>Capture a validated, immutable range without changing HEAD, index or working files.</summary>
-    public async Task<GitStagedSnapshot> CaptureRangeAsync(string repositoryPath, string baseCommit, string headCommit, CancellationToken cancellationToken)
+    public Task<GitStagedSnapshot> CaptureRangeAsync(string repositoryPath, string baseCommit, string headCommit, CancellationToken cancellationToken) =>
+        CaptureRangeAsync(repositoryPath, baseCommit, headCommit, includeImpactFiles: true, cancellationToken);
+
+    /// <inheritdoc cref="CaptureRangeAsync(string, string, string, CancellationToken)"/>
+    /// <param name="includeImpactFiles">See <see cref="CaptureUnpushedAsync(string, bool, CancellationToken)"/>.</param>
+    public async Task<GitStagedSnapshot> CaptureRangeAsync(string repositoryPath, string baseCommit, string headCommit,
+        bool includeImpactFiles, CancellationToken cancellationToken)
     {
         var ancestry = await RunTextGitAsync(repositoryPath,
             ["merge-base", "--is-ancestor", baseCommit, headCommit], cancellationToken);
         EnsureSucceeded(ancestry, "validate that the base is an ancestor of the selected head", repositoryPath);
-        return await CaptureCommittedCoreAsync(repositoryPath, baseCommit, headCommit, cancellationToken);
+        return await CaptureCommittedCoreAsync(repositoryPath, baseCommit, headCommit, includeImpactFiles, cancellationToken);
     }
 
     /// <summary>Capture all committed files at HEAD; dirty working files are explicitly excluded.</summary>
-    public async Task<GitStagedSnapshot> CaptureRepositoryAsync(string repositoryPath, CancellationToken cancellationToken)
+    public Task<GitStagedSnapshot> CaptureRepositoryAsync(string repositoryPath, CancellationToken cancellationToken) =>
+        CaptureRepositoryAsync(repositoryPath, includeImpactFiles: true, cancellationToken);
+
+    /// <inheritdoc cref="CaptureRepositoryAsync(string, CancellationToken)"/>
+    /// <param name="includeImpactFiles">See <see cref="CaptureUnpushedAsync(string, bool, CancellationToken)"/>.</param>
+    public async Task<GitStagedSnapshot> CaptureRepositoryAsync(string repositoryPath, bool includeImpactFiles, CancellationToken cancellationToken)
     {
         var head = await RunTextGitAsync(repositoryPath, ["rev-parse", "--verify", "HEAD^{commit}"], cancellationToken);
         EnsureSucceeded(head, "resolve HEAD", repositoryPath);
-        return await CaptureCommittedCoreAsync(repositoryPath, "4b825dc642cb6eb9a060e54bf8d69288fbee4904", head.StdOut.Trim(), cancellationToken);
+        return await CaptureCommittedCoreAsync(repositoryPath, "4b825dc642cb6eb9a060e54bf8d69288fbee4904", head.StdOut.Trim(),
+            includeImpactFiles, cancellationToken);
     }
 
-    private async Task<GitStagedSnapshot> CaptureCommittedCoreAsync(string repositoryPath, string mergeBaseRef, string headCommit, CancellationToken cancellationToken)
+    private async Task<GitStagedSnapshot> CaptureCommittedCoreAsync(string repositoryPath, string mergeBaseRef, string headCommit,
+        bool includeImpactFiles, CancellationToken cancellationToken)
     {
         // This scope represents committed state, so enumerate HEAD's tree rather than the index.
         // `-l` supplies each blob's size before any content is read.
@@ -734,16 +758,21 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         }
 
         // Impact ranking also consumes immutable HEAD contents. Reuse blobs retained above and fill
-        // the remaining aggregate budget with supported source files from the HEAD tree.
-        var impactFiles = new List<GitIndexTextFile>();
-        foreach (var entry in headEntries.Where(entry =>
-                     entry.Type == "blob" && MintLintAnalyzer.SupportsFile(entry.RelativePath)))
+        // the remaining aggregate budget with supported source files from the HEAD tree. Null, not
+        // empty, when the caller skipped them, so MintLint never reads "no references" from it.
+        List<GitIndexTextFile>? impactFiles = null;
+        if (includeImpactFiles)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var source = await ReadHeadTextAsync(entry);
-            if (!source.IsBinary && source.Content is not null)
+            impactFiles = [];
+            foreach (var entry in headEntries.Where(entry =>
+                         entry.Type == "blob" && MintLintAnalyzer.SupportsFile(entry.RelativePath)))
             {
-                impactFiles.Add(new GitIndexTextFile(entry.RelativePath, source.Content));
+                cancellationToken.ThrowIfCancellationRequested();
+                var source = await ReadHeadTextAsync(entry);
+                if (!source.IsBinary && source.Content is not null)
+                {
+                    impactFiles.Add(new GitIndexTextFile(entry.RelativePath, source.Content));
+                }
             }
         }
 

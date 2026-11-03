@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using VibeRails.Services.Git;
 using VibeRails.Services.GitPreflight;
 using Xunit;
 
@@ -681,6 +682,55 @@ public sealed class GitStagedSnapshotProviderTests : IAsyncLifetime
         Assert.DoesNotContain(snapshot.ImpactFiles!, file => file.RelativePath == "staged-only.cs");
     }
 
+    /// <summary>
+    /// VIBE-267: a review fingerprints changed and rule files only. Reading every HEAD source for
+    /// impact ranking took one git process per file, minutes on a large repository, twice per
+    /// review capture. Without impact files the changed and rule files must be unchanged, and the
+    /// impact list is null (not captured), never an empty list that reads as "nothing references it".
+    /// </summary>
+    [Theory]
+    [InlineData("unpushed")]
+    [InlineData("range")]
+    [InlineData("repository")]
+    public async Task CommittedCaptures_CanSkipImpactFilesWithoutChangingTheirChangedOrRuleFiles(string scope)
+    {
+        await ConfigureUpstreamAtHeadAsync();
+        var baseCommit = await HeadAsync();
+        await File.WriteAllTextAsync(
+            Path.Combine(_repository, "tracked.cs"),
+            "public class HeadVersion { }\n",
+            TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(
+            Path.Combine(_repository, "head-caller.cs"),
+            "public class HeadCaller { HeadVersion value; }\n",
+            TestContext.Current.CancellationToken);
+        await GitAsync("add", ".");
+        await GitAsync("commit", "-m", "unpushed head content");
+        var headCommit = await HeadAsync();
+        var provider = new GitStagedSnapshotProvider();
+        var ct = TestContext.Current.CancellationToken;
+
+        Task<GitStagedSnapshot> Capture(bool includeImpactFiles) => scope switch
+        {
+            "unpushed" => provider.CaptureUnpushedAsync(_repository, includeImpactFiles, ct),
+            "range" => provider.CaptureRangeAsync(_repository, baseCommit, headCommit, includeImpactFiles, ct),
+            _ => provider.CaptureRepositoryAsync(_repository, includeImpactFiles, ct)
+        };
+        var full = await Capture(includeImpactFiles: true);
+        var lean = await Capture(includeImpactFiles: false);
+
+        Assert.Contains(full.ImpactFiles!, file => file.RelativePath == "head-caller.cs");
+        Assert.Null(lean.ImpactFiles);
+        Assert.Equal(
+            full.Files.Select(file => (file.RelativePath, file.ChangeKind, file.Content, file.PreviousContent, file.AddedContent)),
+            lean.Files.Select(file => (file.RelativePath, file.ChangeKind, file.Content, file.PreviousContent, file.AddedContent)));
+        Assert.Contains(lean.Files, file => file.RelativePath == "tracked.cs" && file.Content == "public class HeadVersion { }\n");
+        Assert.Equal(full.AgentFiles.Select(file => (file.RelativePath, file.Content)),
+            lean.AgentFiles.Select(file => (file.RelativePath, file.Content)));
+        Assert.NotEmpty(lean.AgentFiles);
+        Assert.Equal(full.CheckIdentity, lean.CheckIdentity);
+    }
+
     [Fact]
     public async Task CaptureUnpushedAsync_RejectsOversizedHeadBlobBeforeReadingIt()
     {
@@ -827,6 +877,13 @@ public sealed class GitStagedSnapshotProviderTests : IAsyncLifetime
     }
 
     private Task GitAsync(params string[] arguments) => GitInAsync(_repository, arguments);
+
+    private async Task<string> HeadAsync()
+    {
+        var head = await GitCli.RunAsync(_repository, ["rev-parse", "HEAD"], TestContext.Current.CancellationToken);
+        Assert.True(head.Succeeded, head.StdErr);
+        return head.StdOut.Trim();
+    }
 
     private static async Task GitInAsync(string workingDirectory, params string[] arguments)
     {
