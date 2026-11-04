@@ -40,6 +40,90 @@ public sealed class BoardChecksTests : IAsyncLifetime
     private Task<BoardCheckRecord> Run(JobActionKind kind, params string[] args) => Engine().ExecuteAsync(repo, repo,
         card.Key, Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), kind, args, Ct);
 
+    [Theory]
+    [InlineData(JobActionKind.CodeQuality, "working-tree", false)]
+    [InlineData(JobActionKind.CodeQuality, "working-tree", true)]
+    [InlineData(JobActionKind.CodeQuality, "repository", false)]
+    [InlineData(JobActionKind.CodeQuality, "repository", true)]
+    [InlineData(JobActionKind.CodeQuality, "unpushed", false)]
+    [InlineData(JobActionKind.CodeQuality, "unpushed", true)]
+    [InlineData(JobActionKind.Vca, "working-tree", true)]
+    [InlineData(JobActionKind.Vca, "repository", true)]
+    [InlineData(JobActionKind.Vca, "unpushed", true)]
+    public async Task UnbornBranchHasNothingToCheckAndPreservesWorkingFiles(JobActionKind kind, string scope, bool hasFiles)
+    {
+        var workspace = Path.Combine(root, "unborn");
+        Directory.CreateDirectory(workspace);
+        Assert.True((await GitCli.RunAsync(workspace, ["init", "--initial-branch=main"], Ct)).Succeeded);
+        if (hasFiles)
+        {
+            await File.WriteAllTextAsync(Path.Combine(workspace, "staged.cs"), "class Staged {}\n", Ct);
+            Assert.True((await GitCli.RunAsync(workspace, ["add", "staged.cs"], Ct)).Succeeded);
+            await File.WriteAllTextAsync(Path.Combine(workspace, "untracked.cs"), "class Untracked {}\n", Ct);
+        }
+        var before = await GitCli.RunAsync(workspace, ["status", "--porcelain"], Ct);
+
+        var result = await Engine().ExecuteAsync(repo, workspace, card.Key, "unborn", "check", kind, [scope], Ct);
+
+        Assert.Equal("Skipped/not applicable", result.Status);
+        Assert.Equal("Nothing to check: this branch has no commits yet.", result.Summary);
+        Assert.Equal(0, result.FileCount);
+        Assert.Equal(0, result.AnalyzedCount);
+        Assert.Null(result.BaseCommit);
+        Assert.Null(result.HeadCommit);
+        Assert.Null(result.SnapshotHash);
+        Assert.Null(result.Evidence);
+        Assert.NotNull(result.EndedUtc);
+        Assert.Contains(result.Limitations, text => text.Contains("no files were analyzed"));
+        var saved = (await store.GetCheckAsync(repo, card.Id, result.Id, Ct))!;
+        Assert.Equal(result.Status, saved.Status);
+        Assert.Equal(result.Summary, saved.Summary);
+        Assert.Equal(result.Limitations, saved.Limitations);
+        Assert.NotNull(saved.EndedUtc);
+        Assert.Equal(before.StdOut, (await GitCli.RunAsync(workspace, ["status", "--porcelain"], Ct)).StdOut);
+        Assert.False((await GitCli.RunAsync(workspace, ["rev-parse", "--verify", "HEAD"], Ct)).Succeeded);
+        if (hasFiles)
+        {
+            Assert.Equal("class Staged {}\n", await File.ReadAllTextAsync(Path.Combine(workspace, "staged.cs"), Ct));
+            Assert.Equal("class Untracked {}\n", await File.ReadAllTextAsync(Path.Combine(workspace, "untracked.cs"), Ct));
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task InvalidHeadStillFailsInsteadOfClaimingNothingToCheck(bool symbolic)
+    {
+        var invalid = new string('f', 40) + "\n";
+        if (symbolic)
+        {
+            await Git("symbolic-ref", "HEAD", "refs/heads/broken");
+            await File.WriteAllTextAsync(Path.Combine(repo, ".git", "refs", "heads", "broken"), invalid, Ct);
+        }
+        else await File.WriteAllTextAsync(Path.Combine(repo, ".git", "HEAD"), invalid, Ct);
+
+        var result = await Run(JobActionKind.CodeQuality, "working-tree");
+
+        Assert.Equal("Failed to run", result.Status);
+        Assert.Contains("Cannot resolve HEAD", result.Summary);
+    }
+
+    [Fact]
+    public async Task ExplicitRangeDoesNotRequireACommitOnTheCurrentBranch()
+    {
+        await Write("example.cs", "class Committed {}\n");
+        await Git("add", ".");
+        await Git("-c", "core.hooksPath=", "commit", "-m", "feature");
+        var head = await Git("rev-parse", "HEAD");
+        await Git("symbolic-ref", "HEAD", "refs/heads/unborn");
+
+        var result = await Run(JobActionKind.CodeQuality, "range", baseline, head);
+
+        Assert.Equal("Passed", result.Status);
+        Assert.Equal(1, result.AnalyzedCount);
+        Assert.Equal(head, result.HeadCommit);
+    }
+
     [Fact]
     public async Task SavedEvidenceRetainsExactSourcesAndIgnoresAfterCheckoutChanges()
     {

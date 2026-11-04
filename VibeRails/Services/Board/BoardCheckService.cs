@@ -64,6 +64,11 @@ public sealed class BoardCheckService(
         {
             record = record with { Status = "Cancelled", Summary = "Check cancelled; analysis is incomplete.", EndedUtc = DateTime.UtcNow };
         }
+        catch (NoCommitsException ex)
+        {
+            record = record with { Status = "Skipped/not applicable", Summary = ex.Message,
+                Limitations = ["No baseline commit is available for this scope; no files were analyzed."], EndedUtc = DateTime.UtcNow };
+        }
         catch (Exception ex)
         {
             record = record with { Status = "Failed to run", Summary = ex.Message, EndedUtc = DateTime.UtcNow };
@@ -81,9 +86,9 @@ public sealed class BoardCheckService(
                 throw new ArgumentException("Check ranges require full base and head commit SHAs.");
             return await snapshots.CaptureRangeAsync(workspace, scope.Base!, scope.Head!, ct);
         }
+        var head = await ReadHeadAsync(workspace, ct, allowUnborn: true);
         if (scope.Kind == "repository") return await snapshots.CaptureRepositoryAsync(workspace, ct);
         if (scope.Kind == "unpushed") return await snapshots.CaptureUnpushedAsync(workspace, ct);
-        var head = await ReadHeadAsync(workspace, ct);
         var snapshot = captureImpact ? await snapshots.CaptureWorkingTreeCheckAsync(workspace, ct) : await snapshots.CaptureWorkingTreeAsync(workspace, ct);
         var check = captureImpact ? await snapshots.CaptureWorkingTreeCheckAsync(workspace, ct) : await snapshots.CaptureWorkingTreeAsync(workspace, ct);
         if (head != await ReadHeadAsync(workspace, ct) || Fingerprint(snapshot) != Fingerprint(check))
@@ -162,12 +167,24 @@ public sealed class BoardCheckService(
     private static string Version(JobActionKind kind) => (kind == JobActionKind.CodeQuality
         ? typeof(MintLintAnalyzer).Assembly : typeof(VcaPreflightStep).Assembly).GetName().Version?.ToString() ?? "unknown";
 
-    private static async Task<string> ReadHeadAsync(string workspace, CancellationToken ct)
+    private static async Task<string> ReadHeadAsync(string workspace, CancellationToken ct, bool allowUnborn = false)
     {
         var head = await GitCli.RunAsync(workspace, ["rev-parse", "--verify", "HEAD^{commit}"], ct);
-        if (!head.Succeeded) throw new InvalidOperationException("Cannot resolve HEAD. Commit an initial baseline before running checks.");
-        return head.StdOut.Trim();
+        if (head.Succeeded) return head.StdOut.Trim();
+        if (head.TimedOut) throw new TimeoutException("Git timed out while resolving HEAD.");
+
+        // Only a symbolic HEAD pointing to a missing branch is unborn. A detached HEAD,
+        // corrupt object/ref, invalid repository or failed Git command must remain an error.
+        var symbolic = await GitCli.RunAsync(workspace, ["symbolic-ref", "-q", "HEAD"], ct);
+        if (symbolic.Succeeded && symbolic.StdOut.Trim().StartsWith("refs/heads/", StringComparison.Ordinal))
+        {
+            var branch = await GitCli.RunAsync(workspace, ["show-ref", "--verify", "--quiet", symbolic.StdOut.Trim()], ct);
+            if (allowUnborn && !branch.TimedOut && branch.ExitCode == 1) throw new NoCommitsException();
+        }
+        throw new InvalidOperationException("Cannot resolve HEAD. Check that the repository and its HEAD reference are valid.");
     }
+
+    private sealed class NoCommitsException() : InvalidOperationException("Nothing to check: this branch has no commits yet.");
 
     internal static string RulesFingerprint(GitStagedSnapshot snapshot) => Hash(snapshot.AgentFiles
         .OrderBy(file => file.RelativePath, StringComparer.Ordinal).SelectMany(file => new[] { file.RelativePath, file.Content }));

@@ -28,6 +28,13 @@ detected edit/HEAD race; this is not a filesystem transaction. Saved Code qualit
 the tracked text used for impact ranking too, within the existing text snapshot budget. Quality
 still analyzes **added code** only, with the user's local ignores captured once for the run.
 
+Before the first commit on a branch, working-tree, unpushed and repository checks finish as
+**Skipped/not applicable** with “Nothing to check: this branch has no commits yet.” No files
+are analyzed, including staged and untracked files; the saved attempt records that limitation
+without claiming a captured snapshot. This does not fail the Automation action. A corrupt or
+otherwise unavailable HEAD still fails visibly. Explicit commit ranges remain independent of
+the current branch and are validated normally.
+
 The action records its attempt before capturing. Findings finish the action successfully and
 remain advisory. An analysis failure marks that action/Automation failed but allows subsequent
 checks and the review Worker to run. Script/Worker failures remain fail-fast. The ordinary run

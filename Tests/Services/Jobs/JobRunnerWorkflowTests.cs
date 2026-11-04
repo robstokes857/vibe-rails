@@ -6,8 +6,11 @@ using VibeRails.DTOs;
 using VibeRails.Services;
 using VibeRails.Services.Board;
 using VibeRails.Services.Cli;
+using VibeRails.Services.Git;
+using VibeRails.Services.GitPreflight;
 using VibeRails.Services.Jobs;
 using VibeRails.Services.Terminal;
+using VibeRails.Services.VCA.Hooks;
 using VibeRails.Utils;
 using Xunit;
 
@@ -15,6 +18,40 @@ namespace Tests.Services.Jobs;
 
 public sealed class JobRunnerWorkflowTests
 {
+    [Fact]
+    public async Task UnbornBranchCheckDoesNotFailTheWorkflowOrBlockFollowingActions()
+    {
+        var workspace = Path.Combine(Path.GetTempPath(), "job-unborn-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workspace);
+        try
+        {
+            Assert.True((await GitCli.RunAsync(workspace, ["init"], TestContext.Current.CancellationToken)).Succeeded);
+            var check = ScriptAction("check", 0, "") with { Kind = JobActionKind.CodeQuality, Arguments = ["working-tree"] };
+            var run = Run([check, ScriptAction("after", 1, "inspect.py")]) with
+                { ProjectPath = workspace, TerminalSessionId = "outer-pty" };
+            var store = StoreFor(run);
+            store.Setup(s => s.StartRunActionAsync(run.Id, It.IsAny<string>(), CancellationToken.None)).ReturnsAsync(true);
+            var completed = new List<(string Id, JobRunActionStatus Status, string? Output)>();
+            store.Setup(s => s.CompleteRunActionAsync(run.Id, It.IsAny<string>(), It.IsAny<JobRunActionStatus>(), It.IsAny<int?>(),
+                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), CancellationToken.None))
+                .Callback<string, string, JobRunActionStatus, int?, string?, string?, string?, CancellationToken>(
+                    (_, id, status, _, _, output, _, _) => completed.Add((id, status, output))).Returns(Task.CompletedTask);
+            store.Setup(s => s.CompleteIdleRunAsync(run.Id, CancellationToken.None)).ReturnsAsync(JobRunStatus.Succeeded);
+            var cli = new Mock<ICliWrapper>(MockBehavior.Strict);
+            cli.Setup(c => c.RunAsync(It.IsAny<CliRequest>(), It.IsAny<Func<CliOutputLine, ValueTask>>(), CancellationToken.None))
+                .ReturnsAsync(new CliResult(0, false, false, "inspected", "", TimeSpan.Zero, "python-test"));
+            using var provider = BuildServices(store, PreparedScripts(), cli, checks: true);
+
+            Assert.Equal(0, await JobRunner.RunAsync(new ParsedArgs { JobRunId = run.Id, WorkDir = workspace }, provider));
+            Assert.Equal(new[] { "check", "after" }, completed.Select(item => item.Id));
+            Assert.All(completed, item => Assert.Equal(JobRunActionStatus.Succeeded, item.Status));
+            Assert.Contains("Skipped/not applicable", completed[0].Output);
+            Assert.Contains("Nothing to check: this branch has no commits yet.", completed[0].Output);
+            store.Verify(s => s.CompleteIdleRunAsync(run.Id, CancellationToken.None), Times.Once);
+        }
+        finally { Directory.Delete(workspace, recursive: true); }
+    }
+
     [Fact]
     public async Task CheckExecutionFailureStillRunsFollowingActionsAndKeepsFailedOutcome()
     {
@@ -407,7 +444,8 @@ public sealed class JobRunnerWorkflowTests
         Mock<IAutomationScriptService> scriptService,
         Mock<ICliWrapper> cli,
         IRepository? repository = null,
-        IBoardStore? boards = null)
+        IBoardStore? boards = null,
+        bool checks = false)
     {
         var automationConsumer = new Mock<IAutomationConsumer>(MockBehavior.Strict);
         automationConsumer.SetupGet(candidate => candidate.IdleShutdownToken).Returns(CancellationToken.None);
@@ -420,6 +458,10 @@ public sealed class JobRunnerWorkflowTests
             .AddSingleton(automationConsumer.Object)
             .AddSingleton(repository ?? Mock.Of<IRepository>());
         if (boards is not null) services.AddSingleton(boards);
+        if (checks) services.AddSingleton<GitStagedSnapshotProvider>()
+            .AddSingleton<IVcaHookValidationService>(provider =>
+                new VcaRulesHookValidationService(provider.GetRequiredService<GitStagedSnapshotProvider>()))
+            .AddSingleton<BoardCheckService>();
         return services.BuildServiceProvider();
     }
 
