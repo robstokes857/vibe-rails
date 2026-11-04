@@ -1,11 +1,19 @@
-using System.Diagnostics;
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services;
+using VibeRails.Services.Board;
 using VibeRails.Services.Integrations.VibeCodeRemote;
 
 namespace VibeRails.Jobs;
 
+/// <summary>
+/// Closes open session rows whose recorded owner process is no longer running them. The owner is
+/// still running a session only while its PID is alive, readable and started before the session did
+/// (<see cref="SessionOwnerProcess"/>). A PID the operating system has since handed to another
+/// process is not the owner, including another user's process that cannot be inspected at all:
+/// after a reboot, macOS hands low PIDs to root-owned daemons, and a bare "has it exited" check
+/// called those daemons live forever, so the rows never closed.
+/// </summary>
 public sealed class StaleSessionCleanupJob(
     ILogger<StaleSessionCleanupJob> logger,
     ISystemResourceService resources,
@@ -40,7 +48,7 @@ public sealed class StaleSessionCleanupJob(
                 continue;
             }
 
-            if (IsProcessAlive(session.OwnerPid.Value))
+            if (SessionOwnerProcess.IsRunning(session.OwnerPid.Value, session.StartedUTC))
                 continue;
 
             orphanedSessions.Add(session);
@@ -55,19 +63,6 @@ public sealed class StaleSessionCleanupJob(
         {
             await repository.CompleteSessionAsync(session.SessionId, -1);
             await remoteStateService.DeregisterTerminalAsync(session.SessionId);
-        }
-    }
-
-    private static bool IsProcessAlive(int pid)
-    {
-        try
-        {
-            using var process = Process.GetProcessById(pid);
-            return !process.HasExited;
-        }
-        catch
-        {
-            return false;
         }
     }
 }

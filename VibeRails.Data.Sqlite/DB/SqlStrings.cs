@@ -801,7 +801,7 @@ namespace VibeRails.DB
               AND (WorkingDirectory = $directory OR WorkingDirectory LIKE $directoryPrefix ESCAPE '\');
             """;
         public const string SelectOpenSessionCleanupCandidates = """
-            SELECT s.Id, s.OwnerPid
+            SELECT s.Id, s.OwnerPid, s.StartedUTC
             FROM Sessions s
             WHERE s.EndedUTC IS NULL
               AND (

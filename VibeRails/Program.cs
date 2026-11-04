@@ -94,7 +94,11 @@ AppDomain.CurrentDomain.FirstChanceException += (_, args) =>
                        || typeName.Contains("SEHException", StringComparison.OrdinalIgnoreCase)
                        || typeName.Contains("OnnxRuntime", StringComparison.OrdinalIgnoreCase)
                        || typeName.StartsWith("Pty.Net", StringComparison.OrdinalIgnoreCase)
-                       || typeName.StartsWith("System.ComponentModel.Win32Exception", StringComparison.OrdinalIgnoreCase);
+                       // Process.StartTime on a PID this user may not inspect (on macOS, a recycled
+                       // PID now owned by root) throws this Win32Exception; the session and run
+                       // owner checks catch it and treat the owner as gone. Routine, not a crash.
+                       || (typeName.StartsWith("System.ComponentModel.Win32Exception", StringComparison.OrdinalIgnoreCase)
+                           && !ex.Message.StartsWith("Unable to retrieve the specified information about the process", StringComparison.Ordinal));
 
         if (isNative)
         {

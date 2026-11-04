@@ -7,7 +7,8 @@ namespace VibeRails.Services.Board;
 /// A tab child records its own PID in <c>Sessions.OwnerPid</c> when its session starts, so the
 /// owner is still there only while a process with that PID exists and started before the session
 /// did: a PID the operating system has since handed to a later process fails the start-time check.
-/// A process that cannot be read (gone, or another user's) is not running the session.
+/// A process that cannot be read (gone, or another user's) is not running the session. The Board's
+/// cross-window checks and the stale-session cleanup job share this rule.
 /// </summary>
 public static class SessionOwnerProcess
 {

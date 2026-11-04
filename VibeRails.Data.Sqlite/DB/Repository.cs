@@ -1835,7 +1835,8 @@ namespace VibeRails.DB
             {
                 sessions.Add(new OpenSessionCleanupCandidate(
                     SessionId: reader.GetString(0),
-                    OwnerPid: reader.IsDBNull(1) ? null : reader.GetInt32(1)));
+                    OwnerPid: reader.IsDBNull(1) ? null : reader.GetInt32(1),
+                    StartedUTC: DateTime.Parse(reader.GetString(2), null, System.Globalization.DateTimeStyles.RoundtripKind)));
             }
 
             return sessions;

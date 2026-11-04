@@ -98,7 +98,9 @@ also sees the board manager and workers another window runs: a session that is n
 root, is still open in state.db (`IBoardStore.GetOpenSessionOwnersAsync`, read in batches of 200
 ids, newest first, however old the link) and whose recorded `Sessions.OwnerPid` (its tab child) is
 a live process that started before the session did (`SessionOwnerProcess`, so a reused PID does
-not count). Age never hides a live owner: a manager can run for days. A second window's manager
+not count; `StaleSessionCleanupJob` closes open rows by the same rule, so a recycled or unreadable
+owner is only re-checked until its next ten-minute pass). Age never hides a live owner: a manager
+can run for days. A second window's manager
 launch, from the chip or Start Agent workflow, is a 409 (`BoardLaunchService.ManagerElsewhereMessage`);
 the status carries `elsewhere` and the chip reads Running in another window, with no Go to, Stop
 or Start. Another window's workers count toward the worker limit and the chip's busy count; the

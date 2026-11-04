@@ -12,7 +12,8 @@ public record SessionResponse(
 
 public record OpenSessionCleanupCandidate(
     string SessionId,
-    int? OwnerPid
+    int? OwnerPid,
+    DateTime StartedUTC
 );
 
 public record SessionLogResponse(
