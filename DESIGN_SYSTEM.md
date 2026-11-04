@@ -393,7 +393,7 @@ Label the preference itself, such as “Email notifications,” rather than usin
 
 Cards group a meaningful object or task. Use a quiet border, one heading and a small set of actions. Let the content determine height; avoid equal-height layouts that create large empty areas. Give action buttons separate targets rather than nesting buttons in a clickable card.
 
-Board task tiles give the assignee (including **Unassigned**) its own left-aligned row, followed by **Start work** / **Go to agent** / **Go to manager** on a separate, right-aligned row with at least 8px between them. Keep these rows separate at every lane width, including for short assignee names. A manager label, when present, sits above the assignee. The desktop app uses a compact lane minimum of `max(288px, 18rem)` to reduce horizontal scrolling and grow with text scaling; controls must stay inside the card.
+Board task tiles put the assignee (including **Unassigned**) and **Start work** / **Go to agent** / **Go to manager** on one row: the assignee chip flush left, the action flush right, vertically centred on each other, with at least 8px between them. That row never wraps or stacks, at any lane width, so the two controls sit at the same height in every card. When a lane is too narrow for both, the assignee's name ellipsizes (its tooltip keeps the full name); the action label is never clipped. A manager label, when present, sits on its own line above that row. The desktop app uses a compact lane minimum of `max(288px, 18rem)` to reduce horizontal scrolling and grow with text scaling; controls must stay inside the card.
 
 | Part | Value |
 | --- | --- |

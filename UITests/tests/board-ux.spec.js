@@ -3204,21 +3204,30 @@ test('long new-card descriptions grow inside the composer instead of painting ov
     expect(layout.attachmentsTop).toBeGreaterThanOrEqual(layout.composerBottom);
 });
 
-async function expectStackedCardControls(tile) {
+// The assignee chip and the work action share ONE row in every card: same vertical centre, chip
+// flush left, action flush right, at least 8px between them, nothing spilling out of the tile.
+// With `fullName: false` the lane is too narrow for both, so the chip's name may ellipsize; the
+// action label never does.
+async function expectAlignedCardControls(tile, { fullName = true } = {}) {
     const chip = tile.locator('.board-assignee-chip');
     const action = tile.locator('.board-card-start-work');
     const [chipBounds, actionBounds, footerBounds] = await Promise.all([
         chip.boundingBox(), action.boundingBox(), tile.locator('.board-card-foot').boundingBox()
     ]);
-    expect(actionBounds.y - chipBounds.y - chipBounds.height).toBeGreaterThanOrEqual(7.9);
+    const chipMiddle = chipBounds.y + chipBounds.height / 2;
+    const actionMiddle = actionBounds.y + actionBounds.height / 2;
+    expect(Math.abs(chipMiddle - actionMiddle)).toBeLessThan(1);
     expect(Math.abs(chipBounds.x - footerBounds.x)).toBeLessThan(1);
     expect(Math.abs(actionBounds.x + actionBounds.width - footerBounds.x - footerBounds.width)).toBeLessThan(1);
-    expect(await chip.locator('.board-assignee-name').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    expect(actionBounds.x - chipBounds.x - chipBounds.width).toBeGreaterThanOrEqual(7.9);
+    expect(await action.locator('[data-board-start-work-label]').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    if (fullName)
+        expect(await chip.locator('.board-assignee-name').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
     expect(await tile.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
 }
 
 for (const width of [1920, 1440, 390]) {
-    test(`the card face never squeezes the assignee name for Start work at ${width}px`, async ({ page }, testInfo) => {
+    test(`the card face keeps the assignee beside Start work at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 900 });
         // Four lanes: roomy at 1920px, compact at 1440px and at the lane floor on phones.
         const columns = ['Backlog', 'Build', 'Review', 'Done'].map((name, position) => ({
@@ -3234,7 +3243,9 @@ for (const width of [1920, 1440, 390]) {
         await expect(chip).toContainText('Card review (claude)');
         await page.screenshot({ path: testInfo.outputPath(`board-face-long-assignee-${width}.png`) });
         await expect(start).toBeVisible();
-        await expectStackedCardControls(tile);
+        // Four lanes at 1440px and the 288px floor at 390px are both too narrow for this long
+        // environment name beside Start work, so the chip ellipsizes it there; 1920px has room.
+        await expectAlignedCardControls(tile, { fullName: width >= 1920 });
     });
 
     test(`Start work on the card face launches saved work and fits a narrow lane at ${width}px`, async ({ page }, testInfo) => {
@@ -3260,7 +3271,7 @@ for (const width of [1920, 1440, 390]) {
         const tile = page.locator('.board-card');
         const start = tile.getByRole('button', { name: 'Start work on VB-1', exact: true });
         await expect(start).toBeVisible();
-        await expectStackedCardControls(tile);
+        await expectAlignedCardControls(tile);
         await page.screenshot({ path: testInfo.outputPath(`board-face-start-work-${width}.png`) });
 
         let releaseLaunch;
@@ -3299,7 +3310,7 @@ for (const { assignee, active, action } of [
     { assignee: 'base:claude', active: true, action: 'Go to agent on VB-1' },
     { assignee: null, active: false, action: 'Start work on VB-1' }
 ]) {
-    test(`${action} stays below a short assignee even when leftover space remains`, async ({ page }, testInfo) => {
+    test(`${action} sits beside a short assignee on one row`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width: 1440, height: 900 });
         const columns = ['Backlog', 'Ready'].map((name, position) => ({
             id: position ? `col_${position}` : 'col_ready', name, position, boardId: 'brd_main', color: '#64748b'
@@ -3312,7 +3323,7 @@ for (const { assignee, active, action } of [
         const start = tile.getByRole('button', { name: action, exact: true });
         await expect(chip).toContainText(assignee ? 'Claude' : 'Unassigned');
         await expect(start).toBeVisible();
-        await expectStackedCardControls(tile);
+        await expectAlignedCardControls(tile);
         await page.screenshot({ path: testInfo.outputPath(`board-face-lineup-${active ? 'go-to-agent' : 'start-work'}.png`) });
     });
 }
@@ -3320,7 +3331,7 @@ for (const { assignee, active, action } of [
 const compactCardLayouts = [16, 20].flatMap(rootSize => [1440, 1024, 768, 390, 375, 320].flatMap(width =>
     [false, true].map(active => ({ rootSize, width, active }))));
 for (const { rootSize, width, active } of compactCardLayouts) {
-    test(`compact card keeps ${active ? 'Go to agent below Claude' : 'Start work below Unassigned'} at ${rootSize}px root size and ${width}px viewport`, async ({ page }, testInfo) => {
+    test(`compact card keeps ${active ? 'Go to agent beside Claude' : 'Start work beside Unassigned'} at ${rootSize}px root size and ${width}px viewport`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 1200 });
         const columns = ['Ready', 'Build', 'Review', 'PR', 'Ship', 'Done'].map((name, position) => ({
             id: position ? `col_${position}` : 'col_ready', name, position, boardId: 'brd_main', color: '#64748b'
@@ -3335,7 +3346,7 @@ for (const { rootSize, width, active } of compactCardLayouts) {
         const laneWidth = await tile.evaluate(element => element.closest('.board-lane').getBoundingClientRect().width);
         expect(laneWidth).toBeCloseTo(Math.max(288, 18 * rootSize), 0);
         await tile.screenshot({ path: testInfo.outputPath(`compact-card-${rootSize}-${width}-${active ? 'active' : 'unassigned'}.png`) });
-        await expectStackedCardControls(tile);
+        await expectAlignedCardControls(tile);
     });
 }
 

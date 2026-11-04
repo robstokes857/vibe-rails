@@ -4139,8 +4139,9 @@
 
                 .board-view .board-agent-mark {
                     color: #38bdf8;
-                    margin-right: 0.25rem;
-                    font-size: 0.72rem;
+                    margin-right: 0.3rem;
+                    font-size: 1rem;
+                    vertical-align: -0.1em;
                 }
 
                 /* Keep a permanent ghost beside a clipped animation stage. The stage has room
@@ -4251,7 +4252,7 @@
                 .board-view .board-key {
                     color: var(--color-text-muted, #94a3b8);
                     font-family: 'JetBrains Mono', 'Fira Code', monospace;
-                    font-size: 0.68rem;
+                    font-size: 0.74rem;
                     white-space: nowrap;
                     min-width: 0;
                     max-width: 100%;
@@ -4355,30 +4356,47 @@
                     font-size: 0.7rem;
                 }
 
-                /* Card footer: each control owns a row at every lane width.
-                   Assignment stays left; Start work / Go to agent stays below it at the right. */
+                /* Card footer: an optional manager label, then ONE control row that never wraps.
+                   The assignee chip hugs the left and Start work / Go to agent hugs the right on
+                   the same baseline in every card, at every lane width. When the lane is too
+                   narrow for both, the assignee NAME ellipsizes (its title holds the full name);
+                   the action keeps its full label. Wrapping and stacking were both tried and both
+                   put the two controls at different heights from card to card. */
                 .board-view .board-card-foot {
                     display: flex;
                     flex-direction: column;
-                    align-items: flex-start;
+                    align-items: stretch;
                     gap: var(--space-2);
                     margin-top: 0.45rem;
                     padding-top: 0.4rem;
                     border-top: 1px solid color-mix(in srgb, var(--color-border, #334155) 60%, transparent);
                 }
 
+                .board-view .board-card-controls {
+                    display: flex;
+                    flex-wrap: nowrap;
+                    align-items: center;
+                    justify-content: space-between;
+                    gap: var(--space-2);
+                    min-width: 0;
+                }
+
                 .board-view .board-card-start-work {
                     display: inline-flex;
                     flex: none;
                     align-items: center;
-                    align-self: flex-end;
                     gap: 0.3rem;
                     padding: 0.2rem 0.45rem;
                     font-size: 14px;
                     white-space: nowrap;
                 }
 
-                /* Assignment owns a row so its name never competes with the launch action. */
+                /* The chip shrinks before the action does; only its name gives way. */
+                .board-view .board-card-controls .board-assignee-chip {
+                    flex: 0 1 auto;
+                    min-width: 0;
+                }
+
                 .board-assignee-chip {
                     display: inline-flex;
                     align-items: center;

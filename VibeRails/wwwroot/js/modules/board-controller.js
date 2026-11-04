@@ -1036,7 +1036,7 @@ export class BoardController {
                         </div>
                     </div>
                     <div class="board-card-foot">${manager ? `<span class="board-manager-chip" title="Manager: ${escapeHtml(manager.label)}">${this.avatarHtml(manager, 18)}<span class="board-assignee-name">Manager · ${escapeHtml(manager.label)}</span></span>`
-                        : boardManager ? `<span class="board-manager-chip is-board-manager" title="Run by the board manager (${escapeHtml(boardManager.label)})"><i class="fa-solid fa-diagram-project" aria-hidden="true"></i><span class="board-assignee-name">Board manager · ${escapeHtml(boardManager.label)}</span></span>` : ''}${assignee}${startWork}</div>
+                        : boardManager ? `<span class="board-manager-chip is-board-manager" title="Run by the board manager (${escapeHtml(boardManager.label)})"><i class="fa-solid fa-diagram-project" aria-hidden="true"></i><span class="board-assignee-name">Board manager · ${escapeHtml(boardManager.label)}</span></span>` : ''}<div class="board-card-controls">${assignee}${startWork}</div></div>
                 </div>
             </article>`;
     }

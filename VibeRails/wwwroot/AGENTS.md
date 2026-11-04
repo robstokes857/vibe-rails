@@ -607,10 +607,13 @@ Without the required assignee/manager, it opens the editor for selection. Card-f
 launches share a per-card in-flight guard, retained across lane repaints. Activity polling
 updates the button, and navigation discards unfinished card reads.
 
-The assignee (including **Unassigned**) has its own left-aligned row; the action always sits
-on a separate, right-aligned row below it with at least 8px between them. A manager label
-stays above the assignee. Keep this layout at every lane width and text scale. Cover the
-minimum lane width as well as roomy layouts in the Board harness.
+The assignee (including **Unassigned**) and the action share one non-wrapping row
+(`.board-card-controls`): chip flush left, action flush right, vertically centred, at least 8px
+apart, at every lane width and text scale. A lane too narrow for both ellipsizes the assignee
+name (the chip's title keeps it); the action label is never clipped. A manager label is its own
+line above that row. Stacking and wrapping were both tried and rejected because the two controls
+landed at different heights from card to card. Cover the minimum lane width as well as roomy
+layouts in the Board harness (`expectAlignedCardControls`).
 
 `board-card-assign.js` is the lane card's assignee menu. The whole assignee chip, assigned or
 **Unassigned**, is one button that opens it; an assigned card's menu leads with an **Unassign** row.
