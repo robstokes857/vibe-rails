@@ -1146,7 +1146,8 @@ namespace VibeRails.DTOs
         string MatchKind,
         string? ReasonKind,
         string? ReasonText,
-        DateTime CreatedUtc
+        DateTime CreatedUtc,
+        string? Author = null
     );
 
     public record CodeAnalyzerIgnoreListResponse(

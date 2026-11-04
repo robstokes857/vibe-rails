@@ -26,11 +26,12 @@ public sealed partial class BoardStore
         await RequireWritableCardAsync(connection, null, check.CardId, cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
-            INSERT INTO BoardChecks (Id, CardId, RunId, ActionId, StartedUTC, EndedUTC, SummaryJson, ResultJson)
-            SELECT $id, c.Id, $run, $action, $started, $ended, $summary, $result
+            INSERT INTO BoardChecks (Id, CardId, RunId, ActionId, StartedUTC, EndedUTC, SummaryJson, ResultJson, EvidenceJson)
+            SELECT $id, c.Id, $run, $action, $started, $ended, $summary, $result, $evidence
             FROM BoardCards c WHERE c.Id = $card AND c.ProjectPath = $project{ProjectPathCollation} AND c.DeletedUTC IS NULL
             ON CONFLICT(Id) DO UPDATE SET EndedUTC = excluded.EndedUTC,
-                SummaryJson = excluded.SummaryJson, ResultJson = excluded.ResultJson
+                SummaryJson = excluded.SummaryJson, ResultJson = excluded.ResultJson,
+                EvidenceJson = excluded.EvidenceJson
             WHERE BoardChecks.CardId = excluded.CardId AND BoardChecks.RunId = excluded.RunId
               AND BoardChecks.ActionId = excluded.ActionId AND BoardChecks.EndedUTC IS NULL;
             """;
@@ -41,8 +42,10 @@ public sealed partial class BoardStore
         command.Parameters.AddWithValue("$action", check.ActionId);
         command.Parameters.AddWithValue("$started", ToDb(check.StartedUtc));
         command.Parameters.AddWithValue("$ended", check.EndedUtc is {} end ? ToDb(end) : DBNull.Value);
-        command.Parameters.AddWithValue("$summary", JsonSerializer.Serialize(check with { ResultJson = null }, StorageJsonSerializerContext.Default.BoardCheckRecord));
+        command.Parameters.AddWithValue("$summary", JsonSerializer.Serialize(check with { ResultJson = null, Evidence = null }, StorageJsonSerializerContext.Default.BoardCheckRecord));
         command.Parameters.AddWithValue("$result", (object?)check.ResultJson ?? DBNull.Value);
+        command.Parameters.AddWithValue("$evidence", check.Evidence is null ? DBNull.Value
+            : JsonSerializer.Serialize(check.Evidence, StorageJsonSerializerContext.Default.BoardCheckEvidence));
         return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
     }
 
@@ -71,7 +74,7 @@ public sealed partial class BoardStore
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
-            SELECT e.SummaryJson, e.ResultJson FROM BoardChecks e JOIN BoardCards c ON c.Id = e.CardId
+            SELECT e.SummaryJson, e.ResultJson, e.EvidenceJson FROM BoardChecks e JOIN BoardCards c ON c.Id = e.CardId
             WHERE e.Id = $id AND c.Id = $card AND c.ProjectPath = $project{ProjectPathCollation} AND c.DeletedUTC IS NULL;
             """;
         command.Parameters.AddWithValue("$id", checkId);
@@ -80,7 +83,10 @@ public sealed partial class BoardStore
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken)) return null;
         return JsonSerializer.Deserialize(reader.GetString(0), StorageJsonSerializerContext.Default.BoardCheckRecord)! with
-        { ResultJson = reader.IsDBNull(1) ? null : reader.GetString(1) };
+        {
+            ResultJson = reader.IsDBNull(1) ? null : reader.GetString(1),
+            Evidence = reader.IsDBNull(2) ? null : JsonSerializer.Deserialize(reader.GetString(2), StorageJsonSerializerContext.Default.BoardCheckEvidence)
+        };
     }
 
     public async Task<IReadOnlyList<BoardCheckRecord>> GetLatestChecksAsync(string projectPath, string cardId, CancellationToken cancellationToken = default)

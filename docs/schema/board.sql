@@ -165,10 +165,16 @@ CREATE TABLE BoardCardSessions ( SessionId TEXT PRIMARY KEY, CardId TEXT NOT NUL
 CREATE TABLE BoardCards ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Number INTEGER NOT NULL, ColumnId TEXT NOT NULL REFERENCES BoardColumns(Id), Position INTEGER NOT NULL, Title TEXT NOT NULL, Description TEXT NOT NULL DEFAULT '', Assignee TEXT NULL, Priority TEXT NOT NULL DEFAULT 'medium', Type TEXT NOT NULL DEFAULT 'task', Points INTEGER NULL, Tags TEXT NOT NULL DEFAULT '[]', Blocked INTEGER NOT NULL DEFAULT 0, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, Flagged INTEGER NOT NULL DEFAULT 0, CardKey TEXT, DeletedUTC TEXT, DisplayId TEXT, AgentMade INTEGER NOT NULL DEFAULT 0, AgentMadeBy TEXT, AgentMadeSessionId TEXT, WorkflowMode TEXT, ManagerSelection TEXT, ManagerOptionsJson TEXT, Pinned INTEGER, RemoteCreated INTEGER, PostProcessed INTEGER NOT NULL DEFAULT 1, GhostReason TEXT, UNIQUE(ProjectPath, Number) );
 
 -- table BoardChecks
-CREATE TABLE BoardChecks ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, RunId TEXT NOT NULL, ActionId TEXT NOT NULL, StartedUTC TEXT NOT NULL, EndedUTC TEXT NULL, SummaryJson TEXT NOT NULL, ResultJson TEXT NULL, UNIQUE(CardId, RunId, ActionId) );
+CREATE TABLE BoardChecks ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, RunId TEXT NOT NULL, ActionId TEXT NOT NULL, StartedUTC TEXT NOT NULL, EndedUTC TEXT NULL, SummaryJson TEXT NOT NULL, ResultJson TEXT NULL, EvidenceJson TEXT, UNIQUE(CardId, RunId, ActionId) );
 
 -- table BoardCodeLinks
 CREATE TABLE BoardCodeLinks ( Id TEXT NOT NULL PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, Url TEXT NOT NULL, Kind TEXT NOT NULL, Label TEXT NOT NULL, CreatedUTC TEXT NOT NULL, UNIQUE(CardId, Url) );
+
+-- table BoardCodeQualityIgnoreHistory
+CREATE TABLE BoardCodeQualityIgnoreHistory ( Id TEXT PRIMARY KEY, RepositoryPath TEXT NOT NULL COLLATE NOCASE, Path TEXT NOT NULL COLLATE NOCASE, Operation TEXT NOT NULL, EntryJson TEXT NOT NULL, Author TEXT NULL, RecordedUTC TEXT NOT NULL );
+
+-- table BoardCodeQualityIgnores
+CREATE TABLE BoardCodeQualityIgnores ( RepositoryPath TEXT NOT NULL COLLATE NOCASE, Path TEXT NOT NULL COLLATE NOCASE, EntryJson TEXT NOT NULL, RemovedUTC TEXT NULL, LocallyModified INTEGER NOT NULL DEFAULT 0, LegacyFingerprint TEXT NULL, PRIMARY KEY (RepositoryPath, Path) );
 
 -- table BoardColumns
 CREATE TABLE BoardColumns ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Name TEXT NOT NULL, Position INTEGER NOT NULL, Color TEXT NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, BoardId TEXT NULL );

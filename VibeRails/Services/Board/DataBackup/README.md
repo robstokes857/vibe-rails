@@ -21,6 +21,15 @@ local data cannot be recovered before its first capture. State/session recording
 through their existing separate backup path; external `@path` files and tracker tokens
 outside board.db are not Board data.
 
+Code quality coverage includes `BoardChecks.ResultJson` and `EvidenceJson`: the saved report,
+full captured text of scope/rule/impact files, added-code inputs and captured ignore rules. Older
+checks without captured text remain as recorded; backup never rereads the current checkout to
+invent historical contents. `BoardCodeQualityIgnores` and `BoardCodeQualityIgnoreHistory` retain
+every current exemption and saved/removal event with its reason and local-account author (unknown
+for legacy entries). Before the Board snapshot, a read-only legacy observation pass retains rules
+from every repository in `state.db`, including those never scanned in this version. Local choices
+win old-version conflicts; both versions remain in history. No legacy schema/data is modified.
+
 Rows are queryable JSON objects with `table`, `key` (JSON of the SQLite primary-key values,
 or rowid for a table without a primary key) and `values`. Original column names and native
 null/integer/real/string values are preserved. BLOBs and text above 64 KiB become

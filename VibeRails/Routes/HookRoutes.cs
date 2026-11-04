@@ -514,7 +514,7 @@ public static class HookRoutes
         }).WithName("GetCodeAnalyzerSource");
 
         // Code quality ignore list — files the user removed from scan results, persisted
-        // per repository in state.db. The MintLint step drops them before analysis.
+        // per repository in board.db, with attributed history. The MintLint step drops them before analysis.
         app.MapGet("/api/v1/code-analyzer/ignores", async (
             ICodeAnalyzerIgnoreStore ignoreStore,
             IGitService gitService,
@@ -529,7 +529,7 @@ public static class HookRoutes
             var files = await ignoreStore.ListAsync(rootPath, cancellationToken);
             return Results.Ok(new CodeAnalyzerIgnoreListResponse(
                 [.. files.Select(file => new CodeAnalyzerIgnoreEntryResponse(
-                    file.Path, file.MatchKind, file.ReasonKind, file.ReasonText, file.CreatedUtc))]));
+                    file.Path, file.MatchKind, file.ReasonKind, file.ReasonText, file.CreatedUtc, file.Author))]));
         }).WithName("ListCodeAnalyzerIgnores");
 
         app.MapPost("/api/v1/code-analyzer/ignores", async (

@@ -30,17 +30,31 @@ public sealed class BoardCheckService(
             throw new InvalidOperationException("Could not save the check attempt.");
         try
         {
-            var snapshot = await CaptureAsync(workspace, scope, ct);
+            var snapshot = await CaptureAsync(workspace, scope, ct, captureImpact: kind == JobActionKind.CodeQuality);
             record = record with { BaseCommit = snapshot.CheckIdentity?.BaseCommit,
                 HeadCommit = snapshot.CheckIdentity?.HeadCommit, SnapshotHash = Fingerprint(snapshot),
                 RulesHash = RulesFingerprint(snapshot), FileCount = snapshot.Files.Count,
                 ScopeFiles = snapshot.Files.Select(file => $"{file.ChangeKind}: {file.RelativePath}").ToList() };
+            // Freeze the preferences once: the evidence and engine must use the same rules.
+            var ignoreRules = kind == JobActionKind.CodeQuality
+                ? ignores is null ? [] : await ignores.GetIgnoreRulesAsync(snapshot.RepositoryPath, ct)
+                : null;
+            record = record with { Evidence = new(
+                snapshot.Files.Select(file => new BoardCheckFile(file.RelativePath, file.PreviousRelativePath,
+                    file.ChangeKind.ToString(), file.IsBinary, file.Content, file.PreviousContent,
+                    file.AddedContent, file.AddedLineNumbers)).ToList(),
+                snapshot.AgentFiles.Select(file => new BoardCheckTextFile(file.RelativePath, file.Content)).ToList(),
+                snapshot.ImpactFiles?.Select(file => new BoardCheckTextFile(file.RelativePath, file.Content)).ToList(),
+                ignoreRules) };
+            // Preserve captured inputs even if the process ends during analysis.
+            if (board is not null && !await board.SaveCheckAsync(project, record, ct))
+                throw new InvalidOperationException("Could not save the captured check inputs.");
             var invocation = new VcaHookInvocation(VcaHookKind.Preview, null, workspace, false, TimeSpan.Zero,
                 false, WorkingTreeScope: scope.Kind == "working-tree");
             var request = new GitPreflightRequest(workspace, invocation,
                 WorkingTreeChanges: scope.Kind == "working-tree", UnpushedChanges: scope.Kind != "working-tree", ScopeLabel: scope.Kind);
             var step = kind == JobActionKind.CodeQuality
-                ? (IGitPreflightStep)new MintLintPreflightStep(ignores) : new VcaPreflightStep(vca);
+                ? (IGitPreflightStep)new MintLintPreflightStep(ignores, ignoreRules) : new VcaPreflightStep(vca);
             var result = await step.ExecuteAsync(new(runId, request, snapshot,
                 (_, _, _) => ValueTask.CompletedTask), ct);
             ct.ThrowIfCancellationRequested();
@@ -59,7 +73,7 @@ public sealed class BoardCheckService(
         return record;
     }
 
-    internal async Task<GitStagedSnapshot> CaptureAsync(string workspace, JobCheckScope scope, CancellationToken ct)
+    internal async Task<GitStagedSnapshot> CaptureAsync(string workspace, JobCheckScope scope, CancellationToken ct, bool captureImpact = true)
     {
         if (scope.Kind == "range")
         {
@@ -70,8 +84,8 @@ public sealed class BoardCheckService(
         if (scope.Kind == "repository") return await snapshots.CaptureRepositoryAsync(workspace, ct);
         if (scope.Kind == "unpushed") return await snapshots.CaptureUnpushedAsync(workspace, ct);
         var head = await ReadHeadAsync(workspace, ct);
-        var snapshot = await snapshots.CaptureWorkingTreeAsync(workspace, ct);
-        var check = await snapshots.CaptureWorkingTreeAsync(workspace, ct);
+        var snapshot = captureImpact ? await snapshots.CaptureWorkingTreeCheckAsync(workspace, ct) : await snapshots.CaptureWorkingTreeAsync(workspace, ct);
+        var check = captureImpact ? await snapshots.CaptureWorkingTreeCheckAsync(workspace, ct) : await snapshots.CaptureWorkingTreeAsync(workspace, ct);
         if (head != await ReadHeadAsync(workspace, ct) || Fingerprint(snapshot) != Fingerprint(check))
             throw new InvalidOperationException("Working files or HEAD changed during capture. Run checks again.");
         return snapshot with { CheckIdentity = new(head, head) };
@@ -82,7 +96,7 @@ public sealed class BoardCheckService(
         if (record.SnapshotHash is null || record.EndedUtc is null) return "Unknown freshness";
         try
         {
-            var snapshot = await CaptureAsync(workspace, new(record.Scope, record.BaseCommit, record.HeadCommit), ct);
+            var snapshot = await CaptureAsync(workspace, new(record.Scope, record.BaseCommit, record.HeadCommit), ct, captureImpact: record.Tool != "VCA");
             var current = Fingerprint(snapshot) == record.SnapshotHash
                 && Version(record.Tool == "VCA" ? JobActionKind.Vca : JobActionKind.CodeQuality) == record.ToolVersion;
             // A pinned range remains valid for that range, but does not cover newer HEAD changes.
@@ -118,7 +132,6 @@ public sealed class BoardCheckService(
         if (skipped > 0) limitations.Add($"{skipped} files skipped, ignored, deleted, binary or unavailable; see evidence for coverage.");
         if (deferred > 0) limitations.Add($"{deferred} rules deferred; commit-message validation remains outstanding.");
         if (!quality && missingRules > 0) limitations.Add($"{missingRules} rule files could not be captured. Rule coverage is incomplete.");
-        if (quality && record.Scope == "working-tree") limitations.Add("Impact ranking reads live tracked sources and is not captured atomically with the changed files.");
         if (analyzed == 0) limitations.Add(quality ? "No supported added code was analyzed." : "No applicable rules were analyzed.");
         var status = result.Status switch
         {
@@ -163,7 +176,9 @@ public sealed class BoardCheckService(
         { snapshot.CheckIdentity?.BaseCommit ?? "", snapshot.CheckIdentity?.HeadCommit ?? "", RulesFingerprint(snapshot) }
         .Concat(snapshot.Files.OrderBy(file => file.RelativePath, StringComparer.Ordinal).SelectMany(file => new[]
         { file.RelativePath, file.PreviousRelativePath ?? "", file.ChangeKind.ToString(), file.Content ?? "<unavailable>",
-            file.PreviousContent ?? "", file.AddedContent ?? "", file.IsBinary.ToString() })));
+            file.PreviousContent ?? "", file.AddedContent ?? "", file.IsBinary.ToString() }))
+        .Concat((snapshot.ImpactFiles ?? []).OrderBy(file => file.RelativePath, StringComparer.Ordinal)
+            .SelectMany(file => new[] { file.RelativePath, file.Content })));
 
     private static string Hash(IEnumerable<string> values)
     {

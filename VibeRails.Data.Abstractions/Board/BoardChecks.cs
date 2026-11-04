@@ -7,7 +7,23 @@ public sealed record BoardCheckRecord(
     string? RulesHash, string ToolVersion, DateTime StartedUtc, DateTime? EndedUtc,
     string Summary, int FileCount, int AnalyzedCount, int SkippedCount, int FindingCount,
     IReadOnlyList<string> Limitations, string? ResultJson = null,
-    string? WorkspacePath = null, IReadOnlyList<string>? ScopeFiles = null);
+    string? WorkspacePath = null, IReadOnlyList<string>? ScopeFiles = null,
+    BoardCheckEvidence? Evidence = null);
+
+/// <summary>The captured text used by a check, kept separately from its summary.</summary>
+public sealed record BoardCheckEvidence(
+    IReadOnlyList<BoardCheckFile> Files,
+    IReadOnlyList<BoardCheckTextFile> RuleFiles,
+    IReadOnlyList<BoardCheckTextFile>? ImpactFiles,
+    IReadOnlyList<VibeRails.DB.CodeAnalyzerIgnoredFile>? IgnoreRules);
+
+/// <summary>One scope file, including full text and the exact added-code input when available.</summary>
+public sealed record BoardCheckFile(string Path, string? PreviousPath, string ChangeKind,
+    bool IsBinary, string? Content, string? PreviousContent, string? AddedContent,
+    IReadOnlyList<int>? AddedLineNumbers);
+
+/// <summary>A captured rule or impact-ranking source.</summary>
+public sealed record BoardCheckTextFile(string Path, string Content);
 
 public partial interface IBoardStore
 {

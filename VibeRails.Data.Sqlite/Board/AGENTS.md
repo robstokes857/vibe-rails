@@ -1,5 +1,14 @@
 # Board persistence
 
+`board-checks/2` adds nullable `BoardChecks.EvidenceJson` for full captured text and the exact
+exemptions used by an attempt, separate from paged summaries. Completed evidence is immutable;
+older rows remain readable without source text. `board-code-quality-ignores/1` adds the current
+exemption/tombstone table and immutable history behind `IBoardStore`. Reads and data backups
+observe the legacy ignore table in state.db without changing it. Untouched adopted rules follow
+old-side changes; locally edited rules/tombstones win conflicts, with old-side values archived.
+New writes record the local OS account; never invent authors for legacy data. All these tables
+are covered by the existing all-table Board data backup. See the [check contract](../../VibeRails/Services/Board/CHECKS.md).
+
 `SaveLaneAutomationAsync` allows a pure permutation of the currently selected Job IDs even when
 one has since become paused/unavailable. Soft-deleted Jobs hidden by the lane API may be omitted;
 missing or wrong-project entries remain part of the visible set. The writable-board and revision checks still run inside

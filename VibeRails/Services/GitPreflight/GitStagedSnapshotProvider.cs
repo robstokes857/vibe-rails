@@ -352,6 +352,37 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         }
     }
 
+    /// <summary>Freezes the tracked text used for a saved check's impact ranking as well as its changed files.</summary>
+    internal async Task<GitStagedSnapshot> CaptureWorkingTreeCheckAsync(string workingDirectory, CancellationToken ct)
+    {
+        var snapshot = await CaptureWorkingTreeAsync(workingDirectory, ct);
+        var changed = snapshot.Files.ToDictionary(file => file.RelativePath, PathComparer);
+        var guard = new WorkingTreePathGuard(snapshot.RepositoryPath);
+        var impact = new List<GitIndexTextFile>();
+        long bytes = snapshot.Files.Sum(file => (long)Encoding.UTF8.GetByteCount(file.Content ?? "")
+            + Encoding.UTF8.GetByteCount(file.PreviousContent ?? ""));
+        foreach (var path in snapshot.TrackedFiles ?? [])
+        {
+            ct.ThrowIfCancellationRequested();
+            if (!MintLintAnalyzer.SupportsFile(path)) continue;
+            string? content;
+            if (changed.TryGetValue(path, out var file)) content = file.IsBinary ? null : file.Content;
+            else
+            {
+                var fullPath = ToFullPath(snapshot.RepositoryPath, path);
+                if (!guard.IsReadableRegularFile(fullPath)) continue;
+                var length = new FileInfo(fullPath).Length;
+                if (length > MaximumTextFileBytes) continue;
+                if (bytes + length > MaximumSnapshotBytes)
+                    throw new InvalidOperationException("The check's captured source exceeds the text snapshot budget.");
+                (content, _) = await ReadWorkingTreeContentAsync(fullPath, ct);
+                bytes += length;
+            }
+            if (content is not null) impact.Add(new(path, content));
+        }
+        return snapshot with { ImpactFiles = impact };
+    }
+
     private async Task<GitStagedSnapshot> CaptureWorkingTreeCoreAsync(
         string workingDirectory,
         CancellationToken cancellationToken)

@@ -7,7 +7,8 @@ using VibeRails.Services.VCA.Hooks;
 
 namespace VibeRails.Services.GitPreflight;
 
-public sealed class MintLintPreflightStep(ICodeAnalyzerIgnoreStore? ignoreStore = null) : IGitPreflightStep
+public sealed class MintLintPreflightStep(ICodeAnalyzerIgnoreStore? ignoreStore = null,
+    IReadOnlyList<CodeAnalyzerIgnoredFile>? capturedIgnoreRules = null) : IGitPreflightStep
 {
     public const string Id = "mintlint";
 
@@ -37,8 +38,8 @@ public sealed class MintLintPreflightStep(ICodeAnalyzerIgnoreStore? ignoreStore 
         // The user's ignore list removes files from Code quality results entirely — both
         // here and in the Rules-page scan, which share this step. Never let a store failure
         // break the (non-blocking) analysis; a missing list just means nothing is ignored.
-        IReadOnlyList<CodeAnalyzerIgnoredFile> ignoreRules = [];
-        if (ignoreStore is not null)
+        IReadOnlyList<CodeAnalyzerIgnoredFile> ignoreRules = capturedIgnoreRules ?? [];
+        if (capturedIgnoreRules is null && ignoreStore is not null)
         {
             try
             {
@@ -197,7 +198,7 @@ public sealed class MintLintPreflightStep(ICodeAnalyzerIgnoreStore? ignoreStore 
                     candidate.File.RelativePath,
                     candidate.File.Content!))
                 .ToList());
-            referencedBy = context.Request.UnpushedChanges && context.Snapshot.ImpactFiles is not null
+            referencedBy = context.Snapshot.ImpactFiles is not null
                 ? ImpactAnalyzer.CountReferencingSources(
                     impactTargets,
                     context.Snapshot.ImpactFiles

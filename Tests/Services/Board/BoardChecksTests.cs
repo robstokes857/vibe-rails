@@ -40,6 +40,59 @@ public sealed class BoardChecksTests : IAsyncLifetime
     private Task<BoardCheckRecord> Run(JobActionKind kind, params string[] args) => Engine().ExecuteAsync(repo, repo,
         card.Key, Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), kind, args, Ct);
 
+    [Fact]
+    public async Task SavedEvidenceRetainsExactSourcesAndIgnoresAfterCheckoutChanges()
+    {
+        const string current = "// retained comment\r\nclass Changed { public string Name => \"λ\"; }\r\n";
+        await Write("example.cs", current);
+        await Write("ignored.cs", "class Ignored {}\n");
+        await Write("vc.rules.md", "## Vibe Rails Rules\n- WARN: Check the source\n");
+        await File.WriteAllBytesAsync(Path.Combine(repo, "binary.dat"), [0, 1, 2, 0, 3], Ct);
+        var rule = new CodeAnalyzerIgnoredFile("ignored.cs", "file", "test", "Fixture code", DateTime.UtcNow);
+        var ignores = new Mock<ICodeAnalyzerIgnoreStore>();
+        ignores.Setup(x => x.GetIgnoreRulesAsync(repo, It.IsAny<CancellationToken>())).ReturnsAsync([rule]);
+        var engine = new BoardCheckService(new(), new VcaRulesHookValidationService(new GitStagedSnapshotProvider()), services, ignores.Object);
+        var result = await engine.ExecuteAsync(repo, repo, card.Key, "evidence", "quality", JobActionKind.CodeQuality, ["working-tree"], Ct);
+        Assert.Equal(1, result.AnalyzedCount);
+        ignores.Verify(x => x.GetIgnoreRulesAsync(repo, It.IsAny<CancellationToken>()), Times.Once);
+
+        await Write("example.cs", "class Later {}\n");
+        File.Delete(Path.Combine(repo, "ignored.cs"));
+        var reopened = new BoardStore(connection, connection);
+        var saved = (await reopened.GetCheckAsync(repo, card.Id, result.Id, Ct))!;
+        Assert.Equal(result.ResultJson, saved.ResultJson);
+        var evidence = Assert.IsType<BoardCheckEvidence>(saved.Evidence);
+        var source = Assert.Single(evidence.Files, f => f.Path == "example.cs");
+        Assert.Equal(current, source.Content);
+        Assert.Equal("class Original {}\n", source.PreviousContent);
+        Assert.NotNull(source.AddedContent);
+        Assert.NotEmpty(source.AddedLineNumbers!);
+        Assert.Equal("class Ignored {}\n", Assert.Single(evidence.Files, f => f.Path == "ignored.cs").Content);
+        Assert.Null(Assert.Single(evidence.Files, f => f.Path == "binary.dat").Content);
+        Assert.Equal(rule, Assert.Single(evidence.IgnoreRules!));
+        Assert.Contains(evidence.RuleFiles, f => f.Path == "vc.rules.md" && f.Content.Contains("Check the source"));
+        Assert.Contains(evidence.ImpactFiles!, f => f.Path == "example.cs" && f.Content == current);
+        Assert.All(await reopened.GetChecksAsync(repo, card.Id, cancellationToken: Ct), row => Assert.Null(row.Evidence));
+        Assert.All(await reopened.GetLatestChecksAsync(repo, card.Id, Ct), row => Assert.Null(row.Evidence));
+        Assert.StartsWith("Stale", await engine.FreshnessAsync(repo, saved, Ct));
+    }
+
+    [Fact]
+    public async Task OlderEvidenceWithoutSourcesStillLoadsAndFailedAnalysisKeepsCapturedText()
+    {
+        await Write("example.cs", "class BeforeFailure {}\n");
+        var validation = new Mock<IVcaHookValidationService>();
+        validation.Setup(x => x.ValidateAsync(It.IsAny<VcaHookInvocation>(), It.IsAny<GitStagedSnapshot>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("analysis failed"));
+        var failed = await Engine(validation.Object).ExecuteAsync(repo, repo, card.Key, "failure-evidence", "vca", JobActionKind.Vca, ["working-tree"], Ct);
+        Assert.Equal("Failed to run", failed.Status);
+        Assert.Equal("class BeforeFailure {}\n", Assert.Single(failed.Evidence!.Files).Content);
+        var legacy = failed with { Id = "legacy", RunId = "legacy", Evidence = null };
+        Assert.True(await store.SaveCheckAsync(repo, legacy, Ct));
+        Assert.Null((await store.GetCheckAsync(repo, card.Id, legacy.Id, Ct))!.Evidence);
+        Assert.NotNull((await store.GetCheckAsync(repo, card.Id, failed.Id, Ct))!.Evidence);
+    }
+
     [Theory]
     [InlineData("HEAD")]
     [InlineData("--all")]

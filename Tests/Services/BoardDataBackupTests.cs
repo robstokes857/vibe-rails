@@ -79,6 +79,34 @@ public sealed class BoardDataBackupTests : IDisposable
     }
 
     [Fact]
+    public async Task CheckReportAndFullSourceEvidenceRoundTripThroughBackupParts()
+    {
+        await store.EnsureDefaultColumnsAsync(root, Ct);
+        var card = await store.CreateCardAsync(root, new(null, "Source evidence", "", null, "medium", null, [], false), Ct);
+        var source = "// λ雪\r\n" + new string('x', 2 * 1024 * 1024 + 200);
+        var evidence = new BoardCheckEvidence(
+            [new("source.cs", null, "Added", false, source, null, source, [1, 2])], [], null,
+            [new("fixtures", "directory", "test", "Kept verbatim", DateTime.UtcNow)]);
+        var check = new BoardCheckRecord("backup-check", card.Id, "run", "action", "Code quality", "Passed", "working-tree",
+            null, null, "hash", null, "1", DateTime.UtcNow, DateTime.UtcNow, "saved report", 1, 1, 0, 0, [],
+            ResultJson: "{\"report\":\"exact original\"}", Evidence: evidence);
+        Assert.True(await store.SaveCheckAsync(root, check, Ct));
+        var items = new List<BoardDataBackupItem>();
+        await store.ReadDataBackupAsync((item, _) => { items.Add(item); return Task.CompletedTask; }, Ct);
+        using var row = JsonDocument.Parse(Assert.Single(items, item => item.Json is not null
+            && JsonDocument.Parse(item.Json).RootElement.GetProperty("table").GetString() == "BoardChecks").Json!);
+        var parts = items.Where(item => item.Content is not null).ToDictionary(item => item.Sha256, item => item.Content!);
+        Assert.Equal(check.ResultJson, Values(row).GetProperty("ResultJson").GetString());
+        var archived = Encoding.UTF8.GetString(Restore(Values(row).GetProperty("EvidenceJson"), parts));
+        using var parsed = JsonDocument.Parse(archived);
+        Assert.Equal(source, parsed.RootElement.GetProperty("files")[0].GetProperty("content").GetString());
+        Assert.Equal("Kept verbatim", parsed.RootElement.GetProperty("ignoreRules")[0].GetProperty("reasonText").GetString());
+        Assert.All(parts.Values, part => Assert.InRange(part.Length, 1, BoardBackupProtocol.ContentBytes));
+        using var summary = JsonDocument.Parse(Values(row).GetProperty("SummaryJson").GetString()!);
+        Assert.Equal(JsonValueKind.Null, summary.RootElement.GetProperty("evidence").ValueKind);
+    }
+
+    [Fact]
     public async Task LostCommitReplyResumesSameSnapshotAndOnlyAcknowledgesMatchingReceipt()
     {
         await store.EnsureDefaultColumnsAsync(root, Ct);

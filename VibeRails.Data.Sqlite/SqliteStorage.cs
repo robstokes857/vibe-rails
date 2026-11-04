@@ -66,7 +66,7 @@ public static class SqliteStorage
         services.TryAddSingleton<IJobStore>(sp => new JobStore(StateConnectionString(sp), sp.GetService<BoardAutomationEventSource>()?.Store, sp.GetService<IReviewRunSnapshotFactory>()));
         services.TryAddSingleton<ITokenSavingsStore>(sp => new TokenSavingsStore(StateConnectionString(sp)));
         services.TryAddSingleton<ITokenSavingsPublishStore>(sp => new TokenSavingsPublishStore(StateConnectionString(sp)));
-        services.TryAddSingleton<ICodeAnalyzerIgnoreStore>(sp => new CodeAnalyzerIgnoreStore(StateConnectionString(sp)));
+        services.TryAddSingleton<ICodeAnalyzerIgnoreStore>(sp => new BoardCodeAnalyzerIgnoreStore(sp.GetRequiredService<IBoardStore>()));
         services.TryAddSingleton<IPrReviewStore>(sp => CreatePrReviewStore(sp.GetRequiredService<SqliteStoragePaths>().StatePath));
         services.TryAddSingleton<ILlmExchangeLogStore>(sp => new LlmExchangeLogStore(ConnectionString(
             sp.GetRequiredService<SqliteStoragePaths>().ProxyDatabasePath)));

@@ -24,8 +24,9 @@ For one commit, select its parent as base and the commit as head. For an initial
 repository scope covers that committed tree. Linked commits never choose or imply a range. No
 checkout, staging or worktree mutation is required. Committed captures reuse the existing bounded
 blob reader and immutable impact corpus. Working-tree capture is compared twice and rejects a
-detected edit/HEAD race; this is not a filesystem transaction. Working-tree impact ranking reads
-live tracked files. Quality still analyzes **added code** only, with the user's local ignores.
+detected edit/HEAD race; this is not a filesystem transaction. Saved Code quality checks capture
+the tracked text used for impact ranking too, within the existing text snapshot budget. Quality
+still analyzes **added code** only, with the user's local ignores captured once for the run.
 
 The action records its attempt before capturing. Findings finish the action successfully and
 remain advisory. An analysis failure marks that action/Automation failed but allows subsequent
@@ -43,6 +44,22 @@ If the run is unavailable, completion is unknown. No background host is introduc
 immutable after completion. Reruns append attempts. Summaries and full engine JSON are stored
 separately; history pages contain 50 summaries and the latest result of each engine is queried
 independently. Existing state/schema rows are retained and older binaries ignore the new table.
+
+`board-checks/2` adds nullable `EvidenceJson`. New attempts save the full captured text before
+analysis: scope files (current/previous text, exact added lines and their source line numbers),
+rule files, available impact sources, and the exact ignore rules passed to the engine. Binary or
+unavailable files retain manifest entries without invented contents. Evidence is loaded only with
+the full report, never in summary pages. Failure/cancellation after capture retains the inputs;
+completed attempts cannot be overwritten. Older reports have no captured text and remain readable.
+The existing Board data backup includes both report and source columns, chunking large values.
+
+Current exemptions use `BoardCodeAnalyzerIgnoreStore` over `IBoardStore`. The additive
+`board-code-quality-ignores/1` tables retain current values and every saved/removal event, including
+path, match kind, reason, original creation time and author. New author values identify the local
+OS account, not a verified cloud identity. Legacy `state.db` rules have unknown authors. Reads and
+backups retain legacy observations without changing the old table. Untouched adopted rules follow
+old-version edits/removals; a choice made by the current version wins over conflicting old-version
+writes, which are still archived. Removal retains the original exemption and its history.
 
 Records include start/end times, engine version, actual scope file manifest, checkout, base/head,
 SHA-256 input and rule fingerprints, coverage/finding counts and explicit limitations. VCA keeps
@@ -73,8 +90,8 @@ single review Worker. This avoids an empty working-tree result after a commit. M
 must be addressed or the user can select an explicit range/repository scope. Actions stay editable,
 reorderable and removable. New boards no longer install this special review recipe; existing
 recipes and their check actions remain unchanged. VIBE-25 owns
-hosted recipe/evidence distribution. Local evidence currently remains local and is not added to
-the Board sync wire contract by this change.
+hosted recipe/evidence distribution. Evidence is not added to the hosted Board UI sync contract;
+the independent owner-bound Board data backup retains it.
 
 Validation lives in `BoardChecksTests`, Board route/tool tests, existing preflight regressions,
 `jobs-controller.test.mjs` and the card Checks cases in `board-ux.spec.js`.

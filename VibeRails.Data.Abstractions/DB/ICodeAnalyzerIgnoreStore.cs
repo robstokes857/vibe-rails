@@ -22,12 +22,14 @@ public static class CodeAnalyzerIgnoreMatchKind
 /// <param name="MatchKind">"file" (exact match) or "directory" (the path itself plus everything under it).</param>
 /// <param name="ReasonKind">"test" / "config" / "other", or null when no reason was given.</param>
 /// <param name="ReasonText">Optional free-text note (used with "other", but stored for any kind).</param>
+[method: System.Text.Json.Serialization.JsonConstructor]
 public sealed record CodeAnalyzerIgnoredFile(
     string Path,
     string MatchKind,
     string? ReasonKind,
     string? ReasonText,
-    DateTime CreatedUtc)
+    DateTime CreatedUtc,
+    string? Author = null)
 {
     /// <summary>Convenience overload for the common file case (default MatchKind = file).</summary>
     public CodeAnalyzerIgnoredFile(string path, string? reasonKind, string? reasonText, DateTime createdUtc)
@@ -35,7 +37,7 @@ public sealed record CodeAnalyzerIgnoredFile(
 }
 
 /// <summary>
-/// Persists the Code quality ignore list to state.db, keyed per repository so one state.db can
+/// Persists the Code quality ignore list, keyed per repository so one store can
 /// serve many checkouts. Unlike the token-saver tally this store THROWS on failure: an ignore
 /// the user believes was saved but wasn't would silently reintroduce files into results.
 /// </summary>

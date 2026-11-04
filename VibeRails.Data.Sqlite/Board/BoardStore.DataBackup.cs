@@ -14,6 +14,8 @@ public sealed partial class BoardStore
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(emit);
+        // Include every repository's legacy exemptions even when no check has run there yet.
+        await RetainLegacyCodeQualityIgnoresAsync(null, cancellationToken);
         await using var connection = await OpenAsync(cancellationToken);
         using var transaction = connection.BeginTransaction(deferred: true);
         var tables = new List<string>();
