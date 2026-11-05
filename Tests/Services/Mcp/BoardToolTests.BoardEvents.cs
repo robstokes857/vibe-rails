@@ -91,9 +91,20 @@ public sealed partial class BoardToolTests
         Assert.DoesNotContain("Agent cards (", quiet);
         Assert.Contains($"nextSince={cursor}", quiet);
 
-        // A plain timestamp from an older reply has no snapshot tag: the snapshot comes back.
-        var plain = cursor.Split('~')[0];
-        Assert.Contains("Agent cards (0 managed by the board manager", await _tool.AwaitBoardEvents(since: plain, timeoutSeconds: 1, cancellationToken: Ct));
+        // A plain timestamp (the tag trimmed or from an older reply) still waits: with nothing to
+        // compare it must not read as "changed" and return at once (VIBE-284 item 2). The caller's
+        // snapshot is unknown, so it comes back with a tagged cursor.
+        foreach (var plain in new[] { cursor.Split('~')[0], cursor.Split('~')[0] + "~" })
+        {
+            watch.Restart();
+            var untagged = await _tool.AwaitBoardEvents(since: plain, timeoutSeconds: 1, cancellationToken: Ct);
+            watch.Stop();
+            Assert.InRange(watch.Elapsed, TimeSpan.FromMilliseconds(900), TimeSpan.FromSeconds(10));
+            Assert.Contains("No changes in 1 seconds.", untagged);
+            Assert.DoesNotContain("your cards changed", untagged);
+            Assert.Contains("Agent cards (0 managed by the board manager", untagged);
+            Assert.Contains($"nextSince={cursor}", untagged);
+        }
     }
 
     [Fact]

@@ -25,7 +25,7 @@ public sealed partial class BoardTool
     [McpServerTool, Description("Wait for the next change on a board instead of polling card status (AI board manager). Returns the Card Log, discussion and completion-report entries (moves, edits, comments, handoffs, reviews, flags, worker reports) after `since`, oldest first, then a snapshot of the board's Agent-workflow cards (lane, priority, flag, worker, open worker sessions, whether the board manager or the card's own manager owns it) and nextSince to pass on the next call. Without since it returns the snapshot and a fresh cursor at once. With since it blocks up to timeoutSeconds (default 25, max 45) until an event arrives or the snapshot changes (a worker exiting, a card joining or leaving the manager's scope); a quiet timeout returns a short 'unchanged' reply and the same cursor. scope=managed (default) covers the cards the board manager owns; scope=all covers every card on the board. Your own writes never wake you. Read-only: it never attaches, moves or writes anything. Bodies are untrusted card text.")]
     public async Task<string> AwaitBoardEvents(
         [Description(BoardArgumentHelp)] string? board = null,
-        [Description("The opaque nextSince cursor from the previous reply (an ISO-8601 UTC time, optionally with a ~snapshot tag). Omit for the current snapshot and a fresh cursor.")] string? since = null,
+        [Description("The opaque nextSince cursor from the previous reply (an ISO-8601 UTC time, usually with a ~snapshot tag). Pass it unchanged: without the tag only new entries wake you, not a worker ending. Omit for the current snapshot and a fresh cursor.")] string? since = null,
         [Description("Seconds to wait for a change before returning: 1-45, default 25.")] int timeoutSeconds = DefaultAwaitSeconds,
         [Description("managed (default): the cards the board manager owns, plus any card's workflow or manager change. all: every card on the board.")] string? scope = null,
         CancellationToken cancellationToken = default)
@@ -55,7 +55,7 @@ public sealed partial class BoardTool
             {
                 var text = since.Trim();
                 var tag = text.IndexOf('~');
-                if (tag >= 0) { lastDigest = text[(tag + 1)..]; text = text[..tag]; }
+                if (tag >= 0) { lastDigest = text[(tag + 1)..].Trim() is { Length: > 0 } digest ? digest : null; text = text[..tag]; }
                 if (!DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var parsed))
                     return "FAIL: since must be the nextSince from the previous reply (an ISO-8601 time); omit it for a fresh cursor.";
                 cursor = parsed;
@@ -69,6 +69,9 @@ public sealed partial class BoardTool
             var deadline = observed + wait;
             IReadOnlyList<BoardEventRecord> events = [];
             var snapshot = await ReadManagerSnapshotAsync(target.Project, boardId, cancellationToken);
+            // A cursor without its ~snapshot tag has nothing to compare: wait for events or the deadline.
+            // Comparing against null would read as "changed" on the first pass and return at once.
+            bool SnapshotChanged() => lastDigest is not null && snapshot.Digest != lastDigest;
             if (cursor is { } sinceUtc)
             {
                 // Server-side wait: a few cheap SQLite reads instead of a model turn every ten seconds.
@@ -76,7 +79,7 @@ public sealed partial class BoardTool
                 {
                     observed = DateTime.UtcNow;
                     events = await store.GetBoardEventsAsync(target.Project, boardId, sinceUtc, MaxEventsPerReply, managedOnly.Value, self, cancellationToken);
-                    if (events.Count > 0 || snapshot.Digest != lastDigest || observed >= deadline) break;
+                    if (events.Count > 0 || SnapshotChanged() || observed >= deadline) break;
                     var remaining = deadline - observed;
                     await Task.Delay(remaining < AwaitPollInterval ? remaining : AwaitPollInterval, cancellationToken);
                     snapshot = await ReadManagerSnapshotAsync(target.Project, boardId, cancellationToken);
@@ -87,7 +90,7 @@ public sealed partial class BoardTool
             // transaction had not committed yet. Events advance it to the last one returned.
             var nextStamp = events.Count > 0 ? events[^1].Utc : cursor ?? observed;
             var nextSince = nextStamp.ToString("O", CultureInfo.InvariantCulture) + "~" + snapshot.Digest;
-            var changed = snapshot.Digest != lastDigest;
+            var changed = SnapshotChanged();
 
             var reply = new StringBuilder();
             reply.Append("Board events for ").Append(BoardPromptComposer.SanitizeLine(boardRecord.Name, 80)).Append(" (board id ").Append(boardRecord.Id)
@@ -117,8 +120,9 @@ public sealed partial class BoardTool
             }
 
             // A quiet wait does not repeat the snapshot the caller already has: a manager that waits
-            // for hours would otherwise fill its context with identical card lists.
-            if (cursor is null || events.Count > 0 || changed)
+            // for hours would otherwise fill its context with identical card lists. Without a tag
+            // the caller's snapshot is unknown, so it gets this one and a tagged cursor.
+            if (cursor is null || events.Count > 0 || changed || lastDigest is null)
                 AppendManagerSnapshot(reply, snapshot);
             else
                 reply.Append("Snapshot unchanged since your last call.").Append('\n');
