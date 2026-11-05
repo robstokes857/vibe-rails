@@ -1282,7 +1282,8 @@ It saves model, speed, effort, start mode and YOLO through root-only GET/PUT
 normal launch builder and stores one `GlobalCache` row per base CLI in normal
 `state.db` (`ui.llm-launch-defaults.v1.<cli>`); no schema change or CLI config write.
 Worker, card-manager and board-manager selectors fill these defaults when changing
-LLM or opening without explicit saved options. Explicit saved options win; abort a
+LLM or opening a new card. Saved options, including null for an explicit all-default/YOLO-off
+choice, win on saved cards and managers; abort a
 replaced editor's load and preserve edits made while a default request is pending.
 Saved environments retain their own options and do not offer this action.
 

@@ -142,6 +142,7 @@ export function bindBoardLaunchOptions(container, selection, { app, useDefaults 
                 .then(options => {
                     if (!alive() || edited) return;
                     const values = normalizeBoardLaunchOptions(selection, options);
+                    if (model) model.innerHTML = renderLlmModelOptions(cli, values.model);
                     for (const key of ['model', 'effort', 'mode', 'speed']) {
                         const input = container.querySelector(`[data-board-launch-${key}]`);
                         if (input) input.value = values[key];

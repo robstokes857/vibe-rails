@@ -3593,6 +3593,8 @@ test('a late LLM default cannot overwrite a draft or a different selection', asy
     await page.getByText('Description images', { exact: true }).click();
     const editor = page.locator('[data-board-card-editor]');
     const worker = editor.locator('[data-board-worker-launch-options]');
+    await editor.locator('#board-card-assignee').evaluate(select => select.tomselect.setValue('base:claude'));
+    await editor.locator('#board-card-assignee').evaluate(select => select.tomselect.setValue('base:codex'));
     await expect.poll(() => Boolean(release)).toBe(true);
     await worker.getByRole('combobox', { name: 'Model', exact: true }).selectOption('gpt-6.1-terra');
     release();
@@ -3618,6 +3620,8 @@ test('Start work waits for saved LLM defaults before saving or launching', async
         await route.fulfill({ json: { model: 'gpt-6-astra', effort: 'high', speed: 'ultrafast', yolo: true } });
     });
     await page.getByText('Description images', { exact: true }).click();
+    await page.locator('#board-card-assignee').evaluate(select => select.tomselect.setValue('base:claude'));
+    await page.locator('#board-card-assignee').evaluate(select => select.tomselect.setValue('base:codex'));
     await expect.poll(() => Boolean(release)).toBe(true);
     await page.locator('[data-board-start-work]').click();
     await page.locator('[data-board-start-work]').click();
@@ -3627,6 +3631,62 @@ test('Start work waits for saved LLM defaults before saving or launching', async
     expect(requests.find(request => request.method === 'PUT').body.baseLlmOptions)
         .toEqual({ model: 'gpt-6-astra', effort: 'high', speed: 'ultrafast', mode: '', yolo: true });
     expect(requests.filter(request => request.path.endsWith('/launch'))).toHaveLength(1);
+});
+
+test('saved empty worker and manager options stay YOLO-off after normalization to null', async ({ page }) => {
+    let card;
+    const requests = await openBoard(page, { assignee: 'base:codex', onCard: value => {
+        card = value;
+        Object.assign(card, { workflowMode: 'agent', managerSelection: 'base:codex',
+            baseLlmOptions: { yolo: true }, managerBaseLlmOptions: { yolo: true } });
+    } });
+    let defaultReads = 0;
+    await page.route('**/api/v1/llm-picker/defaults/*', route => {
+        defaultReads++;
+        return route.fulfill({ json: { yolo: true } });
+    });
+    // Mirror the production BaseLlmOptionsBuilder normalization, pinned by BoardServiceTests.
+    await page.route('**/api/v1/board/cards/card_test', route => {
+        if (route.request().method() === 'PUT') {
+            Object.assign(card, route.request().postDataJSON());
+            for (const key of ['baseLlmOptions', 'managerBaseLlmOptions']) {
+                const options = card[key];
+                if (options && !options.yolo && !options.model && !options.effort && !options.mode && !options.speed) card[key] = null;
+            }
+        }
+        return route.fulfill({ json: card });
+    });
+    await page.getByText('Description images', { exact: true }).click();
+    const workerYolo = page.locator('[data-board-worker-launch-options] [data-board-launch-yolo]');
+    const managerYolo = page.locator('[data-board-manager-launch-options] [data-board-launch-yolo]');
+    await workerYolo.uncheck();
+    await managerYolo.uncheck();
+    await page.locator('[data-board-save-card]').click();
+    await expect(page.locator('[data-board-card-editor]')).toHaveCount(0);
+    expect(card.baseLlmOptions).toBeNull();
+    expect(card.managerBaseLlmOptions).toBeNull();
+    await page.getByText('Description images', { exact: true }).click();
+    await expect(workerYolo).not.toBeChecked();
+    await expect(managerYolo).not.toBeChecked();
+    await page.locator('[data-board-start-work]').click();
+    await expect(page.locator('[data-board-card-editor]')).toHaveCount(0);
+    expect(defaultReads).toBe(0);
+    expect(card.baseLlmOptions).toBeNull();
+    expect(card.managerBaseLlmOptions).toBeNull();
+    expect(requests.filter(request => request.path.endsWith('/launch'))).toHaveLength(1);
+});
+
+test('selecting an LLM restores its escaped custom default model', async ({ page }) => {
+    await openBoard(page, { assignee: 'base:codex' });
+    await page.route('**/api/v1/llm-picker/defaults/claude', route => route.fulfill({
+        json: { model: 'team/custom-deployment', mode: 'plan', yolo: false }
+    }));
+    await page.getByText('Description images', { exact: true }).click();
+    await page.locator('#board-card-assignee').evaluate(select => select.tomselect.setValue('base:claude'));
+    const model = page.locator('[data-board-worker-launch-options] [data-board-launch-model]');
+    await expect(model).toHaveValue('team/custom-deployment');
+    await expect(model.locator('option:checked')).toHaveText('team/custom-deployment (custom)');
+    await expect(page.locator('[data-board-worker-launch-options] [data-board-launch-mode]')).toHaveValue('plan');
 });
 
 test('Start work preserves the board and stores base launch options including YOLO', async ({ page }) => {

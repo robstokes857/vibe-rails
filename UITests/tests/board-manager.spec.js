@@ -192,6 +192,37 @@ test('the Manager tab saves the worker limit and standing orders with the revisi
     await expect(panel.getByLabel('Workers at a time')).toHaveValue('2');
 });
 
+test('saved empty board-manager options never re-inherit a YOLO-on default', async ({ page }) => {
+    const { state } = await openBoard(page, { manager: { baseLlmOptions: { yolo: true } } });
+    let defaultReads = 0;
+    await page.route('**/api/v1/llm-picker/defaults/*', route => {
+        defaultReads++;
+        return route.fulfill({ json: { yolo: true } });
+    });
+    await page.route('**/api/v1/board/boards/brd_main/manager', route => {
+        if (route.request().method() === 'PUT') {
+            const body = route.request().postDataJSON();
+            expect(body.baseLlmOptions).toEqual({ model: '', effort: '', mode: '', yolo: false, speed: '' });
+            state.manager = { ...state.manager, ...body, baseLlmOptions: null, revision: state.manager.revision + 1 };
+        }
+        return route.fulfill({ json: { enabled: true, ...state.manager } });
+    });
+    const open = async () => {
+        await page.getByRole('button', { name: 'Board settings', exact: true }).click();
+        await page.getByRole('tab', { name: 'Manager', exact: true }).click();
+    };
+    await open();
+    const yolo = page.locator('[data-board-manager-settings] [data-board-launch-yolo]');
+    await yolo.uncheck();
+    await page.getByRole('button', { name: 'Save manager', exact: true }).click();
+    await expect.poll(() => state.manager.baseLlmOptions).toBeNull();
+    await expect(yolo).not.toBeChecked();
+    await page.evaluate(() => window.app.closeModal());
+    await open();
+    await expect(yolo).not.toBeChecked();
+    expect(defaultReads).toBe(0);
+});
+
 test('the chip offers set up when the board has no manager, and opens the Manager tab', async ({ page }) => {
     await openBoard(page, { manager: { selection: null, revision: 0, instructions: null } });
     const chip = page.locator('[data-board-ai-manager]');

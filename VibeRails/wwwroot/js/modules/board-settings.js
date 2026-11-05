@@ -411,7 +411,8 @@ export function mountBoardManager(app, element, boardId, { onSaved, picker = mou
                 host.innerHTML = renderBoardLaunchOptions(selection, options, { idPrefix: 'board-manager-settings' });
                 disposeOptions = bindBoardLaunchOptions(host, selection, { app, useDefaults: options == null }) || (() => {});
             };
-            renderOptions(status.baseLlmOptions, status.selection || '');
+            // The stored null also represents a saved all-default/YOLO-off selection.
+            renderOptions(status.baseLlmOptions || {}, status.selection || '');
             const change = () => renderOptions();
             select.addEventListener('change', change);
             return () => { select.removeEventListener('change', change); disposeOptions(); disposePicker(); };

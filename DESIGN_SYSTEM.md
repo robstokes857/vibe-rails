@@ -346,8 +346,9 @@ with their own revision checks and preserves drafts if a save fails.
 
 Base-LLM option editors place a **Make Default For LLM** `btn-link` action with a
 padlock icon below YOLO. It saves model, speed, effort, start mode and YOLO for that
-LLM on this computer. Selecting that LLM fills its saved defaults; explicit saved
-card or manager choices and edits made while defaults load take precedence.
+LLM on this computer. Selecting that LLM fills its saved defaults; saved card or
+manager choices (including an all-default/YOLO-off choice) and edits made while
+defaults load take precedence.
 
 | Part | Value |
 | --- | --- |

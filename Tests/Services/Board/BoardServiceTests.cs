@@ -19,6 +19,22 @@ public sealed class BoardServiceTests : IDisposable
     private readonly BoardStore _store;
     private readonly BoardService _service;
 
+    [Fact]
+    public async Task EmptyWorkerAndManagerOptionsRoundTripAsNullAndBuildWithoutYolo()
+    {
+        var created = await _service.CreateCardAsync(_project, new(Title: "Explicit defaults",
+            Assignee: "base:codex", BaseLlmOptions: new(Yolo: true), WorkflowMode: "agent",
+            ManagerSelection: "base:codex", ManagerBaseLlmOptions: new(Yolo: true)), Ct);
+        var empty = new BaseLlmOptions("", "", "", false, "");
+        await _service.UpdateCardAsync(_project, created.Id,
+            new(BaseLlmOptions: empty, ManagerBaseLlmOptions: empty), Ct);
+        var reopened = (await _service.GetCardAsync(_project, created.Id, Ct))!;
+        Assert.Null(reopened.BaseLlmOptions);
+        Assert.Null(reopened.ManagerBaseLlmOptions);
+        Assert.Empty(VibeRails.Services.LlmClis.BaseLlmOptionsBuilder.BuildArguments(LLM.Codex, reopened.BaseLlmOptions));
+        Assert.Empty(VibeRails.Services.LlmClis.BaseLlmOptionsBuilder.BuildArguments(LLM.Codex, reopened.ManagerBaseLlmOptions));
+    }
+
     public BoardServiceTests()
     {
         Directory.CreateDirectory(_root);

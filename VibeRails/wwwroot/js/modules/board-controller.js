@@ -1927,7 +1927,8 @@ export class BoardController {
                 if (hint) host.insertAdjacentHTML('beforeend', `<p class="board-editor-muted board-assignee-hint">${escapeHtml(hint)}</p>`);
                 this.launchOptionsDispose = bindBoardLaunchOptions(host, selection, { app: this.app, useDefaults: options == null });
             };
-            renderOptions(card.baseLlmOptions, card.assignee || '');
+            // A saved null is also an explicit all-default/YOLO-off choice, not inheritance.
+            renderOptions(card.id ? card.baseLlmOptions || {} : card.baseLlmOptions, card.assignee || '');
             assigneeSelect.addEventListener('change', () => renderOptions());
             editor.querySelector('[data-board-clear-assignee]')?.addEventListener('click', () => {
                 setLlmPickerValue(this.app, assigneeSelect, '');
@@ -1952,7 +1953,7 @@ export class BoardController {
                 if (hint) host.insertAdjacentHTML('beforeend', `<p class="board-editor-muted board-assignee-hint">${escapeHtml(hint)}</p>`);
                 this.managerLaunchOptionsDispose = bindBoardLaunchOptions(host, selection, { app: this.app, useDefaults: options == null });
             };
-            renderManagerOptions(card.managerBaseLlmOptions, card.managerSelection || '');
+            renderManagerOptions(card.id ? card.managerBaseLlmOptions || {} : card.managerBaseLlmOptions, card.managerSelection || '');
             managerSelect.addEventListener('change', () => renderManagerOptions());
         }
         const workflowSelect = editor.querySelector('#board-card-workflow');
