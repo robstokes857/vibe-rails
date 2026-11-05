@@ -307,12 +307,13 @@
   #vr-system .vr-install-head i { width: 22px; font-size: 20px; text-align: center; }
   #vr-system .vr-install[data-os="windows"] .vr-install-head i { color: #59b3f0; }
   #vr-system .vr-install[data-os="linux"] .vr-install-head i { color: #ee7339; }
-  #vr-system .vr-install[data-os="mac"] .vr-install-head i, #vr-system .vr-install[data-os="github"] .vr-install-head i { color: #f5f5f7; }
-  #vr-system .vr-install-cmd { position: relative; flex: 1; padding: 12px 58px 12px 14px; background: rgb(0 0 0 / 0.24); }
-  #vr-system .vr-install-cmd code { display: block; color: var(--vr-teal); font: 400 12.8px/1.5 var(--font-mono); word-break: break-all; }
-  #vr-system .vr-install-cmd .vr-btn-icon { position: absolute; top: 8px; right: 8px; }
+  #vr-system .vr-install[data-os="mac"] .vr-install-head i { color: #f5f5f7; }
+  #vr-system .vr-install-cmd { position: relative; flex: 1; padding: 16px 52px 16px 18px; background: rgb(0 0 0 / 0.24); }
+  #vr-system .vr-install-cmd code { display: block; color: var(--vr-teal); font: 400 14px/1.6 var(--font-mono); word-break: break-all; }
+  #vr-system .vr-install-cmd .vr-btn-icon { position: absolute; top: 12px; right: 12px; }
   #vr-system .vr-install-cmd .vr-btn-icon.is-copied { color: var(--tone-success-fg); background: var(--tone-success-bg); border-color: var(--tone-success-border); }
-  #vr-system .vr-install-download { padding: 0 14px 12px; background: rgb(0 0 0 / 0.24); }
+  #vr-system .vr-install-download { padding: 0 8px 8px; background: rgb(0 0 0 / 0.24); }
+  #vr-system .vr-install-download .vr-btn { min-height: 0; padding: 4px 10px; color: var(--vr-teal); }
   #vr-system .vr-feature { display: grid; gap: 12px; }
   #vr-system .vr-feature .vr-icon-tile-lg { justify-self: center; }
   #vr-system .vr-feature h3 { font: 600 18px/1.4 var(--font-display); text-align: center; }
@@ -588,7 +589,7 @@
               <code>irm https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/install.ps1 | iex</code>
               <button class="vr-btn vr-btn-icon vr-btn-sm cursor-interaction" type="button" data-copy aria-label="Copy Windows install command"><i data-lucide="copy" aria-hidden="true"></i></button>
             </div>
-            <div class="vr-install-download"><a class="vr-btn vr-btn-primary vr-btn-sm cursor-interaction" href="#vr-home" data-notice="The installer download opens GitHub releases in the app."><i data-lucide="download" aria-hidden="true"></i>Download Windows Installer from GitHub</a></div>
+            <div class="vr-install-download"><a class="vr-btn vr-btn-ghost vr-btn-sm cursor-interaction" href="#vr-home" data-notice="The installer download opens GitHub releases in the app."><i data-lucide="download" aria-hidden="true"></i>Download Windows Installer from GitHub</a></div>
           </div>
           <div class="vr-install" data-os="linux">
             <div class="vr-install-head"><i class="fa-brands fa-ubuntu" aria-hidden="true"></i><span>Linux</span></div>
@@ -609,7 +610,7 @@
             <p class="vr-feature-proof">Less time reconstructing what happened. More context for the next step.</p>
           </article>
         </div>
-        <p class="vr-caption">Platform marks from Font Awesome Brands, tinted per platform · the copy button shows a check for 1.6 seconds instead of a toast.</p>
+        <p class="vr-caption">Platform marks from Font Awesome Brands, tinted per platform · the Windows download is a ghost link, not a filled button · the copy button shows a check for 1.6 seconds instead of a toast.</p>
       </section>
       <section class="vr-section vr-span">
         <h2 class="vr-section-title"><span>21</span> Milestone notice &amp; nudge</h2>

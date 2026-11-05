@@ -1,3 +1,4 @@
+using VibeRails.Jobs;
 using VibeRails.Services;
 using Xunit;
 
@@ -83,19 +84,31 @@ public sealed class SystemResourceServiceTests
         Assert.Equal(Poll, snapshot.QuietFor);
     }
 
+    /// <summary>
+    /// macOS has no machine-wide figure. The quiet window used to stay closed there, so a large search
+    /// backfill always waited the gate's full 30 minutes (VIBE-284). Nothing shows the rest of the
+    /// machine busy, so polls count as quiet, even while this process works; pressure still falls back
+    /// to this process's CPU.
+    /// </summary>
     [Fact]
-    public void WithoutAMachineFigureTheQuietWindowStaysClosedAndPressureFallsBackToProcessCpu()
+    public void WithoutAMachineFigureThePollsCountAsQuietAndPressureFallsBackToProcessCpu()
     {
         var feed = new SampleFeed(machine: false);
         var service = new SystemResourceService(feed.Next);
+        Assert.Equal(TimeSpan.Zero, service.Startup.QuietFor);
 
         var snapshot = service.Record(feed.Advance(systemPercent: 0, processPercent: 75));
 
         Assert.Null(snapshot.SystemCpuPercent);
         Assert.Null(snapshot.OtherCpuPercent);
-        Assert.Equal(TimeSpan.Zero, snapshot.QuietFor);
+        Assert.Equal(Poll, snapshot.QuietFor);
+        Assert.Equal(3 * Poll, Repeat(service, feed, 2, systemPercent: 0).QuietFor);
         Assert.True(SystemResourceService.ExceedsCpuThreshold(snapshot));
         Assert.False(SystemResourceService.ExceedsCpuThreshold(snapshot with { ProcessCpuPercent = 65 }));
+
+        var gate = new SearchBackfillGate();
+        var quietLongEnough = Repeat(service, feed, (int)(SearchBackfillGate.QuietWindow / Poll), systemPercent: 0);
+        Assert.Equal(SearchBackfillDecision.Idle, gate.Decide(SearchBackfillGate.SmallBacklog + 1, quietLongEnough, quietLongEnough.CapturedAt));
     }
 
     [Fact]

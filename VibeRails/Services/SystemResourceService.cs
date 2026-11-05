@@ -20,8 +20,10 @@ public sealed record ResourceSnapshot
 
     /// <summary>
     /// How long, as of <see cref="CapturedAt"/>, <see cref="OtherCpuPercent"/> has stayed under
-    /// <see cref="SystemResourceService.QuietCpuThreshold"/>. Zero while the machine is busy or the
-    /// platform has no system-wide figure.
+    /// <see cref="SystemResourceService.QuietCpuThreshold"/>. Zero while the machine is busy and in the
+    /// startup snapshot. Where the platform has no system-wide figure (macOS) nothing can show the
+    /// rest of the machine busy, so polls count as quiet: otherwise a large search backfill could
+    /// never pass its idle gate there and always waited out the gate's maximum (VIBE-284).
     /// </summary>
     public TimeSpan QuietFor { get; init; }
 
@@ -134,8 +136,9 @@ public sealed class SystemResourceService : BackgroundService, ISystemResourceSe
         var procCpu = ComputeProcessCpu(_lastSample, sample);
         var systemCpu = SystemActivityReader.CpuPercent(_lastSample.System, sample.System);
         var snap = BuildSnapshot(sample, procCpu, systemCpu, TimeSpan.Zero);
-        // A reading is the average since the previous poll, so a quiet reading makes that whole interval quiet.
-        _quietSince = snap.OtherCpuPercent < QuietCpuThreshold ? _quietSince ?? _lastSample.At : null;
+        // A reading is the average since the previous poll, so a quiet reading makes that whole interval
+        // quiet. No machine figure is no evidence of load: see ResourceSnapshot.QuietFor.
+        _quietSince = snap.OtherCpuPercent is not { } other || other < QuietCpuThreshold ? _quietSince ?? _lastSample.At : null;
         if (_quietSince is { } since) snap = snap with { QuietFor = sample.At - since };
         _lastSample = sample;
         Volatile.Write(ref _current, snap);

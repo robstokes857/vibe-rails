@@ -162,7 +162,7 @@ Keep important instructions at body size. Avoid long uppercase labels, and let t
 | Section tab | Manrope 500, 0.8rem, uppercase; 700 when active | `.app-subnav-link` |
 | Badge | Manrope 400, 11px / 1.6 | Status badges |
 | Inline code | JetBrains Mono, 0.85em, `--color-accent` on a 12% teal fill | `code` |
-| Command | JetBrains Mono 400, 0.8rem / 1.5, `--color-accent`, breaks anywhere | `.install-cmd-compact code` |
+| Command | JetBrains Mono 400, 0.875rem / 1.6, `--color-accent`, breaks anywhere like a terminal line (`word-break: break-all`) | `.install-cmd-compact code` |
 
 The root font size is 16px from 768px and 14px below (`site.css`), so rem sizes shrink by an eighth on phones; editable fields stay at 16px. Letter-spacing is 0 except board field labels (0.04em). Text is set uppercase only by CSS, never typed in capitals. The examples use smaller demo sizes (13px buttons, 12px labels); implement the sizes in the scale above.
 
@@ -377,6 +377,8 @@ Label the preference itself, such as “Email notifications,” rather than usin
 | Row | Label left, control right, at least 44px tall |
 | Status line | Beside a switch that acts at once: a 9px dot and a sentence ("On — notifications enabled", "Blocked in your browser settings") |
 
+Keep the 18px switch knob vertically centered in both states; its checked-state translation must preserve that centering.
+
 **In the code today**
 
 | Today | Becomes | Files |
@@ -517,6 +519,7 @@ Today: `.vibe-empty-state` with an `i.empty-state-mark` or `img.vibe-empty-state
 | `dialog.vibe-confirm-dialog` via `window.vibeRails.confirm` or `form[data-confirm-*]` | Confirmation dialog (keeps its API) | `confirmation.js`, `vibe-theme.css` |
 | `dialog.api-key-dialog` (Create an API key) | Form dialog (600px) | `vibe-api-keys.css` |
 | `rb-dialog`, `rc-dialog`, `share-dialog`, `share-access-dialog`, `vibe-sharing-dialog`, `vibe-board-artifact-dialog`, `home-image-dialog` | Dialog | Page stylesheets |
+| Board session and agent replay (`vibe-board-artifact-dialog.vibe-board-replay-dialog`) | Full-viewport reader: 2rem inset up to 1800px wide, one-line header carrying the title, status note and Close, no inner scrolling; the replayer's own header is one row | `vibe-boards.css`, `session-replay/style.css` |
 | Board card drawer (`aside.vibe-card-panel[role=dialog]`), terminal PIN and composer overlays | Keep their layouts; apply the dialog surface, focus and Escape rules | `vibe-boards.css`, `viberails.css`, `vibe-theme.css` |
 
 Bootstrap modals and offcanvas are not used.
@@ -531,7 +534,7 @@ These patterns belong to the public home page and the header. Task screens do no
 | Wordmark | "Vibe Rails" in the Wordmark style, 0.75rem right of the mascot |
 | Hero | `h1` "Vibe Rails" at the Marketing hero size in `--brand-gradient` with its shine; the Hero lead below; a Kicker introducing the install cards; soft violet and teal glows behind |
 | Section opener | An Eyebrow ("Works with your stack") above a Section heading |
-| Install card | A card with a header (platform mark and name), the command in the Command style on a recessed well with a copy icon button, and for Windows a small primary download button. Platform marks are tinted: Windows `#59b3f0`, Linux `#ee7339`, Apple and GitHub `#f5f5f7`. The GitHub card is one link |
+| Install card | Three cards share the row (`col-lg-4 col-md-6`): Windows, Linux and Mac. Each has a header (platform mark and name) and the command in the Command style on a recessed well (16px top and bottom, 18px left, and the copy button width plus 20px on the right so the text never runs under it) with a copy icon button. The Windows card adds a small Ghost link (`btn btn-link btn-sm`, 13px with a 12px floor on phones, `--color-accent`, 16px download icon) that opens the latest GitHub release; its label starts flush with the command text. Platform marks are tinted: Windows `#59b3f0`, Linux `#ee7339`, Apple `#f5f5f7`. There is no GitHub card; the repository link lives in `llms.txt` and the JSON-LD `sameAs` |
 | Feature card | Icon tile, centred component heading, description, a teal-ticked list, and a bold closing line |
 | Partner tiles | Provider logos in their own colors in "Works with your stack" |
 | Token savings | The hero chip and meter count tokens saved with tabular figures and digit separators; milestones switch to the lime milestone tone |
@@ -541,6 +544,8 @@ These patterns belong to the public home page and the header. Task screens do no
 Start with a single column. Add columns only when controls and labels fit naturally. At narrow widths, stack form groups and wrap action rows; avoid horizontal page scrolling. Test at 320px, 375px, 768px and 1024px, including enlarged text and long labels.
 
 Hosted boards keep at least 24rem of lane height. When wrapped controls, enlarged text or a short viewport leave less room, the page scrolls vertically instead of compressing the card list. Lanes retain their own card scrolling and horizontal lane navigation. Card attachments offer owners a labelled image picker and Upload image action, format/size guidance, an inline error and a polite upload status. Shared members only read attachments.
+
+The session replayer (`session-replay/style.css`) puts the code and events panel beside the terminal only when its frame is wider than 1200px. From 721px to 1200px the panel sits under a full-width terminal, with its file or event view and its list side by side (VIBE-148). When the frame is too short for both (a 320px terminal and a 280px panel), the player scrolls vertically instead of squeezing either panel. At 720px and below the readable screen replaces xterm and the player scrolls. The replayer's breakpoints respond to its iframe width, not the window width.
 
 Keep menus and dialogs inside the viewport. Do not hide essential actions behind hover. Maintain 16px editable-field text on small screens and adequate touch targets. Preserve visible focus when sticky navigation or overlays are present.
 
@@ -576,7 +581,8 @@ The markup below illustrates semantics. The proposed classes describe a future s
 
 - New and updated UI uses [Lucide](https://lucide.dev/) icons: 24-grid strokes with `stroke="currentColor"`, 2px wide (1.8px in the header), 15–18px beside text, `aria-hidden="true"`. In Razor views, inline the SVG as the header already does rather than adding a script. The examples load Lucide from a CDN.
 - Existing screens use Font Awesome 6.5.1 Free (`fas`, `fa-solid`, `far`), loaded on every page by `_Layout.cshtml`. Keep it until a screen is updated, and do not mix the two libraries within one component.
-- Brand marks (Windows, Ubuntu, Apple, GitHub) come from Font Awesome Brands; Lucide has none. Partner and provider logos are image files in `wwwroot/assets/img`.
+- Brand marks (Windows, Ubuntu, Apple) come from Font Awesome Brands; Lucide has none. Partner and provider logos are image files in `wwwroot/assets/img`.
+- Provider tiles show one mark at a time: the provider artwork after it loads, or the contextual SVG fallback while loading, for unknown providers, or after an image failure. `provider-icons.js` sets the SVG's `hidden` attribute explicitly; `vibe-theme.css` supplies its hidden display rule.
 - Icon-only controls carry an accessible name; decorative icons are hidden from assistive technology.
 
 ## Accessibility

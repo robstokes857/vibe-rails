@@ -161,9 +161,10 @@ function Test-PreFlightChecks {
     Assert-NativeCommandSucceeded -ExitCode $LASTEXITCODE -Operation "Fetching the release branch"
     $localCommit = git rev-parse HEAD
     Assert-NativeCommandSucceeded -ExitCode $LASTEXITCODE -Operation "Resolving the local release commit"
+    # The fetch above fails for a branch origin does not have, so the remote ref must resolve here.
     $remoteCommit = git rev-parse --verify "refs/remotes/origin/$currentBranch" 2>$null
     Assert-NativeCommandSucceeded -ExitCode $LASTEXITCODE -Operation "Resolving the remote release commit"
-    if ($remoteCommit -and $localCommit -ne $remoteCommit) {
+    if ($localCommit -ne $remoteCommit) {
         $behind = git rev-list --count "HEAD..origin/$currentBranch" 2>$null
         Assert-NativeCommandSucceeded -ExitCode $LASTEXITCODE -Operation "Comparing the release branch with origin"
         if ($behind -gt 0) {
