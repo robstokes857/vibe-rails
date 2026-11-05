@@ -58,8 +58,10 @@ independently. Existing state/schema rows are retained and older binaries ignore
 `board-checks/2` adds nullable `EvidenceJson`. New attempts save the full captured text before
 analysis: scope files (current/previous text, exact added lines and their source line numbers),
 rule files, available impact sources, and the exact ignore rules passed to the engine. Binary or
-unavailable files retain manifest entries without invented contents. Evidence is written once,
-before analysis; the completion save passes none and the upsert keeps the stored column. An impact
+unavailable files retain manifest entries without invented contents. Evidence is serialized and
+sent once, before analysis; the completion save passes none and the upsert keeps the stored column.
+SQLite still rewrites the whole row on that update, so the WAL carries the evidence a second time;
+avoiding that needs a separate evidence table, which has not been worth the schema change. An impact
 source whose text equals a scope file's captured text is stored only in the scope files. Evidence
 is read only through `GetCheckEvidenceAsync`, never with a report or summary page: it can run to
 tens of megabytes. Failure/cancellation after capture retains the inputs; completed attempts cannot

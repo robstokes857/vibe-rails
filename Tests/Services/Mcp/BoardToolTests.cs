@@ -95,10 +95,11 @@ public sealed partial class BoardToolTests : IDisposable
         // VIBE-284 item 1: captured sources stay out of the record read; they are listed and read per file.
         var source = "class Captured {}\n" + new string('y', 45000);
         var captured = evidence with { Id = "captured", RunId = "run-captured", ResultJson = "{}",
-            Evidence = new([new("src/a.cs", null, "Modified", false, source, "class Old {}", null, null),
+            Evidence = new([new("src/a.cs", null, "Modified", false, source, "class Old {}", "class Captured {}", [1]),
                     new("logo.png", null, "Added", true, null, null, null, null)],
                 [new("vc.rules.md", "## Vibe Rails Rules\n- WARN: rule text\n")],
-                [new("src/caller.cs", "class Caller { Captured c; }")], []) };
+                [new("src/caller.cs", "class Caller { Captured c; }")],
+                [new("Generated", "directory", "generated", "Fixture\noutput", new DateTime(2026, 11, 1, 0, 0, 0, DateTimeKind.Utc), "Rob")]) };
         Assert.True(await _store.SaveCheckAsync(_project, captured, Ct));
         var record = await _tool.ReadBoardCheck(card.Key, "captured", cancellationToken: Ct);
         Assert.DoesNotContain("class Captured", record);
@@ -109,11 +110,14 @@ public sealed partial class BoardToolTests : IDisposable
         Assert.Contains("- Added: logo.png · binary or unavailable", index);
         Assert.Contains("- vc.rules.md", index);
         Assert.Contains("- src/caller.cs", index);
+        Assert.Contains("- directory Generated · generated: Fixture output · by Rob · created 2026-11-01T00:00:00.0000000Z", index);
         Assert.DoesNotContain("class Captured", index);
         var page = await _tool.ReadBoardCheck(card.Key, "captured", file: "src/a.cs", cancellationToken: Ct);
-        Assert.Contains("class Captured {}", page);
+        Assert.Contains("Change: Modified\n=== Current text ===\nclass Captured {}", page);
         Assert.Contains("Continue with offset=40000", page);
-        Assert.EndsWith(new string('y', 5018), await _tool.ReadBoardCheck(card.Key, "captured", 40000, "src/a.cs", Ct));
+        // The baseline and the exact engine input follow the current text (VIBE-284 review N1).
+        var rest = await _tool.ReadBoardCheck(card.Key, "captured", 40000, "src/a.cs", Ct);
+        Assert.Contains(new string('y', 5000) + "\n=== Previous text ===\nclass Old {}\n=== Added code analyzed (source lines 1) ===\nclass Captured {}", rest);
         Assert.Contains("WARN: rule text", await _tool.ReadBoardCheck(card.Key, "captured", file: "vc.rules.md", cancellationToken: Ct));
         Assert.Contains("class Caller", await _tool.ReadBoardCheck(card.Key, "captured", file: "src/caller.cs", cancellationToken: Ct));
         Assert.Contains("captured without text", await _tool.ReadBoardCheck(card.Key, "captured", file: "logo.png", cancellationToken: Ct));

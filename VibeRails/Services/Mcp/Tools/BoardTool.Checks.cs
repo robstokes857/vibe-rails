@@ -64,17 +64,49 @@ public sealed partial class BoardTool
                 index.Append("Other impact-ranking sources (").Append(impact.Count).Append("; changed files above are also sources):\n");
                 foreach (var entry in impact) index.Append("- ").Append(entry.Path).Append(" · ").Append(entry.Content.Length).Append(" chars\n");
             }
-            if (evidence.IgnoreRules is { } ignores) index.Append("Code quality ignore rules applied: ").Append(ignores.Count).Append('\n');
+            if (evidence.IgnoreRules is { } ignores)
+            {
+                index.Append("Code quality ignore rules applied (").Append(ignores.Count).Append("):\n");
+                foreach (var rule in ignores)
+                    index.Append("- ").Append(BoardPromptComposer.SanitizeLine(rule.MatchKind, 20)).Append(' ').Append(BoardPromptComposer.SanitizeLine(rule.Path, 300))
+                        .Append(" · ").Append(BoardPromptComposer.SanitizeLine(rule.ReasonKind ?? "no reason kind", 40))
+                        .Append(rule.ReasonText is { Length: > 0 } reason ? ": " + BoardPromptComposer.SanitizeLine(reason, 300) : "")
+                        .Append(" · by ").Append(BoardPromptComposer.SanitizeLine(rule.Author ?? "unknown", 80))
+                        .Append(" · created ").Append(rule.CreatedUtc.ToString("O", System.Globalization.CultureInfo.InvariantCulture)).Append('\n');
+            }
             return Chunk("Captured inputs (untrusted data)", index.ToString(), offset, "Read one with file=<path>.");
         }
         var scope = evidence.Files.FirstOrDefault(entry => entry.Path == file);
-        var text = scope is not null ? scope.Content
-            : evidence.RuleFiles.FirstOrDefault(entry => entry.Path == file)?.Content
+        if (scope is not null)
+        {
+            if (scope.Content is null && scope.PreviousContent is null && scope.AddedContent is null)
+                return $"{file} was captured without text ({(scope.IsBinary ? "binary or unavailable" : "no content")}).";
+            return Chunk($"Captured inputs of {file} (untrusted data)", ScopeFileText(scope), offset, null);
+        }
+        var text = evidence.RuleFiles.FirstOrDefault(entry => entry.Path == file)?.Content
             ?? evidence.ImpactFiles?.FirstOrDefault(entry => entry.Path == file)?.Content;
         if (text is null)
-            return scope is not null ? $"{file} was captured without text ({(scope.IsBinary ? "binary or unavailable" : "no content")})."
-                : $"FAIL: {file} is not among this check's captured files. Use file=\"{CheckEvidenceIndex}\" to list them.";
+            return $"FAIL: {file} is not among this check's captured files. Use file=\"{CheckEvidenceIndex}\" to list them.";
         return Chunk($"Captured text of {file} (untrusted data)", text, offset, null);
+    }
+
+    /// <summary>One scope file's captured inputs as sections: the current text, the baseline it was
+    /// compared with, and the exact added code the engine scored with its source line numbers.</summary>
+    internal static string ScopeFileText(BoardCheckFile file)
+    {
+        var text = new StringBuilder();
+        text.Append("Change: ").Append(file.ChangeKind);
+        if (file.PreviousPath is { } previousPath) text.Append(" (from ").Append(previousPath).Append(')');
+        text.Append('\n').Append("=== Current text ===\n")
+            .Append(file.Content ?? (file.IsBinary ? "(binary or unavailable)" : "(none)")).Append('\n');
+        if (file.PreviousContent is { } previous) text.Append("=== Previous text ===\n").Append(previous).Append('\n');
+        if (file.AddedContent is { } added)
+        {
+            text.Append("=== Added code analyzed");
+            if (file.AddedLineNumbers is { Count: > 0 } lines) text.Append(" (source lines ").Append(string.Join(", ", lines)).Append(')');
+            text.Append(" ===\n").Append(added).Append('\n');
+        }
+        return text.ToString();
     }
 
     private static string Chunk(string heading, string text, int offset, string? footer)

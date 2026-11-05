@@ -53,7 +53,8 @@ public sealed class BoardCheckService(
             }
             record = record with { Evidence = Evidence(snapshot, ignoreRules) };
             // Preserve captured inputs even if the process ends during analysis. Once stored, later
-            // saves pass null, which keeps them, instead of serializing and writing a second copy.
+            // saves pass null, which keeps them, instead of serializing and sending a second copy
+            // (SQLite still rewrites the row on the completion update; see CHECKS.md).
             if (board is not null && !await board.SaveCheckAsync(project, record, ct))
                 throw new InvalidOperationException("Could not save the captured check inputs.");
             evidenceSaved = true;
