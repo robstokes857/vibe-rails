@@ -26,6 +26,22 @@ build/install scripts, and component documentation in this repository.
 [API_SEC.md](API_SEC.md) stays here as the API security contract and review gate.
 Read it before changing API exposure, authentication, or production listeners.
 
+## Public repository boundary
+
+Treat tracked files as public, including terminal fixtures, generated documents and
+archives. Publish private source material or research only when explicitly authorized
+for public release; otherwise keep it in the private research repository or the active
+card's internal attachments and comments. Check the card's sharing settings before
+including sensitive details. Use portable, repository-relative references for necessary
+cross-repository contracts, and avoid developer-machine paths and unrelated private
+implementation details.
+
+When checking disclosures, inspect packaged copies and reachable Git history as well
+as current text files. A `.bin` fixture may contain readable terminal output. Adding a
+path to `.gitignore` or deleting a current file does not remove already tracked content
+or historical commits. History rewriting and credential rotation are separate actions;
+do not perform them as incidental documentation cleanup.
+
 ## Database change policy
 
 Opening a new version must just work. Required schema setup is automatic; never require a

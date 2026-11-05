@@ -207,4 +207,5 @@ browser sign-in configuration.
   `Services/DeviceLinks.md` beneath its application directory.
 
 The private companion explanation and investigation context are in
-`C:\source\vibe-books\OAuth\README.md`.
+`OAuth/README.md` in the private research repository referenced by the root
+contributor guide.

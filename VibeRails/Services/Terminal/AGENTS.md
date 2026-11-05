@@ -27,8 +27,8 @@ Related routes/UI:
 - `Routes/TerminalRoutes.cs`
 - `wwwroot/js/modules/terminal-multitab.js`
 
-Remote relay server (other repo):
-- `C:\source\VibeRailsFrontEnd\VibeRails-Front\VibeRails-Front`
+Remote relay server: the application directory in the sibling `VibeRails-Front`
+repository. Its local checkout location is developer-specific.
 
 ## Core Architecture
 
