@@ -12,11 +12,15 @@ public interface ILlmPickerPreferenceService
         UpdateLlmPickerPreferencesRequest request,
         CancellationToken cancellationToken = default);
     Task<LlmPickerPreferencesResponse> ResetAsync(CancellationToken cancellationToken = default);
+    /// <summary>Reads this computer's saved launch choices for a base LLM.</summary>
+    Task<BaseLlmOptions> GetLaunchDefaultsAsync(string cli, CancellationToken cancellationToken = default);
+    /// <summary>Saves validated launch choices for one base LLM without changing CLI configuration.</summary>
+    Task<BaseLlmOptions> SaveLaunchDefaultsAsync(string cli, BaseLlmOptions options, CancellationToken cancellationToken = default);
 }
 
 public sealed class LlmPickerPreferenceValidationException(string message) : Exception(message);
 
-public sealed class LlmPickerPreferenceService(IRepository repository) : ILlmPickerPreferenceService
+public sealed partial class LlmPickerPreferenceService(IRepository repository) : ILlmPickerPreferenceService
 {
     public const string CacheKey = "ui.llm-picker.v1";
     internal const int DocumentVersion = 1;

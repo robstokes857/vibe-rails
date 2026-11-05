@@ -6,6 +6,14 @@ const pinnedModels = Object.freeze({
     'deepseek-v4-pro': 'deepseek/deepseek-v4-pro', 'kimi-k3': 'moonshotai/kimi-k3'
 });
 const openCodeClis = ['opencode', 'glm-5.2', 'glm-5.3', 'deepseek-v4-pro', 'kimi-k3'];
+const pendingDefaults = new WeakMap();
+
+/** Wait for the current editors, including a selection changed during an earlier request. */
+export function waitForBoardLaunchDefaults(root) {
+    const pending = [...(root?.querySelectorAll?.('[data-board-launch-options]') || [])]
+        .map(element => pendingDefaults.get(element)).filter(Boolean);
+    return pending.length ? Promise.all(pending).then(() => waitForBoardLaunchDefaults(root)) : null;
+}
 const efforts = Object.freeze({
     claude: ['low', 'medium', 'high', 'xhigh', 'max'],
     codex: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
@@ -67,6 +75,10 @@ export function renderBoardLaunchOptions(selection, options = {}, { idPrefix = '
             <input class="form-check-input" type="checkbox" id="${escapeHtml(idPrefix)}-yolo" data-board-launch-yolo ${values.yolo ? 'checked' : ''}>
             <label class="form-check-label" for="${escapeHtml(idPrefix)}-yolo">YOLO mode</label>
         </div>
+        <button type="button" class="btn btn-link btn-sm px-0 mt-2" data-board-launch-default>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+            Make Default For LLM
+        </button>
     </div>`;
 }
 
@@ -80,7 +92,7 @@ export function readBoardLaunchOptions(container, selection) {
     });
 }
 
-export function bindBoardLaunchOptions(container, selection) {
+export function bindBoardLaunchOptions(container, selection, { app, useDefaults = false } = {}) {
     const model = container.querySelector('[data-board-launch-model]');
     const effort = container.querySelector('[data-board-launch-effort]');
     const speed = container.querySelector('[data-board-launch-speed]');
@@ -101,5 +113,62 @@ export function bindBoardLaunchOptions(container, selection) {
     };
     model?.addEventListener('change', synchronize);
     synchronize();
-    return () => model?.removeEventListener('change', synchronize);
+    const cli = baseCli(selection);
+    const button = app && container.querySelector('[data-board-launch-default]');
+    const abort = new AbortController();
+    let disposed = false;
+    let edited = false;
+    const alive = () => !disposed && container.isConnected !== false;
+    const markEdited = () => { edited = true; abort.abort(); };
+    const endpoint = `/api/v1/llm-picker/defaults/${encodeURIComponent(cli || '')}`;
+    const saveDefault = async () => {
+        if (!alive() || button.disabled) return;
+        edited = true;
+        button.disabled = true;
+        try {
+            await app.apiCall(endpoint, 'PUT', readBoardLaunchOptions(container, selection), { showLoading: false, preferErrorResponseMessage: true });
+            if (alive()) app.showToast('LLM defaults', 'Default options saved for this LLM.', 'success');
+        } catch (error) {
+            if (alive()) app.showToast('LLM defaults', error?.message || 'Default options could not be saved.', 'error');
+        } finally { if (alive()) button.disabled = false; }
+    };
+    if (app && cli) {
+        container.addEventListener('input', markEdited);
+        container.addEventListener('change', markEdited);
+        button?.addEventListener('click', saveDefault);
+        if (useDefaults) {
+            const optionsRoot = container.querySelector('[data-board-launch-options]') || container;
+            const loading = app.apiCall(endpoint, 'GET', null, { showLoading: false, signal: abort.signal })
+                .then(options => {
+                    if (!alive() || edited) return;
+                    const values = normalizeBoardLaunchOptions(selection, options);
+                    for (const key of ['model', 'effort', 'mode', 'speed']) {
+                        const input = container.querySelector(`[data-board-launch-${key}]`);
+                        if (input) input.value = values[key];
+                    }
+                    const yolo = container.querySelector('[data-board-launch-yolo]');
+                    if (yolo) yolo.checked = values.yolo;
+                    synchronize();
+                    container.dispatchEvent(new Event('change', { bubbles: true }));
+                })
+                .catch(error => {
+                    if (alive() && !edited && error?.name !== 'AbortError')
+                        app.showToast('LLM defaults', error?.message || 'Default options could not be loaded.', 'error');
+                })
+                .finally(() => {
+                    if (pendingDefaults.get(optionsRoot) === loading) pendingDefaults.delete(optionsRoot);
+                });
+            pendingDefaults.set(optionsRoot, loading);
+        }
+    }
+    return () => {
+        disposed = true;
+        abort.abort();
+        model?.removeEventListener('change', synchronize);
+        if (app && cli) {
+            container.removeEventListener('input', markEdited);
+            container.removeEventListener('change', markEdited);
+            button?.removeEventListener('click', saveDefault);
+        }
+    };
 }

@@ -463,6 +463,8 @@ middleware serves their paths rather than registering individual API endpoints.
 | POST | `/api/v1/lifecycle/disconnect` | [LifecycleRoutes.cs](VibeRails/Routes/LifecycleRoutes.cs) |
 | POST | `/api/v1/lifecycle/ping` | [LifecycleRoutes.cs](VibeRails/Routes/LifecycleRoutes.cs) |
 | DELETE | `/api/v1/llm-picker/preferences` | [LlmPickerRoutes.cs](VibeRails/Routes/LlmPickerRoutes.cs) |
+| GET | `/api/v1/llm-picker/defaults/{cli}` | [LlmPickerRoutes.cs](VibeRails/Routes/LlmPickerRoutes.cs) |
+| PUT | `/api/v1/llm-picker/defaults/{cli}` | [LlmPickerRoutes.cs](VibeRails/Routes/LlmPickerRoutes.cs) |
 | GET | `/api/v1/llm-picker/preferences` | [LlmPickerRoutes.cs](VibeRails/Routes/LlmPickerRoutes.cs) |
 | PUT | `/api/v1/llm-picker/preferences` | [LlmPickerRoutes.cs](VibeRails/Routes/LlmPickerRoutes.cs) |
 | POST | `/api/v1/mcp/inspect` | [McpRoutes.cs](VibeRails/Routes/McpRoutes.cs) |
@@ -767,6 +769,9 @@ or perform these writes. This is dashboard confirmation, not protection against 
 same-origin JavaScript executing with the dashboard's full authority. Responses do not echo
 proofs; key changes emit a fixed event and warning with no credential. Account linking retains
 its separate explicit hosted approval flow.
+
+GET/PUT `/api/v1/llm-picker/defaults/{cli}` are root-only, require both local credentials,
+and accept validated base-CLI launch choices only; they neither launch a CLI nor edit its config.
 
 Approved Python script discovery starts in the installed scripts directory and excludes
 repository/active-venv and PYBRIDGE_PYTHON overrides. Visible Windows shell launches resolve

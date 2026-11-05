@@ -62,16 +62,48 @@ public sealed class LlmPickerRoutesTests
         });
     }
 
+    [Fact]
+    public async Task LaunchDefaults_RoundTripSpeedAndMapValidationFailure()
+    {
+        var options = new BaseLlmOptions("gpt-6-astra", "high", null, true, "ultrafast");
+        var service = new Mock<ILlmPickerPreferenceService>();
+        service.Setup(x => x.GetLaunchDefaultsAsync("codex", It.IsAny<CancellationToken>())).ReturnsAsync(options);
+        service.Setup(x => x.SaveLaunchDefaultsAsync("codex", options, It.IsAny<CancellationToken>())).ReturnsAsync(options);
+        service.Setup(x => x.SaveLaunchDefaultsAsync("shell", It.IsAny<BaseLlmOptions>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ArgumentException("Choose a base LLM."));
+        await WithHostAsync(service.Object, async baseUrl =>
+        {
+            var loaded = await SharedClient.GetFromJsonAsync<BaseLlmOptions>($"{baseUrl}/api/v1/llm-picker/defaults/codex", TestContext.Current.CancellationToken);
+            Assert.Equal(options, loaded);
+            using var saved = await SharedClient.PutAsJsonAsync($"{baseUrl}/api/v1/llm-picker/defaults/codex", options, TestContext.Current.CancellationToken);
+            Assert.Equal(options, await saved.Content.ReadFromJsonAsync<BaseLlmOptions>(TestContext.Current.CancellationToken));
+            using var invalid = await SharedClient.PutAsJsonAsync($"{baseUrl}/api/v1/llm-picker/defaults/shell", options, TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        });
+    }
+
+    [Fact]
+    public async Task LaunchDefaults_AreUnavailableOutsideRootBackend()
+    {
+        await WithHostAsync(new Mock<ILlmPickerPreferenceService>(MockBehavior.Strict).Object, async baseUrl =>
+        {
+            using var get = await SharedClient.GetAsync($"{baseUrl}/api/v1/llm-picker/defaults/codex", TestContext.Current.CancellationToken);
+            using var put = await SharedClient.PutAsJsonAsync($"{baseUrl}/api/v1/llm-picker/defaults/codex", new BaseLlmOptions(), TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.NotFound, get.StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, put.StatusCode);
+        }, isActiveRootBackend: false);
+    }
+
     private static async Task WithHostAsync(
         ILlmPickerPreferenceService service,
-        Func<string, Task> test)
+        Func<string, Task> test, bool isActiveRootBackend = true)
     {
         var builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Services.AddSingleton(service);
         await using var app = builder.Build();
-        LlmPickerRoutes.Map(app);
+        LlmPickerRoutes.Map(app, isActiveRootBackend);
         await app.StartAsync(TestContext.Current.CancellationToken);
         try
         {

@@ -3,7 +3,7 @@ import { BoardApi } from './board-api.js';
 import { boardTracker } from './board-brand.js';
 import { jobLaunchKind } from './launch-kind.js';
 import { mountLlmPicker } from './pickers/llm-picker.js';
-import { renderBoardLaunchOptions, bindBoardLaunchOptions, readBoardLaunchOptions } from './board-launch-options.js';
+import { renderBoardLaunchOptions, bindBoardLaunchOptions, readBoardLaunchOptions, waitForBoardLaunchDefaults } from './board-launch-options.js';
 
 // A dedicated board's tracker connection sits under General; a local board offers each as a tab.
 const TRACKER_TABS = [['jira', 'Jira Cloud'], ['ado', 'Azure DevOps']];
@@ -143,6 +143,12 @@ const levelHeader = id => {
 };
 
 const levelSection = (id, body) => `<section class="mb-3" data-context-level="${id}">${levelHeader(id)}${body}</section>`;
+const contextDisclosure = (id, body) => {
+    const [, label, reach] = CONTEXT_LEVELS.find(([level]) => level === id);
+    return `<details class="mb-3" data-context-level="${id}"${id === 'app' ? ' open' : ''}>
+        <summary>${label}</summary><p class="board-editor-muted mt-2 mb-2" data-context-reach>${reach}</p>${body}
+    </details>`;
+};
 
 /**
  * One editor for every context level, broadest first. Settings shows App context alone
@@ -152,9 +158,10 @@ const levelSection = (id, body) => `<section class="mb-3" data-context-level="${
 export const contextEditorSection = ({ board = true } = {}) => `
     <div data-context-editor>
         <p class="board-editor-muted">A launch gets every level that applies to it, broadest first, in one labelled block. Empty levels send nothing. Each level can contain up to 4,000 characters.</p>
-        <div data-context-unit="app">${levelSection('app', '<div data-board-settings-content>Loading context…</div>')}</div>
-        ${board ? `<div data-context-unit="board">${levelSection('board', '<div data-board-settings-content>Loading context…</div>')}</div>
+        <div data-context-unit="app">${contextDisclosure('app', '<div data-board-settings-content>Loading context…</div>')}</div>
+        ${board ? `<div data-context-unit="board">${contextDisclosure('board', '<div data-board-settings-content>Loading context…</div>')}</div>
         <div data-context-unit="card"><div data-board-settings-content>Loading context…</div></div>` : ''}
+        <button type="button" class="btn btn-sm btn-primary" data-context-save disabled>Save context</button>
     </div>`;
 
 export const laneAutomationSection = () => `
@@ -257,19 +264,21 @@ export function mountBoardSync(app, element, boardId, onStatus = () => {}) {
 // afterRender(element, result) may mount widgets on the fresh markup and return their disposer;
 // clear(element) is the payload for a [data-settings-clear] button; reloadAfterSave re-renders
 // from the saved result so widgets show what was stored.
-function mountSettings(app, element, { load, render, read, save, savedMessage, onSaved, afterRender, clear, reloadAfterSave = false, toastTitle = 'Board' }) {
+// saveGroup coordinates one footer across independently revisioned records. Its snapshot is
+// the submitted draft, so edits made during a save remain dirty for the next one.
+function mountSettings(app, element, { load, render, read, save, savedMessage, onSaved, afterRender, beforeSave, clear, reloadAfterSave = false, toastTitle = 'Board', saveGroup }) {
     if (!element) return () => {};
     const abort = new AbortController();
     let disposed = false;
     let revision = null;
     let busy = false;
+    let savedDraft = null;
     let disposeWidgets = () => {};
     const content = element.querySelector('[data-board-settings-content]');
     const alive = () => !disposed && element.isConnected !== false;
     const show = result => {
         disposeWidgets();
         disposeWidgets = () => {};
-        revision = result.revision;
         content.innerHTML = render(result);
         element.querySelectorAll('[data-context-mode]').forEach(select => {
             const message = element.querySelector(`[data-context-message="${select.dataset.contextMode}"]`);
@@ -278,6 +287,11 @@ function mountSettings(app, element, { load, render, read, save, savedMessage, o
             sync();
         });
         disposeWidgets = afterRender?.(element, result) || (() => {});
+        if (saveGroup) {
+            savedDraft = JSON.stringify(read(element));
+        }
+        revision = result.revision;
+        saveGroup?.refresh();
     };
     async function reload() {
         try {
@@ -289,27 +303,43 @@ function mountSettings(app, element, { load, render, read, save, savedMessage, o
             content.innerHTML = `<p role="alert">${escapeHtml(error?.message || 'Settings could not be loaded.')}</p><button type="button" class="btn btn-sm btn-outline-secondary" data-settings-retry>Retry</button>`;
         }
     }
+    const persist = async (clearing = false) => {
+        if (!alive() || busy || revision === null) return false;
+        busy = true;
+        try {
+            const waiting = !clearing && beforeSave?.(element);
+            if (waiting) await waiting;
+            if (!alive()) return false;
+            const draft = clearing ? clear(element) : read(element);
+            const serialized = JSON.stringify(draft);
+            if (saveGroup && serialized === savedDraft) return true;
+            const result = await save({ ...draft, expectedRevision: revision });
+            if (!alive()) return false;
+            if (reloadAfterSave) show(result);
+            else revision = result.revision;
+            savedDraft = serialized;
+            onSaved?.(result);
+            if (!saveGroup) app.showToast(toastTitle, savedMessage, 'success');
+            return true;
+        } catch (error) {
+            if (alive()) app.showToast(toastTitle, error?.message || 'Settings could not be saved.', 'error');
+            return false;
+        } finally {
+            busy = false;
+        }
+    };
     const click = async event => {
         if (event.target.closest('[data-settings-retry]')) { void reload(); return; }
         const clearing = clear && event.target.closest('[data-settings-clear]');
         const button = clearing || event.target.closest('[data-settings-save]');
         if (!button || busy || revision === null) return;
-        busy = true;
         button.disabled = true;
-        try {
-            const result = await save({ ...(clearing ? clear(element) : read(element)), expectedRevision: revision });
-            if (!alive()) return;
-            if (reloadAfterSave) show(result);
-            else revision = result.revision;
-            onSaved?.(result);
-            app.showToast(toastTitle, savedMessage, 'success');
-        } catch (error) {
-            if (alive()) app.showToast(toastTitle, error?.message || 'Settings could not be saved.', 'error');
-        } finally {
-            busy = false;
+        try { await persist(Boolean(clearing)); }
+        finally {
             if (alive() && button.isConnected !== false) button.disabled = false;
         }
     };
+    saveGroup?.register({ ready: () => alive() && revision !== null, save: () => persist() });
     element.addEventListener('click', click);
     void reload();
     return () => { disposed = true; abort.abort(); disposeWidgets(); element.removeEventListener('click', click); };
@@ -376,12 +406,12 @@ export function mountBoardManager(app, element, boardId, { onSaved, picker = mou
                 selectedValue: status.selection || ''
             }) || (() => {});
             let disposeOptions = () => {};
-            const renderOptions = (options = {}, selection = select.value) => {
+            const renderOptions = (options, selection = select.value) => {
                 disposeOptions();
                 host.innerHTML = renderBoardLaunchOptions(selection, options, { idPrefix: 'board-manager-settings' });
-                disposeOptions = bindBoardLaunchOptions(host, selection) || (() => {});
+                disposeOptions = bindBoardLaunchOptions(host, selection, { app, useDefaults: options == null }) || (() => {});
             };
-            renderOptions(status.baseLlmOptions || {}, status.selection || '');
+            renderOptions(status.baseLlmOptions, status.selection || '');
             const change = () => renderOptions();
             select.addEventListener('change', change);
             return () => { select.removeEventListener('change', change); disposeOptions(); disposePicker(); };
@@ -398,6 +428,7 @@ export function mountBoardManager(app, element, boardId, { onSaved, picker = mou
         },
         clear: () => ({ selection: '', baseLlmOptions: null }),
         save: payload => BoardApi.saveBoardManagerAsync(boardId, payload),
+        beforeSave: waitForBoardLaunchDefaults,
         savedMessage: 'Board manager saved.',
         reloadAfterSave: true,
         onSaved
@@ -408,43 +439,43 @@ export function mountBoardManager(app, element, boardId, { onSaved, picker = mou
 let contextEditorIds = 0;
 
 /** App context: above every board and project, so it takes no board id. */
-export function mountAppContext(app, element, _boardId = null, { toastTitle = 'Board' } = {}) {
+export function mountAppContext(app, element, _boardId = null, { toastTitle = 'Board', saveGroup } = {}) {
     const id = `app-context-message-${++contextEditorIds}`;
     return mountSettings(app, element, {
         load: extra => BoardApi.getAppContextAsync(extra),
         render: ({ message }) => `
             <label class="visually-hidden" for="${id}">App context</label>
-            <textarea id="${id}" class="form-control form-control-sm mb-2" rows="5" maxlength="4000" placeholder="Context for every LLM launched from VibeRails…" spellcheck="true" data-context-message="app">${escapeHtml(message || '')}</textarea>
-            <button type="button" class="btn btn-sm btn-outline-primary" data-settings-save>Save App context</button>`,
+            <textarea id="${id}" class="form-control form-control-sm mb-2" rows="5" maxlength="4000" placeholder="Context for every LLM launched from VibeRails…" spellcheck="true" data-context-message="app">${escapeHtml(message || '')}</textarea>`,
         read: root => ({ message: root.querySelector('[data-context-message="app"]').value }),
         save: payload => BoardApi.saveAppContextAsync(payload),
         savedMessage: 'App context saved for every launch.',
-        toastTitle
+        toastTitle,
+        saveGroup
     });
 }
 
 /** Board context, stored as the board's Every Context message. */
-export function mountBoardLevelContext(app, element, boardId) {
+export function mountBoardLevelContext(app, element, boardId, { saveGroup } = {}) {
     const id = `board-level-context-message-${++contextEditorIds}`;
     return mountSettings(app, element, {
         load: extra => BoardApi.getBoardEveryContextAsync(boardId, extra),
         render: ({ message }) => `
             <label class="visually-hidden" for="${id}">Board context</label>
-            <textarea id="${id}" class="form-control form-control-sm mb-2" rows="5" maxlength="4000" placeholder="Context for every LLM launched for this board…" spellcheck="true" data-context-message="board">${escapeHtml(message || '')}</textarea>
-            <button type="button" class="btn btn-sm btn-outline-primary" data-settings-save>Save Board context</button>`,
+            <textarea id="${id}" class="form-control form-control-sm mb-2" rows="5" maxlength="4000" placeholder="Context for every LLM launched for this board…" spellcheck="true" data-context-message="board">${escapeHtml(message || '')}</textarea>`,
         read: root => ({ message: root.querySelector('[data-context-message="board"]').value }),
         save: payload => BoardApi.saveBoardEveryContextAsync(boardId, payload),
-        savedMessage: 'Board context saved for this board.'
+        savedMessage: 'Board context saved for this board.',
+        saveGroup
     });
 }
 
 /** Card context and Card type context: the board's Agent context record, saved together. */
-export function mountCardContext(app, element, boardId) {
+export function mountCardContext(app, element, boardId, { saveGroup } = {}) {
     const id = `card-context-message-${++contextEditorIds}`;
     return mountSettings(app, element, {
         load: extra => BoardApi.getBoardContextAsync(boardId, extra),
         render: ({ context }) => `
-            ${levelSection('card', `
+            ${contextDisclosure('card', `
                 <label class="visually-hidden" for="${id}">Card context</label>
                 <textarea id="${id}" class="form-control form-control-sm" rows="4" maxlength="4000" placeholder="Context for every card agent on this board…" spellcheck="true" data-context-card>${escapeHtml(context.defaultMessage)}</textarea>`)}
             ${levelSection('type', TYPES.map(([type, label]) => {
@@ -457,8 +488,7 @@ export function mountCardContext(app, element, boardId) {
                     </select>
                     <textarea class="form-control form-control-sm" rows="3" maxlength="4000" data-context-message="${type}" aria-label="${label} card type context" spellcheck="true">${escapeHtml(override?.message || '')}</textarea>
                 </details>`;
-            }).join('') + '<p class="board-editor-muted">An empty type-specific-only message sends no Card or Card type context.</p>')}
-            <button type="button" class="btn btn-sm btn-outline-primary" data-settings-save>Save Card and Card type context</button>`,
+            }).join('') + '<p class="board-editor-muted">An empty type-specific-only message sends no Card or Card type context.</p>')}`,
         read: root => ({ context: {
             defaultMessage: root.querySelector('[data-context-card]').value,
             typeOverrides: TYPES.map(([type]) => ({ type,
@@ -467,19 +497,45 @@ export function mountCardContext(app, element, boardId) {
             }))
         } }),
         save: payload => BoardApi.saveBoardContextAsync(boardId, payload),
-        savedMessage: 'Card and Card type context saved.'
+        savedMessage: 'Card and Card type context saved.',
+        saveGroup
     });
 }
 
 /**
  * Mounts every unit {@link contextEditorSection} rendered. Each level keeps its own revision, so
- * saving one never overwrites another's draft. Returns one dispose for all of them.
+ * one Save context action saves changed units without replacing any draft.
+ * Returns one dispose for all of them.
  */
 export function mountContextEditor(app, root, { boardId = null, toastTitle = 'Board' } = {}) {
+    const button = root?.querySelector('[data-context-save]');
+    const controls = [];
+    let disposed = false;
+    let saving = false;
+    const saveGroup = {
+        register: control => controls.push(control),
+        refresh: () => {
+            if (!disposed && button) button.disabled = saving || !controls.every(control => control.ready());
+        }
+    };
     const unit = name => root?.querySelector(`[data-context-unit="${name}"]`);
-    const disposers = [mountAppContext(app, unit('app'), null, { toastTitle })];
-    if (boardId) disposers.push(mountBoardLevelContext(app, unit('board'), boardId), mountCardContext(app, unit('card'), boardId));
-    return () => disposers.forEach(dispose => dispose());
+    const disposers = [mountAppContext(app, unit('app'), null, { toastTitle, saveGroup })];
+    if (boardId) disposers.push(mountBoardLevelContext(app, unit('board'), boardId, { saveGroup }), mountCardContext(app, unit('card'), boardId, { saveGroup }));
+    const save = async () => {
+        if (disposed || saving || !controls.every(control => control.ready())) return;
+        saving = true;
+        button.textContent = 'Saving…';
+        saveGroup.refresh();
+        try {
+            const results = await Promise.all(controls.map(control => control.save()));
+            if (!disposed && results.every(Boolean)) app.showToast(toastTitle, 'Context saved.', 'success');
+        } finally {
+            saving = false;
+            if (!disposed) { button.textContent = 'Save context'; saveGroup.refresh(); }
+        }
+    };
+    button?.addEventListener('click', save);
+    return () => { disposed = true; button?.removeEventListener('click', save); disposers.forEach(dispose => dispose()); };
 }
 
 // Automatic account sync status and an immediate retry.

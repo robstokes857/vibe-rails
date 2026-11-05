@@ -195,6 +195,7 @@ test('the Manager settings tab mounts the picker, saves selection, options, work
         '[data-board-manager-instructions]': { value: 'Bugs before features.' },
         '[data-board-manager-options]': {
             innerHTML: '',
+            addEventListener() {}, removeEventListener() {},
             // bindBoardLaunchOptions wires change listeners and reads <option>s; the fakes accept both.
             querySelector: selector => {
                 const value = { '[data-board-launch-model]': 'gpt-6-astra', '[data-board-launch-effort]': 'high', '[data-board-launch-speed]': 'ultrafast' }[selector];

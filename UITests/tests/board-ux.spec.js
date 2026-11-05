@@ -2116,9 +2116,15 @@ for (const width of [1440, 390]) {
             }
             return route.fulfill({ json: appContext });
         });
-        await page.route('**/api/v1/board/boards/brd_main/context', route => route.fulfill({
-            json: { revision: 0, context: { defaultMessage: 'Board-only instructions', typeOverrides: [] } }
-        }));
+        let cardContext = { revision: 0, context: { defaultMessage: 'Board-only instructions', typeOverrides: [] } };
+        await page.route('**/api/v1/board/boards/brd_main/context', route => {
+            if (route.request().method() === 'PUT') {
+                const body = route.request().postDataJSON();
+                expect(body.expectedRevision).toBe(cardContext.revision);
+                cardContext = { revision: cardContext.revision + 1, context: body.context };
+            }
+            return route.fulfill({ json: cardContext });
+        });
         const open = async () => {
             await page.getByRole('button', { name: 'Board settings', exact: true }).click();
             await page.getByRole('tab', { name: 'Context', exact: true }).click();
@@ -2132,7 +2138,15 @@ for (const width of [1440, 390]) {
         }
         const contextPanel = page.locator('#board-settings-context');
         // VIBE-229: one editor, broadest level first, each saying which launches it reaches.
-        await expect(contextPanel.locator('[data-context-level] > h6')).toHaveText(['App context', 'Board context', 'Card context', 'Card type context']);
+        await expect(contextPanel.locator('[data-context-level] > summary, [data-context-level] > h6')).toHaveText(['App context', 'Board context', 'Card context', 'Card type context']);
+        const disclosures = contextPanel.locator('details');
+        await expect(disclosures).toHaveCount(8);
+        await expect(contextPanel.locator('details[open] > summary')).toHaveText(['App context']);
+        await expect(contextPanel.getByRole('button', { name: /Save/ })).toHaveCount(1);
+        await page.screenshot({ path: testInfo.outputPath('context-default.png'), animations: 'disabled' });
+        await contextPanel.locator('[data-context-level="board"] > summary').focus();
+        await page.keyboard.press('Enter');
+        await contextPanel.locator('[data-context-level="card"] > summary').click();
         await expect(contextPanel.locator('[data-context-level="app"] [data-context-reach]')).toContainText('launches with no board');
         await expect(contextPanel.locator('[data-context-level="board"] [data-context-reach]')).toContainText('currently selected board');
         const appMessage = page.getByLabel('App context', { exact: true });
@@ -2149,17 +2163,18 @@ for (const width of [1440, 390]) {
         await page.getByRole('tab', { name: 'General', exact: true }).click();
         await page.getByRole('tab', { name: 'Context', exact: true }).click();
         await expect(message).toHaveValue(text);
-        await page.getByRole('button', { name: 'Save Board context', exact: true }).click();
+        await page.getByRole('button', { name: 'Save context', exact: true }).click();
         await expect.poll(() => saved.message).toBe(text);
         expect(Object.keys(writes[0])).toEqual(['message', 'expectedRevision']);
-        // Saving one level keeps the other levels' drafts and saves nothing else.
+        // One action saves changed levels, retaining every draft and its own revision.
         await expect(cardMessage).toHaveValue('Unsaved Card context draft');
         await expect(appMessage).toHaveValue('Unsaved App draft');
-        expect(appContext.message).toBe('Applies everywhere');
-        await page.getByRole('button', { name: 'Save App context', exact: true }).click();
         await expect.poll(() => appContext.message).toBe('Unsaved App draft');
+        await expect.poll(() => cardContext.context.defaultMessage).toBe('Unsaved Card context draft');
+        await expect(page.getByRole('button', { name: 'Save context', exact: true })).toBeEnabled();
         await page.evaluate(() => window.app.closeModal());
         await open();
+        await contextPanel.locator('[data-context-level="board"] > summary').click();
         await expect(message).toHaveValue(text);
         await expect(appMessage).toHaveValue('Unsaved App draft');
         expect(await page.evaluate(() => window.__everyContextXss)).toBeUndefined();
@@ -2168,13 +2183,18 @@ for (const width of [1440, 390]) {
         await page.screenshot({ path: testInfo.outputPath('context-levels.png'), animations: 'disabled' });
         failSave = true;
         await message.fill('Preserve this draft after failure');
-        await page.getByRole('button', { name: 'Save Board context', exact: true }).click();
+        await appMessage.fill('Saved despite Board failure');
+        await page.getByRole('button', { name: 'Save context', exact: true }).click();
         await expect(page.getByText('Context save failed.', { exact: true })).toBeVisible();
         await expect(message).toHaveValue('Preserve this draft after failure');
+        await expect.poll(() => appContext.message).toBe('Saved despite Board failure');
+        const appRevision = appContext.revision;
+        await expect(page.getByRole('button', { name: 'Save context', exact: true })).toBeEnabled();
         failSave = false;
         await message.fill('');
-        await page.getByRole('button', { name: 'Save Board context', exact: true }).click();
+        await page.getByRole('button', { name: 'Save context', exact: true }).click();
         await expect.poll(() => saved.message).toBe('');
+        expect(appContext.revision).toBe(appRevision);
         await page.evaluate(() => window.app.closeModal());
         await open();
         await expect(message).toHaveValue('');
@@ -2196,16 +2216,18 @@ test('Card and Card type context persist default and per-type choices and preser
     });
     await page.getByRole('button', { name: 'Board settings', exact: true }).click();
     await page.getByRole('tab', { name: 'Context', exact: true }).click();
+    await page.locator('[data-context-level="card"] > summary').click();
     await page.getByLabel('Card context', { exact: true }).fill('Read project conventions. <img src=x onerror="window.__contextXss=1">');
     await page.locator('[data-context-level="type"] summary').filter({ hasText: /^Bug$/ }).click();
     await page.getByLabel('Bug cards', { exact: true }).selectOption('append');
     await page.getByLabel('Bug card type context', { exact: true }).fill('Reproduce before changing code.');
-    await page.getByRole('button', { name: 'Save Card and Card type context', exact: true }).click();
+    await page.getByRole('button', { name: 'Save context', exact: true }).click();
     await expect.poll(() => saved.revision).toBe(1);
     expect(saved.context.typeOverrides.find(item => item.type === 'bug')).toEqual({ type: 'bug', mode: 'append', message: 'Reproduce before changing code.' });
     await page.locator('#modal-container [data-action="close-modal"]').first().click();
     await page.getByRole('button', { name: 'Board settings', exact: true }).click();
     await page.getByRole('tab', { name: 'Context', exact: true }).click();
+    await page.locator('[data-context-level="card"] > summary').click();
     await expect(page.getByLabel('Card context', { exact: true })).toHaveValue(saved.context.defaultMessage);
     await page.locator('[data-context-level="type"] summary').filter({ hasText: /^Bug$/ }).click();
     await expect(page.getByLabel('Bug cards', { exact: true })).toHaveValue('append');
@@ -2213,9 +2235,84 @@ test('Card and Card type context persist default and per-type choices and preser
     await page.screenshot({ path: testInfo.outputPath('board-context.png') });
     conflict = true;
     await page.getByLabel('Card context', { exact: true }).fill('Keep my draft');
-    await page.getByRole('button', { name: 'Save Card and Card type context', exact: true }).click();
+    await page.getByRole('button', { name: 'Save context', exact: true }).click();
     await expect(page.getByText('Board context changed while you were editing.', { exact: true })).toBeVisible();
     await expect(page.getByLabel('Card context', { exact: true })).toHaveValue('Keep my draft');
+});
+
+test('Context save waits for loading and preserves edits made during an in-flight save', async ({ page }) => {
+    await openBoard(page);
+    await page.route('**/api/v1/board/boards/brd_main/context', route => route.fulfill({
+        json: { revision: 0, context: { defaultMessage: '', typeOverrides: [] } }
+    }));
+    await page.route('**/api/v1/board/boards/brd_main/every-context', route => route.fulfill({
+        json: { revision: 0, message: '' }
+    }));
+    let finishLoad;
+    let finishSave;
+    let saved = { message: 'Original', revision: 4 };
+    const writes = [];
+    await page.route('**/api/v1/board/app-context', async route => {
+        if (route.request().method() === 'GET') {
+            await new Promise(resolve => { finishLoad = resolve; });
+        } else {
+            const body = route.request().postDataJSON();
+            writes.push(body);
+            expect(body.expectedRevision).toBe(saved.revision);
+            if (writes.length === 1) await new Promise(resolve => { finishSave = resolve; });
+            saved = { message: body.message, revision: saved.revision + 1 };
+        }
+        return route.fulfill({ json: saved });
+    });
+    await page.getByRole('button', { name: 'Board settings', exact: true }).click();
+    await page.getByRole('tab', { name: 'Context', exact: true }).click();
+    const save = page.locator('[data-context-save]');
+    await expect(save).toBeDisabled();
+    await expect.poll(() => Boolean(finishLoad)).toBe(true);
+    finishLoad();
+    await expect(save).toBeEnabled();
+    const message = page.getByLabel('App context', { exact: true });
+    await message.fill('First draft');
+    await save.click();
+    await expect(save).toBeDisabled();
+    await expect(save).toHaveText('Saving…');
+    await expect.poll(() => Boolean(finishSave)).toBe(true);
+    await message.fill('Newer draft');
+    finishSave();
+    await expect(save).toBeEnabled();
+    await expect(message).toHaveValue('Newer draft');
+    expect(saved.message).toBe('First draft');
+    await save.click();
+    await expect.poll(() => saved.message).toBe('Newer draft');
+    await expect(save).toBeEnabled();
+    await save.click();
+    await expect(save).toBeEnabled();
+    expect(writes).toEqual([
+        { message: 'First draft', expectedRevision: 4 },
+        { message: 'Newer draft', expectedRevision: 5 }
+    ]);
+});
+
+test('Settings reuses the App-only context disclosure and single save action', async ({ page }) => {
+    await openBoard(page);
+    let saved = { message: 'Every launch', revision: 2 };
+    await page.route('**/api/v1/board/app-context', route => {
+        if (route.request().method() === 'PUT') {
+            const body = route.request().postDataJSON();
+            expect(body.expectedRevision).toBe(saved.revision);
+            saved = { message: body.message, revision: saved.revision + 1 };
+        }
+        return route.fulfill({ json: saved });
+    });
+    await page.evaluate(() => window.app.navigate('settings'));
+    await page.getByRole('tab', { name: 'Context', exact: true }).click();
+    const editor = page.locator('[data-context-editor]');
+    await expect(editor.locator('details')).toHaveCount(1);
+    await expect(editor.locator('details[open] > summary')).toHaveText(['App context']);
+    await expect(editor.getByRole('button')).toHaveCount(1);
+    await editor.getByLabel('App context', { exact: true }).fill('All projects');
+    await editor.getByRole('button', { name: 'Save context', exact: true }).click();
+    await expect.poll(() => saved.message).toBe('All projects');
 });
 
 async function openLaneAgentsBoard(page) {
@@ -3428,6 +3525,109 @@ for (const width of [1440, 390]) {
         await expect(page.locator('[data-board-worker-launch-options] [data-board-launch-yolo]')).toBeChecked();
     });
 }
+
+for (const width of [1440, 390]) {
+    test(`LLM defaults restore model, speed, effort and YOLO across selectors at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        const requests = await openBoard(page, { assignee: 'base:codex' });
+        const defaults = {};
+        const writes = [];
+        await page.route('**/api/v1/llm-picker/defaults/*', route => {
+            const cli = new URL(route.request().url()).pathname.split('/').at(-1);
+            if (route.request().method() === 'PUT') {
+                defaults[cli] = route.request().postDataJSON();
+                writes.push(cli);
+            }
+            return route.fulfill({ json: defaults[cli] || {} });
+        });
+        await page.getByText('Description images', { exact: true }).click();
+        const editor = page.locator('[data-board-card-editor]');
+        const worker = editor.locator('[data-board-worker-launch-options]');
+        await worker.getByRole('combobox', { name: 'Model', exact: true }).selectOption('gpt-6-astra');
+        await worker.getByRole('combobox', { name: 'Speed', exact: true }).selectOption('ultrafast');
+        await worker.getByRole('combobox', { name: 'Effort', exact: true }).selectOption('xhigh');
+        await worker.getByLabel('YOLO mode', { exact: true }).check();
+        const save = worker.getByRole('button', { name: 'Make Default For LLM', exact: true });
+        await expect(save).toHaveClass(/\bbtn-link\b/);
+        await expect(save.locator('svg[aria-hidden="true"]')).toHaveCount(1);
+        await save.click();
+        await expect.poll(() => writes.length).toBe(1);
+        expect(defaults.codex).toEqual({ model: 'gpt-6-astra', effort: 'xhigh', mode: '', yolo: true, speed: 'ultrafast' });
+        expect(requests.filter(request => request.method === 'PUT')).toHaveLength(0);
+        await save.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: testInfo.outputPath('llm-default-action.png'), animations: 'disabled' });
+        const choose = selection => editor.locator('#board-card-assignee').evaluate((select, value) => select.tomselect.setValue(value), selection);
+        await choose('base:claude');
+        await worker.getByRole('combobox', { name: 'Start mode', exact: true }).selectOption('plan');
+        await worker.getByRole('button', { name: 'Make Default For LLM', exact: true }).click();
+        await expect.poll(() => defaults.claude?.mode).toBe('plan');
+        await choose('base:codex');
+        await expect(worker.getByRole('combobox', { name: 'Speed', exact: true })).toHaveValue('ultrafast');
+        await expect(worker.getByRole('combobox', { name: 'Effort', exact: true })).toHaveValue('xhigh');
+        await expect(worker.getByLabel('YOLO mode', { exact: true })).toBeChecked();
+        await editor.locator('#board-card-workflow').selectOption('agent');
+        await expect.poll(() => editor.locator('#board-card-manager').evaluate(select => Boolean(select.tomselect))).toBe(true);
+        await editor.locator('#board-card-manager').evaluate(select => select.tomselect.setValue('base:codex'));
+        const manager = editor.locator('[data-board-manager-launch-options]');
+        await expect(manager.getByRole('combobox', { name: 'Speed', exact: true })).toHaveValue('ultrafast');
+        await expect(manager.getByLabel('YOLO mode', { exact: true })).toBeChecked();
+        await editor.locator('#board-card-workflow').selectOption('manual');
+        await worker.getByRole('combobox', { name: 'Effort', exact: true }).selectOption('low');
+        await editor.locator('[data-board-save-card]').click();
+        await expect(editor).toHaveCount(0);
+        await page.getByText('Description images', { exact: true }).click();
+        await expect(worker.getByRole('combobox', { name: 'Effort', exact: true })).toHaveValue('low');
+        expect(defaults.codex.effort).toBe('xhigh');
+    });
+}
+
+test('a late LLM default cannot overwrite a draft or a different selection', async ({ page }) => {
+    await openBoard(page, { assignee: 'base:codex' });
+    let release;
+    let replies = 0;
+    await page.route('**/api/v1/llm-picker/defaults/codex', async route => {
+        await new Promise(resolve => { release = resolve; });
+        await route.fulfill({ json: { model: 'gpt-6-astra', effort: 'xhigh', speed: 'ultrafast', yolo: true } });
+        replies++;
+    });
+    await page.getByText('Description images', { exact: true }).click();
+    const editor = page.locator('[data-board-card-editor]');
+    const worker = editor.locator('[data-board-worker-launch-options]');
+    await expect.poll(() => Boolean(release)).toBe(true);
+    await worker.getByRole('combobox', { name: 'Model', exact: true }).selectOption('gpt-6.1-terra');
+    release();
+    await expect.poll(() => replies).toBe(1);
+    await expect(worker.getByRole('combobox', { name: 'Model', exact: true })).toHaveValue('gpt-6.1-terra');
+    await expect(worker.getByLabel('YOLO mode', { exact: true })).not.toBeChecked();
+    release = null;
+    await editor.locator('#board-card-assignee').evaluate(select => select.tomselect.setValue('base:claude'));
+    await editor.locator('#board-card-assignee').evaluate(select => select.tomselect.setValue('base:codex'));
+    await expect.poll(() => Boolean(release)).toBe(true);
+    await editor.locator('#board-card-assignee').evaluate(select => select.tomselect.setValue('base:claude'));
+    release();
+    await expect.poll(() => replies).toBe(2);
+    await expect(worker.getByRole('combobox', { name: 'Start mode', exact: true })).toBeVisible();
+    await expect(worker.getByRole('combobox', { name: 'Speed', exact: true })).toHaveCount(0);
+});
+
+test('Start work waits for saved LLM defaults before saving or launching', async ({ page }) => {
+    const requests = await openBoard(page, { assignee: 'base:codex' });
+    let release;
+    await page.route('**/api/v1/llm-picker/defaults/codex', async route => {
+        await new Promise(resolve => { release = resolve; });
+        await route.fulfill({ json: { model: 'gpt-6-astra', effort: 'high', speed: 'ultrafast', yolo: true } });
+    });
+    await page.getByText('Description images', { exact: true }).click();
+    await expect.poll(() => Boolean(release)).toBe(true);
+    await page.locator('[data-board-start-work]').click();
+    await page.locator('[data-board-start-work]').click();
+    expect(requests.filter(request => request.method === 'PUT' || request.path.endsWith('/launch'))).toHaveLength(0);
+    release();
+    await expect(page.locator('[data-board-card-editor]')).toHaveCount(0);
+    expect(requests.find(request => request.method === 'PUT').body.baseLlmOptions)
+        .toEqual({ model: 'gpt-6-astra', effort: 'high', speed: 'ultrafast', mode: '', yolo: true });
+    expect(requests.filter(request => request.path.endsWith('/launch'))).toHaveLength(1);
+});
 
 test('Start work preserves the board and stores base launch options including YOLO', async ({ page }) => {
     const requests = await openBoard(page, { assignee: 'base:codex' });

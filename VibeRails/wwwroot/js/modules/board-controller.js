@@ -64,7 +64,7 @@ import { bindComposerPreview, boardTextOptions } from './board-composer-preview.
 import { createBoardImagePreviews } from './board-image-previews.js';
 import { openDiffModal } from './diff-modal.js';
 import * as SessionDebug from './session-viewer.js';
-import { renderBoardLaunchOptions, readBoardLaunchOptions, bindBoardLaunchOptions } from './board-launch-options.js';
+import { renderBoardLaunchOptions, readBoardLaunchOptions, bindBoardLaunchOptions, waitForBoardLaunchDefaults } from './board-launch-options.js';
 import { openBoardAttachment, disposeBoardAttachmentPreview, fileToAttachmentPayload, getAttachmentPreviewKind } from './board-attachments.js';
 
 const CARD_TYPES = [
@@ -1916,7 +1916,7 @@ export class BoardController {
                 placeholder: 'Unassigned',
                 selectedValue: card?.assignee || ''
             });
-            const renderOptions = (options = {}, selection = assigneeSelect.value) => {
+            const renderOptions = (options, selection = assigneeSelect.value) => {
                 this.launchOptionsDispose?.();
                 const host = editor.querySelector('[data-board-worker-launch-options]');
                 if (!host) return;
@@ -1925,9 +1925,9 @@ export class BoardController {
                 // model/effort controls read as intended, not broken.
                 const hint = this.assigneeLaunchHint(selection);
                 if (hint) host.insertAdjacentHTML('beforeend', `<p class="board-editor-muted board-assignee-hint">${escapeHtml(hint)}</p>`);
-                this.launchOptionsDispose = bindBoardLaunchOptions(host, selection);
+                this.launchOptionsDispose = bindBoardLaunchOptions(host, selection, { app: this.app, useDefaults: options == null });
             };
-            renderOptions(card.baseLlmOptions || {}, card.assignee || '');
+            renderOptions(card.baseLlmOptions, card.assignee || '');
             assigneeSelect.addEventListener('change', () => renderOptions());
             editor.querySelector('[data-board-clear-assignee]')?.addEventListener('click', () => {
                 setLlmPickerValue(this.app, assigneeSelect, '');
@@ -1943,16 +1943,16 @@ export class BoardController {
                 placeholder: 'Choose a manager agent…',
                 selectedValue: card.managerSelection || ''
             });
-            const renderManagerOptions = (options = {}, selection = managerSelect.value) => {
+            const renderManagerOptions = (options, selection = managerSelect.value) => {
                 this.managerLaunchOptionsDispose?.();
                 const host = editor.querySelector('[data-board-manager-launch-options]');
                 if (!host) return;
                 host.innerHTML = renderBoardLaunchOptions(selection, options, { idPrefix: 'board-manager-launch' });
                 const hint = this.assigneeLaunchHint(selection);
                 if (hint) host.insertAdjacentHTML('beforeend', `<p class="board-editor-muted board-assignee-hint">${escapeHtml(hint)}</p>`);
-                this.managerLaunchOptionsDispose = bindBoardLaunchOptions(host, selection);
+                this.managerLaunchOptionsDispose = bindBoardLaunchOptions(host, selection, { app: this.app, useDefaults: options == null });
             };
-            renderManagerOptions(card.managerBaseLlmOptions || {}, card.managerSelection || '');
+            renderManagerOptions(card.managerBaseLlmOptions, card.managerSelection || '');
             managerSelect.addEventListener('change', () => renderManagerOptions());
         }
         const workflowSelect = editor.querySelector('#board-card-workflow');
@@ -2877,6 +2877,14 @@ export class BoardController {
     }
 
     async saveCard(editor) {
+        if (editor._boardLoadingDefaults) return;
+        const defaults = waitForBoardLaunchDefaults(editor);
+        if (defaults) {
+            editor._boardLoadingDefaults = true;
+            try { await defaults; } finally { editor._boardLoadingDefaults = false; }
+            if (editor.isConnected !== false) return this.saveCard(editor);
+            return;
+        }
         if (editor._boardSaving || editor._boardUploading || editor._boardStarting || editor._boardOrganizing) return;
         const payload = this.readCardForm(editor);
         if (!this.validateCardTitle(editor, payload)) return;
@@ -3107,6 +3115,14 @@ export class BoardController {
     }
 
     async startWork(editor, card, intent = 'work') {
+        if (editor._boardLoadingDefaults) return;
+        const defaults = waitForBoardLaunchDefaults(editor);
+        if (defaults) {
+            editor._boardLoadingDefaults = true;
+            try { await defaults; } finally { editor._boardLoadingDefaults = false; }
+            if (editor.isConnected !== false) return this.startWork(editor, card, intent);
+            return;
+        }
         if (!card?.id) return;
         if (this._startingCards.has(card.id)) return;
         if (editor._boardSaving || editor._boardUploading || editor._boardStarting || editor._boardOrganizing) return;

@@ -812,6 +812,14 @@ Normal terminal statuses continue independently. Comment attention metadata surv
 merge; local alert attribution stays local. See `BoardStore.Attention.cs` and the Board guide.
 
 Lane agent buttons include the first lane and open the destination lane's Automation settings.
+The shared Context editor uses native disclosures, opens only App context initially, and saves
+changed levels from one action while retaining their separate revision checks. Base-LLM option
+editors share a **Make Default For LLM** action for model, speed, effort, mode and YOLO.
+`LlmPickerPreferenceService` stores these validated presets in one existing `GlobalCache` row per
+CLI (`ui.llm-launch-defaults.v1.<cli>`, normal `state.db`); root-only GET/PUT
+`/api/v1/llm-picker/defaults/{cli}` reads live data with no schema or CLI-config changes.
+Explicit saved options and in-progress edits win over presets; saving/launching waits for a pending preset load.
+
 `board-lane-agents.js` handles assignment/removal, descriptions, reviewer selection and setup state.
 Its Add form can create a repository script Automation using the existing Jobs approval path.
 `board-card-assign.js` is the lane card's assignee menu (VIBE-145): the assignee chip (one button,

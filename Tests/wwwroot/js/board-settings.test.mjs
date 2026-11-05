@@ -227,14 +227,14 @@ test('the Context tab lists every level broadest first, and Settings reuses it f
     assert.deepEqual(levels(contextEditorSection()), ['app', 'board', 'card']);
     assert.deepEqual(levels(contextEditorSection({ board: false })), ['app']);
     // Each level says which launches it reaches; App and Board follow the nudge, Card always applies.
-    assert.match(contextEditorSection(), /<h6 class="mb-1">App context<\/h6><p[^>]*>Every LLM CLI launched from VibeRails[^<]*no board[^<]*nudge/);
-    assert.match(contextEditorSection(), /<h6 class="mb-1">Board context<\/h6><p[^>]*>Every LLM CLI launched for this board[^<]*currently selected board[^<]*nudge/);
+    assert.match(contextEditorSection(), /<summary>App context<\/summary><p[^>]*>Every LLM CLI launched from VibeRails[^<]*no board[^<]*nudge/);
+    assert.match(contextEditorSection(), /<summary>Board context<\/summary><p[^>]*>Every LLM CLI launched for this board[^<]*currently selected board[^<]*nudge/);
     assert.ok(contextEditorSection().indexOf('App context') < contextEditorSection().indexOf('Board context'));
     assert.doesNotMatch(contextEditorSection({ board: false }), /Board context/);
     assert.doesNotMatch(boardSettingsNavigation(), /App context|Every Context|data-board-settings-tab="every-context"/);
 });
 
-test('Card and Card type context render as two ordered levels with one save', async () => {
+test('Card context is collapsed above card types and all levels share the editor save', async () => {
     const content = { innerHTML: '' };
     const element = {
         isConnected: true,
@@ -251,7 +251,12 @@ test('Card and Card type context render as two ordered levels with one save', as
     assert.match(html, /Always sent/);
     assert.match(html, /<option value="append" selected>Card context \+ type-specific<\/option>/);
     assert.match(html, /&lt;b&gt;Bug&lt;\/b&gt;/);
-    assert.equal(html.match(/data-settings-save/g).length, 1);
+    assert.match(html, /<details[^>]*data-context-level="card">/);
+    assert.equal((html.match(/<details/g) || []).length, 6);
+    assert.doesNotMatch(html, /<details[^>]*\bopen\b|data-settings-save/);
+    assert.equal((contextEditorSection().match(/data-context-save/g) || []).length, 1);
+    assert.match(contextEditorSection(), /data-context-level="app" open/);
+    assert.doesNotMatch(contextEditorSection(), /data-context-level="board" open/);
     dispose();
 });
 
@@ -264,7 +269,7 @@ test('the editor mounts App context alone in Settings and every level for a boar
         querySelectorAll: () => [],
         addEventListener() {}, removeEventListener() {}
     });
-    const root = { querySelector: selector => unitElement(/data-context-unit="([^"]+)"/.exec(selector)[1]) };
+    const root = { querySelector: selector => selector === '[data-context-save]' ? null : unitElement(/data-context-unit="([^"]+)"/.exec(selector)[1]) };
     const app = { apiCall: (path, method, _body, options) => { calls.push({ path, method, signal: options.signal }); return new Promise(() => {}); } };
     BoardApi.attach(app);
     const disposeSettings = mountContextEditor(app, root, { toastTitle: 'Settings' });

@@ -339,6 +339,16 @@ Compact discussion forms put the optional question first, followed by a labelled
 picker and a full-width **Start discussion** action at the bottom. Use a section heading
 for the task and keep blank-question guidance below the textarea.
 
+Context editors use native triangle disclosures for App, Board and Card context and
+each card type, ordered broadest first. Only the first disclosure opens by default.
+Place one primary **Save context** action below the editor; it saves changed levels
+with their own revision checks and preserves drafts if a save fails.
+
+Base-LLM option editors place a **Make Default For LLM** `btn-link` action with a
+padlock icon below YOLO. It saves model, speed, effort, start mode and YOLO for that
+LLM on this computer. Selecting that LLM fills its saved defaults; explicit saved
+card or manager choices and edits made while defaults load take precedence.
+
 | Part | Value |
 | --- | --- |
 | Field | `--control-height`, 9px × 11px padding, `--color-bg-base` fill, `--control-border` border, `--radius-control`, 16px text |

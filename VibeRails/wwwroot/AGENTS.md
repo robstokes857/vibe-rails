@@ -430,9 +430,11 @@ levels broadest first and says which launches each reaches: **App context** (eve
 GET/PUT `/api/v1/board/app-context`), **Board context** (the board's Every Context message, GET/PUT
 `/api/v1/board/boards/{boardId}/every-context`), **Card context** and **Card type context** (the
 board's default message and per-type default/replace/append overrides, GET/PUT `.../context`).
-Settings mounts App context alone; a board mounts all four. Each unit loads, aborts and saves with its
-own revision, so one save never discards another level's draft; Card and Card type context are one
-record with one save. App and Board context reach launches only when their Nudge switch is on; Card
+Settings mounts App context alone; a board mounts all four. App, Board and Card context use the same
+native triangle disclosures as the card types; only App starts open. One **Save context** button below
+the editor saves changed units, each with its own revision; Card and Card type context stay one record.
+Loading must finish before saving. A partial save keeps all drafts and advances only successful units'
+revisions, so retrying sends only remaining changes. App and Board context reach launches only when their Nudge switch is on; Card
 and Card type context reach card agents for Start work and Chat with agent either way. The editors
 escape saved text. Saving context is independent of **Save name**.
 The picker footer's **Manage boards** opens an up/down order editor. **Save order** persists the
@@ -1273,6 +1275,16 @@ materializes `Check commit message for: ...`; empty lists/entries, control chara
 and CSV quote wrappers are rejected. Backend write validation remains authoritative.
 
 ## Customizable LLM Pickers
+
+The shared Board launch-options editor places **Make Default For LLM** below YOLO.
+It saves model, speed, effort, start mode and YOLO through root-only GET/PUT
+`/api/v1/llm-picker/defaults/{cli}`. `LlmPickerPreferenceService` validates with the
+normal launch builder and stores one `GlobalCache` row per base CLI in normal
+`state.db` (`ui.llm-launch-defaults.v1.<cli>`); no schema change or CLI config write.
+Worker, card-manager and board-manager selectors fill these defaults when changing
+LLM or opening without explicit saved options. Explicit saved options win; abort a
+replaced editor's load and preserve edits made while a default request is pending.
+Saved environments retain their own options and do not offer this action.
 
 Rules and Quality Fix actions use inline selectors with the shared `assignee` picker context,
 including Quick Launches and Agents. Selecting one remembers the choice across both pages; each Fix button launches directly without an intermediate dialog.

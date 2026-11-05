@@ -5,7 +5,7 @@ namespace VibeRails.Routes;
 
 public static class LlmPickerRoutes
 {
-    public static void Map(WebApplication app)
+    public static void Map(WebApplication app, bool isActiveRootBackend = true)
     {
         app.MapGet("/api/v1/llm-picker/preferences", async (
             ILlmPickerPreferenceService service,
@@ -28,10 +28,30 @@ public static class LlmPickerRoutes
             }
         }).WithName("UpdateLlmPickerPreferences");
 
+        if (isActiveRootBackend) MapLaunchDefaults(app);
+
         app.MapDelete("/api/v1/llm-picker/preferences", async (
             ILlmPickerPreferenceService service,
             CancellationToken cancellationToken) =>
             Results.Ok(await service.ResetAsync(cancellationToken)))
             .WithName("ResetLlmPickerPreferences");
+    }
+
+    private static void MapLaunchDefaults(WebApplication app)
+    {
+        app.MapGet("/api/v1/llm-picker/defaults/{cli}", async (
+            string cli, ILlmPickerPreferenceService service, CancellationToken cancellationToken) =>
+        {
+            try { return Results.Ok(await service.GetLaunchDefaultsAsync(cli, cancellationToken)); }
+            catch (ArgumentException error) { return Results.BadRequest(new ErrorResponse(error.Message)); }
+        }).WithName("GetLlmLaunchDefaults");
+
+        app.MapPut("/api/v1/llm-picker/defaults/{cli}", async (
+            string cli, BaseLlmOptions options, ILlmPickerPreferenceService service, CancellationToken cancellationToken) =>
+        {
+            try { return Results.Ok(await service.SaveLaunchDefaultsAsync(cli, options, cancellationToken)); }
+            catch (ArgumentException error) { return Results.BadRequest(new ErrorResponse(error.Message)); }
+        }).WithName("SaveLlmLaunchDefaults");
+
     }
 }
