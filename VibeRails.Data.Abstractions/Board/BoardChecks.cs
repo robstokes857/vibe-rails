@@ -10,7 +10,9 @@ public sealed record BoardCheckRecord(
     string? WorkspacePath = null, IReadOnlyList<string>? ScopeFiles = null,
     BoardCheckEvidence? Evidence = null);
 
-/// <summary>The captured text used by a check, kept separately from its summary.</summary>
+/// <summary>The captured text used by a check, kept separately from its summary. Impact sources
+/// whose text equals a scope file's captured <see cref="BoardCheckFile.Content"/> are stored once,
+/// in <see cref="Files"/>: the impact corpus is <see cref="ImpactFiles"/> plus those files.</summary>
 public sealed record BoardCheckEvidence(
     IReadOnlyList<BoardCheckFile> Files,
     IReadOnlyList<BoardCheckTextFile> RuleFiles,
@@ -27,12 +29,17 @@ public sealed record BoardCheckTextFile(string Path, string Content);
 
 public partial interface IBoardStore
 {
-    /// <summary>Insert an attempt or complete an unfinished attempt, scoped to a live card.</summary>
+    /// <summary>Insert an attempt or complete an unfinished attempt, scoped to a live card. A null
+    /// <see cref="BoardCheckRecord.Evidence"/> keeps the evidence an earlier save stored for the attempt.</summary>
     Task<bool> SaveCheckAsync(string projectPath, BoardCheckRecord check, CancellationToken cancellationToken = default);
     /// <summary>Newest summaries first; full evidence is loaded separately. No historical rows are removed.</summary>
     Task<IReadOnlyList<BoardCheckRecord>> GetChecksAsync(string projectPath, string cardId, int offset = 0, CancellationToken cancellationToken = default);
     /// <summary>Latest attempt of each tool, independent of history pagination.</summary>
     Task<IReadOnlyList<BoardCheckRecord>> GetLatestChecksAsync(string projectPath, string cardId, CancellationToken cancellationToken = default);
-    /// <summary>Read full evidence through the same project/card boundary.</summary>
+    /// <summary>One attempt with its engine result, through the same project/card boundary. Captured
+    /// source text can run to tens of megabytes, so <see cref="BoardCheckRecord.Evidence"/> stays null
+    /// here; <see cref="GetCheckEvidenceAsync"/> reads it.</summary>
     Task<BoardCheckRecord?> GetCheckAsync(string projectPath, string cardId, string checkId, CancellationToken cancellationToken = default);
+    /// <summary>The captured inputs of one attempt, or null when the attempt or its evidence is absent.</summary>
+    Task<BoardCheckEvidence?> GetCheckEvidenceAsync(string projectPath, string cardId, string checkId, CancellationToken cancellationToken = default);
 }

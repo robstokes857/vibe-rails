@@ -926,6 +926,55 @@ public sealed class GitStagedSnapshotProviderTests : IAsyncLifetime
         Assert.Null(await GitStagedSnapshotProvider.TryReadTreeBytesAsync(_repository, tree, "missing.bin", 1024, ct));
     }
 
+    /// <summary>
+    /// VIBE-284 item 7: a working-tree check whose sources exceed the aggregate budget used to throw,
+    /// failing every Code quality check on a large repository. Impact ranking is advisory: surplus
+    /// sources are skipped and counted, as the committed scopes do.
+    /// </summary>
+    [Fact]
+    public async Task CaptureWorkingTreeCheckAsync_SkipsAndCountsImpactSourcesPastTheBudget()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await File.WriteAllTextAsync(Path.Combine(_repository, "first.cs"), "public class FirstHeadSource { }\n", ct);
+        await File.WriteAllTextAsync(Path.Combine(_repository, "second.cs"), "public class SecondHeadSource { }\n", ct);
+        await GitAsync("add", ".");
+        await GitAsync("commit", "-m", "two sources");
+
+        // 40 bytes: first.cs (33) fits; second.cs (34) and tracked.cs (19) do not.
+        var snapshot = await new GitStagedSnapshotProvider(maximumUnpushedSnapshotBytes: 40)
+            .CaptureWorkingTreeCheckAsync(_repository, ct);
+
+        Assert.Empty(snapshot.Files);
+        Assert.Equal("first.cs", Assert.Single(snapshot.ImpactFiles!).RelativePath);
+        Assert.Equal(2, snapshot.ImpactFilesOmitted);
+        Assert.Equal(0, (await new GitStagedSnapshotProvider().CaptureWorkingTreeCheckAsync(_repository, ct)).ImpactFilesOmitted);
+    }
+
+    [Fact]
+    public async Task CommittedCaptures_CountImpactSourcesLeftOutByTheBudget()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await File.WriteAllTextAsync(Path.Combine(_repository, "first.cs"), "public class FirstHeadSource { }\n", ct);
+        await File.WriteAllTextAsync(Path.Combine(_repository, "second.cs"), "public class SecondHeadSource { }\n", ct);
+        await GitAsync("add", ".");
+        await GitAsync("commit", "-m", "two sources");
+        await ConfigureUpstreamAtHeadAsync();
+        await File.WriteAllTextAsync(Path.Combine(_repository, "tracked.cs"), "class B { }\n", ct);
+        await GitAsync("add", ".");
+        await GitAsync("commit", "-m", "small change");
+
+        // Rules (18) + the change (12) and its baseline (19) leave room for first.cs (33), not second.cs (34).
+        var snapshot = await new GitStagedSnapshotProvider(maximumUnpushedSnapshotBytes: 100)
+            .CaptureUnpushedAsync(_repository, includeImpactFiles: true, ct);
+
+        Assert.Equal("class B { }\n", Assert.Single(snapshot.Files).Content);
+        Assert.Contains(snapshot.ImpactFiles!, file => file.RelativePath == "first.cs");
+        Assert.DoesNotContain(snapshot.ImpactFiles!, file => file.RelativePath == "second.cs");
+        Assert.Equal(1, snapshot.ImpactFilesOmitted);
+        Assert.Equal(0, (await new GitStagedSnapshotProvider(maximumUnpushedSnapshotBytes: 100)
+            .CaptureUnpushedAsync(_repository, includeImpactFiles: false, ct)).ImpactFilesOmitted);
+    }
+
     private async Task ConfigureUpstreamAtHeadAsync()
     {
         await GitAsync("branch", "upstream-base", "HEAD");

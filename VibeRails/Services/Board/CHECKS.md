@@ -23,10 +23,13 @@ Check actions store their validated scope vector in the existing `ArgumentsJson`
 For one commit, select its parent as base and the commit as head. For an initial commit at HEAD,
 repository scope covers that committed tree. Linked commits never choose or imply a range. No
 checkout, staging or worktree mutation is required. Committed captures reuse the existing bounded
-blob reader and immutable impact corpus. Working-tree capture is compared twice and rejects a
-detected edit/HEAD race; this is not a filesystem transaction. Saved Code quality checks capture
-the tracked text used for impact ranking too, within the existing text snapshot budget. Quality
-still analyzes **added code** only, with the user's local ignores captured once for the run.
+blob reader and immutable impact corpus; VCA checks skip that corpus. Working-tree capture is
+compared twice (the second pass without impact sources: an edit to one shows up as a changed file)
+and rejects a detected edit/HEAD race; this is not a filesystem transaction. Saved Code quality
+checks capture the tracked text used for impact ranking too, within the existing text snapshot
+budget; sources past the budget are skipped and counted in a limitation, never a failed check.
+Quality still analyzes **added code** only, with the user's local ignores captured once for the
+run. An unreadable ignore list means nothing is ignored, recorded as a limitation.
 
 Before the first commit on a branch, working-tree, unpushed and repository checks finish as
 **Skipped/not applicable** with “Nothing to check: this branch has no commits yet.” No files
@@ -55,9 +58,12 @@ independently. Existing state/schema rows are retained and older binaries ignore
 `board-checks/2` adds nullable `EvidenceJson`. New attempts save the full captured text before
 analysis: scope files (current/previous text, exact added lines and their source line numbers),
 rule files, available impact sources, and the exact ignore rules passed to the engine. Binary or
-unavailable files retain manifest entries without invented contents. Evidence is loaded only with
-the full report, never in summary pages. Failure/cancellation after capture retains the inputs;
-completed attempts cannot be overwritten. Older reports have no captured text and remain readable.
+unavailable files retain manifest entries without invented contents. Evidence is written once,
+before analysis; the completion save passes none and the upsert keeps the stored column. An impact
+source whose text equals a scope file's captured text is stored only in the scope files. Evidence
+is read only through `GetCheckEvidenceAsync`, never with a report or summary page: it can run to
+tens of megabytes. Failure/cancellation after capture retains the inputs; completed attempts cannot
+be overwritten. Older reports have no captured text and remain readable.
 The existing Board data backup includes both report and source columns, chunking large values.
 
 Current exemptions use `BoardCodeAnalyzerIgnoreStore` over `IBoardStore`. The additive
@@ -76,7 +82,8 @@ rules; Code quality counts files, with findings counting files at NeedsWork/AtRi
 
 `GET /api/v1/board/cards/{card}/checks` reads summaries, current waiting/running actions and eligible
 Automations. `GET .../checks/{id}` loads full evidence immediately; **Compare inputs** adds
-`?verify=true` to compare captured inputs in the current project checkout. Freshness remains qualified because local ignore preferences may change.
+`?verify=true` to compare captured inputs in the current project checkout. The report carries the
+record and engine result, not the captured source text. Freshness remains qualified because local ignore preferences may change.
 A pinned range whose head differs from current HEAD is stale for the current checkout. A missing
 scope/tool/repository is unknown. The snapshot never claims that other scopes were analyzed.
 
@@ -86,7 +93,9 @@ Report text is inert, source-generated JSON is used throughout, and requests/vie
 on close, replacement and navigation. Checks show no aggregate card score.
 
 `get_board_card` includes each engine's latest saved summary; `read_board_check` lists history or
-returns full evidence in 40,000-character chunks. Both use the same project/card store boundary.
+returns one check's record and engine result in 40,000-character chunks. Its `file="*"` lists the
+captured scope, rule and impact files, and `file=<path>` reads one file's captured text in the same
+chunks. All use the same project/card store boundary.
 The new read tool is part of the explicit Board grants on both MCP transports. Review Workers are
 instructed to inspect scope, coverage and failures before choosing the next lane through UI/MCP.
 

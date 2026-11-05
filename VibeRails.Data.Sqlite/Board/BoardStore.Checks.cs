@@ -31,7 +31,7 @@ public sealed partial class BoardStore
             FROM BoardCards c WHERE c.Id = $card AND c.ProjectPath = $project{ProjectPathCollation} AND c.DeletedUTC IS NULL
             ON CONFLICT(Id) DO UPDATE SET EndedUTC = excluded.EndedUTC,
                 SummaryJson = excluded.SummaryJson, ResultJson = excluded.ResultJson,
-                EvidenceJson = excluded.EvidenceJson
+                EvidenceJson = COALESCE(excluded.EvidenceJson, BoardChecks.EvidenceJson)
             WHERE BoardChecks.CardId = excluded.CardId AND BoardChecks.RunId = excluded.RunId
               AND BoardChecks.ActionId = excluded.ActionId AND BoardChecks.EndedUTC IS NULL;
             """;
@@ -74,7 +74,7 @@ public sealed partial class BoardStore
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
-            SELECT e.SummaryJson, e.ResultJson, e.EvidenceJson FROM BoardChecks e JOIN BoardCards c ON c.Id = e.CardId
+            SELECT e.SummaryJson, e.ResultJson FROM BoardChecks e JOIN BoardCards c ON c.Id = e.CardId
             WHERE e.Id = $id AND c.Id = $card AND c.ProjectPath = $project{ProjectPathCollation} AND c.DeletedUTC IS NULL;
             """;
         command.Parameters.AddWithValue("$id", checkId);
@@ -84,9 +84,24 @@ public sealed partial class BoardStore
         if (!await reader.ReadAsync(cancellationToken)) return null;
         return JsonSerializer.Deserialize(reader.GetString(0), StorageJsonSerializerContext.Default.BoardCheckRecord)! with
         {
-            ResultJson = reader.IsDBNull(1) ? null : reader.GetString(1),
-            Evidence = reader.IsDBNull(2) ? null : JsonSerializer.Deserialize(reader.GetString(2), StorageJsonSerializerContext.Default.BoardCheckEvidence)
+            ResultJson = reader.IsDBNull(1) ? null : reader.GetString(1)
         };
+    }
+
+    public async Task<BoardCheckEvidence?> GetCheckEvidenceAsync(string projectPath, string cardId, string checkId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT e.EvidenceJson FROM BoardChecks e JOIN BoardCards c ON c.Id = e.CardId
+            WHERE e.Id = $id AND c.Id = $card AND c.ProjectPath = $project{ProjectPathCollation} AND c.DeletedUTC IS NULL;
+            """;
+        command.Parameters.AddWithValue("$id", checkId);
+        command.Parameters.AddWithValue("$card", cardId);
+        command.Parameters.AddWithValue("$project", NormalizeProjectPath(projectPath));
+        return await command.ExecuteScalarAsync(cancellationToken) is string json
+            ? JsonSerializer.Deserialize(json, StorageJsonSerializerContext.Default.BoardCheckEvidence)
+            : null;
     }
 
     public async Task<IReadOnlyList<BoardCheckRecord>> GetLatestChecksAsync(string projectPath, string cardId, CancellationToken cancellationToken = default)

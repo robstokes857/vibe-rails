@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using MintLint;
+using Serilog;
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services.Git;
@@ -28,6 +29,7 @@ public sealed class BoardCheckService(
             "Capturing the selected scope.", 0, 0, 0, 0, [], WorkspacePath: workspace);
         if (board is not null && !await board.SaveCheckAsync(project, record, ct))
             throw new InvalidOperationException("Could not save the check attempt.");
+        var evidenceSaved = false;
         try
         {
             var snapshot = await CaptureAsync(workspace, scope, ct, captureImpact: kind == JobActionKind.CodeQuality);
@@ -35,20 +37,26 @@ public sealed class BoardCheckService(
                 HeadCommit = snapshot.CheckIdentity?.HeadCommit, SnapshotHash = Fingerprint(snapshot),
                 RulesHash = RulesFingerprint(snapshot), FileCount = snapshot.Files.Count,
                 ScopeFiles = snapshot.Files.Select(file => $"{file.ChangeKind}: {file.RelativePath}").ToList() };
-            // Freeze the preferences once: the evidence and engine must use the same rules.
-            var ignoreRules = kind == JobActionKind.CodeQuality
-                ? ignores is null ? [] : await ignores.GetIgnoreRulesAsync(snapshot.RepositoryPath, ct)
-                : null;
-            record = record with { Evidence = new(
-                snapshot.Files.Select(file => new BoardCheckFile(file.RelativePath, file.PreviousRelativePath,
-                    file.ChangeKind.ToString(), file.IsBinary, file.Content, file.PreviousContent,
-                    file.AddedContent, file.AddedLineNumbers)).ToList(),
-                snapshot.AgentFiles.Select(file => new BoardCheckTextFile(file.RelativePath, file.Content)).ToList(),
-                snapshot.ImpactFiles?.Select(file => new BoardCheckTextFile(file.RelativePath, file.Content)).ToList(),
-                ignoreRules) };
-            // Preserve captured inputs even if the process ends during analysis.
+            // Freeze the preferences once: the evidence and engine must use the same rules. Like the
+            // commit hook's MintLint step, a store failure means nothing is ignored, never a failed check.
+            IReadOnlyList<CodeAnalyzerIgnoredFile>? ignoreRules = null;
+            var ignoresUnavailable = false;
+            if (kind == JobActionKind.CodeQuality)
+            {
+                try { ignoreRules = ignores is null ? [] : await ignores.GetIgnoreRulesAsync(snapshot.RepositoryPath, ct); }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    Log.Warning(ex, "[BoardChecks] Could not load the Code quality ignore list; checking every file.");
+                    ignoreRules = [];
+                    ignoresUnavailable = true;
+                }
+            }
+            record = record with { Evidence = Evidence(snapshot, ignoreRules) };
+            // Preserve captured inputs even if the process ends during analysis. Once stored, later
+            // saves pass null, which keeps them, instead of serializing and writing a second copy.
             if (board is not null && !await board.SaveCheckAsync(project, record, ct))
                 throw new InvalidOperationException("Could not save the captured check inputs.");
+            evidenceSaved = true;
             var invocation = new VcaHookInvocation(VcaHookKind.Preview, null, workspace, false, TimeSpan.Zero,
                 false, WorkingTreeScope: scope.Kind == "working-tree");
             var request = new GitPreflightRequest(workspace, invocation,
@@ -59,6 +67,8 @@ public sealed class BoardCheckService(
                 (_, _, _) => ValueTask.CompletedTask), ct);
             ct.ThrowIfCancellationRequested();
             record = Complete(record, snapshot, result, kind);
+            if (ignoresUnavailable)
+                record = record with { Limitations = [.. record.Limitations, "The Code quality ignore list could not be read; no files were ignored."] };
         }
         catch (OperationCanceledException)
         {
@@ -73,9 +83,27 @@ public sealed class BoardCheckService(
         {
             record = record with { Status = "Failed to run", Summary = ex.Message, EndedUtc = DateTime.UtcNow };
         }
-        if (board is not null && !await board.SaveCheckAsync(project, record, CancellationToken.None))
+        if (board is not null && !await board.SaveCheckAsync(project, evidenceSaved ? record with { Evidence = null } : record, CancellationToken.None))
             throw new InvalidOperationException("The check finished but its evidence could not be saved.");
         return record;
+    }
+
+    /// <summary>The captured inputs. An impact source identical to a scope file's text is that file:
+    /// on a working-tree or committed check most changed files would otherwise be stored twice.</summary>
+    internal static BoardCheckEvidence Evidence(GitStagedSnapshot snapshot, IReadOnlyList<CodeAnalyzerIgnoredFile>? ignoreRules)
+    {
+        var scopeText = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var file in snapshot.Files)
+            if (file.Content is not null) scopeText.TryAdd(file.RelativePath, file.Content);
+        return new(
+            snapshot.Files.Select(file => new BoardCheckFile(file.RelativePath, file.PreviousRelativePath,
+                file.ChangeKind.ToString(), file.IsBinary, file.Content, file.PreviousContent,
+                file.AddedContent, file.AddedLineNumbers)).ToList(),
+            snapshot.AgentFiles.Select(file => new BoardCheckTextFile(file.RelativePath, file.Content)).ToList(),
+            snapshot.ImpactFiles?
+                .Where(file => !(scopeText.TryGetValue(file.RelativePath, out var text) && string.Equals(text, file.Content, StringComparison.Ordinal)))
+                .Select(file => new BoardCheckTextFile(file.RelativePath, file.Content)).ToList(),
+            ignoreRules);
     }
 
     internal async Task<GitStagedSnapshot> CaptureAsync(string workspace, JobCheckScope scope, CancellationToken ct, bool captureImpact = true)
@@ -84,14 +112,16 @@ public sealed class BoardCheckService(
         {
             if (!JobCheckScope.IsSha(scope.Base) || !JobCheckScope.IsSha(scope.Head))
                 throw new ArgumentException("Check ranges require full base and head commit SHAs.");
-            return await snapshots.CaptureRangeAsync(workspace, scope.Base!, scope.Head!, ct);
+            return await snapshots.CaptureRangeAsync(workspace, scope.Base!, scope.Head!, captureImpact, ct);
         }
         var head = await ReadHeadAsync(workspace, ct, allowUnborn: true);
-        if (scope.Kind == "repository") return await snapshots.CaptureRepositoryAsync(workspace, ct);
-        if (scope.Kind == "unpushed") return await snapshots.CaptureUnpushedAsync(workspace, ct);
+        if (scope.Kind == "repository") return await snapshots.CaptureRepositoryAsync(workspace, captureImpact, ct);
+        if (scope.Kind == "unpushed") return await snapshots.CaptureUnpushedAsync(workspace, captureImpact, ct);
         var snapshot = captureImpact ? await snapshots.CaptureWorkingTreeCheckAsync(workspace, ct) : await snapshots.CaptureWorkingTreeAsync(workspace, ct);
-        var check = captureImpact ? await snapshots.CaptureWorkingTreeCheckAsync(workspace, ct) : await snapshots.CaptureWorkingTreeAsync(workspace, ct);
-        if (head != await ReadHeadAsync(workspace, ct) || Fingerprint(snapshot) != Fingerprint(check))
+        // The second pass only proves the changed set held still. Impact sources are unchanged tracked
+        // files: one edited after the first pass read it shows up here as a changed file instead.
+        var check = await snapshots.CaptureWorkingTreeAsync(workspace, ct);
+        if (head != await ReadHeadAsync(workspace, ct) || Fingerprint(snapshot with { ImpactFiles = null }) != Fingerprint(check))
             throw new InvalidOperationException("Working files or HEAD changed during capture. Run checks again.");
         return snapshot with { CheckIdentity = new(head, head) };
     }
@@ -135,6 +165,8 @@ public sealed class BoardCheckService(
                 : "VCA preserves WARN, COMMIT and STOP findings. This run does not acknowledge commit messages or enforce a Git operation."
         };
         if (skipped > 0) limitations.Add($"{skipped} files skipped, ignored, deleted, binary or unavailable; see evidence for coverage.");
+        if (quality && snapshot.ImpactFilesOmitted > 0)
+            limitations.Add($"{snapshot.ImpactFilesOmitted} source files were left out of impact ranking by the capture size budget; reference counts may be low.");
         if (deferred > 0) limitations.Add($"{deferred} rules deferred; commit-message validation remains outstanding.");
         if (!quality && missingRules > 0) limitations.Add($"{missingRules} rule files could not be captured. Rule coverage is incomplete.");
         if (analyzed == 0) limitations.Add(quality ? "No supported added code was analyzed." : "No applicable rules were analyzed.");

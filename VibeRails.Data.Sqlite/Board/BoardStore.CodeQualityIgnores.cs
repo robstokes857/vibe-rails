@@ -114,6 +114,8 @@ public sealed partial class BoardStore
 
     // Read-only adoption: old binaries retain their own list. Once edited here, the new-side
     // choice wins, but every distinct old-side value remains in the backup history as well.
+    // Every Rules scan, Code quality check and pre-commit MintLint step reads the list, so the
+    // board.db write transaction opens only when the old side differs from what is adopted.
     private async Task RetainLegacyCodeQualityIgnoresAsync(string? repository, CancellationToken ct)
     {
         var legacy = new List<(string Repository, CodeAnalyzerIgnoredFile File)>();
@@ -132,6 +134,7 @@ public sealed partial class BoardStore
                     DateTime.Parse(reader.GetString(5), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind))));
         }
         await using var connection = await OpenAsync(ct);
+        if (!await LegacyIgnoreAdoptionPendingAsync(connection, repository, legacy, ct)) return;
         using var transaction = connection.BeginTransaction();
         var present = new HashSet<string>(StringComparer.Ordinal);
         foreach (var (legacyRepository, file) in legacy)
@@ -178,6 +181,42 @@ public sealed partial class BoardStore
                 entry.Repository, entry.Path, "legacy removed", entry.Json, null, ct);
         }
         await transaction.CommitAsync(ct);
+    }
+
+    /// <summary>Whether adoption would write anything, decided with plain reads. Mirrors the writes:
+    /// an old-side value not yet archived, a missing row, an untouched row that differs from the old
+    /// side or was removed, or an untouched live row the old side no longer has.</summary>
+    private static async Task<bool> LegacyIgnoreAdoptionPendingAsync(SqliteConnection connection, string? repository,
+        IReadOnlyList<(string Repository, CodeAnalyzerIgnoredFile File)> legacy, CancellationToken ct)
+    {
+        var rows = new Dictionary<string, (string? Fingerprint, bool Local, bool Removed)>(StringComparer.Ordinal);
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT RepositoryPath,Path,LegacyFingerprint,LocallyModified,RemovedUTC IS NOT NULL FROM BoardCodeQualityIgnores"
+                + (repository is null ? ";" : " WHERE RepositoryPath=$repo;");
+            if (repository is not null) command.Parameters.AddWithValue("$repo", repository);
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+                rows[LegacyIgnoreKey(reader.GetString(0), reader.GetString(1))] =
+                    (reader.IsDBNull(2) ? null : reader.GetString(2), reader.GetInt64(3) != 0, reader.GetInt64(4) != 0);
+        }
+        var present = new HashSet<string>(StringComparer.Ordinal);
+        var archived = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (legacyRepository, file) in legacy)
+        {
+            var key = LegacyIgnoreKey(legacyRepository, file.Path);
+            var fingerprint = LegacyIgnoreId(legacyRepository, file.Path, IgnoreJson(file));
+            present.Add(key);
+            archived.Add(fingerprint);
+            if (!rows.TryGetValue(key, out var row)) return true;
+            if (!row.Local && (row.Fingerprint != fingerprint || row.Removed)) return true;
+        }
+        if (rows.Any(pair => !pair.Value.Local && !pair.Value.Removed && !present.Contains(pair.Key))) return true;
+        if (archived.Count == 0) return false;
+        using var history = connection.CreateCommand();
+        history.CommandText = "SELECT COUNT(*) FROM BoardCodeQualityIgnoreHistory WHERE Id IN (SELECT value FROM json_each($ids));";
+        history.Parameters.AddWithValue("$ids", JsonSerializer.Serialize(archived.ToList(), StorageJsonSerializerContext.Default.ListString));
+        return Convert.ToInt64(await history.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) != archived.Count;
     }
 
     private static string LegacyIgnoreKey(string repository, string path) => repository.ToUpperInvariant() + "\0"

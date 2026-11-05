@@ -128,6 +128,8 @@ public sealed class BoardChecksTests : IAsyncLifetime
     public async Task SavedEvidenceRetainsExactSourcesAndIgnoresAfterCheckoutChanges()
     {
         const string current = "// retained comment\r\nclass Changed { public string Name => \"λ\"; }\r\n";
+        await Write("caller.cs", "class Caller { Changed value; }\n");
+        await Git("add", "."); await Git("-c", "core.hooksPath=", "commit", "-m", "caller");
         await Write("example.cs", current);
         await Write("ignored.cs", "class Ignored {}\n");
         await Write("vc.rules.md", "## Vibe Rails Rules\n- WARN: Check the source\n");
@@ -145,7 +147,10 @@ public sealed class BoardChecksTests : IAsyncLifetime
         var reopened = new BoardStore(connection, connection);
         var saved = (await reopened.GetCheckAsync(repo, card.Id, result.Id, Ct))!;
         Assert.Equal(result.ResultJson, saved.ResultJson);
-        var evidence = Assert.IsType<BoardCheckEvidence>(saved.Evidence);
+        // VIBE-284: the report read never inflates captured sources; they have their own read.
+        Assert.Null(saved.Evidence);
+        var evidence = Assert.IsType<BoardCheckEvidence>(await reopened.GetCheckEvidenceAsync(repo, card.Id, result.Id, Ct));
+        Assert.Equal(result.Evidence, evidence, EvidenceComparer.Instance);
         var source = Assert.Single(evidence.Files, f => f.Path == "example.cs");
         Assert.Equal(current, source.Content);
         Assert.Equal("class Original {}\n", source.PreviousContent);
@@ -155,7 +160,11 @@ public sealed class BoardChecksTests : IAsyncLifetime
         Assert.Null(Assert.Single(evidence.Files, f => f.Path == "binary.dat").Content);
         Assert.Equal(rule, Assert.Single(evidence.IgnoreRules!));
         Assert.Contains(evidence.RuleFiles, f => f.Path == "vc.rules.md" && f.Content.Contains("Check the source"));
-        Assert.Contains(evidence.ImpactFiles!, f => f.Path == "example.cs" && f.Content == current);
+        // A changed file is stored once, in Files; unchanged sources remain impact evidence.
+        Assert.DoesNotContain(evidence.ImpactFiles!, f => f.Path == "example.cs");
+        Assert.Contains(evidence.ImpactFiles!, f => f.Path == "caller.cs" && f.Content == "class Caller { Changed value; }\n");
+        Assert.Null(await reopened.GetCheckEvidenceAsync(repo, card.Id, "missing", Ct));
+        Assert.Null(await reopened.GetCheckEvidenceAsync(repo + "-other", card.Id, result.Id, Ct));
         Assert.All(await reopened.GetChecksAsync(repo, card.Id, cancellationToken: Ct), row => Assert.Null(row.Evidence));
         Assert.All(await reopened.GetLatestChecksAsync(repo, card.Id, Ct), row => Assert.Null(row.Evidence));
         Assert.StartsWith("Stale", await engine.FreshnessAsync(repo, saved, Ct));
@@ -173,8 +182,53 @@ public sealed class BoardChecksTests : IAsyncLifetime
         Assert.Equal("class BeforeFailure {}\n", Assert.Single(failed.Evidence!.Files).Content);
         var legacy = failed with { Id = "legacy", RunId = "legacy", Evidence = null };
         Assert.True(await store.SaveCheckAsync(repo, legacy, Ct));
-        Assert.Null((await store.GetCheckAsync(repo, card.Id, legacy.Id, Ct))!.Evidence);
-        Assert.NotNull((await store.GetCheckAsync(repo, card.Id, failed.Id, Ct))!.Evidence);
+        Assert.Null(await store.GetCheckEvidenceAsync(repo, card.Id, legacy.Id, Ct));
+        Assert.NotNull(await store.GetCheckEvidenceAsync(repo, card.Id, failed.Id, Ct));
+    }
+
+    /// <summary>VIBE-284 item 5: evidence is written once, before analysis. The completion save
+    /// passes no evidence and must keep what the attempt already stored.</summary>
+    [Fact]
+    public async Task CompletionWithoutEvidenceKeepsTheEvidenceSavedBeforeAnalysis()
+    {
+        var running = new BoardCheckRecord("once", card.Id, "run-once", "action", "Code quality", "Running", "working-tree",
+            null, null, null, null, "1", DateTime.UtcNow, null, "Capturing", 0, 0, 0, 0, [],
+            Evidence: new([new("a.cs", null, "Modified", false, "class A {}", null, null, null)], [], null, []));
+        Assert.True(await store.SaveCheckAsync(repo, running, Ct));
+        Assert.True(await store.SaveCheckAsync(repo, running with { Status = "Passed", EndedUtc = DateTime.UtcNow, Evidence = null }, Ct));
+        Assert.Equal("Passed", (await store.GetCheckAsync(repo, card.Id, running.Id, Ct))!.Status);
+        Assert.Equal("class A {}", Assert.Single((await store.GetCheckEvidenceAsync(repo, card.Id, running.Id, Ct))!.Files).Content);
+    }
+
+    /// <summary>VIBE-284 item 3: a busy or unreadable ignore store must not turn an advisory Code
+    /// quality check into "Failed to run"; it checks every file and says so.</summary>
+    [Fact]
+    public async Task IgnoreStoreFailureStillRunsTheCodeQualityCheck()
+    {
+        await Write("example.cs", "class Changed { int Value => 1; }\n");
+        var ignores = new Mock<ICodeAnalyzerIgnoreStore>();
+        ignores.Setup(x => x.GetIgnoreRulesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new SqliteException("database is locked", 5));
+        var engine = new BoardCheckService(new(), new VcaRulesHookValidationService(new GitStagedSnapshotProvider()), services, ignores.Object);
+
+        var result = await engine.ExecuteAsync(repo, repo, card.Key, "ignores-down", "quality", JobActionKind.CodeQuality, ["working-tree"], Ct);
+
+        Assert.NotEqual("Failed to run", result.Status);
+        Assert.Equal(1, result.AnalyzedCount);
+        Assert.Contains(result.Limitations, text => text.Contains("ignore list could not be read"));
+        Assert.Empty((await store.GetCheckEvidenceAsync(repo, card.Id, result.Id, Ct))!.IgnoreRules!);
+    }
+
+    private sealed class EvidenceComparer : IEqualityComparer<BoardCheckEvidence?>
+    {
+        public static readonly EvidenceComparer Instance = new();
+        public bool Equals(BoardCheckEvidence? x, BoardCheckEvidence? y) => x is not null && y is not null
+            && x.Files.Select(f => (f.Path, f.ChangeKind, f.Content, f.PreviousContent, f.AddedContent))
+                .SequenceEqual(y.Files.Select(f => (f.Path, f.ChangeKind, f.Content, f.PreviousContent, f.AddedContent)))
+            && x.RuleFiles.SequenceEqual(y.RuleFiles)
+            && (x.ImpactFiles ?? []).SequenceEqual(y.ImpactFiles ?? [])
+            && (x.IgnoreRules ?? []).SequenceEqual(y.IgnoreRules ?? []);
+        public int GetHashCode(BoardCheckEvidence? obj) => 0;
     }
 
     [Theory]

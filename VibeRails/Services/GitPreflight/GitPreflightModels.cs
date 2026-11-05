@@ -80,7 +80,10 @@ public sealed record GitStagedSnapshot(
     GitCheckSnapshotIdentity? CheckIdentity = null,
     // Untracked files git does not ignore (ls-files --others --exclude-standard). Only the
     // working-tree scope captures them; a full impact scan adds them to TrackedFiles.
-    IReadOnlyList<string>? UntrackedFiles = null)
+    IReadOnlyList<string>? UntrackedFiles = null,
+    // Supported sources left out of ImpactFiles because the capture's aggregate byte budget was
+    // spent. Impact ranking is advisory, so the capture continues and reports the shortfall.
+    int ImpactFilesOmitted = 0)
 {
     public static GitStagedSnapshot Preview(string repositoryPath) => new(
         Path.GetFullPath(repositoryPath),

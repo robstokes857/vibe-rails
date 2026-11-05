@@ -36,6 +36,8 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
     /// signal the scope is wrong (a vendored tree, a generated bundle), not a limit to raise.
     /// </summary>
     private const int MaximumPatchBytes = 32 * 1024 * 1024;
+    /// <summary>Aggregate content budget of committed-scope captures and of a working-tree check's
+    /// impact sources: <see cref="MaximumSnapshotBytes"/> unless a test constructs a smaller one.</summary>
     private readonly long _maximumUnpushedSnapshotBytes;
 
     /// <summary>
@@ -352,13 +354,16 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         }
     }
 
-    /// <summary>Freezes the tracked text used for a saved check's impact ranking as well as its changed files.</summary>
+    /// <summary>Freezes the tracked text used for a saved check's impact ranking as well as its changed files.
+    /// Sources past the aggregate budget are counted in <see cref="GitStagedSnapshot.ImpactFilesOmitted"/>
+    /// instead of failing the check: impact ranking is advisory, as in the committed scopes.</summary>
     internal async Task<GitStagedSnapshot> CaptureWorkingTreeCheckAsync(string workingDirectory, CancellationToken ct)
     {
         var snapshot = await CaptureWorkingTreeAsync(workingDirectory, ct);
         var changed = snapshot.Files.ToDictionary(file => file.RelativePath, PathComparer);
         var guard = new WorkingTreePathGuard(snapshot.RepositoryPath);
         var impact = new List<GitIndexTextFile>();
+        var omitted = 0;
         long bytes = snapshot.Files.Sum(file => (long)Encoding.UTF8.GetByteCount(file.Content ?? "")
             + Encoding.UTF8.GetByteCount(file.PreviousContent ?? ""));
         foreach (var path in snapshot.TrackedFiles ?? [])
@@ -373,14 +378,25 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
                 if (!guard.IsReadableRegularFile(fullPath)) continue;
                 var length = new FileInfo(fullPath).Length;
                 if (length > MaximumTextFileBytes) continue;
-                if (bytes + length > MaximumSnapshotBytes)
-                    throw new InvalidOperationException("The check's captured source exceeds the text snapshot budget.");
+                if (bytes + length > _maximumUnpushedSnapshotBytes)
+                {
+                    omitted++;
+                    continue;
+                }
                 (content, _) = await ReadWorkingTreeContentAsync(fullPath, ct);
                 bytes += length;
             }
             if (content is not null) impact.Add(new(path, content));
         }
-        return snapshot with { ImpactFiles = impact };
+        if (omitted > 0)
+        {
+            Log.Warning(
+                "[GitPreflight] Check capture reached its {BudgetBytes} byte content budget; "
+                + "{OmittedCount} source file(s) were left out of impact ranking.",
+                _maximumUnpushedSnapshotBytes,
+                omitted);
+        }
+        return snapshot with { ImpactFiles = impact, ImpactFilesOmitted = omitted };
     }
 
     private async Task<GitStagedSnapshot> CaptureWorkingTreeCoreAsync(
@@ -819,8 +835,10 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         // the remaining aggregate budget with supported source files from the HEAD tree. Null, not
         // empty, when the caller skipped them, so MintLint never reads "no references" from it.
         List<GitIndexTextFile>? impactFiles = null;
+        var impactOmitted = 0;
         if (includeImpactFiles)
         {
+            var skippedBeforeImpact = budget.SkippedFileCount;
             impactFiles = [];
             foreach (var entry in headEntries.Where(entry =>
                          entry.Type == "blob" && MintLintAnalyzer.SupportsFile(entry.RelativePath)))
@@ -832,6 +850,8 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
                     impactFiles.Add(new GitIndexTextFile(entry.RelativePath, source.Content));
                 }
             }
+
+            impactOmitted = budget.SkippedFileCount - skippedBeforeImpact;
         }
 
         if (budget.SkippedFileCount > 0)
@@ -843,7 +863,8 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
                 budget.SkippedFileCount);
         }
 
-        return new GitStagedSnapshot(repositoryPath, files, agentFiles, trackedFiles, impactFiles, CheckIdentity: new(mergeBaseRef, headCommit));
+        return new GitStagedSnapshot(repositoryPath, files, agentFiles, trackedFiles, impactFiles, CheckIdentity: new(mergeBaseRef, headCommit),
+            ImpactFilesOmitted: impactOmitted);
     }
 
     private static async Task<Dictionary<string, int?>> ReadUnpushedChangedLineCountsAsync(

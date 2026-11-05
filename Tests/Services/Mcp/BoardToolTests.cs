@@ -87,9 +87,39 @@ public sealed partial class BoardToolTests : IDisposable
         Assert.Contains("Findings", detail);
         var first = await _tool.ReadBoardCheck(card.Key, "check", cancellationToken: Ct);
         Assert.Contains("Continue with offset=40000", first);
-        var second = await _tool.ReadBoardCheck(card.Key, "check", 40000, Ct);
+        var second = await _tool.ReadBoardCheck(card.Key, "check", 40000, cancellationToken: Ct);
         Assert.DoesNotContain("Continue with offset=", second);
         Assert.StartsWith("FAIL:", await _tool.ReadBoardCheck(other.Key, "check", cancellationToken: Ct));
+        Assert.StartsWith("No captured inputs were saved", await _tool.ReadBoardCheck(card.Key, "check", file: "*", cancellationToken: Ct));
+
+        // VIBE-284 item 1: captured sources stay out of the record read; they are listed and read per file.
+        var source = "class Captured {}\n" + new string('y', 45000);
+        var captured = evidence with { Id = "captured", RunId = "run-captured", ResultJson = "{}",
+            Evidence = new([new("src/a.cs", null, "Modified", false, source, "class Old {}", null, null),
+                    new("logo.png", null, "Added", true, null, null, null, null)],
+                [new("vc.rules.md", "## Vibe Rails Rules\n- WARN: rule text\n")],
+                [new("src/caller.cs", "class Caller { Captured c; }")], []) };
+        Assert.True(await _store.SaveCheckAsync(_project, captured, Ct));
+        var record = await _tool.ReadBoardCheck(card.Key, "captured", cancellationToken: Ct);
+        Assert.DoesNotContain("class Captured", record);
+        Assert.DoesNotContain("rule text", record);
+        Assert.Contains("file=\"*\"", record);
+        var index = await _tool.ReadBoardCheck(card.Key, "captured", file: "*", cancellationToken: Ct);
+        Assert.Contains("- Modified: src/a.cs · 45018 chars", index);
+        Assert.Contains("- Added: logo.png · binary or unavailable", index);
+        Assert.Contains("- vc.rules.md", index);
+        Assert.Contains("- src/caller.cs", index);
+        Assert.DoesNotContain("class Captured", index);
+        var page = await _tool.ReadBoardCheck(card.Key, "captured", file: "src/a.cs", cancellationToken: Ct);
+        Assert.Contains("class Captured {}", page);
+        Assert.Contains("Continue with offset=40000", page);
+        Assert.EndsWith(new string('y', 5018), await _tool.ReadBoardCheck(card.Key, "captured", 40000, "src/a.cs", Ct));
+        Assert.Contains("WARN: rule text", await _tool.ReadBoardCheck(card.Key, "captured", file: "vc.rules.md", cancellationToken: Ct));
+        Assert.Contains("class Caller", await _tool.ReadBoardCheck(card.Key, "captured", file: "src/caller.cs", cancellationToken: Ct));
+        Assert.Contains("captured without text", await _tool.ReadBoardCheck(card.Key, "captured", file: "logo.png", cancellationToken: Ct));
+        Assert.StartsWith("FAIL: missing.cs is not among", await _tool.ReadBoardCheck(card.Key, "captured", file: "missing.cs", cancellationToken: Ct));
+        Assert.StartsWith("FAIL: file needs a checkId", await _tool.ReadBoardCheck(card.Key, file: "*", cancellationToken: Ct));
+        Assert.StartsWith("FAIL:", await _tool.ReadBoardCheck(other.Key, "captured", file: "src/a.cs", cancellationToken: Ct));
     }
 
     [Fact]

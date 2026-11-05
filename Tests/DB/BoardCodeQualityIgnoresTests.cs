@@ -91,6 +91,34 @@ public sealed class BoardCodeQualityIgnoresTests : IDisposable
         Assert.Contains(history, row => row.GetProperty("EntryJson").GetString()!.Contains("Conflicting old writer edit"));
     }
 
+    /// <summary>
+    /// VIBE-284 item 4: every Rules scan, Code quality check and pre-commit MintLint step reads the
+    /// list. Once the old side is adopted, a read must not open a board.db write transaction, so it
+    /// neither waits behind nor blocks a concurrent Board write. A later old-side edit still lands.
+    /// </summary>
+    [Fact]
+    public async Task AdoptedLegacyRulesAreReadWithoutTheBoardWriteLock()
+    {
+        var repo = Path.Combine(root, "steady");
+        var file = new CodeAnalyzerIgnoredFile("a.cs", "file", "test", "Initial", DateTime.UtcNow);
+        await legacy.UpsertAsync(repo, file, Ct);
+        Assert.Single(await current.ListAsync(repo, Ct));
+        await current.UpsertAsync(repo, new("local.cs", "file", "test", "Local choice", DateTime.UtcNow, "Rob"), Ct);
+        Assert.Equal(2, (await current.ListAsync(repo, Ct)).Count);
+
+        await using (var writer = new SqliteConnection($"Data Source={Path.Combine(root, "board.db")};Pooling=False"))
+        {
+            await writer.OpenAsync(Ct);
+            using var held = writer.BeginTransaction();
+            var read = await current.ListAsync(repo, Ct).WaitAsync(TimeSpan.FromSeconds(10), Ct);
+            Assert.Equal(["a.cs", "local.cs"], read.Select(rule => rule.Path).Order());
+        }
+
+        await legacy.UpsertAsync(repo, file with { ReasonText = "Old writer edit" }, Ct);
+        Assert.Equal("Old writer edit", (await current.ListAsync(repo, Ct)).Single(rule => rule.Path == "a.cs").ReasonText);
+        Assert.Equal(3, Rows(await Backup(), "BoardCodeQualityIgnoreHistory").Count);
+    }
+
     [Fact]
     public async Task ProductionRegistrationUsesBoardStoreAndDefaultsAuthorToLocalAccount()
     {
