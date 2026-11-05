@@ -4,6 +4,7 @@ using System.Text;
 using System.Threading.Channels;
 using Serilog;
 using VibeRails.Utils;
+using VibeRails.Services.Board.Sync;
 
 namespace VibeRails.Services.Terminal;
 
@@ -51,6 +52,8 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
 
     private volatile ClientWebSocket? _socket;
     private string? _sessionId;
+    private string? _safetyGeneration;
+    private readonly string? _safetyStateDirectory;
     // Cancelled only by DisposeAsync; survives across reconnects.
     private CancellationTokenSource? _lifetimeCts;
     private Task? _supervisor;
@@ -66,9 +69,10 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
     /// relay accepted it. Supply it only for a session that was registered in the first place.
     /// </param>
     /// <param name="hostBackoff">Host-wide reconnect pacing; defaults to <see cref="RemoteRelayBackoff.Shared"/>.</param>
-    public RemoteTerminalConnection(Func<CancellationToken, Task<bool>>? reregister, RemoteRelayBackoff? hostBackoff = null)
+    public RemoteTerminalConnection(Func<CancellationToken, Task<bool>>? reregister, RemoteRelayBackoff? hostBackoff = null, string? safetyStateDirectory = null)
     {
         _reregister = reregister;
+        _safetyStateDirectory = safetyStateDirectory;
         _hostBackoff = hostBackoff ?? RemoteRelayBackoff.Shared;
     }
 
@@ -111,7 +115,7 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
     internal static HandshakeOutcome ClassifyFailure(int statusCode) => statusCode switch
     {
         404 => HandshakeOutcome.SessionMissing,
-        400 or 401 or 403 => HandshakeOutcome.Rejected,
+        400 or 401 or 403 or 409 => HandshakeOutcome.Rejected,
         // No response (DNS, refused, TLS, timeout), 429, 5xx, or a proxy's unexpected answer.
         _ => HandshakeOutcome.HostUnavailable
     };
@@ -188,6 +192,14 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
         {
             using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             connectCts.CancelAfter(ConnectTimeout);
+            var safety = new RemoteSafetyClient(() => new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false }),
+                () => new Uri(frontendUrl), () => apiKey, "/api/v1/terminal/remote-access", _safetyStateDirectory);
+            var generation = await safety.EnsureAsync(true, false, connectCts.Token);
+            if (_safetyGeneration is not null && _safetyGeneration != generation)
+                throw RemoteSafetyClient.Failure("account_remote_reapproval_required");
+            _safetyGeneration = generation;
+            socket.Options.SetRequestHeader("X-VibeRails-Safety-Protocol", "1");
+            socket.Options.SetRequestHeader("X-VibeRails-Safety-Generation", generation);
             await socket.ConnectAsync(new Uri(wsUri), connectCts.Token);
 
             _socket = socket;
@@ -203,7 +215,7 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
             if (ct.IsCancellationRequested)
                 return new(HandshakeOutcome.Cancelled);
 
-            var outcome = ClassifyFailure(status);
+            var outcome = ex is BoardSyncClientException policyError ? policyError.Code == "account_remote_access_unavailable" ? HandshakeOutcome.HostUnavailable : HandshakeOutcome.Rejected : ClassifyFailure(status);
             if (ex is WebSocketException or OperationCanceledException or HttpRequestException)
             {
                 // Expected while the relay is down or has lost the session: one line, no stack.
@@ -263,11 +275,12 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
                 try { await Task.WhenAll(send, receive); } catch { }
             }
 
+            var policyClosed = socket.CloseStatus == WebSocketCloseStatus.PolicyViolation;
             try { socket.Dispose(); } catch { }
             if (ReferenceEquals(_socket, socket))
                 _socket = null;
 
-            if (lifetime.IsCancellationRequested)
+            if (lifetime.IsCancellationRequested || policyClosed)
                 break;
 
             // Connection dropped mid-session. Discard any stale queued frames —

@@ -495,6 +495,7 @@ namespace VibeRails
                             // 30s so a stalled endpoint can't starve the timer thread.
                             client.Timeout = TimeSpan.FromSeconds(30);
                         })
+                        .AddHttpMessageHandler<Services.Board.Sync.RemoteSafetyUploadHandler>()
                         .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
                     serviceCollection.AddHostedService<TokenSavingsPublishJob>();
                     serviceCollection.AddHostedService<SessionDataDrainJob>();
@@ -525,20 +526,24 @@ namespace VibeRails
                 {
                     client.Timeout = TimeSpan.FromMinutes(30);
                 })
+                .AddHttpMessageHandler<Services.Board.Sync.RemoteSafetyUploadHandler>()
                 .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
 
             serviceCollection.AddSingleton<Services.Backups.BackupFiles>();
             serviceCollection.AddSingleton<Services.Backups.CompleteBackupService>();
             serviceCollection.AddSingleton<Services.Board.Backup.BoardBackupTransport>();
             serviceCollection.AddSingleton<Services.Board.Backup.BoardDataBackupService>();
+            serviceCollection.AddTransient<Services.Board.Sync.RemoteSafetyUploadHandler>();
             serviceCollection.AddHttpClient(Services.Board.Backup.BoardBackupTransport.ClientName, client =>
                 client.Timeout = TimeSpan.FromMinutes(2))
+                .AddHttpMessageHandler<Services.Board.Sync.RemoteSafetyUploadHandler>()
                 .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
             // A named client, not AddHttpClient<BackupTransport>: the transient typed client would be captured
             // once by the singleton CompleteBackupService and its handler never rotated (see TokenSavingsPublishJob).
             serviceCollection.AddSingleton<Services.Backups.BackupTransport>();
             serviceCollection.AddHttpClient(Services.Backups.BackupTransport.HttpClientName, client =>
                 client.Timeout = TimeSpan.FromMinutes(2))
+                .AddHttpMessageHandler<Services.Board.Sync.RemoteSafetyUploadHandler>()
                 .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
 
             // Push Notification Service (forwards per-tab "ready/waiting" pushes to VibeRails-Front); sends X-Api-Key.

@@ -13,6 +13,8 @@ public interface IBoardSyncClient
 {
     /// <summary>True when an endpoint and an API key are both configured; the sync is off otherwise.</summary>
     bool IsConfigured { get; }
+    Task<RemoteSafetyStatus> SafetyStatusAsync(CancellationToken ct) => throw new NotSupportedException();
+    Task<RemoteSafetyStatus> ApproveSafetyAsync(string expected, int accountId, string destination, CancellationToken ct) => throw new NotSupportedException();
     string? DestinationKey { get; }
 
     /// <summary>Advertises this open project root and consumes at most one owner launch request.</summary>
@@ -41,7 +43,7 @@ public interface IBoardSyncClient
 /// <c>X-Api-Key</c>, and the named client follows no redirects: a redirect would replay the key and
 /// body to wherever it pointed.
 /// </summary>
-public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Func<Uri?> endpoint, Func<string?> apiKey) : IBoardSyncClient
+public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Func<Uri?> endpoint, Func<string?> apiKey, RemoteSafetyClient? safety = null) : IBoardSyncClient
 {
     public const string HttpClientName = "board-sync";
 
@@ -62,6 +64,8 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Fu
     public static readonly TimeSpan ExchangeTimeout = TimeSpan.FromSeconds(30);
 
     public Uri? Endpoint => endpoint();
+    public Task<RemoteSafetyStatus> SafetyStatusAsync(CancellationToken ct) => safety?.StatusAsync(ct) ?? throw new NotSupportedException();
+    public Task<RemoteSafetyStatus> ApproveSafetyAsync(string expected, int accountId, string destination, CancellationToken ct) => safety?.ApproveAsync(expected, accountId, destination, ct) ?? throw new NotSupportedException();
 
     /// <inheritdoc />
     public Task<BoardLaunchPollResult> PollLaunchAsync(BoardLaunchPoll body, CancellationToken ct, string destination) =>
@@ -130,6 +134,12 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Fu
         // Same configured origin and credential as Board sync; never a request-selected host.
         using var request = new HttpRequestMessage(HttpMethod.Put, new Uri(target, "/api/v1/board-content/parts/" + part.Sha256));
         request.Headers.Add("X-Api-Key", credential);
+        if (safety is not null)
+        {
+            var generation = await safety.EnsureAsync(true, true, ct);
+            request.Headers.Add("X-VibeRails-Safety-Protocol", "1");
+            request.Headers.Add("X-VibeRails-Safety-Generation", generation);
+        }
         request.Content = new ByteArrayContent(bytes.ToArray());
         request.Content.Headers.ContentType = new("application/octet-stream");
         using var client = httpClientFactory.CreateClient(HttpClientName);
@@ -176,6 +186,12 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Fu
 
         using var request = new HttpRequestMessage(method, new Uri(target.AbsoluteUri.TrimEnd('/') + "/" + relativePath));
         request.Headers.Add("X-Api-Key", key);
+        if (safety is not null && method != HttpMethod.Delete)
+        {
+            var generation = await safety.EnsureAsync(true, true, cancellationToken);
+            request.Headers.Add("X-VibeRails-Safety-Protocol", "1");
+            request.Headers.Add("X-VibeRails-Safety-Generation", generation);
+        }
         if (body is not null && requestInfo is not null)
             request.Content = JsonContent.Create(body, requestInfo);
 
@@ -193,11 +209,13 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Fu
                     throw new BoardSyncClientException("Board sync returned HTTP 429; entries remain queued.", "http_429", status,
                         retryAfter: TimeSpan.FromSeconds(Math.Clamp(delay.TotalSeconds, 1, 60)));
                 }
-                if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-                    throw new BoardSyncClientException("viberails.ai rejected the API key. Check it in Settings.", "unauthorized", status);
+
                 // Only a bounded, recognised code changes what the desktop does; the message is
                 // always the desktop's own wording, so remote prose never reaches logs or the UI.
                 var (code, entryId) = await ReadErrorAsync(response, timeout.Token);
+                if (RemoteSafetyClient.IsSafetyCode(code)) throw RemoteSafetyClient.Failure(code!);
+                if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+                    throw new BoardSyncClientException("viberails.ai rejected the API key. Check it in Settings.", "unauthorized", status);
                 if (response.StatusCode == HttpStatusCode.BadRequest && code == BoardSyncWire.CodeInvalidEntry && entryId is not null)
                     throw new BoardSyncClientException("The server rejected a queued entry. Its data has been kept locally.",
                         BoardSyncWire.CodeInvalidEntry, status, entryId);
@@ -272,7 +290,7 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Fu
                     entryId = property.Value.GetString();
                 }
             }
-            if (code is not (BoardSyncWire.CodeInvalidEntry or BoardSyncWire.CodeInvalidRequest
+            if (!RemoteSafetyClient.IsSafetyCode(code) && code is not (BoardSyncWire.CodeInvalidEntry or BoardSyncWire.CodeInvalidRequest
                 or BoardSyncWire.CodeBoardNotFound or BoardSyncWire.CodeWriteConflict))
                 return (null, null);
             var wellFormedId = entryId is { Length: > 0 and <= BoardSyncWire.MaxIdLength }
@@ -314,5 +332,6 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Fu
 
     /// <summary>The production instance: named client, endpoint and key both re-read per call.</summary>
     public static BoardSyncHttpClient FromConfiguration(IHttpClientFactory factory, Microsoft.Extensions.Configuration.IConfiguration configuration) =>
-        new(factory, () => BoardSyncEndpoint.FromConfiguration(configuration), static () => ParserConfigs.GetApiKey());
+        new(factory, () => BoardSyncEndpoint.FromConfiguration(configuration), static () => ParserConfigs.GetApiKey(),
+            new RemoteSafetyClient(() => factory.CreateClient(HttpClientName), () => BoardSyncEndpoint.FromConfiguration(configuration), static () => ParserConfigs.GetApiKey()));
 }

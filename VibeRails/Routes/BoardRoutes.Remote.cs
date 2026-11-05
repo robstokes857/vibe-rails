@@ -2,6 +2,8 @@ using VibeRails.Services.Board.Sync;
 
 namespace VibeRails.Routes;
 
+public sealed record RemoteSafetyApprovalRequest(string Generation, int AccountId, string Destination);
+
 public static partial class BoardRoutes
 {
     private static void MapRemoteBoards(WebApplication app)
@@ -12,6 +14,10 @@ public static partial class BoardRoutes
             context.HttpContext.Response.Headers.CacheControl = "no-store";
             return next(context);
         });
+        routes.MapGet("/safety", (IBoardSyncClient client, CancellationToken ct) =>
+            RunAsync(async () => Results.Ok(await client.SafetyStatusAsync(ct))));
+        routes.MapPost("/safety/approve", (IBoardSyncClient client, RemoteSafetyApprovalRequest request, CancellationToken ct) =>
+            RunAsync(async () => Results.Ok(await client.ApproveSafetyAsync(request.Generation, request.AccountId, request.Destination, ct))));
         routes.MapGet("", (RemoteBoardsService boards, int? offset, CancellationToken ct) =>
             RunAsync(async () => Results.Ok(await boards.ListAsync(offset ?? 0, ct))));
         routes.MapPut("/{id}", (RemoteBoardsService boards, string id, RemoteBoardWriteRequest request, CancellationToken ct) =>

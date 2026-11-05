@@ -22,6 +22,7 @@ public sealed class RemoteTerminalConnectionTests : IAsyncDisposable
     private readonly string _originalUrl = ParserConfigs.GetFrontendUrl();
     private readonly string _originalKey = ParserConfigs.GetApiKey();
     private readonly FakeRelay _relay = new();
+    private readonly string _safetyDirectory = Path.Combine(Path.GetTempPath(), "terminal-safety-" + Guid.NewGuid().ToString("N"));
 
     [Theory]
     [InlineData(404, "SessionMissing")]
@@ -58,7 +59,7 @@ public sealed class RemoteTerminalConnectionTests : IAsyncDisposable
             Interlocked.Increment(ref reregistered);
             _relay.Registered = true;
             return Task.FromResult(true);
-        }, new RemoteRelayBackoff());
+        }, new RemoteRelayBackoff(), _safetyDirectory);
 
         await connection.ConnectAsync(SessionId, Ct);
 
@@ -78,7 +79,7 @@ public sealed class RemoteTerminalConnectionTests : IAsyncDisposable
             Interlocked.Increment(ref reregistered);
             _relay.Registered = true;
             return Task.FromResult(true);
-        }, new RemoteRelayBackoff());
+        }, new RemoteRelayBackoff(), _safetyDirectory);
         connection.OnReconnected += () => reconnected.TrySetResult();
         await connection.ConnectAsync(SessionId, Ct);
         Assert.True(connection.IsConnected);
@@ -99,7 +100,7 @@ public sealed class RemoteTerminalConnectionTests : IAsyncDisposable
     {
         // Job sessions are never exposed remotely; TerminalStateService answers false for them.
         await StartRelayAsync();
-        await using var connection = new RemoteTerminalConnection(_ => Task.FromResult(false), new RemoteRelayBackoff());
+        await using var connection = new RemoteTerminalConnection(_ => Task.FromResult(false), new RemoteRelayBackoff(), _safetyDirectory);
 
         await connection.ConnectAsync(SessionId, Ct);
 
@@ -119,7 +120,7 @@ public sealed class RemoteTerminalConnectionTests : IAsyncDisposable
         {
             Interlocked.Increment(ref reregistered);
             return Task.FromResult(true);
-        }, backoff);
+        }, backoff, _safetyDirectory);
 
         await connection.ConnectAsync(SessionId, Ct);
 
@@ -135,7 +136,7 @@ public sealed class RemoteTerminalConnectionTests : IAsyncDisposable
         await StartRelayAsync();
         _relay.Status = StatusCodes.Status503ServiceUnavailable;
         var backoff = new RemoteRelayBackoff();
-        await using var connection = new RemoteTerminalConnection(_ => Task.FromResult(true), backoff);
+        await using var connection = new RemoteTerminalConnection(_ => Task.FromResult(true), backoff, _safetyDirectory);
 
         await connection.ConnectAsync(SessionId, Ct);
 
@@ -161,6 +162,7 @@ public sealed class RemoteTerminalConnectionTests : IAsyncDisposable
         ParserConfigs.SetFrontendUrl(_originalUrl);
         ParserConfigs.SetApiKey(_originalKey);
         await _relay.DisposeAsync();
+        if (Directory.Exists(_safetyDirectory)) Directory.Delete(_safetyDirectory, true);
     }
 
     /// <summary>Answers /ws/v1/terminal like the hosted relay: 404 while the session has no row.</summary>
@@ -183,6 +185,9 @@ public sealed class RemoteTerminalConnectionTests : IAsyncDisposable
             builder.WebHost.UseUrls("http://127.0.0.1:0");
             _app = builder.Build();
             _app.UseWebSockets();
+            _app.MapGet("/api/v1/terminal/remote-access", () => Results.Text("""
+                {"accountId":1,"generation":"0","remoteWork":{"state":"enabled","unlockUtc":null},"uploadsBlocked":false}
+                """, "application/json"));
             _app.Map("/ws/v1/terminal", async context =>
             {
                 Interlocked.Increment(ref _handshakes);

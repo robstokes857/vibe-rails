@@ -8,6 +8,9 @@ export function openRemoteBoards(app, onChanged = () => {}) {
     let edit = null;
     app.showModal('Remote boards', `<section data-remote-boards>
         <p class="text-muted">Boards stored on viberails.ai. Review old copies here, including boards no longer on this computer.</p>
+        <aside class="alert alert-warning" data-safety hidden role="status"><p data-safety-message></p>
+            <a href="https://viberails.ai/Account" target="_blank" rel="noopener noreferrer">Account and recovery</a>
+            <button type="button" class="btn btn-outline-secondary" data-safety-approve hidden>I reviewed pending work; allow sending</button></aside>
         <div class="d-flex gap-2 flex-wrap mb-3">
             <input type="search" class="form-control" style="flex:1;min-width:160px" data-remote-search aria-label="Search loaded remote boards" placeholder="Search loaded boards…">
             <select class="form-select" style="width:auto;max-width:100%" data-remote-filter aria-label="Filter remote boards">
@@ -136,6 +139,24 @@ export function openRemoteBoards(app, onChanged = () => {}) {
     get('[data-remote-refresh]').addEventListener('click', () => load());
     get('[data-remote-more]').addEventListener('click', () => load(true));
     get('[data-remote-cancel]').addEventListener('click', () => { edit = null; get('[data-remote-editor]').hidden = true; setBusy(false); });
+    let safetyState;
+    async function safetyStatus() {
+        try {
+            safetyState = await request('/safety');
+            if (!active()) return;
+            get('[data-safety]').hidden = safetyState.remoteWork.state === 'enabled' && !safetyState.uploadsBlocked && !safetyState.localReviewRequired;
+            get('[data-safety-message]').textContent = safetyState.remoteWork.state !== 'enabled'
+                ? 'Remote access is paused. Open Account for the unlock date and recovery action. Your local changes are retained.'
+                : safetyState.uploadsBlocked ? 'Uploads are independently blocked. Contact support; recovery does not clear this block.'
+                : 'Review your queued Board changes before allowing uploads. This restores permission only; it does not start work or connect terminals.';
+            get('[data-safety-approve]').hidden = safetyState.remoteWork.state !== 'enabled' || safetyState.uploadsBlocked || !safetyState.localReviewRequired;
+        } catch { /* Ordinary remote loading reports connectivity errors. */ }
+    }
+    get('[data-safety-approve]').addEventListener('click', async () => {
+        try { await request('/safety/approve', 'POST', { generation: safetyState.generation, accountId: safetyState.accountId, destination: safetyState.destination }); await safetyStatus(); }
+        catch (error) { status(error.message); }
+    });
+    safetyStatus();
     load();
     return () => abort.abort();
 }

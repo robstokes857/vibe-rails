@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Serilog;
 using VibeRails.Utils;
+using VibeRails.Services.Board.Sync;
 
 namespace VibeRails.Services.Integrations.VibeCodeRemote;
 
@@ -84,6 +85,11 @@ public class RemoteStateService : IRemoteStateService
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(RegisterTimeout);
+            var safety = new RemoteSafetyClient(() => new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false }),
+                () => new Uri(frontendUrl), () => apiKey, "/api/v1/terminal/remote-access");
+            var generation = await safety.EnsureAsync(true, false, timeout.Token);
+            request.Headers.Add("X-VibeRails-Safety-Protocol", "1");
+            request.Headers.Add("X-VibeRails-Safety-Generation", generation);
             using var response = await _httpClient.SendAsync(request, timeout.Token);
             if (response.IsSuccessStatusCode)
                 return true;

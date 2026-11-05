@@ -2206,6 +2206,8 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(AdoBoardSummaryResponse))]
     [JsonSerializable(typeof(AdoPullResponse))]
     [JsonSerializable(typeof(BoardSyncStatusResponse))]
+    [JsonSerializable(typeof(VibeRails.Services.Board.Sync.RemoteSafetyStatus))]
+    [JsonSerializable(typeof(VibeRails.Routes.RemoteSafetyApprovalRequest))]
     [JsonSerializable(typeof(VibeRails.Services.Board.Sync.RemoteBoardPage))]
     [JsonSerializable(typeof(VibeRails.Services.Board.Sync.RemoteBoardWriteRequest))]
     [JsonSerializable(typeof(VibeRails.Services.Board.Sync.RemoteBoardActionResult))]
