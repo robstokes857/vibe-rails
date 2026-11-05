@@ -40,6 +40,8 @@ public class Settings : IJsonOnDeserialized, IJsonOnSerializing
     // there is no saved cloud API key.
     public bool RouteThroughVibeRailsAi { get; set; } = false;
     public bool UseVsCodeTheme { get; set; } = false;
+    /// <summary>Opt-in offline Board spelling, including the VS Code webview. Off for new and older settings files.</summary>
+    public bool VsCodeSpellCheck { get; set; } = false;
     /// <summary>Suggest optional Vibe Board tracking for default/base LLM launches.</summary>
     public bool CreateVibeStoryTracking { get; set; } = true;
     /// <summary>Suggest optional Vibe Board tracking for saved/custom environment launches.</summary>

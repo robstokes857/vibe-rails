@@ -1449,7 +1449,9 @@ namespace VibeRails.DTOs
         bool? ClaudeGatewaySupportsToolSearch = null,
         // Non-secret inherited fallback status; an explicitly entered gateway masks it.
         bool CodexInheritedBaseBypassesRelay = false,
-        bool ClaudeInheritedBaseBypassesRelay = false
+        bool ClaudeInheritedBaseBypassesRelay = false,
+        // Opt-in Board spelling; omitted requests preserve the saved choice.
+        bool? VsCodeSpellCheck = null
     );
     // Append new fields at the END of this record, with a default. Inserting one in the middle
     // shifts every positional argument after it: call sites only fail to compile when the types

@@ -6,6 +6,185 @@ const IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAw
 const DESCRIPTION = 'Repro screenshot\n![Screenshot.png](attachment:att_image)\n<img src=x onerror="window.__injected=true">';
 
 for (const width of [1440, 390]) {
+    test(`offline spelling corrects native fields and preserves undo at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        await openBoard(page, { appSettings: { vsCodeSpellCheck: true } });
+        await page.locator('.board-card').click();
+        const editor = page.locator('[data-board-card-editor]');
+        const description = editor.locator('[data-board-composer="description"] textarea');
+        const source = 'This is mispelled.\n`codeerrror` @src/fileerrror.cs https://urlerrror.invalid\n```js\nfencederrror();\n```';
+        await description.fill(source);
+        const marks = editor.locator('[data-board-composer="description"] .board-spelling-error');
+        await expect(marks).toHaveText(['mispelled']);
+        await description.evaluate(input => { input.focus(); input.setSelectionRange(10, 10); });
+        await page.keyboard.press('Alt+ArrowDown');
+        const popup = page.getByRole('dialog', { name: 'Spelling suggestions for mispelled', exact: true });
+        await expect(popup).toBeVisible();
+        await expect(popup.getByRole('button', { name: 'misspelled', exact: true })).toBeFocused();
+        await page.screenshot({ path: testInfo.outputPath(`spelling-${width}.png`) });
+        const box = await popup.boundingBox();
+        expect(box.x).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.width).toBeLessThanOrEqual(width);
+        await popup.getByRole('button', { name: 'misspelled', exact: true }).click();
+        await expect(description).toHaveValue(source.replace('mispelled', 'misspelled'));
+        await page.keyboard.press('Control+z');
+        await expect(description).toHaveValue(source);
+        await editor.getByRole('button', { name: 'Check spelling: description', exact: true }).click();
+        await expect(popup).toBeVisible();
+        await page.keyboard.press('Escape');
+        await expect(popup).toHaveCount(0);
+        await expect(editor).toBeVisible();
+        await expect(description).toBeFocused();
+        await editor.locator('#board-card-title').fill('Speling title');
+        await expect(editor.locator('#board-card-title').locator('..').locator('.board-spelling-error')).toHaveText(['Speling']);
+        const comment = editor.locator('[data-board-composer="comment"] textarea');
+        await comment.fill('Another errror');
+        await expect(editor.locator('[data-board-composer="comment"] .board-spelling-error')).toHaveText(['errror']);
+    });
+}
+
+test('offline spelling shares ignores, persists personal words and leaves drafts unchanged', async ({ page }) => {
+    const requests = await openBoard(page, { appSettings: { vsCodeSpellCheck: true } });
+    await page.locator('.board-card').click();
+    const editor = page.locator('[data-board-card-editor]');
+    const description = editor.locator('[data-board-composer="description"] textarea');
+    const comment = editor.locator('[data-board-composer="comment"] textarea');
+    await description.fill('frobnizz quuxword');
+    await comment.fill('frobnizz quuxword');
+    await editor.getByRole('button', { name: 'Check spelling: description', exact: true }).click();
+    await page.getByRole('button', { name: 'Ignore word', exact: true }).click();
+    await expect(editor.locator('[data-board-composer="description"] .board-spelling-error')).toHaveText(['quuxword']);
+    await expect(editor.locator('[data-board-composer="comment"] .board-spelling-error')).toHaveText(['quuxword']);
+    await editor.getByRole('button', { name: 'Check spelling: description', exact: true }).click();
+    await page.getByRole('button', { name: 'Add to dictionary', exact: true }).click();
+    await expect(editor.locator('[data-board-composer] .board-spelling-error')).toHaveCount(0);
+    await expect(description).toHaveValue('frobnizz quuxword');
+    await expect(comment).toHaveValue('frobnizz quuxword');
+    expect(requests.some(request => request.method === 'PUT')).toBe(false);
+    await page.reload();
+    await page.getByRole('navigation').getByRole('button', { name: /^Board(?: —.*)?$/ }).click();
+    await page.locator('.board-card').click();
+    await description.fill('frobnizz quuxword');
+    await expect(editor.locator('[data-board-composer="description"] .board-spelling-error')).toHaveText(['frobnizz']);
+});
+
+test('offline spelling recovers from failed assets and works without eval, workers or external connections', async ({ page }) => {
+    let fail = true;
+    await page.route('**/assets/spellcheck/english.js*', route => fail ? route.abort() : route.continue());
+    await openBoard(page, { appSettings: { vsCodeSpellCheck: true } });
+    // The production spelling path is plain ESM, including its dictionary; no blob/eval/worker exceptions.
+    await page.evaluate(() => {
+        const policy = document.createElement('meta');
+        policy.httpEquiv = 'Content-Security-Policy';
+        policy.content = "script-src 'self'; connect-src 'self'; worker-src 'none'; object-src 'none'";
+        document.head.append(policy);
+    });
+    await page.locator('.board-card').click();
+    const editor = page.locator('[data-board-card-editor]');
+    const description = editor.locator('[data-board-composer="description"] textarea');
+    await description.fill('mispelled');
+    await expect(editor.locator('[data-board-composer="description"] .board-spelling-status')).toContainText('Spelling unavailable');
+    fail = false;
+    await editor.getByRole('button', { name: 'Check spelling: description', exact: true }).click();
+    await expect(page.getByRole('dialog', { name: 'Spelling suggestions for mispelled', exact: true })).toBeVisible();
+    await page.keyboard.press('Escape');
+    // Denied local storage must explain that the word is only ignored for this session.
+    await page.evaluate(() => { Storage.prototype.setItem = () => { throw new Error('Storage disabled'); }; });
+    await editor.getByRole('button', { name: 'Check spelling: description', exact: true }).click();
+    await page.getByRole('button', { name: 'Add to dictionary', exact: true }).click();
+    await expect(editor.locator('[data-board-composer="description"] .board-spelling-status')).toContainText('could not be saved');
+    await expect(description).toHaveValue('mispelled');
+});
+
+test('offline spelling aligns clickable marks after wrapping and native field scrolling', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 950 });
+    await openBoard(page, { appSettings: { vsCodeSpellCheck: true } });
+    await page.locator('.board-card').click();
+    const editor = page.locator('[data-board-card-editor]');
+    const title = editor.locator('#board-card-title');
+    await title.fill('A long title with many ordinary words and a mispelled');
+    await title.press('Home');
+    await title.press('End');
+    await expect.poll(() => title.evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
+    const titleMark = title.locator('..').locator('.board-spelling-error');
+    await expect(titleMark).toHaveText('mispelled');
+    const popup = page.getByRole('dialog', { name: 'Spelling suggestions for mispelled', exact: true });
+    let box = await titleMark.boundingBox();
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await expect(popup).toBeVisible();
+    await page.keyboard.press('Escape');
+    const comment = editor.locator('[data-board-composer="comment"] textarea');
+    await comment.fill(('A line with many ordinary words to wrap.\n').repeat(35) + 'This is mispelled');
+    await comment.press('Control+End');
+    const mark = comment.locator('..').locator('.board-spelling-error');
+    await expect(mark).toHaveText('mispelled');
+    await expect.poll(() => comment.evaluate(element => element.scrollTop)).toBeGreaterThan(100);
+    box = await mark.boundingBox();
+    const fieldBox = await comment.boundingBox();
+    expect(box.y).toBeGreaterThanOrEqual(fieldBox.y);
+    expect(box.y + box.height).toBeLessThanOrEqual(fieldBox.y + fieldBox.height);
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: 'right' });
+    await expect(popup).toBeVisible();
+    await popup.getByRole('button', { name: 'misspelled', exact: true }).click();
+    await expect(comment).toHaveValue(('A line with many ordinary words to wrap.\n').repeat(35) + 'This is misspelled');
+});
+
+for (const width of [1440, 390]) {
+    test(`spell check feature flag defaults off and saves through General settings at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        const dictionaries = [];
+        page.on('request', request => { if (request.url().includes('/spellcheck/english.js')) dictionaries.push(request.url()); });
+        await openBoard(page);
+        let saved = {};
+        await page.route('**/api/v1/settings', route => {
+            if (route.request().method() === 'POST') saved = { ...saved, ...route.request().postDataJSON() };
+            return route.fulfill({ json: saved });
+        });
+        await page.locator('.board-card').click();
+        const editor = page.locator('[data-board-card-editor]');
+        const input = editor.locator('[data-board-composer="description"] textarea');
+        await input.fill('mispelled');
+        await expect(editor.locator('.board-spelling, .board-spelling-tools')).toHaveCount(0);
+        await expect(input).toHaveAttribute('spellcheck', 'true');
+        await page.waitForTimeout(500); // Negative assertion: no deferred dictionary load while off.
+        expect(dictionaries).toHaveLength(0);
+
+        await page.evaluate(() => { window.app.closeModal(); window.app.navigate('settings'); });
+        const general = page.locator('#settings-panel-general');
+        const toggle = general.getByRole('switch', { name: 'VS Code Spell Check', exact: true });
+        await expect(general).toBeVisible();
+        await expect(toggle).not.toBeChecked();
+        const save = page.locator('#settings-save-button');
+        await toggle.check();
+        await expect(save).toBeEnabled();
+        await page.screenshot({ path: testInfo.outputPath(`spell-check-setting-${width}.png`) });
+        await save.click();
+        await expect(save).toBeDisabled();
+        expect(saved.vsCodeSpellCheck).toBe(true);
+
+        await page.evaluate(() => window.app.navigate('board'));
+        await page.locator('.board-card').click();
+        await input.fill('mispelled');
+        await expect(editor.locator('[data-board-composer="description"] .board-spelling-error')).toHaveText(['mispelled']);
+        // Applying a saved flag also disposes an already-mounted field, preserving its draft.
+        await page.evaluate(() => window.app.setAppSettings({ vsCodeSpellCheck: false }));
+        await expect(editor.locator('.board-spelling, .board-spelling-tools')).toHaveCount(0);
+        await expect(input).toHaveValue('mispelled');
+        await expect(input).toHaveAttribute('spellcheck', 'true');
+
+        await page.evaluate(() => { window.app.closeModal(); window.app.navigate('settings'); });
+        await expect(toggle).toBeChecked();
+        await toggle.uncheck();
+        await save.click();
+        await expect(save).toBeDisabled();
+        expect(saved.vsCodeSpellCheck).toBe(false);
+        await page.evaluate(() => window.app.navigate('board'));
+        await page.locator('.board-card').click();
+        await expect(editor.locator('.board-spelling, .board-spelling-tools')).toHaveCount(0);
+    });
+}
+
+for (const width of [1440, 390]) {
     test(`lanes collapse, preserve scrolling and restore after reload at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 700 });
         let card;
@@ -1622,7 +1801,7 @@ const SUMMARY_FIELDS = ['id', 'key', 'columnId', 'position', 'title', 'descripti
 const cardSummary = card => Object.fromEntries(SUMMARY_FIELDS.filter(field => field in card).map(field => [field, card[field]]));
 
 async function openBoard(page, { active = false, assignee = null, relatedCards = false, empty = false,
-    onCard = () => {}, extraPickerItems = [], mainBoard = {},
+    onCard = () => {}, extraPickerItems = [], mainBoard = {}, appSettings = {},
     columns = [{ id: 'col_ready', name: 'Ready', position: 0, color: '#3b82f6', boardId: 'brd_main' }] } = {}) {
     if (process.env.VIBERAILS_BOARD_STATIC === '1') {
         await page.addInitScript(() => sessionStorage.setItem('viberails_tab', 'board-fixture'));
@@ -1738,7 +1917,7 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
         } });
         const payloads = {
             '/api/v1/context': { isInGit: true, rootPath: 'C:/board-fixture', launchDirectory: 'C:/board-fixture' },
-            '/api/v1/settings': {},
+            '/api/v1/settings': appSettings,
             '/api/v1/environments': { environments: [{ id: 7, name: 'Card review', cli: 'claude' }] },
             '/api/v1/llm-picker/preferences': { items: [
                 { key: 'base:codex', kind: 'base', group: 'Base CLIs', label: 'Codex', cli: 'codex', enabled: true, order: 0 },
@@ -3957,27 +4136,32 @@ test('link navigation protects draft edits and an unsuccessful link leaves them 
     await expect(page.locator('.board-card-modal-dialog .modal-title')).toHaveText('VB-2 · Related work');
 });
 
-test('Markdown previews as literal source without HTML execution or external images', async ({ page }) => {
+test('uploaded Markdown previews safely and preserves Source and card drafts', async ({ page }, testInfo) => {
     await openBoard(page);
     const external = [];
     await page.route('https://attacker.invalid/**', route => { external.push(route.request().url()); return route.abort(); });
     const source = '# CLI Options\n\n**Model settings**\n\n<img src=x onerror="window.__boardXss=1">\n\n'
         + '![remote](https://attacker.invalid/track)\n\n[bad](javascript:alert(1))';
     await page.getByText('Description images', { exact: true }).click();
+    await page.locator('#board-card-title').fill('Unsaved Markdown title');
     await page.locator('[data-board-files]').setInputFiles({ name: 'CLI_OPTIONS.MD', mimeType: 'text/markdown', buffer: Buffer.from(source) });
     await page.locator('[data-board-view-attachment="att_uploaded"]').click();
     const viewer = page.getByRole('dialog', { name: 'Attachment preview' });
-    // Markdown shows its own source, so the syntax survives instead of becoming elements.
-    // Nothing parses it, which is why the embedded HTML is inert rather than sanitized.
+    await expect(viewer.locator('.vb-board-attachment-markdown h1')).toHaveText('CLI Options');
+    await expect(viewer.locator('.vb-board-attachment-markdown strong')).toHaveText('Model settings');
+    await expect(viewer.locator('.vb-board-attachment-markdown')).toContainText('<img src=x onerror=');
+    await page.screenshot({ path: testInfo.outputPath('markdown-preview.png') });
+    await viewer.getByRole('button', { name: 'Source', exact: true }).click();
     await expect(viewer.locator('.vb-board-attachment-text')).toContainText('# CLI Options');
     await expect(viewer.locator('.vb-board-attachment-text')).toContainText('**Model settings**');
     await expect(viewer.locator('.vb-board-attachment-text')).toContainText('<img src=x onerror=');
     await expect(viewer.locator('[data-attachment-body]')
-        .locator('h1,strong,img,iframe,script,a[href^="javascript:"]')).toHaveCount(0);
+        .locator('img,iframe,script,a[href^="javascript:"]')).toHaveCount(0);
     expect(await page.evaluate(() => window.__boardXss)).toBeUndefined();
     expect(external).toEqual([]);
     await viewer.getByRole('button', { name: 'Close attachment' }).click();
     await expect(page.locator('[data-board-card-editor]')).toBeVisible();
+    await expect(page.locator('#board-card-title')).toHaveValue('Unsaved Markdown title');
 });
 
 function pdfFixture() {
@@ -4475,7 +4659,7 @@ for (const width of [1440, 390]) {
         await expect(editor.locator('[data-local-card-status]')).toContainText('Saved');
         expect(requests.find(request => request.method === 'PUT').body).toEqual({ title: 'Edited outside card' });
         await editor.getByLabel('Description', { exact: true }).fill('Preserve this unsaved description');
-        await editor.getByLabel('Add a comment').fill('Comment saved on outside card');
+        await editor.getByLabel('Add a comment', { exact: true }).fill('Comment saved on outside card');
         await editor.getByRole('button', { name: 'Post comment' }).click();
         await expect(editor.locator('[data-local-card-comments]')).toContainText('Comment saved on outside card');
         await expect(editor.getByLabel('Description', { exact: true })).toHaveValue('Preserve this unsaved description');

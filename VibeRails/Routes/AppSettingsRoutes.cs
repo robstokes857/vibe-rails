@@ -169,6 +169,8 @@ public static class AppSettingsRoutes
                 settings.RemoteAccountKeyFingerprint = null;
             }
             settings.UseVsCodeTheme = settingsDto.UseVsCodeTheme;
+            if (settingsDto.VsCodeSpellCheck.HasValue)
+                settings.VsCodeSpellCheck = settingsDto.VsCodeSpellCheck.Value;
             if (settingsDto.CreateVibeStoryTracking.HasValue)
                 settings.CreateVibeStoryTracking = settingsDto.CreateVibeStoryTracking.Value;
             if (settingsDto.CreateVibeStoryTrackingCustomEnvs.HasValue)
@@ -333,7 +335,8 @@ public static class AppSettingsRoutes
             ClaudeGatewayApiKeyHeader: settings.ClaudeGatewayApiKeyHeader,
             ClaudeGatewaySupportsToolSearch: settings.ClaudeGatewaySupportsToolSearch,
             CodexInheritedBaseBypassesRelay: InheritedBaseBypassesRelay("OPENAI_BASE_URL", null),
-            ClaudeInheritedBaseBypassesRelay: InheritedBaseBypassesRelay(LlmProxyClaudeConfig.BaseUrlVariable, LlmProxyUpstream.ClaudeVariable)
+            ClaudeInheritedBaseBypassesRelay: InheritedBaseBypassesRelay(LlmProxyClaudeConfig.BaseUrlVariable, LlmProxyUpstream.ClaudeVariable),
+            VsCodeSpellCheck: settings.VsCodeSpellCheck
         );
     }
 

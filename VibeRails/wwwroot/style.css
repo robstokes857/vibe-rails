@@ -19934,6 +19934,28 @@ body.performance-mode .brand-text-sm {
     .vb-setup-installer { margin-left: 0; }
 }
 
+/* Board spelling decorates the native field; this layer never paints text or receives input. */
+.board-spelling { position: relative; min-width: 0; width: 100%; }
+.board-spelling > input, .board-spelling > textarea { display: block; width: 100%; }
+.board-spelling-overlay { position: absolute; inset: 0; overflow: hidden; pointer-events: none; border-radius: inherit; }
+.board-spelling-mirror { position: absolute; box-sizing: border-box; color: transparent; pointer-events: none; }
+.board-spelling-error { color: transparent; text-decoration: underline wavy var(--color-danger, #ef4444); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.board-spelling-tools { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; padding: 2px 8px; }
+.board-spelling-check { min-height: var(--control-height-small, 32px); padding: 2px 4px; border: 0; border-radius: var(--radius-control);
+    background: transparent; color: var(--color-text-muted, #94a3b8); font: inherit; font-size: var(--text-support, 13px); text-align: left; }
+.board-spelling-check:hover { color: var(--color-accent, #14b8a6); background: var(--color-bg-surface-hover, #1e1e2a); }
+.board-spelling-check:focus-visible, .board-spelling-popup button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.board-spelling-status { font-size: var(--text-support, 13px); color: var(--color-text-muted, #94a3b8); }
+.board-spelling-popup { position: fixed; z-index: 1100; overflow-y: auto; padding: 5px; border: 1px solid var(--control-border);
+    border-radius: var(--radius-surface); background: var(--color-bg-surface-hover, #1e1e2a); color: var(--color-text, #f8fafc);
+    box-shadow: var(--shadow-menu, 0 12px 32px #0008); }
+.board-spelling-heading { margin: 0; padding: 6px 8px; overflow-wrap: anywhere; color: var(--color-text-muted, #94a3b8); font-size: var(--text-support, 13px); }
+.board-spelling-popup button { display: block; width: 100%; min-height: var(--control-height); padding: 6px 8px; border: 0;
+    border-radius: var(--radius-control); background: transparent; color: var(--color-text, #f8fafc); text-align: left;
+    font: inherit; font-size: var(--text-control, 14px); overflow-wrap: anywhere; }
+.board-spelling-popup button:hover { background: var(--menu-item-hover); }
+@media (forced-colors: active) { .board-spelling-error { text-decoration-color: Mark; } }
+
 /* Touch and motion apply to shared chrome; terminal/Monaco rendering is independent. */
 @media (pointer: coarse), (max-width: 576px) {
     :root { --control-height: 44px; }

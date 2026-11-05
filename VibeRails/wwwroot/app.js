@@ -30,6 +30,7 @@ import { setupVSCodeScriptImport } from './js/modules/vscode-script-import.js';
 import { setupVSCodeLauncherBridge } from './js/modules/vscode-launcher-bridge.js';
 import { setupVSCodeReviewBridge } from './js/modules/vscode-review-bridge.js';
 import { UiVisibility } from './js/modules/ui-visibility.js';
+import { setBoardSpellingEnabled } from './js/modules/board-spelling.js';
 import { showAppToast } from './js/modules/toast-service.js';
 import { getLlmName, getProjectNameFromPath, formatRelativeTime, getCliBrand, escapeHtml } from './js/modules/utils.js';
 
@@ -494,6 +495,7 @@ export class VibeControlApp {
             ...settings
         });
         this.applyVsCodeThemePreference();
+        setBoardSpellingEnabled(this.appSettings.vsCodeSpellCheck);
         this.updateAccountNav();
         this.terminalTokenCompression?.setEnabledSources(getTokenSaverEnabledSources(this.appSettings));
     }
@@ -503,6 +505,7 @@ export class VibeControlApp {
             remoteAccess: false,
             apiKey: '',
             useVsCodeTheme: false,
+            vsCodeSpellCheck: false,
             mcpEnabled: true,
             computerName: '',
             codexLlmProxyEnabled: false,

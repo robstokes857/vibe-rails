@@ -61,6 +61,7 @@ import { renderCommentHtml, wrapSelectionAsCode, toPlainPreview } from './board-
 import { historySection, mountHistory } from './board-history.js';
 import { bindBoardReferences, canonicalSessionId } from './board-references.js';
 import { bindComposerPreview, boardTextOptions } from './board-composer-preview.js';
+import { bindBoardSpelling } from './board-spelling.js';
 import { createBoardImagePreviews } from './board-image-previews.js';
 import { openDiffModal } from './diff-modal.js';
 import * as SessionDebug from './session-viewer.js';
@@ -1849,6 +1850,7 @@ export class BoardController {
         };
         editor.addEventListener('input', trackEdits);
         editor.addEventListener('change', trackEdits);
+        this.composerDisposers.push(bindBoardSpelling(editor.querySelector('#board-card-title')));
         editor._boardDiscussionImages = createBoardImagePreviews(() => editor._boardCard,
             () => this.applyCommentClamps(editor.querySelector('[data-board-comments]')));
         this.composerDisposers.push(() => editor._boardDiscussionImages.dispose());
@@ -2116,6 +2118,7 @@ export class BoardController {
             }
         };
         input.addEventListener('input', autoGrow);
+        this.composerDisposers.push(bindBoardSpelling(input));
         this.composerDisposers.push(bindComposerPreview(composer, input, card));
         this.composerDisposers.push(bindBoardReferences(input, { app: this.app, host: composer, card,
             onLink: async item => {

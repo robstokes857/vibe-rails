@@ -43,6 +43,7 @@ export class SettingsController {
             remoteAccess: false,
             apiKey: '',
             useVsCodeTheme: false,
+            vsCodeSpellCheck: false,
             createVibeStoryTracking: true,
             createVibeStoryTrackingCustomEnvs: false,
             mcpEnabled: true,
@@ -93,6 +94,7 @@ export class SettingsController {
             const performanceModeToggle = root.querySelector('#setting-performance-mode');
             const useVsCodeThemeRow = root.querySelector('#setting-use-vscode-theme-row');
             const useVsCodeThemeToggle = root.querySelector('#setting-use-vscode-theme');
+            const vsCodeSpellCheckToggle = root.querySelector('#setting-vscode-spell-check');
             const createVibeStoryTrackingToggle = root.querySelector('#setting-create-vibe-story-tracking');
             const createVibeStoryTrackingCustomEnvsToggle = root.querySelector('#setting-create-vibe-story-tracking-custom-envs');
             const mcpEnabledToggle = root.querySelector('#setting-enable-mcp');
@@ -138,6 +140,7 @@ export class SettingsController {
             if (useVsCodeThemeToggle) {
                 useVsCodeThemeToggle.checked = settings.useVsCodeTheme || false;
             }
+            if (vsCodeSpellCheckToggle) vsCodeSpellCheckToggle.checked = settings.vsCodeSpellCheck === true;
             if (createVibeStoryTrackingToggle) {
                 createVibeStoryTrackingToggle.checked = settings.createVibeStoryTracking !== false;
             }
@@ -234,7 +237,8 @@ export class SettingsController {
                             clearApiKey,
                             createVibeStoryTrackingToggle?.checked ?? true,
                             createVibeStoryTrackingCustomEnvsToggle?.checked ?? false,
-                            gatewayCredentialEdits(root)
+                            gatewayCredentialEdits(root),
+                            vsCodeSpellCheckToggle?.checked ?? false
                         );
                         if (savedSettings) {
                             await this._reconcileSavedApiKey(savedSettings, linkedKeyVersion);
@@ -273,7 +277,7 @@ export class SettingsController {
         }
     }
 
-    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexEnterpriseNetworkProxy, codexLlmProxyMode, claudeEnterpriseNetworkProxy, openCodeEnterpriseNetworkProxy, grokEnterpriseNetworkProxy, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, clearApiKey = false, createVibeStoryTracking = true, createVibeStoryTrackingCustomEnvs = false, gatewayCredentials = {}) {
+    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexEnterpriseNetworkProxy, codexLlmProxyMode, claudeEnterpriseNetworkProxy, openCodeEnterpriseNetworkProxy, grokEnterpriseNetworkProxy, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, clearApiKey = false, createVibeStoryTracking = true, createVibeStoryTrackingCustomEnvs = false, gatewayCredentials = {}, vsCodeSpellCheck = false) {
         try {
             const previous = this.app.appSettings || {};
             // A new gateway receives that CLI's traffic and credentials; clearing one does not
@@ -293,6 +297,7 @@ export class SettingsController {
                 remoteAccess: remoteAccess,
                 apiKey: apiKey,
                 useVsCodeTheme: useVsCodeTheme,
+                vsCodeSpellCheck,
                 mcpEnabled: mcpEnabled,
                 computerName: computerName,
                 codexEnterpriseNetworkProxy: codexEnterpriseNetworkProxy,
@@ -469,6 +474,7 @@ export class SettingsController {
             '#setting-remote-access',
             '#setting-api-key',
             '#setting-use-vscode-theme',
+            '#setting-vscode-spell-check',
             '#setting-create-vibe-story-tracking',
             '#setting-create-vibe-story-tracking-custom-envs',
             '#setting-computer-name',
@@ -503,6 +509,7 @@ export class SettingsController {
             remoteAccess: isChecked('#setting-remote-access'),
             apiKey: valueOf('#setting-api-key'),
             useVsCodeTheme: isChecked('#setting-use-vscode-theme'),
+            vsCodeSpellCheck: isChecked('#setting-vscode-spell-check'),
             createVibeStoryTracking: isChecked('#setting-create-vibe-story-tracking'),
             createVibeStoryTrackingCustomEnvs: isChecked('#setting-create-vibe-story-tracking-custom-envs'),
             computerName: valueOf('#setting-computer-name'),
@@ -593,6 +600,7 @@ export class SettingsController {
         const remoteAccessToggle = root.querySelector('#setting-remote-access');
         const apiKeyInput = root.querySelector('#setting-api-key');
         const useVsCodeThemeToggle = root.querySelector('#setting-use-vscode-theme');
+        const vsCodeSpellCheckToggle = root.querySelector('#setting-vscode-spell-check');
         const createVibeStoryTrackingToggle = root.querySelector('#setting-create-vibe-story-tracking');
         const createVibeStoryTrackingCustomEnvsToggle = root.querySelector('#setting-create-vibe-story-tracking-custom-envs');
         const computerNameInput = root.querySelector('#setting-computer-name');
@@ -611,6 +619,7 @@ export class SettingsController {
             apiKeyInput.dataset.originalValue = settings.apiKey || '';
         }
         if (useVsCodeThemeToggle) useVsCodeThemeToggle.checked = settings.useVsCodeTheme === true;
+        if (vsCodeSpellCheckToggle) vsCodeSpellCheckToggle.checked = settings.vsCodeSpellCheck === true;
         if (createVibeStoryTrackingToggle) createVibeStoryTrackingToggle.checked = settings.createVibeStoryTracking !== false;
         if (createVibeStoryTrackingCustomEnvsToggle) createVibeStoryTrackingCustomEnvsToggle.checked = settings.createVibeStoryTrackingCustomEnvs === true;
         if (computerNameInput) {

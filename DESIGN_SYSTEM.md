@@ -344,6 +344,22 @@ each card type, ordered broadest first. Only the first disclosure opens by defau
 Place one primary **Save context** action below the editor; it saves changed levels
 with their own revision checks and preserves drafts if a save fails.
 
+Settings > General exposes **VS Code Spell Check**, off by default and saved with
+the application settings. Only when enabled do Board titles, descriptions and comment
+composers offer offline English spelling help in browsers and the VS Code webview.
+When disabled, attach no spelling UI or input handlers and do not load its dictionary.
+Keep native text fields, selection, undo and
+reference autocomplete. A non-interactive overlay marks misspellings with a wavy
+`--color-danger` underline without changing text color or field geometry. Click a
+marked word, right-click it, or press Alt+Down at the word to open suggestions.
+Use the ordinary opaque action-popover surface and keyboard-focusable buttons for
+replacements, **Ignore word** (this session), and **Add to dictionary** (this browser
+profile). Escape returns focus to the field. An unobtrusive **Check spelling** action
+also opens the first issue, giving keyboard and touch users an explicit entry point.
+Skip code, URLs, email addresses and file/card references. Spelling never blocks saving
+and never sends draft text to a service; explain dictionary-load or storage failures
+beside the spelling action and allow retry.
+
 Base-LLM option editors place a **Make Default For LLM** `btn-link` action with a
 padlock icon below YOLO. It saves model, speed, effort, start mode and YOLO for that
 LLM on this computer. Selecting that LLM fills its saved defaults; saved card or
@@ -555,6 +571,14 @@ These patterns belong to the public home page and the header. Task screens do no
 Start with a single column. Add columns only when controls and labels fit naturally. At narrow widths, stack form groups and wrap action rows; avoid horizontal page scrolling. Test at 320px, 375px, 768px and 1024px, including enlarged text and long labels.
 
 Hosted boards keep at least 24rem of lane height. When wrapped controls, enlarged text or a short viewport leave less room, the page scrolls vertically instead of compressing the card list. Lanes retain their own card scrolling and horizontal lane navigation. Card attachments offer owners a labelled image picker and Upload image action, format/size guidance, an inline error and a polite upload status. Shared members only read attachments.
+
+Desktop Board Markdown attachments open in the existing nested reader, showing formatted
+**Preview** by default and a **Source** toggle beside it. Use ordinary labelled buttons with
+`aria-pressed` in a named group; preserve Download, Escape, focus return and the card's unsaved
+draft. Prose uses the body scale, headings the display font and code the monospace font.
+Tables and code scroll within the reader, including on narrow screens. Raw HTML stays literal,
+images show an inert text placeholder, and only explicit HTTP(S) links open a new tab without
+referrer or opener access. Keep long-file truncation visible and preserve the original download.
 
 The session replayer (`session-replay/style.css`) puts the code and events panel beside the terminal only when its frame is wider than 1200px. From 721px to 1200px the panel sits under a full-width terminal, with its file or event view and its list side by side (VIBE-148). When the frame is too short for both (a 320px terminal and a 280px panel), the player scrolls vertically instead of squeezing either panel. At 720px and below the readable screen replaces xterm and the player scrolls. The replayer's breakpoints respond to its iframe width, not the window width.
 

@@ -89,3 +89,5 @@ Tests/TokenSaver/Fixtures/** -text
 # VCA regression fixtures are byte-exact (CRLF, BOM, and binary cases are
 # deliberate). text=auto would rewrite them at commit or checkout.
 Tests/VcaRegression/Fixtures/** -text
+VibeRails/wwwroot/assets/spellcheck/english.js -text
+VibeRails/wwwroot/assets/board/markdown-it.min.js -text

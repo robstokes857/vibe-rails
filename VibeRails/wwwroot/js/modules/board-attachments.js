@@ -1,5 +1,5 @@
 // Card files never execute as documents in our origin. We fetch with the normal API
-// credentials, show text as text, and paint PDFs onto a canvas only.
+// credentials, render Markdown with raw HTML/images disabled, and paint PDFs onto a canvas only.
 import { isConfirmDialogOpen } from './utils.js';
 
 const MAX_TEXT_PREVIEW_CHARACTERS = 200_000;
@@ -11,10 +11,8 @@ let activePreview = null;
 export function getAttachmentPreviewKind(attachment) {
     const mime = String(attachment?.mimeType || '').toLowerCase();
     if (['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(mime)) return 'image';
-    // Markdown previews as its own source. Rendering it would cost a parser plus a
-    // sanitizer to re-earn the safety textContent gives us for free, and anyone who
-    // wants it formatted can open the file in an editor.
-    if (mime === 'text/markdown' || mime === 'text/plain') return 'text';
+    if (mime === 'text/markdown') return 'markdown';
+    if (mime === 'text/plain') return 'text';
     if (mime === 'application/pdf') return 'pdf';
     return 'download';
 }
@@ -59,7 +57,7 @@ export async function openBoardAttachment(app, cardId, attachment) {
             <button type="button" class="btn btn-sm btn-outline-secondary me-3" data-attachment-download disabled>Download</button>
             <button type="button" class="btn-close" data-attachment-close aria-label="Close attachment"></button></div>
           <div class="vb-board-attachment-toolbar" data-attachment-toolbar hidden></div>
-          <div class="modal-body vb-board-attachment-body" data-attachment-body aria-live="polite">Loading attachment…</div>
+          <div class="modal-body vb-board-attachment-body" data-attachment-body tabindex="0" aria-label="Attachment content" aria-live="polite">Loading attachment…</div>
         </div></div></div><div class="modal-backdrop fade show vb-diff-modal-backdrop"></div>`;
     layer.querySelector('.modal-title').textContent = attachment.name || 'Attachment';
     const previousFocus = document.activeElement;
@@ -103,7 +101,7 @@ export async function openBoardAttachment(app, cardId, attachment) {
         if (isConfirmDialogOpen()) return;
         if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); close(); }
         if (event.key === 'Tab') {
-            const focusable = [...layer.querySelectorAll('button:not([disabled]),a[href],input:not([disabled])')]
+            const focusable = [...layer.querySelectorAll('button:not([disabled]),a[href],input:not([disabled]),[tabindex="0"]')]
                 .filter(element => element.offsetParent !== null);
             const first = focusable[0], last = focusable.at(-1);
             if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
@@ -143,7 +141,7 @@ export async function openBoardAttachment(app, cardId, attachment) {
             img.src = objectUrl(new Blob([blob], { type: attachment.mimeType }));
             img.onerror = () => { body.textContent = 'This image cannot be previewed. You can still download the original file.'; };
             body.append(img);
-        } else if (kind === 'text') {
+        } else if (kind === 'text' || kind === 'markdown') {
             const bytes = await blob.slice(0, MAX_TEXT_PREVIEW_BYTES).arrayBuffer();
             if (disposed) return close;
             // The streaming decoder tolerates only a cut final UTF-8 sequence, not malformed bytes.
@@ -159,6 +157,39 @@ export async function openBoardAttachment(app, cardId, attachment) {
                 body.append(notice);
             }
             body.append(preview);
+            if (kind === 'markdown') {
+                try {
+                    const { renderAttachmentMarkdown } = await import('./board-attachment-markdown.js');
+                    if (disposed) return close;
+                    const rendered = document.createElement('article');
+                    rendered.className = 'vb-board-attachment-markdown';
+                    rendered.setAttribute('aria-label', 'Markdown preview');
+                    rendered.innerHTML = renderAttachmentMarkdown(preview.textContent);
+                    body.append(rendered);
+                    toolbar.hidden = false;
+                    toolbar.innerHTML = '<div role="group" aria-label="Markdown view">'
+                        + '<button type="button" class="btn btn-sm btn-outline-secondary" data-markdown-preview aria-pressed="true">Preview</button> '
+                        + '<button type="button" class="btn btn-sm btn-outline-secondary" data-markdown-source aria-pressed="false">Source</button></div>';
+                    const previewButton = toolbar.querySelector('[data-markdown-preview]');
+                    const sourceButton = toolbar.querySelector('[data-markdown-source]');
+                    const setView = showPreview => {
+                        rendered.hidden = !showPreview;
+                        preview.hidden = showPreview;
+                        previewButton.setAttribute('aria-pressed', String(showPreview));
+                        sourceButton.setAttribute('aria-pressed', String(!showPreview));
+                        body.scrollTop = 0;
+                    };
+                    previewButton.addEventListener('click', () => setView(true));
+                    sourceButton.addEventListener('click', () => setView(false));
+                    setView(true);
+                } catch {
+                    if (disposed) return close;
+                    const notice = document.createElement('p');
+                    notice.className = 'alert alert-info';
+                    notice.textContent = 'Markdown preview unavailable. Showing source; you can still download the original file.';
+                    body.prepend(notice);
+                }
+            }
         } else if (kind === 'pdf') {
             // Previewing a PDF is a convenience, never a requirement: the bytes are already
             // downloadable and a real PDF viewer renders them better than we do. So every

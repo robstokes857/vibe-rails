@@ -6,6 +6,7 @@ import { mountLlmPicker } from './pickers/llm-picker.js';
 import { renderCommentHtml } from './board-text.js';
 import { previousWorkHtml } from './board-previous-work.js';
 import { boardTracker, cardTracker, trackerLabel } from './board-brand.js';
+import { bindBoardSpelling } from './board-spelling.js';
 
 const TYPES = [['task', 'Task'], ['bug', 'Bug'], ['feature', 'Feature'], ['research-spike', 'Research spike'], ['chore', 'Chore / tech debt']];
 const options = (items, selected) => items.map(([id, name]) => `<option value="${escapeHtml(id)}"${id === selected ? ' selected' : ''}>${escapeHtml(name)}</option>`).join('');
@@ -83,6 +84,7 @@ export function openLocalCardEditor(app, detail, { openCard, onChanged }) {
     let busy = false;
     let linksDispose = null;
     let pickerDispose = null;
+    const spellingDisposers = [];
     const lifetime = new AbortController();
     const dispose = () => {
         if (disposed) return;
@@ -90,6 +92,7 @@ export function openLocalCardEditor(app, detail, { openCard, onChanged }) {
         lifetime.abort();
         linksDispose?.();
         pickerDispose?.();
+        spellingDisposers.splice(0).forEach(dispose => dispose());
     };
     app.showModal(cardLabel(card), localCardEditorHtml(detail), { onClose: dispose });
     const editor = document.getElementById('modal-container')?.querySelector('[data-local-board-card-editor]');
@@ -117,6 +120,9 @@ export function openLocalCardEditor(app, detail, { openCard, onChanged }) {
         editor.querySelectorAll('input, select, textarea, button').forEach(control => { control.disabled = true; });
         form.elements.namedItem('assignee').tomselect?.disable();
         return dispose;
+    }
+    for (const id of ['local-card-title', 'local-card-description', 'local-card-comment']) {
+        spellingDisposers.push(bindBoardSpelling(editor.querySelector(`#${id}`)));
     }
     linksDispose = bindCardLinks(editor, card, {
         api: {
@@ -166,6 +172,7 @@ export function openLocalCardEditor(app, detail, { openCard, onChanged }) {
             card.comments = [...(card.comments || []), entry];
             comments.innerHTML = commentsHtml(card, boardTracker(detail));
             body.value = '';
+            body.dispatchEvent(new Event('input', { bubbles: true }));
             changed();
         } catch (error) { showError(error?.message || 'Could not post the comment.'); }
         finally { if (alive()) lock(false); }

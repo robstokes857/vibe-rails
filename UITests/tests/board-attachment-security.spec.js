@@ -7,7 +7,7 @@ async function isolatedViewerPage(page) {
     await page.goto('/attachment-fixture');
 }
 
-test('Markdown previews as inert source text, never as rendered HTML', async ({ page }) => {
+test('Markdown renders safely and Source preserves the uploaded text', async ({ page }) => {
     await isolatedViewerPage(page);
     const unexpected = [];
     page.on('request', request => { if (request.url().includes('attacker.example')) unexpected.push(request.url()); });
@@ -15,22 +15,85 @@ test('Markdown previews as inert source text, never as rendered HTML', async ({ 
         + '![tracker](https://attacker.example/pixel)\n\n'
         + '<svg><g/onload=alert(1)//<p>\n\n<img src=x onerror="window.__xss=1">\n\n'
         + '<iframe srcdoc="<script>alert(1)</script>"></iframe>\n\n'
-        + '[bad](javascript:alert(1))';
+        + '[bad](javascript:alert(1))\n\n[internal](/api/v1/shutdown)\n\n'
+        + '| Name | Value |\n| --- | --- |\n| Feature | Ready |\n\n'
+        + '[guide](https://example.com/guide)\n\n```html\n<img src=x>\n```';
     await page.evaluate(async markdown => {
         const { openBoardAttachment } = await import('/js/modules/board-attachments.js');
+        document.getElementById('unsaved').focus();
         await openBoardAttachment({ apiCall: async () => new Blob([markdown]) },
             'card-1', { id: 'att-md', name: 'notes.md', mimeType: 'text/markdown' });
     }, source);
-    // The whole source survives verbatim, which is only possible if nothing parsed it.
-    await expect(page.locator('.vb-board-attachment-text')).toHaveText(source);
+    await expect(page.locator('.vb-board-attachment-markdown h1')).toHaveText('Scope');
+    await expect(page.locator('.vb-board-attachment-markdown strong')).toHaveText('Strong');
+    await expect(page.locator('.vb-board-attachment-markdown td').last()).toHaveText('Ready');
+    await expect(page.locator('.vb-board-attachment-markdown pre code')).toHaveText('<img src=x>\n');
+    await expect(page.locator('.vb-board-attachment-text')).toBeHidden();
+    const link = page.locator('.vb-board-attachment-markdown a');
+    await expect(link).toHaveCount(1);
+    await expect(link).toHaveAttribute('href', 'https://example.com/guide');
+    await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
     const result = await page.evaluate(() => ({
         live: document.querySelectorAll('.vb-board-attachment-layer img, .vb-board-attachment-layer svg,'
-            + ' .vb-board-attachment-layer iframe, .vb-board-attachment-layer a, .vb-board-attachment-layer h1').length,
+            + ' .vb-board-attachment-layer iframe, .vb-board-attachment-layer script').length,
         executed: Boolean(window.__xss)
     }));
     expect(result.live).toBe(0);
     expect(result.executed).toBe(false);
     expect(unexpected).toEqual([]);
+    await page.getByRole('button', { name: 'Source', exact: true }).click();
+    await expect(page.locator('.vb-board-attachment-text')).toBeVisible();
+    expect(await page.locator('.vb-board-attachment-text').textContent()).toBe(source);
+    await expect(page.locator('.vb-board-attachment-markdown')).toBeHidden();
+    await page.keyboard.press('Tab');
+    await expect(page.locator('[data-attachment-body]')).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(page.locator('[data-attachment-download]')).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await expect(page.locator('[data-attachment-body]')).toBeFocused();
+    await page.getByRole('button', { name: 'Preview', exact: true }).focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.vb-board-attachment-markdown')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Preview', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#unsaved')).toHaveValue('unsaved description');
+    await expect(page.locator('#unsaved')).toBeFocused();
+    expect(await page.locator('#parent-card').evaluate(element => element.inert)).toBe(false);
+});
+
+for (const width of [390, 1440]) {
+    test(`Markdown reader contains wide content and truncates long previews at ${width}px`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 900 });
+        await isolatedViewerPage(page);
+        await page.addStyleTag({ url: '/style.css' });
+        await page.evaluate(async () => {
+            const { openBoardAttachment } = await import('/js/modules/board-attachments.js');
+            await openBoardAttachment({ apiCall: async () => new Blob(['# Long report\n\n```\n' + 'x'.repeat(220000) + '\n```']) },
+                'card-1', { id: 'att-long', name: 'long.md', mimeType: 'text/markdown' });
+        });
+        await expect(page.locator('[data-attachment-body]')).toContainText('Preview truncated');
+        await expect(page.locator('.vb-board-attachment-markdown h1')).toHaveText('Long report');
+        const geometry = await page.locator('.vb-board-attachment-modal .modal-content').evaluate(el => ({
+            width: el.getBoundingClientRect().width, scroll: el.scrollWidth, client: el.clientWidth
+        }));
+        expect(geometry.width).toBeLessThanOrEqual(width);
+        expect(geometry.scroll).toBeLessThanOrEqual(geometry.client + 1);
+        await page.getByRole('button', { name: 'Source', exact: true }).click();
+        expect((await page.locator('.vb-board-attachment-text').textContent()).length).toBe(200000);
+    });
+}
+
+test('Markdown module failure preserves Source and Download', async ({ page }) => {
+    await page.route('**/board-attachment-markdown.js', route => route.abort());
+    await isolatedViewerPage(page);
+    await page.evaluate(async () => {
+        const { openBoardAttachment } = await import('/js/modules/board-attachments.js');
+        await openBoardAttachment({ apiCall: async () => new Blob(['# Keep this']) },
+            'card-1', { id: 'att-md', name: 'offline.md', mimeType: 'text/markdown' });
+    });
+    await expect(page.locator('[data-attachment-body]')).toContainText('Markdown preview unavailable');
+    await expect(page.locator('.vb-board-attachment-text')).toHaveText('# Keep this');
+    await expect(page.locator('[data-attachment-download]')).toBeEnabled();
 });
 
 test('active binaries are download-only; nested close restores card and revokes URLs', async ({ page }) => {

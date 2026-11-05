@@ -676,10 +676,24 @@ relationships do not automatically share sessions or commits. Refresh to see MCP
 Once the session is attached, one agent `link_board_commit` call shares the snapshot with all
 its attached cards; the frontend reads the ordinary commit lists and needs no extra request.
 
-The card title, description, comment composer, and Chat with agent question ask the browser
-for spell check (`spellcheck="true"`). Chromium leaves it off unless the field requests it.
-Commit SHAs, session ids, and other identifiers stay unchecked. The same request covers a
-foreign card's title, description, and comment, plus the board's agent-context messages.
+Settings > General > **VS Code Spell Check** (`vsCodeSpellCheck` / `Settings.VsCodeSpellCheck`)
+is off by default, including for older settings. The nullable API field preserves the saved
+choice when omitted. `app.setAppSettings` applies the flag through `setBoardSpellingEnabled`:
+disabled fields get no spelling DOM/listeners or dictionary load; changing the saved flag
+mounts/disposes existing bindings without losing drafts or personal words.
+When enabled, the card title, description and comment composer use `board-spelling.js` for offline English
+spelling in browsers and VS Code (whose Electron host disables native checking). It decorates
+the native fields with a transparent, non-interactive mirror, skips Markdown code, URLs,
+identifiers and references, and offers click/right-click, Alt+Down and **Check spelling**
+entry points. Suggestions use native `insertText` for undo; input events preserve dirty tracking,
+auto-grow and references. Ignore words live for the page session; Add to dictionary stores only
+normalized words under `viberails.board.spelling.words.v1` in this browser/webview profile.
+Storage failures fall back to session ignore with an inline explanation. The lazy bundled
+`assets/spellcheck/english.js` contains nspell plus one English dictionary, with licenses and
+rebuild instructions beside it. No external request, worker, API or database change is involved.
+Dispose each field's binding with its editor; stale async checks cannot repaint a changed draft.
+The same binding covers editable foreign cards. Other prose fields (Chat with agent and board
+context) retain native `spellcheck="true"`; commit SHAs, session IDs and other identifiers stay unchecked.
 Descriptions always open as editable source, with no preview pane or Edit/Preview controls.
 Markdown is always enabled for rendered comments; the retired browser preference is ignored.
 Previous work remains available as a collapsed sidebar section for saved handoffs and file entry
@@ -699,7 +713,8 @@ composer share `boardTextOptions` (Markdown enabled, attachments, sessions, comm
 composer shows a live preview with small raster thumbnails. `board-image-previews.js` owns authenticated large-image
 loads for composers and posted Comments, including cancellation, Blob URL disposal and retry on
 the next render after a failed fetch. New-card image tokens use temporary IDs rewritten after
-upload; failed saves preserve the unfinished queue. Markdown/TXT file attachments still preview as source.
+upload; failed saves preserve the unfinished queue. Markdown attachments have a separate
+read-only Preview/Source viewer; TXT previews as source.
 
 **Reference typeahead** is shared by descriptions/comments/new cards. `board-references.js`
 uses the disposable/debounced popup in `board-file-refs.js`. `@` searches files only, even when
@@ -748,20 +763,26 @@ their inline `data:` previews for `![name](attachment:<id>)`; other content load
 credentials through `/attachments/{id}/content` using `app.apiCall(..., {responseType:'blob'})`.
 No credential is placed in a URL, and no uploaded file is served from static assets.
 
-`board-attachments.js` owns a nested, disposable viewer: TXT **and Markdown** both reach the
-DOM through textContent, so Markdown previews as its own source and no Markdown parser or
-HTML sanitizer is vendored; PDF.js paints canvas pages without document scripting,
+`board-attachments.js` owns a nested, disposable viewer: TXT and Markdown Source reach the
+DOM through textContent. Markdown Preview lazy-loads `board-attachment-markdown.js` and the
+vendored markdown-it browser module, with raw HTML disabled, no plugins/highlighter, inert
+image placeholders and only absolute HTTP(S) links without credentials. Relative and custom
+scheme links stay literal. No HTML sanitizer is needed under that configuration; enabling HTML
+or plugins requires a new security decision. Preview/Source never modifies stored files or
+the surrounding draft; failed renderer loading leaves Source and Download available.
+PDF.js paints canvas pages without document scripting,
 annotations, XFA, or eval. Other file types only download as octet-stream. Uploaded
 filenames and metadata remain untrusted. Close/unload aborts requests, terminates PDF work,
 and revokes Blob URLs. Image previews use tracked Blob URLs directly, avoiding a full base64 copy;
 both the browser and VS Code image CSP allow these URLs.
 
-`assets/board` holds exactly one dependency — PDF.js, as `pdf.min.js` plus
-`pdf.worker.min.js`. Its CMaps, standard fonts and Wasm decoders are deliberately not
+`assets/board` holds PDF.js (`pdf.min.js` plus `pdf.worker.min.js`) and the self-contained
+markdown-it browser module with dependency licenses and an update script. PDF.js's CMaps,
+standard fonts and Wasm decoders are deliberately not
 vendored (194 files and 6.4 MB against 1.7 MB for the renderer), so CJK text and PDFs that
 omit the base-14 fonts fall back to system faces. Read `assets/board/README.md` before
-upgrading or before adding a frontend library here: rendered Markdown costs a parser plus a
-sanitizer to re-earn what textContent gives for free.
+upgrading or before adding a frontend library here; preserve the documented Markdown safety
+configuration and the browser/webview security regressions.
 
 Cards have one current state: no History rail or expected-description token. Attachment changes
 do not require a revision refresh. Failed queued uploads retain the card ID and unfinished queue

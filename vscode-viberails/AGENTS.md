@@ -155,6 +155,18 @@ before writing its template. A `srcdoc` frame cannot resolve local resources thr
 VS Code's service worker. The replay frame explicitly retains the parent CSP; keep the
 real-webview regression in `src/test/suite/session-replay-webview.test.ts` when changing it.
 
+Board spelling is opt-in through Settings > General > **VS Code Spell Check** (default false).
+It is owned by the shared frontend (`board-spelling.js`), with a lazy offline
+English dictionary ES module in `assets/spellcheck`. VS Code disables native Electron spell
+checking; do not rely on a field's `spellcheck` attribute or loosen the content policy.
+`src/test/suite/board-spelling-webview.test.ts` verifies dictionary loading under the production
+CSP, native correction/undo and disposal in a real webview. Keep the assets in packaged wwwroot.
+
+Markdown attachments use the shared, read-only Preview/Source viewer and a locally bundled
+markdown-it ES module. HTML stays disabled and images stay inert; never relax the webview
+CSP for uploaded content. `src/test/suite/board-attachment-webview.test.ts` covers renderer
+and stylesheet loading under the production policy, safety, source preservation and focus.
+
 ### Load-bearing manifest entries
 
 The `shift+enter` and `escape` keybinding entries in `package.json` (including the one whose `command` is the empty string) exist to stop VS Code from swallowing those keys inside the webview terminal. **Do not remove or "clean up" any of them.**

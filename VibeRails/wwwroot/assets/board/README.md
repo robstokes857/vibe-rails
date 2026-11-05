@@ -12,6 +12,8 @@ a new library to this directory.
 | `pdf.worker.min.js` | PDF.js worker, loaded through `GlobalWorkerOptions.workerSrc` | 6.3.289 |
 | `LICENSE-pdfjs.txt` | Apache-2.0, as shipped by the project | — |
 | `board-attachments.css` | Our own styles for the viewer layer | — |
+| `markdown-it.min.js` | Self-contained browser ES module for read-only Markdown | 15.0.3 |
+| `LICENSE-markdown-it.txt`, `LICENSE-*.txt` | Parser and bundled dependency notices | — |
 
 Upstream: <https://github.com/mozilla/pdf.js/releases>. Both JS files come from the `pdfjs-dist`
 build of the same release and **must be upgraded together** — a worker that does not match its
@@ -30,14 +32,38 @@ Wasm stays off (`useWasm: false`) and so does eval (`isEvalSupported: false`) be
 production CSP forbids both. PDF.js's bundled JavaScript decoders keep that boundary intact. XFA
 is off (`enableXfa: false`): it is a scripting-capable form layer with no place in a preview.
 
-## Before adding another library here
+## Markdown safety and upgrades
 
-The board renders **no Markdown and no HTML** from attachments. TXT and Markdown both reach the
-DOM through `textContent`, which is why this directory ships no Markdown parser and no HTML
-sanitizer — there is nothing to sanitize, because nothing is ever parsed. Rendering Markdown would
-cost a parser *plus* a sanitizer to re-earn exactly the safety `textContent` gives for free, and it
-would put two more dependencies on the attachment path, which handles untrusted files by
-definition. `board-text.js` documents the same rule for comment and description bodies.
+Markdown attachments use `board-attachment-markdown.js`, loaded only when opening a Markdown
+file. The parser is [markdown-it](https://github.com/markdown-it/markdown-it), MIT, with bundled
+entities (BSD-2-Clause), linkify-it, mdurl, punycode.js and uc.micro (MIT). Its browser module is
+about 125 KB uncompressed. Source maps, CLI, plugins, syntax highlighters and editor packages are
+not shipped. No network, worker, eval or stylesheet injection is required.
+
+Use the upstream [HTML-disabled safety strategy](https://github.com/markdown-it/markdown-it/blob/master/docs/safety.md):
+raw HTML is escaped, no plugins can generate additional markup, all images become text, and
+links are restricted to absolute HTTP(S) URLs without credentials. Links use a new tab with
+`noopener noreferrer`. Relative URLs cannot reach authenticated application routes. This
+configuration does not need an HTML sanitizer; **enabling HTML or adding plugins changes that
+decision and requires a new security review**. Comments still use the separate escape-first
+`board-text.js` renderer. TXT and Markdown Source use `textContent`.
+
+Preview/Source never edits the attachment. Preserve the existing 1 MiB / 200,000-character
+preview bounds, truncation notice, original download, cancellation and parent draft/focus.
+
+To update the parser, install into a temporary directory, without install scripts:
+
+```powershell
+npm install --prefix <temporary-directory> --ignore-scripts --no-audit --no-fund markdown-it@15.0.3 entities@8.1.0 linkify-it@6.1.0 mdurl@2.1.0 punycode.js@2.3.1 uc.micro@3.0.0
+node VibeRails/wwwroot/assets/board/update-markdown.mjs <temporary-directory>/node_modules
+```
+
+The updater checks exact versions, copies the official browser build and license notices,
+and strips only the development source-map pointer. Keep its output byte-exact via
+`.gitattributes`. After upgrading, run the Markdown Node regressions, attachment browser
+security tests and real VS Code attachment webview test.
+
+## Before adding another library here
 
 If a new dependency really is warranted: pin an exact version, vendor its licence next to it, add
 a row to the table above, and say in this file what you chose not to vendor and why.

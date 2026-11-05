@@ -10,9 +10,10 @@ test('preview choice only trusts server-normalized safe MIME categories', () => 
     assert.equal(getAttachmentPreviewKind({ mimeType: 'application/pdf' }), 'pdf');
 });
 
-test('Markdown previews as its own source rather than as rendered HTML', () => {
-    assert.equal(getAttachmentPreviewKind({ mimeType: 'text/markdown' }), 'text');
+test('only server-normalized Markdown selects the formatted viewer', () => {
+    assert.equal(getAttachmentPreviewKind({ mimeType: 'text/markdown' }), 'markdown');
     assert.equal(getAttachmentPreviewKind({ mimeType: 'text/plain' }), 'text');
+    assert.equal(getAttachmentPreviewKind({ mimeType: 'text/plain', name: 'notes.md' }), 'text');
 });
 
 function previewDom(t) {

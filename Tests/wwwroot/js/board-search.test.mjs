@@ -194,7 +194,9 @@ function formHarness() {
 
 test('foreign editor saves only changed fields and preserves drafts after comment activity or a failed save', async t => {
     const form = formHarness(), commentForm = formHarness();
-    commentForm.fields.body = { value: '**Comment draft** #abcdef0 <script>invalid</script>' };
+    const bodyEvents = [];
+    commentForm.fields.body = { value: '**Comment draft** #abcdef0 <script>invalid</script>',
+        dispatchEvent: event => bodyEvents.push(event.type) };
     const comments = { innerHTML: '' }, status = { textContent: '' };
     const elements = { '[data-local-card-form]': form, '[data-local-comment-form]': commentForm,
         '[data-local-card-comments]': comments, '[data-local-card-status]': status };
@@ -224,6 +226,7 @@ test('foreign editor saves only changed fields and preserves drafts after commen
     await commentForm.handlers.submit(submit);
     assert.equal(form.fields.description.value, 'Keep this draft');
     assert.equal(commentForm.fields.body.value, '');
+    assert.deepEqual(bodyEvents, ['input'], 'clearing the composer refreshes spelling decorations');
     assert.match(comments.innerHTML, /Comment draft/);
     assert.match(comments.innerHTML, /<strong>Comment draft<\/strong>/);
     assert.doesNotMatch(comments.innerHTML, /<script>|data-board-ref-commit/i);
