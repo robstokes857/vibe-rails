@@ -1,16 +1,22 @@
 const { test, expect } = require('@playwright/test');
 
-async function setup(page) {
+async function setup(page, safety = { generation: '0', accountId: 1, destination: 'https://viberails.ai', remoteWork: { state: 'enabled' }, uploadsBlocked: false, localReviewRequired: false, uploadReviewRequired: false }) {
     const row = (id, name, isOwner = true, localCopies = []) => ({ id, name, isOwner, localCopies, lanes: ['Backlog', 'Done'], url: 'https://viberails.ai/boards/' + id });
     const state = {
         rows: [row('linked', 'Current work', true, [{ projectName: 'vibe-rails', syncEnabled: true }]),
             row('old', 'Old unused board'), row('shared', '<img src=x onerror=alert(1)>', false)],
-        context: 'account-a', writes: [], offsets: [], nextOffset: null, fail: false, blockRead: null
+        safety, approvals: [], context: 'account-a', writes: [], offsets: [], nextOffset: null, fail: false, blockRead: null
     };
     await page.addInitScript(() => sessionStorage.setItem('viberails_tab', 'board-fixture'));
     await page.routeWebSocket('**/api/v1/events/ws*', () => {});
     await page.route('**/api/v1/**', async route => {
         const request = route.request(), url = new URL(request.url());
+        if (url.pathname === '/api/v1/board/remote/safety') return route.fulfill({ json: state.safety });
+        if (url.pathname === '/api/v1/board/remote/safety/approve') {
+            state.approvals.push(request.postDataJSON());
+            state.safety = { ...state.safety, localReviewRequired: false, uploadReviewRequired: state.safety.uploadsBlocked };
+            return route.fulfill({ json: state.safety });
+        }
         if (url.pathname.startsWith('/api/v1/board/remote')) {
             if (request.method() === 'GET') {
                 state.offsets.push(url.searchParams.get('offset'));
@@ -131,4 +137,17 @@ test('Closing a manager cancels stale reads without reopening the modal', async 
     state.blockRead = null;
     await page.getByRole('button', { name: 'Remote boards', exact: true }).click();
     await expect(page.locator('[data-remote-row]')).toHaveCount(3);
+});
+
+
+test('Upload-blocked accounts can reapprove connections without approving queued uploads', async ({ page }) => {
+    const state = await setup(page, { generation: '1', accountId: 7, destination: 'https://viberails.ai', remoteWork: { state: 'enabled' },
+        uploadsBlocked: true, localReviewRequired: true, uploadReviewRequired: true });
+    const manager = page.getByRole('dialog', { name: 'Remote boards', exact: true });
+    await manager.getByRole('button', { name: 'I reviewed pending work; allow remote connections', exact: true }).click();
+    await expect(manager.locator('[data-safety-approve]')).toBeHidden();
+    await expect(manager.locator('[data-safety-message]')).toContainText('Remote connections remain available');
+    expect(state.approvals).toEqual([{ generation: '1', accountId: 7, destination: 'https://viberails.ai' }]);
+    expect(state.writes).toEqual([]);
+    expect(state.safety.uploadReviewRequired).toBe(true);
 });

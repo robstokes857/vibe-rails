@@ -26,7 +26,7 @@ shown account, destination and generation, and changes only the local permission
 Queued payloads, ACKs and cursors stay under the existing Board store. Local Board editing
 and discard controls remain available. Old terminal objects never adopt a new generation;
 1008 and recovery/upgrade handshakes stop reconnection. Fresh Connect and Start actions are
-still required. An independent upload block never becomes a terminal ban.
+still required. An independent upload block never becomes a terminal ban. Reapproval while uploads remain blocked clears only the remote-connection hold; queued uploads keep a separate unapproved hold until the block is removed and the user approves them.
 
 Roll out the service's status/schema with recovery disabled, release this companion, drain
 old server instances, and only then enable `RemoteAccess:RecoveryEnabled` on the service.

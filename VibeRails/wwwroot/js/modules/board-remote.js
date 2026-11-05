@@ -144,12 +144,14 @@ export function openRemoteBoards(app, onChanged = () => {}) {
         try {
             safetyState = await request('/safety');
             if (!active()) return;
-            get('[data-safety]').hidden = safetyState.remoteWork.state === 'enabled' && !safetyState.uploadsBlocked && !safetyState.localReviewRequired;
+            get('[data-safety]').hidden = safetyState.remoteWork.state === 'enabled' && !safetyState.uploadsBlocked && !safetyState.localReviewRequired && !safetyState.uploadReviewRequired;
             get('[data-safety-message]').textContent = safetyState.remoteWork.state !== 'enabled'
                 ? 'Remote access is paused. Open Account for the unlock date and recovery action. Your local changes are retained.'
-                : safetyState.uploadsBlocked ? 'Uploads are independently blocked. Contact support; recovery does not clear this block.'
+                : safetyState.uploadsBlocked ? 'Uploads are independently blocked. ' + (safetyState.localReviewRequired ? 'You can review and restore remote connections below. ' : 'Remote connections remain available. ') + 'Contact support about uploads.'
                 : 'Review your queued Board changes before allowing uploads. This restores permission only; it does not start work or connect terminals.';
-            get('[data-safety-approve]').hidden = safetyState.remoteWork.state !== 'enabled' || safetyState.uploadsBlocked || !safetyState.localReviewRequired;
+            const approve = get('[data-safety-approve]');
+            approve.hidden = safetyState.remoteWork.state !== 'enabled' || !(safetyState.localReviewRequired || (!safetyState.uploadsBlocked && safetyState.uploadReviewRequired));
+            approve.textContent = safetyState.uploadsBlocked ? 'I reviewed pending work; allow remote connections' : 'I reviewed pending work; allow sending';
         } catch { /* Ordinary remote loading reports connectivity errors. */ }
     }
     get('[data-safety-approve]').addEventListener('click', async () => {
