@@ -41,3 +41,21 @@ test('large descriptions and long code markers do not change source positions', 
     const errors = findMisspellings(source, speller);
     assert.deepEqual(errors.map(x => x.word), []); // The final fence is intentionally still open.
 });
+
+test('embedded backtick runs at the description limit are checked in bounded time', () => {
+    // F1: the former inline regex took about five seconds on this 100,000-char
+    // input. Keep a generous budget for CI; the scanner normally takes milliseconds.
+    const source = 'a' + '`'.repeat(99998) + 'x';
+    const started = performance.now();
+    assert.deepEqual(spellingWords(source), []);
+    assert.ok(performance.now() - started < 2000, 'Inline-code scan stalled the UI');
+});
+
+test('inline delimiters match exact run lengths and preserve prose offsets after code', () => {
+    const source = 'before ``code `inside` code`` after\r\nnext `unfinished\r\nlast';
+    const words = spellingWords(source);
+    assert.deepEqual(words.map(item => item.word), ['before', 'after', 'next', 'last']);
+    for (const { word, start, end } of words) assert.equal(source.slice(start, end), word);
+    const mismatched = 'before ``code ` still code`` after';
+    assert.deepEqual(spellingWords(mismatched).map(item => item.word), ['before', 'after']);
+});

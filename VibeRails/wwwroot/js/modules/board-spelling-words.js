@@ -1,12 +1,38 @@
+const blank = value => value.replace(/[^\r\n]/g, ' ');
+
+// Pair exact-length delimiter runs once, without a backtracking regex or repeated
+// suffix searches. Unclosed inline code remains unchecked through its line end.
+function maskInlineCode(text) {
+    const runs = [...text.matchAll(/`+/g)].map(match => ({
+        start: match.index, end: match.index + match[0].length, length: match[0].length, next: -1
+    }));
+    const nextByLength = new Map();
+    for (let index = runs.length - 1; index >= 0; index--) {
+        const run = runs[index];
+        run.next = nextByLength.get(run.length) ?? -1;
+        nextByLength.set(run.length, index);
+    }
+    const parts = [];
+    let position = 0;
+    for (let index = 0; index < runs.length;) {
+        const run = runs[index];
+        const newline = run.next < 0 ? text.indexOf('\n', run.end) : -1;
+        const end = run.next >= 0 ? runs[run.next].end : newline < 0 ? text.length : newline;
+        parts.push(text.slice(position, run.start), blank(text.slice(run.start, end)));
+        position = end;
+        do { index++; } while (index < runs.length && runs[index].start < end);
+    }
+    parts.push(text.slice(position));
+    return parts.join('');
+}
+
 /** English spelling tokens with source offsets. Never rewrite the author's Markdown. */
 export function spellingWords(value) {
     let text = String(value ?? '');
-    const blank = value => value.replace(/[^\r\n]/g, ' ');
     // Fenced (including unfinished) and indented code, then inline code of any tick length.
     text = text.replace(/^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^ {0,3}\1[^\n]*(?:\n|$)|(?![\s\S]))/gm, blank)
-        .replace(/^(?: {4}|\t).*$/gm, blank)
-        .replace(/(`+)([^`]|(?!\1)`)*?\1/g, blank)
-        .replace(/`[^\n]*$/gm, blank);
+        .replace(/^(?: {4}|\t).*$/gm, blank);
+    text = maskInlineCode(text);
     // Keep link labels as prose; destinations, raw HTML and reference definitions are technical.
     text = text.replace(/\]\([^\n)]*\)/g, blank)
         .replace(/^ {0,3}\[[^\]\n]+\]:[^\n]*/gm, blank)
