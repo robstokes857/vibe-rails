@@ -8,6 +8,10 @@
 .vb-board-attachment-markdown { overflow-wrap: anywhere; color: var(--color-text); line-height: 1.6; }
 .vb-board-attachment-markdown[hidden], .vb-board-attachment-text[hidden] { display: none; }
 .vb-board-attachment-markdown :is(h1, h2, h3, h4, h5, h6) { font-family: var(--font-display); margin: 1.5rem 0 .75rem; }
+.vb-board-attachment-markdown h1 { font-size: 2rem; line-height: 1.2; }
+.vb-board-attachment-markdown h2 { font-size: 1.5rem; line-height: 1.3; }
+.vb-board-attachment-markdown h3 { font-size: 1.125rem; line-height: 1.4; }
+.vb-board-attachment-markdown :is(h4, h5, h6) { font-size: 1rem; line-height: 1.4; }
 .vb-board-attachment-markdown > :first-child { margin-top: 0; }
 .vb-board-attachment-markdown p { color: inherit; }
 .vb-board-attachment-markdown a { color: var(--color-accent); }
