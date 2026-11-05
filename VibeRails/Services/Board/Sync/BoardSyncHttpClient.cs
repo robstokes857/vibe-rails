@@ -186,9 +186,13 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Fu
 
         using var request = new HttpRequestMessage(method, new Uri(target.AbsoluteUri.TrimEnd('/') + "/" + relativePath));
         request.Headers.Add("X-Api-Key", key);
-        if (safety is not null && method != HttpMethod.Delete)
+        var remoteWork = relativePath == "publish" || relativePath.EndsWith("/push", StringComparison.Ordinal)
+            || relativePath.Contains("/entries?", StringComparison.Ordinal) || relativePath.EndsWith("/activity", StringComparison.Ordinal)
+            || relativePath.StartsWith("launches/", StringComparison.Ordinal);
+        if (safety is not null && remoteWork)
         {
-            var generation = await safety.EnsureAsync(true, true, cancellationToken);
+            var upload = method != HttpMethod.Get && !relativePath.StartsWith("launches/", StringComparison.Ordinal);
+            var generation = await safety.EnsureAsync(true, upload, cancellationToken);
             request.Headers.Add("X-VibeRails-Safety-Protocol", "1");
             request.Headers.Add("X-VibeRails-Safety-Generation", generation);
         }

@@ -297,6 +297,16 @@ public sealed class BoardSyncHttpClientTests
         else await Assert.ThrowsAsync<BoardSyncClientException>(() => client.PutContentPartAsync(part, bytes, Ct, client.DestinationKey));
     }
 
+    [Fact]
+    public async Task ReadOnlyBrowsingDoesNotRequireUploadPermission()
+    {
+        using var handler = new Handler(_ => new(HttpStatusCode.OK) { Content = new StringContent("[]") });
+        var safety = new RemoteSafetyClient(() => throw new InvalidOperationException("Read must not gate on upload permission"),
+            () => new Uri("https://example.com"), () => "test-key");
+        var client = new BoardSyncHttpClient(new Factory(handler), () => new Uri("https://example.com/api/v1/boards"), () => "test-key", safety);
+        Assert.Empty(await client.DiscoverAsync(Ct));
+    }
+
     private static BoardSyncHttpClient Client(Handler handler) => new(new Factory(handler), new Uri("https://example.com/api/v1/boards"), () => "test-key");
     private sealed class NonSeekableStream(byte[] bytes) : MemoryStream(bytes)
     {
