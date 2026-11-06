@@ -103,7 +103,7 @@ public sealed class BoardCheckService(
                 EndedUtc = DateTime.UtcNow };
             // A gate that graded nothing must not pass: the card's code was never seen.
             if (minimum is char grade && !ex.ResearchSpike)
-                record = record with { MinimumGradeMet = false, Summary = $"{record.Summary}. Minimum grade {grade} not checked; this step fails.",
+                record = record with { MinimumGradeResult = BoardCheckRecord.GradeNotChecked, Summary = $"{record.Summary}. Minimum grade {grade} not checked; this step fails.",
                     GradeSummary = $"No code is attached to this card, so the minimum grade {grade} could not be checked. Link the card's commits and run the step again." };
         }
         catch (Exception ex)
@@ -132,13 +132,21 @@ public sealed class BoardCheckService(
     /// and the worst files, with the full evidence one <c>read_board_check</c> away.</summary>
     internal static BoardReviewRecord CheckReport(BoardCheckRecord record)
     {
-        var result = record.Status is "Failed to run" or "Cancelled" or "Needs review" ? "Incomplete"
+        // A minimum that could not be checked leaves the step's question unanswered: incomplete, not a finding.
+        var result = record.Status is "Failed to run" or "Cancelled" or "Needs review"
+                || record.MinimumGradeResult == BoardCheckRecord.GradeNotChecked && record.Status != "Findings" ? "Incomplete"
             : record.Status == "Findings" ? "Findings" : "No findings reported";
         var findings = new StringBuilder()
             .Append(record.Status).Append(": ").AppendLine(record.Summary)
             .AppendLine(record.MinimumGrade is null
                 ? "Minimum grade: none set. Findings are feedback only and do not fail the step."
-                : $"Minimum grade {record.MinimumGrade}: {(record.MinimumGradeMet switch { true => "met", false => "not met, so this step failed", null => "not evaluated" })}. {record.GradeSummary}".TrimEnd());
+                : $"Minimum grade {record.MinimumGrade}: {record.MinimumGradeResult switch
+                {
+                    BoardCheckRecord.GradeMet => "met",
+                    BoardCheckRecord.GradeNotMet => "not met, so this step failed",
+                    BoardCheckRecord.GradeNotChecked => "not checked, so this step failed",
+                    _ => "not evaluated"
+                }}. {record.GradeSummary}".TrimEnd());
         var worst = WorstFiles(record.ResultJson);
         if (worst.Length > 0) findings.AppendLine("Worst files (concern score/100, rating, top categories):").AppendLine(worst);
         findings.Append($"Per-file metrics and captured inputs: read_board_check checkId={record.Id}.");
@@ -291,8 +299,10 @@ public sealed class BoardCheckService(
 
     /// <summary>
     /// Records the minimum-grade decision. The grade is <see cref="CodeQualityRule"/>'s, the same code Git
-    /// Guard's <c>Code quality minimum</c> rule runs, so a failing step also means a failing commit gate at
-    /// that level. Below the minimum the outcome is Findings even when no single file reached NeedsWork.
+    /// Guard's <c>Code quality minimum</c> rule runs, so the same added code fails both at the same grade.
+    /// Below the minimum the outcome is Findings even when no single file reached NeedsWork. Changed source
+    /// the capture could not read (the gate's metadata lists it) is not checked: the step fails, and the
+    /// outcome records incomplete coverage rather than a finding.
     /// </summary>
     internal static BoardCheckRecord ApplyMinimumGrade(BoardCheckRecord record, char minimum,
         RuleValidationResult gate, int hiddenByIgnores)
@@ -306,8 +316,16 @@ public sealed class BoardCheckService(
             limitations.Add($"{hiddenByIgnores} files hidden from the report by local ignore settings still count toward the minimum grade. Use exempt_code_quality_file to exempt a file.");
         var summary = record.Summary.EndsWith(" Advisory analysis.", StringComparison.Ordinal)
             ? record.Summary[..^" Advisory analysis.".Length] : record.Summary;
+        if (gate is { IsValid: false, Metadata: IReadOnlyList<string> })
+        {
+            limitations.Add($"Minimum grade {minimum} not checked. {message}");
+            return record with { MinimumGradeResult = BoardCheckRecord.GradeNotChecked, GradeSummary = message, Limitations = limitations,
+                Summary = $"{summary} Minimum grade {minimum} not checked: changed source could not be read. This step fails.",
+                Status = record.Status is "Passed" or "Skipped/not applicable" ? "Completed with limitations" : record.Status };
+        }
         summary = gate.IsValid ? $"{summary} Minimum grade {minimum} met." : $"{summary} Minimum grade {minimum} not met: {message} This step fails.";
-        return record with { MinimumGradeMet = gate.IsValid, GradeSummary = message, Summary = summary, Limitations = limitations,
+        return record with { MinimumGradeResult = gate.IsValid ? BoardCheckRecord.GradeMet : BoardCheckRecord.GradeNotMet,
+            GradeSummary = message, Summary = summary, Limitations = limitations,
             Status = gate.IsValid || record.Status is "Failed to run" or "Cancelled" ? record.Status : "Findings" };
     }
 

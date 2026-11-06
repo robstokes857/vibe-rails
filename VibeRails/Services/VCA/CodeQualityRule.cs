@@ -67,10 +67,26 @@ public static class CodeQualityRule
     /// so it and Git Guard's rule judge the same added code by the same thresholds (VIBE-278).
     /// Report ignore preferences do not apply here, as they do not apply to the rule.
     /// </summary>
+    /// <remarks>
+    /// Unlike the rule, it never skips changed supported source it could not read. The snapshot marks a
+    /// file over the 5 MiB text limit or the capture budget as binary, and the rule passes binary files
+    /// as no added code; a lane minimum that graded nothing must not pass. Such files fail as not
+    /// checked, with <see cref="RuleValidationResult.Metadata"/> listing them.
+    /// </remarks>
     public static RuleValidationResult EvaluateSnapshot(char minimumGrade, GitStagedSnapshot snapshot,
-        CancellationToken cancellationToken = default) =>
-        Evaluate(minimumGrade, snapshot.Files.Where(file =>
-            !CodeAnalyzerIgnoreRules.IsIgnored(file.RelativePath, snapshot.QualityExemptions ?? [])), cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        var exemptions = snapshot.QualityExemptions ?? [];
+        var files = snapshot.Files.Where(file => !CodeAnalyzerIgnoreRules.IsIgnored(file.RelativePath, exemptions)).ToList();
+        var unreadable = files.Where(file => file.ExistsInIndex && file.ChangeKind != GitStagedChangeKind.Deleted
+                && MintLintAnalyzer.SupportsFile(file.RelativePath) && (file.IsBinary || file.Content is null))
+            .Select(file => file.RelativePath).ToList();
+        if (unreadable.Count == 0) return Evaluate(minimumGrade, files, cancellationToken);
+        var named = string.Join(", ", unreadable.Take(5)) + (unreadable.Count > 5 ? $" and {unreadable.Count - 5} more" : "");
+        return new(false, $"Code quality could not read {unreadable.Count} changed source file(s): {named}. They are over the "
+            + $"5 MiB text limit or the capture budget, or not text, so the minimum grade {minimumGrade} was not checked. "
+            + "Exempt a generated file with exempt_code_quality_file if it should not be graded.", unreadable);
+    }
 
     internal static RuleValidationResult EvaluateScore(char minimumGrade, double concern)
     {

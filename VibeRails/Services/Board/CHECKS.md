@@ -126,17 +126,27 @@ The grade is `CodeQualityRule.EvaluateSnapshot`, the code behind Git Guard's
 `Code quality minimum A|B|C` rule: the same health thresholds (A ≥90, B ≥80, C ≥70) over the
 overall grade of all added code in scope. Explicit exemptions apply; dashboard ignore preferences
 do not, as in the rule. A file the report hides through an ignore still counts toward the grade,
-and the limitations say how many files were hidden that way. Below the minimum, the check outcome is **Findings**,
-`MinimumGradeMet` is false, `GradeSummary` carries the rule's sentence, and `JobRunner` fails the
-action with it as the error. The run then fails, so the lane step fails even when a review Worker
-in the same Automation reports a pass; later actions in the Automation (normally that Worker) still
-run, as for any failed check. A card with no linked code fails a minimum (nothing could be graded);
-a Research spike and any scope with nothing to analyse still skip and pass, as the rule does for an
-empty scan. Analysis that fails to run is already a failure and is not graded.
+and the limitations say how many files were hidden that way. `MinimumGradeResult` is **Met**,
+**Not met** or **Not checked**; `GradeSummary` carries the reason. Below the minimum the check
+outcome is **Findings** and `JobRunner` fails the action with that sentence as the error. The run
+then fails, so the lane step fails even when a review Worker in the same Automation reports a pass;
+later actions in the Automation (normally that Worker) still run, as for any failed check.
+
+**Not checked** also fails the step, but records incomplete coverage rather than a finding: the
+outcome stays Needs review or becomes Completed with limitations, and the review report is
+Incomplete. It covers a card with no linked code, and changed supported source the capture could not
+read. The snapshot records a file over the 5 MiB text limit or the capture budget as binary, so
+`EvaluateSnapshot` lists such files and refuses to grade around them (review finding R1); exempt a
+generated file to let the step pass. Non-code changes, explicit exemptions, a Research spike and any
+scope with nothing to analyse still skip and pass, as the rule does for an empty scan. Analysis that
+fails to run is already a failure and is not graded.
 
 Git Guard enforces the grade only when the user turns on `Code quality minimum X` in VCA, at the
 level they choose (WARN/COMMIT/STOP). The lane setting does not change the hook; both share the
-grading code, so a step that fails at grade C also fails that rule.
+grading code, so the same added code fails both at the same grade. One difference remains: the
+rule still passes a changed source file it could only capture as binary (pinned in
+`CodeQualityRuleTests.NoAddedSupportedCodeIsExplicitlySkipped`); whether the hook should block on
+it is a separate decision.
 
 ### Results as review reports
 
@@ -144,7 +154,8 @@ Every Code quality check that runs for a card, in any lane and any position, als
 canonical review report on that card through `IBoardStore.SaveCheckReviewAsync`, so agents see
 it with `get_board_reviews` and in `get_board_card`'s Code reviews. Its id is
 `review_check_<check id>`, reviewer **Code quality check**, provider VibeRails. Its result is
-Findings, No findings reported, or Incomplete (failed to run, cancelled or no code attached). Its
+Findings, No findings reported, or Incomplete (failed to run, cancelled, no code attached, or a
+minimum grade that could not be checked). Its
 process status is Failed when the action failed. The findings name the outcome, the minimum grade and the
 worst files, and point to `read_board_check`. It has no reviewer session or review run, so it
 can never satisfy a reviewer's own pass, and its freshness is the check's: verifying it reports

@@ -278,7 +278,7 @@ public static class JobRunner
         // Findings are advisory unless the action sets a minimum grade (VIBE-278); then a grade below it,
         // or a card with no code to grade, fails the action and so the lane step.
         return check.FailsAction
-            ? new(JobRunActionStatus.Failed, JobRunStatus.Failed, 1, check.MinimumGradeMet == false ? check.GradeSummary ?? check.Summary : check.Summary, output, "")
+            ? new(JobRunActionStatus.Failed, JobRunStatus.Failed, 1, check.MinimumGradeResult is null ? check.Summary : check.GradeSummary ?? check.Summary, output, "")
             : new(JobRunActionStatus.Succeeded, JobRunStatus.Succeeded, 0, null, output, "");
     }
 

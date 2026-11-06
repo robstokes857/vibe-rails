@@ -10,13 +10,20 @@ public sealed record BoardCheckRecord(
     string Summary, int FileCount, int AnalyzedCount, int SkippedCount, int FindingCount,
     IReadOnlyList<string> Limitations, string? ResultJson = null,
     string? WorkspacePath = null, IReadOnlyList<string>? ScopeFiles = null,
-    BoardCheckEvidence? Evidence = null, string? MinimumGrade = null, bool? MinimumGradeMet = null,
+    BoardCheckEvidence? Evidence = null, string? MinimumGrade = null, string? MinimumGradeResult = null,
     string? GradeSummary = null)
 {
+    /// <summary><see cref="MinimumGradeResult"/>: the grade met the minimum.</summary>
+    public const string GradeMet = "Met";
+    /// <summary><see cref="MinimumGradeResult"/>: the grade was below the minimum.</summary>
+    public const string GradeNotMet = "Not met";
+    /// <summary><see cref="MinimumGradeResult"/>: no grade could be established (no linked code, unreadable source).</summary>
+    public const string GradeNotChecked = "Not checked";
+
     /// <summary>Whether the action fails: the check could not run, or a Code quality minimum grade was not
-    /// met (VIBE-278). Without a minimum, findings stay advisory and the action succeeds.</summary>
+    /// met or could not be checked (VIBE-278). Without a minimum, findings stay advisory.</summary>
     [JsonIgnore]
-    public bool FailsAction => Status is "Failed to run" or "Cancelled" || MinimumGradeMet == false;
+    public bool FailsAction => Status is "Failed to run" or "Cancelled" || MinimumGradeResult is GradeNotMet or GradeNotChecked;
 }
 
 /// <summary>The captured text used by a check, kept separately from its summary. Impact sources

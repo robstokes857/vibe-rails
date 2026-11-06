@@ -52,7 +52,7 @@ public sealed partial class BoardChecksTests
         var check = await Run(JobActionKind.CodeQuality, "working-tree", "minimum", "C");
 
         Assert.Equal("C", check.MinimumGrade);
-        Assert.False(check.MinimumGradeMet);
+        Assert.Equal(BoardCheckRecord.GradeNotMet, check.MinimumGradeResult);
         Assert.True(check.FailsAction);
         Assert.Equal("Findings", check.Status);
         Assert.Contains("is below minimum C", check.GradeSummary);
@@ -62,7 +62,7 @@ public sealed partial class BoardChecksTests
         var snapshot = await new GitStagedSnapshotProvider().CaptureWorkingTreeAsync(repo, Ct);
         Assert.Equal(CodeQualityRule.EvaluateSnapshot('C', snapshot, Ct).Message, check.GradeSummary);
         var saved = (await store.GetCheckAsync(repo, card.Id, check.Id, Ct))!;
-        Assert.Equal((check.MinimumGrade, check.MinimumGradeMet, check.GradeSummary), (saved.MinimumGrade, saved.MinimumGradeMet, saved.GradeSummary));
+        Assert.Equal((check.MinimumGrade, check.MinimumGradeResult, check.GradeSummary), (saved.MinimumGrade, saved.MinimumGradeResult, saved.GradeSummary));
 
         var review = Assert.Single(await store.GetReviewsAsync(repo, card.Id, 0, Ct));
         Assert.Equal(BoardCheckService.CheckReviewPrefix + check.Id, review.Id);
@@ -82,14 +82,14 @@ public sealed partial class BoardChecksTests
     {
         await Write("example.cs", "class Clean { public int Value => 1; }\n");
         var met = await Run(JobActionKind.CodeQuality, "working-tree", "minimum", "C");
-        Assert.True(met.MinimumGradeMet);
+        Assert.Equal(BoardCheckRecord.GradeMet, met.MinimumGradeResult);
         Assert.False(met.FailsAction);
         Assert.Contains("Minimum grade C met.", met.Summary);
 
         await Write("example.cs", MessySource);
         var advisory = await Run(JobActionKind.CodeQuality, "working-tree");
         Assert.Null(advisory.MinimumGrade);
-        Assert.Null(advisory.MinimumGradeMet);
+        Assert.Null(advisory.MinimumGradeResult);
         Assert.False(advisory.FailsAction);
 
         var reviews = await store.GetReviewsAsync(repo, card.Id, 0, Ct);
@@ -111,10 +111,10 @@ public sealed partial class BoardChecksTests
 
         Assert.Equal(research ? "Skipped/not applicable" : "Needs review", check.Status);
         Assert.Equal(!research, check.FailsAction);
-        Assert.Equal(research ? null : false, check.MinimumGradeMet);
+        Assert.Equal(research ? null : BoardCheckRecord.GradeNotChecked, check.MinimumGradeResult);
         var review = Assert.Single(await store.GetReviewsAsync(repo, card.Id, 0, Ct));
         Assert.Equal(research ? "No findings reported" : "Incomplete", review.Result);
-        if (!research) Assert.Contains("Link the card's commits", review.Findings);
+        if (!research) Assert.Contains("Minimum grade B: not checked, so this step failed. No code is attached", review.Findings);
     }
 
     [Fact]
@@ -129,14 +129,66 @@ public sealed partial class BoardChecksTests
 
         var ignored = await engine.ExecuteAsync(repo, repo, card.Key, "ignored", "quality", JobActionKind.CodeQuality, ["working-tree", "minimum", "C"], Ct);
         Assert.Equal(0, ignored.AnalyzedCount);
-        Assert.False(ignored.MinimumGradeMet);
+        Assert.Equal(BoardCheckRecord.GradeNotMet, ignored.MinimumGradeResult);
         Assert.Contains(ignored.Limitations, line => line.StartsWith("1 files hidden from the report by local ignore settings still count", StringComparison.Ordinal));
 
         await store.SaveCodeQualityExemptionAsync(repo, card.Id, "example.cs", false, "Generated fixture", BoardAuthor.User(), Ct);
         var exempt = await engine.ExecuteAsync(repo, repo, card.Key, "exempt", "quality", JobActionKind.CodeQuality, ["working-tree", "minimum", "C"], Ct);
-        Assert.True(exempt.MinimumGradeMet);
+        Assert.Equal(BoardCheckRecord.GradeMet, exempt.MinimumGradeResult);
         Assert.False(exempt.FailsAction);
         Assert.DoesNotContain(exempt.Limitations, line => line.Contains("hidden from the report", StringComparison.Ordinal));
+    }
+
+    // Review finding R1: the snapshot records supported source over the 5 MiB text limit (or the capture
+    // budget) as binary, and the rule passes binary files as no added code. A minimum must not.
+    private static string OversizedSource => MessySource + "\n/*" + new string(' ', 5 * 1024 * 1024) + "*/\n";
+
+    [Theory]
+    [InlineData("working-tree")]
+    [InlineData("commit")]
+    [InlineData("card")]
+    public async Task UnreadableChangedSourceIsNotCheckedAndFailsTheMinimum_NotAFinding(string scope)
+    {
+        await Write("Messy.cs", MessySource);
+        var control = await Run(JobActionKind.CodeQuality, "working-tree", "minimum", "C");
+        Assert.Equal(BoardCheckRecord.GradeNotMet, control.MinimumGradeResult);
+
+        await Write("Messy.cs", OversizedSource);
+        string[] args = scope switch
+        {
+            "working-tree" => ["working-tree", "minimum", "C"],
+            "commit" => ["commit", await Commit(), "minimum", "C"],
+            _ => ["card", "minimum", "C"]
+        };
+        if (scope == "card") await Link(await Commit());
+        var check = await Run(JobActionKind.CodeQuality, args);
+
+        Assert.Equal(0, check.AnalyzedCount);
+        Assert.Equal(BoardCheckRecord.GradeNotChecked, check.MinimumGradeResult);
+        Assert.True(check.FailsAction);
+        Assert.Equal("Completed with limitations", check.Status);
+        Assert.Contains("could not read 1 changed source file(s): Messy.cs", check.GradeSummary);
+        Assert.Contains("Minimum grade C not checked", check.Summary);
+        var review = await store.GetReviewAsync(repo, card.Id, BoardCheckService.CheckReviewPrefix + check.Id, Ct);
+        Assert.Equal("Incomplete", review!.Result);
+        Assert.Contains("Minimum grade C: not checked, so this step failed.", review.Findings);
+    }
+
+    [Fact]
+    public async Task NonCodeAndExemptChangesStillSkipAndPassTheMinimum()
+    {
+        await Write("notes.md", "Release notes\n");
+        var docs = await Run(JobActionKind.CodeQuality, "working-tree", "minimum", "A");
+        Assert.Equal(BoardCheckRecord.GradeMet, docs.MinimumGradeResult);
+        Assert.False(docs.FailsAction);
+
+        await Write("Generated.cs", OversizedSource);
+        await store.SaveCodeQualityExemptionAsync(repo, card.Id, "Generated.cs", false, "Generated", BoardAuthor.User(), Ct);
+        var engine = new BoardCheckService(new(), new VcaRulesHookValidationService(new GitStagedSnapshotProvider()), services,
+            exemptions: new CodeQualityExemptionService(services));
+        var exempt = await engine.ExecuteAsync(repo, repo, card.Key, "exempt-large", "quality", JobActionKind.CodeQuality, ["working-tree", "minimum", "A"], Ct);
+        Assert.Equal(BoardCheckRecord.GradeMet, exempt.MinimumGradeResult);
+        Assert.False(exempt.FailsAction);
     }
 
     [Fact]
