@@ -43,18 +43,24 @@ for (const width of [1440, 390]) {
     });
 }
 
-test('offline spelling scans embedded long backtick runs without stalling the browser', async ({ page }) => {
-    await openBoard(page);
-    const result = await page.evaluate(async () => {
-        const { spellingWords } = await import('/js/modules/board-spelling-words.js');
-        const source = 'a' + '`'.repeat(99998) + 'x';
-        const start = performance.now();
-        const words = spellingWords(source);
-        return { milliseconds: performance.now() - start, words };
+for (const [name, prefix, marker] of [
+    ['embedded long backtick runs', 'a', '`'],
+    ['unfinished backtick fence lines', '', '`'],
+    ['unfinished tilde fence lines', '', '~']
+]) {
+    test(`offline spelling scans ${name} without stalling the browser`, async ({ page }) => {
+        await openBoard(page);
+        const result = await page.evaluate(async ({ prefix, marker }) => {
+            const { spellingWords } = await import('/js/modules/board-spelling-words.js');
+            const source = prefix + marker.repeat(99999 - prefix.length) + 'x';
+            const start = performance.now();
+            const words = spellingWords(source);
+            return { milliseconds: performance.now() - start, words };
+        }, { prefix, marker });
+        expect(result.words).toEqual([]);
+        expect(result.milliseconds).toBeLessThan(1000);
     });
-    expect(result.words).toEqual([]);
-    expect(result.milliseconds).toBeLessThan(2000);
-});
+}
 
 test('offline spelling shares ignores, persists personal words and leaves drafts unchanged', async ({ page }) => {
     const requests = await openBoard(page, { appSettings: { vsCodeSpellCheck: true } });

@@ -1,5 +1,35 @@
 const blank = value => value.replace(/[^\r\n]/g, ' ');
 
+// Scan each line once, including an unfinished final line. Delimiter runs must
+// never backtrack against the rest of a long opening line.
+function maskFencedCode(text) {
+    const parts = [];
+    let fenceMarker = '', fenceLength = 0;
+    for (let start = 0; start < text.length;) {
+        const newline = text.indexOf('\n', start);
+        const end = newline < 0 ? text.length : newline + 1;
+        let markerStart = start;
+        while (markerStart - start < 3 && text[markerStart] === ' ') markerStart++;
+        const marker = text[markerStart];
+        let markerEnd = markerStart;
+        if (marker === '`' || marker === '~') {
+            while (markerEnd < end && text[markerEnd] === marker) markerEnd++;
+        }
+        const length = markerEnd - markerStart;
+        const insideFence = fenceLength > 0;
+        if (!insideFence && length >= 3) {
+            fenceMarker = marker;
+            fenceLength = length;
+        } else if (insideFence && marker === fenceMarker && length >= fenceLength) {
+            fenceLength = 0;
+        }
+        const line = text.slice(start, end);
+        parts.push(insideFence || fenceLength > 0 ? blank(line) : line);
+        start = end;
+    }
+    return parts.join('');
+}
+
 // Pair exact-length delimiter runs once, without a backtracking regex or repeated
 // suffix searches. Unclosed inline code remains unchecked through its line end.
 function maskInlineCode(text) {
@@ -30,8 +60,7 @@ function maskInlineCode(text) {
 export function spellingWords(value) {
     let text = String(value ?? '');
     // Fenced (including unfinished) and indented code, then inline code of any tick length.
-    text = text.replace(/^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^ {0,3}\1[^\n]*(?:\n|$)|(?![\s\S]))/gm, blank)
-        .replace(/^(?: {4}|\t).*$/gm, blank);
+    text = maskFencedCode(text).replace(/^(?: {4}|\t).*$/gm, blank);
     text = maskInlineCode(text);
     // Keep link labels as prose; destinations, raw HTML and reference definitions are technical.
     text = text.replace(/\]\([^\n)]*\)/g, blank)

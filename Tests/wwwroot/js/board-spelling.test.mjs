@@ -51,6 +51,30 @@ test('embedded backtick runs at the description limit are checked in bounded tim
     assert.ok(performance.now() - started < 2000, 'Inline-code scan stalled the UI');
 });
 
+test('unfinished fence lines at the description limit are checked in bounded time', () => {
+    for (const marker of ['`', '~']) {
+        const source = marker.repeat(99999) + 'x';
+        const started = performance.now();
+        assert.deepEqual(spellingWords(source), []);
+        // The former fence regex took seconds before reaching the inline scanner.
+        assert.ok(performance.now() - started < 1000, 'Fence scan stalled the UI');
+    }
+});
+
+test('fences mask unfinished final lines and close only with matching sufficient runs', () => {
+    for (const marker of ['`', '~']) {
+        const fence = marker.repeat(4);
+        const otherFence = (marker === '`' ? '~' : '`').repeat(4);
+        const source = `🙂 before\r\n   ${fence}lang\r\ninside\r\n${marker.repeat(3)}\r\n`
+            + `stillinside\r\n${otherFence}\r\nalsocode\r\n  ${fence}${marker}\r\nafter`;
+        const words = spellingWords(source);
+        assert.deepEqual(words.map(item => item.word), ['before', 'after']);
+        for (const { word, start, end } of words) assert.equal(source.slice(start, end), word);
+        assert.deepEqual(spellingWords(`valid\n   ${fence}unfinished`), [{ word: 'valid', start: 0, end: 5 }]);
+        assert.deepEqual(spellingWords(`valid\n${fence}\nunfinished`), [{ word: 'valid', start: 0, end: 5 }]);
+    }
+});
+
 test('inline delimiters match exact run lengths and preserve prose offsets after code', () => {
     const source = 'before ``code `inside` code`` after\r\nnext `unfinished\r\nlast';
     const words = spellingWords(source);
