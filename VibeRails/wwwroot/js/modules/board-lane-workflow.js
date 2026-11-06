@@ -2,7 +2,7 @@ import { escapeHtml } from './utils.js';
 import { BoardStepStatus as Status } from './board-step-status.js';
 
 const icons = { [Status.Passed]: 'circle-check', [Status.Skipped]: 'forward-step', [Status.Failed]: 'circle-xmark',
-    'Completed with limitations': 'circle-exclamation', 'Findings': 'circle-exclamation',
+    'Completed with limitations': 'circle-exclamation', 'Findings': 'circle-exclamation', 'Needs review': 'circle-exclamation',
     'Skipped/not applicable': 'forward-step', 'Failed to run': 'circle-xmark',
     [Status.Fixing]: 'wrench', [Status.Reviewing]: 'spinner', [Status.Running]: 'spinner', [Status.Stopping]: 'hourglass-half' };
 const completed = step => [Status.Passed, Status.Skipped].includes(step.stepStatus || step.status);

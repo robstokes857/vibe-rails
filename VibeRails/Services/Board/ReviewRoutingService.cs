@@ -63,6 +63,8 @@ public sealed class ReviewRoutingService(IBoardStore boards, IRepository reposit
             throw new BoardValidationException("Describe the coding work this session contributed to the selected review scope.");
         try
         {
+            if (settings.Scope is "card" or "commit")
+                throw new ArgumentException("Card and commit scopes are for deterministic checks. Choose a review scope.");
             if (settings.Scope != "unknown")
                 JobCheckScope.Parse(settings.Scope == "range" ? [settings.Scope, settings.BaseCommit ?? "", settings.HeadCommit ?? ""] : [settings.Scope]);
         }

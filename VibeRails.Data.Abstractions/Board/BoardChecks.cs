@@ -17,7 +17,8 @@ public sealed record BoardCheckEvidence(
     IReadOnlyList<BoardCheckFile> Files,
     IReadOnlyList<BoardCheckTextFile> RuleFiles,
     IReadOnlyList<BoardCheckTextFile>? ImpactFiles,
-    IReadOnlyList<VibeRails.DB.CodeAnalyzerIgnoredFile>? IgnoreRules);
+    IReadOnlyList<VibeRails.DB.CodeAnalyzerIgnoredFile>? IgnoreRules,
+    IReadOnlyList<string>? CommitShas = null);
 
 /// <summary>One scope file, including full text and the exact added-code input when available.</summary>
 public sealed record BoardCheckFile(string Path, string? PreviousPath, string ChangeKind,

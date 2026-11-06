@@ -16,7 +16,7 @@ export function checkRow(check) {
     return `<article class="board-check-result">
         <div><strong>${esc(check.tool)}</strong><span class="board-check-status" data-status="${esc(check.status)}">${esc(check.status)}</span></div>
         <p>${check.analyzedCount || 0} ${check.tool === 'VCA' ? 'rules' : 'files'} analyzed · ${check.findingCount || 0} findings · ${check.skippedCount || 0} files skipped</p>
-        ${pending ? `<p>${esc(check.summary)}</p>` : ''}
+        ${pending || check.status === 'Needs review' ? `<p>${esc(check.summary)}</p>` : ''}
         <p>Scope: ${esc(check.scope)} · ${esc(new Date(check.startedUtc).toLocaleString())}</p>
         <p class="board-editor-muted">${check.endedUtc ? 'Unknown freshness — view report to compare captured inputs.' : 'Waiting for completed evidence.'}</p>
         ${pending ? '' : `<button type="button" class="btn btn-link btn-sm" data-check-view="${esc(check.id)}">View report</button>`}

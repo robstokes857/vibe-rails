@@ -84,6 +84,8 @@ public sealed class BoardReviewService(IBoardStore store, IBoardService board)
                 DateTime.UtcNow, SessionId: session, TabId: linked.TabId);
         }
         if (row.ReportedUtc is not null || row.CapturedUtc is not null) return row;
+        if (scope is "card" or "commit")
+            throw new BoardValidationException("Card and commit scopes are for deterministic checks. Choose a review scope.");
         if (scope != "unknown") JobCheckScope.Parse(scope == "range" ? [scope, baseCommit ?? "", headCommit ?? ""] : [scope]);
         if (row.Routing is {} routing)
         {

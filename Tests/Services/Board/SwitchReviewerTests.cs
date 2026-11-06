@@ -70,6 +70,15 @@ public sealed partial class SwitchReviewerTests : IAsyncLifetime
         Assert.Equal("base:opencode", (await boards.FindCardAsync(project, card.Id, Ct))!.Assignee);
     }
 
+    [Theory]
+    [InlineData("card")]
+    [InlineData("commit")]
+    public async Task DeterministicCheckScopesCannotBecomeLlmReviewScopes(string scope)
+    {
+        await Assert.ThrowsAsync<BoardValidationException>(() =>
+            routing.SaveSettingsAsync(project, card.Id, new(Scope: scope), Ct));
+    }
+
     [Fact]
     public async Task SameCodingProviderIsRejected_ForMappingsFallbackAndOverride()
     {

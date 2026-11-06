@@ -278,7 +278,8 @@ Standalone Automation Workers get the self-exit guidance without requiring Board
 See the [terminal contract](../Terminal/AGENTS.md#agent-self-completion-and-terminal-menu-vibe-49).
 
 The lane add form has a separate body and type/Automation selectors. Lane VCA/Code quality additions
-use working-tree scope. `GET /api/v1/jobs/scripts` discovers bounded repository script candidates
+use working-tree scope for VCA and linked-card-commit scope for Code quality.
+`GET /api/v1/jobs/scripts` discovers bounded repository script candidates
 through the existing file index and validates them using `AutomationScriptService`. Saved content
 hashes identify approved scripts; discovery never approves a file. The normal save route still
 approves current contents. Catalog limits (200 candidates, 32 MiB total inspection) are explicit.

@@ -1511,7 +1511,7 @@ export class JobController {
             return;
         }
 
-        this.editorActions.push(isCheck(kind) ? { id: this.newActionId(), kind, arguments: ["unpushed"] } : kind === JOB_ACTION.WORKER
+        this.editorActions.push(isCheck(kind) ? { id: this.newActionId(), kind, arguments: [kind === JOB_ACTION.QUALITY ? 'card' : 'unpushed'] } : kind === JOB_ACTION.WORKER
             ? { id: this.newActionId(), kind, environmentId: null, environmentName: null, llm: 0 }
             : {
                 id: this.newActionId(),
@@ -1728,11 +1728,12 @@ export class JobController {
         if (!action) return;
 
         if (field === 'checkScope') {
-            action.arguments = event.target.value === 'range' ? ['range', '', ''] : [event.target.value];
+            action.arguments = event.target.value === 'range' ? ['range', '', '']
+                : event.target.value === 'commit' ? ['commit', ''] : [event.target.value];
             this.renderEditorActions(); return;
         }
-        if (field === 'checkBase' || field === 'checkHead') {
-            action.arguments[field === 'checkBase' ? 1 : 2] = event.target.value.trim(); return;
+        if (field === 'checkBase' || field === 'checkHead' || field === 'checkCommit') {
+            action.arguments[field === 'checkHead' ? 2 : 1] = event.target.value.trim(); return;
         }
         if (field === 'argument') {
             const index = Number(event.target.dataset.argumentIndex);
@@ -1940,7 +1941,7 @@ export class JobController {
 
             if (isCheck(action.kind)) {
                 if (!validCheckScope(action.arguments)) {
-                    if (validate) this.app.showError('Choose a check scope and full 40-character base/head commit SHAs for a range.');
+                    if (validate) this.app.showError('Choose a check scope. One commit needs a 7–40 character SHA; a range needs full 40-character base/head SHAs.');
                     return null;
                 }
                 normalizedActions.push({ id: action.id, kind: action.kind, arguments: [...action.arguments] });

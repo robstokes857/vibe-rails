@@ -27,9 +27,31 @@ test('check actions retain explicit scope through editor and portable recipes', 
     assert.deepEqual(recipe.actions.map(a => [a.kind, a.arguments]), actions.map(a => [a.kind, a.arguments]));
     assert.equal(validCheckScope(['linked-commits']), false);
     assert.equal(validCheckScope(['working-tree']), true);
+    assert.equal(validCheckScope(['card']), true);
+    assert.equal(validCheckScope(['commit', 'Abc1234']), true);
+    assert.equal(validCheckScope(['commit', 'HEAD']), false);
+    assert.equal(validCheckScope(['commit', '--all']), false);
     assert.equal(validCheckScope(['range', '--all', 'HEAD']), false);
     assert.equal(validCheckScope(actions[1].arguments), true);
     assert.match(checkFields({ arguments: ['range', '<script>', ''] }), /&lt;script&gt;/);
+    assert.match(checkFields({ arguments: ['commit', '<script>'] }), /&lt;script&gt;/);
+    assert.match(checkFields({ kind: 2 }), /value="card" selected/);
+});
+
+test('the check editor defaults Code quality to card commits and retains a supplied commit', () => {
+    const controller = new JobController(createApp());
+    controller.addEditorAction(2);
+    controller.addEditorAction(3);
+    assert.deepEqual(controller.editorActions.map(action => action.arguments), [['card'], ['unpushed']]);
+    const row = { dataset: { jobActionId: controller.editorActions[0].id } };
+    const edit = (actionField, value) => controller.updateEditorActionField({
+        target: { dataset: { actionField }, value, closest: () => row }
+    });
+    edit('checkScope', 'commit');
+    edit('checkCommit', ' Abc1234 ');
+    assert.deepEqual(controller.editorActions[0].arguments, ['commit', 'Abc1234']);
+    edit('checkScope', 'card');
+    assert.deepEqual(controller.editorActions[0].arguments, ['card']);
 });
 
 function createApp() {

@@ -1208,7 +1208,11 @@ sources (`includeImpactFiles: false`), which are every supported source at HEAD 
 passes plus the dirty working tree, `begin_board_review` took minutes: reviewers recorded
 "stalled without returning an id", and one installed-build call that did return took 152 s
 (VIBE-267). The same ranges now capture in 4 to 7 s. Board Code quality checks and the code
-analyzer still read impact sources, because their ranking uses them. Since VIBE-269 every
+analyzer still read impact sources, because their ranking uses them. New Code quality actions
+use linked card commits; an explicit `commit` scope accepts a single SHA. The capture pins the
+selected commit set, filters changed paths and attributes added lines to selected commits, excluding
+interleaved work. See [the check contract](CHECKS.md) for first-parent, missing-code and freshness
+behavior. LLM review scopes are independent. Since VIBE-269 every
 committed-scope and staged blob, impact sources included, is read by object id through one
 `git cat-file --batch` process per capture (`GitBlobBatchReader`), with base blobs taken from the
 base tree's `ls-tree -l` listing. Measured 2026-11-03 on a 19-file range of this repository: 0.7 to

@@ -79,7 +79,7 @@ public sealed partial class BoardStore
     private static string CheckOutcome(IReadOnlyList<string> statuses)
     {
         if (statuses.Count == 0) return "Unknown";
-        foreach (var outcome in new[] { "Failed to run", "Cancelled", "Findings", "Completed with limitations" })
+        foreach (var outcome in new[] { "Failed to run", "Cancelled", "Needs review", "Findings", "Completed with limitations" })
             if (statuses.Contains(outcome)) return outcome;
         if (statuses.All(status => status == "Passed")) return "Passed";
         if (statuses.All(status => status == "Skipped/not applicable")) return "Skipped/not applicable";

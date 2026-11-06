@@ -12,7 +12,7 @@ using Xunit;
 
 namespace Tests.Services.Board;
 
-public sealed class BoardChecksTests : IAsyncLifetime
+public sealed partial class BoardChecksTests : IAsyncLifetime
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "board-checks-" + Guid.NewGuid().ToString("N"));
     private string repo = null!, connection = null!, baseline = null!;

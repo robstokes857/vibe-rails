@@ -15,14 +15,29 @@ Check actions store their validated scope vector in the existing `ArgumentsJson`
 
 | Arguments | Captured inputs |
 | --- | --- |
+| `["card"]` | The card's linked commits; only their surviving additions at the newest selected tree are scored |
+| `["commit", "<SHA>"]` | One commit against its first parent, or the empty tree for an initial commit; 7–40 hexadecimal characters |
 | `["working-tree"]` | All changed/untracked files against HEAD, including unrelated card work; committed changes excluded |
 | `["range", "<base SHA>", "<head SHA>"]` | Net committed changes; full SHAs required and base must be an ancestor of head |
 | `["unpushed"]` | Merge base of upstream and HEAD through HEAD; missing upstream fails visibly |
 | `["repository"]` | All committed files at HEAD; dirty/untracked files excluded |
 
-For one commit, select its parent as base and the commit as head. For an initial commit at HEAD,
-repository scope covers that committed tree. Linked commits never choose or imply a range. No
-checkout, staging or worktree mutation is required. Committed captures reuse the existing bounded
+New lane Code quality actions and newly added Code quality steps default to **card** scope.
+Existing explicitly configured scopes are retained; edit an existing Automation to select
+**Linked commits on the card**. VCA's defaults are unchanged. A card with no linked commits gets
+**Needs review**, with “no code attached to this card”; a Research spike is **Skipped/not applicable**.
+Other non-code work can explicitly skip the lane check. A standalone run without a card must use
+another scope, such as **One commit**. Results never move a card or set its attention flag.
+
+Card capture requires one first-parent history. Divergent or side-branch selections fail visibly
+and can be checked individually with commit scope. Each selected commit supplies its changed paths;
+the oldest selected commit's first parent and newest selected tree bound capture. Git line attribution
+then removes additions from interleaved, unlinked commits, including additions in the same file.
+Reverted/overwritten code is not scored. Full file, rule and impact text is committed context, not
+additional code being scored. Root commits use the empty tree; merge commits use their first parent.
+The exact resolved commit set is saved in evidence and included in the fingerprint. Comparing a card
+check also compares today's linked set; adding/removing a link makes the old evidence stale.
+No checkout, staging or worktree mutation is required. Committed captures reuse the existing bounded
 blob reader and immutable impact corpus; VCA checks skip that corpus. Working-tree capture is
 compared twice (the second pass without impact sources: an edit to one shows up as a changed file)
 and rejects a detected edit/HEAD race; this is not a filesystem transaction. Saved Code quality
@@ -53,7 +68,8 @@ Saved check outcomes distinguish **Passed** (applicable analysis completed witho
 **Completed with limitations** (analysis ran, but some coverage was skipped, ignored, deferred or
 unavailable), **Skipped/not applicable** (nothing applicable was analyzed), **Findings**,
 **Failed to run**, and **Cancelled**. Coverage counts and limitations remain part of the evidence;
-findings take precedence over coverage limitations.
+findings take precedence over coverage limitations. **Needs review** identifies a card check with
+no code attached; it remains advisory so the review Worker can attach the intended commits.
 
 For check-only Automations, the lane and card Automation rail display the exact run's saved check
 outcome and summary through `BoardLaneAutomationStatus.DisplayStatus`, also used by MCP. Multiple
@@ -119,9 +135,9 @@ instructed to inspect scope, coverage and failures before choosing the next lane
 
 ## Starter review integration
 
-`ReviewCheckDefaults.Create()` supplies **Code quality → VCA**, both in unpushed scope, before the
+`ReviewCheckDefaults.Create()` supplies **Code quality (card) → VCA (unpushed)** before the
 single review Worker. This avoids an empty working-tree result after a commit. Missing upstream
-must be addressed or the user can select an explicit range/repository scope. Actions stay editable,
+for VCA must be addressed or the user can select an explicit scope. Actions stay editable,
 reorderable and removable. New boards no longer install this special review recipe; existing
 recipes and their check actions remain unchanged. VIBE-25 owns
 hosted recipe/evidence distribution. Evidence is not added to the hosted Board UI sync contract;

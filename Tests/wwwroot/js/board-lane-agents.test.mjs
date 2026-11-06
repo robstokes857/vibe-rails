@@ -47,7 +47,7 @@ test('a same-name Automation with another workflow blocks the check instead of P
     }
 });
 
-test('new checks use working changes and creation survives lane-save retries', async () => {
+test('new quality checks use card commits while VCA keeps working changes and lane-save retries reuse creation', async () => {
     for (const kind of ['check:2', 'check:3']) {
         const requests = [];
         const draft = { kind };
@@ -55,7 +55,7 @@ test('new checks use working changes and creation survives lane-save retries', a
             column: { name: 'Review' }, projectPath: '/repo', alive: () => true,
             api: async (...args) => { requests.push(args); return { ...args[2], id: 42 }; } };
         assert.equal(await prepareLaneAutomation(context), 42);
-        assert.deepEqual(requests[0][2].actions, [{ kind: Number(kind.slice(6)), arguments: ['working-tree'] }]);
+        assert.deepEqual(requests[0][2].actions, [{ kind: Number(kind.slice(6)), arguments: [kind === 'check:2' ? 'card' : 'working-tree'] }]);
         assert.equal(await prepareLaneAutomation(context), 42);
         assert.equal(requests.length, 1);
     }
@@ -83,6 +83,17 @@ test('purpose filters preserve attention and distinguish human and unclassified 
 });
 
 import { laneStepMarkup, laneArrowMarkup } from '../../../VibeRails/wwwroot/js/modules/board-lane-workflow.js';
+import { checkRow } from '../../../VibeRails/wwwroot/js/modules/board-card-checks.js';
+
+test('missing card code is displayed as needs review with its explanation', () => {
+    const html = checkRow({ id: 'check-1', tool: 'Code quality', status: 'Needs review',
+        summary: 'no code attached to this card', scope: 'card', startedUtc: '2026-11-06T00:00:00Z' });
+    assert.match(html, /Needs review/);
+    assert.match(html, /no code attached to this card/);
+    const step = laneStepMarkup(7, [{ cardId: 'card-1', steps: [{ jobId: 7, stepStatus: 'Passed', displayStatus: 'Needs review' }] }]);
+    assert.match(step, /fa-circle-exclamation/);
+    assert.doesNotMatch(step, /fa-circle-check/);
+});
 
 test('workflow progress identifies each card and only offers server-authorized skips', () => {
     const flow = [{ cardId: 'card-1', cardLabel: 'VIBE-123 <img src=x>',

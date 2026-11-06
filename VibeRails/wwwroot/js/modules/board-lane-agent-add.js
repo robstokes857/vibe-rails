@@ -115,10 +115,11 @@ export async function prepareLaneAutomation(context) {
         description = `Runs ${action.scriptPath} when a card enters ${column.name}.`;
     } else if (['check:2', 'check:3'].includes(draft.kind)) {
         const kind = Number(draft.kind.slice(6));
-        name = `${kind === 2 ? 'Code quality' : 'VCA'} · ${column.name} · working-tree`;
-        action = { kind, arguments: ['working-tree'] };
+        const scope = kind === 2 ? 'card' : 'working-tree';
+        name = `${kind === 2 ? 'Code quality' : 'VCA'} · ${column.name} · ${scope}`;
+        action = { kind, arguments: [scope] };
         description = `${kind === 2 ? 'Code quality' : 'VCA'} checks working changes when a card enters ${column.name}.`;
-        existing = findCheckAutomation(jobs, { name, kind, scope: 'working-tree' });
+        existing = findCheckAutomation(jobs, { name, kind, scope });
         if (existing && !existing.reuse) throw new Error(`An Automation named “${existing.job.name}” already exists with a different workflow. Rename or edit it on the Automations page.`);
     } else throw new Error('Choose what to add.');
     let saved = existing?.job;

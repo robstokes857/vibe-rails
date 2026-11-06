@@ -4,12 +4,11 @@ namespace VibeRails.DTOs;
 public static class ReviewCheckDefaults
 {
     /// <summary>
-    /// Uses unpushed committed changes so committing does not turn a review into an empty-tree pass.
-    /// Missing upstream is a visible execution failure; the reviewer still receives that evidence.
+    /// Code quality follows the card's linked commits; VCA retains its explicit unpushed scope.
     /// </summary>
     public static List<JobActionRequest> Create() =>
     [
-        new(null, JobActionKind.CodeQuality, Arguments: ["unpushed"]),
+        new(null, JobActionKind.CodeQuality, Arguments: ["card"]),
         new(null, JobActionKind.Vca, Arguments: ["unpushed"])
     ];
 }

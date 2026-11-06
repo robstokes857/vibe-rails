@@ -64,7 +64,7 @@ public sealed record GitStagedFileSnapshot(
     string? StagedMode = null,
     string? PreviousMode = null);
 
-public sealed record GitCheckSnapshotIdentity(string BaseCommit, string HeadCommit);
+public sealed record GitCheckSnapshotIdentity(string BaseCommit, string HeadCommit, IReadOnlyList<string>? CommitShas = null);
 
 public sealed record GitStagedSnapshot(
     string RepositoryPath,

@@ -32,7 +32,15 @@ public sealed class BoardCheckService(
         var evidenceSaved = false;
         try
         {
-            var snapshot = await CaptureAsync(workspace, scope, ct, captureImpact: kind == JobActionKind.CodeQuality);
+            IReadOnlyList<string>? commits = null;
+            if (scope.Kind == "card")
+            {
+                if (board is null || card is null)
+                    throw new InvalidOperationException("Card scope requires a Board card. Select commit scope for a standalone check.");
+                commits = (await board.GetCommitsAsync(project, card.Id, ct)).Select(commit => commit.Sha).ToArray();
+                if (commits.Count == 0) throw new NoAttachedCodeException(card.Type == BoardCardTypes.ResearchSpike);
+            }
+            var snapshot = await CaptureAsync(workspace, scope, ct, captureImpact: kind == JobActionKind.CodeQuality, commits: commits);
             record = record with { BaseCommit = snapshot.CheckIdentity?.BaseCommit,
                 HeadCommit = snapshot.CheckIdentity?.HeadCommit, SnapshotHash = Fingerprint(snapshot),
                 RulesHash = RulesFingerprint(snapshot), FileCount = snapshot.Files.Count,
@@ -80,6 +88,13 @@ public sealed class BoardCheckService(
             record = record with { Status = "Skipped/not applicable", Summary = ex.Message,
                 Limitations = ["No baseline commit is available for this scope; no files were analyzed."], EndedUtc = DateTime.UtcNow };
         }
+        catch (NoAttachedCodeException ex)
+        {
+            record = record with { Status = ex.ResearchSpike ? "Skipped/not applicable" : "Needs review",
+                Summary = ex.ResearchSpike ? "Research spike: no code attached to this card." : "no code attached to this card",
+                Limitations = ["No files were analyzed. Attach commits and run the check again, or explicitly skip the lane check for non-code work."],
+                EndedUtc = DateTime.UtcNow };
+        }
         catch (Exception ex)
         {
             record = record with { Status = "Failed to run", Summary = ex.Message, EndedUtc = DateTime.UtcNow };
@@ -104,11 +119,15 @@ public sealed class BoardCheckService(
             snapshot.ImpactFiles?
                 .Where(file => !(scopeText.TryGetValue(file.RelativePath, out var text) && string.Equals(text, file.Content, StringComparison.Ordinal)))
                 .Select(file => new BoardCheckTextFile(file.RelativePath, file.Content)).ToList(),
-            ignoreRules);
+            ignoreRules, snapshot.CheckIdentity?.CommitShas);
     }
 
-    internal async Task<GitStagedSnapshot> CaptureAsync(string workspace, JobCheckScope scope, CancellationToken ct, bool captureImpact = true)
+    internal async Task<GitStagedSnapshot> CaptureAsync(string workspace, JobCheckScope scope, CancellationToken ct,
+        bool captureImpact = true, IReadOnlyList<string>? commits = null)
     {
+        if (scope.Kind is "card" or "commit")
+            return await snapshots.CaptureCommitsAsync(workspace,
+                scope.Kind == "commit" ? [scope.Head!] : commits ?? [], captureImpact, ct);
         if (scope.Kind == "range")
         {
             if (!JobCheckScope.IsSha(scope.Base) || !JobCheckScope.IsSha(scope.Head))
@@ -132,7 +151,15 @@ public sealed class BoardCheckService(
         if (record.SnapshotHash is null || record.EndedUtc is null) return "Unknown freshness";
         try
         {
-            var snapshot = await CaptureAsync(workspace, new(record.Scope, record.BaseCommit, record.HeadCommit), ct, captureImpact: record.Tool != "VCA");
+            IReadOnlyList<string>? commits = null;
+            if (record.Scope == "card")
+            {
+                commits = (await services.GetRequiredService<IBoardStore>().GetCommitsAsync(workspace, record.CardId, ct))
+                    .Select(commit => commit.Sha).ToArray();
+                if (commits.Count == 0) return "Stale: no commits are attached to the card anymore";
+            }
+            var snapshot = await CaptureAsync(workspace, new(record.Scope, record.BaseCommit, record.HeadCommit), ct,
+                captureImpact: record.Tool != "VCA", commits: commits);
             var current = Fingerprint(snapshot) == record.SnapshotHash
                 && Version(record.Tool == "VCA" ? JobActionKind.Vca : JobActionKind.CodeQuality) == record.ToolVersion;
             // A pinned range remains valid for that range, but does not cover newer HEAD changes.
@@ -161,7 +188,8 @@ public sealed class BoardCheckService(
             record.Scope == "working-tree"
                 ? "Working-tree changes relative to HEAD, including untracked files; committed changes are excluded. All changed files in this checkout are included, even if unrelated to this card."
                 : record.Scope == "repository" ? "All committed files at HEAD; dirty and untracked working files are excluded."
-                : "Net changes between the saved base and head; dirty and untracked working files are excluded. Linked card commits were not used to infer scope.",
+                : record.Scope is "card" or "commit" ? "Only surviving added lines from the selected commits at the newest selected tree are analyzed. Interleaved commits and dirty/untracked files are excluded; rules and impact context come from that committed tree."
+                : "Net changes between the saved base and head; dirty and untracked working files are excluded.",
             quality ? "Code quality is advisory. Only added code in supported languages is analyzed; reach is lexical, not compiler coverage. Local ignore settings apply."
                 : "VCA preserves WARN, COMMIT and STOP findings. This run does not acknowledge commit messages or enforce a Git operation."
         };
@@ -219,12 +247,17 @@ public sealed class BoardCheckService(
     }
 
     private sealed class NoCommitsException() : InvalidOperationException("Nothing to check: this branch has no commits yet.");
+    private sealed class NoAttachedCodeException(bool researchSpike) : InvalidOperationException
+    {
+        public bool ResearchSpike { get; } = researchSpike;
+    }
 
     internal static string RulesFingerprint(GitStagedSnapshot snapshot) => Hash(snapshot.AgentFiles
         .OrderBy(file => file.RelativePath, StringComparer.Ordinal).SelectMany(file => new[] { file.RelativePath, file.Content }));
 
     internal static string Fingerprint(GitStagedSnapshot snapshot) => Hash(new[]
         { snapshot.CheckIdentity?.BaseCommit ?? "", snapshot.CheckIdentity?.HeadCommit ?? "", RulesFingerprint(snapshot) }
+        .Concat(snapshot.CheckIdentity?.CommitShas ?? [])
         .Concat(snapshot.Files.OrderBy(file => file.RelativePath, StringComparer.Ordinal).SelectMany(file => new[]
         { file.RelativePath, file.PreviousRelativePath ?? "", file.ChangeKind.ToString(), file.Content ?? "<unavailable>",
             file.PreviousContent ?? "", file.AddedContent ?? "", file.IsBinary.ToString() }))

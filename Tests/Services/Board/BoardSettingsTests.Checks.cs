@@ -12,6 +12,8 @@ public sealed partial class BoardSettingsTests
     [InlineData("Completed with limitations", null, "Completed with limitations")]
     [InlineData("Skipped/not applicable", null, "Skipped/not applicable")]
     [InlineData("Findings", null, "Findings")]
+    [InlineData("Needs review", null, "Needs review")]
+    [InlineData("Passed", "Needs review", "Needs review")]
     [InlineData("Passed", "Skipped/not applicable", "Completed with limitations")]
     [InlineData("Skipped/not applicable", "Skipped/not applicable", "Skipped/not applicable")]
     [InlineData("Completed with limitations", "Findings", "Findings")]

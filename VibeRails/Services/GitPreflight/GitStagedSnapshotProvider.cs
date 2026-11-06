@@ -7,7 +7,7 @@ using VibeRails.Services.Git;
 
 namespace VibeRails.Services.GitPreflight;
 
-public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGitWorkingTreeSnapshotProvider
+public sealed partial class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGitWorkingTreeSnapshotProvider
 {
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(15);
     private const int MaximumTextFileBytes = 5 * 1024 * 1024;
@@ -682,7 +682,7 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
     }
 
     private async Task<GitStagedSnapshot> CaptureCommittedCoreAsync(string repositoryPath, string mergeBaseRef, string headCommit,
-        bool includeImpactFiles, CancellationToken cancellationToken)
+        bool includeImpactFiles, CancellationToken cancellationToken, IReadOnlySet<string>? selectedPaths = null)
     {
         // This scope represents committed state, so enumerate HEAD's tree rather than the index.
         // `-l` supplies each blob's size before any content is read.
@@ -712,6 +712,13 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
             [mergeBaseRef, headCommit, "--"],
             "read unpushed added lines",
             cancellationToken);
+
+        // Patch sections are positional with the complete name-status listing. Filter only
+        // after parsing them, before loading blobs, or an unrelated section would shift all
+        // subsequent additions onto the wrong selected file (or invalidate the patch).
+        if (selectedPaths is not null)
+            changedEntries = changedEntries.Where(entry => selectedPaths.Contains(entry.RelativePath)
+                || entry.PreviousRelativePath is { } previous && selectedPaths.Contains(previous)).ToList();
 
         var budget = new SnapshotMemoryBudget(_maximumUnpushedSnapshotBytes);
         var headTextByObject = new Dictionary<string, BlobTextResult>(StringComparer.Ordinal);

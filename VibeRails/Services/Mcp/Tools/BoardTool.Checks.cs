@@ -50,6 +50,8 @@ public sealed partial class BoardTool
         if (file == CheckEvidenceIndex)
         {
             var index = new StringBuilder();
+            if (evidence.CommitShas is { Count: > 0 } commits)
+                index.Append("Selected commits: ").AppendJoin(", ", commits).Append('\n');
             index.Append("Scope files (").Append(evidence.Files.Count).Append("):\n");
             foreach (var entry in evidence.Files)
             {
@@ -118,7 +120,7 @@ public sealed partial class BoardTool
     }
 
     internal static string CheckSummary(IReadOnlyList<BoardCheckRecord> checks) => checks.Count == 0
-        ? "Checks: Not run. A card does not define a Git change boundary."
+        ? "Checks: Not run. Card scope uses linked commits; attach code before running a card check."
         : "Checks (saved evidence; current freshness unknown):\n" + string.Join("\n", checks.Select(check =>
             $"- {check.Tool}: {(check.EndedUtc is null ? "Running/completion unknown" : check.Status)} · {check.StartedUtc:O} · scope {check.Scope}"
             + $" · {check.AnalyzedCount} analyzed ({(check.Tool == "VCA" ? "rules" : "files")}), {check.SkippedCount} skipped files, {check.FindingCount} findings"

@@ -1404,7 +1404,7 @@ test('draft image attachments survive creation', async ({ page }) => {
     await expect(page.locator('[data-board-attachments] .board-attachment-thumb')).toBeVisible();
 });
 
-test('lane Agents shows running agents and adds VCA and Code quality for working changes', async ({ page }) => {
+test('lane Agents adds VCA for working changes and Code quality for linked card commits', async ({ page }) => {
     const { jobs, settings } = await openLaneAgentsBoard(page);
     settings.lane_2.runningAgents = [{ runId: 'run_1', name: 'Code reviewer', cardId: 'card_test', cardLabel: 'VIBE-34 · My card', terminalSessionId: 'recording_1' }];
     const created = [];
@@ -1417,14 +1417,14 @@ test('lane Agents shows running agents and adds VCA and Code quality for working
     await button.click();
     const panel = page.locator('.board-lane-agents-panel');
     await expect(panel.locator('[data-lane-running]')).toContainText('VIBE-34 · My card');
-    for (const [choice, scope] of [['check:3', 'working-tree'], ['check:2', 'working-tree']]) {
+    for (const choice of ['check:3', 'check:2']) {
         await panel.getByRole('button', { name: 'Add agent or automation', exact: true }).click();
         await panel.getByLabel('What would you like to add?').selectOption(choice);
         await expect(panel.locator('[data-agent-scope]')).toHaveCount(0);
         await panel.getByRole('button', { name: 'Add to lane', exact: true }).click();
         await expect(panel.getByRole('button', { name: 'Add agent or automation', exact: true })).toBeVisible();
     }
-    expect(created.map(job => job.actions)).toEqual([[{ kind: 3, arguments: ['working-tree'] }], [{ kind: 2, arguments: ['working-tree'] }]]);
+    expect(created.map(job => job.actions)).toEqual([[{ kind: 3, arguments: ['working-tree'] }], [{ kind: 2, arguments: ['card'] }]]);
     expect(settings.lane_2.jobIds).toEqual([12, 14, 41, 42]);
     await page.evaluate(() => { window.app.boardController.goToCardAutomation = (...args) => { window.__openedLaneAgent = args; }; });
     await panel.locator('[data-lane-running-id="run_1"]').click();
