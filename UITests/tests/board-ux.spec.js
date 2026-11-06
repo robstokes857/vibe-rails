@@ -62,6 +62,21 @@ for (const [name, prefix, marker] of [
     });
 }
 
+test('offline spelling checks prose after same-line backtick pairs', async ({ page }) => {
+    await openBoard(page, { appSettings: { vsCodeSpellCheck: true } });
+    await page.locator('.board-card').click();
+    const editor = page.locator('[data-board-card-editor]');
+    const description = editor.locator('[data-board-composer="description"] textarea');
+    const marks = editor.locator('[data-board-composer="description"] .board-spelling-error');
+    for (const length of [3, 4]) {
+        for (const ending of ['', '\n']) {
+            const ticks = '`'.repeat(length);
+            await description.fill(`${ticks}code${ticks} mispelled${ending}`);
+            await expect(marks).toHaveText(['mispelled']);
+        }
+    }
+});
+
 test('offline spelling shares ignores, persists personal words and leaves drafts unchanged', async ({ page }) => {
     const requests = await openBoard(page, { appSettings: { vsCodeSpellCheck: true } });
     await page.locator('.board-card').click();

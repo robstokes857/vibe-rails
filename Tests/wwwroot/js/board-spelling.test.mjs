@@ -75,6 +75,17 @@ test('fences mask unfinished final lines and close only with matching sufficient
     }
 });
 
+test('same-line backtick pairs leave trailing prose available for spelling', () => {
+    for (const length of [3, 4]) {
+        for (const ending of ['', '\n']) {
+            const ticks = '`'.repeat(length);
+            const source = `${ticks}code${ticks} mispelled${ending}`;
+            const start = source.indexOf('mispelled');
+            assert.deepEqual(findMisspellings(source, speller), [{ word: 'mispelled', start, end: start + 9 }]);
+        }
+    }
+});
+
 test('inline delimiters match exact run lengths and preserve prose offsets after code', () => {
     const source = 'before ``code `inside` code`` after\r\nnext `unfinished\r\nlast';
     const words = spellingWords(source);

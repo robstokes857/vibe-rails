@@ -17,7 +17,10 @@ function maskFencedCode(text) {
         }
         const length = markerEnd - markerStart;
         const insideFence = fenceLength > 0;
-        if (!insideFence && length >= 3) {
+        // Backtick fence info cannot contain backticks. Leave same-line code
+        // spans and their trailing prose for the inline scanner.
+        if (!insideFence && length >= 3
+            && (marker !== '`' || !text.slice(markerEnd, end).includes('`'))) {
             fenceMarker = marker;
             fenceLength = length;
         } else if (insideFence && marker === fenceMarker && length >= fenceLength) {
