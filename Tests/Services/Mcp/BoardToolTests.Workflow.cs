@@ -10,6 +10,31 @@ namespace Tests.Services.Mcp;
 public sealed partial class BoardToolTests
 {
     [Fact]
+    public async Task CardAndAgentStatusUseTheSavedCheckOutcome()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var lane = (await _store.GetColumnsAsync(_project, Ct))[0];
+        var job = await _jobs.CreateJobAsync(new("Quality", _project, LLM.NotSet, null, "", null, true, [],
+            Actions: [new(null, JobActionKind.CodeQuality, Arguments: ["working-tree"])]), Ct);
+        await _store.SaveLaneAutomationAsync(_project, lane.Id, [job.Id], 0, Ct);
+        var card = await _store.CreateCardAsync(_project, new(lane.Id, "Check", "", null, "medium", null, [], false), Ct);
+        var run = Assert.Single(await _jobs.EnqueueDueSchedulesAsync(DateTime.UtcNow.AddMinutes(2), Ct));
+        var action = Assert.Single(await _jobs.GetRunActionsAsync(run, Ct));
+        Assert.True(await _store.SaveCheckAsync(_project, new("check", card.Id, run, action.Id,
+            "Code quality", "Completed with limitations", "working-tree", null, null, null, null, "1",
+            DateTime.UtcNow, DateTime.UtcNow, "5 files analyzed; 7 skipped.", 12, 5, 7, 0, []), Ct));
+        await _jobs.CompleteRunAsync(run, JobRunStatus.Succeeded, 0, null, Ct);
+
+        foreach (var response in new[] { await _tool.GetBoardCard(card.Key, cancellationToken: Ct),
+            await _tool.GetBoardAgentStatus(card.Key, cancellationToken: Ct) })
+        {
+            Assert.Contains("Quality · Completed with limitations", response);
+            Assert.Contains("5 files analyzed; 7 skipped.", response);
+            Assert.DoesNotContain("Quality · Passed", response);
+        }
+    }
+
+    [Fact]
     public async Task WorkflowToolRequiresManagedSessionAndNeverAllowsAgentSkip()
     {
         await _store.EnsureDefaultColumnsAsync(_project, Ct);

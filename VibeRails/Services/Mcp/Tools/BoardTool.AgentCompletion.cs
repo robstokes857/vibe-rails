@@ -119,7 +119,7 @@ public sealed partial class BoardTool
         var text = new StringBuilder("Lane Automation entries (current workflow first, in execution order):\n");
         foreach (var entry in entries)
         {
-            text.Append("- ").Append(BoardPromptComposer.SanitizeLine(entry.Name, 120)).Append(" · ").Append(entry.StepStatus ?? entry.Status)
+            text.Append("- ").Append(BoardPromptComposer.SanitizeLine(entry.Name, 120)).Append(" · ").Append(entry.DisplayStatus)
                 .Append(" · job ").Append(entry.JobId).Append(" · entry ").Append(entry.EventKey).Append(" · lane ").Append(entry.ColumnId)
                 .Append(" · settles ").Append(entry.DueUtc.ToString("O"));
             if (entry.RunId is not null) text.Append(" · run ").Append(entry.RunId);

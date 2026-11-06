@@ -34,3 +34,15 @@ test('retry is offered only when authorized and carries the exact card and entry
     step.canRerun = false;
     assert.doesNotMatch(laneStepMarkup(7, flows), /data-agent-action="rerun"/);
 });
+
+test('check outcomes replace execution pass labels without changing advisory ordering', () => {
+    for (const displayStatus of ['Completed with limitations', 'Skipped/not applicable', 'Findings', 'Failed to run', 'Unknown']) {
+        const flows = [{ cardId: 'card', cardLabel: 'Card', steps: [
+            { jobId: 7, stepStatus: Status.Passed, status: Status.Succeeded, displayStatus }
+        ] }];
+        const markup = laneStepMarkup(7, flows);
+        assert.ok(markup.includes(displayStatus));
+        assert.doesNotMatch(markup, /is-passed|> Passed</);
+        assert.ok(laneArrowMarkup(7, flows).includes('is-complete'));
+    }
+});

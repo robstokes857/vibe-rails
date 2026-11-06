@@ -161,7 +161,7 @@ export function mountLaneAgentBody({ app, panel, column, signal, position, updat
                     if (!alive()) return;
                     const step = settings.workflows?.find(flow => flow.cardId === button.dataset.cardId)?.steps
                         ?.find(step => step.jobId === id && step.eventKey === button.dataset.eventKey);
-                    if (step) Object.assign(step, { status: 'Queued', stepStatus: 'Queued', canRerun: false,
+                    if (step) Object.assign(step, { status: 'Queued', stepStatus: 'Queued', displayStatus: 'Queued', checkStatus: null, canRerun: false,
                         runId: result.runId, reason: 'Re-run queued.' });
                 } else await BoardApi.skipCardAutomationAsync(button.dataset.cardId, id, button.dataset.eventKey);
                 if (!alive()) return;

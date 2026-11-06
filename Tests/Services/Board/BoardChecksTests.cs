@@ -295,7 +295,7 @@ public sealed class BoardChecksTests : IAsyncLifetime
         var first = await Run(JobActionKind.CodeQuality, "working-tree");
         Assert.Equal(2, first.FileCount);
         Assert.Equal(1, first.AnalyzedCount); Assert.Equal(1, first.SkippedCount);
-        Assert.NotEqual("Passed", first.Status);
+        Assert.Equal("Completed with limitations", first.Status);
         Assert.Contains(first.ScopeFiles!, path => path.Contains("unrelated.xyz"));
         Assert.NotNull(first.ResultJson); Assert.NotNull(first.SnapshotHash);
         await Git("add", "."); await Git("-c", "core.hooksPath=", "commit", "-m", "changes");
@@ -370,7 +370,7 @@ public sealed class BoardChecksTests : IAsyncLifetime
 
     [Theory]
     [InlineData(GitPreflightStepStatus.Blocked, 1, 0, "Findings")]
-    [InlineData(GitPreflightStepStatus.Passed, 1, 1, "Skipped/not applicable")]
+    [InlineData(GitPreflightStepStatus.Passed, 1, 1, "Completed with limitations")]
     [InlineData(GitPreflightStepStatus.Passed, 0, 0, "Skipped/not applicable")]
     [InlineData(GitPreflightStepStatus.Passed, 1, 0, "Passed")]
     public void VcaStatusDoesNotHideMissingCoverage(GitPreflightStepStatus status, int rules, int deferred, string expected)
@@ -397,8 +397,36 @@ public sealed class BoardChecksTests : IAsyncLifetime
         var completed = BoardCheckService.Complete(record, snapshot, result, JobActionKind.Vca);
 
         Assert.Equal(1, completed.SkippedCount);
-        Assert.Equal("Skipped/not applicable", completed.Status);
+        Assert.Equal("Completed with limitations", completed.Status);
         Assert.Contains(completed.Limitations!, limitation => limitation.Contains("deleted"));
+    }
+
+    [Theory]
+    [InlineData(5, 7, 0, GitPreflightStepStatus.Passed, "Completed with limitations")]
+    [InlineData(5, 0, 7, GitPreflightStepStatus.Passed, "Completed with limitations")]
+    [InlineData(0, 7, 0, GitPreflightStepStatus.Skipped, "Skipped/not applicable")]
+    [InlineData(0, 0, 0, GitPreflightStepStatus.Passed, "Skipped/not applicable")]
+    [InlineData(5, 0, 0, GitPreflightStepStatus.Passed, "Passed")]
+    [InlineData(5, 7, 0, GitPreflightStepStatus.Warning, "Findings")]
+    [InlineData(5, 7, 0, GitPreflightStepStatus.Error, "Failed to run")]
+    [InlineData(5, 7, 0, GitPreflightStepStatus.Cancelled, "Cancelled")]
+    public void QualityStatusDistinguishesPartialCoverageFromNoAnalysis(int analyzed, int skipped, int ignored,
+        GitPreflightStepStatus status, string expected)
+    {
+        var record = new BoardCheckRecord("id", "card", "run", "action", "Code quality", "Running", "working-tree",
+            null, null, null, null, "1", DateTime.UtcNow, null, "", 0, 0, 0, 0, []);
+        var result = new GitPreflightStepResult("quality", "Code quality", status, "engine summary", [], 0, true,
+            new Dictionary<string, string> { ["supportedFileCount"] = analyzed.ToString(),
+                ["skippedFileCount"] = skipped.ToString(), ["ignoredFileCount"] = ignored.ToString() });
+
+        var completed = BoardCheckService.Complete(record, new(repo, [], []), result, JobActionKind.CodeQuality);
+
+        Assert.Equal(expected, completed.Status);
+        Assert.Equal(analyzed, completed.AnalyzedCount);
+        Assert.Equal(skipped + ignored, completed.SkippedCount);
+        if (status is not (GitPreflightStepStatus.Error or GitPreflightStepStatus.Cancelled))
+            Assert.StartsWith($"{analyzed} files analyzed;", completed.Summary);
+        else Assert.Equal("engine summary", completed.Summary);
     }
 
     private Task Write(string name, string content) => File.WriteAllTextAsync(Path.Combine(repo, name), content, Ct);

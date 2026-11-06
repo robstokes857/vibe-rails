@@ -177,12 +177,13 @@ public sealed class BoardCheckService(
             GitPreflightStepStatus.Cancelled => "Cancelled",
             GitPreflightStepStatus.Warning or GitPreflightStepStatus.Blocked => "Findings",
             GitPreflightStepStatus.Skipped => "Skipped/not applicable",
-            _ when analyzed == 0 || skipped > 0 || deferred > 0 || (!quality && missingRules > 0) => "Skipped/not applicable",
+            _ when analyzed == 0 => "Skipped/not applicable",
+            _ when skipped > 0 || deferred > 0 || (!quality && missingRules > 0) => "Completed with limitations",
             _ => "Passed"
         };
         var summary = quality && result.Status is not (GitPreflightStepStatus.Error or GitPreflightStepStatus.Cancelled)
             ? $"{analyzed} files analyzed; {findings} files with code-quality findings; {skipped} skipped. Advisory analysis."
-            : status == "Skipped/not applicable" && result.Status == GitPreflightStepStatus.Passed
+            : status is "Skipped/not applicable" or "Completed with limitations" && result.Status == GitPreflightStepStatus.Passed
                 ? "Analysis completed with incomplete or missing coverage. See limitations." : result.Summary;
         return record with { Status = status, Summary = summary, AnalyzedCount = analyzed,
             SkippedCount = skipped, FindingCount = findings, Limitations = limitations,

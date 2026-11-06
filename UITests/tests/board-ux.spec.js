@@ -4696,6 +4696,41 @@ for (const width of [1440, 390]) {
 }
 
 for (const width of [1440, 390]) {
+    test(`check outcome agrees across lane and card at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        const { jobs, settings } = await openLaneAgentsBoard(page);
+        Object.assign(jobs.find(job => job.id === 15), { name: 'Code quality', actions: [{ kind: 2, arguments: ['working-tree'] }] });
+        settings.lane_2.jobIds = [15];
+        const summary = '5 files analyzed; 0 files with code-quality findings; 7 skipped. Advisory analysis.';
+        const entry = { jobId: 15, name: 'Code quality', eventKey: 'check-entry', status: 'Succeeded',
+            stepStatus: 'Passed', displayStatus: 'Completed with limitations', reason: summary, canSkip: false };
+        settings.lane_2.workflows = [{ cardId: 'card_test', cardLabel: 'Example change', steps: [entry] }];
+        await page.route('**/api/v1/board/columns/lane_2/automation/running', route => route.fulfill({ json: {
+            runningAgents: [], workflows: settings.lane_2.workflows
+        } }));
+        await page.route('**/api/v1/board/cards/card_test/automations', route => route.fulfill({ json: {
+            jobs: [], runs: [], laneEntries: [entry]
+        } }));
+        await page.route('**/api/v1/board/cards/card_test/checks?*', route => route.fulfill({ json: {
+            latest: [{ id: 'check', tool: 'Code quality', status: entry.displayStatus, scope: 'working-tree',
+                startedUtc: '2026-11-05T12:00:00Z', summary, analyzedCount: 5, skippedCount: 7, findingCount: 0 }], pending: []
+        } }));
+        await page.getByRole('button', { name: 'Agents and Automations on entry to Review', exact: true }).click();
+        const panel = page.getByRole('dialog', { name: 'Agents and Automations', exact: true });
+        const state = panel.locator('[data-lane-step-id="15"] .board-workflow-state');
+        await expect(state).toHaveText('Completed with limitations');
+        await expect(state).not.toHaveClass(/is-passed/);
+        await page.screenshot({ path: testInfo.outputPath(`check-lane-${width}.png`) });
+        await page.keyboard.press('Escape');
+        await page.locator('.board-card').first().click();
+        const editor = page.locator('[data-board-card-editor]');
+        await expect(editor.locator('[data-board-automation-runs]')).toContainText('Completed with limitations');
+        await expect(editor.locator('[data-board-automation-runs]')).toContainText(summary);
+        await editor.locator('[data-board-advanced] > summary').click();
+        await expect(editor.locator('[data-board-checks]')).toContainText('Completed with limitations');
+        await page.screenshot({ path: testInfo.outputPath(`check-card-${width}.png`) });
+    });
+
     test(`ordered lane workflow status and per-card skip at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 950 });
         await page.clock.install();
@@ -4768,6 +4803,7 @@ for (const width of [1440, 390]) {
         await page.clock.install();
         const { settings, writes } = await openLaneAgentsBoard(page);
         const step = { jobId: 12, eventKey: 'retry-entry', status: initialState === 'Failed' ? 'Failed' : 'Succeeded', stepStatus: initialState,
+            displayStatus: initialState === 'Failed' ? 'Failed to run' : initialState,
             canSkip: true, canRerun: true, reason: initialState === 'Failed' ? 'Agent process failed.'
                 : 'The agent finished without an explicit pass/fail decision. Later steps remain waiting.' };
         settings.lane_2.workflows = [{ cardId: 'card_test', cardLabel: 'VIBE-123 · Example change', steps: [step] }];
@@ -4786,7 +4822,7 @@ for (const width of [1440, 390]) {
             requests.push(route.request().postDataJSON());
             if (reject) return route.fulfill({ status: 409, json: { error: 'Automation is busy. Try again.' } });
             await new Promise(resolve => { releaseRun = resolve; });
-            Object.assign(step, { status: 'Queued', stepStatus: 'Queued', canRerun: false, reason: 'Re-run queued.' });
+            Object.assign(step, { status: 'Queued', stepStatus: 'Queued', displayStatus: 'Queued', canRerun: false, reason: 'Re-run queued.' });
             await route.fulfill({ json: { success: true, runId: 'rerun-id' } });
         });
         await page.getByRole('button', { name: 'Agents and Automations on entry to Review', exact: true }).click();
@@ -4818,7 +4854,7 @@ for (const width of [1440, 390]) {
         expect(requests).toEqual([{ jobId: 12, eventKey: 'retry-entry' }, { jobId: 12, eventKey: 'retry-entry' }]);
         expect(writes).toEqual([]);
         for (const state of ['Reviewing', 'Running']) {
-            Object.assign(step, { status: 'Running', stepStatus: state, reason: 'Automation retry running.' });
+            Object.assign(step, { status: 'Running', stepStatus: state, displayStatus: state, reason: 'Automation retry running.' });
             await page.clock.fastForward(10100);
             await expect(panel.locator('.board-workflow-state').first()).toHaveText(state);
             const spinner = panel.locator('[data-lane-step-id="12"] .fa-spinner');
@@ -4829,7 +4865,7 @@ for (const width of [1440, 390]) {
             await page.emulateMedia({ reducedMotion: 'no-preference' });
         }
         await page.screenshot({ path: testInfo.outputPath(`lane-rerun-running-${width}.png`) });
-        Object.assign(step, { status: 'Succeeded', stepStatus: 'Passed', canSkip: false, reason: 'Review passed.' });
+        Object.assign(step, { status: 'Succeeded', stepStatus: 'Passed', displayStatus: 'Passed', canSkip: false, reason: 'Review passed.' });
         await page.clock.fastForward(10100);
         await expect(panel.locator('[data-lane-step-id="12"]')).toContainText('Passed');
         await expect(panel.locator('[data-lane-step-id="12"] .fa-spinner')).toHaveCount(0);

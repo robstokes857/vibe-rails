@@ -38,7 +38,7 @@ function automationEditor() {
         querySelector: selector => selector === '[data-board-automation-controls]' ? host : null,
         querySelectorAll: () => []
     };
-    return { editor, select };
+    return { editor, select, runs: nodes['[data-board-automation-runs]'] };
 }
 
 function fakeApp(state) {
@@ -52,7 +52,7 @@ function fakeApp(state) {
                 if (state.catalogFails-- > 0) throw new Error('catalog unavailable');
                 return { jobs: [{ id: 1, actions: [{ kind: 0, environmentId: 7 }] }, { id: 2, actions: [] }] };
             }
-            return { jobs: state.jobs, runs: [], laneEntries: [] };
+            return { jobs: state.jobs, runs: [], laneEntries: state.laneEntries || [] };
         }
     };
     BoardApi.attach(app);
@@ -97,5 +97,18 @@ test('a failed catalog read only loses the grouping until a later refresh succee
     assert.match(select.innerHTML, /<optgroup label="Agents"><option value="1">Review/);
     await controls.refresh();
     assert.equal(app.catalogCalls, 2, 'and the success is kept');
+    controls.dispose();
+});
+
+test('card Automation rail displays the saved check outcome and summary', async () => {
+    const state = { jobs: [], laneEntries: [{ name: 'Code quality', status: 'Succeeded', stepStatus: 'Passed',
+        displayStatus: 'Completed with limitations', reason: '5 files analyzed; 7 skipped.' }] };
+    const app = fakeApp(state);
+    const { editor, runs } = automationEditor();
+    const controls = bindCardAutomations(editor, { id: 'card_a' }, { app });
+    await settle();
+    assert.match(runs.innerHTML, /Completed with limitations/);
+    assert.match(runs.innerHTML, /5 files analyzed; 7 skipped/);
+    assert.doesNotMatch(runs.innerHTML, />Passed</);
     controls.dispose();
 });

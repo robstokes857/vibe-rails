@@ -47,6 +47,22 @@ evidence row is resolved against its run when displayed: failed/cancelled/interr
 stay presented as a successful check.
 If the run is unavailable, completion is unknown. No background host is introduced.
 
+### Outcome wording
+
+Saved check outcomes distinguish **Passed** (applicable analysis completed without findings),
+**Completed with limitations** (analysis ran, but some coverage was skipped, ignored, deferred or
+unavailable), **Skipped/not applicable** (nothing applicable was analyzed), **Findings**,
+**Failed to run**, and **Cancelled**. Coverage counts and limitations remain part of the evidence;
+findings take precedence over coverage limitations.
+
+For check-only Automations, the lane and card Automation rail display the exact run's saved check
+outcome and summary through `BoardLaneAutomationStatus.DisplayStatus`, also used by MCP. Multiple
+check actions show findings before limitations, and a mix of passed and skipped checks means
+completed with limitations. Missing or incomplete evidence is unknown. Retries use their own
+evidence; historical attempts are not rewritten. Execution state and `StepStatus` still determine
+workflow eligibility: findings and limited/empty coverage remain advisory. Automations containing
+Workers retain the explicit worker verdict; mixed script/check Automations retain the run outcome.
+
 ## Evidence and access
 
 `IBoardStore` owns all writes and reads. Additive component migration `board-checks/1` creates

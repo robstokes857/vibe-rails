@@ -110,6 +110,8 @@ public sealed partial class BoardStore
         }
         var workflow = await ReadWorkflowStatusDataAsync(board, state, project, cards, result.Values.SelectMany(rows => rows).ToList(), hasRuns, ct);
         foreach (var card in cards) ApplyWorkflowStatuses(card, result[card.Id], workflow);
+        if (hasRuns && await _stateFeatures.HasTableAsync(state, "JobRunActions", ct))
+            await ApplyLaneCheckOutcomesAsync(board, state, project, result, ct);
         return result;
     }
 }

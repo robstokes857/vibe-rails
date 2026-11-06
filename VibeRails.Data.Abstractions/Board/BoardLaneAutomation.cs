@@ -18,8 +18,11 @@ public sealed record BoardLaneAutomationDispatch(string Status, string Reason, s
 public sealed record BoardLaneAutomationStatus(string EventKey, long JobId, string ColumnId,
     DateTime DueUtc, string Name, string Status, string Reason, string? RunId = null, string Purpose = "work",
     string? WorkflowId = null, int Position = 0, bool IsCurrent = false, string? StepStatus = null,
-    bool CanSkip = false, bool RequiresVerdict = false)
+    bool CanSkip = false, bool RequiresVerdict = false, string? CheckStatus = null)
 {
+    /// <summary>The saved check outcome for check-only runs, otherwise the workflow state.</summary>
+    public string DisplayStatus => CheckStatus ?? StepStatus ?? Status;
+
     /// <summary>A stopped current step that failed or has no verdict can be explicitly retried by the user.</summary>
     public bool CanRerun => IsCurrent && Status is not (BoardStepStatus.Queued or BoardStepStatus.Running)
         && (StepStatus ?? Status) is BoardStepStatus.Failed or BoardStepStatus.Cancelled

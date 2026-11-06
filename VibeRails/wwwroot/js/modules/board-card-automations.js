@@ -91,7 +91,7 @@ export function bindCardAutomations(editor, card, { app, onQueued }) {
             const entries = result?.laneEntries || [];
             runs.innerHTML = entries.map(entry => `<div class="board-automation-run">
                 <span class="board-side-title">${escapeHtml(entry.name)}</span>
-                <span class="board-side-sub">${escapeHtml(entry.stepStatus || entry.status)}</span>
+                <span class="board-side-sub">${escapeHtml(entry.displayStatus || entry.stepStatus || entry.status)}</span>
                 <span class="board-side-sub">${escapeHtml(entry.reason)}</span>
                 ${(entry.canSkip || entry.status === 'Waiting' && !entry.runId) ? `<p class="board-side-empty">Steps run in order. The next step waits for this one to pass or be skipped.</p>
                     <button type="button" class="btn btn-sm btn-outline-secondary" data-board-skip-automation
