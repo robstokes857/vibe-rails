@@ -35,6 +35,7 @@ import { escapeHtml, confirmDialog, parseLlmSelection, getCliBrand, canonicalLlm
 import { mountLlmPicker, setLlmPickerValue, getEnabledLlmItems, getAllLlmItems } from './pickers/llm-picker.js';
 import { launchKind } from './launch-kind.js';
 import { BoardApi } from './board-api.js';
+import { BoardCardSelection, cardDeletionConfirmation } from './board-card-selection.js';
 import { BoardPicker, openBoardOrderManager } from './board-picker.js';
 import { boardBrandLogo, boardTracker, cardTracker, trackerLabel } from './board-brand.js';
 import { BoardLaneAgents } from './board-lane-agents.js';
@@ -137,6 +138,7 @@ export class BoardController {
         this._activityDisposers = [];
         this._activityGeneration = 0;
         this._startingCards = new Map();
+        this.cardSelection = new BoardCardSelection(this);
         this.collapsedLaneIds = this.readCollapsedLaneIds();
         this._laneScrollTops = new Map();
         BoardApi.attach(app);
@@ -223,6 +225,7 @@ export class BoardController {
     }
 
     unload() {
+        this.cardSelection.reset();
         this.boardPicker?.dispose();
         this.boardPicker = null;
         this.boardOrderDispose?.();
@@ -606,6 +609,7 @@ export class BoardController {
 
     async switchBoard(boardId) {
         if (!boardId || boardId === this.state.boardId) return;
+        this.cardSelection?.reset();
         this.state.boardId = boardId;
         this.persistBoardSelection();
         await this.refresh();
@@ -780,6 +784,10 @@ export class BoardController {
         });
         this.root.addEventListener('click', event => this.onClick(event));
         this.root.addEventListener('keydown', event => this.onKeydown(event));
+        this.root.addEventListener('change', event => {
+            if (event.target.matches('[data-board-card-select]'))
+                this.cardSelection.toggle(event.target.dataset.boardCardSelect, event.target.checked);
+        });
 
         const search = this.query('[data-board-search]');
         search?.addEventListener('input', () => {
@@ -917,6 +925,7 @@ export class BoardController {
 
         const clear = this.query('[data-board-clear-filters]');
         if (clear) clear.hidden = !this.hasActiveFilters();
+        this.cardSelection?.render();
     }
 
     // info comes from assigneeInfo()/authorInfo(). A CLI brand mark when there is
@@ -1004,10 +1013,11 @@ export class BoardController {
         // is-live paints the marching "an agent is on this" border (see the template CSS).
         return `
             <article class="board-card${card.flagged ? ' is-flagged' : ''}${card.blocked ? ' is-blocked' : ''}${card.activeTabId || card.hasActiveDesktopAgent ? ' is-live' : ''}${card.hasActiveDesktopAgent && !card.activeTabId ? ' is-desktop-live' : ''}" data-card-id="${escapeHtml(card.id)}"
-                tabindex="0" role="button" aria-label="${escapeHtml(cardDisplayId(card))}: ${escapeHtml(card.title)}${card.agentMade ? ` — ${escapeHtml(agentMadeSummary(card))}` : ''}${card.flagged ? ' — Needs your attention' : ''}${ghost ? ` — ${escapeHtml(ghost)}` : ''}">
+                ${this.cardSelection?.active ? 'role="group"' : 'tabindex="0" role="button"'} aria-label="${escapeHtml(cardDisplayId(card))}: ${escapeHtml(card.title)}${card.agentMade ? ` — ${escapeHtml(agentMadeSummary(card))}` : ''}${card.flagged ? ' — Needs your attention' : ''}${ghost ? ` — ${escapeHtml(ghost)}` : ''}">
                 <span class="board-card-rail" data-priority="${escapeHtml(card.priority)}"
                     title="${escapeHtml(card.priority)} priority"></span>
                 <div class="board-card-body">
+                    ${this.cardSelection?.cardControl(card) || ''}
                     <div class="board-card-top">
                         <span class="board-key${ghost ? ' has-ghost' : ''}"${ghost ? ` title="${escapeHtml(ghost)}"` : ''}>${ghostKeyHtml(`${card.flagged ? '<i class="fa-solid fa-flag board-attention-flag" title="Needs your attention" aria-hidden="true"></i> ' : ''}${card.agentMade ? `<i class="fa-solid fa-robot board-agent-mark" title="${escapeHtml(agentMadeSummary(card))}" aria-label="${escapeHtml(agentMadeSummary(card))}"></i> ` : ''}${escapeHtml(cardDisplayId(card))}`, card)}</span>
                         <button type="button" class="board-icon-btn board-card-pin${card.pinned ? ' is-pinned' : ''}" data-board-action="toggle-pin" ${readOnly ? 'disabled' : ''}
@@ -1053,6 +1063,7 @@ export class BoardController {
 
     renderLanes() {
         const scroll = this.captureScroll();
+        const selectionFocus = globalThis.document?.activeElement?.dataset?.boardCardSelect;
         const visible = this.filteredCards();
 
         const html = this.state.columns
@@ -1111,6 +1122,7 @@ export class BoardController {
 
         const host = this.query('[data-board-lanes]');
         if (host) host.innerHTML = html;
+        this.cardSelection?.render();
         if (host) {
             this.laneAgents.mount(host);
             this.laneAgents.updateActivity(this._activeAutomationColumnIds);
@@ -1126,6 +1138,8 @@ export class BoardController {
                 }
             }, { passive: true });
         });
+        if (selectionFocus) this.queryAll('[data-board-card-select]')
+            .find(input => input.dataset.boardCardSelect === selectionFocus)?.focus({ preventScroll: true });
     }
 
     cancelPageRequests() {
@@ -1134,6 +1148,10 @@ export class BoardController {
     }
 
     filtersChanged(debounce = false) {
+        const wasSelecting = this.cardSelection?.active;
+        if (this.cardSelection) {
+            this.cardSelection.reset(this.cardSelection.selected.size ? 'Selection cleared because the filters changed.' : '');
+        }
         this.boardSearch?.setQuery(this.state.filters.q);
         this._boardPollAbort?.abort();
         clearTimeout(this._filterTimer);
@@ -1141,6 +1159,8 @@ export class BoardController {
         this._refreshGeneration += 1;
         this._refreshAbort?.abort();
         this.cancelPageRequests();
+        if (wasSelecting) this.renderLanes();
+        else this.cardSelection?.render();
         if (debounce) this._filterTimer = setTimeout(() => void this.refresh(), 200);
         else void this.refresh();
     }
@@ -1224,6 +1244,7 @@ export class BoardController {
 
     bindDragAndDrop() {
         this.destroySortables();
+        if (this.cardSelection?.active) return;
         if (this.currentBoard()?.shared) return;
         if (typeof window.Sortable === 'undefined') return;
         const animation = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 160;
@@ -1325,6 +1346,7 @@ export class BoardController {
             ]);
             if (!isCurrent()) return;
             this.state.boards = boards;
+            if (this.state.boardId !== boardId) this.cardSelection?.reset();
             this.state.boardId = boardId;
             this.state.columns = columns;
             this.state.cards = page.cards || [];
@@ -1345,6 +1367,7 @@ export class BoardController {
     // ============================================
 
     onClick(event) {
+        if (this.cardSelection?.handleClick(event)) return;
         const trigger = event.target.closest('[data-board-action]');
         const action = trigger?.dataset.boardAction;
         const cardEl = event.target.closest('.board-card');
@@ -3217,23 +3240,19 @@ export class BoardController {
 
     async deleteCurrentCard(editor) {
         const cardId = this.cardIdFromEditor(editor);
-        if (!cardId) return;
+        if (!cardId || editor._deletingCard) return;
+        editor._deletingCard = true;
         const card = this.state.cards.find(c => c.id === cardId);
-        const confirmed = await confirmDialog({
-            title: 'Delete card',
-            message: `Delete ${card?.key || 'this card'}? This cannot be undone.`,
-            confirmLabel: 'Delete',
-            danger: true
-        });
-        if (!confirmed) return;
-
         try {
+            if (!await confirmDialog(cardDeletionConfirmation([card])) || !editor.isConnected) return;
             await BoardApi.deleteBoardCardAsync(cardId);
             this.app.closeModal();
             this.app.showToast('Board', 'Card deleted.', 'success');
             await this.refresh();
         } catch (error) {
             this.app.showToast('Board', error?.message || 'Failed to delete the card.', 'error');
+        } finally {
+            editor._deletingCard = false;
         }
     }
 

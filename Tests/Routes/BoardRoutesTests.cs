@@ -585,6 +585,10 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
             Assert.Equal(HttpStatusCode.BadRequest, comment.StatusCode);
         }
         Assert.Equal("Shared task", (await store.FindCardAsync(_project, card.Id, ct))!.Title);
+        using var deleted = await SendAsync(HttpMethod.Delete, $"/api/v1/board/cards/{card.Id}", "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.BadRequest, deleted.StatusCode);
+        Assert.Contains("read-only", await deleted.Content.ReadAsStringAsync(ct));
+        Assert.NotNull(await store.FindCardAsync(_project, card.Id, ct));
         Assert.Equal(0, await store.CountUnsentLogEntriesAsync(shared.Id, ct));
     }
 

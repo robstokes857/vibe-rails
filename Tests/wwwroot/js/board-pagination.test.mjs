@@ -12,6 +12,7 @@ function harness() {
         showToast(...args) { toasts.push(args); }
     });
     controller.root = { isConnected: true };
+    controller.cardSelection.render = () => {}; // This fixture exercises paging without selection DOM.
     controller.queryAll = () => [];
     controller.renderLanes = () => {};
     controller.state.boardId = 'main';

@@ -46,7 +46,8 @@ test('the face button routes its click without opening the card editor', () => {
     h.controller.startWorkFromFace = id => starts.push(id);
     const trigger = { dataset: { boardAction: 'start-work' } };
     h.controller.onClick({
-        target: { closest: selector => selector === '[data-board-action]' ? trigger : { dataset: { cardId: 'card-1' } } },
+        target: { closest: selector => selector === '[data-board-action]' ? trigger
+            : selector === '.board-card' ? { dataset: { cardId: 'card-1' } } : null },
         stopPropagation: () => { stopped = true; }
     });
     assert.deepEqual(starts, ['card-1']);

@@ -1,0 +1,25 @@
+.board-selection {
+    padding: var(--space-3);
+    border: 1px solid var(--control-border);
+    border-radius: var(--radius-control);
+    background: var(--color-bg-surface);
+}
+.board-selection p { margin: 0 0 var(--space-2); }
+.board-selection-help { color: var(--color-text-muted); font-size: var(--text-support, 13px); }
+.board-selection-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.board-selection-actions [data-board-selection-action="delete"] { min-width: 140px; }
+.board-selection details { margin-top: var(--space-2); }
+.board-selection summary { cursor: pointer; }
+.board-selection ul { max-height: 180px; overflow: auto; margin: var(--space-2) 0 0; padding: 0; }
+.board-selection li { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0; }
+.board-selection li > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.board-selection-error { display: block; color: var(--feedback-error-fg); }
+.board-view .board-card-select {
+    display: flex; align-items: center; gap: var(--space-2); min-height: 44px;
+    cursor: pointer; color: var(--color-text); font-size: var(--text-control, 14px);
+}
+.board-card-select input { width: 17px; height: 17px; accent-color: var(--color-accent); }
+.board-view.is-selecting .board-card { cursor: default; }
+.board-view.is-selecting .board-card [data-board-action] { display: none; }
+.board-view.is-selecting .board-card.is-selected { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+.board-selection [hidden], .board-selection[hidden], [data-board-selection-action][hidden] { display: none !important; }

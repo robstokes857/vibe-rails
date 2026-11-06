@@ -47,7 +47,7 @@
         appStyleLink.rel = 'stylesheet';
         appStyleLink.href = window.__viberails_asset_url__('style.css');
         document.head.appendChild(appStyleLink);
-        for (const path of ['js/modules/code-report/vendor/quality/quality-report.css', 'js/modules/code-report/styles.css', 'assets/board/board-lane-agents.css', 'assets/board/board-card-assign.css']) {
+        for (const path of ['js/modules/code-report/vendor/quality/quality-report.css', 'js/modules/code-report/styles.css', 'assets/board/board-lane-agents.css', 'assets/board/board-card-assign.css', 'assets/board/board-card-selection.css']) {
             const link = document.createElement('link');
             link.rel = 'stylesheet';
             link.href = window.__viberails_asset_url__(path);
@@ -5797,6 +5797,7 @@
                     <div class="board-stats" data-board-stats></div>
                     <div class="board-head-actions">
                         <div class="board-ai-manager" data-board-ai-manager aria-live="polite" hidden></div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap" data-board-selection-action="start">Select cards</button>
                         <button type="button" class="btn btn-sm btn-outline-primary text-nowrap" data-board-action="new-card">
                             <i class="fa-solid fa-plus" aria-hidden="true"></i>
                             <span>New card</span>
@@ -5805,6 +5806,18 @@
                 </header>
 
                 <p class="board-shared-notice" data-board-shared-notice role="status" hidden></p>
+
+                <section class="board-selection" data-board-selection aria-label="Card selection" hidden>
+                    <p data-board-selection-status role="status" aria-live="polite"></p>
+                    <div data-board-selection-controls>
+                        <p class="board-selection-help">Check individual cards to select them. Loading more cards does not select them. Changing boards or filters clears selection.</p>
+                        <div class="board-selection-actions">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" data-board-selection-action="cancel">Cancel selection</button>
+                            <button type="button" class="btn btn-sm btn-outline-danger" data-board-selection-action="delete" disabled>Delete selected</button>
+                        </div>
+                    </div>
+                    <details data-board-selection-list hidden><summary>Review selected cards</summary><ul></ul></details>
+                </section>
 
                 <div class="board-toolbar" role="group" aria-label="Filter cards">
                     <div class="board-search">

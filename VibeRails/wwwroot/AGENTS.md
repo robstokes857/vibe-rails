@@ -222,6 +222,22 @@ base64 encoding. The resulting JSON is for
 
 ## Board
 
+**Multi-select deletion (VIBE-283).** `board-card-selection.js` owns the lane board's
+Select cards mode, native labelled checkboxes, count, exact selected-card list and
+Delete selected action. Only explicitly checked loaded cards enter selection; loading
+another page never selects it. Board/filter changes and unload clear selection and
+invalidate pending batches. Search spans projects, so selection is available only in
+the current local board's lanes; shared boards remain read-only. Collapsing a lane or
+refreshing pages retains explicit selections, names any outside the visible lanes and
+opens their review list. The count and list, not server result totals, define the batch.
+Single and multiple deletes use `cardDeletionConfirmation` and the same authenticated
+DELETE route. Lock from confirmation through completion; send bounded sequential
+requests, retain per-card failures for retry and refresh counts/lanes. Never retry
+successful IDs. Navigation stops unsent requests; it cannot undo an in-flight deletion.
+Keep the shared consequence text aligned when VIBE-282 changes storage deletion.
+Coverage: `board-card-selection.test.mjs`, `board-card-selection.spec.js`, and
+`BoardRoutesTests.Deletion.cs`; browser tests use only synthetic API fixtures.
+
 Retained shared-board copies are read-only. The board disables dragging, creation and work
 launches; its card viewer disables editing while preserving history/session/attachment reads.
 The foreign-project card response also carries `shared` so its editor enforces the same rule.
