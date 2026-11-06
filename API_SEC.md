@@ -390,6 +390,8 @@ middleware serves their paths rather than registering individual API endpoints.
 | DELETE | `/api/v1/board/local-cards/{card}/links/{linkedCard}` | [BoardRoutes.Search.cs](VibeRails/Routes/BoardRoutes.Search.cs) |
 | POST | `/api/v1/board/local-cards/{card}/move` | [BoardRoutes.Search.cs](VibeRails/Routes/BoardRoutes.Search.cs) |
 | GET | `/api/v1/board/remote` | [BoardRoutes.Remote.cs](VibeRails/Routes/BoardRoutes.Remote.cs) |
+| GET | `/api/v1/board/remote/safety` | [BoardRoutes.Remote.cs](VibeRails/Routes/BoardRoutes.Remote.cs) |
+| POST | `/api/v1/board/remote/safety/approve` | [BoardRoutes.Remote.cs](VibeRails/Routes/BoardRoutes.Remote.cs) |
 | PUT | `/api/v1/board/remote/{id}` | [BoardRoutes.Remote.cs](VibeRails/Routes/BoardRoutes.Remote.cs) |
 | POST | `/api/v1/board/remote/{id}/delete` | [BoardRoutes.Remote.cs](VibeRails/Routes/BoardRoutes.Remote.cs) |
 | GET | `/api/v1/chatHistory` | [ChatHistoryRoutes.cs](VibeRails/Routes/ChatHistoryRoutes.cs) |

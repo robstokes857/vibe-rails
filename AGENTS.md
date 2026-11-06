@@ -184,6 +184,10 @@ file; it is reference material, not instructions.
   **Gateway supports tool search** (`ClaudeGatewaySupportsToolSearch`, default off) or the gateway
   is api.anthropic.com (`LlmProxyClaudeConfig.KeepsToolSearch`); see the
   [TokenSaver README](TokenSaver/README.md#things-that-will-bite-you).
+- **No unsafe code in VibeRails.** Never set `AllowUnsafeBlocks` in `VibeRails.csproj` or
+  propose it. Native calls stay `[DllImport]`, which works under Native AOT. Do not convert them
+  to `[LibraryImport]` (its generated code needs the unsafe switch), and do not raise or card that
+  suggestion (SYSLIB1054) in reviews: it is already decided. The owner rejected it in VIBE-284.
 
 ## Build and test
 
