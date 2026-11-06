@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using VibeRails.DTOs;
 
 namespace VibeRails.Services.GitPreflight;
@@ -52,6 +53,8 @@ public sealed partial class GitStagedSnapshotProvider
                 if (entry.PreviousRelativePath is { } previous) paths.Add(previous);
             }
         }
+        if (resolved.Count > 1)
+            await ExpandRenamedPathsAsync(repositoryPath, paths, chain.Take(Array.IndexOf(chain, oldest) + 1), cancellationToken);
         var snapshot = await CaptureCommittedCoreAsync(repositoryPath, baseline, head, includeImpactFiles, cancellationToken, paths);
         if (resolved.Count > 1)
         {
@@ -94,5 +97,33 @@ public sealed partial class GitStagedSnapshotProvider
             snapshot = snapshot with { Files = files };
         }
         return snapshot with { CheckIdentity = new(baseline, head, resolved.Order(StringComparer.Ordinal).ToArray()) };
+    }
+
+    private static async Task ExpandRenamedPathsAsync(string repositoryPath, HashSet<string> paths,
+        IEnumerable<string> history, CancellationToken cancellationToken)
+    {
+        // A selected addition can be renamed in an unlinked commit and therefore appear at
+        // neither selected name in the net diff. Follow every intervening rename before any
+        // filtering. --stdin batches the history; NUL paths preserve spaces and Unicode.
+        var renames = await RunTextGitAsync(repositoryPath,
+            ["diff-tree", "--stdin", "--no-ext-diff", "--no-textconv", "--no-commit-id", "--name-status", "-z", "-r",
+                "-M", "--root", "--diff-merges=first-parent", "--diff-filter=R"], cancellationToken,
+            standardInput: Encoding.UTF8.GetBytes(string.Join('\n', history) + "\n"), maximumOutputBytes: MaximumPatchBytes);
+        if (renames.OutputLimitExceeded)
+            throw new InvalidOperationException("Selected-commit rename history exceeded the capture limit; run separate commit checks.");
+        EnsureSucceeded(renames, "follow selected file renames", repositoryPath);
+        var entries = ParseNameStatus(renames.StdOut);
+        bool expanded;
+        do
+        {
+            expanded = false;
+            foreach (var entry in entries)
+            {
+                if (entry.PreviousRelativePath is not { } previous
+                    || !paths.Contains(previous) && !paths.Contains(entry.RelativePath)) continue;
+                expanded |= paths.Add(previous);
+                expanded |= paths.Add(entry.RelativePath);
+            }
+        } while (expanded);
     }
 }

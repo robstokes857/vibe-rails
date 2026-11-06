@@ -31,7 +31,8 @@ another scope, such as **One commit**. Results never move a card or set its atte
 
 Card capture requires one first-parent history. Divergent or side-branch selections fail visibly
 and can be checked individually with commit scope. Each selected commit supplies its changed paths;
-the oldest selected commit's first parent and newest selected tree bound capture. Git line attribution
+the oldest selected commit's first parent and newest selected tree bound capture. Paths follow all
+intervening renames before filtering, including chains of unlinked renames. Git line attribution
 then removes additions from interleaved, unlinked commits, including additions in the same file.
 Reverted/overwritten code is not scored. Full file, rule and impact text is committed context, not
 additional code being scored. Root commits use the empty tree; merge commits use their first parent.

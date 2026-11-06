@@ -56,6 +56,7 @@ test('new quality checks use card commits while VCA keeps working changes and la
             api: async (...args) => { requests.push(args); return { ...args[2], id: 42 }; } };
         assert.equal(await prepareLaneAutomation(context), 42);
         assert.deepEqual(requests[0][2].actions, [{ kind: Number(kind.slice(6)), arguments: [kind === 'check:2' ? 'card' : 'working-tree'] }]);
+        assert.match(requests[0][2].description, kind === 'check:2' ? /linked commits/ : /working changes/);
         assert.equal(await prepareLaneAutomation(context), 42);
         assert.equal(requests.length, 1);
     }

@@ -118,7 +118,8 @@ export async function prepareLaneAutomation(context) {
         const scope = kind === 2 ? 'card' : 'working-tree';
         name = `${kind === 2 ? 'Code quality' : 'VCA'} · ${column.name} · ${scope}`;
         action = { kind, arguments: [scope] };
-        description = `${kind === 2 ? 'Code quality' : 'VCA'} checks working changes when a card enters ${column.name}.`;
+        description = kind === 2 ? `Code quality checks the card's linked commits when it enters ${column.name}.`
+            : `VCA checks working changes when a card enters ${column.name}.`;
         existing = findCheckAutomation(jobs, { name, kind, scope });
         if (existing && !existing.reuse) throw new Error(`An Automation named “${existing.job.name}” already exists with a different workflow. Rename or edit it on the Automations page.`);
     } else throw new Error('Choose what to add.');

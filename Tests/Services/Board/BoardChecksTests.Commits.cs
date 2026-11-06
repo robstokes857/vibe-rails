@@ -101,6 +101,40 @@ public sealed partial class BoardChecksTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CardCommitsFollowUnlinkedRenamesWithoutDroppingSelectedCode(bool renameTwice)
+    {
+        await Write("created.cs", "class SelectedFirst {}\n");
+        var first = await Commit();
+        await Git("mv", "created.cs", "renamed space λ.cs");
+        await Commit();
+        var finalPath = "renamed space λ.cs";
+        if (renameTwice)
+        {
+            finalPath = "final.cs";
+            await Git("mv", "renamed space λ.cs", finalPath);
+            await Commit();
+        }
+        await Write("last.cs", "class SelectedLast {}\n");
+        var last = await Commit();
+        await Link(first);
+        await Link(last);
+        await Write(finalPath, "class Dirty {}\n");
+
+        var check = await Run(JobActionKind.CodeQuality, "card");
+
+        Assert.Equal("Passed", check.Status);
+        Assert.Equal(2, check.FileCount);
+        Assert.Equal(2, check.AnalyzedCount);
+        Assert.Equal(0, check.SkippedCount);
+        var renamed = Assert.Single(check.Evidence!.Files, file => file.Path == finalPath);
+        Assert.Equal("class SelectedFirst {}", renamed.AddedContent);
+        Assert.Equal(new[] { 1 }, renamed.AddedLineNumbers);
+        Assert.Contains(check.Evidence.Files, file => file.Path == "last.cs" && file.AddedContent!.Contains("SelectedLast"));
+    }
+
+    [Theory]
     [InlineData("HEAD")]
     [InlineData("--all")]
     [InlineData("abc123")]
