@@ -5797,7 +5797,6 @@
                     <div class="board-stats" data-board-stats></div>
                     <div class="board-head-actions">
                         <div class="board-ai-manager" data-board-ai-manager aria-live="polite" hidden></div>
-                        <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap" data-board-selection-action="start">Select cards</button>
                         <button type="button" class="btn btn-sm btn-outline-primary text-nowrap" data-board-action="new-card">
                             <i class="fa-solid fa-plus" aria-hidden="true"></i>
                             <span>New card</span>
@@ -5819,7 +5818,7 @@
                     <details data-board-selection-list hidden><summary>Review selected cards</summary><ul></ul></details>
                 </section>
 
-                <div class="board-toolbar" role="group" aria-label="Filter cards">
+                <div class="board-toolbar" role="group" aria-label="Filter and select cards">
                     <div class="board-search">
                         <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
                         <input type="search" class="board-control board-search-input" data-board-search
@@ -5859,6 +5858,7 @@
                         <i class="fa-solid fa-xmark" aria-hidden="true"></i>
                         <span>Clear</span>
                     </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap" data-board-selection-action="start">Select cards</button>
                 </div>
             </div>
 

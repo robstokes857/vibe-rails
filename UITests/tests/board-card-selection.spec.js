@@ -68,7 +68,8 @@ test('keyboard selection, counted confirmation, Escape/cancel, and successful de
     await expect(selected(page)).toHaveText('2 selected');
     await deleteSelected(page).click();
     const dialog = page.getByRole('alertdialog');
-    await expect(dialog).toContainText('Delete the 2 selected cards?');
+    await expect(dialog).toContainText('the 2 selected cards');
+    await expect(dialog).toContainText('This cannot be undone.');
     await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
