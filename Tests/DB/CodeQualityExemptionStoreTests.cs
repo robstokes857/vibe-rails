@@ -87,7 +87,7 @@ public sealed class CodeQualityExemptionStoreTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task DeletingACardStopsItsExemptionsWithoutDeletingTheirHistory()
+    public async Task DeletingACardRemovesItsOwnedExemptions()
     {
         await store.SaveCodeQualityExemptionAsync(root, first.Id, "a.cs", false, "Keep history", Author, Ct);
         Assert.True(await store.DeleteCardAsync(root, first.Id, Ct));
@@ -96,7 +96,7 @@ public sealed class CodeQualityExemptionStoreTests : IAsyncLifetime
         await connection.OpenAsync(Ct);
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT COUNT(*) FROM BoardCodeQualityExemptions;";
-        Assert.Equal(1L, await command.ExecuteScalarAsync(Ct));
+        Assert.Equal(0L, await command.ExecuteScalarAsync(Ct));
     }
 
     [Fact]

@@ -234,6 +234,22 @@ queue. A merge appends source content and copies its rails before soft deletion;
 metadata wins. Legacy notes are read with Comments, and new notes are comments. See SYNC.md for
 source/destination delivery, return moves and the companion hosted deletion projection.
 
+## Permanent local card deletion (VIBE-282)
+
+Single and bulk UI deletes call the existing authenticated DELETE route, `BoardService` and
+`IBoardStore.DeleteCardAsync`. The store checks live project membership and writable-board
+ownership inside its transaction, removes the card-owned graph, and renumbers only that lane.
+Foreign keys remove discussion, attachments/bytes, commit snapshots, card-session links,
+checks, reviews, handoffs and derived caches. Explicit cleanup handles the workflow/activity
+tables and card-scoped exemptions that have no cascade. Shared completion reports, recordings,
+other cards and repository rules remain. A failure rolls the entire deletion back.
+
+`BoardDeletedCards` reserves the old identity and carries a payload-free deletion outbox for
+an existing hosted publication. `BoardDeletedTrackerItems` prevents Jira/ADO re-import. Both
+are added empty by `board-card-deletion/1`; previously soft-deleted data is neither converted
+nor purged. Hosted incoming history and merge continue their existing soft-delete protocols.
+The independent data-backup pipeline retains its own archives without deletion callbacks.
+
 ## Lane agent controls (2026-09-30)
 
 VIBE-18 adds model/effort labels from the Worker's saved Environment arguments. The panel reads
@@ -952,7 +968,7 @@ and schema snapshot tests; altering already-applied migration SQL does not upgra
 | Browser content | Escape-first small text renderer; attachment images allow only raster data URLs. File response is an octet-stream attachment with `nosniff`, `no-store`, and restrictive CSP. Text uses `textContent`; PDF paints to canvas, not an active document iframe. |
 | Agent instructions | Launch composer bounds text, neutralizes template braces, flattens controls/bidi in metadata, and labels card content as data. Tool output is still untrusted text; fences are guidance, not an authorization boundary. |
 | MCP permissions | HTTP uses both credentials. Stdio is a process owned by the local user and has their database access; no new listener. `AuthorizeBoardTools` is explicit/default-false and produces a per-launch 14-tool allowlist, with provider-specific handling. It is a client approval choice, not a server-side card ACL. A separate default-off YOLO option can explicitly request the base provider's global bypass/auto-approve flag. |
-| Destruction / retention | MCP has no delete tool, but allowed tools can alter other cards in the resolved project. Card deletes are soft (`DeletedUTC`, VB-51) and the Card Log records each field change with its old value, but nothing restores from it automatically. Do not claim all agent writes are reversible. |
+| Destruction / retention | MCP has no delete tool, but allowed tools can alter other cards in the resolved project. Confirmed local card deletion permanently removes the owned graph (VIBE-282); recordings and independent backup archives remain. Do not claim all agent writes are reversible. |
 | Availability | Authenticated file uploads intentionally have no byte limit, and attachment routes disable Kestrel's request limit. Base64 JSON, decoded bytes and SQLite BLOB handling buffer whole files. Current-file count is 40, but removed history bytes, comments, revisions and snapshots have no aggregate retention budget. |
 
 The unlimited-file behavior is explicit existing product policy, not an accidental missing check

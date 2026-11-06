@@ -133,7 +133,7 @@ public sealed partial class BoardStore
         await using (var exists = connection.CreateCommand())
         {
             exists.Transaction = transaction;
-            exists.CommandText = "SELECT 1 FROM BoardJiraLinks WHERE SiteId = $site AND IssueId = $issue;";
+            exists.CommandText = "SELECT 1 FROM BoardJiraLinks WHERE SiteId = $site AND IssueId = $issue UNION ALL SELECT 1 FROM BoardDeletedTrackerItems WHERE Provider = 'jira' AND ConnectionId = $site AND ItemId = $issue;";
             exists.Parameters.AddWithValue("$site", link.SiteId);
             exists.Parameters.AddWithValue("$issue", link.IssueId);
             if (await exists.ExecuteScalarAsync(cancellationToken) is not null)
@@ -161,7 +161,9 @@ public sealed partial class BoardStore
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT CardId, SiteId, IssueId, IssueKey, AssigneeDisplay, IssueUpdated, LastPulledUTC, Mapping
-            FROM BoardJiraLinks WHERE SiteId = $site AND IssueId = $issue;
+            FROM BoardJiraLinks WHERE SiteId = $site AND IssueId = $issue
+            UNION ALL SELECT CardId, ConnectionId, ItemId, '', NULL, DeletedUTC, DeletedUTC, NULL
+            FROM BoardDeletedTrackerItems WHERE Provider = 'jira' AND ConnectionId = $site AND ItemId = $issue;
             """;
         command.Parameters.AddWithValue("$site", siteId);
         command.Parameters.AddWithValue("$issue", issueId);

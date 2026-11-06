@@ -529,10 +529,12 @@ serialization or tool discovery into the Native AOT path.
   (comment, commit, session, attachment, linked card) while it stays open; a closed section only
   marks the numbers stale.
   Change the numbers in one place and update the plan in `vibe-books/vibe_board_context_rot`.
-- **Deleting a card is a soft delete (VB-51).** It sets `BoardCards.DeletedUTC` and writes a
-  `deleted` log entry; every read, count, lookup, pull and lane Automation skips it, and its rows
-  (comments, attachments, links, sessions) stay. A Jira pull never recreates a soft-deleted card.
-  Restore and the 30-day purge are VB-54. An older binary still shows soft-deleted cards.
+- **Confirmed local card deletion is permanent (VIBE-282).** The shared service/store path
+  removes the selected live card and its owned content in one transaction. Minimal identity,
+  tracker-import and hosted-deletion receipts prevent reuse/recreation; they contain no card
+  text or attachments. Recordings, shared records and independent backups survive. The UI's
+  single/bulk confirmation shares this contract. Existing soft-deleted cards are not swept;
+  remote history and merge retain their separate soft-delete protocols. No age-based purge.
 - Attachment removal deletes its row and cascades its bytes. Only current attachments are
   readable. Database backups can retain older data; removal is not secure erasure.
 - **Agent-made (VIBE-11).** `BoardCards.AgentMade` is set once, inside the create transaction, and

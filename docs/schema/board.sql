@@ -59,6 +59,9 @@ CREATE INDEX IX_BoardComments_Unsent ON BoardComments(CardId) WHERE RemoteSeq IS
 -- index IX_BoardContextSamples_Card
 CREATE INDEX IX_BoardContextSamples_Card ON BoardContextSamples(CardId, MeasuredUTC);
 
+-- index IX_BoardDeletedCards_Outbox
+CREATE INDEX IX_BoardDeletedCards_Outbox ON BoardDeletedCards(BoardId, RemoteSeq);
+
 -- index IX_BoardDesktopActivity_Client
 CREATE INDEX IX_BoardDesktopActivity_Client ON BoardDesktopActivity(ClientId, EndedUTC, ExpiresUTC);
 
@@ -203,8 +206,14 @@ CREATE TABLE BoardContextSamples ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REF
 -- table BoardContextSettings
 CREATE TABLE BoardContextSettings ( BoardId TEXT PRIMARY KEY REFERENCES Boards(Id) ON DELETE CASCADE, ContextJson TEXT NOT NULL, Revision INTEGER NOT NULL , EveryContextMessage TEXT, EveryContextRevision INTEGER);
 
+-- table BoardDeletedCards
+CREATE TABLE BoardDeletedCards ( CardId TEXT PRIMARY KEY, CardKey TEXT NOT NULL COLLATE NOCASE UNIQUE, ProjectPath TEXT NOT NULL, Number INTEGER NOT NULL, BoardId TEXT NOT NULL, DeletedUTC TEXT NOT NULL, EntryId TEXT NOT NULL UNIQUE, AuthorKind TEXT NOT NULL, AuthorLabel TEXT NOT NULL, AuthorCli TEXT, RemoteSeq INTEGER, Managed INTEGER NOT NULL );
+
 -- table BoardDeletedComments
 CREATE TABLE BoardDeletedComments ( CommentId TEXT PRIMARY KEY REFERENCES BoardComments(Id) ON DELETE CASCADE, DeletedUTC TEXT NOT NULL );
+
+-- table BoardDeletedTrackerItems
+CREATE TABLE BoardDeletedTrackerItems ( Provider TEXT NOT NULL, ConnectionId TEXT NOT NULL, ItemId TEXT NOT NULL, CardId TEXT NOT NULL, ProjectPath TEXT NOT NULL, DeletedUTC TEXT NOT NULL, PRIMARY KEY (Provider, ConnectionId, ItemId) );
 
 -- table BoardDesktopActivity
 CREATE TABLE BoardDesktopActivity ( CardId TEXT NOT NULL, ClientId TEXT NOT NULL, ClientLabel TEXT NOT NULL, ExpiresUTC TEXT NOT NULL, EndedUTC TEXT, PRIMARY KEY (CardId, ClientId) );

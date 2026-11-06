@@ -10,7 +10,7 @@ namespace Tests.Services.Board;
 /// The board's SQLite store against a real temp-file database: key allocation, dense positions,
 /// lane deletion, cascades and project isolation — the invariants board-controller.js relies on.
 /// </summary>
-public sealed class BoardStoreTests : IDisposable
+public sealed partial class BoardStoreTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), $"viberails-board-store-{Guid.NewGuid():N}");
     private readonly string _connectionString;
@@ -544,7 +544,7 @@ public sealed class BoardStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task DeleteCard_RenumbersItsLane_HidesTheCard_AndKeepsItsRails()
+    public async Task DeleteCard_RenumbersItsLane_AndRemovesTheCardAndItsRails()
     {
         await _store.EnsureDefaultColumnsAsync(_project, Ct);
         var a = await _store.CreateCardAsync(_project, NewCard("A"), Ct);
@@ -563,8 +563,7 @@ public sealed class BoardStoreTests : IDisposable
         Assert.Null(await _store.GetCardDetailAsync(_project, a.Id, Ct));
         Assert.Equal(b.Id, Assert.Single(await _store.GetCardsAsync(_project, Ct)).Id);
 
-        // VB-51: a delete is soft. The row and its rails stay (VB-54 restores them); the Card Log
-        // records who deleted it.
+        // VIBE-282: the card and its content are removed, including the former Card Log.
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(Ct);
         foreach (var table in new[] { "BoardCardSessions", "BoardCommits", "BoardCommitSnapshots", "BoardAttachments" })
@@ -572,20 +571,20 @@ public sealed class BoardStoreTests : IDisposable
             await using var count = connection.CreateCommand();
             count.CommandText = $"SELECT COUNT(*) FROM {table} WHERE CardId = $card";
             count.Parameters.AddWithValue("$card", a.Id);
-            Assert.Equal(1L, (long)(await count.ExecuteScalarAsync(Ct))!);
+            Assert.Equal(0L, (long)(await count.ExecuteScalarAsync(Ct))!);
         }
         await using var deleted = connection.CreateCommand();
         deleted.CommandText = """
-            SELECT (SELECT DeletedUTC IS NOT NULL FROM BoardCards WHERE Id = $card),
+            SELECT (SELECT COUNT(*) FROM BoardCards WHERE Id = $card),
                    (SELECT COUNT(*) FROM BoardComments WHERE CardId = $card AND Kind = 'comment'),
                    (SELECT COUNT(*) FROM BoardComments WHERE CardId = $card AND Kind = 'deleted' AND AuthorKind = 'user');
             """;
         deleted.Parameters.AddWithValue("$card", a.Id);
         await using var reader = await deleted.ExecuteReaderAsync(Ct);
         Assert.True(await reader.ReadAsync(Ct));
-        Assert.Equal(1L, reader.GetInt64(0));
-        Assert.Equal(1L, reader.GetInt64(1));
-        Assert.Equal(1L, reader.GetInt64(2));
+        Assert.Equal(0L, reader.GetInt64(0));
+        Assert.Equal(0L, reader.GetInt64(1));
+        Assert.Equal(0L, reader.GetInt64(2));
     }
 
     [Fact]
@@ -797,7 +796,7 @@ public sealed class BoardStoreTests : IDisposable
         Assert.Equal(2, (await _store.GetNotesAsync(_project, card.Key, Ct)).Count);
         Assert.Empty(await _store.GetNotesAsync(_project, "PA-99", Ct));
 
-        // A soft delete keeps both kinds, and a hidden card's notes are not served.
+        // Permanent deletion removes both discussion kinds.
         Assert.True(await _store.DeleteCardAsync(_project, card.Id, Ct));
         Assert.Empty(await _store.GetNotesAsync(_project, card.Key, Ct));
         await using var connection = new SqliteConnection(_connectionString);
@@ -805,7 +804,7 @@ public sealed class BoardStoreTests : IDisposable
         await using var count = connection.CreateCommand();
         count.CommandText = "SELECT COUNT(*) FROM BoardComments WHERE CardId = $card AND Kind IN ('comment','note')";
         count.Parameters.AddWithValue("$card", card.Id);
-        Assert.Equal(2L, (long)(await count.ExecuteScalarAsync(Ct))!);
+        Assert.Equal(0L, (long)(await count.ExecuteScalarAsync(Ct))!);
     }
 
     [Fact]

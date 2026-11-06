@@ -52,7 +52,9 @@ public sealed partial class BoardStore
         command.CommandText = """
             SELECT m.Id, m.CardId, m.Kind, m.RemoteSeq FROM BoardSyncLog m
             JOIN BoardCards c ON c.Id = m.CardId JOIN BoardColumns k ON k.Id = c.ColumnId
-            WHERE COALESCE(m.SyncBoardId, k.BoardId) = $board AND (m.RemoteSeq IS NULL OR m.RemoteSeq > 0);
+            WHERE COALESCE(m.SyncBoardId, k.BoardId) = $board AND (m.RemoteSeq IS NULL OR m.RemoteSeq > 0)
+            UNION ALL SELECT EntryId, CardId, 'deleted', RemoteSeq FROM BoardDeletedCards
+            WHERE BoardId = $board AND (RemoteSeq IS NULL OR RemoteSeq > 0);
             """;
         var local = new List<(string Id, long? Seq)>();
         var forked = lastSeq < expected.Cursor;
@@ -78,6 +80,7 @@ public sealed partial class BoardStore
                 RemoteSeq = CASE WHEN SyncBoardId IS NULL THEN $seq ELSE 0 END,
                 TransferRemoteSeq = CASE WHEN SyncBoardId IS NOT NULL THEN $seq ELSE TransferRemoteSeq END
             WHERE Id = $id;
+            UPDATE BoardDeletedCards SET RemoteSeq = $seq WHERE EntryId = $id;
             """;
         var idParameter = command.Parameters.Add("$id", SqliteType.Text);
         var sequenceParameter = command.Parameters.Add("$seq", SqliteType.Integer);

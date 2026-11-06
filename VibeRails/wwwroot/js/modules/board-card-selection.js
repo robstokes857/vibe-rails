@@ -3,14 +3,14 @@ import { cardLabel } from './board-card-label.js';
 import { BoardApi } from './board-api.js';
 
 // Single-card and multi-card deletion share this consequence text. Keep it in sync with
-// the store's delete contract (including the permanent-delete follow-up, VIBE-282).
+// the store's permanent-delete contract.
 export function cardDeletionConfirmation(cards) {
     const count = cards.length;
     return {
         title: count === 1 ? 'Delete card?' : `Delete ${count} cards?`,
         message: count === 1
-            ? `Delete ${cardLabel(cards[0]) || 'this card'}? This cannot be undone.`
-            : `Delete the ${count} selected cards? This cannot be undone.`,
+            ? `Permanently delete ${cardLabel(cards[0]) || 'this card'} and its discussion, attachments, and saved commit data? Session recordings are kept. This cannot be undone.`
+            : `Permanently delete the ${count} selected cards and their discussion, attachments, and saved commit data? Session recordings are kept. This cannot be undone.`,
         confirmLabel: count === 1 ? 'Delete card' : `Delete ${count} cards`,
         danger: true
     };

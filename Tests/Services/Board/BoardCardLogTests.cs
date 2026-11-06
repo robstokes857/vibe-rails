@@ -248,7 +248,7 @@ public sealed partial class BoardCardLogTests : IDisposable
     }
 
     [Fact]
-    public async Task Delete_IsSoft_HidesTheCardEverywhere_AndLogsIt()
+    public async Task Delete_IsPermanent_RemovesTheCardAndItsLog()
     {
         await _store.EnsureDefaultColumnsAsync(_project, Ct);
         var kept = await _store.CreateCardAsync(_project, NewCard("Kept"), Ct);
@@ -266,11 +266,9 @@ public sealed partial class BoardCardLogTests : IDisposable
         Assert.False(await _store.DeleteCardAsync(_project, card.Id, Ct));
         Assert.Null(await _store.UpdateCardAsync(_project, card.Id, new BoardCardPatch(Title: "Revived?"), Ct));
 
-        // The row, its comment and its log stay; only DeletedUTC marks it.
-        Assert.NotNull(await ScalarAsync("SELECT DeletedUTC FROM BoardCards WHERE Id = $id", card.Id));
-        Assert.Equal("Still here", await ScalarAsync("SELECT Body FROM BoardComments WHERE CardId = $id AND Kind = 'comment'", card.Id));
-        Assert.Equal("Deleted", await ScalarAsync("SELECT Body FROM BoardComments WHERE CardId = $id AND Kind = 'deleted'", card.Id));
-        Assert.Equal("sess-2", await ScalarAsync("SELECT SessionId FROM BoardComments WHERE CardId = $id AND Kind = 'deleted'", card.Id));
+        Assert.Null(await ScalarAsync("SELECT Id FROM BoardCards WHERE Id = $id", card.Id));
+        Assert.Null(await ScalarAsync("SELECT Body FROM BoardComments WHERE CardId = $id", card.Id));
+        Assert.Equal(card.Key, await ScalarAsync("SELECT CardKey FROM BoardDeletedCards WHERE CardId = $id", card.Id));
     }
 
     [Fact]

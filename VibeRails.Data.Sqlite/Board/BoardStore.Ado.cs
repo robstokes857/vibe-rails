@@ -107,7 +107,11 @@ public sealed partial class BoardStore
     {
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
-        command.CommandText = AdoLinkSelect + " FROM BoardAdoLinks a WHERE a.ConnectionId = $connection AND a.WorkItemId = $item;";
+        command.CommandText = AdoLinkSelect + """
+             FROM BoardAdoLinks a WHERE a.ConnectionId = $connection AND a.WorkItemId = $item
+             UNION ALL SELECT CardId, ConnectionId, CAST(ItemId AS INTEGER), 0, DeletedUTC, NULL, DeletedUTC, NULL
+             FROM BoardDeletedTrackerItems WHERE Provider = 'ado' AND ConnectionId = $connection AND ItemId = CAST($item AS TEXT);
+            """;
         command.Parameters.AddWithValue("$connection", connectionId);
         command.Parameters.AddWithValue("$item", workItemId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -145,7 +149,7 @@ public sealed partial class BoardStore
         await using (var exists = connection.CreateCommand())
         {
             exists.Transaction = transaction;
-            exists.CommandText = "SELECT 1 FROM BoardAdoLinks WHERE ConnectionId = $connection AND WorkItemId = $item;";
+            exists.CommandText = "SELECT 1 FROM BoardAdoLinks WHERE ConnectionId = $connection AND WorkItemId = $item UNION ALL SELECT 1 FROM BoardDeletedTrackerItems WHERE Provider = 'ado' AND ConnectionId = $connection AND ItemId = CAST($item AS TEXT);";
             exists.Parameters.AddWithValue("$connection", link.ConnectionId);
             exists.Parameters.AddWithValue("$item", link.WorkItemId);
             if (await exists.ExecuteScalarAsync(cancellationToken) is not null)

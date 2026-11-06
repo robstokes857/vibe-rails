@@ -6,6 +6,48 @@ namespace Tests.Services.Board;
 
 public sealed class BoardSyncStoreTests : IDisposable
 {
+    [Fact]
+    public async Task PermanentDeletionOutbox_IsBoardScoped_DurableAndContainsNoCardContent()
+    {
+        await store.EnsureDefaultColumnsAsync(root, Ct);
+        var card = await store.CreateCardAsync(root, new(null, "Private title", "Private description", null, "medium", null, [], false), Ct);
+        var other = await store.CreateBoardAsync(root, "Other", Ct);
+        await store.SaveSyncLinkAsync(new(card.BoardId, "remote", 0, true, null, null, null, default, default), Ct);
+        var created = Assert.Single(await store.GetUnsentLogEntriesAsync(card.BoardId, 10, Ct));
+        await store.MarkLogEntriesSentAsync([new(created.Entry.Id, 1)], Ct);
+        await store.AddCommentAsync(root, card.Id, BoardAuthor.User(), "Private comment", Ct);
+        Assert.True(await store.DeleteCardAsync(root, card.Id, Ct));
+
+        var reopened = new BoardStore(cs, cs);
+        var deleted = Assert.Single(await reopened.GetUnsentLogEntriesAsync(card.BoardId, 10, Ct));
+        Assert.Equal("deleted", deleted.Entry.Kind);
+        Assert.Equal(card.Key, deleted.CardKey);
+        Assert.Null(deleted.Entry.Changes);
+        Assert.DoesNotContain("Private", deleted.Entry.Body);
+        Assert.Empty(await reopened.GetUnsentLogEntriesAsync(other.Id, 10, Ct));
+        Assert.Equal(1, await reopened.CountUnsentLogEntriesAsync(card.BoardId, Ct));
+        Assert.False(await reopened.RejectLogEntryAsync(other.Id, deleted.Entry.Id, Ct));
+        await reopened.MarkLogEntriesSentAsync([new(deleted.Entry.Id, 2)], Ct);
+        Assert.Equal(2, await reopened.GetMaxAcknowledgedSequenceAsync(card.BoardId, Ct));
+        Assert.True(await reopened.HasLogEntryAsync(deleted.Entry.Id, Ct));
+        Assert.Empty(await reopened.GetUnsentLogEntriesAsync(card.BoardId, 10, Ct));
+        await Assert.ThrowsAsync<BoardSyncHistoryConflictException>(() => reopened.MarkLogEntriesSentAsync([new(deleted.Entry.Id, 3)], Ct));
+        await reopened.ResetSentMarksAsync(card.BoardId, Ct);
+        Assert.Equal(0, await reopened.GetMaxAcknowledgedSequenceAsync(card.BoardId, Ct));
+        Assert.Empty(await reopened.GetUnsentLogEntriesAsync(card.BoardId, 10, Ct));
+    }
+
+    [Fact]
+    public async Task UnpublishedPermanentDeletionDoesNotPublishContentOrADeletionForAnUnknownCard()
+    {
+        await store.EnsureDefaultColumnsAsync(root, Ct);
+        var card = await store.CreateCardAsync(root, new(null, "Local", "", null, "medium", null, [], false), Ct);
+        Assert.True(await store.DeleteCardAsync(root, card.Id, Ct));
+        Assert.Empty(await store.GetUnsentLogEntriesAsync(card.BoardId, 10, Ct));
+        Assert.Equal(0, await store.CountUnsentLogEntriesAsync(card.BoardId, Ct));
+        Assert.Equal(0, await store.WriteSyncBaselineAsync(root, card.BoardId, Ct));
+    }
+
     private readonly string root = Path.Combine(Path.GetTempPath(), "board-sync-tests-" + Guid.NewGuid().ToString("N"));
     private readonly string cs;
     private readonly BoardStore store;
@@ -155,7 +197,7 @@ public sealed class BoardSyncStoreTests : IDisposable
         await ExecuteAsync("UPDATE BoardCards SET CardKey = NULL;");
         card = (await store.FindCardAsync(root, card.Id, Ct))!;
         Assert.False(BoardKeys.TryParseStored(card.Key, out _));
-        if (deleted) await store.DeleteCardAsync(root, card.Id, Ct);
+        if (deleted) await store.DeleteSyncedCardAsync(root, card.Id, BoardAuthor.User(), new("log_legacy_delete", 2, DateTime.UtcNow, BoardId: card.BoardId), Ct);
         var stamp = new BoardSyncStamp("log_legacy_baseline", 1, DateTime.UtcNow, BoardId: card.BoardId);
         var retained = await store.CreateSyncedCardAsync(root, card.Id, card.Key,
             new(card.ColumnId, "Remote", "", null, "medium", null, [], false, BoardId: card.BoardId), BoardAuthor.User(), stamp, Ct);

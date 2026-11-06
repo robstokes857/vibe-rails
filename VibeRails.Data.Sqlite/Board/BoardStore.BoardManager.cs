@@ -268,7 +268,8 @@ public sealed partial class BoardStore
     /// 1. The Card Log (VB-51): every card write appends a BoardComments row in its own IMMEDIATE
     ///    transaction, so moves, edits, comments, handoffs and flags arrive in commit order. Hidden
     ///    and deleted discussion stays out, exactly as it does for card reads; a card's deletion is
-    ///    the one entry kept for a deleted card, so a manager learns the card is gone.
+    ///    the one entry kept for a soft-deleted card. Permanent deletion uses its payload-free
+    ///    identity receipt instead, so a manager still learns the card is gone.
     /// 2. Completion reports (BoardAgentCompletions), which are not Card Log rows: a worker that
     ///    reports and exits without a comment still wakes its manager.
     /// managedOnly keeps the cards the board manager owns, plus a workflow or manager change on any
@@ -296,6 +297,13 @@ public sealed partial class BoardStore
                   AND ($managedOnly = 0 OR ({BoardManagedCardSql})
                        OR (m.Kind = 'change' AND (m.Changes LIKE '%"workflowMode"%' OR m.Changes LIKE '%"managerSelection"%')))
                   AND ($exclude IS NULL OR m.SessionId IS NULL OR m.SessionId <> $exclude)
+                UNION ALL
+                SELECT d.DeletedUTC, 2, d.rowid, d.CardId, d.CardKey, NULL, '', 'deleted', d.AuthorKind, d.AuthorLabel,
+                       'Deleted permanently', NULL
+                FROM BoardDeletedCards d
+                WHERE d.ProjectPath = $project{ProjectPathCollation} AND d.BoardId = $board
+                  AND d.DeletedUTC > $since AND ($exact IS NULL OR d.DeletedUTC = $exact)
+                  AND ($managedOnly = 0 OR d.Managed = 1)
                 UNION ALL
                 SELECT a.CompletedUTC, 1, a.rowid, c.Id, {CardKeySql}, c.DisplayId, lane.Name, 'completion', 'agent', s.DisplayName,
                        substr(a.Outcome || ': ' || a.Summary, 1, {EventBodyReadChars}), NULL

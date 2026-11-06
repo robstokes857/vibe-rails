@@ -60,7 +60,7 @@ public sealed class BoardDesktopActivityTests : IDisposable
         await _store.DeleteCardAsync(_project, local.Id, Ct);
         Assert.Empty(await ActiveAsync(local));
         Assert.False(await _store.StartDesktopActivityAsync(_project, local.Id, "client", "Codex", expiry, Ct));
-        Assert.Equal(1L, await ScalarAsync("SELECT COUNT(*) FROM BoardDesktopActivity WHERE CardId = $card AND EndedUTC IS NOT NULL", local.Id));
+        Assert.Equal(0L, await ScalarAsync("SELECT COUNT(*) FROM BoardDesktopActivity WHERE CardId = $card", local.Id));
     }
 
     [Theory]

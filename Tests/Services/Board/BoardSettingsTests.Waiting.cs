@@ -261,13 +261,13 @@ public sealed partial class BoardSettingsTests
         Assert.Equal(0, await Due(card.Id));
         if (operation == "delete")
         {
-            // Deleted cards are not discoverable, but the cancellation evidence is retained.
+            // Permanent card deletion removes its dispatch evidence too.
             await using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync(Ct);
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT Reason FROM BoardLaneAutomationDispatch WHERE CardId = $id";
             command.Parameters.AddWithValue("$id", card.Id);
-            Assert.Equal("Card was deleted.", await command.ExecuteScalarAsync(Ct));
+            Assert.Null(await command.ExecuteScalarAsync(Ct));
         }
         else
         {

@@ -59,7 +59,7 @@ const checkbox = (page, id) => page.locator(`[data-board-card-select="card-${id}
 const selected = page => page.locator('[data-board-selection-status]');
 const deleteSelected = page => page.getByRole('button', { name: 'Delete selected', exact: true });
 
-test('keyboard selection, counted confirmation, Escape/cancel, and successful deletion of only selected cards', async ({ page }) => {
+test('keyboard selection, counted confirmation, Escape/cancel, and successful deletion of only selected cards', async ({ page }, testInfo) => {
     const state = await mount(page);
     await page.getByRole('button', { name: 'Select cards', exact: true }).click();
     await expect(checkbox(page, 0)).toBeFocused();
@@ -68,9 +68,13 @@ test('keyboard selection, counted confirmation, Escape/cancel, and successful de
     await expect(selected(page)).toHaveText('2 selected');
     await deleteSelected(page).click();
     const dialog = page.getByRole('alertdialog');
+    await expect(dialog).toContainText('Permanently delete');
+    await expect(dialog).toContainText('discussion, attachments, and saved commit data');
+    await expect(dialog).toContainText('Session recordings are kept.');
     await expect(dialog).toContainText('the 2 selected cards');
     await expect(dialog).toContainText('This cannot be undone.');
     await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
+    await page.screenshot({ path: testInfo.outputPath('permanent-deletion-confirmation.png') });
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
     await expect(deleteSelected(page)).toBeFocused();
@@ -108,6 +112,7 @@ test('partial failures retain selected IDs beyond the first page and retry never
     expect(state.cards.some(card => card.id === 'card-35')).toBeTruthy();
     state.failures.clear();
     await deleteSelected(page).click();
+    await expect(page.getByRole('alertdialog')).toContainText('Permanently delete');
     await page.getByRole('alertdialog').getByRole('button', { name: 'Delete card', exact: true }).click();
     await expect(selected(page)).toContainText('1 of 1 cards deleted.');
     expect(state.removed).toEqual(['card-0', 'card-35', 'card-35']);

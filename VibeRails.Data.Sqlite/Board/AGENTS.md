@@ -1,5 +1,14 @@
 # Board persistence
 
+VIBE-282: local `DeleteCardAsync` permanently removes one live, project-scoped card through
+`BoardStore.CardDeletion.cs`. Foreign keys cascade its content; explicit transactional cleanup
+removes card-owned workflow reports/steps, dispatch, desktop activity and exemptions. Session
+recordings, session completion records, other cards' links and repository-wide rules survive.
+`board-card-deletion/1` adds empty identity/delivery receipts and tracker-import tombstones;
+there is no backfill or purge. Sequences and reserved keys prevent identity reuse. The hosted
+deletion outbox contains no card payload; remote history still uses the existing soft-delete
+protocol. Backup archives remain independent. Older soft-deleted rows are left untouched.
+
 VIBE-291 declares authorized discussion work by changing only the requested session/card link
 from `chat` to `chat_work` through `AuthorizeDiscussionWorkAsync`. No schema migration or history
 backfill is needed. The link keeps its name, creation time, tab ID, selection and default-card order;
@@ -10,7 +19,8 @@ this session, but never planning, manager or review provenance. Board-managed wo
 `board-code-quality-exemptions/1` (VIBE-275, additive) stores explicit per-card/repository file
 exemptions separately from legacy dashboard ignores. Scoped reads and transactional writes stay
 behind `IBoardStore`; replacement/revocation retains original JSON and attributed revocation.
-There is no card-deletion cascade or backfill. The existing all-table Board backup includes it.
+Local permanent card deletion removes card-scoped exemptions; repository-scoped rows survive.
+There is no backfill. The existing all-table Board backup includes it.
 Older versions cannot mistake a per-card exemption for a repository ignore. See
 [file exemptions](../../VibeRails/Services/Board/CHECKS.md#file-exemptions-vibe-275).
 
@@ -90,8 +100,8 @@ lane's board. With the switch off it is the rule from before board managers, wit
 message. An update re-checks only when the workflow, the manager or the board actually changes
 (a resent unchanged value is not a change), so removing a board manager or turning the switch off
 never fails a title edit.
-`GetBoardEventsAsync` unions `BoardComments` (all kinds, not hidden, not deleted; a deleted card
-keeps only its `deleted` row) with `BoardAgentCompletions` for the board's cards after a `ToDb`
+`GetBoardEventsAsync` unions `BoardComments` (all kinds, not hidden, not deleted; a soft-deleted card
+keeps only its `deleted` row), permanent deletion receipts and `BoardAgentCompletions` for the board's cards after a `ToDb`
 cursor, ordered by stamp, source and rowid; `managedOnly` keeps board-managed cards plus any card's
 workflow/manager `change` row, `excludeSessionId` drops the caller's own rows, and a full batch is
 trimmed so it never ends inside a group of rows that share a stamp; a batch that is one stamp

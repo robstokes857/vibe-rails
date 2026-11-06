@@ -234,7 +234,8 @@ Single and multiple deletes use `cardDeletionConfirmation` and the same authenti
 DELETE route. Lock from confirmation through completion; send bounded sequential
 requests, retain per-card failures for retry and refresh counts/lanes. Never retry
 successful IDs. Navigation stops unsent requests; it cannot undo an in-flight deletion.
-Keep the shared consequence text aligned when VIBE-282 changes storage deletion.
+The shared confirmation explicitly describes permanent deletion of discussion, attachments
+and saved commit data, and retention of session recordings (VIBE-282).
 Coverage: `board-card-selection.test.mjs`, `board-card-selection.spec.js`, and
 `BoardRoutesTests.Deletion.cs`; browser tests use only synthetic API fixtures.
 

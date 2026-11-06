@@ -132,6 +132,7 @@ public sealed partial class BoardStore
         await QueueSyncRebuildSnapshotsAsync(db, tx, link.ProjectPath, expected.BoardId, cancellationToken);
         var now = ToDb(DateTime.UtcNow);
         await ExecuteSharingAsync(db, tx, """
+            UPDATE BoardDeletedCards SET RemoteSeq=0 WHERE BoardId=$board;
             UPDATE BoardSyncLinks SET RemoteBoardId=$remote, Cursor=0, LayoutHash=NULL,
                 ActivityAfter=NULL, LastSyncUTC=NULL, LastError=NULL, UpdatedUTC=$now WHERE BoardId=$board;
             UPDATE BoardSyncRebuilds SET Phase='upload', ReplacementRemoteBoardId=$remote, UpdatedUTC=$now

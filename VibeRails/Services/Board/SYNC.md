@@ -436,8 +436,13 @@ Moves between boards retain that identity and use the transfer protocol above.
 
 Web creation and lane moves queue the normal local lane Automations, including their existing
 60-second settling time. A web edit aimed at a lane deleted locally is retained in history;
-the surviving local lane generates a correction for the next push. Soft deletes retain card
-data; restore/purge is VB-54. Deleting a local board does not delete its published copy.
+the surviving local lane generates a correction for the next push. Incoming remote soft deletes
+retain card data. Confirmed local deletion (VIBE-282) removes the card and its owned data, retaining
+only identity/import receipts and a payload-free hosted deletion outbox. These identities cannot
+be re-created by a later pull. Delivery acknowledgements, rejection status and history recovery
+include that outbox; replacement publications retire its old delivery marks. Existing soft-deleted
+rows are not purged. Local deletion never calls the independent backup archive service.
+Deleting a local board does not delete its published copy.
 
 ## Storage and compatibility
 

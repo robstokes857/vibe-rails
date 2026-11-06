@@ -600,6 +600,10 @@ public sealed partial class BoardStore : IBoardStore
         // The stored key cannot be re-guessed from the number alone; the unique index turns the
         // (astronomically unlikely) collision into a failed write rather than two cards on one key.
         var cardKey = synced?.CardKey ?? BoardKeys.NewStoredKey(prefix, number);
+        if (await ScalarLongAsync(connection, transaction,
+            "SELECT COUNT(*) FROM BoardDeletedCards WHERE CardId = $id OR CardKey = $key;",
+            ("$id", id), cancellationToken, ("$key", cardKey)) > 0)
+            throw new BoardValidationException("This card identity was permanently deleted.");
         var now = stamp?.CreatedUtc ?? DateTime.UtcNow;
         var keyNumber = synced?.Number ?? number;
         var displayId = card.DisplayId is not null || synced is not null
@@ -818,13 +822,8 @@ public sealed partial class BoardStore : IBoardStore
         return updated;
     }
 
-    /// <summary>
-    /// Soft delete (VB-51): the card leaves every list, lookup and count, and its pending lane
-    /// Automations are dropped, but the row, its log and its links stay for restore (VB-54).
-    /// </summary>
-    public Task<bool> DeleteCardAsync(string projectPath, string cardId, CancellationToken cancellationToken = default, BoardAuthor? author = null) =>
-        DeleteCardCoreAsync(projectPath, cardId, author ?? BoardAuthor.User(), stamp: null, cancellationToken);
-
+    // Remote history retains its existing soft-delete/restore protocol. Local confirmed deletion
+    // uses the permanent path in BoardStore.CardDeletion.cs.
     private async Task<bool> DeleteCardCoreAsync(string projectPath, string cardId, BoardAuthor author, BoardSyncStamp? stamp, CancellationToken cancellationToken)
     {
         var project = NormalizeProjectPath(projectPath);
@@ -2128,6 +2127,8 @@ public sealed partial class BoardStore : IBoardStore
         // Agent context stay in BoardContextSettings and are read as the Board, Card and Card type levels.
         SqliteMigrationRunner.Apply(connection, "board-app-context", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, AppContextSchemaSql));
+        SqliteMigrationRunner.Apply(connection, "board-card-deletion", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, CardDeletionSchemaSql));
         ReconcileDerivedRows(connection);
     }
 
@@ -2159,7 +2160,7 @@ public sealed partial class BoardStore : IBoardStore
         {
             probe.CommandText = $"""
                 SELECT 1 WHERE EXISTS (
-                    SELECT 1 FROM BoardCards c
+                    SELECT 1 FROM (SELECT ProjectPath, Number FROM BoardCards UNION ALL SELECT ProjectPath, Number FROM BoardDeletedCards) c
                     LEFT JOIN BoardCardSequences s ON s.ProjectPath = c.ProjectPath{ProjectPathCollation}
                     WHERE s.ProjectPath IS NULL OR s.LastNumber < c.Number
                 ) OR EXISTS (
@@ -2236,7 +2237,7 @@ public sealed partial class BoardStore : IBoardStore
     // declared further down and would still be null while an earlier field initialised.
     internal static string CardSequenceReseedSql => $"""
         INSERT INTO BoardCardSequences (ProjectPath, LastNumber)
-            SELECT ProjectPath, MAX(Number) FROM BoardCards
+            SELECT ProjectPath, MAX(Number) FROM (SELECT ProjectPath, Number FROM BoardCards UNION ALL SELECT ProjectPath, Number FROM BoardDeletedCards)
             GROUP BY ProjectPath{ProjectPathCollation}
         ON CONFLICT(ProjectPath) DO UPDATE SET LastNumber = MAX(LastNumber, excluded.LastNumber);
         """;

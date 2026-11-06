@@ -107,5 +107,11 @@ test('single and bulk confirmations share the deletion consequence', () => {
     const bulk = cardDeletionConfirmation([{}, {}]);
     assert.match(single.message, /VIBE-2 · A card/);
     assert.equal(single.message.split('? ')[1], bulk.message.split('? ')[1]);
+    for (const confirmation of [single, bulk]) {
+        assert.match(confirmation.message, /Permanently delete/);
+        assert.match(confirmation.message, /discussion, attachments, and saved commit data/);
+        assert.match(confirmation.message, /Session recordings are kept\. This cannot be undone\./);
+        assert.equal(confirmation.danger, true);
+    }
     assert.equal(bulk.confirmLabel, 'Delete 2 cards');
 });

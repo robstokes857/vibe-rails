@@ -60,6 +60,10 @@ public sealed partial class BoardStore
             SELECT c.Id, {keyClaim} AS Reserved FROM BoardCards c {CardPrefixJoinSql}
             WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.Id <> $id
                 AND ({CardDisplayIdSql} = $display COLLATE NOCASE OR {keyClaim})
+            UNION ALL
+            SELECT c.CardId, 1 FROM BoardDeletedCards c {CardPrefixJoinSql}
+            WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.CardId <> $id
+              AND ({keyClaim} OR ($prefix = '{BoardKeys.LegacyPrefix}' AND c.CardKey = {CardPrefixSql} || '-' || $number))
             ORDER BY Reserved DESC LIMIT 1;
             """;
         command.Parameters.AddWithValue("$project", project);

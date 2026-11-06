@@ -47,7 +47,12 @@ public sealed partial class BoardStore
             FROM {table} link LEFT JOIN BoardCards card ON card.Id = link.CardId
             WHERE link.{connectionColumn} = $connection
               AND (card.ProjectPath = $project{ProjectPathCollation} OR card.Id IS NULL)
-              AND link.{itemColumn} IN ({string.Join(",", parameters)});
+              AND link.{itemColumn} IN ({string.Join(",", parameters)})
+            UNION ALL
+            SELECT {(table == "BoardAdoLinks" ? "CAST(ItemId AS INTEGER)" : "ItemId")}, 0 FROM BoardDeletedTrackerItems
+            WHERE Provider = '{(table == "BoardAdoLinks" ? "ado" : "jira")}' AND ConnectionId = $connection
+              AND ProjectPath = $project{ProjectPathCollation}
+              AND ItemId IN ({string.Join(",", parameters.Select(p => $"CAST({p} AS TEXT)"))});
             """;
         command.Parameters.AddWithValue("$connection", connectionId);
         command.Parameters.AddWithValue("$project", NormalizeProjectPath(projectPath));

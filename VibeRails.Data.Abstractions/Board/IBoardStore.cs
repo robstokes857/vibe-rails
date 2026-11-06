@@ -65,10 +65,10 @@ public partial interface IBoardStore
     Task<IReadOnlyList<BoardCardRecord>> GetCardsAsync(string projectPath, CancellationToken cancellationToken = default, string? boardId = null);
     Task<BoardCardRecord?> FindCardAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
     Task<BoardCardDetailRecord?> GetCardDetailAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
-    // Card writes append a Card Log entry in the same transaction. A null author means the local user.
+    // Creation and updates append a Card Log entry in the same transaction. A null author means the local user.
     Task<BoardCardRecord> CreateCardAsync(string projectPath, NewBoardCard card, CancellationToken cancellationToken = default, BoardAuthor? author = null);
     Task<BoardCardRecord?> UpdateCardAsync(string projectPath, string cardId, BoardCardPatch patch, CancellationToken cancellationToken = default, BoardAuthor? author = null);
-    /// <summary>Soft-deletes the card: it disappears from every read, but its rows and links stay for a later restore.</summary>
+    /// <summary>Permanently deletes one live card and its owned data. Preserves reserved identities, shared records, recordings and backups.</summary>
     Task<bool> DeleteCardAsync(string projectPath, string cardId, CancellationToken cancellationToken = default, BoardAuthor? author = null);
     Task<BoardCardRecord?> MoveCardAsync(string projectPath, string cardId, string columnId, int? position, CancellationToken cancellationToken = default, BoardAuthor? author = null);
 

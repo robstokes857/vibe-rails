@@ -205,9 +205,13 @@ public sealed partial class BoardStore
         // comments; the server applies entries in the order it receives them.
         command.CommandText = $"""
             SELECT m.Id, m.CardId, m.AuthorKind, m.AuthorLabel, m.AuthorCli, m.SessionId, m.Body, m.CreatedUTC, m.Kind, m.Changes,
-                   COALESCE(c.CardKey, {CardPrefixSql} || '-' || c.Number)
+                   COALESCE(c.CardKey, {CardPrefixSql} || '-' || c.Number),
+                   CASE WHEN m.Kind = 'created' THEN 0 ELSE 1 END AS SortKind, m.rowid AS SortId
             {UnsentEntriesFromSql}
-            ORDER BY CASE WHEN m.Kind = 'created' THEN 0 ELSE 1 END, m.rowid
+            UNION ALL
+            SELECT EntryId, CardId, AuthorKind, AuthorLabel, AuthorCli, NULL, 'Deleted permanently', DeletedUTC, 'deleted', NULL,
+                   CardKey, 1, rowid FROM BoardDeletedCards WHERE BoardId = $board AND RemoteSeq IS NULL
+            ORDER BY SortKind, SortId
             LIMIT $limit;
             """;
         command.Parameters.AddWithValue("$board", boardId);
@@ -236,7 +240,7 @@ public sealed partial class BoardStore
     public async Task<int> CountUnsentLogEntriesAsync(string boardId, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);
-        return (int)await ScalarLongAsync(connection, null, "SELECT COUNT(*) " + UnsentEntriesFromSql + ";", ("$board", boardId), cancellationToken);
+        return (int)await ScalarLongAsync(connection, null, "SELECT (SELECT COUNT(*) " + UnsentEntriesFromSql + ") + (SELECT COUNT(*) FROM BoardDeletedCards WHERE BoardId = $board AND RemoteSeq IS NULL);", ("$board", boardId), cancellationToken);
     }
 
     public async Task<bool> RejectLogEntryAsync(string boardId, string entryId, CancellationToken cancellationToken = default)
@@ -251,6 +255,7 @@ public sealed partial class BoardStore
                 TransferRemoteSeq = CASE WHEN SyncBoardId IS NOT NULL THEN -1 ELSE TransferRemoteSeq END
             WHERE Id = $entry AND (CASE WHEN SyncBoardId IS NULL THEN RemoteSeq ELSE TransferRemoteSeq END) IS NULL
               AND COALESCE(SyncBoardId, (SELECT k.BoardId FROM BoardCards c JOIN BoardColumns k ON k.Id = c.ColumnId WHERE c.Id = BoardComments.CardId)) = $board;
+            UPDATE BoardDeletedCards SET RemoteSeq = -1 WHERE EntryId = $entry AND BoardId = $board AND RemoteSeq IS NULL;
             """;
         command.Parameters.AddWithValue("$entry", entryId);
         command.Parameters.AddWithValue("$board", boardId);
@@ -270,9 +275,10 @@ public sealed partial class BoardStore
     {
         await using var connection = await OpenAsync(cancellationToken);
         return await ScalarLongAsync(connection, null, """
-            SELECT COALESCE(MAX(m.RemoteSeq), 0) FROM BoardSyncLog m
+            SELECT MAX(Seq) FROM (SELECT COALESCE(MAX(m.RemoteSeq), 0) AS Seq FROM BoardSyncLog m
             JOIN BoardCards c ON c.Id = m.CardId JOIN BoardColumns k ON k.Id = c.ColumnId
-            WHERE COALESCE(m.SyncBoardId, k.BoardId) = $board AND m.RemoteSeq > 0;
+            WHERE COALESCE(m.SyncBoardId, k.BoardId) = $board AND m.RemoteSeq > 0
+            UNION ALL SELECT COALESCE(MAX(RemoteSeq), 0) FROM BoardDeletedCards WHERE BoardId = $board AND RemoteSeq > 0);
             """, ("$board", boardId), cancellationToken);
     }
 
@@ -280,8 +286,9 @@ public sealed partial class BoardStore
     {
         await using var connection = await OpenAsync(cancellationToken);
         return (int)await ScalarLongAsync(connection, null, """
-            SELECT COUNT(*) FROM BoardSyncLog m JOIN BoardCards c ON c.Id = m.CardId
-            JOIN BoardColumns k ON k.Id = c.ColumnId WHERE COALESCE(m.SyncBoardId, k.BoardId) = $board AND m.RemoteSeq = -1;
+            SELECT (SELECT COUNT(*) FROM BoardSyncLog m JOIN BoardCards c ON c.Id = m.CardId
+            JOIN BoardColumns k ON k.Id = c.ColumnId WHERE COALESCE(m.SyncBoardId, k.BoardId) = $board AND m.RemoteSeq = -1)
+            + (SELECT COUNT(*) FROM BoardDeletedCards WHERE BoardId = $board AND RemoteSeq = -1);
             """, ("$board", boardId), cancellationToken);
     }
 
@@ -290,11 +297,13 @@ public sealed partial class BoardStore
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
-            SELECT m.Id, COALESCE(c.CardKey, {CardPrefixSql} || '-' || c.Number), m.Kind
+            SELECT m.Id, COALESCE(c.CardKey, {CardPrefixSql} || '-' || c.Number), m.Kind, m.rowid AS SortId
             FROM BoardSyncLog m JOIN BoardCards c ON c.Id = m.CardId
             JOIN BoardColumns k ON k.Id = c.ColumnId
             LEFT JOIN BoardProjectKeys pk ON pk.ProjectPath = c.ProjectPath
-            WHERE COALESCE(m.SyncBoardId, k.BoardId) = $board AND m.RemoteSeq = -1 ORDER BY m.rowid DESC LIMIT $limit;
+            WHERE COALESCE(m.SyncBoardId, k.BoardId) = $board AND m.RemoteSeq = -1
+            UNION ALL SELECT EntryId, CardKey, 'deleted', rowid FROM BoardDeletedCards WHERE BoardId = $board AND RemoteSeq = -1
+            ORDER BY SortId DESC LIMIT $limit;
             """;
         command.Parameters.AddWithValue("$board", boardId);
         command.Parameters.AddWithValue("$limit", Math.Clamp(limit, 1, 50));
@@ -448,6 +457,7 @@ public sealed partial class BoardStore
                 RemoteSeq = CASE WHEN SyncBoardId IS NULL THEN $seq ELSE 0 END,
                 TransferRemoteSeq = CASE WHEN SyncBoardId IS NOT NULL THEN $seq ELSE TransferRemoteSeq END
             WHERE Id = $id;
+            UPDATE BoardDeletedCards SET RemoteSeq = $seq WHERE EntryId = $id;
             """;
         var id = command.Parameters.Add("$id", SqliteType.Text);
         var seq = command.Parameters.Add("$seq", SqliteType.Integer);
@@ -458,13 +468,14 @@ public sealed partial class BoardStore
                 // Compare the effective ledger: transferred entries have a separate sequence
                 // while their legacy RemoteSeq stays local-only for older backends.
                 if (await ScalarLongAsync(connection, transaction, """
-                    SELECT COUNT(*) FROM BoardSyncLog existing
-                    JOIN BoardCards c ON c.Id = existing.CardId JOIN BoardColumns k ON k.Id = c.ColumnId
+                    WITH entries AS (
+                        SELECT m.Id, m.RemoteSeq, COALESCE(m.SyncBoardId, k.BoardId) AS BoardId
+                        FROM BoardSyncLog m JOIN BoardCards c ON c.Id = m.CardId JOIN BoardColumns k ON k.Id = c.ColumnId
+                        UNION ALL SELECT EntryId, RemoteSeq, BoardId FROM BoardDeletedCards)
+                    SELECT COUNT(*) FROM entries existing
                     WHERE (existing.Id = $id AND existing.RemoteSeq > 0 AND existing.RemoteSeq <> $seq)
-                       OR (existing.Id <> $id AND existing.RemoteSeq > 0 AND existing.RemoteSeq = $seq AND COALESCE(existing.SyncBoardId, k.BoardId) = (
-                           SELECT COALESCE(source.SyncBoardId, sourceColumn.BoardId) FROM BoardSyncLog source
-                           JOIN BoardCards sourceCard ON sourceCard.Id = source.CardId
-                           JOIN BoardColumns sourceColumn ON sourceColumn.Id = sourceCard.ColumnId WHERE source.Id = $id));
+                       OR (existing.Id <> $id AND existing.RemoteSeq > 0 AND existing.RemoteSeq = $seq
+                           AND existing.BoardId = (SELECT BoardId FROM entries WHERE Id = $id));
                     """, ("$id", entryId), cancellationToken, ("$seq", remoteSeq)) > 0)
                     throw new BoardSyncHistoryConflictException(entryId, remoteSeq);
                 // Only an ACK of a later local outbox row releases rejected field protection.
@@ -506,6 +517,10 @@ public sealed partial class BoardStore
         // Entries skipped on the old remote board say nothing about the new one.
         command.CommandText = "DELETE FROM BoardSyncSkippedEntries WHERE BoardId = $board;";
         await command.ExecuteNonQueryAsync(cancellationToken);
+        // A replacement remote board has no deleted cards to reconstruct. Keep the local
+        // identity reservations but discard delivery sequence numbers from its predecessor.
+        command.CommandText = "UPDATE BoardDeletedCards SET RemoteSeq = 0 WHERE BoardId = $board;";
+        await command.ExecuteNonQueryAsync(cancellationToken);
         command.CommandText = """
             UPDATE BoardComments SET
                 RemoteSeq = CASE WHEN SyncBoardId IS NULL THEN NULL ELSE 0 END,
@@ -521,7 +536,7 @@ public sealed partial class BoardStore
     public async Task<bool> HasLogEntryAsync(string entryId, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);
-        return await ScalarLongAsync(connection, null, "SELECT COUNT(*) FROM BoardSyncLog WHERE Id = $id;", ("$id", entryId), cancellationToken) > 0;
+        return await ScalarLongAsync(connection, null, "SELECT (SELECT COUNT(*) FROM BoardSyncLog WHERE Id = $id) + (SELECT COUNT(*) FROM BoardDeletedCards WHERE EntryId = $id);", ("$id", entryId), cancellationToken) > 0;
     }
 
     public async Task<IReadOnlySet<string>> GetFieldsChangedAfterAsync(string cardId, long remoteSeq, CancellationToken cancellationToken = default)
@@ -604,6 +619,10 @@ public sealed partial class BoardStore
         var number = ParseKeyNumber(cardKey);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
+        if (await ScalarLongAsync(connection, transaction,
+            "SELECT COUNT(*) FROM BoardDeletedCards WHERE CardId = $id OR CardKey = $key;",
+            ("$id", cardId), cancellationToken, ("$key", cardKey)) > 0)
+            throw new BoardValidationException("The remote card identity was permanently deleted locally.");
         var taken = await ScalarLongAsync(connection, transaction,
             "SELECT COUNT(*) FROM BoardCards WHERE Id = $id OR CardKey = $key;",
             ("$id", cardId), cancellationToken, ("$key", cardKey));
