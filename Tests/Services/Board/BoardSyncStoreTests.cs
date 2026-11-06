@@ -6,6 +6,66 @@ namespace Tests.Services.Board;
 
 public sealed class BoardSyncStoreTests : IDisposable
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PermanentDeletionOrder_SurvivesUpgradeClockSkewAndCascades(bool upgrade)
+    {
+        await store.EnsureDefaultColumnsAsync(root, Ct);
+        var kept = await store.CreateCardAsync(root, new(null, "Kept", "", null, "medium", null, [], false), Ct);
+        var gone = await store.CreateCardAsync(root, new(null, "Gone", "", null, "medium", null, [], false), Ct);
+        await store.SaveSyncLinkAsync(new(kept.BoardId, "remote", 0, true, null, null, null, default, default), Ct);
+        var created = await store.GetUnsentLogEntriesAsync(kept.BoardId, 20, Ct);
+        await store.MarkLogEntriesSentAsync(created.Select((entry, index) => new KeyValuePair<string, long>(entry.Entry.Id, index + 1)).ToArray(), Ct);
+        await store.AddCommentAsync(root, kept.Id, BoardAuthor.User(), "Before deletion", Ct);
+
+        if (upgrade)
+        {
+            // A shipped schema has existing log rows but no shared ordering metadata.
+            await ExecuteAsync("""
+                DROP TRIGGER BoardComments_RecordSyncOrder;
+                DROP TRIGGER BoardComments_RemoveSyncOrder;
+                DROP TRIGGER BoardDeletedCards_RecordSyncOrder;
+                DROP TRIGGER BoardDeletedCards_RemoveSyncOrder;
+                DROP TABLE BoardSyncEntryOrder;
+                DELETE FROM SchemaMigrations WHERE Component = 'board-card-deletion' AND Version = 2;
+                """);
+        }
+        var reopened = new BoardStore(cs, cs);
+        if (upgrade)
+        {
+            await using var db = new SqliteConnection(cs);
+            await db.OpenAsync(Ct);
+            await using var count = db.CreateCommand();
+            count.CommandText = "SELECT COUNT(*) FROM BoardSyncEntryOrder;";
+            Assert.Equal(0L, await count.ExecuteScalarAsync(Ct)); // no historical backfill
+        }
+        Assert.True(await reopened.DeleteCardAsync(root, gone.Id, Ct));
+        // Simulate an older binary inserting only the original comment columns. The trigger
+        // must put this after the deletion, even though its authored time is earlier.
+        await ExecuteAsync("""
+            INSERT INTO BoardComments (Id, CardId, AuthorKind, AuthorLabel, Body, CreatedUTC)
+            SELECT 'old-writer-comment', Id, 'user', 'User', 'After deletion', '2000-01-01T00:00:00.0000000Z'
+            FROM BoardCards WHERE Title = 'Kept';
+            UPDATE BoardComments SET CreatedUTC = '2099-01-01T00:00:00.0000000Z' WHERE Body = 'Before deletion';
+            """);
+
+        var queue = await new BoardStore(cs, cs).GetUnsentLogEntriesAsync(kept.BoardId, 20, Ct);
+        Assert.Equal(new[] { "comment", "deleted", "comment" }, queue.Select(entry => entry.Entry.Kind));
+        Assert.Equal("Before deletion", queue[0].Entry.Body);
+        Assert.Equal("old-writer-comment", queue[2].Entry.Id);
+        Assert.Equal(queue[0].Entry.Id, Assert.Single(await reopened.GetUnsentLogEntriesAsync(kept.BoardId, 1, Ct)).Entry.Id);
+        await using var checkDb = new SqliteConnection(cs);
+        await checkDb.OpenAsync(Ct);
+        await using var check = checkDb.CreateCommand();
+        check.CommandText = """
+            SELECT COUNT(*) FROM BoardSyncEntryOrder o
+            WHERE NOT EXISTS (SELECT 1 FROM BoardComments m WHERE m.Id = o.EntryId)
+              AND NOT EXISTS (SELECT 1 FROM BoardDeletedCards d WHERE d.EntryId = o.EntryId);
+            """;
+        Assert.Equal(0L, await check.ExecuteScalarAsync(Ct));
+    }
+
     [Fact]
     public async Task PermanentDeletionOutbox_IsBoardScoped_DurableAndContainsNoCardContent()
     {

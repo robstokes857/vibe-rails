@@ -601,8 +601,8 @@ public sealed partial class BoardStore : IBoardStore
         // (astronomically unlikely) collision into a failed write rather than two cards on one key.
         var cardKey = synced?.CardKey ?? BoardKeys.NewStoredKey(prefix, number);
         if (await ScalarLongAsync(connection, transaction,
-            "SELECT COUNT(*) FROM BoardDeletedCards WHERE CardId = $id OR CardKey = $key;",
-            ("$id", id), cancellationToken, ("$key", cardKey)) > 0)
+            $"SELECT COUNT(*) FROM BoardDeletedCards WHERE CardId = $id OR StoredCardKey = $key OR (ProjectPath = $project{ProjectPathCollation} AND CardKey = $key);",
+            ("$id", id), cancellationToken, ("$key", cardKey), ("$project", project)) > 0)
             throw new BoardValidationException("This card identity was permanently deleted.");
         var now = stamp?.CreatedUtc ?? DateTime.UtcNow;
         var keyNumber = synced?.Number ?? number;
@@ -2129,6 +2129,8 @@ public sealed partial class BoardStore : IBoardStore
             SqliteSchema.Execute(db, transaction, AppContextSchemaSql));
         SqliteMigrationRunner.Apply(connection, "board-card-deletion", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, CardDeletionSchemaSql));
+        SqliteMigrationRunner.Apply(connection, "board-card-deletion", 2, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, SyncEntryOrderSchemaSql));
         ReconcileDerivedRows(connection);
     }
 

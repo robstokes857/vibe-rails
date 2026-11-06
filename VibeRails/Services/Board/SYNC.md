@@ -317,6 +317,10 @@ received change to each field wins. An exact retry receives its original acknowl
 reusing an entry ID with different content is rejected. Failed or invalid acknowledgements
 leave entries queued. The local outbox sends creation entries first and later entries in
 insertion order, independent of clock skew.
+Future Card Log entries and permanent-deletion receipts share `BoardSyncEntryOrder`'s
+monotonic insertion sequence; their table-local rowids must never be mixed as an order.
+Pre-sequence log rows retain their rowid order before future entries, without a backfill.
+Deleting a card removes its log-order rows but does not reset the sequence high-water mark.
 
 Acknowledgements must match request identity order, use distinct positive sequences no greater
 than `LastSeq`, and advertise a `LastSeq` at least as high as the applied cursor and previously

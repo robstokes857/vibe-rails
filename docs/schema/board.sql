@@ -207,7 +207,7 @@ CREATE TABLE BoardContextSamples ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REF
 CREATE TABLE BoardContextSettings ( BoardId TEXT PRIMARY KEY REFERENCES Boards(Id) ON DELETE CASCADE, ContextJson TEXT NOT NULL, Revision INTEGER NOT NULL , EveryContextMessage TEXT, EveryContextRevision INTEGER);
 
 -- table BoardDeletedCards
-CREATE TABLE BoardDeletedCards ( CardId TEXT PRIMARY KEY, CardKey TEXT NOT NULL COLLATE NOCASE UNIQUE, ProjectPath TEXT NOT NULL, Number INTEGER NOT NULL, BoardId TEXT NOT NULL, DeletedUTC TEXT NOT NULL, EntryId TEXT NOT NULL UNIQUE, AuthorKind TEXT NOT NULL, AuthorLabel TEXT NOT NULL, AuthorCli TEXT, RemoteSeq INTEGER, Managed INTEGER NOT NULL );
+CREATE TABLE BoardDeletedCards ( CardId TEXT PRIMARY KEY, CardKey TEXT NOT NULL COLLATE NOCASE, StoredCardKey TEXT COLLATE NOCASE UNIQUE, ProjectPath TEXT NOT NULL, Number INTEGER NOT NULL, BoardId TEXT NOT NULL, DeletedUTC TEXT NOT NULL, EntryId TEXT NOT NULL UNIQUE, AuthorKind TEXT NOT NULL, AuthorLabel TEXT NOT NULL, AuthorCli TEXT, RemoteSeq INTEGER, Managed INTEGER NOT NULL, UNIQUE (ProjectPath, CardKey) );
 
 -- table BoardDeletedComments
 CREATE TABLE BoardDeletedComments ( CommentId TEXT PRIMARY KEY REFERENCES BoardComments(Id) ON DELETE CASCADE, DeletedUTC TEXT NOT NULL );
@@ -290,6 +290,9 @@ CREATE TABLE BoardSharedOrigins ( BoardId TEXT PRIMARY KEY REFERENCES Boards(Id)
 -- table BoardStarterWorkflows
 CREATE TABLE BoardStarterWorkflows ( ColumnId TEXT PRIMARY KEY REFERENCES BoardColumns(Id) ON DELETE CASCADE, RecipeId TEXT NOT NULL, Completed INTEGER NOT NULL DEFAULT 0 );
 
+-- table BoardSyncEntryOrder
+CREATE TABLE BoardSyncEntryOrder ( Sequence INTEGER PRIMARY KEY AUTOINCREMENT, EntryId TEXT NOT NULL UNIQUE );
+
 -- table BoardSyncLinks
 CREATE TABLE BoardSyncLinks ( BoardId TEXT PRIMARY KEY REFERENCES Boards(Id) ON DELETE CASCADE, RemoteBoardId TEXT NOT NULL, Cursor INTEGER NOT NULL DEFAULT 0, Enabled INTEGER NOT NULL DEFAULT 1, LayoutHash TEXT, LastSyncUTC TEXT, LastError TEXT, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL , DestinationKey TEXT, ActivitySchema INTEGER NOT NULL DEFAULT 0, ActivityAfter TEXT);
 
@@ -355,6 +358,18 @@ CREATE TRIGGER BoardComments_QueueAdo AFTER INSERT ON BoardComments WHEN NEW.Kin
 
 -- trigger BoardComments_QueueJira
 CREATE TRIGGER BoardComments_QueueJira AFTER INSERT ON BoardComments WHEN NEW.Kind IN ('comment', 'note') AND NEW.RemoteSeq IS NULL AND NEW.SyncBoardId IS NULL AND NOT (NEW.AuthorKind = 'agent' AND NEW.AuthorLabel = 'Jira' AND NEW.AuthorCli IS NULL AND NEW.SessionId IS NULL) AND COALESCE(NEW.DiscussionHidden, 0) = 0 AND CASE WHEN json_valid(NEW.Changes) THEN COALESCE(json_extract(NEW.Changes, '$.jiraCopy'), 0) ELSE 0 END = 0 AND CASE WHEN json_valid(NEW.Changes) THEN COALESCE(json_extract(NEW.Changes, '$.syncToJira.to'), 1) ELSE 1 END != 0 BEGIN INSERT OR IGNORE INTO BoardJiraDeliveries (Id, CardId, ConnectionId, IssueId, Kind, SourceId, Body, CreatedUTC, UpdatedUTC) SELECT lower(hex(randomblob(16))), c.Id, j.SiteId, j.IssueId, 'comment', NEW.Id, NEW.AuthorLabel || ': ' || NEW.Body, NEW.CreatedUTC, NEW.CreatedUTC FROM BoardCards c JOIN BoardJiraLinks j ON j.CardId = c.Id JOIN BoardJiraConnections conn ON conn.Id = j.SiteId AND conn.ProjectPath = c.ProjectPath WHERE c.Id = NEW.CardId AND c.DeletedUTC IS NULL; END;
+
+-- trigger BoardComments_RecordSyncOrder
+CREATE TRIGGER BoardComments_RecordSyncOrder AFTER INSERT ON BoardComments BEGIN INSERT INTO BoardSyncEntryOrder (EntryId) VALUES (NEW.Id); END;
+
+-- trigger BoardComments_RemoveSyncOrder
+CREATE TRIGGER BoardComments_RemoveSyncOrder AFTER DELETE ON BoardComments BEGIN DELETE FROM BoardSyncEntryOrder WHERE EntryId = OLD.Id; END;
+
+-- trigger BoardDeletedCards_RecordSyncOrder
+CREATE TRIGGER BoardDeletedCards_RecordSyncOrder AFTER INSERT ON BoardDeletedCards BEGIN INSERT INTO BoardSyncEntryOrder (EntryId) VALUES (NEW.EntryId); END;
+
+-- trigger BoardDeletedCards_RemoveSyncOrder
+CREATE TRIGGER BoardDeletedCards_RemoveSyncOrder AFTER DELETE ON BoardDeletedCards BEGIN DELETE FROM BoardSyncEntryOrder WHERE EntryId = OLD.EntryId; END;
 
 -- trigger BoardLaneAutomations_ClearAdditional
 CREATE TRIGGER BoardLaneAutomations_ClearAdditional AFTER UPDATE ON BoardLaneAutomations BEGIN DELETE FROM BoardLaneAdditionalAutomations WHERE ColumnId = NEW.ColumnId; END;

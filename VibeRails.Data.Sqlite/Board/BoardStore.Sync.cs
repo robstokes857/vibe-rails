@@ -57,6 +57,7 @@ public sealed partial class BoardStore
         JOIN BoardCards c ON c.Id = m.CardId
         JOIN BoardColumns k ON k.Id = c.ColumnId
         LEFT JOIN BoardProjectKeys pk ON pk.ProjectPath = c.ProjectPath
+        LEFT JOIN BoardSyncEntryOrder o ON o.EntryId = m.Id
         WHERE COALESCE(m.SyncBoardId, k.BoardId) = $board AND m.RemoteSeq IS NULL
           AND EXISTS (SELECT 1 FROM BoardSyncLog x WHERE x.CardId = c.Id AND COALESCE(x.SyncBoardId, k.BoardId) = $board AND x.Kind = 'created')
           AND NOT EXISTS (SELECT 1 FROM BoardSyncLog x WHERE x.CardId = c.Id AND COALESCE(x.SyncBoardId, k.BoardId) = $board AND x.Kind = 'created' AND x.RemoteSeq = -1)
@@ -202,16 +203,20 @@ public sealed partial class BoardStore
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         // Oldest first, so a card's `created` entry reaches the server before its changes and
-        // comments; the server applies entries in the order it receives them.
+        // comments; the server applies entries in the order it receives them. Both sources
+        // share an insertion sequence, so a new deletion cannot jump ahead of a lost-ACK retry.
         command.CommandText = $"""
             SELECT m.Id, m.CardId, m.AuthorKind, m.AuthorLabel, m.AuthorCli, m.SessionId, m.Body, m.CreatedUTC, m.Kind, m.Changes,
                    COALESCE(c.CardKey, {CardPrefixSql} || '-' || c.Number),
-                   CASE WHEN m.Kind = 'created' THEN 0 ELSE 1 END AS SortKind, m.rowid AS SortId
+                   CASE WHEN m.Kind = 'created' THEN 0 ELSE 1 END AS SortKind,
+                   o.Sequence IS NOT NULL AS SortEra, COALESCE(o.Sequence, m.rowid) AS SortId
             {UnsentEntriesFromSql}
             UNION ALL
-            SELECT EntryId, CardId, AuthorKind, AuthorLabel, AuthorCli, NULL, 'Deleted permanently', DeletedUTC, 'deleted', NULL,
-                   CardKey, 1, rowid FROM BoardDeletedCards WHERE BoardId = $board AND RemoteSeq IS NULL
-            ORDER BY SortKind, SortId
+            SELECT d.EntryId, d.CardId, d.AuthorKind, d.AuthorLabel, d.AuthorCli, NULL, 'Deleted permanently', d.DeletedUTC, 'deleted', NULL,
+                   d.CardKey, 1, o.Sequence IS NOT NULL, COALESCE(o.Sequence, d.rowid)
+            FROM BoardDeletedCards d LEFT JOIN BoardSyncEntryOrder o ON o.EntryId = d.EntryId
+            WHERE d.BoardId = $board AND d.RemoteSeq IS NULL
+            ORDER BY SortKind, SortEra, SortId
             LIMIT $limit;
             """;
         command.Parameters.AddWithValue("$board", boardId);
@@ -620,8 +625,8 @@ public sealed partial class BoardStore
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
         if (await ScalarLongAsync(connection, transaction,
-            "SELECT COUNT(*) FROM BoardDeletedCards WHERE CardId = $id OR CardKey = $key;",
-            ("$id", cardId), cancellationToken, ("$key", cardKey)) > 0)
+            $"SELECT COUNT(*) FROM BoardDeletedCards WHERE CardId = $id OR StoredCardKey = $key OR (ProjectPath = $project{ProjectPathCollation} AND CardKey = $key);",
+            ("$id", cardId), cancellationToken, ("$key", cardKey), ("$project", project)) > 0)
             throw new BoardValidationException("The remote card identity was permanently deleted locally.");
         var taken = await ScalarLongAsync(connection, transaction,
             "SELECT COUNT(*) FROM BoardCards WHERE Id = $id OR CardKey = $key;",

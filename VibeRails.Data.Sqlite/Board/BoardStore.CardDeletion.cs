@@ -10,7 +10,8 @@ public sealed partial class BoardStore
     private const string CardDeletionSchemaSql = """
         CREATE TABLE BoardDeletedCards (
             CardId TEXT PRIMARY KEY,
-            CardKey TEXT NOT NULL COLLATE NOCASE UNIQUE,
+            CardKey TEXT NOT NULL COLLATE NOCASE,
+            StoredCardKey TEXT COLLATE NOCASE UNIQUE,
             ProjectPath TEXT NOT NULL,
             Number INTEGER NOT NULL,
             BoardId TEXT NOT NULL,
@@ -20,7 +21,8 @@ public sealed partial class BoardStore
             AuthorLabel TEXT NOT NULL,
             AuthorCli TEXT,
             RemoteSeq INTEGER,
-            Managed INTEGER NOT NULL
+            Managed INTEGER NOT NULL,
+            UNIQUE (ProjectPath, CardKey)
         );
         CREATE INDEX IX_BoardDeletedCards_Outbox ON BoardDeletedCards(BoardId, RemoteSeq);
         CREATE TABLE BoardDeletedTrackerItems (
@@ -32,6 +34,32 @@ public sealed partial class BoardStore
             DeletedUTC TEXT NOT NULL,
             PRIMARY KEY (Provider, ConnectionId, ItemId)
         );
+        """;
+
+    // One insertion sequence for both outbox sources. Triggers also cover older writers;
+    // AUTOINCREMENT prevents card cascades from making a later entry sort before a receipt.
+    // Existing log rows retain their original rowid ordering, ahead of these future entries.
+    private const string SyncEntryOrderSchemaSql = """
+        CREATE TABLE BoardSyncEntryOrder (
+            Sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+            EntryId TEXT NOT NULL UNIQUE
+        );
+        CREATE TRIGGER BoardComments_RecordSyncOrder AFTER INSERT ON BoardComments
+        BEGIN
+            INSERT INTO BoardSyncEntryOrder (EntryId) VALUES (NEW.Id);
+        END;
+        CREATE TRIGGER BoardComments_RemoveSyncOrder AFTER DELETE ON BoardComments
+        BEGIN
+            DELETE FROM BoardSyncEntryOrder WHERE EntryId = OLD.Id;
+        END;
+        CREATE TRIGGER BoardDeletedCards_RecordSyncOrder AFTER INSERT ON BoardDeletedCards
+        BEGIN
+            INSERT INTO BoardSyncEntryOrder (EntryId) VALUES (NEW.EntryId);
+        END;
+        CREATE TRIGGER BoardDeletedCards_RemoveSyncOrder AFTER DELETE ON BoardDeletedCards
+        BEGIN
+            DELETE FROM BoardSyncEntryOrder WHERE EntryId = OLD.EntryId;
+        END;
         """;
 
     /// <summary>
@@ -50,8 +78,8 @@ public sealed partial class BoardStore
         command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO BoardDeletedCards
-                (CardId, CardKey, ProjectPath, Number, BoardId, DeletedUTC, EntryId, AuthorKind, AuthorLabel, AuthorCli, RemoteSeq, Managed)
-            VALUES ($id, $key, $project, $number, $board, $now, $entry, $kind, $label, $cli,
+                (CardId, CardKey, StoredCardKey, ProjectPath, Number, BoardId, DeletedUTC, EntryId, AuthorKind, AuthorLabel, AuthorCli, RemoteSeq, Managed)
+            VALUES ($id, $key, (SELECT CardKey FROM BoardCards WHERE Id = $id), $project, $number, $board, $now, $entry, $kind, $label, $cli,
                 CASE WHEN EXISTS (SELECT 1 FROM BoardSyncLinks WHERE BoardId = $board)
                   AND EXISTS (SELECT 1 FROM BoardSyncLog WHERE CardId = $id AND Kind = 'created'
                     AND (SyncBoardId IS NULL OR SyncBoardId = $board) AND (RemoteSeq IS NULL OR RemoteSeq > 0))

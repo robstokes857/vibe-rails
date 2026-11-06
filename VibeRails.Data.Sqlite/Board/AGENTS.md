@@ -8,6 +8,13 @@ recordings, session completion records, other cards' links and repository-wide r
 there is no backfill or purge. Sequences and reserved keys prevent identity reuse. The hosted
 deletion outbox contains no card payload; remote history still uses the existing soft-delete
 protocol. Backup archives remain independent. Older soft-deleted rows are left untouched.
+Computed legacy keys are reserved per project; `StoredCardKey` reserves genuine stored keys
+globally. Two legacy projects may both have a deleted `VB-1` without conflicting.
+`board-card-deletion/2` adds a shared insertion sequence for future Card Log entries and
+deletion receipts, including inserts from older binaries. Existing log rows keep their
+rowid order ahead of future entries; no history is backfilled. Card cascades remove their
+log-order metadata, while the sequence high-water mark survives. This keeps lost-ACK retries
+ordered across both outbox sources without using wall-clock timestamps.
 
 VIBE-291 declares authorized discussion work by changing only the requested session/card link
 from `chat` to `chat_work` through `AuthorizeDiscussionWorkAsync`. No schema migration or history

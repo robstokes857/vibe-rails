@@ -10,6 +10,41 @@ namespace Tests.Services.Board;
 public sealed partial class BoardStoreTests
 {
     [Fact]
+    public async Task PermanentDelete_LegacyKeysAreProjectScoped_AndStoredKeysStayGloballyReserved()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        await _store.EnsureDefaultColumnsAsync(_otherProject, Ct);
+        var first = await _store.CreateCardAsync(_project, NewCard("First legacy"), Ct);
+        var second = await _store.CreateCardAsync(_otherProject, NewCard("Second legacy"), Ct);
+        foreach (var card in new[] { first, second })
+            await ExecuteDeletionSql("""
+                UPDATE BoardProjectKeys SET Prefix = 'VB' WHERE ProjectPath = $project;
+                UPDATE BoardCards SET CardKey = NULL WHERE Id = $id;
+                """, card);
+        first = (await _store.FindCardAsync(_project, first.Id, Ct))!;
+        second = (await _store.FindCardAsync(_otherProject, second.Id, Ct))!;
+        Assert.Equal("VB-1", first.Key);
+        Assert.Equal(first.Key, second.Key);
+
+        Assert.True(await _store.DeleteCardAsync(_project, first.Id, Ct));
+        Assert.NotNull(await _store.FindCardAsync(_otherProject, second.Id, Ct));
+        Assert.True(await _store.DeleteCardAsync(_otherProject, second.Id, Ct));
+        Assert.Equal(2, await DeletionCount("BoardDeletedCards", "CardKey", "VB-1"));
+        var reusedLegacy = await Assert.ThrowsAsync<BoardValidationException>(() => _store.CreateSyncedCardAsync(_project, "reused-legacy", "VB-1",
+            NewCard("Recreated") with { BoardId = first.BoardId }, BoardAuthor.User(), new("legacy-entry", 42, DateTime.UtcNow, BoardId: first.BoardId), Ct));
+        Assert.Contains("permanently deleted", reusedLegacy.Message);
+
+        var thirdProject = Path.Combine(_root, "third-project");
+        await _store.EnsureDefaultColumnsAsync(thirdProject, Ct);
+        Assert.NotNull(await _store.CreateCardAsync(thirdProject, NewCard("Different project") with { DisplayId = "VB-1" }, Ct));
+
+        var permanent = await _store.CreateCardAsync(_project, NewCard("Permanent key"), Ct);
+        Assert.True(await _store.DeleteCardAsync(_project, permanent.Id, Ct));
+        await Assert.ThrowsAsync<BoardValidationException>(() => _store.CreateSyncedCardAsync(_otherProject, "reused-permanent", permanent.Key,
+            NewCard("Recreated") with { BoardId = second.BoardId }, BoardAuthor.User(), new("permanent-entry", 43, DateTime.UtcNow, BoardId: second.BoardId), Ct));
+    }
+
+    [Fact]
     public async Task PermanentDelete_RemovesOwnedGraph_AndPreservesOtherBoardsAndSharedSessions()
     {
         await _store.EnsureDefaultColumnsAsync(_project, Ct);
@@ -74,6 +109,9 @@ public sealed partial class BoardStoreTests
         await ExecuteDeletionSql("UPDATE BoardCards SET DeletedUTC = $now WHERE Id = $id;", old);
         // Recreate the pre-feature schema in this disposable fixture, including its retained data.
         await ExecuteDeletionSql("""
+            DROP TRIGGER BoardComments_RecordSyncOrder;
+            DROP TRIGGER BoardComments_RemoveSyncOrder;
+            DROP TABLE BoardSyncEntryOrder;
             DROP TABLE BoardDeletedCards;
             DROP TABLE BoardDeletedTrackerItems;
             DELETE FROM SchemaMigrations WHERE Component = 'board-card-deletion';
@@ -192,7 +230,7 @@ public sealed partial class BoardStoreTests
         command.CommandText = sql;
         command.Parameters.AddWithValue("$id", card.Id);
         command.Parameters.AddWithValue("$lane", card.ColumnId);
-        command.Parameters.AddWithValue("$project", _project);
+        command.Parameters.AddWithValue("$project", card.ProjectPath);
         command.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("O"));
         await command.ExecuteNonQueryAsync(Ct);
     }
