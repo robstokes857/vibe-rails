@@ -83,7 +83,9 @@ public sealed record GitStagedSnapshot(
     IReadOnlyList<string>? UntrackedFiles = null,
     // Supported sources left out of ImpactFiles because the capture's aggregate byte budget was
     // spent. Impact ranking is advisory, so the capture continues and reports the shortfall.
-    int ImpactFilesOmitted = 0)
+    int ImpactFilesOmitted = 0,
+    // Explicit quality exemptions captured once for this run, including card identity and reason.
+    IReadOnlyList<VibeRails.DB.CodeAnalyzerIgnoredFile>? QualityExemptions = null)
 {
     public static GitStagedSnapshot Preview(string repositoryPath) => new(
         Path.GetFullPath(repositoryPath),

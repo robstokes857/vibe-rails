@@ -5,6 +5,7 @@ using Serilog;
 using VibeRails.Services;
 using VibeRails.Services.Git;
 using VibeRails.Services.GitPreflight;
+using VibeRails.Services.Board;
 using VibeRails.Services.VCA;
 using VibeRails.Services.VCA.Hooks;
 
@@ -15,7 +16,7 @@ namespace VibeRails.Services.Mcp.Tools;
 /// MCP normalizes the method name to snake_case (<c>validate_vca</c>).
 /// </summary>
 [McpServerToolType]
-public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
+public class RulesTool(IGitStagedSnapshotProvider snapshotProvider, CodeQualityExemptionService? exemptions = null)
 {
     private static readonly IFileClassifier FileClassifier = new FileClassifier();
     private static readonly StringComparer GitPathComparer = OperatingSystem.IsWindows()
@@ -94,7 +95,7 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
     [Description("Validates staged files against VCA rules defined in vc.rules.md files. Supports '- [WARN] Rule' and '- Rule (WARN)' formats. Call this BEFORE attempting to commit changes. Returns validation results with any COMMIT-level violations that require acknowledgment.")]
     public async Task<string> ValidateVca()
     {
-        var report = await ValidateVcaReportAsync(snapshotProvider, Directory.GetCurrentDirectory());
+        var report = await ValidateVcaReportAsync(snapshotProvider, Directory.GetCurrentDirectory(), exemptions: exemptions);
         return report.Output;
     }
 
@@ -106,7 +107,7 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
         CancellationToken cancellationToken = default,
         GitStagedSnapshot? stagedSnapshot = null,
         bool workingTreeScope = false,
-        ICommitSignatureVerifier? signatureVerifier = null)
+        ICommitSignatureVerifier? signatureVerifier = null, CodeQualityExemptionService? exemptions = null)
     {
         // "changed" when validating a working-tree snapshot, "staged" when validating the
         // index — the transcript must name what was actually looked at.
@@ -200,8 +201,12 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider)
             {
                 var qualitySnapshot = await snapshotProvider.CaptureAsync(gitRoot, cancellationToken);
                 return await ValidateVcaReportAsync(snapshotProvider, gitRoot, commitMessage, validateCommitMessage,
-                    cancellationToken, qualitySnapshot, workingTreeScope, signatureVerifier);
+                    cancellationToken, qualitySnapshot, workingTreeScope, signatureVerifier, exemptions);
             }
+
+            if (stagedSnapshot is { QualityExemptions: null } && exemptions is not null
+                && allRules.Any(rule => rule.Enforcement is not ("SKIP" or "DISABLED") && CodeQualityRule.TryParse(rule.RuleText, out _)))
+                stagedSnapshot = stagedSnapshot with { QualityExemptions = await exemptions.GetRulesAsync(gitRoot, cancellationToken) };
 
             // Validate against rules
             var violations = new List<string>();

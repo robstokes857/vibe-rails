@@ -152,6 +152,7 @@ public partial class CommandServiceTests
             "save_board_handoff",
             "read_board_session",
             "get_board_notes", "read_board_attachment", "read_board_check",
+            "exempt_code_quality_file", "list_code_quality_exemptions", "revoke_code_quality_exemption",
             "list_board_agent_options", "start_board_agent",
             "create_board_card", "update_board_card", "move_board_card", "add_board_comment",
             "append_board_note", "add_board_attachment", "attach_board_session", "link_board_commit", "link_board_code",

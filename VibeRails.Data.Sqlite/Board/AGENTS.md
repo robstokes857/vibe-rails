@@ -1,5 +1,12 @@
 # Board persistence
 
+`board-code-quality-exemptions/1` (VIBE-275, additive) stores explicit per-card/repository file
+exemptions separately from legacy dashboard ignores. Scoped reads and transactional writes stay
+behind `IBoardStore`; replacement/revocation retains original JSON and attributed revocation.
+There is no card-deletion cascade or backfill. The existing all-table Board backup includes it.
+Older versions cannot mistake a per-card exemption for a repository ignore. See
+[file exemptions](../../VibeRails/Services/Board/CHECKS.md#file-exemptions-vibe-275).
+
 `board-checks/2` adds nullable `BoardChecks.EvidenceJson` for full captured text and the exact
 exemptions used by an attempt, separate from paged summaries. Completed evidence is immutable;
 older rows remain readable without source text. `board-code-quality-ignores/1` adds the current

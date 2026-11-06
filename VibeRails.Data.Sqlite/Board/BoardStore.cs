@@ -2071,6 +2071,8 @@ public sealed partial class BoardStore : IBoardStore
             SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardChecks ADD COLUMN EvidenceJson TEXT"));
         SqliteMigrationRunner.Apply(connection, "board-code-quality-ignores", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, CodeQualityIgnoresSchemaSql));
+        SqliteMigrationRunner.Apply(connection, "board-code-quality-exemptions", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, CodeQualityExemptionsSchemaSql));
         SqliteMigrationRunner.Apply(connection, "board-starter-workflows", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, StarterWorkflowSchemaSql));
         SqliteMigrationRunner.Apply(connection, "board-jira-delivery", 1, MigrationKind.Additive, (db, transaction) =>

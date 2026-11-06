@@ -126,7 +126,10 @@ Health is 100 minus the existing scan's overall concern score. Hooks and MCP use
 snapshot; Rules-page validation uses working-tree additions. Deletions, unchanged renames,
 binary files and unsupported file types contribute no added code. An empty scan is explicitly
 skipped. Missing content or an invalid score must not silently pass. Report ignore preferences
-are presentation settings and do not exempt code from this repository rule.
+are presentation settings and do not exempt code from this repository rule. Explicit file
+exemptions created with `exempt_code_quality_file` do apply: repository-wide entries, plus only
+the current card's entries. They are captured with the source snapshot and never skip unrelated
+VCA rules. See [file exemptions](../Board/CHECKS.md#file-exemptions-vibe-275).
 
 Quality failures follow the standard WARN/COMMIT/STOP policy, including re-evaluation at
 commit-msg. Invalid handwritten thresholds warn as unsupported; rule writers accept only A/B/C.

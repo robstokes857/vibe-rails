@@ -384,6 +384,8 @@ public static class VcaHookProcessHost
         services.AddSingleton<IVcaHookRunner, VcaHookRunner>();
         services.AddSingleton<IVcaHookValidationAnalyzer, VcaHookValidationAnalyzer>();
         services.AddSqliteJobStorage(_ => StatePath());
+        // Resolved lazily by quality exemptions; an unreadable Board must not block local Jobs.
+        services.AddSqliteBoardStorage(_ => StatePath());
         // Approvals a reviewer already gave over the staged tree (VB-50). Same file; read only here,
         // and resolved only when a signature finding is pending, so building the runner opens nothing.
         services.AddSqliteReviewRequestStorage(_ => StatePath());

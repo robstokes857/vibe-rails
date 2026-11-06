@@ -22,6 +22,8 @@ public static class CodeAnalyzerIgnoreMatchKind
 /// <param name="MatchKind">"file" (exact match) or "directory" (the path itself plus everything under it).</param>
 /// <param name="ReasonKind">"test" / "config" / "other", or null when no reason was given.</param>
 /// <param name="ReasonText">Optional free-text note (used with "other", but stored for any kind).</param>
+/// <param name="ExemptionId">Explicit exemption identity in captured evidence; null for a dashboard ignore preference.</param>
+/// <param name="CardId">The card this explicit exemption belongs to; null for repository-wide rules.</param>
 [method: System.Text.Json.Serialization.JsonConstructor]
 public sealed record CodeAnalyzerIgnoredFile(
     string Path,
@@ -29,7 +31,9 @@ public sealed record CodeAnalyzerIgnoredFile(
     string? ReasonKind,
     string? ReasonText,
     DateTime CreatedUtc,
-    string? Author = null)
+    string? Author = null,
+    string? ExemptionId = null,
+    string? CardId = null)
 {
     /// <summary>Convenience overload for the common file case (default MatchKind = file).</summary>
     public CodeAnalyzerIgnoredFile(string path, string? reasonKind, string? reasonText, DateTime createdUtc)

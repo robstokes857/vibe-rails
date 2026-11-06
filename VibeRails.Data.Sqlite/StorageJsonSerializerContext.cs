@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using VibeRails.DTOs;
 namespace VibeRails.DTOs;
 [JsonSerializable(typeof(VibeRails.Services.Board.BoardHandoff))]
+[JsonSerializable(typeof(VibeRails.Services.Board.CodeQualityExemption))]
 [JsonSerializable(typeof(float[]))]
 [JsonSerializable(typeof(VibeRails.Services.BertV2.SearchDocument))]
 [JsonSerializable(typeof(VibeRails.Services.Board.BoardReviewRecord))]

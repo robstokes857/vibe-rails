@@ -663,7 +663,9 @@ existing overall score for added code under the declaring rule file; individual 
 not decide the result. The cutoffs are health 90/80/70, with C the lowest selectable minimum.
 Git Guard and MCP validate the staged snapshot, while Rules-page validation captures working-tree
 additions once per request. Failures use standard WARN/COMMIT/STOP enforcement. Report-only ignore
-preferences do not exempt code from the rule, and changes with no supported added code are skipped.
+preferences do not exempt code from the rule. Explicit file exemptions created through the Board
+MCP tools apply to both this rule and Code quality reports, scoped to one card or the repository;
+they never bypass other VCA rules. Changes with no supported added code are skipped.
 
 The full-width Quality workspace (`code-quality`) renders the host-owned Code Atlas / Quality
 Lab viewer, third in the top navigation. Rules and Git Guard have the fourth destination
@@ -2000,6 +2002,13 @@ pipeline. `IBoardStore` retains attempts, provenance and reports in additive `Bo
 `BoardChecksReader` combines saved evidence with per-card run state; `read_board_check` supplies
 reviewer evidence, and the Checks panel reuses the existing CodeReportViewer. No scan result
 moves a card. See [scope, persistence, status and starter contracts](../VibeRails/Services/Board/CHECKS.md).
+
+`CodeQualityExemptionService` resolves explicit file exemptions from `IBoardStore`, by the lane
+run's project/card or Git Guard's inherited session and matching checkout. The engines share the
+captured rules, and saved check evidence retains their scope, reason and author. The additive
+`BoardCodeQualityExemptions` table keeps superseded/revoked entries and participates in Board
+backups; it remains separate from legacy dashboard ignore preferences. MCP exposes create/list/
+revoke operations on both transports, with normal Board attribution and writable-card checks.
 
 Lane Automations always run in selected order per card. The lane popup and card rail share
 per-step progress, explicit LLM verdicts and user skips; no execution-mode setting is required.

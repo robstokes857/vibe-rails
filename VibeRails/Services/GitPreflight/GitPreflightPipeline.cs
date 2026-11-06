@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using Serilog;
+using VibeRails.Services.Board;
 using VibeRails.Services.VCA.Hooks;
 
 namespace VibeRails.Services.GitPreflight;
@@ -15,14 +17,17 @@ public sealed class GitPreflightPipeline : IGitPreflightPipeline
     private readonly IGitStagedSnapshotProvider _snapshotProvider;
     private readonly IGitWorkingTreeSnapshotProvider _workingTreeSnapshotProvider;
     private readonly IReadOnlyList<IGitPreflightStep> _steps;
+    private readonly CodeQualityExemptionService? _exemptions;
 
     public GitPreflightPipeline(
         IGitStagedSnapshotProvider snapshotProvider,
         IGitWorkingTreeSnapshotProvider workingTreeSnapshotProvider,
-        IEnumerable<IGitPreflightStep> steps)
+        IEnumerable<IGitPreflightStep> steps,
+        CodeQualityExemptionService? exemptions = null)
     {
         _snapshotProvider = snapshotProvider;
         _workingTreeSnapshotProvider = workingTreeSnapshotProvider;
+        _exemptions = exemptions;
         var byId = steps.ToDictionary(step => step.StepId, StringComparer.Ordinal);
         _steps = StepOrder.Select(id => byId.TryGetValue(id, out var step)
             ? step
@@ -118,6 +123,21 @@ public sealed class GitPreflightPipeline : IGitPreflightPipeline
                 commitAllowed: false,
                 emitCancellationToken: cancellationToken);
             return failed;
+        }
+
+        if (_exemptions is not null && !request.Invocation.DemoUi)
+        {
+            try
+            {
+                snapshot = snapshot with { QualityExemptions = await _exemptions.GetRulesAsync(snapshot.RepositoryPath, cancellationToken) };
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Log.Warning(ex, "[GitGuard] Could not read Code quality exemptions; checking every file.");
+                snapshot = snapshot with { QualityExemptions = [] };
+                await EmitAsync(GitPreflightEventType.StepOutput, null, GitPreflightStepStatus.Warning,
+                    "Code quality exemptions could not be read; no files were exempted.", emitCancellationToken: cancellationToken);
+            }
         }
 
         await EmitAsync(

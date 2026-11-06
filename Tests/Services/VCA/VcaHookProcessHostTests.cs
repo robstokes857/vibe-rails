@@ -1,10 +1,31 @@
 using VibeRails.Services.VCA.Hooks;
+using Microsoft.Extensions.DependencyInjection;
+using VibeRails.Services.Board;
+using VibeRails.Services.GitPreflight;
 using Xunit;
 
 namespace Tests.Services.VCA;
 
 public class VcaHookProcessHostTests
 {
+    [Fact]
+    public async Task HookResolvesQualityExemptionsWithoutOpeningBoardUntilTheScan()
+    {
+        var registrations = new ServiceCollection();
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+        using var input = new StringReader("");
+        VcaHookProcessHost.ConfigureServices(registrations, output, error, input, false);
+        var opened = false;
+        registrations.AddSingleton<IBoardStore>(_ => { opened = true; throw new InvalidOperationException("Unavailable Board"); });
+        using var services = registrations.BuildServiceProvider();
+        Assert.NotNull(services.GetRequiredService<IGitPreflightPipeline>());
+        var exemptions = services.GetRequiredService<CodeQualityExemptionService>();
+        Assert.False(opened);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => exemptions.GetRulesAsync(Path.GetTempPath(), TestContext.Current.CancellationToken));
+        Assert.True(opened);
+    }
+
     [Fact]
     public async Task RunAsync_PreviewMode_RendersHookProgressOutput()
     {

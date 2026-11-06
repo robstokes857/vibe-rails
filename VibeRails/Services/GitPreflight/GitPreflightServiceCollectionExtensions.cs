@@ -26,6 +26,7 @@ public static class GitPreflightServiceCollectionExtensions
         // A container-owned instance: the container disposes it, so it must not be the static Shared one.
         services.TryAddSingleton<ICommitSignatureVerifier, ViberailsCommitSignatureVerifier>();
         services.AddGitSnapshots();
+        services.TryAddSingleton<VibeRails.Services.Board.CodeQualityExemptionService>();
         services.AddSingleton<VibeRails.Services.Board.BoardCheckService>();
         services.AddSingleton<IGitPreflightStep, VcaPreflightStep>();
         services.AddSingleton<IGitPreflightStep, MintLintPreflightStep>();

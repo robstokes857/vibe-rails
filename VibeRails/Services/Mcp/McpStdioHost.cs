@@ -142,6 +142,7 @@ public static class McpStdioHost
         // lets an LLM pick up a card from ANY terminal, not only a VibeRails tab. No live tab host
         // here, so linked sessions never report as open from this transport.
         services.AddSqliteBoardStorage(_ => ResolveStatePath());
+        services.AddSingleton<VibeRails.Services.Board.CodeQualityExemptionService>();
         services.AddSingleton<VibeRails.Services.Board.IBoardProjectResolver, VibeRails.Services.Board.BoardProjectResolver>();
         services.AddSingleton<VibeRails.Services.Board.IBoardCommitService, VibeRails.Services.Board.BoardCommitService>();
         services.AddSingleton<VibeRails.Services.Board.IBoardLiveSessionProbe, VibeRails.Services.Board.NullBoardLiveSessionProbe>();

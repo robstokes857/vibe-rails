@@ -1,4 +1,5 @@
 using MintLint;
+using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using VibeRails.Services;
 using VibeRails.Services.GitPreflight;
@@ -228,6 +229,27 @@ public sealed class CodeQualityRuleTests
         var report = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(), stagedSnapshot: snapshot, cancellationToken: Ct);
         Assert.False(report.HasStopViolation);
         Assert.Equal(0, report.ApplicableRuleCount);
+    }
+
+    [Fact]
+    public async Task RulesPageCapturesExplicitExemptionsOnceForAllQualityRules()
+    {
+        var snapshot = Snapshot("Code quality minimum C", File("bad.cs", Messy));
+        var provider = new Mock<IGitWorkingTreeSnapshotProvider>();
+        provider.Setup(p => p.CaptureWorkingTreeAsync(Root, It.IsAny<CancellationToken>())).ReturnsAsync(snapshot);
+        var store = new Mock<VibeRails.Services.Board.IBoardStore>();
+        store.Setup(s => s.GetCodeQualityExemptionsAsync(Root, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new VibeRails.Services.Board.CodeQualityExemption("exempt", "bad.cs", null, "Generated source",
+                VibeRails.Services.Board.BoardAuthor.User(), DateTime.UtcNow)]);
+        using var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection()
+            .AddSingleton(store.Object).BuildServiceProvider();
+        var service = new RuleValidationService(new RulesService(), Mock.Of<IAgentFileService>(), provider.Object,
+            new VibeRails.Services.Board.CodeQualityExemptionService(services));
+        var result = await service.ValidateAsync(["bad.cs"],
+            "ABC".Select(g => new RuleWithEnforcement($"Code quality minimum {g}", Enforcement.STOP)).ToList(), Root, Ct);
+        Assert.All(result.Results, r => { Assert.True(r.Passed, r.Message); Assert.Contains("no added code", r.Message); });
+        provider.Verify(p => p.CaptureWorkingTreeAsync(Root, It.IsAny<CancellationToken>()), Times.Once);
+        store.Verify(s => s.GetCodeQualityExemptionsAsync(Root, null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

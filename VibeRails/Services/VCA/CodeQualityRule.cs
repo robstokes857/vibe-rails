@@ -1,5 +1,6 @@
 using System.Globalization;
 using MintLint;
+using VibeRails.DB;
 using VibeRails.Services.GitPreflight;
 
 namespace VibeRails.Services.VCA;
@@ -10,7 +11,7 @@ public static class CodeQualityRule
     /// <summary>Shared catalog description for all supported grade thresholds.</summary>
     public const string Description =
         "Checks the overall Code quality grade of added code in supported source files under this rule file. "
-        + "Uses the combined grade, not individual file grades. Report ignore preferences do not disable this rule.";
+        + "Uses the combined grade, not individual file grades. Explicit Code quality exemptions apply; report ignore preferences do not disable this rule.";
 
     /// <summary>Recognizes a quality rule, including malformed hand-written thresholds.</summary>
     public static bool LooksLike(string text) =>
@@ -87,6 +88,7 @@ public static class CodeQualityRule
         var relative = Path.GetRelativePath(snapshot.RepositoryPath, directory).Replace('\\', '/');
         var prefix = relative == "." ? "" : relative.TrimEnd('/') + "/";
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        return snapshot.Files.Where(file => file.RelativePath.StartsWith(prefix, comparison));
+        return snapshot.Files.Where(file => file.RelativePath.StartsWith(prefix, comparison)
+            && !CodeAnalyzerIgnoreRules.IsIgnored(file.RelativePath, snapshot.QualityExemptions ?? []));
     }
 }

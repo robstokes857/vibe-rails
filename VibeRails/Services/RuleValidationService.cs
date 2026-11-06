@@ -34,13 +34,15 @@ namespace VibeRails.Services
         private readonly IRulesService _rulesService;
         private readonly IAgentFileService _agentFileService;
         private readonly IGitWorkingTreeSnapshotProvider _snapshotProvider;
+        private readonly VibeRails.Services.Board.CodeQualityExemptionService? _exemptions;
 
         public RuleValidationService(IRulesService rulesService, IAgentFileService agentFileService,
-            IGitWorkingTreeSnapshotProvider snapshotProvider)
+            IGitWorkingTreeSnapshotProvider snapshotProvider, VibeRails.Services.Board.CodeQualityExemptionService? exemptions = null)
         {
             _rulesService = rulesService;
             _agentFileService = agentFileService;
             _snapshotProvider = snapshotProvider;
+            _exemptions = exemptions;
         }
 
         public async Task<ValidationResultSet> ValidateAsync(
@@ -57,7 +59,7 @@ namespace VibeRails.Services
                 if (CodeQualityRule.LooksLike(rule.RuleText))
                 {
                     results.Add(await ValidateCodeQualityAsync(rule, files, rootPath,
-                        () => qualitySnapshot ??= _snapshotProvider.CaptureWorkingTreeAsync(rootPath, cancellationToken),
+                        () => qualitySnapshot ??= CaptureQualityAsync(rootPath, cancellationToken),
                         cancellationToken));
                     continue;
                 }
@@ -127,7 +129,7 @@ namespace VibeRails.Services
                 if (CodeQualityRule.LooksLike(rule.RuleText))
                 {
                     results.Add(await ValidateCodeQualityAsync(rule, GetScopedFiles(files, sourceFile, rootPath), rootPath,
-                        () => qualitySnapshot ??= _snapshotProvider.CaptureWorkingTreeAsync(rootPath, cancellationToken),
+                        () => qualitySnapshot ??= CaptureQualityAsync(rootPath, cancellationToken),
                         cancellationToken));
                     continue;
                 }
@@ -186,6 +188,13 @@ namespace VibeRails.Services
             return new ValidationResultSet(results);
         }
 
+        private async Task<GitStagedSnapshot> CaptureQualityAsync(string rootPath, CancellationToken cancellationToken)
+        {
+            var snapshot = await _snapshotProvider.CaptureWorkingTreeAsync(rootPath, cancellationToken);
+            return snapshot with { QualityExemptions = _exemptions is null ? []
+                : await _exemptions.GetRulesAsync(snapshot.RepositoryPath, cancellationToken) };
+        }
+
         private static async Task<ValidationResult> ValidateCodeQualityAsync(
             RuleWithEnforcement rule, List<string> files, string rootPath,
             Func<Task<GitStagedSnapshot>> capture, CancellationToken cancellationToken)
@@ -204,7 +213,8 @@ namespace VibeRails.Services
                 var comparison = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
                 var paths = files.Select(file => Path.GetFullPath(file, rootPath)).ToHashSet(comparison);
                 var quality = CodeQualityRule.Evaluate(grade,
-                    snapshot.Files.Where(file => paths.Contains(file.FullPath)), cancellationToken);
+                    snapshot.Files.Where(file => paths.Contains(file.FullPath)
+                        && !VibeRails.DB.CodeAnalyzerIgnoreRules.IsIgnored(file.RelativePath, snapshot.QualityExemptions ?? [])), cancellationToken);
                 return new(rule.RuleText, rule.Enforcement, quality.IsValid, quality.Message);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or TimeoutException)

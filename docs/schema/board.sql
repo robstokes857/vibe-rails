@@ -116,6 +116,12 @@ CREATE UNIQUE INDEX IX_BoardSyncRebuilds_Pending ON BoardSyncRebuilds(BoardId) W
 -- index IX_Boards_Project
 CREATE INDEX IX_Boards_Project ON Boards(ProjectPath, Position);
 
+-- index IX_CodeQualityExemptions_Card
+CREATE UNIQUE INDEX IX_CodeQualityExemptions_Card ON BoardCodeQualityExemptions(ProjectPath, CardId, Path) WHERE CardId IS NOT NULL AND RevokedUTC IS NULL;
+
+-- index IX_CodeQualityExemptions_Repository
+CREATE UNIQUE INDEX IX_CodeQualityExemptions_Repository ON BoardCodeQualityExemptions(ProjectPath, Path) WHERE CardId IS NULL AND RevokedUTC IS NULL;
+
 -- index UX_BoardCards_CardKey
 CREATE UNIQUE INDEX UX_BoardCards_CardKey ON BoardCards(CardKey) WHERE CardKey IS NOT NULL;
 
@@ -169,6 +175,9 @@ CREATE TABLE BoardChecks ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES 
 
 -- table BoardCodeLinks
 CREATE TABLE BoardCodeLinks ( Id TEXT NOT NULL PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, Url TEXT NOT NULL, Kind TEXT NOT NULL, Label TEXT NOT NULL, CreatedUTC TEXT NOT NULL, UNIQUE(CardId, Url) );
+
+-- table BoardCodeQualityExemptions
+CREATE TABLE BoardCodeQualityExemptions ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL COLLATE NOCASE, Path TEXT NOT NULL COLLATE NOCASE, CardId TEXT NULL, EntryJson TEXT NOT NULL, RevokedUTC TEXT NULL, RevokedByJson TEXT NULL );
 
 -- table BoardCodeQualityIgnoreHistory
 CREATE TABLE BoardCodeQualityIgnoreHistory ( Id TEXT PRIMARY KEY, RepositoryPath TEXT NOT NULL COLLATE NOCASE, Path TEXT NOT NULL COLLATE NOCASE, Operation TEXT NOT NULL, EntryJson TEXT NOT NULL, Author TEXT NULL, RecordedUTC TEXT NOT NULL );

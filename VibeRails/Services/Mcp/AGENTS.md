@@ -191,6 +191,15 @@ path registers its own minimal services in `McpStdioHost.ConfigureServices`.
 
 ## Tools
 
+The Board tool set also exposes `exempt_code_quality_file`, `list_code_quality_exemptions` and
+`revoke_code_quality_exemption` (VIBE-275). They use ordinary Board card resolution and write
+attribution; shared read-only cards reject writes. One exact file and a nonblank reason are
+required. The default `card` scope follows only that card; `repository` lasts until revoked.
+These explicit exemptions apply to Code quality reports and Git Guard's Code quality rule,
+not to other VCA rules. They are local, backed-up Board data with retained revocation history.
+They are explicit entries in `BoardMcpAuthorization.ToolNames`, on both existing transports;
+no listener or authentication exception is added. See [the contract](../Board/CHECKS.md#file-exemptions-vibe-275).
+
 `link_board_code(url, card?)` saves a GitHub PR/commit reference without fetching the URL.
 It follows ordinary Board target resolution, author attribution, session attachment and desktop
 activity rules. References appear in `get_board_card`, card publication and future session exports.

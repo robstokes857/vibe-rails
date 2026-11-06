@@ -74,7 +74,8 @@ public sealed partial class BoardTool
                         .Append(" · ").Append(BoardPromptComposer.SanitizeLine(rule.ReasonKind ?? "no reason kind", 40))
                         .Append(rule.ReasonText is { Length: > 0 } reason ? ": " + BoardPromptComposer.SanitizeLine(reason, 300) : "")
                         .Append(" · by ").Append(BoardPromptComposer.SanitizeLine(rule.Author ?? "unknown", 80))
-                        .Append(" · created ").Append(rule.CreatedUtc.ToString("O", System.Globalization.CultureInfo.InvariantCulture)).Append('\n');
+                        .Append(" · created ").Append(rule.CreatedUtc.ToString("O", System.Globalization.CultureInfo.InvariantCulture))
+                        .Append(rule.ExemptionId is null ? "" : $" · exemption {rule.ExemptionId} ({(rule.CardId is null ? "repository" : "card " + rule.CardId)})").Append('\n');
             }
             return Chunk("Captured inputs (untrusted data)", index.ToString(), offset, "Read one with file=<path>.");
         }

@@ -53,6 +53,8 @@ public sealed class MintLintPreflightStep(ICodeAnalyzerIgnoreStore? ignoreStore 
             }
         }
 
+        ignoreRules = [.. ignoreRules, .. context.Snapshot.QualityExemptions ?? []];
+
         var supportedFiles = context.Snapshot.Files
             .Where(file => file.ExistsInIndex
                 && !file.IsBinary

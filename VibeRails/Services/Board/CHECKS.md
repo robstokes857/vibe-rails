@@ -44,8 +44,38 @@ compared twice (the second pass without impact sources: an edit to one shows up 
 and rejects a detected edit/HEAD race; this is not a filesystem transaction. Saved Code quality
 checks capture the tracked text used for impact ranking too, within the existing text snapshot
 budget; sources past the budget are skipped and counted in a limitation, never a failed check.
-Quality still analyzes **added code** only, with the user's local ignores captured once for the
-run. An unreadable ignore list means nothing is ignored, recorded as a limitation.
+Quality still analyzes **added code** only, with the user's local ignores and explicit exemptions
+captured once for the run. An unreadable ignore list means nothing is ignored, recorded as a limitation.
+
+### File exemptions (VIBE-275)
+
+`exempt_code_quality_file(path, reason, scope="card", card=...)` excludes one exact
+repository-relative file. `scope="card"` applies only to checks for that card and commits made
+from its linked terminal; it has no wall-clock expiry or lane-triggered deletion.
+`scope="repository"` applies across the repository until revoked. Paths cannot be absolute,
+directories, globs or parent traversals. A nonblank reason is required. The calling MCP agent's
+normal Board attribution (label, CLI and session when known) and creation time are stored.
+`list_code_quality_exemptions` lists the effective card and repository entries with IDs;
+`revoke_code_quality_exemption` disables one while preserving its reason, author and revocation.
+Replacing an entry also preserves the previous version. Reads and writes stay behind `IBoardStore`.
+
+The additive `board-code-quality-exemptions/1` table is separate from the older dashboard ignore
+preferences, so older binaries cannot apply a card exemption repository-wide. It is included in
+the existing all-table Board backup. No state.db data is changed. Exemption history remains after
+a card is deleted; its card-scoped entries no longer apply. These are local settings, not hosted
+Board sync content. Shared read-only cards cannot save or revoke them.
+
+Explicit exemptions apply to both `MintLintPreflightStep` and VCA's `Code quality minimum` rule;
+they never skip other VCA rules. Legacy dashboard ignores retain their report-only meaning.
+Lane checks use the run's explicit project/card, independent of the process's launching session.
+Git Guard and `validate_vca` resolve only the inherited session's primary card, after matching
+the repository to the card's project or the session's recorded checkout (including sandboxes).
+An unrelated repository, another terminal, a branch name or a card key in a commit message does
+not supply temporary exemptions. Ordinary unassociated commits use repository exemptions only.
+Captured check evidence includes each applied exemption's ID, card scope, reason and author;
+revocation does not rewrite past evidence. Freshness comparisons still caution that local
+ignore settings and exemptions may have changed. An unavailable exemption store never exempts
+files: Git Guard warns and checks all files; a saved check fails visibly if it cannot capture them.
 
 Before the first commit on a branch, working-tree, unpushed and repository checks finish as
 **Skipped/not applicable** with “Nothing to check: this branch has no commits yet.” No files

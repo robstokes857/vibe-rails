@@ -1,5 +1,6 @@
 using VibeRails.Services.Mcp.Tools;
 using VibeRails.Services.GitPreflight;
+using VibeRails.Services.Board;
 
 namespace VibeRails.Services.VCA.Hooks;
 
@@ -18,7 +19,7 @@ public interface IVcaHookValidationService
 
 public sealed class VcaRulesHookValidationService(
     IGitStagedSnapshotProvider snapshotProvider,
-    ICommitSignatureVerifier? signatureVerifier = null) : IVcaHookValidationService
+    ICommitSignatureVerifier? signatureVerifier = null, CodeQualityExemptionService? exemptions = null) : IVcaHookValidationService
 {
     public async Task<VcaHookValidationResult> ValidateAsync(
         VcaHookInvocation invocation,
@@ -70,7 +71,7 @@ public sealed class VcaRulesHookValidationService(
             cancellationToken,
             snapshot,
             workingTreeScope: invocation.WorkingTreeScope,
-            signatureVerifier: signatureVerifier);
+            signatureVerifier: signatureVerifier, exemptions: exemptions);
         return new VcaHookValidationResult(
             report.Output,
             new VcaHookValidationSummary(

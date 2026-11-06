@@ -14,7 +14,7 @@ namespace VibeRails.Services.Board;
 /// <summary>Runs only the deterministic engines. Never calls the preflight pipeline or moves a card.</summary>
 public sealed class BoardCheckService(
     GitStagedSnapshotProvider snapshots, IVcaHookValidationService vca,
-    IServiceProvider services, ICodeAnalyzerIgnoreStore? ignores = null)
+    IServiceProvider services, ICodeAnalyzerIgnoreStore? ignores = null, CodeQualityExemptionService? exemptions = null)
 {
     public async Task<BoardCheckRecord> ExecuteAsync(string project, string workspace, string? cardKey,
         string runId, string actionId, JobActionKind kind, IReadOnlyList<string> arguments, CancellationToken ct)
@@ -41,6 +41,8 @@ public sealed class BoardCheckService(
                 if (commits.Count == 0) throw new NoAttachedCodeException(card.Type == BoardCardTypes.ResearchSpike);
             }
             var snapshot = await CaptureAsync(workspace, scope, ct, captureImpact: kind == JobActionKind.CodeQuality, commits: commits);
+            snapshot = snapshot with { QualityExemptions = exemptions is null ? []
+                : await exemptions.GetRulesAsync(snapshot.RepositoryPath, ct, project, card?.Id) };
             record = record with { BaseCommit = snapshot.CheckIdentity?.BaseCommit,
                 HeadCommit = snapshot.CheckIdentity?.HeadCommit, SnapshotHash = Fingerprint(snapshot),
                 RulesHash = RulesFingerprint(snapshot), FileCount = snapshot.Files.Count,
@@ -59,7 +61,7 @@ public sealed class BoardCheckService(
                     ignoresUnavailable = true;
                 }
             }
-            record = record with { Evidence = Evidence(snapshot, ignoreRules) };
+            record = record with { Evidence = Evidence(snapshot, [.. ignoreRules ?? [], .. snapshot.QualityExemptions]) };
             // Preserve captured inputs even if the process ends during analysis. Once stored, later
             // saves pass null, which keeps them, instead of serializing and sending a second copy
             // (SQLite still rewrites the row on the completion update; see CHECKS.md).
@@ -164,7 +166,7 @@ public sealed class BoardCheckService(
                 && Version(record.Tool == "VCA" ? JobActionKind.Vca : JobActionKind.CodeQuality) == record.ToolVersion;
             // A pinned range remains valid for that range, but does not cover newer HEAD changes.
             if (record.Scope == "range" && record.HeadCommit != await ReadHeadAsync(workspace, ct)) current = false;
-            return current ? "Captured inputs match; local ignore settings may have changed" : "Stale: inputs or tool version changed";
+            return current ? "Captured inputs match; local ignore settings or exemptions may have changed" : "Stale: inputs or tool version changed";
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { return "Unknown freshness: scope is unavailable"; }
     }
