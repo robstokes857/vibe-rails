@@ -273,9 +273,12 @@ public static class JobRunner
         var output = $"{check.Tool}: {check.Status} — {check.Summary}\nScope: {check.Scope}; "
             + $"{check.AnalyzedCount} analyzed; {check.SkippedCount} skipped; {check.FindingCount} findings.\n"
             + string.Join("\n", check.Limitations) + $"\nSaved evidence: {check.Id}";
+        if (check.MinimumGrade is not null) output += $"\nMinimum grade {check.MinimumGrade}: {check.GradeSummary ?? "not evaluated"}";
         Console.WriteLine(output);
-        return check.Status is "Failed to run" or "Cancelled"
-            ? new(JobRunActionStatus.Failed, JobRunStatus.Failed, 1, check.Summary, output, "")
+        // Findings are advisory unless the action sets a minimum grade (VIBE-278); then a grade below it,
+        // or a card with no code to grade, fails the action and so the lane step.
+        return check.FailsAction
+            ? new(JobRunActionStatus.Failed, JobRunStatus.Failed, 1, check.MinimumGradeMet == false ? check.GradeSummary ?? check.Summary : check.Summary, output, "")
             : new(JobRunActionStatus.Succeeded, JobRunStatus.Succeeded, 0, null, output, "");
     }
 

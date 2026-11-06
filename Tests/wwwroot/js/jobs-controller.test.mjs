@@ -54,6 +54,35 @@ test('the check editor defaults Code quality to card commits and retains a suppl
     assert.deepEqual(controller.editorActions[0].arguments, ['card']);
 });
 
+test('a Code quality minimum grade survives scope edits and only Code quality may carry one (VIBE-278)', async () => {
+    const { validCheckScope, checkFields, splitCheckArguments } = await import(pathToFileURL(path.resolve('VibeRails/wwwroot/js/modules/job-checks.js')).href);
+    const controller = new JobController(createApp());
+    controller.addEditorAction(2);
+    const row = { dataset: { jobActionId: controller.editorActions[0].id } };
+    const edit = (actionField, value) => controller.updateEditorActionField({
+        target: { dataset: { actionField }, value, closest: () => row }
+    });
+    edit('checkMinimum', 'C');
+    assert.deepEqual(controller.editorActions[0].arguments, ['card', 'minimum', 'C']);
+    edit('checkScope', 'commit');
+    edit('checkCommit', 'abc1234');
+    assert.deepEqual(controller.editorActions[0].arguments, ['commit', 'abc1234', 'minimum', 'C']);
+    edit('checkScope', 'range');
+    assert.deepEqual(controller.editorActions[0].arguments, ['range', '', '', 'minimum', 'C']);
+    edit('checkScope', 'card');
+    edit('checkMinimum', '');
+    assert.deepEqual(controller.editorActions[0].arguments, ['card']);
+
+    assert.deepEqual(splitCheckArguments(['commit', 'abc1234', 'minimum', 'B']), { scope: ['commit', 'abc1234'], minimum: 'B' });
+    assert.equal(validCheckScope(['card', 'minimum', 'A'], 2), true);
+    assert.equal(validCheckScope(['card', 'minimum', 'A'], 3), false);
+    assert.equal(validCheckScope(['card', 'minimum', 'D'], 2), false);
+    assert.equal(validCheckScope(['card', 'minimum'], 2), false);
+    assert.match(checkFields({ kind: 2, arguments: ['card', 'minimum', 'B'] }), /value="B" selected>Fail the step below grade B/);
+    assert.match(checkFields({ kind: 2, arguments: ['card'] }), /value="" selected>Post as feedback only/);
+    assert.doesNotMatch(checkFields({ kind: 3, arguments: ['unpushed'] }), /checkMinimum/);
+});
+
 function createApp() {
     const calls = [];
     return {

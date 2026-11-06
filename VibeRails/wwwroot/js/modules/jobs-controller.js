@@ -1,5 +1,5 @@
 import { automationWorkerName } from './environment-editor.js';
-import { isCheck, checkName, checkFields, validCheckScope } from './job-checks.js';
+import { isCheck, checkName, checkFields, validCheckScope, splitCheckArguments, joinCheckArguments } from './job-checks.js';
 import {
     confirmDialog,
     getLlmName,
@@ -1683,7 +1683,7 @@ export class JobController {
         }
 
         if (isCheck(action.kind)) return `<article class="job-action-card" data-job-action-id="${actionId}">
-            <header><span class="job-action-number">${index + 1}</span><strong>${checkName(action.kind)}</strong>${controls}</header>${checkFields(action)}</article>`;
+            <header><span class="job-action-number">${index + 1}</span><strong>${checkName(action.kind)}</strong>${controls}</header>${checkFields(action, actionId)}</article>`;
         const runtime = Number(action.scriptRuntime);
         const argumentRows = (action.arguments || []).map((argument, argumentIndex) => `
             <div class="job-script-argument-row">
@@ -1728,9 +1728,14 @@ export class JobController {
         if (!action) return;
 
         if (field === 'checkScope') {
-            action.arguments = event.target.value === 'range' ? ['range', '', '']
+            const scope = event.target.value === 'range' ? ['range', '', '']
                 : event.target.value === 'commit' ? ['commit', ''] : [event.target.value];
+            action.arguments = joinCheckArguments(scope, splitCheckArguments(action.arguments).minimum);
             this.renderEditorActions(); return;
+        }
+        if (field === 'checkMinimum') {
+            action.arguments = joinCheckArguments(splitCheckArguments(action.arguments).scope, event.target.value);
+            return;
         }
         if (field === 'checkBase' || field === 'checkHead' || field === 'checkCommit') {
             action.arguments[field === 'checkHead' ? 2 : 1] = event.target.value.trim(); return;
@@ -1940,7 +1945,7 @@ export class JobController {
             }
 
             if (isCheck(action.kind)) {
-                if (!validCheckScope(action.arguments)) {
+                if (!validCheckScope(action.arguments, action.kind)) {
                     if (validate) this.app.showError('Choose a check scope. One commit needs a 7–40 character SHA; a range needs full 40-character base/head SHAs.');
                     return null;
                 }

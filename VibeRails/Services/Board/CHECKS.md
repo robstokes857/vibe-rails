@@ -85,7 +85,8 @@ otherwise unavailable HEAD still fails visibly. Explicit commit ranges remain in
 the current branch and are validated normally.
 
 The action records its attempt before capturing. Findings finish the action successfully and
-remain advisory. An analysis failure marks that action/Automation failed but allows subsequent
+remain advisory unless a Code quality action sets a minimum grade (below). An analysis failure,
+or a missed minimum grade, marks that action/Automation failed but allows subsequent
 checks and the review Worker to run. Script/Worker failures remain fail-fast. The ordinary run
 cancel/deadline/reaper owns termination. The last Worker's idle-shutdown fallback preserves earlier
 failed checks and their error details; pending user cancellation takes precedence. An unfinished
@@ -100,15 +101,55 @@ Saved check outcomes distinguish **Passed** (applicable analysis completed witho
 unavailable), **Skipped/not applicable** (nothing applicable was analyzed), **Findings**,
 **Failed to run**, and **Cancelled**. Coverage counts and limitations remain part of the evidence;
 findings take precedence over coverage limitations. **Needs review** identifies a card check with
-no code attached; it remains advisory so the review Worker can attach the intended commits.
+no code attached; it remains advisory so the review Worker can attach the intended commits,
+unless the action sets a minimum grade.
 
 For check-only Automations, the lane and card Automation rail display the exact run's saved check
 outcome and summary through `BoardLaneAutomationStatus.DisplayStatus`, also used by MCP. Multiple
 check actions show findings before limitations, and a mix of passed and skipped checks means
 completed with limitations. Missing or incomplete evidence is unknown. Retries use their own
 evidence; historical attempts are not rewritten. Execution state and `StepStatus` still determine
-workflow eligibility: findings and limited/empty coverage remain advisory. Automations containing
+workflow eligibility: findings and limited/empty coverage remain advisory; a missed minimum grade
+fails the run, so the step shows Failed with the grade as its reason. Automations containing
 Workers retain the explicit worker verdict; mixed script/check Automations retain the run outcome.
+
+### Minimum grade (VIBE-278)
+
+A Code quality action chooses, when it is added to a lane or edited on the Automations page,
+whether findings only post feedback (the default) or **fail the step below grade A, B or C**.
+The choice ends the action's argument vector: `["card", "minimum", "C"]`. `JobCheckScope.Parse`
+strips it; only Code quality may carry it, and `JobService` rejects it on VCA. No schema changes.
+An older binary rejects the longer vector, so the check shows **Failed to run** there: it fails
+closed instead of silently passing.
+
+The grade is `CodeQualityRule.EvaluateSnapshot`, the code behind Git Guard's
+`Code quality minimum A|B|C` rule: the same health thresholds (A ≥90, B ≥80, C ≥70) over the
+overall grade of all added code in scope. Explicit exemptions apply; dashboard ignore preferences
+do not, as in the rule. A file the report hides through an ignore still counts toward the grade,
+and the limitations say how many files were hidden that way. Below the minimum, the check outcome is **Findings**,
+`MinimumGradeMet` is false, `GradeSummary` carries the rule's sentence, and `JobRunner` fails the
+action with it as the error. The run then fails, so the lane step fails even when a review Worker
+in the same Automation reports a pass; later actions in the Automation (normally that Worker) still
+run, as for any failed check. A card with no linked code fails a minimum (nothing could be graded);
+a Research spike and any scope with nothing to analyse still skip and pass, as the rule does for an
+empty scan. Analysis that fails to run is already a failure and is not graded.
+
+Git Guard enforces the grade only when the user turns on `Code quality minimum X` in VCA, at the
+level they choose (WARN/COMMIT/STOP). The lane setting does not change the hook; both share the
+grading code, so a step that fails at grade C also fails that rule.
+
+### Results as review reports
+
+Every Code quality check that runs for a card, in any lane and any position, also saves a
+canonical review report on that card through `IBoardStore.SaveCheckReviewAsync`, so agents see
+it with `get_board_reviews` and in `get_board_card`'s Code reviews. Its id is
+`review_check_<check id>`, reviewer **Code quality check**, provider VibeRails. Its result is
+Findings, No findings reported, or Incomplete (failed to run, cancelled or no code attached). Its
+process status is Failed when the action failed. The findings name the outcome, the minimum grade and the
+worst files, and point to `read_board_check`. It has no reviewer session or review run, so it
+can never satisfy a reviewer's own pass, and its freshness is the check's: verifying it reports
+unknown and points to the card's Checks. It is saved once, with a discussion receipt from VibeRails
+that is not sent to Jira or Azure DevOps. A failure to save it is logged and never fails the check.
 
 ## Evidence and access
 

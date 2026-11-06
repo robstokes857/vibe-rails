@@ -53,6 +53,56 @@ public sealed class JobRunnerWorkflowTests
     }
 
     [Fact]
+    public async Task CodeQualityBelowItsMinimumGradeFailsTheRunButFollowingActionsStillRun()
+    {
+        // VIBE-278: with a minimum grade, a low grade is no longer advisory. The run fails with the
+        // grade as its reason, and the actions after it (normally the review Worker) still run.
+        var workspace = Path.Combine(Path.GetTempPath(), "job-minimum-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workspace);
+        var ct = TestContext.Current.CancellationToken;
+        try
+        {
+            foreach (var args in new string[][] { ["init"], ["config", "user.email", "tests@local"], ["config", "user.name", "Checks"] })
+                Assert.True((await GitCli.RunAsync(workspace, args, ct)).Succeeded);
+            await File.WriteAllTextAsync(Path.Combine(workspace, "readme.md"), "base\n", ct);
+            Assert.True((await GitCli.RunAsync(workspace, ["add", "."], ct)).Succeeded);
+            Assert.True((await GitCli.RunAsync(workspace, ["-c", "core.hooksPath=", "commit", "-m", "base"], ct)).Succeeded);
+            await File.WriteAllTextAsync(Path.Combine(workspace, "Messy.cs"), "public class Messy { public int Run(int a, int b) { "
+                + string.Join("\n", Enumerable.Range(0, 8).Select(i => $"var dependency{i} = new Repository();"))
+                + string.Join("\n", Enumerable.Range(0, 90).Select(i => $"if (a == {i} && b > 0) {{ a += b; }}"))
+                + " return a; } }", ct);
+
+            var check = ScriptAction("check", 0, "") with { Kind = JobActionKind.CodeQuality, Arguments = ["working-tree", "minimum", "C"] };
+            var run = Run([check, ScriptAction("after", 1, "inspect.py")]) with { ProjectPath = workspace, TerminalSessionId = "outer-pty" };
+            var store = StoreFor(run);
+            store.Setup(s => s.StartRunActionAsync(run.Id, It.IsAny<string>(), CancellationToken.None)).ReturnsAsync(true);
+            var completed = new List<(string Id, JobRunActionStatus Status, string? Error)>();
+            store.Setup(s => s.CompleteRunActionAsync(run.Id, It.IsAny<string>(), It.IsAny<JobRunActionStatus>(), It.IsAny<int?>(),
+                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), CancellationToken.None))
+                .Callback<string, string, JobRunActionStatus, int?, string?, string?, string?, CancellationToken>(
+                    (_, id, status, _, error, _, _, _) => completed.Add((id, status, error))).Returns(Task.CompletedTask);
+            string? runError = null;
+            store.Setup(s => s.CompleteRunAsync(run.Id, JobRunStatus.Failed, 1, It.IsAny<string>(), CancellationToken.None))
+                .Callback<string, JobRunStatus, int?, string?, CancellationToken>((_, _, _, error, _) => runError = error).Returns(Task.CompletedTask);
+            var cli = new Mock<ICliWrapper>(MockBehavior.Strict);
+            cli.Setup(c => c.RunAsync(It.IsAny<CliRequest>(), It.IsAny<Func<CliOutputLine, ValueTask>>(), CancellationToken.None))
+                .ReturnsAsync(new CliResult(0, false, false, "inspected", "", TimeSpan.Zero, "python-test"));
+            using var provider = BuildServices(store, PreparedScripts(), cli, checks: true);
+
+            Assert.Equal(1, await JobRunner.RunAsync(new ParsedArgs { JobRunId = run.Id, WorkDir = workspace }, provider));
+            Assert.Equal(new[] { ("check", JobRunActionStatus.Failed), ("after", JobRunActionStatus.Succeeded) },
+                completed.Select(item => (item.Id, item.Status)));
+            Assert.Contains("is below minimum C", completed[0].Error);
+            Assert.Contains("is below minimum C", runError);
+        }
+        finally
+        {
+            foreach (var file in Directory.EnumerateFiles(workspace, "*", SearchOption.AllDirectories)) File.SetAttributes(file, FileAttributes.Normal);
+            Directory.Delete(workspace, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task CheckExecutionFailureStillRunsFollowingActionsAndKeepsFailedOutcome()
     {
         // No engine is registered: an unavailable deterministic tool must not hide the failure

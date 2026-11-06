@@ -7,6 +7,7 @@ using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services.Git;
 using VibeRails.Services.GitPreflight;
+using VibeRails.Services.VCA;
 using VibeRails.Services.VCA.Hooks;
 
 namespace VibeRails.Services.Board;
@@ -19,14 +20,15 @@ public sealed class BoardCheckService(
     public async Task<BoardCheckRecord> ExecuteAsync(string project, string workspace, string? cardKey,
         string runId, string actionId, JobActionKind kind, IReadOnlyList<string> arguments, CancellationToken ct)
     {
-        var scope = JobCheckScope.Parse(arguments);
+        var scope = JobCheckScope.Parse(kind, arguments);
+        var minimum = kind == JobActionKind.CodeQuality ? scope.MinimumGrade : null;
         var board = cardKey is null ? null : services.GetRequiredService<IBoardStore>();
         var card = board is null ? null : await board.FindCardAsync(project, cardKey!, ct)
             ?? throw new InvalidOperationException("The check's card is no longer available in this project.");
         var record = new BoardCheckRecord(Guid.NewGuid().ToString("N"), card?.Id ?? "", runId, actionId,
             kind == JobActionKind.CodeQuality ? "Code quality" : "VCA", "Running", scope.Kind,
             scope.Base, scope.Head, null, null, Version(kind), DateTime.UtcNow, null,
-            "Capturing the selected scope.", 0, 0, 0, 0, [], WorkspacePath: workspace);
+            "Capturing the selected scope.", 0, 0, 0, 0, [], WorkspacePath: workspace, MinimumGrade: minimum?.ToString());
         if (board is not null && !await board.SaveCheckAsync(project, record, ct))
             throw new InvalidOperationException("Could not save the check attempt.");
         var evidenceSaved = false;
@@ -80,6 +82,9 @@ public sealed class BoardCheckService(
             record = Complete(record, snapshot, result, kind);
             if (ignoresUnavailable)
                 record = record with { Limitations = [.. record.Limitations, "The Code quality ignore list could not be read; no files were ignored."] };
+            if (minimum is char grade && !record.FailsAction)
+                record = ApplyMinimumGrade(record, grade, CodeQualityRule.EvaluateSnapshot(grade, snapshot, ct),
+                    HiddenByIgnores(snapshot, ignoreRules ?? []));
         }
         catch (OperationCanceledException)
         {
@@ -96,6 +101,10 @@ public sealed class BoardCheckService(
                 Summary = ex.ResearchSpike ? "Research spike: no code attached to this card." : "no code attached to this card",
                 Limitations = ["No files were analyzed. Attach commits and run the check again, or explicitly skip the lane check for non-code work."],
                 EndedUtc = DateTime.UtcNow };
+            // A gate that graded nothing must not pass: the card's code was never seen.
+            if (minimum is char grade && !ex.ResearchSpike)
+                record = record with { MinimumGradeMet = false, Summary = $"{record.Summary}. Minimum grade {grade} not checked; this step fails.",
+                    GradeSummary = $"No code is attached to this card, so the minimum grade {grade} could not be checked. Link the card's commits and run the step again." };
         }
         catch (Exception ex)
         {
@@ -103,8 +112,67 @@ public sealed class BoardCheckService(
         }
         if (board is not null && !await board.SaveCheckAsync(project, evidenceSaved ? record with { Evidence = null } : record, CancellationToken.None))
             throw new InvalidOperationException("The check finished but its evidence could not be saved.");
+        // Whatever lane or position ran it, the card's agents read the result where they read reviews.
+        if (board is not null && card is not null && kind == JobActionKind.CodeQuality)
+        {
+            try
+            {
+                if (!await board.SaveCheckReviewAsync(project, CheckReport(record), CancellationToken.None))
+                    Log.Warning("[BoardChecks] Check {CheckId} finished, but its card was unavailable for the review report.", record.Id);
+            }
+            catch (Exception ex) { Log.Warning(ex, "[BoardChecks] Check {CheckId} finished, but its review report could not be saved.", record.Id); }
+        }
         return record;
     }
+
+    /// <summary>The prefix of review reports that come from a saved check rather than a reviewer.</summary>
+    public const string CheckReviewPrefix = "review_check_";
+
+    /// <summary>A finished Code quality check as a canonical review report: the outcome, the minimum grade
+    /// and the worst files, with the full evidence one <c>read_board_check</c> away.</summary>
+    internal static BoardReviewRecord CheckReport(BoardCheckRecord record)
+    {
+        var result = record.Status is "Failed to run" or "Cancelled" or "Needs review" ? "Incomplete"
+            : record.Status == "Findings" ? "Findings" : "No findings reported";
+        var findings = new StringBuilder()
+            .Append(record.Status).Append(": ").AppendLine(record.Summary)
+            .AppendLine(record.MinimumGrade is null
+                ? "Minimum grade: none set. Findings are feedback only and do not fail the step."
+                : $"Minimum grade {record.MinimumGrade}: {(record.MinimumGradeMet switch { true => "met", false => "not met, so this step failed", null => "not evaluated" })}. {record.GradeSummary}".TrimEnd());
+        var worst = WorstFiles(record.ResultJson);
+        if (worst.Length > 0) findings.AppendLine("Worst files (concern score/100, rating, top categories):").AppendLine(worst);
+        findings.Append($"Per-file metrics and captured inputs: read_board_check checkId={record.Id}.");
+        var scope = record.Scope switch
+        {
+            "card" => "the card's linked commits",
+            "commit" => $"commit {record.HeadCommit}",
+            "range" => $"{record.BaseCommit}..{record.HeadCommit}",
+            _ => record.Scope
+        };
+        var reported = record.EndedUtc ?? DateTime.UtcNow;
+        return new(CheckReviewPrefix + record.Id, record.CardId, "VibeRails", "Code quality check", record.StartedUtc,
+            ProcessStatus: record.FailsAction ? "Failed" : "Succeeded", Error: record.FailsAction ? record.GradeSummary ?? record.Summary : null,
+            Workspace: record.WorkspacePath, Scope: record.Scope,
+            ScopeDescription: $"Code quality check of {scope}{(record.MinimumGrade is null ? "" : $", minimum grade {record.MinimumGrade}")}; evidence read_board_check checkId={record.Id}",
+            BaseCommit: record.BaseCommit, HeadCommit: record.HeadCommit, CapturedUtc: record.StartedUtc, Result: result,
+            Findings: Bound(findings.ToString(), 20_000),
+            Validation: Bound($"Deterministic Code quality analysis (MintLint {record.ToolVersion}): {record.AnalyzedCount} files analyzed, {record.SkippedCount} skipped, {record.FindingCount} at NeedsWork or AtRisk. No code was run and no reviewer read the change.", 6_000),
+            Limitations: Bound(record.Limitations.Count == 0 ? "None recorded." : string.Join("\n", record.Limitations), 6_000),
+            ReportedUtc: reported, ScopeFiles: record.ScopeFiles?.Take(1000).ToList());
+    }
+
+    private static string WorstFiles(string? resultJson)
+    {
+        if (resultJson is null) return "";
+        try
+        {
+            var result = JsonSerializer.Deserialize(resultJson, AppJsonSerializerContext.Default.GitPreflightStepResult);
+            return result?.Details?.GetValueOrDefault("worstFiles")?.Trim() ?? "";
+        }
+        catch (JsonException) { return ""; }
+    }
+
+    private static string Bound(string text, int max) => text.Length <= max ? text : string.Concat(text.AsSpan(0, max - 1), "…");
 
     /// <summary>The captured inputs. An impact source identical to a scope file's text is that file:
     /// on a working-tree or committed check most changed files would otherwise be stored twice.</summary>
@@ -220,6 +288,34 @@ public sealed class BoardCheckService(
             EndedUtc = DateTime.UtcNow,
             ResultJson = JsonSerializer.Serialize(result, AppJsonSerializerContext.Default.GitPreflightStepResult) };
     }
+
+    /// <summary>
+    /// Records the minimum-grade decision. The grade is <see cref="CodeQualityRule"/>'s, the same code Git
+    /// Guard's <c>Code quality minimum</c> rule runs, so a failing step also means a failing commit gate at
+    /// that level. Below the minimum the outcome is Findings even when no single file reached NeedsWork.
+    /// </summary>
+    internal static BoardCheckRecord ApplyMinimumGrade(BoardCheckRecord record, char minimum,
+        RuleValidationResult gate, int hiddenByIgnores)
+    {
+        var message = gate.Message ?? (gate.IsValid ? "The minimum grade is met." : "The minimum grade is not met.");
+        var limitations = record.Limitations
+            .Select(line => line.StartsWith("Code quality is advisory.", StringComparison.Ordinal)
+                ? $"Below minimum grade {minimum} this step fails. The grade is the overall Code quality grade of all added code in scope, as in Git Guard's “Code quality minimum {minimum}” rule; explicit file exemptions apply. Only added code in supported languages is analyzed; reach is lexical, not compiler coverage."
+                : line).ToList();
+        if (hiddenByIgnores > 0)
+            limitations.Add($"{hiddenByIgnores} files hidden from the report by local ignore settings still count toward the minimum grade. Use exempt_code_quality_file to exempt a file.");
+        var summary = record.Summary.EndsWith(" Advisory analysis.", StringComparison.Ordinal)
+            ? record.Summary[..^" Advisory analysis.".Length] : record.Summary;
+        summary = gate.IsValid ? $"{summary} Minimum grade {minimum} met." : $"{summary} Minimum grade {minimum} not met: {message} This step fails.";
+        return record with { MinimumGradeMet = gate.IsValid, GradeSummary = message, Summary = summary, Limitations = limitations,
+            Status = gate.IsValid || record.Status is "Failed to run" or "Cancelled" ? record.Status : "Findings" };
+    }
+
+    /// <summary>Supported files the report leaves out only because of local ignore settings.</summary>
+    private static int HiddenByIgnores(GitStagedSnapshot snapshot, IReadOnlyList<CodeAnalyzerIgnoredFile> ignoreRules) =>
+        snapshot.Files.Count(file => file.ExistsInIndex && !file.IsBinary && MintLintAnalyzer.SupportsFile(file.RelativePath)
+            && CodeAnalyzerIgnoreRules.IsIgnored(file.RelativePath, ignoreRules)
+            && !CodeAnalyzerIgnoreRules.IsIgnored(file.RelativePath, snapshot.QualityExemptions ?? []));
 
     private static int QualityFindingCount(GitPreflightStepResult result)
     {

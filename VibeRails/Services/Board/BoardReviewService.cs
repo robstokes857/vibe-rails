@@ -139,6 +139,9 @@ public sealed class BoardReviewService(IBoardStore store, IBoardService board)
         if (card is null) return null;
         var row = await store.GetReviewAsync(project, card.Id, id, ct);
         if (row is null || !verify) return row;
+        // A check's report has no review capture to compare; its check keeps the fingerprinted inputs.
+        if (row.Id.StartsWith(BoardCheckService.CheckReviewPrefix, StringComparison.Ordinal))
+            return row with { Freshness = "Unknown — a saved Code quality check; compare its inputs from the card's Checks" };
         // Do not follow a persisted/caller-supplied path. Another checkout cannot establish freshness.
         if (!VibeRails.Utils.ProjectPathComparer.Matches(row.Workspace, comparisonWorkspace)
             || row.SnapshotHash is null || row.ReportedUtc is null)

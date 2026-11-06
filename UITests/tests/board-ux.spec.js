@@ -1421,10 +1421,18 @@ test('lane Agents adds VCA for working changes and Code quality for linked card 
         await panel.getByRole('button', { name: 'Add agent or automation', exact: true }).click();
         await panel.getByLabel('What would you like to add?').selectOption(choice);
         await expect(panel.locator('[data-agent-scope]')).toHaveCount(0);
+        // VIBE-278: only Code quality offers a failing grade; feedback only is the default.
+        const findings = panel.getByLabel('Findings', { exact: true });
+        await expect(findings).toHaveCount(choice === 'check:2' ? 1 : 0);
+        if (choice === 'check:2') {
+            await expect(findings).toHaveValue('');
+            await findings.selectOption('C');
+        }
         await panel.getByRole('button', { name: 'Add to lane', exact: true }).click();
         await expect(panel.getByRole('button', { name: 'Add agent or automation', exact: true })).toBeVisible();
     }
-    expect(created.map(job => job.actions)).toEqual([[{ kind: 3, arguments: ['working-tree'] }], [{ kind: 2, arguments: ['card'] }]]);
+    expect(created.map(job => job.actions)).toEqual([[{ kind: 3, arguments: ['working-tree'] }], [{ kind: 2, arguments: ['card', 'minimum', 'C'] }]]);
+    expect(created[1].name).toBe('Code quality · Review · card · minimum C');
     expect(settings.lane_2.jobIds).toEqual([12, 14, 41, 42]);
     await page.evaluate(() => { window.app.boardController.goToCardAutomation = (...args) => { window.__openedLaneAgent = args; }; });
     await panel.locator('[data-lane-running-id="run_1"]').click();

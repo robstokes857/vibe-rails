@@ -62,6 +62,30 @@ test('new quality checks use card commits while VCA keeps working changes and la
     }
 });
 
+test('a Code quality lane check can fail its step below a chosen grade (VIBE-278)', async () => {
+    const requests = [];
+    const context = { draft: { kind: 'check:2', minimum: 'B' }, settings: { jobIds: [], jobs: [] }, jobs: [], environments: [],
+        column: { name: 'Review' }, projectPath: '/repo', alive: () => true,
+        api: async (...args) => { requests.push(args); return { ...args[2], id: 43 }; } };
+    assert.equal(await prepareLaneAutomation(context), 43);
+    const body = requests[0][2];
+    assert.equal(body.name, 'Code quality · Review · card · minimum B');
+    assert.deepEqual(body.actions, [{ kind: 2, arguments: ['card', 'minimum', 'B'] }]);
+    assert.match(body.description, /Below grade B the step fails/);
+
+    // A feedback-only check of the same lane is a different Automation; it is never reused for a gate.
+    const feedback = check(8, { name: 'Code quality · Review · card · minimum B', kind: 2, scope: 'card' });
+    assert.equal(findCheckAutomation([feedback], { name: body.name, kind: 2, args: body.actions[0].arguments }).reuse, false);
+    const gate = check(9, { name: body.name, actions: [{ kind: 2, arguments: ['card', 'minimum', 'B'] }] });
+    assert.equal(findCheckAutomation([gate], { name: body.name, kind: 2, args: body.actions[0].arguments }).reuse, true);
+    // An unknown grade falls back to feedback only rather than inventing a threshold.
+    const fallback = { ...context, draft: { kind: 'check:2', minimum: 'D' } };
+    requests.length = 0;
+    await prepareLaneAutomation(fallback);
+    assert.deepEqual(requests[0][2].actions, [{ kind: 2, arguments: ['card'] }]);
+    assert.match(requests[0][2].description, /never fail the step/);
+});
+
 test('disabled matching check is re-enabled without reapproving actions', async () => {
     const job = check(7, { enabled: false });
     const updates = [];

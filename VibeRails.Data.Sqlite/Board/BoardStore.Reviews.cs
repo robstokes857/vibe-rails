@@ -74,6 +74,49 @@ public sealed partial class BoardStore
         return true;
     }
 
+    public async Task<bool> SaveCheckReviewAsync(string projectPath, BoardReviewRecord review, CancellationToken cancellationToken = default)
+    {
+        if (review.ReportedUtc is null || review.SessionId is not null || review.RunId is not null)
+            throw new ArgumentException("A check report is finished, and has no reviewer session or review run.", nameof(review));
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        await RequireWritableCardAsync(connection, transaction, review.CardId, cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = $"""
+            INSERT INTO BoardReviews (Id, CardId, CreatedUTC, ReportedUTC, RecordJson)
+            SELECT $id, c.Id, $created, $reported, $json FROM BoardCards c
+            WHERE c.Id = $card AND c.ProjectPath = $project{ProjectPathCollation} AND c.DeletedUTC IS NULL
+            ON CONFLICT(Id) DO NOTHING;
+            """;
+        command.Parameters.AddWithValue("$id", review.Id);
+        command.Parameters.AddWithValue("$card", review.CardId);
+        command.Parameters.AddWithValue("$project", NormalizeProjectPath(projectPath));
+        command.Parameters.AddWithValue("$created", ToDb(review.CreatedUtc));
+        command.Parameters.AddWithValue("$reported", ToDb(review.ReportedUtc.Value));
+        command.Parameters.AddWithValue("$json", JsonSerializer.Serialize(review, StorageJsonSerializerContext.Default.BoardReviewRecord));
+        if (await command.ExecuteNonQueryAsync(cancellationToken) != 1) return false;
+        // The same receipt a reviewer's report gets, from VibeRails itself. It stays off Jira and Azure DevOps.
+        var author = BoardAuthor.System(review.Reviewer);
+        await using var comment = connection.CreateCommand();
+        comment.Transaction = transaction;
+        comment.CommandText = """
+            INSERT INTO BoardComments (Id, CardId, AuthorKind, AuthorLabel, AuthorCli, SessionId, Body, CreatedUTC, Kind, Changes)
+            VALUES ($id, $card, $kind, $label, NULL, NULL, $body, $now, 'comment', $changes);
+            """;
+        comment.Parameters.AddWithValue("$id", "cm_" + Guid.NewGuid().ToString("N"));
+        comment.Parameters.AddWithValue("$card", review.CardId);
+        comment.Parameters.AddWithValue("$kind", author.Kind);
+        comment.Parameters.AddWithValue("$label", author.Label);
+        comment.Parameters.AddWithValue("$body", $"{review.Reviewer} saved: {review.Result}. See Code reviews, report {review.Id} (get_board_reviews reviewId={review.Id}). Scope: {review.ScopeDescription}");
+        comment.Parameters.AddWithValue("$now", ToDb(review.ReportedUtc.Value));
+        comment.Parameters.AddWithValue("$changes", BoardJiraCommentPolicy.Changes(author, syncToJira: false)!);
+        await comment.ExecuteNonQueryAsync(cancellationToken);
+        await TouchCardAsync(connection, transaction, review.CardId, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return true;
+    }
+
     public async Task<IReadOnlyList<BoardReviewRecord>> GetReviewsAsync(string projectPath, string cardId, int offset = 0, CancellationToken cancellationToken = default)
         => await ReadReviewsAsync(projectPath, cardId, null, offset, cancellationToken);
 

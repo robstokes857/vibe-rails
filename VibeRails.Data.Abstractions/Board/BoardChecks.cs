@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace VibeRails.Services.Board;
 
 /// <summary>One check attempt. Results are immutable after completion and survive reruns.</summary>
@@ -8,7 +10,14 @@ public sealed record BoardCheckRecord(
     string Summary, int FileCount, int AnalyzedCount, int SkippedCount, int FindingCount,
     IReadOnlyList<string> Limitations, string? ResultJson = null,
     string? WorkspacePath = null, IReadOnlyList<string>? ScopeFiles = null,
-    BoardCheckEvidence? Evidence = null);
+    BoardCheckEvidence? Evidence = null, string? MinimumGrade = null, bool? MinimumGradeMet = null,
+    string? GradeSummary = null)
+{
+    /// <summary>Whether the action fails: the check could not run, or a Code quality minimum grade was not
+    /// met (VIBE-278). Without a minimum, findings stay advisory and the action succeeds.</summary>
+    [JsonIgnore]
+    public bool FailsAction => Status is "Failed to run" or "Cancelled" || MinimumGradeMet == false;
+}
 
 /// <summary>The captured text used by a check, kept separately from its summary. Impact sources
 /// whose text equals a scope file's captured <see cref="BoardCheckFile.Content"/> are stored once,

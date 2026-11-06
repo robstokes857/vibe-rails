@@ -7,7 +7,8 @@ namespace VibeRails.Services.Board;
 public sealed partial class BoardStore
 {
     // Workflow eligibility still follows execution success. Display the evidence outcome for
-    // check-only runs without turning advisory findings into a gate or approving a Worker.
+    // check-only runs without turning advisory findings into a gate or approving a Worker. A missed
+    // minimum grade fails the run itself (VIBE-278), so that step keeps Failed and the grade as reason.
     private static async Task ApplyLaneCheckOutcomesAsync(SqliteConnection board, SqliteConnection state,
         string project, Dictionary<string, List<BoardLaneAutomationStatus>> cards, CancellationToken ct)
     {

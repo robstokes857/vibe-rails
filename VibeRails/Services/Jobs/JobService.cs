@@ -445,7 +445,7 @@ public sealed class JobService(
 
             if (JobCheckScope.IsCheck(action.Kind))
             {
-                try { _ = JobCheckScope.Parse(action.Arguments); }
+                try { _ = JobCheckScope.Parse(action.Kind, action.Arguments); }
                 catch (ArgumentException ex) { throw JobServiceException.BadRequest(ex.Message); }
                 normalizedActions.Add(new JobActionRequest(id, action.Kind, Arguments: action.Arguments!.ToList()));
                 continue;
@@ -549,7 +549,7 @@ public sealed class JobService(
 
             if (JobCheckScope.IsCheck(action.Kind))
             {
-                _ = JobCheckScope.Parse(action.Arguments);
+                _ = JobCheckScope.Parse(action.Kind, action.Arguments);
                 continue;
             }
 

@@ -137,6 +137,9 @@ Rules-page and legacy validation report snapshot I/O, access, invalid-operation 
 failures as `UNSUPPORTED:` quality results at the declared level, then continue unrelated rules.
 Cancellation still propagates to the caller.
 `CodeQualityRule` owns grading and scope, shared by the active validators and legacy adapter.
+A lane Code quality check with a minimum grade calls `CodeQualityRule.EvaluateSnapshot`, so a
+failing step and this rule agree (VIBE-278, see [minimum grade](../Board/CHECKS.md#minimum-grade-vibe-278)).
+Change the thresholds here, once, for both.
 Regression fixtures and real-hook coverage live under `Tests/VcaRegression/Fixtures/code-quality`
 and `CodeQualityTests.cs`; score boundaries and aggregate behavior are in `CodeQualityRuleTests.cs`.
 

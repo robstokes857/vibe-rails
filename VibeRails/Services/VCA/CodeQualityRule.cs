@@ -62,6 +62,16 @@ public static class CodeQualityRule
         return EvaluateScore(minimumGrade, scan.Overall.Score);
     }
 
+    /// <summary>
+    /// Grades every captured file except explicit exemptions. A lane check's minimum grade uses this,
+    /// so it and Git Guard's rule judge the same added code by the same thresholds (VIBE-278).
+    /// Report ignore preferences do not apply here, as they do not apply to the rule.
+    /// </summary>
+    public static RuleValidationResult EvaluateSnapshot(char minimumGrade, GitStagedSnapshot snapshot,
+        CancellationToken cancellationToken = default) =>
+        Evaluate(minimumGrade, snapshot.Files.Where(file =>
+            !CodeAnalyzerIgnoreRules.IsIgnored(file.RelativePath, snapshot.QualityExemptions ?? [])), cancellationToken);
+
     internal static RuleValidationResult EvaluateScore(char minimumGrade, double concern)
     {
         var requiredHealth = minimumGrade switch

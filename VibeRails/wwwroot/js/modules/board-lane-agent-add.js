@@ -1,6 +1,7 @@
 import { escapeHtml } from './utils.js';
 import { agentPurposeOptions } from './agent-purpose.js';
 import { selectedLaneJobIds } from './board-lane-agent-list.js';
+import { checkMinimumOptions, joinCheckArguments, CHECK_MINIMUM_GRADES, CHECK_MINIMUM_HELP } from './job-checks.js';
 
 /** Preserve argv boundaries; the server validates containment, runtime and approval. */
 export function laneScriptAction(path, argumentsText = '') {
@@ -11,12 +12,19 @@ export function laneScriptAction(path, argumentsText = '') {
     return { kind: 1, scriptPath, scriptRuntime, arguments: argumentsText === '' ? [] : argumentsText.split(/\r?\n/) };
 }
 
-export function findCheckAutomation(jobs, { name, kind, scope }) {
+/** A same-name check is reused only with the same action, including its minimum grade (VIBE-278). */
+export function findCheckAutomation(jobs, { name, kind, scope, args }) {
     const job = (jobs || []).find(item => String(item.name ?? '').trim().toLowerCase() === name.trim().toLowerCase());
     if (!job) return null;
     const actions = Array.isArray(job.actions) ? job.actions : [];
-    return { job, reuse: actions.length === 1 && Number(actions[0].kind) === kind && actions[0].arguments?.[0] === scope };
+    const wanted = args ?? [scope];
+    const saved = actions[0]?.arguments ?? [];
+    return { job, reuse: actions.length === 1 && Number(actions[0].kind) === kind
+        && saved.length === wanted.length && wanted.every((value, index) => saved[index] === value) };
 }
+
+/** The draft's failing grade, or '' for feedback only. */
+const laneCheckMinimum = draft => CHECK_MINIMUM_GRADES.includes(draft.minimum) ? draft.minimum : '';
 
 export const laneWorker = (job, environments) => {
     const id = job?.actions?.find(a => Number(a.kind) === 0)?.environmentId ?? job?.environmentId;
@@ -63,7 +71,11 @@ export function laneAgentAddMarkup(draft, settings, jobs, environments, scripts)
             ${worker ? `<label for="board-lane-purpose">What kind of work? <span class="text-muted">(optional)</span></label>
                 <select id="board-lane-purpose" class="form-select" data-lane-draft="purpose">${agentPurposeOptions(draft.purpose ?? worker.purpose)}</select>
                 <small>Saved on the agent “${escapeHtml(worker.name)}” wherever it is used. Future agent comments can be filtered by this purpose.</small>` : ''}` : ''}
-        ${draft.kind.startsWith('check:') ? '<p class="board-lane-check-summary">Checks working changes, including staged and unstaged edits. Committed code is covered by Git Guard.</p>' : ''}
+        ${draft.kind === 'check:3' ? '<p class="board-lane-check-summary">Checks working changes, including staged and unstaged edits. Committed code is covered by Git Guard.</p>' : ''}
+        ${draft.kind === 'check:2' ? `<p class="board-lane-check-summary">Checks the code in the card’s linked commits.</p>
+            <label for="board-lane-check-minimum">Findings</label>
+            <select id="board-lane-check-minimum" class="form-select" data-lane-draft="minimum" aria-describedby="board-lane-check-minimum-help">${checkMinimumOptions(laneCheckMinimum(draft))}</select>
+            <small id="board-lane-check-minimum-help">${CHECK_MINIMUM_HELP} With no linked code, a minimum grade fails the step.</small>` : ''}
         ${draft.kind === 'script' ? `<label for="board-lane-script-search">Find script</label>
             <input id="board-lane-script-search" type="search" class="form-control" data-lane-draft="scriptQuery" maxlength="256" value="${escapeHtml(draft.scriptQuery || '')}" placeholder="Search by file name or path">
             <button type="button" class="btn btn-sm btn-link" data-agent-action="reload-scripts">Search scripts</button>
@@ -116,11 +128,13 @@ export async function prepareLaneAutomation(context) {
     } else if (['check:2', 'check:3'].includes(draft.kind)) {
         const kind = Number(draft.kind.slice(6));
         const scope = kind === 2 ? 'card' : 'working-tree';
-        name = `${kind === 2 ? 'Code quality' : 'VCA'} · ${column.name} · ${scope}`;
-        action = { kind, arguments: [scope] };
-        description = kind === 2 ? `Code quality checks the card's linked commits when it enters ${column.name}.`
+        const minimum = kind === 2 ? laneCheckMinimum(draft) : '';
+        name = `${kind === 2 ? 'Code quality' : 'VCA'} · ${column.name} · ${scope}${minimum ? ` · minimum ${minimum}` : ''}`;
+        action = { kind, arguments: joinCheckArguments([scope], minimum) };
+        description = kind === 2 ? `Code quality checks the card's linked commits when it enters ${column.name}. ${minimum
+            ? `Below grade ${minimum} the step fails.` : 'Findings are posted as feedback and never fail the step.'}`
             : `VCA checks working changes when a card enters ${column.name}.`;
-        existing = findCheckAutomation(jobs, { name, kind, scope });
+        existing = findCheckAutomation(jobs, { name, kind, args: action.arguments });
         if (existing && !existing.reuse) throw new Error(`An Automation named “${existing.job.name}” already exists with a different workflow. Rename or edit it on the Automations page.`);
     } else throw new Error('Choose what to add.');
     let saved = existing?.job;
