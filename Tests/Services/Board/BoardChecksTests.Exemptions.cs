@@ -1,6 +1,7 @@
 using VibeRails.DTOs;
 using VibeRails.Services.Board;
 using VibeRails.Services.GitPreflight;
+using VibeRails.Services.Mcp.Tools;
 using VibeRails.Services.VCA.Hooks;
 using Xunit;
 
@@ -8,6 +9,32 @@ namespace Tests.Services.Board;
 
 public sealed partial class BoardChecksTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DirectMcpValidationKeepsExemptionsWhenPolicyIsStaged(bool policyIsStaged)
+    {
+        await Write("vc.rules.md", "## Vibe Rails Rules\n- Code quality minimum C (STOP)\n");
+        if (!policyIsStaged)
+        {
+            await Git("add", "vc.rules.md");
+            await Git("-c", "core.hooksPath=", "commit", "-m", "rules");
+        }
+        var messy = "public class Messy { public int Run(int a, int b) { "
+            + string.Join("\n", Enumerable.Range(0, 8).Select(i => $"var dependency{i} = new Repository();"))
+            + string.Join("\n", Enumerable.Range(0, 90).Select(i => $"if (a == {i} && b > 0) {{ a += b; }}"))
+            + " return a; } }";
+        await Write("example.cs", messy);
+        await Git("add", ".");
+        var snapshots = new GitStagedSnapshotProvider();
+        Assert.True((await RulesTool.ValidateVcaReportAsync(snapshots, repo, cancellationToken: Ct)).HasStopViolation);
+        await store.SaveCodeQualityExemptionAsync(repo, card.Id, "example.cs", true, "Generated fixture", BoardAuthor.User(), Ct);
+        var report = await RulesTool.ValidateVcaReportAsync(snapshots, repo, cancellationToken: Ct,
+            exemptions: new CodeQualityExemptionService(services));
+        Assert.False(report.HasStopViolation, report.Output);
+        Assert.Contains("no added code", report.Output);
+    }
+
     [Fact]
     public async Task CardAndRepositoryExemptionsApplyToSavedChecksAndRemainInEvidenceAfterRevocation()
     {

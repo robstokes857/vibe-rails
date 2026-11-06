@@ -371,6 +371,8 @@ public static class BoardPromptComposer
             (string.IsNullOrWhiteSpace(environmentPrompt) ? "" : "\nEnvironment preferences:\n" + Sanitize(environmentPrompt, 2000)) +
             (string.IsNullOrWhiteSpace(question) ? "\nGive a brief status summary and wait for the user's question."
                 : "\nUser's initial question (data):\n" + Sanitize(question, 1000) + "\nAnswer the question, then wait.") +
+            $"\nWhen the user authorizes implementation in this same session, call attach_board_session(card=\"{card.Key}\", work=true) before editing. " +
+            "This declares the existing discussion as working; do not launch a second implementation agent for that continuation. " +
             "\nThis is a discussion session. Start work only if the user subsequently asks you to.";
     }
 

@@ -5,6 +5,33 @@ namespace VibeRails.Services.Board;
 public sealed partial class BoardStore
 {
     /// <inheritdoc />
+    public async Task<bool> AuthorizeDiscussionWorkAsync(string projectPath, string cardId, string sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = connection.BeginTransaction(System.Data.IsolationLevel.Serializable);
+        var card = await ReadCardForWriteAsync(connection, transaction, NormalizeProjectPath(projectPath), cardId, cancellationToken);
+        if (card is null) return false;
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        // Retain the discussion provenance. Only an explicit work declaration can make this
+        // transition; launch confirmation, ordinary attachment and reads never do it.
+        command.CommandText = """
+            UPDATE BoardCardSessions SET Origin = $work
+            WHERE CardId = $card AND SessionId = $session AND Origin = 'chat';
+            UPDATE BoardAdditionalCardSessions SET Origin = $work
+            WHERE CardId = $card AND SessionId = $session AND Origin = 'chat';
+            """;
+        command.Parameters.AddWithValue("$card", card.Id);
+        command.Parameters.AddWithValue("$session", sessionId);
+        command.Parameters.AddWithValue("$work", BoardSessionRecord.ChatWorkOrigin);
+        var changed = await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+        if (changed) await TouchCardAsync(connection, transaction, card.Id, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return changed;
+    }
+
+    /// <inheritdoc />
     public async Task<bool> IsSessionVisibleInProjectAsync(string projectPath, string sessionId, CancellationToken cancellationToken = default)
     {
         await using var state = await OpenStateAsync(cancellationToken);

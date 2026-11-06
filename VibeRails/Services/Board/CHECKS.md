@@ -131,7 +131,7 @@ tens of megabytes. Failure/cancellation after capture retains the inputs; comple
 be overwritten. Older reports have no captured text and remain readable.
 The existing Board data backup includes both report and source columns, chunking large values.
 
-Current exemptions use `BoardCodeAnalyzerIgnoreStore` over `IBoardStore`. The additive
+Legacy dashboard ignore preferences use `BoardCodeAnalyzerIgnoreStore` over `IBoardStore`. The additive
 `board-code-quality-ignores/1` tables retain current values and every saved/removal event, including
 path, match kind, reason, original creation time and author. New author values identify the local
 OS account, not a verified cloud identity. Legacy `state.db` rules have unknown authors. Reads and

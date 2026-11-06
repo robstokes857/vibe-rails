@@ -70,8 +70,8 @@ public partial interface IBoardService
 
     Task<List<BoardSessionDto>?> GetSessionsAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
     Task<BoardSessionDto?> LinkSessionAsync(string projectPath, string idOrKey, string sessionId, string? tabId, string selection, string cli, string displayName, string origin, CancellationToken cancellationToken = default);
-    /// <summary>Idempotently attach the caller's session, preserving existing links and their default card.</summary>
-    Task<BoardSessionDto?> AttachSessionAsync(string projectPath, string idOrKey, string sessionId, string? tabId, CancellationToken cancellationToken = default);
+    /// <summary>Attach the caller's session; work explicitly declares a discussion's authorized implementation on this card.</summary>
+    Task<BoardSessionDto?> AttachSessionAsync(string projectPath, string idOrKey, string sessionId, string? tabId, CancellationToken cancellationToken = default, bool work = false);
     Task<BoardSessionDto?> RenameSessionAsync(string projectPath, string idOrKey, string sessionId, string displayName, CancellationToken cancellationToken = default);
     Task<bool> UnlinkSessionAsync(string projectPath, string idOrKey, string sessionId, CancellationToken cancellationToken = default);
 

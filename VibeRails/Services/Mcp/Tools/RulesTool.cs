@@ -155,7 +155,7 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider, CodeQualityE
             {
                 var policySnapshot = await snapshotProvider.CaptureAsync(gitRoot, cancellationToken);
                 return await ValidateVcaReportAsync(snapshotProvider, gitRoot, commitMessage, validateCommitMessage,
-                    cancellationToken, policySnapshot, workingTreeScope, signatureVerifier);
+                    cancellationToken, policySnapshot, workingTreeScope, signatureVerifier, exemptions);
             }
 
             // Find vc.rules.md files

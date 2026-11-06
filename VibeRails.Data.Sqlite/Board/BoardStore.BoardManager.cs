@@ -391,7 +391,7 @@ public sealed partial class BoardStore
             {CardPrefixJoinSql}
             WHERE c.ProjectPath = $project{ProjectPathCollation} AND lane.BoardId = $board AND c.DeletedUTC IS NULL
               AND {BoardManagedCardSql}
-              AND s.Origin IN ('{BoardSessionRecord.WorkerOrigin}', '{BoardSessionRecord.PlanningWorkerOrigin}');
+              AND s.Origin IN ('{BoardSessionRecord.WorkerOrigin}', '{BoardSessionRecord.PlanningWorkerOrigin}', '{BoardSessionRecord.ChatWorkOrigin}');
             """;
         command.Parameters.AddWithValue("$project", project);
         command.Parameters.AddWithValue("$board", boardId.Trim());

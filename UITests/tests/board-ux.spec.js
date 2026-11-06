@@ -3670,8 +3670,9 @@ test('Start work on an unassigned card face opens assignment without launching',
     expect(requests.filter(request => request.method === 'PUT' || request.path.endsWith('/launch'))).toHaveLength(0);
 });
 
-test('a running agent exposes Go to agent while keeping Save and the session available', async ({ page }) => {
-    const requests = await openBoard(page, { active: true });
+for (const origin of ['launch', 'chat_work']) {
+test(`a running ${origin} agent exposes Go to agent while keeping Save and the session available`, async ({ page }) => {
+    const requests = await openBoard(page, { active: true, onCard: card => { card.sessions[0].origin = origin; } });
     await page.evaluate(() => {
         window.__agentTabs = [];
         window.app.terminalController.adoptLaunchedTab = async id => { window.__agentTabs.push(id); return true; };
@@ -3686,6 +3687,7 @@ test('a running agent exposes Go to agent while keeping Save and the session ava
     expect(await page.evaluate(() => window.__agentTabs)).toEqual(['agent_tab']);
     expect(requests.filter(request => request.method === 'PUT' || request.path.endsWith('/launch'))).toHaveLength(0);
 });
+}
 
 for (const width of [1440, 390]) {
     test(`Agent workflow keeps manager and worker choices separate at ${width}px`, async ({ page }, testInfo) => {

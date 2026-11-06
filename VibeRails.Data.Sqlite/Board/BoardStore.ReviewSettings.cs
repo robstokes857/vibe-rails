@@ -21,10 +21,18 @@ public sealed partial class BoardStore
                 SELECT s.SessionId FROM {AllSessionsSql} s JOIN BoardCards c ON c.Id = s.CardId
                 WHERE c.ProjectPath = $project{ProjectPathCollation} AND s.SessionId IN ({parameters})
                   AND s.Origin IN ('chat', 'planning', 'code_review', 'agent_manager', 'agent_worker_planning')
+                  AND (s.Origin <> 'chat' OR NOT EXISTS (
+                    SELECT 1 FROM {AllSessionsSql} w JOIN BoardCards wc ON wc.Id = w.CardId
+                    WHERE w.SessionId = s.SessionId AND w.Origin = 'chat_work'
+                      AND wc.ProjectPath = $project{ProjectPathCollation} AND wc.DeletedUTC IS NULL))
                 UNION
                 SELECT s.SessionId FROM BoardContextSamples s JOIN BoardCards c ON c.Id = s.CardId
                 WHERE c.ProjectPath = $project{ProjectPathCollation} AND s.SessionId IN ({parameters})
-                  AND s.Intent IN ('chat', 'planning', 'code_review', 'manager');
+                  AND s.Intent IN ('chat', 'planning', 'code_review', 'manager')
+                  AND (s.Intent <> 'chat' OR NOT EXISTS (
+                    SELECT 1 FROM {AllSessionsSql} w JOIN BoardCards wc ON wc.Id = w.CardId
+                    WHERE w.SessionId = s.SessionId AND w.Origin = 'chat_work'
+                      AND wc.ProjectPath = $project{ProjectPathCollation} AND wc.DeletedUTC IS NULL));
                 """;
             for (var i = 0; i < batch.Length; i++) command.Parameters.AddWithValue($"$s{i}", batch[i]);
             command.Parameters.AddWithValue("$project", NormalizeProjectPath(projectPath));

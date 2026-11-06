@@ -505,6 +505,10 @@ public class McpServerHttpTests : IAsyncLifetime
     public async Task AttachBoardSession_RejectsUnknownDesktopCard()
     {
         await using var client = await ConnectAsync(TestContext.Current.CancellationToken);
+        var schema = Assert.Single(await client.GetAvailableToolsAsync(TestContext.Current.CancellationToken),
+            tool => tool.Name == "attach_board_session").JsonSchema;
+        Assert.Equal("boolean", schema.GetProperty("properties").GetProperty("work").GetProperty("type").GetString());
+        Assert.DoesNotContain(schema.GetProperty("required").EnumerateArray(), field => field.GetString() == "work");
         var result = await client.CallToolAsync("attach_board_session", new Dictionary<string, object?> { ["card"] = "VB-2" }, TestContext.Current.CancellationToken);
         Assert.Contains("FAIL: card not found", result.Text);
     }

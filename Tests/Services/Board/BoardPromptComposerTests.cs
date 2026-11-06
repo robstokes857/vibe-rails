@@ -315,7 +315,9 @@ public sealed class BoardPromptComposerTests
         Assert.Contains("brief status summary and wait", prompt);
         Assert.DoesNotContain("resume from there instead of starting over", prompt);
         Assert.DoesNotContain("move_board_card when", prompt);
-        Assert.EndsWith("Start work only if the user subsequently asks you to.", prompt);
+        Assert.Contains("Start work only if the user subsequently asks you to.", prompt);
+        Assert.Contains("attach_board_session(card=\"VB-12\", work=true) before editing", prompt);
+        Assert.Contains("do not launch a second implementation agent", prompt);
     }
 
     [Fact]

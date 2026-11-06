@@ -197,7 +197,11 @@ work and curated entry points without editing the task; it also posts the handof
 Keep recall persistence behind `IBoardStore`. `read_board_session` may read only linked sessions;
 its previews and full-document reads are paged. `search_history` keeps explicit keys project-scoped
 and labels broader-history fallback. Discussion sessions may coexist with work and never count as
-working agents. Preserve short bootstraps, input limits, lane state and the prohibition on injecting
+working agents unless the user explicitly authorizes implementation and the agent declares it with
+`attach_board_session(card=..., work=true)` (VIBE-291). This changes only that card's `chat` link to
+`chat_work`, retaining its discussion provenance and original launch/context history. Ordinary
+attachments and comments do not promote a discussion. The continuing session then counts as work
+only while its exact terminal session is live; no second worker is launched. Preserve short bootstraps, input limits, lane state and the prohibition on injecting
 generated input into a live TUI. See [the recall contract](ARCHITECTURE.md#card-recall-vb-13).
 
 ## Local MCP board discovery (VIBE-28)
@@ -485,7 +489,8 @@ serialization or tool discovery into the Native AOT path.
   only auto-link an entirely unlinked session. `attach_board_session(card)` explicitly adds another
   attachment. Keep the original link as the omitted-card default, falling back to the oldest
   remaining attachment if removed. Rename/unlink acts on one card/session pair. Unknown session
-  status is not ended (F6); live indicators still depend on the root-local probe.
+  status is not ended (F6); live indicators still depend on the root-local probe. In particular,
+  stdio MCP has no live-tab probe and reports status unknown unless an end time is confirmed.
   Manual links require an existing local session whose normalized working directory matches
   the Board project (`IBoardStore.IsSessionVisibleInProjectAsync`). Missing or foreign sessions
   are rejected before any link or replay-delivery write. Launch/MCP attachments keep their

@@ -12,6 +12,12 @@ before changing behavior. Existing nested `vc.rules.md` checks still apply.
 ## Scope
 This folder owns PTY lifecycle, session tracking hooks, local WebSocket viewer handling, and remote relay integration.
 
+Board discussion continuation (VIBE-291) does not alter PTY ownership or launch a second CLI.
+After explicit implementation authorization, `attach_board_session(work=true)` records `chat_work`
+on that card's existing session link. Board running indicators still require the exact session ID
+from the root's live tab probe; an attachment or a stale tab ID is not evidence of liveness.
+Stdio MCP has no such probe, so an unconfirmed end is reported as unknown, not ended.
+
 Primary files (reorg'd into subdirectories):
 - `Services/Terminal/Pty/Terminal.cs`, `KeyTranslator.cs`, `ShellCommandBuilder.cs`
 - `Services/Terminal/Core/TerminalRunner.cs`, `TerminalSessionService.cs`, `TerminalStateService.cs`, `TerminalTabHostService.cs`, `ChildParentWatchdogService.cs`, `NativeConsoleGeometry.cs`

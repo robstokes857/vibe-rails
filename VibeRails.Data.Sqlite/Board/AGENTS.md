@@ -1,5 +1,12 @@
 # Board persistence
 
+VIBE-291 declares authorized discussion work by changing only the requested session/card link
+from `chat` to `chat_work` through `AuthorizeDiscussionWorkAsync`. No schema migration or history
+backfill is needed. The link keeps its name, creation time, tab ID, selection and default-card order;
+context samples and previous comments remain unchanged. Only explicit `attach_board_session(work=true)`
+calls make this transition. Coding-source checks may override historical chat-only provenance for
+this session, but never planning, manager or review provenance. Board-managed worker counts include it.
+
 `board-code-quality-exemptions/1` (VIBE-275, additive) stores explicit per-card/repository file
 exemptions separately from legacy dashboard ignores. Scoped reads and transactional writes stay
 behind `IBoardStore`; replacement/revocation retains original JSON and attributed revocation.

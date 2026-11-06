@@ -433,7 +433,7 @@ public sealed class BoardLaunchService(
         var live = tabs.Where(tab => tab.HasActiveSession && !string.IsNullOrWhiteSpace(tab.SessionId))
             .Select(tab => tab.SessionId!).ToHashSet(StringComparer.Ordinal);
         var all = (await store.GetManagedWorkerSessionsAsync(projectPath, boardId, cancellationToken))
-            .Where(session => session.Origin == BoardSessionRecord.WorkerOrigin)
+            .Where(session => session.Origin is BoardSessionRecord.WorkerOrigin or BoardSessionRecord.ChatWorkOrigin)
             .GroupBy(session => session.SessionId, StringComparer.Ordinal).Select(group => group.First()).ToList();
         if (all.Count == 0) return new([], NoSessions);
         var elsewhere = await RunningElsewhereAsync(all.Where(session => !live.Contains(session.SessionId))

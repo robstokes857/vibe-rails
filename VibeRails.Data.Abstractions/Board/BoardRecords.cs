@@ -184,6 +184,8 @@ public sealed record BoardSessionRecord(
     public const string ManagerOrigin = "agent_manager";
     public const string WorkerOrigin = "agent_worker";
     public const string PlanningWorkerOrigin = "agent_worker_planning";
+    /// <summary>A discussion explicitly continued as user-authorized implementation work.</summary>
+    public const string ChatWorkOrigin = "chat_work";
 }
 
 /// <summary>A session's default card link and that card's project; other attachments may also exist.</summary>

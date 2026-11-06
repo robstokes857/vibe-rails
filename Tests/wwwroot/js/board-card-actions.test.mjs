@@ -417,6 +417,23 @@ test('A live Automation is not the working agent: Start work stays and Go to age
     assert.equal(focused, 'agent-tab');
 });
 
+test('An authorized discussion focuses its existing terminal without launching a worker', async () => {
+    const h = harness();
+    const label = {};
+    h.fields['[data-board-start-work]'].querySelector = selector => selector === '[data-board-start-work-label]' ? label : null;
+    h.card.sessions = [{ id: 'discussion', tabId: 'discussion-tab', origin: 'chat_work', active: true }];
+    let focused;
+    h.app.terminalController = { async adoptLaunchedTab(tab) { focused = tab; return true; } };
+    h.controller.updateStartWorkButton(h.editor, h.card);
+    assert.equal(label.textContent, 'Go to agent');
+    await h.controller.startWork(h.editor, h.card);
+    assert.equal(focused, 'discussion-tab');
+    assert.deepEqual(h.calls, []);
+    h.card.sessions[0].active = false;
+    h.controller.updateStartWorkButton(h.editor, h.card);
+    assert.equal(label.textContent, 'Start work');
+});
+
 test('Start work opens a session that started in another window while saving', async () => {
     const h = harness();
     let navigation;

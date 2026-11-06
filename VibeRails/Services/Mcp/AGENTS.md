@@ -1,5 +1,11 @@
 # MCP Server (in-process)
 
+`attach_board_session(card=..., work=true)` explicitly declares that the user authorized
+implementation in an ongoing discussion (VIBE-291). Omitting `work` only links the session and
+preserves discussion-only behavior. The declaration preserves the original default card and
+other links, launches nothing, and never manufactures liveness. `get_board_card` reports an
+unconfirmed session end as unknown: stdio MCP deliberately has no root-local live-tab probe.
+
 ## Board agent assignment and launch
 
 `list_board_agent_options` discovers the current root project's enabled Board picker and

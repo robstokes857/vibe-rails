@@ -13,6 +13,7 @@ test('coding source excludes managers, planning workers and reviewers while reta
         { id: 'manual-coding', origin: 'launch' },
         { id: 'manual-review', origin: 'code_review' },
         { id: 'discussion', origin: 'chat' },
+        { id: 'authorized-discussion', origin: 'chat_work' },
         { id: 'attached-review', origin: 'mcp', isReview: true },
         { id: 'attached-manager', origin: 'mcp', isReview: false, isNonCoding: true },
         { id: 'attached-planner', origin: 'mcp', isReview: false, isNonCoding: true },
@@ -20,7 +21,7 @@ test('coding source excludes managers, planning workers and reviewers while reta
     ];
     const html = cardReviewsSection({ id: 'card', sessions });
     assert.deepEqual([...html.matchAll(/<option value="session:([^"]+)"/g)].map(match => match[1]),
-        ['coding-worker', 'manual-coding', 'attached-coder']);
+        ['coding-worker', 'manual-coding', 'authorized-discussion', 'attached-coder']);
 });
 
 test('planning workers retain their worker role in the session list', t => {

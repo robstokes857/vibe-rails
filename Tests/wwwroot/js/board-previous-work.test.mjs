@@ -13,9 +13,12 @@ test('previous work escapes task data and shows file reasons, roles and provenan
     assert.equal(previousWorkHtml({}), '');
 });
 
-test('discussion sessions never become the working agent', () => {
+test('only explicitly authorized discussions become working agents while live', () => {
     const isWorking = BoardController.prototype.isWorkingSession;
     assert.equal(isWorking({ active: true, origin: 'chat' }), false);
     assert.equal(isWorking({ active: true, origin: 'code_review' }), false);
     assert.equal(isWorking({ active: true, origin: 'launch' }), true);
+    assert.equal(isWorking({ active: true, origin: 'chat_work' }), true);
+    assert.equal(isWorking({ active: false, origin: 'chat_work' }), false);
+    assert.equal(isWorking({ active: true, origin: 'chat_work', isAutomation: true }), false);
 });

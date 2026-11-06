@@ -253,14 +253,16 @@ public sealed class BoardManagerLaunchTests : IDisposable
         Assert.Empty(_requests);
     }
 
-    [Fact]
-    public async Task TheWorkerLimit_HoldsAcrossTheBoardsManagedCards_ButNotReviewsPlannersOrOwnManagers()
+    [Theory]
+    [InlineData(BoardSessionRecord.WorkerOrigin)]
+    [InlineData(BoardSessionRecord.ChatWorkOrigin)]
+    public async Task TheWorkerLimit_HoldsAcrossTheBoardsManagedCards_ButNotReviewsPlannersOrOwnManagers(string origin)
     {
         var boardId = await BoardWithManagerAsync();
         var busy = await _store.CreateCardAsync(_root, Card("Busy", BoardWorkflowModes.Agent), Ct);
         var next = await _store.CreateCardAsync(_root, Card("Next", BoardWorkflowModes.Agent), Ct);
         var own = await _store.CreateCardAsync(_root, Card("Own manager", BoardWorkflowModes.Agent, "base:codex"), Ct);
-        var running = await LiveWorkerAsync(busy);
+        var running = await LiveWorkerAsync(busy, origin);
 
         var refused = await Assert.ThrowsAsync<BoardConflictException>(() => Launcher().LaunchAsync(_root, next.Id, null, Ct, intent: "worker"));
         Assert.Contains("at most 1 implementation worker at a time", refused.Message);

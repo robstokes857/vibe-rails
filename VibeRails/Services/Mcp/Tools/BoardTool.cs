@@ -786,11 +786,12 @@ public sealed partial class BoardTool(
         }
     }
 
-    [McpServerTool, Description("Link work to a card in the current project. In a VibeRails terminal, attach its current session without changing the original default; later link_board_commit calls share with all attached cards. In a desktop MCP client, show desktop activity without creating a terminal session or changing commit links. Desktop callers should pass the card explicitly on later calls. No session-id argument; safe to repeat. Does not move cards or copy earlier commits.")]
+    [McpServerTool, Description("Link a session to a card in the current project. After the user explicitly authorizes implementation in a discussion, pass work=true to declare that this same session is now working on this card. Ordinary attachment preserves discussion-only status. In a VibeRails terminal, keep the original default; later link_board_commit calls share with all attached cards. In a desktop MCP client, show desktop activity without creating a terminal session or changing commit links. Desktop callers should pass the card explicitly on later calls. No session-id argument; safe to repeat. Does not move cards, launch another agent or copy earlier commits.")]
     public async Task<string> AttachBoardSession(
         [Description("Card key like VB-12 (or the card id) to attach the current session to.")] string card,
         CancellationToken cancellationToken = default,
-        McpServer? server = null)
+        McpServer? server = null,
+        [Description("True only after the user explicitly authorizes implementation in this discussion. Declares work on this card; false only attaches the session.")] bool work = false)
     {
         try
         {
@@ -815,10 +816,12 @@ public sealed partial class BoardTool(
             }
             var tabId = Environment.GetEnvironmentVariable(LocalToolApiContext.CurrentTabIdVariable);
             var attached = await service.AttachSessionAsync(target.Project, target.CardId!, projects.CurrentSessionId!,
-                string.IsNullOrWhiteSpace(tabId) ? null : tabId.Trim(), cancellationToken);
+                string.IsNullOrWhiteSpace(tabId) ? null : tabId.Trim(), cancellationToken, work);
             return attached is null
                 ? $"FAIL: card not found: {card}"
-                : $"Attached session {attached.Id} to {target.CardKey}. Existing card attachments and the default card are unchanged. Call link_board_commit once per commit to link it to every attached card.";
+                : $"Attached session {attached.Id} to {target.CardKey}. Existing card attachments and the default card are unchanged. Call link_board_commit once per commit to link it to every attached card."
+                    + (attached.Origin == "chat" ? " This remains a discussion. After explicit user authorization to implement, call attach_board_session with work=true."
+                        : attached.Origin == BoardSessionRecord.ChatWorkOrigin ? " This discussion is declared as authorized work; running status still requires its live terminal." : "");
         }
         catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
         catch (BoardConflictException ex) { return "FAIL: " + ex.Message; }
@@ -1219,7 +1222,7 @@ public sealed partial class BoardTool(
                 if (extra.Outcome.ExitCode is int code && code != 0) builder.Append(" (exit ").Append(code).Append(')');
             }
             else
-                builder.Append(" · ended");
+                builder.Append(" · status unknown (no confirmed end time)");
             builder.Append(" · session ").Append(session.Id).Append('\n');
             builder.Append("    purpose: ").Append(session.Origin).Append('\n');
             if (extra.LastComment is { } last)

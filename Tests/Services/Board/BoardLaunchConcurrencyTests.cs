@@ -308,6 +308,30 @@ public sealed class BoardLaunchConcurrencyTests : IDisposable
     }
 
     [Theory]
+    [InlineData("work")]
+    [InlineData("worker")]
+    public async Task AuthorizedDiscussionBlocksDuplicateWorkerUntilItsSessionEnds(string intent)
+    {
+        var card = await CreateCardAsync();
+        if (intent == "worker")
+            card = (await _store.UpdateCardAsync(_root, card.Id, new(WorkflowMode: "agent", ManagerSelection: "base:codex"), Ct))!;
+        var session = Guid.NewGuid().ToString();
+        await _store.LinkSessionAsync(_root, card.Id, session, "existing", "base:codex", "codex", "Discussion", "chat", Ct);
+        var service = new BoardService(_store, Mock.Of<IBoardCommitService>(), new TerminalTabLiveSessionProbe(_tabs.Object));
+        _tabs.Setup(t => t.ListTabsAsync(It.IsAny<CancellationToken>())).ReturnsAsync([new("existing", DateTime.UtcNow, true, session)]);
+        await service.AttachSessionAsync(_root, card.Id, session, null, Ct, work: true);
+        var conflict = await Assert.ThrowsAsync<BoardConflictException>(() => Launcher().LaunchAsync(_root, card.Id, null, Ct, intent));
+        Assert.Equal(session, conflict.SessionId);
+        _tabs.Verify(t => t.CreateTabAsync(It.IsAny<CancellationToken>()), Times.Never);
+
+        _tabs.Setup(t => t.ListTabsAsync(It.IsAny<CancellationToken>())).ReturnsAsync([new("existing", DateTime.UtcNow, false, session)]);
+        _tabs.Setup(t => t.StartSessionAsync("tab-1", It.IsAny<StartTerminalRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TerminalStatusResponse(true, Guid.NewGuid().ToString(), "codex", _root));
+        Assert.NotNull(await Launcher().LaunchAsync(_root, card.Id, null, Ct, intent));
+        _tabs.Verify(t => t.CreateTabAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
     [InlineData("chat", "work")]
     [InlineData("launch", "chat")]
     public async Task DiscussionAndWorkCanCoexistWithoutMovingTheCard(string existingOrigin, string intent)

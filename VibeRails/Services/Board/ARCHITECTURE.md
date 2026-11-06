@@ -136,6 +136,13 @@ but unused. Content/model versions and fenced completions reject stale vectors; 
 lose old searchable chunks before replacement inference. See the
 [shared search contract](../BertV2/README.md). Source access remains behind `IBoardStore`.
 
+After the user authorizes implementation in a discussion, `attach_board_session(work=true)`
+changes that card's link from `chat` to `chat_work` (VIBE-291). This retains the discussion's
+identity, original context samples and other attachments. Ordinary attachment never promotes
+it. All existing working-agent projections and duplicate-worker guards recognize `chat_work`;
+live status still comes only from the exact root-local terminal session. A stdio MCP read has
+no live-tab probe, so it reports an unknown state until an actual end time is available.
+
 The existing **Chat with agent** control accepts an optional 1,000-character question. Discussion
 launches carry a short MCP bootstrap plus the user's context block (App, Board, Card and Card type, VIBE-229),
 at most 2,000 characters of environment initial message and
@@ -1271,7 +1278,9 @@ link race, preserving the link's other fields and refusing to replace another ex
 This confirmation does not change ordinary duplicate-link behavior or backfill historical sessions.
 Session DTOs expose batched project-scoped `isNonCoding` classification so additional-card links
 cannot hide non-coding provenance from the source picker. No purpose is inferred from current card settings. Known chat/planning/review links and
-historical context samples exclude those sessions even when attached to another card. Each card
+historical context samples exclude those sessions even when attached to another card. Explicit
+`chat_work` authorization overrides only chat provenance; planning, manager and review provenance
+remain excluded. An ordinary `chat` link on another card remains ineligible there. Each card
 in a multi-card session needs its own declaration. Unknown or unmapped sources visibly use fallback.
 
 The chosen review checkout is the current project directory. The UI and prompt state this choice

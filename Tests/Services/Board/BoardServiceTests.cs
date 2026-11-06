@@ -9,7 +9,7 @@ using Xunit;
 namespace Tests.Services.Board;
 
 /// <summary>Validation and wire mapping over a real store; git and the tab host are faked.</summary>
-public sealed class BoardServiceTests : IDisposable
+public sealed partial class BoardServiceTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), $"viberails-board-service-{Guid.NewGuid():N}");
     private readonly string _connectionString;
