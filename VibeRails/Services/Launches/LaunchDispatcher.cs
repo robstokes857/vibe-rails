@@ -102,10 +102,17 @@ public sealed class LaunchDispatcher(ILaunchStore store, LaunchService service, 
             await validator.ValidateSnapshotAsync(run.Snapshot, cancel.Token);
             await LaunchBoardValidation.ValidateAsync(services.GetRequiredService<IBoardStore>(), run, cancel.Token);
             using var process = Process.GetCurrentProcess();
-            sessionId = Guid.NewGuid().ToString();
+            var proposedSessionId = Guid.NewGuid().ToString();
             var deadline = action.Script?.TimeoutSeconds is { } secondsLimit ? DateTime.UtcNow.AddSeconds(secondsLimit) : (DateTime?)null;
-            if (!await store.StartAsync(claim, sessionId, null, run.Snapshot.Context.WorkingDirectory,
-                Environment.ProcessId, process.StartTime.ToUniversalTime(), deadline, cancel.Token)) return;
+            if (!await store.StartAsync(claim, proposedSessionId, null, run.Snapshot.Context.WorkingDirectory,
+                Environment.ProcessId, process.StartTime.ToUniversalTime(), deadline, cancel.Token))
+            {
+                // Cancellation can arrive after the claim but before the durable start.
+                // No Action has executed: acknowledge it using this claim's ownership token.
+                await store.CompleteAsync(claim, "cancelled", ct: CancellationToken.None);
+                return;
+            }
+            sessionId = proposedSessionId;
             await repository.CreateSessionAsync(sessionId, "Shell", null, run.Snapshot.Context.WorkingDirectory, Environment.ProcessId);
             await repository.SetSessionDisplayNameAsync(sessionId, "Action: " + action.Name);
             writer = new SessionOutputWriter(repository);

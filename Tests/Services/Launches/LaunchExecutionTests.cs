@@ -72,6 +72,70 @@ public sealed class LaunchExecutionTests : IDisposable
     }
 
     [Fact]
+    public async Task CancellationBetweenActionClaimAndStartReleasesCapacityWithoutCreatingSessions()
+    {
+        string? cancelRunId = null;
+        var validations = 0;
+        var scripts = new Mock<IAutomationScriptService>();
+        scripts.Setup(x => x.NormalizeAsync(It.IsAny<string>(), It.IsAny<JobActionRequest>(), It.IsAny<CancellationToken>(), true))
+            .Returns(async (string _, JobActionRequest action, CancellationToken ct, bool _) =>
+            {
+                // The dispatcher validates once after claiming; the Action validates again
+                // immediately before StartAsync. Cancel at that second boundary.
+                if (cancelRunId is not null && ++validations == 2)
+                {
+                    var claimed = (await store.GetRunAsync(cancelRunId, ct))!;
+                    Assert.Equal("claimed", claimed.Status);
+                    Assert.Null(claimed.StartedUtc);
+                    Assert.True(await store.CancelAsync(claimed.Id, claimed.ProjectPath, ct));
+                }
+                return action with { ApprovedHash = "hash" };
+            });
+        scripts.Setup(x => x.PrepareAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<JobRunActionRecord>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PreparedAutomationScript("python", ["check.py"], root, new Dictionary<string, string?>()));
+        var wrapper = new Mock<ICliWrapper>();
+        wrapper.Setup(x => x.RunAsync(It.IsAny<CliRequest>(), It.IsAny<Func<CliOutputLine, ValueTask>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CliResult(0, false, false, "", "", TimeSpan.Zero, "script"));
+        var repo = new Mock<IRepository>();
+        var services = new ServiceCollection();
+        services.AddSingleton<ILaunchStore>(store);
+        services.AddSingleton(scripts.Object);
+        services.AddSingleton(wrapper.Object);
+        services.AddSingleton(repo.Object);
+        services.AddSingleton(Mock.Of<IBoardStore>());
+        services.AddScoped<LaunchService>();
+        await using var provider = services.BuildServiceProvider();
+        var service = provider.GetRequiredService<LaunchService>();
+        var dispatcher = new LaunchDispatcher(store, service, Mock.Of<ITerminalTabHostService>(MockBehavior.Strict),
+            provider.GetRequiredService<IServiceScopeFactory>(), provider.GetRequiredService<IBoardStore>());
+        using var bound = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+        bound.CancelAfter(TimeSpan.FromSeconds(10));
+        for (var i = 0; i <= LaunchDispatcher.Capacity; i++)
+        {
+            cancelRunId = null;
+            var action = await service.SaveActionAsync(root, null,
+                new("Check " + i, "", "script", new("check.py", JobScriptRuntime.Python, [])), bound.Token);
+            var run = await service.EnqueueAsync("action", action.Id, new(root, root, "manual", "cancel-" + i), bound.Token);
+            if (i < LaunchDispatcher.Capacity) cancelRunId = run.Id;
+            validations = 0;
+            await dispatcher.DispatchAsync(run.Id, bound.Token);
+            while (!(run = (await store.GetRunAsync(run.Id, bound.Token))!).IsTerminal) await Task.Delay(10, bound.Token);
+            if (cancelRunId is not null)
+            {
+                Assert.Equal("cancelled", run.Status);
+                Assert.Null(run.StartedUtc);
+                Assert.Null(run.SessionId);
+                Assert.NotNull(run.EndedUtc);
+                Assert.Empty(await store.GetActiveRunsAsync(bound.Token));
+                Assert.Empty(repo.Invocations);
+                Assert.Empty(wrapper.Invocations);
+            }
+            else Assert.Equal("succeeded", run.Status);
+        }
+        wrapper.Verify(x => x.RunAsync(It.IsAny<CliRequest>(), It.IsAny<Func<CliOutputLine, ValueTask>?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task SealedUnstartedPresetRecoversButUnacknowledgedScriptNeedsExplicitResolution()
     {
         var service = new LaunchService(store, Mock.Of<IAutomationScriptService>());
