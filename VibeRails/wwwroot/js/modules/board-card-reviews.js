@@ -2,10 +2,10 @@ import { BoardApi } from './board-api.js';
 import { escapeHtml as esc } from './utils.js';
 import { switchReviewerDefaults, routingSummary, reviewerTargetMarkup, mountReviewerTarget, routingEditorMarkup, mountRoutingEditor } from './reviewer-routing.js';
 
-export function cardReviewsSection(card) {
-    return `<section class="board-block" data-board-reviews aria-label="Code reviews">
-        <h3 class="board-block-label">Code reviews</h3>
-        ${card?.id ? `<p class="small" data-review-resolution role="status">Loading Switch reviewer…</p>
+export function cardReviewsSection(card, { readOnly = false } = {}) {
+    return `<section class="${readOnly ? 'board-side-section' : 'board-block'} text-break" data-board-reviews aria-label="Code reviews">
+        <h3 class="${readOnly ? 'board-side-label' : 'board-block-label'}">Code reviews</h3>
+        ${card?.id ? `${readOnly ? '' : `<p class="small" data-review-resolution role="status">Loading Switch reviewer…</p>
             <label class="form-check"><input class="form-check-input" type="checkbox" data-review-override> Override reviewer for this review</label>
             <div data-review-target-host hidden>${reviewerTargetMarkup()}</div>
             <button type="button" class="btn btn-sm btn-outline-primary mt-2" data-review-run disabled>Run review</button>
@@ -26,14 +26,14 @@ export function cardReviewsSection(card) {
                 <button type="button" class="btn btn-sm btn-outline-secondary" data-review-save>Save review inputs</button>
                 <p class="small" data-review-settings-message role="status"></p>
             </details>
-            <p class="board-editor-muted">Uses saved review inputs. New reviews capture current inputs; queued runs and retries keep their recorded routing and scope. Lane reviews use their Worker’s mappings.</p>
-            <p data-review-message role="status" aria-live="polite"></p>
+            <p class="board-editor-muted">Uses saved review inputs. New reviews capture current inputs; queued runs and retries keep their recorded routing and scope. Lane reviews use their Worker’s mappings.</p>`}
+            <p class="board-editor-muted" data-review-message role="status" aria-live="polite">Loading reviews…</p>
             <button type="button" class="btn btn-sm btn-link" data-review-refresh>Refresh reviews</button>
             <div data-review-latest></div>
             <details><summary>Older runs</summary><div data-review-history></div>
                 <button type="button" class="btn btn-sm btn-link" data-review-more hidden>Load older runs</button></details>
-            <section data-review-report aria-label="Review report" hidden></section>`
-            : '<p>Save the card to run a review.</p>'}
+            <section data-review-report aria-label="Review report" tabindex="-1" hidden></section>`
+            : `<p class="board-editor-muted">Save the card to ${readOnly ? 'see code reviews' : 'run a review'}.</p>`}
     </section>`;
 }
 
@@ -66,16 +66,17 @@ export function reviewReport(row, { compare = true } = {}) {
         ${compare ? `<button type="button" class="btn btn-sm btn-link" data-review-compare="${esc(row.id)}">Compare review inputs</button>` : ''}`;
 }
 
-export function bindCardReviews(editor, card, app, onQueued) {
+export function bindCardReviews(editor, card, app, onQueued, { readOnly = false, onOpenSession } = {}) {
     const host = editor.querySelector('[data-board-reviews]');
     if (!host || !card?.id) return null;
     const find = key => host.querySelector(`[data-review-${key}]`);
-    const target = mountReviewerTarget(app, find('target-host'), { selection: 'base:codex' }, () => void preview());
+    const target = readOnly ? null : mountReviewerTarget(app, find('target-host'), { selection: 'base:codex' }, () => void preview());
     let routingEditor, settingsRequest, previewRequest, previewGeneration = 0, settingsBusy = false, ready = false;
-    const picker = find('target-host').querySelector('[data-reviewer-target]');
-    picker.setAttribute('data-review-picker', '');
+    const picker = find('target-host')?.querySelector('[data-reviewer-target]');
+    picker?.setAttribute('data-review-picker', '');
     const url = `/api/v1/board/cards/${encodeURIComponent(card.id)}/reviews`;
     let disposed = false, busy = false, generation = 0, reportGeneration = 0, offset = 0, rows = [], request, reportRequest;
+    let latestMarkup, historyMarkup;
     const current = () => !disposed && host.isConnected;
     const message = text => { if (current()) find('message').textContent = text; };
     const options = signal => ({ showLoading: false, preferErrorResponseMessage: true, signal });
@@ -126,7 +127,7 @@ export function bindCardReviews(editor, card, app, onQueued) {
     }
     const inputChange = event => {
         if (event.target === find('override')) { find('target-host').hidden = !event.target.checked; void preview(); }
-        else if (find('settings').contains(event.target)) { find('range').hidden = find('scope').value !== 'range'; settingsChanged(); }
+        else if (find('settings')?.contains(event.target)) { find('range').hidden = find('scope').value !== 'range'; settingsChanged(); }
     };
     host.addEventListener('change', inputChange);
     async function refresh(more = false) {
@@ -134,14 +135,27 @@ export function bindCardReviews(editor, card, app, onQueued) {
         const version = ++generation;
         request?.abort(); request = new AbortController();
         try {
-            const page = more ? offset + 50 : 0;
-            const response = await app.apiCall(`${url}?offset=${page}`, 'GET', null, options(request.signal));
+            // Refresh every loaded page so background polls retain expanded history and
+            // offset pagination stays correct when a new attempt arrives at the front.
+            const page = more ? offset + 50 : offset;
+            const pages = [];
+            for (let start = more ? page : 0; start <= page; start += 50) {
+                const response = await app.apiCall(`${url}?offset=${start}`, 'GET', null, options(request.signal));
+                if (!current() || version !== generation) return;
+                pages.push(response);
+                if (!response.hasMore) break;
+            }
+            const response = pages[pages.length - 1];
             if (!current() || version !== generation) return;
-            rows = more ? [...rows, ...(response.reviews || [])].filter((r, i, all) => all.findIndex(x => x.id === r.id) === i) : response.reviews || [];
-            offset = page;
-            const latest = response.latest || rows.find(r => r.reportedUtc);
-            find('latest').innerHTML = rows.length ? reviewRow(rows[0]) + (latest && latest.id !== rows[0].id ? `<h4>Latest report</h4>${reviewRow(latest)}` : '') : '<p>No code reviews yet.</p>';
-            find('history').innerHTML = rows.slice(1).map(reviewRow).join('') || '<p>No older runs.</p>';
+            rows = [...(more ? rows : []), ...pages.flatMap(p => p.reviews || [])].filter((r, i, all) => all.findIndex(x => x.id === r.id) === i);
+            offset = more ? page : (pages.length - 1) * 50;
+            const latest = pages[0].latest || rows.find(r => r.reportedUtc);
+            const latestHtml = ((rows[0] ? reviewRow(rows[0]) : '')
+                + (latest && latest.id !== rows[0]?.id ? `<h4>Latest report</h4>${reviewRow(latest)}` : '')) || '<p>No code reviews yet.</p>';
+            const historyHtml = rows.slice(1).filter(row => row.id !== latest?.id).map(reviewRow).join('') || '<p>No older runs.</p>';
+            // Keep keyboard focus and scroll positions on unchanged background polls.
+            if (latestMarkup !== latestHtml) find('latest').innerHTML = latestMarkup = latestHtml;
+            if (historyMarkup !== historyHtml) find('history').innerHTML = historyMarkup = historyHtml;
             find('more').hidden = !response.hasMore;
             message('A successful process exit without a report is not approval.');
         } catch (error) {
@@ -151,13 +165,16 @@ export function bindCardReviews(editor, card, app, onQueued) {
     async function report(id, verify) {
         const version = ++reportGeneration;
         reportRequest?.abort(); reportRequest = new AbortController();
+        find('report').hidden = false;
+        find('report').textContent = 'Loading review report…';
         try {
             const row = await app.apiCall(`${url}/${encodeURIComponent(id)}?verify=${verify}`, 'GET', null, options(reportRequest.signal));
             if (!current() || version !== reportGeneration) return;
             find('report').hidden = false;
             find('report').innerHTML = reviewReport(row);
+            find('report').focus();
         } catch (error) {
-            if (current() && version === reportGeneration && !reportRequest.signal.aborted) message(error?.message || 'Could not read review.');
+            if (current() && version === reportGeneration && !reportRequest.signal.aborted) find('report').textContent = error?.message || 'Could not read review. Select View report to retry.';
         }
     }
     async function run() {
@@ -176,16 +193,17 @@ export function bindCardReviews(editor, card, app, onQueued) {
         if (!button || !host.contains(button)) return;
         if (button.hasAttribute('data-review-run')) void run();
         else if (button.hasAttribute('data-review-save')) void saveSettings();
-        else if (button.hasAttribute('data-review-refresh')) { void refresh(); void preview(); }
+        else if (button.hasAttribute('data-review-refresh')) { void refresh(); if (!readOnly) void preview(); }
         else if (button.hasAttribute('data-review-more')) void refresh(true);
         else if (button.dataset.reviewView) void report(button.dataset.reviewView, true);
         else if (button.dataset.reviewCompare) void report(button.dataset.reviewCompare, true);
+        else if (button.dataset.boardOpenSession) onOpenSession?.(button.dataset.boardOpenSession);
     };
     host.addEventListener('click', click);
-    void refresh(); void loadSettings();
+    void refresh(); if (!readOnly) void loadSettings();
     return { refresh, dispose() {
         disposed = true; ++generation; ++reportGeneration;
-        request?.abort(); reportRequest?.abort(); settingsRequest?.abort(); previewRequest?.abort(); target.dispose(); routingEditor?.dispose();
+        request?.abort(); reportRequest?.abort(); settingsRequest?.abort(); previewRequest?.abort(); target?.dispose(); routingEditor?.dispose();
         host.removeEventListener('change', inputChange); host.removeEventListener('click', click);
     } };
 }

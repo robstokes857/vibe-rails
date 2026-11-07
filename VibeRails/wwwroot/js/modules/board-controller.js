@@ -57,6 +57,7 @@ import { openLocalCardEditor } from './board-local-card.js';
 import { cardAutomationControls, bindCardAutomations } from './board-card-automations.js';
 import { cardSharingSection, bindCardSharing } from './board-card-sharing.js';
 import { requestReviewSection, bindRequestReview, commitApprovalBadge } from './board-card-request-review.js';
+import { cardReviewsSection, bindCardReviews } from './board-card-reviews.js';
 import { contextSectionMarkup, bindCardContext } from './board-card-context.js';
 import { cardDisplayId, cardLabel } from './board-card-label.js';
 import { agentMadeSummary, bindAgentProvenance } from './board-agent-provenance.js';
@@ -454,6 +455,7 @@ export class BoardController {
                     editor.querySelectorAll('[data-board-composer]').forEach(composer => composer._refreshPreview?.());
                 }
                 void this.cardAutomations?.refresh();
+                void this.cardReviews?.refresh();
             }
         } catch (error) {
             if (current()) console.warn('Could not refresh Board session activity:', error);
@@ -493,6 +495,8 @@ export class BoardController {
     }
 
     disposeCardPickers() {
+        this.cardReviews?.dispose();
+        this.cardReviews = null;
         this.cardChecks?.dispose();
         this.cardChecks = null;
         this.cardAutomations?.dispose();
@@ -1720,6 +1724,7 @@ export class BoardController {
                         <div class="board-side-list" data-board-automations></div>
                     </section>
 
+                    ${cardReviewsSection(card, { readOnly: true })}
                     ${requestReviewSection(Boolean(card))}
                     ${cardSharingSection(Boolean(card))}
 
@@ -1900,6 +1905,14 @@ export class BoardController {
         this.disposeCardPickers();
         const assigneeSelect = editor.querySelector('#board-card-assignee');
         this.cardChecks = bindCardChecks(editor, card, this.app);
+        this.cardReviews = bindCardReviews(editor, card, this.app, null, {
+            readOnly: true,
+            onOpenSession: id => {
+                const session = editor._boardCard.sessions?.find(item => item.id === id) || { id };
+                if (session.active && session.tabId) this.focusSessionTab(editor._boardCard, session);
+                else this.openSessionReplay(session);
+            }
+        });
         this.cardSharing = bindCardSharing(editor, card, { app: this.app, hasDraft: () => this.cardHasDraft(editor) });
         // Request review (VB-50 slice E). Approvals over linked commits' trees decorate the Commits rail.
         this.cardRequestReview?.dispose();
@@ -2029,7 +2042,8 @@ export class BoardController {
     lockSharedCardEditor(editor) {
         const readActions = '[data-board-open-session], [data-board-open-diff], [data-board-view-attachment], '
             + '[data-board-comment-jump], [data-board-ref-session], [data-board-ref-commit], [data-board-ref-card], '
-            + '[data-board-image], [data-board-open-linked-card], [data-board-comment-more]';
+            + '[data-board-image], [data-board-open-linked-card], [data-board-comment-more], '
+            + '[data-review-view], [data-review-compare], [data-review-refresh], [data-review-more]';
         const lock = () => {
             editor.querySelectorAll('input, textarea, select').forEach(control => {
                 if (control.matches('[data-board-comment-filter]')) return;

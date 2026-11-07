@@ -785,8 +785,13 @@ renders without rewriting stored text. Navigation uses existing replay/diff/unsa
 guards. Abort and generation checks prevent stale results or asynchronous selections from
 overwriting edited text.
 
-The card keeps the latest Checks summary and optional saved report under Advanced. Run checks, Earlier results
-and the Code reviews panel are unmounted; evidence and review APIs remain available. Lane Agents
+The card keeps the latest Checks summary and optional saved report under Advanced. Run checks and Earlier results
+are unmounted. Code reviews is a read-only sidebar section below Agent & Automation runs: it shows
+the newest attempt and latest saved MCP/Automation report, with older runs paged on demand.
+View report displays escaped findings, validation, limitations and captured scope; Compare review
+inputs checks freshness. The existing activity refresh retains loaded history and open reports,
+without changing editor drafts. Dispose review requests on close/replacement/unload. Reviewer
+setup and launch controls remain unmounted; report readers use the existing review APIs. Lane Agents
 lists the originating lane’s running agents (including cards outside loaded pages), and offers
 VCA/Code quality choices with explicit scope as ordinary one-action Automations. These choices
 configure future lane entry; they do not launch during setup. Automation names are unique per

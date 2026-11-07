@@ -1524,7 +1524,7 @@ for (const width of [1440, 390]) {
         expect(runs).toBe(0);
         await expect(panel.locator('[data-check-run-options]')).toHaveCount(0);
         await expect(panel.locator('[data-check-history]')).toHaveCount(0);
-        await expect(page.locator('[data-board-reviews]')).toHaveCount(0);
+        await expect(page.locator('[data-board-reviews]')).toHaveCount(1);
         rows = [check];
         await panel.getByRole('button', { name: 'Refresh checks', exact: true }).click();
         await expect(panel.locator('[data-check-summary]')).toContainText('2 files skipped');
@@ -3632,6 +3632,131 @@ test('Automation recordings have their own rail and live robot without overwriti
     expect(card.priority).toBe('critical'); expect(card.points).toBe(8); expect(card.tags).toEqual(['keep-stored']);
 });
 
+const savedReview = (id, changes = {}) => ({
+    id, reviewer: 'Codex', provider: 'codex', processStatus: 'Succeeded', result: 'Findings',
+    createdUtc: '2026-11-07T10:00:00Z', reportedUtc: '2026-11-07T10:05:00Z',
+    scope: 'working-tree', scopeDescription: 'Uncommitted changes', freshness: 'Unknown freshness',
+    workspace: 'C:/example/project', scopeFiles: ['src/example.js'],
+    findings: 'Medium-high: preserve the saved result.\n<img src=x onerror="window.__reviewXss=1">',
+    validation: 'Reviewed the changed files and ran the focused tests.', limitations: 'No live service was contacted.',
+    ...changes
+});
+
+for (const width of [320, 375, 768, 1024]) {
+    test(`card displays MCP review findings and preserves drafts at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        const requests = await openBoard(page);
+        const report = savedReview('review-1', { reviewer: "Codex's reviewer", terminalSessionId: 'session_test', workspace: `C:/example/${'long-path-'.repeat(30)}` });
+        let reviews = [savedReview('pending', { result: null, reportedUtc: null, processStatus: 'Succeeded' })];
+        const reads = [];
+        await page.route('**/api/v1/board/cards/card_test/reviews**', route => {
+            expect(route.request().method()).toBe('GET');
+            reads.push(route.request().url());
+            return route.fulfill({ json: route.request().url().includes('/review-1?')
+                ? { ...report, freshness: 'Stale: inputs changed' } : { reviews, latest: report, hasMore: false } });
+        });
+        await page.locator('.board-card').click();
+        const editor = page.locator('[data-board-card-editor]');
+        const panel = editor.getByRole('region', { name: 'Code reviews', exact: true });
+        await expect(panel.locator('[data-review-latest]')).toContainText('Report missing');
+        await expect(panel.locator('[data-review-latest]')).toContainText('Latest report');
+        await expect(panel.locator('[data-review-run], [data-review-settings]')).toHaveCount(0);
+        await panel.getByRole('button', { name: 'View report', exact: true }).focus();
+        await page.evaluate(() => window.app.boardController.refreshSessionActivity());
+        await expect(panel.getByRole('button', { name: 'View report', exact: true })).toBeFocused();
+        await editor.locator('#board-card-title').fill('Unsaved review investigation');
+        await editor.locator('[data-board-composer="description"] textarea').fill('Description draft');
+        await editor.locator('[data-board-composer="comment"] textarea').fill('Comment draft');
+        await panel.getByRole('button', { name: 'View report', exact: true }).click();
+        const detail = panel.getByRole('region', { name: 'Review report', exact: true });
+        await expect(detail).toContainText(report.findings);
+        await expect(detail).toContainText(report.validation);
+        await expect(detail).toContainText(report.limitations);
+        await expect(detail).toContainText('Stale: inputs changed');
+        await expect(detail).toBeFocused();
+        await expect(detail.locator('img')).toHaveCount(0);
+        expect(await page.evaluate(() => window.__reviewXss)).toBeUndefined();
+        await detail.getByText('Captured files', { exact: true }).click();
+        await expect(detail).toContainText('src/example.js');
+        await page.screenshot({ path: testInfo.outputPath(`card-review-${width}.png`) });
+        expect(await editor.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+        await detail.getByRole('button', { name: 'Compare review inputs' }).click();
+        await expect(detail).toContainText('Stale: inputs changed');
+        reviews = [savedReview('pending', { result: 'No findings reported' })];
+        await page.evaluate(() => window.app.boardController.refreshSessionActivity());
+        await expect(panel.locator('[data-review-latest]')).toContainText('No findings reported');
+        await expect(detail).toContainText(report.findings);
+        await expect(editor.locator('#board-card-title')).toHaveValue('Unsaved review investigation');
+        await expect(editor.locator('[data-board-composer="description"] textarea')).toHaveValue('Description draft');
+        await expect(editor.locator('[data-board-composer="comment"] textarea')).toHaveValue('Comment draft');
+        await page.evaluate(() => { window.app.boardController.openSessionReplay = session => { window.reviewReplay = session.id; }; });
+        await panel.getByRole('button', { name: 'Terminal / replay' }).click();
+        expect(await page.evaluate(() => window.reviewReplay)).toBe('session_test');
+        expect(reads.filter(url => url.endsWith('/review-1?verify=true')).length).toBe(2);
+        expect(reads.some(url => /settings|preview/.test(url))).toBe(false);
+        expect(requests.some(request => request.path.startsWith('/api/v1/board/cards/card_test') && request.method !== 'GET')).toBe(false);
+    });
+}
+
+test('card review history survives polling and keeps the latest saved report visible', async ({ page }) => {
+    await openBoard(page);
+    let reviews = Array.from({ length: 55 }, (_, i) => savedReview(`run-${i}`, { reportedUtc: null, result: null }));
+    const latest = savedReview('older-report');
+    await page.route('**/api/v1/board/cards/card_test/reviews?*', route => {
+        const offset = Number(new URL(route.request().url()).searchParams.get('offset'));
+        return route.fulfill({ json: { reviews: reviews.slice(offset, offset + 50), latest, hasMore: offset + 50 < reviews.length } });
+    });
+    await page.locator('.board-card').click();
+    const panel = page.locator('[data-board-reviews]');
+    await expect(panel.locator('[data-review-view="older-report"]')).toBeVisible();
+    await panel.getByText('Older runs', { exact: true }).click();
+    await panel.getByRole('button', { name: 'Load older runs' }).click();
+    await expect(panel.locator('[data-review-history] article')).toHaveCount(54);
+    reviews.unshift(savedReview('new-run', { reportedUtc: null, result: null }));
+    await page.evaluate(() => window.app.boardController.refreshSessionActivity());
+    await expect(panel.locator('[data-review-history] article')).toHaveCount(55);
+    await expect(panel.locator('[data-review-view="older-report"]')).toBeVisible();
+    await expect(panel.getByRole('button', { name: 'Load older runs' })).toBeHidden();
+});
+
+test('card review failures recover and late reports cannot overwrite another report or reopened card', async ({ page }) => {
+    await openBoard(page);
+    let failList = true, failReport = true;
+    await page.route('**/api/v1/board/cards/card_test/reviews?*', route => failList
+        ? route.fulfill({ status: 503, json: { error: 'Reviews unavailable' } })
+        : route.fulfill({ json: { reviews: [savedReview('a'), savedReview('b')], hasMore: false } }));
+    await page.route('**/api/v1/board/cards/card_test/reviews/*', route => failReport
+        ? route.fulfill({ status: 503, json: { error: 'Report unavailable' } })
+        : route.fulfill({ json: savedReview('b', { findings: 'Second report' }) }));
+    await page.locator('.board-card').click();
+    const panel = page.locator('[data-board-reviews]');
+    await expect(panel.locator('[data-review-message]')).toContainText('Reviews unavailable');
+    failList = false;
+    await panel.getByRole('button', { name: 'Refresh reviews' }).click();
+    await panel.locator('[data-review-view="a"]').click();
+    await expect(panel.locator('[data-review-report]')).toContainText('Report unavailable');
+    failReport = false;
+    await page.evaluate(() => {
+        const app = window.app, original = app.apiCall.bind(app);
+        app.apiCall = (url, ...args) => url.includes('/reviews/a?')
+            ? new Promise(resolve => { window.releaseReview = resolve; window.reviewSignal = args[2].signal; })
+            : original(url, ...args);
+    });
+    await panel.locator('[data-review-view="a"]').click();
+    await panel.getByText('Older runs', { exact: true }).click();
+    await panel.locator('[data-review-view="b"]').click();
+    await expect(panel.locator('[data-review-report]')).toContainText('Second report');
+    expect(await page.evaluate(() => window.reviewSignal.aborted)).toBe(true);
+    await page.evaluate(row => window.releaseReview(row), savedReview('a', { findings: 'Obsolete report' }));
+    await expect(panel.locator('[data-review-report]')).not.toContainText('Obsolete report');
+    await panel.locator('[data-review-view="a"]').click();
+    await page.evaluate(() => window.app.closeModal());
+    expect(await page.evaluate(() => window.reviewSignal.aborted)).toBe(true);
+    await page.locator('.board-card').click();
+    await page.evaluate(row => window.releaseReview(row), savedReview('a', { findings: 'Closed card report' }));
+    await expect(panel.locator('[data-review-report]')).toBeHidden();
+});
+
 test('Code review definition uses the shared provider and purpose fields', async ({ page }) => {
     await openBoard(page);
     const writes = [];
@@ -3665,7 +3790,8 @@ for (const width of [1440, 390]) {
         await page.route('**/api/v1/board/cards/card_test/reviews**', route => { reviewReads++; return route.fulfill({ json: {} }); });
         await page.getByText('Description images', { exact: true }).click();
         const editor = page.locator('[data-board-card-editor]');
-        await expect(editor.locator('[data-board-reviews]')).toHaveCount(0);
+        await expect(editor.locator('[data-board-reviews]')).toHaveCount(1);
+        await expect(editor.locator('[data-review-run], [data-review-settings], [data-review-override]')).toHaveCount(0);
         await expect(editor.locator('[data-check-run-options], [data-check-history]')).toHaveCount(0);
         await expect(editor.locator('[data-board-checks]')).not.toBeVisible();
         await expect(editor.locator('[data-board-sessions] [data-session-id]')).toHaveCount(1);
@@ -3673,7 +3799,7 @@ for (const width of [1440, 390]) {
         await editor.locator('#board-card-title').fill('Keep this unsaved draft');
         await page.evaluate(() => window.app.boardController.refreshSessionActivity());
         await expect(editor.locator('#board-card-title')).toHaveValue('Keep this unsaved draft');
-        expect(reviewReads).toBe(0);
+        expect(reviewReads).toBeGreaterThan(0);
         await page.screenshot({ path: testInfo.outputPath(`compact-card-${width}.png`) });
     });
 }

@@ -1253,12 +1253,14 @@ the caller's server-derived checkout, never a stored path. A different checkout 
 changed HEAD or captured inputs are Stale. Opening a report in the UI compares inputs; the user
 can compare again after editing files. Findings are escaped text with file references.
 
-The card's Code reviews section uses the saved card, preserving editor drafts. Its Switch reviewer
-defaults and override picker send explicit `code_review` intent and leave assignment unchanged. Recordings
-have terminal/replay access and are excluded from ordinary Sessions/Automations counts. The
-review snapshot also classifies an early MCP-created link without rewriting its stored origin.
-The existing visible-page activity refresh updates the section; requests/pickers are disposed on
-editor replacement. Both launch prompts teach ten-second MCP polling and handling findings by severity.
+The card's Code reviews sidebar uses the saved card and existing review reads, preserving editor
+drafts. It shows the newest attempt and independently retrieved latest saved report, with paged
+older runs and escaped findings, validation, limitations and scope. Reviewer setup/launch controls
+remain unmounted. Recordings have terminal/replay access and stay in Agent & Automation runs;
+the review snapshot also classifies an early MCP-created link without rewriting its stored origin.
+The existing visible-page activity refresh updates loaded history without closing an open report;
+requests are cancelled and stale responses ignored on editor replacement/close/unload.
+Both launch prompts teach ten-second MCP polling and handling findings by severity.
 High (including critical) and medium-high findings block completion of reviewed work. Medium-low
 and low findings are non-blocking notes; the worker chooses to fix now or create/reuse a backlog
 card. Deferral references the original card and finding in the backlog card and links its key in
