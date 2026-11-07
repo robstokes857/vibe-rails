@@ -33,6 +33,16 @@ public static class BoardLaunchRoutes
             var row = await store.FindCardAsync(project, card, ct);
             return row is null ? Results.NotFound() : Results.Ok(await store.GetLaunchEventsAsync(project, row.Id, ct));
         });
+        // The card's own runs, newest first (50 per page, `offset` pages back), from the launch store's
+        // card index. The card dialog used to page every project run and filter by card, losing a
+        // card's runs once 100 newer ones existed elsewhere (VIBE-296).
+        api.MapGet("/cards/{card}/launches/runs", async (string card, int? offset, IBoardStore store, ILaunchStore runs, IBoardProjectResolver projects, CancellationToken ct) =>
+        {
+            var project = await projects.ResolveAsync(ct);
+            var row = await store.FindCardAsync(project, card, ct);
+            return row is null ? Results.NotFound()
+                : Results.Ok(new LaunchRunPage(await runs.GetBoardRunsAsync(LaunchService.ProjectKey(project), row.Id, offset ?? 0, ct: ct), null));
+        });
         api.MapPost("/cards/{card}/launches", async (string card, LaunchRequest request, BoardLaunchWorkflow workflow, IBoardProjectResolver projects, CancellationToken ct) =>
             await workflow.EnqueueCardAsync(await projects.ResolveAsync(ct), card, request, ct) is { } run
                 ? Results.Ok(run) : Results.NotFound());

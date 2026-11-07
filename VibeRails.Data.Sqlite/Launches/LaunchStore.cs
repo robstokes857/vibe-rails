@@ -32,6 +32,16 @@ public sealed partial class LaunchStore : ILaunchStore
             command.CommandText = "ALTER TABLE Runs ADD COLUMN ExecutionPid INTEGER; ALTER TABLE Runs ADD COLUMN ExecutionStartedUTC TEXT;";
             command.ExecuteNonQuery();
         });
+        // VIBE-296: the `project:<key>` lease names an upper-cased comparison key. Open-root readers
+        // need the project as its root spelled it. A separate table, not a RuntimeLeases column:
+        // older builds INSERT into RuntimeLeases positionally and would fail on a fourth column.
+        SqliteMigrationRunner.Apply(db, "launches", 3, MigrationKind.Additive, (migration, tx) =>
+        {
+            using var command = migration.CreateCommand();
+            command.Transaction = tx;
+            command.CommandText = "CREATE TABLE ProjectRootPaths (ProjectKey TEXT PRIMARY KEY, ProjectRoot TEXT NOT NULL);";
+            command.ExecuteNonQuery();
+        });
         SqliteConnectionFactory.EnsureWalMode(db);
     }
 

@@ -182,10 +182,11 @@ if (JobTickProcessHost.IsRequested(args))
     return;
 }
 
-if (args.Any(a => new[] { "--job-run", "--env", "--env-id" }.Any(option =>
-    a.Equals(option, StringComparison.OrdinalIgnoreCase) || a.StartsWith(option + "=", StringComparison.OrdinalIgnoreCase))))
+// `vb --env <base-cli> --workdir <dir>` stays live for native-terminal base CLI launches; only
+// custom environment names, --env-id and --job-run are retired.
+if (RetiredLaunchArguments.IsRetired(args))
 {
-    Console.Error.WriteLine("Custom environments and multi-step Automations are retired. Select an AI Agent or Action.");
+    Console.Error.WriteLine(RetiredLaunchArguments.Message);
     Environment.ExitCode = 2;
     return;
 }

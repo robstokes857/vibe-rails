@@ -32,15 +32,27 @@ public sealed record ScriptAction(string Path, JobScriptRuntime Runtime, string[
 public sealed record CheckAction(string Scope, string? FailGrade = null, string? BaseCommit = null, string? HeadCommit = null);
 
 /// <summary>A schedule/event is scoped to an explicitly authorized project, independently of global visibility.</summary>
+/// <remarks><see cref="ProjectPath"/> is the comparison key (upper-cased on Windows/macOS); <see cref="ProjectRoot"/>
+/// is the path as the authorizing root spelled it, for anything that touches the filesystem. Bindings saved
+/// before VIBE-296 have no root and fall back to the key.</remarks>
 public sealed record LaunchTriggerBinding(string Id, string DefinitionId, string DefinitionType,
     string ProjectPath, JobTriggerRequest Trigger, bool Enabled, long Revision,
-    DateTime CreatedUtc, DateTime UpdatedUtc, DateTime? NextRunUtc = null);
+    DateTime CreatedUtc, DateTime UpdatedUtc, DateTime? NextRunUtc = null, string? ProjectRoot = null);
 
 public sealed record LaunchExecutionContext(string ProjectPath, string WorkingDirectory,
     string TriggerKind, string OccurrenceId, string? BindingId = null, string? BoardId = null,
     string? CardId = null, string? LaneEntryId = null, string? PromptPrefix = null,
     bool AuthorizeBoardTools = false, bool ContextIncluded = false, string? ComposedPrompt = null,
-    string? SessionOrigin = null, string? Selection = null, string? PromptOverride = null);
+    string? SessionOrigin = null, string? Selection = null, string? PromptOverride = null,
+    string? ProjectRoot = null, string? SessionTitle = null)
+{
+    /// <summary>
+    /// The project as the queuing root spelled it. <see cref="ProjectPath"/> is the comparison key
+    /// (upper-cased on Windows/macOS) and is never a working directory: a case-sensitive volume
+    /// cannot open it. Runs queued before VIBE-296 have no root and fall back to the key.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore] public string Root => ProjectRoot ?? ProjectPath;
+}
 
 /// <summary>The complete immutable input to one run; retries copy it rather than reading current options.</summary>
 public sealed record LaunchSnapshot(LaunchExecutionContext Context, LaunchPreset? Preset = null,

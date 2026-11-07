@@ -7,21 +7,24 @@ This directory contains the CLI launcher implementations for different LLM provi
 2. Specifying environment variable configuration
 3. Launching the CLI in platform-specific terminals
 
-## Unified `--env` Flag
+## `--env` Flag (base CLIs only)
 
-All launchers build commands using the unified `--env` flag:
+Native-terminal launches (`IBaseLlmCliLauncher.LaunchInTerminal`, used by
+`POST /api/v1/sandboxes/{id}/launch/{cli}`) spawn `vb` with `BaseLlmCliLauncher.BuildVbArgv`:
 
-- **Custom environment**: `vb --env "{envName}" --workdir "{dir}"`
-- **Base CLI (no custom env)**: `vb --env {cliName} --workdir "{dir}"`
+- **Base CLI**: `vb --env {cliWireName} --workdir "{dir}" [-- <cli args>]`
 
-Only `--env` is supported for environment bootstrap mode. `ILlmParser.Parse()` does steps 1–2
-and returns `LLM.NotSet` for anything else; the caller (`CliLoop.RunTerminalWithWebAsync`) then
-performs step 3:
+`ILlmParser.Parse()` resolves the value:
 1. The special-case strings `"glm-5.2"` / `"grok"` / `"glm-5.3"` / `"deepseek-v4-pro"` / `"kimi-k3"` (can't be a C# enum name) →
    GLM 5.2 / GLM 5.3 / DeepSeek V4 Pro / Kimi K3 are OpenCode-backed pseudo-CLI base launches; `"grok"` is the native Grok Build CLI (`"grok-4.6"` still parses as that same CLI)
 2. If it matches an LLM enum name (claude/codex/antigravity/copilot/shell/opencode, case-insensitive)
    → base CLI launch
-3. Otherwise → custom environment name, looked up in DB via `FindEnvironmentByNameAsync()`
+
+Custom environments are retired (VIBE-292). `Program.cs` calls `RetiredLaunchArguments.IsRetired`
+before building the host and exits with code 2 for `--env-id`, `--job-run`, the `--env=` form, and
+an `--env` value that is not a base CLI. Arguments after `--` belong to the CLI and are never
+inspected. `CliSpawnCommandBuilderTests.SandboxBaseCliArgvSurvivesProgramArgumentGating` pins that
+`BuildVbArgv` output passes the gate; keep the two in step when either changes (VIBE-296).
 
 The old `--environment` / `--lmbootstrap` aliases and broader CLI command router have been removed.
 

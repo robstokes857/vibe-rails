@@ -29,6 +29,9 @@ CREATE TABLE DefinitionAttachments ( Id TEXT PRIMARY KEY, DefinitionId TEXT NOT 
 -- table LaunchPresets
 CREATE TABLE LaunchPresets ( Id TEXT PRIMARY KEY, Name TEXT NOT NULL, Description TEXT NOT NULL, Cli INTEGER NOT NULL, InitialPrompt TEXT, Enabled INTEGER NOT NULL, Revision INTEGER NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, RetiredUTC TEXT, Payload TEXT NOT NULL);
 
+-- table ProjectRootPaths
+CREATE TABLE ProjectRootPaths (ProjectKey TEXT PRIMARY KEY, ProjectRoot TEXT NOT NULL);
+
 -- table Runs
 CREATE TABLE Runs ( Sequence INTEGER PRIMARY KEY AUTOINCREMENT, Id TEXT NOT NULL UNIQUE, DefinitionId TEXT NOT NULL, DefinitionType TEXT NOT NULL, ProjectPath TEXT NOT NULL, OccurrenceId TEXT NOT NULL, Snapshot TEXT NOT NULL, Status TEXT NOT NULL, QueuedUTC TEXT NOT NULL, SourceRunId TEXT, ClaimToken TEXT, OwnerPid INTEGER, OwnerStartedUTC TEXT, ClaimedUTC TEXT, StartedUTC TEXT, EndedUTC TEXT, CancelRequested INTEGER NOT NULL DEFAULT 0, SessionId TEXT, TabId TEXT, ResolvedPrompt TEXT, ResolvedWorkingDirectory TEXT, ExitCode INTEGER, Error TEXT, EvidenceId TEXT, Verdict TEXT, DeadlineUTC TEXT, ExecutionPid INTEGER, ExecutionStartedUTC TEXT, UNIQUE(ProjectPath, OccurrenceId));
 

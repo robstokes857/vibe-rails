@@ -13,8 +13,18 @@ public sealed class LaunchEventService(ILaunchStore store, LaunchService launche
     {
         var state = ParserConfigs.GetStatePath();
         if (string.IsNullOrWhiteSpace(state)) state = Path.Combine(PathConstants.GetInstallDirPath(), PathConstants.STATE_FILENAME);
-        var store = SqliteStorage.CreateLaunchStore(state);
-        return new(store, new LaunchService(store, new AutomationScriptService(new JobExecutableResolver()), SqliteStorage.CreateBoardStore(state)));
+        return Create(state);
+    }
+
+    /// <summary>
+    /// Git hooks only enqueue, and must keep working when board.db is busy, newer or damaged, so
+    /// this never opens it: the LaunchService has no Board store, and the root that starts each
+    /// session adds the nudge and App/Board context (VIBE-296).
+    /// </summary>
+    internal static LaunchEventService Create(string statePath)
+    {
+        var store = SqliteStorage.CreateLaunchStore(statePath);
+        return new(store, new LaunchService(store, new AutomationScriptService(new JobExecutableResolver())));
     }
 
     public async Task<int> CountAsync(string project, JobTriggerKind kind, CancellationToken ct) =>

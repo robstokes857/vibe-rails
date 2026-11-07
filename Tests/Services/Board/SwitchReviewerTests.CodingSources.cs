@@ -49,6 +49,7 @@ public sealed partial class SwitchReviewerTests
         var sessionId = Guid.NewGuid().ToString();
         await repository.CreateSessionAsync(sessionId, "claude", null, project, 1);
         BoardSessionRecord? earlyLink = null;
+        string? startedTitle = null;
         var tabs = new Mock<ITerminalTabHostService>();
         tabs.SetupGet(t => t.MaxTabs).Returns(8);
         tabs.Setup(t => t.ListTabsAsync(Ct)).ReturnsAsync([]);
@@ -56,6 +57,7 @@ public sealed partial class SwitchReviewerTests
         tabs.Setup(t => t.StartSessionAsync("tab", It.IsAny<StartTerminalRequest>(), Ct))
             .Returns(async (string tab, StartTerminalRequest request, CancellationToken token) =>
             {
+                startedTitle = request.Title;
                 if (request.LaunchClaim is { } claim) await launches.StartAsync(claim, sessionId, "Work", project, Environment.ProcessId, DateTime.UtcNow, ct: token);
                 if (earlyAttachment)
                     earlyLink = await boards.LinkSessionAsync(project, card.Id, sessionId, null, selection, "claude", "Early attachment", "mcp", Ct);
@@ -71,11 +73,16 @@ public sealed partial class SwitchReviewerTests
 
         var linked = Assert.Single((await boards.GetCardDetailAsync(project, card.Id, Ct))!.Sessions);
         Assert.Equal(origin, linked.Origin);
+        // A saved Agent (preset) launch is titled after the card like a base launch, not after the
+        // preset, and its one link carries that title (VIBE-296 item 4).
+        var cardTitle = $"{card.DisplayId} · Role and purpose";
+        Assert.Equal(cardTitle, startedTitle);
         if (earlyLink is not null)
         {
             Assert.Equal(earlyLink.CreatedUtc, linked.CreatedUtc);
             Assert.Equal(earlyLink.DisplayName, linked.DisplayName);
         }
+        else Assert.Equal(cardTitle, linked.DisplayName);
         if (intent != "code_review")
             Assert.Equal(!eligible, await boards.IsNonCodingSessionAsync(project, sessionId, Ct));
         if (origin == "agent_worker_planning")

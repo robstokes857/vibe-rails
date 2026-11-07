@@ -19,12 +19,13 @@ export function bindCardAutomations(editor, card, { app, onQueued }) {
         if(!current() || loading || busy)return;
         loading=true;
         try {
-            const [catalog,entries,page]=await Promise.all([api.catalog({signal:abort.signal}),api.call(`board/cards/${encodeURIComponent(card.id)}/launches`,'GET',null,{signal:abort.signal}),api.call('runs?limit=100','GET',null,{signal:abort.signal})]);
+            // The card's own runs (VIBE-296): never page every project run and filter here.
+            const [catalog,entries,page]=await Promise.all([api.catalog({signal:abort.signal}),api.call(`board/cards/${encodeURIComponent(card.id)}/launches`,'GET',null,{signal:abort.signal}),api.call(`board/cards/${encodeURIComponent(card.id)}/launches/runs`,'GET',null,{signal:abort.signal})]);
             if(!current())return;
             items=catalog.items.filter(item=>item.canLaunch);
             const markup='<option value="">Choose…</option>'+items.map(item=>`<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)} (${escapeHtml(item.kind)})</option>`).join('');
             if(markup!==rendered){const selected=select.value;select.innerHTML=rendered=markup;if(items.some(item=>item.id===selected))select.value=selected;}
-            const runs=(page.runs||[]).filter(run=>run.snapshot?.context?.cardId===card.id);
+            const runs=page?.runs||[];
             list.innerHTML=(entries||[]).filter(entry=>entry.current).map(entry=>`<div class="board-automation-run"><strong>${escapeHtml(catalog.items.find(item=>item.id===entry.definitionId)?.name || 'Unavailable definition')}</strong><span>Process: ${escapeHtml(entry.processStatus)} · Result: ${escapeHtml(entry.verdict||'Not reported')}</span><span>${escapeHtml(entry.summary||'')}</span>${entry.skipRequested?'Skip requested':`<button class="btn btn-sm btn-outline-secondary" data-launch-skip="${escapeHtml(entry.id)}">Stop and skip</button>`}</div>`).join('')+runs.map(run=>`<div class="board-automation-run"><span>${escapeHtml(run.snapshot.preset?.name||run.snapshot.action?.name)} · ${escapeHtml(run.status)}</span>${run.sessionId?`<button class="btn btn-sm btn-link" data-launch-replay="${escapeHtml(run.sessionId)}">Recorded terminal</button>`:''}</div>`).join('');
             button.disabled=!select.value;
         }catch(error){if(current())message.textContent=error.message;}finally{loading=false;}

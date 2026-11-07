@@ -115,15 +115,19 @@ public class TerminalSessionService : ITerminalSessionService
     {
         var snapshot = launch.Run.Snapshot;
         var preset = snapshot.Preset!;
+        // A Board launch names its tab after the card; other launches after the preset. A snapshot
+        // queued by an enqueue-only host (git hooks never open board.db) leaves ContextIncluded off,
+        // so the nudge and App/Board context are added here, for the run's own project (VIBE-296).
         return StartCoreAsync(preset.Cli, snapshot.Context.WorkingDirectory, null,
-            VibeRails.Services.Launches.LaunchOptionBuilder.Build(preset), preset.Name, false, resolvePrompt, "",
-            snapshot.Context.AuthorizeBoardTools, snapshot.Context.BoardId, true, launch);
+            VibeRails.Services.Launches.LaunchOptionBuilder.Build(preset), snapshot.Context.SessionTitle ?? preset.Name, false, resolvePrompt, "",
+            snapshot.Context.AuthorizeBoardTools, snapshot.Context.BoardId, snapshot.Context.ContextIncluded, launch,
+            contextProjectPath: snapshot.Context.Root);
     }
 
     private async Task<bool> StartCoreAsync(LLM llm, string workingDirectory, string? environmentName, string[]? extraArgs,
         string? title, bool makeRemote, Func<Task<ResolvedPrompt>>? resolveInitialPrompt, string summary,
         bool authorizeBoardTools, string? contextBoardId, bool contextIncluded,
-        VibeRails.Services.Launches.LaunchExecution? launch = null)
+        VibeRails.Services.Launches.LaunchExecution? launch = null, string? contextProjectPath = null)
     {
         await s_lifecycleGate.WaitAsync();
 
@@ -153,6 +157,7 @@ public class TerminalSessionService : ITerminalSessionService
                 summary: summary,
                 authorizeBoardTools: authorizeBoardTools,
                 contextBoardId: contextBoardId,
+                contextProjectPath: contextProjectPath,
                 contextIncluded: contextIncluded,
                 launch: launch,
                 onRemoteTakeoverAuthorized: trigger =>

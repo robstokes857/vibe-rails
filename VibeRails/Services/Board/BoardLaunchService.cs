@@ -246,7 +246,7 @@ public sealed class BoardLaunchService(
                 var origin = isManager ? BoardSessionRecord.ManagerOrigin
                     : isWorker ? isPlanning && !isReview ? BoardSessionRecord.PlanningWorkerOrigin : BoardSessionRecord.WorkerOrigin
                     : isReview ? "code_review" : intent == "chat" ? "chat" : isPlanning ? "planning" : BoardSessionRecord.LaunchOrigin;
-                var launchedRun = await LaunchPresetAsync(preset, projectPath, card.BoardId, card.Id, prompt, origin, parsed.Key, cancellationToken);
+                var launchedRun = await LaunchPresetAsync(preset, projectPath, card.BoardId, card.Id, prompt, origin, parsed.Key, title, cancellationToken);
                 tab = new TerminalTabStatusResponse(launchedRun.TabId!, launchedRun.QueuedUtc, true, launchedRun.SessionId);
                 session = new TerminalStatusResponse(true, launchedRun.SessionId, parsed.Cli, launchedRun.ResolvedWorkingDirectory ?? projectPath);
             }
@@ -265,7 +265,14 @@ public sealed class BoardLaunchService(
                     cancellationToken);
             }
 
-            if (!string.IsNullOrWhiteSpace(session.SessionId))
+            if (preset is not null && !string.IsNullOrWhiteSpace(session.SessionId))
+            {
+                // LaunchDispatcher already linked this session exactly once, with this card title
+                // and origin from the run snapshot (VIBE-296). Re-linking only raised a conflict.
+                if ((await store.GetAgentSessionsAsync(projectPath, card.Id, session.SessionId!, cancellationToken)).Count == 0)
+                    throw new BoardValidationException("The card was deleted while its agent was starting. The terminal has been closed.");
+            }
+            else if (!string.IsNullOrWhiteSpace(session.SessionId))
             {
                 var origin = isManager ? BoardSessionRecord.ManagerOrigin
                     : isWorker ? isPlanning && !isReview ? BoardSessionRecord.PlanningWorkerOrigin : BoardSessionRecord.WorkerOrigin
@@ -530,7 +537,7 @@ public sealed class BoardLaunchService(
             if (preset is not null)
             {
                 var launchedRun = await LaunchPresetAsync(preset, projectPath, board.Id, null, composed.Prompt,
-                    BoardSessionRecord.ManagerOrigin, parsed.Key, cancellationToken);
+                    BoardSessionRecord.ManagerOrigin, parsed.Key, title, cancellationToken);
                 tab = new TerminalTabStatusResponse(launchedRun.TabId!, launchedRun.QueuedUtc, true, launchedRun.SessionId);
                 session = new TerminalStatusResponse(true, launchedRun.SessionId, parsed.Cli, launchedRun.ResolvedWorkingDirectory ?? projectPath);
             }
@@ -675,12 +682,13 @@ public sealed class BoardLaunchService(
     }
 
     private async Task<LaunchRun> LaunchPresetAsync(LaunchPreset preset, string project, string? boardId, string? cardId,
-        string prompt, string origin, string selection, CancellationToken ct)
+        string prompt, string origin, string selection, string title, CancellationToken ct)
     {
         if (launchService is null || launchDispatcher is null) throw new BoardValidationException("The launch service is unavailable.");
         var run = await launchService.EnqueueAsync("preset", preset.Id,
             new(project, project, "board", "board:" + Guid.NewGuid().ToString("N"), BoardId: boardId, CardId: cardId,
-                AuthorizeBoardTools: true, ContextIncluded: true, ComposedPrompt: prompt, SessionOrigin: origin, Selection: selection), ct, preset.Revision);
+                AuthorizeBoardTools: true, ContextIncluded: true, ComposedPrompt: prompt, SessionOrigin: origin, Selection: selection,
+                SessionTitle: title), ct, preset.Revision);
         run = await launchDispatcher.DispatchAsync(run.Id, ct);
         if (run.Status == "queued")
         {

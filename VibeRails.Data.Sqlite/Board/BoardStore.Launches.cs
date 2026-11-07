@@ -138,7 +138,8 @@ public sealed partial class BoardStore
     {
         await using var db = await OpenAsync(ct);
         await using var cmd = db.CreateCommand();
-        cmd.CommandText = "UPDATE BoardLaunchEvents SET ProcessStatus=$status WHERE Id=$id AND RunId=$run;";
+        // An unchanged status is not a write: the root scheduler reaches here every 2 s (VIBE-296).
+        cmd.CommandText = "UPDATE BoardLaunchEvents SET ProcessStatus=$status WHERE Id=$id AND RunId=$run AND ProcessStatus<>$status;";
         cmd.Parameters.AddWithValue("$status", processStatus); cmd.Parameters.AddWithValue("$id", id); cmd.Parameters.AddWithValue("$run", runId);
         return await cmd.ExecuteNonQueryAsync(ct) == 1;
     }

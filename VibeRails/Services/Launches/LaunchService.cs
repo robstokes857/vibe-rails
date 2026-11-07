@@ -8,11 +8,19 @@ using VibeRails.Services.Terminal;
 namespace VibeRails.Services.Launches;
 
 /// <summary>Shared HTTP/MCP/domain boundary for definition saves and immutable run admission.</summary>
+/// <remarks>
+/// Without <paramref name="boards"/> (the git-hook enqueue path, which must never open board.db), a
+/// preset snapshot leaves the nudge and App/Board context to the root that starts its session.
+/// </remarks>
 public sealed class LaunchService(ILaunchStore store, IAutomationScriptService scripts, IBoardStore? boards = null)
 {
+    /// <summary>Comparison and lease key. Upper-cased where paths compare case-insensitively; never a working directory.</summary>
     public static string ProjectKey(string project) => OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
-        ? Path.TrimEndingDirectorySeparator(Path.GetFullPath(project)).ToUpperInvariant()
-        : Path.TrimEndingDirectorySeparator(Path.GetFullPath(project));
+        ? ProjectRoot(project).ToUpperInvariant()
+        : ProjectRoot(project);
+
+    /// <summary>The full path with its original casing, for anything that touches the filesystem or the user.</summary>
+    public static string ProjectRoot(string project) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(project));
 
     public async Task<LaunchCatalog> CatalogAsync(string project, CancellationToken ct = default)
     {
@@ -103,7 +111,8 @@ public sealed class LaunchService(ILaunchStore store, IAutomationScriptService s
             new(ProjectKey(project), project, "binding", "validation"), ct);
         var binding = new LaunchTriggerBinding(id ?? "binding_" + Guid.NewGuid().ToString("N"), request.DefinitionId,
             request.DefinitionType, ProjectKey(project), request.Trigger, request.Enabled, 0, default, default,
-            request.Trigger.Kind == JobTriggerKind.Schedule ? JobScheduleCalculator.ComputeNext(request.Trigger, DateTime.UtcNow) : null);
+            request.Trigger.Kind == JobTriggerKind.Schedule ? JobScheduleCalculator.ComputeNext(request.Trigger, DateTime.UtcNow) : null,
+            ProjectRoot(project));
         return await store.SaveBindingAsync(binding, request.ExpectedRevision, ct);
     }
 
@@ -116,7 +125,11 @@ public sealed class LaunchService(ILaunchStore store, IAutomationScriptService s
             LaunchValidation.ValidateSnapshot(existing.Snapshot);
             return existing;
         }
-        var snapshot = await SnapshotAsync(type, id, context with { ProjectPath = ProjectKey(context.ProjectPath) }, ct);
+        var snapshot = await SnapshotAsync(type, id, context with
+        {
+            ProjectPath = ProjectKey(context.ProjectPath),
+            ProjectRoot = context.ProjectRoot ?? ProjectRoot(context.ProjectPath)
+        }, ct);
         if (expectedRevision is not null && snapshot.Revision != expectedRevision)
             throw new LaunchConflictException("Definition changed while composing the launch. Try again.", snapshot.Revision);
         return await store.EnqueueAsync(snapshot, ct: ct);
@@ -175,19 +188,29 @@ public sealed class LaunchService(ILaunchStore store, IAutomationScriptService s
         {
             var a = await store.GetActionAsync(id, ct) ?? throw new LaunchValidationException("Action is unavailable. Replace the saved selection.");
             if (!a.Enabled || a.RetiredUtc is not null) throw new LaunchValidationException("This Action is disabled or retired.");
-            var hash = await ValidateActionForProjectAsync(a, context.ProjectPath, false, ct);
+            var hash = await ValidateActionForProjectAsync(a, context.Root, false, ct);
             snapshot = new(context, Action: a, ApprovedScriptHash: hash);
         }
         else throw new LaunchValidationException("Unknown definition type.");
         if (snapshot.Preset is { } preset && context.ComposedPrompt is null)
         {
-            var nudge = Config.LoadFresh().CreateVibeStoryTracking;
             var prompt = string.IsNullOrEmpty(context.PromptPrefix) ? context.PromptOverride ?? preset.InitialPrompt
                 : context.PromptPrefix + "\n\n" + (context.PromptOverride ?? preset.InitialPrompt);
-            if (nudge && string.IsNullOrWhiteSpace(prompt)) prompt = VibeStoryTrackingPrompt.Guidance;
-            if (nudge && boards is not null)
-                prompt = VibeRails.Services.Terminal.ContextLevels.Prefix(await VibeRails.Services.Terminal.ContextLevels.ResolveNudgedAsync(boards, context.ProjectPath, context.BoardId, ct)) + prompt;
-            snapshot = snapshot with { Context = context with { ComposedPrompt = prompt, ContextIncluded = true } };
+            if (boards is null)
+            {
+                // Enqueue-only hosts (git hooks) must keep working when board.db is busy, newer or
+                // damaged, so they never open it. The root's session start adds the nudge and
+                // App/Board context instead, as the retired Jobs hook path did (VIBE-296).
+                snapshot = snapshot with { Context = context with { ComposedPrompt = prompt, ContextIncluded = false } };
+            }
+            else
+            {
+                var nudge = Config.LoadFresh().CreateVibeStoryTracking;
+                if (nudge && string.IsNullOrWhiteSpace(prompt)) prompt = VibeStoryTrackingPrompt.Guidance;
+                if (nudge)
+                    prompt = VibeRails.Services.Terminal.ContextLevels.Prefix(await VibeRails.Services.Terminal.ContextLevels.ResolveNudgedAsync(boards, context.Root, context.BoardId, ct)) + prompt;
+                snapshot = snapshot with { Context = context with { ComposedPrompt = prompt, ContextIncluded = true } };
+            }
         }
         LaunchValidation.ValidateSnapshot(snapshot);
         return snapshot;
@@ -207,7 +230,7 @@ public sealed class LaunchService(ILaunchStore store, IAutomationScriptService s
         {
             var current = await store.GetActionAsync(a.Id, ct);
             if (current is null || !current.Enabled || current.RetiredUtc is not null) throw new LaunchValidationException("The Action is now disabled or retired.");
-            var hash = await ValidateActionForProjectAsync(a, snapshot.Context.ProjectPath, false, ct);
+            var hash = await ValidateActionForProjectAsync(a, snapshot.Context.Root, false, ct);
             if (hash != snapshot.ApprovedScriptHash) throw new LaunchValidationException("The approved script content no longer matches this run.");
         }
     }

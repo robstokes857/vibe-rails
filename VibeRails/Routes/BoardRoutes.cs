@@ -552,7 +552,9 @@ public static partial class BoardRoutes
             && http.RequestServices.GetService<VibeRails.Launches.ILaunchStore>() is { } runs)
         {
             var run = (await runs.GetActiveRunsAsync(ct)).SingleOrDefault(r => r.SessionId == session && r.TabId == contact.Owner);
-            if (run is not null) return run.ProjectPath;
+            // The cased root, never run.ProjectPath: that is the upper-cased comparison key, which a
+            // case-sensitive volume cannot open as a nested launch's working directory (VIBE-296).
+            if (run is not null) return run.Snapshot.Context.Root;
         }
         return Project();
     }

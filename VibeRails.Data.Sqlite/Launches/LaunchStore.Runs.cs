@@ -30,9 +30,6 @@ public sealed partial class LaunchStore
             if (await reader.ReadAsync(ct)) return ReadRun(reader);
 
         if ((snapshot.Preset is null) == (snapshot.Action is null)) throw new LaunchValidationException("Choose exactly one preset or Action.");
-        await RequireAvailable(db, tx, snapshot.DefinitionType, snapshot.DefinitionId,
-            sourceRunId is null ? snapshot.Revision : null,
-            automatic: sourceRunId is null && snapshot.Context.TriggerKind != "manual", ct);
         if (sourceRunId is not null)
         {
             using var source = Command(db, "SELECT Snapshot,Status FROM Runs WHERE Id=$id AND ProjectPath=$project;", tx,
@@ -45,6 +42,11 @@ public sealed partial class LaunchStore
             snapshot = original with { Context = original.Context with { OccurrenceId = snapshot.Context.OccurrenceId } };
             LaunchValidation.ValidateSnapshot(snapshot);
         }
+        // Validate the definition the run will actually execute: a retry's is the source run's, swapped
+        // in above, never whatever the caller passed in (VIBE-296).
+        await RequireAvailable(db, tx, snapshot.DefinitionType, snapshot.DefinitionId,
+            sourceRunId is null ? snapshot.Revision : null,
+            automatic: sourceRunId is null && snapshot.Context.TriggerKind != "manual", ct);
         var id = "run_" + Guid.NewGuid().ToString("N");
         using (var cmd = Command(db, """
             INSERT INTO Runs(Id,DefinitionId,DefinitionType,ProjectPath,OccurrenceId,Snapshot,Status,QueuedUTC,SourceRunId)
@@ -205,21 +207,45 @@ public sealed partial class LaunchStore
     public async Task<IReadOnlyList<string>> GetOpenProjectRootsAsync(DateTime nowUtc, CancellationToken ct = default)
     {
         using var db = Open();
-        using var cmd = Command(db, "SELECT substr(Name,9) FROM RuntimeLeases WHERE Name LIKE 'project:%' AND UntilUTC>$now;", null, ("$now", Stamp(nowUtc)));
+        // A lease taken by an older build has no recorded root; its key is still a usable answer.
+        using var cmd = Command(db, """
+            SELECT COALESCE(p.ProjectRoot, substr(l.Name,9)) FROM RuntimeLeases l
+            LEFT JOIN ProjectRootPaths p ON p.ProjectKey=substr(l.Name,9)
+            WHERE l.Name LIKE 'project:%' AND l.UntilUTC>$now;
+            """, null, ("$now", Stamp(nowUtc)));
         using var reader = await cmd.ExecuteReaderAsync(ct);
         List<string> roots = [];
         while (await reader.ReadAsync(ct)) roots.Add(reader.GetString(0));
         return roots;
     }
 
+    private const string LeaseSql = """
+        INSERT INTO RuntimeLeases VALUES($name,$owner,$until) ON CONFLICT(Name) DO UPDATE SET
+        Owner=excluded.Owner,UntilUTC=excluded.UntilUTC WHERE RuntimeLeases.Owner=$owner OR RuntimeLeases.UntilUTC<=$now;
+        """;
+
     public async Task<bool> TryLeaseAsync(string name, string owner, DateTime nowUtc, TimeSpan duration, CancellationToken ct = default)
     {
         using var db = Open();
-        using var cmd = Command(db, """
-            INSERT INTO RuntimeLeases VALUES($name,$owner,$until) ON CONFLICT(Name) DO UPDATE SET
-            Owner=excluded.Owner,UntilUTC=excluded.UntilUTC WHERE RuntimeLeases.Owner=$owner OR RuntimeLeases.UntilUTC<=$now;
-            """, null, ("$name", name), ("$owner", owner), ("$until", Stamp(nowUtc + duration)), ("$now", Stamp(nowUtc)));
+        using var cmd = Command(db, LeaseSql, null, ("$name", name), ("$owner", owner), ("$until", Stamp(nowUtc + duration)), ("$now", Stamp(nowUtc)));
         return await cmd.ExecuteNonQueryAsync(ct) == 1;
+    }
+
+    public async Task<bool> TryLeaseProjectAsync(string projectKey, string projectRoot, string owner, DateTime nowUtc, TimeSpan duration, CancellationToken ct = default)
+    {
+        using var db = Open();
+        using var tx = db.BeginTransaction(deferred: false);
+        using (var lease = Command(db, LeaseSql, tx, ("$name", "project:" + projectKey), ("$owner", owner),
+            ("$until", Stamp(nowUtc + duration)), ("$now", Stamp(nowUtc))))
+            if (await lease.ExecuteNonQueryAsync(ct) != 1) return false;
+        // Unchanged on every tick after the first, so the upsert's WHERE keeps it from rewriting the row.
+        using (var path = Command(db, """
+            INSERT INTO ProjectRootPaths(ProjectKey,ProjectRoot) VALUES($key,$root) ON CONFLICT(ProjectKey) DO UPDATE SET
+            ProjectRoot=excluded.ProjectRoot WHERE ProjectRootPaths.ProjectRoot<>excluded.ProjectRoot;
+            """, tx, ("$key", projectKey), ("$root", projectRoot)))
+            await path.ExecuteNonQueryAsync(ct);
+        tx.Commit();
+        return true;
     }
 
     public async Task SaveCheckEvidenceAsync(string runId, VibeRails.Services.Board.BoardCheckRecord check, CancellationToken ct = default)

@@ -292,6 +292,7 @@ middleware serves their paths rather than registering individual API endpoints.
 | GET | `/api/v1/runs/{id}/attachments/{attachmentId}/content` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |
 | GET, PUT | `/api/v1/board/columns/{column}/launches` | [BoardLaunchRoutes.cs](VibeRails/Routes/BoardLaunchRoutes.cs); root only |
 | GET | `/api/v1/board/cards/{card}/launches` | [BoardLaunchRoutes.cs](VibeRails/Routes/BoardLaunchRoutes.cs); root only |
+| GET | `/api/v1/board/cards/{card}/launches/runs` | [BoardLaunchRoutes.cs](VibeRails/Routes/BoardLaunchRoutes.cs); root only |
 | POST | `/api/v1/board/cards/{card}/launches/{entry}/skip` | [BoardLaunchRoutes.cs](VibeRails/Routes/BoardLaunchRoutes.cs); root only |
 | OPTIONS | `*` | [CookieAuthMiddleware.cs](VibeRails/Middleware/CookieAuthMiddleware.cs); global bypass, not a business mapping |
 | GET | `/api/v1/agent-tools/terminal` | [AgentToolRoutes.cs](VibeRails/Routes/AgentToolRoutes.cs) |

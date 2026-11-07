@@ -71,15 +71,29 @@ public sealed class LaunchDispatcher(ILaunchStore store, LaunchService service, 
                 return (await store.GetRunAsync(id, ct))!;
             }
             var preset = run.Snapshot.Preset!;
-            var session = await tabs.StartSessionAsync(tab.TabId, new StartTerminalRequest(
-                WorkingDirectory: run.Snapshot.Context.WorkingDirectory, Cli: LlmParser.ToWireName(preset.Cli), Title: preset.Name,
-                ContextIncluded: true) { LaunchClaim = claim, PreserveWorkingDirectory = true }, ct);
             var context = run.Snapshot.Context;
+            // A Board launch supplies the card's `{DisplayId} · {Title}`; the tab and the card's one
+            // session link both use it. The child reads the same title from the snapshot (VIBE-296).
+            var title = context.SessionTitle ?? preset.Name;
+            var session = await tabs.StartSessionAsync(tab.TabId, new StartTerminalRequest(
+                WorkingDirectory: context.WorkingDirectory, Cli: LlmParser.ToWireName(preset.Cli), Title: title,
+                ContextIncluded: context.ContextIncluded) { LaunchClaim = claim, PreserveWorkingDirectory = true }, ct);
             if (context.CardId is not null && session.SessionId is not null)
             {
-                await board.LinkSessionAsync(context.ProjectPath, context.CardId, session.SessionId, tab.TabId,
-                    context.Selection ?? $"preset:{preset.Id}:{LlmParser.ToWireName(preset.Cli).ToLowerInvariant()}",
-                    LlmParser.ToWireName(preset.Cli), preset.Name, context.SessionOrigin ?? "launch", ct);
+                var origin = context.SessionOrigin ?? BoardSessionRecord.LaunchOrigin;
+                try
+                {
+                    await board.LinkSessionAsync(context.Root, context.CardId, session.SessionId, tab.TabId,
+                        context.Selection ?? $"preset:{preset.Id}:{LlmParser.ToWireName(preset.Cli).ToLowerInvariant()}",
+                        LlmParser.ToWireName(preset.Cli), title, origin, ct);
+                }
+                catch (BoardConflictException) when (ConfirmsLaunchOrigin(origin))
+                {
+                    // The CLI's own MCP connection can attach its session first (origin "mcp"). This
+                    // launch then refines that one attachment's origin rather than linking it twice.
+                    if (!await board.ConfirmSessionLaunchOriginAsync(context.Root, context.CardId, session.SessionId, origin, ct))
+                        throw;
+                }
             }
         }
         catch (Exception ex)
@@ -92,6 +106,11 @@ public sealed class LaunchDispatcher(ILaunchStore store, LaunchService service, 
         }
         return (await store.GetRunAsync(id, CancellationToken.None))!;
     }
+
+    /// <summary>The explicit launch origins <see cref="IBoardStore.ConfirmSessionLaunchOriginAsync"/> may apply to an early attachment.</summary>
+    private static bool ConfirmsLaunchOrigin(string origin) => origin is BoardSessionRecord.LaunchOrigin
+        or BoardSessionRecord.ManagerOrigin or BoardSessionRecord.WorkerOrigin or BoardSessionRecord.PlanningWorkerOrigin
+        or "chat" or "planning" or "code_review";
 
     private static async Task ExecuteActionAsync(IServiceScopeFactory scopes, LaunchRun run, LaunchClaim claim, CancellationToken stopping)
     {
@@ -139,7 +158,7 @@ public sealed class LaunchDispatcher(ILaunchStore store, LaunchService service, 
                     script.Arguments, script.WorkingDirectory, script.TimeoutSeconds, run.Snapshot.ApprovedScriptHash,
                     null, null, null, null, null, "", "");
                 var prepared = await services.GetRequiredService<IAutomationScriptService>().PrepareAsync(
-                    run.Snapshot.Context.WorkingDirectory, run.ProjectPath, scriptInput, cancel.Token);
+                    run.Snapshot.Context.WorkingDirectory, run.Snapshot.Context.Root, scriptInput, cancel.Token);
                 var result = await services.GetRequiredService<ICliWrapper>().RunAsync(new CliRequest(prepared.Executable,
                     prepared.Arguments, prepared.WorkingDirectory, prepared.EnvironmentVariables,
                     script.TimeoutSeconds is { } seconds ? TimeSpan.FromSeconds(seconds) : Timeout.InfiniteTimeSpan,
@@ -166,7 +185,7 @@ public sealed class LaunchDispatcher(ILaunchStore store, LaunchService service, 
             }
             else
             {
-                var check = await services.GetRequiredService<BoardCheckService>().ExecuteAsync(run.ProjectPath,
+                var check = await services.GetRequiredService<BoardCheckService>().ExecuteAsync(run.Snapshot.Context.Root,
                     run.Snapshot.Context.WorkingDirectory, run.Snapshot.Context.CardId, run.Id, action.Id,
                     action.Kind == "vca" ? JobActionKind.Vca : JobActionKind.CodeQuality,
                     LaunchService.CheckArguments(action.Check!), cancel.Token);

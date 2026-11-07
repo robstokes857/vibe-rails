@@ -32,6 +32,11 @@ public interface ILaunchStore
     Task<bool> CancelAsync(string id, string projectPath, CancellationToken ct = default);
     Task<IReadOnlyList<string>> GetOpenProjectRootsAsync(DateTime nowUtc, CancellationToken ct = default);
     Task<bool> TryLeaseAsync(string name, string owner, DateTime nowUtc, TimeSpan duration, CancellationToken ct = default);
+    /// <summary>
+    /// The <c>project:&lt;key&gt;</c> presence lease, recording the project as this root spells it so
+    /// <see cref="GetOpenProjectRootsAsync"/> returns a usable path rather than the comparison key.
+    /// </summary>
+    Task<bool> TryLeaseProjectAsync(string projectKey, string projectRoot, string owner, DateTime nowUtc, TimeSpan duration, CancellationToken ct = default);
     Task<IReadOnlyList<LaunchAttachment>> ListAttachmentsAsync(string definitionId, CancellationToken ct = default);
     Task<LaunchAttachment> AddAttachmentAsync(string definitionId, string name, string mimeType, byte[] content, CancellationToken ct = default);
     Task<LaunchAttachmentContent?> ReadAttachmentAsync(string definitionId, string attachmentId, CancellationToken ct = default);

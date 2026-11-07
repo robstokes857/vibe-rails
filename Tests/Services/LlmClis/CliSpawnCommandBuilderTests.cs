@@ -230,6 +230,32 @@ public class CliSpawnCommandBuilderTests
             envName: null);
 
         Assert.Equal(["--env", expectedEnv, "--workdir", "C:\\project"], argv);
+        // VIBE-296: Program.cs exits before the host for retired argv. A base CLI is not retired.
+        Assert.False(VibeRails.Utils.RetiredLaunchArguments.IsRetired(argv));
+    }
+
+    /// <summary>
+    /// The sandbox route (POST /api/v1/sandboxes/{id}/launch/{cli}) spawns exactly this argv for every
+    /// base CLI. VIBE-292's gate rejected any --env, so the launched terminal died with the retirement
+    /// message; it must reach the LMBootstrap path instead, CLI passthrough included.
+    /// </summary>
+    [Theory]
+    [InlineData(LLM.Claude)]
+    [InlineData(LLM.Codex)]
+    [InlineData(LLM.Antigravity)]
+    [InlineData(LLM.Copilot)]
+    [InlineData(LLM.Grok46)]
+    [InlineData(LLM.Glm52)]
+    public void SandboxBaseCliArgvSurvivesProgramArgumentGating(LLM llm)
+    {
+        var argv = BaseLlmCliLauncher.BuildVbArgv(llm, "C:\\Sandboxes\\My App", ["--model", "x", "--env-id", "9"], envName: null);
+
+        Assert.False(VibeRails.Utils.RetiredLaunchArguments.IsRetired(argv));
+        var parsed = VibeRails.Utils.ArgumentParser.Parse(argv);
+        Assert.True(parsed.IsLMBootstrap);
+        Assert.Equal(llm, LlmParser.ParseValue(parsed.LMBootstrapCli));
+        Assert.Null(parsed.EnvId);
+        Assert.Equal(["--model", "x", "--env-id", "9"], parsed.ExtraArgs);
     }
 
     private static (string App, string[] Argv, string Script) BuildWindows(

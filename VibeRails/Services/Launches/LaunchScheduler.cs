@@ -47,7 +47,7 @@ public sealed class LaunchScheduler(IServiceScopeFactory scopes, ILaunchStore st
         var launch = services.GetRequiredService<LaunchService>();
         var now = DateTime.UtcNow;
         var project = await services.GetRequiredService<IBoardProjectResolver>().ResolveAsync(ct);
-        await store.TryLeaseAsync("project:" + LaunchService.ProjectKey(project), owner, now, TimeSpan.FromSeconds(30), ct);
+        await store.TryLeaseProjectAsync(LaunchService.ProjectKey(project), LaunchService.ProjectRoot(project), owner, now, TimeSpan.FromSeconds(30), ct);
         await services.GetRequiredService<BoardLaunchWorkflow>().TickAsync(ct);
         if (await store.TryLeaseAsync("scheduler", owner, now, TimeSpan.FromSeconds(30), ct))
         {
@@ -59,8 +59,10 @@ public sealed class LaunchScheduler(IServiceScopeFactory scopes, ILaunchStore st
                 if (!binding.Enabled || binding.NextRunUtc is not { } due || due > now) continue;
                 try
                 {
+                    // The binding's cased root, when it has one, is also the working directory (VIBE-296).
+                    var bindingRoot = binding.ProjectRoot ?? binding.ProjectPath;
                     await launch.EnqueueAsync(binding.DefinitionType, binding.DefinitionId,
-                        new(binding.ProjectPath, binding.ProjectPath, "schedule", $"schedule:{binding.Id}:{due:O}", binding.Id), ct);
+                        new(bindingRoot, bindingRoot, "schedule", $"schedule:{binding.Id}:{due:O}", binding.Id), ct);
                     await store.AdvanceBindingAsync(binding.Id, binding.Revision, due, JobScheduleCalculator.ComputeNext(binding.Trigger, now), ct);
                 }
                 catch (Exception ex) when (ex is LaunchValidationException or LaunchConflictException or AutomationScriptValidationException)

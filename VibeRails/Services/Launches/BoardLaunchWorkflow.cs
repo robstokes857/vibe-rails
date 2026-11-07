@@ -64,7 +64,7 @@ public sealed class BoardLaunchWorkflow(IBoardStore board, ILaunchStore runs, La
     public async Task TickAsync(CancellationToken ct)
     {
         var entries = await board.GetLaunchEventsAsync(ct: ct);
-        foreach (var entry in entries.Where(e => e.RunId is not null))
+        foreach (var entry in entries.Where(e => e.RunId is not null && !IsSettled(e)))
         {
             var run = await runs.GetRunAsync(entry.RunId!, ct);
             if (run is null) continue;
@@ -73,7 +73,9 @@ public sealed class BoardLaunchWorkflow(IBoardStore board, ILaunchStore runs, La
                 await runs.CancelAsync(run.Id, run.ProjectPath, ct);
                 run = (await runs.GetRunAsync(run.Id, ct))!;
             }
-            await board.UpdateLaunchEventAsync(entry.Id, run.Id, run.Status, ct);
+            // Every 2 s tick reaches here; write board.db only when the process status moved (VIBE-296).
+            if (entry.ProcessStatus != run.Status)
+                await board.UpdateLaunchEventAsync(entry.Id, run.Id, run.Status, ct);
             if (entry.Current && entry.Verdict is null && run.IsTerminal && run.Snapshot.Action is not null)
                 await board.ReportLaunchEventAsync(entry.ProjectPath, entry.CardId, entry.Id,
                     run.Status == "succeeded" ? "passed" : "failed", run.Error ?? "Action completed: " + run.Status, run.SessionId, null, ct: ct, expectedRunId: run.Id);
@@ -105,6 +107,15 @@ public sealed class BoardLaunchWorkflow(IBoardStore board, ILaunchStore runs, La
             }
         }
     }
+
+    /// <summary>
+    /// An entry whose recorded run already ended needs no more ticking: its terminal status is stored,
+    /// and an Action's verdict is reported (a preset reports its own). A retry replaces the run id and
+    /// resets the status to queued, which makes the entry live again.
+    /// </summary>
+    internal static bool IsSettled(BoardLaunchEvent entry) =>
+        entry.ProcessStatus is "succeeded" or "failed" or "cancelled" or "timed-out" or "interrupted"
+        && (entry.Verdict is not null || entry.DefinitionType != "action" || !entry.Current);
 
     public static bool ReleasesNext(BoardLaunchEvent entry)
     {

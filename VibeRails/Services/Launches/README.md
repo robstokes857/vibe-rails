@@ -52,6 +52,7 @@ the existing local-user project resolver.
 | `GET /runs/{id}/attachments/{attachmentId}/content` | Project- and snapshot-scoped retained attachment |
 | `GET, PUT /board/columns/{column}/launches` | `{selections:[{definitionId,definitionType,gate}],revision}` |
 | `GET /board/cards/{card}/launches` | Ordered lane entries, process state, verdict and run reference |
+| `GET /board/cards/{card}/launches/runs` | `{runs,nextCursor:null}`: that card's runs newest first, 50 per page; `offset` (0–1,000,000) pages back. The card dialog uses it instead of filtering project-wide `/runs` |
 | `POST /board/cards/{card}/launches/{entry}/skip` | User skip, scoped to the current entry |
 
 Creates use `expectedRevision:0`; updates must use the positive revision returned
@@ -94,6 +95,32 @@ may take over after 30 seconds only when no root for that project remains open.
 Before/after-commit hooks only enqueue; VCA preflight blocking
 remains independent. No daemon or OS registration is added.
 
+Hooks never open `board.db` (`LaunchEventService.Create` builds a `LaunchService`
+without a Board store), so a busy, newer or damaged Board database cannot fail a
+commit. Their preset snapshots leave `ContextIncluded` off; the root's terminal
+start then adds the nudge and App/Board context for the run's project, as the
+retired Jobs hook path did. Every other admission composes them up front.
+
+`ProjectKey` (upper-cased on Windows and macOS) is only the comparison and lease
+key in `Runs.ProjectPath`, bindings and `project:<key>` leases. It is never a
+working directory or a path shown to the user. Each snapshot context records
+`projectRoot`, the project as the queuing root spelled it, and `Root` falls back
+to the key for runs queued before VIBE-296. Bindings record their root the same
+way. Nested Board launches, Action scripts and checks, Board links and context
+resolution use it. `launches/3` adds `ProjectRootPaths(ProjectKey, ProjectRoot)`,
+which the scheduler writes alongside its project lease. Open-root readers, such as
+the review inbox clone list, return those paths. A lease from an older build still
+answers with its key. The table is separate, not a `RuntimeLeases` column, because
+older builds insert into that table positionally.
+
+A Board launch passes `sessionTitle` (`{DisplayId} · {Title}`). The dispatcher
+uses it for the tab title and for the card's one session link. When the CLI's MCP
+connection attached the session first, the dispatcher refines that attachment's
+origin instead of linking it again. Agent comments take their purpose from a saved
+review or review origin first, then from the preset snapshotted on the session's
+launch run (`BoardService.FindAgentPurposeAsync`). Lane entries are written only
+when their process status changes, and entries whose run has ended are not ticked.
+
 Run states are `queued`, `claimed`, `running`, `uncertain`, and terminal
 `succeeded`, `failed`, `cancelled`, `timed-out`, `interrupted`. Cancellation does
 not release running capacity before termination. An Action cancelled between claim
@@ -119,8 +146,11 @@ work before releasing successors. Lane configuration edits affect future entries
 ## Cutover and compatibility
 
 Environment, environment-settings, Step, Job and old Board Automation HTTP
-surfaces return retirement responses. `--env`, `--env-id` and `--job-run` are
-retired. Base CLI launches, Board managers and script/check engines remain.
+surfaces return retirement responses. `--env-id`, `--job-run` and `--env` with a
+custom environment name are retired: `Program.cs` exits with code 2 through
+`RetiredLaunchArguments.IsRetired`. `vb --env <base-cli> --workdir <dir>` remains,
+because native-terminal base CLI launches (the sandbox launch route) spawn exactly
+that. Base CLI launches, Board managers and script/check engines remain.
 Legacy rows, schema, folders and recordings are retained without conversion or
 cleanup. An old saved selection is unavailable until explicitly replaced; names
 are never matched to new IDs. An older application version can still run its own

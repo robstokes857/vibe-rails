@@ -167,8 +167,10 @@ public class TerminalRunner
             var preparedSession = launch is null
                 ? await _commandService.PrepareSessionAsync(llm, envName, extraArgs, initialPrompt, summary, sessionId,
                     authorizeBoardTools, resolveContext)
+                // A launch snapshot normally carries its composed nudge and context. One queued
+                // without them (ContextIncluded off: git-hook enqueue, VIBE-296) gets them here.
                 : await _commandService.PrepareLaunchSessionAsync(llm, envName, extraArgs, initialPrompt, summary, sessionId,
-                    authorizeBoardTools, resolveContext, suppressNudge: true);
+                    authorizeBoardTools, resolveContext, suppressNudge: contextIncluded);
             if (launch is not null)
                 await launch.BeforeSpawnAsync(sessionId, preparedSession.InitialPrompt, workDir, ct);
             foreach (var kvp in _toolApiContext.BuildEnvironment(sessionId))

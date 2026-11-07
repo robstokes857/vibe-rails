@@ -491,9 +491,23 @@ public sealed partial class BoardService(
         if (existing is null)
             return null;
         author = author with { Purpose = author.Kind == BoardAuthor.AgentKind && author.SessionId is { } session
-            ? await store.FindSessionPurposeAsync(projectPath, existing.Id, session, cancellationToken) : null };
+            ? await FindAgentPurposeAsync(projectPath, existing.Id, session, cancellationToken) : null };
         var comment = await store.AddCommentAsync(projectPath, existing.Id, author, text, cancellationToken, syncToJira);
         return comment is null ? null : ToDto(comment);
+    }
+
+    /// <summary>
+    /// A saved review or review origin first; otherwise the purpose snapshotted on the preset of the
+    /// launch run that started this session for this card (VIBE-296). Retired Job and Environment
+    /// purposes are no longer consulted.
+    /// </summary>
+    private async Task<string?> FindAgentPurposeAsync(string projectPath, string cardId, string sessionId, CancellationToken cancellationToken)
+    {
+        if (await store.FindSessionPurposeAsync(projectPath, cardId, sessionId, cancellationToken) is { } purpose) return purpose;
+        if (launchRuns is null) return null;
+        var run = (await launchRuns.GetBoardRunsAsync(Launches.LaunchService.ProjectKey(projectPath), cardId,
+            sessionId: sessionId, ct: cancellationToken)).FirstOrDefault();
+        return run?.Snapshot.Preset?.Purpose is { } snapshotted && VibeRails.DTOs.AgentPurpose.IsValid(snapshotted) ? snapshotted : null;
     }
 
     public async Task<BoardCommentDto?> AddNoteAsync(string projectPath, string idOrKey, BoardAuthor author, string body, CancellationToken cancellationToken = default, bool syncToJira = true)

@@ -46,13 +46,16 @@ function fakeApp(state) {
         data: { configs: { rootPath: 'C:/repo' } },
         showToast() {},
         catalogCalls: 0,
+        urls: [],
         async apiCall(url) {
+            app.urls.push(url);
             if (url === '/api/v1/launch-catalog') {
                 app.catalogCalls++;
                 if (state.catalogFails-- > 0) throw new Error('catalog unavailable');
                 return { items: state.jobs.map(job => ({ ...job, id: String(job.id), kind: 'agent', definitionType: 'preset', canLaunch: true })) };
             }
-            if (url.startsWith('/api/v1/runs')) return { runs: [] };
+            if (/^\/api\/v1\/board\/cards\/[^/]+\/launches\/runs$/.test(url)) return { runs: state.cardRuns || [], nextCursor: null };
+            if (url.startsWith('/api/v1/runs')) throw new Error('the card dialog must not page every project run');
             return state.laneEntries || [];
 
         }
@@ -112,5 +115,22 @@ test('card Automation rail displays the saved check outcome and summary', async 
     assert.match(runs.innerHTML, /Process: succeeded · Result: passed/);
     assert.match(runs.innerHTML, /5 files analyzed; 7 skipped/);
     assert.doesNotMatch(runs.innerHTML, />Passed</);
+    controls.dispose();
+});
+
+// VIBE-296: the dialog read `runs?limit=100` for the whole project and filtered by card, so a
+// card's runs vanished once 100 newer runs existed elsewhere. The server now scopes them.
+test('card runs come from the card-scoped route and are shown as returned', async () => {
+    const state = { jobs: [], cardRuns: [
+        { id: 'run_new', status: 'running', sessionId: 'session-1', snapshot: { preset: { name: 'Reviewer' }, context: { cardId: 'card a/b' } } },
+        { id: 'run_old', status: 'succeeded', snapshot: { action: { name: 'Lint' }, context: { cardId: 'card a/b' } } }
+    ] };
+    const app = fakeApp(state);
+    const { editor, runs } = automationEditor();
+    const controls = bindCardAutomations(editor, { id: 'card a/b' }, { app });
+    await settle();
+    assert.ok(app.urls.includes('/api/v1/board/cards/card%20a%2Fb/launches/runs'), 'the card id is encoded into the scoped route');
+    assert.ok(!app.urls.some(url => url.startsWith('/api/v1/runs')), 'no project-wide run page is fetched');
+    assert.match(runs.innerHTML, /Reviewer · running[\s\S]*data-launch-replay="session-1"[\s\S]*Lint · succeeded/);
     controls.dispose();
 });
