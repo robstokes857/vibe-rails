@@ -110,7 +110,7 @@ public sealed class LaunchDispatcher(ILaunchStore store, LaunchService service, 
     /// <summary>The explicit launch origins <see cref="IBoardStore.ConfirmSessionLaunchOriginAsync"/> may apply to an early attachment.</summary>
     private static bool ConfirmsLaunchOrigin(string origin) => origin is BoardSessionRecord.LaunchOrigin
         or BoardSessionRecord.ManagerOrigin or BoardSessionRecord.WorkerOrigin or BoardSessionRecord.PlanningWorkerOrigin
-        or "chat" or "planning" or "code_review";
+        or "chat" or "planning" or "code_review" or BoardSessionRecord.AutomationOrigin or "lane_review";
 
     private static async Task ExecuteActionAsync(IServiceScopeFactory scopes, LaunchRun run, LaunchClaim claim, CancellationToken stopping)
     {

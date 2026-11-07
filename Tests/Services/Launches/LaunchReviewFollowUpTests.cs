@@ -92,11 +92,47 @@ public sealed class LaunchReviewFollowUpTests : IDisposable
         Assert.Empty(await store.GetOpenProjectRootsAsync(now.AddMinutes(1), Ct));
     }
 
+    /// <summary>
+    /// Review R1: an enabled script binding validates against the cased root, as saving the Action did.
+    /// The validator here is ordinal, like a case-sensitive macOS volume; the upper-cased key fails it.
+    /// </summary>
+    [Fact]
+    public async Task EnabledScriptBindingsValidateAgainstTheCasedRootNotTheKey()
+    {
+        var cased = LaunchService.ProjectRoot(repo);
+        var seen = new List<string>();
+        var scripts = new Mock<IAutomationScriptService>();
+        scripts.Setup(x => x.NormalizeAsync(It.IsAny<string>(), It.IsAny<JobActionRequest>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()))
+            .ReturnsAsync((string project, JobActionRequest action, CancellationToken _, bool _) =>
+            {
+                seen.Add(project);
+                if (!string.Equals(LaunchService.ProjectRoot(project), cased, StringComparison.Ordinal))
+                    throw new AutomationScriptValidationException("No such directory on a case-sensitive volume: " + project);
+                return action with { ApprovedHash = new string('a', 64) };
+            });
+        var service = new LaunchService(store, scripts.Object);
+        var action = await service.SaveActionAsync(repo, null, new("Lint", "", "script", new("lint.py", JobScriptRuntime.Python, [])), Ct);
+
+        var binding = await service.SaveBindingAsync(repo, null, new(action.Id, "action", new(JobTriggerKind.Commit)), Ct);
+
+        Assert.True(binding.Enabled);
+        Assert.Equal(cased, binding.ProjectRoot, StringComparer.Ordinal);
+        Assert.All(seen, project => Assert.Equal(cased, LaunchService.ProjectRoot(project), StringComparer.Ordinal));
+        Assert.True(seen.Count >= 2, "the Action save and the binding validation both reached the validator");
+        // The hook then queues the same Action against the same root.
+        Assert.Equal(1, await new LaunchEventService(store, service).EnqueueAsync(repo, JobTriggerKind.Commit, "cccc", Ct));
+        Assert.Equal(cased, Assert.Single((await store.ListRunsAsync(LaunchService.ProjectKey(repo), ct: Ct)).Runs).Snapshot.Context.Root,
+            StringComparer.Ordinal);
+    }
+
     /// <summary>Item 4: the Board title reaches the tab and the card's single session link.</summary>
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task PresetBoardLaunchUsesTheCardTitleAndLinksTheSessionOnce(bool earlyAttachment)
+    [InlineData(false, BoardSessionRecord.LaunchOrigin)]
+    [InlineData(true, BoardSessionRecord.LaunchOrigin)]
+    // Review R2: lane launches refine an early MCP attachment too, so they still count as Automations.
+    [InlineData(true, BoardSessionRecord.AutomationOrigin)]
+    [InlineData(true, "lane_review")]
+    public async Task PresetBoardLaunchUsesTheCardTitleAndLinksTheSessionOnce(bool earlyAttachment, string origin)
     {
         var board = new BoardStore($"Data Source={Path.Combine(root, "board.db")};Pooling=False",
             $"Data Source={Path.Combine(root, "state.db")};Pooling=False");
@@ -105,7 +141,7 @@ public sealed class LaunchReviewFollowUpTests : IDisposable
         var preset = await PresetAsync("Preset name");
         var title = $"{card.DisplayId} · Card";
         var run = await Service(board).EnqueueAsync("preset", preset.Id, new(repo, repo, "board", "board:title",
-            BoardId: card.BoardId, CardId: card.Id, ContextIncluded: true, ComposedPrompt: "Work", SessionOrigin: BoardSessionRecord.LaunchOrigin,
+            BoardId: card.BoardId, CardId: card.Id, ContextIncluded: true, ComposedPrompt: "Work", SessionOrigin: origin,
             SessionTitle: title), Ct);
         var session = Guid.NewGuid().ToString();
         StartTerminalRequest? started = null;
@@ -128,7 +164,7 @@ public sealed class LaunchReviewFollowUpTests : IDisposable
 
         Assert.Equal(title, started!.Title);
         var linked = Assert.Single((await board.GetCardDetailAsync(repo, card.Id, Ct))!.Sessions);
-        Assert.Equal(BoardSessionRecord.LaunchOrigin, linked.Origin);
+        Assert.Equal(origin, linked.Origin);
         Assert.Equal(earlyAttachment ? "Early attachment" : title, linked.DisplayName);
         Assert.Equal("running", (await store.GetRunAsync(run.Id, Ct))!.Status);
     }

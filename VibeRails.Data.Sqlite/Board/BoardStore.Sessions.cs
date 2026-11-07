@@ -57,8 +57,10 @@ public sealed partial class BoardStore
     public async Task<bool> ConfirmSessionLaunchOriginAsync(string projectPath, string cardId, string sessionId,
         string origin, CancellationToken cancellationToken = default)
     {
+        // Lane launches (automation, lane_review) refine an early MCP attachment the same way (VIBE-296 R2).
         if (origin is not (BoardSessionRecord.LaunchOrigin or BoardSessionRecord.ManagerOrigin
-            or BoardSessionRecord.WorkerOrigin or BoardSessionRecord.PlanningWorkerOrigin or "chat" or "planning" or "code_review"))
+            or BoardSessionRecord.WorkerOrigin or BoardSessionRecord.PlanningWorkerOrigin or "chat" or "planning" or "code_review"
+            or BoardSessionRecord.AutomationOrigin or "lane_review"))
             throw new BoardValidationException("Choose an explicit launch origin.");
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(System.Data.IsolationLevel.Serializable);

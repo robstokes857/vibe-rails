@@ -108,7 +108,7 @@ public sealed class LaunchService(ILaunchStore store, IAutomationScriptService s
         if (request.Trigger.Kind is not (JobTriggerKind.Schedule or JobTriggerKind.PreCommit or JobTriggerKind.Commit))
             throw new LaunchValidationException("Use a schedule, before-commit or after-commit binding. Board lanes own their own ordered selections.");
         if (request.Enabled) await SnapshotAsync(request.DefinitionType, request.DefinitionId,
-            new(ProjectKey(project), project, "binding", "validation"), ct);
+            Keyed(new(project, project, "binding", "validation")), ct);
         var binding = new LaunchTriggerBinding(id ?? "binding_" + Guid.NewGuid().ToString("N"), request.DefinitionId,
             request.DefinitionType, ProjectKey(project), request.Trigger, request.Enabled, 0, default, default,
             request.Trigger.Kind == JobTriggerKind.Schedule ? JobScheduleCalculator.ComputeNext(request.Trigger, DateTime.UtcNow) : null,
@@ -125,15 +125,21 @@ public sealed class LaunchService(ILaunchStore store, IAutomationScriptService s
             LaunchValidation.ValidateSnapshot(existing.Snapshot);
             return existing;
         }
-        var snapshot = await SnapshotAsync(type, id, context with
-        {
-            ProjectPath = ProjectKey(context.ProjectPath),
-            ProjectRoot = context.ProjectRoot ?? ProjectRoot(context.ProjectPath)
-        }, ct);
+        var snapshot = await SnapshotAsync(type, id, Keyed(context), ct);
         if (expectedRevision is not null && snapshot.Revision != expectedRevision)
             throw new LaunchConflictException("Definition changed while composing the launch. Try again.", snapshot.Revision);
         return await store.EnqueueAsync(snapshot, ct: ct);
     }
+
+    /// <summary>
+    /// The one place a context gets its comparison key: ProjectPath becomes the key and ProjectRoot keeps
+    /// the cased path, so every validation and snapshot resolves files against the root (VIBE-296 R1).
+    /// </summary>
+    private static LaunchExecutionContext Keyed(LaunchExecutionContext context) => context with
+    {
+        ProjectPath = ProjectKey(context.ProjectPath),
+        ProjectRoot = context.ProjectRoot ?? ProjectRoot(context.ProjectPath)
+    };
 
     public async Task<LaunchRun> RetryAsync(string project, string id, CancellationToken ct = default)
     {
