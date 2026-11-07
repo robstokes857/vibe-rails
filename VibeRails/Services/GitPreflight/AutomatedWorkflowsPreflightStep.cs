@@ -12,7 +12,8 @@ namespace VibeRails.Services.GitPreflight;
 /// the only preflight stage that can stop a commit.
 /// </summary>
 public sealed class AutomatedWorkflowsPreflightStep(
-    IJobStoreAccessor? jobStoreAccessor = null) : IGitPreflightStep
+    IJobStoreAccessor? jobStoreAccessor = null,
+    VibeRails.Services.Launches.LaunchEventService? launches = null) : IGitPreflightStep
 {
     public const string Id = "automated-workflows";
 
@@ -42,15 +43,6 @@ public sealed class AutomatedWorkflowsPreflightStep(
                 cancellationToken);
         }
 
-        if (jobStoreAccessor is null)
-        {
-            return await FinishAsync(
-                context,
-                GitPreflightStepStatus.Skipped,
-                "No automations are set to run before this commit.",
-                cancellationToken);
-        }
-
         if (context.Request.Invocation.DemoUi)
         {
             return await FinishAsync(
@@ -60,14 +52,11 @@ public sealed class AutomatedWorkflowsPreflightStep(
                 cancellationToken);
         }
 
-        // Resolve the store only once this non-blocking step is executing. JobStore initializes
-        // SQLite in its constructor; resolving it while DI builds the hook runner would let a
-        // locked or damaged Jobs database abort the hook before the pipeline can downgrade the
-        // failure to a warning.
-        var jobStore = jobStoreAccessor.GetRequiredStore();
+        if (launches is null && jobStoreAccessor is not null)
+            return await FinishAsync(context, GitPreflightStepStatus.Skipped, "Legacy Automations are retired.", cancellationToken);
+        var events = launches ?? VibeRails.Services.Launches.LaunchEventService.Create();
         var projectPath = context.Snapshot.RepositoryPath;
-        var matching = (await jobStore.GetJobsAsync(projectPath, cancellationToken: cancellationToken))
-            .Count(job => job.Enabled && job.Triggers.Any(trigger => trigger.Kind == JobTriggerKind.PreCommit));
+        var matching = await events.CountAsync(projectPath, JobTriggerKind.PreCommit, cancellationToken);
 
         if (matching == 0)
         {
@@ -86,35 +75,8 @@ public sealed class AutomatedWorkflowsPreflightStep(
             return await FinishAsync(context, GitPreflightStepStatus.Skipped, preview, cancellationToken);
         }
 
-        var runIds = await jobStore.EnqueueEventRunsAsync(
-            projectPath,
-            JobTriggerKind.PreCommit,
-            context.RunId,
-            cancellationToken);
-
-        string message;
-        if (runIds.Count == 0)
-        {
-            message = matching == 1
-                ? "The matching automation is already running, so it was not queued again."
-                : "Matching automations are already running, so none were queued again.";
-        }
-        else if (runIds.Count == 1)
-        {
-            message = "Queued 1 automation to run before this commit.";
-        }
-        else
-        {
-            message = $"Queued {runIds.Count} automations to run before this commit.";
-        }
-
-        if (runIds.Count > 0)
-        {
-            Log.Information(
-                "[Jobs] Queued {Count} before-commit run(s) for {Repository}",
-                runIds.Count,
-                projectPath);
-        }
+        var count = await events.EnqueueAsync(projectPath, JobTriggerKind.PreCommit, context.RunId, cancellationToken);
+        var message = $"Queued {count} before-commit Agent/Action runs. Execution continues asynchronously.";
 
         return await FinishAsync(context, GitPreflightStepStatus.Passed, message, cancellationToken);
     }

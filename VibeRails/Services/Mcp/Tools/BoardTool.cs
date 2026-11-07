@@ -38,7 +38,7 @@ public sealed partial class BoardTool(
     VibeRails.Services.Jira.JiraCommentService? jiraComments = null,
     DesktopMcpActivityTracker? desktopActivity = null,
     VibeRails.Services.AzureDevOps.AdoCommentService? adoComments = null,
-    Func<VibeRails.Utils.Settings>? launchSettings = null)
+    Func<VibeRails.Utils.Settings>? launchSettings = null, VibeRails.Launches.ILaunchStore? launches = null)
 {
     /// <summary>
     /// MCP image payloads are base64 encoded and copied by the protocol stack. Keep this transfer
@@ -139,6 +139,10 @@ public sealed partial class BoardTool(
             builder.Append("- ").Append(column.Name)
                 .Append(" (id ").Append(column.Id).Append(", ").Append(count).Append(" card").Append(count == 1 ? "" : "s");
             builder.Append(")\n");
+            var launchLane = await store.GetLaunchLaneAsync(project, column.Id, cancellationToken);
+            foreach (var selection in launchLane?.Selections ?? [])
+                builder.Append("  on entry: ").Append(selection.DefinitionType).Append(' ').Append(selection.DefinitionId)
+                    .Append("; gate: ").Append(selection.Gate).AppendLine(". Single run; inspect launch catalog for details.");
             foreach (var automation in automations[column.Id])
             {
                 anyAutomation = true;
@@ -317,12 +321,13 @@ public sealed partial class BoardTool(
             outcomes[session.Id] = (outcome, last);
         }
         var automations = await service.GetLaneAutomationsByLaneAsync(project, lanes.Select(c => c.Id).ToList(), cancellationToken);
-        var entries = await store.GetLaneAutomationStatusesAsync(project, detail.Id, cancellationToken);
+        var entries = await store.GetLaunchEventsAsync(project, detail.Id, cancellationToken);
         var stats = new CardRenderStats();
         var text = FormatCard(detail, lane?.Name ?? detail.ColumnId, lanes.Select(c => LaneLabel(c.Name, automations[c.Id])).ToList(), outcomes, options, boardName,
             [], stats);
         text += $"\nProject: {project}\nCard ID: {detail.Id}";
-        text += "\n\n" + FormatLaneStatuses(entries);
+        text += "\n\nLane runs: " + (entries.Count == 0 ? "None." : string.Join("\n", entries.Select(e =>
+            $"{e.Id}: {e.DefinitionId} · {e.ProcessStatus} · verdict {e.Verdict ?? "not reported"} · run {e.RunId ?? "pending"}")));
         var checks = await store.GetLatestChecksAsync(project, detail.Id, cancellationToken);
         text += "\n\n" + CheckSummary(checks);
         var reviewRows = await store.GetReviewsAsync(project, detail.Id, 0, cancellationToken);

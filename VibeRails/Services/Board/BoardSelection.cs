@@ -9,9 +9,10 @@ namespace VibeRails.Services.Board;
 /// <c>env:{id}:{cli}</c> for a saved environment — the same string the picker's
 /// <c>LlmPickerPreferenceItem.Key</c> uses, so a card assignee is directly launchable.
 /// </summary>
-public sealed partial record BoardSelection(string Key, LLM Llm, string Cli, int? EnvironmentId)
+public sealed partial record BoardSelection(string Key, LLM Llm, string Cli, int? EnvironmentId, string? PresetId = null)
 {
     public bool IsEnvironment => EnvironmentId is not null;
+    public bool IsPreset => PresetId is not null;
 
     public static bool TryParse(string? value, out BoardSelection? selection)
     {
@@ -31,6 +32,13 @@ public sealed partial record BoardSelection(string Key, LLM Llm, string Cli, int
         // Picker keys carry the lowercase wire name (buildLlmSelectionValue in utils.js).
         var cli = LlmParser.ToWireName(llm).ToLowerInvariant();
 
+        if (match.Groups["preset"].Success)
+        {
+            var id = match.Groups["preset"].Value;
+            selection = new BoardSelection($"preset:{id}:{cli}", llm, cli, null, id);
+            return true;
+        }
+
         if (match.Groups["id"].Success)
         {
             var id = int.Parse(match.Groups["id"].Value, NumberStyles.None, CultureInfo.InvariantCulture);
@@ -48,6 +56,6 @@ public sealed partial record BoardSelection(string Key, LLM Llm, string Cli, int
         return environmentId is int id ? $"env:{id}:{cli}" : $"base:{cli}";
     }
 
-    [GeneratedRegex(@"^(?:base:(?<cli>[A-Za-z0-9.\-]+)|env:(?<id>\d{1,9}):(?<cli>[A-Za-z0-9.\-]+))$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^(?:base:(?<cli>[A-Za-z0-9.\-]+)|env:(?<id>\d{1,9}):(?<cli>[A-Za-z0-9.\-]+)|preset:(?<preset>preset_[a-fA-F0-9]{32}):(?<cli>[A-Za-z0-9.\-]+))$", RegexOptions.IgnoreCase)]
     private static partial Regex KeyPattern();
 }

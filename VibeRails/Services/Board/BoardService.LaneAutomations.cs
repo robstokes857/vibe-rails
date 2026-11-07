@@ -19,7 +19,7 @@ public sealed record BoardLaneAutomationInfo(
     string? Unavailable,
     string? ActiveRunId,
     bool ActiveRunIsRunning,
-    string? Description = null)
+    string? Description = null, string? DefinitionId = null)
 {
     public bool WouldQueue => Unavailable is null && ActiveRunId is null;
 }
@@ -146,31 +146,21 @@ public sealed partial class BoardService
     /// <summary>Shared with the launch prompt, which has the store but not the service.</summary>
     internal static async Task<IReadOnlyList<BoardLaneAutomationInfo>> DescribeLaneAutomationsAsync(IBoardStore store, string projectPath, string columnId, CancellationToken cancellationToken)
     {
-        var selection = await store.GetLaneAutomationAsync(projectPath, columnId, cancellationToken);
-        if (selection is null || selection.JobIds.Count == 0)
-            return [];
-        return (await store.DescribeLaneAutomationsAsync(projectPath, selection.JobIds, cancellationToken)).Select(Describe).ToList();
+        var result = new List<BoardLaneAutomationInfo>();
+        var current = await store.GetLaunchLaneAsync(projectPath, columnId, cancellationToken);
+        foreach (var selected in current?.Selections ?? [])
+            result.Add(new(0, selected.DefinitionId, $"Single {selected.DefinitionType}; {selected.Gate} gate", "Linked run evidence", null, null, false, DefinitionId: selected.DefinitionId));
+        var legacy = await store.GetLaneAutomationAsync(projectPath, columnId, cancellationToken);
+        foreach (var id in legacy?.JobIds ?? [])
+            result.Add(new(id, $"Retired Automation #{id}", "Replace this saved selection with an Agent or Action.", "Retained history", "is retired", null, false));
+        return result;
     }
 
     internal static async Task<IReadOnlyDictionary<string, IReadOnlyList<BoardLaneAutomationInfo>>> DescribeLaneAutomationsByLaneAsync(
         IBoardStore store, string projectPath, IReadOnlyList<string> columnIds, CancellationToken cancellationToken)
     {
-        var selections = new Dictionary<string, IReadOnlyList<long>>(StringComparer.Ordinal);
-        foreach (var columnId in columnIds.Distinct(StringComparer.Ordinal))
-        {
-            var selection = await store.GetLaneAutomationAsync(projectPath, columnId, cancellationToken);
-            if (selection is { JobIds.Count: > 0 })
-                selections[columnId] = selection.JobIds;
-        }
-        var described = selections.Count == 0
-            ? new Dictionary<long, BoardLaneAutomationInfo>()
-            : (await store.DescribeLaneAutomationsAsync(projectPath, selections.Values.SelectMany(ids => ids).Distinct().ToList(), cancellationToken))
-                .ToDictionary(d => d.JobId, Describe);
         var result = new Dictionary<string, IReadOnlyList<BoardLaneAutomationInfo>>(StringComparer.Ordinal);
-        foreach (var columnId in columnIds)
-            result[columnId] = selections.TryGetValue(columnId, out var ids)
-                ? ids.Select(id => described[id]).ToList()
-                : [];
+        foreach (var id in columnIds.Distinct()) result[id] = await DescribeLaneAutomationsAsync(store, projectPath, id, cancellationToken);
         return result;
     }
 

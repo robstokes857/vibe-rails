@@ -111,7 +111,8 @@ public class TerminalRunner
         bool authorizeBoardTools = false,
         string? contextBoardId = null,
         string? contextProjectPath = null,
-        bool contextIncluded = false)
+        bool contextIncluded = false,
+        VibeRails.Services.Launches.LaunchExecution? launch = null)
     {
         // Plain shell sessions are shared remotely like any other session when remote is
         // enabled. A remote viewer of an agent session can already Ctrl+C out of the prompt
@@ -161,10 +162,15 @@ public class TerminalRunner
             var boardProject = contextProjectPath;
             if (string.IsNullOrWhiteSpace(boardProject)) boardProject = ParserConfigs.GetRootPath();
             if (string.IsNullOrWhiteSpace(boardProject)) boardProject = workDir;
-            var preparedSession = await _commandService.PrepareSessionAsync(
-                llm, envName, extraArgs, initialPrompt, summary, sessionId, authorizeBoardTools: authorizeBoardTools,
-                resolveNudgedContext: _boardStore is null || contextIncluded ? null : () => ContextLevels.ResolveNudgedAsync(_boardStore,
-                    boardProject, contextBoardId, ct));
+            Func<Task<IReadOnlyList<ContextLevels.Level>>>? resolveContext = _boardStore is null || contextIncluded
+                ? null : () => ContextLevels.ResolveNudgedAsync(_boardStore, boardProject, contextBoardId, ct);
+            var preparedSession = launch is null
+                ? await _commandService.PrepareSessionAsync(llm, envName, extraArgs, initialPrompt, summary, sessionId,
+                    authorizeBoardTools, resolveContext)
+                : await _commandService.PrepareLaunchSessionAsync(llm, envName, extraArgs, initialPrompt, summary, sessionId,
+                    authorizeBoardTools, resolveContext, suppressNudge: true);
+            if (launch is not null)
+                await launch.BeforeSpawnAsync(sessionId, preparedSession.InitialPrompt, workDir, ct);
             foreach (var kvp in _toolApiContext.BuildEnvironment(sessionId))
             {
                 preparedSession.Environment[kvp.Key] = kvp.Value;
@@ -209,7 +215,7 @@ public class TerminalRunner
             // test harness, both of which are shell programs rather than program + argv).
             if (requireDirectCli && preparedSession.Executable is null)
                 throw new InvalidOperationException("This CLI cannot accept a startup mode safely.");
-            var spawnCliDirectly = (jobRunId is not null || requireDirectCli) && preparedSession.Executable is not null;
+            var spawnCliDirectly = (launch is not null || jobRunId is not null || requireDirectCli) && preparedSession.Executable is not null;
             // macOS starts in canonical tty mode. Sending a long command before zsh enters its
             // line editor can lose input/Enter; shell parsing also used a flattened prompt. Pass
             // the real argv at spawn instead. Jobs retain their exit-with-CLI semantics, while
@@ -697,6 +703,7 @@ public class TerminalRunner
             ReleaseWorktreeLease(sessionId);
 
             await _stateService.CompleteSessionAsync(sessionId, -1);
+            await VibeRails.Services.Launches.LaunchExecution.CompleteSessionAsync(sessionId, -1);
             throw;
         }
     }
@@ -719,6 +726,7 @@ public class TerminalRunner
         // inside the run, so "the agent finished" steps must land before the run is marked done.
         await RunPostStepsAsync(sessionId, exitCode, CancellationToken.None);
         await _stateService.CompleteSessionAsync(sessionId, exitCode);
+        await VibeRails.Services.Launches.LaunchExecution.CompleteSessionAsync(sessionId, exitCode);
     }
 
     /// <summary>

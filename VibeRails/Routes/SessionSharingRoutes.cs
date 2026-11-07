@@ -31,11 +31,6 @@ public static class SessionSharingRoutes
                 var tabs = await context.RequestServices.GetRequiredService<VibeRails.Services.Terminal.ITerminalTabHostService>().ListTabsAsync(ct);
                 var ownerTab = tabs.FirstOrDefault(tab => tab.TabId == contact.Owner && tab.HasActiveSession);
                 var ownsSession = contact.Owner == sessionId.ToString("D") || ownerTab?.SessionId == sessionId.ToString("D");
-                if (!ownsSession && ownerTab?.JobRunId is { } runId)
-                {
-                    var actions = await context.RequestServices.GetRequiredService<VibeRails.DB.IJobStore>().GetRunActionsAsync(runId, ct);
-                    ownsSession = actions.Any(action => action.SessionId == sessionId.ToString("D"));
-                }
                 if (!ownsSession)
                     return Results.StatusCode(403);
             }

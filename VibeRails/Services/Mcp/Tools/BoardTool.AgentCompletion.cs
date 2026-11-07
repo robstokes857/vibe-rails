@@ -91,21 +91,20 @@ public sealed partial class BoardTool
             if (sessions.Count == 0) text.AppendLine("No linked agent sessions yet.");
             if (selected is null)
             {
-                var entries = await store.GetLaneAutomationStatusesAsync(target.Project, detail.Id, cancellationToken);
-                text.AppendLine(FormatLaneStatuses(entries));
-                var runs = await store.GetAgentRunsAsync(target.Project, detail.Id, cancellationToken);
-                foreach (var run in runs)
+                var entries = await store.GetLaunchEventsAsync(target.Project, detail.Id, cancellationToken);
+                foreach (var entry in entries)
                 {
-                    text.Append("- Run ").Append(run.Id).Append(" · ").Append(BoardPromptComposer.SanitizeLine(run.Name, 120))
-                        .Append(" · ").Append(run.Status).Append(" · queued ").Append(run.QueuedUtc.ToString("O"));
-                    if (run.SessionId is not null) text.Append(" · terminal session ").Append(run.SessionId);
-                    if (run.WorkerSessionId is not null) text.Append(" · agent session ").Append(run.WorkerSessionId);
-                    if (run.Error is not null) text.Append(" · ").Append(BoardPromptComposer.SanitizeLine(run.Error, 600));
-                    text.AppendLine();
+                    text.Append("- Lane entry ").Append(entry.Id).Append(" · ").Append(entry.DefinitionId)
+                        .Append(" · current: ").Append(entry.Current).Append(" · process: ").Append(entry.ProcessStatus)
+                        .Append(" · verdict: ").Append(entry.Verdict ?? "awaiting explicit result").Append(" · run: ").AppendLine(entry.RunId ?? "not queued");
+                    if (entry.RunId is not null && launches is not null && await launches.GetRunAsync(entry.RunId, cancellationToken) is { } run)
+                        text.Append("  Actual process: ").Append(run.Status).Append(" · session: ").Append(run.SessionId)
+                            .Append(" · evidence: ").Append(run.EvidenceId).Append(" · ").AppendLine(run.Error);
                 }
-                if (runs.Count == 0 && entries.Count == 0) text.AppendLine("No pending entries or recent card Automation runs.");
+                if (entries.Count == 0) text.AppendLine("No current-model lane entries.");
             }
-            text.Append("Poll again in about 10 seconds while waiting. A completion report is the agent's result; only a terminal run status confirms all Automation actions finished.");
+            text.AppendLine(CheckSummary(await store.GetLatestChecksAsync(target.Project, detail.Id, cancellationToken)));
+            text.Append("Poll again in about 10 seconds while waiting. A completion report is the agent's result; the run process status and explicit lane verdict are separate.");
             text.Append("\n").Append(await GetBoardReviews(card, cancellationToken: cancellationToken));
             return text.ToString();
         }

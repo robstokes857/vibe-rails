@@ -182,6 +182,14 @@ if (JobTickProcessHost.IsRequested(args))
     return;
 }
 
+if (args.Any(a => new[] { "--job-run", "--env", "--env-id" }.Any(option =>
+    a.Equals(option, StringComparison.OrdinalIgnoreCase) || a.StartsWith(option + "=", StringComparison.OrdinalIgnoreCase))))
+{
+    Console.Error.WriteLine("Custom environments and multi-step Automations are retired. Select an AI Agent or Action.");
+    Environment.ExitCode = 2;
+    return;
+}
+
 var builder = WebApplication.CreateSlimBuilder(args);
 
 // Remove default host logging providers so Microsoft.Extensions.Logging does not

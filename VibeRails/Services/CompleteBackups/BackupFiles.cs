@@ -17,7 +17,7 @@ public sealed class BackupFiles(IServiceScopeFactory scopes)
         "Credentials: JSON/TOML credential fields, MCP env/headers blocks, header/environment argument values and credential arguments; auth/oauth/credential/token/secret/accounts files, .env files, .claude.json and its backups, browser profiles, script-signing approvals/PINs, private keys, signing keys and OS keychains. Reconnect accounts and reapprove scripts after restore.",
         "Derived files: node_modules, .git, caches, logs, tmp, telemetry, binaries, models, embeddings and mining databases. Derived tables inside state.db remain in its complete snapshot.",
         "CLI runtime state: native session transcripts, prompt history, CLI log/history databases, file-history checkpoints, shell snapshots and downloaded packages are not configuration and are excluded from CLI homes. VibeRails sessions remain in state.db.",
-        "External files: repositories, sandboxes, dependencies, arbitrary @path references and script imports are outside coverage. Only referenced Automation script files and configured/native CLI homes are included.",
+        "External files: repositories, sandboxes, dependencies, arbitrary @path references and script imports are outside coverage. Only scripts referenced by Action bindings, legacy installation folders and native CLI homes are included. Retired external environment homes are not enumerated.",
         "File links and inaccessible/unstable files are reported as incomplete. Separate datasets have separate snapshot times. Native history includes only bytes retained locally; previously dropped or deleted captures cannot be recovered.",
         "Database content, prompts, history, scripts and text configuration may contain embedded secrets. These private account archives preserve that content; filename filtering is not a general secret scrubber."
     ];
@@ -39,49 +39,39 @@ public sealed class BackupFiles(IServiceScopeFactory scopes)
     {
         var result = new List<BackupFileSource>();
         using var scope = scopes.CreateScope();
-        // Every configured CLI home is captured as its own required tree. The name filter never applies to it
-        // or its ancestors: an environment called "Auth review" or "token-cache" is a label, not a credential
-        // store. Homes under envs/ keep their installation/envs entry names; the envs/ walk skips them.
+        // Retired environment/Job rows are preserved in state snapshots, never interpreted as
+        // current definitions. The legacy installation folder remains part of file recovery.
         var envRoot = Path.Combine(root, "envs");
         var homes = new Dictionary<string, string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
-        foreach (var env in (await scope.ServiceProvider.GetRequiredService<IEnvironmentStore>().GetAllEnvironmentsAsync(ct))
-            .Where(e => !string.IsNullOrWhiteSpace(e.Path)))
-        {
-            // A relative stored path would resolve against the process directory, not a configured home.
-            if (!Path.IsPathFullyQualified(env.Path)) { result.Add(new(env.Path, $"environments/{env.Id}", "Configured environment directory is not an absolute path.")); continue; }
-            var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(env.Path));
-            homes.TryAdd(full, IsWithin(envRoot, full) ? "installation/envs/" + Path.GetRelativePath(envRoot, full).Replace('\\', '/') : $"environments/{env.Id}");
-        }
 
+        if (Directory.Exists(envRoot))
+            foreach (var directory in Directory.EnumerateDirectories(envRoot))
+                homes[directory] = "installation/envs/" + Path.GetFileName(directory);
         foreach (var file in Directory.EnumerateFiles(root).Order(StringComparer.Ordinal))
             if (Path.GetExtension(file).ToLowerInvariant() is ".json" or ".toml" or ".yaml" or ".yml" or ".md")
                 Add(file, "installation/" + Path.GetFileName(file));
         AddTree(Path.Combine(root, "scripts"), "installation/scripts");
         AddTree(envRoot, "installation/envs", cliHome: true);
+        foreach (var (directory, entry) in homes) AddTree(directory, entry, required: true, cliHome: true);
         AddTree(Path.Combine(root, "history"), "installation/history");
-        foreach (var (configured, entry) in homes) AddTree(configured, entry, required: true, cliHome: true);
-
-        var jobs = await scope.ServiceProvider.GetRequiredService<IJobStore>().GetJobsAsync(includeDeleted: true, cancellationToken: ct);
-        foreach (var job in jobs)
-            foreach (var action in (job.Actions ?? []).Where(a => !string.IsNullOrWhiteSpace(a.ScriptPath)))
-            {
-                var entry = $"automation/{job.Id}/{action.Id}";
-                string path;
-                try
-                {
-                    if (!Path.IsPathFullyQualified(job.ProjectPath ?? "")) { result.Add(new(job.ProjectPath ?? "", entry, "Automation repository path is not absolute.")); continue; }
-                    path = Path.GetFullPath(action.ScriptPath!, job.ProjectPath!);
-                }
-                catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
-                { result.Add(new(action.ScriptPath!, entry, "Referenced script path is invalid.")); continue; }
-                // Saved actions are repository relative; a corrupt/legacy path must not expand the backup boundary.
-                if (!IsWithin(job.ProjectPath!, path))
-                    result.Add(new(path, entry, "Referenced script is outside its repository."));
-                // An explicitly referenced, approved script is captured whatever its name (rotate_token.py,
-                // cache_warm.py): the name filter exists for discovered credential stores, and dropping a
-                // required file silently would report coverage the archive does not have.
-                else Add(path, $"{entry}/{Path.GetFileName(path)}", required: true);
-            }
+        var launchDb = Path.Combine(root, "launches.db");
+        if (File.Exists(launchDb)) Add(launchDb, "installation/launches.db", required: true);
+        var launches = scope.ServiceProvider.GetRequiredService<VibeRails.Launches.ILaunchStore>();
+        var actions = await launches.ListActionsAsync(ct);
+        foreach (var binding in await launches.ListBindingsAsync(ct: ct))
+        {
+            var script = actions.FirstOrDefault(a => a.Id == binding.DefinitionId)?.Script;
+            if (script is null) continue;
+            var entry = $"actions/{binding.DefinitionId}/{binding.Id}";
+            if (!Path.IsPathFullyQualified(binding.ProjectPath))
+            { result.Add(new(binding.ProjectPath, entry, "Action project path is not absolute.")); continue; }
+            string path;
+            try { path = Path.GetFullPath(script.Path, binding.ProjectPath); }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            { result.Add(new(script.Path, entry, "Referenced script path is invalid.")); continue; }
+            if (!IsWithin(binding.ProjectPath, path)) result.Add(new(path, entry, "Referenced script is outside its repository."));
+            else Add(path, $"{entry}/{Path.GetFileName(path)}", required: true);
+        }
 
         // ~/.claude.json is deliberately absent: it is a credential/account file and Excluded() rejects it by name.
         foreach (var name in new[] { ".codex", ".claude", ".copilot", ".opencode", ".grok", ".gemini" })

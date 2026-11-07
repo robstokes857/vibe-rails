@@ -6,11 +6,50 @@ using VibeRails.Services.Integrations.VibeCodeRemote;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.Terminal;
 using VibeRails.Utils;
+using VibeRails.Launches;
+using VibeRails.Services.Launches;
 
 namespace VibeRails.Routes;
 
 public static class TerminalRoutes
 {
+    private static async Task<IResult> StartSavedLaunchAsync(WebApplication app, HttpContext http,
+        ITerminalSessionService terminal, IPromptPlaceholderService prompts, CancellationToken ct)
+    {
+        if (app.Services.GetService<ProcessRole>() is not { IsTerminalTabChild: true, IsActiveRootBackend: false })
+            return Results.StatusCode(403);
+        var store = http.RequestServices.GetRequiredService<ILaunchStore>();
+        var service = http.RequestServices.GetRequiredService<LaunchService>();
+        var id = http.Request.Headers["X-VibeRails-Launch-Run"].ToString();
+        var token = http.Request.Headers["X-VibeRails-Launch-Claim"].ToString();
+        var run = await store.GetRunAsync(id, ct);
+        if (run?.Snapshot.Preset is null || run.Status != "claimed" || string.IsNullOrEmpty(token) || run.ClaimToken != token)
+            return Results.Conflict(new ErrorResponse("The saved launch is no longer available to this process."));
+        try
+        {
+            await service.ValidateSnapshotAsync(run.Snapshot, ct);
+            if (http.Request.Headers["X-VibeRails-Tool-Session"].FirstOrDefault() is { } toolSession
+                && http.Request.Headers["X-VibeRails-Tool-Tab"].FirstOrDefault() is { } toolTab
+                && VibeRails.Auth.AgentCredentialService.IsAgentToken(toolSession)
+                && VibeRails.Auth.AgentCredentialService.IsAgentToken(toolTab))
+                http.RequestServices.GetRequiredService<VibeRails.Services.AgentTools.ILocalToolApiContext>().AcceptParentContact(toolSession, toolTab);
+            var execution = new LaunchExecution(store, service, run, http.RequestServices.GetRequiredService<VibeRails.Services.Board.IBoardStore>());
+            var snapshot = run.Snapshot;
+            var template = snapshot.Context.ComposedPrompt ?? snapshot.Context.PromptPrefix + snapshot.Preset.InitialPrompt;
+            var boardCard = snapshot.Context.CardId is null ? null : await http.RequestServices.GetRequiredService<VibeRails.Services.Board.IBoardStore>()
+                .FindCardAsync(snapshot.Context.ProjectPath, snapshot.Context.CardId, ct);
+            var success = await terminal.StartLaunchSessionAsync(execution, () => prompts.ResolveLaunchAsync(template,
+                new PromptPlaceholderContext(snapshot.Context.WorkingDirectory, EnvironmentName: snapshot.Preset.Name,
+                    BoardCardKey: boardCard?.Key), ct));
+            return success ? Results.Ok(new TerminalStatusResponse(true, terminal.ActiveSessionId, terminal.ActiveCli, terminal.ActiveWorkingDirectory))
+                : Results.Conflict(new ErrorResponse("The terminal already has a session."));
+        }
+        catch (Exception ex) when (ex is LaunchValidationException or LaunchConflictException or PromptTooLongException)
+        {
+            return Results.BadRequest(new ErrorResponse(ex.Message));
+        }
+    }
+
     public static void Map(WebApplication app, string launchDirectory)
     {
         // GET /api/v1/terminal/status - Check if terminal session is active
@@ -39,6 +78,9 @@ public static class TerminalRoutes
             {
                 return Results.BadRequest(new ErrorResponse("A terminal session is already active. Stop it first."));
             }
+
+            if (context.Request.Headers.ContainsKey("X-VibeRails-Launch-Run"))
+                return await StartSavedLaunchAsync(app, context, terminalService, promptPlaceholders, cancellationToken);
 
             // Validate required fields
             if (string.IsNullOrEmpty(request?.Cli))
@@ -74,30 +116,12 @@ public static class TerminalRoutes
             if (string.IsNullOrEmpty(workDir))
                 workDir = launchDirectory;
 
-            // Get custom args if environment specified
-            string[]? extraArgs = BaseLlmOptionsBuilder.BuildArguments(llm, baseOptions);
-            string? environmentPrompt = null;
-            int? environmentId = null;
+            // Retired selections never fall back to a base CLI or a same-named preset.
             if (!string.IsNullOrEmpty(request.EnvironmentName) || request.EnvironmentId.HasValue)
-            {
-                var environment = request.EnvironmentId is int requestedEnvironmentId
-                    ? await repository.GetEnvironmentByIdAsync(requestedEnvironmentId, cancellationToken) : null;
-                if (environment is null || environment.LLM != llm)
-                    return Results.NotFound(new ErrorResponse("Environment not found in this project. Choose it again."));
-                request = request with { EnvironmentName = environment.CustomName };
-                if (environment != null)
-                {
-                    if (!ProjectPathComparer.IsVisibleIn(environment.ProjectPath, ParserConfigs.GetRootPath()))
-                        return Results.NotFound(new ErrorResponse("Environment not found in this project."));
-                    if (!string.IsNullOrEmpty(environment.CustomArgs))
-                    {
-                        extraArgs = ShellArgSanitizer.ParseAndValidate(environment.CustomArgs);
-                    }
-                    environmentPrompt = environment.CustomPrompt;
-                    environmentId = environment.Id;
-                    await repository.TouchEnvironmentLastUsedAsync(environment.Id, cancellationToken);
-                }
-            }
+                return Results.Json(new ErrorResponse("Custom environments are retired. Choose a launch preset."), statusCode: 410);
+
+            string[]? extraArgs = BaseLlmOptionsBuilder.BuildArguments(llm, baseOptions);
+            int? environmentId = null;
 
             // Resume summary: prefer the user-edited text from the modal,
             // fall back to generating one server-side if only a session ID was sent.
@@ -118,19 +142,8 @@ public static class TerminalRoutes
             }
 
             var requestedPrompt = request.InitialPrompt;
-            if (string.IsNullOrWhiteSpace(requestedPrompt) && !string.IsNullOrWhiteSpace(environmentPrompt))
-                requestedPrompt = environmentPrompt;
 
-            // The once-only placeholder pass for every in-process launch (web tabs, Multi Run,
-            // the agent terminal tool): {{datetime}}-style built-ins fill in and {{step:<id>}}
-            // references execute, and the same string then feeds both the seq-1 UserInputs
-            // recording and the CLI argv. The resume summary below is generated text and is
-            // deliberately never resolved.
-            //
-            // Deferred into StartSessionAsync rather than run here: the HasActiveSession check
-            // above is a courtesy, not a reservation, so resolving at this point would let two
-            // simultaneous requests both execute the referenced step commands even though only
-            // one of them can end up owning a terminal.
+            // Resolve supported substitutions once, after the session owns the terminal slot.
             Func<Task<ResolvedPrompt>>? resolveInitialPrompt = string.IsNullOrWhiteSpace(requestedPrompt)
                 ? null
                 : () => promptPlaceholders.ResolveLaunchAsync(

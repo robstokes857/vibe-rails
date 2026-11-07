@@ -7,11 +7,11 @@ namespace VibeRails.Services.Board;
 public sealed record BoardChecksResponse(IReadOnlyList<BoardCheckRecord> Checks,
     IReadOnlyList<BoardCheckRecord> Pending, IReadOnlyList<BoardCheckAutomation> Automations, bool HasMore,
     IReadOnlyList<BoardCheckRecord> Latest);
-public sealed record BoardCheckAutomation(long Id, string Name, bool Enabled, IReadOnlyList<string> Scopes);
+public sealed record BoardCheckAutomation(long Id, string Name, bool Enabled, IReadOnlyList<string> Scopes, string? DefinitionId = null);
 public sealed record BoardCheckReportResponse(BoardCheckRecord Check, string Freshness);
 
 /// <summary>Joins local run liveness with durable evidence without altering either history.</summary>
-public sealed class BoardChecksReader(IBoardStore boards, IJobStore jobs, BoardCheckService engine)
+public sealed class BoardChecksReader(IBoardStore boards, BoardCheckService engine, VibeRails.Launches.ILaunchStore? launches = null)
 {
     public async Task<BoardChecksResponse?> ReadAsync(string project, string cardKey, int offset, CancellationToken ct)
     {
@@ -25,43 +25,28 @@ public sealed class BoardChecksReader(IBoardStore boards, IJobStore jobs, BoardC
         var latest = new List<BoardCheckRecord>();
         foreach (var check in await boards.GetLatestChecksAsync(project, card.Id, ct))
             latest.Add(await ResolveAsync(check, ct));
-        var catalog = await jobs.GetJobsAsync(project, cancellationToken: ct);
-        var options = catalog.Where(job => job.Actions?.Any(a => JobCheckScope.IsCheck(a.Kind)) == true)
-            .Select(job => new BoardCheckAutomation(job.Id, job.Name, job.Enabled,
-                job.Actions!.Where(a => JobCheckScope.IsCheck(a.Kind)).Select(a => string.Join(" ", a.Arguments)).ToList())).ToList();
+        var catalog = launches is null ? [] : await launches.ListActionsAsync(ct);
+        var options = catalog.Where(a => a.Check is not null && a.RetiredUtc is null)
+            .Select(a => new BoardCheckAutomation(0, a.Name, a.Enabled, [a.Check!.Scope], a.Id)).ToList();
         var pending = new List<BoardCheckRecord>();
-        var active = (await jobs.GetActiveRunsAsync(ct)).Concat(await jobs.GetQueuedRunsAsync(ct));
-        var recent = new List<JobRunRecord>();
-        foreach (var reference in await boards.GetAgentRunsAsync(project, card.Id, ct))
-            if (await jobs.GetRunAsync(reference.Id, ct) is { } run) recent.Add(run);
-        foreach (var run in active.Concat(recent).DistinctBy(r => r.Id).OrderByDescending(r => r.QueuedUtc)
-            .Where(r => ProjectPathComparer.Matches(r.ProjectPath, project)
-                && JobBoardContext.GetCardKey(r.TriggerKind, r.TriggerKey) == card.Key))
+        var runs = launches is null ? [] : await launches.GetBoardRunsAsync(VibeRails.Services.Launches.LaunchService.ProjectKey(project), card.Id, ct: ct);
+        foreach (var run in runs.Where(r => r.Snapshot.Action?.Check is not null))
         {
-            var actions = await jobs.GetRunActionsAsync(run.Id, ct);
-            foreach (var action in actions.Where(a => JobCheckScope.IsCheck(a.Kind)).OrderByDescending(a => a.Position))
-            {
-                var tool = action.Kind == JobActionKind.Vca ? "VCA" : "Code quality";
-                if (checks.Concat(latest).Any(c => c.RunId == run.Id && c.ActionId == action.Id)
-                    || latest.Any(c => c.Tool == tool && c.RunId != run.Id && c.StartedUtc >= run.QueuedUtc)) continue;
-                var live = run.Status is JobRunStatus.Queued or JobRunStatus.Running;
-                var status = live ? (action.Status == JobRunActionStatus.Pending ? "Waiting" : "Running")
-                    : run.Status == JobRunStatus.Cancelled ? "Cancelled"
-                    : action.Status == JobRunActionStatus.Skipped ? "Skipped/not applicable" : "Failed to run";
-                pending.Add(new($"pending-{action.Id}", card.Id, run.Id, action.Id,
-                    tool, status, string.Join(" ", action.Arguments), null, null, null, null, "unknown", run.QueuedUtc, run.EndedUtc,
-                    live ? "Waiting for this Automation action to save evidence."
-                        : $"No completed check evidence. Run {run.Status}: {action.ErrorMessage ?? run.ErrorMessage}", 0, 0, 0, 0, []));
-            }
+            var action = run.Snapshot.Action!;
+            if (checks.Concat(latest).Any(c => c.RunId == run.Id)) continue;
+            pending.Add(new($"pending-{run.Id}", card.Id, run.Id, action.Id,
+                action.Kind == "vca" ? "VCA" : "Code quality", run.Status == "cancelled" ? "Cancelled" : run.IsTerminal ? "Failed to run" : run.Status == "queued" ? "Waiting" : "Running",
+                action.Check!.Scope, null, null, null, null, "unknown", run.QueuedUtc, run.EndedUtc,
+                run.Error ?? "Waiting for saved check evidence.", 0, 0, 0, 0, []));
         }
-        foreach (var entry in (await boards.GetLaneAutomationStatusesAsync(project, card.Id, ct)).Where(e => e.RunId is null))
+        foreach (var entry in (await boards.GetLaunchEventsAsync(project, card.Id, ct)).Where(e => e.RunId is null))
         {
-            var job = catalog.FirstOrDefault(job => job.Id == entry.JobId);
-            foreach (var action in job?.Actions?.Where(a => JobCheckScope.IsCheck(a.Kind)) ?? [])
-                pending.Add(new($"entry-{entry.EventKey}-{action.Id}", card.Id, "lane-entry", action.Id,
-                    action.Kind == JobActionKind.Vca ? "VCA" : "Code quality", entry.Status,
-                    string.Join(" ", action.Arguments), null, null, null, null, "unknown", entry.DueUtc, null,
-                    entry.Reason, 0, 0, 0, 0, []));
+            var action = catalog.FirstOrDefault(a => a.Id == entry.DefinitionId && a.Check is not null);
+            if (action is null) continue;
+            pending.Add(new($"entry-{entry.Id}", card.Id, "lane-entry", action.Id,
+                action.Kind == "vca" ? "VCA" : "Code quality", entry.SkipRequested ? "Skipped" : entry.Current ? "Waiting" : "Cancelled",
+                action.Check!.Scope, null, null, null, null, "unknown", entry.DueUtc, null,
+                entry.Summary ?? "Waiting for the lane entry.", 0, 0, 0, 0, []));
         }
         return new(resolved, pending, options, checks.Count == 50, latest);
     }
@@ -78,12 +63,12 @@ public sealed class BoardChecksReader(IBoardStore boards, IJobStore jobs, BoardC
     private async Task<BoardCheckRecord> ResolveAsync(BoardCheckRecord check, CancellationToken ct)
     {
         if (check.EndedUtc is not null) return check;
-        var run = await jobs.GetRunAsync(check.RunId, ct);
+        var run = launches is null ? null : await launches.GetRunAsync(check.RunId, ct);
         if (run is null) return check with { Status = "Unknown", Summary = "Run unavailable; completion is unknown." };
-        return run.Status is JobRunStatus.Queued or JobRunStatus.Running ? check : check with
+        return !run.IsTerminal ? check : check with
         {
-            Status = run.Status == JobRunStatus.Cancelled ? "Cancelled" : "Failed to run",
-            Summary = $"Run ended ({run.Status}) before check evidence was completed. {run.ErrorMessage}"
+            Status = run.Status == "cancelled" ? "Cancelled" : "Failed to run",
+            Summary = $"Run ended ({run.Status}) before check evidence was completed. {run.Error}"
         };
     }
 }

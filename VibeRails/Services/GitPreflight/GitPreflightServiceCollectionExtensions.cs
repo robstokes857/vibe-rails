@@ -30,7 +30,6 @@ public static class GitPreflightServiceCollectionExtensions
         services.AddSingleton<VibeRails.Services.Board.BoardCheckService>();
         services.AddSingleton<IGitPreflightStep, VcaPreflightStep>();
         services.AddSingleton<IGitPreflightStep, MintLintPreflightStep>();
-        services.AddSingleton<IJobStoreAccessor, ServiceProviderJobStoreAccessor>();
         services.AddSingleton<IGitPreflightStep, AutomatedWorkflowsPreflightStep>();
         services.AddSingleton<IGitPreflightPipeline, GitPreflightPipeline>();
         return services;

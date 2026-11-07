@@ -261,8 +261,6 @@ namespace VibeRails
             serviceCollection.AddScoped<Services.Board.Sync.BoardSharingService>();
             serviceCollection.AddScoped<Services.Board.Sync.RemoteBoardsService>();
             serviceCollection.AddSingleton<Services.Board.Sync.IBoardSyncScheduler, Services.Board.Sync.BoardSyncScheduler>();
-            serviceCollection.AddScoped<Services.Board.BoardAutomationService>();
-            serviceCollection.AddScoped<Services.Board.BoardCardAutomationService>();
             serviceCollection.AddScoped<Services.Board.BoardChecksReader>();
             // Run-once card post-processing (VIBE-185). Each IBoardCardPostProcessor registration is
             // one rule; the job below runs them on active roots only.
@@ -297,8 +295,7 @@ namespace VibeRails
             // Scoped because it reads steps through the scoped IRepository, matching TerminalRunner
             // (its only launch-path consumer) so both live in the same scope.
             serviceCollection.AddScoped<IEnvironmentStepRunner, EnvironmentStepRunner>();
-            // Resolves {{datetime}}-style built-ins and {{step:<id>}} output injection in an
-            // environment's Initial Message. Scoped for the same IRepository reason as above.
+            // Resolves supported prompt built-ins; retired step syntax is rejected.
             serviceCollection.AddScoped<IPromptPlaceholderService, PromptPlaceholderService>();
             serviceCollection.AddSingleton<Services.Workspaces.IManagedWorktreeService, Services.Workspaces.ManagedWorktreeService>();
             // Playwright's real backend uses a fake CLI but shares the developer account's state
@@ -310,13 +307,12 @@ namespace VibeRails
                 Serilog.Log.Warning(
                     "[Jobs] Automation scheduler NOT registered: VIBERAILS_TEST_FAKE_CLI=1 marks this as a UI-test host");
             }
-            serviceCollection.AddScoped<IJobService, JobService>();
-            // Cross-repository Automation import (root dashboard only; the routes are gated, the
-            // registration is harmless elsewhere). Scoped for the same IRepository reason as above.
-            serviceCollection.AddScoped<IAutomationImportService, AutomationImportService>();
+            Services.Launches.LaunchServiceRegistration.AddLaunchDefinitions(serviceCollection);
+            serviceCollection.AddScoped<Services.Launches.LaunchService>();
+            serviceCollection.AddScoped<Services.Launches.LaunchDispatcher>();
+            serviceCollection.AddScoped<Services.Launches.BoardLaunchWorkflow>();
             serviceCollection.AddScoped<IAgentTerminalToolService, AgentTerminalToolService>();
             serviceCollection.AddScoped<ILlmPickerPreferenceService, LlmPickerPreferenceService>();
-            serviceCollection.AddScoped<IAutomationNavPreferenceService, AutomationNavPreferenceService>();
             // Python script signing: file-based state + a lazily-probed interpreter. Singleton so
             // the run-history and the signing-file lock live in one place. Factory form on
             // purpose: Discover() probes the filesystem/PATH for an interpreter, and that must

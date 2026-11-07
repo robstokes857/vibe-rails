@@ -210,35 +210,6 @@ public static partial class BoardRoutes
 
         // ---------------------------------------------------------------- cards
 
-        app.MapGet("/api/v1/board/columns/{columnId}/automation", (BoardAutomationService automation, string columnId, CancellationToken cancellationToken) =>
-            RunAsync(async () => OkOrNotFound(await automation.GetAsync(Project(), columnId, cancellationToken), "Lane")))
-            .WithName("GetBoardLaneAutomation");
-
-        // The lane panel's 10-second running list, without the catalog and setup probes of the settings read.
-        app.MapGet("/api/v1/board/columns/{columnId}/automation/running", (BoardAutomationService automation, string columnId, CancellationToken cancellationToken) =>
-            RunAsync(async () => OkOrNotFound(await automation.GetRunningAgentsAsync(Project(), columnId, cancellationToken), "Lane")))
-            .WithName("GetBoardLaneRunningAgents");
-
-        app.MapPut("/api/v1/board/columns/{columnId}/automation", (BoardAutomationService automation, string columnId, UpdateBoardLaneAutomationRequest request, CancellationToken cancellationToken) =>
-            RunAsync(async () => OkOrNotFound(await automation.SaveAsync(Project(), columnId, request, cancellationToken), "Lane")))
-            .WithName("SaveBoardLaneAutomation");
-
-        app.MapGet("/api/v1/board/cards/{card}/automations", (BoardCardAutomationService automation, string card, CancellationToken cancellationToken) =>
-            RunAsync(async () => OkOrNotFound(await automation.GetAsync(Project(), card, cancellationToken), "Card")))
-            .WithName("GetBoardCardAutomations");
-
-        app.MapPost("/api/v1/board/cards/{card}/automations", (BoardCardAutomationService automation, string card, RunBoardCardAutomationRequest request, CancellationToken cancellationToken) =>
-            RunAsync(async () => OkOrNotFound(await automation.RunAsync(Project(), card, request.JobId, cancellationToken), "Card")))
-            .WithName("RunBoardCardAutomation");
-
-        app.MapPost("/api/v1/board/cards/{card}/automations/skip", (BoardCardAutomationService automation, string card, SkipBoardCardAutomationRequest request, CancellationToken cancellationToken) =>
-            RunAsync(async () => OkOrNotFound(await automation.SkipAsync(Project(), card, request.JobId, request.EventKey, cancellationToken), "Card")))
-            .WithName("SkipBoardCardAutomation");
-
-        app.MapPost("/api/v1/board/cards/{card}/automations/rerun", (BoardCardAutomationService automation, string card, RerunBoardCardAutomationRequest request, CancellationToken cancellationToken) =>
-            RunAsync(async () => OkOrNotFound(await automation.RerunAsync(Project(), card, request.JobId, request.EventKey, cancellationToken), "Card")))
-            .WithName("RerunBoardCardAutomation");
-
         app.MapGet("/api/v1/board/cards", (IBoardService board, string? boardId, int? pageSize, string? columnId,
             int? offset, string? continuationToken, string? q, string? assignee, string? type, string? priority, string? tag,
             string? origin, bool? ghost, CancellationToken cancellationToken) =>
@@ -288,8 +259,8 @@ public static partial class BoardRoutes
                 ? Results.Ok(new OK("Comment deleted")) : NotFound("Comment", commentId)))
             .WithName("DeleteBoardComment");
 
-        app.MapPost("/api/v1/board/cards/{card}/launch", (IBoardLaunchService launcher, string card, LaunchBoardCardRequest? request, CancellationToken cancellationToken) =>
-            RunAsync(async () => OkOrNotFound(await launcher.LaunchAsync(Project(), card, request?.Selection, cancellationToken, request?.Intent ?? "work", request?.Review, request?.Question, request?.Task), "Card")))
+        app.MapPost("/api/v1/board/cards/{card}/launch", (IBoardLaunchService launcher, HttpContext http, string card, LaunchBoardCardRequest? request, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(await launcher.LaunchAsync(await LaunchProjectAsync(http, cancellationToken), card, request?.Selection, cancellationToken, request?.Intent ?? "work", request?.Review, request?.Question, request?.Task), "Card")))
             .WithName("LaunchBoardCard");
 
         // The context an agent launched on this card right now would receive (VB-63): the launch
@@ -572,6 +543,19 @@ public static partial class BoardRoutes
             board.PointsField, board.Columns.Select(ToResponse).ToList(), board.Warnings.ToList());
 
     private static string Project() => ParserConfigs.GetRootPath();
+
+    // Only middleware-authenticated contacts can select the project captured by their run.
+    // No request field or header supplied by a caller is a project capability.
+    internal static async Task<string> LaunchProjectAsync(HttpContext http, CancellationToken ct)
+    {
+        if (http.Items[typeof(VibeRails.Auth.AgentCredentialService.Contact)] is VibeRails.Auth.AgentCredentialService.Contact { SessionId: { } session } contact
+            && http.RequestServices.GetService<VibeRails.Launches.ILaunchStore>() is { } runs)
+        {
+            var run = (await runs.GetActiveRunsAsync(ct)).SingleOrDefault(r => r.SessionId == session && r.TabId == contact.Owner);
+            if (run is not null) return run.ProjectPath;
+        }
+        return Project();
+    }
 
     private static IResult OkOrNotFound<T>(T? value, string kind) where T : class =>
         value is null ? Results.NotFound(new ErrorResponse($"{kind} not found.")) : Results.Ok(value);

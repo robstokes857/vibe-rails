@@ -10,7 +10,7 @@ using VibeRails.Utils;
 namespace VibeRails.Services.Board;
 
 /// <summary>Shared explicit source, reviewer and checkout resolution for previews, direct launches and Jobs.</summary>
-public sealed class ReviewRoutingService(IBoardStore boards, IRepository repository, IJobExecutableResolver executables)
+public sealed class ReviewRoutingService(IBoardStore boards, IRepository repository, IJobExecutableResolver executables, VibeRails.Launches.ILaunchStore? launches = null)
 {
     /// <summary>Validate editable mappings without requiring every provider to be installed.</summary>
     public static void Validate(ReviewerRouting? routing, string purpose)
@@ -33,7 +33,8 @@ public sealed class ReviewRoutingService(IBoardStore boards, IRepository reposit
     {
         if (target is null || !BoardSelection.TryParse(target.Selection, out var selection))
             throw new BoardValidationException("Choose a reviewer provider or environment.");
-        if (selection!.IsEnvironment && target.Options is not null)
+        if (selection!.IsEnvironment) throw new BoardValidationException("The reviewer environment is retired. Choose an Agent or base CLI.");
+        if (selection.IsPreset && target.Options is not null)
             throw new BoardValidationException("Saved reviewer environments use their own model and permission settings.");
         try { BaseLlmOptionsBuilder.Normalize(selection.Llm, target.Options); }
         catch (ArgumentException ex) { throw new BoardValidationException(ex.Message); }
@@ -96,9 +97,7 @@ public sealed class ReviewRoutingService(IBoardStore boards, IRepository reposit
     {
         Validate(routing, "code_review");
         if (selectionOverride is not null) ValidateTarget(selectionOverride);
-        var workerProblem = workerId > 0 && ((await repository.GetStepsForEnvironmentAsync(workerId, ct)).Count > 0
-            || workerPrompt?.Contains("{{step", StringComparison.OrdinalIgnoreCase) == true)
-            ? "Switch reviewer Workers cannot own steps. Move the steps and their prompt references into the selected reviewer environments, then request a new review." : null;
+        var workerProblem = workerId > 0 ? "Legacy review Workers are retired. Select an Agent." : null;
         var card = cardKey is null ? null : await boards.FindCardAsync(project, cardKey, ct)
             ?? throw new BoardValidationException("The review card is no longer available in this project.");
         // Recipe defaults apply only to an absent settings row. Even a deliberately empty/unknown
@@ -114,30 +113,20 @@ public sealed class ReviewRoutingService(IBoardStore boards, IRepository reposit
         var selected = selectionOverride ?? mapping?.Reviewer ?? routing.Fallback;
         ValidateTarget(selected);
         BoardSelection.TryParse(selected.Selection, out var parsed);
-        selected = selected with { Selection = parsed!.Key, Options = parsed.IsEnvironment ? null : BaseLlmOptionsBuilder.Normalize(parsed.Llm, selected.Options) };
+        selected = selected with { Selection = parsed!.Key, Options = parsed.IsEnvironment || parsed.IsPreset ? null : BaseLlmOptionsBuilder.Normalize(parsed.Llm, selected.Options) };
         if (routing.Mode == "switch" && string.Equals(source.Provider, parsed.Cli, StringComparison.OrdinalIgnoreCase))
             throw new BoardValidationException($"{parsed.Cli} did the coding. Choose a different LLM for the Switch reviewer, then request a new review.");
         var reviewer = parsed!.Cli;
         var model = selected.Options?.Model;
         string? fingerprint = null;
-        if (parsed.EnvironmentId is int id)
+        if (parsed.IsPreset)
         {
-            var environment = await repository.GetEnvironmentByIdAsync(id, ct);
-            if (environment is null || environment.LLM != parsed.Llm || !ProjectPathComparer.IsVisibleIn(environment.ProjectPath, project))
-                problem ??= "The chosen reviewer environment is unavailable in this project. Restore it or choose another reviewer for a new review.";
-            else if (environment.ReviewerRouting?.Mode == "switch")
-                problem ??= "A routing target must be a fixed provider or environment, not another Switch reviewer.";
-            else
-            {
-                reviewer = environment.CustomName;
-                var args = ShellArgSanitizer.ParseAndValidate(environment.CustomArgs).ToArray();
-                for (var i = 0; i < args.Length; i++)
-                {
-                    if (args[i] is "--model" or "-m" && i + 1 < args.Length) model = args[++i];
-                    else if (args[i].StartsWith("--model=", StringComparison.Ordinal)) model = args[i][8..];
-                }
-                fingerprint = await EnvironmentFingerprintAsync(environment, ct);
-            }
+            var preset = launches is null ? null : await launches.GetPresetAsync(parsed.PresetId!, ct);
+            if (preset is null || preset.Cli != parsed.Llm || !preset.Enabled || preset.RetiredUtc is not null || preset.Kind != "agent")
+                throw new BoardValidationException("The reviewer Agent is unavailable.");
+            reviewer = preset.Name;
+            model = preset.Options.Base?.Model;
+            fingerprint = preset.Revision.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
         if (executables.Resolve(parsed.Llm) is null)
             problem ??= $"Install/sign in to {parsed.Cli}, or choose another reviewer for a new review. No provider was substituted.";
@@ -154,9 +143,8 @@ public sealed class ReviewRoutingService(IBoardStore boards, IRepository reposit
     public async Task<ReviewLaunchSnapshot?> PrepareAsync(string project, int workerId, string? cardKey, CancellationToken ct,
         string defaultScope = "working-tree")
     {
-        var worker = await repository.GetEnvironmentByIdAsync(workerId, ct);
-        if (worker?.Purpose != "code_review" || worker.ReviewerRouting?.Mode != "switch") return null;
-        return await ResolveAsync(project, cardKey, worker.ReviewerRouting, null, ct, workerId, worker.CustomPrompt, defaultScope);
+        await Task.CompletedTask;
+        throw new BoardValidationException("Legacy review Workers are retired. Select an Agent.");
     }
 
     /// <summary>Recheck availability and frozen scope at execution, including on retry.</summary>
@@ -168,12 +156,13 @@ public sealed class ReviewRoutingService(IBoardStore boards, IRepository reposit
             throw new BoardValidationException(r.Problem);
         BoardSelection.TryParse(r.Selected.Selection, out var parsed);
         LLM_Environment? environment = null;
-        if (parsed!.EnvironmentId is int id)
+        if (parsed!.IsEnvironment) throw new BoardValidationException("Legacy reviewer environment is retired.");
+        if (parsed.IsPreset)
         {
-            environment = await repository.GetEnvironmentByIdAsync(id, ct);
-            if (environment is null || environment.LLM != parsed.Llm || environment.ReviewerRouting?.Mode == "switch" || !ProjectPathComparer.IsVisibleIn(environment.ProjectPath, r.Workspace)
-                || await EnvironmentFingerprintAsync(environment, ct) != snapshot.EnvironmentFingerprint)
-                throw new BoardValidationException("The chosen reviewer environment was removed or changed after queueing. Restore it or request a new review; this run keeps its original selection.");
+            var preset = launches is null ? null : await launches.GetPresetAsync(parsed.PresetId!, ct);
+            if (preset is null || !preset.Enabled || preset.RetiredUtc is not null || preset.Kind != "agent"
+                || preset.Revision.ToString(System.Globalization.CultureInfo.InvariantCulture) != snapshot.EnvironmentFingerprint)
+                throw new BoardValidationException("Reviewer Agent changed. Request a new review.");
         }
         if (executables.Resolve(parsed.Llm) is null) throw new BoardValidationException($"The selected {parsed.Cli} CLI is unavailable. Install it and retry.");
         if (!Directory.Exists(r.Workspace)) throw new BoardValidationException("The review checkout is unavailable. Restore it before retrying.");

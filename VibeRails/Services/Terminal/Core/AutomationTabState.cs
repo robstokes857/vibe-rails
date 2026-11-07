@@ -8,7 +8,7 @@ namespace VibeRails.Services.Terminal;
 /// host may be reclaimed only after both the run and its PTY have finished, and only if
 /// no session start raced those checks. Saved recording metadata survives PTY teardown.
 /// </summary>
-internal sealed class AutomationTabState(string runId, string name)
+internal sealed class AutomationTabState(string runId, string name, bool savedLaunch = false)
 {
     private readonly Lock _gate = new();
     private int _startsInFlight;
@@ -19,6 +19,40 @@ internal sealed class AutomationTabState(string runId, string name)
 
     public string RunId { get; } = runId;
     public string Name { get; } = name;
+    public bool SavedLaunch { get; } = savedLaunch;
+
+    public async Task<bool> HasCompletedRunAsync(VibeRails.Launches.ILaunchStore store, TerminalStatusResponse? status, CancellationToken ct)
+    {
+        var checkedVersion = await CheckLaunchAsync(store, status, ct);
+        return checkedVersion is not null;
+    }
+
+    private async Task<long?> CheckLaunchAsync(VibeRails.Launches.ILaunchStore store, TerminalStatusResponse? status, CancellationToken ct)
+    {
+        long version;
+        string session;
+        lock (_gate)
+        {
+            if (status is null || _reclaiming || _hasUnconfirmedStart || _startsInFlight != 0 || _lastSession?.SessionId is not { } id) return null;
+            session = id;
+            version = _startVersion;
+            if (status.SessionId is not null && status.SessionId != session) return null;
+        }
+        var run = await store.GetRunAsync(RunId, ct);
+        lock (_gate)
+            return !_hasUnconfirmedStart && _startsInFlight == 0 && version == _startVersion
+                && run?.SessionId == session && run.IsTerminal ? version : null;
+    }
+
+    public async Task<long?> CheckReclamationAsync(VibeRails.Launches.ILaunchStore store, ISessionStore sessions,
+        Func<CancellationToken, Task<TerminalStatusResponse?>> readStatus, CancellationToken ct)
+    {
+        var status = await readStatus(ct);
+        if (status?.HasActiveSession != false) return null;
+        var version = await CheckLaunchAsync(store, status, ct);
+        if (version is null || LastSession?.SessionId is not { } session) return null;
+        return (await sessions.GetSessionByIdAsync(session, ct))?.EndedUTC is not null ? version : null;
+    }
 
     public TerminalStatusResponse? LastSession
     {

@@ -154,6 +154,7 @@ public static class McpStdioHost
         services.AddScoped<VibeRails.Services.Board.BoardReviewService>();
         services.AddScoped<VibeRails.Services.Board.BoardWorkflowService>();
         VibeRails.Services.GitPreflight.GitPreflightServiceCollectionExtensions.AddGitSnapshots(services);
+        VibeRails.Services.Launches.LaunchServiceRegistration.AddLaunchDefinitions(services, ResolveStatePath);
         services.AddScoped<RulesTool>();
         services.AddScoped<BoardTool>();
         // PR review tools. The store owns its dedicated schema and read-only legacy adoption, so this child needs only

@@ -1,5 +1,5 @@
 using System.Text.Json;
-using VibeRails.DB;
+using VibeRails.Launches;
 using VibeRails.Services.Integrations.VibeCodeRemote;
 using VibeRails.Services.ReviewRequests;
 using VibeRails.Utils;
@@ -46,11 +46,11 @@ public static class ReviewInboxRoutes
             }
         });
 
-        group.MapGet("", async (ReviewInboxService inbox, IJobStore jobs, CancellationToken ct) =>
-            Results.Json(inbox.View(Project(), await OpenRootsAsync(jobs, ct)), ReviewInboxJsonContext.Default.ReviewInboxView));
+        group.MapGet("", async (ReviewInboxService inbox, ILaunchStore launches, CancellationToken ct) =>
+            Results.Json(inbox.View(Project(), await OpenRootsAsync(launches, ct)), ReviewInboxJsonContext.Default.ReviewInboxView));
 
-        group.MapPost("/refresh", async (ReviewInboxService inbox, IJobStore jobs, CancellationToken ct) =>
-            Results.Json(await inbox.RefreshNowAsync(Project(), ct, await OpenRootsAsync(jobs, ct)), ReviewInboxJsonContext.Default.ReviewInboxView));
+        group.MapPost("/refresh", async (ReviewInboxService inbox, ILaunchStore launches, CancellationToken ct) =>
+            Results.Json(await inbox.RefreshNowAsync(Project(), ct, await OpenRootsAsync(launches, ct)), ReviewInboxJsonContext.Default.ReviewInboxView));
 
         group.MapPost("/{reference}/reject", async Task<IResult> (string reference, HttpContext context, ReviewInboxService inbox, CancellationToken ct) =>
         {
@@ -74,7 +74,7 @@ public static class ReviewInboxRoutes
         // The popup runs in its own window and outlives this request; 202 says it was opened, the list says how it ended.
         // The optional body names one of the view's clones (VIBE-213 item 7); any other folder is refused.
         group.MapPost("/{reference}/approve", async Task<IResult> (string reference, HttpContext context, ReviewInboxService inbox,
-            IJobStore jobs, CancellationToken ct) =>
+            ILaunchStore launches, CancellationToken ct) =>
         {
             if (context.Request.ContentLength > MaxApproveBodyBytes) return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
             ReviewInboxApproveRequest? body = null;
@@ -92,7 +92,7 @@ public static class ReviewInboxRoutes
                         ReviewInboxJsonContext.Default.ReviewRequestError, statusCode: StatusCodes.Status400BadRequest);
                 }
             }
-            var openRoots = string.IsNullOrWhiteSpace(body?.RepositoryPath) ? null : await OpenRootsAsync(jobs, ct);
+            var openRoots = string.IsNullOrWhiteSpace(body?.RepositoryPath) ? null : await OpenRootsAsync(launches, ct);
             return Results.Json(inbox.BeginApprove(reference, Project(), body?.RepositoryPath, openRoots),
                 ReviewInboxJsonContext.Default.ReviewInboxActionResult, statusCode: StatusCodes.Status202Accepted);
         });
@@ -100,7 +100,7 @@ public static class ReviewInboxRoutes
 
     private static string Project() => ParserConfigs.GetRootPath();
 
-    /// <summary>The projects every open root has, from the presence rows the Jobs scheduler refreshes each cycle.</summary>
-    private static Task<IReadOnlyList<string>> OpenRootsAsync(IJobStore jobs, CancellationToken ct) =>
-        jobs.GetOpenProjectRootsAsync(DateTime.UtcNow, ct);
+    /// <summary>The projects every open root has, from the root leases refreshed while backends are open.</summary>
+    private static Task<IReadOnlyList<string>> OpenRootsAsync(ILaunchStore launches, CancellationToken ct) =>
+        launches.GetOpenProjectRootsAsync(DateTime.UtcNow, ct);
 }

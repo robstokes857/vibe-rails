@@ -11,7 +11,7 @@ namespace VibeRails.Services.Board;
 public sealed record BoardReviewsResponse(IReadOnlyList<BoardReviewRecord> Reviews, bool HasMore, BoardReviewRecord? Latest = null);
 
 /// <summary>Shared review result and scope contract for REST and MCP. Never moves a card.</summary>
-public sealed class BoardReviewService(IBoardStore store, IBoardService board)
+public sealed class BoardReviewService(IBoardStore store, IBoardService board, VibeRails.Launches.ILaunchStore? launches = null)
 {
     private static readonly GitStagedSnapshotProvider snapshots = new();
 
@@ -22,18 +22,18 @@ public sealed class BoardReviewService(IBoardStore store, IBoardService board)
         var card = await store.FindCardAsync(project, cardKey, ct);
         if (card is null) return null;
         var saved = await store.GetReviewsAsync(project, card.Id, offset, ct);
-        var runs = await store.GetReviewRunsAsync(project, card.Id, offset, ct);
+        var runs = await VibeRails.Services.Launches.LaunchReviewRuns.ReadAsync(launches, project, card.Id, offset, ct);
         var rows = saved.ToList();
         foreach (var run in runs.Where(r => r.Purpose == "code_review"))
                 if (!rows.Any(r => r.RunId == run.Id))
                     rows.Add(await store.GetReviewAsync(project, card.Id, run.Id, ct) ?? FromRun(card.Id, run));
         if (offset == 0)
         {
-            var entries = await store.GetLaneAutomationStatusesAsync(project, card.Id, ct);
-            foreach (var entry in entries.Where(e => e.Purpose == "code_review" && e.RunId is null))
+            var entries = await store.GetLaunchEventsAsync(project, card.Id, ct);
+            foreach (var entry in entries.Where(e => e.Gate == "review" && e.RunId is null))
             {
-                rows.Add(new($"entry-{entry.EventKey}", card.Id, "unknown", entry.Name,
-                    entry.DueUtc, ProcessStatus: entry.Status, Error: entry.Reason));
+                rows.Add(new($"entry-{entry.Id}", card.Id, "unknown", entry.DefinitionId,
+                    entry.DueUtc, ProcessStatus: entry.SkipRequested ? "Skipped" : !entry.Current ? "Cancelled" : "Waiting", Error: entry.Summary));
             }
         }
         var resolved = new List<BoardReviewRecord>();
@@ -41,7 +41,7 @@ public sealed class BoardReviewService(IBoardStore store, IBoardService board)
         {
             var run = runs.FirstOrDefault(r => r.Id == row.RunId);
             if (run is null && row.RunId is not null)
-                run = await store.FindReviewRunAsync(project, card.Id, row.RunId, null, ct);
+                run = (await VibeRails.Services.Launches.LaunchReviewRuns.ReadAsync(launches, project, card.Id, 0, ct, runId: row.RunId)).FirstOrDefault();
             var updated = run is null ? (row.RunId is null ? row : row with { ProcessStatus = "Run status unknown" }) : row with { ProcessStatus = run.Status.ToString(), Error = run.Error ?? run.Routing?.Problem,
                 SessionId = run.WorkerSessionId ?? row.SessionId, TerminalSessionId = run.SessionId ?? row.TerminalSessionId };
             if (updated.RunId is null && updated.SessionId is {} session)
@@ -72,7 +72,7 @@ public sealed class BoardReviewService(IBoardStore store, IBoardService board)
         var linked = (await store.GetAgentSessionsAsync(project, cardId, session, ct)).SingleOrDefault()?.Session
             ?? throw new BoardValidationException("This session is not linked to the review card. Call attach_board_session for this card first.");
         var row = await store.GetReviewForSessionAsync(project, cardId, session, ct);
-        if (row is null && await store.FindReviewRunAsync(project, cardId, null, session, ct) is {} run)
+        if (row is null && (await VibeRails.Services.Launches.LaunchReviewRuns.ReadAsync(launches, project, cardId, 0, ct, sessionId: session)).FirstOrDefault() is {} run)
             row = FromRun(cardId, run);
         if (row is null)
         {

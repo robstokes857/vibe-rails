@@ -76,10 +76,9 @@ public static class SandboxRoutes
             var existing = await repository.GetSandboxByIdAsync(id, cancellationToken);
             if (existing?.EnvironmentId is int ownerId)
             {
-                var owner = await repository.GetEnvironmentByIdAsync(ownerId, cancellationToken);
-                var ownerName = owner?.CustomName ?? $"environment {ownerId}";
+                var ownerName = $"retired environment {ownerId}";
                 return Results.Conflict(new ErrorResponse(
-                    $"This sandbox is the workspace for '{ownerName}'. Change that environment's workspace mode, or delete the environment, to release it first."));
+                    $"This sandbox is the workspace for '{ownerName}'. Its data is retained for older versions."));
             }
 
             try
@@ -223,24 +222,7 @@ public static class SandboxRoutes
             // exactly once per launch.
             string[]? launcherArgs = null;
             if (!string.IsNullOrEmpty(envName) || request?.EnvironmentId is not null)
-            {
-                var environment = request?.EnvironmentId is int environmentId
-                    ? await repository.GetEnvironmentByIdAsync(environmentId, cancellationToken) : null;
-                if (environment is null || environment.LLM != llm)
-                    return Results.NotFound(new ErrorResponse("Environment not found in this project. Choose it again."));
-                envName = environment.CustomName;
-                launcherArgs = ["--env-id", environment.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)];
-                if (environment != null)
-                {
-                    if (!ProjectPathComparer.IsVisibleIn(environment.ProjectPath, ParserConfigs.GetRootPath()))
-                        return Results.NotFound(new ErrorResponse("Environment not found in this project."));
-                    if (!string.IsNullOrEmpty(environment.CustomArgs))
-                    {
-                        var customArgs = ShellArgSanitizer.ParseAndValidate(environment.CustomArgs);
-                        args.InsertRange(0, customArgs);
-                    }
-                }
-            }
+                return Results.Json(new ErrorResponse("Custom environments are retired. Choose a launch preset."), statusCode: 410);
 
             var result = launchService.LaunchInTerminal(llm, envName, sandbox.Path, args.ToArray(), launcherArgs);
 
@@ -330,9 +312,7 @@ public static class SandboxRoutes
         var names = new Dictionary<int, string>(ownerIds.Count);
         foreach (var ownerId in ownerIds)
         {
-            var environment = await repository.GetEnvironmentByIdAsync(ownerId, cancellationToken);
-            if (environment is not null)
-                names[ownerId] = environment.CustomName;
+            names[ownerId] = $"Retired environment {ownerId}";
         }
 
         return names;

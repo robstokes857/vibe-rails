@@ -4,6 +4,8 @@ using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services.Terminal;
 using VibeRails.Utils;
+using VibeRails.Launches;
+using VibeRails.Services.Launches;
 
 namespace VibeRails.Services.Board;
 
@@ -48,9 +50,9 @@ public sealed record BoardLaunchPrompt(string Prompt, string? EnvironmentPrompt,
 /// <summary>
 /// Root-backend only (it needs the in-process tab host). Copies the create/start/cleanup shape of
 /// <c>TerminalTabHostService.CreatePythonScriptTabAsync</c>. The composed prompt is handed to the
-/// tab child as <c>StartTerminalRequest.InitialPrompt</c>: TerminalRoutes prefers a request prompt
-/// over the environment's, so the combined TEMPLATE reaches the one PromptPlaceholderService pass
-/// unchanged — the once-only resolution invariant holds and no prompt plumbing changes.
+/// tab child as <c>StartTerminalRequest.InitialPrompt</c> for base launches, or snapshotted in the
+/// saved preset run. The combined template reaches one PromptPlaceholderService pass in the
+/// execution owner, preserving once-only resolution.
 ///
 /// After the session is linked and the launch reservation released, the launch records how much
 /// context the card put in front of the agent (VB-63). That measurement never fails a launch: a
@@ -65,7 +67,8 @@ public sealed class BoardLaunchService(
     IRepository repository,
     ITerminalTabHostService tabHost,
     IBoardContextEstimator contextEstimator, ReviewRoutingService? reviewRouting = null,
-    Func<Settings>? launchSettings = null, Func<int, DateTime, bool>? sessionOwnerRunning = null) : IBoardLaunchService
+    Func<Settings>? launchSettings = null, Func<int, DateTime, bool>? sessionOwnerRunning = null,
+    ILaunchStore? launchStore = null, LaunchService? launchService = null, LaunchDispatcher? launchDispatcher = null) : IBoardLaunchService
 {
     /// <summary>The refusal a second window's board manager launch gets (VIBE-262).</summary>
     public const string ManagerElsewhereMessage = "This board's manager is already running in another VibeRails window on this project. "
@@ -170,51 +173,25 @@ public sealed class BoardLaunchService(
         if (!BoardSelection.TryParse(selectionText, out var parsed) || parsed is null)
             throw new BoardValidationException("That assignee is not a launchable LLM selection.");
 
-        LLM_Environment? environment = null;
         if (parsed.IsEnvironment)
-        {
-            // Same discipline as EnvironmentLaunchService.ResolveEnvironmentAsync: resolve by id,
-            // require the provider to still match, and never fall back to a display name.
-            var byId = await repository.GetEnvironmentByIdAsync(parsed.EnvironmentId!.Value, cancellationToken);
-            environment = byId is not null && byId.LLM == parsed.Llm ? byId : null;
-            if (environment is null)
-                throw new BoardValidationException("The assigned environment no longer exists (or changed CLI). Pick another assignee.");
-            if (!ProjectPathComparer.IsVisibleIn(environment.ProjectPath, projectPath))
-                throw new BoardValidationException("The assigned environment belongs to another project.");
-        }
-
-        if (isManager && (environment?.Purpose == "code_review" || environment?.ReviewerRouting?.Mode == "switch"))
-            throw new BoardValidationException("Choose a work environment or base agent as manager; a code review environment is a worker.");
-
-        string? routingWorkerPrompt = null;
-        if (routingSnapshot is null && intent != "chat" && environment?.ReviewerRouting?.Mode == "switch")
-        {
-            if (reviewRouting is null) throw new BoardValidationException("Review routing is unavailable in this host.");
-            routingWorkerPrompt = environment.CustomPrompt;
-            routingSnapshot = await reviewRouting.ResolveAsync(projectPath, card.Key, environment.ReviewerRouting, null,
-                cancellationToken, environment.Id, environment.CustomPrompt);
-            BoardSelection.TryParse(routingSnapshot.Resolution.Selected.Selection, out parsed);
-            environment = parsed!.EnvironmentId is int reviewerId ? await repository.GetEnvironmentByIdAsync(reviewerId, cancellationToken) : null;
-            intent = "code_review";
-        }
-
-        if (intent != "chat" && environment?.Purpose == "code_review") intent = "code_review";
+            throw new BoardValidationException("Custom environments are retired. Replace this saved selection with an Agent.");
+        var preset = await ResolvePresetAsync(parsed, cancellationToken);
+        if (isManager && preset?.Purpose == "code_review")
+            throw new BoardValidationException("Choose a work Agent as manager; a review Agent is a worker.");
+        if (intent != "chat" && preset?.Purpose == "code_review") intent = "code_review";
         var isReview = intent == "code_review";
-        var assigneeLabel = environment is not null
-            ? $"{environment.CustomName} ({parsed.Cli})"
-            : parsed.Cli;
-        // App and Board context follow the Nudge switch for this launch's kind: base or saved environment.
-        var nudgeEnabled = ContextLevels.NudgeEnabled((launchSettings ?? Config.LoadFresh)(), environment is not null);
-        var composed = await ComposePromptAsync(store, projectPath, card, assigneeLabel, routingWorkerPrompt is null ? environment?.CustomPrompt : routingWorkerPrompt + "\n" + environment?.CustomPrompt, intent, cancellationToken, task, isWorker, nudgeEnabled);
-        if (intent == "chat") composed = composed with { Prompt = BoardPromptComposer.ComposeDiscussion(card, environment?.CustomPrompt, question, ContextLevels.Format(composed.ContextLevels)) };
+        var assigneeLabel = preset is not null ? $"{preset.Name} ({parsed.Cli})" : parsed.Cli;
+        // App and Board context follow the Nudge switch for base and saved preset launches.
+        var nudgeEnabled = (launchSettings ?? Config.LoadFresh)().CreateVibeStoryTracking;
+        var composed = await ComposePromptAsync(store, projectPath, card, assigneeLabel, preset?.InitialPrompt, intent, cancellationToken, task, isWorker, nudgeEnabled);
+        if (intent == "chat") composed = composed with { Prompt = BoardPromptComposer.ComposeDiscussion(card, preset?.InitialPrompt, question, ContextLevels.Format(composed.ContextLevels)) };
         var prompt = composed.Prompt + (routingSnapshot is null ? "" : ReviewRoutingService.Prompt(routingSnapshot.Resolution));
         var title = $"{card.DisplayId} · {Truncate(card.Title, 60)}";
         var launchOptions = routingSnapshot is not null ? routingSnapshot.Resolution.Selected.Options
-            : !parsed.IsEnvironment && string.Equals(parsed.Key, savedSelection, StringComparison.Ordinal) ? isManager ? card.ManagerBaseLlmOptions : card.BaseLlmOptions : null;
-        var launchArgs = environment is null ? VibeRails.Services.LlmClis.BaseLlmOptionsBuilder.BuildArguments(parsed.Llm, launchOptions)
-            : ShellArgSanitizer.ParseAndValidate(environment.CustomArgs).ToArray();
+            : !parsed.IsEnvironment && !parsed.IsPreset && string.Equals(parsed.Key, savedSelection, StringComparison.Ordinal) ? isManager ? card.ManagerBaseLlmOptions : card.BaseLlmOptions : null;
+        var launchArgs = preset is not null ? LaunchOptionBuilder.Build(preset) : VibeRails.Services.LlmClis.BaseLlmOptionsBuilder.BuildArguments(parsed.Llm, launchOptions);
         if (intent == "chat" && launchArgs.Sum(arg => arg.Length + 1) > 4000)
-            throw new BoardValidationException("For card discussion, use at most 4000 characters of environment arguments, or choose a base agent.");
+            throw new BoardValidationException("For card discussion, use at most 4000 characters of launch arguments, or choose a base agent.");
         var isPlanning = card.Type == "research-spike" || launchArgs.Select((arg, index) =>
             arg is "--permission-mode=plan" or "--mode=plan" or "--agent=plan"
             || arg is "--permission-mode" or "--mode" or "--agent" && index + 1 < launchArgs.Length && launchArgs[index + 1] == "plan").Any(value => value);
@@ -263,19 +240,30 @@ public sealed class BoardLaunchService(
         try
         {
             if (routingSnapshot is not null) await reviewRouting!.RequireLaunchAsync(routingSnapshot, cancellationToken);
-            tab = await tabHost.CreateTabAsync(cancellationToken);
-            var session = await tabHost.StartSessionAsync(
-                tab.TabId,
-                new StartTerminalRequest(
-                    WorkingDirectory: projectPath,
-                    Cli: parsed.Cli,
-                    EnvironmentName: environment?.CustomName,
-                    EnvironmentId: environment?.Id,
-                    Title: title,
-                    InitialPrompt: prompt,
-                    BaseLlmOptions: launchOptions,
-                    AuthorizeBoardTools: true, ContextBoardId: card.BoardId, ContextIncluded: true) { PreserveWorkingDirectory = routingSnapshot is not null },
-                cancellationToken);
+            TerminalStatusResponse session;
+            if (preset is not null)
+            {
+                var origin = isManager ? BoardSessionRecord.ManagerOrigin
+                    : isWorker ? isPlanning && !isReview ? BoardSessionRecord.PlanningWorkerOrigin : BoardSessionRecord.WorkerOrigin
+                    : isReview ? "code_review" : intent == "chat" ? "chat" : isPlanning ? "planning" : BoardSessionRecord.LaunchOrigin;
+                var launchedRun = await LaunchPresetAsync(preset, projectPath, card.BoardId, card.Id, prompt, origin, parsed.Key, cancellationToken);
+                tab = new TerminalTabStatusResponse(launchedRun.TabId!, launchedRun.QueuedUtc, true, launchedRun.SessionId);
+                session = new TerminalStatusResponse(true, launchedRun.SessionId, parsed.Cli, launchedRun.ResolvedWorkingDirectory ?? projectPath);
+            }
+            else
+            {
+                tab = await tabHost.CreateTabAsync(cancellationToken);
+                session = await tabHost.StartSessionAsync(
+                    tab.TabId,
+                    new StartTerminalRequest(
+                        WorkingDirectory: projectPath,
+                        Cli: parsed.Cli,
+                        Title: title,
+                        InitialPrompt: prompt,
+                        BaseLlmOptions: launchOptions,
+                        AuthorizeBoardTools: true, ContextBoardId: card.BoardId, ContextIncluded: true) { PreserveWorkingDirectory = routingSnapshot is not null },
+                    cancellationToken);
+            }
 
             if (!string.IsNullOrWhiteSpace(session.SessionId))
             {
@@ -513,18 +501,10 @@ public sealed class BoardLaunchService(
             throw new BoardValidationException("Set up this board's manager in Board settings > Manager first.");
         if (!BoardSelection.TryParse(settings.Selection, out var parsed) || parsed is null)
             throw new BoardValidationException("The board manager is not a launchable LLM selection.");
-        LLM_Environment? environment = null;
         if (parsed.IsEnvironment)
-        {
-            var byId = await repository.GetEnvironmentByIdAsync(parsed.EnvironmentId!.Value, cancellationToken);
-            environment = byId is not null && byId.LLM == parsed.Llm ? byId : null;
-            if (environment is null)
-                throw new BoardValidationException("The board manager's environment no longer exists (or changed CLI). Pick another manager in Board settings.");
-            if (!ProjectPathComparer.IsVisibleIn(environment.ProjectPath, projectPath))
-                throw new BoardValidationException("The board manager's environment belongs to another project.");
-            if (environment.Purpose == "code_review" || environment.ReviewerRouting?.Mode == "switch")
-                throw new BoardValidationException("Choose a work environment or base agent as the board manager; a code review environment is a worker.");
-        }
+            throw new BoardValidationException("Custom environments are retired. Replace the board manager with an Agent.");
+        var preset = await ResolvePresetAsync(parsed, cancellationToken);
+        if (preset?.Purpose == "code_review") throw new BoardValidationException("Choose a work Agent as board manager.");
 
         var tabs = await tabHost.ListTabsAsync(cancellationToken);
         var managerSessions = await store.GetBoardManagerSessionsAsync(projectPath, board.Id, 10, cancellationToken);
@@ -537,25 +517,34 @@ public sealed class BoardLaunchService(
         if (tabs.Count >= tabHost.MaxTabs)
             throw new BoardConflictException($"All {tabHost.MaxTabs} terminal tabs are in use. Close one first.");
 
-        var label = environment is not null ? $"{environment.CustomName} ({parsed.Cli})" : parsed.Cli;
-        var nudgeEnabled = ContextLevels.NudgeEnabled((launchSettings ?? Config.LoadFresh)(), environment is not null);
+        var label = preset is not null ? $"{preset.Name} ({parsed.Cli})" : parsed.Cli;
+        var nudgeEnabled = (launchSettings ?? Config.LoadFresh)().CreateVibeStoryTracking;
         var liveWorkerCards = (await LiveImplementationWorkersAsync(projectPath, board.Id, tabs, cancellationToken)).Sessions
             .Select(worker => worker.CardId).ToHashSet(StringComparer.Ordinal);
-        var composed = await ComposeBoardManagerPromptAsync(store, projectPath, board, settings, label, environment?.CustomPrompt, nudgeEnabled, liveWorkerCards, cancellationToken);
+        var composed = await ComposeBoardManagerPromptAsync(store, projectPath, board, settings, label, preset?.InitialPrompt, nudgeEnabled, liveWorkerCards, cancellationToken);
         var title = $"{Truncate(board.Name, 40)} · Manager";
         TerminalTabStatusResponse? tab = null;
         try
         {
-            tab = await tabHost.CreateTabAsync(cancellationToken);
-            var session = await tabHost.StartSessionAsync(tab.TabId, new StartTerminalRequest(
-                WorkingDirectory: projectPath,
-                Cli: parsed.Cli,
-                EnvironmentName: environment?.CustomName,
-                EnvironmentId: environment?.Id,
-                Title: title,
-                InitialPrompt: composed.Prompt,
-                BaseLlmOptions: environment is null ? settings.BaseLlmOptions : null,
-                AuthorizeBoardTools: true, ContextBoardId: board.Id, ContextIncluded: true), cancellationToken);
+            TerminalStatusResponse session;
+            if (preset is not null)
+            {
+                var launchedRun = await LaunchPresetAsync(preset, projectPath, board.Id, null, composed.Prompt,
+                    BoardSessionRecord.ManagerOrigin, parsed.Key, cancellationToken);
+                tab = new TerminalTabStatusResponse(launchedRun.TabId!, launchedRun.QueuedUtc, true, launchedRun.SessionId);
+                session = new TerminalStatusResponse(true, launchedRun.SessionId, parsed.Cli, launchedRun.ResolvedWorkingDirectory ?? projectPath);
+            }
+            else
+            {
+                tab = await tabHost.CreateTabAsync(cancellationToken);
+                session = await tabHost.StartSessionAsync(tab.TabId, new StartTerminalRequest(
+                    WorkingDirectory: projectPath,
+                    Cli: parsed.Cli,
+                    Title: title,
+                    InitialPrompt: composed.Prompt,
+                    BaseLlmOptions: settings.BaseLlmOptions,
+                    AuthorizeBoardTools: true, ContextBoardId: board.Id, ContextIncluded: true), cancellationToken);
+            }
             if (string.IsNullOrWhiteSpace(session.SessionId))
             {
                 Log.Warning("[Board] Tab {TabId} started the manager for board {Board} without a session id; the board will not show it", tab.TabId, board.Id);
@@ -673,6 +662,33 @@ public sealed class BoardLaunchService(
         {
             Log.Warning(ex, "[Board] Could not record the launch context sample for {Card}", card.Key);
         }
+    }
+
+    private async Task<LaunchPreset?> ResolvePresetAsync(BoardSelection selection, CancellationToken ct)
+    {
+        if (!selection.IsPreset) return null;
+        var preset = launchStore is null ? null : await launchStore.GetPresetAsync(selection.PresetId!, ct);
+        if (preset is null || !preset.Enabled || preset.RetiredUtc is not null || preset.Cli != selection.Llm)
+            throw new BoardValidationException("This saved Agent is unavailable. Replace the selection.");
+        if (preset.Kind != "agent") throw new BoardValidationException("A Quick Launch cannot run as a Board Agent. Add an initial prompt first.");
+        return LaunchOptionBuilder.Normalize(preset);
+    }
+
+    private async Task<LaunchRun> LaunchPresetAsync(LaunchPreset preset, string project, string? boardId, string? cardId,
+        string prompt, string origin, string selection, CancellationToken ct)
+    {
+        if (launchService is null || launchDispatcher is null) throw new BoardValidationException("The launch service is unavailable.");
+        var run = await launchService.EnqueueAsync("preset", preset.Id,
+            new(project, project, "board", "board:" + Guid.NewGuid().ToString("N"), BoardId: boardId, CardId: cardId,
+                AuthorizeBoardTools: true, ContextIncluded: true, ComposedPrompt: prompt, SessionOrigin: origin, Selection: selection), ct, preset.Revision);
+        run = await launchDispatcher.DispatchAsync(run.Id, ct);
+        if (run.Status == "queued")
+        {
+            await launchStore!.CancelAsync(run.Id, run.ProjectPath, CancellationToken.None);
+            throw new BoardConflictException("Execution capacity is in use. This launch was cancelled; try again when a slot is free. Run: " + run.Id);
+        }
+        if (run.SessionId is null || run.TabId is null) throw new BoardConflictException("The launch did not confirm a session. Check run " + run.Id + " before retrying.");
+        return run;
     }
 
     private static string Truncate(string value, int max) =>

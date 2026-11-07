@@ -38,6 +38,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
     {
         /// <summary>The view that draws this tab itself (VIBE-159); null for an ordinary tab.</summary>
         public string? Owner { get; init; }
+        public AutomationTabState? Automation { get; set; } = Automation;
         public SemaphoreSlim SessionGate { get; } = new(1, 1);
         public string? LastStartedSessionId { get; set; }
         public bool HasUnconfirmedStart { get; set; }
@@ -99,6 +100,15 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
 
     public async Task<TerminalTabStatusResponse> CreateTabAsync(CancellationToken cancellationToken = default)
         => await CreateTabCoreAsync(cancellationToken);
+
+    public void RegisterLaunchTab(string tabId, string runId, string name)
+    {
+        lock (_lock)
+        {
+            if (!_tabs.TryGetValue(tabId, out var child)) throw new InvalidOperationException("The launch tab is unavailable.");
+            child.Automation = new AutomationTabState(runId, name, savedLaunch: true);
+        }
+    }
 
     public async Task<TerminalTabStatusResponse> CreateTabAsync(string? owner, CancellationToken cancellationToken = default)
         => await CreateTabCoreAsync(cancellationToken, owner: NormalizeOwner(owner));
@@ -309,7 +319,6 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         // The scheduler closes every confirmed finished Automation; creation only needs one slot.
         // Recordings remain in session history. Ordinary terminals are never candidates.
         await using var scope = _scopeFactory.CreateAsyncScope();
-        var store = scope.ServiceProvider.GetRequiredService<IJobStore>();
         var sessions = scope.ServiceProvider.GetRequiredService<ISessionStore>();
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(5));
@@ -353,7 +362,10 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             candidateTimeout.CancelAfter(TimeSpan.FromSeconds(1));
             try
             {
-                return await child.Automation!.CheckReclamationAsync(store, sessions,
+                if (child.Automation!.SavedLaunch)
+                    return await child.Automation.CheckReclamationAsync(scope.ServiceProvider.GetRequiredService<VibeRails.Launches.ILaunchStore>(), sessions,
+                        token => GetTerminalStatusFromChildAsync(child, token), candidateTimeout.Token);
+                return await child.Automation.CheckReclamationAsync(scope.ServiceProvider.GetRequiredService<IJobStore>(), sessions,
                     token => GetTerminalStatusFromChildAsync(child, token), candidateTimeout.Token);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -530,36 +542,8 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         if (string.IsNullOrWhiteSpace(request.EnvironmentName) && !request.EnvironmentId.HasValue)
             return request;
 
-        await using var scope = _scopeFactory.CreateAsyncScope();
-        var llm = scope.ServiceProvider.GetRequiredService<ILlmParser>().Parse(request.Cli);
-        if (llm == LLM.NotSet || llm == LLM.Shell)
-            return request;
-
-        var repository = scope.ServiceProvider.GetRequiredService<IRepository>();
-        var environment = request.EnvironmentId is int environmentId
-            ? await repository.GetEnvironmentByIdAsync(environmentId, cancellationToken) : null;
-        if (environment is null || environment.LLM != llm
-            || !ProjectPathComparer.IsVisibleIn(environment.ProjectPath, ParserConfigs.GetRootPath()))
-            throw new InvalidOperationException("Environment not found in this project. Choose it again.");
-        request = request with { EnvironmentName = environment.CustomName };
-
-        if (request.PreserveWorkingDirectory || !environment.UsesWorkspaceClone)
-            return request;
-
-        var projectPath = string.IsNullOrWhiteSpace(request.WorkingDirectory)
-            ? _launchDirectory
-            : request.WorkingDirectory;
-
-        var workspaceService = scope.ServiceProvider.GetRequiredService<IRunWorkspaceService>();
-        var workspace = await workspaceService.ResolveAsync(environment, projectPath, cancellationToken);
-
-        // The route turns this into a 400 carrying the reason, which is what the user needs to
-        // see — starting the tab in the project directory instead would silently write the
-        // agent's changes to the very tree the workspace exists to protect.
-        if (!workspace.Success)
-            throw new InvalidOperationException(workspace.Error);
-
-        return request with { WorkingDirectory = workspace.WorkingDirectory };
+        await Task.CompletedTask;
+        throw new InvalidOperationException("Custom environments are retired. Choose a launch preset.");
     }
 
     public async Task<TerminalStatusResponse> StopSessionAsync(string tabId, CancellationToken cancellationToken = default)
@@ -946,8 +930,9 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             try
             {
                 using var scope = _scopeFactory.CreateScope();
-                automationCompleted = await automation.HasCompletedRunAsync(
-                    scope.ServiceProvider.GetRequiredService<IJobStore>(), status, cancellationToken);
+                automationCompleted = automation.SavedLaunch
+                    ? await automation.HasCompletedRunAsync(scope.ServiceProvider.GetRequiredService<VibeRails.Launches.ILaunchStore>(), status, cancellationToken)
+                    : await automation.HasCompletedRunAsync(scope.ServiceProvider.GetRequiredService<IJobStore>(), status, cancellationToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -1395,6 +1380,11 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             }
             if (payload.AuthorizeBoardTools)
                 request.Headers.Add("X-VibeRails-Board-Authorization", "true");
+            if (payload.LaunchClaim is { } claim)
+            {
+                request.Headers.Add("X-VibeRails-Launch-Run", claim.RunId);
+                request.Headers.Add("X-VibeRails-Launch-Claim", claim.Token);
+            }
             var json = JsonSerializer.Serialize(payload, AppJsonSerializerContext.Default.StartTerminalRequest);
             request.Content = new StringContent(json, Encoding.UTF8, "application/json");
         }

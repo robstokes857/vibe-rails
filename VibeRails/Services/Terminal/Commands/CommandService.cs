@@ -32,7 +32,8 @@ public sealed record PreparedTerminalSession(
     Dictionary<string, string> Environment,
     bool OpenCodeProxyActive = false,
     string? Executable = null,
-    IReadOnlyList<string>? Argv = null);
+    IReadOnlyList<string>? Argv = null,
+    string? InitialPrompt = null);
 
 public class CommandService : ICommandService
 {
@@ -99,9 +100,14 @@ public class CommandService : ICommandService
         _storyTrackingSettings = storyTrackingSettings;
     }
 
-    public async Task<PreparedTerminalSession> PrepareSessionAsync(
+    public Task<PreparedTerminalSession> PrepareSessionAsync(LLM llm, string? envName, string[]? extraArgs,
+        string? initialPrompt = null, string summary = "", string? sessionId = null, bool authorizeBoardTools = false,
+        Func<Task<IReadOnlyList<ContextLevels.Level>>>? resolveNudgedContext = null) =>
+        PrepareLaunchSessionAsync(llm, envName, extraArgs, initialPrompt, summary, sessionId, authorizeBoardTools, resolveNudgedContext);
+
+    public async Task<PreparedTerminalSession> PrepareLaunchSessionAsync(
         LLM llm, string? envName, string[]? extraArgs, string? initialPrompt = null, string summary = "",
-        string? sessionId = null, bool authorizeBoardTools = false, Func<Task<IReadOnlyList<ContextLevels.Level>>>? resolveNudgedContext = null)
+        string? sessionId = null, bool authorizeBoardTools = false, Func<Task<IReadOnlyList<ContextLevels.Level>>>? resolveNudgedContext = null, bool suppressNudge = false)
     {
         if (Environment.GetEnvironmentVariable("VIBERAILS_TEST_FAKE_CLI") == "1")
         {
@@ -218,7 +224,7 @@ public class CommandService : ICommandService
         var nudgeEnabled = string.IsNullOrEmpty(envName)
             ? settings.CreateVibeStoryTracking
             : settings.CreateVibeStoryTrackingCustomEnvs;
-        if (nudgeEnabled)
+        if (nudgeEnabled && !suppressNudge)
         {
             // Story tracking remains a fallback, so its ready-only instruction never
             // displaces a task. App and Board context accompany tasks and continuations too.
@@ -431,7 +437,8 @@ public class CommandService : ICommandService
             // Grok rides /llm/cli-chat; the OpenCode lease also keeps that route up.
             OpenCodeProxyActive: openCodeProxyActive || grokProxyActive,
             Executable: cli,
-            Argv: directArgv);
+            Argv: directArgv,
+            InitialPrompt: prompt);
     }
 
     private async Task<string[]> SkipMissingCodexDesktopBridgeAsync(string envName, string[] launchArgs)

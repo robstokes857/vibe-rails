@@ -108,6 +108,22 @@ public class TerminalSessionService : ITerminalSessionService
     }
 
     public async Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false, Func<Task<ResolvedPrompt>>? resolveInitialPrompt = null, string summary = "", bool authorizeBoardTools = false, string? contextBoardId = null, bool contextIncluded = false)
+        => await StartCoreAsync(llm, workingDirectory, environmentName, extraArgs, title, makeRemote, resolveInitialPrompt,
+            summary, authorizeBoardTools, contextBoardId, contextIncluded);
+
+    public Task<bool> StartLaunchSessionAsync(VibeRails.Services.Launches.LaunchExecution launch, Func<Task<ResolvedPrompt>> resolvePrompt)
+    {
+        var snapshot = launch.Run.Snapshot;
+        var preset = snapshot.Preset!;
+        return StartCoreAsync(preset.Cli, snapshot.Context.WorkingDirectory, null,
+            VibeRails.Services.Launches.LaunchOptionBuilder.Build(preset), preset.Name, false, resolvePrompt, "",
+            snapshot.Context.AuthorizeBoardTools, snapshot.Context.BoardId, true, launch);
+    }
+
+    private async Task<bool> StartCoreAsync(LLM llm, string workingDirectory, string? environmentName, string[]? extraArgs,
+        string? title, bool makeRemote, Func<Task<ResolvedPrompt>>? resolveInitialPrompt, string summary,
+        bool authorizeBoardTools, string? contextBoardId, bool contextIncluded,
+        VibeRails.Services.Launches.LaunchExecution? launch = null)
     {
         await s_lifecycleGate.WaitAsync();
 
@@ -120,10 +136,7 @@ public class TerminalSessionService : ITerminalSessionService
                 s_completedSnapshot = null;
             }
 
-            // Past the gate and past the occupancy check, so this call owns the slot and no
-            // concurrent start can also reach here. That is what makes it safe to run the
-            // Initial Message's {{step:<id>}} commands: a loser blocks on the gate above, sees
-            // the winner's terminal, and returns false without executing anything.
+            // Resolve once after owning the slot; rejected starts have no prompt side effects.
             var resolved = resolveInitialPrompt is null ? null : await resolveInitialPrompt();
             var initialPrompt = resolved?.Prompt;
             workingDirectory = resolved?.WorkingDirectory ?? workingDirectory;
@@ -141,6 +154,7 @@ public class TerminalSessionService : ITerminalSessionService
                 authorizeBoardTools: authorizeBoardTools,
                 contextBoardId: contextBoardId,
                 contextIncluded: contextIncluded,
+                launch: launch,
                 onRemoteTakeoverAuthorized: trigger =>
                 {
                     Log.Information(
@@ -172,6 +186,9 @@ public class TerminalSessionService : ITerminalSessionService
                 try { exitCode = terminal.ExitCode; } catch (InvalidOperationException) { }
                 ScheduleExitCleanup(terminal, sessionId, exitCode);
             }
+
+            if (launch is not null) launch.Watch(async () =>
+                await ShutdownActiveSessionAsync(terminal, -1, "Launch cancelled or timed out", requireExternalOwnership: false));
 
             return true;
         }
@@ -733,6 +750,7 @@ public class TerminalSessionService : ITerminalSessionService
             if (teardown.TerminalToDispose?.CompletedByAgent == true)
                 _stateService.RecordAgentSessionEnd(teardown.SessionId);
             await _stateService.CompleteSessionAsync(teardown.SessionId, exitCode);
+            await VibeRails.Services.Launches.LaunchExecution.CompleteSessionAsync(teardown.SessionId, exitCode);
             if (teardown.TerminalToDispose?.CompletedByAgent == true)
                 agentClosedSessionId = teardown.SessionId;
         }

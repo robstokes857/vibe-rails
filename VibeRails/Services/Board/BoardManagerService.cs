@@ -50,7 +50,7 @@ public sealed class BoardManagerService(IBoardStore store, IBoardLaunchService l
                 throw new BoardValidationException("Choose a manager agent from the list.");
             if (request.BaseLlmOptions is not null)
             {
-                if (parsed.IsEnvironment)
+                if ((parsed.IsEnvironment || parsed.IsPreset))
                     throw new BoardValidationException("Manager base options require a base CLI manager. Saved environments use their own launch settings.");
                 try { options = LlmClis.BaseLlmOptionsBuilder.Normalize(parsed.Llm, request.BaseLlmOptions); }
                 catch (ArgumentException ex) { throw new BoardValidationException(ex.Message); }

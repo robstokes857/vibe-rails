@@ -10,56 +10,6 @@ public static class CliLaunchRoutes
 {
     public static void Map(WebApplication app, string launchDirectory)
     {
-        app.MapGet("/api/v1/environments/{name}/launch", (LlmCliEnvironmentService envService, string name, LLM llm) =>
-        {
-            try
-            {
-                var envVars = envService.GetEnvironmentVariables(name, llm);
-                return Results.Ok(envVars);
-            }
-            catch (ArgumentException ex)
-            {
-                // Name escaped the envs root (containment guard) — reject rather than 500.
-                return Results.BadRequest(new ErrorResponse(ex.Message));
-            }
-        }).WithName("GetLaunchEnvironment");
-
-        app.MapPost("/api/v1/cli/launch/{cli}", async (
-            IEnvironmentLaunchService environmentLaunchService,
-            ILlmParser llmParser,
-            string cli,
-            LaunchCliRequest? request,
-            CancellationToken cancellationToken) =>
-        {
-            var llm = llmParser.Parse(cli);
-
-            if (llm == LLM.NotSet)
-            {
-                return Results.BadRequest(new ErrorResponse($"Unknown CLI type: {cli}"));
-            }
-
-            // LLM.Shell is a terminal-only type (a bare PTY, no agent) and has no launcher;
-            // reject it here so it returns 400 instead of throwing 500 inside LaunchLLMService.
-            if (llm == LLM.Shell)
-            {
-                return Results.BadRequest(new ErrorResponse("The plain shell terminal is not a launchable agent CLI."));
-            }
-
-            var result = await environmentLaunchService.LaunchAsync(
-                llm,
-                request ?? new LaunchCliRequest(),
-                launchDirectory,
-                cancellationToken: cancellationToken);
-
-            return Results.Ok(new LaunchCliResponse(
-                Success: result.Success,
-                ExitCode: 0,
-                Message: result.Message,
-                StandardOutput: "",
-                StandardError: result.Success ? "" : result.Message
-            ));
-        }).WithName("LaunchCli");
-
         app.MapPost("/api/v1/cli/launch/vscode", (LaunchVsCodeRequest? request) =>
         {
             try

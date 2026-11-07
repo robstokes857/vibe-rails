@@ -19,12 +19,13 @@ public static class RouteExtensions
         // short-lived backend process attached to every terminal tab or `vb --env` session.
         if (isActiveRootBackend)
             FileSystemRoutes.Map(app, launchDirectory);
-        EnvironmentRoutes.Map(app);
-        EnvironmentStepRoutes.Map(app);
+
+
+        RetiredLaunchRoutes.Map(app);
         LlmPickerRoutes.Map(app, isActiveRootBackend);
-        AutomationNavRoutes.Map(app);
+
         PythonScriptRoutes.Map(app, isActiveRootBackend);
-        JobRoutes.Map(app, launchDirectory, isActiveRootBackend);
+
         CliLaunchRoutes.Map(app, launchDirectory);
         SessionRoutes.Map(app);
         ChatHistoryRoutes.Map(app);
@@ -53,7 +54,7 @@ public static class RouteExtensions
         HookRoutes.Map(app);
         if (isActiveRootBackend)
             CodeGraphRoutes.Map(app);
-        LlmSettingsRoutes.Map(app);
+
         UpdateRoutes.Map(app);
         AppSettingsRoutes.Map(app, isActiveRootBackend);
         if (isActiveRootBackend)
@@ -76,6 +77,7 @@ public static class RouteExtensions
         if (isActiveRootBackend) PinRoutes.Map(app);
         // PR review tracker: configured watches or project-origin fallback, with `gh`; root dashboard only.
         if (isActiveRootBackend) PrReviewRoutes.Map(app);
+        if (isActiveRootBackend) { LaunchRoutes.Map(app); BoardLaunchRoutes.Map(app); }
         PushRoutes.Map(app);
         LifecycleRoutes.Map(app);
         app.Services.GetRequiredService<AppEventWebSocketHandler>().MapWebSocket(app);

@@ -27,6 +27,7 @@ public static class JobTriggerProcessHost
         IJobStore? jobStore,
         CancellationToken cancellationToken)
     {
+        if (jobStore is not null) return 0; // Retired compatibility injection: never touch legacy Jobs.
         try
         {
             var trigger = GetValue(args, "--job-trigger");
@@ -62,29 +63,10 @@ public static class JobTriggerProcessHost
             if (string.IsNullOrWhiteSpace(commit))
                 return 0;
 
-            if (jobStore is null)
-            {
-                var installDirectory = PathConstants.GetInstallDirPath();
-                Directory.CreateDirectory(installDirectory);
-                var statePath = Path.Combine(installDirectory, PathConstants.STATE_FILENAME);
-                jobStore = SqliteStorage.CreateJobStore(statePath);
-            }
+            var count = await VibeRails.Services.Launches.LaunchEventService.Create().EnqueueAsync(
+                repositoryPath, JobTriggerKind.Commit, commit.ToLowerInvariant(), cancellationToken);
+            if (count > 0) Log.Information("[Launches] Queued {Count} after-commit runs", count);
 
-            // Enqueue only — deliberately. Spawning terminals from here used to be unbounded: this
-            // loop called the launcher once per returned run with no cap, so a rebase or an amend
-            // loop producing six commits in two minutes spawned six job processes at once. Handing
-            // queued runs to the next active root scheduler means they inherit both the per-job
-            // overlap guard and the machine-wide launch cap.
-            //
-            // Cost is a small amount of latency: an active root picks it up on its next scheduler
-            // poll (normally within ten seconds) rather than launching directly from the Git hook.
-            var runIds = await jobStore.EnqueueEventRunsAsync(
-                repositoryPath,
-                JobTriggerKind.Commit,
-                commit.ToLowerInvariant(),
-                cancellationToken);
-            if (runIds.Count > 0)
-                Log.Information("[Jobs] Queued {Count} commit-triggered run(s) for {Repository}", runIds.Count, repositoryPath);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

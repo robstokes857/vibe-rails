@@ -11,7 +11,8 @@ public sealed record CliRequest(
     string WorkingDirectory,
     IReadOnlyDictionary<string, string?>? EnvironmentVariables = null,
     TimeSpan? Timeout = null,
-    string? StandardInput = null);
+    string? StandardInput = null,
+    Func<int, Task>? OnStarted = null);
 
 /// <summary>
 /// One visible OS terminal window running <paramref name="ScriptBody"/>. The wrapper writes the

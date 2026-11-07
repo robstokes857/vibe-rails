@@ -98,7 +98,19 @@ public sealed class CliWrapper : ICliWrapper
 
         try
         {
-            var result = await command.ExecuteAsync(linkedCts.Token).ConfigureAwait(false);
+            var execution = command.ExecuteAsync(linkedCts.Token);
+            try
+            {
+                if (request.OnStarted is not null) await request.OnStarted(execution.ProcessId).ConfigureAwait(false);
+            }
+            catch
+            {
+                // A caller that cannot persist ownership must not leave an untracked child.
+                await linkedCts.CancelAsync();
+                try { await execution.ConfigureAwait(false); } catch (OperationCanceledException) { }
+                throw;
+            }
+            var result = await execution.ConfigureAwait(false);
             exitCode = result.ExitCode;
         }
         catch (OperationCanceledException)

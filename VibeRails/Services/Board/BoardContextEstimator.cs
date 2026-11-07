@@ -33,7 +33,7 @@ public sealed class BoardContextEstimator(
     IBoardService service,
     IBoardStore store,
     IRepository repository,
-    Func<Settings>? launchSettings = null) : IBoardContextEstimator
+    Func<Settings>? launchSettings = null, VibeRails.Launches.ILaunchStore? launches = null) : IBoardContextEstimator
 {
     public async Task<BoardContextEstimateResponse?> EstimateAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default)
     {
@@ -145,11 +145,8 @@ public sealed class BoardContextEstimator(
     {
         if (string.IsNullOrWhiteSpace(assignee) || !BoardSelection.TryParse(assignee, out var parsed) || parsed is null)
             return new ResolvedAssignee(null, null);
-        if (!parsed.IsEnvironment)
-            return new ResolvedAssignee(parsed.Cli, null);
-        var environment = await repository.GetEnvironmentByIdAsync(parsed.EnvironmentId!.Value, cancellationToken);
-        if (environment is null || environment.LLM != parsed.Llm || !ProjectPathComparer.IsVisibleIn(environment.ProjectPath, projectPath))
-            return new ResolvedAssignee(parsed.Cli, null);
-        return new ResolvedAssignee($"{environment.CustomName} ({parsed.Cli})", environment.CustomPrompt);
+        if (parsed.IsPreset && launches is not null && await launches.GetPresetAsync(parsed.PresetId!, cancellationToken) is { } preset)
+            return new ResolvedAssignee(preset.Name, preset.InitialPrompt);
+        return new ResolvedAssignee(parsed.IsEnvironment ? "Retired selection" : parsed.Cli, null);
     }
 }

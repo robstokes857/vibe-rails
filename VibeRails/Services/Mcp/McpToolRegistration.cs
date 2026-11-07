@@ -22,6 +22,7 @@ public static class McpToolRegistration
 
     /// <summary>Registers every VibeRails tool class with <see cref="SerializerOptions"/>. Add new tool classes here only.</summary>
     public static IMcpServerBuilder WithVibeRailsTools(this IMcpServerBuilder builder) => builder
+        .WithTools<LaunchTool>(SerializerOptions)
         .WithTools<RulesTool>(SerializerOptions)
         .WithTools<SessionSearchTool>(SerializerOptions)
         .WithTools<TokenSaverTool>(SerializerOptions)

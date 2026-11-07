@@ -10,6 +10,8 @@ public interface ITerminalTabHostService
     Task CloseCompletedAutomationTabsAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     Task<IReadOnlyList<TerminalTabStatusResponse>> ListTabsAsync(CancellationToken cancellationToken = default);
     Task<TerminalTabStatusResponse> CreateTabAsync(CancellationToken cancellationToken = default);
+    /// <summary>Associates an automatic single launch with its tab for safe completed-host reclamation.</summary>
+    void RegisterLaunchTab(string tabId, string runId, string name) { }
     /// <summary>
     /// Creates a tab that belongs to one view (the script workbench's agent pane). The tab list
     /// reports <paramref name="owner"/> so the Terminals page leaves the tab out of its strip and

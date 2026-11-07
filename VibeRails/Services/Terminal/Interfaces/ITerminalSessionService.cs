@@ -20,6 +20,8 @@ public interface ITerminalSessionService
     /// one of them can go on to own a terminal. Null when there is no Initial Message.
     /// </param>
     Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false, Func<Task<ResolvedPrompt>>? resolveInitialPrompt = null, string summary = "", bool authorizeBoardTools = false, string? contextBoardId = null, bool contextIncluded = false);
+    Task<bool> StartLaunchSessionAsync(VibeRails.Services.Launches.LaunchExecution launch,
+        Func<Task<ResolvedPrompt>> resolvePrompt) => throw new NotSupportedException();
     Task HandleWebSocketAsync(WebSocket webSocket, CancellationToken cancellationToken, int? cols = null, int? rows = null);
     Task<TerminalInputResponse> SendInputAsync(TerminalInputRequest request, CancellationToken cancellationToken = default);
     Task StopSessionAsync();

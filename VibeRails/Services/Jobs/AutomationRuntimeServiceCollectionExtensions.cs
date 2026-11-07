@@ -10,8 +10,8 @@ using VibeRails.Utils;
 namespace VibeRails.Services.Jobs;
 
 /// <summary>
-/// The shared Automation scheduling and native-terminal launch graph. The dashboard and terminal
-/// process hosts use this registration so Environment/workspace behavior stays consistent.
+/// The shared single-launch scheduling and native-terminal launch graph. The dashboard and terminal
+/// process hosts use this registration so provider and workspace preparation stays consistent.
 /// </summary>
 public static class AutomationRuntimeServiceCollectionExtensions
 {
@@ -20,13 +20,11 @@ public static class AutomationRuntimeServiceCollectionExtensions
         bool hostScheduler)
     {
         services.AddSqliteStateStorage(_ => new SqliteStoragePaths(ParserConfigs.GetStatePath()),
-            consumeBoardEvents: hostScheduler);
+            consumeBoardEvents: false);
         services.TryAddScoped<VibeRails.Services.Board.ReviewRoutingService>();
-        services.TryAddSingleton<VibeRails.DTOs.IReviewRunSnapshotFactory, VibeRails.Services.Board.ReviewRunSnapshotFactory>();
         services.TryAddSingleton<IJobExecutableResolver, JobExecutableResolver>();
         services.TryAddSingleton<IAutomationScriptService, AutomationScriptService>();
-        services.TryAddSingleton<IJobProcessLauncher, JobProcessLauncher>();
-        // Shared process runner for repository-script actions and Environment Steps. It is
+        // Shared process runner for repository-script Actions. It is
         // stateless, so each process host uses one singleton.
         services.TryAddSingleton<ICliWrapper, CliWrapper>();
 
@@ -42,19 +40,11 @@ public static class AutomationRuntimeServiceCollectionExtensions
         services.TryAddScoped<IGrokLlmCliLauncher, GrokLlmCliLauncher>();
         services.TryAddScoped<ILaunchLLMService, LaunchLLMService>();
         services.TryAddScoped<IEnvironmentLaunchService, EnvironmentLaunchService>();
-        services.TryAddScoped<IJobLaunchService, JobLaunchService>();
-        if (hostScheduler)
-            services.TryAddScoped<IJobTerminalTabLauncher, JobTerminalTabLauncher>();
-
-        services.TryAddSingleton<JobSchedulerHealth>();
-        services.TryAddSingleton<JobSchedulerHostedService>();
-        services.TryAddSingleton<IJobScheduler>(serviceProvider =>
-            serviceProvider.GetRequiredService<JobSchedulerHostedService>());
-
         if (hostScheduler)
         {
-            services.AddHostedService(serviceProvider =>
-                serviceProvider.GetRequiredService<JobSchedulerHostedService>());
+            services.TryAddScoped<VibeRails.Services.Launches.LaunchService>();
+            services.TryAddScoped<VibeRails.Services.Launches.LaunchDispatcher>();
+            services.AddHostedService<VibeRails.Services.Launches.LaunchScheduler>();
         }
 
         return services;

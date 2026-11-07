@@ -88,7 +88,7 @@ public sealed partial class BoardService(
     IBoardCommitService commits,
     IBoardLiveSessionProbe liveSessions,
     BoardSearchService? searchService = null,
-    PostProcessing.BoardGhostService? ghosts = null) : IBoardService
+    PostProcessing.BoardGhostService? ghosts = null, VibeRails.Launches.ILaunchStore? launchRuns = null) : IBoardService
 {
     // Raised 2026-09-17 (description 20k→100k, comment 10k→50k, attachments 12→40 per card): the
     // first agents to work cards split multi-part reports across comments and hit the old caps.
@@ -280,9 +280,9 @@ public sealed partial class BoardService(
         var desktopCards = await store.GetDesktopActiveCardIdsAsync(projectPath, cards.Select(card => card.Id).ToList(), DateTime.UtcNow, cancellationToken);
         var live = await liveSessions.GetLiveSessionsAsync(cancellationToken);
         var activeByCard = new Dictionary<string, (string SessionId, string TabId)>(StringComparer.Ordinal);
-        var waiting = (await store.GetWaitingAutomationCardIdsAsync(projectPath, cards.Select(c => c.Id).ToList(), cancellationToken))
+        var waiting = (await GetWaitingLaunchCardsAsync(projectPath, cards.Select(c => c.Id).ToList(), cancellationToken))
             .ToHashSet(StringComparer.Ordinal);
-        var automationCards = (await store.GetRunningAutomationsAsync(projectPath, cancellationToken))
+        var automationCards = (await GetRunningLaunchesAsync(projectPath, cancellationToken))
             .Select(run => run.CardId).ToHashSet(StringComparer.Ordinal);
         var agentCards = cards.Where(card => card.WorkflowMode == BoardWorkflowModes.Agent)
             .Select(card => card.Id).ToHashSet(StringComparer.Ordinal);
@@ -684,7 +684,7 @@ public sealed partial class BoardService(
         var live = await liveSessions.GetLiveSessionsAsync(cancellationToken);
         var sessions = await SessionDtosAsync(detail.Card.ProjectPath, detail.Sessions, live, cancellationToken);
         var hasActiveAutomation = sessions.Any(s => s.Active && s.IsAutomation)
-            || (await store.GetRunningAutomationsAsync(detail.Card.ProjectPath, cancellationToken))
+            || (await GetRunningLaunchesAsync(detail.Card.ProjectPath, cancellationToken))
                 .Any(run => run.CardId == detail.Card.Id);
         // The working agent is the first live session that is not an Automation's (see GetCardListResponseAsync).
         var active = sessions.FirstOrDefault(s => s.Active && !s.IsAutomation && IsWorkflowAgent(s.Origin, detail.Card.WorkflowMode == BoardWorkflowModes.Agent));
@@ -707,7 +707,7 @@ public sealed partial class BoardService(
             detail.Attachments.Select(ToDto).ToList(),
             detail.Card.BaseLlmOptions,
             notes, summary.Type, summary.BoardId, summary.Flagged, hasActiveAutomation, summary.DisplayId, summary.AgentMade,
-            (await store.GetWaitingAutomationCardIdsAsync(detail.Card.ProjectPath, [detail.Card.Id], cancellationToken)).Count > 0,
+            (await GetWaitingLaunchCardsAsync(detail.Card.ProjectPath, [detail.Card.Id], cancellationToken)).Count > 0,
             summary.AgentMadeBy, summary.AgentMadeSessionId, summary.JiraIssueKey,
             summary.WorkflowMode, summary.ManagerSelection, summary.ManagerBaseLlmOptions)
         {
@@ -841,7 +841,7 @@ public sealed partial class BoardService(
     private static BaseLlmOptions? NormalizeManagerOptions(string? selection, BaseLlmOptions? options)
     {
         if (options is null) return null;
-        if (!BoardSelection.TryParse(selection, out var parsed) || parsed is null || parsed.IsEnvironment)
+        if (!BoardSelection.TryParse(selection, out var parsed) || parsed is null || (parsed.IsEnvironment || parsed.IsPreset))
             throw new BoardValidationException("Manager base options require a base CLI manager. Saved environments use their own launch settings.");
         return NormalizeBaseOptions(selection, options);
     }
@@ -881,7 +881,7 @@ public sealed partial class BoardService(
     /// poll and launch gate all decide through this.
     /// </summary>
     internal static bool IsAutomationSession(string? origin, string sessionId, IReadOnlySet<string>? automationIds) =>
-        origin is BoardSessionRecord.AutomationOrigin or "code_review" || automationIds?.Contains(sessionId) == true;
+        origin is BoardSessionRecord.AutomationOrigin or "code_review" or "lane_review" || automationIds?.Contains(sessionId) == true;
 
     private async Task<List<BoardSessionDto>> SessionDtosAsync(string projectPath,
         IReadOnlyList<BoardSessionRecord> sessions, IReadOnlyDictionary<string, string> live, CancellationToken cancellationToken)
@@ -1037,7 +1037,7 @@ public sealed partial class BoardService(
 
     private static BaseLlmOptions? NormalizeBaseOptions(string? selection, BaseLlmOptions? options)
     {
-        if (options is null || !BoardSelection.TryParse(selection, out var parsed) || parsed is null || parsed.IsEnvironment)
+        if (options is null || !BoardSelection.TryParse(selection, out var parsed) || parsed is null || (parsed.IsEnvironment || parsed.IsPreset))
             return null;
         try { return BaseLlmOptionsBuilder.Normalize(parsed.Llm, options); }
         catch (ArgumentException ex) { throw new BoardValidationException(ex.Message); }

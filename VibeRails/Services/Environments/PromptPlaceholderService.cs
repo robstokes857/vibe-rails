@@ -1,20 +1,14 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using Serilog;
-using VibeRails.DB;
 using VibeRails.DTOs;
-using VibeRails.Services.Cli;
 using VibeRails.Services.Workspaces;
 using VibeRails.Utils;
 
 namespace VibeRails.Services.Environments;
 
 /// <summary>
-/// Where a prompt is being resolved from. WorkingDirectory must already be workspace-resolved
-/// (a clone-mode environment resolves {{git_branch}} and runs {{step:...}} commands inside the
-/// clone, not the project root). EnvironmentId scopes {{step:&lt;id&gt;}} lookups — a null id means
-/// no environment is in play and every step reference resolves to the deleted-step text.
+/// Execution context for ordinary placeholders. EnvironmentId is retained only for source compatibility.
 /// </summary>
 public sealed record PromptPlaceholderContext(
     string WorkingDirectory,
@@ -22,7 +16,7 @@ public sealed record PromptPlaceholderContext(
     string? EnvironmentName = null,
     string? BoardCardKey = null);
 
-/// <summary>The once-resolved message and the directory the CLI and its steps must use.</summary>
+/// <summary>The once-resolved message and the directory the CLI must use.</summary>
 public sealed record ResolvedPrompt(string? Prompt, string WorkingDirectory);
 
 /// <summary>
@@ -36,10 +30,10 @@ public sealed class PromptTooLongException(string message, int actualChars, int 
     public int ActualChars { get; } = actualChars;
     public int MaxChars { get; } = maxChars;
 
-    /// <summary>The resolved message itself is over budget — usually a step that printed a lot.</summary>
+    /// <summary>The resolved message itself is over budget — including substituted context.</summary>
     public static PromptTooLongException ForResolvedPrompt(int actualChars, int maxChars) => new(
         $"The Initial Message resolved to {actualChars:N0} characters, over the {maxChars:N0} character limit. " +
-        "Shorten the message, or reduce the output of the steps it references.",
+        "Shorten the initial message.",
         actualChars, maxChars);
 
     /// <summary>A resumed session's recap plus its attached Board card references is over budget.</summary>
@@ -61,11 +55,8 @@ public sealed class PromptTooLongException(string message, int actualChars, int 
 }
 
 /// <summary>
-/// Resolves the auto-filled placeholders an Initial Message may carry. This must run exactly once
-/// per launch, in the process that owns the PTY (TerminalRoutes for web tabs, CliLoop for spawned
-/// terminals): {{step:&lt;id&gt;}} executes a shell command, so a second resolution pass would run it
-/// a second time — and resolving where the seq-1 UserInputs recording happens is what keeps the
-/// recorded text identical to what the CLI actually received.
+/// Resolves supported placeholders exactly once in the process owning the PTY.
+/// Retired executable step syntax is rejected before any worktree or process side effect.
 /// </summary>
 public interface IPromptPlaceholderService
 {
@@ -80,60 +71,15 @@ public interface IPromptPlaceholderService
         CancellationToken cancellationToken = default);
 }
 
-/// <summary>
-/// Three token families, matched in a single pass over the template so no substituted text is ever
-/// re-scanned — an environment named <c>{{date}}</c>, a branch named <c>{{step:&lt;id&gt;}}</c>, or a
-/// step that prints a token all reach the CLI literally:
-///
-///   1. Built-ins — {{datetime}}, {{date}}, {{time}}, {{env_name}}, {{git_branch}},
-///      {{board_card}} — matched case-insensitively with any default= argument ignored. The Board
-///      card key is present only for an Automation launched by a Board lane event.
-///      Unknown names pass through untouched: they are the user-prompted variables the frontend
-///      fill-values modal owns, and on headless paths they ship literally, as they always have.
-///   2. {{step:&lt;guid&gt;}} — runs the referenced step hidden and captured (the same
-///      TerminalScriptBuilder path as the step Test button) and splices its output in. Best-effort
-///      by design: a deleted step, a disabled step, a non-zero exit, or a timeout substitutes
-///      explanatory text and the launch continues — unlike lifecycle pre-steps, a broken prompt
-///      step must not strand the session.
-///   3. {{worktree path="..." delete_after_days=7}} — both arguments optional; provisions one
-///      managed worktree before branch/step resolution, substitutes its absolute path, and
-///      selects it as the launch directory. Invalid options or creation failures abort launch.
-/// </summary>
+/// <summary>Resolves supported built-ins once; substituted values are never rescanned.</summary>
 public sealed partial class PromptPlaceholderService : IPromptPlaceholderService
 {
-    /// <summary>Substituted for a {{step:&lt;id&gt;}} whose step no longer exists.</summary>
-    public const string DeletedStepText = "(user deleted this step function)";
-
-    /// <summary>
-    /// Cap per referenced step, so one runaway build log cannot eat the whole
-    /// <see cref="MaxResolvedPromptChars"/> budget and fail the launch for every other token.
-    /// </summary>
-    public const int MaxStepOutputChars = 4000;
-
-    /// <summary>
-    /// Cap on the whole resolved message. It is typed into a shell as a single quoted argument,
-    /// and Windows caps a command line around 32k chars; going over produces a mangled command
-    /// rather than a clean failure, so the resolver refuses instead.
-    /// </summary>
     public const int MaxResolvedPromptChars = 30_000;
-
-    /// <summary>Substituted for a {{step:&lt;id&gt;}} whose step exists but is switched off.</summary>
-    public static string DisabledStepText(string displayName) =>
-        $"(step \"{displayName}\" is disabled and was not run)";
-
-    private readonly IEnvironmentStore _repository;
-    private readonly ICliWrapper _cli;
     private readonly TimeProvider _timeProvider;
     private readonly IManagedWorktreeService? _worktrees;
 
-    public PromptPlaceholderService(
-        IEnvironmentStore repository,
-        ICliWrapper cli,
-        TimeProvider? timeProvider = null,
-        IManagedWorktreeService? worktrees = null)
+    public PromptPlaceholderService(TimeProvider? timeProvider = null, IManagedWorktreeService? worktrees = null)
     {
-        _repository = repository;
-        _cli = cli;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _worktrees = worktrees;
     }
@@ -149,6 +95,7 @@ public sealed partial class PromptPlaceholderService : IPromptPlaceholderService
         PromptPlaceholderContext context,
         CancellationToken cancellationToken = default)
     {
+        VibeRails.Launches.LaunchValidation.RejectRetiredPrompt(prompt);
         if (string.IsNullOrEmpty(prompt))
             return new ResolvedPrompt(prompt, context.WorkingDirectory);
 
@@ -188,46 +135,12 @@ public sealed partial class PromptPlaceholderService : IPromptPlaceholderService
             context = context with { WorkingDirectory = worktree.Path };
         }
 
-        // Everything that needs I/O is resolved up front, against the original template, so the
-        // Replace pass below is pure — a value spliced in cannot become a token to resolve.
-        var stepIds = new List<string>();
-        var seenStepIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var needsGitBranch = false;
-
-        foreach (Match match in matches)
-        {
-            if (TryReadStepId(match, out var stepId))
-            {
-                if (seenStepIds.Add(stepId))
-                    stepIds.Add(stepId);
-            }
-            else if (match.Groups[1].Value.Equals("git_branch", StringComparison.OrdinalIgnoreCase))
-            {
-                needsGitBranch = true;
-            }
-        }
-
-        // The git call costs a process spawn, so it only happens when a token asks for it.
-        var gitBranch = needsGitBranch
-            ? await GetGitBranchAsync(context.WorkingDirectory, cancellationToken)
-            : null;
-
-        // Each distinct step runs once even when referenced twice, sequentially in template
-        // order — parallel shell commands in one working directory invite races for no win.
-        var stepOutputs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var stepId in stepIds)
-        {
-            stepOutputs[stepId] = Guid.TryParse(stepId, out _)
-                ? await RunStepForPromptAsync(stepId, context, cancellationToken)
-                : DeletedStepText;
-        }
-
+        var needsGitBranch = matches.Cast<Match>().Any(match =>
+            match.Groups[1].Value.Equals("git_branch", StringComparison.OrdinalIgnoreCase));
+        var gitBranch = needsGitBranch ? await GetGitBranchAsync(context.WorkingDirectory, cancellationToken) : null;
         var now = _timeProvider.GetLocalNow();
         var resolved = TokenRegex().Replace(prompt, match =>
         {
-            if (TryReadStepId(match, out var stepId))
-                return stepOutputs[stepId];
-
             return match.Groups[1].Value.ToLowerInvariant() switch
             {
                 "datetime" => now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture),
@@ -237,104 +150,12 @@ public sealed partial class PromptPlaceholderService : IPromptPlaceholderService
                 "git_branch" => gitBranch ?? "(no git branch)",
                 "board_card" => context.BoardCardKey ?? "",
                 "worktree" => worktreePath!,
-                // User-prompted variables are someone else's to handle — and so is {{step}} with
-                // an argument that is not an id. Leave the token exactly as written.
+                // User-prompted variables retain their existing caller-owned handling.
                 _ => match.Value
             };
         });
         return new ResolvedPrompt(resolved, context.WorkingDirectory);
     }
-
-    /// <summary>
-    /// Recognises the {{step:&lt;id&gt;}} shape inside a generic token match and hands back the
-    /// lookup key. Ids are normalised through Guid so the same step written two ways (braces,
-    /// mixed case) still runs once. A syntactically valid but non-Guid id is returned as-is and
-    /// resolves to the deleted-step text; anything else is not a step token at all.
-    /// </summary>
-    private static bool TryReadStepId(Match match, [NotNullWhen(true)] out string? stepId)
-    {
-        stepId = null;
-        if (!match.Groups[1].Value.Equals("step", StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        var argument = StepArgumentRegex().Match(match.Groups[2].Value);
-        if (!argument.Success)
-            return false;
-
-        var rawId = argument.Groups[1].Value;
-        stepId = Guid.TryParse(rawId, out var guid) ? guid.ToString() : rawId;
-        return true;
-    }
-
-    private async Task<string> RunStepForPromptAsync(
-        string stepId,
-        PromptPlaceholderContext context,
-        CancellationToken cancellationToken)
-    {
-        if (context.EnvironmentId is not int environmentId)
-            return DeletedStepText;
-
-        var step = await _repository.GetStepByIdAsync(environmentId, stepId, cancellationToken);
-        if (step is null)
-            return DeletedStepText;
-
-        // Disabled is the user's "stop running this" switch — every other consumer of steps
-        // honours it, and a prompt reference is no more entitled to run the command than a
-        // lifecycle phase is. Distinct wording from the deleted text so the LLM (and the user
-        // reading the recorded seq-1 input) can tell "turned off" from "gone".
-        if (!step.Enabled)
-        {
-            Log.Information(
-                "[Prompt] Skipping referenced step {Step} in the Initial Message — it is disabled",
-                step.DisplayName);
-            return DisabledStepText(step.DisplayName);
-        }
-
-        var timeout = TimeSpan.FromSeconds(Math.Clamp(
-            step.TimeoutSeconds, EnvironmentStep.MinTimeoutSeconds, EnvironmentStep.MaxTimeoutSeconds));
-
-        Log.Information(
-            "[Prompt] Running referenced step {Step} for the Initial Message (timeout {Timeout}s)",
-            step.DisplayName, timeout.TotalSeconds);
-
-        using var script = TerminalScriptBuilder.CreateCapturedScript(step.Command, context.WorkingDirectory);
-        var result = await _cli.RunAsync(
-            new CliRequest(
-                script.Executable,
-                script.Arguments,
-                context.WorkingDirectory,
-                Timeout: timeout),
-            onLine: null,
-            cancellationToken);
-
-        // A cancelled run means the launch itself is being torn down — propagate rather than
-        // handing back a half-truth substitution nobody will read. Thrown unconditionally: the
-        // runner can cancel for reasons of its own (process teardown, a lost pipe) without our
-        // token being signalled, and falling through would splice in a partial capture.
-        if (result.Cancelled)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            throw new OperationCanceledException(
-                $"Step \"{step.DisplayName}\" was cancelled while resolving the Initial Message.");
-        }
-
-        var output = result.StandardOutput.Trim();
-        if (output.Length == 0)
-            output = result.StandardError.Trim();
-        output = TextTruncation.TruncateWithMarker(output, MaxStepOutputChars, "… (output truncated)");
-
-        // A failing step's output is usually the interesting part (think `npm test`), so it is
-        // kept and the failure is appended — the LLM should see both.
-        if (result.TimedOut)
-            return AppendNote(output, $"(step \"{step.DisplayName}\" timed out)");
-        if (result.ExitCode != 0)
-            return AppendNote(output, $"(step \"{step.DisplayName}\" exited with code {result.ExitCode})");
-
-        return output;
-    }
-
-    private static string AppendNote(string output, string note) =>
-        output.Length == 0 ? note : output + "\n" + note;
 
     private static async Task<string?> GetGitBranchAsync(string workingDirectory, CancellationToken cancellationToken)
     {
@@ -361,10 +182,4 @@ public sealed partial class PromptPlaceholderService : IPromptPlaceholderService
     [GeneratedRegex(@"\{\{\s*([A-Za-z_][A-Za-z0-9_.-]*)([^{}]*)\}\}")]
     private static partial Regex TokenRegex();
 
-    // The argument tail of {{step:<guid>}} — inserted by the environment form's "Insert step
-    // output" picker. The loose hex-and-dashes capture is validated with Guid.TryParse rather
-    // than a stricter pattern so a malformed id degrades to the deleted-step text instead of
-    // silently staying literal.
-    [GeneratedRegex(@"^\s*:\s*([0-9a-fA-F\-]+)\s*$")]
-    private static partial Regex StepArgumentRegex();
 }

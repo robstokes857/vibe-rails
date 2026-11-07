@@ -28,7 +28,7 @@ public sealed class BoardAgentOptionsTool
 
     /// <summary>Lists enabled Board assignees and the model, effort, mode and speed options for base CLIs.</summary>
     [McpServerTool]
-    [Description("List the same enabled base agents and saved environments as the current VibeRails project's Board picker, plus supported base launch settings, including Codex model/speed combinations. An Agent workflow manager delegates with start_board_agent(card=..., intent=worker, selection=<returned picker key>, task=<assignment and expected output>); no assignment update is needed. To configure future launches, use the returned picker key and baseLlmOptions with create_board_card or update_board_card. Requires a VibeRails-launched terminal with an open root backend. Saved environment settings and credentials are not returned.")]
+    [Description("List the same enabled base agents and saved Agents as the current VibeRails project's Board picker, plus supported base launch settings, including Codex model/speed combinations. An Agent workflow manager delegates with start_board_agent(card=..., intent=worker, selection=<returned picker key>, task=<assignment and expected output>); no assignment update is needed. To configure future launches, use the returned picker key and baseLlmOptions with create_board_card or update_board_card. Requires a VibeRails-launched terminal with an open root backend. Saved environment settings and credentials are not returned.")]
     public async Task<string> ListBoardAgentOptions(CancellationToken cancellationToken = default)
     {
         var sessionToken = readEnvironment(LocalToolApiContext.SessionTokenVariable);
@@ -68,7 +68,7 @@ public sealed class BoardAgentOptionsTool
     private static string FormatOptions(LlmPickerPreferencesResponse preferences)
     {
         var builder = new StringBuilder("Enabled Board agents for the current VibeRails project:\n");
-        foreach (var item in preferences.Items.Where(item => item.Enabled)
+        foreach (var item in preferences.Items.Where(item => item.Enabled && item.Kind != "quick-launch")
                      .OrderBy(item => item.Kind == "base" ? 0 : 1).ThenBy(item => item.Order))
         {
             if (!BoardSelection.TryParse(item.Key, out var selection) || selection is null
@@ -76,9 +76,9 @@ public sealed class BoardAgentOptionsTool
                 || selection.EnvironmentId != item.EnvironmentId)
                 continue;
             builder.Append("- ").Append(selection.Key).Append(": ").Append(BoardPromptComposer.SanitizeLine(item.Label, 200)).Append('\n');
-            if (selection.IsEnvironment)
+            if (selection.IsEnvironment || selection.IsPreset)
             {
-                builder.Append("  Uses saved environment settings; baseLlmOptions cannot override it.\n");
+                builder.Append("  Uses saved Agent settings; baseLlmOptions cannot override it.\n");
                 continue;
             }
             var pinned = BaseLlmOptionsBuilder.PinnedModel(selection.Llm);
