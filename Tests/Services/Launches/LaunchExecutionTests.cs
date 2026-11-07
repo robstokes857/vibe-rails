@@ -135,6 +135,72 @@ public sealed class LaunchExecutionTests : IDisposable
         wrapper.Verify(x => x.RunAsync(It.IsAny<CliRequest>(), It.IsAny<Func<CliOutputLine, ValueTask>?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Theory]
+    [InlineData("cancelled")]
+    [InlineData("unexpected")]
+    [InlineData("rejected-then-cancelled")]
+    public async Task PreHandoffFailuresReleaseEveryOwnedClaim(string failure)
+    {
+        var service = new LaunchService(store, Mock.Of<IAutomationScriptService>());
+        using var process = Process.GetCurrentProcess();
+        for (var i = 0; i < LaunchDispatcher.Capacity; i++)
+        {
+            var preset = (await service.SavePresetAsync(null, new("Agent " + i, "", "codex", InitialPrompt: "Work"), Ct)).Preset;
+            var run = await service.EnqueueAsync("preset", preset.Id, new(root, root, "manual", "failure-" + i), Ct);
+            using var request = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+            var dispatcherStore = new Mock<ILaunchStore>(MockBehavior.Strict);
+            dispatcherStore.Setup(x => x.GetRunAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Returns((string id, CancellationToken ct) => store.GetRunAsync(id, ct));
+            dispatcherStore.Setup(x => x.TryClaimAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+                .Returns(async (string id, int capacity, int pid, DateTime started, CancellationToken ct) =>
+                {
+                    var claim = await store.TryClaimAsync(id, capacity, pid, started, ct);
+                    Assert.NotNull(claim);
+                    // The claim has committed before the HTTP request is cancelled.
+                    if (failure != "unexpected") request.Cancel();
+                    return claim;
+                });
+            dispatcherStore.Setup(x => x.CompleteAsync(It.IsAny<LaunchClaim>(), It.IsAny<string>(), It.IsAny<int?>(),
+                    It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .Returns((LaunchClaim claim, string status, int? exit, string? error, string? evidence, string? verdict, CancellationToken ct) =>
+                    store.CompleteAsync(claim, status, exit, error, evidence, verdict, ct));
+            var validationStore = new Mock<ILaunchStore>(MockBehavior.Strict);
+            validationStore.Setup(x => x.GetPresetAsync(preset.Id, It.IsAny<CancellationToken>()))
+                .Returns((string id, CancellationToken ct) => failure switch
+                {
+                    "unexpected" => Task.FromException<LaunchPreset?>(new InvalidOperationException("Validation unavailable")),
+                    "rejected-then-cancelled" => Task.FromException<LaunchPreset?>(new LaunchValidationException("Preset rejected")),
+                    _ => store.GetPresetAsync(id, ct)
+                });
+            var tabs = new Mock<ITerminalTabHostService>(MockBehavior.Strict);
+            var dispatcher = new LaunchDispatcher(dispatcherStore.Object,
+                new LaunchService(validationStore.Object, Mock.Of<IAutomationScriptService>()), tabs.Object,
+                Mock.Of<IServiceScopeFactory>(MockBehavior.Strict), Mock.Of<IBoardStore>(MockBehavior.Strict));
+            if (failure == "cancelled")
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => dispatcher.DispatchAsync(run.Id, request.Token));
+            else if (failure == "unexpected")
+                await Assert.ThrowsAsync<InvalidOperationException>(() => dispatcher.DispatchAsync(run.Id, request.Token));
+            else
+                Assert.Equal("failed", (await dispatcher.DispatchAsync(run.Id, request.Token)).Status);
+
+            var completed = (await store.GetRunAsync(run.Id, Ct))!;
+            Assert.Equal(failure == "cancelled" ? "cancelled" : "failed", completed.Status);
+            Assert.NotNull(completed.EndedUtc);
+            Assert.Null(completed.TabId);
+            Assert.Null(completed.SessionId);
+            Assert.Empty(tabs.Invocations);
+            Assert.Empty(await store.GetActiveRunsAsync(Ct));
+        }
+        // All three slots, not only the next slot, remain available after repeated failures.
+        for (var i = 0; i < LaunchDispatcher.Capacity; i++)
+        {
+            var preset = (await service.SavePresetAsync(null, new("Next " + i, "", "codex", InitialPrompt: "Work"), Ct)).Preset;
+            var run = await service.EnqueueAsync("preset", preset.Id, new(root, root, "manual", "next-" + i), Ct);
+            Assert.NotNull(await store.TryClaimAsync(run.Id, LaunchDispatcher.Capacity,
+                Environment.ProcessId, process.StartTime.ToUniversalTime(), Ct));
+        }
+    }
+
     [Fact]
     public async Task SealedUnstartedPresetRecoversButUnacknowledgedScriptNeedsExplicitResolution()
     {

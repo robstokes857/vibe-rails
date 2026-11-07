@@ -39,8 +39,17 @@ public sealed class LaunchDispatcher(ILaunchStore store, LaunchService service, 
         }
         catch (Exception ex) when (ex is LaunchValidationException or AutomationScriptValidationException or BoardValidationException)
         {
-            await store.CompleteAsync(claim, "failed", error: ex.Message, ct: ct);
-            return (await store.GetRunAsync(id, ct))!;
+            await store.CompleteAsync(claim, "failed", error: ex.Message, ct: CancellationToken.None);
+            return (await store.GetRunAsync(id, CancellationToken.None))!;
+        }
+        catch (Exception ex)
+        {
+            // Nothing has been handed to a terminal or Action yet. A cancelled request
+            // or failed validation must not strand its durable capacity reservation.
+            await store.CompleteAsync(claim, ex is OperationCanceledException ? "cancelled" : "failed",
+                error: ex is OperationCanceledException ? null : "Launch validation could not complete.",
+                ct: CancellationToken.None);
+            throw;
         }
         if (run.Snapshot.Action is not null)
         {

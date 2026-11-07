@@ -98,7 +98,10 @@ Run states are `queued`, `claimed`, `running`, `uncertain`, and terminal
 `succeeded`, `failed`, `cancelled`, `timed-out`, `interrupted`. Cancellation does
 not release running capacity before termination. An Action cancelled between claim
 and durable start acknowledges its owned claim immediately, releasing unused capacity
-without creating or finalizing a session. CLI deadlines are watched by
+without creating or finalizing a session. Dispatch validation failures and request
+cancellation before handoff also release the owned claim, using cleanup independent
+of the cancelled request. Once handed off, the execution owner retains responsibility
+for termination and capacity release. CLI deadlines are watched by
 the owning child; script deadlines use the script runner. Root recovery compares
 session outcomes and PID creation times. Scripts also record child identity so
 a dead root cannot make a live script appear finished. A crash before durable
