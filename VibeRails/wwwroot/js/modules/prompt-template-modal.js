@@ -293,7 +293,10 @@ function showPromptTemplateModal(app, options) {
         // Context for auto-filled tokens: env_name resolves client-side; steps give the
         // {{step:<id>}} preview chips their names.
         const context = { environmentName: options.environmentName, steps: options.steps };
-        app.showModal(title, renderModalHtml({ ...options, context }));
+        if (app.showModal(title, renderModalHtml({ ...options, context })) === false) {
+            resolve(null);
+            return;
+        }
 
         const modalContainer = document.getElementById('modal-container');
         const form = modalContainer?.querySelector('#vb-prompt-template-form');

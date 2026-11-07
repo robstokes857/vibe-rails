@@ -339,6 +339,22 @@ Compact discussion forms put the optional question first, followed by a labelled
 picker and a full-width **Start discussion** action at the bottom. Use a section heading
 for the task and keep blank-question guidance below the textarea.
 
+In the desktop card editor, keep this discussion section compact: 8px between related
+controls, a two-row question field, and one short optional-question hint. Place the
+**Needs your attention** and **Blocked** switches below discussion, separated from
+it and from each other by quiet horizontal rules. These switches are draft fields;
+the nearby guidance states that **Save** applies them. Keep the sidebar's top inset
+compact and avoid stacking an extra bottom margin on the Display ID section above Type.
+
+Board cards and AI Agent definitions share the desktop card-editor shell and controls:
+wide main content, narrow settings sidebar, a divider, one shared scroller and a separate
+persistent footer. Main content is the name/title, directly editable prompt/description,
+existing attachment controls, then Comments (Board) or Run history (definitions).
+Typed caret suggestions replace helper toolbars; no Preview/Write/Edit mode switch is
+needed. Agents reuse the Board provider and launch-options controls. Actions use their
+script/check fields. Automatic runs name the execution project. Mobile stacks these same
+slots without moving Save into the scroller.
+
 Context editors use native triangle disclosures for App, Board and Card context and
 each card type, ordered broadest first. Only the first disclosure opens by default.
 Place one primary **Save context** action below the editor; it saves changed levels
@@ -411,7 +427,7 @@ Keep the 18px switch knob vertically centered in both states; its checked-state 
 | Today | Becomes | Files |
 | --- | --- | --- |
 | `.form-check` lists with a bold name and a muted description (API key capabilities) | Checkbox list in a fieldset | `viberails.css`, `vibe-api-keys.css` |
-| `label.vibe-card-toggle` ("Needs your attention", "Blocked") | Checkbox | `vibe-boards.css` |
+| `label.vibe-card-toggle` ("Needs your attention", "Blocked") | Checkbox on hosted boards; draft switches below discussion in the desktop editor | `vibe-boards.css`, desktop `style.css` |
 | `label.vibe-switch` + `.notif-status` (push notifications) | Switch with status line | `viberails.css` (Toggle switch, Notifications card) |
 | Radio cards in the share-access dialog (built in script) | Radio | `share-access.css`, `share-access.js` |
 | `.form-switch` | Unused; do not adopt | `viberails.css` |

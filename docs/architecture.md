@@ -1350,6 +1350,19 @@ The flyout shows visible automations and currently approved scripts; unsigned or
 
 ### Frontend Layer
 
+`ai-agents-controller.js` owns the unified AI Agents screen for global presets and
+individual Actions. Agent/Quick Launch classification follows the saved initial prompt.
+The terminal, Board and VS Code launch pickers use stable definition IDs and the typed
+catalog. The former Job and Environment editors are no longer mounted.
+
+Board and definition editors share `card-editor.js`, `card-editor-composer.js`,
+`card-editor-attachments.js` and the existing `board-launch-options.js` controls.
+Owner adapters provide persistence and attachment ownership; Comments and Run history
+occupy the same activity slot. History polling and saved check/review viewers are separate
+from editable drafts. `launch-lane-editor.js` retains ordered Board runs and explicit gates;
+Board managers retain their own workflows. See the frontend and launch service guides
+for current contracts; older Job/Environment descriptions below are historical.
+
 Selecting a terminal tab acknowledges its current **Waiting for user input** badge and
 returns the tab to **Connected**, including before xterm is mounted. `TerminalTab.setActive`
 calls `TabStatusController.onTabActivated`; repeated waiting events stay suppressed until

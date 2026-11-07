@@ -1,5 +1,43 @@
 # Web UI Frontend
 
+## Unified AI Agents and shared editor (VIBE-294)
+
+`ai-agents-controller.js` owns the one **AI Agents** view: global Agents, Quick Launches
+and individual Actions. `automations`/`jobs` URLs redirect to that controller; they do not
+mount the retired Environment or multi-step Job editors. The terminal picker includes
+all presets and retains Quick Launch management. The VS Code native launch tree uses
+`launch-catalog` and `runs` with stable definition IDs and server eligibility. Preset
+launches pass through the dashboard prompt resolver; Action runs can queue in the host.
+
+Board cards and definitions call `card-editor.js` for the two-column shell, one scroller
+and persistent footer, `card-editor-composer.js` for the native composer, and
+`card-editor-attachments.js` for attachment presentation and mutation. Owner adapters
+supply persistence, previews and relationship callbacks: Agent references never create
+Board relationships. `board-launch-options.js` remains the provider/model/defaults
+control source. Comments and Run history occupy the same activity slot below attachments.
+Attention and blocked are draft switches below the Board discussion; plain definitions
+have no Board workflow controls.
+
+`launch-api.js` wraps the authenticated typed API documented in
+[the launch contract](../Services/Launches/README.md).
+Definition and trigger saves retain expected revisions, including partial attachment
+uploads. Provider drafts and editor text are independent of `launch-history.js` polling;
+close and navigation guards retain unsaved work. Typed references use the shared caret
+popup, including built-ins and existing custom variables; step syntax is rejected.
+Manual template values become a revision-checked run prompt override, never a preset edit.
+
+`launch-lane-editor.js` keeps ordered definition IDs and process/result/review gates.
+`board-lane-agent-body.js` polls current per-card lane progress, with explicit verdicts,
+retry, skip and session links. `board-card-automations.js` queues definitions with the
+saved card context. Managers and ordinary Start work use their existing Board contracts.
+Retired selections remain visibly unavailable; do not resolve them by label.
+
+Run `playwright.ai-agents.config.js` and the Board harness for editor, attachment, history,
+manual run, ordering, conflict, keyboard and 320/375/768/1024px coverage. Earlier sections
+below describing active Environment/Job management are historical; the typed launch
+contract and these modules supersede that retired surface.
+
+
 ## Attention comments and terminal alerts (VIBE-40)
 
 Comments with `isAttention=true` get a red border, background and text plus a flag label. Render
@@ -16,13 +54,13 @@ boards/lanes and a card search, confirms the destination and lane Automation cou
 to replace an editor with unsaved drafts. Dispose it on close/replacement/unload. The existing
 navbar **Sign in** opens the device approval flow when signed out. The top navigation is the
 only application navigation. Quality is third and Rules fourth; they are separate destinations.
-Automations follows Agents, then MCP and Reviews. Reviews stays hidden until the saved
+AI Agents follows Rules, then MCP and Reviews. Reviews stays hidden until the saved
 **Enable PR Reviewer and GitHub publishing** setting is on, and updates immediately after
 the setting is loaded or saved. The standalone play button opens
-Quick actions for automations and signed scripts. Application Settings opens from
+Quick actions for eligible Agents, Quick Launches and Actions. Application Settings opens from
 **Account settings** in the account dropdown; when signed out, a text **Settings** link
 stays visible beside **Sign in / Sign up**. There is no standalone Settings icon.
-Its footer offers only **Customize list…**; open Agents and Automations through their top navigation links.
+Its footer opens **Manage AI Agents**.
 Rules runs validation only; Quality restores or starts its own cached scan when opened.
 
 Comments includes agent checkpoints and legacy note rows. Attention entries appear first; the

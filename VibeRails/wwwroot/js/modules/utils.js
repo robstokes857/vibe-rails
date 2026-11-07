@@ -546,6 +546,9 @@ export function enhanceSelectWithTomSelect(selectEl, options = {}) {
     }
 
     const ts = new window.TomSelect(selectEl, config);
+    // Opening under a stationary pointer must not replace the keyboard's active
+    // option. The vendored Tom Select clears this flag on actual pointer movement.
+    ts.on('dropdown_open', () => { ts.ignoreHover = true; });
 
     if (typeof onCustomize === 'function') {
         mountLlmPickerFooter(ts, selectEl, onCustomize, customizeLabel);
@@ -743,6 +746,11 @@ export function parseLlmSelection(selection, environments = []) {
             environmentName: null,
             displayName: baseCli?.label || formatCliDisplayName(cli)
         };
+    }
+
+    if (value.startsWith('preset:')) {
+        const [, presetId, cli] = value.split(':');
+        return { kind:'preset', value, cli:canonicalLlmCli(cli), presetId, envId:null, environmentName:null, displayName:'Saved launch' };
     }
 
     if (value.startsWith('env:')) {

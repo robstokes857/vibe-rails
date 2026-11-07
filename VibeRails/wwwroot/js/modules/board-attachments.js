@@ -37,6 +37,13 @@ export function disposeBoardAttachmentPreview() {
 
 /** Opens an independent nested layer, keeping the card editor and unsaved edits alive. */
 export async function openBoardAttachment(app, cardId, attachment) {
+    return openEditorAttachment(app, attachment, options => app.apiCall(
+        `/api/v1/board/cards/${encodeURIComponent(cardId)}/attachments/${encodeURIComponent(attachment.id)}/content`,
+        'GET', null, { responseType: 'blob', showLoading: false, ...options }));
+}
+
+/** Owner-aware reader. The caller supplies authenticated content access, never an arbitrary URL. */
+export async function openEditorAttachment(app, attachment, loadContent) {
     disposeBoardAttachmentPreview();
     const host = document.getElementById('modal-container');
     if (!host) return () => {};
@@ -126,8 +133,7 @@ export async function openBoardAttachment(app, cardId, attachment) {
     });
 
     try {
-        blob = await app.apiCall(`/api/v1/board/cards/${encodeURIComponent(cardId)}/attachments/${encodeURIComponent(attachment.id)}/content`,
-            'GET', null, { responseType: 'blob', showLoading: false, signal: abort.signal });
+        blob = await loadContent({ signal: abort.signal });
         if (disposed) return close;
         download.disabled = false;
         const kind = getAttachmentPreviewKind(attachment);

@@ -1,20 +1,9 @@
 /**
- * Host → dashboard commands behind the VS Code Activity Bar launcher view.
- *
- * The extension lists the same catalog the nav Play flyout shows and queues automation runs
- * itself. Everything that needs dashboard UI — a script's run window (arguments, stdin, PIN),
- * the "Customize list…" modal, the Automation page — and dashboard feedback (the queued toast
- * plus a run-list refresh) is delegated here, so both entry points share one code path.
- *
- * The other direction, dashboard → host, is `__viberails_launcherChanged__` (installed by the
- * extension on `window`): the launcher's save/reset and the Automation catalog reload call it
- * themselves, and this module relays the scripts controller's state updates to it, so a script
- * that was signed, revoked, renamed, edited, imported or deleted re-sorts the view. The review
- * request views (VB-50 slices D and F) share this host → dashboard listener; their dashboard → host
- * relay is vscode-review-bridge.js.
- *
- * Install this BEFORE setupVSCodeScriptImport: that call posts the ready signal which releases
- * messages the extension queued while the page was still loading.
+ * VS Code launcher commands use the same definition editor and template/terminal
+ * flow as the browser. Actions can be queued by the host; presets go through the
+ * shared prompt resolver before creating a revision-checked run.
+ * Older script and Automation command names remain compatibility aliases.
+ * Install before setupVSCodeScriptImport releases queued host messages.
  */
 import { isParentMessage } from './parent-message.js';
 
@@ -25,6 +14,15 @@ export function setupVSCodeLauncherBridge(app, host = window) {
         if (!isParentMessage({ source }, host)) return;
         if (!data || typeof data !== 'object') return;
         switch (data.command) {
+            case 'launchDefinition':
+                if (typeof data.definitionId !== 'string' || !data.definitionId || data.definitionType !== 'preset') return;
+                void settle(app, () => app.aiAgentsController?.launch(data.definitionId, 'preset', { focusTerminal: true }), 'Could not launch this definition.');
+                return;
+            case 'launchQueued':
+                app.showToast?.('AI Agents', 'Run queued.', 'success');
+                if (typeof data.definitionId === 'string' && ['preset', 'action'].includes(data.definitionType))
+                    void settle(app, () => app.aiAgentsController?.openEditor(data.definitionType, data.definitionId), null);
+                return;
             case 'runScript':
                 if (typeof data.name !== 'string' || !data.name) return;
                 void settle(app, () => app.jobController?.pythonScripts?.run?.(data.name), 'Could not run that script.');

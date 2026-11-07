@@ -183,7 +183,7 @@ async function stopBoardManagerAsync(boardId) {
 }
 
 async function getLaneAutomationAsync(columnId, extra = {}) {
-    return call(`/columns/${enc(columnId)}/automation`, 'GET', null, extra);
+    return call(`/columns/${enc(columnId)}/launches`, 'GET', null, extra);
 }
 
 /** The lane panel's running list only: cheap enough to poll. */
@@ -192,7 +192,7 @@ async function getLaneRunningAgentsAsync(columnId, extra = {}) {
 }
 
 async function saveLaneAutomationAsync(columnId, payload) {
-    return call(`/columns/${enc(columnId)}/automation`, 'PUT', payload);
+    return call(`/columns/${enc(columnId)}/launches`, 'PUT', payload);
 }
 
 async function getCardAutomationsAsync(cardId, extra = {}) {

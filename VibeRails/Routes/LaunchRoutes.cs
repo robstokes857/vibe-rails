@@ -74,7 +74,8 @@ public static class LaunchRoutes
         {
             var project = await projects.ResolveAsync(ct);
             return Results.Ok(await service.EnqueueAsync(request.DefinitionType, request.DefinitionId,
-                new(project, project, "manual", "manual:" + (request.OccurrenceId ?? Guid.NewGuid().ToString("N"))), ct));
+                new(project, project, "manual", "manual:" + (request.OccurrenceId ?? Guid.NewGuid().ToString("N")),
+                    PromptPrefix: request.PromptPrefix, PromptOverride: request.InitialPrompt), ct, request.ExpectedRevision));
         });
         api.MapPost("/runs/{id}/resolve", async (string id, ResolveUncertainLaunchRequest request, LaunchService service, IBoardProjectResolver projects, CancellationToken ct) =>
             Results.Ok(await service.ResolveUncertainAsync(await projects.ResolveAsync(ct), id, request.ConfirmedStopped, ct)));

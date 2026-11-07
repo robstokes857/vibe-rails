@@ -1,7 +1,8 @@
 import { BoardApi } from './board-api.js';
 
 /** Owns authenticated raster loads for one editor surface, including retries and Blob cleanup. */
-export function createBoardImagePreviews(getCard, onLoad = () => {}) {
+export function createBoardImagePreviews(getCard, onLoad = () => {}, loadContent = (id, options) =>
+    BoardApi.getCardAttachmentContentAsync(getCard().id, id, options)) {
     const abort = new AbortController();
     const blobs = new Map(), fetching = new Map();
     let disposed = false;
@@ -23,7 +24,7 @@ export function createBoardImagePreviews(getCard, onLoad = () => {}) {
             };
             if (blobs.has(id)) { show(blobs.get(id)); continue; }
             if (!fetching.has(id)) {
-                const request = BoardApi.getCardAttachmentContentAsync(getCard().id, id, { signal: abort.signal })
+                const request = loadContent(id, { signal: abort.signal })
                     .then(blob => {
                         if (disposed || !attachments().some(a => a.id === id)) return null;
                         const url = URL.createObjectURL(new Blob([blob], { type: record.mimeType }));

@@ -1518,6 +1518,14 @@ export class TerminalManager {
         let tab = this.getActiveTab();
         const selectionForMeta = selection || (!tab?.state?.hasActiveSession ? tab?.state?.selection : null);
         const meta = this.getSelectionMeta(selectionForMeta);
+        if (String(selectionForMeta || '').startsWith('preset:')) {
+            await this.app.aiAgentsController.launch(selectionForMeta.split(':')[1], 'preset', { focusTerminal: true });
+            return;
+        }
+        if (String(selectionForMeta || '').startsWith('env:')) {
+            this.app.showToast('Launch unavailable', 'This legacy selection is retired. Choose a saved Quick Launch or built-in CLI.', 'warning');
+            return;
+        }
         if (!meta.cli) {
             this.showSelectionRequiredFeedback(this.startBtn);
             return;

@@ -1,3 +1,6 @@
+import { attachmentSection, createEditorAttachments } from './card-editor-attachments.js';
+import { composerMarkup, bindCardComposer } from './card-editor-composer.js';
+import { cardEditorLayout, configureCardEditorDialog } from './card-editor.js';
 import { codeLinksSection, renderCodeLinks } from './board-code-links.js';
 import { AGENT_PURPOSES, agentPurposeLabel, matchesCommentFilter } from './agent-purpose.js';
 import { cardChecksSection, bindCardChecks } from './board-card-checks.js';
@@ -58,7 +61,7 @@ import { contextSectionMarkup, bindCardContext } from './board-card-context.js';
 import { cardDisplayId, cardLabel } from './board-card-label.js';
 import { agentMadeSummary, bindAgentProvenance } from './board-agent-provenance.js';
 import { cardIdentityHtml, ghostKeyHtml, ghostSettingHtml, ghostSummary, readGhostField } from './board-ghost.js';
-import { renderCommentHtml, wrapSelectionAsCode, toPlainPreview } from './board-text.js';
+import { renderCommentHtml, toPlainPreview } from './board-text.js';
 import { historySection, mountHistory } from './board-history.js';
 import { bindBoardReferences, canonicalSessionId } from './board-references.js';
 import { bindComposerPreview, boardTextOptions } from './board-composer-preview.js';
@@ -67,7 +70,7 @@ import { createBoardImagePreviews } from './board-image-previews.js';
 import { openDiffModal } from './diff-modal.js';
 import * as SessionDebug from './session-viewer.js';
 import { renderBoardLaunchOptions, readBoardLaunchOptions, bindBoardLaunchOptions, waitForBoardLaunchDefaults } from './board-launch-options.js';
-import { openBoardAttachment, disposeBoardAttachmentPreview, fileToAttachmentPayload, getAttachmentPreviewKind } from './board-attachments.js';
+import { openBoardAttachment, disposeBoardAttachmentPreview } from './board-attachments.js';
 
 const CARD_TYPES = [
     { value: 'task', label: 'Task' },
@@ -81,17 +84,10 @@ const FILTERS_STORAGE_KEY = 'viberails.board.filters.v1';
 const COLLAPSED_LANES_STORAGE_KEY = 'viberails.board.collapsedLanes.v1';
 // The last board the user looked at (see board-selection.js).
 const BOARD_STORAGE_KEY = BOARD_SELECTION_STORAGE_KEY;
-const RASTER_DATA_URL_RE = /^data:image\/(?:png|jpeg|gif|webp);base64,/i;
 
 const emptyFilters = () => ({ q: '', assignee: '', type: '', priority: '', origin: '', ghost: '' });
 // Task-key namespace for the terminal tab that works a card (see wwwroot/AGENTS.md).
 const CARD_TASK_KEY = cardId => `board-card:${cardId}`;
-
-function formatFileSize(bytes) {
-    const size = Math.max(0, Number(bytes) || 0);
-    return size >= 1024 * 1024 ? `${(size / (1024 * 1024)).toFixed(1)} MB`
-        : size >= 1024 ? `${Math.ceil(size / 1024)} KB` : `${size} bytes`;
-}
 
 function cardType(value) {
     return CARD_TYPES.find(item => item.value === value) || CARD_TYPES[0];
@@ -1550,8 +1546,8 @@ export class BoardController {
 
         this.app.showModal(card ? cardLabel(card) : 'New card', `
             <div class="board-card-editor" data-board-card-editor data-card-id="${escapeHtml(card?.id || '')}">
-                <div class="board-editor-scroll">
-                <div class="board-editor-main">
+                ${cardEditorLayout({
+                    main: `
                     ${this.remoteBadge(card)}
                     ${card && card.boardId !== this.state.boardId ? `<div class="alert alert-info" role="note">This card is on another board: <strong>${escapeHtml(this.boardById(card.boardId)?.name || '')}</strong>. Changes are saved to that board.</div>` : ''}
                     <input type="text" class="form-control board-editor-title" id="board-card-title"
@@ -1567,16 +1563,9 @@ export class BoardController {
                         })}
                     </section>
 
-                    <section class="board-block">
-                        <h3 class="board-block-label">Attachments <span class="board-count" data-board-count="attachments">${card?.attachments?.length || 0}</span></h3>
-                        <div class="board-attachment-list" data-board-attachments></div>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" data-board-add-files>
-                            <i class="fa-solid fa-paperclip" aria-hidden="true"></i> Upload files
-                        </button>
-                        <input type="file" hidden multiple data-board-files>
-                        <p class="board-editor-muted mt-2">Up to 12 files, any size. Preview images, text and PDFs.</p>
-                    </section>
-
+`,
+                    attachments: attachmentSection(card?.attachments?.length || 0),
+                    activity: `
                     <section class="board-block board-activity">
                         <h3 class="board-block-label">Comments <span class="board-count" data-board-count="comments">${card?.comments?.length || 0}</span></h3>
                         ${card ? `<label class="board-editor-label" for="board-comment-filter">Show comments</label>
@@ -1597,10 +1586,8 @@ export class BoardController {
                             submitLabel: 'Save'
                         }) : '<p class="board-editor-muted">Save the card to start a comment thread.</p>'}
                     </section>
-                </div>
-
-                <aside class="board-editor-side">
-                    <div class="board-side-scroll">
+`,
+                    sidebar: `
                     ${cardIdentityHtml(card)}
                     <div class="board-side-fields">
                         <div>
@@ -1649,24 +1636,14 @@ export class BoardController {
                             </div>
                         </div>
                         <div data-board-worker-launch-options data-board-launch-options></div>
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="board-card-flagged"
-                                data-board-flagged${card?.flagged ? ' checked' : ''}>
-                            <label class="form-check-label" for="board-card-flagged"><i class="fa-solid fa-flag" aria-hidden="true"></i> Needs your attention</label>
-                        </div>
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="board-card-blocked"
-                                data-board-blocked${card?.blocked ? ' checked' : ''}>
-                            <label class="form-check-label" for="board-card-blocked">Blocked</label>
-                        </div>
                     </div>
 
                     ${card ? `<section class="board-side-section board-discussion" aria-labelledby="board-discussion-title">
                         <h3 class="board-discussion-title" id="board-discussion-title">Discuss this card</h3>
                         <div>
                             <label class="board-editor-label" for="board-chat-question">Initial question <span class="text-muted">(optional)</span></label>
-                            <textarea id="board-chat-question" class="form-control" data-board-chat-question maxlength="1000" rows="3" spellcheck="true" placeholder="e.g. Where did we leave off?" aria-describedby="board-chat-help"></textarea>
-                            <p class="board-editor-muted" id="board-chat-help">Leave blank to start an open discussion.</p>
+                            <textarea id="board-chat-question" class="form-control" data-board-chat-question maxlength="1000" rows="2" spellcheck="true" placeholder="e.g. Where did we leave off?" aria-describedby="board-chat-help"></textarea>
+                            <p class="board-editor-muted" id="board-chat-help">Leave blank for an open discussion.</p>
                         </div>
                         <div>
                             <label class="board-editor-label" for="board-chat-agent">Discuss with</label>
@@ -1680,6 +1657,20 @@ export class BoardController {
                         </button>
                     </section>` : ''}
 
+
+                    <section class="board-side-section board-card-status" aria-label="Card status">
+                        <label class="card-editor-switch-row" for="board-card-flagged">
+                            <span>Needs your attention</span>
+                            <input type="checkbox" role="switch" class="card-editor-switch" id="board-card-flagged"
+                                data-board-flagged${card?.flagged ? ' checked' : ''} aria-describedby="board-card-status-help">
+                        </label>
+                        <label class="card-editor-switch-row" for="board-card-blocked">
+                            <span>Blocked</span>
+                            <input type="checkbox" role="switch" class="card-editor-switch" id="board-card-blocked"
+                                data-board-blocked${card?.blocked ? ' checked' : ''} aria-describedby="board-card-status-help">
+                        </label>
+                        <p class="board-editor-muted" id="board-card-status-help">Applied when you save.</p>
+                    </section>
 
                     <div data-board-previous-work>${previousWorkHtml(card)}</div>
                     ${card ? cardOrganizeSection() : ''}
@@ -1739,11 +1730,8 @@ export class BoardController {
                         ${contextSectionMarkup()}${historySection()}
                     </details></section>` : ''}
 
-                    </div>
-                </aside>
-                </div>
-
-                    <div class="board-editor-actions">
+`,
+                    footer: `
                         ${card ? `<button type="button" class="btn btn-sm btn-outline-danger" data-board-delete-card>
                             <i class="fa-solid fa-trash" aria-hidden="true"></i> Delete
                         </button>` : '<span></span>'}
@@ -1755,7 +1743,8 @@ export class BoardController {
                             </button>` : ''}
                             <button type="button" class="btn btn-sm btn-outline-primary" data-board-save-card>Save</button>
                         </span>
-                    </div>
+`
+                })}
             </div>
         `, { onClose: () => {
             if (outsideBoard) this.disposeSessionActivity();
@@ -1771,12 +1760,7 @@ export class BoardController {
         if (generation !== this._openCardGeneration) return;
 
         const container = document.getElementById('modal-container');
-        const dialog = container?.querySelector('.modal-dialog');
-        // app.showModal always ships modal-dialog-scrollable, which puts a
-        // scrollbar on .modal-body. This editor owns its own scroller, so that
-        // extra bar has to come off or the dialog shows two.
-        dialog?.classList.remove('modal-lg', 'modal-dialog-scrollable');
-        dialog?.classList.add('modal-xl', 'board-card-modal-dialog');
+        configureCardEditorDialog(container);
 
         const editor = container?.querySelector('[data-board-card-editor]');
         if (!editor) return;
@@ -1868,7 +1852,7 @@ export class BoardController {
         });
         // Link navigation replaces this editor. Track form edits separately from link search.
         const trackEdits = event => {
-            if (event.target.closest('.board-side-fields, [data-board-composer="description"], #board-card-title, #board-card-display-id'))
+            if (event.target.closest('.board-side-fields, .board-card-status, [data-board-composer="description"], #board-card-title, #board-card-display-id'))
                 editor._boardHasEdits = true;
         };
         editor.addEventListener('input', trackEdits);
@@ -2096,54 +2080,15 @@ export class BoardController {
     // Composer (shared by the description and comments)
     // ============================================
 
-    composerMarkup({ name, value = '', placeholder = '', disabled = false, submitLabel = '' }) {
-        const off = disabled ? ' disabled' : '';
-        return `
-            <div class="board-composer" data-board-composer="${name}">
-                <div class="board-composer-toolbar">
-                    <button type="button" class="board-composer-btn" data-board-composer-action="code"
-                        title="Format the selection as code"${off}>
-                        <i class="fa-solid fa-code" aria-hidden="true"></i><span>Code</span>
-                    </button>
-                    <button type="button" class="board-composer-btn" data-board-composer-action="image"
-                        title="Attach a file (or paste an image)"${off}>
-                        <i class="fa-solid fa-paperclip" aria-hidden="true"></i><span>Attach</span>
-                    </button>
-                    <span class="board-composer-hint">@ file · ! card/session · # commit</span>
-                </div>
-                <textarea class="form-control board-composer-input" data-board-composer-input
-                    placeholder="${escapeHtml(placeholder)}" rows="3" spellcheck="true"${off}>${escapeHtml(value)}</textarea>
-                ${name === 'comment' ? '<div class="board-comment-body board-composer-live" data-board-composer-live aria-label="Live preview"></div>' : ''}
-                <input type="file" hidden data-board-composer-file multiple>
-                <div class="board-composer-busy" data-board-composer-busy hidden>Adding files…</div>
-                ${submitLabel ? `<div class="board-composer-footer">
-                    <button type="button" class="btn btn-sm btn-outline-primary board-composer-submit"
-                        data-board-composer-action="submit"${off}>${escapeHtml(submitLabel)}</button>
-                </div>` : ''}
-            </div>`;
-    }
+    composerMarkup(options) { return composerMarkup(options); }
 
     bindComposer(composer, { card = null, onSubmit = null } = {}) {
         if (!composer) return;
-        const input = composer.querySelector('[data-board-composer-input]');
-        const file = composer.querySelector('[data-board-composer-file]');
-        if (!input) return;
-
-        const autoGrow = () => {
-            input.style.height = 'auto';
-            const needed = input.scrollHeight;
-            // Drop the inline height first so a flex parent (the create-card
-            // description) can size the box. Only lock a pixel height when the
-            // text is taller than that allocation.
-            input.style.height = '';
-            if (needed > input.clientHeight + 1) {
-                input.style.height = `${needed}px`;
-            }
-        };
-        input.addEventListener('input', autoGrow);
-        this.composerDisposers.push(bindBoardSpelling(input));
-        this.composerDisposers.push(bindComposerPreview(composer, input, card));
-        this.composerDisposers.push(bindBoardReferences(input, { app: this.app, host: composer, card,
+        this.composerDisposers.push(bindCardComposer(composer, {
+            onSubmit,
+            onAttach: (input, files) => this.attachImages(composer, input, card, files),
+            bindPreview: input => bindComposerPreview(composer, input, card),
+            bindReferences: input => bindBoardReferences(input, { app: this.app, host: composer, card,
             onLink: async item => {
                 if (item.kind === 'session' && card.sessions?.some(s => canonicalSessionId(s.id) === canonicalSessionId(item.session.id))) return;
                 if (item.kind === 'commit' && card.commits?.some(c => c.sha === item.commit.sha)) return;
@@ -2167,175 +2112,36 @@ export class BoardController {
                     if (editor?.isConnected) this.renderCommitsPanel(editor, card);
                 }
             }
+        }),
         }));
-        // Sized now rather than on the next frame: an occluded page never gets one,
-        // and the description box would open at its one-line default.
-        autoGrow();
-
-        const submit = () => {
-            if (!onSubmit) return;
-            const text = input.value.trim();
-            if (!text) return;
-            onSubmit(text);
-        };
-
-        composer.querySelectorAll('[data-board-composer-action]').forEach(button => {
-            button.addEventListener('click', () => {
-                const action = button.dataset.boardComposerAction;
-                if (action === 'code') {
-                    const next = wrapSelectionAsCode(input.value, input.selectionStart, input.selectionEnd);
-                    input.value = next.value;
-                    input.setSelectionRange(next.selectionStart, next.selectionEnd);
-                    input.focus();
-                    input.dispatchEvent(new Event('input', { bubbles: true }));
-                } else if (action === 'image') {
-                    file?.click();
-                } else if (action === 'submit') {
-                    submit();
-                }
-            });
-        });
-
-        input.addEventListener('keydown', event => {
-            if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && onSubmit) {
-                event.preventDefault();
-                event.stopPropagation();
-                submit();
-            }
-        });
-
-        file?.addEventListener('change', () => {
-            this.attachImages(composer, input, card, Array.from(file.files || []));
-            file.value = '';
-        });
-
-        // The first paste handler in this codebase: pull image files off the
-        // clipboard and let normal text paste through untouched.
-        input.addEventListener('paste', event => {
-            const images = Array.from(event.clipboardData?.files || [])
-                .filter(item => item.type.startsWith('image/'));
-            if (images.length === 0) return;
-            event.preventDefault();
-            this.attachImages(composer, input, card, images);
-        });
-
-        input.addEventListener('dragover', event => {
-            if (!Array.from(event.dataTransfer?.types || []).includes('Files')) return;
-            event.preventDefault();
-            composer.classList.add('is-drop-target');
-        });
-        input.addEventListener('dragleave', () => composer.classList.remove('is-drop-target'));
-        input.addEventListener('drop', event => {
-            const images = Array.from(event.dataTransfer?.files || []);
-            composer.classList.remove('is-drop-target');
-            if (images.length === 0) return;
-            event.preventDefault();
-            this.attachImages(composer, input, card, images);
-        });
     }
 
-    async attachImages(composer, input, card, files, { inline = true } = {}) {
-        if (!files.length) return;
-        const editor = composer?.closest('[data-board-card-editor]');
-        if (editor?._boardUploading || editor?._boardSaving || editor?._boardStarting) return;
-        if (editor) editor._boardUploading = true;
-        const busy = composer.querySelector('[data-board-composer-busy]');
-        if (busy) busy.hidden = false;
-        try {
-            for (const file of files) {
-                if ((card.attachments?.length || 0) + (card.pendingAttachments?.length || 0) >= 12)
-                    throw new Error('A card can hold at most 12 attachments.');
-                const payload = await fileToAttachmentPayload(file);
-                if (!card.id) {
-                    card.pendingAttachments ||= [];
-                    payload.id = `pending_${crypto.randomUUID().replaceAll('-', '')}`;
-                    card.pendingAttachments.push(payload);
-                    if (inline && getAttachmentPreviewKind(payload) === 'image')
-                        insertAtCursor(input, `![${payload.name.replace(/[\[\]\r\n]/g, '')}](attachment:${payload.id})`);
-                    if (editor) this.renderAttachmentsPanel(editor, card);
-                    continue;
-                }
-                const attachment = await BoardApi.addCardAttachmentAsync(card.id, payload);
-                card.attachments = card.attachments || [];
-                card.attachments.push(attachment);
-                if (inline && getAttachmentPreviewKind(attachment) === 'image')
-                    insertAtCursor(input, `![${attachment.name.replace(/[\[\]\r\n]/g, '')}](attachment:${attachment.id})`);
-                if (editor) this.renderAttachmentsPanel(editor, card);
-                editor?._boardContext?.refresh();
-            }
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-        } catch (error) {
-            this.app.showToast('Board', error?.message || 'Failed to add the file.', 'error');
-        } finally {
-            if (busy) busy.hidden = true;
-            if (editor) editor._boardUploading = false;
+    attachmentPanel(editor) {
+        if (!editor._attachmentPanel) {
+            editor._attachmentPanel = createEditorAttachments({
+                editor,
+                getOwner: () => editor._boardCard,
+                isBusy: () => editor._boardUploading || editor._boardSaving || editor._boardStarting,
+                setBusy: value => { editor._boardUploading = value; },
+                upload: payload => BoardApi.addCardAttachmentAsync(editor._boardCard.id, payload),
+                remove: attachment => BoardApi.deleteCardAttachmentAsync(editor._boardCard.id, attachment.id),
+                preview: attachment => openBoardAttachment(this.app, editor._boardCard.id, attachment),
+                confirmRemove: attachment => confirmDialog({ title: 'Delete attachment', message: `Delete ${attachment.name} from this card? This also removes its inline previews.`, confirmLabel: 'Delete', danger: true }),
+                onChanged: () => { editor._boardContext?.refresh(); this.renderCardDiscussion(editor, editor._boardCard); },
+                showError: message => this.app.showToast('Board', message, 'error')
+            });
+            this.composerDisposers.push(() => editor._attachmentPanel.dispose());
         }
+        return editor._attachmentPanel;
+    }
+
+    async attachImages(composer, input, card, files, options = {}) {
+        const editor = composer?.closest('[data-board-card-editor]');
+        if (editor) await this.attachmentPanel(editor).addFiles(composer, input, files, options);
     }
 
     renderAttachmentsPanel(editor, card) {
-        const host = editor?.querySelector('[data-board-attachments]');
-        if (!host) return;
-        const attachments = card?.attachments || [];
-        const pending = card?.pendingAttachments || [];
-        this.updateSectionCount(editor, 'attachments', attachments.length + pending.length);
-        // Small rasters come with a data: URL (the same one inline images use), so the row can
-        // show the picture itself; everything else gets the file icon.
-        const lead = attachment => RASTER_DATA_URL_RE.test(String(attachment.url || ''))
-            ? `<img class="board-attachment-thumb" src="${escapeHtml(attachment.url)}" alt="" loading="lazy">`
-            : '<i class="fa-solid fa-file" aria-hidden="true"></i>';
-        host.innerHTML = attachments.map(attachment => `
-            <div class="board-attachment-row">
-                <button type="button" class="board-side-main" data-board-view-attachment="${escapeHtml(attachment.id)}">
-                    ${lead(attachment)}
-                    <span class="board-side-copy"><span class="board-side-title">${escapeHtml(attachment.name)}</span>
-                    <span class="board-side-sub">${formatFileSize(attachment.bytes)} · ${getAttachmentPreviewKind(attachment) === 'download' ? 'Download' : 'Preview'}</span></span>
-                </button>
-                <button type="button" class="btn btn-sm btn-outline-danger board-attachment-remove" data-board-remove-attachment="${escapeHtml(attachment.id)}" aria-label="Delete ${escapeHtml(attachment.name)}"><i class="fa-solid fa-trash-can" aria-hidden="true"></i> Delete</button>
-            </div>`).join('') + pending.map((attachment, index) => `
-            <div class="board-attachment-row"><span class="board-side-copy"><span class="board-side-title">${escapeHtml(attachment.name)}</span>
-                <span class="board-side-sub">${formatFileSize(attachment.bytes)} · Uploads when you save</span></span>
-                <button type="button" class="btn btn-sm btn-outline-secondary board-attachment-remove" data-board-remove-pending="${index}" aria-label="Remove ${escapeHtml(attachment.name)}"><i class="fa-solid fa-xmark" aria-hidden="true"></i> Remove</button>
-            </div>`).join('') || '<p class="board-editor-muted">No files attached.</p>';
-        host.querySelectorAll('[data-board-view-attachment]').forEach(button => button.addEventListener('click', async () => {
-            const attachment = attachments.find(item => item.id === button.dataset.boardViewAttachment);
-            if (!attachment) return;
-            try { await openBoardAttachment(this.app, card.id, attachment); }
-            catch (error) { this.app.showToast('Board', error?.message || 'Could not open the file.', 'error'); }
-        }));
-        host.querySelectorAll('[data-board-remove-pending]').forEach(button => button.addEventListener('click', () => {
-            if (editor._boardUploading || editor._boardSaving || editor._boardStarting) return;
-            pending.splice(Number(button.dataset.boardRemovePending), 1);
-            this.renderAttachmentsPanel(editor, card);
-            editor.querySelectorAll('[data-board-composer]').forEach(composer => composer._refreshPreview?.());
-        }));
-        host.querySelectorAll('[data-board-remove-attachment]').forEach(button => button.addEventListener('click', async () => {
-            if (editor._boardUploading || editor._boardSaving || editor._boardStarting) return;
-            const attachment = attachments.find(item => item.id === button.dataset.boardRemoveAttachment);
-            if (!attachment) return;
-            // Share the attachment-mutation guard with uploads so Save and other removals
-            // cannot race this operation or reintroduce a removed file from a stale array.
-            editor._boardUploading = true;
-            button.disabled = true;
-            try {
-                if (!await confirmDialog({ title: 'Delete attachment', message: `Delete ${attachment.name} from this card? This also removes its inline previews.`, confirmLabel: 'Delete', danger: true }) || !editor.isConnected) return;
-                await BoardApi.deleteCardAttachmentAsync(card.id, attachment.id);
-                card.attachments = card.attachments.filter(item => item.id !== attachment.id);
-                if (!editor.isConnected) return;
-                this.renderAttachmentsPanel(editor, card);
-                editor._boardContext?.refresh();
-                // Repaint from the current text, preserving every unsaved field and comment.
-                editor.querySelectorAll('[data-board-composer]').forEach(composer => {
-                    composer._refreshPreview?.();
-                });
-                this.renderCardDiscussion(editor, card);
-                this.app.showToast('Board', 'Attachment deleted.', 'success');
-            } catch (error) {
-                if (editor.isConnected) this.app.showToast('Board', error?.message || 'Could not delete the file.', 'error');
-            } finally {
-                editor._boardUploading = false;
-                button.disabled = false;
-            }
-        }));
+        if (editor) this.attachmentPanel(editor).render();
     }
 
     // ============================================
@@ -3525,7 +3331,8 @@ export class BoardController {
                 </div>
                 ${column ? laneAutomationSection() : '<p class="board-editor-muted mt-3">Save the lane to configure an Automation.</p>'}
             </div>
-        `, { onClose: () => { this.state.editingColumnId = null; this.boardSettingsDispose?.(); this.boardSettingsDispose = null; } });
+        `, { beforeClose: () => this.boardSettingsDispose?.beforeClose?.(() => this.app.closeModal()),
+            onClose: () => { this.state.editingColumnId = null; this.boardSettingsDispose?.(); this.boardSettingsDispose = null; } });
 
         const container = document.getElementById('modal-container');
         const editor = container?.querySelector('[data-board-lane-editor]');
@@ -3604,17 +3411,4 @@ export class BoardController {
             this.app.showToast('Board', error?.message || 'Failed to delete the lane.', 'error');
         }
     }
-}
-
-/** Inserts text on its own line at the caret and leaves the caret after it. */
-function insertAtCursor(input, text) {
-    const start = input.selectionStart ?? input.value.length;
-    const end = input.selectionEnd ?? start;
-    const before = input.value.slice(0, start);
-    const after = input.value.slice(end);
-    const lead = before && !before.endsWith('\n') ? '\n' : '';
-    input.value = `${before}${lead}${text}\n${after}`;
-    const caret = before.length + lead.length + text.length + 1;
-    input.setSelectionRange(caret, caret);
-    input.focus();
 }

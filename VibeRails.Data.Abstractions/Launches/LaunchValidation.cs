@@ -21,6 +21,7 @@ public static partial class LaunchValidation
         if ((snapshot.Preset is null) == (snapshot.Action is null)) throw new LaunchValidationException("A run must contain exactly one preset or Action.");
         RejectRetiredPrompt(snapshot.Preset?.InitialPrompt);
         RejectRetiredPrompt(snapshot.Context.PromptPrefix);
+        RejectRetiredPrompt(snapshot.Context.PromptOverride);
         RejectRetiredPrompt(snapshot.Context.ComposedPrompt);
         if (snapshot.Preset is { Kind: "quick-launch" } && snapshot.Context.TriggerKind != "manual")
             throw new LaunchValidationException("Quick Launches are available only for manual terminal launches.");

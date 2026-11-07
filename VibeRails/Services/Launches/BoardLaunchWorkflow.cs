@@ -10,6 +10,41 @@ namespace VibeRails.Services.Launches;
 public sealed class BoardLaunchWorkflow(IBoardStore board, ILaunchStore runs, LaunchService launches,
     BoardReviewService reviews)
 {
+    /// <summary>Current per-card lane progress, scoped to the host's project.</summary>
+    public async Task<IReadOnlyList<LaunchLaneEntry>?> GetLaneActivityAsync(string project, string column, CancellationToken ct)
+    {
+        if (await board.GetLaunchLaneAsync(project, column, ct) is null) return null;
+        List<LaunchLaneEntry> result = [];
+        foreach (var entry in (await board.GetLaunchEventsAsync(project, ct: ct)).Where(e => e.ColumnId == column && e.Current))
+        {
+            var card = await board.FindCardAsync(project, entry.CardId, ct);
+            if (card is null) continue;
+            var run = entry.RunId is null ? null : await launches.GetRunAsync(project, entry.RunId, ct);
+            var name = entry.DefinitionType == "preset" ? (await runs.GetPresetAsync(entry.DefinitionId, ct))?.Name
+                : (await runs.GetActionAsync(entry.DefinitionId, ct))?.Name;
+            result.Add(new(entry, string.IsNullOrEmpty(card.DisplayId) ? card.Key : card.DisplayId,
+                name ?? "Unavailable definition", run));
+        }
+        return result;
+    }
+
+    /// <summary>Queues a manual definition run with this project's saved card context and links.</summary>
+    public async Task<LaunchRun?> EnqueueCardAsync(string project, string cardId, LaunchRequest request, CancellationToken ct)
+    {
+        var card = await board.FindCardAsync(project, cardId, ct);
+        if (card is null) return null;
+        var preset = request.DefinitionType == "preset" ? await runs.GetPresetAsync(request.DefinitionId, ct) : null;
+        var levels = await ContextLevels.ResolveForCardAsync(board, project, card.BoardId, card.Type,
+            ContextLevels.NudgeEnabled(Config.LoadFresh(), false), ct);
+        var prompt = preset is null ? null : BoardPromptComposer.ComposeAutomationPrompt(card.Key, preset.InitialPrompt,
+            preset.Purpose, card.WorkflowMode == "agent", ContextLevels.Format(levels));
+        return await launches.EnqueueAsync(request.DefinitionType, request.DefinitionId,
+            new(project, project, "manual", "board-manual:" + card.Id + ":" + (request.OccurrenceId ?? Guid.NewGuid().ToString("N")),
+                BoardId: card.BoardId, CardId: card.Id, AuthorizeBoardTools: true, ContextIncluded: true,
+                ComposedPrompt: prompt, SessionOrigin: "automation",
+                Selection: preset is null ? null : $"preset:{preset.Id}:{LlmParser.ToWireName(preset.Cli).ToLowerInvariant()}"), ct, preset?.Revision);
+    }
+
     public async Task<BoardLaunchLane?> SaveAsync(string project, string column, BoardLaunchLane lane, CancellationToken ct)
     {
         if (lane.Selections is null || lane.Selections.Any(s => s is null))

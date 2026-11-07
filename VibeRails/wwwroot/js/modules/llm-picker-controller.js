@@ -8,22 +8,20 @@ import {
     populateLlmSelectionItemsSelect,
     canonicalLlmSelection
 } from './utils.js';
-import { LAUNCH_KIND_LABELS, launchKind } from './launch-kind.js';
+import { LAUNCH_KIND_LABELS } from './launch-kind.js';
 
 const PREFERENCES_ENDPOINT = '/api/v1/llm-picker/preferences';
 // The server's group strings. They are echoed back verbatim on save (the preferences PUT
 // compares them) and never shown: display grouping comes from LAUNCH_KIND_LABELS.
 const BASE_GROUP = 'Base CLIs';
-const ENVIRONMENT_GROUP = 'Custom Environments';
+const ENVIRONMENT_GROUP = 'AI Agents';
 const CUSTOMIZABLE_CONTEXTS = new Set(['terminal']);
 const KIND_RANK = Object.freeze({ base: 0, 'quick-launch': 1, agent: 2 });
 
-// Each matcher sees the catalog item and its launch kind: 'base', or for a saved setup
-// 'quick-launch' (no starting message) / 'agent' (has one). The terminal picker is where a
-// user types their own task, so Agents stay out of it; Board pickers assign either.
+// Both launch surfaces use the server's Agent / Quick Launch classification.
 const CONTEXT_MATCHERS = Object.freeze({
-    terminal: (item, kind) => item.kind === 'base' || kind === 'quick-launch',
-    assignee: (item) => item.kind === 'environment' || (item.kind === 'base' && item.cli !== 'shell'),
+    terminal: (item) => ['base', 'agent', 'quick-launch'].includes(item.kind),
+    assignee: (item) => item.kind === 'agent' || item.kind === 'quick-launch' || (item.kind === 'base' && item.cli !== 'shell'),
     'multi-run': (item) => item.kind === 'base' && item.cli !== 'shell',
     'environment-provider': (item) => item.kind === 'base' && item.cli !== 'shell'
 });
@@ -38,7 +36,6 @@ export class LlmPickerController {
         this.catalog = null;
         this.usingFallbackCatalog = false;
         this.loadPromise = null;
-        this.lastEnvironmentsFingerprint = null;
         this.mountedPickers = new Set();
         this.pickerBySelect = new WeakMap();
         this.modalState = null;
@@ -72,35 +69,6 @@ export class LlmPickerController {
         return promise;
     }
 
-    /**
-     * Re-resolve the catalog after an environments fetch, but only when the
-     * picker-relevant environment data actually changed. Environments are
-     * re-fetched on every poll/refresh; without this gate each one would cost a
-     * redundant preferences request plus a Tom Select re-render of every
-     * mounted picker.
-     */
-    async refreshFromEnvironments(environments) {
-        const fingerprint = (environments || [])
-            .map((environment) => [
-                environment?.id,
-                String(environment?.cli || '').toLowerCase(),
-                environment?.name || '',
-                environment?.hidden ? 1 : 0,
-                environment?.automationWorker ? 1 : 0,
-                // Saving or clearing a starting message moves a setup between the Quick
-                // Launch and Agent groups, so mounted pickers must re-resolve.
-                launchKind(environment) === 'agent' ? 1 : 0
-            ].join(':'))
-            .join('|');
-        if (fingerprint === this.lastEnvironmentsFingerprint
-            && this.catalog
-            && !this.usingFallbackCatalog) {
-            return this.catalog;
-        }
-        this.lastEnvironmentsFingerprint = fingerprint;
-        return this.loadPreferences({ force: true });
-    }
-
     mount(selectEl, configuration = {}) {
         if (!selectEl) return () => {};
 
@@ -113,7 +81,7 @@ export class LlmPickerController {
         const record = {
             selectEl,
             configuration: {
-                placeholder: context === 'terminal' ? 'Choose a CLI or Quick Launch…' : 'Select LLM...',
+                placeholder: context === 'terminal' ? 'Choose a CLI, Agent or Quick Launch…' : 'Select LLM...',
                 searchable: true,
                 searchPlaceholder: 'Search…',
                 includeGroups: context !== 'multi-run' && context !== 'environment-provider',
@@ -282,7 +250,7 @@ export class LlmPickerController {
                 label: `${label}${suffix}`,
                 cli: item.cli,
                 environmentId: item.environmentId,
-                environmentName: item.kind === 'environment'
+                environmentName: ['agent', 'quick-launch'].includes(item.kind)
                     ? item.label.replace(/ \([^)]*\)$/, '')
                     : null,
                 kind: item.kind,
@@ -299,7 +267,7 @@ export class LlmPickerController {
         if (selectedValue && !optionItems.some((item) => item.value === selectedValue)
             && context !== 'environment-provider') {
             const outOfContext = (this.catalog || []).find((item) =>
-                item.kind === 'environment' && this._selectionValue(item, plainCliValues) === selectedValue);
+                ['agent', 'quick-launch'].includes(item.kind) && this._selectionValue(item, plainCliValues) === selectedValue);
             if (outOfContext && (!configuration.filterItem || configuration.filterItem(outOfContext))) {
                 optionItems.push(toOption(outOfContext, ' (agent)'));
             }
@@ -322,6 +290,9 @@ export class LlmPickerController {
             });
         }
 
+        if (selectedValue && /^(env|preset):/.test(selectedValue) && !optionItems.some(item => item.value === selectedValue)) {
+            optionItems.push({ value:selectedValue, label:'Unavailable / retired selection', cli:selectedValue.split(':').at(-1), kind:'unavailable', group:'Unavailable' });
+        }
         return optionItems;
     }
 
@@ -338,21 +309,9 @@ export class LlmPickerController {
         return catalog.filter((item) => matcher(item, this._launchKind(item)));
     }
 
-    /**
-     * 'base' for a built-in CLI; for a saved setup, whether it carries a starting message. An
-     * environment the app has not loaded yet counts as an Agent: the conservative answer keeps
-     * an unknown setup out of the terminal picker rather than offering it without its message.
-     */
+    /** The classification is supplied by the shared server catalog. */
     _launchKind(item) {
-        if (item.kind !== 'environment') return 'base';
-        const environment = this._environmentFor(item);
-        return environment ? launchKind(environment) : 'agent';
-    }
-
-    _environmentFor(item) {
-        return (this.app.data.environments || []).find((candidate) =>
-            Number(candidate.id) === item.environmentId
-            && String(candidate.cli).toLowerCase() === item.cli) || null;
+        return ['agent', 'quick-launch'].includes(item.kind) ? item.kind : 'base';
     }
 
     _normalizeCatalog(items) {
@@ -363,7 +322,7 @@ export class LlmPickerController {
         return items
             .map((item) => ({
                 key: String(item?.key || ''),
-                kind: item?.kind === 'environment' ? 'environment' : 'base',
+                kind: ['agent','quick-launch'].includes(item?.kind) ? item.kind : 'base',
                 group: String(item?.group || ''),
                 label: String(item?.label || ''),
                 cli: String(item?.cli || '').toLowerCase(),
@@ -391,26 +350,10 @@ export class LlmPickerController {
             enabled: true,
             order
         }));
-        const environmentItems = (this.app.data.environments || [])
-            .map((environment, order) => {
-                // Automation Workers never enter the launch catalog (the server-resolved
-                // catalog excludes them too — this fallback must agree).
-                if (environment?.automationWorker) return null;
-                const cli = String(environment?.cli || '').toLowerCase();
-                const environmentId = Number.parseInt(environment?.id, 10);
-                if (!cli || !Number.isFinite(environmentId)) return null;
-                return {
-                    key: `env:${environmentId}:${cli}`,
-                    kind: 'environment',
-                    group: ENVIRONMENT_GROUP,
-                    label: `${environment.name || `Env ${environmentId}`} (${cli})`,
-                    cli,
-                    environmentId,
-                    enabled: !environment.hidden,
-                    order
-                };
-            })
-            .filter(Boolean);
+        const environmentItems = (this.app.data.launchCatalog || [])
+            .filter(item => item.definitionType === 'preset' && !item.retired)
+            .map((item, order) => ({ key:`preset:${item.id}:${item.cli}`, kind:item.kind,
+                group:ENVIRONMENT_GROUP, label:item.name, cli:item.cli, enabled:item.enabled, order }));
         return [...baseItems, ...environmentItems];
     }
 
@@ -437,7 +380,7 @@ export class LlmPickerController {
                         <div class="modal-header">
                             <div>
                                 <h5 class="modal-title" id="llm-picker-modal-title">Manage quick launches</h5>
-                                <p class="text-muted small mb-0">A Quick Launch opens a CLI with saved model, effort and permission settings and no starting message. Choose what the terminal picker shows, in which order. Agents — saved setups with their own message — live on the Agents page.</p>
+                                <p class="text-muted small mb-0">A Quick Launch opens a CLI with saved model, effort and permission settings and no starting message. Choose what the terminal picker shows, in which order. Manage all saved definitions on AI Agents.</p>
                             </div>
                             <button type="button" class="btn-close" data-llm-picker-action="cancel"
                                     aria-label="Close quick launch settings"></button>
@@ -450,7 +393,7 @@ export class LlmPickerController {
                                 </div>
                                 <div class="llm-picker-modal-section mt-4">
                                     <div class="llm-picker-modal-section-head">
-                                        <h6>Quick Launches</h6>
+                                        <h6>Agents and Quick Launches</h6>
                                         <button type="button" class="btn btn-sm btn-outline-primary"
                                                 data-llm-picker-action="create">
                                             <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>New quick launch
@@ -550,7 +493,7 @@ export class LlmPickerController {
             : '<span class="llm-picker-row-logo llm-picker-row-logo-fallback"><i class="fa-solid fa-terminal" aria-hidden="true"></i></span>';
         const key = escapeHtml(item.key);
         const label = escapeHtml(item.label);
-        const editable = item.kind === 'environment';
+        const editable = ['agent', 'quick-launch'].includes(item.kind);
         return `
             <div class="llm-picker-modal-row has-launch-action${item.enabled ? '' : ' is-hidden'}"
                  data-llm-picker-key="${key}" data-llm-picker-group-name="${escapeHtml(item.group)}">
@@ -580,10 +523,6 @@ export class LlmPickerController {
                     ${editable ? `<button type="button" class="btn btn-sm btn-outline-secondary llm-picker-icon-button"
                             data-llm-picker-edit aria-label="Edit ${label}" title="Edit">
                         <i class="fa-solid fa-pen" aria-hidden="true"></i>
-                    </button>
-                    <button type="button" class="btn btn-sm btn-outline-danger llm-picker-icon-button"
-                            data-llm-picker-delete aria-label="Delete ${label}" title="Delete">
-                        <i class="fa-solid fa-trash" aria-hidden="true"></i>
                     </button>` : ''}
                     <button type="button" class="btn btn-sm btn-outline-primary llm-picker-launch-button"
                             data-llm-picker-launch aria-label="Launch ${label}">
@@ -593,82 +532,29 @@ export class LlmPickerController {
             </div>`;
     }
 
-    /** Built-in CLIs and Quick Launches are listed; Agents are carried but not shown. */
+    /** All current presets share the terminal picker preferences. */
     _modalVisible(item) {
-        return item.kind === 'base' || this._launchKind(item) === 'quick-launch';
+        return ['base', 'agent', 'quick-launch'].includes(item.kind);
     }
 
     /**
-     * Opening the setup form replaces #modal-container, so this dialog closes first and
-     * returns once the form is done, either way. A dirty draft is saved before leaving so a
-     * reordering is not lost behind a create.
+     * Save picker preferences before opening the shared definition editor.
      */
     async _withSetupForm(open) {
         const state = this.modalState;
         if (!state || state.disposed || state.pending) return;
         if (state.dirty && !(await this._savePreferences({ close: false, toast: false }))) return;
         if (this.modalState !== state || state.disposed) return;
-        const { originSelect, triggerElement } = state;
-        const reopen = () => this.openCustomizationModal({ originSelect, triggerElement });
         this._closeCustomizationModal({ restoreFocus: false });
-        open({ onChanged: reopen, onCancel: reopen });
+        await open();
     }
 
     _createQuickLaunch() {
-        void this._withSetupForm((callbacks) =>
-            this.app.environmentController.createEnvironment({ variant: 'quick-launch', ...callbacks }));
+        void this._withSetupForm(() => this.app.aiAgentsController.openEditor('preset'));
     }
 
     _editQuickLaunch(key) {
-        const item = this.modalState?.items.find((candidate) => candidate.key === key);
-        const environment = item ? this._environmentFor(item) : null;
-        if (!environment?.name) {
-            this._showModalError('This quick launch is no longer available. Reopen the list to refresh it.');
-            return;
-        }
-        void this._withSetupForm((callbacks) =>
-            void this.app.environmentController.editEnvironment(environment.name, { variant: 'quick-launch', ...callbacks }));
-    }
-
-    async _deleteQuickLaunch(key) {
-        const state = this.modalState;
-        const item = state?.items.find((candidate) => candidate.key === key);
-        const environment = item ? this._environmentFor(item) : null;
-        if (!state || state.disposed || state.pending) return;
-        if (!environment?.name) {
-            this._showModalError('This quick launch is no longer available. Reopen the list to refresh it.');
-            return;
-        }
-        const confirmed = await confirmDialog({
-            title: `Delete quick launch “${environment.name}”?`,
-            message: 'Its saved CLI settings are removed. Terminals already running are not affected.',
-            confirmLabel: 'Delete',
-            danger: true
-        });
-        if (!confirmed || this.modalState !== state || state.pending) return;
-        this._showModalError('');
-        this._setModalPending(true, 'Deleting…');
-        try {
-            await this.app.apiCall(`/api/v1/environments/${encodeURIComponent(environment.name)}`, 'DELETE', null,
-                { showLoading: false, preferErrorResponseMessage: true });
-            await this.app.environmentController.refreshEnvironments();
-            if (this.modalState !== state) return;
-            // The catalog was re-resolved by the refresh; rebuild the list from it, keeping the
-            // draft's order and visibility for everything that survived.
-            const fresh = new Map((this.catalog || []).map((entry) => [entry.key, entry]));
-            state.items = state.items.filter((entry) => fresh.has(entry.key)).map((entry) => ({ ...fresh.get(entry.key), enabled: entry.enabled }));
-            for (const entry of fresh.values()) {
-                if (!state.items.some((candidate) => candidate.key === entry.key)) state.items.push({ ...entry });
-            }
-            this.app.showToast('Quick launch deleted', `${environment.name} was removed.`, 'info');
-        } catch (error) {
-            if (this.modalState === state) {
-                // The server refuses while an Automation still uses it; its message says which.
-                this._showModalError(error?.message || 'Could not delete this quick launch.');
-            }
-        } finally {
-            if (this.modalState === state) this._setModalPending(false);
-        }
+        void this._withSetupForm(() => this.app.aiAgentsController.openEditor('preset', key.split(':')[1]));
     }
 
     _bindModalActions() {
@@ -709,9 +595,6 @@ export class LlmPickerController {
                 void this._launchModalItem(key);
             });
             row.querySelector('[data-llm-picker-edit]')?.addEventListener('click', () => this._editQuickLaunch(key));
-            row.querySelector('[data-llm-picker-delete]')?.addEventListener('click', () => {
-                void this._deleteQuickLaunch(key);
-            });
             row.querySelector('[data-llm-picker-enabled]')?.addEventListener('change', (event) => {
                 const item = state.items.find((candidate) => candidate.key === key);
                 if (!item) return;
@@ -798,28 +681,25 @@ export class LlmPickerController {
         const item = state?.items.find((candidate) => candidate.key === key);
         if (!state || state.disposed || state.pending || !item) return;
 
-        const environment = item.kind === 'environment'
-            ? (this.app.data.environments || []).find((candidate) =>
-                Number(candidate.id) === item.environmentId
-                && String(candidate.cli).toLowerCase() === item.cli
-                && !candidate.automationWorker)
-            : null;
-        if (item.kind === 'environment' && !environment?.name) {
-            this._showModalError('This quick launch is no longer available. Reopen the list to refresh it.');
+        if (item.key.startsWith('preset:')) {
+            this._closeCustomizationModal({ restoreFocus:false });
+            await this.app.aiAgentsController.launch(item.key.split(':')[1], 'preset', { focusTerminal: true });
             return;
         }
-
+        if (!item.key.startsWith('base:')) {
+            this._showModalError('This saved selection is unavailable. Choose a current Agent or Quick Launch.');
+            return;
+        }
         this._showModalError('');
         this._setModalPending(true, 'Save');
         try {
             // Visibility only controls the pickers. A one-off launch never saves the
-            // modal draft or enables the item, and environments retain their profile.
+            // modal draft or enables the item.
             const opened = await this.app.terminalController.launchInFocus({
                 cli: item.cli,
-                environmentName: environment?.name || null,
                 workingDirectory: state.launchWorkingDirectory,
-                title: environment?.name || item.label,
-                tabLabel: environment?.name || item.label,
+                title: item.label,
+                tabLabel: item.label,
                 forceNewTab: true
             });
             if (opened !== false && this.modalState === state) {

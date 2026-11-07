@@ -47,12 +47,15 @@ export function mountProjectHealthFixPickers(app, root) {
 export async function launchProjectHealthFix(app, { title, prompt, workingDirectory, selectionValue }) {
     const selection = parseLlmSelection(selectionValue, app.data?.environments || []);
     if (!selection.cli || selection.cli === 'shell'
-        || (selection.kind === 'environment' && !selection.environmentName)) {
+        || selection.kind === 'environment') {
         app.showToast('Choose an agent', 'Choose a CLI, Quick Launch or Agent beside the Fix button.', 'warning');
         return false;
     }
     rememberAgent(selectionValue);
     try {
+        if (selection.kind === 'preset') {
+            return Boolean(await app.aiAgentsController.launch(selection.presetId, 'preset', { focusTerminal: true, promptPrefix: prompt }));
+        }
         if (typeof app.terminalController?.launchInFocus !== 'function') {
             throw new Error('The terminal is unavailable. Reload the page and try again.');
         }

@@ -1,3 +1,4 @@
+import { mountLaunchLane } from './launch-lane-editor.js';
 import { escapeHtml } from './utils.js';
 import { BoardApi } from './board-api.js';
 import { boardTracker } from './board-brand.js';
@@ -541,39 +542,5 @@ export function mountContextEditor(app, root, { boardId = null, toastTitle = 'Bo
 
 // Automatic account sync status and an immediate retry.
 export function mountLaneAutomation(app, element, columnId, onSaved) {
-    return mountSettings(app, element, {
-        // The lane settings carry id/name/enabled; the project catalog says which entries are
-        // Agents. Losing the catalog only loses the grouping.
-        load: async extra => {
-            const projectPath = app.data?.configs?.rootPath || '';
-            const [lane, catalog] = await Promise.all([
-                BoardApi.getLaneAutomationAsync(columnId, extra),
-                projectPath
-                    ? app.apiCall(`/api/v1/jobs?projectPath=${encodeURIComponent(projectPath)}`, 'GET', null, { showLoading: false, ...extra }).catch(() => null)
-                    : Promise.resolve(null)
-            ]);
-            return { ...lane, kinds: new Map((catalog?.jobs || []).map(job => [job.id, jobLaunchKind(job)])) };
-        },
-        render: ({ jobs, jobIds, jobId, starterSetupPending, kinds }) => {
-            const selected = new Set(jobIds ?? (jobId ? [jobId] : []));
-            const choices = [...[...selected].map(id => jobs.find(job => job.id === id)
-                || { id, name: `Unavailable entry (${id})`, enabled: false }), ...jobs.filter(job => !selected.has(job.id))];
-            const row = job => `<label class="d-flex align-items-start gap-2 mb-2">
-                    <input type="checkbox" class="form-check-input flex-shrink-0" data-lane-automation-job value="${Number(job.id)}" ${selected.has(job.id) ? 'checked' : ''} ${!job.enabled && !selected.has(job.id) ? 'disabled' : ''}>
-                    <span class="text-break">${escapeHtml(job.name)}${job.enabled ? '' : ' (disabled)'}</span>
-                </label>`;
-            const agents = choices.filter(job => kinds?.get(job.id) === 'agent');
-            const automations = choices.filter(job => kinds?.get(job.id) !== 'agent');
-            return `${starterSetupPending ? '<p role="status">Starter review setup is pending. Reopen to retry, or save your lane selection to cancel the default.</p>' : ''}
-            <p class="board-editor-muted">Select any number, or clear all so nothing runs on entry. Remove unavailable or disabled selections before saving.</p>
-            ${agents.length ? `<fieldset class="mb-2"><legend class="board-editor-label">Agents on entry</legend>${agents.map(row).join('')}</fieldset>` : ''}
-            ${automations.length ? `<fieldset class="mb-2"><legend class="board-editor-label">Automations on entry</legend>${automations.map(row).join('')}</fieldset>` : ''}
-            ${jobs.length ? '' : '<p class="board-editor-muted">Create an Agent or Automation for this project first.</p>'}
-            <button type="button" class="btn btn-sm btn-outline-primary" data-settings-save>Save lane settings</button>`;
-        },
-        read: root => ({ jobIds: [...root.querySelectorAll('[data-lane-automation-job]:checked')].map(input => Number(input.value)) }),
-        save: payload => BoardApi.saveLaneAutomationAsync(columnId, payload),
-        savedMessage: 'Lane settings saved.',
-        onSaved
-    });
+    return element ? mountLaunchLane(app, element, columnId, onSaved) : () => {};
 }

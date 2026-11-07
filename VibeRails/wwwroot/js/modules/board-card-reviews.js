@@ -51,7 +51,7 @@ export function reviewRow(row) {
     </article>`;
 }
 
-export function reviewReport(row) {
+export function reviewReport(row, { compare = true } = {}) {
     return `<h4>${esc(row.result || 'Report missing')}</h4>
         ${row.routing ? `<p>${esc(routingSummary(row.routing))}</p><p>Coding source checkout: ${esc(row.routing.source?.workspace || 'Unknown')}</p>` : ''}
         <p>${esc(row.reviewer)} · ${esc(row.provider)} · ${esc(row.freshness)}</p>
@@ -63,7 +63,7 @@ export function reviewReport(row) {
         ${row.captureLimitations ? `<p>${esc(row.captureLimitations)}</p>` : ''}
         ${[['Findings', row.findings], ['Validation', row.validation], ['Limitations', row.limitations]].map(([label, text]) =>
             `<h5>${label}</h5><div class="board-review-text">${esc(text || 'Not reported')}</div>`).join('')}
-        <button type="button" class="btn btn-sm btn-link" data-review-compare="${esc(row.id)}">Compare review inputs</button>`;
+        ${compare ? `<button type="button" class="btn btn-sm btn-link" data-review-compare="${esc(row.id)}">Compare review inputs</button>` : ''}`;
 }
 
 export function bindCardReviews(editor, card, app, onQueued) {

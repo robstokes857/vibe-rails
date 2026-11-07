@@ -133,3 +133,20 @@ system prompt, bare and debug; Codex model/effort/speed/YOLO and alternate-scree
 configuration; OpenCode-family plugin disablement through existing `--pure`
 preparation. Additional argv retains other supported flags. Existing command
 preparation owns TokenSaver, MCP registration, credentials and sanitization.
+
+## Browser and VS Code integration
+
+The AI Agents view and native VS Code launch tree use the same global catalog.
+VS Code preset launches enter the dashboard prompt resolver so custom template values
+use the same UI; Actions can be queued directly by the extension.
+`POST /runs` optionally accepts `promptPrefix` (for a Quality/Rules task), `initialPrompt`
+(filled template values) and `expectedRevision`. The immutable context retains the
+one-run override; the saved preset is unchanged. Both prompt fields reject retired step
+syntax. Project and execution directory still come only from the authenticated root.
+
+`POST /board/cards/{card}/launches` queues a definition using the saved project-owned
+card context and normal Board grants. `GET /board/columns/{column}/launches/activity`
+returns current per-card entries with labels and project-scoped run snapshots. The UI
+keeps process status and explicit verdict separate and uses the existing retry and
+per-card skip endpoints. These additions use normal root authentication and no schema
+migration or legacy-data conversion.

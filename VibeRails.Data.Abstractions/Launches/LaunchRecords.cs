@@ -40,7 +40,7 @@ public sealed record LaunchExecutionContext(string ProjectPath, string WorkingDi
     string TriggerKind, string OccurrenceId, string? BindingId = null, string? BoardId = null,
     string? CardId = null, string? LaneEntryId = null, string? PromptPrefix = null,
     bool AuthorizeBoardTools = false, bool ContextIncluded = false, string? ComposedPrompt = null,
-    string? SessionOrigin = null, string? Selection = null);
+    string? SessionOrigin = null, string? Selection = null, string? PromptOverride = null);
 
 /// <summary>The complete immutable input to one run; retries copy it rather than reading current options.</summary>
 public sealed record LaunchSnapshot(LaunchExecutionContext Context, LaunchPreset? Preset = null,

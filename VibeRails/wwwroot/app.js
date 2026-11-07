@@ -6,7 +6,6 @@
 import { AgentController } from './js/modules/agent-controller.js';
 import { DashboardController } from './js/modules/dashboard-controller.js';
 import { SessionController } from './js/modules/session-controller.js';
-import { EnvironmentController } from './js/modules/environment-controller.js';
 import { ConfigController } from './js/modules/config-controller.js';
 import { RuleController } from './js/modules/rule-controller.js';
 import { CliLauncher } from './js/modules/cli-launcher.js';
@@ -18,11 +17,11 @@ import { AccountNavMenu, accountSummary } from './js/modules/account-nav.js';
 import { McpController } from './js/modules/mcp-controller.js';
 import { PrReviewsController } from './js/modules/pr-reviews-controller.js';
 import { ReviewInboxController } from './js/modules/review-inbox-controller.js';
-import { JobController } from './js/modules/jobs-controller.js';
+import { AiAgentsController } from './js/modules/ai-agents-controller.js';
 import { PythonScriptWorkbench } from './js/modules/python-script-workbench.js';
 import { BoardController } from './js/modules/board-controller.js';
 import { LlmPickerController } from './js/modules/llm-picker-controller.js';
-import { AutomationNavLauncher } from './js/modules/automation-launcher.js';
+import { LaunchMenu as AutomationNavLauncher } from './js/modules/launch-menu.js';
 import { AppEventClient } from './js/modules/app-event-client.js';
 import { TerminalTokenCompressionMeter, getTokenSaverEnabledSources } from './js/modules/terminal-token-compression.js';
 import { openFileExplorer } from './js/modules/file-explorer.js';
@@ -57,7 +56,6 @@ export class VibeControlApp {
         this.agentController = new AgentController(this);
         this.dashboardController = new DashboardController(this);
         this.sessionController = new SessionController(this);
-        this.environmentController = new EnvironmentController(this);
         this.configController = new ConfigController(this);
         this.ruleController = new RuleController(this);
         this.cliLauncher = new CliLauncher(this);
@@ -67,7 +65,8 @@ export class VibeControlApp {
         this.mcpController = new McpController(this);
         this.prReviewsController = new PrReviewsController(this);
         this.reviewInboxController = new ReviewInboxController(this);
-        this.jobController = new JobController(this);
+        this.aiAgentsController = new AiAgentsController(this);
+        this.jobController = this.aiAgentsController;
         this.pythonScriptWorkbench = new PythonScriptWorkbench(this);
         this.boardController = new BoardController(this);
         this.automationNavLauncher = new AutomationNavLauncher(this);
@@ -598,14 +597,12 @@ export class VibeControlApp {
     }
 
     getDuplicateTabViewName(view) {
-        // Detail views land on their parent page: a duplicated Python workbench tab
-        // opens the Automations page (the script list), not the single-script editor.
-        // 'jobs' is the historical id Board and VS Code links still use; it is the Agents page.
+        // Detail views and legacy launch URLs land on their shared management page.
         const normalizedView = ['agents', 'rule-files', 'agent-edit', 'agent-create'].includes(view)
             ? 'dashboard'
                 : view === 'python-script'
-                    ? 'automations'
-                    : view === 'jobs'
+                    ? 'ai-agents'
+                    : ['jobs', 'automations'].includes(view)
                         ? 'ai-agents'
                         : view;
         const duplicateableViews = new Set([
@@ -785,12 +782,12 @@ export class VibeControlApp {
 
     updateActiveSubNav(view) {
         // Rule editors retain the Rules highlight; Quality has its own destination.
-        // The Python workbench belongs to Automations; the legacy 'jobs' id is the Agents page.
+        // The Python workbench and legacy launch URLs belong to AI Agents.
         const highlightView = ['agents', 'rule-files', 'agent-edit', 'agent-create'].includes(view)
             ? 'dashboard'
             : view === 'python-script'
-                    ? 'automations'
-                    : view === 'jobs'
+                    ? 'ai-agents'
+                    : ['jobs', 'automations'].includes(view)
                         ? 'ai-agents'
                         : view;
         document.querySelectorAll('.app-subnav-link').forEach(link => {
@@ -856,7 +853,6 @@ export class VibeControlApp {
         this.jobController?.unload?.();
         this.pythonScriptWorkbench?.unload?.();
         this.boardController?.unload?.();
-        this.environmentController?.unload?.();
         this.updateActiveSubNav(view);
         this.setupAlert?.setView(view);
         this.terminalController?.resetLayoutStateForNavigation();
@@ -888,12 +884,10 @@ export class VibeControlApp {
             'pr-reviews': () => this.prReviewsController.loadView(data),
             // Reviews requested of this account (VB-50 slice D); reached from the PR Reviews header.
             'review-inbox': () => this.reviewInboxController.loadView(),
-            // One controller serves both pages. 'jobs' stays as the historical id that Board
-            // lane links and the VS Code launcher bridge navigate to; it opens the Agents page,
-            // which redirects an Automation's edit request to its own page.
-            'ai-agents': () => this.jobController.loadView({ ...data, mode: 'agents' }),
-            'automations': () => this.jobController.loadView({ ...data, mode: 'automations' }),
-            'jobs': () => this.jobController.loadView({ ...data, mode: 'agents' }),
+            // Legacy launch URLs share the same definition management screen.
+            'ai-agents': () => this.aiAgentsController.loadView(data),
+            'automations': () => this.aiAgentsController.loadView(data),
+            'jobs': () => this.aiAgentsController.loadView(data),
             'python-script': () => this.pythonScriptWorkbench.loadView(data),
             'board': () => this.boardController.loadView(data)
         };
@@ -1232,7 +1226,7 @@ export class VibeControlApp {
         void panel.mount();
     }
 
-    showModal(title, content, { onClose = null } = {}) {
+    showModal(title, content, { onClose = null, beforeClose = null } = {}) {
         const modalContainer = document.getElementById('modal-container');
         if (!modalContainer) return;
 
@@ -1240,7 +1234,7 @@ export class VibeControlApp {
         // modal gets its cleanup, background state, and original focus restored
         // before the new dialog captures those things for itself.
         if (this.modalState || modalContainer.firstElementChild) {
-            this.closeModal();
+            if (this.closeModal() === false) return false;
         } else {
             this.runModalCleanup();
         }
@@ -1286,6 +1280,7 @@ export class VibeControlApp {
             background,
             previousFocus,
             keydownHandler: null,
+            beforeClose,
             closed: false
         };
         state.keydownHandler = event => this.handleTopLevelModalKeydown(event, state);
@@ -1302,6 +1297,7 @@ export class VibeControlApp {
     closeModal() {
         const state = this.modalState;
         if (state?.closed) return;
+        if (state?.beforeClose?.() === false) return false;
         if (state) {
             state.closed = true;
             if (state.keydownHandler) {
@@ -1649,6 +1645,7 @@ export class VibeControlApp {
                 }
                 throw new Error(message);
             }
+            if (response.status === 204) return null;
             if (requestOptions?.responseType === 'blob') return await response.blob();
             return await response.json();
         } catch (error) {
@@ -1686,21 +1683,14 @@ export class VibeControlApp {
         // block or blank the others.
         const environmentsTask = (async () => {
             try {
-                const envResponse = await this.apiCall('/api/v1/environments', 'GET', null, { showLoading: false });
-                // Keep one normalization path for environment records. In particular, this
-                // preserves the `hidden` flag used by every LLM/environment selector.
-                this.environmentController.setEnvironments(envResponse.environments || []);
-                // Re-resolve after Environment CRUD/legacy Hidden updates so the
-                // cached catalog and every currently mounted picker stay in sync.
-                // No-ops when the picker-relevant environment data is unchanged.
-                await this.llmPickerController.refreshFromEnvironments(envResponse.environments || []);
-            } catch (error) {
-                console.error('Failed to fetch environments:', error);
-                // Keep the last known-good catalog. Environment references are durable
-                // configuration, and a transient list failure must not make mounted
-                // pickers or editor drafts behave as though those environments were
-                // deleted. A cold start already begins with an empty array.
-            }
+                const catalog = await this.apiCall('/api/v1/launch-catalog', 'GET', null, { showLoading:false });
+                const fingerprint = JSON.stringify(catalog.items);
+                this.data.launchCatalog = catalog.items;
+                if (this._launchCatalogFingerprint !== fingerprint) {
+                    this._launchCatalogFingerprint = fingerprint;
+                    await this.llmPickerController.loadPreferences({ force:true });
+                }
+            } catch (error) { console.error('Failed to refresh launch catalog:', error); }
         })();
 
         const gitTasks = [];

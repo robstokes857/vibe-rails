@@ -16,7 +16,7 @@ export class BoardLaneAgents {
     button(column) {
         return `<button type="button" class="board-lane-agents-button" data-board-action="lane-agents"
             data-column-id="${escapeHtml(column.id)}" aria-haspopup="dialog" aria-expanded="false"
-            aria-label="Agents and Automations on entry to ${escapeHtml(column.name)}" title="Manage Agents and Automations on entry to ${escapeHtml(column.name)}">
+            aria-label="Agents and Actions on entry to ${escapeHtml(column.name)}" title="Manage Agents and Actions on entry to ${escapeHtml(column.name)}">
             ${icon('robot')}<span class="board-lane-agents-count" aria-hidden="true">…</span>
             <span class="board-lane-agents-caption">On entry</span>
         </button>`;
@@ -54,9 +54,9 @@ export class BoardLaneAgents {
     updateCount(button, settings) {
         if (Number(button.dataset.agentsRevision) > settings.revision) return;
         button.dataset.agentsRevision = String(settings.revision ?? 0);
-        const count = selectedIds(settings).length;
+        const count = settings.selections?.length || 0;
         button.querySelector('.board-lane-agents-count').textContent = String(count);
-        button.title = `${count} on entry (Agents and Automations). Click to manage.`;
+        button.title = `${count} on entry (Agents and Actions). Click to manage.`;
     }
 
     updateColumnCount(columnId, settings) {
@@ -77,7 +77,7 @@ export class BoardLaneAgents {
 
     open(button, column) {
         if (this.anchor === button) { this.close(); return; }
-        this.close(false);
+        if (this.close(false) === false) return;
         if (!column) return;
         const abort = new AbortController();
         const panel = document.createElement('section');
@@ -87,10 +87,10 @@ export class BoardLaneAgents {
         panel.setAttribute('aria-labelledby', 'board-lane-agents-title');
         panel.innerHTML = `<header class="board-lane-agents-heading">
             <span class="board-lane-agents-heading-icon" aria-hidden="true">${icon('robot')}</span>
-            <div class="board-lane-agents-heading-copy"><h2 id="board-lane-agents-title">Agents and Automations</h2><p>On entry to <strong>${escapeHtml(column.name)}</strong></p></div>
+            <div class="board-lane-agents-heading-copy"><h2 id="board-lane-agents-title">Agents and Actions</h2><p>On entry to <strong>${escapeHtml(column.name)}</strong></p></div>
             <button type="button" class="board-lane-agents-action" data-agent-action="close" aria-label="Close lane panel">${icon('xmark')}</button>
         </header>
-        <p class="board-lane-agents-help">They run top to bottom after a card stays here for 60 seconds. Each step waits for the previous one to pass or be skipped, and each handles one card at a time.</p>
+        <p class="board-lane-agents-help">They run top to bottom after a card stays here for 60 seconds. Each run waits for the previous one to satisfy its gate or be skipped.</p>
         <section data-lane-running aria-label="Running agents" aria-live="polite"></section>
         <div data-lane-agents-content role="status">Loading agents…</div>`;
         this.anchor = button;
@@ -112,6 +112,7 @@ export class BoardLaneAgents {
         const disposeBody = mountLaneAgentBody({ app: this.app, panel, column, signal: abort.signal, position,
             updateCount: settings => this.updateColumnCount(column.id, settings),
             close: restoreFocus => this.close(restoreFocus), openRunningAgent: this.openRunningAgent });
+        this.beforeClosePanel = disposeBody.beforeClose;
 
         const outside = event => {
             if (!panel.contains(event.target) && !this.anchor?.contains(event.target) && !isConfirmDialogOpen()) this.close(false);
@@ -142,7 +143,9 @@ export class BoardLaneAgents {
         panel.querySelector('[data-agent-action="close"]').focus();
     }
 
-    close(restoreFocus = true) {
+    close(restoreFocus = true, force = false) {
+        if (!force && this.beforeClosePanel?.(() => this.close(restoreFocus)) === false) return false;
+        this.beforeClosePanel = null;
         this.cleanup?.();
         this.cleanup = null;
         this.positionPanel = null;
@@ -152,11 +155,12 @@ export class BoardLaneAgents {
         this.anchor?.removeAttribute('aria-controls');
         if (restoreFocus && this.anchor?.isConnected) this.anchor.focus();
         this.anchor = null;
+        return true;
     }
 
     dispose() {
         this.countAbort?.abort();
-        this.close(false);
+        this.close(false, true);
         this.root = null;
     }
 }

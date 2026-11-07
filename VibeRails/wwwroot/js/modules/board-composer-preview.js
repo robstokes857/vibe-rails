@@ -8,12 +8,12 @@ export function boardTextOptions(card) {
 }
 
 /** Owns the comment composer's authenticated raster previews. */
-export function bindComposerPreview(composer, input, card) {
+export function bindComposerPreview(composer, input, card, loadContent) {
     const live = composer.querySelector('[data-board-composer-live]');
     if (!live) return () => {};
     const abort = new AbortController();
     let disposed = false;
-    const images = createBoardImagePreviews(() => card);
+    const images = createBoardImagePreviews(() => card, () => {}, loadContent);
     function update() {
         if (disposed) return;
         const options = boardTextOptions(card);

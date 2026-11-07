@@ -2300,6 +2300,7 @@ namespace VibeRails.DTOs
 [JsonSerializable(typeof(ResolveUncertainLaunchRequest))]
 [JsonSerializable(typeof(LaunchError))]
 [JsonSerializable(typeof(LaunchCatalog))]
+[JsonSerializable(typeof(IReadOnlyList<LaunchLaneEntry>))]
 [JsonSerializable(typeof(SavedPreset))]
 [JsonSerializable(typeof(LaunchAction))]
 [JsonSerializable(typeof(LaunchAttachmentContent))]

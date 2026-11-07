@@ -25,7 +25,7 @@ export const ASSIGN_ACTION = 'assign-card';
  */
 export function assignMenuItems(items = [], environments = []) {
     const rows = (items || []).map((item, order) => {
-        let kind = 'base';
+        let kind = ['agent', 'quick-launch'].includes(item.kind) ? item.kind : 'base';
         if (item.kind === 'environment') {
             const environment = (environments || []).find(candidate =>
                 Number(candidate?.id) === Number(item.environmentId)
