@@ -94,7 +94,7 @@ public sealed class BoardAgentOptionsToolTests
         Assert.Contains("without intent=worker starts the saved manager on an Agent card", result);
         Assert.Contains("On a Manual card, start_board_agent(card=...) starts the saved Assignee", result);
         Assert.Contains("separate managerSelection and managerBaseLlmOptions", result);
-        Assert.Contains("Uses saved environment settings; baseLlmOptions cannot override it", result);
+        Assert.Contains("Uses saved Agent settings; baseLlmOptions cannot override it", result);
         Assert.Contains("update_board_card(card=...", result);
         Assert.True(result.IndexOf("Agent workflow delegation:", StringComparison.Ordinal)
             < result.IndexOf("Saved-assignment setup:", StringComparison.Ordinal));

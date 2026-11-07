@@ -313,9 +313,9 @@ public sealed class TerminalRoutesPromptDeferralTests : IDisposable
                 It.IsAny<string>(), false, It.IsAny<Func<Task<ResolvedPrompt>>>(), It.IsAny<string>(), false)).ReturnsAsync(true);
             using var response = await SharedClient.PostAsJsonAsync(new Uri(new Uri(app.Urls.First()), "/api/v1/terminal/start"),
                 new StartTerminalRequest(Cli: "Claude", EnvironmentName: "stale-name", EnvironmentId: environmentId), TestContext.Current.CancellationToken);
-            Assert.Equal(allowed ? HttpStatusCode.OK : HttpStatusCode.NotFound, response.StatusCode);
+            Assert.Equal(HttpStatusCode.Gone, response.StatusCode);
             repository.Verify(r => r.GetEnvironmentByNameAndLlmAsync(It.IsAny<string>(), It.IsAny<LLM>(), It.IsAny<CancellationToken>()), Times.Never);
-            if (!allowed) Assert.DoesNotContain(terminal.Invocations, i => i.Method.Name == nameof(ITerminalSessionService.StartSessionAsync));
+            Assert.DoesNotContain(terminal.Invocations, i => i.Method.Name == nameof(ITerminalSessionService.StartSessionAsync));
         }
         finally { await StopAsync(app); }
     }

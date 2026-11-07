@@ -56,22 +56,14 @@ public sealed class AutomationRuntimeServiceCollectionExtensionsTests : IDisposa
         });
         using var scope = provider.CreateScope();
 
-        Assert.IsType<JobLaunchService>(scope.ServiceProvider.GetRequiredService<IJobLaunchService>());
-        Assert.IsType<JobTerminalTabLauncher>(scope.ServiceProvider.GetRequiredService<IJobTerminalTabLauncher>());
-
-        var concreteScheduler = provider.GetRequiredService<JobSchedulerHostedService>();
-        Assert.Same(concreteScheduler, provider.GetRequiredService<IJobScheduler>());
-        Assert.Same(
-            concreteScheduler,
-            Assert.Single(provider.GetServices<IHostedService>().OfType<JobSchedulerHostedService>()));
-        Assert.Same(
-            provider.GetRequiredService<JobSchedulerHealth>(),
-            provider.GetRequiredService<JobSchedulerHealth>());
+        Assert.NotNull(scope.ServiceProvider.GetRequiredService<VibeRails.Services.Launches.LaunchDispatcher>());
+        Assert.Null(provider.GetService<IJobScheduler>());
+        Assert.Null(scope.ServiceProvider.GetService<IJobLaunchService>());
+        Assert.Empty(provider.GetServices<IHostedService>().OfType<JobSchedulerHostedService>());
+        Assert.Single(provider.GetServices<IHostedService>().OfType<VibeRails.Services.Launches.LaunchScheduler>());
+        Assert.True(File.Exists(Path.Combine(_root, "launches.db")));
         Assert.Single(provider.GetServices<ICliWrapper>());
-        Assert.IsType<AutomationScriptService>(
-            provider.GetRequiredService<IAutomationScriptService>());
-        Assert.IsType<JobProcessLauncher>(
-            provider.GetRequiredService<IJobProcessLauncher>());
+        Assert.IsType<AutomationScriptService>(provider.GetRequiredService<IAutomationScriptService>());
     }
 
     [Fact]

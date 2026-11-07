@@ -43,25 +43,28 @@ public sealed partial class BoardSettingsTests
     public async Task WaitingCardsAreVisibleAcrossListDetailAndActivity_AndAdvanceAfterBusyRun()
     {
         var (board, _, lane, _) = await Lanes();
-        var job = await Job();
-        await _boards.SaveLaneAutomationAsync(_root, lane, [job.Id], 0, Ct);
+        var runs = new VibeRails.Data.Sqlite.LaunchStore($"Data Source={Path.Combine(_root, "launches.db")};Pooling=False");
+        var launches = new VibeRails.Services.Launches.LaunchService(runs, Mock.Of<IAutomationScriptService>());
+        var preset = (await launches.SavePresetAsync(null, new("Agent", "", "codex", InitialPrompt: "Work"), Ct)).Preset;
+        await _boards.SaveLaunchLaneAsync(_root, lane, new([new(preset.Id, "preset", "result")], 0), Ct);
         var first = await Card(lane);
-        var run = Assert.Single(await Tick(await Due(first.Id)));
+        var entry = Assert.Single(await _boards.GetLaunchEventsAsync(_root, first.Id, Ct));
+        var run = await launches.EnqueueAsync("preset", preset.Id, new(_root, _root, "board-lane", "first", BoardId: board, CardId: first.Id, LaneEntryId: entry.Id), Ct);
+        await _boards.AcknowledgeLaunchEventAsync(entry.Id, run.Id, Ct);
+        var claim = (await runs.TryClaimAsync(run.Id, 3, 1, DateTime.UtcNow, Ct))!;
         var second = await Card(lane);
-        await Tick(await Due(second.Id));
-        var service = new BoardService(_boards, Mock.Of<IBoardCommitService>(), new NullBoardLiveSessionProbe());
+        var service = new BoardService(_boards, Mock.Of<IBoardCommitService>(), new NullBoardLiveSessionProbe(), launchRuns: runs);
         Assert.True((await service.GetCardAsync(_root, second.Id, Ct))!.HasWaitingAutomation);
         Assert.True((await service.GetCardsAsync(_root, Ct, board)).Cards.Single(c => c.Id == second.Id).HasWaitingAutomation);
         var request = new BoardCardActivityRequest(board, [first.Id, second.Id]);
         var activity = await service.GetCardActivityAsync(_root, request, Ct);
         Assert.True(activity.Cards.Single(c => c.Id == second.Id).HasWaitingAutomation);
         Assert.False(activity.Cards.Single(c => c.Id == first.Id).HasWaitingAutomation);
-        Assert.Empty(await _boards.GetWaitingAutomationCardIdsAsync(_root + "-other", [second.Id], Ct));
-        var otherBoard = await _boards.CreateBoardAsync(_root, "Other", Ct);
-        Assert.Empty((await service.GetCardActivityAsync(_root, request with { BoardId = otherBoard.Id }, Ct)).Cards);
-        await _jobs.StartRunAsync(run, Environment.ProcessId, Ct);
-        await _jobs.CompleteRunAsync(run, JobRunStatus.Succeeded, 0, null, Ct);
-        Assert.Single(await Tick(await Due(second.Id)));
+        await runs.CompleteAsync(claim, "succeeded", 0, ct: Ct);
+        var secondEntry = Assert.Single(await _boards.GetLaunchEventsAsync(_root, second.Id, Ct));
+        var next = await launches.EnqueueAsync("preset", preset.Id, new(_root, _root, "board-lane", "second", BoardId: board, CardId: second.Id, LaneEntryId: secondEntry.Id), Ct);
+        await _boards.AcknowledgeLaunchEventAsync(secondEntry.Id, next.Id, Ct);
+        Assert.NotNull(await runs.TryClaimAsync(next.Id, 3, 1, DateTime.UtcNow, Ct));
         Assert.False((await service.GetCardAsync(_root, second.Id, Ct))!.HasWaitingAutomation);
     }
 

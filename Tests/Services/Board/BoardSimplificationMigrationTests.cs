@@ -78,6 +78,15 @@ public sealed class BoardSimplificationMigrationTests : IDisposable
         using var command = db.CreateCommand();
         command.CommandText = """
             -- Remove newer-only objects before reconstructing the old installed schema.
+            DROP TRIGGER BoardCards_Launch_Insert;
+            DROP TRIGGER BoardCards_Launch_Move;
+            DROP TRIGGER BoardCards_Launch_Delete;
+            DROP TRIGGER BoardCards_Launch_Retire;
+            DROP TABLE BoardLaunchSelections;
+            DROP TABLE BoardLaunchLanes;
+            DROP TABLE BoardLaunchReports;
+            DROP TABLE BoardLaunchEvents;
+            DELETE FROM SchemaMigrations WHERE Component = 'board-launches';
             DROP TRIGGER BoardCards_EndDesktopActivity;
             DROP TRIGGER BoardCards_DeleteDesktopActivity;
             DROP TRIGGER BoardColumns_EndDesktopActivity;

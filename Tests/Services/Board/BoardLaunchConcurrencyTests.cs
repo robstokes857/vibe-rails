@@ -423,7 +423,7 @@ public sealed class BoardLaunchConcurrencyTests : IDisposable
         const string reviewer = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
         const string agent = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
         await _store.LinkSessionAsync(_root, card.Id, run, "run-tab", "", "shell", "Automation: codex_code_review", BoardSessionRecord.AutomationOrigin, Ct);
-        await _store.LinkSessionAsync(_root, card.Id, reviewer, "reviewer-tab", "", "codex", "codex_code_review", BoardSessionRecord.McpOrigin, Ct);
+        await _store.LinkSessionAsync(_root, card.Id, reviewer, "reviewer-tab", "", "codex", "codex_code_review", "lane_review", Ct);
         await using (var connection = new SqliteConnection(_connectionString))
         {
             await connection.OpenAsync(Ct);

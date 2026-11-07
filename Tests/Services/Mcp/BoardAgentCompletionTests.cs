@@ -19,6 +19,7 @@ public sealed class BoardAgentCompletionTests : IDisposable
     private readonly BoardService service;
     private readonly Resolver resolver;
     private readonly BoardTool tool;
+    private readonly VibeRails.Data.Sqlite.LaunchStore launches;
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 
     public BoardAgentCompletionTests()
@@ -30,7 +31,8 @@ public sealed class BoardAgentCompletionTests : IDisposable
         jobs = new JobStore(state, store);
         service = new BoardService(store, Mock.Of<IBoardCommitService>(), new NullBoardLiveSessionProbe());
         resolver = new Resolver(root);
-        tool = new BoardTool(service, resolver, store, new BoardWorkflowService(store, new BoardReviewService(store, service)));
+        launches = new($"Data Source={Path.Combine(root, "launches.db")};Pooling=False");
+        tool = new BoardTool(service, resolver, store, new BoardWorkflowService(store, new BoardReviewService(store, service)), launches: launches);
     }
 
     [Fact]
@@ -81,25 +83,23 @@ public sealed class BoardAgentCompletionTests : IDisposable
     public async Task PollingSeesPendingQueuedAndFailedRunsBeforeARecordingExists()
     {
         var card = await Card();
-        var job = await jobs.CreateJobAsync(new("Review", root, LLM.NotSet, null, "", null, true, [],
-            Actions: [new(null, JobActionKind.Script, ScriptPath: "check.py", ScriptRuntime: JobScriptRuntime.Python)]), Ct);
+        var launchService = new VibeRails.Services.Launches.LaunchService(launches, Mock.Of<VibeRails.Services.Jobs.IAutomationScriptService>());
+        var preset = (await launchService.SavePresetAsync(null, new("Review", "", "codex", InitialPrompt: "Review"), Ct)).Preset;
         var review = (await store.GetColumnsAsync(root, Ct)).Single(c => c.Name == "Review");
-        await store.SaveLaneAutomationAsync(root, review.Id, [job.Id], 0, Ct);
+        await store.SaveLaunchLaneAsync(root, review.Id, new([new(preset.Id, "preset")], 0), Ct);
         await store.MoveCardAsync(root, card.Id, review.Id, null, Ct);
-        Assert.Contains("Review · Waiting", await tool.GetBoardAgentStatus(card.Key, cancellationToken: Ct));
-
-        var runId = (await jobs.EnqueueBoardCardRunAsync(root, job.Id, card.Key, Ct))!;
-        var queued = await tool.GetBoardAgentStatus(card.Key, cancellationToken: Ct);
-        Assert.Contains($"Run {runId}", queued);
-        Assert.Contains("Queued", queued);
-        await jobs.StartRunAsync(runId, Environment.ProcessId, Ct);
-        await jobs.CompleteRunAsync(runId, JobRunStatus.Failed, 1, "Worker failed before launch", Ct);
+        Assert.Contains("not queued", await tool.GetBoardAgentStatus(card.Key, cancellationToken: Ct));
+        var entry = Assert.Single(await store.GetLaunchEventsAsync(root, card.Id, Ct));
+        var run = await launchService.EnqueueAsync("preset", preset.Id, new(root, root, "board-lane", "test", CardId: card.Id, LaneEntryId: entry.Id), Ct);
+        await store.AcknowledgeLaunchEventAsync(entry.Id, run.Id, Ct);
+        Assert.Contains(run.Id, await tool.GetBoardAgentStatus(card.Key, cancellationToken: Ct));
+        var claim = (await launches.TryClaimAsync(run.Id, 3, 1, DateTime.UtcNow, Ct))!;
+        await launches.CompleteAsync(claim, "failed", 1, "Worker failed before launch", ct: Ct);
         var failed = await tool.GetBoardAgentStatus(card.Key, cancellationToken: Ct);
-        Assert.Contains("Failed", failed);
+        Assert.Contains("failed", failed);
         Assert.Contains("Worker failed before launch", failed);
-        Assert.Empty(await store.GetAgentRunsAsync(Path.Combine(root, "foreign"), card.Id, Ct));
         var other = await Card();
-        Assert.DoesNotContain(runId, await tool.GetBoardAgentStatus(other.Key, cancellationToken: Ct));
+        Assert.DoesNotContain(run.Id, await tool.GetBoardAgentStatus(other.Key, cancellationToken: Ct));
     }
 
     [Theory]

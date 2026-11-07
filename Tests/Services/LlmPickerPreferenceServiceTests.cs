@@ -1,349 +1,65 @@
-using System.Text.Json;
 using Moq;
 using VibeRails.DB;
 using VibeRails.DTOs;
+using VibeRails.Launches;
 using VibeRails.Services;
 using Xunit;
-
 namespace Tests.Services;
 
-[Collection("ProcessEnvIsolation")]
-public sealed class LlmPickerPreferenceServiceTests : IDisposable
+public sealed class LlmPickerPreferenceServiceTests
 {
-    private readonly string _originalRoot = VibeRails.Utils.ParserConfigs.GetRootPath();
-    private readonly bool _originalIsInGit = VibeRails.Utils.ParserConfigs.GetIsInGit();
-    private readonly string? _originalBranch = VibeRails.Utils.ParserConfigs.GetGitBranch();
-    private readonly string? _originalRemote = VibeRails.Utils.ParserConfigs.GetGitRemoteUrl();
-
-    public LlmPickerPreferenceServiceTests() =>
-        VibeRails.Utils.ParserConfigs.SetGitState(AppContext.BaseDirectory, isInGit: true);
-
-    public void Dispose() =>
-        VibeRails.Utils.ParserConfigs.SetGitState(_originalRoot, _originalIsInGit, _originalBranch, _originalRemote);
+    private CancellationToken Ct => TestContext.Current.CancellationToken;
+    private static LaunchPreset Preset(string id, string? prompt = "task", bool enabled = true) =>
+        new(id, id, "", LLM.Codex, new(), [], prompt, enabled, 1, DateTime.UtcNow, DateTime.UtcNow);
 
     [Fact]
-    public async Task GetAsync_ReturnsCanonicalDefaultsAndHonorsEnvironmentHidden()
+    public async Task GlobalPresetsAndBaseClisNeverReadLegacyEnvironments()
     {
-        var environments = new List<LLM_Environment>
-        {
-            Environment(10, "Visible", LLM.Claude),
-            Environment(11, "Quiet", LLM.Codex, hidden: true)
-        };
-        var repository = NewRepository(environments, (string?)null);
-        var service = new LlmPickerPreferenceService(repository.Object);
-
-        var response = await service.GetAsync(TestContext.Current.CancellationToken);
-
-        Assert.Equal(
-            ["base:claude", "base:codex", "base:glm-5.2", "base:glm-5.3", "base:deepseek-v4-pro",
-             "base:kimi-k3", "base:grok", "base:opencode", "base:copilot", "base:antigravity", "base:shell"],
-            response.Items.Where(item => item.Kind == "base").Select(item => item.Key));
-        Assert.True(response.Items.Single(item => item.Key == "env:10:claude").Enabled);
-        Assert.False(response.Items.Single(item => item.Key == "env:11:codex").Enabled);
-        Assert.Equal(
-            Enumerable.Range(0, 11),
-            response.Items.Where(item => item.Kind == "base").Select(item => item.Order));
+        var repository = new Mock<IRepository>(MockBehavior.Strict);
+        repository.Setup(r => r.GetGlobalCacheValueAsync(LlmPickerPreferenceService.CacheKey, It.IsAny<CancellationToken>())).ReturnsAsync((string?)null);
+        var store = new Mock<ILaunchStore>(MockBehavior.Strict);
+        store.Setup(s => s.ListPresetsAsync(It.IsAny<CancellationToken>())).ReturnsAsync([Preset("agent"), Preset("quick", ""), Preset("disabled", enabled: false)]);
+        var items = (await new LlmPickerPreferenceService(repository.Object, store.Object).GetAsync(Ct)).Items;
+        Assert.Equal(11, items.Count(i => i.Kind == "base"));
+        Assert.Contains(items, i => i.Key == "preset:agent:codex" && i.Kind == "agent" && i.Enabled);
+        Assert.Contains(items, i => i.Key == "preset:quick:codex" && i.Kind == "quick-launch");
+        Assert.Contains(items, i => i.Key == "preset:disabled:codex" && !i.Enabled);
+        Assert.DoesNotContain(items, i => i.Kind == "environment");
     }
 
     [Fact]
-    public async Task SaveAndGet_RoundTripsVisibilityAndBothGroupOrders()
+    public async Task VisibilityAndOrderRoundTripWithoutMutatingDefinitions()
     {
-        string? persistedDocument = null;
-        var environments = new List<LLM_Environment>
-        {
-            Environment(20, "First", LLM.Claude),
-            Environment(21, "Second", LLM.Codex)
-        };
-        var repository = NewRepository(environments, () => persistedDocument);
-        repository.Setup(item => item.SaveLlmPickerStateAsync(
-                LlmPickerPreferenceService.CacheKey,
-                It.IsAny<string?>(),
-                It.IsAny<IReadOnlyDictionary<int, bool>>(),
-                It.IsAny<CancellationToken>()))
-            .Callback((string _, string? json, IReadOnlyDictionary<int, bool> hidden, CancellationToken _) =>
-            {
-                persistedDocument = json;
-                foreach (var environment in environments)
-                {
-                    if (hidden.TryGetValue(environment.Id, out var value)) environment.Hidden = value;
-                }
-            })
-            .Returns(Task.CompletedTask);
-        var service = new LlmPickerPreferenceService(repository.Object);
-        var defaults = await service.GetAsync(TestContext.Current.CancellationToken);
-        var reordered = Reorder(
-            defaults.Items,
-            baseKeys: defaults.Items.Where(item => item.Kind == "base").Select(item => item.Key).Reverse(),
-            environmentKeys: ["env:21:codex", "env:20:claude"],
-            disabledKeys: new HashSet<string>(["base:codex", "env:20:claude"]));
-
-        var saved = await service.SaveAsync(
-            new UpdateLlmPickerPreferencesRequest(reordered),
-            TestContext.Current.CancellationToken);
-        var loaded = await service.GetAsync(TestContext.Current.CancellationToken);
-
-        Assert.NotNull(persistedDocument);
-        Assert.Equal(
-            saved.Items.Select(item => (item.Key, item.Enabled, item.Order)),
-            loaded.Items.Select(item => (item.Key, item.Enabled, item.Order)));
-        Assert.Equal("base:shell", loaded.Items.First(item => item.Kind == "base").Key);
-        Assert.Equal("env:21:codex", loaded.Items.First(item => item.Kind == "environment").Key);
-        Assert.False(loaded.Items.Single(item => item.Key == "base:codex").Enabled);
-        Assert.True(environments.Single(item => item.Id == 20).Hidden);
-        Assert.False(environments.Single(item => item.Id == 21).Hidden);
+        string? json = null;
+        var repository = new Mock<IRepository>(MockBehavior.Strict);
+        repository.Setup(r => r.GetGlobalCacheValueAsync(LlmPickerPreferenceService.CacheKey, It.IsAny<CancellationToken>())).ReturnsAsync(() => json);
+        repository.Setup(r => r.SetGlobalCacheValueAsync(LlmPickerPreferenceService.CacheKey, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback((string _, string value, CancellationToken _) => json = value).Returns(Task.CompletedTask);
+        var store = new Mock<ILaunchStore>(MockBehavior.Strict);
+        store.Setup(s => s.ListPresetsAsync(It.IsAny<CancellationToken>())).ReturnsAsync([Preset("a"), Preset("b")]);
+        var service = new LlmPickerPreferenceService(repository.Object, store.Object);
+        var first = (await service.GetAsync(Ct)).Items;
+        var update = first.Select(i => i.Kind == "base" ? i : i with { Order = i.Key.Contains(":b:") ? 0 : 1, Enabled = i.Key.Contains(":b:") }).ToList();
+        await service.SaveAsync(new(update), Ct);
+        var loaded = (await service.GetAsync(Ct)).Items.Where(i => i.Kind != "base").ToArray();
+        Assert.Equal("preset:b:codex", loaded[0].Key);
+        Assert.False(loaded[1].Enabled);
+        await service.ResetAsync(Ct);
+        Assert.All((await service.GetAsync(Ct)).Items, i => Assert.True(i.Enabled));
+        store.Verify(s => s.ListPresetsAsync(It.IsAny<CancellationToken>()), Times.AtLeastOnce);
     }
 
     [Fact]
-    public async Task GetAsync_AppendsNewCatalogItemsAndIgnoresDeletedEnvironmentKeys()
-    {
-        var document = new LlmPickerPreferenceDocument(
-            1,
-            ["base:codex", "base:claude"],
-            ["env:999:codex", "env:30:claude"],
-            ["base:codex"]);
-        var json = JsonSerializer.Serialize(
-            document,
-            AppJsonSerializerContext.Default.LlmPickerPreferenceDocument);
-        var environments = new List<LLM_Environment>
-        {
-            Environment(30, "Existing", LLM.Claude),
-            Environment(31, "New", LLM.OpenCode)
-        };
-        var service = new LlmPickerPreferenceService(NewRepository(environments, json).Object);
-
-        var response = await service.GetAsync(TestContext.Current.CancellationToken);
-
-        Assert.Equal("base:codex", response.Items[0].Key);
-        Assert.False(response.Items[0].Enabled);
-        Assert.Equal("base:claude", response.Items[1].Key);
-        Assert.Equal("base:glm-5.2", response.Items[2].Key);
-        Assert.Equal("base:glm-5.3", response.Items[3].Key);
-        Assert.Equal("base:deepseek-v4-pro", response.Items[4].Key);
-        Assert.Equal("base:kimi-k3", response.Items[5].Key);
-        Assert.Equal("base:grok", response.Items[6].Key);
-        Assert.DoesNotContain(response.Items, item => item.Key.Contains("999", StringComparison.Ordinal));
-        Assert.Equal(
-            ["env:30:claude", "env:31:opencode"],
-            response.Items.Where(item => item.Kind == "environment").Select(item => item.Key));
-    }
-
-    [Fact]
-    public async Task GetAsync_MapsRetiredGrokWireNameOntoGrok()
-    {
-        var document = new LlmPickerPreferenceDocument(
-            1,
-            ["base:grok-4.6", "base:claude"],
-            ["env:12:grok-4.6"],
-            ["base:grok-4.6"]);
-        var json = JsonSerializer.Serialize(
-            document,
-            AppJsonSerializerContext.Default.LlmPickerPreferenceDocument);
-        var service = new LlmPickerPreferenceService(
-            NewRepository([Environment(12, "Review", LLM.Grok46)], json).Object);
-
-        var response = await service.GetAsync(TestContext.Current.CancellationToken);
-
-        var grok = response.Items.Single(item => item.Key == "base:grok");
-        Assert.Equal(0, grok.Order);
-        Assert.False(grok.Enabled);
-        Assert.Equal("Grok", grok.Label);
-        Assert.Equal("env:12:grok", response.Items.Single(item => item.Kind == "environment").Key);
-    }
-
-    [Theory]
-    [InlineData("{\"version\":1}")]
-    [InlineData("{\"version\":1,\"baseOrder\":[null],\"environmentOrder\":[],\"disabledBaseKeys\":[]}")]
-    public async Task GetAsync_IncompleteButValidDocumentFallsBackToDefaults(string json)
-    {
-        var service = new LlmPickerPreferenceService(NewRepository([], json).Object);
-
-        var response = await service.GetAsync(TestContext.Current.CancellationToken);
-
-        Assert.Equal("base:claude", response.Items[0].Key);
-        Assert.All(response.Items, item => Assert.True(item.Enabled));
-    }
-
-    [Fact]
-    public async Task SaveAsync_RejectsDuplicateKeysPositionsUnknownItemsAndCrossGroupMoves()
-    {
-        var environments = new List<LLM_Environment> { Environment(40, "Work", LLM.Codex) };
-        var repository = NewRepository(environments, (string?)null);
-        var service = new LlmPickerPreferenceService(repository.Object);
-        var defaults = (await service.GetAsync(TestContext.Current.CancellationToken)).Items;
-
-        var duplicateKey = defaults.Select(item => item with { }).ToList();
-        duplicateKey[1] = duplicateKey[1] with { Key = duplicateKey[0].Key };
-        await Assert.ThrowsAsync<LlmPickerPreferenceValidationException>(() =>
-            service.SaveAsync(new(duplicateKey), TestContext.Current.CancellationToken));
-
-        var duplicatePosition = defaults.Select(item => item with { }).ToList();
-        duplicatePosition[1] = duplicatePosition[1] with { Order = duplicatePosition[0].Order };
-        await Assert.ThrowsAsync<LlmPickerPreferenceValidationException>(() =>
-            service.SaveAsync(new(duplicatePosition), TestContext.Current.CancellationToken));
-
-        var unknown = defaults.Select(item => item with { }).ToList();
-        unknown[0] = unknown[0] with { Key = "base:invented", Cli = "invented", Label = "Invented" };
-        await Assert.ThrowsAsync<LlmPickerPreferenceValidationException>(() =>
-            service.SaveAsync(new(unknown), TestContext.Current.CancellationToken));
-
-        var crossGroup = defaults.Select(item => item with { }).ToList();
-        crossGroup[0] = crossGroup[0] with { Group = "Custom Environments" };
-        await Assert.ThrowsAsync<LlmPickerPreferenceValidationException>(() =>
-            service.SaveAsync(new(crossGroup), TestContext.Current.CancellationToken));
-
-        repository.Verify(item => item.SaveLlmPickerStateAsync(
-            It.IsAny<string>(),
-            It.IsAny<string?>(),
-            It.IsAny<IReadOnlyDictionary<int, bool>>(),
-            It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task ResetAsync_RemovesDocumentAndMakesAllEnvironmentsVisible()
-    {
-        var environments = new List<LLM_Environment>
-        {
-            Environment(50, "One", LLM.Claude, hidden: true),
-            Environment(51, "Two", LLM.Codex, hidden: true)
-        };
-        var repository = NewRepository(environments, "{\"version\":1}");
-        repository.Setup(item => item.SaveLlmPickerStateAsync(
-                LlmPickerPreferenceService.CacheKey,
-                null,
-                It.IsAny<IReadOnlyDictionary<int, bool>>(),
-                It.IsAny<CancellationToken>()))
-            .Callback((string _, string? _, IReadOnlyDictionary<int, bool> hidden, CancellationToken _) =>
-            {
-                foreach (var environment in environments) environment.Hidden = hidden[environment.Id];
-            })
-            .Returns(Task.CompletedTask);
-        var service = new LlmPickerPreferenceService(repository.Object);
-
-        var response = await service.ResetAsync(TestContext.Current.CancellationToken);
-
-        Assert.All(response.Items, item => Assert.True(item.Enabled));
-        Assert.All(environments, environment => Assert.False(environment.Hidden));
-        repository.Verify(item => item.SaveLlmPickerStateAsync(
-            LlmPickerPreferenceService.CacheKey,
-            null,
-            It.Is<IReadOnlyDictionary<int, bool>>(values => values.Values.All(hidden => !hidden)),
-            It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task GetAsync_ExcludesAutomationWorkersRegardlessOfHidden()
-    {
-        var environments = new List<LLM_Environment>
-        {
-            Environment(60, "Regular", LLM.Claude),
-            Environment(61, "Worker", LLM.Codex, automationWorker: true),
-            Environment(62, "HiddenWorker", LLM.Codex, hidden: true, automationWorker: true)
-        };
-        var service = new LlmPickerPreferenceService(
-            NewRepository(environments, (string?)null).Object);
-
-        var response = await service.GetAsync(TestContext.Current.CancellationToken);
-
-        Assert.Equal(
-            ["env:60:claude"],
-            response.Items.Where(item => item.Kind == "environment").Select(item => item.Key));
-    }
-
-    [Fact]
-    public async Task ResetAsync_NeverTouchesAutomationWorkerVisibility()
-    {
-        var environments = new List<LLM_Environment>
-        {
-            Environment(70, "Regular", LLM.Claude, hidden: true),
-            Environment(71, "Worker", LLM.Codex, hidden: true, automationWorker: true)
-        };
-        var repository = NewRepository(environments, "{\"version\":1}");
-        var service = new LlmPickerPreferenceService(repository.Object);
-
-        await service.ResetAsync(TestContext.Current.CancellationToken);
-
-        Assert.False(environments.Single(item => item.Id == 70).Hidden);
-        Assert.True(environments.Single(item => item.Id == 71).Hidden);
-        repository.Verify(item => item.SaveLlmPickerStateAsync(
-            LlmPickerPreferenceService.CacheKey,
-            null,
-            It.Is<IReadOnlyDictionary<int, bool>>(values =>
-                values.ContainsKey(70) && !values.ContainsKey(71)),
-            It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task GetAndReset_ExcludeUnscopedAndForeignSetups()
-    {
-        var own = Environment(80, "Here", LLM.Codex, hidden: true);
-        var legacy = Environment(81, "Legacy", LLM.Claude, hidden: true);
-        legacy.ProjectPath = null;
-        var foreign = Environment(82, "Elsewhere", LLM.Codex, hidden: true);
-        foreign.ProjectPath = Path.Combine(own.ProjectPath!, "another-repository");
-        var repository = NewRepository([own, legacy, foreign], (string?)null);
-        var service = new LlmPickerPreferenceService(repository.Object);
-
-        var response = await service.GetAsync(TestContext.Current.CancellationToken);
-        Assert.Equal(["env:80:codex"], response.Items.Where(item => item.Kind == "environment").Select(item => item.Key));
-
-        await service.ResetAsync(TestContext.Current.CancellationToken);
-        repository.Verify(item => item.SaveLlmPickerStateAsync(
-            LlmPickerPreferenceService.CacheKey, null,
-            It.Is<IReadOnlyDictionary<int, bool>>(values => values.Count == 1 && values.ContainsKey(80)),
-            It.IsAny<CancellationToken>()), Times.Once);
-        Assert.True(legacy.Hidden);
-        Assert.Null(legacy.ProjectPath);
-        Assert.True(foreign.Hidden);
-    }
-
-    private static Mock<IRepository> NewRepository(
-        List<LLM_Environment> environments,
-        string? document)
-        => NewRepository(environments, () => document);
-
-    private static Mock<IRepository> NewRepository(
-        List<LLM_Environment> environments,
-        Func<string?> document)
+    public async Task InvalidSnapshotsCannotDropOrInventSelections()
     {
         var repository = new Mock<IRepository>();
-        repository.Setup(item => item.GetCustomEnvironmentsAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(environments);
-        repository.Setup(item => item.GetGlobalCacheValueAsync(
-                LlmPickerPreferenceService.CacheKey,
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(document);
-        return repository;
-    }
-
-    private static LLM_Environment Environment(
-        int id, string name, LLM llm, bool hidden = false, bool automationWorker = false) => new()
-    {
-        Id = id,
-        CustomName = name,
-        LLM = llm,
-        Hidden = hidden,
-        ProjectPath = VibeRails.Utils.ParserConfigs.GetRootPath(),
-        AutomationWorker = automationWorker
-    };
-
-    private static List<LlmPickerPreferenceItem> Reorder(
-        IReadOnlyCollection<LlmPickerPreferenceItem> source,
-        IEnumerable<string> baseKeys,
-        IEnumerable<string> environmentKeys,
-        IReadOnlySet<string> disabledKeys)
-    {
-        var byKey = source.ToDictionary(item => item.Key, StringComparer.Ordinal);
-        var result = new List<LlmPickerPreferenceItem>();
-        result.AddRange(baseKeys.Select((key, order) => byKey[key] with
-        {
-            Order = order,
-            Enabled = !disabledKeys.Contains(key)
-        }));
-        result.AddRange(environmentKeys.Select((key, order) => byKey[key] with
-        {
-            Order = order,
-            Enabled = !disabledKeys.Contains(key)
-        }));
-        return result;
+        var service = new LlmPickerPreferenceService(repository.Object);
+        var items = (await service.GetAsync(Ct)).Items;
+        await Assert.ThrowsAsync<LlmPickerPreferenceValidationException>(() => service.SaveAsync(new([]), Ct));
+        var duplicate = items.ToList(); duplicate[1] = duplicate[0];
+        await Assert.ThrowsAsync<LlmPickerPreferenceValidationException>(() => service.SaveAsync(new(duplicate), Ct));
+        var unknown = items.ToList(); unknown[0] = unknown[0] with { Key = "env:42:codex" };
+        await Assert.ThrowsAsync<LlmPickerPreferenceValidationException>(() => service.SaveAsync(new(unknown), Ct));
+        repository.Verify(r => r.SaveLlmPickerStateAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<IReadOnlyDictionary<int, bool>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 }

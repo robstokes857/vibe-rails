@@ -26,8 +26,8 @@ public sealed class JobDescriptionTests : IDisposable
         Assert.Equal("Review security and regression coverage.", job.Description);
         var boards = new BoardStore($"Data Source={Path.Combine(root, "board.db")};Pooling=False", ConnectionString);
         var definition = Assert.Single(await boards.DescribeLaneAutomationsAsync(root, [job.Id], Ct));
-        Assert.Equal(job.Description, definition.Description);
-        Assert.Contains(job.Description!, BoardService.Describe(definition).Summary);
+        Assert.Null(definition.Description);
+        Assert.False(definition.Enabled);
         var update = new UpdateJobRequest("renamed", root, LLM.NotSet, null, "", null, true, [],
             Actions: [new(null, JobActionKind.Script, ScriptPath: "check.py", ScriptRuntime: JobScriptRuntime.Python)]);
         Assert.Equal(job.Description, (await jobs.UpdateJobAsync(job.Id, update, Ct))!.Description);

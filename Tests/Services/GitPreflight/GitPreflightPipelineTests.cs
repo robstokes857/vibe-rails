@@ -106,15 +106,20 @@ public sealed class GitPreflightPipelineTests
     }
 
     [Fact]
-    public async Task AutomatedWorkflowStep_JobStoreInitializationFailure_IsAWarningAndCannotBlockTheCommit()
+    public async Task AutomatedWorkflowStep_LaunchStoreInitializationFailure_IsAWarningAndCannotBlockTheCommit()
     {
+        var store = new Moq.Mock<VibeRails.Launches.ILaunchStore>();
+        store.Setup(x => x.ListBindingsAsync(Moq.It.IsAny<string>(), null, Moq.It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new IOException("component unavailable"));
+        var events = new VibeRails.Services.Launches.LaunchEventService(store.Object,
+            new VibeRails.Services.Launches.LaunchService(store.Object, Moq.Mock.Of<VibeRails.Services.Jobs.IAutomationScriptService>()));
         var pipeline = new GitPreflightPipeline(
             new SnapshotProvider(),
             new SnapshotProvider(),
             [
                 new TestStep(VcaPreflightStep.Id, true, GitPreflightStepStatus.Passed, []),
                 new TestStep(MintLintPreflightStep.Id, false, GitPreflightStepStatus.Passed, []),
-                new AutomatedWorkflowsPreflightStep(new ThrowingJobStoreAccessor())
+                new AutomatedWorkflowsPreflightStep(launches: events)
             ]);
 
         var result = await pipeline.RunAsync(
@@ -127,7 +132,7 @@ public sealed class GitPreflightPipelineTests
             result.Steps,
             step => step.StepId == AutomatedWorkflowsPreflightStep.Id);
         Assert.Equal(GitPreflightStepStatus.Warning, automation.Status);
-        Assert.Contains("database is locked", automation.Summary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("component unavailable", automation.Summary, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

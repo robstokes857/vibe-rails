@@ -40,7 +40,7 @@ public sealed class ReviewInboxRoutesTests : IAsyncLifetime
         _project = Path.Combine(_root, "vibe-rails");
         _other = Path.Combine(_root, "review-clone");
         ParserConfigs.SetGitState(_project, isInGit: true);
-        var jobs = new Mock<IJobStore>(MockBehavior.Strict);
+        var jobs = new Mock<VibeRails.Launches.ILaunchStore>(MockBehavior.Strict);
         jobs.Setup(j => j.GetOpenProjectRootsAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([_project, _other]);
 

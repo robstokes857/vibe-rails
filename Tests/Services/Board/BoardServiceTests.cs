@@ -161,7 +161,7 @@ public sealed partial class BoardServiceTests : IDisposable
         const string id = "55555555-5555-4555-8555-555555555555";
         const string ordinary = "66666666-6666-4666-8666-666666666666";
         await SeedSessionAsync(ordinary, _project);
-        await _service.LinkSessionAsync(_project, card.Id, id, "automation-tab", "", "shell", "Renamed review", BoardSessionRecord.LaunchOrigin, Ct);
+        await _service.LinkSessionAsync(_project, card.Id, id, "automation-tab", "", "shell", "Renamed review", BoardSessionRecord.AutomationOrigin, Ct);
         await _service.LinkSessionAsync(_project, card.Id, ordinary, "agent-tab", "", "codex", "Automation: just a name", BoardSessionRecord.ManualOrigin, Ct);
         await using (var connection = new SqliteConnection(_connectionString))
         {
@@ -207,7 +207,7 @@ public sealed partial class BoardServiceTests : IDisposable
         const string agent = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
         await _service.LinkSessionAsync(_project, card.Id, run, "run-tab", "", "shell", "Automation: codex_code_review", BoardSessionRecord.AutomationOrigin, Ct);
         // The review CLI is linked when its first MCP comment lands; only JobRuns.SessionId marks it as the run's own recording.
-        await _service.LinkSessionAsync(_project, card.Id, reviewer, "reviewer-tab", "", "codex", "codex_code_review", BoardSessionRecord.McpOrigin, Ct);
+        await _service.LinkSessionAsync(_project, card.Id, reviewer, "reviewer-tab", "", "codex", "codex_code_review", "lane_review", Ct);
         await _service.LinkSessionAsync(_project, card.Id, agent, "agent-tab", "base:claude", "claude", "Claude · VB-1", BoardSessionRecord.LaunchOrigin, Ct);
         await using (var connection = new SqliteConnection(_connectionString))
         {

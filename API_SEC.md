@@ -28,7 +28,7 @@ does not allow arbitrary inline scripts, and browser connections are restricted 
 CLI descendants receive separate random credential pairs, never the dashboard pair.
 Root tool contacts rotate on each accepted tab launch, bind to the resulting session, and require its
 tab to remain active and reachable. They permit only GET picker/sharing capabilities, POST
-current-project card launch, POST sharing links for an owned session, and (VB-50 slice E) POST
+card launch in the authenticated session's project, POST sharing links for an owned session, and (VB-50 slice E) POST
 `/api/v1/review-requests` attaching only the contact's own session plus GET
 `/api/v1/review-requests/{id}/disclosure` for a request that attaches it, both refused 403 otherwise;
 never the request list, staged preview, detail, send, decisions, cancel or delete. They cannot reach
@@ -38,7 +38,10 @@ token-saver/self-completion controls. Both values must belong to the same contac
 Replacement contacts stay unbound until the child confirms startup; a rejected start discards
 only its candidate and preserves the live session's contact. Uncertain starts never promote a
 candidate. These scopes add no middleware bypass or listener. The stdio Board store capability
-remains the local OS user's authority described below.
+remains the local OS user's authority described below. For a saved run launched by another project's
+root scheduler, the card-launch callback derives its project from the immutable
+run matching the authenticated contact's session and tab. No caller field can
+choose that project.
 
 The bootstrap cookie is HttpOnly, SameSite=Lax and Secure on HTTPS and the normal HTTP
 `localhost` origin. Numeric loopback HTTP (`127.0.0.1` / `[::1]`) retains a non-Secure cookie:
@@ -260,6 +263,36 @@ middleware serves their paths rather than registering individual API endpoints.
 
 | Method | Path | Mapping source |
 | --- | --- | --- |
+| GET, POST, PUT, PATCH, DELETE | `/api/v1/environments/{**rest}` | [RetiredLaunchRoutes.cs](VibeRails/Routes/RetiredLaunchRoutes.cs); 410, no legacy data access |
+| GET, POST, PUT, PATCH, DELETE | `/api/v1/jobs/{**rest}` | [RetiredLaunchRoutes.cs](VibeRails/Routes/RetiredLaunchRoutes.cs); 410, no legacy data access |
+| GET, POST, PUT, PATCH, DELETE | `/api/v1/automation-nav/{**rest}` | [RetiredLaunchRoutes.cs](VibeRails/Routes/RetiredLaunchRoutes.cs); 410, no legacy data access |
+| GET, POST, PUT, PATCH, DELETE | `/api/v1/codex/settings/{**rest}` | [RetiredLaunchRoutes.cs](VibeRails/Routes/RetiredLaunchRoutes.cs); 410, no legacy data access |
+| GET, POST, PUT, PATCH, DELETE | `/api/v1/claude/settings/{**rest}` | [RetiredLaunchRoutes.cs](VibeRails/Routes/RetiredLaunchRoutes.cs); 410, no legacy data access |
+| GET, POST, PUT, PATCH, DELETE | `/api/v1/board/cards/{card}/automations/{**rest}` | [RetiredLaunchRoutes.cs](VibeRails/Routes/RetiredLaunchRoutes.cs); 410, no legacy data access |
+| GET, POST, PUT, PATCH, DELETE | `/api/v1/board/columns/{column}/automation/{**rest}` | [RetiredLaunchRoutes.cs](VibeRails/Routes/RetiredLaunchRoutes.cs); 410, no legacy data access |
+| GET, POST, PUT, PATCH, DELETE | `/api/v1/cli/launch/{cli}` | [RetiredLaunchRoutes.cs](VibeRails/Routes/RetiredLaunchRoutes.cs); 410, no legacy data access |
+| GET | `/api/v1/launch-catalog` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |
+| GET, POST | `/api/v1/presets` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |
+| GET, PUT | `/api/v1/presets/{id}` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |
+| POST | `/api/v1/presets/{id}/retire` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |
+| GET, POST | `/api/v1/actions` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |
+| GET, PUT | `/api/v1/actions/{id}` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |
+| POST | `/api/v1/actions/{id}/retire` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |
+| GET, POST | `/api/v1/trigger-bindings` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |
+| PUT | `/api/v1/trigger-bindings/{id}` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |
+| GET, POST | `/api/v1/runs` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |
+| GET | `/api/v1/runs/{id}` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |
+| GET | `/api/v1/runs/{id}/evidence` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |
+| POST | `/api/v1/runs/{id}/resolve` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only, explicit stopped-child confirmation and dead owner required |
+| POST | `/api/v1/runs/{id}/retry` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |
+| POST | `/api/v1/runs/{id}/cancel` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |
+| GET, POST | `/api/v1/presets/{id}/attachments` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |
+| DELETE | `/api/v1/presets/{id}/attachments/{attachmentId}` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |
+| GET | `/api/v1/presets/{id}/attachments/{attachmentId}/content` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |
+| GET | `/api/v1/runs/{id}/attachments/{attachmentId}/content` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |
+| GET, PUT | `/api/v1/board/columns/{column}/launches` | [BoardLaunchRoutes.cs](VibeRails/Routes/BoardLaunchRoutes.cs); root only |
+| GET | `/api/v1/board/cards/{card}/launches` | [BoardLaunchRoutes.cs](VibeRails/Routes/BoardLaunchRoutes.cs); root only |
+| POST | `/api/v1/board/cards/{card}/launches/{entry}/skip` | [BoardLaunchRoutes.cs](VibeRails/Routes/BoardLaunchRoutes.cs); root only |
 | OPTIONS | `*` | [CookieAuthMiddleware.cs](VibeRails/Middleware/CookieAuthMiddleware.cs); global bypass, not a business mapping |
 | GET | `/api/v1/agent-tools/terminal` | [AgentToolRoutes.cs](VibeRails/Routes/AgentToolRoutes.cs) |
 | POST | `/api/v1/agent-tools/terminal/input` | [AgentToolRoutes.cs](VibeRails/Routes/AgentToolRoutes.cs) |
@@ -278,9 +311,6 @@ middleware serves their paths rather than registering individual API endpoints.
 | POST | `/api/v1/agents/rules` | [AgentRoutes.cs](VibeRails/Routes/AgentRoutes.cs) |
 | PUT | `/api/v1/agents/rules/enforcement` | [AgentRoutes.cs](VibeRails/Routes/AgentRoutes.cs) |
 | POST | `/api/v1/agents/validate` | [AgentRoutes.cs](VibeRails/Routes/AgentRoutes.cs) |
-| DELETE | `/api/v1/automation-nav/preferences` | [AutomationNavRoutes.cs](VibeRails/Routes/AutomationNavRoutes.cs) |
-| GET | `/api/v1/automation-nav/preferences` | [AutomationNavRoutes.cs](VibeRails/Routes/AutomationNavRoutes.cs) |
-| PUT | `/api/v1/automation-nav/preferences` | [AutomationNavRoutes.cs](VibeRails/Routes/AutomationNavRoutes.cs) |
 | GET | `/api/v1/bert/captures` | [BertRoutes.cs](VibeRails/Routes/BertRoutes.cs) |
 | GET | `/api/v1/bert/captures/by-session/{sessionId}` | [BertRoutes.cs](VibeRails/Routes/BertRoutes.cs) |
 | GET | `/api/v1/bert/captures/{documentId}` | [BertRoutes.cs](VibeRails/Routes/BertRoutes.cs) |
@@ -335,10 +365,6 @@ middleware serves their paths rather than registering individual API endpoints.
 | POST | `/api/v1/board/cards/{card}/attachments` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | DELETE | `/api/v1/board/cards/{card}/attachments/{attachmentId}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | GET | `/api/v1/board/cards/{card}/attachments/{attachmentId}/content` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
-| GET | `/api/v1/board/cards/{card}/automations` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
-| POST | `/api/v1/board/cards/{card}/automations` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
-| POST | `/api/v1/board/cards/{card}/automations/rerun` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
-| POST | `/api/v1/board/cards/{card}/automations/skip` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | GET | `/api/v1/board/cards/{card}/checks` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | GET | `/api/v1/board/cards/{card}/checks/{checkId}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | POST | `/api/v1/board/cards/{card}/comments` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
@@ -378,9 +404,6 @@ middleware serves their paths rather than registering individual API endpoints.
 | PUT | `/api/v1/board/columns/order` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | DELETE | `/api/v1/board/columns/{columnId}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | PUT | `/api/v1/board/columns/{columnId}` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
-| GET | `/api/v1/board/columns/{columnId}/automation` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
-| PUT | `/api/v1/board/columns/{columnId}/automation` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
-| GET | `/api/v1/board/columns/{columnId}/automation/running` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | GET | `/api/v1/board/files` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | GET | `/api/v1/board/local-cards/{card}` | [BoardRoutes.Search.cs](VibeRails/Routes/BoardRoutes.Search.cs) |
 | PUT | `/api/v1/board/local-cards/{card}` | [BoardRoutes.Search.cs](VibeRails/Routes/BoardRoutes.Search.cs) |
@@ -403,10 +426,7 @@ middleware serves their paths rather than registering individual API endpoints.
 | GET | `/api/v1/chatHistory/{sessionId}/summary` | [ChatHistoryRoutes.cs](VibeRails/Routes/ChatHistoryRoutes.cs) |
 | GET | `/api/v1/chatHistory/{sessionId}/terminal-replay` | [ChatHistoryRoutes.cs](VibeRails/Routes/ChatHistoryRoutes.cs) |
 | GET | `/api/v1/chatHistory/{sessionId}/transcript` | [ChatHistoryRoutes.cs](VibeRails/Routes/ChatHistoryRoutes.cs) |
-| GET | `/api/v1/claude/settings/{envName}` | [LlmSettingsRoutes.cs](VibeRails/Routes/LlmSettingsRoutes.cs) |
-| PUT | `/api/v1/claude/settings/{envName}` | [LlmSettingsRoutes.cs](VibeRails/Routes/LlmSettingsRoutes.cs) |
 | POST | `/api/v1/cli/launch/vscode` | [CliLaunchRoutes.cs](VibeRails/Routes/CliLaunchRoutes.cs) |
-| POST | `/api/v1/cli/launch/{cli}` | [CliLaunchRoutes.cs](VibeRails/Routes/CliLaunchRoutes.cs) |
 | POST | `/api/v1/code-analyzer` | [HookRoutes.cs](VibeRails/Routes/HookRoutes.cs) |
 | GET | `/api/v1/code-analyzer/changes` | [CodeGraphRoutes.cs](VibeRails/Routes/CodeGraphRoutes.cs) |
 | GET | `/api/v1/code-analyzer/changes/diff` | [CodeGraphRoutes.cs](VibeRails/Routes/CodeGraphRoutes.cs) |
@@ -416,17 +436,9 @@ middleware serves their paths rather than registering individual API endpoints.
 | POST | `/api/v1/code-analyzer/ignores` | [HookRoutes.cs](VibeRails/Routes/HookRoutes.cs) |
 | POST | `/api/v1/code-analyzer/ignores/bulk` | [HookRoutes.cs](VibeRails/Routes/HookRoutes.cs) |
 | GET | `/api/v1/code-analyzer/source` | [HookRoutes.cs](VibeRails/Routes/HookRoutes.cs) |
-| GET | `/api/v1/codex/settings/{envName}` | [LlmSettingsRoutes.cs](VibeRails/Routes/LlmSettingsRoutes.cs) |
-| PUT | `/api/v1/codex/settings/{envName}` | [LlmSettingsRoutes.cs](VibeRails/Routes/LlmSettingsRoutes.cs) |
 | GET | `/api/v1/compression/catalog` | [CompressionRoutes.cs](VibeRails/Routes/CompressionRoutes.cs) |
 | POST | `/api/v1/compression/preview` | [CompressionRoutes.cs](VibeRails/Routes/CompressionRoutes.cs) |
 | GET | `/api/v1/context` | [ProjectRoutes.cs](VibeRails/Routes/ProjectRoutes.cs) |
-| GET | `/api/v1/environments` | [EnvironmentRoutes.cs](VibeRails/Routes/EnvironmentRoutes.cs) |
-| POST | `/api/v1/environments` | [EnvironmentRoutes.cs](VibeRails/Routes/EnvironmentRoutes.cs) |
-| POST | `/api/v1/environments/steps/test` | [EnvironmentStepRoutes.cs](VibeRails/Routes/EnvironmentStepRoutes.cs) |
-| DELETE | `/api/v1/environments/{name}` | [EnvironmentRoutes.cs](VibeRails/Routes/EnvironmentRoutes.cs) |
-| GET | `/api/v1/environments/{name}` | [EnvironmentRoutes.cs](VibeRails/Routes/EnvironmentRoutes.cs) |
-| PUT | `/api/v1/environments/{name}` | [EnvironmentRoutes.cs](VibeRails/Routes/EnvironmentRoutes.cs) |
 | GET | `/api/v1/environments/{name}/launch` | [CliLaunchRoutes.cs](VibeRails/Routes/CliLaunchRoutes.cs) |
 | ANY (WebSocket) | `/api/v1/events/ws` | [AppNotificationRoutes.cs](VibeRails/Routes/AppNotificationRoutes.cs); [WebSocketHandler.cs](VibeRails/Routes/WebSocketHandler.cs) |
 | GET | `/api/v1/filesystem/entries` | [FileSystemRoutes.cs](VibeRails/Routes/FileSystemRoutes.cs) |
@@ -446,22 +458,6 @@ middleware serves their paths rather than registering individual API endpoints.
 | PUT | `/api/v1/http-relay/test/posts/{id:int}` | [HttpRelayRoutes.cs](VibeRails/Routes/HttpRelayRoutes.cs) |
 | GET | `/api/v1/internal/logs` | [InternalToolsRoutes.cs](VibeRails/Routes/InternalToolsRoutes.cs) |
 | GET | `/api/v1/internal/uploads` | [InternalToolsRoutes.cs](VibeRails/Routes/InternalToolsRoutes.cs) |
-| GET | `/api/v1/jobs` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
-| POST | `/api/v1/jobs` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
-| GET | `/api/v1/jobs/catalog` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
-| POST | `/api/v1/jobs/import` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
-| GET | `/api/v1/jobs/runs` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
-| POST | `/api/v1/jobs/runs/delete` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
-| GET | `/api/v1/jobs/runs/summary` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
-| DELETE | `/api/v1/jobs/runs/{runId}` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
-| GET | `/api/v1/jobs/runs/{runId}` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
-| POST | `/api/v1/jobs/runs/{runId}/cancel` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
-| POST | `/api/v1/jobs/runs/{runId}/retry` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
-| GET | `/api/v1/jobs/scripts` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
-| DELETE | `/api/v1/jobs/{id:long}` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
-| GET | `/api/v1/jobs/{id:long}` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
-| PUT | `/api/v1/jobs/{id:long}` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
-| POST | `/api/v1/jobs/{id:long}/run` | [JobRoutes.cs](VibeRails/Routes/JobRoutes.cs) |
 | POST | `/api/v1/lifecycle/disconnect` | [LifecycleRoutes.cs](VibeRails/Routes/LifecycleRoutes.cs) |
 | POST | `/api/v1/lifecycle/ping` | [LifecycleRoutes.cs](VibeRails/Routes/LifecycleRoutes.cs) |
 | DELETE | `/api/v1/llm-picker/preferences` | [LlmPickerRoutes.cs](VibeRails/Routes/LlmPickerRoutes.cs) |
@@ -670,6 +666,16 @@ target `'*'`, and data goes over the transferred port
 ([MCP guide](VibeRails/Services/Mcp/AGENTS.md#mcp-explorer-dashboard)).
 
 ### MCP and agent launches
+
+Launch definitions are global in `launches.db`; execution remains project-scoped.
+HTTP derives scope from the root resolver, Board from its card/board, and schedules
+from their saved binding. Launch claims travel only from the authenticated root
+to its tab child; claim tokens are excluded from public run JSON. Child start
+requires the claimed run and token, and revalidates its immutable inputs and Board
+entry before spawn. New catalog/run routes are unavailable to scoped descendant
+contacts. Agent-owned attachments require both owner and attachment IDs; retained
+run attachments also require the authorized project and snapshot membership.
+See the [launch contract](VibeRails/Services/Launches/README.md).
 
 [HTTP and stdio MCP](VibeRails/Services/Mcp/AGENTS.md) share explicit tool registration.
 HTTP `/mcp` is absent from terminal-tab children; its DI and mapping gates must agree.

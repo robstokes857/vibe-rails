@@ -99,8 +99,8 @@ public sealed class BoardLaneAutomationDescribeTests
                 $"Data Source={Path.Combine(root, "state.db")};Pooling=False");
             var described = await store.DescribeLaneAutomationsAsync(root, [42, 43], TestContext.Current.CancellationToken);
             Assert.Equal([42L, 43L], described.Select(d => d.JobId));
-            Assert.All(described, d => Assert.Null(d.Name));
-            Assert.Equal("Automation #42 — definition unavailable; output: nothing",
+            Assert.All(described, d => Assert.Contains("Retired", d.Name));
+            Assert.Equal("Retired Automation #42 — no actions; output: nothing",
                 $"{BoardService.Describe(described[0]).Name} — {BoardService.Describe(described[0]).Summary}; output: {BoardService.Describe(described[0]).Output}");
             Assert.Empty(await store.DescribeLaneAutomationsAsync(root, [], TestContext.Current.CancellationToken));
         }

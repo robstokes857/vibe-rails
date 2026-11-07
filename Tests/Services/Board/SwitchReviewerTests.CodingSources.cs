@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using VibeRails.DTOs;
 using VibeRails.Services;
@@ -34,12 +35,14 @@ public sealed partial class SwitchReviewerTests
     private async Task VerifyLaunch(string workflow, string intent, string type, string? args, string origin,
         bool eligible, bool earlyAttachment)
     {
+        var launches = new VibeRails.Data.Sqlite.LaunchStore($"Data Source={Path.Combine(root, "launches.db")};Pooling=False");
+        var launchService = new VibeRails.Services.Launches.LaunchService(launches, Mock.Of<VibeRails.Services.Jobs.IAutomationScriptService>(), boards);
         var selection = "base:claude";
         if (args is not null)
         {
-            var environment = new LLM_Environment { CustomName = earlyAttachment ? "Early planning" : "Planning", LLM = LLM.Claude, CustomArgs = args, ProjectPath = project };
-            await repository.SaveEnvironmentAsync(environment, Ct);
-            selection = $"env:{environment.Id}:claude";
+            var preset = (await launchService.SavePresetAsync(null, new("Planning", "", "claude",
+                AdditionalArgv: VibeRails.Utils.ShellArgSanitizer.ParseAndValidate(args).ToArray(), InitialPrompt: "Work"), Ct)).Preset;
+            selection = $"preset:{preset.Id}:claude";
         }
         card = await boards.CreateCardAsync(project, new(null, "Role and purpose", "", selection, "low", null, [], false,
             Type: type, WorkflowMode: workflow, ManagerSelection: workflow == "agent" ? "base:claude" : null), Ct);
@@ -51,15 +54,19 @@ public sealed partial class SwitchReviewerTests
         tabs.Setup(t => t.ListTabsAsync(Ct)).ReturnsAsync([]);
         tabs.Setup(t => t.CreateTabAsync(Ct)).ReturnsAsync(new TerminalTabStatusResponse("tab", DateTime.UtcNow, false));
         tabs.Setup(t => t.StartSessionAsync("tab", It.IsAny<StartTerminalRequest>(), Ct))
-            .Returns(async () =>
+            .Returns(async (string tab, StartTerminalRequest request, CancellationToken token) =>
             {
+                if (request.LaunchClaim is { } claim) await launches.StartAsync(claim, sessionId, "Work", project, Environment.ProcessId, DateTime.UtcNow, ct: token);
                 if (earlyAttachment)
                     earlyLink = await boards.LinkSessionAsync(project, card.Id, sessionId, null, selection, "claude", "Early attachment", "mcp", Ct);
                 return new TerminalStatusResponse(true, sessionId, "claude", project);
             });
         // Context measurement is best effort. Eligibility must survive its failure.
         var estimator = new Mock<IBoardContextEstimator>(MockBehavior.Strict);
-        var launcher = new BoardLaunchService(boards, repository, tabs.Object, estimator.Object);
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var dispatcher = new VibeRails.Services.Launches.LaunchDispatcher(launches, launchService, tabs.Object, services.GetRequiredService<IServiceScopeFactory>(), boards);
+        var launcher = new BoardLaunchService(boards, repository, tabs.Object, estimator.Object,
+            launchStore: launches, launchService: launchService, launchDispatcher: dispatcher);
         await launcher.LaunchAsync(project, card.Id, null, Ct, intent);
 
         var linked = Assert.Single((await boards.GetCardDetailAsync(project, card.Id, Ct))!.Sessions);

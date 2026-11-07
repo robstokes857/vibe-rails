@@ -455,29 +455,16 @@ public sealed class BackupFilesCredentialTests : IDisposable
         Write(Path.Combine(repository, "cache_warm.py"), "print('warm')");
         var state = Path.Combine(root, "state.db");
         SqliteStorage.EnsureAllSchemas(new(state));
-        var jobs = SqliteStorage.CreateJobStore(state);
-        await jobs.CreateJobAsync(new("Rotate", repository, VibeRails.Services.LLM.NotSet, null, "", null, true, [],
-            Actions: [new(null, JobActionKind.Script, ScriptPath: "rotate_token.py"),
-                new(null, JobActionKind.Script, ScriptPath: "cache_warm.py"),
-                new(null, JobActionKind.Script, ScriptPath: "missing.py")]), Ct);
-        var legacy = await jobs.CreateJobAsync(new("Legacy", repository, VibeRails.Services.LLM.NotSet, null, "", null, true, [],
-            Actions: [new(null, JobActionKind.Script, ScriptPath: "check.py")]), Ct);
-        // The store absolutizes new paths; an older row can still hold a relative one, which GetFullPath(path, base) rejects.
-        using (var db = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={state};Pooling=False"))
+        var launches = SqliteStorage.CreateLaunchStore(state);
+        foreach (var name in new[] { "rotate_token.py", "cache_warm.py", "missing.py" })
         {
-            db.Open();
-            using var update = db.CreateCommand();
-            update.CommandText = "UPDATE Jobs SET ProjectPath = 'relative/repo' WHERE Id = $id";
-            update.Parameters.AddWithValue("$id", legacy.Id);
-            Assert.Equal(1, update.ExecuteNonQuery());
+            var action = await launches.SaveActionAsync(new(name, name, "", "script", new(name, JobScriptRuntime.Python, []), null, true, 0, default, default), 0, Ct);
+            await launches.SaveBindingAsync(new(name, action.Id, "action", repository, new(JobTriggerKind.Commit), true, 0, default, default), 0, Ct);
         }
-
-        var files = (await Enumerate()).Where(f => f.Entry.StartsWith("automation/", StringComparison.Ordinal)).ToList();
-
+        var files = (await Enumerate()).Where(f => f.Entry.StartsWith("actions/", StringComparison.Ordinal)).ToList();
         Assert.Contains(files, f => f.Entry.EndsWith("/rotate_token.py", StringComparison.Ordinal) && f.Issue is null);
         Assert.Contains(files, f => f.Entry.EndsWith("/cache_warm.py", StringComparison.Ordinal) && f.Issue is null);
         Assert.Contains(files, f => f.Issue == "Referenced script is missing.");
-        Assert.Contains(files, f => f.Issue == "Automation repository path is not absolute.");
     }
 
     [Theory]
@@ -679,7 +666,7 @@ public sealed class BackupFilesCredentialTests : IDisposable
     }
 
     [Fact]
-    public async Task ConfiguredHomesAreCapturedWhateverTheEnvironmentIsCalled()
+    public async Task LegacyExternalHomesAreNoLongerEnumeratedAndInstallationFilesAreRetained()
     {
         // Environment names are labels: "Auth review" or "token-cache" must not read as a credential or cache store.
         var envs = Path.Combine(root, "install", "envs");
@@ -699,10 +686,10 @@ public sealed class BackupFilesCredentialTests : IDisposable
         Assert.Contains("installation/envs/Auth review/claude/settings.json", entries);
         Assert.Contains("installation/envs/Auth review/claude/CLAUDE.md", entries);
         Assert.DoesNotContain(entries, e => e.EndsWith(".credentials.json", StringComparison.Ordinal));
-        Assert.Single(entries, e => e.EndsWith("/token-cache/codex/config.toml", StringComparison.Ordinal) || e.StartsWith("environments/", StringComparison.Ordinal) && e.EndsWith("/config.toml", StringComparison.Ordinal));
+        Assert.DoesNotContain(entries, e => e.StartsWith("environments/", StringComparison.Ordinal));
         Assert.Contains("installation/envs/Unconfigured/codex/AGENTS.md", entries);
         Assert.Equal(entries.Count, entries.Distinct().Count());
-        Assert.Equal("Configured environment directory is missing.", Assert.Single(files, f => f.Entry == "installation/envs/Gone/codex").Issue);
+        Assert.DoesNotContain(files, f => f.Entry == "installation/envs/Gone/codex");
     }
 
     private async Task<List<BackupFileSource>> Enumerate(params LLM_Environment[] environments)

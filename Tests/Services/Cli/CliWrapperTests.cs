@@ -12,6 +12,30 @@ public class CliWrapperTests
 {
     private static readonly ICliWrapper Cli = new CliWrapper();
 
+    [Fact]
+    public async Task OwnershipCallbackFailureStopsTheChildBeforeReturning()
+    {
+        var pid = 0;
+        var request = Shell("ping -n 20 127.0.0.1 >nul", "sleep 20") with
+        {
+            OnStarted = id => { pid = id; throw new InvalidOperationException("Cannot save ownership"); }
+        };
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Cli.RunAsync(request, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.True(pid > 0);
+        try { using var process = System.Diagnostics.Process.GetProcessById(pid); Assert.True(process.HasExited); }
+        catch (ArgumentException) { }
+    }
+
+    [Fact]
+    public async Task FastChildStillReportsItsOutcomeAfterOwnershipCallback()
+    {
+        var pid = 0;
+        var result = await Cli.RunAsync(Shell("exit /b 0", "exit 0") with
+        { OnStarted = id => { pid = id; return Task.CompletedTask; } }, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.True(result.IsSuccess);
+        Assert.True(pid > 0);
+    }
+
     private static string WorkDir => Path.GetTempPath();
 
     /// <summary>A shell invocation that runs one inline command, per platform.</summary>

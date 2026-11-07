@@ -66,7 +66,7 @@ public sealed partial class BoardReviewsTests
         var head = await Git("rev-parse", "HEAD");
         File.Delete(Path.Combine(repo, "dirty.cs"));
 
-        var flow = await Workflow();
+        var flow = await NewWorkflow();
         var session = flow.Session;
         var begun = await reviews.BeginAsync(repo, card.Id, session, repo, "range", "Committed and dirty deletions", rangeBase, head, true, Ct);
         Assert.NotNull(begun.SnapshotHash);
@@ -76,10 +76,11 @@ public sealed partial class BoardReviewsTests
         var saved = await reviews.SaveAsync(repo, card.Id, session, begun.Id, "No findings reported", "None", "Reviewed deletions", "None", Ct);
         Assert.Equal("No findings reported", saved.Result);
         Assert.StartsWith("Current", (await reviews.ReportAsync(repo, card.Key, begun.Id, true, repo, Ct))!.Freshness);
-        await new BoardWorkflowService(store, reviews).ReportAsync(repo, card.Id, repo,
+        await new BoardWorkflowService(store, reviews, flow.Workflow).ReportAsync(repo, card.Id, repo,
             BoardAuthor.Agent("Codex", "codex", session), "passed", "Deletions reviewed", null, begun.Id, Ct);
-        await jobs.CompleteRunAsync(flow.RunId, JobRunStatus.Succeeded, 0, null, Ct);
-        Assert.Equal("Passed", (await store.GetLaneAutomationStatusesAsync(repo, card.Id, Ct))[0].StepStatus);
+        await flow.Runs.CompleteAsync(flow.Claim, "succeeded", 0, ct: Ct);
+        await flow.Workflow.TickAsync(Ct);
+        Assert.Equal("passed", (await store.GetLaunchEventsAsync(repo, card.Id, Ct))[0].Verdict);
 
         await Git("restore", "dirty.cs");
         Assert.StartsWith("Stale", (await reviews.ReportAsync(repo, card.Key, begun.Id, true, repo, Ct))!.Freshness);

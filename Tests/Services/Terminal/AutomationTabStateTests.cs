@@ -219,6 +219,31 @@ public sealed class AutomationTabStateTests
         Assert.Equal(tab, JsonSerializer.Deserialize(json, AppJsonSerializerContext.Default.TerminalTabStatusResponse));
     }
 
+    [Theory]
+    [InlineData("succeeded", false, true, true)]
+    [InlineData("running", false, true, false)]
+    [InlineData("uncertain", false, true, false)]
+    [InlineData("succeeded", true, true, false)]
+    [InlineData("succeeded", false, false, false)]
+    public async Task SavedLaunchReclamationRequiresTerminalRunIdleExactSessionAndFlushedRecording(string status, bool active, bool flushed, bool expected)
+    {
+        var state = new AutomationTabState("run", "Agent", savedLaunch: true);
+        state.BeginSessionStart();
+        state.EndSessionStart(new(true, "outer"));
+        var runs = new Mock<VibeRails.Launches.ILaunchStore>(MockBehavior.Strict);
+        runs.Setup(x => x.GetRunAsync("run", It.IsAny<CancellationToken>())).ReturnsAsync(
+            new VibeRails.Launches.LaunchRun("run", 1, "preset", "preset", "/project", "event", null!, status, DateTime.UtcNow, SessionId: "outer"));
+        var version = await state.CheckReclamationAsync(runs.Object, Sessions(flushed ? DateTime.UtcNow : null).Object,
+            _ => Task.FromResult<TerminalStatusResponse?>(new(active, "outer")), TestContext.Current.CancellationToken);
+        Assert.Equal(expected, version is not null);
+        if (version is { } checkedVersion)
+        {
+            state.BeginSessionStart();
+            state.EndSessionStart(new(true, "replacement"));
+            Assert.False(state.TryReserveForReclamation(checkedVersion));
+        }
+    }
+
     private static AutomationTabState Started()
     {
         var state = new AutomationTabState("run", "workflow");

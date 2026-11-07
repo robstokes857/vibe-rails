@@ -219,7 +219,7 @@ public sealed class ManagedWorktreeServiceTests : IAsyncLifetime
     [Fact]
     public async Task GitBranchPlaceholderResolvesInsideTheNewWorktree()
     {
-        var prompts = new PromptPlaceholderService(Mock.Of<IEnvironmentStore>(), Mock.Of<ICliWrapper>(), worktrees: Service);
+        var prompts = new PromptPlaceholderService(worktrees: Service);
         var result = await prompts.ResolveLaunchAsync("{{worktree}} on {{git_branch}}", new PromptPlaceholderContext(Root), Ct);
         var worktree = Assert.Single(await Store.ListAsync(Ct));
         Assert.Equal(worktree.Path, result.WorkingDirectory);

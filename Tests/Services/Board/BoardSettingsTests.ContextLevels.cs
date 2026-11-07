@@ -65,8 +65,8 @@ public sealed partial class BoardSettingsTests
     [Theory]
     [InlineData("base:codex", true, false, true)]
     [InlineData("base:codex", false, true, false)]
-    [InlineData("env:42:codex", true, false, false)]
-    [InlineData("env:42:codex", false, true, true)]
+    [InlineData("preset:preset_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:codex", true, false, true)]
+    [InlineData("preset:preset_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:codex", false, true, false)]
     public async Task ContextEstimateAndLaunchSampleIncludeAppAndBoardContextOnlyForTheSelectedLaunchNudge(
         string selection, bool baseEnabled, bool customEnabled, bool expected)
     {
@@ -77,7 +77,9 @@ public sealed partial class BoardSettingsTests
         var service = new BoardService(_boards, Mock.Of<IBoardCommitService>(), new NullBoardLiveSessionProbe());
         await service.SaveContextSettingsAsync(_root, board, new(new("Card-level context", []), 0), Ct);
         var settings = new Settings { CreateVibeStoryTracking = baseEnabled, CreateVibeStoryTrackingCustomEnvs = customEnabled };
-        var estimator = new BoardContextEstimator(service, _boards, Mock.Of<IRepository>(), () => settings);
+        var launches = new Mock<VibeRails.Launches.ILaunchStore>();
+        launches.Setup(x => x.GetPresetAsync("preset_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", It.IsAny<CancellationToken>())).ReturnsAsync(new VibeRails.Launches.LaunchPreset("preset_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "codex", "", VibeRails.Services.LLM.Codex, new(), [], "", true, 1, DateTime.UtcNow, DateTime.UtcNow));
+        var estimator = new BoardContextEstimator(service, _boards, Mock.Of<IRepository>(), () => settings, launches.Object);
         var baseline = (await estimator.EstimateAsync(_root, card.Id, Ct))!;
 
         await service.SaveEveryContextSettingsAsync(_root, board, new("This board's message", 0), Ct);

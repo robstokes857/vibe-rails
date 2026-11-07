@@ -1,5 +1,9 @@
 using Moq;
 using VibeRails.DB;
+using VibeRails.Data.Sqlite;
+using VibeRails.Launches;
+using VibeRails.Services.Launches;
+using VibeRails.Services.Jobs;
 using VibeRails.DTOs;
 using VibeRails.Services;
 using VibeRails.Services.GitPreflight;
@@ -10,79 +14,40 @@ namespace Tests.Services.GitPreflight;
 
 public sealed class AutomatedWorkflowsPreflightStepTests
 {
-    [Fact]
-    public async Task ExecuteAsync_NativePreCommit_QueuesMatchingAutomations()
+    [Theory]
+    [InlineData(true, JobTriggerKind.PreCommit, 1)]
+    [InlineData(false, JobTriggerKind.PreCommit, 0)]
+    [InlineData(true, JobTriggerKind.Commit, 0)]
+    public async Task OnlyMatchingAuthorizedEventsQueueSingleSnapshots(bool enqueue, JobTriggerKind trigger, int count)
     {
-        var store = new Mock<IJobStore>(MockBehavior.Strict);
-        store
-            .Setup(item => item.GetJobsAsync(Snapshot.RepositoryPath, false, It.IsAny<CancellationToken>()))
-            .ReturnsAsync([Job(enabled: true, JobTriggerKind.PreCommit)]);
-        store
-            .Setup(item => item.EnqueueEventRunsAsync(
-                Snapshot.RepositoryPath,
-                JobTriggerKind.PreCommit,
-                "run-1",
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(["queued-run"]);
-
-        var (result, output) = await ExecuteAsync(
-            Step(store.Object),
-            Request(enqueue: true));
-
-        Assert.Equal(GitPreflightStepStatus.Passed, result.Status);
-        Assert.False(result.Blocking);
-        Assert.Contains("Queued 1 automation", output);
-        store.Verify(item => item.EnqueueEventRunsAsync(
-            Snapshot.RepositoryPath,
-            JobTriggerKind.PreCommit,
-            "run-1",
-            It.IsAny<CancellationToken>()), Times.Once);
+        var root = Path.Combine(Path.GetTempPath(), "launch-preflight-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(Snapshot.RepositoryPath);
+        try
+        {
+            var store = new LaunchStore($"Data Source={Path.Combine(root, "launches.db")};Pooling=False");
+            var service = new LaunchService(store, Mock.Of<IAutomationScriptService>());
+            var preset = (await service.SavePresetAsync(null, new("Review", "", "codex", InitialPrompt: "Review"), TestContext.Current.CancellationToken)).Preset;
+            await service.SaveBindingAsync(Snapshot.RepositoryPath, null, new(preset.Id, "preset", new(trigger)), TestContext.Current.CancellationToken);
+            var step = new AutomatedWorkflowsPreflightStep(launches: new LaunchEventService(store, service));
+            var (result, _) = await ExecuteAsync(step, Request(enqueue));
+            var runs = await store.ListRunsAsync(LaunchService.ProjectKey(Snapshot.RepositoryPath), ct: TestContext.Current.CancellationToken);
+            Assert.Equal(count, runs.Runs.Count);
+            Assert.False(result.Blocking);
+            await ExecuteAsync(step, Request(enqueue));
+            Assert.Equal(count, (await store.ListRunsAsync(LaunchService.ProjectKey(Snapshot.RepositoryPath), ct: TestContext.Current.CancellationToken)).Runs.Count);
+        }
+        finally { Directory.Delete(root, true); }
     }
 
     [Fact]
-    public async Task ExecuteAsync_GitGuardPreview_DoesNotEnqueue()
+    public async Task RetiredAccessorIsNeverOpened()
     {
         var store = new Mock<IJobStore>(MockBehavior.Strict);
-        store
-            .Setup(item => item.GetJobsAsync(Snapshot.RepositoryPath, false, It.IsAny<CancellationToken>()))
-            .ReturnsAsync([Job(enabled: true, JobTriggerKind.PreCommit)]);
-
-        var (result, output) = await ExecuteAsync(
-            Step(store.Object),
-            Request(enqueue: false));
-
+        var (result, output) = await ExecuteAsync(Step(store.Object), Request(true));
         Assert.Equal(GitPreflightStepStatus.Skipped, result.Status);
-        Assert.Contains("does not start", output, StringComparison.OrdinalIgnoreCase);
-        store.Verify(
-            item => item.EnqueueEventRunsAsync(
-                It.IsAny<string>(),
-                It.IsAny<JobTriggerKind>(),
-                It.IsAny<string>(),
-                It.IsAny<CancellationToken>()),
-            Times.Never);
-    }
-
-    [Fact]
-    public async Task ExecuteAsync_IgnoresAfterCommitAutomations()
-    {
-        var store = new Mock<IJobStore>(MockBehavior.Strict);
-        store
-            .Setup(item => item.GetJobsAsync(Snapshot.RepositoryPath, false, It.IsAny<CancellationToken>()))
-            .ReturnsAsync([Job(enabled: true, JobTriggerKind.Commit)]);
-
-        var (result, output) = await ExecuteAsync(
-            Step(store.Object),
-            Request(enqueue: true));
-
-        Assert.Equal(GitPreflightStepStatus.Skipped, result.Status);
-        Assert.Contains("No automations", output, StringComparison.OrdinalIgnoreCase);
-        store.Verify(
-            item => item.EnqueueEventRunsAsync(
-                It.IsAny<string>(),
-                It.IsAny<JobTriggerKind>(),
-                It.IsAny<string>(),
-                It.IsAny<CancellationToken>()),
-            Times.Never);
+        Assert.Contains("retired", output);
+        store.VerifyNoOtherCalls();
     }
 
     [Fact]

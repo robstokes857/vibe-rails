@@ -90,7 +90,7 @@ public sealed partial class BoardSettingsTests
     [InlineData(false, true, true)]
     [InlineData(true, false, true)]
     [InlineData(true, true, true)]
-    public async Task DeterministicRetryReleasesNextStepOnlyAfterSuccess(bool manualCardRun, bool checkOnly, bool fixing)
+    public async Task LegacyStorageRetryRemainsCompatibleButRuntimeReportsAreRetired(bool manualCardRun, bool checkOnly, bool fixing)
     {
         var (_, lane, _, _) = await Lanes();
         var first = checkOnly
@@ -109,9 +109,8 @@ public sealed partial class BoardSettingsTests
             var session = Guid.NewGuid().ToString();
             await service.LinkSessionAsync(_root, card.Id, session, null, "base:codex", "codex", "Worker", "work", Ct);
             var entry = (await _boards.GetLaneAutomationStatusesAsync(_root, card.Id, Ct))[0];
-            await new BoardWorkflowService(_boards, new BoardReviewService(_boards, service)).ReportAsync(_root, card.Id, _root,
-                BoardAuthor.Agent("Codex", "codex", session), "fixing", "Fixing the failed check", entry.EventKey, null, Ct);
-            Assert.Equal("Fixing", (await _boards.GetLaneAutomationStatusesAsync(_root, card.Id, Ct))[0].StepStatus);
+            await Assert.ThrowsAsync<BoardValidationException>(() => new BoardWorkflowService(_boards, new BoardReviewService(_boards, service)).ReportAsync(_root, card.Id, _root,
+                BoardAuthor.Agent("Codex", "codex", session), "fixing", "Fixing the failed check", entry.EventKey, null, Ct));
         }
         var retry = (manualCardRun
             ? await _jobs.EnqueueBoardCardRunAsync(_root, first.Id, card.Key, Ct)

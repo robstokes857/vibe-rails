@@ -56,14 +56,14 @@ public sealed class BoardStoreSchemaProbeCacheTests : IDisposable
     }
 
     [Fact]
-    public async Task LaneAutomationDescriptions_NoticeAutomationsTablesCreatedAfterTheFirstRead()
+    public async Task LaneAutomationDescriptions_KeepLegacySelectionsUnavailable()
     {
         StateDatabaseSchema.Ensure(_stateConnectionString);
         var store = new BoardStore(_boardConnectionString, _stateConnectionString);
 
         // A fresh stdio host: state.db has terminal history but has never held Automations.
         var unavailable = Assert.Single(await store.DescribeLaneAutomationsAsync(_root, [1], Ct));
-        Assert.Null(unavailable.Name);
+        Assert.Equal("Retired Automation #1", unavailable.Name);
         Assert.Empty(await store.GetRunningAutomationsAsync(_root, Ct));
         Assert.Empty(await store.GetAutomationSessionIdsAsync(_root, ["session-1"], Ct));
 
@@ -73,8 +73,8 @@ public sealed class BoardStoreSchemaProbeCacheTests : IDisposable
             Actions: [new(null, JobActionKind.Script, ScriptPath: "check.py", ScriptRuntime: JobScriptRuntime.Python)],
             Description: "Reviews the branch."), Ct);
         var described = Assert.Single(await store.DescribeLaneAutomationsAsync(_root, [job.Id], Ct));
-        Assert.Equal("review", described.Name);
-        Assert.Equal("Reviews the branch.", described.Description);
+        Assert.Equal($"Retired Automation #{job.Id}", described.Name);
+        Assert.Null(described.Description);
         Assert.Empty(await store.GetRunningAutomationsAsync(_root, Ct));
     }
 

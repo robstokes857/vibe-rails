@@ -329,9 +329,17 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         builder.Services.AddScoped<BoardSharingService>();
         builder.Services.AddScoped<RemoteBoardsService>();
 
+        var projects = new Mock<IBoardProjectResolver>();
+        projects.Setup(p => p.ResolveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(_project);
+        builder.Services.AddSingleton(projects.Object);
+        builder.Services.AddSingleton<VibeRails.Launches.ILaunchStore>(new VibeRails.Data.Sqlite.LaunchStore($"Data Source={Path.Combine(_root, "launches.db")};Pooling=False"));
+        builder.Services.AddScoped<VibeRails.Services.Launches.LaunchService>();
+        builder.Services.AddScoped<VibeRails.Services.Launches.BoardLaunchWorkflow>();
         _app = builder.Build();
         _app.UseMiddleware<CookieAuthMiddleware>();
         BoardRoutes.Map(_app);
+        RetiredLaunchRoutes.Map(_app);
+        BoardLaunchRoutes.Map(_app);
         await _app.StartAsync(TestContext.Current.CancellationToken);
         _baseUri = new Uri(_app.Urls.First());
     }
@@ -348,120 +356,34 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Move_WithSkipAutomations_RecordsTheSkip_AndQueuesNothing()
+    public async Task MoveSkipsCurrentLaunchEntriesAtomically()
     {
         var ct = TestContext.Current.CancellationToken;
         var boards = _app.Services.GetRequiredService<IBoardStore>();
-        var jobs = _app.Services.GetRequiredService<IJobStore>();
-        // Jobs join Environments (their Workers); this fixture's state.db has never held either.
-        await using (var state = new SqliteConnection(_connectionString))
-        {
-            await state.OpenAsync(ct);
-            await using var environments = state.CreateCommand();
-            environments.CommandText = SqlStrings.CreateEnvironmentsTable;
-            await environments.ExecuteNonQueryAsync(ct);
-        }
-        using var created = await PostJsonAsync("/api/v1/board/cards", new { title = "Spike", type = "research-spike" });
-        created.EnsureSuccessStatusCode();
-        using var createdDocument = await ReadJsonAsync(created);
-        var cardId = createdDocument.RootElement.GetProperty("id").GetString()!;
-        var columns = await boards.GetColumnsAsync(_project, ct);
-        var reviewId = columns.Single(c => c.Name == "Review").Id;
-        var buildId = columns.Single(c => c.Name == "Build").Id;
-        var job = await jobs.CreateJobAsync(new("Automated code review", _project, LLM.NotSet, null, "", null, true, [],
-            Actions: [new(null, JobActionKind.Script, ScriptPath: "check.py", ScriptRuntime: JobScriptRuntime.Python, ApprovedHash: "pinned")]), ct);
-        await boards.SaveLaneAutomationAsync(_project, reviewId, [job.Id], 0, ct);
-
-        // The same flag the MCP tool takes, so a manual drag can offer the choice later.
-        using var skipped = await PostJsonAsync($"/api/v1/board/cards/{cardId}/move", new { columnId = reviewId, skipAutomations = true });
-        skipped.EnsureSuccessStatusCode();
-        using var skippedDocument = await ReadJsonAsync(skipped);
-        Assert.Equal(reviewId, skippedDocument.RootElement.GetProperty("columnId").GetString());
-        Assert.Empty(await boards.GetPendingLaneAutomationsAsync(_project, cardId, ct));
-        var comment = Assert.Single(skippedDocument.RootElement.GetProperty("comments").EnumerateArray());
-        Assert.Equal("user", comment.GetProperty("author").GetProperty("kind").GetString());
-        Assert.Equal("Moved to Review; lane Automations skipped at the caller's request: \"Automated code review\".", comment.GetProperty("body").GetString());
-        using var skippedStates = await GetJsonAsync($"/api/v1/board/cards/{cardId}/automations");
-        var skippedEntry = Assert.Single(skippedStates.RootElement.GetProperty("laneEntries").EnumerateArray());
-        Assert.Equal("Skipped", skippedEntry.GetProperty("status").GetString());
-        Assert.Contains("caller's request", skippedEntry.GetProperty("reason").GetString());
-
-        // Without the flag the entry is recorded as before; the default is unchanged.
-        using var back = await PostJsonAsync($"/api/v1/board/cards/{cardId}/move", new { columnId = buildId });
-        back.EnsureSuccessStatusCode();
-        using var moved = await PostJsonAsync($"/api/v1/board/cards/{cardId}/move", new { columnId = reviewId });
-        moved.EnsureSuccessStatusCode();
-        var pending = Assert.Single(await boards.GetPendingLaneAutomationsAsync(_project, cardId, ct));
-        Assert.Equal(job.Id, pending.JobId);
-        Assert.Equal(reviewId, pending.ColumnId);
-        Assert.InRange(pending.DueUtc, DateTime.UtcNow.AddSeconds(50), DateTime.UtcNow.AddSeconds(70));
-        using var waitingStates = await GetJsonAsync($"/api/v1/board/cards/{cardId}/automations");
-        var waitingEntry = waitingStates.RootElement.GetProperty("laneEntries")[0];
-        Assert.Equal("Waiting", waitingEntry.GetProperty("status").GetString());
-        Assert.Equal(reviewId, waitingEntry.GetProperty("columnId").GetString());
-        var skipPath = $"/api/v1/board/cards/{cardId}/automations/skip";
-        using var none = await SendAsync(HttpMethod.Post, skipPath);
-        using var sessionOnly = await SendAsync(HttpMethod.Post, skipPath, "test-session");
-        using var tabOnly = await SendAsync(HttpMethod.Post, skipPath, tab: "test-tab");
-        Assert.Equal(HttpStatusCode.Unauthorized, none.StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, sessionOnly.StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, tabOnly.StatusCode);
-        var skipBody = new { jobId = job.Id, eventKey = waitingEntry.GetProperty("eventKey").GetString() };
-        using var foreignSkip = await PostJsonAsync("/api/v1/board/cards/card_foreign/automations/skip", skipBody);
-        Assert.Equal(HttpStatusCode.NotFound, foreignSkip.StatusCode);
-        using var continued = await PostJsonAsync(skipPath, skipBody);
-        continued.EnsureSuccessStatusCode();
-        using var continuedJson = await ReadJsonAsync(continued);
-        Assert.All(continuedJson.RootElement.GetProperty("laneEntries").EnumerateArray(),
-            entry => Assert.Equal("Skipped", entry.GetProperty("status").GetString()));
-        Assert.Empty(await boards.GetPendingLaneAutomationsAsync(_project, cardId, ct));
-        using var staleSkip = await PostJsonAsync(skipPath, skipBody);
-        Assert.Equal(HttpStatusCode.Conflict, staleSkip.StatusCode);
-    }
-
-    [Fact]
-    public async Task CardAutomations_UseAuthenticatedScopedAotRequests_AndRetainQueuedRuns()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var boards = _app.Services.GetRequiredService<IBoardStore>();
-        var jobs = _app.Services.GetRequiredService<IJobStore>();
         await boards.EnsureDefaultColumnsAsync(_project, ct);
-        var card = await boards.CreateCardAsync(_project, new(null, "Run from here", "", null, "medium", null, [], false), ct);
-        await using (var connection = new SqliteConnection(_connectionString))
-        {
-            await connection.OpenAsync(ct);
-            await using var command = connection.CreateCommand();
-            command.CommandText = SqlStrings.CreateEnvironmentsTable;
-            await command.ExecuteNonQueryAsync(ct);
-        }
-        var job = await jobs.CreateJobAsync(new("Checks", _project, LLM.NotSet, null, "", null, true, [],
-            Actions: [new(null, JobActionKind.Script, ScriptPath: "check.py", ScriptRuntime: JobScriptRuntime.Python, ApprovedHash: "pinned")]), ct);
-        var path = $"/api/v1/board/cards/{card.Id}/automations";
-        foreach (var method in new[] { HttpMethod.Get, HttpMethod.Post })
-        {
-            using var none = await SendAsync(method, path);
-            using var sessionOnly = await SendAsync(method, path, "test-session");
-            using var tabOnly = await SendAsync(method, path, tab: "test-tab");
-            Assert.Equal(HttpStatusCode.Unauthorized, none.StatusCode);
-            Assert.Equal(HttpStatusCode.Unauthorized, sessionOnly.StatusCode);
-            Assert.Equal(HttpStatusCode.Unauthorized, tabOnly.StatusCode);
-        }
-        using var listed = await GetJsonAsync(path);
-        Assert.Equal(job.Id, listed.RootElement.GetProperty("jobs")[0].GetProperty("id").GetInt64());
-        using var invalid = await SendJsonAsync(HttpMethod.Post, path, new { jobId = 0 });
-        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
-        using var queued = await SendJsonAsync(HttpMethod.Post, path, new { jobId = job.Id });
-        queued.EnsureSuccessStatusCode();
-        using var queuedJson = await ReadJsonAsync(queued);
-        var runId = queuedJson.RootElement.GetProperty("runId").GetString();
-        Assert.Equal(card.Key, JobRunner.GetBoardCardKey((await jobs.GetRunAsync(runId!, ct))!));
-        using var reopened = await GetJsonAsync(path);
-        Assert.Equal(runId, reopened.RootElement.GetProperty("runs")[0].GetProperty("id").GetString());
-        using var duplicate = await SendJsonAsync(HttpMethod.Post, path, new { jobId = job.Id });
-        Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
-        using var foreign = await SendJsonAsync(HttpMethod.Post, "/api/v1/board/cards/card_foreign/automations", new { jobId = job.Id });
-        Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
+        var lanes = await boards.GetColumnsAsync(_project, ct);
+        await boards.SaveLaunchLaneAsync(_project, lanes[1].Id, new([new("preset_test", "preset")], 0), ct);
+        var card = await boards.CreateCardAsync(_project, new(lanes[0].Id, "Test", "", null, "medium", null, [], false), ct);
+        using var moved = await PostJsonAsync($"/api/v1/board/cards/{card.Id}/move", new { columnId = lanes[1].Id, skipAutomations = true });
+        moved.EnsureSuccessStatusCode();
+        Assert.True(Assert.Single(await boards.GetLaunchEventsAsync(_project, card.Id, ct)).SkipRequested);
     }
+
+    [Theory]
+    [InlineData("/api/v1/board/cards/card/automations")]
+    [InlineData("/api/v1/board/columns/lane/automation")]
+    public async Task RetiredAutomationRoutesRequireCredentialsAndReturnGone(string path)
+    {
+        foreach (var pair in new[] { (Session: (string?)null, Tab: (string?)null), ("test-session", null), (null, "test-tab") })
+        {
+            using var denied = await SendAsync(HttpMethod.Get, path, pair.Session, pair.Tab);
+            Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+        }
+        using var retired = await SendAsync(HttpMethod.Get, path, "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.Gone, retired.StatusCode);
+    }
+
+
 
     [Fact]
     public async Task ActivityRequiresBothCredentials_BoundsRequests_AndOmitsCardText()
@@ -873,7 +795,7 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
     public async Task Launch_ComposesThePrompt_StartsATab_AndLinksTheSession()
     {
         using var columnsDocument = await GetJsonAsync("/api/v1/board/columns");
-        using var created = await PostJsonAsync("/api/v1/board/cards", new { title = "Ship the board", description = "All of it.", assignee = "env:7:codex" });
+        using var created = await PostJsonAsync("/api/v1/board/cards", new { title = "Ship the board", description = "All of it.", assignee = "base:codex" });
         using var createdDocument = await ReadJsonAsync(created);
         var cardId = createdDocument.RootElement.GetProperty("id").GetString()!;
 
@@ -900,11 +822,11 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         Assert.Equal("tab-1", launchDocument.RootElement.GetProperty("tabId").GetString());
         Assert.Equal("sess-1", launchDocument.RootElement.GetProperty("sessionId").GetString());
         Assert.Equal("PROJ-1", BoardKeyText.Short(launchDocument.RootElement.GetProperty("cardKey").GetString()));
-        Assert.Equal("env:7:codex", launchDocument.RootElement.GetProperty("selection").GetString());
+        Assert.Equal("base:codex", launchDocument.RootElement.GetProperty("selection").GetString());
 
         Assert.NotNull(started);
         Assert.Equal("codex", started!.Cli);
-        Assert.Equal("my-env", started.EnvironmentName);
+        Assert.Null(started.EnvironmentName);
         Assert.Equal(_project, started.WorkingDirectory);
         Assert.Equal("PROJ-1 · Ship the board", BoardKeyText.Short(started.Title));
         Assert.True(started.AuthorizeBoardTools);
@@ -913,14 +835,14 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         // Board and lane names ride inside the fenced card block, between the title and the description.
         Assert.Contains("Title: Ship the board\nBoard: project\nLanes: Backlog → Ready → Build → Review → Done\nAll of it.", started.InitialPrompt);
         // The environment's template is appended unresolved — resolution happens once, in the tab child.
-        Assert.EndsWith("\n\nRead AGENTS.md. {{datetime}}", started.InitialPrompt);
+        Assert.DoesNotContain("Read AGENTS.md. {{datetime}}", started.InitialPrompt);
 
         using var detail = await GetJsonAsync($"/api/v1/board/cards/{cardId}");
         var session = Assert.Single(detail.RootElement.GetProperty("sessions").EnumerateArray());
         Assert.Equal("sess-1", session.GetProperty("id").GetString());
         Assert.Equal("tab-1", session.GetProperty("tabId").GetString());
         Assert.Equal("launch", session.GetProperty("origin").GetString());
-        Assert.Equal("env:7:codex", session.GetProperty("selection").GetString());
+        Assert.Equal("base:codex", session.GetProperty("selection").GetString());
         Assert.False(session.GetProperty("active").GetBoolean());
 
         // A stale environment id is a 400, never a fall back by name.
@@ -1181,57 +1103,13 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         using var stale = await SendJsonAsync(HttpMethod.Put, contextPath, payload);
         Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
         using var laneSaved = await SendJsonAsync(HttpMethod.Put, lanePath, new { jobId = (long?)null, expectedRevision = 0 });
-        laneSaved.EnsureSuccessStatusCode();
-        using var invalidJob = await SendJsonAsync(HttpMethod.Put, lanePath, new { jobId = 999, expectedRevision = 1 });
-        Assert.Equal(HttpStatusCode.BadRequest, invalidJob.StatusCode);
+        Assert.Equal(HttpStatusCode.Gone, laneSaved.StatusCode);
         var foreignBoard = await _app.Services.GetRequiredService<IBoardStore>().CreateBoardAsync(_root + "-foreign", "Foreign", TestContext.Current.CancellationToken);
         using var foreign = await SendJsonAsync(HttpMethod.Put, $"/api/v1/board/boards/{foreignBoard.Id}/context", payload);
         Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
     }
 
-    [Fact]
-    public async Task LaneAutomations_RoundTripMultipleJobs_RejectInvalidLists_AndAcceptLegacyClients()
-    {
-        using var catalog = await GetJsonAsync("/api/v1/board/boards");
-        var lane = catalog.RootElement.GetProperty("boards")[0].GetProperty("columns")[0].GetProperty("id").GetString();
-        var path = $"/api/v1/board/columns/{lane}/automation";
-        await using (var connection = new SqliteConnection(_connectionString))
-        {
-            await connection.OpenAsync(TestContext.Current.CancellationToken);
-            await using var command = connection.CreateCommand();
-            command.CommandText = SqlStrings.CreateEnvironmentsTable;
-            await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
-        }
-        var jobs = _app.Services.GetRequiredService<IJobStore>();
-        async Task<long> CreateJob(string name) => (await jobs.CreateJobAsync(new(name, _project, LLM.NotSet, null, "", null, true, [], Actions:
-            [new(null, JobActionKind.Script, ScriptPath: "check.py", ScriptRuntime: JobScriptRuntime.Python, ApprovedHash: "pinned")]), TestContext.Current.CancellationToken)).Id;
-        var first = await CreateJob("First");
-        var second = await CreateJob("Second");
-        using var saved = await SendJsonAsync(HttpMethod.Put, path, new { jobIds = new[] { first, second }, expectedRevision = 0 });
-        saved.EnsureSuccessStatusCode();
-        using var savedValue = await ReadJsonAsync(saved);
-        Assert.Equal(new[] { first, second }, savedValue.RootElement.GetProperty("jobIds").EnumerateArray().Select(id => id.GetInt64()));
-        using var read = await GetJsonAsync(path);
-        Assert.Equal(2, read.RootElement.GetProperty("jobs").GetArrayLength());
-        Assert.Equal(2, read.RootElement.GetProperty("jobIds").GetArrayLength());
-        Assert.Equal(first, read.RootElement.GetProperty("jobId").GetInt64());
-        using var stale = await SendJsonAsync(HttpMethod.Put, path, new { jobIds = Array.Empty<long>(), expectedRevision = 0 });
-        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
-        using var duplicate = await SendJsonAsync(HttpMethod.Put, path, new { jobIds = new[] { first, first }, expectedRevision = 1 });
-        Assert.Equal(HttpStatusCode.BadRequest, duplicate.StatusCode);
-        using var mixed = await SendJsonAsync(HttpMethod.Put, path, new { jobId = first, jobIds = new[] { second }, expectedRevision = 1 });
-        Assert.Equal(HttpStatusCode.BadRequest, mixed.StatusCode);
-        using var missingRevision = await SendJsonAsync(HttpMethod.Put, path, new { jobIds = new[] { second } });
-        Assert.Equal(HttpStatusCode.BadRequest, missingRevision.StatusCode);
-        using var legacy = await SendJsonAsync(HttpMethod.Put, path, new { jobId = second, expectedRevision = 1 });
-        legacy.EnsureSuccessStatusCode();
-        using var legacyValue = await ReadJsonAsync(legacy);
-        Assert.Equal(second, Assert.Single(legacyValue.RootElement.GetProperty("jobIds").EnumerateArray()).GetInt64());
-        using var cleared = await SendJsonAsync(HttpMethod.Put, path, new { jobIds = Array.Empty<long>(), expectedRevision = 2 });
-        cleared.EnsureSuccessStatusCode();
-        using var empty = await GetJsonAsync(path);
-        Assert.Equal(0, empty.RootElement.GetProperty("jobIds").GetArrayLength());
-    }
+
 
     [Fact]
     public async Task ChatLaunch_UsesBoardContext_PreservesLane_AndLinksSession()

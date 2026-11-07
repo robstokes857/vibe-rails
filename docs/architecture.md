@@ -1,5 +1,16 @@
 # VibeRails architecture reference
 
+## Global AI Agents and single Actions (VIBE-292)
+
+The current launch model uses global presets and single typed Actions in
+`~/.vibe_rails/launches.db`, automatically initialized in Debug and Release.
+`LaunchService` snapshots admissions, `LaunchDispatcher` owns atomic execution
+claims, and `LaunchScheduler` runs only in an open root backend. Board assignments
+and ordered entries remain behind `IBoardStore`; recordings stay in the session
+store. Retired Environment/Job definitions are retained without adoption or
+execution. Historical sections describing their launch paths are superseded by
+this component's [implementation and API contract](../VibeRails/Services/Launches/README.md).
+
 ## Corporate gateways for Codex and Claude
 
 `LlmProxySettingsService` resolves each destination from the saved Enterprise Network Proxy,
@@ -222,10 +233,10 @@ does not attach the new session or change tool authorization.
 - **Rule File Management** - Create and manage `vc.rules.md` files with customizable coding rules
 - **Rule Enforcement** - Define standards with three enforcement levels (WARN/COMMIT/STOP)
 - **Multi-LLM Support** - Unified interface for Claude, Codex, Antigravity, Copilot, and OpenCode CLIs
-- **Agents and Quick Launches** - A saved CLI setup (model, arguments, settings, workspace) is a Quick Launch in the terminal picker; with a starting message it is an Agent that runs on demand, on a schedule, around commits or from a Board lane. Both are `Environments` rows
+- **Agents and Quick Launches** - A saved CLI setup (model, arguments, settings, workspace) is a Quick Launch in the terminal picker; with a starting message it is an Agent that runs on demand, on a schedule, around commits or from a Board lane. Both are global `LaunchPresets` records in `launches.db`
 - **Workspace clones** - An Agent or Quick Launch can run in its own git clone or a fresh clone each run (`Sandboxes` rows; no UI of their own since 2026-10-11)
 - **Session Logging** - Track and monitor all CLI session history and outputs
-- **Automations** - Ordered workflows of repository `.py`, `.ps1`, and `.sh` scripts and checks (VCA, Code quality) with no LLM step, on a schedule, a commit trigger or a Board lane; they run while a VibeRails root backend is open
+- **Actions** - One repository script, VCA check or Code quality check per definition; scheduled/event execution runs only while a root backend is open. Board lanes retain ordered single runs and explicit gates.
 - **MCP Integration** - Custom Model Context Protocol server with specialized tools
 
 ## Technology Stack

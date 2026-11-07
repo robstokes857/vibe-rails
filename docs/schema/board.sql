@@ -95,6 +95,12 @@ CREATE INDEX IX_BoardLaneWorkflows_Column ON BoardLaneWorkflows(ColumnId, Curren
 -- index IX_BoardLaneWorkflows_Current
 CREATE UNIQUE INDEX IX_BoardLaneWorkflows_Current ON BoardLaneWorkflows(CardId) WHERE Current = 1;
 
+-- index IX_BoardLaunchEvents_Card
+CREATE INDEX IX_BoardLaunchEvents_Card ON BoardLaunchEvents(CardId,Current,EntryId,Position);
+
+-- index IX_BoardLaunchEvents_Current
+CREATE INDEX IX_BoardLaunchEvents_Current ON BoardLaunchEvents(Current,DueUnixMs);
+
 -- index IX_BoardManagerSessions_Board
 CREATE INDEX IX_BoardManagerSessions_Board ON BoardManagerSessions(BoardId, StartedUTC);
 
@@ -254,6 +260,18 @@ CREATE TABLE BoardLaneWorkflowSteps ( WorkflowId TEXT NOT NULL REFERENCES BoardL
 -- table BoardLaneWorkflows
 CREATE TABLE BoardLaneWorkflows ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL, ColumnId TEXT NOT NULL, CreatedUnixMs INTEGER NOT NULL, Current INTEGER NOT NULL DEFAULT 1 );
 
+-- table BoardLaunchEvents
+CREATE TABLE BoardLaunchEvents(Id TEXT PRIMARY KEY, EntryId TEXT NOT NULL, ProjectPath TEXT NOT NULL, CardId TEXT NOT NULL, ColumnId TEXT NOT NULL, BoardId TEXT, DefinitionId TEXT NOT NULL, DefinitionType TEXT NOT NULL, Gate TEXT NOT NULL, Position INTEGER NOT NULL, DueUnixMs INTEGER NOT NULL, Current INTEGER NOT NULL, RunId TEXT, ProcessStatus TEXT NOT NULL DEFAULT 'queued', Verdict TEXT, SkipRequested INTEGER NOT NULL DEFAULT 0, Summary TEXT);
+
+-- table BoardLaunchLanes
+CREATE TABLE BoardLaunchLanes(ColumnId TEXT PRIMARY KEY REFERENCES BoardColumns(Id) ON DELETE CASCADE, Revision INTEGER NOT NULL);
+
+-- table BoardLaunchReports
+CREATE TABLE BoardLaunchReports(Id INTEGER PRIMARY KEY AUTOINCREMENT, EventId TEXT NOT NULL, Verdict TEXT NOT NULL, Summary TEXT NOT NULL, SessionId TEXT, ReviewId TEXT, CreatedUTC TEXT NOT NULL);
+
+-- table BoardLaunchSelections
+CREATE TABLE BoardLaunchSelections(ColumnId TEXT NOT NULL REFERENCES BoardColumns(Id) ON DELETE CASCADE, Position INTEGER NOT NULL, DefinitionId TEXT NOT NULL, DefinitionType TEXT NOT NULL, Gate TEXT NOT NULL, PRIMARY KEY(ColumnId, Position), UNIQUE(ColumnId,DefinitionId));
+
 -- table BoardManagerFeature
 CREATE TABLE BoardManagerFeature ( Id INTEGER PRIMARY KEY CHECK (Id = 1), Enabled INTEGER NOT NULL, UpdatedUTC TEXT NOT NULL );
 
@@ -331,6 +349,18 @@ CREATE TRIGGER BoardCards_LaneAutomation_Insert AFTER INSERT ON BoardCards BEGIN
 
 -- trigger BoardCards_LaneAutomation_Move
 CREATE TRIGGER BoardCards_LaneAutomation_Move AFTER UPDATE OF ColumnId ON BoardCards WHEN OLD.ColumnId <> NEW.ColumnId BEGIN DELETE FROM BoardPendingAutomations WHERE CardId = NEW.Id; INSERT INTO BoardPendingAutomations (CardId, ColumnId, JobId, EventKey, DueUnixMs) SELECT NEW.Id, NEW.ColumnId, a.JobId, lower(hex(randomblob(16))), CAST(unixepoch('subsec') * 1000 AS INTEGER) + 60000 FROM BoardLaneAutomations a WHERE a.ColumnId = NEW.ColumnId AND a.JobId IS NOT NULL; END;
+
+-- trigger BoardCards_Launch_Delete
+CREATE TRIGGER BoardCards_Launch_Delete AFTER DELETE ON BoardCards BEGIN UPDATE BoardLaunchEvents SET Current=0 WHERE CardId=OLD.Id; END;
+
+-- trigger BoardCards_Launch_Insert
+CREATE TRIGGER BoardCards_Launch_Insert AFTER INSERT ON BoardCards BEGIN UPDATE BoardLaunchEvents SET Current=0 WHERE CardId=NEW.Id AND Current=1; INSERT INTO BoardLaunchEvents(Id,EntryId,ProjectPath,CardId,ColumnId,BoardId,DefinitionId,DefinitionType,Gate,Position,DueUnixMs,Current) SELECT lower(hex(randomblob(16))), NEW.Id || ':' || NEW.UpdatedUTC, NEW.ProjectPath,NEW.Id,NEW.ColumnId, c.BoardId,s.DefinitionId,s.DefinitionType,s.Gate,s.Position,CAST(unixepoch('subsec')*1000 AS INTEGER)+60000,1 FROM BoardLaunchSelections s JOIN BoardColumns c ON c.Id=s.ColumnId WHERE s.ColumnId=NEW.ColumnId; END;
+
+-- trigger BoardCards_Launch_Move
+CREATE TRIGGER BoardCards_Launch_Move AFTER UPDATE OF ColumnId ON BoardCards WHEN OLD.ColumnId<>NEW.ColumnId BEGIN UPDATE BoardLaunchEvents SET Current=0 WHERE CardId=NEW.Id AND Current=1; INSERT INTO BoardLaunchEvents(Id,EntryId,ProjectPath,CardId,ColumnId,BoardId,DefinitionId,DefinitionType,Gate,Position,DueUnixMs,Current) SELECT lower(hex(randomblob(16))), NEW.Id || ':' || NEW.UpdatedUTC, NEW.ProjectPath,NEW.Id,NEW.ColumnId, c.BoardId,s.DefinitionId,s.DefinitionType,s.Gate,s.Position,CAST(unixepoch('subsec')*1000 AS INTEGER)+60000,1 FROM BoardLaunchSelections s JOIN BoardColumns c ON c.Id=s.ColumnId WHERE s.ColumnId=NEW.ColumnId; END;
+
+-- trigger BoardCards_Launch_Retire
+CREATE TRIGGER BoardCards_Launch_Retire AFTER UPDATE OF DeletedUTC ON BoardCards WHEN NEW.DeletedUTC IS NOT NULL BEGIN UPDATE BoardLaunchEvents SET Current=0 WHERE CardId=NEW.Id; END;
 
 -- trigger BoardCards_ResolveAttention
 CREATE TRIGGER BoardCards_ResolveAttention AFTER UPDATE OF Flagged ON BoardCards WHEN NEW.Flagged = 0 BEGIN UPDATE BoardAttentionRequests SET ResolvedUTC = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE CardId = NEW.Id AND ResolvedUTC IS NULL; END;

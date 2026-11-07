@@ -250,28 +250,18 @@ public sealed partial class BoardChecksTests : IAsyncLifetime
     [Fact]
     public async Task ReaderShowsQueueAndCancelledBeforeCheck_AndReconcilesInterruptedEvidence()
     {
-        await using (var state = new SqliteConnection(connection))
-        {
-            await state.OpenAsync(Ct); await using var command = state.CreateCommand();
-            command.CommandText = SqlStrings.CreateEnvironmentsTable;
-            await command.ExecuteNonQueryAsync(Ct);
-        }
-        var jobs = new JobStore(connection, store);
-        var job = await jobs.CreateJobAsync(new("Checks", repo, LLM.NotSet, null, "", null, true, [],
-            Actions: ReviewCheckDefaults.Create()), Ct);
-        var run = (await jobs.EnqueueBoardCardRunAsync(repo, job.Id, card.Key, Ct))!;
-        var reader = new BoardChecksReader(store, jobs, Engine());
-        var queued = (await reader.ReadAsync(repo, card.Id, 0, Ct))!;
-        Assert.Equal(2, queued.Pending.Count); Assert.All(queued.Pending, item => Assert.Equal("Waiting", item.Status));
-        await jobs.CompleteRunAsync(run, JobRunStatus.Cancelled, 3, "cancelled", Ct);
-        var cancelled = (await reader.ReadAsync(repo, card.Id, 0, Ct))!;
-        Assert.All(cancelled.Pending, item => Assert.Equal("Cancelled", item.Status));
-        var actions = await jobs.GetRunActionsAsync(run, Ct);
-        var incomplete = new BoardCheckRecord("incomplete", card.Id, run, actions[0].Id, "Code quality", "Running", "unpushed",
+        var launches = new VibeRails.Data.Sqlite.LaunchStore($"Data Source={Path.Combine(root, "launches.db")};Pooling=False");
+        var service = new VibeRails.Services.Launches.LaunchService(launches, Moq.Mock.Of<VibeRails.Services.Jobs.IAutomationScriptService>());
+        var action = await service.SaveActionAsync(repo, null, new("Check", "", "vca", Check: new("working-tree")), Ct);
+        var run = await service.EnqueueAsync("action", action.Id, new(repo, repo, "manual", "check", CardId: card.Id), Ct);
+        var reader = new BoardChecksReader(store, Engine(), launches);
+        Assert.Equal("Waiting", Assert.Single((await reader.ReadAsync(repo, card.Id, 0, Ct))!.Pending).Status);
+        await launches.CancelAsync(run.Id, VibeRails.Services.Launches.LaunchService.ProjectKey(repo), Ct);
+        Assert.Equal("Cancelled", Assert.Single((await reader.ReadAsync(repo, card.Id, 0, Ct))!.Pending).Status);
+        var incomplete = new BoardCheckRecord("incomplete", card.Id, run.Id, action.Id, "VCA", "Running", "working-tree",
             null, null, null, null, "1", DateTime.UtcNow, null, "capture", 0, 0, 0, 0, []);
         Assert.True(await store.SaveCheckAsync(repo, incomplete, Ct));
-        var afterRestart = (await reader.ReadAsync(repo, card.Id, 0, Ct))!;
-        Assert.Equal("Cancelled", Assert.Single(afterRestart.Checks).Status);
+        Assert.Equal("Cancelled", Assert.Single((await reader.ReadAsync(repo, card.Id, 0, Ct))!.Checks).Status);
     }
 
     [Fact]
