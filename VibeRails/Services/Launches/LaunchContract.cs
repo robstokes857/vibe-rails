@@ -1,0 +1,22 @@
+using VibeRails.DTOs;
+using VibeRails.Launches;
+
+namespace VibeRails.Services.Launches;
+
+public sealed record SavePresetRequest(string Name, string? Description, string Cli, LaunchOptions? Options = null,
+    string[]? AdditionalArgv = null, string? InitialPrompt = null, bool Enabled = true, long ExpectedRevision = 0,
+    int? TimeoutMinutes = null, string Purpose = "work");
+public sealed record SaveActionRequest(string Name, string? Description, string Kind, ScriptAction? Script = null,
+    CheckAction? Check = null, bool Enabled = true, long ExpectedRevision = 0);
+public sealed record SaveBindingRequest(string DefinitionId, string DefinitionType, JobTriggerRequest Trigger,
+    bool Enabled = true, long ExpectedRevision = 0);
+public sealed record LaunchRequest(string DefinitionId, string DefinitionType = "preset", string? OccurrenceId = null);
+public sealed record ResolveUncertainLaunchRequest(bool ConfirmedStopped);
+public sealed record RetireLaunchRequest(long ExpectedRevision);
+public sealed record LaunchError(string Error, string Code, long? CurrentRevision = null);
+public sealed record LaunchCatalogItem(string Id, string DefinitionType, string Kind, string Name, string Description,
+    long Revision, bool Enabled, bool Retired, string? Cli, bool CanLaunch, bool CanRunAutomatically,
+    string? IneligibleReason, bool SupportsAttachments);
+public sealed record LaunchCatalog(IReadOnlyList<LaunchCatalogItem> Items);
+public sealed record SavedPreset(LaunchPreset Preset, IReadOnlyList<LaunchTriggerBinding> AffectedBindings);
+public sealed record LaunchAttachmentRequest(string Name, string DataUrl);

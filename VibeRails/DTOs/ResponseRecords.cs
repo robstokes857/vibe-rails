@@ -1,3 +1,5 @@
+using VibeRails.Launches;
+using VibeRails.Services.Launches;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using VibeRails.Services;
@@ -1267,6 +1269,10 @@ namespace VibeRails.DTOs
         /// <summary>Server-only review scope decision. Browser input cannot bypass workspace resolution.</summary>
         [JsonIgnore]
         public bool PreserveWorkingDirectory { get; init; }
+
+        /// <summary>Only the authenticated parent sends this claim in private child headers.</summary>
+        [JsonIgnore]
+        public VibeRails.Launches.LaunchClaim? LaunchClaim { get; init; }
     }
 
     public record TerminalInputRequest(
@@ -2286,6 +2292,27 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(PrReviewDeleteResponse))]
     [JsonSerializable(typeof(PrReviewQueueResponse))]
     [JsonSerializable(typeof(VibeRails.DB.PrReview))]
+[JsonSerializable(typeof(SavePresetRequest))]
+[JsonSerializable(typeof(SaveActionRequest))]
+[JsonSerializable(typeof(SaveBindingRequest))]
+[JsonSerializable(typeof(LaunchRequest))]
+[JsonSerializable(typeof(RetireLaunchRequest))]
+[JsonSerializable(typeof(ResolveUncertainLaunchRequest))]
+[JsonSerializable(typeof(LaunchError))]
+[JsonSerializable(typeof(LaunchCatalog))]
+[JsonSerializable(typeof(SavedPreset))]
+[JsonSerializable(typeof(LaunchAction))]
+[JsonSerializable(typeof(LaunchAttachmentContent))]
+[JsonSerializable(typeof(BoardLaunchLane))]
+[JsonSerializable(typeof(IReadOnlyList<BoardLaunchEvent>))]
+[JsonSerializable(typeof(LaunchPreset))]
+[JsonSerializable(typeof(LaunchRun))]
+[JsonSerializable(typeof(LaunchRunPage))]
+[JsonSerializable(typeof(LaunchTriggerBinding))]
+[JsonSerializable(typeof(IReadOnlyList<LaunchTriggerBinding>))]
+[JsonSerializable(typeof(LaunchAttachment))]
+[JsonSerializable(typeof(IReadOnlyList<LaunchAttachment>))]
+[JsonSerializable(typeof(LaunchAttachmentRequest))]
     internal partial class AppJsonSerializerContext : JsonSerializerContext
     {
     }

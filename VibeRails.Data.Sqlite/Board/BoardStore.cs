@@ -918,6 +918,12 @@ public sealed partial class BoardStore : IBoardStore
             await LogCardMovedAsync(connection, transaction, existing.Id, source, column, author ?? BoardAuthor.User(), nowUtc, cancellationToken);
         if (skipLaneAutomations && !sameColumn)
         {
+            await using var skipNew = connection.CreateCommand();
+            skipNew.Transaction = transaction;
+            skipNew.CommandText = "UPDATE BoardLaunchEvents SET SkipRequested=1,Verdict='skipped',Summary='Skipped on lane entry' WHERE CardId=$card AND Current=1;";
+            skipNew.Parameters.AddWithValue("$card", cardId);
+            await skipNew.ExecuteNonQueryAsync(cancellationToken);
+
             // The lane-entry triggers above have just replaced this card's pending entries with
             // the destination lane's. Removing them here, in the same transaction, is the
             // caller's explicit "move without firing" (VB-34); the settings and the move are
@@ -2131,6 +2137,7 @@ public sealed partial class BoardStore : IBoardStore
             SqliteSchema.Execute(db, transaction, CardDeletionSchemaSql));
         SqliteMigrationRunner.Apply(connection, "board-card-deletion", 2, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, SyncEntryOrderSchemaSql));
+        SqliteMigrationRunner.Apply(connection, "board-launches", 1, MigrationKind.Additive, ApplyLaunchSchema);
         ReconcileDerivedRows(connection);
     }
 

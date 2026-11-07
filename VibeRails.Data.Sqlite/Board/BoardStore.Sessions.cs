@@ -141,30 +141,23 @@ public sealed partial class BoardStore
                 while (await reader.ReadAsync(cancellationToken)) result.Add(reader.GetString(0));
             }
         }
-        await using var state = await OpenStateAsync(cancellationToken);
-        // A Board-only/stdio host need not have initialized Jobs. This is a read, not setup.
-        if (!_stateFeatures.HasColumn(state, "JobRuns", "SessionId"))
-            return result;
-        var purpose = _stateFeatures.HasColumn(state, "JobRuns", "Purpose") ? "Purpose" : "'work'";
-        var hasTerminalSession = _stateFeatures.HasColumn(state, "JobRuns", "TerminalSessionId");
-        foreach (var batch in sessionIds.Distinct(StringComparer.Ordinal).Chunk(100))
+        await using (var connection = await OpenAsync(cancellationToken))
         {
-            await using var command = state.CreateCommand();
-            var parameters = string.Join(",", batch.Select((_, index) => $"$s{index}"));
-            var terminal = hasTerminalSession ? "TerminalSessionId" : "NULL";
-            command.CommandText = $"""
-                SELECT SessionId, {terminal} FROM JobRuns
-                WHERE ProjectPath = $project{ProjectPathCollation}
-                  AND ($reviews = 0 OR {purpose} = 'code_review')
-                  AND (SessionId IN ({parameters}) OR {terminal} IN ({parameters}));
-                """;
-            command.Parameters.AddWithValue("$reviews", reviewsOnly ? 1 : 0);
-            command.Parameters.AddWithValue("$project", NormalizeProjectPath(projectPath));
-            for (var i = 0; i < batch.Length; i++) command.Parameters.AddWithValue($"$s{i}", batch[i]);
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
-                for (var i = 0; i < 2; i++)
-                    if (!reader.IsDBNull(i)) result.Add(reader.GetString(i));
+            foreach (var batch in sessionIds.Distinct(StringComparer.Ordinal).Chunk(100))
+            {
+                await using var query = connection.CreateCommand();
+                var parameters = string.Join(",", batch.Select((_, i) => $"$s{i}"));
+                query.CommandText = $"""
+                    SELECT s.SessionId FROM {AllSessionsSql} s JOIN BoardCards c ON c.Id=s.CardId
+                    WHERE c.ProjectPath=$project{ProjectPathCollation} AND c.DeletedUTC IS NULL
+                        AND s.SessionId IN ({parameters}) AND (s.Origin='lane_review' OR ($reviews=1 AND s.Origin='code_review'));
+                    """;
+                query.Parameters.AddWithValue("$project", NormalizeProjectPath(projectPath));
+                query.Parameters.AddWithValue("$reviews", reviewsOnly ? 1 : 0);
+                for (var i = 0; i < batch.Length; i++) query.Parameters.AddWithValue($"$s{i}", batch[i]);
+                await using var reader = await query.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken)) result.Add(reader.GetString(0));
+            }
         }
         return result;
     }

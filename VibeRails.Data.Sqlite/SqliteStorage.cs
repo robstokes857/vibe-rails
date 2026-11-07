@@ -15,6 +15,7 @@ public sealed record SqliteStoragePaths(string StatePath, string? VectorPath = n
     internal string ProxyDatabasePath => ProxyPath ?? Path.Combine(Path.GetDirectoryName(StatePath) ?? ".", "proxy_exchanges.db");
     public string BoardDatabasePath => Path.Combine(Path.GetDirectoryName(StatePath) ?? ".", "board.db");
     public string PrReviewDatabasePath => Path.Combine(Path.GetDirectoryName(StatePath) ?? ".", "pr_reviews.db");
+    public string LaunchDatabasePath => Path.Combine(Path.GetDirectoryName(StatePath) ?? ".", "launches.db");
     public string SearchDatabasePath => Path.Combine(Path.GetDirectoryName(StatePath) ?? ".", "search.db");
 }
 
@@ -60,6 +61,7 @@ public static class SqliteStorage
         services.TryAddScoped<IMetadataStore>(sp => sp.GetRequiredService<IRepository>());
         services.TryAddScoped<IChatSummaryStore>(sp => sp.GetRequiredService<IRepository>());
         services.TryAddSingleton<IConversationTitleStore>(sp => new ConversationTitleStore(StateConnectionString(sp)));
+        services.TryAddSingleton<VibeRails.Launches.ILaunchStore>(sp => CreateLaunchStore(sp.GetRequiredService<SqliteStoragePaths>().StatePath));
         services.TryAddSingleton<IManagedWorktreeStore>(sp => new ManagedWorktreeStore(StateConnectionString(sp)));
         services.TryAddSingleton<IReviewRequestStore>(sp => new ReviewRequestStore(StateConnectionString(sp)));
         services.TryAddSingleton<IBoardStore>(sp => CreateBoardStore(sp.GetRequiredService<SqliteStoragePaths>().StatePath));
@@ -101,6 +103,10 @@ public static class SqliteStorage
     public static IPrReviewStore CreatePrReviewStore(string stateDatabasePath) =>
         new PrReviewStore(ConnectionString(new SqliteStoragePaths(stateDatabasePath).PrReviewDatabasePath),
             legacyConnectionString: ConnectionString(stateDatabasePath));
+
+    /// <summary>Fresh global launch definitions, in one normal path for every configuration.</summary>
+    public static VibeRails.Launches.ILaunchStore CreateLaunchStore(string stateDatabasePath) =>
+        new LaunchStore(ConnectionString(new SqliteStoragePaths(stateDatabasePath).LaunchDatabasePath));
 
     public static IServiceCollection AddSqliteJobStorage(this IServiceCollection services,
         Func<IServiceProvider, string> statePathFactory)
@@ -144,6 +150,7 @@ public static class SqliteStorage
         StateDatabaseSchema.Ensure(state, logger);
         _ = new JobStore(state);
         _ = CreateBoardStore(paths.StatePath);
+        _ = CreateLaunchStore(paths.StatePath);
         using (var connection = SqliteConnectionFactory.Open(state))
         {
             TokenSavingsStore.EnsureSchema(connection);

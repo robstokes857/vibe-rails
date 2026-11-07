@@ -39,9 +39,9 @@ public sealed partial class BoardStore
     public async Task<IReadOnlyList<BoardLaneAutomationDefinition>> DescribeLaneAutomationsAsync(
         string projectPath, IReadOnlyList<long> jobIds, CancellationToken cancellationToken = default)
     {
-        if (jobIds.Count == 0) return [];
-        await using var state = await OpenStateAsync(cancellationToken);
-        return await DescribeLaneAutomationsAsync(state, projectPath, jobIds, cancellationToken);
+        await Task.CompletedTask;
+        return jobIds.Select(id => new BoardLaneAutomationDefinition(id, $"Retired Automation #{id}",
+            false, false, true, false, null, "", "", [], null, false)).ToList();
     }
 
     private async Task<IReadOnlyList<BoardLaneAutomationDefinition>> DescribeLaneAutomationsAsync(
