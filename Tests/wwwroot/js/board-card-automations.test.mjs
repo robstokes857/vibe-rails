@@ -33,7 +33,7 @@ function automationEditor() {
         '[data-board-reload-automations]': control(),
         '[data-board-automation-runs]': Object.assign(control(), { innerHTML: '' })
     };
-    const host = { isConnected: true, querySelector: selector => nodes[selector] ?? null };
+    const host = { ...control(), isConnected: true, querySelector: selector => nodes[selector] ?? null };
     const editor = {
         querySelector: selector => selector === '[data-board-automation-controls]' ? host : null,
         querySelectorAll: () => []
@@ -47,67 +47,69 @@ function fakeApp(state) {
         showToast() {},
         catalogCalls: 0,
         async apiCall(url) {
-            if (url.startsWith('/api/v1/jobs?')) {
+            if (url === '/api/v1/launch-catalog') {
                 app.catalogCalls++;
                 if (state.catalogFails-- > 0) throw new Error('catalog unavailable');
-                return { jobs: [{ id: 1, actions: [{ kind: 0, environmentId: 7 }] }, { id: 2, actions: [] }] };
+                return { items: state.jobs.map(job => ({ ...job, id: String(job.id), kind: 'agent', definitionType: 'preset', canLaunch: true })) };
             }
-            return { jobs: state.jobs, runs: [], laneEntries: state.laneEntries || [] };
+            if (url.startsWith('/api/v1/runs')) return { runs: [] };
+            return state.laneEntries || [];
+
         }
     };
     BoardApi.attach(app);
     return app;
 }
 
-test('a refresh with the same jobs leaves the open picker alone and reads the catalog once', async () => {
+test('fresh eligibility leaves an unchanged open picker alone', async () => {
     const state = { jobs: [{ id: 1, name: 'Review', enabled: true }, { id: 2, name: 'Deploy', enabled: true }], catalogFails: 0 };
     const app = fakeApp(state);
     const { editor, select } = automationEditor();
     const controls = bindCardAutomations(editor, { id: 'card_a' }, { app });
     await settle();
     assert.equal(select.writes, 1);
-    assert.match(select.innerHTML, /<optgroup label="Agents"><option value="1">Review[\s\S]*<optgroup label="Automations"><option value="2">Deploy/);
+    assert.match(select.innerHTML, /<option value="1">Review[\s\S]*<option value="2">Deploy/);
 
     select.value = '2'; // the user has the dropdown open on Deploy
     await controls.refresh();
     await controls.refresh();
     assert.equal(select.writes, 1, 'an unchanged list is not rewritten, so the dropdown stays open');
     assert.equal(select.value, '2');
-    assert.equal(app.catalogCalls, 1, 'the catalog is read once per editor open');
+    assert.equal(app.catalogCalls, 3, 'eligibility is refreshed');
 
     state.jobs = [...state.jobs, { id: 3, name: 'Ship', enabled: true }];
     await controls.refresh();
     assert.equal(select.writes, 2, 'a changed list is rewritten');
     assert.match(select.innerHTML, /Ship/);
     assert.equal(select.value, '2', 'and keeps the selection');
-    assert.equal(app.catalogCalls, 1);
+    assert.equal(app.catalogCalls, 4);
     controls.dispose();
 });
 
-test('a failed catalog read only loses the grouping until a later refresh succeeds', async () => {
+test('a failed catalog offers no unsafe launch until refresh succeeds', async () => {
     const state = { jobs: [{ id: 1, name: 'Review', enabled: true }], catalogFails: 1 };
     const app = fakeApp(state);
     const { editor, select } = automationEditor();
     const controls = bindCardAutomations(editor, { id: 'card_a' }, { app });
     await settle();
-    assert.match(select.innerHTML, /<optgroup label="Automations"><option value="1">Review/);
+    assert.equal(select.writes, 0);
 
     await controls.refresh();
     assert.equal(app.catalogCalls, 2, 'the failure is retried');
-    assert.match(select.innerHTML, /<optgroup label="Agents"><option value="1">Review/);
+    assert.match(select.innerHTML, /<option value="1">Review/);
     await controls.refresh();
-    assert.equal(app.catalogCalls, 2, 'and the success is kept');
+    assert.equal(select.writes, 1, 'unchanged catalog is not repainted');
     controls.dispose();
 });
 
 test('card Automation rail displays the saved check outcome and summary', async () => {
-    const state = { jobs: [], laneEntries: [{ name: 'Code quality', status: 'Succeeded', stepStatus: 'Passed',
-        displayStatus: 'Completed with limitations', reason: '5 files analyzed; 7 skipped.' }] };
+    const state = { jobs: [], laneEntries: [{ current: true, processStatus: 'succeeded', verdict: 'passed',
+        summary: '5 files analyzed; 7 skipped.' }] };
     const app = fakeApp(state);
     const { editor, runs } = automationEditor();
     const controls = bindCardAutomations(editor, { id: 'card_a' }, { app });
     await settle();
-    assert.match(runs.innerHTML, /Completed with limitations/);
+    assert.match(runs.innerHTML, /Process: succeeded · Result: passed/);
     assert.match(runs.innerHTML, /5 files analyzed; 7 skipped/);
     assert.doesNotMatch(runs.innerHTML, />Passed</);
     controls.dispose();

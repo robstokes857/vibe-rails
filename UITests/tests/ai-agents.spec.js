@@ -1,0 +1,303 @@
+const { test, expect } = require('@playwright/test');
+
+async function setup(page) {
+    const state={presets:[],actions:[],bindings:[],runs:[],files:[],requests:[],conflict:false};
+    const base=[['codex','Codex'],['claude','Claude'],['copilot','Copilot'],['opencode','OpenCode']];
+    const items=()=>[...state.presets.map(p=>({id:p.id,name:p.name,description:p.description,definitionType:'preset',cli:p.cli,kind:p.initialPrompt?.trim()?'agent':'quick-launch',revision:p.revision,enabled:p.enabled,retired:false,canLaunch:p.enabled,canRunAutomatically:p.enabled && !!p.initialPrompt?.trim(),supportsAttachments:true})),...state.actions.map(p=>({...p,definitionType:'action',canLaunch:true,canRunAutomatically:true}))];
+    await page.addInitScript(()=>sessionStorage.setItem('viberails_tab','fixture'));
+    await page.routeWebSocket('**/api/v1/events/ws*',()=>{});
+    await page.route('**/api/v1/**',async route=>{
+        const req=route.request(), path=new URL(req.url()).pathname, method=req.method(), body=req.postDataJSON();
+        state.requests.push({path,method,body});
+        const ok=json=>route.fulfill({json});
+        if(path==='/api/v1/context')return ok({isInGit:true,rootPath:'C:\\fixtures\\project',launchDirectory:'C:\\fixtures\\project',isActiveRootBackend:true});
+        if(path==='/api/v1/launch-catalog')return ok({items:items()});
+        if(path==='/api/v1/llm-picker/preferences')return ok({items:[...base.map(([cli,label],order)=>({key:`base:${cli}`,kind:'base',group:'Base CLIs',label,cli,enabled:true,order})),...items().filter(p=>p.definitionType==='preset').map((p,order)=>({key:`preset:${p.id}:${p.cli}`,kind:p.kind,group:'AI Agents',label:p.name,cli:p.cli,enabled:p.enabled,order}))]});
+        if(path.includes('/launch-defaults'))return ok({model:'',effort:'',speed:'',mode:'',yolo:false});
+        if(path==='/api/v1/trigger-bindings'){if(method==='GET')return ok(state.bindings);const result={...body,id:'binding_'+state.bindings.length,revision:1};state.bindings.push(result);return ok(result);}
+        if(path==='/api/v1/runs'){if(method==='GET')return ok({runs:state.runs,nextCursor:null});const p=state.presets.find(p=>p.id===body.definitionId);const run={id:'run_'+state.runs.length,sequence:state.runs.length+1,definitionId:body.definitionId,status:'queued',queuedUtc:new Date().toISOString(),snapshot:{preset:p},verdict:null};state.runs.push(run);return ok(run);}
+        if(path.endsWith('/attachments')) {
+            if(method==='GET')return ok(state.files);
+            if(state.holdUpload)await state.holdUpload;
+            if(state.failUploadName===body.name){state.failUploadName=null;return route.fulfill({status:500,json:{error:'Upload interrupted'}});}
+            const file={id:'att_'+state.files.length,name:body.name,mimeType:'image/png',size:10};state.files.push(file);return ok(file);
+        }
+        const match=path.match(/^\/api\/v1\/(presets|actions)(?:\/([^/]+))?$/);
+        if(match){const list=match[1]==='presets'?state.presets:state.actions;if(method==='GET')return ok(list.find(p=>p.id===match[2]));if(state.conflict)return route.fulfill({status:409,json:{error:'Changed elsewhere. Reopen the latest version before saving.',code:'revision_conflict',currentRevision:9}});const index=list.findIndex(p=>p.id===match[2]);const value={...body,id:match[2]||'preset_'+list.length,revision:(list[index]?.revision||0)+1};if(index<0)list.push(value);else list[index]=value;return ok(match[1]==='presets'?{preset:value,affectedBindings:[]}:value);}
+        if(path==='/api/v1/board/files')return ok({files:['src/example.cs']});
+        if(path==='/api/v1/agents')return ok({agents:[]});
+        if(path==='/api/v1/rules/details')return ok({rules:[]});
+        if(path==='/api/v1/board/boards')return ok([]);
+        if(path.includes('terminal-tabs'))return ok({tabs:[]});
+        if(path.includes('settings'))return ok({});
+        return ok({});
+    });
+    await page.goto('/?view=ai-agents');
+    await expect(page.getByRole('heading',{name:'AI Agents',exact:true})).toBeVisible();
+    return state;
+}
+
+test('shared editor creates an Agent, keeps provider drafts and uses native typed variables',async({page})=>{
+    const state=await setup(page);
+    await page.getByRole('button',{name:'New agent',exact:true}).click();
+    const editor=page.locator('[data-launch-editor]');
+    await editor.getByLabel('Name',{exact:true}).fill('Reviewer');
+    const prompt=editor.getByLabel('Initial prompt (optional)',{exact:true});
+    await prompt.fill('Review {{git_');
+    await expect(page.getByRole('option',{name:/git_branch/})).toBeVisible();
+    await prompt.press('Enter');
+    await expect(prompt).toHaveValue('Review {{git_branch}} ');
+    await expect(editor.locator('[data-board-launch-model]')).toBeVisible();
+    await editor.locator('[data-board-launch-effort]').selectOption('high');
+    await editor.locator('[data-launch-provider]').selectOption('base:claude');
+    await editor.locator('[data-launch-provider]').selectOption('base:codex');
+    await expect(editor.locator('[data-board-launch-effort]')).toHaveValue('high');
+    await expect(prompt).toHaveValue('Review {{git_branch}} ');
+    await editor.getByRole('button',{name:'Create agent',exact:true}).click();
+    await expect.poll(()=>state.presets.length).toBe(1);
+    expect(state.presets[0]).toMatchObject({name:'Reviewer',initialPrompt:'Review {{git_branch}} ',options:{base:{effort:'high'}},expectedRevision:0});
+    expect(state.requests.filter(r=>/environments|\/jobs|\/automations/.test(r.path))).toEqual([]);
+});
+
+test('conflict retains source and history refresh never changes the draft',async({page})=>{
+    const state=await setup(page);
+    state.presets.push({id:'preset_saved',name:'Saved',cli:'codex',initialPrompt:'Original',enabled:true,revision:2,options:{base:{effort:'high'}}});
+    await page.getByRole('button',{name:'Refresh',exact:true}).click();
+    await page.getByRole('button',{name:'Saved',exact:true}).click();
+    const editor=page.locator('[data-launch-editor]'),prompt=editor.getByLabel('Initial prompt (optional)',{exact:true});
+    await prompt.fill('Draft remains');
+    await editor.getByRole('button',{name:'Refresh',exact:true}).click();
+    await expect(prompt).toHaveValue('Draft remains');
+    state.conflict=true;
+    await editor.getByRole('button',{name:'Save',exact:true}).click();
+    await expect(editor.locator('[data-launch-error]')).toContainText('Your draft is kept');
+    await expect(prompt).toHaveValue('Draft remains');
+    await prompt.fill('{{step:old}}');
+    await editor.getByRole('button',{name:'Save',exact:true}).click();
+    await expect(editor.locator('[data-launch-error]')).toContainText('Step placeholders are retired');
+});
+
+for(const width of [320,375,768,1024])test(`editor footer and single scroller at ${width}px`,async({page},testInfo)=>{
+    await page.setViewportSize({width,height:800});await setup(page);
+    await page.getByRole('button',{name:'New agent',exact:true}).click();
+    const editor=page.locator('[data-launch-editor]');
+    const bounds=await editor.getByRole('button',{name:'Create agent',exact:true}).boundingBox();
+    expect(bounds.y+bounds.height).toBeLessThanOrEqual(800);
+    const close=await page.getByRole('button',{name:'Close dialog',exact:true}).boundingBox();
+    expect(close.width).toBeGreaterThanOrEqual(44);expect(close.height).toBeGreaterThanOrEqual(44);
+    expect(await editor.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBeTruthy();
+    await page.screenshot({path:testInfo.outputPath(`editor-${width}.png`)});
+});
+const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64');
+const file=name=>({name,mimeType:'image/png',buffer:png});
+
+test('staged attachments retry without recreating the preset or reuploading successful files',async({page})=>{
+    const state=await setup(page);
+    await page.getByRole('button',{name:'New agent',exact:true}).click();
+    const editor=page.locator('[data-launch-editor]');
+    await editor.getByLabel('Name',{exact:true}).fill('Files');
+    await editor.locator('[data-board-composer-file]').setInputFiles([file('first.png'),file('second.png')]);
+    await expect(editor.locator('[data-board-remove-pending]')).toHaveCount(2);
+    state.failUploadName='second.png';
+    await editor.locator('[data-launch-save]').click();
+    await expect(editor.locator('[data-launch-error]')).toContainText('Your draft is kept');
+    expect(state.presets).toHaveLength(1);expect(state.files).toHaveLength(1);
+    expect(state.presets[0].enabled).toBe(false);
+    expect(state.presets[0].initialPrompt).toBeNull();
+    await editor.locator('[data-launch-save]').click();
+    await expect(editor.locator('[data-launch-save]')).toHaveText('Save');
+    await expect.poll(()=>state.files.length).toBe(2);
+    expect(state.presets).toHaveLength(1);
+    expect(state.presets[0].initialPrompt).toContain('attachment:att_0');
+    expect(state.presets[0].initialPrompt).toContain('attachment:att_1');
+    expect(state.presets[0].initialPrompt).not.toContain('pending_');
+    expect(state.presets[0].enabled).toBe(true);
+    expect(state.requests.filter(r=>r.path.endsWith('/attachments')&&r.method==='POST'&&r.body.name==='first.png')).toHaveLength(1);
+});
+
+test('upload keeps its original insertion while the user types and moves the caret',async({page})=>{
+    const state=await setup(page);
+    state.presets.push({id:'preset_saved',name:'Saved',cli:'codex',initialPrompt:'Start END',enabled:true,revision:1});
+    await page.locator('[data-agent-refresh]').click();await page.getByRole('button',{name:'Saved',exact:true}).click();
+    const editor=page.locator('[data-launch-editor]'),prompt=editor.locator('[data-board-composer-input]');
+    await prompt.focus();await prompt.evaluate(el=>el.setSelectionRange(6,6));
+    let release;state.holdUpload=new Promise(resolve=>{release=resolve;});
+    await editor.locator('[data-board-composer-file]').setInputFiles(file('image.png'));
+    await expect(editor.locator('[data-board-composer-busy]')).toBeVisible();
+    await prompt.press('End');await prompt.pressSequentially(' remains');release();
+    await expect(prompt).toHaveValue('Start \n![image.png](attachment:att_0)\nEND remains');
+    expect(state.requests.some(r=>r.path.includes('/board/')&&r.method!=='GET')).toBeFalsy();
+});
+
+test('Escape dismisses suggestions first and navigation retains unsaved drafts',async({page})=>{
+    await setup(page);await page.getByRole('button',{name:'New agent',exact:true}).click();
+    const editor=page.locator('[data-launch-editor]'),prompt=editor.locator('[data-board-composer-input]');
+    await prompt.fill('Keep {{git_');await expect(page.getByRole('option',{name:/git_branch/})).toBeVisible();
+    await prompt.press('Escape');await expect(page.getByRole('option',{name:/git_branch/})).toHaveCount(0);await expect(editor).toBeVisible();
+    await page.evaluate(()=>window.app.navigate('board'));
+    const confirm=page.getByRole('alertdialog');
+    await expect(confirm).toBeVisible();await confirm.getByRole('button',{name:'Cancel',exact:true}).click();
+    await expect(prompt).toHaveValue('Keep {{git_');
+    expect(await page.evaluate(()=>window.app.currentView)).toBe('ai-agents');
+});
+
+test('Action fields and definition schedules save their typed contracts',async({page})=>{
+    const state=await setup(page);await page.getByRole('button',{name:'New action',exact:true}).click();
+    const editor=page.locator('[data-launch-editor]');
+    await editor.getByLabel('Name',{exact:true}).fill('Quality gate');
+    await editor.getByLabel('Action type',{exact:true}).selectOption('code-quality');
+    await editor.getByLabel('Minimum grade (optional)',{exact:true}).fill('B');
+    await editor.getByRole('button',{name:'Add schedule or event',exact:true}).click();
+    await editor.getByLabel('Frequency',{exact:true}).selectOption('2');
+    await editor.getByLabel('Local time',{exact:true}).fill('08:30');
+    await editor.locator('[data-launch-save]').click();
+    await expect.poll(()=>state.bindings.length).toBe(1);
+    expect(state.actions[0]).toMatchObject({kind:'code-quality',script:null,check:{scope:'working-tree',failGrade:'B'}});
+    expect(state.bindings[0]).toMatchObject({definitionType:'action',trigger:{kind:0,scheduleKind:2,localTime:'08:30'}});
+    expect(await editor.locator('[data-definition-launch-options]').count()).toBe(0);
+});
+
+test('history polling preserves expanded configuration, evidence and focused controls',async({page},testInfo)=>{
+    const state=await setup(page);
+    const preset={id:'preset_saved',name:'Reviewer',cli:'codex',initialPrompt:'Original',enabled:true,revision:2};state.presets.push(preset);
+    state.runs.push({id:'run_saved',sequence:1,status:'succeeded',queuedUtc:'2026-11-07T10:00:00Z',verdict:'failed',evidenceId:'review_saved',snapshot:{context:{cardId:'card_saved'},preset:{...preset,revision:1,initialPrompt:'Earlier prompt'}}});
+    await page.route('**/api/v1/board/cards/card_saved/reviews/review_saved',route=>route.fulfill({json:{result:'Needs changes',findings:'Review requires changes',scope:'working-tree',scopeDescription:'Uncommitted changes'}}));
+    await page.locator('[data-agent-refresh]').click();await page.getByRole('button',{name:'Reviewer',exact:true}).click();
+    const editor=page.locator('[data-launch-editor]');
+    await editor.getByText('Run configuration · revision 1').click();await editor.getByRole('button',{name:'Review result'}).click();
+    await expect(editor.locator('[data-run-result]')).toContainText('Review requires changes');
+    await editor.locator('[data-run-evidence]').focus();
+    await page.clock.install();await page.clock.fastForward(10000);
+    await expect(editor.locator('details[data-run-id]')).toHaveAttribute('open','');
+    await expect(editor.locator('[data-run-evidence]')).toBeFocused();await expect(editor.locator('[data-run-result]')).toContainText('Review requires changes');
+    await expect(editor.locator('[data-run-list]')).toContainText('Process: succeeded · Result: failed');
+    await expect(editor.locator('[data-board-composer-input]')).toHaveValue('Original');
+    const summary=editor.locator('details[data-run-id] > summary');
+    await summary.focus();state.runs[0].error='Report did not pass';
+    await page.clock.fastForward(10000);await expect(summary).toBeFocused();
+    await expect(editor.locator('[data-run-result]')).toContainText('Review requires changes');
+    await page.screenshot({path:testInfo.outputPath('saved-agent-history.png')});
+});
+
+test('ordered lane selections preserve gates and lock editing during writes',async({page})=>{
+    const state=await setup(page);
+    state.presets.push({id:'p1',name:'Review',cli:'codex',initialPrompt:'Review',enabled:true,revision:1},{id:'p2',name:'Test',cli:'codex',initialPrompt:'Test',enabled:true,revision:1});
+    let saved,release;const pending=new Promise(resolve=>{release=resolve;});
+    await page.route('**/api/v1/board/columns/lane/launches',async route=>{
+        if(route.request().method()==='GET')return route.fulfill({json:{revision:4,selections:[{definitionId:'p1',definitionType:'preset',gate:'review'},{definitionId:'p2',definitionType:'preset',gate:'result'}]}});
+        saved=route.request().postDataJSON();await pending;await route.fulfill({json:{...saved,revision:5}});
+    });
+    await page.evaluate(async()=>{const {mountLaunchLane}=await import('/js/modules/launch-lane-editor.js');const host=document.createElement('div');document.querySelector('#app-content').replaceChildren(host);mountLaunchLane(window.app,host,'lane');});
+    await page.getByRole('button',{name:'Move Test up',exact:true}).click();
+    await page.getByRole('button',{name:'Save lane settings',exact:true}).click();
+    await expect(page.locator('[data-lane-gate]').first()).toBeDisabled();
+    expect(saved).toMatchObject({revision:4,selections:[{definitionId:'p2',gate:'result'},{definitionId:'p1',gate:'review'}]});release();
+    await expect(page.locator('[data-lane-gate]').first()).toBeEnabled();
+});
+
+test('terminal picker manages Agents and Quick Launches in the shared editor', async ({ page }) => {
+    const state = await setup(page);
+    state.presets.push({ id: 'quick', name: 'Fast terminal', cli: 'codex', initialPrompt: '', enabled: true, revision: 1 },
+        { id: 'agent', name: 'Review changes', cli: 'codex', initialPrompt: 'Review', enabled: true, revision: 1 });
+    await page.locator('[data-agent-refresh]').click();
+    await expect(page.getByRole('button', { name: 'Review changes', exact: true })).toBeVisible();
+    await page.evaluate(() => window.app.llmPickerController.openCustomizationModal());
+    await expect(page.locator('[data-llm-picker-key="preset:agent:codex"]')).toBeVisible();
+    const quick = page.locator('[data-llm-picker-key="preset:quick:codex"]');
+    await expect(quick).toBeVisible();
+    await expect(quick.locator('[data-llm-picker-delete]')).toHaveCount(0);
+    await quick.locator('[data-llm-picker-edit]').click();
+    await expect(page.locator('[data-launch-editor]').getByLabel('Name', { exact: true })).toHaveValue('Fast terminal');
+    await expect(page.locator('[data-launch-kind]')).toContainText('Quick Launch');
+});
+
+test('a refused replacement keeps the open editor references and polling alive', async ({ page }) => {
+    const state = await setup(page);
+    state.presets.push({ id: 'original', name: 'Original', cli: 'codex', initialPrompt: 'Review', enabled: true, revision: 1 });
+    await page.locator('[data-agent-refresh]').click();
+    await page.getByRole('button', { name: 'Original', exact: true }).click();
+    const prompt = page.locator('[data-board-composer-input]');
+    await prompt.fill('Draft');
+    await page.evaluate(() => window.app.aiAgentsController.openEditor());
+    await page.getByRole('button', { name: 'Cancel', exact: true }).last().click();
+    await prompt.fill('Draft {{git_');
+    await expect(page.getByRole('option', { name: /git_branch/ })).toBeVisible();
+    await prompt.press('Escape');
+    await page.locator('[data-run-refresh]').click();
+    await expect(prompt).toHaveValue('Draft {{git_');
+});
+
+test('Action runs show saved check evidence without using a Board review route', async ({ page }) => {
+    const state = await setup(page);
+    state.actions.push({ id: 'check', name: 'Quality gate', kind: 'code-quality', enabled: true, revision: 1, check: { scope: 'working-tree' } });
+    state.runs.push({ id: 'check_run', sequence: 1, status: 'failed', verdict: 'failed', evidenceId: 'check_result', queuedUtc: '2026-11-07T10:00:00Z', snapshot: { action: state.actions[0] } });
+    await page.route('**/api/v1/runs/check_run/evidence', route => route.fulfill({ json: {
+        tool: 'Code quality', status: 'Failed', scope: 'working-tree', summary: 'Two findings require attention', analyzedCount: 4, findingCount: 2,
+        resultJson: JSON.stringify({ details: { findings: ['Cyclomatic complexity'] } })
+    } }));
+    await page.locator('[data-agent-refresh]').click();
+    await page.getByRole('button', { name: 'Quality gate', exact: true }).click();
+    await page.getByRole('button', { name: 'Check result' }).click();
+    await expect(page.locator('[data-run-result]')).toContainText('Two findings require attention');
+    await page.getByText('Full recorded output', { exact: true }).click();
+    await expect(page.locator('[data-run-result]')).toContainText('Cyclomatic complexity');
+});
+
+test('preset attachment readers use their owner and restore the editable draft', async ({ page }) => {
+    const state = await setup(page);
+    state.presets.push({ id: 'files_owner', name: 'Attached', cli: 'codex', initialPrompt: 'Original', enabled: true, revision: 1 });
+    state.files = [{ id: 'note', name: 'note.md', mimeType: 'text/markdown', size: 18 }];
+    const reads = [];
+    await page.route('**/api/v1/presets/files_owner/attachments/note/content', route => {
+        reads.push(route.request().url());
+        return route.fulfill({ contentType: 'text/markdown', body: '# Agent attachment\nSafe **content**.' });
+    });
+    await page.locator('[data-agent-refresh]').click();
+    await page.getByRole('button', { name: 'Attached', exact: true }).click();
+    const prompt = page.locator('[data-board-composer-input]');
+    await prompt.fill('Keep this draft');
+    await page.locator('[data-board-view-attachment="note"]').click();
+    await expect(page.getByRole('heading', { name: 'Agent attachment', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Close attachment', exact: true }).click();
+    await expect(prompt).toHaveValue('Keep this draft');
+    expect(reads).toHaveLength(1);
+    expect(state.requests.some(request => request.path.includes('/board/cards/') && request.path.includes('/attachments'))).toBe(false);
+});
+
+test('removing a staged file also removes its unsaved inline reference', async ({ page }) => {
+    await setup(page);
+    await page.getByRole('button', { name: 'New agent', exact: true }).click();
+    await page.locator('[data-board-composer-file]').setInputFiles(file('remove.png'));
+    await expect(page.locator('[data-board-composer-input]')).toHaveValue(/attachment:pending_/);
+    await page.locator('[data-board-remove-pending]').click();
+    await expect(page.locator('[data-board-composer-input]')).not.toHaveValue(/pending_/);
+    await expect(page.locator('[data-board-remove-pending]')).toHaveCount(0);
+});
+
+test('save locks the enhanced provider and a failed run preserves disabled controls', async ({ page }) => {
+    const state = await setup(page);
+    state.presets.push({ id: 'quick_lock', name: 'Quick lock', cli: 'codex', initialPrompt: '', enabled: true, revision: 1 });
+    let release;
+    await page.route('**/api/v1/presets/quick_lock', async route => {
+        if (route.request().method() !== 'PUT') return route.fallback();
+        await new Promise(resolve => { release = resolve; });
+        Object.assign(state.presets[0], route.request().postDataJSON(), { revision: 2 });
+        return route.fulfill({ json: { preset: state.presets[0], affectedBindings: [] } });
+    });
+    await page.route('**/api/v1/runs', route => route.request().method() === 'POST'
+        ? route.fulfill({ status: 503, json: { error: 'Runner unavailable' } }) : route.fallback());
+    await page.locator('[data-agent-refresh]').click();
+    await page.getByRole('button', { name: 'Quick lock', exact: true }).click();
+    const editor = page.locator('[data-launch-editor]');
+    const provider = editor.locator('[data-launch-provider]');
+    await editor.getByRole('button', { name: 'Save and run', exact: true }).click();
+    await expect.poll(() => Boolean(release)).toBe(true);
+    await expect(provider).toBeDisabled();
+    expect(await provider.evaluate(node => node.tomselect.isDisabled)).toBe(true);
+    release();
+    await expect(page.getByText('Runner unavailable', { exact: true })).toBeVisible();
+    await expect(editor.locator('[data-launch-save]')).toBeEnabled();
+    await expect(provider).toBeEnabled();
+    expect(await provider.evaluate(node => node.tomselect.isDisabled)).toBe(false);
+    await expect(editor.locator('[data-binding-add]')).toBeDisabled();
+});

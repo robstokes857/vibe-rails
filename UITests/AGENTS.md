@@ -108,17 +108,17 @@ Uses the actual Board editor and synthetic API responses with installed Chrome. 
 create, rename, revoke, manual refresh, escaped link labels, draft preservation and uncertain/late results.
 No application database is opened and no card is uploaded.
 
-### Focused Agents editor tests (No Backend Required)
+### Focused AI Agents editor tests (No Backend Required)
 
-From `UITests`, run `npx playwright test --config playwright.agents-editor.config.js`.
-The real frontend runs against intercepted API fixtures and a temporary static server.
-Coverage includes one-name Agent creation, the shared CLI setup form (an Agent is a setup with a
-starting message, a Quick Launch the same setup without one), provider switching, draft
-preservation, clickable prompt tokens, modal focus/cleanup, cancellation, save retries and narrow
-layouts. No application database or CLI is used. It also pins VIBE-58: a rename writes no setup,
-setup edits keep unrepresented Codex arguments, reserved CLI names get a valid setup identifier
-(the fixture rejects them like `EnvironmentRoutes`), and check-only Automations list on their own
-page and save unchanged.
+Run `node UITests/node_modules/@playwright/test/cli.js test --config UITests/playwright.ai-agents.config.js`
+from the repository root. The production frontend uses intercepted typed definition,
+binding, run and attachment APIs. Tests cover provider drafts, typed references, revision
+conflicts, navigation guards, staged-upload retries, caret placement, history preservation,
+Action fields, schedules and layouts at 320/375/768/1024px. The Board harness also covers
+the new ordered lane and manual-card adapters alongside existing comments, attachment,
+manager and navigation behavior. The older `playwright.agents-editor.config.js` fixtures
+exercise the retired Environment/Job editor and are not the current acceptance harness.
+No application database or CLI is used.
 
 ### Focused Automation terminal menu tests (No Backend Required)
 

@@ -21,22 +21,16 @@ function rule(css, selector) {
     return match[0];
 }
 
-test('the card editor strips Bootstrap\'s extra scroller so the dialog has one bar', () => {
-    const source = readFileSync(controllerPath, 'utf8');
-    assert.match(source, /classList\.remove\('modal-lg', 'modal-dialog-scrollable'\)/);
-    assert.match(source, /classList\.add\('modal-xl', 'board-card-modal-dialog'\)/);
-
-    const open = source.slice(
-        source.indexOf('async openCardEditor'),
-        source.indexOf('bindCardEditor(editor, card)')
-    );
-    assert.match(open, /class="board-editor-scroll"/);
-    // Save/Delete are a sibling of the scroller, not nested inside it.
-    assert.match(
-        open,
-        /<div class="board-editor-scroll">[\s\S]*<\/aside>\s*<\/div>\s*<div class="board-editor-actions">/
-    );
-    assert.match(source, /querySelector\('\.board-editor-scroll'\)/);
+test('Board and Agent editors share a single scroller and a sibling footer', () => {
+    const shell = readFileSync('VibeRails/wwwroot/js/modules/card-editor.js', 'utf8');
+    assert.match(shell, /classList\.remove\('modal-lg', 'modal-dialog-scrollable'\)/);
+    assert.match(shell, /classList\.add\('modal-xl', 'board-card-modal-dialog'\)/);
+    assert.match(shell, /<div class="board-editor-scroll">[\s\S]*<\/aside>\s*<\/div>\s*<div class="board-editor-actions">/);
+    for (const owner of ['board-controller', 'ai-agents-controller']) {
+        const source = readFileSync(`VibeRails/wwwroot/js/modules/${owner}.js`, 'utf8');
+        assert.match(source, /cardEditorLayout\(/);
+        assert.match(source, /configureCardEditorDialog\(/);
+    }
 });
 
 test('opening a card keeps the id on the editor and ignores a stale fetch', () => {
@@ -84,7 +78,7 @@ test('card prose asks the browser for spell check and identifiers do not', () =>
     // Stay inside the opening tag. A later field's attribute must not satisfy this field.
     assert.match(open, /id="board-card-title"[^>]*spellcheck="true"/);
     assert.match(open, /id="board-chat-question"[^>]*spellcheck="true"/);
-    const composer = source.slice(source.indexOf('composerMarkup({'), source.indexOf('bindComposer(composer,'));
+    const composer = readFileSync('VibeRails/wwwroot/js/modules/card-editor-composer.js', 'utf8');
     assert.match(composer, /data-board-composer-input[^>]*spellcheck="true"/);
     assert.match(open, /name="sha"[^>]*spellcheck="false"/);
     assert.match(open, /name="displayName"[^>]*spellcheck="false"/);

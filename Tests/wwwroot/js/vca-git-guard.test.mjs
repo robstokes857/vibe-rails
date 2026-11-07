@@ -390,7 +390,7 @@ function projectHealthLauncherHarness(t, { remembered = '', launch = () => true 
     const catalog = [
         { cli: 'codex', key: 'base:codex' },
         { cli: 'claude', key: 'base:claude' },
-        { cli: 'opencode', key: 'env:7:opencode' }
+        { cli: 'opencode', key: 'preset:preset_7:opencode' }
     ];
     const state = { mounted: 0, disposed: 0 };
     const app = {
@@ -408,6 +408,7 @@ function projectHealthLauncherHarness(t, { remembered = '', launch = () => true 
             },
             setValue(element, value) { element.value = value; }
         },
+        aiAgentsController: { launch(id, type, options) { const input = { id, type, ...options }; launches.push(input); return launch(input); } },
         terminalController: { launchInFocus(options) { launches.push(options); return launch(options); } },
         showModal() { assert.fail('Fix should launch directly without a modal'); },
         showToast(...args) { toasts.push(args); }
@@ -452,26 +453,26 @@ test('inline fix pickers share preferences, synchronize choices, and dispose the
     assert.equal(state.mounted, 3);
     assert.deepEqual([...selects.values()].map(select => select.value), ['base:codex', 'base:codex', 'base:codex']);
     assert.equal(launches.length, 0);
-    choose('quality', 'env:7:opencode');
-    assert.deepEqual([...selects.values()].map(select => select.value), ['env:7:opencode', 'env:7:opencode', 'env:7:opencode']);
-    assert.equal(stored(), 'env:7:opencode');
+    choose('quality', 'preset:preset_7:opencode');
+    assert.deepEqual([...selects.values()].map(select => select.value), ['preset:preset_7:opencode', 'preset:preset_7:opencode', 'preset:preset_7:opencode']);
+    assert.equal(stored(), 'preset:preset_7:opencode');
     dispose();
     assert.equal(state.disposed, 3);
     assert.ok([...selects.values()].every(select => select.handlers.size === 0));
     const disposeAgain = mountProjectHealthFixPickers(app, root);
-    assert.deepEqual([...selects.values()].map(select => select.value), ['env:7:opencode', 'env:7:opencode', 'env:7:opencode']);
+    assert.deepEqual([...selects.values()].map(select => select.value), ['preset:preset_7:opencode', 'preset:preset_7:opencode', 'preset:preset_7:opencode']);
     disposeAgain();
 });
 
-test('Project health launches the selected custom environment with the quality brief', async t => {
+test('Project health launches the selected global preset with the quality brief', async t => {
     const { controller, launches, choose } = projectHealthLauncherHarness(t);
-    choose('quality', 'env:7:opencode');
+    choose('quality', 'preset:preset_7:opencode');
     assert.equal(await controller.launchProjectHealthFix('quality'), true);
-    assert.equal(launches[0].cli, 'opencode');
-    assert.equal(launches[0].environmentName, 'Quality reviewer');
-    assert.equal(launches[0].workingDirectory, 'C:\\source\\project');
-    assert.match(launches[0].initialPrompt, /CODE QUALITY/);
-    assert.doesNotMatch(launches[0].initialPrompt, /\nRULES\n/);
+    assert.equal(launches[0].id, 'preset_7');
+    assert.equal(launches[0].type, 'preset');
+    assert.equal(launches[0].focusTerminal, true);
+    assert.match(launches[0].promptPrefix, /CODE QUALITY/);
+    assert.doesNotMatch(launches[0].promptPrefix, /\nRULES\n/);
 });
 
 test('empty, pending, failed, and different-repository scans disable and guard Fix code quality', async t => {
@@ -598,11 +599,11 @@ test('Project health keeps the selected agent after a launch failure and permits
     const { controller, launches, choose, selects, buttons, toasts } = projectHealthLauncherHarness(t, {
         launch() { if (shouldFail) throw new Error('Terminal unavailable'); return true; }
     });
-    choose('quality', 'env:7:opencode');
+    choose('quality', 'preset:preset_7:opencode');
     assert.equal(await controller.launchProjectHealthFix('quality'), false);
     assert.match(toasts[0][1], /Terminal unavailable/);
     assert.equal(buttons.get('quality').disabled, false);
-    assert.equal(selects.get('quality').value, 'env:7:opencode');
+    assert.equal(selects.get('quality').value, 'preset:preset_7:opencode');
     shouldFail = false;
     assert.equal(await controller.launchProjectHealthFix('quality'), true);
     assert.equal(launches.length, 2);
@@ -653,6 +654,7 @@ test('Project health does not launch an agent outside a Git repository', async (
     const launches = [];
     const toasts = [];
     const controller = new RuleController({
+        aiAgentsController: { launch(id, type, options) { const input = { id, type, ...options }; launches.push(input); return launch(input); } },
         terminalController: { launchInFocus(options) { launches.push(options); } },
         data: { configs: {} },
         showToast(...args) { toasts.push(args); }

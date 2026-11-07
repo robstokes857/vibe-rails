@@ -87,6 +87,19 @@ public class LaunchRoutesTests
             Assert.Equal(HttpStatusCode.OK, runResponse.StatusCode);
             var run = (await runResponse.Content.ReadFromJsonAsync<LaunchRun>(ct))!;
             Assert.Null(run.ClaimToken);
+            using var prefixed = await Client.PostAsJsonAsync(url + "/api/v1/runs",
+                new LaunchRequest(saved.Preset.Id, PromptPrefix: "Fix selected finding", InitialPrompt: "Template value", ExpectedRevision: 1), ct);
+            Assert.Equal(HttpStatusCode.OK, prefixed.StatusCode);
+            var prefixedRun = (await prefixed.Content.ReadFromJsonAsync<LaunchRun>(ct))!;
+            Assert.Equal("Work", prefixedRun.Snapshot.Preset!.InitialPrompt);
+            Assert.EndsWith("Fix selected finding\n\nTemplate value", prefixedRun.Snapshot.Context.ComposedPrompt);
+            Assert.Equal(root, prefixedRun.Snapshot.Context.WorkingDirectory);
+            using var staleRun = await Client.PostAsJsonAsync(url + "/api/v1/runs",
+                new LaunchRequest(saved.Preset.Id, InitialPrompt: "Stale template value", ExpectedRevision: 99), ct);
+            Assert.Equal(HttpStatusCode.Conflict, staleRun.StatusCode);
+            using var retiredPrompt = await Client.PostAsJsonAsync(url + "/api/v1/runs",
+                new LaunchRequest(saved.Preset.Id, InitialPrompt: "{{step:old}}"), ct);
+            Assert.Equal(HttpStatusCode.BadRequest, retiredPrompt.StatusCode);
             using var attach = await Client.PostAsJsonAsync(url + $"/api/v1/presets/{saved.Preset.Id}/attachments", new LaunchAttachmentRequest("note.txt", "data:text/plain;base64,aGk="), ct);
             Assert.Equal(HttpStatusCode.OK, attach.StatusCode);
             var attachment = (await attach.Content.ReadFromJsonAsync<LaunchAttachment>(ct))!;

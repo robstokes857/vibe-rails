@@ -14,7 +14,7 @@ import {
 import { ReviewRequestRow, ReviewRequestsTreeDataProvider } from './review-requests-view';
 import { bindSidebarTreeView } from './sidebar-tree-view';
 import {
-    AUTOMATION_NAV_PREFERENCES_PATH,
+    LAUNCH_CATALOG_PATH,
     BOOTSTRAP_REQUEST_TIMEOUT_MS,
     BOOTSTRAP_RETRY_ATTEMPTS,
     BOOTSTRAP_RETRY_DELAY_MS,
@@ -350,7 +350,7 @@ function registerLauncherView(context: vscode.ExtensionContext, registeredComman
 
     const provider = new LauncherTreeDataProvider({
         isBackendReady,
-        fetchItems: () => requestJson(getBackendConnection(), 'GET', AUTOMATION_NAV_PREFERENCES_PATH)
+        fetchItems: () => requestJson(getBackendConnection(), 'GET', LAUNCH_CATALOG_PATH)
     });
     launcherProvider = provider;
 
@@ -361,7 +361,7 @@ function registerLauncherView(context: vscode.ExtensionContext, registeredComman
         ...bindSidebarTreeView<LauncherNode>(LAUNCHER_VIEW_ID, provider, registeredCommands),
         vscode.commands.registerCommand(COMMAND_LAUNCHER_REFRESH, () => provider.refresh()),
         vscode.commands.registerCommand(COMMAND_LAUNCHER_RUN, (item?: LauncherItem) => runLauncherItem(item, {
-            request: (method, route) => requestJson(getBackendConnection(), method, route),
+            request: (method, route, body) => requestJson(getBackendConnection(), method, route, body),
             openDashboard: () => openDashboard(context),
             reveal: () => webviewManager?.reveal(),
             post: (message) => webviewManager?.postWhenReady(message) ?? Promise.resolve(false),

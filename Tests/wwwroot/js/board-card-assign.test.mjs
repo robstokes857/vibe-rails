@@ -80,15 +80,15 @@ test('the menu, the chip label and the editor picker include targets hidden from
     picker.catalog = [
         { key: 'base:claude', kind: 'base', label: 'Claude', cli: 'claude', enabled: true },
         { key: 'base:codex', kind: 'base', label: 'Codex', cli: 'codex', enabled: false },
-        { key: 'env:7:claude', kind: 'environment', label: 'Card review (claude)', cli: 'claude', environmentId: 7, enabled: false },
+        { key: 'preset:preset_7:claude', kind: 'agent', label: 'Card review (claude)', cli: 'claude', environmentId: 7, enabled: false },
         { key: 'base:shell', kind: 'base', label: 'Terminal', cli: 'shell', enabled: false }
     ];
     app.llmPickerController = picker;
 
     assert.deepEqual(picker.getEnabledItems('assignee').map(item => item.key), ['base:claude'], 'launching still honours hiding');
-    assert.deepEqual(new BoardCardAssign(app).rows().map(row => row.key), ['base:claude', 'base:codex', 'env:7:claude'],
+    assert.deepEqual(new BoardCardAssign(app).rows().map(row => row.key), ['base:claude', 'base:codex', 'preset:preset_7:claude'],
         'hidden targets are assignable; the shell never is');
-    assert.equal(new BoardController(app).assigneeInfo('env:7:claude').label, 'Card review (claude)',
+    assert.equal(new BoardController(app).assigneeInfo('preset:preset_7:claude').label, 'Card review (claude)',
         'a hidden assignee keeps its real name on the chip');
 
     const editor = picker._buildOptionItems({ context: 'assignee', includeHidden: true, includeGroups: true }, 'base:codex');

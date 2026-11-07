@@ -190,27 +190,28 @@ test('lane activity pauses and refreshes on reveal, then releases its subscripti
     const f = fixture(t);
     installGlobals(t, { window: f.host, document: f.page });
     const clock = timers(t, f.host);
-    const content = { removeAttribute() {}, querySelector: () => null, querySelectorAll: () => [] };
+    const content = surface({ isConnected: true, removeAttribute() {}, querySelector: () => null, querySelectorAll: () => [] });
     const running = {};
     const panel = surface({ isConnected: true, classList: { toggle() {} },
         querySelector: selector => selector === '[data-lane-agents-content]' ? content : running });
     let reads = 0;
     f.app.apiCall = async url => {
-        if (url.endsWith('/automation/running')) reads++;
-        return { jobIds: [], jobs: [], environments: [], runningAgents: [], workflows: [] };
+        if (url.endsWith('/launches/activity')) { reads++; return []; }
+        if (url.endsWith('/launch-catalog')) return { items: [] };
+        return { selections: [], revision: 0 };
     };
     BoardApi.attach(f.app);
     const dispose = mountLaneAgentBody({ app: f.app, panel, column: { id: 'lane' },
         signal: new AbortController().signal, position() {}, updateCount() {} });
     await settle();
     f.show(false); clock.tick();
-    assert.equal(reads, 0);
+    assert.equal(reads, 1);
     f.show(true);
     await settle();
-    assert.equal(reads, 1);
+    assert.equal(reads, 2);
     dispose();
     f.show(false); f.show(true); clock.tick();
-    assert.equal(reads, 1);
+    assert.equal(reads, 2);
     assert.equal(f.visibility.listeners.size, 0);
 });
 

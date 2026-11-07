@@ -14,6 +14,10 @@ function fixture({ run = async () => {}, customize = async () => {}, refreshRuns
         addEventListener: (type, handler) => { assert.equal(type, 'message'); receive = handler; }
     };
     const app = {
+        aiAgentsController: {
+            launch: async (...args) => calls.push(['launch', ...args]),
+            openEditor: async (...args) => calls.push(['editor', ...args])
+        },
         jobController: {
             pythonScripts: { run: async (name) => { calls.push(['run', name]); return run(name); } },
             refreshRuns: async (options) => { calls.push(['refreshRuns', options]); return refreshRuns(options); }
@@ -29,6 +33,15 @@ function fixture({ run = async () => {}, customize = async () => {}, refreshRuns
 }
 
 const settled = () => new Promise((resolve) => setImmediate(resolve));
+
+test('typed preset launches resolve templates in the shared browser flow and Action history opens by stable ID', async () => {
+    const f = fixture();
+    f.send({ command: 'launchDefinition', definitionType: 'preset', definitionId: 'preset_1' });
+    f.send({ command: 'launchDefinition', definitionType: 'action', definitionId: 'action_1' });
+    f.send({ command: 'launchQueued', definitionType: 'action', definitionId: 'action_1' });
+    await settled();
+    assert.deepEqual(f.calls, [['launch', 'preset_1', 'preset', { focusTerminal: true }], ['editor', 'action', 'action_1']]);
+});
 
 test('each host command reaches the same code path the nav flyout uses', async () => {
     const f = fixture();

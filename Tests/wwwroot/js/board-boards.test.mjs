@@ -91,7 +91,7 @@ test('image previews use tracked object URLs supported by the VS Code webview CS
     // The webview CSP lets blob: images through as well, for everything else that paints one.
     assert.match(readFileSync(webviewPath, 'utf8'), /`img-src \$\{webview\.cspSource\} https: data: blob:`/);
     // The attachment list shows a thumbnail for small rasters (the same data: URL inline images use).
-    const controller = readFileSync(controllerPath, 'utf8');
+    const controller = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/card-editor-attachments.js'), 'utf8');
     assert.match(controller, /const RASTER_DATA_URL_RE = \/\^data:image\\\/\(\?:png\|jpeg\|gif\|webp\);base64,\/i;/);
     assert.match(controller, /<img class="board-attachment-thumb" src="\$\{escapeHtml\(attachment\.url\)\}"/);
 });

@@ -72,12 +72,9 @@ export const LAUNCH_ARG_VS_CODE = '--vs-code-v1';
 export const HEALTH_PATH = '/health';
 /** Auth-gated; returns 200 and then stops the host ~50ms later. */
 export const SHUTDOWN_PATH = '/api/v1/shutdown';
-/** The nav Play flyout's catalog: automations and scripts in the user's saved order. */
-export const AUTOMATION_NAV_PREFERENCES_PATH = '/api/v1/automation-nav/preferences';
-/** Queues an automation run for the scheduler, exactly what the dashboard's "Run now" posts. */
-export function jobRunPath(jobId: number): string {
-    return `/api/v1/jobs/${encodeURIComponent(String(jobId))}/run`;
-}
+/** Shared global definitions and project-scoped execution. */
+export const LAUNCH_CATALOG_PATH = '/api/v1/launch-catalog';
+export const LAUNCH_RUNS_PATH = '/api/v1/runs';
 /** The cached list of review requests addressed to the signed-in account (root backend only). */
 export const REVIEW_INBOX_PATH = '/api/v1/review-inbox';
 /** Approve opens the signing popup on the backend's machine; reject posts the comment to viberails.ai. */

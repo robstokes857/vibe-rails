@@ -51,6 +51,26 @@ public sealed partial class BoardReviewsTests
     }
 
     [Fact]
+    public async Task ManualCardRunKeepsSavedContextAndRejectsForeignProject()
+    {
+        var f = await NewWorkflow();
+        var request = new LaunchRequest(f.Run.DefinitionId, OccurrenceId: "manual-card-test");
+        var activity = await f.Workflow.GetLaneActivityAsync(repo, f.Lane, Ct);
+        Assert.Equal(2, activity!.Count);
+        Assert.Contains(activity, item => item.Run?.Id == f.Run.Id && item.Entry.Gate == "review");
+        Assert.Null(await f.Workflow.GetLaneActivityAsync(Path.Combine(root, "foreign"), f.Lane, Ct));
+        var run = await f.Workflow.EnqueueCardAsync(repo, card.Id, request, Ct);
+        Assert.NotNull(run);
+        Assert.Equal(card.Id, run.Snapshot.Context.CardId);
+        Assert.Equal(card.BoardId, run.Snapshot.Context.BoardId);
+        Assert.True(run.Snapshot.Context.AuthorizeBoardTools);
+        Assert.Contains(card.Key, run.Snapshot.Context.ComposedPrompt);
+        Assert.Null(run.Snapshot.Context.LaneEntryId);
+        Assert.Equal(run.Id, (await f.Workflow.EnqueueCardAsync(repo, card.Id, request, Ct))!.Id);
+        Assert.Null(await f.Workflow.EnqueueCardAsync(Path.Combine(root, "foreign"), card.Id, request, Ct));
+    }
+
+    [Fact]
     public async Task WorkflowReviewRequiresExplicitPassAndSuccessfulProcessCompletion()
     {
         var f = await NewWorkflow();

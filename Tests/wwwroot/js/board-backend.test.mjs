@@ -68,7 +68,7 @@ test('Start work launches through the server without changing the current view',
     assert.match(start, /await this\.refresh\(\)/, 'refresh the board after starting');
     assert.match(source, /TODO\(board\): "Auto Launch"/, 'the Auto Launch follow-up note stays in the code');
     // Save/Delete remain siblings of the scroller (see board-card-modal.test.mjs); Start work sits with Save.
-    assert.match(source, /<div class="board-editor-actions">[\s\S]*data-board-start-work[\s\S]*data-board-save-card/);
+    assert.match(source, /footer: `[\s\S]*data-board-start-work[\s\S]*data-board-save-card/);
 });
 
 test('the Reset sample control is gone and the live-session dot has styles', () => {

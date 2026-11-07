@@ -1,133 +1,57 @@
-/**
- * The Activity Bar "Launch" view: the nav Play flyout's catalog as a VS Code tree.
- *
- * The list is the same `GET /api/v1/automation-nav/preferences` catalog the dashboard's
- * flyout renders, filtered and ordered by the same rules (see `normalizeLauncherItems` and
- * `isLauncherItemRunnable` in wwwroot/js/modules/automation-launcher.js — keep the two in
- * step). Clicking a row runs it, like a flyout row: automations are queued straight from the
- * extension host (`POST /api/v1/jobs/{id}/run`, no dashboard needed on screen), scripts are
- * handed to the dashboard's private script terminal (and optional signing PIN prompt).
- *
- * Everything the tree needs from the extension host arrives through small dependency
- * objects so the behaviour is unit-testable without a backend or a webview.
- */
+/** Global launch definitions shared with the browser's AI Agents screen. */
 import * as vscode from 'vscode';
+import { randomUUID } from 'crypto';
 import { BackendMethod, BackendRequestError } from './backend-api';
-import { COMMAND_LAUNCHER_RUN, jobRunPath } from './constants';
+import { COMMAND_LAUNCHER_RUN, LAUNCH_RUNS_PATH } from './constants';
 
 export interface LauncherItem {
     key: string;
-    kind: 'automation' | 'script';
+    id: string;
+    definitionType: 'preset' | 'action';
+    kind: string;
     label: string;
-    jobId: number;
+    name: string;
     enabled: boolean;
-    order: number;
-    /** approved | modified | unapproved for scripts; null for automations. */
-    status: string | null;
-    scriptFileName?: string;
+    retired: boolean;
+    canLaunch: boolean;
+    ineligibleReason?: string;
 }
-
 export interface LauncherGroup {
-    kind: 'group';
-    key: string;
-    label: string;
-    category: LauncherItem['kind'];
+    kind: 'group'; key: string; label: string; category: 'preset' | 'action';
 }
 export type LauncherNode = LauncherItem | LauncherGroup;
-
 const LAUNCHER_GROUPS: LauncherGroup[] = [
-    { kind: 'group', key: 'automations', label: 'Agents & automations', category: 'automation' },
-    { kind: 'group', key: 'scripts', label: 'Scripts', category: 'script' }
+    { kind: 'group', key: 'presets', label: 'Agents and Quick Launches', category: 'preset' },
+    { kind: 'group', key: 'actions', label: 'Actions', category: 'action' }
 ];
-
-export const LAUNCHER_LOAD_FAILED_MESSAGE = 'Could not load agents and automations.';
-export const LAUNCHER_ALL_HIDDEN_MESSAGE = 'Everything is hidden. Use "Customize list…" to show some.';
-export const LAUNCHER_NONE_RUNNABLE_MESSAGE = 'No agents, automations or signed scripts available. Sign a script on the Automations page.';
-export const LAUNCHER_EMPTY_MESSAGE = 'No agents or automations yet. Create one from the Agents or Automations page.';
+export const LAUNCHER_LOAD_FAILED_MESSAGE = 'Could not load AI Agents.';
+export const LAUNCHER_NONE_RUNNABLE_MESSAGE = 'No eligible launches. Manage definitions in AI Agents.';
+export const LAUNCHER_EMPTY_MESSAGE = 'No definitions yet. Create one in AI Agents.';
 export const LAUNCHER_ITEM_CONTEXT = 'launcherItem';
-const SCRIPT_KEY_PREFIX = 'script:';
-
-/**
- * Shapes the server's launcher catalog: one entry per automation (`jobId`) or script
- * (`status`), malformed entries dropped, sorted by saved order.
- */
 export function normalizeLauncherItems(raw: unknown): LauncherItem[] {
-    if (!Array.isArray(raw)) {
-        return [];
-    }
-
-    return raw
-        .map((entry): LauncherItem => {
-            const item = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>;
-            const kind: LauncherItem['kind'] = item.kind === 'script' ? 'script' : 'automation';
-            const scriptFileName = typeof item.scriptFileName === 'string' && item.scriptFileName
-                ? item.scriptFileName
-                : undefined;
-            return {
-                key: String(item.key || ''),
-                kind,
-                label: String(item.label || ''),
-                ...(scriptFileName ? { scriptFileName } : {}),
-                jobId: Number(item.jobId),
-                enabled: Boolean(item.enabled),
-                order: Number(item.order) || 0,
-                status: kind === 'script' ? String(item.status || 'unapproved') : null
-            };
-        })
-        .filter((item) => item.key && (item.kind === 'script' || Number.isFinite(item.jobId)))
-        .sort((a, b) => a.order - b.order);
+    if (!Array.isArray(raw)) return [];
+    return raw.filter(item => item && typeof item.id === 'string' && item.id
+        && typeof item.name === 'string' && item.name
+        && ['preset', 'action'].includes(item.definitionType))
+        .map(item => ({ id: item.id, key: `${item.definitionType}:${item.id}`,
+            definitionType: item.definitionType, kind: String(item.kind), name: item.name, label: item.name,
+            enabled: item.enabled === true, retired: item.retired === true, canLaunch: item.canLaunch === true,
+            ineligibleReason: typeof item.ineligibleReason === 'string' ? item.ineligibleReason : undefined }));
 }
-
-/** A launcher item can be run right now: automations always, scripts only while signed. */
 export function isLauncherItemRunnable(item: LauncherItem): boolean {
-    return item.kind !== 'script' || item.status === 'approved';
+    return item.enabled && !item.retired && item.canLaunch;
 }
-
-/** The rows the flyout shows: runnable and not hidden by the user's customization. */
-export function visibleLauncherItems(items: LauncherItem[]): LauncherItem[] {
-    return items.filter((item) => isLauncherItemRunnable(item) && item.enabled);
-}
-
-/**
- * The flyout's empty-state text for a catalog, or `undefined` when there is something to
- * show. `null` stands for a catalog that could not be loaded.
- */
+export function visibleLauncherItems(items: LauncherItem[]): LauncherItem[] { return items; }
 export function launcherEmptyMessage(items: LauncherItem[] | null): string | undefined {
-    if (items === null) {
-        return LAUNCHER_LOAD_FAILED_MESSAGE;
-    }
-    const runnable = items.filter(isLauncherItemRunnable);
-    const visible = runnable.filter((item) => item.enabled);
-    if (visible.length > 0) {
-        return undefined;
-    }
-    if (runnable.length > 0) {
-        return LAUNCHER_ALL_HIDDEN_MESSAGE;
-    }
-    return items.length > 0 ? LAUNCHER_NONE_RUNNABLE_MESSAGE : LAUNCHER_EMPTY_MESSAGE;
+    if (items === null) return LAUNCHER_LOAD_FAILED_MESSAGE;
+    if (!items.length) return LAUNCHER_EMPTY_MESSAGE;
+    return items.some(isLauncherItemRunnable) ? undefined : LAUNCHER_NONE_RUNNABLE_MESSAGE;
 }
-
-/** What the flyout hands to `PythonScriptsController.run`: the registration id behind the key. */
-export function scriptNameFromItem(item: LauncherItem): string {
-    return item.key.startsWith(SCRIPT_KEY_PREFIX) ? item.key.slice(SCRIPT_KEY_PREFIX.length) : item.label;
+export function launcherItemDescription(item: LauncherItem): string {
+    return isLauncherItemRunnable(item) ? item.kind : 'Unavailable';
 }
-
-/** Row description: the script runtime read from the file extension, as the flyout's icons do. */
-export function launcherItemDescription(item: LauncherItem): string | undefined {
-    if (item.kind !== 'script') {
-        return undefined;
-    }
-    const fileName = (item.scriptFileName || item.label).toLowerCase();
-    if (fileName.endsWith('.py')) { return 'Python'; }
-    if (fileName.endsWith('.ps1')) { return 'PowerShell'; }
-    if (fileName.endsWith('.sh')) { return 'Bash'; }
-    return 'Script';
-}
-
 export interface LauncherProviderDependencies {
-    /** True once the backend is authenticated and healthy, with or without a dashboard panel. */
     isBackendReady(): boolean;
-    /** Resolves the body of `GET /api/v1/automation-nav/preferences`. */
     fetchItems(): Promise<unknown>;
 }
 
@@ -174,37 +98,30 @@ export class LauncherTreeDataProvider implements vscode.TreeDataProvider<Launche
     }
 
     public getTreeItem(item: LauncherNode): vscode.TreeItem {
-        if (item.kind === 'group') {
+        if ('category' in item) {
             const node = new vscode.TreeItem(item.label, vscode.TreeItemCollapsibleState.Expanded);
             node.id = `launcher-group:${item.key}`;
             node.description = String(this.getChildren(item).length);
             node.contextValue = 'launcherGroup';
-            node.iconPath = new vscode.ThemeIcon(item.category === 'script' ? 'code' : 'rocket');
+            node.iconPath = new vscode.ThemeIcon(item.category === 'action' ? 'code' : 'rocket');
             return node;
         }
         const node = new vscode.TreeItem(item.label, vscode.TreeItemCollapsibleState.None);
         node.id = item.key;
         node.description = launcherItemDescription(item);
-        const runtime = launcherItemDescription(item);
-        const icon = runtime === 'PowerShell' ? 'terminal-powershell' : runtime === 'Bash' ? 'terminal-bash'
-            : item.kind === 'script' ? 'file-code' : 'zap';
-        const color = runtime === 'Python' ? 'charts.yellow' : runtime === 'Bash' ? 'charts.green'
-            : item.kind === 'script' ? 'charts.blue' : 'charts.purple';
-        node.iconPath = new vscode.ThemeIcon(icon, new vscode.ThemeColor(color));
-        node.tooltip = item.kind === 'script'
-            ? `${item.label}\n${runtime} · Signed\nRun in a private script terminal. Input is not saved.`
-            : `Run ${item.label} now`;
+        node.iconPath = new vscode.ThemeIcon(item.definitionType === 'action' ? 'code' : 'zap');
+        node.tooltip = item.ineligibleReason || `Run ${item.label} now`;
         node.contextValue = LAUNCHER_ITEM_CONTEXT;
-        node.command = { command: COMMAND_LAUNCHER_RUN, title: 'Run now', arguments: [item] };
+        if (isLauncherItemRunnable(item)) node.command = { command: COMMAND_LAUNCHER_RUN, title: 'Run now', arguments: [item] };
         return node;
     }
 
     public getChildren(element?: LauncherNode): LauncherNode[] {
         const items = this.getItems();
-        if (element?.kind === 'group') return items.filter(item => item.kind === element.category);
+        if (element && 'category' in element) return items.filter(item => item.definitionType === element.category);
         if (element) return [];
-        // Keep the user's saved order within each section; omit empty headings.
-        return LAUNCHER_GROUPS.filter(group => items.some(item => item.kind === group.category));
+        // Keep catalog order within each section; omit empty headings.
+        return LAUNCHER_GROUPS.filter(group => items.some(item => item.definitionType === group.category));
     }
 
     public dispose(): void {
@@ -241,82 +158,38 @@ export class LauncherTreeDataProvider implements vscode.TreeDataProvider<Launche
 }
 
 export interface RunLauncherDependencies {
-    /** Authenticated call to the running backend; rejects with `BackendRequestError` on a non-2xx. */
-    request(method: BackendMethod, path: string): Promise<unknown>;
-    /** Starts the backend and opens the panel when needed; resolves once it is open. */
+    request(method: BackendMethod, path: string, body?: unknown): Promise<unknown>;
     openDashboard(): Promise<void>;
     reveal(): void;
-    /** Delivers a message to the dashboard once its bridge is ready; false when it never was. */
     post(message: object): Promise<boolean>;
     notifyQueued(label: string, message: string): void;
     notifyError(message: string): void;
-    /** Asked for after a 404: the row no longer exists on the server. */
     refresh(): void;
-    /**
-     * Keys guarded against a repeated delivery: a run in flight, or one that settled less than
-     * the click cooldown ago. A second click on the same row is ignored meanwhile.
-     */
     running: Set<string>;
-    /** Overrides `LAUNCHER_CLICK_COOLDOWN_MS`; tests use 0. */
     clickCooldownMs?: number;
 }
-
-/**
- * How long a row stays guarded after its run settles. VS Code delivers a tree row's command
- * once for the first click and again for the double-click, up to the OS double-click time
- * later (900 ms at the Windows maximum). A quick run that settled between the two deliveries
- * would otherwise let the second one queue the Automation again, which the backend rejects as
- * an overlapping run.
- */
 export const LAUNCHER_CLICK_COOLDOWN_MS = 1000;
-
-/**
- * Runs one row the way a flyout click would. The guard set defuses the double delivery a
- * tree row's command gets from a double-click, whether or not the first run is still in flight.
- */
 export async function runLauncherItem(item: LauncherItem | undefined, dependencies: RunLauncherDependencies): Promise<void> {
-    if (!item || typeof item.key !== 'string' || !item.key || dependencies.running.has(item.key)) {
-        return;
-    }
-
+    if (!item?.id || !isLauncherItemRunnable(item) || dependencies.running.has(item.key)) return;
     dependencies.running.add(item.key);
     try {
-        if (item.kind === 'script') {
-            await runScript(item, dependencies);
-        } else {
-            await runAutomation(item, dependencies);
+        if (item.definitionType === 'preset') {
+            // Use the same template-value prompt, revision check and terminal
+            // adoption as the browser picker before posting the typed run.
+            await dependencies.openDashboard();
+            dependencies.reveal();
+            if (!await dependencies.post({ command: 'launchDefinition', definitionId: item.id, definitionType: 'preset' }))
+                throw new Error('The dashboard could not receive this launch. Try again.');
+            return;
         }
+        await dependencies.request('POST', LAUNCH_RUNS_PATH,
+            { definitionId: item.id, definitionType: item.definitionType, occurrenceId: randomUUID() });
+        dependencies.notifyQueued(item.label, 'Queued.');
+        void dependencies.post({ command: 'launchQueued', definitionId: item.id, definitionType: item.definitionType });
     } catch (error) {
+        if (error instanceof BackendRequestError && [404, 409, 400].includes(error.status)) dependencies.refresh();
         dependencies.notifyError(`${item.label}: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
-        // Not released at once: the double-click's second delivery may still be on its way.
         setTimeout(() => dependencies.running.delete(item.key), dependencies.clickCooldownMs ?? LAUNCHER_CLICK_COOLDOWN_MS);
-    }
-}
-
-async function runAutomation(item: LauncherItem, dependencies: RunLauncherDependencies): Promise<void> {
-    let message: string;
-    try {
-        const response = await dependencies.request('POST', jobRunPath(item.jobId)) as { message?: unknown } | null | undefined;
-        const text = typeof response?.message === 'string' ? response.message.trim() : '';
-        message = text || 'Queued.';
-    } catch (error) {
-        if (error instanceof BackendRequestError && error.status === 404) {
-            dependencies.refresh();
-        }
-        throw error;
-    }
-
-    dependencies.notifyQueued(item.label, message);
-    // The dashboard, when it is on screen, shows its usual toast and refreshes its run list.
-    void dependencies.post({ command: 'automationQueued', jobId: item.jobId, message });
-}
-
-async function runScript(item: LauncherItem, dependencies: RunLauncherDependencies): Promise<void> {
-    await dependencies.openDashboard();
-    dependencies.reveal();
-    const delivered = await dependencies.post({ command: 'runScript', name: scriptNameFromItem(item) });
-    if (!delivered) {
-        throw new Error('The dashboard did not respond. Try again.');
     }
 }

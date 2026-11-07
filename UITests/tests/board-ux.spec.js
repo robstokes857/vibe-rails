@@ -1404,41 +1404,6 @@ test('draft image attachments survive creation', async ({ page }) => {
     await expect(page.locator('[data-board-attachments] .board-attachment-thumb')).toBeVisible();
 });
 
-test('lane Agents adds VCA for working changes and Code quality for linked card commits', async ({ page }) => {
-    const { jobs, settings } = await openLaneAgentsBoard(page);
-    settings.lane_2.runningAgents = [{ runId: 'run_1', name: 'Code reviewer', cardId: 'card_test', cardLabel: 'VIBE-34 · My card', terminalSessionId: 'recording_1' }];
-    const created = [];
-    await page.route('**/api/v1/jobs', route => {
-        const body = route.request().postDataJSON();
-        created.push(body); const job = { ...body, id: 40 + created.length }; jobs.push(job);
-        return route.fulfill({ json: job });
-    });
-    const button = page.getByRole('button', { name: 'Agents and Automations on entry to Review', exact: true });
-    await button.click();
-    const panel = page.locator('.board-lane-agents-panel');
-    await expect(panel.locator('[data-lane-running]')).toContainText('VIBE-34 · My card');
-    for (const choice of ['check:3', 'check:2']) {
-        await panel.getByRole('button', { name: 'Add agent or automation', exact: true }).click();
-        await panel.getByLabel('What would you like to add?').selectOption(choice);
-        await expect(panel.locator('[data-agent-scope]')).toHaveCount(0);
-        // VIBE-278: only Code quality offers a failing grade; feedback only is the default.
-        const findings = panel.getByLabel('Findings', { exact: true });
-        await expect(findings).toHaveCount(choice === 'check:2' ? 1 : 0);
-        if (choice === 'check:2') {
-            await expect(findings).toHaveValue('');
-            await findings.selectOption('C');
-        }
-        await panel.getByRole('button', { name: 'Add to lane', exact: true }).click();
-        await expect(panel.getByRole('button', { name: 'Add agent or automation', exact: true })).toBeVisible();
-    }
-    expect(created.map(job => job.actions)).toEqual([[{ kind: 3, arguments: ['working-tree'] }], [{ kind: 2, arguments: ['card', 'minimum', 'C'] }]]);
-    expect(created[1].name).toBe('Code quality · Review · card · minimum C');
-    expect(settings.lane_2.jobIds).toEqual([12, 14, 41, 42]);
-    await page.evaluate(() => { window.app.boardController.goToCardAutomation = (...args) => { window.__openedLaneAgent = args; }; });
-    await panel.locator('[data-lane-running-id="run_1"]').click();
-    expect(await page.evaluate(() => window.__openedLaneAgent)).toEqual(['card_test', 'recording_1']);
-});
-
 test('large inline rasters use authenticated content and release Blob URLs on close', async ({ page }) => {
     await openBoard(page, { onCard: card => { card.attachments[0].url = ''; } });
     let reads = 0;
@@ -1685,7 +1650,7 @@ test('move and merge use explicit destinations and preserve drafts until saved',
     let moved, merged;
     let finishMove;
     const moveResponse = new Promise(resolve => { finishMove = resolve; });
-    await page.route('**/api/v1/board/columns/col_build/automation', route => route.fulfill({ json: { jobIds: [7] } }));
+    await page.route('**/api/v1/board/columns/col_build/launches', route => route.fulfill({ json: { selections: [{ definitionId: "preset_7", definitionType: "preset", gate: "result" }] } }));
     await page.route('**/api/v1/board/cards/card_test/move', async route => {
         moved = route.request().postDataJSON();
         current.boardId = 'brd_sprint'; current.columnId = moved.columnId;
@@ -1708,7 +1673,7 @@ test('move and merge use explicit destinations and preserve drafts until saved',
     await editor.locator('#board-card-title').fill('Description images');
     await editor.locator('[data-move-card]').click();
     const confirmation = page.getByRole('alertdialog');
-    await expect(confirmation).toContainText('1 configured Agent or Automation');
+    await expect(confirmation).toContainText('1 configured Agent or Action');
     await confirmation.getByRole('button', { name: 'Move', exact: true }).click();
     await expect.poll(() => moved).toEqual({ columnId: 'col_build' });
     await expect(editor.locator('#board-card-title')).toBeDisabled();
@@ -1730,7 +1695,7 @@ test('move rechecks edits made while loading the destination before confirmation
     const destinationResponse = new Promise(resolve => { releaseDestination = resolve; });
     let destinationRequested = false;
     let moved = false;
-    await page.route('**/api/v1/board/columns/col_build/automation', async route => {
+    await page.route('**/api/v1/board/columns/col_build/launches', async route => {
         destinationRequested = true;
         await destinationResponse;
         return route.fulfill({ json: { jobIds: [] } });
@@ -1802,7 +1767,7 @@ test('display IDs are visible and editable while permanent IDs remain available'
     const editor = page.locator('[data-board-card-editor]');
     await expect(page.locator('.modal-title')).toContainText('VIBE-7');
     await expect(editor.locator('.board-editor-actions')).not.toContainText('Chat with agent');
-    await expect(editor.getByRole('region', { name: 'Discuss this card' })).toContainText('Leave blank to start an open discussion.');
+    await expect(editor.getByRole('region', { name: 'Discuss this card' })).toContainText('Leave blank for an open discussion.');
     const picker = editor.locator('.board-chat-controls .ts-wrapper');
     const chat = editor.locator('[data-board-chat]');
     expect(await picker.evaluate((element, other) => Boolean(element.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING), await chat.elementHandle())).toBe(true);
@@ -1964,7 +1929,7 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
             '/api/v1/llm-picker/preferences': { items: [
                 { key: 'base:codex', kind: 'base', group: 'Base CLIs', label: 'Codex', cli: 'codex', enabled: true, order: 0 },
                 { key: 'base:claude', kind: 'base', group: 'Base CLIs', label: 'Claude', cli: 'claude', enabled: true, order: 1 },
-                { key: 'env:7:claude', kind: 'environment', group: 'Custom Environments', label: 'Card review (claude)',
+                { key: 'preset:fixture_7:claude', kind: 'agent', group: 'AI Agents', label: 'Card review (claude)',
                     cli: 'claude', environmentId: 7, enabled: true, order: 2 },
                 ...extraPickerItems
             ] },
@@ -2536,744 +2501,35 @@ test('Settings reuses the App-only context disclosure and single save action', a
     await expect.poll(() => saved.message).toBe('All projects');
 });
 
-async function openLaneAgentsBoard(page) {
-    const columns = ['Backlog', 'In Progress', 'Review', 'Done'].map((name, position) => ({
-        id: `lane_${position}`, name, position, boardId: 'brd_main', color: ['#64748b', '#06b6d4', '#a855f7', '#10b981'][position]
-    }));
-    await openBoard(page, { columns, onCard: card => { card.columnId = 'lane_0'; } });
-    const jobs = [
-        { id: 12, name: 'Code reviewer', description: 'Checks the changes', enabled: true },
-        { id: 14, name: 'Test runner', description: 'Runs the test suite', enabled: true },
-        { id: 15, name: 'Release checks', description: 'Checks the release', enabled: true }
-    ].map(job => ({ ...job, projectPath: 'C:/board-fixture', llm: 1, prompt: 'Keep this prompt',
-        timeoutMinutes: 25, environmentId: null, launchMinimized: true, triggers: [{ kind: 3 }],
-        actions: [{ id: 'script_1', kind: 1, scriptPath: 'checks.py', scriptRuntime: 0, arguments: ['--check'] }] }));
-    // Resolve the actual Worker, even when a script runs first or the legacy job LLM differs.
-    jobs[0].llm = 2;
-    jobs[0].actions.push({ id: 'worker_1', kind: 0, environmentId: 8, environmentName: 'Review Worker', llm: 1 });
-    jobs[1].actions.push({ id: 'worker_2', kind: 0, environmentId: 7, environmentName: 'Test Worker', llm: 2 });
-    const settings = Object.fromEntries(columns.map(column => [column.id, { jobIds: column.id === 'lane_2' ? [12, 14] : [], revision: 3 }]));
-    const writes = [];
-    await page.route('**/api/v1/jobs?**', route => route.fulfill({ json: { jobs } }));
-    await page.route(/\/api\/v1\/jobs\/\d+$/, route => {
-        const id = Number(new URL(route.request().url()).pathname.split('/').pop());
-        const job = jobs.find(item => item.id === id);
-        if (route.request().method() === 'PUT') {
-            const body = route.request().postDataJSON();
-            writes.push({ kind: 'description', id, body });
-            Object.assign(job, body);
-        }
-        return route.fulfill({ json: job });
-    });
-    await page.route('**/api/v1/board/columns/*/automation', route => {
-        const id = new URL(route.request().url()).pathname.split('/').at(-2);
-        const current = settings[id];
-        if (route.request().method() === 'PUT') {
-            const body = route.request().postDataJSON();
-            expect(body.expectedRevision).toBe(current.revision);
-            const reordering = body.jobIds.length === current.jobIds.length && body.jobIds.every(jobId => current.jobIds.includes(jobId));
-            expect(reordering || body.jobIds.every(jobId => jobs.some(job => job.id === jobId && job.enabled))).toBe(true);
-            writes.push({ kind: 'selection', id, body });
-            current.jobIds = body.jobIds;
-            current.revision++;
-        }
-        return route.fulfill({ json: { ...current, jobs: jobs.map(({ id, name, enabled, setup }) => ({ id, name, enabled, setup })) } });
-    });
-    await page.route('**/api/v1/jobs/scripts', route => route.fulfill({ json: { scripts: [
-        { path: 'scripts/validate.ps1', runtime: 1, approved: true },
-        { path: 'scripts/test.py', runtime: 0, approved: false },
-        { path: 'scripts/missing.sh', runtime: 2, approved: false, unavailableReason: 'Bash unavailable' }
-    ], hasMore: false } }));
-    await page.evaluate(() => window.app.boardController.refresh());
-    return { jobs, settings, writes };
-}
-
-for (const width of [1440, 390]) {
-    test(`lane actions reorder with keyboard and persist without rewriting jobs at ${width}px`, async ({ page }, testInfo) => {
-        await page.setViewportSize({ width, height: 900 });
-        const { jobs, settings, writes } = await openLaneAgentsBoard(page);
-        jobs.push({ ...jobs[2], id: 16, name: 'VCA', actions: [{ kind: 3, arguments: ['working-tree'] }] });
-        jobs[0].enabled = false;
-        settings.lane_2.jobIds = [12, 14, 15, 16];
-        const button = page.getByRole('button', { name: 'Agents and Automations on entry to Review', exact: true });
-        await button.click();
-        const panel = page.getByRole('dialog', { name: 'Agents and Automations', exact: true });
-        const order = () => panel.locator('.board-lane-agent').evaluateAll(rows => rows.map(row => Number(row.dataset.agentId)));
-        await expect(panel.getByRole('button', { name: 'Move Code reviewer up', exact: true })).toBeDisabled();
-        await expect(panel.getByRole('button', { name: 'Move VCA down', exact: true })).toBeDisabled();
-        await panel.getByRole('button', { name: 'Move VCA up', exact: true }).focus();
-        await page.keyboard.press('Enter');
-        await expect.poll(order).toEqual([12, 14, 16, 15]);
-        await expect(panel.getByRole('button', { name: 'Move VCA up', exact: true })).toBeFocused();
-        await panel.getByRole('button', { name: 'Move Code reviewer down', exact: true }).click();
-        await expect.poll(order).toEqual([14, 12, 16, 15]);
-        expect(writes.map(write => write.kind)).toEqual(['selection', 'selection']);
-        expect(writes.map(write => write.body.expectedRevision)).toEqual([3, 4]);
-        expect(jobs[0].enabled).toBe(false);
-        await page.keyboard.press('Escape');
-        await button.click();
-        await expect.poll(order).toEqual([14, 12, 16, 15]);
-        expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
-        await page.screenshot({ path: testInfo.outputPath(`lane-order-${width}.png`) });
-    });
-
-    test(`lane editors save and cancel over the same Board at ${width}px`, async ({ page }, testInfo) => {
-        await page.setViewportSize({ width, height: 900 });
-        const { jobs, settings, writes } = await openLaneAgentsBoard(page);
-        settings.lane_2.jobIds.push(15);
-        await page.route('**/api/v1/environments', route => route.fulfill({ json: { environments: [
-            { id: 8, name: 'Review Worker', cli: 'codex', customPrompt: 'Review the changes.', automationWorker: true,
-                projectPath: 'C:/board-fixture', customArgs: '--sandbox read-only --search' }
-        ] } }));
-        const board = await page.locator('#app-content [data-view="board"]').elementHandle();
-        const originalUrl = page.url();
-        await page.locator('[data-board-filter-priority]').selectOption('medium');
-        const button = page.getByRole('button', { name: 'Agents and Automations on entry to Review', exact: true });
-        for (const [id, name, noun] of [[12, 'Code reviewer', 'agent'], [15, 'Release checks', 'automation']]) {
-            await button.click();
-            await page.getByRole('button', { name: `Edit ${name}`, exact: true }).click();
-            const editor = page.locator('[data-job-editor]');
-            await expect(editor.locator('#job-name')).toHaveValue(name);
-            expect(page.url()).toBe(originalUrl);
-            expect(await page.evaluate(() => window.app.currentView)).toBe('board');
-            expect(await board.evaluate(el => el.isConnected)).toBe(true);
-            await page.evaluate(() => window.app.boardController.renderLanes());
-            await editor.locator('#job-name').fill(`${name} updated`);
-            await page.screenshot({ path: testInfo.outputPath(`lane-editor-${noun}-${width}.png`) });
-            await editor.getByRole('button', { name: `Save ${noun}`, exact: true }).click();
-            await expect(editor).toHaveCount(0);
-            await expect(button).toBeFocused();
-            await expect(page.locator('[data-board-filter-priority]')).toHaveValue('medium');
-            expect(jobs.find(job => job.id === id).name).toBe(`${name} updated`);
-            await button.click();
-            await page.getByRole('button', { name: `Edit ${name} updated`, exact: true }).click();
-            await expect(editor.locator('#job-name')).toHaveValue(`${name} updated`);
-            await editor.locator('#job-name').fill('Discard this edit');
-            await editor.getByRole('button', { name: 'Cancel', exact: true }).click();
-            await expect(button).toBeFocused();
-            expect(jobs.find(job => job.id === id).name).toBe(`${name} updated`);
-        }
-        expect(writes.map(write => write.kind)).toEqual(['description', 'description']);
-        expect(settings.lane_2.jobIds).toEqual([12, 14, 15]);
-        expect(page.url()).toBe(originalUrl);
-    });
-}
-
-test('lane reorder conflicts preserve the list and reload the latest order before retrying', async ({ page }) => {
-    const { settings, jobs } = await openLaneAgentsBoard(page);
-    let conflict = true;
-    await page.route('**/api/v1/board/columns/lane_2/automation', route => {
-        if (route.request().method() === 'PUT') {
-            if (conflict) {
-                settings.lane_2.jobIds = [14, 12]; settings.lane_2.revision++;
-                return route.fulfill({ status: 409, json: { error: 'Lane changed. Reload before saving.' } });
-            }
-            const body = route.request().postDataJSON();
-            expect(body.expectedRevision).toBe(4);
-            settings.lane_2.jobIds = body.jobIds; settings.lane_2.revision++;
-        }
-        return route.fulfill({ json: { ...settings.lane_2, jobs } });
-    });
-    await page.getByRole('button', { name: 'Agents and Automations on entry to Review', exact: true }).click();
-    const panel = page.getByRole('dialog', { name: 'Agents and Automations', exact: true });
-    const order = () => panel.locator('.board-lane-agent').evaluateAll(rows => rows.map(row => Number(row.dataset.agentId)));
-    await panel.getByRole('button', { name: 'Move Test runner up', exact: true }).click();
-    await expect(panel.getByRole('alert')).toContainText('Lane changed');
-    expect(await order()).toEqual([12, 14]);
-    await panel.getByRole('button', { name: 'Reload', exact: true }).click();
-    await expect.poll(order).toEqual([14, 12]);
-    conflict = false;
-    await panel.getByRole('button', { name: 'Move Code reviewer up', exact: true }).click();
-    await expect.poll(order).toEqual([12, 14]);
-});
-
-for (const replacement of ['navigation', 'another dialog', 'a closed newer dialog']) {
-    test(`a late lane editor load cannot replace ${replacement}`, async ({ page }) => {
-        const { jobs } = await openLaneAgentsBoard(page);
-        let release, requested = false;
-        const gate = new Promise(resolve => { release = resolve; });
-        await page.route('**/api/v1/jobs/12', async route => {
-            requested = true; await gate;
-            await route.fulfill({ json: jobs[0] }).catch(() => {});
-        });
-        await page.evaluate(() => {
-            const controller = window.app.jobController;
-            const open = controller.openFromBoard.bind(controller);
-            controller.openFromBoard = options => (window.__laneEditorLoad = open(options));
-        });
-        await page.getByRole('button', { name: 'Agents and Automations on entry to Review', exact: true }).click();
-        await page.getByRole('button', { name: 'Edit Code reviewer', exact: true }).click();
-        await expect.poll(() => requested).toBe(true);
-        if (replacement === 'navigation') await page.evaluate(() => window.app.navigate('jobs'));
-        else await page.evaluate(close => {
-            window.app.showModal('Keep this dialog', '<p>Another task</p>');
-            if (close) window.app.closeModal();
-        }, replacement === 'a closed newer dialog');
-        release();
-        await page.evaluate(() => window.__laneEditorLoad);
-        await expect(page.locator('[data-job-editor]')).toHaveCount(0);
-        if (replacement === 'another dialog') await expect(page.getByRole('dialog', { name: 'Keep this dialog' })).toBeVisible();
-    });
-}
-
-test('adding an Automation offers a separate optional Worker purpose', async ({ page }) => {
-    const { writes } = await openLaneAgentsBoard(page);
-    await page.route('**/api/v1/environments', route => route.fulfill({ json: { environments: [
-        { id: 7, name: 'Test Worker', cli: 'codex', purpose: 'work' }
-    ] } }));
-    const updates = [];
-    await page.route('**/api/v1/environments/Test%20Worker', route => {
-        updates.push(route.request().postDataJSON());
-        return route.fulfill({ json: { success: true } });
-    });
-    await page.getByRole('button', { name: 'Agents and Automations on entry to Backlog', exact: true }).click();
-    await page.getByRole('button', { name: 'Add agent or automation', exact: true }).click();
-    await page.locator('#board-lane-agent-choice').selectOption('agent');
-    await page.locator('#board-lane-agent').selectOption('14');
-    await expect(page.locator('#board-lane-purpose')).toHaveValue('work');
-    await page.locator('#board-lane-purpose').selectOption('testing');
-    await page.getByRole('button', { name: 'Add to lane', exact: true }).click();
-    await expect.poll(() => updates).toEqual([{ purpose: 'testing' }]);
-    await expect.poll(() => writes.some(w => w.kind === 'selection' && w.body.jobIds.includes(14))).toBe(true);
-});
-
-for (const width of [1440, 390]) {
-    test(`lane script creation and retry after a settings conflict at ${width}px`, async ({ page }, testInfo) => {
-        await page.setViewportSize({ width, height: 900 });
-        const { jobs, settings } = await openLaneAgentsBoard(page);
-        let creates = 0;
-        let conflict = true;
-        await page.route('**/api/v1/jobs', route => {
-            const job = { ...route.request().postDataJSON(), id: 71 };
-            jobs.push(job); creates++;
-            return route.fulfill({ json: job });
-        });
-        await page.route('**/api/v1/board/columns/lane_2/automation', async route => {
-            if (route.request().method() !== 'PUT') return route.fallback();
-            if (conflict) { conflict = false; return route.fulfill({ status: 409, json: { error: 'Selection changed. Retry.' } }); }
-            return route.fallback();
-        });
-        await page.getByRole('button', { name: 'Agents and Automations on entry to Review', exact: true }).click();
-        const panel = page.locator('.board-lane-agents-panel');
-        await panel.getByRole('button', { name: 'Add agent or automation', exact: true }).click();
-        await panel.getByLabel('What would you like to add?').selectOption('script');
-        await panel.getByLabel('Script file', { exact: true }).selectOption('scripts/validate.ps1');
-        await expect(panel).toContainText('2 valid scripts · 1 approved');
-        await expect(panel.getByLabel('Automation name', { exact: true })).toHaveAttribute('maxlength', '100');
-        await panel.getByLabel('Automation name', { exact: true }).evaluate(input => {
-            input.value = 'x'.repeat(101);
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-        });
-        await panel.getByRole('button', { name: 'Add to lane', exact: true }).click();
-        await expect(panel).toContainText('Give this script Automation a name of up to 100 characters.');
-        expect(creates).toBe(0);
-        await panel.getByLabel('Automation name', { exact: true }).fill('Validate release');
-        await panel.getByLabel('Script file', { exact: true }).selectOption('scripts/validate.ps1');
-        await panel.getByLabel('Arguments — one per line').fill('--message\ntwo words\n$(literal)');
-        expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
-        await page.screenshot({ path: testInfo.outputPath(`lane-script-${width}.png`) });
-        await panel.getByRole('button', { name: 'Add to lane', exact: true }).click();
-        await expect(panel).toContainText('Selection changed. Retry.');
-        await expect(panel.getByLabel('Automation', { exact: true })).toHaveValue('71');
-        await panel.getByRole('button', { name: 'Add to lane', exact: true }).click();
-        await expect.poll(() => settings.lane_2.jobIds).toEqual([12, 14, 71]);
-        expect(creates).toBe(1);
-        expect(jobs.find(job => job.id === 71).actions).toEqual([{ kind: 1, scriptPath: 'scripts/validate.ps1',
-            scriptRuntime: 1, arguments: ['--message', 'two words', '$(literal)'] }]);
-    });
-}
-
 test('waiting badge follows server activity and skip preserves editor drafts', async ({ page }, testInfo) => {
     let waiting = true;
     await openBoard(page, { onCard: card => { card.hasWaitingAutomation = true; } });
-    const entry = { jobId: 17, eventKey: 'entry-waiting', name: 'Review', status: 'Waiting', reason: 'Busy with an earlier card.' };
+    const state = await installLaunchFixture(page);
+    state.activity = [{ cardLabel: 'VIBE-1', definitionName: 'Review', entry: {
+        id: 'entry-waiting', cardId: 'card_test', definitionId: 'preset_review', current: true,
+        processStatus: 'queued', gate: 'review', summary: 'Waiting for the preceding run.'
+    } }];
     await page.route('**/api/v1/board/cards/activity', route => route.fulfill({ json: {
         cards: [{ id: 'card_test', activeSessionId: null, activeTabId: null, hasActiveAutomation: false, hasWaitingAutomation: waiting }]
     } }));
-    const response = () => ({ jobs: [], runs: [], laneEntries: [entry] });
-    await page.route('**/api/v1/board/cards/card_test/automations', route => route.fulfill({ json: response() }));
-    const skips = [];
-    await page.route('**/api/v1/board/cards/card_test/automations/skip', async route => {
-        skips.push(route.request().postDataJSON());
-        await new Promise(resolve => setTimeout(resolve, 100));
-        waiting = false; entry.status = 'Skipped'; entry.reason = 'User chose to continue without this Automation.';
-        return route.fulfill({ json: response() });
+    await page.route('**/api/v1/board/cards/card_test/launches/entry-waiting/skip', async route => {
+        state.skips++; waiting = false; state.activity[0].entry.skipRequested = true;
+        return route.fulfill({ status: 204 });
     });
-    // The initial activity request may finish before these waiting-state routes are installed.
     await page.evaluate(() => window.app.boardController.refreshSessionActivity());
     await expect(page.locator('.board-automation-waiting')).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath('waiting-card.png') });
     await page.locator('.board-automation-waiting').click();
     await page.locator('#board-card-title').fill('Keep my draft');
-    const skip = page.getByRole('button', { name: 'Skip this step', exact: true });
-    await expect(skip).toBeVisible();
-    await skip.click();
-    await expect(page.locator('[data-board-automation-runs]')).toContainText('Skipped');
+    await page.getByRole('button', { name: 'Stop and skip', exact: true }).click();
+    await expect(page.locator('[data-board-automation-runs]')).toContainText('Skip requested');
     await expect(page.locator('#board-card-title')).toHaveValue('Keep my draft');
-    expect(skips).toEqual([{ jobId: 17, eventKey: 'entry-waiting' }]);
+    expect(state.skips).toBe(1);
     await expect(page.locator('.board-automation-waiting')).toHaveCount(0);
     waiting = true;
     await page.evaluate(() => window.app.boardController.refreshSessionActivity());
     await expect(page.locator('.board-automation-waiting')).toHaveCount(1);
     await expect(page.locator('#board-card-title')).toHaveValue('Keep my draft');
-});
-
-for (const width of [1440, 390]) {
-    test(`starter reviewer is editable and removable from the first lane at ${width}px`, async ({ page }, testInfo) => {
-        await page.setViewportSize({ width, height: 900 });
-        const { jobs, settings, writes } = await openLaneAgentsBoard(page);
-        jobs[0].setup = 'Setup needed: Install/sign in to claude. No provider will be substituted. <img src=x onerror="window.__setupXss=1">';
-        settings.lane_0.jobIds = [12];
-        const environments = [{ id: 8, name: 'Starter Worker', cli: 'codex', purpose: 'code_review',
-            reviewerRouting: { mode: 'switch', mappings: [
-                { sourceProvider: 'claude', reviewer: { selection: 'base:codex' } },
-                { sourceProvider: 'codex', reviewer: { selection: 'base:claude' } }
-            ], fallback: { selection: 'base:codex' } } }];
-        await page.route('**/api/v1/environments', route => route.fulfill({ json: { environments } }));
-        const reviewerWrites = [];
-        await page.route('**/api/v1/environments/Starter%20Worker', route => {
-            const body = route.request().postDataJSON(); reviewerWrites.push(body);
-            Object.assign(environments[0], body);
-            return route.fulfill({ json: environments[0] });
-        });
-        const launches = [];
-        page.on('request', request => { if (request.method() === 'POST' && /\/(launch|run|run-now)$/.test(new URL(request.url()).pathname)) launches.push(request.url()); });
-        await page.evaluate(() => window.app.boardController.refresh());
-        const button = page.getByRole('button', { name: 'Agents and Automations on entry to Backlog', exact: true });
-        await expect(button).toBeVisible();
-        const buttonBox = await button.boundingBox();
-        expect(buttonBox.x).toBeGreaterThanOrEqual(0);
-        await button.click();
-        const panel = page.getByRole('dialog', { name: 'Agents and Automations', exact: true });
-        await expect(panel).not.toContainText('Claude → Codex; Codex → Claude');
-        await expect(panel).not.toContainText('Code review report');
-        await expect(panel).toContainText('Each step waits for the previous one to pass or be skipped');
-        await expect(panel).not.toContainText('Setup needed: Install/sign in to claude');
-        expect(await page.evaluate(() => window.__setupXss)).toBeUndefined();
-        await expect(panel.getByRole('button', { name: 'Choose reviewer / edit mappings' })).toHaveCount(0);
-        await expect(panel.getByRole('button', { name: 'Edit Code reviewer', exact: true })).toBeEnabled();
-        expect(reviewerWrites).toHaveLength(0);
-        expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
-        await page.screenshot({ path: testInfo.outputPath(`starter-reviewer-${width}.png`) });
-        await panel.getByRole('button', { name: 'Remove Code reviewer from this lane' }).click();
-        await page.getByRole('alertdialog').getByRole('button', { name: 'Remove', exact: true }).click();
-        await expect.poll(() => settings.lane_0.jobIds).toEqual([]);
-        await panel.getByRole('button', { name: 'Close lane panel' }).click();
-        await button.click();
-        await expect(panel).toContainText('Nothing runs when a card enters this lane yet.');
-        expect(writes.every(write => write.kind === 'selection')).toBe(true);
-        expect(launches).toEqual([]);
-    });
-}
-
-for (const width of [1440, 390]) {
-    test(`lane agent model labels and shared running indicators at ${width}px`, async ({ page }, testInfo) => {
-        await page.setViewportSize({ width, height: 900 });
-        await openLaneAgentsBoard(page);
-        const environments = [
-            { id: 8, cli: 'codex', name: 'Review Worker', customArgs: '-m gpt-6.1-sol -c model_reasoning_effort="xhigh"' },
-            { id: 7, cli: 'claude', name: 'Test Worker', customArgs: '--model claude-opus-5-5[1m] --effort max' }
-        ];
-        await page.route('**/api/v1/environments', route => route.fulfill({ json: { environments } }));
-        let active = true;
-        await page.route('**/api/v1/board/cards/activity', route => route.fulfill({ json: {
-            cards: [{ id: 'card_test', activeSessionId: null, activeTabId: null, hasActiveAutomation: active }],
-            activeAutomationColumnIds: active ? ['lane_2'] : []
-        } }));
-        await page.evaluate(() => window.app.boardController.refreshSessionActivity());
-        const button = page.getByRole('button', { name: 'Agents and Automations on entry to Review', exact: true });
-        await expect(button).toHaveClass(/is-running/);
-        await expect(button.locator('.board-lane-agents-caption')).toHaveText('Running');
-        await expect(button.locator('.board-lane-agents-count')).toHaveText('2');
-        expect(await button.evaluate(el => getComputedStyle(el, '::after').animationName)).toBe('board-lane-agent-pulse');
-        const robot = button.locator('.fa-robot');
-        await expectAnimatedStyle(robot, 'opacity');
-        await expect(page.locator('.board-card .board-automation-running')).toHaveCount(1);
-        await button.scrollIntoViewIfNeeded();
-        await button.click();
-        const panel = page.getByRole('dialog', { name: 'Agents and Automations', exact: true });
-        await expect(panel).toContainText('GPT 6.1 Sol · Extra high effort');
-        await expect(panel).toContainText('Opus 5.5 · Maximum effort');
-        await expect(panel).not.toContainText('[1m]');
-        expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
-        await page.screenshot({ path: testInfo.outputPath(`lane-running-${width}.png`) });
-        await page.emulateMedia({ reducedMotion: 'reduce' });
-        expect(await button.evaluate(el => getComputedStyle(el, '::after').animationName)).toBe('none');
-        await expect(robot).toHaveCSS('animation-name', 'none');
-        await expect(robot).toHaveCSS('opacity', '1');
-        await expect(robot).not.toHaveCSS('filter', 'none');
-        expect(await page.locator('.board-automation-running').evaluate(el => getComputedStyle(el).animationName)).toBe('none');
-        // Activity updates preserve the open panel and its text drafts.
-        await panel.getByRole('button', { name: 'Add agent or automation', exact: true }).click();
-        await panel.getByLabel('What would you like to add?').selectOption('script');
-        await panel.getByLabel('Script file', { exact: true }).selectOption('scripts/validate.ps1');
-        const draft = panel.getByLabel('Automation name', { exact: true });
-        await draft.fill('Keep this draft while the agent finishes');
-        active = false;
-        await page.evaluate(() => window.app.boardController.refreshSessionActivity());
-        await expect(button).not.toHaveClass(/is-running/);
-        await expect(button.locator('.board-lane-agents-caption')).toHaveText('On entry');
-        await page.emulateMedia({ reducedMotion: 'no-preference' });
-        await expect(robot).toHaveCSS('animation-name', 'none');
-        await expect(robot).toHaveCSS('filter', 'none');
-        await expect(page.locator('.board-automation-running')).toHaveCount(0);
-        await expect(draft).toHaveValue('Keep this draft while the agent finishes');
-        // Unknown model identifiers render as text.
-        await page.keyboard.press('Escape');
-        environments[0].customArgs = '--model "<img src=x onerror=alert(1)>"';
-        await button.click();
-        await expect(panel.locator('.board-lane-agent-model').first()).toContainText('<img src=x onerror=alert(1)>');
-        await expect(panel.locator('.board-lane-agent-model img')).toHaveCount(0);
-    });
-}
-
-for (const width of [1440, 390]) {
-    test(`lane agent captions stay on one line above the lane cards at ${width}px`, async ({ page }) => {
-        await page.setViewportSize({ width, height: 900 });
-        await openLaneAgentsBoard(page);
-        await expect(page.locator('.board-lane-agents-count').first()).toHaveText('0');
-        const layout = await page.evaluate(() => ({
-            captions: [...document.querySelectorAll('.board-lane-agents-caption')].map(caption => {
-                const bounds = caption.getBoundingClientRect();
-                const style = getComputedStyle(caption);
-                return { text: caption.textContent, height: bounds.height, bottom: bounds.bottom,
-                    textLeft: bounds.left + parseFloat(style.paddingLeft), lineHeight: parseFloat(style.lineHeight) };
-            }),
-            canvasLeft: document.querySelector('.board-canvas').getBoundingClientRect().left,
-            contentTop: Math.min(...[...document.querySelectorAll('.board-lane-list > :first-child')]
-                .map(element => element.getBoundingClientRect().top))
-        }));
-        expect(layout.captions).toHaveLength(4);
-        for (const caption of layout.captions) {
-            expect(caption.text).toBe('On entry');
-            // Wrapped to "On" / "entry", the second line covered the top of the first card.
-            expect(caption.height).toBeLessThanOrEqual(caption.lineHeight + 1);
-            expect(caption.bottom).toBeLessThanOrEqual(layout.contentTop);
-            expect(caption.textLeft).toBeGreaterThanOrEqual(layout.canvasLeft);
-        }
-    });
-
-    test(`compact lane agents use existing controls and fit at ${width}px`, async ({ page }, testInfo) => {
-        await page.setViewportSize({ width, height: 900 });
-        const { jobs, settings, writes } = await openLaneAgentsBoard(page);
-        const buttons = page.locator('.board-lane-agents-button');
-        await expect(buttons).toHaveCount(4);
-        const button = page.getByRole('button', { name: 'Agents and Automations on entry to Review', exact: true });
-        await expect(button.locator('.board-lane-agents-count')).toHaveText('2');
-        await button.scrollIntoViewIfNeeded();
-        const geometry = await button.evaluate(el => {
-            const bounds = el.getBoundingClientRect();
-            const lane = el.closest('.board-lane').getBoundingClientRect();
-            const previous = el.closest('.board-lane').previousElementSibling.getBoundingClientRect();
-            return { overlapLeft: bounds.left < previous.right, overlapRight: bounds.right > lane.left,
-                above: bounds.top < lane.top, below: bounds.bottom > lane.top, gap: lane.left - previous.right };
-        });
-        expect(geometry).toMatchObject({ overlapLeft: true, overlapRight: true, above: true, below: true });
-        expect(geometry.gap).toBeLessThan(12);
-        await button.click();
-        const panel = page.getByRole('dialog', { name: 'Agents and Automations', exact: true });
-        await expect(panel).toContainText('Code reviewer');
-        await expect(panel).toContainText('60 seconds');
-        const codexLogo = panel.locator('[data-agent-id="12"]').getByRole('img', { name: 'Codex', exact: true });
-        const claudeLogo = panel.locator('[data-agent-id="14"]').getByRole('img', { name: 'Claude', exact: true });
-        await expect(codexLogo).toHaveAttribute('src', /openai\.svg$/);
-        await expect(claudeLogo).toHaveAttribute('src', /claude-color\.svg$/);
-        await expect.poll(() => codexLogo.evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true);
-        await expect.poll(() => claudeLogo.evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true);
-        await expect(panel.locator('.board-lane-agent-icon .fa-robot')).toHaveCount(0);
-        const bounds = await panel.boundingBox();
-        expect(bounds.x).toBeGreaterThanOrEqual(0);
-        expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
-        expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
-        await page.screenshot({ path: testInfo.outputPath(`lane-agents-${width}.png`) });
-        await expect(panel.getByRole('switch')).toHaveCount(0);
-        await expect(panel.locator('[data-agent-description]')).toHaveCount(0);
-        await expect(panel.locator('.board-lane-agent-description-preview')).toHaveCount(0);
-        await expect(panel.getByRole('button', { name: /Edit description|Choose reviewer/ })).toHaveCount(0);
-        await panel.getByRole('button', { name: 'Add agent or automation', exact: true }).click();
-        await expect(panel.locator('[data-agent-id]')).toHaveCount(0);
-        await expect(panel.locator('[data-lane-running]')).toBeHidden();
-        if (width > 720) expect((await panel.boundingBox()).width).toBeGreaterThan(600);
-        await panel.getByLabel('What would you like to add?').selectOption('automation');
-        await panel.getByLabel('Automation', { exact: true }).selectOption('15');
-        await panel.getByRole('button', { name: 'Add to lane', exact: true }).click();
-        await expect(button.locator('.board-lane-agents-count')).toHaveText('3');
-        await expect(panel.locator('[data-agent-id="15"] .board-lane-agent-copy')).toContainText('Script workflow');
-        await panel.getByRole('button', { name: 'Remove Test runner from this lane', exact: true }).click();
-        await page.getByRole('alertdialog').getByRole('button', { name: 'Remove', exact: true }).click();
-        await expect(panel.getByText('Test runner', { exact: true })).toHaveCount(0);
-        expect(settings.lane_2.jobIds).toEqual([12, 15]);
-        expect(jobs).toHaveLength(3);
-        await page.keyboard.press('Escape');
-        await expect(panel).toHaveCount(0);
-        await expect(button).toBeFocused();
-        await button.click();
-        await panel.getByRole('button', { name: 'Edit Code reviewer', exact: true }).click();
-        await expect(page.locator('[data-job-editor] #job-name')).toHaveValue('Code reviewer');
-        await expect(panel).toHaveCount(0);
-    });
-}
-
-test('lane agents recover from conflicts, escape text and discard late loads', async ({ page }) => {
-    const { jobs } = await openLaneAgentsBoard(page);
-    jobs[0].name = '<img src=x onerror="window.__laneAgentXss=1">';
-    jobs[0].description = '</textarea><script>window.__laneAgentXss=1</script>';
-    const button = page.getByRole('button', { name: 'Agents and Automations on entry to Review', exact: true });
-    await button.click();
-    const panel = page.getByRole('dialog', { name: 'Agents and Automations', exact: true });
-    await expect(panel.locator('[data-agent-id="12"] .board-lane-agent-copy strong')).toHaveText(jobs[0].name);
-    await expect(panel).not.toContainText(jobs[0].description);
-    await expect(panel.locator('.board-lane-agent-description-preview')).toHaveCount(0);
-    await expect(panel.locator('script, img[onerror]')).toHaveCount(0);
-    await expect(panel.locator('.board-lane-agent-icon img')).toHaveCount(2);
-    await page.route('**/api/v1/board/columns/lane_2/automation', route => {
-        if (route.request().method() === 'PUT') return route.fulfill({ status: 409, json: { error: 'Lane changed. Reload before saving.' } });
-        return route.fulfill({ json: { jobIds: [12, 14], revision: 7, jobs } });
-    });
-    await panel.getByRole('button', { name: 'Remove Test runner from this lane' }).click();
-    await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel', exact: true }).click();
-    await expect(panel.locator('[data-agent-action="edit"]').first()).toBeEnabled();
-    await panel.getByRole('button', { name: 'Remove Test runner from this lane' }).click();
-    await page.getByRole('alertdialog').getByRole('button', { name: 'Remove', exact: true }).click();
-    await expect(panel.getByRole('alert')).toContainText('Lane changed');
-    await expect(panel).toContainText('Test runner');
-    await panel.getByRole('button', { name: 'Reload', exact: true }).click();
-    await expect(panel.getByRole('alert')).toBeEmpty();
-    await page.keyboard.press('Escape');
-    let release;
-    const gate = new Promise(resolve => { release = resolve; });
-    await page.route('**/api/v1/board/columns/lane_2/automation', async route => {
-        await gate;
-        await route.fulfill({ json: { jobIds: [], revision: 8, jobs } }).catch(() => {});
-    });
-    await button.click();
-    await expect(panel).toContainText('Loading agents');
-    await page.evaluate(() => window.app.navigate('jobs'));
-    release();
-    await expect(panel).toHaveCount(0);
-    expect(await page.evaluate(() => window.__laneAgentXss)).toBeUndefined();
-});
-
-test('lane agents handle paused selections, sync the settings badge, and open the existing create editor', async ({ page }) => {
-    const { jobs, settings, writes } = await openLaneAgentsBoard(page);
-    jobs[0].enabled = false;
-    settings.lane_2.jobIds.push(99);
-    const button = page.getByRole('button', { name: 'Agents and Automations on entry to Review', exact: true });
-    await button.click();
-    const panel = page.getByRole('dialog', { name: 'Agents and Automations', exact: true });
-    await expect(panel).toContainText('Unavailable entry (99)');
-    await expect(panel.locator('[data-agent-id="99"]')).not.toContainText('No description yet.');
-    await expect(panel.locator('[data-agent-id="99"] .board-lane-agent-description-preview')).toHaveCount(0);
-    await expect(panel.locator('[data-agent-id="99"] textarea')).toHaveCount(0);
-    await panel.getByRole('button', { name: 'Add agent or automation', exact: true }).click();
-    await panel.getByLabel('What would you like to add?').selectOption('automation');
-        await panel.getByLabel('Automation', { exact: true }).selectOption('15');
-    await panel.getByRole('button', { name: 'Add to lane', exact: true }).click();
-    await expect(panel.getByRole('alert')).toContainText('Enable or remove disabled/unavailable selections');
-    expect(writes).toHaveLength(0);
-    await panel.getByRole('button', { name: 'Cancel', exact: true }).click();
-    await panel.getByRole('button', { name: 'Remove Test runner from this lane' }).click();
-    const confirmation = page.getByRole('alertdialog');
-    await expect(confirmation).toContainText('Code reviewer, 99');
-    await confirmation.getByRole('button', { name: 'Remove', exact: true }).click();
-    await expect(panel).toContainText('Nothing runs when a card enters this lane yet.');
-    expect(settings.lane_2.jobIds).toEqual([]);
-    await page.keyboard.press('Escape');
-    await page.getByRole('button', { name: 'Settings for Review', exact: true }).click();
-    await page.getByRole('checkbox', { name: 'Release checks', exact: true }).check();
-    await page.getByRole('button', { name: 'Save lane settings', exact: true }).click();
-    // The shared modal makes the board inert; the badge still updates behind it.
-    await expect(page.locator('[data-board-action="lane-agents"][data-column-id="lane_2"] .board-lane-agents-count')).toHaveText('1');
-    await page.locator('#modal-container [data-action="close-modal"]').first().click();
-    await button.click();
-    await panel.getByRole('button', { name: 'Add agent or automation', exact: true }).click();
-    await panel.getByLabel('What would you like to add?').selectOption('new');
-    await panel.getByRole('button', { name: 'Create automation', exact: true }).click();
-    await expect(page.locator('[data-job-editor] #job-name')).toHaveValue('');
-    await expect(page.locator('[data-job-editor]')).toContainText('Create automation');
-    await expect(panel).toHaveCount(0);
-    expect(await page.evaluate(() => window.app.currentView)).toBe('board');
-});
-
-test('script search reaches beyond a truncated catalog and ignores stale results without losing drafts', async ({ page }) => {
-    const { jobs } = await openLaneAgentsBoard(page);
-    let releaseOld, oldRequested = false;
-    const old = new Promise(resolve => { releaseOld = resolve; });
-    const prefix = Array.from({ length: 200 }, (_, i) => ({ path: `scripts/a${i}.py`, runtime: 0, approved: false }));
-    await page.route(/\/api\/v1\/jobs\/scripts(?:\?.*)?$/, async route => {
-        const q = new URL(route.request().url()).searchParams.get('q') || '';
-        if (q === 'old') { oldRequested = true; await old; }
-        await route.fulfill({ json: q === 'deploy' ? { scripts: [{ path: 'scripts/z-deploy.py', runtime: 0, approved: true }], hasMore: false }
-            : { scripts: prefix, hasMore: true } });
-    });
-    const creates = [];
-    await page.route('**/api/v1/jobs', route => {
-        const created = { ...route.request().postDataJSON(), id: 71 };
-        jobs.push(created); creates.push(created);
-        return route.fulfill({ json: created });
-    });
-    await page.getByRole('button', { name: 'Agents and Automations on entry to Backlog', exact: true }).click();
-    const panel = page.getByRole('dialog', { name: 'Agents and Automations', exact: true });
-    await panel.getByRole('button', { name: 'Add agent or automation', exact: true }).click();
-    await panel.getByLabel('What would you like to add?').selectOption('script');
-    await expect(panel).toContainText('More matches exist');
-    await panel.getByLabel('Automation name', { exact: true }).fill('Deploy script');
-    await panel.getByLabel('Arguments — one per line').fill('--verify');
-    const search = panel.getByLabel('Find script', { exact: true });
-    await search.fill('old');
-    await search.press('Enter');
-    await expect.poll(() => oldRequested).toBe(true);
-    await expect(panel.getByRole('button', { name: 'Add to lane', exact: true })).toBeDisabled();
-    await search.fill('deploy');
-    await search.press('Enter');
-    const paths = panel.getByLabel('Script file', { exact: true });
-    await expect(paths.locator('option')).toHaveCount(2);
-    await paths.selectOption('scripts/z-deploy.py');
-    const staleResponse = page.waitForResponse('**/api/v1/jobs/scripts?q=old');
-    releaseOld();
-    await staleResponse;
-    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    await expect(paths).toHaveValue('scripts/z-deploy.py');
-    await expect(search).toHaveValue('deploy');
-    await expect(panel.getByLabel('Automation name', { exact: true })).toHaveValue('Deploy script');
-    await panel.getByRole('button', { name: 'Add to lane', exact: true }).click();
-    await expect.poll(() => creates.length).toBe(1);
-    expect(creates[0].actions[0]).toMatchObject({ scriptPath: 'scripts/z-deploy.py', arguments: ['--verify'] });
-});
-
-test('lane agent loading failures recover and navigation disposes the panel', async ({ page }) => {
-    const { jobs } = await openLaneAgentsBoard(page);
-    await page.route('**/api/v1/jobs?**', route => route.fulfill({ status: 503, json: { error: 'Catalog unavailable' } }));
-    await page.getByRole('button', { name: 'Agents and Automations on entry to Review', exact: true }).click();
-    const panel = page.getByRole('dialog', { name: 'Agents and Automations', exact: true });
-    await expect(panel).toContainText('Could not load this lane.');
-    await page.route('**/api/v1/jobs?**', route => route.fulfill({ json: { jobs } }));
-    await panel.getByRole('button', { name: 'Retry', exact: true }).click();
-    await expect(panel).toContainText('Code reviewer');
-    await page.getByRole('button', { name: 'New card', exact: true }).click();
-    await expect(panel).toHaveCount(0);
-    await expect(page.locator('[data-board-card-editor]')).toBeVisible();
-});
-
-test('lane agent drafts survive a background pagination response and remain saveable', async ({ page }) => {
-    const { jobs, writes } = await openLaneAgentsBoard(page);
-    const cards = Array.from({ length: 60 }, (_, index) => ({
-        id: `paged-${index}`, key: `VB-${index + 1}`, title: `Backlog task ${index + 1}`,
-        description: '', columnId: 'lane_0', position: index, type: 'task', priority: 'medium', tags: []
-    }));
-    let release;
-    let requested = false;
-    const gate = new Promise(resolve => { release = resolve; });
-    await page.route('**/api/v1/board/cards?**', async route => {
-        const offset = Number(new URL(route.request().url()).searchParams.get('offset') || 0);
-        if (offset) { requested = true; await gate; }
-        await route.fulfill({ json: {
-            cards: cards.slice(offset, offset + 30),
-            lanes: [{ columnId: 'lane_0', totalCount: 60, filteredCount: 60,
-                nextOffset: offset + 30, hasMore: offset === 0 }],
-            totalCount: 60, filteredCount: 60, blockedCount: 0, remainingPoints: 0, assignees: [], tags: []
-        } });
-    });
-    await page.evaluate(() => window.app.boardController.refresh());
-    await expect(page.locator('.board-card')).toHaveCount(30);
-    await page.locator('.board-lane-list[data-column-id="lane_0"]').evaluate(el => { el.scrollTop = el.scrollHeight; });
-    await expect.poll(() => requested).toBe(true);
-
-    const button = page.getByRole('button', { name: 'Agents and Automations on entry to Review', exact: true });
-    await button.click();
-    const panel = page.getByRole('dialog', { name: 'Agents and Automations', exact: true });
-    await panel.getByRole('button', { name: 'Add agent or automation', exact: true }).click();
-    await panel.getByLabel('What would you like to add?').selectOption('script');
-    await panel.getByLabel('Script file', { exact: true }).selectOption('scripts/validate.ps1');
-    const name = panel.getByLabel('Automation name', { exact: true });
-    await name.fill('Keep this script draft');
-    await name.evaluate(el => el.setSelectionRange(5, 12));
-    release();
-    await expect(page.locator('.board-card')).toHaveCount(60);
-    await expect(name).toHaveValue('Keep this script draft');
-    await expect(name).toBeFocused();
-    expect(await name.evaluate(el => [el.selectionStart, el.selectionEnd])).toEqual([5, 12]);
-    await expect(button).toHaveAttribute('aria-expanded', 'true');
-    expect(writes).toHaveLength(0);
-    await page.keyboard.press('Escape');
-    await expect(panel).toHaveCount(0);
-    await expect(button).toBeFocused();
-});
-
-test('closing lane agents during script discovery discards the late result', async ({ page }) => {
-    const { writes } = await openLaneAgentsBoard(page);
-    let release, requested = false;
-    const gate = new Promise(resolve => { release = resolve; });
-    await page.route('**/api/v1/jobs/scripts', async route => {
-        requested = true; await gate;
-        await route.fulfill({ json: { scripts: [], hasMore: false } }).catch(() => {});
-    });
-    await page.getByRole('button', { name: 'Agents and Automations on entry to Review', exact: true }).click();
-    const panel = page.getByRole('dialog', { name: 'Agents and Automations', exact: true });
-    await panel.getByRole('button', { name: 'Add agent or automation', exact: true }).click();
-    await panel.getByLabel('What would you like to add?').selectOption('script');
-    await expect.poll(() => requested).toBe(true);
-    await page.keyboard.press('Escape'); release();
-    await expect(panel).toHaveCount(0);
-    expect(writes).toHaveLength(0);
-});
-
-test('lane automations select multiple jobs, persist, remove one and clear all', async ({ page }, testInfo) => {
-    await openBoard(page);
-    let saved = { jobIds: [], revision: 0 };
-    await page.route('**/api/v1/board/columns/col_ready/automation', async route => {
-        if (route.request().method() === 'PUT') {
-            const body = route.request().postDataJSON();
-            expect(body.expectedRevision).toBe(saved.revision);
-            saved = { jobIds: body.jobIds, revision: saved.revision + 1 };
-        }
-        return route.fulfill({ json: { ...saved, jobs: [{ id: 12, name: 'Run review', enabled: true }, { id: 13, name: 'Paused', enabled: false }, { id: 14, name: 'Run checks', enabled: true }] } });
-    });
-    await page.getByRole('button', { name: 'Settings for Ready', exact: true }).click();
-    await expect(page.getByText(/stays for 60 seconds/)).toBeVisible();
-    await page.getByRole('checkbox', { name: 'Run review', exact: true }).check();
-    await page.getByRole('checkbox', { name: 'Run checks', exact: true }).check();
-    await expect(page.getByRole('checkbox', { name: 'Paused (disabled)', exact: true })).toBeDisabled();
-    await page.getByRole('button', { name: 'Save lane settings', exact: true }).click();
-    await expect.poll(() => saved).toEqual({ jobIds: [12, 14], revision: 1 });
-    await page.screenshot({ path: testInfo.outputPath('lane-automations.png') });
-    await page.locator('#modal-container [data-action="close-modal"]').first().click();
-    await page.getByRole('button', { name: 'Settings for Ready', exact: true }).click();
-    await expect(page.getByRole('checkbox', { name: 'Run review', exact: true })).toBeChecked();
-    await expect(page.getByRole('checkbox', { name: 'Run checks', exact: true })).toBeChecked();
-    await page.getByRole('checkbox', { name: 'Run review', exact: true }).uncheck();
-    await page.getByRole('button', { name: 'Save lane settings', exact: true }).click();
-    await expect.poll(() => saved).toEqual({ jobIds: [14], revision: 2 });
-    await page.getByRole('checkbox', { name: 'Run checks', exact: true }).uncheck();
-    await page.getByRole('button', { name: 'Save lane settings', exact: true }).click();
-    await expect.poll(() => saved).toEqual({ jobIds: [], revision: 3 });
-});
-
-test('lane automation conflicts preserve selections and unavailable jobs can be removed', async ({ page }, testInfo) => {
-    await page.setViewportSize({ width: 390, height: 844 });
-    await openBoard(page);
-    let payload;
-    await page.route('**/api/v1/board/columns/col_ready/automation', route => {
-        if (route.request().method() === 'PUT') {
-            payload = route.request().postDataJSON();
-            return route.fulfill({ status: 409, json: { error: 'Lane automation changed while you were editing.' } });
-        }
-        return route.fulfill({ json: { jobIds: [12, 13, 99], revision: 7, jobs: [
-            { id: 12, name: '<img src=x onerror="window.__laneXss=1"> Review', enabled: true },
-            { id: 13, name: 'Paused', enabled: false }, { id: 14, name: 'Checks', enabled: true }
-        ] } });
-    });
-    await page.getByRole('button', { name: 'Settings for Ready', exact: true }).click();
-    await page.getByRole('checkbox', { name: 'Paused (disabled)', exact: true }).uncheck();
-    await page.getByRole('checkbox', { name: 'Unavailable entry (99) (disabled)', exact: true }).uncheck();
-    await page.getByRole('checkbox', { name: 'Checks', exact: true }).check();
-    await page.getByRole('button', { name: 'Save lane settings', exact: true }).click();
-    await expect(page.getByText('Lane automation changed while you were editing.', { exact: true })).toBeVisible();
-    expect(payload).toEqual({ jobIds: [12, 14], expectedRevision: 7 });
-    await expect(page.getByRole('checkbox', { name: 'Checks', exact: true })).toBeChecked();
-    await expect(page.getByRole('checkbox', { name: 'Paused (disabled)', exact: true })).not.toBeChecked();
-    expect(await page.evaluate(() => window.__laneXss)).toBeUndefined();
-    await page.screenshot({ path: testInfo.outputPath('lane-automation-conflict.png') });
 });
 
 // VIBE-145: the lane card's assignee chip assigns without opening the editor. The whole chip is
@@ -3300,7 +2556,7 @@ test('the assignee chip assigns from the card face, hidden targets included, and
     await menu.locator('[data-assign-search]').press('Enter');
     await expect(menu).toHaveCount(0);
     const write = requests.find(item => item.method === 'PUT' && item.path === '/api/v1/board/cards/card_test');
-    expect(write.body).toEqual({ assignee: 'env:7:claude' });
+    expect(write.body).toEqual({ assignee: 'preset:fixture_7:claude' });
     await expect(chip).toHaveText(/Card review/);
     await expect(chip).not.toHaveAttribute('data-assignee-id');
     const writes = () => requests.filter(item => item.method === 'PUT' && item.path === '/api/v1/board/cards/card_test');
@@ -3368,9 +2624,9 @@ test('Chat defaults to the assignee, saves first and focuses the returned tab', 
 for (const width of [1440, 1024, 768, 390, 375, 320]) {
     test(`previous work and an initial question remain usable alongside work at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 950 });
-        const discussionTarget = width === 375 ? 'env:17:codex' : 'base:codex';
+        const discussionTarget = width === 375 ? 'preset:fixture_17:codex' : 'base:codex';
         const requests = await openBoard(page, { active: true, assignee: discussionTarget, extraPickerItems: [
-            { key: 'env:17:codex', kind: 'environment', group: 'Custom Environments',
+            { key: 'preset:fixture_17:codex', kind: 'agent', group: 'AI Agents',
                 label: 'Card history and implementation review assistant (codex)',
                 cli: 'codex', environmentId: 17, enabled: true, order: 3 }
         ], onCard: card => {
@@ -3388,8 +2644,9 @@ for (const width of [1440, 1024, 768, 390, 375, 320]) {
         await expect(page.locator('[data-board-previous-work]')).toContainText('Open the card editor here');
         const question = page.getByLabel('Initial question (optional)');
         await question.fill('Why did we choose one scroll region?');
-        await expect(question).toHaveAccessibleDescription('Leave blank to start an open discussion.');
+        await expect(question).toHaveAccessibleDescription('Leave blank for an open discussion.');
         const discussion = page.getByRole('region', { name: 'Discuss this card' });
+        await expect(discussion.locator('[data-board-chat-agent]')).toHaveValue(discussionTarget);
         const picker = discussion.locator('.ts-control');
         const start = discussion.getByRole('button', { name: 'Start discussion', exact: true });
         const questionBounds = await question.boundingBox();
@@ -3421,8 +2678,8 @@ for (const width of [1440, 1024, 768, 390, 375, 320]) {
 
 for (const [assignee, selection] of [
     ['base:codex', 'base:claude'],
-    ['base:codex', 'env:7:claude'],
-    [null, 'env:7:claude']
+    ['base:codex', 'preset:fixture_7:claude'],
+    [null, 'preset:fixture_7:claude']
 ]) {
     test(`Chat can select ${selection} without changing ${assignee || 'an unassigned card'}`, async ({ page }, testInfo) => {
         const requests = await openBoard(page, { assignee });
@@ -3551,7 +2808,7 @@ for (const width of [1920, 1440, 390]) {
         const columns = ['Backlog', 'Build', 'Review', 'Done'].map((name, position) => ({
             id: position ? `col_${position}` : 'col_ready', name, position, boardId: 'brd_main', color: '#64748b'
         }));
-        await openBoard(page, { assignee: 'env:7:claude', columns, onCard: card => {
+        await openBoard(page, { assignee: 'preset:fixture_7:claude', columns, onCard: card => {
             card.jiraIssueKey = 'SCRUM-5';
             card.flagged = true;
         } });
@@ -4013,7 +3270,7 @@ test('work and discussion actions remain reachable on a narrow screen', async ({
     await page.screenshot({ path: testInfo.outputPath('board-chat-narrow-closed.png') });
     await page.locator('.board-chat-controls .ts-control').click();
     const dropdown = page.locator('.ts-dropdown:visible');
-    await expect(dropdown.locator('[data-value="env:7:claude"]')).toBeVisible();
+    await expect(dropdown.locator('[data-value="preset:fixture_7:claude"]')).toBeVisible();
     const bounds = await dropdown.boundingBox();
     expect(bounds.x).toBeGreaterThanOrEqual(0);
     expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
@@ -4267,7 +3524,6 @@ for (const width of [1440, 520]) {
     });
 }
 
-
 for (const width of [1440, 390]) {
     test(`Desktop agent activity keeps distinct indicators at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 900 });
@@ -4376,193 +3632,24 @@ test('Automation recordings have their own rail and live robot without overwriti
     expect(card.priority).toBe('critical'); expect(card.points).toBe(8); expect(card.tags).toEqual(['keep-stored']);
 });
 
-for (const width of [1440, 390]) {
-    test(`card Automation runs stay linked and preserve drafts at ${width}px`, async ({ page }, testInfo) => {
-        await page.setViewportSize({ width, height: 900 });
-        await page.addInitScript(() => localStorage.setItem('viberails.board.filters.v1', JSON.stringify({ tag: 'retired-filter' })));
-        let card;
-        const requests = await openBoard(page, { onCard(value) { card = value; card.tags = ['hidden-tag']; } });
-        let posts = 0;
-        let release;
-        const gate = new Promise(resolve => { release = resolve; });
-        const run = { id: 'run_card', name: 'Review this card', status: 0 };
-        await page.route('**/api/v1/board/cards/card_test/automations', async route => {
-            if (route.request().method() === 'POST') {
-                posts++;
-                expect(route.request().postDataJSON()).toEqual({ jobId: 11 });
-                await gate;
-                return route.fulfill({ json: { success: true, runId: run.id } });
-            }
-            return route.fulfill({ json: {
-                jobs: [{ id: 11, name: 'Review this card', enabled: true }, { id: 12, name: 'Paused', enabled: false }],
-                runs: posts && !card.sessions.some(session => session.id === 'new_recording') ? [run] : []
-            } });
-        });
-        expect(requests.filter(request => request.path === '/api/v1/board/cards').every(request => !request.body?.tag)).toBe(true);
-        expect(await page.evaluate(() => window.app.boardController.state.filters.tag)).toBeUndefined();
-        await expect(page.locator('[data-board-filter-tag], .board-tag')).toHaveCount(0);
-        await page.getByText('Description images', { exact: true }).click();
-        await page.locator('#board-card-title').fill('Unsaved title');
-        const comment = page.locator('[data-board-composer="comment"] textarea');
-        await comment.fill('Unsaved comment');
-        const select = page.getByRole('combobox', { name: 'Agent or Automation to run' });
-        await expect(select.locator('option[value="12"]')).toBeDisabled();
-        await select.selectOption('11');
-        const button = page.getByRole('button', { name: 'Run', exact: true });
-        await button.scrollIntoViewIfNeeded();
-        const bounds = await button.boundingBox();
-        expect(bounds.x).toBeGreaterThanOrEqual(0);
-        expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
-        await page.screenshot({ path: testInfo.outputPath('card-automation-controls.png') });
-        await button.click();
-        await expect(button).toBeDisabled();
-        await button.evaluate(element => element.click());
-        expect(posts).toBe(1);
-        release();
-        await expect(page.locator('[data-board-automation-runs]')).toContainText('Queued');
-        await expect(page.locator('[data-board-count="automations"]')).toHaveText('1');
-        await expect(page.locator('#board-card-title')).toHaveValue('Unsaved title');
-        await expect(comment).toHaveValue('Unsaved comment');
-        expect(requests.filter(request => request.method === 'PUT')).toHaveLength(0);
-
-        run.status = 3; run.errorMessage = 'Terminal could not start.';
-        await page.evaluate(() => window.app.boardController.refreshSessionActivity());
-        await expect(page.locator('[data-board-automation-runs]')).toContainText('Terminal could not start.');
-        await page.locator('#modal-container [data-action="close-modal"]').first().click();
-        await page.getByText('Description images', { exact: true }).click();
-        await expect(page.locator('[data-board-automation-runs]')).toContainText('Failed');
-        // When a recording arrives it owns the open/replay action in the existing rail.
-        card.sessions.push({ id: 'new_recording', displayName: 'Review this card', isAutomation: true,
-            cli: 'shell', active: false, createdAt: '2026-09-26T05:00:00Z' });
-        await page.evaluate(() => window.app.boardController.refreshSessionActivity());
-        await expect(page.locator('[data-board-automations] [data-board-open-session="new_recording"]')).toBeVisible();
-        await expect(page.locator('[data-board-automation-runs] [data-board-run-id]')).toHaveCount(0);
-        await page.locator('[data-board-automations]').scrollIntoViewIfNeeded();
-        await page.screenshot({ path: testInfo.outputPath('card-automation-linked.png') });
-    });
-}
-
-test('lane Automation entries show waiting and terminal reasons before a session exists', async ({ page }) => {
-    await openBoard(page);
-    const entry = { eventKey: 'entry-1', name: '<img src=x onerror="window.__entryXss=1">', status: 'Waiting',
-        reason: 'Automation is busy; waiting for its turn.' };
-    await page.route('**/api/v1/board/cards/card_test/automations', route => route.fulfill({ json: {
-        jobs: [], runs: [], laneEntries: [entry]
-    } }));
-    await page.getByText('Description images', { exact: true }).click();
-    const list = page.locator('[data-board-automation-runs]');
-    await expect(list).toContainText('Waiting');
-    await expect(list).toContainText('Automation is busy; waiting for its turn.');
-    await expect(list.locator('img')).toHaveCount(0);
-    await expect(page.locator('[data-board-count="automations"]')).toHaveText('1');
-    await page.locator('#board-card-title').fill('Unsaved waiting card');
-    for (const status of ['Queued', 'Running', 'Failed', 'Skipped', 'Cancelled']) {
-        entry.status = status;
-        entry.reason = status === 'Cancelled' ? 'Card left the destination lane.' : `Automation ${status.toLowerCase()}.`;
-        await page.evaluate(() => window.app.boardController.refreshSessionActivity());
-        await expect(list).toContainText(status);
-        await expect(list).toContainText(entry.reason);
-        await expect(page.locator('#board-card-title')).toHaveValue('Unsaved waiting card');
-    }
-    expect(await page.evaluate(() => window.__entryXss)).toBeUndefined();
-});
-
-test('card Automation load and launch failures can be retried without losing the selection', async ({ page }) => {
-    await openBoard(page);
-    let loadFailed = true;
-    let launchFailed = true;
-    await page.route('**/api/v1/board/cards/card_test/automations', route => {
-        if (route.request().method() === 'POST') return route.fulfill(launchFailed
-            ? { status: 409, json: { error: 'Automation is already running.' } }
-            : { json: { success: true, runId: 'retry_run' } });
-        return route.fulfill(loadFailed ? { status: 500, json: { error: 'Could not load Automations.' } }
-            : { json: { jobs: [{ id: 11, name: '<img src=x onerror="window.__automationXss=1">', enabled: true }], runs: [] } });
-    });
-    await page.getByText('Description images', { exact: true }).click();
-    const run = page.getByRole('button', { name: 'Run', exact: true });
-    await expect(run).toBeDisabled();
-    loadFailed = false;
-    await page.getByRole('button', { name: 'Reload', exact: true }).click();
-    const select = page.getByRole('combobox', { name: 'Agent or Automation to run' });
-    await select.selectOption('11');
-    await run.click();
-    await expect(page.locator('[data-board-automation-message]')).toHaveText('Automation is already running.');
-    await expect(select).toHaveValue('11');
-    await expect(run).toBeEnabled();
-    launchFailed = false;
-    await run.click();
-    await expect(page.getByText('Run queued and linked to this card.', { exact: true })).toBeVisible();
-    expect(await page.evaluate(() => window.__automationXss)).toBeUndefined();
-});
-
-test('closing a card while its Automation catalog loads cannot repaint the next editor', async ({ page }) => {
-    await openBoard(page);
-    let release;
-    let requested;
-    const started = new Promise(resolve => { requested = resolve; });
-    const gate = new Promise(resolve => { release = resolve; });
-    await page.route('**/api/v1/board/cards/card_test/automations', async route => {
-        requested();
-        await gate;
-        await route.fulfill({ json: { jobs: [{ id: 11, name: 'Stale workflow', enabled: true }], runs: [] } }).catch(() => {});
-    });
-    await page.getByText('Description images', { exact: true }).click();
-    await started;
-    await page.locator('#modal-container [data-action="close-modal"]').first().click();
-    await page.getByRole('button', { name: 'New card', exact: true }).click();
-    release();
-    await expect(page.getByText('Save the card to run an Agent or Automation on it.', { exact: true })).toBeVisible();
-    await expect(page.locator('[data-board-automation-choice]')).toHaveCount(0);
-    await expect(page.getByText('Stale workflow', { exact: true })).toHaveCount(0);
-});
-
-
-test('Automation workers omit retired reviewer routing controls and save an ordinary assignment', async ({ page }, testInfo) => {
+test('Code review definition uses the shared provider and purpose fields', async ({ page }) => {
     await openBoard(page);
     const writes = [];
-    await page.route('**/api/v1/environments', async route => {
-        if (route.request().method() === 'POST') {
-            writes.push(route.request().postDataJSON());
-            return route.fulfill({ json: { id: 100, ...writes.at(-1) } });
-        }
-        return route.fulfill({ json: [] });
+    await page.route('**/api/v1/presets', async route => {
+        const body = route.request().postDataJSON(); writes.push(body);
+        return route.fulfill({ json: { preset: { ...body, id: 'reviewer', revision: 1 }, affectedBindings: [] } });
     });
-    await page.evaluate(() => window.app.environmentController.showEnvironmentForm({ mode: 'create', automationWorker: true }));
-    const form = page.locator('#env-form');
-    await expect(form.getByRole('button', { name: 'Switch reviewer', exact: true })).toHaveCount(0);
-    await expect(form.locator('#env-reviewer-mode, [data-reviewer-policy], [data-reviewer-routing]')).toHaveCount(0);
-    await form.locator('#env-name').fill('Task worker');
-    await form.getByRole('textbox', { name: 'Initial Message', exact: true }).fill('Run the task assigned by the Board manager.');
-    await page.screenshot({ path: testInfo.outputPath('task-worker.png') });
-    await form.getByRole('button', { name: 'Create agent', exact: true }).click();
+    await page.evaluate(() => window.app.aiAgentsController.openEditor());
+    const editor = page.locator('[data-launch-editor]');
+    await expect(editor.locator('[data-launch-provider]')).toHaveValue('base:codex');
+    await editor.getByLabel('Name', { exact: true }).fill('My reviewer');
+    await editor.locator('[data-launch-provider]').selectOption('base:claude');
+    await editor.locator('[data-board-composer-input]').fill('Review the scoped changes and save the report.');
+    await editor.getByText('Additional settings', { exact: true }).click();
+    await editor.getByLabel('Purpose', { exact: true }).selectOption('code_review');
+    await editor.getByRole('button', { name: 'Create agent', exact: true }).click();
     await expect.poll(() => writes.length).toBe(1);
-    expect(writes[0]).toMatchObject({ name: 'Task worker', automationWorker: true,
-        customPrompt: 'Run the task assigned by the Board manager.' });
-    expect(writes[0]).not.toHaveProperty('reviewerRouting');
-});
-
-test('Code review Worker preset defaults to Codex and remains editable', async ({ page }) => {
-    await openBoard(page);
-    const writes = [];
-    await page.route('**/api/v1/environments', async route => {
-        if (route.request().method() === 'POST') {
-            writes.push(route.request().postDataJSON());
-            return route.fulfill({ json: { success: true } });
-        }
-        return route.fulfill({ json: [] });
-    });
-    await page.evaluate(() => window.app.environmentController.showEnvironmentForm({ mode: 'create', automationWorker: true }));
-    const form = page.locator('#env-form');
-    await form.getByRole('button', { name: 'Code review', exact: true }).click();
-    await expect(form.locator('#env-cli')).toHaveValue('codex');
-    await expect(form.locator('#env-purpose')).toHaveValue('code_review');
-    await expect(form.locator('#env-initial-message')).toHaveValue(/Save the review on the originating card/);
-    await form.locator('#env-name').fill('My reviewer');
-    await form.locator('#env-cli').evaluate(select => select.tomselect ? select.tomselect.setValue('claude') : select.value = 'claude');
-    await form.locator('#env-initial-message').fill('Review the scoped changes and save the report.');
-    await form.getByRole('button', { name: 'Create agent', exact: true }).click();
-    await expect.poll(() => writes.length).toBe(1);
-    expect(writes[0]).toMatchObject({ name: 'My reviewer', cli: 'claude', purpose: 'code_review', automationWorker: true });
+    expect(writes[0]).toMatchObject({ name: 'My reviewer', cli: 'claude', purpose: 'code_review' });
 });
 
 for (const width of [1440, 390]) {
@@ -4725,184 +3812,6 @@ for (const width of [1440, 390]) {
         await expect(page.locator('[data-board-filter-type]')).toBeEnabled();
     });
 }
-
-for (const width of [1440, 390]) {
-    test(`check outcome agrees across lane and card at ${width}px`, async ({ page }, testInfo) => {
-        await page.setViewportSize({ width, height: 950 });
-        const { jobs, settings } = await openLaneAgentsBoard(page);
-        Object.assign(jobs.find(job => job.id === 15), { name: 'Code quality', actions: [{ kind: 2, arguments: ['working-tree'] }] });
-        settings.lane_2.jobIds = [15];
-        const summary = '5 files analyzed; 0 files with code-quality findings; 7 skipped. Advisory analysis.';
-        const entry = { jobId: 15, name: 'Code quality', eventKey: 'check-entry', status: 'Succeeded',
-            stepStatus: 'Passed', displayStatus: 'Completed with limitations', reason: summary, canSkip: false };
-        settings.lane_2.workflows = [{ cardId: 'card_test', cardLabel: 'Example change', steps: [entry] }];
-        await page.route('**/api/v1/board/columns/lane_2/automation/running', route => route.fulfill({ json: {
-            runningAgents: [], workflows: settings.lane_2.workflows
-        } }));
-        await page.route('**/api/v1/board/cards/card_test/automations', route => route.fulfill({ json: {
-            jobs: [], runs: [], laneEntries: [entry]
-        } }));
-        await page.route('**/api/v1/board/cards/card_test/checks?*', route => route.fulfill({ json: {
-            latest: [{ id: 'check', tool: 'Code quality', status: entry.displayStatus, scope: 'working-tree',
-                startedUtc: '2026-11-05T12:00:00Z', summary, analyzedCount: 5, skippedCount: 7, findingCount: 0 }], pending: []
-        } }));
-        await page.getByRole('button', { name: 'Agents and Automations on entry to Review', exact: true }).click();
-        const panel = page.getByRole('dialog', { name: 'Agents and Automations', exact: true });
-        const state = panel.locator('[data-lane-step-id="15"] .board-workflow-state');
-        await expect(state).toHaveText('Completed with limitations');
-        await expect(state).not.toHaveClass(/is-passed/);
-        await page.screenshot({ path: testInfo.outputPath(`check-lane-${width}.png`) });
-        await page.keyboard.press('Escape');
-        await page.locator('.board-card').first().click();
-        const editor = page.locator('[data-board-card-editor]');
-        await expect(editor.locator('[data-board-automation-runs]')).toContainText('Completed with limitations');
-        await expect(editor.locator('[data-board-automation-runs]')).toContainText(summary);
-        await editor.locator('[data-board-advanced] > summary').click();
-        await expect(editor.locator('[data-board-checks]')).toContainText('Completed with limitations');
-        await page.screenshot({ path: testInfo.outputPath(`check-card-${width}.png`) });
-    });
-
-    test(`ordered lane workflow status and per-card skip at ${width}px`, async ({ page }, testInfo) => {
-        await page.setViewportSize({ width, height: 950 });
-        await page.clock.install();
-        const { jobs, settings, writes } = await openLaneAgentsBoard(page);
-        jobs.find(job => job.id === 14).name = 'VCA';
-        jobs.find(job => job.id === 14).actions = [{ kind: 3, arguments: ['working-tree'] }];
-        Object.assign(jobs.find(job => job.id === 15), { name: 'Code quality', actions: [{ kind: 2, arguments: ['working-tree'] }] });
-        settings.lane_2.jobIds = [12, 14, 15];
-        const steps = [
-            { jobId: 12, eventKey: 'review-entry', status: 'Running', stepStatus: 'Reviewing', canSkip: true, reason: 'Review in progress.' },
-            { jobId: 14, eventKey: 'vca-entry', status: 'Waiting', stepStatus: 'Waiting', canSkip: true, reason: 'Waiting for Code Review.' },
-            { jobId: 15, eventKey: 'quality-entry', status: 'Waiting', stepStatus: 'Waiting', canSkip: true, reason: 'Waiting for VCA.' }
-        ];
-        settings.lane_2.workflows = [{ cardId: 'card_test', cardLabel: 'VIBE-123 · Example change', steps }];
-        const response = () => ({ runningAgents: [], workflows: settings.lane_2.workflows });
-        let holdPoll = false, heldPoll, releasePoll;
-        // Keep one old poll in flight across Skip to verify the mutation cannot be repainted.
-        await page.route('**/api/v1/board/columns/lane_2/automation/running', async route => {
-            if (holdPoll) {
-                holdPoll = false;
-                const snapshot = structuredClone(response());
-                await new Promise(resolve => { heldPoll = true; releasePoll = resolve; });
-                return route.fulfill({ json: snapshot });
-            }
-            return route.fulfill({ json: response() });
-        });
-        const skips = [];
-        await page.route('**/api/v1/board/cards/card_test/automations/skip', route => {
-            const body = route.request().postDataJSON();
-            skips.push(body);
-            const step = steps.find(step => step.eventKey === body.eventKey);
-            step.stepStatus = 'Skipped'; step.status = 'Skipped'; step.canSkip = false; step.reason = 'User skipped this step.';
-            return route.fulfill({ json: { laneEntries: steps } });
-        });
-        await page.getByRole('button', { name: 'Agents and Automations on entry to Review', exact: true }).click();
-        const panel = page.getByRole('dialog', { name: 'Agents and Automations', exact: true });
-        await expect(panel).toContainText('run top to bottom');
-        await expect(panel.locator('[data-lane-step-id="12"]')).toContainText('Reviewing');
-        await expect(panel.locator('[data-lane-step-id="12"]')).toContainText('VIBE-123');
-        await expect(panel.locator('.board-workflow-arrow')).toHaveCount(2);
-        await expectAnimatedStyle(panel.locator('[data-lane-step-id="12"] .fa-spinner'), 'transform');
-        for (const state of ['Failed', 'Fixing', 'Reviewing', 'Passed']) {
-            steps[0].stepStatus = state;
-            steps[0].reason = state === 'Passed' ? 'No blocking findings.' : state + ' in progress.';
-            steps[0].canSkip = state !== 'Passed';
-            steps[0].status = state === 'Passed' ? 'Succeeded' : 'Running';
-            await page.clock.fastForward(10100);
-            await expect(panel.locator('[data-lane-step-id="12"] .board-workflow-state')).toHaveText(state);
-        }
-        await expect(panel.locator('[data-lane-arrow-id="12"] .is-complete')).toBeVisible();
-        holdPoll = true;
-        await page.clock.fastForward(10100);
-        await expect.poll(() => heldPoll).toBe(true);
-        await panel.locator('[data-lane-step-id="14"]').getByRole('button', { name: 'Skip', exact: true }).click();
-        await expect(panel.locator('[data-lane-step-id="14"]')).toContainText('Skipped');
-        releasePoll();
-        await page.clock.fastForward(100);
-        await expect(panel.locator('[data-lane-step-id="14"]')).toContainText('Skipped');
-        expect(skips).toEqual([{ jobId: 14, eventKey: 'vca-entry' }]);
-        expect(writes).toEqual([]);
-        expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
-        await page.screenshot({ path: testInfo.outputPath(`ordered-workflow-${width}.png`) });
-        await panel.getByRole('button', { name: 'Close lane panel' }).click();
-        await page.clock.fastForward(20000);
-        await expect(panel).toHaveCount(0);
-    });
-
-    for (const initialState of ['Failed', 'Awaiting result']) test(`${initialState} lane steps can be retried safely at ${width}px`, async ({ page }, testInfo) => {
-        await page.setViewportSize({ width, height: 950 });
-        await page.clock.install();
-        const { settings, writes } = await openLaneAgentsBoard(page);
-        const step = { jobId: 12, eventKey: 'retry-entry', status: initialState === 'Failed' ? 'Failed' : 'Succeeded', stepStatus: initialState,
-            displayStatus: initialState === 'Failed' ? 'Failed to run' : initialState,
-            canSkip: true, canRerun: true, reason: initialState === 'Failed' ? 'Agent process failed.'
-                : 'The agent finished without an explicit pass/fail decision. Later steps remain waiting.' };
-        settings.lane_2.workflows = [{ cardId: 'card_test', cardLabel: 'VIBE-123 · Example change', steps: [step] }];
-        let holdPoll = false, heldPoll = false, releasePoll;
-        await page.route('**/api/v1/board/columns/lane_2/automation/running', async route => {
-            const snapshot = structuredClone({ runningAgents: [], workflows: settings.lane_2.workflows });
-            if (holdPoll) {
-                holdPoll = false;
-                await new Promise(resolve => { heldPoll = true; releasePoll = resolve; });
-            }
-            await route.fulfill({ json: snapshot });
-        });
-        const requests = [];
-        let reject = true, releaseRun;
-        await page.route('**/api/v1/board/cards/card_test/automations/rerun', async route => {
-            requests.push(route.request().postDataJSON());
-            if (reject) return route.fulfill({ status: 409, json: { error: 'Automation is busy. Try again.' } });
-            await new Promise(resolve => { releaseRun = resolve; });
-            Object.assign(step, { status: 'Queued', stepStatus: 'Queued', displayStatus: 'Queued', canRerun: false, reason: 'Re-run queued.' });
-            await route.fulfill({ json: { success: true, runId: 'rerun-id' } });
-        });
-        await page.getByRole('button', { name: 'Agents and Automations on entry to Review', exact: true }).click();
-        const panel = page.getByRole('dialog', { name: 'Agents and Automations', exact: true });
-        const rerun = panel.getByRole('button', { name: 'Retry', exact: true });
-        await expect(rerun).toBeVisible();
-        await expect(panel.locator('[data-lane-step-id="12"]').getByRole('button', { name: 'Skip', exact: true })).toBeVisible();
-        await rerun.focus();
-        await page.clock.fastForward(10100);
-        await expect(rerun).toBeFocused();
-        expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
-        await page.screenshot({ path: testInfo.outputPath(`lane-rerun-${width}.png`) });
-        await rerun.click();
-        await expect(panel.locator('[data-agent-error]')).toContainText('Automation is busy');
-        await expect(rerun).toBeEnabled();
-        reject = false;
-        holdPoll = true;
-        await page.clock.fastForward(10100);
-        await expect.poll(() => heldPoll).toBe(true);
-        await rerun.click();
-        await expect(rerun).toBeDisabled();
-        await expect.poll(() => typeof releaseRun).toBe('function');
-        releaseRun();
-        await expect(panel.locator('[data-lane-step-id="12"]')).toContainText('Queued');
-        releasePoll();
-        await page.clock.fastForward(100);
-        await expect(rerun).toHaveCount(0);
-        await expect(panel.locator('[data-lane-step-id="12"]')).toContainText('Queued');
-        expect(requests).toEqual([{ jobId: 12, eventKey: 'retry-entry' }, { jobId: 12, eventKey: 'retry-entry' }]);
-        expect(writes).toEqual([]);
-        for (const state of ['Reviewing', 'Running']) {
-            Object.assign(step, { status: 'Running', stepStatus: state, displayStatus: state, reason: 'Automation retry running.' });
-            await page.clock.fastForward(10100);
-            await expect(panel.locator('.board-workflow-state').first()).toHaveText(state);
-            const spinner = panel.locator('[data-lane-step-id="12"] .fa-spinner');
-            await expectAnimatedStyle(spinner, 'transform');
-            await page.emulateMedia({ reducedMotion: 'reduce' });
-            await expect(spinner).toHaveCSS('animation-name', 'none');
-            await expect(spinner).toHaveCSS('transform', 'none');
-            await page.emulateMedia({ reducedMotion: 'no-preference' });
-        }
-        await page.screenshot({ path: testInfo.outputPath(`lane-rerun-running-${width}.png`) });
-        Object.assign(step, { status: 'Succeeded', stepStatus: 'Passed', displayStatus: 'Passed', canSkip: false, reason: 'Review passed.' });
-        await page.clock.fastForward(10100);
-        await expect(panel.locator('[data-lane-step-id="12"]')).toContainText('Passed');
-        await expect(panel.locator('[data-lane-step-id="12"] .fa-spinner')).toHaveCount(0);
-    });
-}
-
 
 for (const width of [1440, 390]) {
     test(`Public card links support CRUD and preserve editor drafts at ${width}px`, async ({ page }, testInfo) => {
@@ -5129,4 +4038,119 @@ test('Public card links reconcile uncertain creation once and ignore a result af
     await page.evaluate(() => window.app.closeModal()); release();
     await expect(page.locator('[data-card-sharing]')).toHaveCount(0);
     expect(creations).toBe(2);
+});
+// Unified definitions replace the retired Job/lane builder. These tests exercise
+// the production Board popup and saved-card adapters with the typed launch API.
+async function installLaunchFixture(page, { conflict = false } = {}) {
+    const items = [
+        { id:'preset_review',definitionType:'preset',kind:'agent',name:'Review',cli:'codex',enabled:true,canLaunch:true,canRunAutomatically:true },
+        { id:'action_check',definitionType:'action',kind:'vca',name:'Check',enabled:true,canLaunch:true,canRunAutomatically:true },
+        { id:'preset_quick',definitionType:'preset',kind:'quick-launch',name:'Quick',cli:'codex',enabled:true,canLaunch:true,canRunAutomatically:false }
+    ];
+    const state={items,conflict,writes:[],revision:3,selections:[{definitionId:'preset_review',definitionType:'preset',gate:'review'},{definitionId:'action_check',definitionType:'action',gate:'result'}],activity:[],runs:[],posts:0,skips:0,retries:0};
+    await page.route('**/api/v1/launch-catalog',route=>route.fulfill({json:{items}}));
+    await page.route('**/api/v1/board/columns/*/launches',async route=>{
+        if(route.request().method()==='PUT'){
+            const body=route.request().postDataJSON();state.writes.push(body);
+            if(state.conflict)return route.fulfill({status:409,json:{error:'Lane changed elsewhere. Reopen to reload.'}});
+            state.selections=body.selections;state.revision++;
+        }
+        return route.fulfill({json:{selections:state.selections,revision:state.revision}});
+    });
+    await page.route('**/api/v1/board/columns/*/launches/activity',route=>route.fulfill({json:state.activity}));
+    await page.route('**/api/v1/board/cards/card_test/launches',async route=>{
+        if(route.request().method()==='POST'){
+            state.posts++;state.lastRun=route.request().postDataJSON();
+            if(state.hold)await state.hold;
+            const run={id:'run_manual',status:'queued',snapshot:{preset:{name:'Review'},context:{cardId:'card_test'}}};state.runs.push(run);return route.fulfill({json:run});
+        }
+        return route.fulfill({json:state.activity.map(row=>row.entry)});
+    });
+    await page.route('**/api/v1/board/cards/card_test/launches/*/skip',route=>{state.skips++;state.activity[0].entry.skipRequested=true;return route.fulfill({status:204});});
+    await page.route('**/api/v1/runs?*',route=>route.fulfill({json:{runs:state.runs,nextCursor:null}}));
+    await page.route('**/api/v1/runs/*/retry',route=>{state.retries++;state.activity[0].run.status='queued';return route.fulfill({json:state.activity[0].run});});
+    return state;
+}
+
+for (const width of [320,375,768,1024]) test(`unified lane order and gates persist at ${width}px`,async({page},testInfo)=>{
+    await page.setViewportSize({width,height:900});await openBoard(page);
+    const state=await installLaunchFixture(page);
+    const trigger=page.getByRole('button',{name:'Agents and Actions on entry to Ready',exact:true});await trigger.click();
+    const panel=page.locator('.board-lane-agents-panel');
+    await expect(panel.locator('[data-lane-add-choice] option[value="preset_quick"]')).toHaveCount(0);
+    await expect(panel.locator('[data-lane-index="1"] [data-lane-gate] option[value="review"]')).toHaveCount(0);
+    const up=panel.getByRole('button',{name:'Move Check up',exact:true});await up.focus();await up.press('Enter');
+    await panel.getByRole('button',{name:'Save lane settings',exact:true}).click();
+    await expect.poll(()=>state.writes.length).toBe(1);
+    expect(state.writes[0]).toMatchObject({revision:3,selections:[{definitionId:'action_check',gate:'result'},{definitionId:'preset_review',gate:'review'}]});
+    expect(await panel.evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBe(true);
+    await page.screenshot({path:testInfo.outputPath(`unified-lane-${width}.png`)});
+    await panel.getByRole('button',{name:'Close lane panel'}).click();await expect(trigger).toBeFocused();await trigger.click();
+    await expect(panel.locator('[data-lane-selection-list] strong')).toHaveText(['Check','Review']);
+});
+
+test('unified lane conflicts preserve edits and retired selections remain explicit',async({page})=>{
+    await openBoard(page);const state=await installLaunchFixture(page,{conflict:true});
+    state.selections.push({definitionId:'retired',definitionType:'preset',gate:'process'});
+    await page.getByRole('button',{name:'Agents and Actions on entry to Ready',exact:true}).click();
+    const panel=page.locator('.board-lane-agents-panel');
+    await expect(panel).toContainText('Unavailable / retired selection');
+    await panel.getByRole('button',{name:'Move Check up',exact:true}).click();
+    await panel.getByRole('button',{name:'Save lane settings',exact:true}).click();
+    await expect(panel.locator('[data-lane-error]')).toContainText('Lane changed elsewhere');
+    await expect(panel.locator('[data-lane-selection-list] strong')).toHaveText(['Check','Review','Unavailable / retired selection']);
+    expect(state.writes[0].revision).toBe(3);
+    await panel.getByRole('button',{name:'Close lane panel'}).click();
+    await page.getByRole('button',{name:'Cancel',exact:true}).click();
+    await expect(panel).toBeVisible();
+    await expect(panel.locator('[data-lane-selection-list] strong')).toHaveText(['Check','Review','Unavailable / retired selection']);
+    state.conflict=false;
+    await panel.getByRole('button',{name:'Reload latest',exact:true}).click();
+    await page.getByRole('button',{name:'Discard',exact:true}).click();
+    await expect(panel.locator('[data-lane-selection-list] strong')).toHaveText(['Review','Check','Unavailable / retired selection']);
+});
+
+test('unified lane progress distinguishes process and review, retries and skips exact card entries',async({page})=>{
+    await openBoard(page);const state=await installLaunchFixture(page);
+    state.activity=[{cardLabel:'VIBE-1',definitionName:'Review',entry:{id:'entry_1',cardId:'card_test',definitionId:'preset_review',current:true,processStatus:'succeeded',verdict:null,gate:'review',summary:'Review not reported'},run:{id:'run_1',status:'succeeded'}}];
+    await page.getByRole('button',{name:'Agents and Actions on entry to Ready',exact:true}).click();
+    const panel=page.locator('.board-lane-agents-panel');
+    await expect(panel).toContainText('Process: succeeded · Result: Not reported');
+    await panel.getByRole('button',{name:'Retry',exact:true}).click();await expect.poll(()=>state.retries).toBe(1);
+    await expect(panel).toContainText('Process: queued');await panel.getByRole('button',{name:'Stop and skip',exact:true}).click();
+    await expect.poll(()=>state.skips).toBe(1);await expect(panel.getByRole('button',{name:'Stop and skip'})).toHaveCount(0);
+});
+
+test('unified manual card launch preserves title and comment drafts and prevents duplicate starts',async({page})=>{
+    await openBoard(page);const state=await installLaunchFixture(page);
+    let release;state.hold=new Promise(resolve=>{release=resolve;});
+    await page.getByText('Description images',{exact:true}).click();
+    const editor=page.locator('[data-board-card-editor]');
+    await editor.locator('#board-card-title').fill('Draft title');await editor.locator('[data-board-composer="comment"] textarea').fill('Draft comment');
+    await editor.locator('[data-board-automation-choice]').selectOption('preset_review');
+    const run=editor.locator('[data-board-run-automation]');await run.click();await run.evaluate(el=>el.click());expect(state.posts).toBe(1);release();
+    await expect(editor.locator('[data-board-automation-message]')).toContainText('Run queued');
+    expect(state.lastRun).toMatchObject({definitionId:'preset_review',definitionType:'preset'});
+    await expect(editor.locator('#board-card-title')).toHaveValue('Draft title');
+    await expect(editor.locator('[data-board-composer="comment"] textarea')).toHaveValue('Draft comment');
+    await expect(editor.locator('[data-board-automation-runs]')).toContainText('queued');
+});
+
+for (const width of [320,375,768,1024]) test(`shared Board status switches remain draft fields at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    const requests = await openBoard(page, { assignee: 'base:codex' });
+    await page.getByText('Description images', { exact: true }).click();
+    const editor = page.locator('[data-board-card-editor]');
+    const status = editor.getByRole('region', { name: 'Card status' });
+    const attention = status.getByRole('switch', { name: 'Needs your attention' });
+    const blocked = status.getByRole('switch', { name: 'Blocked' });
+    await attention.check(); await blocked.check();
+    expect(requests.filter(request => request.method === 'PUT' && request.path.endsWith('/card_test'))).toHaveLength(0);
+    expect(await status.evaluate(el => Boolean(el.previousElementSibling.classList.contains('board-discussion')))).toBe(true);
+    await status.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath(`board-status-${width}.png`) });
+    await expect(page.locator('.board-card-modal-dialog .btn-close')).toHaveCSS('filter', 'none');
+    await editor.locator('[data-board-save-card]').click();
+    await expect(editor).toHaveCount(0);
+    expect(requests.find(request => request.method === 'PUT' && request.path.endsWith('/card_test')).body).toMatchObject({ flagged: true, blocked: true });
 });

@@ -306,13 +306,13 @@ test('The Automations list puts workflows and scripts in one list, with both col
     assert.match(controller.renderJobsListHtml(), /Could not load scripts\. Refresh to try again\./);
 });
 
-test('Navigation offers Agents and Automations, and the Rules page stays out of it', () => {
+test('Navigation offers one AI Agents entry, and the Rules page stays out of it', () => {
     const index = readFileSync(indexPath, 'utf8');
     const ruleController = readFileSync(ruleControllerPath, 'utf8');
     const jobsController = readFileSync(modulePath, 'utf8');
 
-    assert.match(index, /data-view="ai-agents"[^>]*\n\s*title="Agents — /);
-    assert.match(index, /data-view="automations"[^>]*\n\s*title="Automations — /);
+    assert.match(index, /data-view="ai-agents"[^>]*title="AI Agents/);
+    assert.doesNotMatch(index, /data-view="automations"/);
     // The old page ids are gone from the nav; the ENVS page and its Sandboxes card with them.
     assert.doesNotMatch(index, /data-view="environments"|data-view="jobs"|environments-template|sandbox-item-template|Environment \/ Workers/);
     assert.doesNotMatch(index, />Open Jobs<|previews never queue jobs|>Jobs<\/span>/i);
