@@ -230,14 +230,16 @@ public sealed class RepositoryCodeGraph
                 {
                     id = Id("domain", ancestor);
                     domains.Add(ancestor, id);
+                    // No per-node summary: the response's Description already says the map is the
+                    // current working tree, and repeating it on every node only buried the inspector.
                     nodes.Add(new(id, DisplayName(ancestor.Length == 0 ? name : Path.GetFileName(ancestor)), "module",
-                        ancestor.Length == 0 ? "." : ancestor, domainId, Summary: "Directory in the current working tree."));
+                        ancestor.Length == 0 ? "." : ancestor, domainId));
                     if (domainId is not null) edges.Add(new(Id("contains-domain", ancestor), domainId, id, "contains"));
                 }
                 domainId = id;
             }
             var file = new CodeGraphNode(Id("file", path), DisplayName(Path.GetFileName(path)), "file", path, domainId,
-                outline?.Language, "Current working-tree structure. Saved report measurements may describe an earlier revision.");
+                outline?.Language);
             nodes.Add(file);
             fileNodes.Add(path, file);
             edges.Add(new(Id("contains", path), domainId!, file.Id, "contains"));
@@ -260,7 +262,7 @@ public sealed class RepositoryCodeGraph
                 if (nodes.Count == MaxNodes) { truncated = true; break; }
                 var id = Id("symbol", $"{path}:{declaration.Line}:{declaration.Kind}:{declaration.Name}");
                 nodes.Add(new(id, DisplayName(declaration.Name), declaration.Kind, $"{path}:{declaration.Line}", file.Id,
-                    outline.Language, "Declaration identified by the source parser; no coverage or quality measurement is inferred."));
+                    outline.Language));
                 edges.Add(new(Id("contains", id), file.Id, id, "contains"));
             }
         }

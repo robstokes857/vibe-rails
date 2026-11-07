@@ -15,6 +15,24 @@ export interface HistoryEntry {
     url?: string;
     [key: string]: unknown;
 }
+/** One problem the inspector lists, worst first. Display text only. */
+export interface QualityFinding {
+    level: 'critical' | 'warning';
+    /** At most 200 characters, e.g. "Cyclomatic complexity 31". */
+    title: string;
+    /** At most 300 characters, e.g. "Process, line 12 · critical at 20". */
+    detail?: string;
+}
+/** A host's code-quality summary for a node (VibeRails patch). The inspector shows it first and the first three findings. */
+export interface NodeQuality {
+    /** At most 40 characters, e.g. "Needs work". */
+    rating: string;
+    tone: 'good' | 'neutral' | 'warning' | 'danger';
+    /** At most 200 characters, e.g. "3 problems, 1 critical". */
+    headline: string;
+    /** At most 12 entries. */
+    findings?: QualityFinding[];
+}
 export interface CodeNode {
     id: string;
     name: string;
@@ -22,12 +40,14 @@ export interface CodeNode {
     parentId?: string;
     language?: string;
     path?: string;
+    /** Shown under the path; when `quality` is present it becomes a closing note instead. */
     summary?: string;
     signature?: string;
     metrics?: Record<string, number>;
     changes?: Record<string, number>;
     history?: HistoryEntry[];
     links?: { label: string; url: string }[];
+    quality?: NodeQuality;
     [key: string]: unknown;
 }
 export interface CodeEdge {

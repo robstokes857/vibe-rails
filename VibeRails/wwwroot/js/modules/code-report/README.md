@@ -24,6 +24,17 @@ below the map, so opening either panel shortens the map rather than the page.
   File selection focuses Atlas and its inspector; **Open details** replaces the sidebar with an
   inline panel of saved measurements and captured excerpts (never a modal or window).
   **Show in code explorer** and Escape return to the map. Copy context is absent.
+- The details panel leads with what is wrong (`findings.js`): the file's rating and health, how
+  many measurements are past a limit and, when one function or type holds several of them, where.
+  **What to fix first** lists every problem worst first with the first one open: where it was
+  measured, what the metric means, how to fix it, its limits and the captured code. Measurements
+  within their limits fold under one disclosure, and one row is open at a time. A radar category
+  or score-card metric opens its own row instead. A problem is a raw value past its own warning or
+  critical limit in the direction the metric reads, never a concern threshold (higher-is-better
+  metrics normalize differently). The actionable problems come first and the maintainability
+  index, a composite that only rises when they are fixed, after them; then critical before
+  warning; within a level, distance past the warning limit (capped at twice the
+  warning-to-critical span, so NPath cannot drown the rest), then category weight.
 - The chrome is compact: the sidebar is the grade, the radar and the file list, with **Git
   changes** available beside the default **Report files** list and the changed files lit on the map on load.
   1.5 seconds after Atlas is ready, the first report file is selected using the normal 800 ms map focus
@@ -72,10 +83,14 @@ Cross-directory references also have
 domain edges. These are lexical source evidence, not resolved call graphs or runtime dependencies.
 No coverage or quality metric is inferred from the graph. Before mounting Atlas,
 `graph-metrics.js` overlays the accepted saved report's `lines_of_code` and
-`cyclomatic_complexity` values onto matching file nodes. Paths use the same slash normalization
-as file selection and remain case sensitive. Complexity is the maximum function cyclomatic
-complexity, not the category score; the inspector identifies the saved scan and its timestamp
-when available. Directory and declaration nodes never inherit file measurements. The cached
+`cyclomatic_complexity` values and a `quality` summary (rating, headline and up to 12 problems,
+display text only) onto matching file nodes. Paths use the same slash normalization
+as file selection and remain case sensitive. **Max complexity** is the maximum function cyclomatic
+complexity, not the category score. The inspector leads with the quality summary and **Open
+details**, then the measurements and connections, and closes with the saved scan's timestamp.
+A file the report does not cover says **Not in this scan.**, so an empty inspector never reads as
+clean. The server sends no per-node summaries; the response's description covers provenance.
+Directory and declaration nodes never inherit file measurements. The cached
 working-tree graph stays unchanged, so a new, empty or failed report cannot retain old metrics.
 Atlas only renders finite supplied metrics (including zero); unavailable lines of code,
 complexity and coverage are hidden, without placeholder cells or missing-value footnotes.
@@ -144,6 +159,9 @@ storage, preview CSS, fixture reports/graph, static server and demo shell are no
 `vendor/quality` contains the four unchanged Quality Lab shipping files.
 `vendor/atlas` is Code Atlas 0.14.0 with the workbench's four approved patches: visible domain
 connections, combined toolbar/canvas controls, inspector scroll reset and host nonce support.
+VibeRails adds the inspector's quality summary: `node.quality` is validated in both contract
+copies (host module and template) and declared in `code-atlas.d.mts`, and the template carries
+the `atlas-quality` style block, `qualityBlock()` and the reordered `renderInspector()`.
 The source patch scripts and integration references live in the sibling workbench's `docs/`.
 Refresh from that approved bundle, retaining the relative module imports and TypeScript declarations.
 

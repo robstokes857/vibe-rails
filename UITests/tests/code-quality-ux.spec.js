@@ -480,10 +480,39 @@ test('report selection focuses the isolated map and opens saved details', async 
     await report.getByRole('button', { name: new RegExp(PAYMENT_PATH) }).click();
     const map = page.frameLocator('.code-report iframe');
     await expect(map.locator('#inspector h2')).toHaveText('PaymentProcessor.cs');
+    // What is wrong leads the inspector, with the way into the details right below it.
+    const quality = map.locator('#inspector .entity-quality');
+    await expect(quality.locator('.quality-rating')).toHaveText('At risk');
+    await expect(quality.locator('.quality-headline')).toHaveText('3 critical problems');
+    await expect(quality.locator('.quality-finding strong')).toHaveText(['Cognitive complexity 31', 'Cyclomatic complexity 31', 'Nesting depth 31']);
+    await expect(quality.locator('.quality-finding').first()).toContainText('Critical');
+    await expect(quality.locator('.quality-finding small').first()).toHaveText('Process, line 12 · critical at 25');
+    expect(await map.locator('#inspector').evaluate(inspector => {
+        const children = [...inspector.children];
+        const order = selector => children.findIndex(child => child.matches(selector));
+        return [order('.entity-quality'), order('.button.primary'), order('.metric-grid'), order('.entity-note')];
+    })).toEqual([4, 5, 6, expect.any(Number)]);
+    await expect(map.locator('#inspector .entity-note')).toContainText('Measured in the scan from');
     await map.getByRole('button', { name: /Open details/ }).click();
     const dialog = report.locator('.details-panel');
     await expect(dialog).toBeVisible();
+    // The details open on the verdict and the worst problem, already expanded with its fix and code.
+    await expect(dialog.locator('.verdict-rating')).toHaveText('At risk');
+    await expect(dialog.locator('.verdict-summary strong')).toHaveText('3 critical problems');
+    await expect(dialog.locator('.finding-list').first().locator('.finding-name')).toHaveText(['Cognitive complexity', 'Cyclomatic complexity', 'Nesting depth']);
+    const worst = dialog.locator('.finding-toggle').first();
+    await expect(worst).toHaveAttribute('aria-expanded', 'true');
+    await expect(dialog.locator('.finding-fix')).toContainText('Flatten it');
     await expect(dialog.locator('.code-excerpt')).toContainText('cognitive_complexity evidence');
+    // The fix is readable without scrolling the panel: it ends above the sticky action bar.
+    expect(await dialog.evaluate(panel => panel.querySelector('.finding-fix').getBoundingClientRect().bottom
+        <= panel.querySelector('.details-actions').getBoundingClientRect().top)).toBe(true);
+    await expect(dialog.locator('.within-limits')).not.toHaveAttribute('open', '');
+    await expect(dialog.locator('.within-limits summary')).toContainText('Within limits');
+    // One measurement is open at a time: opening the next problem closes the first.
+    await dialog.locator('.finding-toggle').nth(1).click();
+    await expect(worst).toHaveAttribute('aria-expanded', 'false');
+    await expect(dialog.locator('.code-excerpt')).toContainText('cyclomatic_complexity evidence');
     await expect(dialog.getByRole('button', { name: /Copy context/i })).toHaveCount(0);
     await dialog.getByRole('button', { name: 'Show in code explorer' }).click();
     await expect(dialog).not.toBeVisible();
@@ -502,14 +531,20 @@ test('inspector shows saved file measurements and hides unavailable metrics thro
     };
     const cells = map.locator('#inspector .metric');
     await inspect('payment-file');
-    await expect(cells.locator('span')).toHaveText(['Lines of code', 'Complexity', 'Direct links']);
+    await expect(cells.locator('span')).toHaveText(['Lines of code', 'Max complexity', 'Direct links']);
     await expect(cells.locator('strong')).toHaveText(['2', '31', '1']);
-    await expect(map.locator('#inspector .entity-summary')).toContainText('Measurements from the scan captured');
+    await expect(map.locator('#inspector .entity-note')).toContainText('Measured in the scan from');
+    await expect(map.locator('#inspector .entity-summary')).toHaveCount(0);
     await expect(map.locator('#inspector')).not.toContainText('metric was not supplied');
     await inspect('helper-file');
     await expect(cells.locator('span')).toHaveText(['Direct links']);
+    await expect(map.locator('#inspector .quality-rating')).toHaveText('Clean');
+    await expect(map.locator('#inspector .quality-headline')).toHaveText('No problems: every measurement is within its limits.');
+    await expect(map.locator('#inspector .quality-finding')).toHaveCount(0);
     await inspect('payments');
     await expect(cells.locator('span')).toHaveText(['Direct links']);
+    await expect(map.locator('#inspector .entity-quality')).toHaveCount(0);
+    await expect(map.locator('#inspector .entity-summary')).toHaveCount(0);
 
     const response = scanResponse();
     response.report.files[0].categories[0].metrics.find(item => item.name === 'cyclomatic_complexity').value = 0;
@@ -522,7 +557,8 @@ test('inspector shows saved file measurements and hides unavailable metrics thro
     await page.evaluate(value => window.app.ruleController.codeReportViewer.setResponse(value), response);
     await inspect('payment-file');
     await expect(cells.locator('span')).toHaveText(['Direct links']);
-    await expect(map.locator('#inspector .entity-summary')).not.toContainText('Measurements from');
+    await expect(map.locator('#inspector .entity-quality')).toHaveCount(0);
+    await expect(map.locator('#inspector')).not.toContainText('Measured in');
     await expect(report.locator('.qr')).toHaveAttribute('data-state', 'error');
 });
 
@@ -1020,9 +1056,30 @@ test('graph failures leave saved report and all metrics accessible', async ({ pa
     const report = await openDetails(page);
     await expect(report.locator('[data-code-map]')).toContainText('Map unavailable');
     await report.getByRole('button', { name: new RegExp(PAYMENT_PATH) }).click();
-    await expect(report.locator('.details-panel')).toBeVisible();
-    await report.locator('.details-panel').getByRole('button', { name: /Parameter count/ }).click();
+    const details = report.locator('.details-panel');
+    await expect(details).toBeVisible();
+    await expect(details.locator('.code-excerpt')).toContainText('cognitive_complexity evidence');
+    // Every measurement stays reachable: the ones within their limits fold under one disclosure.
+    await details.locator('.within-limits > summary').click();
+    await details.getByRole('button', { name: /Parameters per function/ }).click();
     await expect(report.locator('.code-excerpt')).toContainText('parameter_count evidence');
+    await expect(details.locator('.finding-fix')).toHaveCount(0);
+    await expect(details.locator('.finding[data-metric="parameter_count"] .finding-where')).toHaveText('Process, line 18 · warning above 15 · critical at 25');
+});
+
+test('a radar category opens its worst measurement even when it is within its limits', async ({ page }) => {
+    await installQualityApi(page);
+    const report = await openDetails(page);
+    await page.evaluate(() => {
+        const viewer = window.app.ruleController.codeReportViewer;
+        viewer.showFile(viewer.response.report.files[0], 'fan_out');
+    });
+    const details = report.locator('.details-panel');
+    await expect(details.locator('.within-limits')).toHaveAttribute('open', '');
+    const fanOut = details.locator('.finding[data-metric="fan_out"] .finding-toggle');
+    await expect(fanOut).toHaveAttribute('aria-expanded', 'true');
+    await expect(details.locator('.code-excerpt')).toContainText('fan_out evidence');
+    await expect(fanOut).toBeInViewport();
 });
 
 test('empty, failed and malformed reports keep their honest state beside the map', async ({ page }) => {

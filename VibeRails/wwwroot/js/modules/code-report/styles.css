@@ -135,6 +135,46 @@
 /* The excerpt chains to the details panel at its end (no overscroll containment here): viewer.js only swallows the wheel once neither can scroll. */
 .code-report .code-excerpt{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--surface-soft);border:1px solid var(--color-border);padding:18px;border-radius:7px;font:13px/1.8 var(--report-font-mono);color:var(--color-primary);max-height:310px;overflow:auto}
 .code-report .detail-note{font-size:13px;color:var(--color-text-muted);line-height:1.6}
+/* File details lead with what is wrong (findings.js): the verdict, the problems worst first with the first one open, then what is within limits. */
+.code-report .details-panel{--finding-critical:var(--color-danger,#ef4444);--finding-critical-fg:var(--feedback-error-fg,#fca5a5);--finding-warning:var(--color-warning,#f59e0b);--finding-good:var(--quality-pass,#b48cf7)}
+.code-report .details-panel .details-path{margin-bottom:14px}
+.code-report .file-verdict{--tone:var(--color-text-muted);display:flex;align-items:center;gap:10px 12px;flex-wrap:wrap}
+.code-report .file-verdict[data-tone=good]{--tone:var(--finding-good)}
+.code-report .file-verdict[data-tone=warning]{--tone:var(--finding-warning)}
+.code-report .file-verdict[data-tone=danger]{--tone:var(--finding-critical)}
+.code-report .verdict-rating{display:inline-flex;align-items:center;gap:7px;padding:3px 10px;border:1px solid var(--tone);border-radius:999px;font-size:12px;font-weight:600;color:var(--color-text);white-space:nowrap}
+.code-report .verdict-rating::before{content:'';width:8px;height:8px;border-radius:50%;background:var(--tone)}
+.code-report .verdict-summary{display:flex;flex-direction:column;min-width:0;font-size:14px;line-height:1.35}
+.code-report .verdict-summary span{font-size:12px;color:var(--color-text-muted)}
+.code-report .verdict-hotspot{margin-top:10px;font-size:13px;line-height:1.5}
+.code-report .findings-heading{margin:18px 0 10px;font-size:13px}
+.code-report .finding-list{display:grid;gap:8px}
+.code-report .finding{min-width:0;border:1px solid var(--color-border);border-left:3px solid var(--color-border);border-radius:8px;background:var(--surface-soft)}
+.code-report .finding[data-level=warning]{border-left-color:var(--finding-warning)}
+.code-report .finding[data-level=critical]{border-left-color:var(--finding-critical)}
+.code-report .finding-toggle{display:block;width:100%;padding:10px 12px;border:0;border-radius:7px;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.code-report .finding-toggle:focus-visible{outline:2px solid var(--color-accent);outline-offset:-2px}
+.code-report .finding-head{display:flex;align-items:baseline;gap:8px;min-width:0}
+.code-report .finding-head::after{content:'';flex:none;align-self:center;width:6px;height:6px;margin-left:2px;border-right:1.5px solid var(--color-text-muted);border-bottom:1.5px solid var(--color-text-muted);transform:rotate(-45deg);transition:transform .15s}
+.code-report .finding-toggle[aria-expanded=true] .finding-head::after{transform:rotate(45deg)}
+.code-report .finding-level{flex:none;font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--finding-warning)}
+.code-report .finding[data-level=critical] .finding-level{color:var(--finding-critical-fg)}
+.code-report .finding-name{flex:1;min-width:0;font-size:13px;font-weight:600;overflow-wrap:anywhere}
+.code-report .finding-value{flex:none;font:500 13px var(--report-font-mono)}
+.code-report .finding-where{display:block;margin-top:3px;font-size:12px;color:var(--color-text-muted);overflow-wrap:anywhere}
+.code-report .finding-body{padding:0 12px 12px}
+.code-report .finding-body p{margin-bottom:8px;font-size:13px;line-height:1.55}
+.code-report .finding-meaning,.code-report .finding-body .finding-limits{color:var(--color-text-muted)}
+.code-report .finding-body .finding-limits{font-size:12px}
+.code-report .finding-body .snippet-heading{margin:10px 0 6px}
+.code-report .finding-body .code-excerpt{padding:12px;font-size:12px;line-height:1.7;max-height:260px}
+.code-report .within-limits{margin-top:18px;padding-top:12px;border-top:1px solid var(--color-border)}
+.code-report .within-limits>summary{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600;list-style:none}
+.code-report .within-limits>summary::-webkit-details-marker{display:none}
+.code-report .within-limits>summary::after{content:'';width:6px;height:6px;margin-left:2px;border-right:1.5px solid var(--color-text-muted);border-bottom:1.5px solid var(--color-text-muted);transform:rotate(-45deg);transition:transform .15s}
+.code-report .within-limits[open]>summary::after{transform:rotate(45deg)}
+.code-report .within-limits[open]>summary{margin-bottom:10px}
+.code-report .details-provenance{margin-top:18px;font-size:12px}
 @container code-report (max-width:1250px){.code-report .graph-note{font-size:10px}
 }
 @container code-report (max-width:960px){.code-report .code-layout{grid-template-columns:1fr;height:auto}
