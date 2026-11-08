@@ -99,7 +99,7 @@ public sealed partial class BoardSettingsTests
     }
 
     [Fact]
-    public async Task SuppressedWaitingWritesStillRotateTheHundredJobDrain()
+    public async Task EveryDueJobIsEvaluatedEachCycle_EvenWhenWaitingWritesAreSuppressed()
     {
         var (board, _, _, _) = await Lanes();
         for (var i = 0; i < 101; i++)
@@ -111,17 +111,16 @@ public sealed partial class BoardSettingsTests
         }
         var now = DateTime.UtcNow.AddMinutes(2);
         var first = await _boards.GetDueLaneAutomationsAsync(now, Ct);
-        Assert.Equal(100, first.Count);
+        Assert.Equal(101, first.Count);
         foreach (var entry in first)
             await _boards.RecordLaneAutomationDispatchAsync(entry, new("Waiting", "Busy"), now, Ct);
         var second = await _boards.GetDueLaneAutomationsAsync(now.AddSeconds(10), Ct);
-        Assert.Contains(second, e => first.All(f => f.EventKey != e.EventKey));
-        var omitted = Assert.Single(first, e => second.All(s => s.EventKey != e.EventKey));
+        Assert.Equal(first, second);
         foreach (var entry in second)
             await _boards.RecordLaneAutomationDispatchAsync(entry, new("Waiting", "Busy"), now.AddSeconds(10), Ct);
         var third = await _boards.GetDueLaneAutomationsAsync(now.AddSeconds(20), Ct);
-        Assert.Equal(omitted.EventKey, third[0].EventKey);
-        var cached = second.First(e => first.Any(f => f.EventKey == e.EventKey));
+        Assert.Equal(first, third);
+        var cached = second[0];
         Assert.Equal(new DateTimeOffset(now).ToUnixTimeMilliseconds(), (await DispatchReceipt(cached)).Attempt);
     }
 

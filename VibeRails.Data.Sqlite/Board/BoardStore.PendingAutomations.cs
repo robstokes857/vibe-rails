@@ -15,32 +15,22 @@ public sealed partial class BoardStore
     {
         await using var connection = await OpenAsync(cancellationToken);
         await using var query = connection.CreateCommand();
-        // One oldest entry per Job prevents a backlog for one busy Automation from hiding
-        // other Jobs beyond the batch limit. Rotate attempted Jobs durably across roots/restarts.
+        // Evaluate every due entry: a card blocked by its own workflow must not hide
+        // another card using the same Job. The dispatcher rechecks prerequisites and overlap.
         query.CommandText = $"""
-            WITH pending AS ({PendingLaneEntriesSql}), ranked AS (
-                SELECT *, ROW_NUMBER() OVER (PARTITION BY JobId ORDER BY DueUnixMs, CardId, EventKey) AS rank
-                FROM pending WHERE DueUnixMs <= $now AND NOT EXISTS (
-                    SELECT 1 FROM BoardCards sharedCard JOIN BoardColumns sharedLane ON sharedLane.Id = sharedCard.ColumnId
-                    JOIN BoardSharedOrigins origin ON origin.BoardId = sharedLane.BoardId WHERE sharedCard.Id = pending.CardId)
-            )
+            WITH pending AS ({PendingLaneEntriesSql})
             SELECT p.CardId, p.JobId, p.EventKey, c.ProjectPath,
                 'board-lane:' || {CardKeySql} || ':' || p.ColumnId || ':' || p.EventKey,
                 c.ColumnId = p.ColumnId AND c.DeletedUTC IS NULL AND (
                     EXISTS (SELECT 1 FROM BoardLaneAutomations a WHERE a.ColumnId = p.ColumnId AND a.JobId = p.JobId)
                     OR EXISTS (SELECT 1 FROM BoardLaneAdditionalAutomations a WHERE a.ColumnId = p.ColumnId AND a.JobId = p.JobId))
-            FROM ranked p JOIN BoardCards c ON c.Id = p.CardId
+            FROM pending p JOIN BoardCards c ON c.Id = p.CardId
             {CardPrefixJoinSql}
-            LEFT JOIN BoardLaneAutomationDispatch d ON d.EventKey = p.EventKey AND d.JobId = p.JobId
-            LEFT JOIN json_each($attempts) attempted ON attempted.key = p.EventKey || ':' || p.JobId
-            WHERE p.rank = 1 AND NOT EXISTS (
-                SELECT 1 FROM BoardLaneWorkflowSteps target
-                JOIN BoardLaneWorkflowSteps prior ON prior.WorkflowId = target.WorkflowId AND prior.Position < target.Position
-                JOIN pending earlier ON earlier.EventKey = prior.EventKey AND earlier.JobId = prior.JobId
-                WHERE target.EventKey = p.EventKey AND target.JobId = p.JobId)
-            ORDER BY COALESCE(attempted.value, d.LastAttemptUnixMs, 0), p.DueUnixMs, p.CardId, p.JobId LIMIT 100;
+            WHERE p.DueUnixMs <= $now AND NOT EXISTS (
+                SELECT 1 FROM BoardColumns lane JOIN BoardSharedOrigins origin ON origin.BoardId = lane.BoardId
+                WHERE lane.Id = c.ColumnId)
+            ORDER BY p.DueUnixMs, p.CardId, p.JobId, p.EventKey;
             """;
-        query.Parameters.AddWithValue("$attempts", WaitingDispatchAttemptsJson());
         query.Parameters.AddWithValue("$now", new DateTimeOffset(nowUtc).ToUnixTimeMilliseconds());
         var entries = new List<BoardLaneAutomationEvent>();
         await using var reader = await query.ExecuteReaderAsync(cancellationToken);

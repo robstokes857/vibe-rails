@@ -152,7 +152,10 @@ public sealed partial class BoardSettingsTests
         }
         if (reason == "overlap") Assert.NotNull(await _jobs.EnqueueManualRunAsync(skipped.Id, Ct));
         var initial = await Tick(due);
-        if (skipFirst) Assert.Empty(initial);
+        // Every due step is evaluated: an unavailable predecessor can be skipped and
+        // release the valid step in this cycle; a busy predecessor still needs a user skip.
+        var waitsForSkip = skipFirst && reason == "overlap";
+        if (waitsForSkip) Assert.Empty(initial);
         else
         {
             var validRun = Assert.Single(initial);
@@ -169,7 +172,7 @@ public sealed partial class BoardSettingsTests
             Assert.Equal("Skipped", entry.StepStatus);
             Assert.False(entry.CanSkip);
         }
-        if (skipFirst) Assert.Equal(valid.Id, (await _jobs.GetRunAsync(Assert.Single(await Tick(due + 2)), Ct))!.JobId);
+        if (waitsForSkip) Assert.Equal(valid.Id, (await _jobs.GetRunAsync(Assert.Single(await Tick(due + 2)), Ct))!.JobId);
         else Assert.Empty(await Tick(due + 2));
 
     }

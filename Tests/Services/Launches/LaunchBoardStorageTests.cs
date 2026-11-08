@@ -1,6 +1,8 @@
 using Microsoft.Data.Sqlite;
+using Moq;
 using VibeRails.Data.Sqlite;
 using VibeRails.Services.Board;
+using VibeRails.Services.Jobs;
 using VibeRails.Services.Launches;
 using Xunit;
 
@@ -70,6 +72,47 @@ public sealed class LaunchBoardStorageTests : IDisposable
         await Assert.ThrowsAsync<BoardConflictException>(() => board.SaveLaunchLaneAsync(root, lane.Id, new([], 0), Ct));
         await board.SaveLaunchLaneAsync(root, lane.Id, new([new("preset_b", "preset")], 1), Ct);
         Assert.Equal("preset_a", Assert.Single(await board.GetLaunchEventsAsync(root, card.Id, Ct)).DefinitionId);
+    }
+
+    [Fact]
+    public async Task FailedReviewOnOlderCard_DoesNotStarveNewerCardsSharedDefinition()
+    {
+        var runs = new LaunchStore($"Data Source={Path.Combine(root, "launches.db")};Pooling=False");
+        var launches = new LaunchService(runs, Mock.Of<IAutomationScriptService>(), board);
+        var next = (await launches.SavePresetAsync(null, new("Next step", "", "codex", InitialPrompt: "Work"), Ct)).Preset;
+        await board.EnsureDefaultColumnsAsync(root, Ct);
+        var lane = (await board.GetColumnsAsync(root, Ct))[0];
+        await board.SaveLaunchLaneAsync(root, lane.Id, new([new("review", "preset", "review"), new(next.Id, "preset")], 0), Ct);
+        var older = await board.CreateCardAsync(root, new(lane.Id, "Older", "", null, "medium", null, [], false), Ct);
+        var newer = await board.CreateCardAsync(root, new(lane.Id, "Newer", "", null, "medium", null, [], false), Ct);
+        foreach (var card in new[] { older, newer })
+        {
+            var review = (await board.GetLaunchEventsAsync(root, card.Id, Ct))[0];
+            var runId = "review-" + card.Id;
+            await board.AcknowledgeLaunchEventAsync(review.Id, runId, Ct);
+            await board.UpdateLaunchEventAsync(review.Id, runId, "succeeded", Ct);
+            await board.ReportLaunchEventAsync(root, card.Id, review.Id,
+                card.Id == older.Id ? "failed" : "passed", "Review result", null, null, ct: Ct);
+        }
+        await using (var db = new SqliteConnection($"Data Source={Path.Combine(root, "board.db")};Pooling=False"))
+        {
+            await db.OpenAsync(Ct);
+            await using var due = db.CreateCommand();
+            due.CommandText = "UPDATE BoardLaunchEvents SET DueUnixMs = CASE WHEN CardId = $older THEN 1 ELSE 2 END;";
+            due.Parameters.AddWithValue("$older", older.Id);
+            await due.ExecuteNonQueryAsync(Ct);
+        }
+
+        await new BoardLaunchWorkflow(board, runs, launches, null!).TickAsync(Ct);
+
+        var blocked = (await board.GetLaunchEventsAsync(root, older.Id, Ct))[1];
+        var queued = (await board.GetLaunchEventsAsync(root, newer.Id, Ct))[1];
+        Assert.Null(blocked.RunId);
+        Assert.NotNull(queued.RunId);
+        var run = (await runs.GetRunAsync(queued.RunId, Ct))!;
+        Assert.Equal(next.Id, run.DefinitionId);
+        Assert.Equal(newer.Id, run.Snapshot.Context.CardId);
+        Assert.Equal("queued", run.Status);
     }
 
     [Fact]

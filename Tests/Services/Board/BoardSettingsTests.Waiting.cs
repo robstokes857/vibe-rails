@@ -121,8 +121,12 @@ public sealed partial class BoardSettingsTests
         }
         var freeCard = await Card(other);
         await SetDue(freeCard, now - 1);
+        var dueEntries = await _boards.GetDueLaneAutomationsAsync(DateTimeOffset.FromUnixTimeMilliseconds(now).UtcDateTime, Ct);
+        Assert.Equal(106, dueEntries.Count);
         var freeRun = Assert.Single(await Tick(now));
         Assert.Equal(independent.Id, (await _jobs.GetRunAsync(freeRun, Ct))!.JobId);
+        foreach (var entry in dueEntries.Where(e => e.JobId == job.Id))
+            Assert.Equal(now, (await DispatchReceipt(entry)).Attempt);
         await _jobs.CompleteRunAsync(busy, JobRunStatus.Succeeded, 0, null, Ct);
         for (var i = 0; i < cards.Count; i++)
         {
@@ -135,7 +139,7 @@ public sealed partial class BoardSettingsTests
     }
 
     [Fact]
-    public async Task MoreThanOneBatchOfBusyJobs_PreservesSequentialOrderAcrossRestart()
+    public async Task EveryDueStepIsEvaluated_ButBusyPredecessorsStillBlockAcrossRestart()
     {
         var (_, lane, _, _) = await Lanes();
         var jobs = new List<long>();
@@ -148,12 +152,14 @@ public sealed partial class BoardSettingsTests
         await _boards.SaveLaneAutomationAsync(_root, lane, jobs, 0, Ct);
         var card = await Card(lane);
         var now = await Due(card.Id);
-        var first = Assert.Single(await _boards.GetDueLaneAutomationsAsync(DateTimeOffset.FromUnixTimeMilliseconds(now).UtcDateTime, Ct));
-        Assert.Equal(jobs[0], first.JobId);
+        var first = await _boards.GetDueLaneAutomationsAsync(DateTimeOffset.FromUnixTimeMilliseconds(now).UtcDateTime, Ct);
+        Assert.Equal(jobs, first.Select(e => e.JobId));
         Assert.Empty(await Tick(now));
-        var next = Assert.Single(await new BoardStore(_connectionString, _stateConnectionString)
-            .GetDueLaneAutomationsAsync(DateTimeOffset.FromUnixTimeMilliseconds(now + 1).UtcDateTime, Ct));
-        Assert.Equal(first.EventKey, next.EventKey);
+        foreach (var entry in first)
+            Assert.Equal("Waiting", (await DispatchReceipt(entry)).Status);
+        var next = await new BoardStore(_connectionString, _stateConnectionString)
+            .GetDueLaneAutomationsAsync(DateTimeOffset.FromUnixTimeMilliseconds(now + 1).UtcDateTime, Ct);
+        Assert.Equal(first, next);
         Assert.Equal(103, (await _boards.GetPendingLaneAutomationsAsync(_root, card.Id, Ct)).Count);
     }
 

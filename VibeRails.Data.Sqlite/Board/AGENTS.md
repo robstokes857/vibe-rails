@@ -185,7 +185,8 @@ intact. Compatibility store methods remain; do not backfill, reset, convert or c
 
 `board-lane-dispatch/1` adds a dispatch ledger and cancellation triggers that write only to that
 new table. Existing queue/schema writers remain compatible. Busy events stay pending; the drain
-selects the oldest entry per Job and rotates attempted Jobs through a bounded batch. Exact event
+evaluates all due local entries oldest first, including multiple cards for the same Job. Per-card
+prerequisite checks and the Job overlap guard decide which entries can run. Exact event
 identity protects reentry from stale acknowledgments. Run commit and Board acknowledgment remain
 independent. Status reads reconcile immutable trigger keys with local Job runs, including a run
 committed before acknowledgment failed. Never backfill or infer execution from an empty queue.

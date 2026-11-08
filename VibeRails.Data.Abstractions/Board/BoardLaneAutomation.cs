@@ -85,7 +85,7 @@ public partial interface IBoardStore
     /// each changed lane. Returns the number of lanes changed; zero when nothing selects the job.
     /// </summary>
     Task<int> RemoveJobFromLanesAsync(long jobId, CancellationToken cancellationToken = default);
-    /// <summary>Reads a bounded batch without claiming or removing entries.</summary>
+    /// <summary>Reads all due local entries, oldest first, without claiming or removing them.</summary>
     Task<IReadOnlyList<BoardLaneAutomationEvent>> GetDueLaneAutomationsAsync(DateTime nowUtc, CancellationToken cancellationToken = default);
     /// <summary>Removes only the observed entry; a subsequent lane entry must survive.</summary>
     Task AcknowledgeLaneAutomationAsync(BoardLaneAutomationEvent entry, CancellationToken cancellationToken = default);

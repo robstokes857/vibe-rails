@@ -1323,6 +1323,12 @@ for review. Portable custom-environment references await VIBE-25; raw local IDs 
 
 ## Waiting lane Automations (VIBE-21)
 
+The Job-based details in this section describe the retained legacy path. Current root hosting
+uses `LaunchScheduler` and `BoardLaunchWorkflow`; see the [launch contract](../Launches/README.md).
+That workflow reads all current entries and checks predecessors per card, so a failed review on
+one card does not hide another card's due step using the same definition. VIBE-270 covers both
+paths with regressions and corrects the legacy due-entry selection below.
+
 VIBE-42 surfaces pending entries on card tiles as **Waiting for Automation**. List, detail and
 the bounded activity poll read the same bulk pending-card lookup behind `IBoardStore`; immutable
 Job trigger keys suppress the waiting badge as soon as a run commits, even before acknowledgment.
@@ -1343,11 +1349,15 @@ distinguishes a committed duplicate, a busy Job, disabled/deleted/missing Jobs, 
 missing actions and no-longer-current entries. Only busy/transient failures retry. Manual card
 runs return a conflict that explicitly says the request was not queued.
 
-Each scheduler cycle reads at most 100 distinct Jobs, taking the oldest settled entry for each
-across both pending tables (due time, card ID, event key). Persisted attempt times rotate Jobs
-across batches; one busy Job with hundreds of cards cannot hide other Jobs. The original due
-time remains unchanged. The scheduler's normal root lifecycle drives retries, including after
-restart; no browser, daemon or alternate runtime database is involved.
+Each scheduler cycle reads every settled local entry across both pending tables, ordered by
+due time, card ID, Job ID and event key (VIBE-270). There is no per-Job selection or batch cap:
+a card blocked by its own failed predecessor must not hide a newer eligible card for the same
+Automation. The dispatcher evaluates each entry's current workflow prerequisites and the Job
+overlap guard before queueing. Pending successors are evaluated too, but cannot run until their
+predecessors pass or are skipped. Original due times remain unchanged. The scheduler's normal
+root lifecycle drives retries, including after restart; no browser, daemon or alternate runtime
+database is involved. An untouched due entry says it is waiting for scheduler evaluation; that
+placeholder does not infer whether a root backend is open.
 
 Coalescing is per card/Job: departure cancels an uncommitted entry, and reentry creates one fresh
 entry bound to the new destination and its 60-second delay. Other cards retain their places.
@@ -1488,9 +1498,10 @@ gate see other roots' committed run outcomes and skips.
 Unchanged Waiting dispatch receipts use a bounded, process-local cache (4,096 entries, five-minute
 refresh). A hit skips opening the Board writer transaction; changed reasons and terminal/queued
 receipts still persist immediately, and only successful writes populate the cache. Event/Job
-identity isolates reentries. In-memory attempt times participate in the due-entry ordering so
-suppressed writes still rotate Jobs beyond the 100-entry drain limit. Periodic durable refresh
-keeps restart/lease-handoff ordering useful. This cache never decides whether a step can run.
+identity isolates reentries. In-memory attempt times select the least recently attempted receipt
+for eviction, while periodic durable refresh retains diagnostic attempt timestamps. Due-entry
+ordering uses original due times even when a receipt write is suppressed. This cache never
+decides whether a step can run.
 
 Polls preserve add-form drafts,
 ignore stale results during mutations and stop when the popup closes.

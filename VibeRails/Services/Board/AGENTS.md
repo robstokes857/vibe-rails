@@ -242,8 +242,9 @@ Keep the card visible in its selected lane; only its Automation entry waits. Bul
 exclude committed runs even before acknowledgment. A skip must not affect a newer entry. Running-step skips request cancellation and hold successors
 until the run stops. Scripts added in the lane picker use ordinary Jobs and existing script approvals.
 
-Busy lane demand stays in the existing Board queues. Keep the oldest pending entry per Job
-first, with one pending entry per card/Job and a fresh 60-second delay after reentry. Moves and
+Busy lane demand stays in the existing Board queues. Evaluate every due entry each cycle,
+oldest first; a blocked card must not hide another card using the same Job. Keep one pending
+entry per card/Job and a fresh 60-second delay after reentry. Moves and
 settings edits cancel uncommitted entries; committed runs keep their own lifecycle. The additive
 dispatch ledger retains reasons, while actual Job run status wins after acknowledgment failures.
 UI, get_board_card, get_board_agent_status and review discovery share that state. Manual card

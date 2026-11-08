@@ -74,7 +74,7 @@ public sealed partial class BoardStore
                 var reason = row.Status != BoardStepStatus.Waiting ? row.Reason
                     : row.DueUtc > now ? "Waiting for the 60-second lane settling period."
                     : definition.InProject && definition.ActiveRunId is not null ? $"Automation is busy with run {definition.ActiveRunId}; waiting for its turn."
-                    : "Waiting for the scheduler; a VibeRails root backend must be open.";
+                    : "Waiting for the scheduler to evaluate this lane entry.";
                 rows[i] = row with { Name = definition.InProject ? definition.Name ?? $"Automation #{row.JobId}" : $"Automation #{row.JobId}",
                     Purpose = definition.InProject ? definition.Purpose : "work", RequiresVerdict = definition.WorkerName is not null, Reason = reason };
                 byTrigger[$"board-lane:{card.Key}:{row.ColumnId}:{row.EventKey}"] = (rows, i);

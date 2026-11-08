@@ -1,6 +1,4 @@
 using System.Globalization;
-using System.Text.Json;
-using VibeRails.DTOs;
 
 namespace VibeRails.Services.Board;
 
@@ -41,15 +39,5 @@ public sealed partial class BoardStore
                 _waitingDispatches.Remove(_waitingDispatches.MinBy(p => p.Value.AttemptUnixMs).Key);
             _waitingDispatches[DispatchCacheKey(entry)] = new(dispatch, now, new DateTimeOffset(now).ToUnixTimeMilliseconds());
         }
-    }
-
-    // LastAttempt drives fairness across the 100-Job drain limit. Suppressed writes must still
-    // rotate attempted Jobs in this process. Persist periodically for restarts/other roots;
-    // never retain statuses here or use this cache to decide whether a step can run.
-    private string WaitingDispatchAttemptsJson()
-    {
-        lock (_waitingDispatchLock)
-            return JsonSerializer.Serialize(_waitingDispatches.ToDictionary(p => p.Key, p => p.Value.AttemptUnixMs),
-                StorageJsonSerializerContext.Default.DictionaryStringInt64);
     }
 }

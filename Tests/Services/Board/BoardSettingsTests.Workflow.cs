@@ -98,7 +98,8 @@ public sealed partial class BoardSettingsTests
         await _boards.SaveLaneAutomationAsync(_root, lane, [first.Id, second.Id], 0, Ct);
         var card = await Card(lane);
         var due = await Due(card.Id);
-        var entry = Assert.Single(await _boards.GetDueLaneAutomationsAsync(DateTimeOffset.FromUnixTimeMilliseconds(due).UtcDateTime, Ct));
+        var entry = (await _boards.GetDueLaneAutomationsAsync(DateTimeOffset.FromUnixTimeMilliseconds(due).UtcDateTime, Ct))
+            .Single(e => e.JobId == first.Id);
         var delivery = new Mock<IBoardStore>(MockBehavior.Strict);
         delivery.Setup(s => s.GetDueLaneAutomationsAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).ReturnsAsync(new[] { entry });
         delivery.Setup(s => s.IsLaneAutomationCurrentAsync(entry, It.IsAny<CancellationToken>()))
