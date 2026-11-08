@@ -43,6 +43,8 @@ export class CodeReportViewer {
         this.destroyed = false;
         this.activeList = 'report';
         const titleId = `code-report-details-${++instanceId}`;
+        // Finding panel ids come from this counter, never from DOM text read back into markup.
+        this.findingIdPrefix = `${titleId}-finding`;
         host.innerHTML = `<div class="code-report code-report-compact">
             <main aria-label="Interactive code report">
                 <div class="code-layout">
@@ -509,7 +511,7 @@ export class CodeReportViewer {
         const open = preferred || findings.problems[0];
         const captured = new Date(this.response?.startedUtc);
         const date = Number.isNaN(captured.valueOf()) ? 'Saved report' : `Report captured ${captured.toLocaleString()}`;
-        const prefix = `${this.details.getAttribute('aria-labelledby')}-finding`;
+        const prefix = this.findingIdPrefix;
         const row = (item, index) => `<div class="finding" data-level="${item.level}" data-metric="${esc(item.name)}">`
             + `<button type="button" class="finding-toggle" data-finding="${index}" aria-expanded="false" aria-controls="${prefix}-${index}">`
             + `<span class="finding-head">${item.level === 'ok' ? '' : `<span class="finding-level">${esc(item.levelLabel)}</span>`}`
