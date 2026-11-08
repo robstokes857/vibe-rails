@@ -19231,9 +19231,8 @@ body.performance-mode .brand-text-sm {
     display: none;
 }
 
-/* The Quality bar: the page header moved under the map so the map fills the viewport under the nav.
-   Same hooks as before (title, scan line, menu, Scan again, Fix); only its place and density changed.
-   The guide and the scan log open beneath it; the viewer counts all of it as chrome below the map. */
+/* The Quality bar leads the report with the title, scan line, menu, Scan again and Fix.
+   The optional guide opens below the bar; the viewer fills the remaining viewport with the map. */
 .code-quality-page .project-health-header {
     flex-wrap: nowrap;
     gap: 16px;
@@ -19280,16 +19279,9 @@ body.performance-mode .brand-text-sm {
 }
 
 .code-quality-guide-toggle:focus-visible {
-    border-radius: 4px;
-    outline: 2px solid color-mix(in srgb, var(--color-primary, #3b82f6) 70%, transparent);
+    border-radius: var(--radius-control);
+    outline: 2px solid var(--focus-ring);
     outline-offset: 2px;
-}
-
-/* The options menu opens upward from the bar so it stays on screen. */
-.code-quality-page .rules-action-menu-popover {
-    top: auto;
-    bottom: calc(100% + 0.4rem);
-    box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.45);
 }
 
 @media (max-width: 820px) {

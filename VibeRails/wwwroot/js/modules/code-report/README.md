@@ -6,17 +6,16 @@ Guard stay on their own page (`dashboard` / `agents`); opening Rules does not st
 and opening Quality does not run rule validation. Settings is the cog beside Automation's play
 button, leaving room for both navigation destinations. The controller supplies the latest real
 MintLint response from its scan cache; the viewer requests a current repository graph through
-`app.apiCall`. The map leads the page: nothing sits between the app nav and the report, and the title, the
-scan line, scan scope, exclusions, Scan again, Fix and Copy scan summary live in the Quality bar
-(`.code-quality-bar`, still a `vb-page-header`) directly under it, so the map takes the viewport
-and the bar's menu opens upward. There is no second report store, scan engine or theme
+`app.apiCall`. The title, scan line, scan scope, exclusions, Scan again, Fix and Copy scan summary
+live in the Quality bar (`.code-quality-bar`, still a `vb-page-header`) above the map and report.
+The bar's menu opens downward over the report. There is no second report store, scan engine or theme
 preference. The bar's **What this scan checks** toggle opens a guide panel beneath it
 (`data-code-analyzer-guide`, static template markup, not viewer output) that lists MintLint's
 seven categories with their metrics, warn/critical thresholds and weights, the grading pipeline,
 reach ranking and the supported languages. `Tests/wwwroot/js/project-health-theme.test.mjs` pins
 it to `ScoringProfile`, `ScoreCalculator` and `LanguageRegistry`, so a tuning change fails that
 test until the guide is updated. The viewer counts the bar, the guide and the scan log as chrome
-below the map, so opening either panel shortens the map rather than the page.
+around the map, so opening either panel shortens the map down to its minimum height.
 
 ## Composition and lifetime
 

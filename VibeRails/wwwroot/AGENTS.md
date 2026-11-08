@@ -96,7 +96,7 @@ shared app palette without a separate appearance preference. Shared controls hav
 
 Validate with `playwright.page-headers.config.js` (includes `design-system.spec.js`) and
 the relevant feature harnesses; these use static frontend files and intercepted APIs.
-The shared heading band keeps Quality's placement below the map.
+The shared heading band places Quality's title, scan status and actions above the map.
 
 ## Page headings (VIBE-70)
 
@@ -105,9 +105,9 @@ one `h1.vb-page-title` in their view templates. `style.css` owns the shared titl
 left alignment, surface band, shared top inset, spacing and narrow-screen stacking. Optional supporting text uses
 `vb-page-description`; grouped controls use `vb-page-actions`. Grid workspaces supply their
 own gap after the header. Keep page-specific status/action styles, but do not restore local
-title rules, uppercase utilities, inline letter spacing or gradient page titles. Quality is the
-one exception in placement: its header is the Quality bar (`.code-quality-bar`) under the map,
-so the map fills the viewport beneath the nav; the bar keeps the shared classes and hooks.
+title rules, uppercase utilities, inline letter spacing or gradient page titles. Quality's
+header is the Quality bar (`.code-quality-bar`) above the map, retaining the shared classes
+and hooks. Its scan guide opens beneath the header and its options menu opens downward.
 
 **Terminology:** "Web UI Chat" refers to the xterm.js-based terminal, NOT a separate chat UI.
 

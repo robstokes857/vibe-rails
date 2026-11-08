@@ -70,8 +70,7 @@ for (const width of [1440, 768, 390]) {
             expect(metrics.typography).toEqual(reference.typography);
             expect(metrics.treatment).toEqual(reference.treatment);
             expect(metrics.leftOffset).toBeCloseTo(17, 0);
-            // Quality intentionally puts its shared header below the map.
-            if (view !== 'code-quality') expect(metrics.topInset).toEqual(reference.topInset);
+            expect(metrics.topInset).toEqual(reference.topInset);
             expect(metrics.right).toBeLessThanOrEqual(width);
             expect(metrics.overflow).toBeLessThanOrEqual(1);
 

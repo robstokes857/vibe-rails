@@ -257,7 +257,9 @@ for (const width of [1920, 1492, 1210, 1100, 1000, 768, 390]) {
         if (width >= 1210) {
             const report = await page.locator('.code-report').boundingBox();
             expect(report.width).toBeGreaterThan(width - 90);
-            expect(report.y).toBeLessThan(200);
+            const header = await page.locator('.code-quality-bar').boundingBox();
+            expect(header.y).toBeLessThan(200);
+            expect(report.y).toBeGreaterThanOrEqual(header.y + header.height);
         }
         if (width === 1492 || width === 390) {
             await expect(page.frameLocator('.code-report iframe').locator('body')).toHaveAttribute('data-startup', 'ready');
@@ -1271,6 +1273,38 @@ for (const viewport of [{ width: 1366, height: 768 }, { width: 390, height: 844 
                 expect(buttonBounds.y + buttonBounds.height).toBeLessThanOrEqual(controlBounds.y + 1);
             }
         }
+        const quality = page.locator('.project-health-quality');
+        const header = quality.locator('.code-quality-bar');
+        const headerBounds = await header.boundingBox();
+        const reportBounds = await quality.locator('.code-report').boundingBox();
+        expect(headerBounds.y).toBeGreaterThanOrEqual(0);
+        expect(headerBounds.y + headerBounds.height).toBeLessThanOrEqual(viewport.height);
+        expect(headerBounds.y + headerBounds.height).toBeLessThanOrEqual(reportBounds.y);
+
+        const options = header.getByLabel('More scan options', { exact: true });
+        await options.click();
+        const menuBounds = await header.locator('.rules-action-menu-popover').boundingBox();
+        const optionsBounds = await options.boundingBox();
+        expect(menuBounds.y).toBeGreaterThanOrEqual(optionsBounds.y + optionsBounds.height);
+        expect(menuBounds.y + menuBounds.height).toBeLessThanOrEqual(viewport.height);
+        await options.click();
+
+        const guideToggle = header.locator('[data-action="toggle-scan-guide"]');
+        const scrollBeforeGuide = await page.evaluate(() => window.scrollY);
+        await guideToggle.click();
+        const guide = quality.locator('[data-code-analyzer-guide]');
+        await expect(guide).toBeVisible();
+        await expect(guideToggle).toHaveAttribute('aria-expanded', 'true');
+        const guideLayout = await quality.evaluate(element => ({
+            guideBottom: element.querySelector('[data-code-analyzer-guide]').getBoundingClientRect().bottom,
+            reportTop: element.querySelector('.code-report').getBoundingClientRect().top,
+            scrollY: window.scrollY
+        }));
+        expect(guideLayout.guideBottom).toBeLessThanOrEqual(guideLayout.reportTop);
+        expect(guideLayout.scrollY).toBe(scrollBeforeGuide);
+        await guideToggle.click();
+        await expect(guide).toBeHidden();
+        await expect(guideToggle).toHaveAttribute('aria-expanded', 'false');
         expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
         await page.screenshot({ path: testInfo.outputPath('quality-inline-fix.png'), fullPage: true });
     });

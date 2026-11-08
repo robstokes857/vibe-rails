@@ -427,10 +427,7 @@
         <div class="view project-health-page code-quality-page" data-view="code-quality">
             <section class="card project-health-card project-health-quality vca-console-card"
                 data-code-analyzer-console data-tone="neutral" aria-busy="false">
-                <!-- The map leads: Code Atlas + Quality Lab fill the viewport under the nav, mounted inline by
-                     RuleController.attachCodeQualityOverview. The title, scan line and actions sit in the bar
-                     beneath them, so nothing pushes the map down. -->
-                <div class="project-health-quality-report" data-code-analyzer-report></div>
+                <!-- Keep the title, scan status and actions above the report. -->
                 <header class="vb-page-header project-health-header code-quality-bar">
                     <div class="vb-page-heading code-quality-bar-heading">
                         <h1 class="vb-page-title">Code quality</h1>
@@ -568,6 +565,8 @@
                         </div>
                     </div>
                 </section>
+                <!-- Code Atlas + Quality Lab mount inline below the header and optional guide. -->
+                <div class="project-health-quality-report" data-code-analyzer-report></div>
                 <!-- The scan log opens from the menu; the bar's scan line carries the scan's size and age. -->
                 <details class="rules-console-transcript project-health-scan-transcript" data-code-analyzer-log hidden>
                     <summary>

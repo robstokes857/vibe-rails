@@ -102,7 +102,7 @@ test('Rules retains its actions and Quality retains the log and coverage menu', 
     assert.match(styleCss, /\.main-container:has\(\.vb-page-header\) \{\s*padding-top: 14px;/);
 });
 
-// The guide at the foot of the Quality card is static markup, so it is pinned to the MintLint
+// The guide beneath the Quality header is static markup, so it is pinned to the MintLint
 // sources it describes: a threshold, weight, category wiring, rating band or language that
 // changes there must change here too, or the page tells the user the wrong thing.
 test('Quality explains what the scan checks, in step with MintLint scoring and its languages', () => {
@@ -160,15 +160,13 @@ test('Quality explains what the scan checks, in step with MintLint scoring and i
     assert.match(ruleControllerSource, /toggleScanGuide\(\) \{[\s\S]*?guide\.hidden = !show;[\s\S]*?setAttribute\('aria-expanded', String\(show\)\)/);
 });
 
-// The map leads: nothing sits between the nav and the map, and the title, scan line and every
-// action move into a compact bar under it. The viewer's chrome-below measurement gives the map
-// the room the old header took.
-test('the map leads the Quality page; the bar with the title, scan line and actions follows it', () => {
+// Keep the title, scan line and actions reachable above the map, with the guide below the bar.
+test('the Quality bar with the title, scan line and actions leads the map', () => {
     const quality = indexHtml.match(/<template id="code-quality-template">([\s\S]*?)<\/template>/)[1];
-    const positions = ['data-code-analyzer-report', '<header class="vb-page-header project-health-header code-quality-bar">',
-        'data-code-analyzer-guide', 'data-code-analyzer-log'].map(marker => quality.indexOf(marker));
+    const positions = ['<header class="vb-page-header project-health-header code-quality-bar">',
+        'data-code-analyzer-guide', 'data-code-analyzer-report', 'data-code-analyzer-log'].map(marker => quality.indexOf(marker));
     assert.ok(positions.every((at, index) => at >= 0 && (index === 0 || at > positions[index - 1])),
-        'map, then the bar, then the guide and the scan log');
+        'the bar, then the optional guide, the map and the scan log');
     const header = quality.match(/<header class="vb-page-header project-health-header code-quality-bar">([\s\S]*?)<\/header>/)[1];
     assert.match(header, /<h1 class="vb-page-title">Code quality<\/h1>\s*<span class="project-health-scan-meta" data-code-analyzer-meta/, 'title and scan line share the heading');
     assert.match(header, /<button class="code-quality-guide-toggle" type="button" data-action="toggle-scan-guide"/);
@@ -177,10 +175,10 @@ test('the map leads the Quality page; the bar with the title, scan line and acti
         assert.match(header, new RegExp(`data-action="${action}"`), `${action} stays in the bar`);
     assert.match(header, /<div class="project-health-fix-controls" role="group"[^>]*>\s*<button[^>]*data-action="launch-health-fix"[^>]*>\s*<i class="fa-solid fa-screwdriver-wrench"[^>]*><\/i>\s*Fix with\s*<\/button>\s*<label class="project-health-fix-picker">/,
         'Fix is a short label ahead of the picker, inside one group');
-    // The shared heading band remains under the map; its menu opens upward and Fix stays a pill.
+    // The shared heading band leads the map; its menu uses the shared downward placement.
     assert.match(styleCss, /\.code-quality-page \.project-health-header \{[^}]*border: 1px solid var\(--color-border, #2d2d3f\)/);
     assert.doesNotMatch(styleCss, /\.code-quality-page \.vb-page-title \{\s*font-size:/);
-    assert.match(styleCss, /\.code-quality-page \.rules-action-menu-popover \{\s*top: auto;\s*bottom: calc\(100% \+ 0\.4rem\);/);
+    assert.doesNotMatch(styleCss, /\.code-quality-page \.rules-action-menu-popover/);
     assert.match(styleCss, /\.project-health-fix-controls \{[^}]*border-radius: 999px;/);
     assert.match(styleCss, /\.project-health-fix-picker \.ts-wrapper \.ts-control \{[^}]*border: 0;/);
     assert.doesNotMatch(styleCss, /\.project-health-fix-controls > \.btn \{[^}]*padding-inline: 12px;\s*\}/, 'the boxed button rule is gone');

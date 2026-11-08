@@ -552,15 +552,14 @@ export class RuleController {
         }
     }
 
-    // The guide opens under the Quality bar; the viewer counts it as chrome below the map and
-    // gives the map the rest, the same as the scan log.
+    // The guide opens between the Quality bar and the map; the viewer measures the remaining
+    // space for the map, also accounting for the scan log below it.
     toggleScanGuide() {
         const guide = this.query('[data-code-analyzer-guide]');
         if (!guide) return;
         const show = guide.hidden;
         guide.hidden = !show;
         this.query('[data-action="toggle-scan-guide"]')?.setAttribute('aria-expanded', String(show));
-        if (show) guide.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
     }
 
     renderRuleInventorySummary() {

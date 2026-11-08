@@ -710,6 +710,10 @@ Desktop notifications use the shared app palette, including the VS Code host the
 there is no separate notification appearance preference. Feature-specific legacy controls migrate
 as those views are updated.
 
+The desktop Quality page places its **Code quality** heading, scan status and actions
+above the repository map and report. The scan guide opens directly below that header;
+the scan-options menu opens downward over the report.
+
 Desktop aliases for values specified above (these add no new visual choices):
 
 | Token | Value | Use |

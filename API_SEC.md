@@ -291,7 +291,8 @@ middleware serves their paths rather than registering individual API endpoints.
 | GET | `/api/v1/presets/{id}/attachments/{attachmentId}/content` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |
 | GET | `/api/v1/runs/{id}/attachments/{attachmentId}/content` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |
 | GET, PUT | `/api/v1/board/columns/{column}/launches` | [BoardLaunchRoutes.cs](VibeRails/Routes/BoardLaunchRoutes.cs); root only |
-| GET | `/api/v1/board/cards/{card}/launches` | [BoardLaunchRoutes.cs](VibeRails/Routes/BoardLaunchRoutes.cs); root only |
+| GET | `/api/v1/board/columns/{column}/launches/activity` | [BoardLaunchRoutes.cs](VibeRails/Routes/BoardLaunchRoutes.cs); root only |
+| GET, POST | `/api/v1/board/cards/{card}/launches` | [BoardLaunchRoutes.cs](VibeRails/Routes/BoardLaunchRoutes.cs); root only |
 | GET | `/api/v1/board/cards/{card}/launches/runs` | [BoardLaunchRoutes.cs](VibeRails/Routes/BoardLaunchRoutes.cs); root only |
 | POST | `/api/v1/board/cards/{card}/launches/{entry}/skip` | [BoardLaunchRoutes.cs](VibeRails/Routes/BoardLaunchRoutes.cs); root only |
 | OPTIONS | `*` | [CookieAuthMiddleware.cs](VibeRails/Middleware/CookieAuthMiddleware.cs); global bypass, not a business mapping |
@@ -440,7 +441,6 @@ middleware serves their paths rather than registering individual API endpoints.
 | GET | `/api/v1/compression/catalog` | [CompressionRoutes.cs](VibeRails/Routes/CompressionRoutes.cs) |
 | POST | `/api/v1/compression/preview` | [CompressionRoutes.cs](VibeRails/Routes/CompressionRoutes.cs) |
 | GET | `/api/v1/context` | [ProjectRoutes.cs](VibeRails/Routes/ProjectRoutes.cs) |
-| GET | `/api/v1/environments/{name}/launch` | [CliLaunchRoutes.cs](VibeRails/Routes/CliLaunchRoutes.cs) |
 | ANY (WebSocket) | `/api/v1/events/ws` | [AppNotificationRoutes.cs](VibeRails/Routes/AppNotificationRoutes.cs); [WebSocketHandler.cs](VibeRails/Routes/WebSocketHandler.cs) |
 | GET | `/api/v1/filesystem/entries` | [FileSystemRoutes.cs](VibeRails/Routes/FileSystemRoutes.cs) |
 | POST | `/api/v1/git/init` | [ProjectRoutes.cs](VibeRails/Routes/ProjectRoutes.cs) |
