@@ -183,6 +183,16 @@ This builds the .NET backend, stages the bundled binaries, compiles the TypeScri
 
 For an interactive loop, open `vscode-viberails/` in VS Code and press **F5** to launch an Extension Development Host.
 
+`npm run test:board-drag` runs the production Board in an isolated VS Code Development Host
+with synthetic API data and no backend. Install `UITests` dependencies first; the harness uses
+its Playwright CDP connection but sends raw mouse events, without native-drag interception.
+It checks an ordinary drag, a lane repaint during dragging, and the next drag. The original
+bug destroyed Sortable's active element during repaint, then threw from `_onDrop` without
+saving the move. Artifacts go to `.vscode-test/board-drag-*.json` and `.png`.
+`VIBERAILS_VSCODE_CLI` may select a standalone VS Code executable when the installed editor is
+updating. Optional `VIBERAILS_DRAG_BASELINE` points to an exported original `board-controller.js`
+for the before/after comparison; it is loaded only as test code in that synthetic webview.
+
 ### Dependency overrides
 
 `package.json` carries an npm `overrides` entry pinning `@azure/msal-node` to `^7.1.0` (VIBE-217, GHSA-xcx6-jx8p-x3h5, Dependabot alert #42). It exists only because every `@azure/identity` release still declares the vulnerable `^6` line, so no `npm update` can reach the patched version on its own. npm records nothing in the lockfile when an override goes stale, and `npm ls` shows no `invalid` marker, so nothing will flag it. Drop the override once `@azure/identity` (reached through `@vscode/vsce`) allows msal-node >= 7.1 by itself; check with `npm view @azure/identity dependencies.@azure/msal-node`. Tracked on VB-NW72V-297.

@@ -695,6 +695,11 @@ The view uses the app's shared surfaces rather than its own: `app.showModal` (up
 for every delete, and `app.showToast` for results. It owns no toast stack, no Bootstrap modal, and
 no theme toggle. Drag and drop is the globally loaded Sortable; `unload()` destroys those
 instances, because they attach document-level listeners that outlive the view's DOM.
+From selection through drop completion, defer lane replacement, cancel pending
+pagination and suppress new scroll pages so refreshes cannot detach the active drag nodes.
+An unchosen click without a drag must also release the guard. Cover both lifecycle races
+and real pointer movement in the synthetic Board harness (`board-pagination.spec.js`) and
+the VS Code webview regression (`board-drag-webview.test.ts`).
 
 ### The card editor
 

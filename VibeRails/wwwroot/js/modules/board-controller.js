@@ -1062,6 +1062,12 @@ export class BoardController {
     }
 
     renderLanes() {
+        // Replacing these nodes also destroys Sortable's active drag. Keep the
+        // latest state and paint it once the card/lane has been released.
+        if (this._boardDragging) {
+            this._boardRenderPending = true;
+            return;
+        }
         const scroll = this.captureScroll();
         const selectionFocus = globalThis.document?.activeElement?.dataset?.boardCardSelect;
         const visible = this.filteredCards();
@@ -1168,7 +1174,7 @@ export class BoardController {
     async loadMoreCards(columnId) {
         // A scroll can fire during a filter debounce or refresh. Its old offset
         // belongs to the previous full result, even after old requests were aborted.
-        if (this._cardPageGeneration !== this._refreshGeneration) return;
+        if (this._boardDragging || this._cardPageGeneration !== this._refreshGeneration) return;
         const lane = this.cardPage?.lanes?.find(item => item.columnId === columnId);
         if (!lane?.hasMore || this._pageRequests.has(columnId)) return;
         this._boardPollAbort?.abort();
@@ -1231,6 +1237,23 @@ export class BoardController {
     // Drag and drop
     // ============================================
 
+    beginBoardDrag() {
+        this._boardDragging = true;
+        this._boardPollAbort?.abort();
+        // Restore a cancelled page's loading button even if this is just a
+        // click, so there is no drop refresh to repaint it.
+        if (this._pageRequests.size) this._boardRenderPending = true;
+        this.cancelPageRequests();
+    }
+
+    endBoardDrag() {
+        this._boardDragging = false;
+        if (this._boardRenderPending) {
+            this._boardRenderPending = false;
+            if (this.root?.isConnected) this.renderLanes();
+        }
+    }
+
     destroySortables() {
         this.sortables.forEach(sortable => {
             try {
@@ -1240,6 +1263,9 @@ export class BoardController {
             }
         });
         this.sortables = [];
+        this._boardDragging = false;
+        this._boardDropPending = false;
+        this._boardRenderPending = false;
     }
 
     bindDragAndDrop() {
@@ -1248,9 +1274,19 @@ export class BoardController {
         if (this.currentBoard()?.shared) return;
         if (typeof window.Sortable === 'undefined') return;
         const animation = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 160;
+        const dragOptions = {
+            filter: () => Boolean(this._boardDropPending),
+            onChoose: () => this.beginBoardDrag(),
+            onUnchoose: () => queueMicrotask(() => {
+                // Sortable unchooses before dispatching onEnd. A simple click
+                // has no onEnd, but a real drop keeps the guard through its save.
+                if (!this._boardDropPending) this.endBoardDrag();
+            })
+        };
 
         this.queryAll('.board-lane-list').forEach(list => {
             this.sortables.push(window.Sortable.create(list, {
+                ...dragOptions,
                 group: 'board-cards',
                 disabled: list.hidden || this.hasActiveFilters(),
                 animation,
@@ -1259,7 +1295,6 @@ export class BoardController {
                 chosenClass: 'is-chosen',
                 dragClass: 'is-dragging',
                 emptyInsertThreshold: 12,
-                onStart: () => { this._boardDragging = true; this._boardPollAbort?.abort(); },
                 onMove: () => {
                     this.queryAll('.board-lane').forEach(lane => lane.classList.remove('is-drop-target'));
                 },
@@ -1268,7 +1303,9 @@ export class BoardController {
                     event.to.closest('.board-lane')?.classList.add('is-drop-target');
                 },
                 onEnd: async event => {
-                    try { await this.onCardDropped(event); } finally { this._boardDragging = false; }
+                    this._boardDropPending = true;
+                    try { await this.onCardDropped(event); }
+                    finally { this._boardDropPending = false; this.endBoardDrag(); }
                 }
             }));
         });
@@ -1276,12 +1313,14 @@ export class BoardController {
         const lanes = this.query('[data-board-lanes]');
         if (!lanes) return;
         this.sortables.push(window.Sortable.create(lanes, {
+            ...dragOptions,
             animation,
             handle: '.board-lane-grip',
             draggable: '.board-lane',
-            onStart: () => { this._boardDragging = true; this._boardPollAbort?.abort(); },
             onEnd: async () => {
-                try { await this.onLanesReordered(); } finally { this._boardDragging = false; }
+                this._boardDropPending = true;
+                try { await this.onLanesReordered(); }
+                finally { this._boardDropPending = false; this.endBoardDrag(); }
             }
         }));
     }

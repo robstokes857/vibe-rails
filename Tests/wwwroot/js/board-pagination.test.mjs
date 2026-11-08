@@ -70,6 +70,28 @@ test('scroll requests one page at a time, deduplicates activity, and advances se
     assert.equal(requests.length, 1);
 });
 
+test('drag scrolling cannot start a page request that would replace the dragged card', async () => {
+    const { controller, requests } = harness();
+    controller._boardDragging = true;
+    await controller.loadMoreCards('done');
+    assert.equal(requests.length, 0);
+});
+
+test('starting a drag cancels an in-flight page before it can replace the lanes', async () => {
+    const { controller, requests } = harness();
+    let renders = 0;
+    controller.renderLanes = () => { renders++; };
+    const pending = controller.loadMoreCards('done');
+    controller.beginBoardDrag();
+    assert.equal(requests[0].options.signal.aborted, true);
+    requests[0].resolve({ cards: [{ id: 'late' }], lanes: [{ columnId: 'done', hasMore: false }] });
+    await pending;
+    assert.deepEqual(controller.state.cards.map(card => card.id), ['a']);
+    assert.equal(renders, 0);
+    controller.endBoardDrag();
+    assert.equal(renders, 1, 'a cancelled selection restores the page loading button');
+});
+
 test('an ordering change restarts paging instead of hiding a promoted card behind the offset', async () => {
     const { controller, requests } = harness();
     let refreshes = 0;

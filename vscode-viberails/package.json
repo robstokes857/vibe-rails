@@ -325,6 +325,7 @@
     "watch": "tsc -watch -p ./",
     "test": "node ./out/test/runTest.js",
     "smoke": "node ./out/test/runTest.js",
+    "test:board-drag": "npm run compile && node ./out/test/runBoardDragTest.js",
     "pretest": "npm run compile",
     "prepare-binaries": "pwsh -ExecutionPolicy Bypass -File ../deploy/prepare-binaries.ps1",
     "package": "npm run package:all",

@@ -1,5 +1,83 @@
 const { test, expect } = require('@playwright/test');
 
+async function openDragBoard(page) {
+    const columns = [
+        { id: 'review', name: 'Review', position: 0, color: '#a855f7' },
+        { id: 'done', name: 'Done', position: 1, color: '#10b981' }
+    ];
+    const card = { id: 'drag-card', key: 'VB-1', title: 'Move this reviewed card',
+        description: '', columnId: 'review', position: 0, type: 'bug', priority: 'high', tags: [],
+        activeTabId: 'tab-fixture', activeSessionId: 'session-fixture' };
+    const moves = [];
+    await page.setViewportSize({ width: 1200, height: 900 });
+    await page.addInitScript(() => {
+        window.__viberails_VSCODE__ = true;
+        sessionStorage.setItem('viberails_tab', 'board-fixture');
+    });
+    await page.routeWebSocket('**/api/v1/events/ws*', () => {});
+    await page.route('**/api/v1/**', async route => {
+        const url = new URL(route.request().url());
+        if (url.pathname === '/api/v1/board/cards/drag-card/move') {
+            const move = route.request().postDataJSON();
+            moves.push(move);
+            Object.assign(card, move);
+            return route.fulfill({ json: card });
+        }
+        const payload = {
+            '/api/v1/context': { isInGit: true, rootPath: 'C:/fixture' },
+            '/api/v1/board/boards': { boards: [{ id: 'main', name: 'Main', position: 0, cardCount: 1, columns }] },
+            '/api/v1/board/columns': { columns },
+            '/api/v1/board/cards': { cards: [card] },
+            '/api/v1/board/cards/activity': { cards: [card], activeAutomationColumnIds: [] }
+        };
+        return route.fulfill({ json: payload[url.pathname] || {} });
+    });
+    await page.goto('/?view=board', { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('.board-card')).toHaveCount(1);
+    await expect(page.locator('.board-view')).not.toHaveClass(/is-loading/);
+    return { card, moves };
+}
+
+test('VS Code card dragging survives a lane repaint and releases the UI after dropping', async ({ page }) => {
+    const { moves } = await openDragBoard(page);
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    const title = page.locator('.board-card-title');
+    const start = await title.boundingBox();
+    await page.mouse.move(start.x + 20, start.y + 10);
+    await page.mouse.down();
+    await page.mouse.move(start.x + 50, start.y + 40, { steps: 6 });
+    await expect(page.locator('.board-card.is-chosen')).toHaveCount(1);
+    await page.evaluate(() => {
+        window.__draggedCard = document.querySelector('[data-card-id="drag-card"].is-chosen');
+        window.app.boardController.renderLanes();
+    });
+    expect(await page.evaluate(() => window.__draggedCard?.isConnected)).toBe(true);
+    const done = await page.locator('.board-lane-list[data-column-id="done"]').boundingBox();
+    await page.mouse.move(done.x + done.width / 2, done.y + 60, { steps: 12 });
+    await page.mouse.up();
+    await expect.poll(() => moves.length).toBe(1);
+    expect(moves[0]).toEqual({ columnId: 'done', position: 0 });
+    await expect(page.locator('.board-lane-list[data-column-id="done"] .board-card')).toHaveCount(1);
+    await expect(page.locator('.is-ghost, .is-chosen, .sortable-fallback')).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => Boolean(window.app.boardController._boardDragging))).toBe(false);
+    await page.getByRole('button', { name: 'Hide Done lane', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Show Done lane', exact: true })).toBeVisible();
+    expect(errors).toEqual([]);
+});
+
+test('a VS Code card click without dragging releases the drag guard', async ({ page }) => {
+    const { moves } = await openDragBoard(page);
+    const card = await page.locator('.board-card').boundingBox();
+    await page.mouse.move(card.x + 8, card.y + 8);
+    await page.mouse.down();
+    await expect.poll(() => page.evaluate(() => Boolean(window.app.boardController._boardDragging))).toBe(true);
+    await page.mouse.up();
+    await expect.poll(() => page.evaluate(() => Boolean(window.app.boardController._boardDragging))).toBe(false);
+    await expect(page.locator('.is-chosen, .is-ghost, .sortable-fallback')).toHaveCount(0);
+    expect(moves).toEqual([]);
+});
+
 test('Done loads 30 cards, scrolls for more, and searches unloaded history', async ({ page }) => {
     const cards = Array.from({ length: 95 }, (_, index) => ({
         id: `done-${index}`, key: `VB-${index + 1}`, title: `Completed task ${index + 1}`,
