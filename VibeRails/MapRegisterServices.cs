@@ -479,6 +479,18 @@ namespace VibeRails
                         sp.GetRequiredService<IHttpClientFactory>().CreateClient(ConversationTitleClient.HttpClientName)));
                     serviceCollection.AddScoped<ConversationTitleService>();
                     serviceCollection.AddHostedService<ConversationTitleJob>();
+                    serviceCollection.AddHttpClient(RunbookRepoCheckJob.HttpClientName,
+                            client => client.Timeout = TimeSpan.FromSeconds(20))
+                        .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+                        {
+                            AllowAutoRedirect = false,
+                            UseCookies = false,
+                            ConnectTimeout = TimeSpan.FromSeconds(10),
+                            MaxResponseHeadersLength = 16,
+                            MaxResponseDrainSize = 0
+                        })
+                        .RemoveAllLoggers();
+                    if (!isFakeCliTestProcess) serviceCollection.AddHostedService<RunbookRepoCheckJob>();
                     serviceCollection.AddHostedService<BertEmbeddingBackfillJob>();
                     // A named client, not AddHttpClient<TokenSavingsPublishJob>: that registers a
                     // transient typed client nothing resolves, while AddHostedService<T> activates
