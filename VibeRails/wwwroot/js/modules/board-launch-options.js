@@ -28,6 +28,15 @@ function baseCli(selection) {
     return cli === 'grok-4.6' ? 'grok' : cli;
 }
 
+/** Load saved defaults for a base CLI; saved environments keep their own options. */
+export async function loadBoardLaunchDefaults(app, selection, { signal } = {}) {
+    const cli = baseCli(selection);
+    if (!cli) return null;
+    const options = await app.apiCall(`/api/v1/llm-picker/defaults/${encodeURIComponent(cli)}`, 'GET', null,
+        { showLoading: false, preferErrorResponseMessage: true, signal });
+    return normalizeBoardLaunchOptions(selection, options);
+}
+
 export function normalizeBoardLaunchOptions(selection, options = {}) {
     const cli = baseCli(selection);
     if (!cli) return null;
@@ -138,10 +147,9 @@ export function bindBoardLaunchOptions(container, selection, { app, useDefaults 
         button?.addEventListener('click', saveDefault);
         if (useDefaults) {
             const optionsRoot = container.querySelector('[data-board-launch-options]') || container;
-            const loading = app.apiCall(endpoint, 'GET', null, { showLoading: false, signal: abort.signal })
-                .then(options => {
+            const loading = loadBoardLaunchDefaults(app, selection, { signal: abort.signal })
+                .then(values => {
                     if (!alive() || edited) return;
-                    const values = normalizeBoardLaunchOptions(selection, options);
                     if (model) model.innerHTML = renderLlmModelOptions(cli, values.model);
                     for (const key of ['model', 'effort', 'mode', 'speed']) {
                         const input = container.querySelector(`[data-board-launch-${key}]`);

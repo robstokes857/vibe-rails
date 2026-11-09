@@ -844,8 +844,10 @@ Explicit saved options and in-progress edits win over presets; saving/launching 
 `board-lane-agents.js` handles assignment/removal, descriptions, reviewer selection and setup state.
 Its Add form can create a repository script Automation using the existing Jobs approval path.
 `board-card-assign.js` is the lane card's assignee menu (VIBE-145): the assignee chip (one button,
-never a filter) lists every `assignee` picker item, hidden ones included, and saves `assignee` alone
-through the ordinary card patch without opening the editor; the server clears old base launch options.
+never a filter) lists every `assignee` picker item, hidden ones included, and saves through the
+ordinary card patch without opening the editor. A changed base CLI loads and saves its LLM defaults
+with `assignee`; a failed load preserves the assignment for retry. Environments and Unassign send
+`assignee` alone, and choosing the current assignee preserves its saved options.
 Waiting cards show a badge backed by the durable lane queue; the card's Automations rail can skip
 one exact pending entry with **Continue without this Automation**. Cards stay in their chosen lane
 while entries wait for an available Automation.

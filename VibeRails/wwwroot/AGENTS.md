@@ -690,8 +690,10 @@ in "Manage quick launches…" (that list curates the launch picker, not assignme
 Assignee and Manager pickers pass `includeHidden: true` for the same reason), grouped
 Built-in CLIs / Quick Launches / Agents (`launch-kind.js` decides the group, an unloaded setup
 counts as an Agent) behind a type-to-filter box; Enter takes the first match only after typing.
-Choosing a row sends the ordinary card patch with only `assignee`, so the server clears the old
-base launch options exactly as a Save with a new Assignee does; model/effort stay in the editor.
+Choosing a base CLI loads its saved LLM defaults and sends them with `assignee` in the ordinary
+card patch, just like changing Assignee in the editor. Wait for defaults before saving; a failed
+load leaves the assignment unchanged and the menu open for retry. Environments and Unassign send
+only `assignee`; selecting the current assignee preserves the card's saved launch options.
 The controller repaints from the saved card and resyncs the board snapshot so the toolbar's
 assignee filter agrees; a failed save toasts and leaves the menu open. The menu is body-mounted
 and positioned like the lane Agents panel; after a lane repaint it re-anchors to the replacement

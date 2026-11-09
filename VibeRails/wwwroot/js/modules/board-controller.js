@@ -70,7 +70,7 @@ import { bindBoardSpelling } from './board-spelling.js';
 import { createBoardImagePreviews } from './board-image-previews.js';
 import { openDiffModal } from './diff-modal.js';
 import * as SessionDebug from './session-viewer.js';
-import { renderBoardLaunchOptions, readBoardLaunchOptions, bindBoardLaunchOptions, waitForBoardLaunchDefaults } from './board-launch-options.js';
+import { renderBoardLaunchOptions, readBoardLaunchOptions, bindBoardLaunchOptions, waitForBoardLaunchDefaults, loadBoardLaunchDefaults } from './board-launch-options.js';
 import { openBoardAttachment, disposeBoardAttachmentPreview } from './board-attachments.js';
 
 const CARD_TYPES = [
@@ -1499,11 +1499,10 @@ export class BoardController {
         }
     }
 
-    // Assign (or unassign) from the lane card's menu (VIBE-145). The patch carries only the
-    // assignee: the server clears the previous base launch options on a change, the same as
-    // saving the editor with a new Assignee. The lane repaints from the server's card so the
-    // chip, the toolbar's assignee filter and a paged board all agree; a failure throws so the
-    // menu stays open for another try.
+    // Assign (or unassign) from the lane card's menu (VIBE-145). Base CLIs carry their saved
+    // defaults, just like a new selection in the editor; environments keep their own options.
+    // The lane repaints from the server's card so the chip, the toolbar's assignee filter and
+    // a paged board all agree; a failure throws so the menu stays open for another try.
     async assignCardFromFace(card, selection) {
         const root = this.root;
         const assignee = canonicalLlmSelection(selection);
@@ -1513,7 +1512,10 @@ export class BoardController {
         if (assignee === canonicalLlmSelection(current.assignee)) return;
         let saved;
         try {
-            saved = await BoardApi.updateBoardCardAsync(card.id, { assignee });
+            const baseLlmOptions = await loadBoardLaunchDefaults(this.app, assignee);
+            if (root !== this.root || !root?.isConnected) return;
+            const patch = baseLlmOptions ? { assignee, baseLlmOptions } : { assignee };
+            saved = await BoardApi.updateBoardCardAsync(card.id, patch);
         } catch (error) {
             this.app.showToast('Board', error?.message || 'Could not change the assignee.', 'error');
             throw error;

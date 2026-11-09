@@ -5,8 +5,8 @@
 // targets as the editor's Assignee picker ('assignee' context: Built-in CLIs, Quick Launches
 // and Agents; never a shell, never an Automation Worker), including any hidden from the launch
 // picker, since that list curates launching, not assignment. Choosing one saves at once through
-// the ordinary card patch, so the server clears the previous base launch options exactly as a
-// Save from the editor would. The menu owns its own positioning, keyboard handling and
+// the ordinary card patch, with saved defaults for a base CLI just like a new selection in the
+// editor. The menu owns its own positioning, keyboard handling and
 // document listeners, the same way the lane Agents panel does; the controller only opens it,
 // re-anchors it after a lane repaint and performs the save.
 

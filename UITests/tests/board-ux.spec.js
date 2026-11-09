@@ -2568,7 +2568,8 @@ test('the assignee chip assigns from the card face, hidden targets included, and
     await expect(page.locator('[data-board-filter-assignee]')).toHaveValue('', { timeout: 500 });
     await menu.locator('[data-assign-value="base:grok"]').click();
     await expect(menu).toHaveCount(0);
-    expect(writes().at(-1).body).toEqual({ assignee: 'base:grok' });
+    expect(writes().at(-1).body).toEqual({ assignee: 'base:grok',
+        baseLlmOptions: { model: '', effort: '', mode: '', yolo: false, speed: '' } });
     await expect(chip).toHaveText(/Grok/);
     await expect(page.locator('.board-card')).toHaveCount(1);
     await chip.hover();
@@ -2587,6 +2588,37 @@ test('the assignee chip assigns from the card face, hidden targets included, and
     await page.getByText('Description images', { exact: true }).click();
     await expect.poll(() => page.evaluate(() => Object.keys(document.querySelector('#board-card-assignee')?.tomselect?.options || {})))
         .toContain('base:grok');
+});
+
+test('the assignee menu preserves the card on a defaults failure and waits on retry', async ({ page }) => {
+    const requests = await openBoard(page, { assignee: 'base:claude' });
+    let fail = true;
+    let release;
+    const defaults = { model: 'gpt-6-astra', effort: 'high', mode: '', yolo: true, speed: 'ultrafast' };
+    await page.route('**/api/v1/llm-picker/defaults/codex', async route => {
+        if (fail) return route.fulfill({ status: 503, json: { error: 'Defaults unavailable' } });
+        await new Promise(resolve => { release = resolve; });
+        return route.fulfill({ json: defaults });
+    });
+    const chip = page.locator('.board-card .board-assignee-chip');
+    await chip.click();
+    const menu = page.locator('#board-assign-panel');
+    const codex = menu.locator('[data-assign-value="base:codex"]');
+    await codex.click();
+    await expect(page.getByText('Defaults unavailable', { exact: true })).toBeVisible();
+    await expect(menu).toBeVisible();
+    await expect(codex).toBeEnabled();
+    await expect(chip).toHaveText(/Claude/);
+    expect(requests.filter(item => item.method === 'PUT')).toEqual([]);
+    fail = false;
+    await codex.click();
+    await expect.poll(() => Boolean(release)).toBe(true);
+    await expect(codex).toBeDisabled();
+    expect(requests.filter(item => item.method === 'PUT')).toEqual([]);
+    release();
+    await expect(menu).toHaveCount(0);
+    await expect(chip).toHaveText(/Codex/);
+    expect(requests.find(item => item.method === 'PUT').body).toEqual({ assignee: 'base:codex', baseLlmOptions: defaults });
 });
 
 test('the assignee menu closes on Escape and outside clicks without saving', async ({ page }) => {
@@ -3058,6 +3090,24 @@ for (const width of [1440, 390]) {
         await page.getByText('Description images', { exact: true }).click();
         await expect(worker.getByRole('combobox', { name: 'Effort', exact: true })).toHaveValue('low');
         expect(defaults.codex.effort).toBe('xhigh');
+
+        // The Board's card-face picker must apply the same saved defaults as the editor.
+        await editor.locator('[data-board-save-card]').click();
+        await expect(editor).toHaveCount(0);
+        const chip = page.locator('.board-card .board-assignee-chip');
+        const menu = page.locator('#board-assign-panel');
+        for (const cli of ['claude', 'codex']) {
+            await chip.click();
+            await menu.locator(`[data-assign-value="base:${cli}"]`).click();
+            await expect(menu).toHaveCount(0);
+            const patch = requests.filter(request => request.method === 'PUT' && request.path.endsWith('/card_test')).at(-1).body;
+            expect(patch).toEqual({ assignee: `base:${cli}`, baseLlmOptions: defaults[cli] });
+        }
+        await page.getByText('Description images', { exact: true }).click();
+        await expect(worker.getByRole('combobox', { name: 'Model', exact: true })).toHaveValue('gpt-6-astra');
+        await expect(worker.getByRole('combobox', { name: 'Speed', exact: true })).toHaveValue('ultrafast');
+        await expect(worker.getByRole('combobox', { name: 'Effort', exact: true })).toHaveValue('xhigh');
+        await expect(worker.getByLabel('YOLO mode', { exact: true })).toBeChecked();
     });
 }
 

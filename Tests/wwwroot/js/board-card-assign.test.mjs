@@ -170,14 +170,17 @@ test('a chip click opens the menu for that card instead of filtering or opening 
     assert.deepEqual(editors, ['card-2']);
 });
 
-function saveHarness({ fail = false } = {}) {
+const codexDefaults = { model: 'gpt-6-astra', effort: 'ultra', mode: '', yolo: true, speed: 'ultrafast' };
+
+function saveHarness({ fail = false, defaults = codexDefaults, loadDefaults } = {}) {
     const calls = [];
     const toasts = [];
     const app = {
         async apiCall(url, method, body) {
             calls.push({ url, method, body });
+            if (method === 'GET') return loadDefaults ? loadDefaults() : defaults;
             if (fail) throw new Error('offline');
-            return { id: 'card-1', assignee: body.assignee || null, baseLlmOptions: null };
+            return { id: 'card-1', assignee: body.assignee || null, baseLlmOptions: body.baseLlmOptions ?? null };
         },
         showToast(...args) { toasts.push(args); }
     };
@@ -192,12 +195,15 @@ function saveHarness({ fail = false } = {}) {
     return { controller, calls, toasts, counts: () => ({ rendered, snapshots }) };
 }
 
-test('choosing an agent patches only the assignee, repaints from the saved card and resyncs the board', async () => {
+test('choosing a base CLI saves its defaults with the assignee and resyncs the board', async () => {
     const h = saveHarness();
     await h.controller.assignCardFromFace(h.controller.state.cards[0], 'base:Codex');
-    assert.deepEqual(h.calls, [{ url: '/api/v1/board/cards/card-1', method: 'PUT', body: { assignee: 'base:codex' } }]);
+    assert.deepEqual(h.calls, [
+        { url: '/api/v1/llm-picker/defaults/codex', method: 'GET', body: null },
+        { url: '/api/v1/board/cards/card-1', method: 'PUT', body: { assignee: 'base:codex', baseLlmOptions: codexDefaults } }
+    ]);
     assert.equal(h.controller.state.cards[0].assignee, 'base:codex');
-    assert.equal(h.controller.state.cards[0].baseLlmOptions, null, 'the server clears base options on a change; the lane shows the saved card');
+    assert.deepEqual(h.controller.state.cards[0].baseLlmOptions, codexDefaults);
     assert.deepEqual(h.toasts, [['Board', 'VIBE-145 assigned to Codex.', 'success']]);
     assert.deepEqual(h.counts(), { rendered: 1, snapshots: 1 });
 });
@@ -213,6 +219,44 @@ test('Unassign sends an empty assignee and the same selection sends nothing', as
     await same.controller.assignCardFromFace(same.controller.state.cards[0], 'base:Claude');
     assert.deepEqual(same.calls, []);
     assert.deepEqual(same.toasts, []);
+    assert.deepEqual(same.controller.state.cards[0].baseLlmOptions, { model: 'opus', effort: 'high' });
+});
+
+test('a saved environment keeps its own settings without loading base defaults', async () => {
+    const h = saveHarness();
+    await h.controller.assignCardFromFace(h.controller.state.cards[0], 'env:7:codex');
+    assert.deepEqual(h.calls, [{ url: '/api/v1/board/cards/card-1', method: 'PUT', body: { assignee: 'env:7:codex' } }]);
+    assert.equal(h.controller.state.cards[0].baseLlmOptions, null);
+});
+
+test('a CLI with no saved defaults clears the previous CLI options', async () => {
+    const h = saveHarness({ defaults: null });
+    await h.controller.assignCardFromFace(h.controller.state.cards[0], 'base:codex');
+    assert.deepEqual(h.calls.at(-1).body, { assignee: 'base:codex',
+        baseLlmOptions: { model: '', effort: '', mode: '', yolo: false, speed: '' } });
+});
+
+test('assignment waits for defaults and cancels when the Board is replaced', async () => {
+    for (const navigate of [false, true]) {
+        let resolveDefaults;
+        const h = saveHarness({ loadDefaults: () => new Promise(resolve => { resolveDefaults = resolve; }) });
+        const pending = h.controller.assignCardFromFace(h.controller.state.cards[0], 'base:codex');
+        assert.deepEqual(h.calls.map(call => call.method), ['GET']);
+        if (navigate) h.controller.root = { isConnected: true };
+        resolveDefaults(codexDefaults);
+        await pending;
+        assert.deepEqual(h.calls.map(call => call.method), navigate ? ['GET'] : ['GET', 'PUT']);
+        assert.equal(h.controller.state.cards[0].assignee, navigate ? 'base:claude' : 'base:codex');
+    }
+});
+
+test('a failed defaults load preserves the assignment and reports the error for retry', async () => {
+    const h = saveHarness({ loadDefaults: () => { throw new Error('Defaults unavailable'); } });
+    await assert.rejects(() => h.controller.assignCardFromFace(h.controller.state.cards[0], 'base:codex'), /Defaults unavailable/);
+    assert.deepEqual(h.calls.map(call => call.method), ['GET']);
+    assert.deepEqual(h.toasts, [['Board', 'Defaults unavailable', 'error']]);
+    assert.equal(h.controller.state.cards[0].assignee, 'base:claude');
+    assert.deepEqual(h.counts(), { rendered: 0, snapshots: 0 });
 });
 
 // Review F1 (codex, f6cd93ad): an open menu must follow an assignment made elsewhere.
@@ -266,7 +310,8 @@ test('a choice is compared with the board\'s current card, not the menu\'s stale
     const stale = card({ assignee: 'base:codex' });
     h.controller.state.cards = [card({ assignee: 'base:claude' })];
     await h.controller.assignCardFromFace(stale, 'base:codex');
-    assert.deepEqual(h.calls.map(call => call.body), [{ assignee: 'base:codex' }], 'Codex is no longer saved, so choosing it must save');
+    assert.deepEqual(h.calls.filter(call => call.method === 'PUT').map(call => call.body),
+        [{ assignee: 'base:codex', baseLlmOptions: codexDefaults }], 'Codex is no longer saved, so choosing it must save with defaults');
     assert.equal(h.controller.state.cards[0].assignee, 'base:codex');
 
     const unchanged = saveHarness();
