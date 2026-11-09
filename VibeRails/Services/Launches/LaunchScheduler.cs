@@ -97,9 +97,17 @@ public sealed class LaunchScheduler(IServiceScopeFactory scopes, ILaunchStore st
     {
         if (run.ClaimToken is null) return;
         var claim = new LaunchClaim(run.Id, run.ClaimToken);
+        if (run is { Status: "claimed", StartedUtc: null } && run.Snapshot.Context.NativeTerminal
+            && run.ClaimedUtc < DateTime.UtcNow.AddSeconds(-30))
+        {
+            // Seal before releasing capacity: a slow child must lose StartAsync after this point.
+            await store.CompleteUnstartedAsync(claim, "uncertain", error: "The native terminal did not acknowledge startup. Check the terminal window before retrying.", ct: ct);
+            return;
+        }
         // An uncertain, unstarted preset is sealed: StartAsync cannot claim it, and all CLI
         // spawning happens after StartAsync. It is safe to release even if the root is alive.
-        if (run.Status == "uncertain" && run.Snapshot.Preset is not null && run.SessionId is null)
+        if (run.Status == "uncertain" && run.SessionId is null && run.StartedUtc is null
+            && (run.Snapshot.Preset is not null || run.Snapshot.Context.NativeTerminal))
         {
             await store.CompleteAsync(claim, "interrupted", error: "Launch was sealed before a CLI session started. Retry explicitly.", ct: ct);
             return;

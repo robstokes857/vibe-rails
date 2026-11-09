@@ -608,7 +608,8 @@ namespace VibeRails
             var parsed = ArgumentParser.Parse(arguments);
             return !IsTerminalTabChildProcess(arguments)
                    && !parsed.IsLMBootstrap
-                   && parsed.JobRunId is null;
+                   && parsed.JobRunId is null
+                   && parsed.LaunchRunId is null;
         }
 
     }

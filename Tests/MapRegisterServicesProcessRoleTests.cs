@@ -26,6 +26,8 @@ public sealed class MapRegisterServicesProcessRoleTests
         { ["--env", "nightly", "--workdir", @"C:\source\repo", "--job-run", "run-1"], false },
         // Script-only Automation runs omit --env but are still execution children, never roots.
         { ["--workdir", @"C:\source\repo", "--job-run", "run-1"], false },
+        { ["--launch-run", "run-1", "--workdir", @"C:\source\repo"], false },
+        { ["--launch-run"], false },
     };
 
     [Theory]

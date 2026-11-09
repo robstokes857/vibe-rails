@@ -176,6 +176,20 @@ public sealed partial class LaunchStore
         return await cmd.ExecuteNonQueryAsync(ct) == 1;
     }
 
+    public async Task<bool> CompleteUnstartedAsync(LaunchClaim claim, string status, string? error = null, CancellationToken ct = default)
+    {
+        if (status is not ("failed" or "cancelled" or "uncertain"))
+            throw new ArgumentOutOfRangeException(nameof(status));
+        using var db = Open();
+        using var cmd = Command(db, """
+            UPDATE Runs SET Status=CASE WHEN CancelRequested=1 AND $status<>'uncertain' THEN 'cancelled' ELSE $status END,
+                EndedUTC=CASE WHEN $status='uncertain' THEN NULL ELSE $now END, Error=$error
+            WHERE Id=$id AND ClaimToken=$token AND Status='claimed' AND StartedUTC IS NULL;
+            """, null, ("$status", status), ("$now", Stamp(DateTime.UtcNow)), ("$error", error),
+            ("$id", claim.RunId), ("$token", claim.Token));
+        return await cmd.ExecuteNonQueryAsync(ct) == 1;
+    }
+
     public async Task<bool> CompleteAsync(LaunchClaim claim, string status, int? exitCode = null, string? error = null,
         string? evidenceId = null, string? verdict = null, CancellationToken ct = default)
     {

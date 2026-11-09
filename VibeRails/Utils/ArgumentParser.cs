@@ -9,9 +9,9 @@ namespace VibeRails.Utils
     ///   vb --version | -v                            → print version and exit
     ///   vb --help | -h                               → print help and exit
     ///   vb --vs-code-v1 [--parent-pid &lt;pid&gt;]         → VS Code extension / new-tab child mode
-    ///   vb --env &lt;name|llm&gt; --workdir &lt;path&gt; [-- ...]  → LMBootstrap (CLI + web concurrent)
-    ///   vb --env &lt;name&gt; --env-id &lt;id&gt; ...             → same, but launching an exact environment row
-    ///   vb --job-run &lt;id&gt; --workdir &lt;path&gt;             → internal script-only Automation process
+    ///   vb --env &lt;llm&gt; --workdir &lt;path&gt; [-- ...]       → base CLI + web concurrent
+    ///   vb --launch-run &lt;id&gt; --workdir &lt;path&gt;          → internal native saved-launch process
+    /// Legacy --env-id, custom --env and --job-run shapes are parsed but rejected at startup.
     /// </summary>
     public static class ArgumentParser
     {
@@ -100,6 +100,11 @@ namespace VibeRails.Utils
                         {
                             parsed.JobRunId = args[++i];
                         }
+                        break;
+
+                    case "--launch-run":
+                        parsed.LaunchRunId = i + 1 < args.Length && !args[i + 1].StartsWith('-')
+                            ? args[++i] : string.Empty;
                         break;
 
                     case "--max-runtime":

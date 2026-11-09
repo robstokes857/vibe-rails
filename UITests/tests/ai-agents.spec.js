@@ -16,6 +16,10 @@ async function setup(page) {
         if(path.includes('/launch-defaults'))return ok({model:'',effort:'',speed:'',mode:'',yolo:false});
         if(path==='/api/v1/trigger-bindings'){if(method==='GET')return ok(state.bindings);const result={...body,id:'binding_'+state.bindings.length,revision:1};state.bindings.push(result);return ok(result);}
         if(path==='/api/v1/runs'){if(method==='GET')return ok({runs:state.runs,nextCursor:null});const p=state.presets.find(p=>p.id===body.definitionId);const run={id:'run_'+state.runs.length,sequence:state.runs.length+1,definitionId:body.definitionId,status:'queued',queuedUtc:new Date().toISOString(),snapshot:{preset:p},verdict:null};state.runs.push(run);return ok(run);}
+        if(/^\/api\/v1\/runs\/[^/]+$/.test(path) && method==='GET') {
+            const run = state.runs.find(run => run.id === path.split('/').pop());
+            return ok({ ...run, ...(state.runUpdate || {}) });
+        }
         if(path.endsWith('/attachments')) {
             if(method==='GET')return ok(state.files);
             if(state.holdUpload)await state.holdUpload;
@@ -36,6 +40,59 @@ async function setup(page) {
     await expect(page.getByRole('heading',{name:'AI Agents',exact:true})).toBeVisible();
     return state;
 }
+
+for (const surface of ['catalog', 'dropdown']) {
+    for (const type of ['preset', 'action']) {
+        test(`${surface} Run starts a native ${type} without opening the editor`, async ({ page }) => {
+            const state = await setup(page);
+            state.presets.push({ id: 'agent', name: 'Test agent', cli: 'codex', initialPrompt: 'Work', enabled: true, revision: 1 });
+            state.actions.push({ id: 'script', name: 'Test script', kind: 'script' });
+            state.runUpdate = { status: 'running', sessionId: 'native-session', tabId: null };
+            await page.locator('[data-agent-refresh]').click();
+            const id = type === 'preset' ? 'agent' : 'script';
+            if (surface === 'dropdown') {
+                await page.getByRole('button', { name: 'Launch an agent or automation', exact: true }).click();
+                await page.locator(`[data-launch-id="${id}"]`).click();
+            } else {
+                await page.locator(`[data-agent-run="${id}"]`).click();
+            }
+            await expect(page.getByText('Started in a native terminal.', { exact: true })).toBeVisible();
+            expect(state.requests.filter(r => r.path === '/api/v1/runs' && r.method === 'POST').map(r => r.body))
+                .toEqual([expect.objectContaining({ definitionId: id, definitionType: type, nativeTerminal: true })]);
+            await expect(page.locator('[data-launch-editor]')).toHaveCount(0);
+            await expect(page.getByRole('heading', { name: 'AI Agents', exact: true })).toBeVisible();
+            expect(state.requests.filter(r => r.method === 'POST' && /terminal-tabs/.test(r.path))).toEqual([]);
+        });
+    }
+}
+
+test('native startup errors are shown and repeated clicks do not enqueue duplicates', async ({ page }) => {
+    const state = await setup(page);
+    state.actions.push({ id: 'script', name: 'Test script', kind: 'script' });
+    await page.locator('[data-agent-refresh]').click();
+    await page.locator('[data-agent-run="script"]').click();
+    await expect(page.getByText('Starting in a native terminal…', { exact: true })).toBeVisible();
+    await page.locator('[data-agent-run="script"]').click();
+    state.runUpdate = { status: 'failed', error: 'Native terminal executable unavailable' };
+    await expect(page.getByText('Native terminal executable unavailable', { exact: true })).toBeVisible();
+    expect(state.runs).toHaveLength(1);
+    await expect(page.getByText('Started in a native terminal.', { exact: true })).toHaveCount(0);
+    await expect(page.locator('[data-launch-editor]')).toHaveCount(0);
+});
+
+test('terminal picker retains the in-app terminal launch path', async ({ page }) => {
+    const state = await setup(page);
+    state.presets.push({ id: 'agent', name: 'Test agent', cli: 'codex', initialPrompt: 'Work', enabled: true, revision: 1 });
+    state.runUpdate = { status: 'running', sessionId: 'session', tabId: 'tab' };
+    await page.evaluate(async () => {
+        window.adoptedTabs = [];
+        window.app.terminalController.adoptLaunchedTab = async id => { window.adoptedTabs.push(id); return true; };
+        await window.app.aiAgentsController.launch('agent', 'preset', { focusTerminal: true });
+    });
+    expect(state.requests.find(r => r.path === '/api/v1/runs' && r.method === 'POST').body.nativeTerminal).toBe(false);
+    expect(await page.evaluate(() => window.adoptedTabs)).toEqual(['tab']);
+    await expect(page.locator('[data-launch-editor]')).toHaveCount(0);
+});
 
 test('quick actions use explicit Run buttons and preserve launch and keyboard behavior', async ({ page }, testInfo) => {
     const state = await setup(page);

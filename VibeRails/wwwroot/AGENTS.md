@@ -9,6 +9,11 @@ all presets and retains Quick Launch management. The VS Code native launch tree 
 `launch-catalog` and `runs` with stable definition IDs and server eligibility. Preset
 launches pass through the dashboard prompt resolver; Action runs can queue in the host.
 
+**Run** in the catalog and top-bar Quick actions requests `nativeTerminal:true` and
+opens a native OS terminal without opening the editor or navigating. Report actual
+startup/failure from the run status; enqueue alone is not successful execution.
+Calls with `focusTerminal:true` retain the existing VibeRails terminal-tab flow.
+
 The catalog presents Agents, Quick Launches and Scripts with the shared surface and
 empty-state styles. **Create script** opens the script-only Action editor; existing checks
 remain editable under Board checks. The Agent editor hides Purpose, defaults new records

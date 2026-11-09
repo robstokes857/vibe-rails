@@ -1,5 +1,16 @@
 import { isRunFinished } from './launch-api.js';
 
+/** Observe actual native startup; enqueue alone does not mean a process has started. */
+export async function waitForNativeLaunch(api, initial) {
+    let run = initial;
+    for (let attempt = 0; attempt < 30; attempt++) {
+        if (run.status === 'running' || isRunFinished(run) || run.status === 'uncertain') return run;
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        run = await api.call(`runs/${encodeURIComponent(run.id)}`);
+    }
+    return run;
+}
+
 /** Follow a queued launch without keeping a timer or request alive after dismissal. */
 export async function openLaunchTerminal(app, api, initial, { signal } = {}) {
     let run = initial;

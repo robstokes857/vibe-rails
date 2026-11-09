@@ -57,7 +57,8 @@ export class LaunchApi {
             occurrenceId = crypto.randomUUID(),
             promptPrefix = null,
             initialPrompt = null,
-            expectedRevision = null
+            expectedRevision = null,
+            nativeTerminal = false
         } = {}
     ) {
         return this.call('runs', 'POST', {
@@ -66,7 +67,8 @@ export class LaunchApi {
             occurrenceId,
             promptPrefix,
             initialPrompt,
-            expectedRevision
+            expectedRevision,
+            nativeTerminal
         });
     }
     runs(id, before, options) {

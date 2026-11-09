@@ -24,6 +24,9 @@ namespace VibeRails.Utils
         // lifecycle back to JobRuns from the native terminal process that owns the work.
         public string? JobRunId { get; set; }
 
+        // Internal native-terminal execution of a claimed immutable launch snapshot.
+        public string? LaunchRunId { get; set; }
+
         // Opt-in absolute deadline in minutes for a --job-run process. Absent (null) means the run
         // lives until the CLI exits or the user closes the window — that is the default.
         // `--job-tick` is not parsed here. It is a retired scheduler argument retained only as an

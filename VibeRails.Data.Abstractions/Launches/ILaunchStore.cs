@@ -27,6 +27,8 @@ public interface ILaunchStore
     Task<bool> SetTabAsync(LaunchClaim claim, string tabId, CancellationToken ct = default);
     Task<bool> StartAsync(LaunchClaim claim, string? sessionId, string? prompt, string workingDirectory,
         int ownerPid, DateTime ownerStartedUtc, DateTime? deadlineUtc = null, CancellationToken ct = default);
+    /// <summary>Seals a failed handoff only if no execution has won the durable start.</summary>
+    Task<bool> CompleteUnstartedAsync(LaunchClaim claim, string status, string? error = null, CancellationToken ct = default);
     Task<bool> CompleteAsync(LaunchClaim claim, string status, int? exitCode = null, string? error = null,
         string? evidenceId = null, string? verdict = null, CancellationToken ct = default);
     Task<bool> CancelAsync(string id, string projectPath, CancellationToken ct = default);

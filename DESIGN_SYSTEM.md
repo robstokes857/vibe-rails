@@ -770,6 +770,10 @@ a quiet border and 12px padding. Keep Run visible beside long names, including o
 narrow screens. Place **Manage AI Agents** in a quieter footer after a separator.
 The trigger references the popover with `aria-controls` and `aria-haspopup="dialog"`;
 ordinary buttons support Tab, and Escape closes it and returns focus to the trigger.
+Run from the catalog or Quick actions starts the saved definition in a native OS
+terminal and leaves the current page open. It does not open the definition editor.
+Show launch progress and failures explicitly; queued work must not be reported as
+already running. Terminal-picker launches retain their in-app terminal behavior.
 
 #### Top bar account
 

@@ -986,7 +986,8 @@ public class TerminalRunner
         ITerminalSessionService sessionService, bool makeRemote = false, CancellationToken ct = default,
         string? initialUserInput = null, string? initialPrompt = null, string? jobRunId = null,
         Action<string>? onSessionCreated = null, bool authorizeBoardTools = false,
-        string? contextBoardId = null, string? contextProjectPath = null, bool contextIncluded = false)
+        string? contextBoardId = null, string? contextProjectPath = null, bool contextIncluded = false,
+        VibeRails.Services.Launches.LaunchExecution? launch = null)
     {
         var (terminal, sessionId, remoteConn) = await CreateSessionAsync(
             llm,
@@ -1003,6 +1004,8 @@ public class TerminalRunner
             contextBoardId: contextBoardId,
             contextProjectPath: contextProjectPath,
             contextIncluded: contextIncluded,
+            title: launch?.Run.Snapshot.Context.SessionTitle ?? launch?.Run.Snapshot.Preset?.Name,
+            launch: launch,
             onRemoteTakeoverAuthorized: trigger =>
             {
                 // Native CLI coexists with remote viewer — both can run concurrently.
@@ -1046,6 +1049,11 @@ public class TerminalRunner
 
             // Register so web UI can find this terminal
             sessionService.RegisterExternalTerminal(terminal, sessionId, workDir);
+            launch?.Watch(() =>
+            {
+                terminal.KillProcessTree();
+                return Task.CompletedTask;
+            });
 
             try
             {

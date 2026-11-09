@@ -150,6 +150,13 @@ public class LaunchRoutesTests
             Assert.Equal(HttpStatusCode.OK, runResponse.StatusCode);
             var run = (await runResponse.Content.ReadFromJsonAsync<LaunchRun>(ct))!;
             Assert.Null(run.ClaimToken);
+            Assert.False(run.Snapshot.Context.NativeTerminal);
+            using var nativeResponse = await SendAsync(HttpMethod.Post, url + "/api/v1/runs",
+                new LaunchRequest(saved.Preset.Id, NativeTerminal: true), ct);
+            Assert.Equal(HttpStatusCode.OK, nativeResponse.StatusCode);
+            var nativeRun = (await nativeResponse.Content.ReadFromJsonAsync<LaunchRun>(ct))!;
+            Assert.True(nativeRun.Snapshot.Context.NativeTerminal);
+            Assert.Equal(root, nativeRun.Snapshot.Context.WorkingDirectory);
             using var prefixed = await SendAsync(HttpMethod.Post, url + "/api/v1/runs",
                 new LaunchRequest(saved.Preset.Id, PromptPrefix: "Fix selected finding", InitialPrompt: "Template value", ExpectedRevision: 1), ct);
             Assert.Equal(HttpStatusCode.OK, prefixed.StatusCode);

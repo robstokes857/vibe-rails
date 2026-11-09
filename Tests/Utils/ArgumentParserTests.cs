@@ -6,6 +6,17 @@ namespace Tests.Utils;
 public class ArgumentParserTests
 {
     [Fact]
+    public void NativeLaunchIsAnExecutionChildAndStopsParsingAtTheSeparator()
+    {
+        var parsed = ArgumentParser.Parse(["--launch-run", "run-1", "--workdir", @"C:\repo"]);
+        Assert.Equal("run-1", parsed.LaunchRunId);
+        Assert.Equal(@"C:\repo", parsed.WorkDir);
+        Assert.False(parsed.OpenBrowser);
+        Assert.Equal("", ArgumentParser.Parse(["--launch-run"]).LaunchRunId);
+        Assert.Null(ArgumentParser.Parse(["--env", "codex", "--", "--launch-run", "data"]).LaunchRunId);
+    }
+
+    [Fact]
     public void Parse_GitGuard_OpensFocusedBrowserMode()
     {
         var parsed = ArgumentParser.Parse(["--git-guard"]);

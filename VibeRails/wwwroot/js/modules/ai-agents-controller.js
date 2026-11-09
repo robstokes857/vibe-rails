@@ -27,7 +27,7 @@ import { mountLlmPicker } from './pickers/llm-picker.js';
 import { runHistorySection, mountRunHistory } from './launch-history.js';
 import { bindingSection, mountBindings } from './launch-bindings.js';
 import { PythonScriptsController } from './python-scripts-controller.js';
-import { openLaunchTerminal } from './launch-terminal.js';
+import { openLaunchTerminal, waitForNativeLaunch } from './launch-terminal.js';
 import { resolvePromptTemplateForLaunch } from './prompt-template-modal.js';
 import { promptVariableHelp, bindPromptVariableHelp } from './prompt-variable-help.js';
 import { bindPromptReferenceHighlights } from './prompt-reference-highlights.js';
@@ -138,7 +138,7 @@ export class AiAgentsController {
     async launch(
         id,
         type = 'preset',
-        { focusTerminal = false, promptPrefix = null } = {}
+        { focusTerminal = false, promptPrefix = null, nativeTerminal = !focusTerminal } = {}
     ) {
         if (this.launching.has(id)) return;
         this.launching.add(id);
@@ -161,8 +161,26 @@ export class AiAgentsController {
             const run = await this.api.run(id, type, {
                 promptPrefix,
                 initialPrompt,
-                expectedRevision
+                expectedRevision,
+                nativeTerminal
             });
+            if (nativeTerminal) {
+                this.app.showToast('AI Agents', 'Starting in a native terminal…', 'info');
+                let started;
+                try {
+                    started = await waitForNativeLaunch(this.api, run);
+                } catch {
+                    this.app.showToast('AI Agents', 'Run queued, but its status could not be checked. Check Run history before retrying.', 'warning');
+                    return run;
+                }
+                if (started.status === 'running' || started.status === 'succeeded')
+                    this.app.showToast('AI Agents', started.status === 'running' ? 'Started in a native terminal.' : 'Run finished.', 'success');
+                else if (started.status === 'queued' || started.status === 'claimed')
+                    this.app.showToast('AI Agents', 'Still waiting to start. Check Run history before running again.', 'warning');
+                else
+                    this.app.showToast('AI Agents', started.error || `Run ${started.status}. Check Run history for details.`, 'error');
+                return started;
+            }
             this.app.showToast(
                 'AI Agents',
                 'Run queued. Follow its status in Run history.',

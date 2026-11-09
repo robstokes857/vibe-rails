@@ -478,6 +478,14 @@ _ = Task.Run(async () =>
 
 string serverUrl = $"http://localhost:{port}";
 
+if (parsedArgs.LaunchRunId is not null)
+{
+    Environment.ExitCode = await VibeRails.Services.Launches.NativeLaunchRunner.RunAsync(
+        parsedArgs.LaunchRunId, app.Services, app.Lifetime.ApplicationStopping);
+    await app.StopAsync();
+    return;
+}
+
 if (parsedArgs.JobRunId is not null)
 {
     // An Automation may be script-only (no --env) or may contain one interactive Worker. The

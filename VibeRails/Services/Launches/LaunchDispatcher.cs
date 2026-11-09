@@ -12,7 +12,7 @@ namespace VibeRails.Services.Launches;
 
 /// <summary>Claims capacity once and executes one preset or one typed Action, without constructing a Job.</summary>
 public sealed class LaunchDispatcher(ILaunchStore store, LaunchService service, ITerminalTabHostService tabs,
-    IServiceScopeFactory scopes, IBoardStore board)
+    IServiceScopeFactory scopes, IBoardStore board, IJobProcessLauncher? nativeLauncher = null)
 {
     public const int Capacity = 3;
 
@@ -50,6 +50,23 @@ public sealed class LaunchDispatcher(ILaunchStore store, LaunchService service, 
                 error: ex is OperationCanceledException ? null : "Launch validation could not complete.",
                 ct: CancellationToken.None);
             throw;
+        }
+        if (run.Snapshot.Context.NativeTerminal)
+        {
+            try
+            {
+                var result = nativeLauncher?.Launch(run.Snapshot.Context.WorkingDirectory,
+                    ["--launch-run", run.Id, "--workdir", run.Snapshot.Context.WorkingDirectory]);
+                if (result?.Success != true)
+                    await store.CompleteUnstartedAsync(claim, "failed", result?.Message ?? "Native terminals are unavailable in this host.",
+                        CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                await store.CompleteUnstartedAsync(claim, "failed", "Could not open the native terminal.", CancellationToken.None);
+                Serilog.Log.Warning(ex, "[Launches] Native terminal handoff failed for {RunId}", id);
+            }
+            return (await store.GetRunAsync(id, CancellationToken.None))!;
         }
         if (run.Snapshot.Action is not null)
         {
@@ -112,7 +129,8 @@ public sealed class LaunchDispatcher(ILaunchStore store, LaunchService service, 
         or BoardSessionRecord.ManagerOrigin or BoardSessionRecord.WorkerOrigin or BoardSessionRecord.PlanningWorkerOrigin
         or "chat" or "planning" or "code_review" or BoardSessionRecord.AutomationOrigin or "lane_review";
 
-    private static async Task ExecuteActionAsync(IServiceScopeFactory scopes, LaunchRun run, LaunchClaim claim, CancellationToken stopping)
+    internal static async Task ExecuteActionAsync(IServiceScopeFactory scopes, LaunchRun run, LaunchClaim claim,
+        CancellationToken stopping, bool nativeTerminal = false)
     {
         await using var scope = scopes.CreateAsyncScope();
         var services = scope.ServiceProvider;
@@ -137,7 +155,9 @@ public sealed class LaunchDispatcher(ILaunchStore store, LaunchService service, 
             {
                 // Cancellation can arrive after the claim but before the durable start.
                 // No Action has executed: acknowledge it using this claim's ownership token.
-                await store.CompleteAsync(claim, "cancelled", ct: CancellationToken.None);
+                var current = await store.GetRunAsync(run.Id, CancellationToken.None);
+                if (current is { Status: "claimed", CancelRequested: true })
+                    await store.CompleteUnstartedAsync(claim, "cancelled", ct: CancellationToken.None);
                 return;
             }
             sessionId = proposedSessionId;
@@ -176,6 +196,8 @@ public sealed class LaunchDispatcher(ILaunchStore store, LaunchService service, 
                             throw new LaunchConflictException("The script no longer owns this run.");
                     }), line =>
                     {
+                        if (nativeTerminal)
+                            (line.IsError ? Console.Error : Console.Out).WriteLine(line.Text);
                         writer.EnqueueLine(Encoding.UTF8.GetBytes(line.Text + "\r\n"), line.IsError, DateTime.UtcNow);
                         return ValueTask.CompletedTask;
                     }, cancel.Token);
@@ -195,6 +217,7 @@ public sealed class LaunchDispatcher(ILaunchStore store, LaunchService service, 
                 status = cancel.IsCancellationRequested ? "cancelled" : check.FailsAction ? "failed" : "succeeded";
                 await store.SaveCheckEvidenceAsync(run.Id, check, CancellationToken.None);
                 writer.EnqueueLine(Encoding.UTF8.GetBytes(check.Summary + "\r\n"), check.FailsAction, DateTime.UtcNow);
+                if (nativeTerminal) Console.WriteLine(check.Summary);
             }
             await writer.DisposeAsync();
             writer = null;
@@ -205,9 +228,14 @@ public sealed class LaunchDispatcher(ILaunchStore store, LaunchService service, 
         catch (Exception ex)
         {
             if (writer is not null) writer.EnqueueLine(Encoding.UTF8.GetBytes("Action stopped before completion.\r\n"), true, DateTime.UtcNow);
-            await store.CompleteAsync(claim, cancel.IsCancellationRequested ? "cancelled" : "failed", 1,
-                ex is LaunchValidationException or AutomationScriptValidationException ? ex.Message : "Action could not complete.");
+            var status = cancel.IsCancellationRequested ? "cancelled" : "failed";
+            var error = ex is LaunchValidationException or AutomationScriptValidationException ? ex.Message : "Action could not complete.";
+            if (watcher is not null || sessionId is not null)
+                await store.CompleteAsync(claim, status, 1, error);
+            else
+                await store.CompleteUnstartedAsync(claim, status, error);
             Serilog.Log.Warning(ex, "[Launches] Action failed for {RunId}", run.Id);
+            if (nativeTerminal) Console.Error.WriteLine(ex.Message);
         }
         finally
         {

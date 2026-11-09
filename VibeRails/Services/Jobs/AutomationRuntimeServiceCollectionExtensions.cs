@@ -27,6 +27,7 @@ public static class AutomationRuntimeServiceCollectionExtensions
         // Shared process runner for repository-script Actions. It is
         // stateless, so each process host uses one singleton.
         services.TryAddSingleton<ICliWrapper, CliWrapper>();
+        services.TryAddSingleton<IJobProcessLauncher, JobProcessLauncher>();
 
         services.TryAddScoped<UserInputRecordingService>();
         services.TryAddScoped<ISandboxService, SandboxService>();

@@ -7,8 +7,8 @@ namespace VibeRails.Services.Jobs;
 
 /// <summary>
 /// Opens a native terminal running this VibeRails executable without requiring an LLM
-/// Environment. Script-only Automations use this path; workflows containing a Worker continue
-/// through <see cref="LlmClis.IEnvironmentLaunchService"/> so its workspace policy is preserved.
+/// Environment. Saved native launches reuse this OS-terminal adapter with a claimed run ID;
+/// the adapter does not read or execute legacy Job definitions.
 /// </summary>
 public interface IJobProcessLauncher
 {
@@ -42,7 +42,7 @@ public sealed class JobProcessLauncher : IJobProcessLauncher
         }
         catch (Exception ex)
         {
-            return new LaunchResult(false, $"Could not open the Automation terminal: {ex.Message}");
+            return new LaunchResult(false, $"Could not open the native terminal: {ex.Message}");
         }
     }
 

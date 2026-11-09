@@ -40,7 +40,7 @@ the existing local-user project resolver.
 | `POST /presets/{id}/retire`, `POST /actions/{id}/retire` | `{expectedRevision}`; retains history and attachments |
 | `GET /trigger-bindings` | Current-project bindings; optional `definitionId` |
 | `POST /trigger-bindings`, `PUT /trigger-bindings/{id}` | `SaveBindingRequest`; `enabled:false` disables |
-| `POST /runs` | `{definitionId,definitionType,occurrenceId?}`; queues latest revision |
+| `POST /runs` | `{definitionId,definitionType,occurrenceId?,nativeTerminal?}`; queues latest revision; native defaults to false |
 | `GET /runs` | Optional `definitionId`, `before` and `limit` (1–100); `{runs,nextCursor}` |
 | `GET /runs/{id}` | Project-scoped immutable inputs and current process state |
 | `POST /runs/{id}/resolve` | `{confirmedStopped:true}` after inspecting an uncertain launch and stopping surviving descendants; rejects live/unverifiable recorded owners, ends as interrupted, never retries |
@@ -66,7 +66,10 @@ and become ineligible. Existing queued Agent snapshots retain their own prompt.
 The picker key for a preset is `preset:<stable-id>:<cli>`; `base:<cli>` remains
 available. Start saved definitions through `/runs`; observe the run's `tabId`
 and `sessionId` to navigate to its terminal. A successful enqueue is not a
-successful process. Synchronous Board launches return a conflict and cancel
+successful process. Native runs have no tab ID: the catalog and Quick actions request
+`nativeTerminal:true`, leave the current view open and poll for startup or failure.
+Terminal-picker and existing VS Code requests retain their in-app terminal behavior.
+Synchronous Board launches return a conflict and cancel
 their queue entry when capacity is unavailable, so manager registration cannot
 be deferred past the caller's launch transaction.
 
@@ -79,6 +82,20 @@ older run snapshots remain readable through the run route. No fake Board card,
 relationship or comment is created.
 
 ## Execution and recovery
+
+For a native run, the root claims capacity and uses the existing OS-terminal launcher
+to invoke `--launch-run <id> --workdir <dir>` as separate argv. That execution child
+starts no root scheduler. It validates the immutable snapshot again and owns normal
+session recording, cancellation and deadlines. Presets use the native console/PTY
+path; Actions stream their captured output to the console and the recording. No
+legacy Job or Environment is created. Native mode is an additive snapshot JSON
+field, with no schema change. A native claim unacknowledged after 30 seconds is
+atomically sealed only if execution has not started; a late child then cannot spawn.
+Run history retains cancellation and outcomes even when the native window closes.
+
+The opt-in Windows fixture at `Tests/headless/NativeLaunchSmoke` exercises real
+native windows, preset PTYs, script execution, output, cancellation and process exit
+using disposable data and fixed PowerShell commands; see its README.
 
 Admission snapshots definition revision, options, composed prompt template,
 attachment IDs, trigger occurrence, project and Board context. Editing changes
