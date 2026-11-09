@@ -37,7 +37,7 @@ async function setup(page) {
     return state;
 }
 
-test('shared editor creates an Agent, keeps provider drafts and uses native typed variables',async({page})=>{
+test('shared editor creates an Agent, keeps provider drafts and uses native typed variables',async({page},testInfo)=>{
     const state=await setup(page);
     await page.locator('.vb-page-actions').getByRole('button',{name:'Create agent',exact:true}).click();
     const editor=page.locator('[data-launch-editor]');
@@ -47,6 +47,8 @@ test('shared editor creates an Agent, keeps provider drafts and uses native type
     await expect(page.getByRole('option',{name:/git_branch/})).toBeVisible();
     await prompt.press('Enter');
     await expect(prompt).toHaveValue('Review {{git_branch}} ');
+    await expect(editor.locator('[data-board-composer-live]')).toHaveCount(0);
+    await page.screenshot({path:testInfo.outputPath('agent-prompt-without-preview.png')});
     await expect(editor.locator('[data-board-launch-model]')).toBeVisible();
     await editor.locator('[data-board-launch-effort]').selectOption('high');
     await editor.locator('[data-launch-provider]').selectOption('base:claude');
@@ -76,13 +78,14 @@ test('prompt help inserts every supported variable and saves literal placeholder
         await expect(prompt).toHaveValue(tokens.slice(0, tokens.indexOf(token) + 1).join(''));
     }
     await expect(editor.locator('[data-launch-kind]')).toHaveText('Agent · starts with this prompt.');
-    await expect(editor.locator('[data-board-composer-live]')).toContainText('{{time}}');
+    await expect(editor.locator('[data-board-composer-live]')).toHaveCount(0);
     await editor.locator('[data-launch-save]').click();
     await expect.poll(() => state.presets.length).toBe(1);
     expect(state.presets[0].initialPrompt).toBe(tokens.join(''));
     await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
     await page.getByRole('button', { name: 'Variable examples', exact: true }).click();
     await expect(prompt).toHaveValue(tokens.join(''));
+    await expect(editor.locator('[data-board-composer-live]')).toHaveCount(0);
 });
 
 test('variable shortcuts preserve the caret, replace selections, support undo and mark drafts dirty', async ({ page }) => {
@@ -118,6 +121,73 @@ test('variable shortcuts preserve the caret, replace selections, support undo an
     expect(await prompt.evaluate(input => input.selectionStart)).toBe(21);
     await editor.locator('[data-launch-save]').click();
     await expect.poll(() => state.presets[0].initialPrompt).toBe('Before {{git_branch}} after');
+});
+
+for (const width of [375, 1280]) test(`prompt references highlight inside the native input at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 });
+    const state = await setup(page);
+    await page.locator('.vb-page-actions').getByRole('button', { name: 'Create agent', exact: true }).click();
+    const editor = page.locator('[data-launch-editor]');
+    const prompt = editor.getByLabel('Initial prompt (optional)', { exact: true });
+    await editor.getByLabel('Name', { exact: true }).fill('Highlighted prompt');
+    const source = 'Please release using @deploy/deploy.ps1\nAt {{time}}, review !VIBE-123 and #abcdef012345.\n<img src=x onerror="window.bad=1">';
+    await prompt.fill(source);
+    const mirror = editor.locator('.prompt-reference-mirror');
+    await expect(mirror.locator('[data-prompt-reference]')).toHaveText(['@deploy/deploy.ps1', '{{time}}', '!VIBE-123', '#abcdef012345']);
+    expect(await mirror.textContent()).toBe(source + '\u200b');
+    await expect(mirror.locator('img,script')).toHaveCount(0);
+    await expect(editor.locator('[data-board-composer-live]')).toHaveCount(0);
+    await expect(editor.locator('.prompt-reference-overlay')).toHaveAttribute('aria-hidden', 'true');
+    expect(await editor.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`inline-references-${width}.png`) });
+    // The painted text and native caret must agree even when the file wraps.
+    const point = await mirror.locator('[data-prompt-reference="variable"]').evaluate(el => {
+        const rect = el.getBoundingClientRect(); return { x: rect.left + 3, y: rect.top + rect.height / 2 };
+    });
+    await page.mouse.click(point.x, point.y);
+    const caret = await prompt.evaluate(input => input.selectionStart);
+    expect(caret).toBeGreaterThanOrEqual(source.indexOf('{{time}}'));
+    expect(caret).toBeLessThanOrEqual(source.indexOf('{{time}}') + 2);
+    await prompt.evaluate(input => input.setSelectionRange(input.value.indexOf('{{time}}'), input.value.indexOf('{{time}}') + 8));
+    await page.keyboard.insertText('{{date}}');
+    await expect(mirror.locator('[data-prompt-reference="variable"]')).toHaveText('{{date}}');
+    await prompt.press('ControlOrMeta+z');
+    await expect(prompt).toHaveValue(source);
+    await expect(mirror.locator('[data-prompt-reference="variable"]')).toHaveText('{{time}}');
+    // The optional spelling wrapper can be added and removed without losing highlighting.
+    await page.evaluate(async () => (await import('/js/modules/board-spelling.js')).setBoardSpellingEnabled(true));
+    await expect(editor.locator('.board-spelling')).toHaveCount(1);
+    await page.evaluate(async () => (await import('/js/modules/board-spelling.js')).setBoardSpellingEnabled(false));
+    await expect(mirror.locator('[data-prompt-reference]')).toHaveCount(4);
+    await prompt.dispatchEvent('compositionstart');
+    await expect(editor.locator('.prompt-reference-overlay')).toHaveCSS('visibility', 'hidden');
+    await prompt.dispatchEvent('compositionend');
+    await page.emulateMedia({ forcedColors: 'active' });
+    await expect(editor.locator('.prompt-reference-overlay')).toHaveCSS('display', 'none');
+    await page.emulateMedia({ forcedColors: 'none' });
+    await editor.locator('[data-launch-save]').click();
+    await expect.poll(() => state.presets[0]?.initialPrompt).toBe(source);
+});
+
+test('reference decorations follow scrolling, wrapping and font changes', async ({ page }) => {
+    await setup(page);
+    await page.locator('.vb-page-actions').getByRole('button', { name: 'Create agent', exact: true }).click();
+    const prompt = page.getByLabel('Initial prompt (optional)', { exact: true });
+    await prompt.fill(Array.from({ length: 30 }, (_, i) => `Line ${i}: @src/long-folder-name/example.cs and {{time}}`).join('\n'));
+    await prompt.evaluate(input => {
+        Object.assign(input.style, { height: '160px', minHeight: '160px', maxHeight: '160px', overflowY: 'auto', fontSize: '20px' });
+        input.scrollTop = input.scrollHeight;
+        input.dispatchEvent(new Event('scroll'));
+    });
+    const mirror = page.locator('.prompt-reference-mirror');
+    await expect(mirror).toHaveCSS('font-size', '20px');
+    const scroll = await prompt.evaluate(input => input.scrollTop);
+    expect(scroll).toBeGreaterThan(0);
+    await expect(mirror).toHaveCSS('transform', `matrix(1, 0, 0, 1, 0, -${scroll})`);
+    await page.setViewportSize({ width: 375, height: 1000 });
+    await expect.poll(async () => mirror.evaluate(el => el.getBoundingClientRect().width)).toBe(await prompt.evaluate(input => input.clientWidth));
+    expect(await mirror.textContent()).toBe(await prompt.inputValue() + '\u200b');
+    await expect(page.locator('[data-launch-editor]')).toBeVisible();
 });
 
 test('conflict retains source and history refresh never changes the draft',async({page})=>{
@@ -164,6 +234,55 @@ for(const width of [320,375,768,1024])test(`editor footer and single scroller at
 });
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64');
 const file=name=>({name,mimeType:'image/png',buffer:png});
+
+for (const width of [375, 1280]) test(`attached images preview inside the prompt before and after saving at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 });
+    const state = await setup(page);
+    const dataUrl = await page.evaluate(() => {
+        const canvas = document.createElement('canvas'); canvas.width = 360; canvas.height = 200;
+        const context = canvas.getContext('2d');
+        context.fillStyle = '#14141d'; context.fillRect(0, 0, 360, 200);
+        context.fillStyle = '#8b5cf6'; context.fillRect(30, 35, 125, 90);
+        context.fillStyle = '#14b8a6'; context.fillRect(205, 75, 125, 90);
+        context.fillStyle = '#f8fafc'; context.font = '20px sans-serif'; context.fillText('Layout reference', 30, 180);
+        return canvas.toDataURL('image/png');
+    });
+    const buffer = Buffer.from(dataUrl.split(',')[1], 'base64');
+    const reads = [];
+    await page.route('**/api/v1/presets/*/attachments/*/content', route => {
+        reads.push(new URL(route.request().url()).pathname);
+        return route.fulfill({ contentType: 'image/png', body: buffer });
+    });
+    await page.locator('.vb-page-actions').getByRole('button', { name: 'Create agent', exact: true }).click();
+    const editor = page.locator('[data-launch-editor]');
+    const prompt = editor.getByLabel('Initial prompt (optional)', { exact: true });
+    await editor.getByLabel('Name', { exact: true }).fill('Image references');
+    await prompt.fill('Please use @src/example.cs and this layout at {{time}}.');
+    await editor.locator('[data-board-composer-file]').setInputFiles({ name: 'layout.png', mimeType: 'image/png', buffer });
+    const previews = editor.getByRole('group', { name: 'Attached image previews' });
+    const thumbnail = previews.getByRole('button', { name: 'Preview layout.png', exact: true });
+    await expect(thumbnail).toBeVisible();
+    await expect.poll(() => thumbnail.locator('img').evaluate(img => img.naturalWidth)).toBe(360);
+    expect(reads).toEqual([]);
+    const draft = await prompt.inputValue();
+    await thumbnail.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath(`prompt-image-${width}.png`) });
+    await thumbnail.click();
+    const viewer = page.getByRole('dialog', { name: 'Attachment preview', exact: true });
+    await expect.poll(() => viewer.locator('img').evaluate(img => img.naturalWidth)).toBe(360);
+    await viewer.getByRole('button', { name: 'Close attachment', exact: true }).click();
+    await expect(prompt).toHaveValue(draft);
+    await editor.locator('[data-launch-save]').click();
+    await expect.poll(() => state.presets[0]?.initialPrompt).toContain('attachment:att_0');
+    await expect.poll(() => thumbnail.locator('img').evaluate(img => img.naturalWidth)).toBe(360);
+    expect(reads.every(path => path.includes('/presets/preset_0/attachments/att_0/content'))).toBe(true);
+    expect(await editor.locator('.prompt-reference-mirror').textContent()).toBe(await prompt.inputValue() + '\u200b');
+    await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+    await page.getByRole('button', { name: 'Image references', exact: true }).click();
+    await expect.poll(() => thumbnail.locator('img').evaluate(img => img.naturalWidth)).toBe(360);
+    await expect(editor.locator('[data-board-composer-live]')).toHaveCount(0);
+    expect(await previews.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+});
 
 for (const width of [320, 375, 768, 1024, 1440]) test(`catalog follows the shared design at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 });
@@ -424,9 +543,11 @@ test('removing a staged file also removes its unsaved inline reference', async (
     await page.locator('.vb-page-actions').getByRole('button', { name: 'Create agent', exact: true }).click();
     await page.locator('[data-board-composer-file]').setInputFiles(file('remove.png'));
     await expect(page.locator('[data-board-composer-input]')).toHaveValue(/attachment:pending_/);
+    await expect(page.getByRole('button', { name: 'Preview remove.png', exact: true })).toBeVisible();
     await page.locator('[data-board-remove-pending]').click();
     await expect(page.locator('[data-board-composer-input]')).not.toHaveValue(/pending_/);
     await expect(page.locator('[data-board-remove-pending]')).toHaveCount(0);
+    await expect(page.locator('.prompt-image-previews')).toBeHidden();
 });
 
 test('save locks the enhanced provider and a failed run preserves disabled controls', async ({ page }) => {

@@ -12,7 +12,16 @@ launches pass through the dashboard prompt resolver; Action runs can queue in th
 The catalog presents Agents, Quick Launches and Scripts with the shared surface and
 empty-state styles. **Create script** opens the script-only Action editor; existing checks
 remain editable under Board checks. The Agent editor hides Purpose, defaults new records
-to `work`, and preserves an existing record's purpose when saving.
+to `work`, and preserves an existing record's purpose when saving. Initial prompts stay
+directly editable without a duplicate live message preview.
+`prompt-reference-highlights.js` paints file, variable, card/session and commit references
+inside the native prompt with the same font metrics. Its non-interactive mirror preserves
+literal source, selection, Undo and caret suggestions; composition and forced colors use
+native text. Mount highlighting before spelling, and dispose the wrappers in reverse order.
+`prompt-image-previews.js` shows only attached raster thumbnails beneath the prompt, inside
+the composer. Pending images use their local data; saved images use the Agent-owned content
+loader and existing Blob cleanup. Click or keyboard activation opens the attachment viewer.
+Attachment changes refresh thumbnails without repeating the message text.
 
 Board cards and definitions call `card-editor.js` for the two-column shell, one scroller
 and persistent footer, `card-editor-composer.js` for the native composer, and
@@ -32,7 +41,7 @@ popup, including built-ins and existing custom variables; step syntax is rejecte
 Manual template values become a revision-checked run prompt override, never a preset edit.
 `prompt-variable-help.js` also lists the supported launch placeholders below the Agent
 prompt. Its native buttons insert at the caret or replace the selection, restore prompt
-focus and notify the composer so preview, dirty tracking and Agent/Quick Launch status update.
+focus and notify the composer so dirty tracking and Agent/Quick Launch status update.
 Keep this list aligned with launch placeholder support; retired step tokens stay absent.
 
 `launch-lane-editor.js` keeps ordered definition IDs and process/result/review gates.

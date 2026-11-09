@@ -47,6 +47,7 @@ export function bindCardComposer(
     {
         onSubmit = null,
         onAttach = null,
+        bindHighlights = null,
         bindReferences = null,
         bindPreview = null
     } = {}
@@ -72,6 +73,7 @@ export function bindCardComposer(
         }
     };
     listen(input, 'input', autoGrow);
+    if (bindHighlights) disposers.push(bindHighlights(input));
     disposers.push(bindBoardSpelling(input));
     if (bindPreview) disposers.push(bindPreview(input));
     if (bindReferences) disposers.push(bindReferences(input));

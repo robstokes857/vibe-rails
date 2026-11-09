@@ -12,7 +12,6 @@ import {
 } from './card-editor-attachments.js';
 import { bindBoardReferences } from './board-references.js';
 import { BoardApi } from './board-api.js';
-import { bindComposerPreview } from './board-composer-preview.js';
 import {
     openEditorAttachment,
     disposeBoardAttachmentPreview
@@ -30,6 +29,8 @@ import { PythonScriptsController } from './python-scripts-controller.js';
 import { openLaunchTerminal } from './launch-terminal.js';
 import { resolvePromptTemplateForLaunch } from './prompt-template-modal.js';
 import { promptVariableHelp, bindPromptVariableHelp } from './prompt-variable-help.js';
+import { bindPromptReferenceHighlights } from './prompt-reference-highlights.js';
+import { bindPromptImagePreviews } from './prompt-image-previews.js';
 
 const labels = {
     agent: 'Agents',
@@ -284,7 +285,7 @@ export class AiAgentsController {
             saved?.name || (isPreset ? 'Create agent' : 'Create script'),
             `<div class="board-card-editor" data-launch-editor>${cardEditorLayout(
                 {
-                    main: `${field('Name', 'name', saved?.name || '')}${isPreset ? `<section class="board-block"><h3 class="board-block-label">Initial prompt <span class="text-muted">(optional)</span></h3>${composerMarkup({ name: 'prompt', label: 'Initial prompt (optional)', value: saved?.initialPrompt || '', placeholder: 'Describe the task. Leave blank for a Quick Launch.', livePreview: true })}<p class="board-editor-muted" data-launch-kind></p>${promptVariableHelp()}</section>` : area('Description (optional)', 'description', saved?.description || '')}`,
+                    main: `${field('Name', 'name', saved?.name || '')}${isPreset ? `<section class="board-block"><h3 class="board-block-label">Initial prompt <span class="text-muted">(optional)</span></h3>${composerMarkup({ name: 'prompt', label: 'Initial prompt (optional)', value: saved?.initialPrompt || '', placeholder: 'Describe the task. Leave blank for a Quick Launch.', livePreview: false })}<p class="board-editor-muted" data-launch-kind></p>${promptVariableHelp()}</section>` : area('Description (optional)', 'description', saved?.description || '')}`,
                     attachments: isPreset
                         ? attachmentSection(attachments.length)
                         : '',
@@ -532,20 +533,15 @@ export class AiAgentsController {
             BoardApi.attach(this.app);
             disposers.push(
                 bindCardComposer(composer, {
+                    bindHighlights: bindPromptReferenceHighlights,
+                    bindPreview: () => bindPromptImagePreviews(this.app, composer, definition, content),
                     onAttach: (input, files) =>
                         panel.addFiles(composer, input, files),
                     bindReferences: (input) =>
                         bindBoardReferences(input, {
                             app: this.app,
                             host: composer
-                        }),
-                    bindPreview: (input) =>
-                        bindComposerPreview(
-                            composer,
-                            input,
-                            definition,
-                            content
-                        )
+                        })
                 })
             );
             editor
@@ -690,6 +686,8 @@ export class AiAgentsController {
                             1
                         );
                         panel.render();
+                        prompt.dispatchEvent(new Event('input', { bubbles: true }));
+                        editor.querySelector('[data-board-composer]')._refreshPreview?.();
                     }
                     body.initialPrompt = prompt.value;
                     body.expectedRevision = definition.revision || 0;

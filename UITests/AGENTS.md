@@ -116,6 +116,9 @@ binding, run and attachment APIs. Tests cover provider drafts, typed references,
 conflicts, navigation guards, staged-upload retries, caret placement, history preservation,
 Action fields, schedules and layouts at 320/375/768/1024px. Prompt-variable shortcuts cover
 click/keyboard insertion, selection replacement, undo and saved literal placeholders.
+Inline reference tests cover native caret alignment, source preservation, escaping, spelling,
+composition and forced colors. Image previews cover pending files, saving/reopening and
+the owner-specific attachment viewer on desktop and narrow screens.
 The Board harness also covers
 the new ordered lane and manual-card adapters alongside existing comments, attachment,
 manager and navigation behavior. The older `playwright.agents-editor.config.js` fixtures

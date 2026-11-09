@@ -26,7 +26,7 @@ export function promptVariableHelp() {
     </div>`;
 }
 
-/** Inserts into the native textarea so previews, dirty tracking and undo stay intact. */
+/** Inserts into the native textarea so dirty tracking and undo stay intact. */
 export function bindPromptVariableHelp(root, input) {
     const abort = new AbortController();
     root.querySelectorAll('[data-prompt-variable]').forEach(button => {
