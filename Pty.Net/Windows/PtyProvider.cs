@@ -311,6 +311,9 @@ namespace Pty.Net.Windows
                     job);
 
                 var result = new PseudoConsoleConnection(connectionOptions);
+                // From here the connection owns cleanup, including a failed resume. Its Dispose
+                // closes processHandle, so the launch finally must never try to use it again.
+                transferred = true;
                 // Install the exit watcher while the primary thread is still suspended, so a
                 // command which exits immediately cannot disappear before Process acquires it.
                 if (ResumeThread(mainThreadHandle) == uint.MaxValue)
@@ -319,7 +322,6 @@ namespace Pty.Net.Windows
                     result.Dispose();
                     throw new Win32Exception(error, "Resume terminal process failed");
                 }
-                transferred = true;
                 return Task.FromResult<IPtyConnection>(result);
             }
             finally
