@@ -337,6 +337,33 @@ Authorization:
   releases a read that EOF never did. Tests: `TerminalProcessExitTests` (fake PTY), `ConPtyOrphanedClientExitTests`
   (real ConPTY with an attached orphan, Windows only).
 
+### Windows process containment (VIBE-302)
+
+Each Windows tab has a root-owned, non-inheritable `WindowsProcessJob`. Before application
+startup, `WindowsJobBootstrap` reads a temporary duplicated job handle from redirected stdin,
+assigns the tab host, closes the duplicate, and acknowledges enrollment. The environment marker
+is removed before any descendants start. Failed enrollment aborts launch; never continue with
+an uncontained workload. The root holds the only long-lived handle, so root death or tab-host
+exit closes the group, including orphaned descendants. The existing parent watchdog remains.
+
+Each ConPTY owns a nested job: create the process suspended, assign it, install its exit watcher,
+then resume it. Stopping/completing/disposal terminates only this inner group, preserving the
+reusable tab host. Closing a tab keeps the existing graceful session-stop/recording sequence
+before terminating the outer group. Neither job permits breakaway. Use `DllImport` and
+`SafeHandle`; do not replace this with `Process.Kill(true)` on Windows.
+
+The exceptional fallback is `WindowsProcessCleanup`: at most three Toolhelp process snapshots,
+4096 pinned candidate identities, creation/exit-time validation, native return-code handling.
+It opens only candidates selected by parent relationships. Snapshot cleanup is best-effort and
+must be reported as such; it cannot prove no descendant escaped a snapshot boundary. Never use
+PID-only taskkill as a supposedly equivalent fallback. First-chance logging excludes error 5
+only in the runtime's known tree-inspection frames; launch/termination failures still surface.
+
+Regressions: `WindowsProcessJobTests`, `FirstChanceExceptionPolicyTests`, plus the existing
+PTY launch, process-exit, final-output, and Automation-capacity suites. The standalone disposable
+fixture is `Tests/headless/WindowsProcessTree`; it never starts the app or opens its databases.
+Changes still require Windows Native AOT validation and live provider/VS Code checks.
+
 ### `ITerminalConsumer.cs`
 - Contract: `void OnOutput(ReadOnlyMemory<byte> data)`.
 - Called synchronously from `Terminal.ReadLoopAsync()`.

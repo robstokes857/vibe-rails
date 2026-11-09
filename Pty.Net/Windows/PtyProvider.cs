@@ -196,40 +196,48 @@ namespace Pty.Net.Windows
             // Resolve the program first: a missing one throws before any pipe or console exists.
             string app = GetAppOnPath(options.App, options.Cwd, options.Environment);
 
-            // Create the in/out pipes
-            if (!CreatePipe(out SafePipeHandle inPipePseudoConsoleSide, out SafePipeHandle inPipeOurSide, null, 0))
-            {
-                throw new InvalidOperationException("Could not create an anonymous pipe", new Win32Exception());
-            }
-
-            if (!CreatePipe(out SafePipeHandle outPipeOurSide, out SafePipeHandle outPipePseudoConsoleSide, null, 0))
-            {
-                throw new InvalidOperationException("Could not create an anonymous pipe", new Win32Exception());
-            }
-
-            var coord = new Coord(options.Cols, options.Rows);
+            var job = new WindowsProcessJob();
+            SafePipeHandle? inPipePseudoConsoleSide = null, inPipeOurSide = null;
+            SafePipeHandle? outPipeOurSide = null, outPipePseudoConsoleSide = null;
             var pseudoConsoleHandle = new SafePseudoConsoleHandle();
-
-            // Create the Pseudo Console, using the pipes
-            int hr = CreatePseudoConsole(coord, inPipePseudoConsoleSide.Handle, outPipePseudoConsoleSide.Handle, 0, out IntPtr hPC);
-
-            // Remember the handle to prevent leakage
-            if (hPC != IntPtr.Zero && hPC != INVALID_HANDLE_VALUE)
-            {
-                pseudoConsoleHandle.InitialSetHandle(hPC);
-            }
-
-            if (hr != S_OK)
-            {
-                Marshal.ThrowExceptionForHR(hr);
-            }
-
-            // Prepare the StartupInfoEx structure attached to the ConPTY.
+            var processHandle = new SafeProcessHandle();
+            var mainThreadHandle = new SafeThreadHandle();
             var startupInfo = default(STARTUPINFOEX);
-            startupInfo.InitAttributeListAttachedToConPTY(pseudoConsoleHandle);
-            IntPtr lpEnvironment = Marshal.StringToHGlobalUni(GetEnvironmentString(options.Environment));
+            IntPtr lpEnvironment = IntPtr.Zero;
+            bool transferred = false;
             try
             {
+
+                // Create the in/out pipes
+                if (!CreatePipe(out inPipePseudoConsoleSide, out inPipeOurSide, null, 0))
+                {
+                    throw new InvalidOperationException("Could not create an anonymous pipe", new Win32Exception());
+                }
+
+                if (!CreatePipe(out outPipeOurSide, out outPipePseudoConsoleSide, null, 0))
+                {
+                    throw new InvalidOperationException("Could not create an anonymous pipe", new Win32Exception());
+                }
+
+                var coord = new Coord(options.Cols, options.Rows);
+
+                // Create the Pseudo Console, using the pipes
+                int hr = CreatePseudoConsole(coord, inPipePseudoConsoleSide.Handle, outPipePseudoConsoleSide.Handle, 0, out IntPtr hPC);
+
+                // Remember the handle to prevent leakage
+                if (hPC != IntPtr.Zero && hPC != INVALID_HANDLE_VALUE)
+                {
+                    pseudoConsoleHandle.InitialSetHandle(hPC);
+                }
+
+                if (hr != S_OK)
+                {
+                    Marshal.ThrowExceptionForHR(hr);
+                }
+
+                // Prepare the StartupInfoEx structure attached to the ConPTY.
+                startupInfo.InitAttributeListAttachedToConPTY(pseudoConsoleHandle);
+                lpEnvironment = Marshal.StringToHGlobalUni(GetEnvironmentString(options.Environment));
                 string arguments = options.VerbatimCommandLine ?
                     WindowsArguments.FormatVerbatim(options.CommandLine) :
                     WindowsArguments.Format(options.CommandLine);
@@ -252,8 +260,6 @@ namespace Pty.Net.Windows
                 }
 
                 var processInfo = default(PROCESS_INFORMATION);
-                var processHandle = new SafeProcessHandle();
-                var mainThreadHandle = new SafeThreadHandle();
 
                 bool success = CreateProcess(
                     null,   // lpApplicationName
@@ -261,7 +267,7 @@ namespace Pty.Net.Windows
                     null,   // lpProcessAttributes
                     null,   // lpThreadAttributes
                     false,  // bInheritHandles VERY IMPORTANT that this is false
-                    EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT, // dwCreationFlags
+                    EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | 0x4, // CREATE_SUSPENDED
                     lpEnvironment,
                     options.Cwd,
                     ref startupInfo,
@@ -290,6 +296,9 @@ namespace Pty.Net.Windows
                     throw new InvalidOperationException($"Could not start terminal process {commandLine.ToString()}: {exception.Message}", exception);
                 }
 
+                // No user code (and thus no descendant) can run until containment is established.
+                job.Assign(processHandle);
+
                 var connectionOptions = new PseudoConsoleConnection.PseudoConsoleConnectionHandles(
                     inPipePseudoConsoleSide,
                     outPipePseudoConsoleSide,
@@ -298,9 +307,19 @@ namespace Pty.Net.Windows
                     pseudoConsoleHandle,
                     processHandle,
                     processInfo.dwProcessId,
-                    mainThreadHandle);
+                    mainThreadHandle,
+                    job);
 
                 var result = new PseudoConsoleConnection(connectionOptions);
+                // Install the exit watcher while the primary thread is still suspended, so a
+                // command which exits immediately cannot disappear before Process acquires it.
+                if (ResumeThread(mainThreadHandle) == uint.MaxValue)
+                {
+                    int error = Marshal.GetLastWin32Error();
+                    result.Dispose();
+                    throw new Win32Exception(error, "Resume terminal process failed");
+                }
+                transferred = true;
                 return Task.FromResult<IPtyConnection>(result);
             }
             finally
@@ -309,6 +328,20 @@ namespace Pty.Net.Windows
                 if (lpEnvironment != IntPtr.Zero)
                 {
                     Marshal.FreeHGlobal(lpEnvironment);
+                }
+                if (!transferred)
+                {
+                    // Also covers failed assignment: the suspended root never joined the job.
+                    if (!processHandle.IsInvalid)
+                        WindowsProcessCleanup.TerminateUnstarted(processHandle);
+                    job.Dispose();
+                    mainThreadHandle.Dispose();
+                    processHandle.Dispose();
+                    pseudoConsoleHandle.Dispose();
+                    inPipeOurSide?.Dispose();
+                    inPipePseudoConsoleSide?.Dispose();
+                    outPipeOurSide?.Dispose();
+                    outPipePseudoConsoleSide?.Dispose();
                 }
             }
         }

@@ -15,6 +15,16 @@ using VibeRails.Services.PythonScripts;
 
 using VibeRails.Utils;
 
+// A tab host cannot initialize services or launch descendants until its parent-owned job
+// contains it. The temporary duplicate closes before acknowledgment; the root owns lifetime.
+try { await Pty.Net.Windows.WindowsJobBootstrap.EnrollAsync(); }
+catch (Exception ex)
+{
+    Console.Error.WriteLine($"Terminal containment bootstrap failed: {ex.Message}");
+    Environment.ExitCode = 1;
+    return;
+}
+
 // Informational invocations must not initialize or migrate the user's databases.
 if (CliLoop.TryHandleStandaloneInformation(args))
     return;
@@ -87,6 +97,9 @@ AppDomain.CurrentDomain.FirstChanceException += (_, args) =>
         var ex = args.Exception;
         if (ex is OperationCanceledException or System.Threading.Tasks.TaskCanceledException)
             return;
+        // .NET tree discovery intentionally catches inaccessible unrelated processes. Keep real
+        // launch/termination access failures and native crash diagnostics at their normal level.
+        if (FirstChanceExceptionPolicy.IsExpectedProcessInspection(ex)) return;
 
         var typeName = ex.GetType().FullName ?? "unknown";
         // Always log native-boundary signals at high visibility.

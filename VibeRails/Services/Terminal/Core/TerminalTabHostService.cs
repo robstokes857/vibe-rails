@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Serilog;
+using Pty.Net.Windows;
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
@@ -38,6 +39,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
     {
         /// <summary>The view that draws this tab itself (VIBE-159); null for an ordinary tab.</summary>
         public string? Owner { get; init; }
+        public WindowsProcessJob? Job { get; init; }
         public AutomationTabState? Automation { get; set; } = Automation;
         public SemaphoreSlim SessionGate { get; } = new(1, 1);
         public string? LastStartedSessionId { get; set; }
@@ -964,6 +966,8 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
 
         var tabId = Guid.NewGuid().ToString("N");
         var bootstrapTcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var job = OperatingSystem.IsWindows() ? new WindowsProcessJob() : null;
+        int enrolled = job is null ? 1 : 0;
 
         var process = new Process
         {
@@ -974,6 +978,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                RedirectStandardInput = OperatingSystem.IsWindows(),
                 StandardOutputEncoding = Encoding.UTF8,
                 StandardErrorEncoding = Encoding.UTF8,
                 CreateNoWindow = true,
@@ -994,6 +999,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             process.StartInfo.Environment[kvp.Key] = kvp.Value;
         }
         process.StartInfo.Environment[LocalToolApiContext.CurrentTabIdVariable] = tabId;
+        if (job is not null) process.StartInfo.Environment[WindowsJobBootstrap.EnvironmentVariable] = "1";
 
         process.OutputDataReceived += (_, args) =>
         {
@@ -1004,6 +1010,11 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
 
             var line = args.Data.Trim();
             Log.Debug("[TerminalTabs:{TabId}] {Line}", tabId, line);
+            if (line == "terminal-job-enrolled")
+            {
+                Volatile.Write(ref enrolled, 1);
+                return;
+            }
 
             if (!line.StartsWith("vs-code-v1=", StringComparison.OrdinalIgnoreCase))
             {
@@ -1011,6 +1022,11 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             }
 
             var bootstrapUrl = line["vs-code-v1=".Length..].Trim();
+            if (Volatile.Read(ref enrolled) == 0)
+            {
+                bootstrapTcs.TrySetException(new InvalidOperationException("Terminal host did not confirm job enrollment"));
+                return;
+            }
             if (!string.IsNullOrWhiteSpace(bootstrapUrl))
             {
                 bootstrapTcs.TrySetResult(bootstrapUrl);
@@ -1047,6 +1063,8 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                     uptime,
                     bootstrapTcs.Task.IsCompleted);
 
+                // Retain containment after an exited host; descendants can still hold ConPTY open.
+                job?.Dispose();
                 RemoveChild(tabId, process.Id);
                 if (!bootstrapTcs.Task.IsCompleted)
                 {
@@ -1060,21 +1078,28 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             exePath,
             _launchDirectory);
 
-        if (!process.Start())
-        {
-            throw new InvalidOperationException("Failed to start terminal tab process.");
-        }
-
-        Log.Information(
-            "[TerminalTabs] Child process started. pid={Pid} selfPid={SelfPid}",
-            process.Id,
-            Environment.ProcessId);
-
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-
+        bool started = false;
         try
         {
+            if (!process.Start())
+                throw new InvalidOperationException("Failed to start terminal tab process.");
+            started = true;
+            if (job is not null)
+            {
+                // The child is blocked before application startup and cannot spawn workloads.
+                long duplicate = job.DuplicateInto(process.SafeHandle);
+                await process.StandardInput.WriteLineAsync(duplicate.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                process.StandardInput.Close();
+            }
+
+            Log.Information(
+                "[TerminalTabs] Child process started. pid={Pid} selfPid={SelfPid}",
+                process.Id,
+                Environment.ProcessId);
+
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+
             string bootstrapUrl;
             try
             {
@@ -1102,13 +1127,23 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                 bootstrapUrl,
                 sessionToken,
                 tabToken,
-                DateTime.UtcNow);
+                DateTime.UtcNow) { Job = job };
         }
         catch
         {
             // Ensure failed handshakes never leave orphaned vb child processes.
             _toolApiContext.RevokeTab(tabId);
-            await TerminateRawProcessAsync(process);
+            if (started && job is not null && Volatile.Read(ref enrolled) == 0)
+            {
+                // It never passed the startup barrier, so there is no workload tree to discover.
+                process.StandardInput.Close();
+                int error = WindowsProcessCleanup.TerminateUnstarted(process.SafeHandle);
+                if (error != 0 && !process.HasExited)
+                    Log.Error("[TerminalTabs] Failed to abort unenrolled host. pid={Pid} error={Error}", process.Id, error);
+                await WaitForExitAsync(process, 3000);
+            }
+            else if (started) await TerminateRawProcessAsync(process, job);
+            job?.Dispose();
             throw;
         }
     }
@@ -1476,13 +1511,28 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             }
         }
 
-        await TerminateRawProcessAsync(child.Process);
+        await TerminateRawProcessAsync(child.Process, child.Job);
     }
 
-    private static async Task TerminateRawProcessAsync(Process process)
+    private static async Task TerminateRawProcessAsync(Process process, WindowsProcessJob? job = null)
     {
         var pid = -1;
         try { pid = process.Id; } catch { }
+
+        if (OperatingSystem.IsWindows())
+        {
+            // Do this even when the host exited: its owned descendants may still be alive.
+            int error = job?.TryTerminate() ?? -1;
+            if (error != 0)
+            {
+                var fallback = WindowsProcessCleanup.TerminateTree(process.SafeHandle, pid);
+                Log.Warning("[TerminalTabs] Job cleanup unavailable/failed; bounded best-effort cleanup cannot certify all descendants exited. pid={Pid} jobError={JobError} result={Result}", pid, error, fallback);
+            }
+            if (!await WaitForExitAsync(process, 3000))
+                Log.Error("[TerminalTabs] Terminal host remained alive after cleanup. pid={Pid}", pid);
+            job?.Dispose();
+            return;
+        }
 
         if (process.HasExited)
         {
@@ -1497,7 +1547,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         }
         catch (Exception ex)
         {
-            Log.Warning(ex, "[TerminalTabs] process.Kill(entireProcessTree) failed; falling back to taskkill. pid={Pid}", pid);
+            Log.Warning(ex, "[TerminalTabs] process.Kill(entireProcessTree) failed. pid={Pid}", pid);
         }
 
         if (await WaitForExitAsync(process, 3000))
@@ -1506,12 +1556,6 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             return;
         }
 
-        if (OperatingSystem.IsWindows() && process.Id > 0)
-        {
-            Log.Warning("[TerminalTabs] Invoking taskkill /T /F fallback. pid={Pid}", pid);
-            await KillProcessTreeWindowsAsync(process.Id);
-            await WaitForExitAsync(process, 3000);
-        }
     }
 
     private static async Task<bool> WaitForExitAsync(Process process, int timeoutMs)
@@ -1528,32 +1572,6 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         catch
         {
             return process.HasExited;
-        }
-    }
-
-    private static async Task KillProcessTreeWindowsAsync(int pid)
-    {
-        using var killer = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "taskkill",
-                Arguments = $"/PID {pid} /T /F",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            }
-        };
-
-        try
-        {
-            killer.Start();
-            await killer.WaitForExitAsync();
-        }
-        catch
-        {
-            // Best-effort only.
         }
     }
 

@@ -668,7 +668,10 @@ public sealed class Terminal : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Log.Debug(ex, "[Terminal] PTY kill during dispose failed or was unnecessary");
+            if (OperatingSystem.IsWindows())
+                Log.Warning(ex, "[Terminal] Windows PTY cleanup failed");
+            else
+                Log.Debug(ex, "[Terminal] PTY kill during dispose failed or was unnecessary");
         }
 
         if (_readLoop != null)

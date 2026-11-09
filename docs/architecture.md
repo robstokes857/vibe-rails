@@ -250,6 +250,14 @@ does not attach the new session or change tool authorization.
 - **Pty.Net** - Cross-platform pseudo-terminal support (inlined fork, ConPTY only)
 - **PyBridge** - AOT-friendly Python process and session runner (in-tree library)
 
+Windows terminal process ownership uses nested, non-inheritable, kill-on-close Job Objects
+(VIBE-302). The root owns each tab job; the tab crosses an enrollment barrier before services
+start. Each inner ConPTY owns a separate job and enrolls its process while suspended, before
+the exit watcher is armed and execution resumes. CLI stop preserves its tab, while tab close
+retains graceful stop/recording finalization before group termination. Exceptional cleanup uses
+bounded, identity-validated Toolhelp snapshots and reports its best-effort limitation. Details:
+[terminal containment](../VibeRails/Services/Terminal/AGENTS.md#windows-process-containment-vibe-302).
+
 ### Frontend
 - **Vanilla JavaScript** - No framework dependencies
 - **Bootstrap 5** - UI framework

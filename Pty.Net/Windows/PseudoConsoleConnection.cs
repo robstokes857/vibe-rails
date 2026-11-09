@@ -51,6 +51,9 @@ namespace Pty.Net.Windows
         /// <inheritdoc/>
         public void Dispose()
         {
+            // Kill residual descendants even when the shell exited before us. In particular this
+            // releases clients holding ConPTY open; the caller already gave output a bounded drain.
+            this.handles.Job.Dispose();
             this.ReaderStream?.Dispose();
             this.WriterStream?.Dispose();
 
@@ -69,15 +72,19 @@ namespace Pty.Net.Windows
         /// <inheritdoc/>
         public void Kill()
         {
-            this.process.Kill();
+            this.KillProcessTree();
         }
 
         /// <inheritdoc/>
         public void KillProcessTree()
         {
-            // Use the Process instance captured when ConPTY was created. Looking the PID up again
-            // after exit risks targeting an unrelated process if Windows has already reused it.
-            this.process.Kill(entireProcessTree: true);
+            int error = this.handles.Job.TryTerminate();
+            if (error == 0) return;
+            var fallback = WindowsProcessCleanup.TerminateTree(this.handles.ProcessHandle, this.Pid);
+            // A snapshot is never proof of complete cleanup. Surface the failure once, including
+            // fallback diagnostics; expected per-process inspection failures never throw.
+            throw new System.ComponentModel.Win32Exception(error, $"Terminal job termination failed; " +
+                $"best-effort cleanup: {fallback}");
         }
 
         /// <inheritdoc/>
@@ -125,7 +132,8 @@ namespace Pty.Net.Windows
                 SafePseudoConsoleHandle pseudoConsoleHandle,
                 SafeProcessHandle processHandle,
                 int pid,
-                SafeThreadHandle mainThreadHandle)
+                SafeThreadHandle mainThreadHandle,
+                WindowsProcessJob job)
             {
                 this.InPipePseudoConsoleSide = inPipePseudoConsoleSide;
                 this.OutPipePseudoConsoleSide = outPipePseudoConsoleSide;
@@ -135,6 +143,7 @@ namespace Pty.Net.Windows
                 this.ProcessHandle = processHandle;
                 this.Pid = pid;
                 this.MainThreadHandle = mainThreadHandle;
+                this.Job = job;
             }
 
             /// <summary>
@@ -188,6 +197,8 @@ namespace Pty.Net.Windows
             /// Gets the handle to the main thread.
             /// </summary>
             internal SafeThreadHandle MainThreadHandle { get; }
+
+            internal WindowsProcessJob Job { get; }
         }
     }
 }

@@ -39,6 +39,12 @@ namespace Pty.Net.Windows
         [DllImport("kernel32.dll")]
         public static extern int GetProcessId(SafeProcessHandle hProcess);
 
+        [DllImport("kernel32.dll", SetLastError = true)]
+        internal static extern uint ResumeThread(SafeThreadHandle thread);
+
+        [DllImport("kernel32.dll")]
+        private static extern void DeleteProcThreadAttributeList(IntPtr list);
+
         [return: MarshalAs(UnmanagedType.Bool)]
         [DllImport("kernel32.dll", SetLastError = true)]
         internal static extern bool CloseHandle(IntPtr hObject);
@@ -181,7 +187,10 @@ namespace Pty.Net.Windows
                 wasInitialized = InitializeProcThreadAttributeList(this.lpAttributeList, AttributeCount, 0, ref size);
                 if (!wasInitialized)
                 {
-                    throw new InvalidOperationException("Couldn't create new process attribute list", new Win32Exception());
+                    int error = Marshal.GetLastWin32Error();
+                    Marshal.FreeHGlobal(this.lpAttributeList);
+                    this.lpAttributeList = IntPtr.Zero;
+                    throw new InvalidOperationException("Couldn't create new process attribute list", new Win32Exception(error));
                 }
 
                 // Set thread attribute list's Pseudo Console to the specified ConPTY
@@ -204,6 +213,7 @@ namespace Pty.Net.Windows
             {
                 if (this.lpAttributeList != IntPtr.Zero)
                 {
+                    DeleteProcThreadAttributeList(this.lpAttributeList);
                     Marshal.FreeHGlobal(this.lpAttributeList);
                     this.lpAttributeList = IntPtr.Zero;
                 }

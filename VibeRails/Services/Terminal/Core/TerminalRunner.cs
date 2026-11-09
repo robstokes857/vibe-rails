@@ -1079,10 +1079,9 @@ public class TerminalRunner
 
     private static void KillAutomationTerminalProcessTree(Terminal terminal)
     {
-        // On Windows the Job PTY is a PowerShell wrapper around the configured CLI. Terminal's
-        // ordinary Dispose kills that wrapper, but Process.Kill() alone does not guarantee its CLI,
-        // MCP, or git children go with it. Idle completion owns this terminal, so close the exact
-        // PTY-rooted process tree before the wrapper can disappear and orphan its descendants.
+        // Idle completion owns this PTY. On Windows its nested process job includes the CLI,
+        // MCP and git descendants, but excludes the reusable tab host. Stop that exact group
+        // before finalizing the session; other platforms retain their existing PTY semantics.
         try
         {
             terminal.KillProcessTree();
