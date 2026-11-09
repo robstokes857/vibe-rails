@@ -16,7 +16,7 @@ public sealed partial class BoardToolTests
     public async Task SyncToRemoteKeepsInternalNotesOffAzureDevOps_AndSyncToJiraIsAnAlias()
     {
         var (card, _, _, _) = await AdoFixtureAsync();
-        var tool = new BoardTool(_service, _resolver, _store, new BoardWorkflowService(_store, new BoardReviewService(_store, _service)));
+        var tool = new BoardTool(_service, _resolver, _store, new BoardWorkflowService());
         await tool.AddBoardComment("Shared update", card.Key, Ct);
         Assert.EndsWith(" Not sent to Jira or Azure DevOps.", await tool.AddBoardComment("Internal note", card.Key, Ct, syncToRemote: false));
         await tool.AppendBoardNote("Older client note", card.Key, Ct, syncToJira: false);
@@ -53,7 +53,7 @@ public sealed partial class BoardToolTests
         _resolver.CurrentSessionId = "ado-worker";
         await _store.LinkSessionAsync(_project, card.Id, _resolver.CurrentSessionId, null, "base:codex", "codex", "Codex", BoardSessionRecord.LaunchOrigin, Ct);
         var links = new[] { "https://viberails.ai/shared/session?key=" + new string('a', 64), "https://viberails.ai/shared/session?key=" + new string('b', 64) };
-        var tool = new BoardTool(_service, _resolver, _store, new BoardWorkflowService(_store, new BoardReviewService(_store, _service)), adoComments: comments);
+        var tool = new BoardTool(_service, _resolver, _store, new BoardWorkflowService(), adoComments: comments);
 
         var result = await tool.AddAdoComment("Done and tested.", [.. links, links[0]], cancellationToken: Ct);
 
@@ -77,7 +77,7 @@ public sealed partial class BoardToolTests
         var board = await _store.CreateBoardAsync(_project, "Destination", Ct);
         var lane = (await _store.GetColumnsAsync(_project, Ct, board.Id))[0];
         await _store.MoveCardAsync(_project, card.Id, lane.Id, null, Ct);
-        var result = await new BoardTool(_service, _resolver, _store, new BoardWorkflowService(_store, new BoardReviewService(_store, _service)), adoComments: comments)
+        var result = await new BoardTool(_service, _resolver, _store, new BoardWorkflowService(), adoComments: comments)
             .AddAdoComment("Done", card: card.Key, cancellationToken: Ct);
         Assert.StartsWith("Posted Azure DevOps comment", result);
         Assert.Single(client.Invocations);
@@ -105,7 +105,7 @@ public sealed partial class BoardToolTests
         if (problem == "no-link")
             target = await _store.CreateCardAsync(_project, new(null, "Local work", "", null, "medium", null, [], false), Ct);
 
-        var result = await new BoardTool(_service, _resolver, _store, new BoardWorkflowService(_store, new BoardReviewService(_store, _service)), adoComments: comments)
+        var result = await new BoardTool(_service, _resolver, _store, new BoardWorkflowService(), adoComments: comments)
             .AddAdoComment("Done", card: target.Key, cancellationToken: Ct);
 
         Assert.StartsWith("FAIL:", result);
@@ -120,7 +120,7 @@ public sealed partial class BoardToolTests
         client.Setup(c => c.AddCommentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
             It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AdoCommentResult(false, true, "Check the work item before retrying."));
-        var result = await new BoardTool(_service, _resolver, _store, new BoardWorkflowService(_store, new BoardReviewService(_store, _service)), adoComments: comments)
+        var result = await new BoardTool(_service, _resolver, _store, new BoardWorkflowService(), adoComments: comments)
             .AddAdoComment("Done", card: card.Key, cancellationToken: Ct);
         Assert.StartsWith("UNCONFIRMED:", result);
         Assert.Single(client.Invocations);
@@ -134,7 +134,7 @@ public sealed partial class BoardToolTests
         var service = new Mock<IBoardService>();
         service.Setup(s => s.AddCommentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<BoardAuthor>(), It.IsAny<string>(), Ct, false))
             .ThrowsAsync(new IOException("SECRET local failure"));
-        var result = await new BoardTool(service.Object, _resolver, _store, new BoardWorkflowService(_store, new BoardReviewService(_store, service.Object)), adoComments: comments)
+        var result = await new BoardTool(service.Object, _resolver, _store, new BoardWorkflowService(), adoComments: comments)
             .AddAdoComment("Done", card: card.Id, cancellationToken: Ct);
         Assert.StartsWith("Posted Azure DevOps comment", result);
         Assert.Contains("Do not repost", result);
@@ -146,7 +146,7 @@ public sealed partial class BoardToolTests
     public async Task AdoCommentRejectsOversizedInputAndLinksBeforePosting()
     {
         var (card, _, client, comments) = await AdoFixtureAsync();
-        var tool = new BoardTool(_service, _resolver, _store, new BoardWorkflowService(_store, new BoardReviewService(_store, _service)), adoComments: comments);
+        var tool = new BoardTool(_service, _resolver, _store, new BoardWorkflowService(), adoComments: comments);
         Assert.StartsWith("FAIL:", await tool.AddAdoComment(new string('x', 20001), card: card.Key, cancellationToken: Ct));
         Assert.StartsWith("FAIL:", await tool.AddAdoComment("Done", Enumerable.Repeat("invalid", 21).ToArray(), card.Key, Ct));
         Assert.StartsWith("FAIL:", await tool.AddAdoComment("Done", ["https://evil.example/"], card.Key, Ct));
@@ -157,7 +157,7 @@ public sealed partial class BoardToolTests
     public async Task AdoCommentWithoutTheServiceFailsAfterResolvingTheCard()
     {
         var (card, _, _, _) = await AdoFixtureAsync();
-        var tool = new BoardTool(_service, _resolver, _store, new BoardWorkflowService(_store, new BoardReviewService(_store, _service)));
+        var tool = new BoardTool(_service, _resolver, _store, new BoardWorkflowService());
         Assert.Equal("FAIL: Azure DevOps commenting is unavailable in this host.", await tool.AddAdoComment("Done", card: card.Key, cancellationToken: Ct));
     }
 
@@ -171,7 +171,7 @@ public sealed partial class BoardToolTests
         await _store.SaveAdoConnectionAsync(AdoConnection(ado.Id) with { DedicatedBoard = true }, Ct);
         await _store.SaveJiraConnectionAsync(new BoardJiraConnectionRecord("jira-connection", _project, jira.Id, "https://jira.example", "user@example.com",
             true, "saved", null, "project = APP", true, null, null, null, null, null, DedicatedBoard: true), Ct);
-        var tool = new BoardTool(_service, _resolver, _store, new BoardWorkflowService(_store, new BoardReviewService(_store, _service)));
+        var tool = new BoardTool(_service, _resolver, _store, new BoardWorkflowService());
 
         var lines = (await tool.ListBoards(Ct)).Split('\n');
 

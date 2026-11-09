@@ -397,8 +397,8 @@ public sealed class BoardLaunchConcurrencyTests : IDisposable
         _tabs.Setup(t => t.StartSessionAsync("tab-1", It.IsAny<StartTerminalRequest>(), It.IsAny<CancellationToken>()))
             .Callback<string, StartTerminalRequest, CancellationToken>((_, value, _) => request = value)
             .ReturnsAsync(new TerminalStatusResponse(true, Guid.NewGuid().ToString(), "codex", _root));
-        var launcher = new BoardLaunchService(_store, _repository.Object, _tabs.Object, new BoardContextEstimator(
-                new BoardService(_store, new Mock<IBoardCommitService>().Object, new NullBoardLiveSessionProbe()), _store, _repository.Object),
+        var launcher = new BoardLaunchService(_store, _tabs.Object, new BoardContextEstimator(
+                new BoardService(_store, new Mock<IBoardCommitService>().Object, new NullBoardLiveSessionProbe()), _store),
             launchSettings: () => new Settings { CreateVibeStoryTracking = baseNudge, CreateVibeStoryTrackingCustomEnvs = !baseNudge });
         await launcher.LaunchAsync(_root, card.Id, null, Ct);
         Assert.True(request!.ContextIncluded);
@@ -409,8 +409,8 @@ public sealed class BoardLaunchConcurrencyTests : IDisposable
 
     // A real estimator over the same store: the launch records its context sample like production does.
     private BoardLaunchService Launcher() =>
-        new(_store, _repository.Object, _tabs.Object, new BoardContextEstimator(
-            new BoardService(_store, new Mock<IBoardCommitService>().Object, new NullBoardLiveSessionProbe()), _store, _repository.Object));
+        new(_store, _tabs.Object, new BoardContextEstimator(
+            new BoardService(_store, new Mock<IBoardCommitService>().Object, new NullBoardLiveSessionProbe()), _store));
 
     [Fact]
     public async Task LiveAutomationDoesNotBlockStartWork_ButTheCardsOwnAgentDoes()

@@ -79,7 +79,7 @@ public sealed partial class BoardSettingsTests
         var settings = new Settings { CreateVibeStoryTracking = baseEnabled, CreateVibeStoryTrackingCustomEnvs = customEnabled };
         var launches = new Mock<VibeRails.Launches.ILaunchStore>();
         launches.Setup(x => x.GetPresetAsync("preset_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", It.IsAny<CancellationToken>())).ReturnsAsync(new VibeRails.Launches.LaunchPreset("preset_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "codex", "", VibeRails.Services.LLM.Codex, new(), [], "", true, 1, DateTime.UtcNow, DateTime.UtcNow));
-        var estimator = new BoardContextEstimator(service, _boards, Mock.Of<IRepository>(), () => settings, launches.Object);
+        var estimator = new BoardContextEstimator(service, _boards, () => settings, launches.Object);
         var baseline = (await estimator.EstimateAsync(_root, card.Id, Ct))!;
 
         await service.SaveEveryContextSettingsAsync(_root, board, new("This board's message", 0), Ct);

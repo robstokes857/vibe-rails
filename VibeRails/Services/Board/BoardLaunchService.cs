@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using Serilog;
-using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services.Terminal;
 using VibeRails.Utils;
@@ -64,7 +63,6 @@ public sealed record BoardLaunchPrompt(string Prompt, string? EnvironmentPrompt,
 /// </summary>
 public sealed class BoardLaunchService(
     IBoardStore store,
-    IRepository repository,
     ITerminalTabHostService tabHost,
     IBoardContextEstimator contextEstimator, ReviewRoutingService? reviewRouting = null,
     Func<Settings>? launchSettings = null, Func<int, DateTime, bool>? sessionOwnerRunning = null,

@@ -76,7 +76,7 @@ public sealed partial class BoardReviewsTests
         var saved = await reviews.SaveAsync(repo, card.Id, session, begun.Id, "No findings reported", "None", "Reviewed deletions", "None", Ct);
         Assert.Equal("No findings reported", saved.Result);
         Assert.StartsWith("Current", (await reviews.ReportAsync(repo, card.Key, begun.Id, true, repo, Ct))!.Freshness);
-        await new BoardWorkflowService(store, reviews, flow.Workflow).ReportAsync(repo, card.Id, repo,
+        await new BoardWorkflowService(flow.Workflow).ReportAsync(repo, card.Id, repo,
             BoardAuthor.Agent("Codex", "codex", session), "passed", "Deletions reviewed", null, begun.Id, Ct);
         await flow.Runs.CompleteAsync(flow.Claim, "succeeded", 0, ct: Ct);
         await flow.Workflow.TickAsync(Ct);

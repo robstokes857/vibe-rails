@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Serilog;
-using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services.Mcp.Tools;
 using VibeRails.Services.Terminal;
@@ -23,7 +22,7 @@ public interface IBoardContextEstimator
 }
 
 /// <summary>
-/// Root-backend only (it resolves the assignee's environment through the state repository). The
+/// Root-backend only (it resolves the assignee's saved preset through the launch store). The
 /// numbers are produced by rendering exactly what the agent would read, through the same code the
 /// launch and the MCP tools use, and counting with <see cref="ContextTokenEstimator"/>. Nothing here
 /// changes what agents receive; it only reports it, so the plan in
@@ -32,7 +31,6 @@ public interface IBoardContextEstimator
 public sealed class BoardContextEstimator(
     IBoardService service,
     IBoardStore store,
-    IRepository repository,
     Func<Settings>? launchSettings = null, VibeRails.Launches.ILaunchStore? launches = null) : IBoardContextEstimator
 {
     public async Task<BoardContextEstimateResponse?> EstimateAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default)

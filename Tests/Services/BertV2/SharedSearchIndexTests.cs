@@ -71,7 +71,7 @@ public sealed partial class SharedSearchIndexTests : IDisposable
         Assert.Contains(relevant.Key, await new SessionSearchTool(history, recall).SearchHistory("tyres", cancellationToken: Ct));
         Assert.Equal(calls + 1, model.Calls); // one query embedding serves the cards and the history groups
         var service = new BoardService(board, Mock.Of<IBoardCommitService>(), new NullBoardLiveSessionProbe());
-        Assert.Contains(relevant.Key, await new BoardTool(service, projects.Object, board, new BoardWorkflowService(board, new BoardReviewService(board, service)), search: Finder()).SearchBoardCards("tyres", cancellationToken: Ct));
+        Assert.Contains(relevant.Key, await new BoardTool(service, projects.Object, board, new BoardWorkflowService(), search: Finder()).SearchBoardCards("tyres", cancellationToken: Ct));
     }
 
     [Fact]

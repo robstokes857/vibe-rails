@@ -109,7 +109,7 @@ public sealed partial class BoardSettingsTests
             var session = Guid.NewGuid().ToString();
             await service.LinkSessionAsync(_root, card.Id, session, null, "base:codex", "codex", "Worker", "work", Ct);
             var entry = (await _boards.GetLaneAutomationStatusesAsync(_root, card.Id, Ct))[0];
-            await Assert.ThrowsAsync<BoardValidationException>(() => new BoardWorkflowService(_boards, new BoardReviewService(_boards, service)).ReportAsync(_root, card.Id, _root,
+            await Assert.ThrowsAsync<BoardValidationException>(() => new BoardWorkflowService().ReportAsync(_root, card.Id, _root,
                 BoardAuthor.Agent("Codex", "codex", session), "fixing", "Fixing the failed check", entry.EventKey, null, Ct));
         }
         var retry = (manualCardRun

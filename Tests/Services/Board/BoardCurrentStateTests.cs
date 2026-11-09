@@ -53,7 +53,7 @@ public sealed class BoardCurrentStateTests : IDisposable
                 await _store.UpdateCardAsync(_project, card.Id, new BoardCardPatch(Description: "edited during startup"), token);
                 return new TerminalStatusResponse(true, session, "codex", _project);
             });
-        var launcher = new BoardLaunchService(_store, Mock.Of<IRepository>(), _tabs.Object, new BoardContextEstimator(_service, _store, Mock.Of<IRepository>()));
+        var launcher = new BoardLaunchService(_store, _tabs.Object, new BoardContextEstimator(_service, _store));
         await launcher.LaunchAsync(_project, card.Id, null, Ct);
         Assert.Contains("original", captured!.InitialPrompt);
         Assert.Equal("PROJ-1 · Ship", BoardKeyText.Short(captured.Title));

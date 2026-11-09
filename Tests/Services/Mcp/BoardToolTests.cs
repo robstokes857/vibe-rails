@@ -62,7 +62,7 @@ public sealed partial class BoardToolTests : IDisposable
         _launchService = new(_launches, Mock.Of<VibeRails.Services.Jobs.IAutomationScriptService>(), _store);
         var reviews = new BoardReviewService(_store, _service, _launches);
         _tool = new BoardTool(_service, _resolver, _store,
-            new BoardWorkflowService(_store, reviews, new VibeRails.Services.Launches.BoardLaunchWorkflow(_store, _launches, _launchService, reviews)), reviews, launches: _launches);
+            new BoardWorkflowService(new VibeRails.Services.Launches.BoardLaunchWorkflow(_store, _launches, _launchService, reviews)), reviews, launches: _launches);
     }
 
     private CancellationToken Ct => TestContext.Current.CancellationToken;
@@ -832,7 +832,7 @@ public sealed partial class BoardToolTests : IDisposable
             .ReturnsAsync(new BoardCardRecord("card_1", _project, 1, "col", 0, "A", "", null, "medium", null, [], false, 0, DateTime.UtcNow, DateTime.UtcNow));
         busy.Setup(b => b.AddCommentAsync(_project, "card_1", It.IsAny<BoardAuthor>(), "hello", It.IsAny<CancellationToken>()))
             .ThrowsAsync(new SqliteException("SQLite Error 5: 'database is locked'.", 5));
-        var tool = new BoardTool(busy.Object, _resolver, _store, new BoardWorkflowService(_store, new BoardReviewService(_store, busy.Object)));
+        var tool = new BoardTool(busy.Object, _resolver, _store, new BoardWorkflowService());
 
         var reply = await tool.AddBoardComment("hello", "PROJ-1", Ct);
         Assert.StartsWith("FAIL: could not add the comment: the Board is temporarily busy", reply);
